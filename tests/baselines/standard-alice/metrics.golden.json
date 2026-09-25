@@ -7,11 +7,13 @@
     "term_fuzzy_precision": 0.0,
     "term_recall": 0.0,
     "render_skip_rate": 0.0,
+    "render_preserved_rate": 0.0,
     "placeholder_retention": 1.0,
-    "pass_rate": 0.9977,
-    "avg_qe": 0.8873,
+    "pass_rate": 1.0,
+    "avg_qe": 0.0,
     "repair_rate": 0.0,
     "needs_human_rate": 0.0,
+    "blocked_human_rate": 0.0,
     "formula_fidelity": 1.0,
     "formula_substitutions": 0.0,
     "visual_critical_rate": 0.0,
@@ -26,6 +28,8 @@
     "terms_audited": 0,
     "terms_with_drift": 0,
     "skipped_blocks": 0,
+    "fail_closed_blocks": 0,
+    "preserved_blocks": 0,
     "skip_families": {},
     "formula_blocks": 0,
     "formula_substitutions": 0,
@@ -37,6 +41,7 @@
       "critical": 0
     },
     "needs_human_blocks": 0,
+    "blocked_human_blocks": 0,
     "chars": 164294,
     "estimated_cost_usd": null
   }

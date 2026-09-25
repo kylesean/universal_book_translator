@@ -64,6 +64,8 @@ def _report(**overrides: Any) -> QualityReport:
         "render_coverage": {
             "rendered_blocks": 93,
             "skipped_blocks": 2,
+            "fail_closed_blocks": 2,
+            "preserved_blocks": 0,
             "render_coverage": 0.98,
         },
         "route": {

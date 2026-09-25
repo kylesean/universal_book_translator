@@ -17,6 +17,22 @@ pytestmark = pytest.mark.fast
 # =============================================================================
 
 
+def test_glossary_drift_detects_a_wrong_rendering() -> None:
+    """The drift scan must separate canonical from wrong target renderings.
+
+    Guards the terminology channel the offline baselines cannot exercise: their
+    mock echoes the fixture's own strings, so a literal assertion there proves
+    nothing about UBT's terminology handling.
+    """
+    from ubt.core.qe.term_drift import detect_term_drift
+
+    glossary = [{"source": "working memory", "translation": "工作记忆", "aliases": []}]
+    ok = detect_term_drift("Working memory is central.", "工作记忆是核心。", glossary)
+    wrong = detect_term_drift("Working memory is central.", "工作内存是核心。", glossary)
+    assert len(ok) == 1 and not ok[0].drifted
+    assert len(wrong) == 1 and wrong[0].drifted
+
+
 def test_glossary_enforcer_alias_canonicalization() -> None:
     """Verify that non-preferred aliases and synonyms are replaced by canonical translations."""
     glossary = [

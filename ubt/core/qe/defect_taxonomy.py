@@ -184,6 +184,21 @@ FLAG_MQM_CRITICAL_BLOCKED = "mqm_critical_blocked"
 #: PE queue must not silently lose members on resume).
 TRIAGE_VERDICT_FLAGS: tuple[str, ...] = (FLAG_NEEDS_HUMAN_REVIEW, FLAG_MQM_CRITICAL_BLOCKED)
 
+#: Render/inplace skip flags that mean "source element deliberately kept"
+#: (chrome, non-prose, policy, footer), as opposed to a fail-closed skip
+#: (spill/no_zone/math_unrenderable) that lost a translation. Shared by the
+#: reporter's coverage split and the export ledger pass so the two cannot drift.
+INTENTIONAL_PRESERVED_SKIP_PREFIXES: tuple[str, ...] = (
+    "render_skip:policy",
+    "render_skip:non_prose",
+    "render_skip:chrome",
+    "render_skip:footer",
+    "inplace_skip:policy",
+    "inplace_skip:non_prose",
+    "inplace_skip:chrome",
+    "inplace_skip:footer",
+)
+
 
 def is_transient_failure(flags: Iterable[str]) -> bool:
     """True when any flag marks a failure a resume may safely re-queue."""

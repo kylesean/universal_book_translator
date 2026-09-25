@@ -203,11 +203,11 @@ async def test_baseline_cognitive_psychology_ch03_end_to_end(tmp_path: Path) -> 
     assert out_file.exists()
     rendered_text = out_file.read_text(encoding="utf-8")
 
-    # 2. Verify terminology consistency
-    assert "工作记忆" in rendered_text
-    assert "语音回路" in rendered_text
-    assert "视空间画板" in rendered_text
-    assert "中央执行系统" in rendered_text
+    # 2. Terminology handling is NOT asserted here: TokenEchoMockProvider echoes
+    # the fixture's custom_responses verbatim, so a literal match would only prove
+    # the fixture wired itself up. Deterministic glossary enforcement and drift
+    # detection are covered directly in tests/unit/test_glossary_enforcer.py.
+    assert rendered_text.strip()
 
     # 3. Verify math equation and code block preservation (skip_translate)
     assert "$$ d' = Z(\\text{Hit Rate}) - Z(\\text{False Alarm Rate}) $$" in rendered_text
@@ -353,8 +353,14 @@ async def test_baseline_standard_alice_epub_e2e(tmp_path: Path) -> None:
         rep["summary"]["completed_blocks"] + rep["summary"]["blocked_human_blocks"]
         == rep["summary"]["total_blocks"]
     )
-    assert rep["summary"]["completed_blocks"] == 883
+    assert rep["summary"]["completed_blocks"] == 885
+    assert rep["summary"]["blocked_human_blocks"] == 0
     assert rep["summary"]["failed_blocks"] == 0
+    # 883→885: the two "Wow! wow! wow!" blocks used to be quarantined because
+    # TokenEchoMockProvider's long filler could not fit three sentences under the
+    # length cap, so the mock violated its own sentence-parity contract and the
+    # omission gate fired on the fixture. The mock now falls back to its micro
+    # filler before giving up; the whole novel delivers with nothing quarantined.
     # Gate wired 2026-09-23 and its golden recorded in the same round (8bef284).
     # The corpus used to be excused as `network`-marked, which was untrue (local
     # EPUB, offline double) — that false marker is why it ran undefended for a week.

@@ -86,12 +86,14 @@ def collect_kpis(report: QualityReport, visual_report: Mapping[str, Any] | None 
         "term_precision": terminology.term_precision,
         "term_fuzzy_precision": terminology.fuzzy_term_precision,
         "term_recall": terminology.term_recall,
-        "render_skip_rate": _div(coverage.skipped_blocks, total_blocks),
+        "render_skip_rate": _div(coverage.fail_closed_blocks, total_blocks),
+        "render_preserved_rate": _div(coverage.preserved_blocks, total_blocks),
         "placeholder_retention": report.placeholder.retention_rate,
         "pass_rate": report.summary.pass_rate,
         "avg_qe": report.score_metrics.avg_qe,
         "repair_rate": _div(report.summary.repaired_blocks, total_blocks),
         "needs_human_rate": _div(report.summary.needs_human_blocks, total_blocks),
+        "blocked_human_rate": _div(report.summary.blocked_human_blocks, total_blocks),
         "formula_fidelity": (
             0.0
             if (formula_blocks == 0 and substitutions > 0)
@@ -119,6 +121,8 @@ def collect_kpis(report: QualityReport, visual_report: Mapping[str, Any] | None 
         "terms_audited": entity.terms_audited,
         "terms_with_drift": entity.terms_with_drift,
         "skipped_blocks": coverage.skipped_blocks,
+        "fail_closed_blocks": coverage.fail_closed_blocks,
+        "preserved_blocks": coverage.preserved_blocks,
         "skip_families": dict(coverage.skip_families),
         "formula_blocks": formula_blocks,
         "formula_substitutions": substitutions,
@@ -126,6 +130,7 @@ def collect_kpis(report: QualityReport, visual_report: Mapping[str, Any] | None 
         "visual_pages": visual_pages,
         "visual_findings": severities,
         "needs_human_blocks": report.summary.needs_human_blocks,
+        "blocked_human_blocks": report.summary.blocked_human_blocks,
         "chars": chars,
         "estimated_cost_usd": report.summary.estimated_cost_usd,
     }

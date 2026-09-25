@@ -223,7 +223,14 @@ class TokenEchoMockProvider(MockModelProvider):
             while count_sentences(body) < sentences:
                 candidate = unit.format(index + 1)
                 if len(body) + len(candidate) > body_cap:
-                    break
+                    # Fall back to the shorter filler before giving up: a short
+                    # multi-sentence source ('"Wow! wow! wow!"') cannot fit the
+                    # long unit under the length cap, and breaking here made the
+                    # mock violate contract #2 and trip the omission gate on its
+                    # own fixture.
+                    candidate = self._MICRO.format(index + 1)
+                    if len(body) + len(candidate) > body_cap:
+                        break
                 index += 1
                 body += candidate
             # Contract #2b — length plausibility (>0.2x source, <1.5x).

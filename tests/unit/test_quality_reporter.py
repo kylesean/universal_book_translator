@@ -243,11 +243,14 @@ def test_render_coverage_and_route_honesty(tmp_path: Path) -> None:
         manifest=manifest,
         output_path=tmp_path / "o.pdf",
     )
-    # Pipeline completed everything, but only half reached the page.
+    # Pipeline completed everything; one block is fail-closed (source left
+    # visible), which is now reported on its own dimension rather than by
+    # shrinking render_coverage.
     assert report.summary.pass_rate == 1.0
     assert report.render_coverage.skipped_blocks == 1
-    assert report.render_coverage.rendered_blocks == 1
-    assert report.render_coverage.render_coverage == 0.5
+    assert report.render_coverage.fail_closed_blocks == 1
+    assert report.render_coverage.preserved_blocks == 0
+    assert report.render_coverage.rendered_blocks == 2
     assert report.render_coverage.skip_families == {"unmatched": 1}
     assert report.route is not None
     assert report.route.mode == "long"

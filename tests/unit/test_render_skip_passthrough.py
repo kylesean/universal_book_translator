@@ -151,7 +151,7 @@ def test_length_policy_ignores_non_prose_and_policy_skips() -> None:
 
 
 def test_summarize_groups_families() -> None:
-    total, verdict = summarize_render_skips(
+    fail_closed, preserved, verdict = summarize_render_skips(
         {
             "render_skip:spill": 2,
             "render_skip:no_zone": 1,
@@ -159,23 +159,32 @@ def test_summarize_groups_families() -> None:
             "html_tag_mismatch": 4,
         }
     )
-    assert total == 4
+    assert fail_closed == 4
+    assert preserved == 0
     assert "spill×2" in verdict
     assert "no_zone×1" in verdict
     assert "review required" in verdict
 
 
+def test_summarize_separates_intentional_preserves() -> None:
+    fail_closed, preserved, verdict = summarize_render_skips(
+        {"render_skip:chrome": 3, "render_skip:non_prose": 1, "render_skip:spill": 2}
+    )
+    assert fail_closed == 2 and preserved == 4
+    assert "spill×2" in verdict and "review required" in verdict
+
+
 def test_summarize_reads_legacy_inplace_prefix() -> None:
-    total, verdict = summarize_render_skips(
+    fail_closed, preserved, verdict = summarize_render_skips(
         {"inplace_skip:overflow(base=10.0)": 2, "inplace_skip:guarded": 1}
     )
-    assert total == 3
+    assert fail_closed == 3 and preserved == 0
     assert "overflow×2" in verdict
     assert "guarded×1" in verdict
 
 
 def test_summarize_empty_and_markdown() -> None:
-    assert summarize_render_skips({}) == (0, "No fail-closed skips recorded")
+    assert summarize_render_skips({}) == (0, 0, "No source-visible skips recorded")
     assert summarize_render_skips({"html_tag_mismatch": 1})[0] == 0
 
     markdown = render_kdp_audit_markdown(_report({"render_skip:spill": 2}))
@@ -183,7 +192,7 @@ def test_summarize_empty_and_markdown() -> None:
     assert "spill×2" in markdown
 
     clean = render_kdp_audit_markdown(_report({}))
-    assert "No fail-closed skips recorded" in clean
+    assert "No source-visible skips recorded" in clean
 
 
 def test_apply_skip_flags_clears_stale_flags_from_previous_render() -> None:

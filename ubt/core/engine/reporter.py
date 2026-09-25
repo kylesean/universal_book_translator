@@ -13,6 +13,7 @@ from ubt.core.cleaners.code_masker import CodeMasker
 from ubt.core.cleaners.math_masker import MathMasker
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.ir.models import BlockStatus, BlockType, BookManifest
+from ubt.core.qe.defect_taxonomy import INTENTIONAL_PRESERVED_SKIP_PREFIXES
 
 # The QE-scored population policy (placeholder/skip exclusion) lives in
 # ubt.core.qe.score_policy, which both this report and the ledger's job stats
@@ -113,8 +114,10 @@ class ReportRenderCoverage(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    rendered_blocks: int  # completed minus fail-closed skips (>= 0)
-    skipped_blocks: int  # sum of render_skip:* flag occurrences
+    rendered_blocks: int  # completed blocks delivered on page (== summary.completed)
+    skipped_blocks: int  # render_skip:* occurrences (fail-closed + intentional)
+    fail_closed_blocks: int = 0  # source left visible; a translation could not be placed
+    preserved_blocks: int = 0  # chrome/non-prose/policy/footer kept in place by design
     render_coverage: float  # rendered / total; 1.0 when nothing was skipped
     skip_families: dict[str, int] = Field(default_factory=dict)
 
@@ -221,6 +224,8 @@ class QualityReport(BaseModel):
         default_factory=lambda: ReportRenderCoverage(
             rendered_blocks=0,
             skipped_blocks=0,
+            fail_closed_blocks=0,
+            preserved_blocks=0,
             render_coverage=1.0,
         )
     )
@@ -367,9 +372,11 @@ def build_quality_report(
         for flag in b.error_flags:
             flag_counts[flag] = flag_counts.get(flag, 0) + 1
 
-    # Render delivery audit: fail-closed overlay skips leave source-visible
-    # text on the page even though the pipeline "completed" those blocks.
-    skipped_blocks, _skip_verdict = summarize_render_skips(flag_counts)
+    # Render delivery audit: fail-closed overlay skips lose a translation;
+    # chrome/policy/non-prose keeps are deliberate. Split them so the fail-closed
+    # count carries the zero-tolerance ceiling and the keeps are reported apart.
+    fail_closed_blocks, preserved_blocks, _skip_verdict = summarize_render_skips(flag_counts)
+    skipped_blocks = fail_closed_blocks + preserved_blocks
     skip_families: dict[str, int] = {}
     for flag, count in flag_counts.items():
         reason = _skip_reason(flag)
@@ -377,7 +384,10 @@ def build_quality_report(
             continue
         family = reason.split("(", 1)[0].strip()
         skip_families[family or flag] = skip_families.get(family or flag, 0) + count
-    rendered_blocks = max(0, completed - skipped_blocks)
+    # ``completed`` already excludes failed/needs-human/blocked blocks, so it is
+    # the delivered figure; subtracting skip flags here double-counted skips on
+    # blocks that were never completed.
+    rendered_blocks = completed
     coverage = round(rendered_blocks / total, 4) if total > 0 else 1.0
 
     route_info: ReportRouteInfo | None = None
@@ -468,6 +478,8 @@ def build_quality_report(
         render_coverage=ReportRenderCoverage(
             rendered_blocks=rendered_blocks,
             skipped_blocks=skipped_blocks,
+            fail_closed_blocks=fail_closed_blocks,
+            preserved_blocks=preserved_blocks,
             render_coverage=coverage,
             skip_families=skip_families,
         ),
@@ -517,26 +529,35 @@ def _skip_reason(flag: str) -> str | None:
     return None
 
 
-def summarize_render_skips(defect_flags: dict[str, int]) -> tuple[int, str]:
-    """Aggregate ``render_skip:{reason}`` defect flags by reason family.
+def summarize_render_skips(defect_flags: dict[str, int]) -> tuple[int, int, str]:
+    """Aggregate ``render_skip:{reason}`` flags by family.
 
-    Returns ``(skipped_blocks, verdict)``. Families strip the parenthesized
-    fit params (``overflow(base=10.0)`` -> ``overflow``) so per-size variants
-    do not fragment the audit. Empty verdict covers both full coverage and
-    engines that recorded no fail-closed skip.
+    Returns ``(fail_closed, preserved, verdict)``. Families strip the
+    parenthesized fit params (``overflow(base=10.0)`` -> ``overflow``) so per-size
+    variants do not fragment the audit. A family is *preserved* when every flag
+    is an intentional keep (chrome/non-prose/policy/footer); anything else is
+    fail-closed and is what the zero-ceiling KPI and the review verdict track.
     """
-    family_counts: dict[str, int] = {}
+    fail_closed_families: dict[str, int] = {}
+    preserved_families: dict[str, int] = {}
     for flag, count in defect_flags.items():
         reason = _skip_reason(flag)
         if reason is None:
             continue
         family = reason.split("(", 1)[0].strip() or reason
-        family_counts[family] = family_counts.get(family, 0) + count
-    total = sum(family_counts.values())
-    if total == 0:
-        return 0, "No fail-closed skips recorded"
-    detail = ", ".join(f"{fam}×{n}" for fam, n in sorted(family_counts.items()))
-    return total, f"{detail} — review required"
+        if flag.startswith(INTENTIONAL_PRESERVED_SKIP_PREFIXES):
+            preserved_families[family] = preserved_families.get(family, 0) + count
+        else:
+            fail_closed_families[family] = fail_closed_families.get(family, 0) + count
+    fail_closed = sum(fail_closed_families.values())
+    preserved = sum(preserved_families.values())
+    if fail_closed:
+        detail = ", ".join(f"{fam}×{n}" for fam, n in sorted(fail_closed_families.items()))
+        return fail_closed, preserved, f"{detail} — review required"
+    if preserved:
+        detail = ", ".join(f"{fam}×{n}" for fam, n in sorted(preserved_families.items()))
+        return 0, preserved, f"{preserved} source element(s) intentionally preserved ({detail})"
+    return 0, 0, "No source-visible skips recorded"
 
 
 # `math_token_corrupt missing=[..] mismatched=[..] mutated=[..] [reordered=[..]]
@@ -689,7 +710,8 @@ def render_kdp_audit_markdown(report: QualityReport) -> str:
             f"{placeholder.corrupt_spans} corrupt span(s) in "
             f"{placeholder.corrupt_blocks} block(s) — review required"
         )
-    skip_total, skip_verdict = summarize_render_skips(report.defect_flags)
+    fail_closed_total, preserved_total, skip_verdict = summarize_render_skips(report.defect_flags)
+    skip_total = fail_closed_total + preserved_total
     cost_line = (
         f"${report.summary.estimated_cost_usd:.5f}"
         if report.summary.estimated_cost_usd is not None
@@ -697,13 +719,15 @@ def render_kdp_audit_markdown(report: QualityReport) -> str:
     )
     advisory_section = _render_advisory_markdown(report.mode_advisory)
     coverage_pct = report.render_coverage.render_coverage * 100
-    if report.render_coverage.skipped_blocks == 0:
-        coverage_verdict = "Full delivery — nothing left source-visible"
-    else:
+    if fail_closed_total:
         coverage_verdict = (
-            f"{report.render_coverage.skipped_blocks} block(s) left source-visible "
+            f"{fail_closed_total} block(s) left source-visible without a translation "
             f"({skip_verdict}) — review required"
         )
+    elif preserved_total:
+        coverage_verdict = f"{preserved_total} source element(s) intentionally preserved"
+    else:
+        coverage_verdict = "Full delivery — nothing left source-visible"
     route_line = ""
     if report.route is not None:
         route_line = (
