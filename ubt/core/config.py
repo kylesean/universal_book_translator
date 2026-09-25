@@ -872,6 +872,7 @@ class UBTConfig(BaseSettings):
         "formula_render",
         "math_backend",
         "granularity",
+        "env",
         mode="before",
     )
     @classmethod

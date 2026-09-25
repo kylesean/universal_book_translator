@@ -29,6 +29,7 @@ from ubt.core.engine.dry_run import create_dry_run_orchestrator
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.pipeline import PipelineOrchestrator
 from ubt.core.exceptions import UBTError
+from ubt.core.fs_perms import restrict_env_file
 from ubt.core.job_options import (
     JOB_ID_MAX_LEN,
     apply_config_overrides,
@@ -79,6 +80,10 @@ def main_callback(
     # Rich Live progress bar (translate) re-route records onto the shared stdout
     # console just before the bar starts, which is the only way a log line and
     # the bar can share one terminal region without tearing.
+    # The API and MCP entry points converge ``.env`` to owner-only at boot; the
+    # CLI is the primary surface that reads it, so it must too, or a credential
+    # file left at 0644 by an editor/copy stays world-readable with no warning.
+    restrict_env_file()
     setup_logging(verbose=verbose)
 
 
@@ -206,7 +211,6 @@ async def _run_translation(
             f"--dual-mode '{config.dual_mode}' will be downgraded to 'monolingual'. "
             "Use --render-engine reflow for a bilingual artifact."
         )
-
 
     if not dry_run and config.api_key.get_secret_value() == MOCK_API_KEY:
         raise RuntimeError(

@@ -445,6 +445,14 @@ def create_app(
                 )
             async with assess_semaphore:
                 return await _assess()
+        if resolved_in.suffix.lower() == ".pdf":
+            # A "shallow" assess is not a cheap manifest read: it still runs the
+            # full pdfium page census + font-encoding witness (assess._pdf_facts).
+            # Queue it on the same slots so a burst cannot pile unbounded
+            # per-page work onto the process (the 503 guard above stays
+            # deep-only; shallow requests wait rather than reject).
+            async with assess_semaphore:
+                return await _assess()
         return await _assess()
 
     @api_app.post(

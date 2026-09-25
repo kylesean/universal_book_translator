@@ -116,11 +116,13 @@ def doctor_command() -> None:
         extra_dirs=(Path(".ubt/docling_cache"), default_output_dir_for_scan()),
     )
     if exposed:
+        parents = sorted({str(path.parent) for path in exposed})
+        target = " ".join(f"'{parent}'" for parent in parents)
         record(
             "Ledger permissions",
             "WARN",
             f"{len(exposed)} file(s) carrying book text are group/other-readable, "
-            f"e.g. {exposed[0]} — tighten with: chmod -R go-rwx '{config.db_dir}'",
+            f"e.g. {exposed[0]} — tighten with: chmod -R go-rwx {target}",
         )
     else:
         record("Ledger permissions", "OK", f"owner-only under {config.db_dir}")

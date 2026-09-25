@@ -44,6 +44,10 @@ def recheck_gates(job_id: str, *, db_dir: Any = None) -> dict[str, Any]:
         "no_draft": 0,
         "blocks": [],
     }
+    if not job_id_is_valid(job_id):
+        # Mirror job_status/pe_import: never build a path from an unvalidated id.
+        report["error"] = f"invalid job id {job_id!r}"
+        return report
     try:
         db_dir = _get_resolve_db_dir()(db_dir)
         db_path = Path(db_dir) / f"{job_id}.sqlite"

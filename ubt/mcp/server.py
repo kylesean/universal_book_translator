@@ -108,8 +108,11 @@ _MAX_RETAINED = 100
 #: ceiling at all: a burst of deep assesses from an agent piled unbounded heavy
 #: ingest onto this process. Two slots, waiters queue —
 #: MCP tool calls are already long-running by design. ``MCP_MAX_RUNNING_JOBS``
-#: keeps governing translations only; shallow assesses stay ungated (they are
-#: a cheap manifest/profile read).
+#: keeps governing translations only. Shallow assesses stay ungated but are
+#: *not* free: they skip the Docling ingest yet still run the full pdfium page
+#: census + font-encoding witness (``assess._pdf_facts``). That work is
+#: serialized process-wide by ``PDFIUM_LOCK`` (ubt/adapters/pdf/pdfium_gate.py),
+#: which is what keeps a shallow burst from exhausting threads.
 _DEEP_ASSESS_SLOTS = 2
 _deep_assess_semaphore = asyncio.Semaphore(_DEEP_ASSESS_SLOTS)
 

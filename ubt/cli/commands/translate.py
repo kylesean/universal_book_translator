@@ -25,6 +25,7 @@ from ubt.core.config import (
     OcrMode,
     PromptStrategyName,
     QeEngine,
+    canonical_render_engine,
 )
 from ubt.core.job_options import sidecar_path
 from ubt.core.log_config import setup_logging
@@ -34,6 +35,7 @@ from ubt.core.presets import Preset
 def _ui_msg(en: str, zh: str) -> str:
     """Return English CLI copy by default, or Chinese when UBT_UI_LANG=zh."""
     return zh if os.environ.get("UBT_UI_LANG", "en").strip().lower().startswith("zh") else en
+
 
 UserRenderEngine = Literal["rigid", "reflow", "auto"]
 
@@ -616,11 +618,19 @@ def translate(
                     or "monolingual"
                 )
                 if dual_mode is not None:
-                    requested_desc_en = f"--render-engine {render_engine} --dual-mode {dual_mode} (explicit)"
-                    requested_desc_zh = f"--render-engine {render_engine} --dual-mode {dual_mode} (显式指定)"
+                    requested_desc_en = (
+                        f"--render-engine {render_engine} --dual-mode {dual_mode} (explicit)"
+                    )
+                    requested_desc_zh = (
+                        f"--render-engine {render_engine} --dual-mode {dual_mode} (显式指定)"
+                    )
                 else:
-                    requested_desc_en = f"--render-engine {render_engine} (adaptive dual-mode: {adaptive_mode})"
-                    requested_desc_zh = f"--render-engine {render_engine} (自适应双语模式: {adaptive_mode})"
+                    requested_desc_en = (
+                        f"--render-engine {render_engine} (adaptive dual-mode: {adaptive_mode})"
+                    )
+                    requested_desc_zh = (
+                        f"--render-engine {render_engine} (自适应双语模式: {adaptive_mode})"
+                    )
 
                 panel_title = _ui_msg(
                     "[bold yellow]⚠ Pre-Flight Layout Tradeoff[/]",
@@ -642,7 +652,11 @@ def translate(
                     "  [bold yellow][2][/] 继续 [bold yellow]'reflow'[/] 重排 + 零 Token 成本自动附赠 [bold green]'*_rigid.pdf'[/] 保真对照版\n"
                     "  [bold red][3][/] 取消并退出 (Abort)",
                 )
-                console.print(Panel.fit(panel_body, title=panel_title, title_align="left", border_style="yellow"))
+                console.print(
+                    Panel.fit(
+                        panel_body, title=panel_title, title_align="left", border_style="yellow"
+                    )
+                )
                 if _is_interactive() and not yes:
                     try:
                         console.print(
@@ -676,7 +690,11 @@ def translate(
                         request["dual_mode"] = "monolingual"
                         if output is not None:
                             orig_name = output.name
-                            new_name = orig_name.replace("_reflow_bilingual", "_rigid_zh").replace("_reflow", "_rigid").replace("_bilingual", "_mono")
+                            new_name = (
+                                orig_name.replace("_reflow_bilingual", "_rigid_zh")
+                                .replace("_reflow", "_rigid")
+                                .replace("_bilingual", "_mono")
+                            )
                             if new_name != orig_name:
                                 output = output.with_name(new_name)
                                 console.print(
@@ -800,7 +818,7 @@ def translate(
                     or "overlay engine" in report_data.get("delivery_warning", "")
                 ):
                     is_bilingual = False
-        elif dual_mode == "monolingual" or render_engine in ("rigid", "overlay"):
+        elif dual_mode == "monolingual" or canonical_render_engine(render_engine) == "rigid":
             is_bilingual = False
 
         doc_label = (
