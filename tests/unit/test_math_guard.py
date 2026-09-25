@@ -286,4 +286,3 @@ def test_undelimited_gate_exempts_code_identifiers_and_snake_case() -> None:
         "where A_{g0} is constant.",
         "其中 A_{g0} 是常数。",
     )
-

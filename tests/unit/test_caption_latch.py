@@ -344,13 +344,14 @@ def test_later_provenance_entry_supplies_missing_bbox(tmp_path: Path) -> None:
 
 def test_empty_formula_preserves_narrative_boundaries_and_bboxes(tmp_path: Path) -> None:
     """Empty formula items (from formula-enrichment=off) must not be dropped.
-    
+
     Dropping them lets defragment_narrative_blocks falsely coalesce text across
     the equation, losing the second text segment's bounding box and leaving
     residual un-erased English text under the equation.
     """
     pytest.importorskip("docling_core")
     from docling_core.types.doc.labels import DocItemLabel
+
     from ubt.adapters.pdf.docling_parser import map_iterated_items
 
     item_before = _LabeledItem(

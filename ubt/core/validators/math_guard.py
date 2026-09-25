@@ -146,6 +146,7 @@ def _has_math_soup_residue(text: str) -> bool:
 
 def _strip_code_snake_case(text: str) -> str:
     """Strip standard snake_case programming identifiers (create_task, code_change)."""
+
     def _repl(m: re.Match[str]) -> str:
         tok = m.group(0)
         return tok if _is_math_subscript_residue(tok) else " "
@@ -214,7 +215,6 @@ def target_missing_math_delimiters(source: str, target: str) -> bool:
     if _has_math_soup_residue(target):
         score += 2
     return score >= 2
-
 
 
 # LaTeX control sequences the Typst overlay probe compiles, mirrored from

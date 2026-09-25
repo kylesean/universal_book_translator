@@ -181,9 +181,7 @@ def extract_lines(pdf_path: Path, page_no: int) -> tuple[list[LineBox], tuple[fl
                 rects = [
                     r
                     for r in rects
-                    if (r[3] - r[1]) >= 5.0
-                    and (r[2] - r[0]) >= 3.0
-                    and (r[3] - r[1]) <= 60.0
+                    if (r[3] - r[1]) >= 5.0 and (r[2] - r[0]) >= 3.0 and (r[3] - r[1]) <= 60.0
                 ]
             rects.sort(key=lambda r: (-r[3], r[0]))
             lines = []

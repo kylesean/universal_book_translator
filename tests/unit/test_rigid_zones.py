@@ -316,4 +316,3 @@ def test_row_is_continuation_robust_to_math_ocr_discrepancy() -> None:
     # Negative case: completely unrelated text must NOT match
     unrelated = "This is a completely different theorem about something else entirely."
     assert not _row_is_continuation(unrelated, block_source)
-

@@ -57,7 +57,9 @@ def test_cli_paper_profile_defaults_to_monolingual_without_warning(
     monkeypatch.setattr(cli_main, "_build_config", spy)
 
     out = tmp_path / "paper_out.md"
-    result = runner.invoke(app, ["translate", str(sample_book_md), "--profile", "paper", "-o", str(out), "--dry-run"])
+    result = runner.invoke(
+        app, ["translate", str(sample_book_md), "--profile", "paper", "-o", str(out), "--dry-run"]
+    )
     assert result.exit_code == 0
     assert built, "_build_config was not called"
     assert built[-1].dual_mode == "monolingual"
@@ -78,7 +80,10 @@ def test_cli_rigid_engine_defaults_to_monolingual_without_warning(
     monkeypatch.setattr(cli_main, "_build_config", spy)
 
     out = tmp_path / "rigid_out.md"
-    result = runner.invoke(app, ["translate", str(sample_book_md), "--render-engine", "rigid", "-o", str(out), "--dry-run"])
+    result = runner.invoke(
+        app,
+        ["translate", str(sample_book_md), "--render-engine", "rigid", "-o", str(out), "--dry-run"],
+    )
     assert result.exit_code == 0
     assert built, "_build_config was not called"
     assert built[-1].dual_mode == "monolingual"
@@ -89,7 +94,20 @@ def test_cli_explicit_dual_mode_conflict_with_rigid_warns(
     monkeypatch: pytest.MonkeyPatch, sample_book_md: Path, tmp_path: Path
 ) -> None:
     out = tmp_path / "rigid_inline.md"
-    result = runner.invoke(app, ["translate", str(sample_book_md), "--render-engine", "rigid", "--dual-mode", "inline", "-o", str(out), "--dry-run"])
+    result = runner.invoke(
+        app,
+        [
+            "translate",
+            str(sample_book_md),
+            "--render-engine",
+            "rigid",
+            "--dual-mode",
+            "inline",
+            "-o",
+            str(out),
+            "--dry-run",
+        ],
+    )
     assert result.exit_code == 0
     assert "Warning: --render-engine rigid is monolingual-only:" in result.stdout
     assert "will be downgraded to 'monolingual'" in result.stdout
@@ -118,7 +136,10 @@ def test_preflight_panel_formats_adaptive_dual_mode_without_none(
         input="3\n",
     )
     assert "--dual-mode None" not in result.output
-    assert "adaptive dual-mode: monolingual" in result.output or "自适应双语模式: monolingual" in result.output
+    assert (
+        "adaptive dual-mode: monolingual" in result.output
+        or "自适应双语模式: monolingual" in result.output
+    )
 
 
 def test_preflight_panel_option1_heals_conflicting_output_filename(
@@ -145,7 +166,9 @@ def test_preflight_panel_option1_heals_conflicting_output_filename(
         captured_paths.append(kwargs.get("output_path"))
         return kwargs.get("output_path") or out_file
 
-    monkeypatch.setattr("ubt.cli.commands.translate._get_run_translation", lambda: fake_run_translation)
+    monkeypatch.setattr(
+        "ubt.cli.commands.translate._get_run_translation", lambda: fake_run_translation
+    )
 
     result = runner.invoke(
         app,
@@ -195,7 +218,9 @@ def test_preflight_panel_option2_guarantees_companion_rigid_flag(
         captured_kwargs.update(kwargs)
         return tmp_path / "out.pdf"
 
-    monkeypatch.setattr("ubt.cli.commands.translate._get_run_translation", lambda: spy_run_translation)
+    monkeypatch.setattr(
+        "ubt.cli.commands.translate._get_run_translation", lambda: spy_run_translation
+    )
 
     result = runner.invoke(
         app,
@@ -266,7 +291,9 @@ def test_auto_render_engine_bypasses_formula_enrichment_on_formula_heavy_pdf(
 
 
 @pytest.mark.asyncio
-async def test_advisory_stage_downgrades_when_adaptive_policy_resolves_rigid(tmp_path: Path) -> None:
+async def test_advisory_stage_downgrades_when_adaptive_policy_resolves_rigid(
+    tmp_path: Path,
+) -> None:
     """When config.render_engine is 'auto' but adaptive_policy.render_engine is 'rigid',
     advisory stage must downgrade effective_mode to 'monolingual' and record dual_mode_downgraded."""
     from unittest.mock import MagicMock
@@ -351,7 +378,3 @@ def test_export_document_label_is_adaptive() -> None:
 
     assert get_doc_label(manifest_mono) == "Translated document"
     assert get_doc_label(manifest_bilingual) == "Bilingual document"
-
-
-
-

@@ -173,7 +173,6 @@ def _row_is_continuation(row_text: str, block_source: str) -> bool:
     return len(norm) >= _MIN_CLAIM_CHARS and dehyph(block_source or "").endswith(norm)
 
 
-
 _ABBREV_TAILS = frozenset(
     [
         "fig",

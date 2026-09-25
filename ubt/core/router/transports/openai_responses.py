@@ -118,13 +118,15 @@ class OpenAIResponsesTransport(BaseTransport):
             payload["max_output_tokens"] = max_tokens
         if reasoning_effort is not None and reasoning_effort.strip():
             eff = reasoning_effort.strip().lower()
-            cached_mode = self._model_reasoning_mode.get(target_model) or self._model_reasoning_mode.get("*")
+            cached_mode = self._model_reasoning_mode.get(
+                target_model
+            ) or self._model_reasoning_mode.get("*")
             if cached_mode == "none":
                 pass
-            elif cached_mode == "nested_minimal":
-                payload["reasoning"] = {"effort": "minimal"}
-            elif eff == "minimal" or (
-                eff == "none" and ("opencode.ai" in self._base_url or "zen" in self._base_url)
+            elif (
+                cached_mode == "nested_minimal"
+                or eff == "minimal"
+                or (eff == "none" and ("opencode.ai" in self._base_url or "zen" in self._base_url))
             ):
                 payload["reasoning"] = {"effort": "minimal"}
             elif "opencode.ai" in self._base_url or "zen" in self._base_url:

@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from ubt.adapters.pdf.docling_blocks import postprocess_blocks, resolve_overlapping_formula_blocks
+from ubt.adapters.pdf.docling_blocks import resolve_overlapping_formula_blocks
 from ubt.adapters.pdf.docling_parser import _cleanup_docling_converter
 from ubt.adapters.pdf.typst_fragments import _prose_to_typst, _reference_numbers
 from ubt.adapters.pdf.typst_reconstructor import TypstReconstructor

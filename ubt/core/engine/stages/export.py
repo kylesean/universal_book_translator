@@ -394,9 +394,13 @@ def _partition_render_skip_counts(
     for cp in skip_checkpoints:
         flags = cp.get("error_flags") or []
         skip_flags = [
-            f for f in flags if isinstance(f, str) and f.startswith(("render_skip:", "inplace_skip:"))
+            f
+            for f in flags
+            if isinstance(f, str) and f.startswith(("render_skip:", "inplace_skip:"))
         ]
-        if skip_flags and all(f.startswith(_INTENTIONAL_PRESERVED_SKIP_PREFIXES) for f in skip_flags):
+        if skip_flags and all(
+            f.startswith(_INTENTIONAL_PRESERVED_SKIP_PREFIXES) for f in skip_flags
+        ):
             preserved += 1
         else:
             fail_closed += 1

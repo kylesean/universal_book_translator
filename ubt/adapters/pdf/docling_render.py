@@ -219,7 +219,6 @@ class DoclingRenderStrategy:
         if is_pdf_target and blocks:
             _warn_forced_engine(requested_engine, active_engine, blocks, manifest=manifest)
 
-
         # Rigid typesetting is monolingual: never let a requested bilingual
         # mode silently produce a mono artifact. The downgrade is recorded so
         # the quality report and the secondary-render guard can see it.

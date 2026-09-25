@@ -113,7 +113,12 @@ def resolve_formula_enrichment(
         )
         return False
 
-    if render_engine == "auto" and path is not None and path.suffix.lower() == ".pdf" and path.exists():
+    if (
+        render_engine == "auto"
+        and path is not None
+        and path.suffix.lower() == ".pdf"
+        and path.exists()
+    ):
         try:
             from ubt.core.ports import classify_pdf_content
 
@@ -126,7 +131,9 @@ def resolve_formula_enrichment(
                 )
                 return False
         except Exception as exc:
-            logger.debug("Failed to classify PDF formula content during enrichment resolution: %s", exc)
+            logger.debug(
+                "Failed to classify PDF formula content during enrichment resolution: %s", exc
+            )
 
     if formula_render == "image":
         logger.info(

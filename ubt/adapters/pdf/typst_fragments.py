@@ -288,7 +288,9 @@ def _normalize_inline_math_delimiters(text: str) -> str:
         text = _SOFT_HYPHEN_SPLIT_RE.sub(r"\1\2", text).replace("\xad", "")
     if "$" not in text:
         return text
-    out = _SPACED_LATEX_DOLLAR_RE.sub(lambda m: f"${(m.group(1) or m.group(2) or '').strip()}$", text)
+    out = _SPACED_LATEX_DOLLAR_RE.sub(
+        lambda m: f"${(m.group(1) or m.group(2) or '').strip()}$", text
+    )
     out = _BARE_DIGIT_MATH_RE.sub(r"\1", out)
     return out
 
@@ -452,8 +454,7 @@ def _reference_numbers(blocks: Sequence[IRBlock]) -> dict[str, str]:
                 in_refs = True
                 counter = 0
             elif in_refs and (
-                _BODY_SECTION_HEADING_RE.match(src_txt)
-                or _BODY_SECTION_HEADING_RE.match(tgt_txt)
+                _BODY_SECTION_HEADING_RE.match(src_txt) or _BODY_SECTION_HEADING_RE.match(tgt_txt)
             ):
                 in_refs = False
                 counter = 0

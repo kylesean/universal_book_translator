@@ -575,7 +575,11 @@ def resolve_overlapping_formula_blocks(blocks: list[IRBlock]) -> list[IRBlock]:
                 )
                 prev_txt = (out[-1].source_text or "").strip()
                 cur_txt = (b.source_text or "").strip()
-                merged_txt = f"{prev_txt}\n{cur_txt}".strip() if cur_txt and cur_txt not in prev_txt else prev_txt
+                merged_txt = (
+                    f"{prev_txt}\n{cur_txt}".strip()
+                    if cur_txt and cur_txt not in prev_txt
+                    else prev_txt
+                )
                 out[-1].bbox = union_box
                 out[-1].source_text = merged_txt
                 if out[-1].target_text is not None:
@@ -602,4 +606,3 @@ def postprocess_blocks(blocks: list[IRBlock], *, allow_cross_page: bool = True) 
         ),
         allow_cross_page=allow_cross_page,
     )
-

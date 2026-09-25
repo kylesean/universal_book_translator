@@ -187,4 +187,3 @@ def resolve_pdf_engine(
     return resolve_render_engine_from_signals(
         requested, has_math=has_math, struct_share=struct_share, has_geometry=has_geometry
     )
-

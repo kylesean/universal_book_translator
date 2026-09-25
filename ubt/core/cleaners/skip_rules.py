@@ -162,7 +162,11 @@ def _is_bib_entry(text: str) -> bool:
     """Label-free bibliography signature (R2 tiers A/B, see above)."""
     if _NARRATIVE_PROSE_RE.search(text):
         return False
-    if _ONLINE_BIB_RE.search(text) or _SHORT_ARTICLE_BIB_RE.match(text) or _DOC_CITATION_RE.search(text):
+    if (
+        _ONLINE_BIB_RE.search(text)
+        or _SHORT_ARTICLE_BIB_RE.match(text)
+        or _DOC_CITATION_RE.search(text)
+    ):
         return True
 
     with _PATTERNS_LOCK:

@@ -659,4 +659,3 @@ def test_resolve_pdf_engine_respects_manifest_formula_heavy() -> None:
     # Without manifest or formula_heavy=False, it resolves to 'publication'
     engine_plain = resolve_pdf_engine("auto", blocks)
     assert engine_plain == "publication"
-

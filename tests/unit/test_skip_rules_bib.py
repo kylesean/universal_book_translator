@@ -451,4 +451,3 @@ def test_bibliography_section_survives_subheading_and_exits_on_appendix() -> Non
     assert states["b337"] is True
     assert states["b343"] is False
     assert states["b344"] is False
-
