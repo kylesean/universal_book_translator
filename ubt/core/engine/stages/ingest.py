@@ -54,14 +54,10 @@ def update_bibliography_section_state(
         return in_bibliography
     h_txt = (b.source_text or "").strip()
     next_slice = blocks[idx + 1 : idx + 5]
-    has_upcoming_bib = any(
-        classify_skip(nb.source_text or "") is not None for nb in next_slice
-    )
+    has_upcoming_bib = any(classify_skip(nb.source_text or "") is not None for nb in next_slice)
     if _BIB_SECTION_HEADING_RE.match(h_txt):
         return has_upcoming_bib
-    if in_bibliography and has_upcoming_bib:
-        return True
-    return False
+    return bool(in_bibliography and has_upcoming_bib)
 
 
 def _guard_chapter_window(

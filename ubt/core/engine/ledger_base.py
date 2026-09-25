@@ -257,7 +257,7 @@ class LedgerBase:
                 raise
 
     def close(self) -> None:
-        """Close the underlying persistent connection."""
+        """Close the underlying persistent connection (idempotent)."""
         with self._lock:
             if self._conn is not None:
                 try:

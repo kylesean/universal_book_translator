@@ -16,6 +16,7 @@ from ubt.core.qe.defect_taxonomy import (
     has_triage_verdict,
     is_repair_only_transient_failure,
     is_transient_failure,
+    is_transient_lifecycle_only,
 )
 
 
@@ -106,3 +107,22 @@ def test_repair_only_marker_is_the_all_transient_repair_case() -> None:
     # Non-transient flags say nothing about the draft: not a repair-only requeue.
     assert not is_repair_only_transient_failure(["needs_human_review"])
     assert not is_repair_only_transient_failure([])
+
+
+def test_transient_lifecycle_only_is_not_a_triage_verdict() -> None:
+    """A provider outage must stay retryable instead of becoming NEEDS_HUMAN.
+
+    ``Drafting error`` is a structural marker, so triage used to classify a
+    transient drafting failure as Major/NEEDS_HUMAN; ``reset_transient_failures``
+    then refused to re-queue it and the block was stranded forever. Only flags
+    that are pure lifecycle markers count here.
+    """
+    assert is_transient_lifecycle_only([f"{DRAFTING_ERROR_PREFIX} 503"])
+    assert is_transient_lifecycle_only([f"{REPAIR_ERROR_PREFIX} timeout"])
+    assert is_transient_lifecycle_only([f"{UNTRANSLATED_PREFIX} silent"])
+    # A permanent drafting failure is deliberately still triaged.
+    assert not is_transient_lifecycle_only([f"{NON_RETRYABLE_DRAFT_PREFIX} HTTP 401"])
+    # A real quality defect alongside the lifecycle marker is still triaged.
+    assert not is_transient_lifecycle_only([f"{DRAFTING_ERROR_PREFIX} 503", "Numeric fidelity"])
+    assert not is_transient_lifecycle_only(["Numeric fidelity"])
+    assert not is_transient_lifecycle_only([])

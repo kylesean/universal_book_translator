@@ -125,7 +125,18 @@ async def run_repair_stage(
                 update = _record_failure(cand, res)
             await asyncio.to_thread(ledger.save_checkpoints_batch, [update])
 
-        await asyncio.gather(*[_repair_and_record(cand) for cand in repair_candidates])
+        results = await asyncio.gather(
+            *[_repair_and_record(cand) for cand in repair_candidates],
+            return_exceptions=True,
+        )
+        for outcome in results:
+            if isinstance(outcome, BaseException) and not isinstance(
+                outcome, asyncio.CancelledError
+            ):
+                # Without return_exceptions=True the first ledger-write failure
+                # propagated while sibling repairs kept calling the paid model
+                # and writing after the stage unwound.
+                logger.warning("repair task failed: %s", outcome)
 
         event = await create_event_fn(
             EventType.REPAIR_BATCH_COMPLETED,

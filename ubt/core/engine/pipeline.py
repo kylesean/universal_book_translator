@@ -515,13 +515,17 @@ class PipelineOrchestrator:
             scan_dirs.append(Path(output_path).parent)
         exposed = world_readable_files(self.config.db_dir, extra_dirs=scan_dirs)
         if exposed:
+            # The exposed files may live outside db_dir (deliverables, caches), so
+            # name their real parents: the old message told operators to chmod
+            # db_dir, which was already owner-only and changed nothing.
+            parents = sorted({str(path.parent) for path in exposed})
+            target = " ".join(f"'{parent}'" for parent in parents)
             logger.warning(
-                "%d file(s) under %s carry book text but are readable by group/other "
-                "(first: %s). Tighten them with: chmod -R go-rwx '%s'",
+                "%d file(s) carry book text but are readable by group/other "
+                "(first: %s). Tighten them with: chmod -R go-rwx %s",
                 len(exposed),
-                self.config.db_dir,
                 exposed[0],
-                self.config.db_dir,
+                target,
             )
         # Bill this run alone: take a provider-side sink when the provider can
         # attribute per run, otherwise a snapshot to diff the shared counters in.
@@ -673,7 +677,10 @@ class PipelineOrchestrator:
                 forced_granularity=getattr(self.config, "granularity", None),
             )
             manifest.run.adaptive_policy = adaptive_policy.to_dict()
-            if hasattr(adapter, "render_engine") and getattr(adapter, "render_engine", None) == "auto":
+            if (
+                hasattr(adapter, "render_engine")
+                and getattr(adapter, "render_engine", None) == "auto"
+            ):
                 adapter.render_engine = adaptive_policy.render_engine
 
             # One object carries the run's shared state into each stage, so a
@@ -748,10 +755,13 @@ class PipelineOrchestrator:
             await run_extraction_witness_stage(ctx)
             async for event in run_mode_advisory_stage(ctx):
                 yield event
-            async for event in run_bible_stage(ctx):
-                yield event
+            # Zero-token preflights BEFORE the bible: the bible stage's skeleton
+            # extraction and abbreviation backfill are billable calls, and the
+            # render/cost preflight exists to fail before any spend.
             await run_render_preflight_stage(ctx)
             await run_cost_preflight_stage(ctx)
+            async for event in run_bible_stage(ctx):
+                yield event
             if self.config.chapter_streaming_enabled and len(manifest.chapters) > 1:
                 async for event in run_chapter_streaming_pipeline(ctx):
                     yield event

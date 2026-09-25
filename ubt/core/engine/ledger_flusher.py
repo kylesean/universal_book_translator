@@ -214,7 +214,27 @@ class CheckpointBatchFlusher:
                 task_exc = exc
         pending = self._drain_nowait()
         if pending:
-            saved = await asyncio.shield(self._save(pending))
+            save_task = asyncio.ensure_future(self._save(pending))
+            try:
+                saved = await asyncio.shield(save_task)
+            except asyncio.CancelledError:
+                # ``shield`` keeps the save running when the awaiter is
+                # cancelled, so the durability verdict used to be dropped and a
+                # failed final flush vanished behind the cancellation. Observe
+                # the shielded task, surface a failed flush, then re-raise the
+                # cancellation only when the flush actually succeeded.
+                try:
+                    saved = await save_task
+                except BaseException:
+                    saved = False
+                if not saved and task_exc is None:
+                    task_exc = RuntimeError(
+                        f"Ledger checkpoint flush failed ({len(pending)} pending item(s)); "
+                        "abandoning batched writes"
+                    )
+                if task_exc is not None:
+                    raise task_exc from None
+                raise
             if not saved and task_exc is None:
                 task_exc = RuntimeError(
                     f"Ledger checkpoint flush failed ({len(pending)} pending item(s)); "

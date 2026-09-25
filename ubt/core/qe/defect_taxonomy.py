@@ -210,6 +210,32 @@ def is_repair_only_transient_failure(flags: Iterable[str]) -> bool:
     return all(flag.startswith(REPAIR_ERROR_PREFIX) for flag in transient)
 
 
+def is_transient_lifecycle_only(flags: Iterable[str]) -> bool:
+    """True when every flag is a lifecycle failure marker, not a quality defect.
+
+    A drafting/repair call that failed transiently (timeout, 5xx, connect error)
+    is a provider problem, not a judgement on a draft: triage must leave it
+    FAILED/REPAIR_PENDING so ``reset_transient_failures`` can re-queue it. Without
+    this, triage classifies the ``Drafting error`` marker as structural (it is in
+    ``STRUCTURAL_DEFECT_MARKERS``), writes a permanent ``NEEDS_HUMAN`` verdict,
+    and the resume path then refuses to retry the never-drafted block — turning a
+    temporary outage into manual work (and, above ``export_min_completion_ratio``,
+    into a job that can never complete).
+
+    A permanent ``NON_RETRYABLE_DRAFT_PREFIX`` block is excluded on purpose: it
+    will fail identically on every resume, so triage is the correct destination.
+    """
+    materialized = [flag for flag in flags if flag]
+    if not any(
+        flag.startswith(prefix) for flag in materialized for prefix in TRANSIENT_FAILURE_PREFIXES
+    ):
+        return False
+    lifecycle_prefixes = (*TRANSIENT_FAILURE_PREFIXES, NON_RETRYABLE_DRAFT_PREFIX)
+    return not any(
+        not any(flag.startswith(prefix) for prefix in lifecycle_prefixes) for flag in materialized
+    )
+
+
 def has_triage_verdict(flags: Iterable[str]) -> bool:
     """True when any flag is a triage verdict (permanent quarantine)."""
     materialized = list(flags)

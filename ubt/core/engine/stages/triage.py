@@ -40,6 +40,7 @@ from ubt.core.qe.defect_taxonomy import (
 from ubt.core.qe.defect_taxonomy import (
     has_critical_defect,
     has_structural_defect,
+    is_transient_lifecycle_only,
 )
 from ubt.core.validators.span_repair import max_severity, span_to_dict
 
@@ -137,6 +138,11 @@ async def run_triage_stage(
         b
         for b in [*repair_pending, *failed]
         if not b.skip_translate
+        # A transient drafting/repair failure is a provider problem, not a
+        # quality verdict: leave it FAILED/REPAIR_PENDING so resume can retry it
+        # (see ``is_transient_lifecycle_only``). Permanent "Drafting
+        # unrecoverable" failures are still triaged.
+        and not is_transient_lifecycle_only(b.error_flags)
         # FAILED is terminal per IRBlock.is_finalized, but this stage is the
         # Documented last net for repair-path failures: classify
         # them into the human queue instead of leaving raw FAILED blocks.
