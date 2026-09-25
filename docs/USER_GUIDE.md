@@ -257,7 +257,7 @@ uv run ubt translate <input_path> [OPTIONS]
 #### ① 输入输出与元数据
 - `input_path` (`Path`，必填)：输入书籍或文档路径，支持 `.pdf`, `.epub`, `.docx`, `.md`, `.markdown`, `.html`, `.htm`, `.txt`。
   - **Markdown 提示**：解析器把表格行按普通叙事段落送入翻译模型，双语交错会把表格复制为两段文本。含表格的技术书籍请改走 HTML 或 PDF 路径（标签级注入会保留表格结构）；纯叙事型 Markdown 不受影响。
-- `-o, --output` (`Path`，默认：`tmp/output/<stem>_bilingual<suffix>`)：目标输出译本路径。
+- `-o, --output` (`Path`，默认：`$UBT_OUTPUT_DIR/<stem>_bilingual<suffix>`；`UBT_OUTPUT_DIR` 默认 `<文档目录>/UBT`)：目标输出译本路径。
 - `-s, --source-lang` (`str`，默认：`"en"`)：源语言代码。
 - `-l, --target-lang` (`str`，默认：`"zh"`)：目标翻译语言代码。
 - `-p, --profile, --domain-profile` (`str`，默认：`"general"`)：翻译领域画像，可选 `general`（通用）、`textbook`（教科书）、`paper`（学术论文）、`fiction`（文学小说）、`humanities`（人文社科）、`technical`（计算机与工程技术）。`--domain-profile` 为 `--profile` 的完整长参数别名。
@@ -455,7 +455,7 @@ uv run ubt api [--host HOST] [--port PORT]
 | **`UBT_LLM_API_KEY`** / `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GEMINI_API_KEY` | 占位符 `mock-key` | 访问外部大模型推理 API 的密钥。未配置时保持占位值——非 `--dry-run` 的 `ubt translate` 会显式报 "using mock-key" 拒跑，而不是静默空请求。支持 CLI `--api-key` 或 Profile 覆盖。 |
 | **`UBT_BASE_URL`** / `OPENAI_BASE_URL` / `ANTHROPIC_BASE_URL` / `OPENCODE_BASE_URL` | 条件默认 | 大模型服务接口基础地址。支持官方直连（OpenAI、Google Gemini、Anthropic）与私有部署。未显式配置时按凭据来源逐级回退，**与 `api_key` 的别名优先级一致**（`UBT_LLM` > `OPENAI` > `OPENCODE` > `DEEPSEEK` > `ANTHROPIC` > `GEMINI`）：`OPENCODE_BASE_URL` → 通用键（`UBT_LLM_API_KEY`/`OPENAI_API_KEY`，不指定供应商）用 OpenAI 默认端点 → `OPENCODE_API_KEY` 用 Zen 端点 → `DEEPSEEK_API_KEY` 用 `https://api.deepseek.com/v1` → `ANTHROPIC_API_KEY` 用 Anthropic Messages 端点 → `GEMINI_API_KEY` 用 Gemini 官方兼容端点 → 否则 `https://api.openai.com/v1`。**密钥与端点从同一张优先级表解析**，不会出现「密钥来自 A、端点来自 B」把凭据发给错误主机的情况。**凭据只从上述显式声明的名字解析**——UBT 不再读取其他程序的凭据文件（opencode `auth.json`、`~/.config/deepseek_key`），也不会把书稿发给一个你没主动选过的端点。 |
 | **`UBT_ALLOW_PAGE_UPLOAD`** | `false` | 书页图像外发总开关：视觉微调（L4 scalpel）页裁剪、VLM 页面评审、cloud/vlm OCR 共用。**默认关闭**（2026-09 隐私复核：未出版书稿的整页图像是载荷里最敏感的一半，而这一路外发曾经既无开关也不出声）。关闭时所有整页/页裁剪图像都不离开本机（OCR auto 自动降级到本地引擎，显式 cloud/vlm 报错拒跑），视觉微调退化为文本级修复；设 `true` 可恢复这些能力。纯文本请求不受影响。`ubt doctor` 会披露当前生效的图像外发路由（auto 的末档云端回退标 WARN 而非 OK）。 |
-| **`UBT_API_MODE`** | `"chat"` | 推理接口协议：`chat`（标准 OpenAI / Gemini 兼容）、`responses`（OpenAI Responses API）、`anthropic`（Anthropic Messages API 直连）。 |
+| **`UBT_API_MODE`** | `"chat"`（`draft_model` 以 `muse-` 开头时自动推导为 `"responses"`，默认草稿模型即如此） | 推理接口协议：`chat`（标准 OpenAI / Gemini 兼容）、`responses`（OpenAI Responses API）、`anthropic`（Anthropic Messages API 直连）。 |
 | **`UBT_PROVIDER_PROFILE`** | `None` | 指定加载配置文件 (`ubt.toml` 或 `~/.ubt/config.toml`) 中声明的供应商配置块名称。 |
 | **`UBT_API_TIMEOUT`** / `UBT_TIMEOUT` | `180.0` | HTTP 请求超时秒数（`UBT_TIMEOUT` 为等义别名）。 |
 | **`UBT_BUDGET_USD`** | `None` | 单个 job 的美元硬预算上限，**跨续跑累计**：账本记录该 job 的历史 token 用量，每个计费进度事件用「历史 + 本次」判定，超限即失败停止（已译块与已花费都留在账本，调高预算后重跑同一 job 继续；`--fresh` 会连同账单一并清零）。开跑前还会先报一行预估（静态前缀按真实 prompt 组装量出，只算 draft 调用），若**最便宜的可能值都已超预算**则在 0 token 处直接拒跑。**fail-closed 预检**：设了预算但 draft/repair/judge 模型不在价表时，开跑即拒绝（未定价模型的成本永远是 unknown，上限形同虚设）；确需照跑用 `UBT_ALLOW_UNPRICED_BUDGET=1` 降级回「每模型告警一次」。CLI 对应 `--budget-usd`。 |

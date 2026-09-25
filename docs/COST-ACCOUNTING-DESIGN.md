@@ -14,8 +14,8 @@
 | --- | --- | --- |
 | 从真实响应取 token | ✅ 可用 | `transports/openai_chat.py` 读 `usage.prompt_tokens/completion_tokens`；`openai_responses.py` 读 `input_tokens/output_tokens`；`anthropic.py` 读 `input_tokens/output_tokens/cache_read_input_tokens/cache_creation_input_tokens`；缓存命中由 `transports/base.py::_extract_cached_tokens` 兜住 4 种 shape |
 | 跨续跑累计 + 落盘 | ✅ 可用 | `engine/usage.py::JobBill` → `engine/ledger.py` 的 `job_meta.usage_totals` → 质量报告 |
-| **价格来源** | ❌ **硬编码** | 全仓唯一价格源是 `router/pricing.py::MODEL_PRICES_USD_PER_MTOK` 的 30 条字面量；`UBTConfig` **无任何价格字段**；用户要加价只能改源码 |
-| 价格覆盖度 | ⚠️ 有缺口 | 30 条 `startswith` 前缀匹配。实测探测 15 个真实模型名，`grok-4` / `kimi-k2` / `llama-3.3-70b` / `mistral-large` / `command-r-plus` 未收录 → 报"未知" |
+| **价格来源** | ❌ **硬编码** | 全仓唯一价格源是 `router/pricing.py::MODEL_PRICES_USD_PER_MTOK` 的 36 条字面量；`UBTConfig` **无任何价格字段**；用户要加价只能改源码 |
+| 价格覆盖度 | ⚠️ 有缺口 | 36 条 `startswith` 前缀匹配。实测探测 15 个真实模型名，`grok-4` / `kimi-k2` / `llama-3.3-70b` / `mistral-large` / `command-r-plus` 未收录 → 报"未知" |
 | 计价维度 | ⚠️ 部分建模 | Batch 折扣 `BATCH_API_DISCOUNT = 0.5` 与缓存输入价均为硬编码常量；Anthropic 缓存**写入** 1.25x 溢价未建模（`pricing.py` 自述 `not modelled`） |
 
 **一句话定性**：现在的实现是"用模型名前缀猜价格"，而真实世界的价格属于 **(厂商, 模型, 渠道, 计费维度)** 四元组，且随时间变化。
