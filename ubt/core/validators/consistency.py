@@ -371,6 +371,34 @@ def _denoted_values(text: str) -> set[str]:
     return values
 
 
+# Compound Chinese magnitudes ('3亿5000万','1万2千') are several digit+unit pairs
+# that together state one value. Neither constituent matches a target written as
+# a plain number ('350000000'), so without this the per-token check reports both
+# as lost and a correct translation is escalated to repair.
+_CN_COMPOUND_RE = re.compile(r"(?:\d[\d.]*[万亿千百]){2,}")
+_CN_COMPOUND_PAIR_RE = re.compile(r"(\d[\d.]*)([万亿千百])")
+
+
+def _cn_compound_runs(text: str) -> list[tuple[list[str], str]]:
+    """(constituent canonical tokens, total value) for each compound magnitude run."""
+    runs: list[tuple[list[str], str]] = []
+    for match in _CN_COMPOUND_RE.finditer(text):
+        pairs = _CN_COMPOUND_PAIR_RE.findall(match.group(0))
+        total = Decimal(0)
+        tokens: list[str] = []
+        ok = True
+        for raw, unit in pairs:
+            value = _to_decimal(raw)
+            if value is None:
+                ok = False
+                break
+            total += value * _CN_SCALE_FACTORS[unit]
+            tokens.append(canonicalize_numeric_token(raw))
+        if ok and tokens:
+            runs.append((tokens, _canon_value(total)))
+    return runs
+
+
 # Common rhetorical idioms where numbers are traditionally translated into
 # Chinese idiomatic phrases (chengyu / dynamic equivalence) without literal digits.
 _NUMERIC_IDIOM_PATTERNS: tuple[tuple[re.Pattern[str], tuple[str, ...]], ...] = (
@@ -494,9 +522,20 @@ class NumericConsistencyValidator(ContentValidator):
         # Scale equivalence is computed once per pair: the values the source
         # states next to a scale word, and every value the target states.
         src_scales = _scale_map(original)
+        source_compounds = _cn_compound_runs(original.translate(_FULLWIDTH_DIGITS))
         tgt_values = _denoted_values(translated) | _denoted_values(normalized_tgt)
+        tgt_values |= {
+            total
+            for text in (translated, normalized_tgt)
+            for _tokens, total in _cn_compound_runs(text)
+        }
+        compound_satisfied = {
+            token for tokens, total in source_compounds if total in tgt_values for token in tokens
+        }
         for num in sorted(src_nums):
             if num in exempt_numbers:
+                continue
+            if num in compound_satisfied:
                 continue
             if _RANGE_DELIMITERS.search(num):
                 sub_parts = [

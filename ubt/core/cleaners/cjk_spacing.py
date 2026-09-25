@@ -139,10 +139,15 @@ def apply_pangu_spacing(text: str, target_lang: str = "zh") -> str:
             seg = " " + seg
         parts[i] = seg
 
-    out = "".join(parts)
-    out = re.sub(rf"([{_CJK}])[ \t\u3000]{{2,}}", r"\1 ", out)
-    out = re.sub(rf"[ \t\u3000]{{2,}}([{_CJK}])", r" \1", out)
-    return out
+    # Collapse 2+ spaces adjacent to CJK only in the *unprotected* segments:
+    # running this on the rejoined string rewrote the bytes inside an inline
+    # code/math span, which the module contract says must never be touched.
+    for i in range(0, len(parts), 2):
+        seg = parts[i]
+        seg = re.sub(rf"([{_CJK}])[ \t\u3000]{{2,}}", r"\1 ", seg)
+        seg = re.sub(rf"[ \t\u3000]{{2,}}([{_CJK}])", r" \1", seg)
+        parts[i] = seg
+    return "".join(parts)
 
 
 def _apply_punct_rules(text: str) -> str:

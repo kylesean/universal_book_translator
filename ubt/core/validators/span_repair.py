@@ -298,7 +298,7 @@ class SpanRepairSplicer:
         if not spans:
             # Fall back to extracting final translation tag or cleaning model output
             if final_match:
-                return final_match.group(1).strip(), False
+                return html.unescape(final_match.group(1).strip()), False
             return model_output.strip(), False
 
         # If any span was an insertion anchored at end-of-text (e.g. missing number),
@@ -310,7 +310,10 @@ class SpanRepairSplicer:
         if has_end_insertion and final_match:
             cleaned = final_match.group(1).strip()
             cleaned = re.sub(r"</?error_span[^>]*>", "", cleaned)
-            return cleaned, False
+            # The annotated draft HTML-escapes span content (see annotate_draft),
+            # so a model that faithfully echoes AT&amp;T must be unescaped on
+            # every <final_translation> return path or the entity ships as text.
+            return html.unescape(cleaned), False
 
         corrections: dict[str, str] = {}
         for match in self._CORRECTION_PATTERN.finditer(model_output):
@@ -332,10 +335,6 @@ class SpanRepairSplicer:
                     replacement = corrections[span.id]
                     # Never blindly append a bare missing number/token to the very end of the paragraph
                     if span.start_pos == span.end_pos == len(original_draft):
-                        if final_match:
-                            cleaned = final_match.group(1).strip()
-                            cleaned = re.sub(r"</?error_span[^>]*>", "", cleaned)
-                            return html.unescape(cleaned), False
                         if len(replacement) > len(original_draft) * 0.5:
                             return replacement, False
                         continue

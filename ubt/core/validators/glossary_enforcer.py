@@ -166,18 +166,27 @@ class DeterministicGlossaryEnforcer:
         self._build_automaton()
 
     def _compile_glossary(self, glossary: list[dict[str, Any]]) -> None:
+        # Two passes on purpose: the alias guard below compares against every
+        # *approved target form*, but the targets are only known after the whole
+        # glossary is read. Compiling in one pass let an alias that collides with
+        # a later entry's translation be rewritten (entry A alias "Beta", entry B
+        # translation "Beta" -> "Beta" got remapped to A's target).
         for entry in glossary:
-            source = str(entry.get("source", "")).strip()
             target = str(entry.get("translation", "")).strip()
             if not target:
                 continue
-
             self._approved_target_forms.add(target)
             # Add inflected variants to approved set
             for var in entry.get("inflected_variants") or []:
                 v_clean = str(var).strip()
                 if v_clean:
                     self._approved_target_forms.add(v_clean)
+
+        for entry in glossary:
+            source = str(entry.get("source", "")).strip()
+            target = str(entry.get("translation", "")).strip()
+            if not target:
+                continue
 
             # 1. Map aliases -> canonical target
             for alias in entry.get("aliases") or []:

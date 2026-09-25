@@ -95,9 +95,13 @@ class UnmaskReport:
     def clean(self) -> bool:
         """True when every masked span restored exactly once, intact, in place.
 
-        "Unverified" tokens (echoed without a checksum suffix, which the
-        masker emits as optional) do NOT fail closed — they are tolerated,
-        not treated as wrong-span restores.
+        ``unverified`` tokens (echoed without the checksum suffix the masker
+        always emits) are *reported* but do not by themselves fail this
+        property; whether they also fail closed is masker-specific. Most
+        maskers restore a checksum-less token verbatim and report it only here;
+        :class:`CitationMasker` refuses to restore it and additionally records
+        it in ``mutated``, so a citation's ``clean`` is False in that case.
+        Callers must not assume ``unverified`` implies a pass.
 
         "Reordered" tokens (checksums intact, but the spans appear in a
         different order than in the masked source) do fail closed: the text is

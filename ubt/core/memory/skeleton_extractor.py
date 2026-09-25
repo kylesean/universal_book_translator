@@ -21,8 +21,35 @@ from ubt.core.memory.bible import BibleEntry, clean_bible_entry
 logger = logging.getLogger(__name__)
 
 _SKELETON_MAX_CHARS = 6000
-_SKELETON_FREQUENCY = 5000
 _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
+_CJK_CHAR_RE = re.compile(r"[\u3400-\u9fff\u3040-\u30ff\uac00-\ud7af]")
+
+
+def _document_text(blocks: Sequence[IRBlock] | Sequence[str]) -> str:
+    parts: list[str] = []
+    for entry in blocks:
+        parts.append(entry if isinstance(entry, str) else (entry.source_text or ""))
+    return "\n".join(parts)
+
+
+def _count_term_occurrences(term: str, text: str) -> int:
+    """Occurrences of ``term`` as a standalone unit (word-bounded for Latin).
+
+    Allows the final word's ordinary English inflections (``coeffect`` matches
+    ``coeffects``; ``agent harness`` matches ``agent harnesses``) so a real term
+    is not dropped for appearing in its plural/gerund form. A different word that
+    merely starts with the term (``cat`` in ``category``) still does not match.
+    """
+    if not term:
+        return 0
+    if _CJK_CHAR_RE.search(term):
+        return text.count(term)
+    words = term.split()
+    pattern = r"\s+".join(re.escape(w) for w in words[:-1])
+    if pattern:
+        pattern += r"\s+"
+    pattern += rf"{re.escape(words[-1])}(?:s|es|ed|ing)?"
+    return len(re.findall(rf"(?<![A-Za-z0-9]){pattern}(?![A-Za-z0-9])", text, re.IGNORECASE))
 
 
 def build_document_skeleton(
@@ -151,6 +178,7 @@ async def extract_skeleton_terms_llm(
         return []
 
     raw_items = _parse_terms_json(raw_response)
+    document_text = _document_text(blocks)
     entries: list[BibleEntry] = []
     for item in raw_items:
         src = str(item.get("source", "")).strip()
@@ -158,11 +186,20 @@ async def extract_skeleton_terms_llm(
         kind = str(item.get("kind", "term")).strip() or "term"
         if not src or not tgt:
             continue
+        # The skeleton channel is the only one whose terms are not mined from the
+        # text, so an LLM can invent a term from a neighbouring sub-discipline.
+        # Anchor every entry to the document and rank by real occurrence instead
+        # of a sentinel frequency that would otherwise put unverified rows at the
+        # top of every block's glossary prompt.
+        occurrences = _count_term_occurrences(src, document_text)
+        if occurrences == 0:
+            logger.debug("Dropping skeleton term %r: not present in the document", src)
+            continue
         cleaned = clean_bible_entry(
             source=src,
             translation=tgt,
             kind=kind if kind in ("term", "person", "place", "org") else "term",
         )
         if cleaned is not None:
-            entries.append(cleaned.model_copy(update={"frequency": _SKELETON_FREQUENCY}))
+            entries.append(cleaned.model_copy(update={"frequency": occurrences}))
     return entries
