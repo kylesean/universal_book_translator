@@ -44,7 +44,6 @@ def sample_pdf_pages(path: Path) -> tuple[int, bool, str]:
             for idx in candidate_indices:
                 if 0 <= idx < page_count and idx not in sample_indices:
                     sample_indices.append(idx)
-            sample_pages = len(sample_indices)
             text_samples: list[str] = []
             for i in sample_indices:
                 page = doc[i]

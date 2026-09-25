@@ -22,7 +22,6 @@ import hashlib
 import json
 import logging
 import os
-import selectors
 import shutil
 import subprocess
 import threading
@@ -227,21 +226,33 @@ class MathjaxRenderer:
             self._close_locked()
             return None
 
+        # A selector only reports *readiness*; ``readline()`` itself still blocks
+        # until a newline arrives, so a Node worker that writes a partial line
+        # and then wedges (OOM/native hang) blocks this thread forever and the
+        # documented deadline never fires. Bound the read with a worker thread;
+        # ``_close_locked`` closes the pipe and lets the daemon thread finish.
         deadline = time.monotonic() + max(1.0, float(timeout_s))
-        selector = selectors.DefaultSelector()
-        try:
-            selector.register(proc.stdout, selectors.EVENT_READ)
-            remaining = max(0.0, deadline - time.monotonic())
-            if not selector.select(remaining):
-                logger.warning("MathJax renderer timed out after %.0fs", timeout_s)
-                self._close_locked()
-                return None
-            line = proc.stdout.readline()
-        except (OSError, ValueError):
+        line_box: list[str | None] = [None]
+        error_box: list[BaseException] = []
+
+        def _read_line() -> None:
+            try:
+                assert proc.stdout is not None
+                line_box[0] = proc.stdout.readline()
+            except BaseException as read_exc:  # noqa: BLE001 - surfaced below
+                error_box.append(read_exc)
+
+        reader = threading.Thread(target=_read_line, daemon=True, name="mathjax-read")
+        reader.start()
+        reader.join(max(0.0, deadline - time.monotonic()))
+        if reader.is_alive():
+            logger.warning("MathJax renderer timed out after %.0fs", timeout_s)
             self._close_locked()
             return None
-        finally:
-            selector.close()
+        if error_box or not line_box[0]:
+            self._close_locked()
+            return None
+        line = line_box[0]
 
         if not line:
             self._close_locked()

@@ -20,6 +20,7 @@ import asyncio
 import logging
 import os
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -529,9 +530,6 @@ class RigidTypesetter:
                 # Chrome / policy / non-prose / verbatim: source-visible by
                 # design, recorded so the audit stays complete.
                 report.skipped.append((block.id, reason))
-                continue
-            if block.block_type not in PROSE_BLOCK_TYPES:
-                report.skipped.append((block.id, "non_prose"))
                 continue
             text = prepare_overlay_text(
                 (block.target_text or "").strip(), target_lang=self.target_lang
@@ -1067,6 +1065,8 @@ class RigidTypesetter:
                 "chrome",
                 "header",
                 "footer",
+                "header_band",
+                "footer_band",
                 "page_number",
                 "verbatim",
                 "symbol",

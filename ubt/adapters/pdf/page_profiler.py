@@ -25,6 +25,7 @@ from typing import Any
 
 from ubt.adapters.pdf import pdf_struct
 from ubt.adapters.pdf.pdfium_gate import pdfium_serialized
+from ubt.core.fs_perms import restrict_dir_to_owner, restrict_file_to_owner
 from ubt.core.policy.layout_policy import (
     PDF_PATH_OPS,
     PDF_TEXT_OPS,
@@ -287,8 +288,10 @@ def profile_pdf(pdf_path: Path, cache_dir: Path | None = None) -> list[PageProfi
     if cache_file is not None:
         try:
             cache_file.parent.mkdir(parents=True, exist_ok=True)
+            restrict_dir_to_owner(cache_file.parent)
             payload = [{"facts": asdict(p.facts), "kind": p.kind.value} for p in profiles]
             cache_file.write_text(json.dumps(payload), encoding="utf-8")
+            restrict_file_to_owner(cache_file)
         except OSError as exc:
             logger.debug("profiler: cannot write cache %s: %s", cache_file, exc)
     return profiles

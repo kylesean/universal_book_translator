@@ -121,13 +121,13 @@ def _norm(name: str) -> str:
 
 
 @lru_cache(maxsize=8)
-def _typst_families(typst_binary: str) -> frozenset[str] | None:
-    """Families the Typst compiler itself can see, or None when it cannot answer."""
-    resolved = shutil.which(typst_binary)
-    if not resolved and Path(typst_binary).is_file():
-        resolved = typst_binary
-    if not resolved:
-        return None
+def _typst_families_cached(resolved: str, mtime_ns: int) -> frozenset[str] | None:
+    """Families the Typst compiler itself can see, or None when it cannot answer.
+
+    ``mtime_ns`` is part of the cache key (see ``_typst_families``); the probe
+    re-runs after a Typst upgrade instead of pruning the font stack against a
+    stale family set.
+    """
     try:
         proc = subprocess.run(
             [resolved, "fonts"],
@@ -148,6 +148,35 @@ def _typst_families(typst_binary: str) -> frozenset[str] | None:
         return None
     names = frozenset(line.strip() for line in proc.stdout.splitlines() if line.strip())
     return names or None
+
+
+class _TypstFamilyProbe:
+    """Callable wrapper keeping the public ``_typst_families(name)`` surface.
+
+    A plain function cannot both accept the config's ``typst_binary`` and key the
+    cache on the resolved binary's mtime, and ``lru_cache`` on a method triggers
+    B019. The cache lives in the module-level :func:`_typst_families_cached`;
+    this wrapper resolves the binary and exposes ``cache_clear`` for the test
+    fixture.
+    """
+
+    def __call__(self, typst_binary: str) -> frozenset[str] | None:
+        resolved = shutil.which(typst_binary)
+        if not resolved and Path(typst_binary).is_file():
+            resolved = typst_binary
+        if not resolved:
+            return None
+        try:
+            mtime_ns = Path(resolved).stat().st_mtime_ns
+        except OSError:
+            mtime_ns = 0
+        return _typst_families_cached(resolved, int(mtime_ns))
+
+    def cache_clear(self) -> None:
+        _typst_families_cached.cache_clear()
+
+
+_typst_families = _TypstFamilyProbe()
 
 
 @lru_cache(maxsize=1)
