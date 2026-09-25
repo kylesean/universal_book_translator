@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator
+import re
+from collections.abc import AsyncIterator, Sequence
 
 from ubt.core.cleaners.lnds_pruner import LNDSPageCleaner, dedup_duplicate_blocks
 from ubt.core.cleaners.skip_rules import classify_skip
@@ -12,7 +13,7 @@ from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.stage_context import StageContext
 from ubt.core.exceptions import DocumentParseError
-from ubt.core.ir.models import BlockStatus, BlockType, LayoutRole
+from ubt.core.ir.models import BlockStatus, BlockType, IRBlock, LayoutRole
 from ubt.core.ir.serializer import compute_file_sha256
 from ubt.core.policy.verdict import apply_verdict, judge_block
 
@@ -23,6 +24,44 @@ logger = logging.getLogger(__name__)
 # "we could not compare", so resume must neither clear blocks (a fully
 # translated book would be destroyed and re-billed) nor raise a mismatch.
 _FINGERPRINT_UNAVAILABLE = "fingerprint_unavailable"
+
+_BIB_SECTION_HEADING_RE = re.compile(
+    r"^(?:(?:\d+(?:\.\d+)*|[IVXLCDM]+)\s*[\.\-–—:]?\s*)?"
+    r"(?:references|bibliography|works\s+cited|literature\s+cited|参考(?:文献|资料)|引用文献)\b",
+    re.IGNORECASE,
+)
+
+
+def update_bibliography_section_state(
+    blocks: Sequence[IRBlock],
+    idx: int,
+    in_bibliography: bool,
+) -> bool:
+    """Update the bibliography section state machine at block index ``idx``.
+
+    - A bibliography heading (``References``, ``7. References``, ``Bibliography``, etc.)
+      opens ``in_bibliography=True`` when at least one of the next 4 blocks is a
+      standalone bibliography entry (preventing Table-of-Contents lines from firing).
+    - Once ``in_bibliography=True`` is active, an internal sub-heading (e.g.
+      ``Primary papers and current implementation sources`` immediately under
+      ``REFERENCES``) preserves ``in_bibliography=True`` as long as at least one of
+      the next 4 blocks after that sub-heading is still a bibliography entry.
+    - A real post-bibliography section heading (e.g. ``Appendix A``) whose upcoming
+      blocks are normal prose cleanly resets ``in_bibliography=False``.
+    """
+    b = blocks[idx]
+    if b.block_type is not BlockType.HEADING:
+        return in_bibliography
+    h_txt = (b.source_text or "").strip()
+    next_slice = blocks[idx + 1 : idx + 5]
+    has_upcoming_bib = any(
+        classify_skip(nb.source_text or "") is not None for nb in next_slice
+    )
+    if _BIB_SECTION_HEADING_RE.match(h_txt):
+        return has_upcoming_bib
+    if in_bibliography and has_upcoming_bib:
+        return True
+    return False
 
 
 def _guard_chapter_window(
@@ -250,17 +289,9 @@ async def run_ingest_stage(
             cleaned_blocks = dedup_duplicate_blocks(cleaned_blocks)
             in_bibliography = False
             for idx_b, b in enumerate(cleaned_blocks):
-                if b.block_type is BlockType.HEADING:
-                    h_txt = (b.source_text or "").strip()
-                    if h_txt.lower() in ("references", "bibliography", "works cited"):
-                        # Confirm it's the actual bibliography section (not a TOC line)
-                        # by checking that at least one of the next 3 blocks is a bib entry.
-                        next_slice = cleaned_blocks[idx_b + 1 : idx_b + 4]
-                        in_bibliography = any(
-                            classify_skip(nb.source_text or "") is not None for nb in next_slice
-                        )
-                    else:
-                        in_bibliography = False
+                in_bibliography = update_bibliography_section_state(
+                    cleaned_blocks, idx_b, in_bibliography
+                )
                 # Role layers (explicit FlowID/BlockType derivation only).
                 b.derive_roles()
                 # Chrome opt-in: the adapter marks running heads and footers

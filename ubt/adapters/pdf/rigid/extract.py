@@ -13,6 +13,7 @@ import logging
 from collections.abc import Sequence
 from pathlib import Path
 
+from ubt.adapters.pdf.pdf_struct import page_sizes
 from ubt.adapters.pdf.pdfium_gate import pdfium_serialized
 from ubt.adapters.pdf.rigid.zones import PageFacts, Rect
 from ubt.adapters.pdf.textgeom import LineBox, extract_lines, synthetic_vlm_lines
@@ -57,6 +58,18 @@ def extract_pages(
         if block.bbox is not None:
             by_page.setdefault(block.bbox.page, []).append(block)
 
+    # pdfium's ``get_mediabox()`` does not inherit ``/MediaBox`` from the page
+    # tree (it silently falls back to US-Letter), while every text rect this
+    # module returns is in the page's true user space. pikepdf resolves
+    # inheritance exactly (same reason ``pdf_struct`` exists), so the frame used
+    # for zones and the overlay must come from here, not pdfium. Resolve all
+    # pages once; failure degrades to the pdfium frame rather than aborting.
+    try:
+        resolved_sizes = page_sizes(path)
+    except Exception:  # noqa: BLE001 - geometry fallback, never fatal
+        logger.debug("pikepdf page-size resolution failed for %s", path, exc_info=True)
+        resolved_sizes = {}
+
     facts: dict[int, PageFacts] = {}
     pdf = pdfium.PdfDocument(str(path))
     try:
@@ -80,6 +93,7 @@ def extract_pages(
                 )
                 continue
             lines, size = extract_lines(path, page_no)
+            size = resolved_sizes.get(page_no, size)
             bg: str | None = None
             if not lines and by_page.get(page_no):
                 lines = _textless_rows(page_no, size, by_page[page_no])

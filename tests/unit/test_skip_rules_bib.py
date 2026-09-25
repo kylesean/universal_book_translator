@@ -384,3 +384,71 @@ def test_in_bibliography_section_context_skips_all_entries() -> None:
     obscure_ref = "K. Satou and H. Tanaka, 'Unusual Self-Published Monograph Without Standard Venue,' Tokyo, 2024."
     assert classify_skip(obscure_ref, in_bibliography=True) == BIB
     assert classify_skip("References", is_heading=True, in_bibliography=True) is None
+
+
+def test_technical_documentation_citations_are_skipped() -> None:
+    """Technical documentation references with consultation/access dates (e.g. KV Cache Handbook p.33) must skip."""
+    doc_entries = (
+        "NVIDIA Transformer Engine documentation. PyTorch attention/inference parameters; K/V caching during decoding. Consulted September 2026.",
+        "vLLM documentation. Automatic Prefix Caching, cache configuration, and prefix-cache isolation/security. Current documentation consulted September 2026.",
+        "NVIDIA TensorRT-LLM documentation. KV Cache System, reuse, prioritized eviction, and host offloading. Current documentation consulted September 2026.",
+        "vLLM documentation. KV Offloading Usage Guide and multi-tier offloading APIs. Current documentation consulted September 2026.",
+        "vLLM documentation. Quantized KV Cache and CacheConfig storage dtype options. Current documentation consulted September 2026.",
+    )
+    for entry in doc_entries:
+        assert classify_skip(entry) == BIB, f"Failed to skip documentation citation: {entry!r}"
+
+
+def test_bibliography_section_survives_subheading_and_exits_on_appendix() -> None:
+    """A sub-heading immediately below REFERENCES (e.g. 'Primary papers and current implementation sources')
+    must NOT reset in_bibliography=False while bibliography entries follow, and must reset on a real post-bib section."""
+    from ubt.core.engine.stages.ingest import update_bibliography_section_state
+    from ubt.core.ir.models import BlockType, IRBlock
+
+    blocks = [
+        IRBlock(id="b330", spine_index=0, block_type=BlockType.HEADING, source_text="REFERENCES"),
+        IRBlock(
+            id="b331",
+            spine_index=1,
+            block_type=BlockType.HEADING,
+            source_text="Primary papers and current implementation sources",
+        ),
+        IRBlock(
+            id="b332",
+            spine_index=2,
+            block_type=BlockType.LIST_ITEM,
+            source_text="A. Vaswani et al. Attention Is All You Need . NeurIPS 2017. arXiv:1706.03762.",
+        ),
+        IRBlock(
+            id="b337",
+            spine_index=3,
+            block_type=BlockType.LIST_ITEM,
+            source_text="Custom internal reference without standard venue or URL, 2026.",
+        ),
+        IRBlock(
+            id="b343",
+            spine_index=4,
+            block_type=BlockType.HEADING,
+            source_text="Appendix A: Proofs",
+        ),
+        IRBlock(
+            id="b344",
+            spine_index=5,
+            block_type=BlockType.NARRATIVE,
+            source_text="In this appendix we derive the lower bound on cache memory.",
+        ),
+    ]
+
+    in_bib = False
+    states: dict[str, bool] = {}
+    for idx, b in enumerate(blocks):
+        in_bib = update_bibliography_section_state(blocks, idx, in_bib)
+        states[b.id] = in_bib
+
+    assert states["b330"] is True
+    assert states["b331"] is True
+    assert states["b332"] is True
+    assert states["b337"] is True
+    assert states["b343"] is False
+    assert states["b344"] is False
+

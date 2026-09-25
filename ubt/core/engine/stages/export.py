@@ -373,6 +373,36 @@ def _check_completion_ratio(
         )
 
 
+_INTENTIONAL_PRESERVED_SKIP_PREFIXES = (
+    "render_skip:policy",
+    "render_skip:non_prose",
+    "render_skip:chrome",
+    "render_skip:footer",
+    "inplace_skip:policy",
+    "inplace_skip:non_prose",
+    "inplace_skip:chrome",
+    "inplace_skip:footer",
+)
+
+
+def _partition_render_skip_counts(
+    skip_checkpoints: list[dict[str, Any]],
+) -> tuple[int, int]:
+    """Separate true fail-closed skips (spill, no_zone, math_unrenderable) from intentional preserved elements."""
+    fail_closed = 0
+    preserved = 0
+    for cp in skip_checkpoints:
+        flags = cp.get("error_flags") or []
+        skip_flags = [
+            f for f in flags if isinstance(f, str) and f.startswith(("render_skip:", "inplace_skip:"))
+        ]
+        if skip_flags and all(f.startswith(_INTENTIONAL_PRESERVED_SKIP_PREFIXES) for f in skip_flags):
+            preserved += 1
+        else:
+            fail_closed += 1
+    return fail_closed, preserved
+
+
 async def _apply_render_skip_ledger_pass(
     ctx: StageContext,
     adapter: DocumentAdapter,
@@ -429,11 +459,23 @@ async def _apply_render_skip_ledger_pass(
     }
     if render_skip_checkpoints or cleared_skips:
         if render_skip_checkpoints:
-            logger.warning(
-                "Job %s rendered with %d fail-closed skipped block(s) left source-visible",
-                actual_job_id,
-                len(render_skip_checkpoints),
+            fail_closed_count, preserved_count = _partition_render_skip_counts(
+                render_skip_checkpoints
             )
+            if fail_closed_count > 0:
+                logger.warning(
+                    "Job %s rendered with %d fail-closed skipped block(s) left source-visible "
+                    "(%d source element(s) intentionally preserved)",
+                    actual_job_id,
+                    fail_closed_count,
+                    preserved_count,
+                )
+            elif preserved_count > 0:
+                logger.info(
+                    "Job %s preserved %d source element(s) intact (0 fail-closed skips)",
+                    actual_job_id,
+                    preserved_count,
+                )
         await asyncio.to_thread(
             ledger.save_checkpoints_batch, render_skip_checkpoints + cleared_skips
         )

@@ -139,10 +139,24 @@ def union_area(rects: Sequence[tuple[float, float, float, float]]) -> float:
     return total
 
 
+_EXTRACT_LINES_CACHE: dict[tuple[str, int, int], tuple[list[LineBox], tuple[float, float]]] = {}
+
+
 @pdfium_serialized
 def extract_lines(pdf_path: Path, page_no: int) -> tuple[list[LineBox], tuple[float, float]]:
     """pdfium line rects in column-aware reading order + page size."""
     import pypdfium2 as pdfium
+
+    cache_key: tuple[str, int, int] | None = None
+    try:
+        resolved = str(pdf_path.resolve())
+        mtime_ns = pdf_path.stat().st_mtime_ns
+        cache_key = (resolved, mtime_ns, page_no)
+        cached = _EXTRACT_LINES_CACHE.get(cache_key)
+        if cached is not None:
+            return list(cached[0]), cached[1]
+    except OSError:
+        cache_key = None
 
     pdf = pdfium.PdfDocument(str(pdf_path))
     try:
@@ -158,12 +172,28 @@ def extract_lines(pdf_path: Path, page_no: int) -> tuple[list[LineBox], tuple[fl
         size = (float(mb[2]) - float(mb[0]), float(mb[3]) - float(mb[1]))
         textpage = page.get_textpage()
         try:
-            rects = [textpage.get_rect(i) for i in range(textpage.count_rects(0, -1))]
+            n_rects = textpage.count_rects(0, -1)
+            rects = [textpage.get_rect(i) for i in range(n_rects)]
+            if n_rects > 600:
+                # Embedded vector scatter plots (e.g. matplotlib/tikz marker clouds)
+                # can emit thousands of sub-5pt micro-glyphs on a single page,
+                # triggering O(K^2) row-fragment merging and 5-minute hangs.
+                rects = [
+                    r
+                    for r in rects
+                    if (r[3] - r[1]) >= 5.0
+                    and (r[2] - r[0]) >= 3.0
+                    and (r[3] - r[1]) <= 60.0
+                ]
             rects.sort(key=lambda r: (-r[3], r[0]))
             lines = []
             for left, bottom, right, top in rects:
                 text = (textpage.get_text_bounded(left, bottom, right, top) or "").strip()
                 if text:
+                    if n_rects > 600 and len(text) > max(240, int((right - left) * 1.5)):
+                        # Skip stacked scatter-plot marker clouds where hundreds of
+                        # overlapping point labels fall inside one bounding box.
+                        continue
                     fsz, is_bold, is_italic = _probe_rect_font_style(
                         textpage, left, bottom, right, top
                     )
@@ -177,7 +207,12 @@ def extract_lines(pdf_path: Path, page_no: int) -> tuple[list[LineBox], tuple[fl
                         )
                     )
             merged = merge_row_fragments(lines)
-            return column_order(merged, size[0]), size
+            result = (column_order(merged, size[0]), size)
+            if cache_key is not None:
+                if len(_EXTRACT_LINES_CACHE) >= 256:
+                    _EXTRACT_LINES_CACHE.clear()
+                _EXTRACT_LINES_CACHE[cache_key] = (list(result[0]), result[1])
+            return result
         finally:
             textpage.close()
             page.close()
@@ -337,24 +372,29 @@ def _glue_run(run: list[LineBox]) -> LineBox:
     if len(run) == 1:
         return run[0]
     kept: list[LineBox] = []
+    kept_norms: list[str] = []
     for ln in run:
         nl = dehyph(ln.text)
         dup = False
+        x0, y0, x1, y1 = ln.rect
         for i, prev in enumerate(kept):
-            np = dehyph(prev.text)
+            px0, py0, px1, py1 = prev.rect
+            if px1 <= x0 or x1 <= px0:
+                continue
+            np = kept_norms[i]
             if not nl or not np:
                 continue
-            px0, py0, px1, py1 = prev.rect
-            x0, y0, x1, y1 = ln.rect
             inter = max(0.0, min(px1, x1) - max(px0, x0)) * max(0.0, min(py1, y1) - max(py0, y0))
             smaller = min((px1 - px0) * (py1 - py0), (x1 - x0) * (y1 - y0))
             if smaller > 0 and inter / smaller >= 0.4 and (nl in np or np in nl):
                 dup = True
                 if len(nl) > len(np):
                     kept[i] = ln
+                    kept_norms[i] = nl
                 break
         if not dup:
             kept.append(ln)
+            kept_norms.append(nl)
     x0 = min(ln.rect[0] for ln in kept)
     y0 = min(ln.rect[1] for ln in kept)
     x1 = max(ln.rect[2] for ln in kept)

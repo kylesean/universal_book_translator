@@ -285,6 +285,19 @@ def _boxes_for(zone: Zone, size_pt: float) -> list[Rect]:
     return boxes
 
 
+def _candidate_rigid_pages(total_pages: int, blocks: Sequence[IRBlock]) -> list[int]:
+    """Return 1-based page numbers needed to plan ``blocks`` (+1/+2 continuation window)."""
+    pages: set[int] = set()
+    for b in blocks:
+        if b.bbox is not None and b.bbox.page >= 1:
+            for p in (b.bbox.page, b.bbox.page + 1, b.bbox.page + 2):
+                if 1 <= p <= total_pages:
+                    pages.add(p)
+    if not pages:
+        return list(range(1, total_pages + 1))
+    return sorted(pages)
+
+
 class RigidTypesetter:
     """Region-rigid adaptive typesetting over the source PDF."""
 
@@ -891,7 +904,8 @@ class RigidTypesetter:
         def _extract_all_pages() -> dict[int, Any]:
             with pikepdf.open(str(source_pdf)) as probe_pdf:
                 total = len(probe_pdf.pages)
-            return extract_pages(source_pdf, list(range(1, total + 1)), list(blocks))
+            target_pages = _candidate_rigid_pages(total, blocks)
+            return extract_pages(source_pdf, target_pages, list(blocks))
 
         pages = await asyncio.to_thread(_extract_all_pages)
         zone_map = build_zones(pages, blocks, allow_chrome_bands=self.translate_chrome)
@@ -1019,7 +1033,23 @@ class RigidTypesetter:
                         with pikepdf.open(overlay_path) as overlay:
                             if overlay.pages:
                                 form = pdf.copy_foreign(overlay.pages[0].as_form_xobject())
-                                page.add_overlay(form, None)
+                                # ``add_overlay(form, None)`` places the form in
+                                # the page's TrimBox (pikepdf's default), which
+                                # scales and re-anchors the whole translation
+                                # layer whenever CropBox/TrimBox < MediaBox. The
+                                # overlay is authored in the MediaBox frame (see
+                                # rigid/extract.py), so place it there explicitly
+                                # for a 1:1, unscaled result.
+                                media = page.mediabox
+                                page.add_overlay(
+                                    form,
+                                    pikepdf.Rectangle(
+                                        float(media[0]),
+                                        float(media[1]),
+                                        float(media[2]),
+                                        float(media[3]),
+                                    ),
+                                )
                     pdf.save(str(out_path))
 
             await asyncio.to_thread(_merge_sync)

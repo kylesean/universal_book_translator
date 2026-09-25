@@ -18,6 +18,7 @@ from pathlib import Path
 
 from ubt.adapters.pdf.alternator import BilingualAlternator
 from ubt.adapters.pdf.diagram_localizer import DiagramLocalizer
+from ubt.adapters.pdf.rigid import RigidTypesetter
 from ubt.adapters.pdf.typst_reconstructor import TypstReconstructor
 from ubt.core.config import canonical_render_engine
 from ubt.core.exceptions import DocumentParseError
@@ -248,8 +249,6 @@ class DoclingRenderStrategy:
         # Source page stays the canvas; prose regions are re-typeset, figures
         # and equations untouched.
         if active_engine == "rigid" and is_pdf_target:
-            from ubt.adapters.pdf.rigid import RigidTypesetter
-
             # Written by ``DoclingPDFAdapter.font_family``'s setter, which the
             # pipeline drives; a plain attribute set at construction would
             # stay ``None`` here forever.

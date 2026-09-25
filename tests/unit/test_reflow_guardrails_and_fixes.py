@@ -257,3 +257,133 @@ def test_cli_preflight_guardrail_warns_and_interrupts_on_forced_reflow(
     assert "排版风险预警" in result.output or "Pre-Flight Layout Tradeoff" in result.output
 
 
+@pytest.mark.fast
+def test_glue_run_and_extract_lines_cache_fast_on_dense_fragments() -> None:
+    """_glue_run must precompute dehyph() in O(K) instead of O(K^2) inner-loop regex calls."""
+    import time
+
+    from ubt.adapters.pdf.textgeom import LineBox, _glue_run
+
+    run = [
+        LineBox(f"fragment_{i}_with_some_text", (float(i * 2), 100.0, float(i * 2 + 10), 110.0))
+        for i in range(600)
+    ]
+    t0 = time.perf_counter()
+    glued = _glue_run(run)
+    elapsed = time.perf_counter() - t0
+    assert glued.text
+    assert elapsed < 0.25, f"_glue_run took {elapsed:.3f}s on 600 fragments (expected < 0.25s)"
+
+
+@pytest.mark.fast
+def test_rigid_candidate_page_numbers_scopes_to_block_pages() -> None:
+    """_candidate_rigid_pages must only select block pages plus +1/+2 continuation lookahead
+    when rendering a small pre-flight sample instead of all pages of a long PDF."""
+    from ubt.adapters.pdf.rigid.typesetter import _candidate_rigid_pages
+
+    sample_blocks = [
+        IRBlock(
+            id="b1",
+            spine_index=1,
+            block_type=BlockType.NARRATIVE,
+            source_text="Hello",
+            target_text="你好",
+            bbox=BoundingBox(page=1, x0=50.0, y0=500.0, x1=300.0, y1=520.0),
+        )
+    ]
+    pages = _candidate_rigid_pages(total_pages=15, blocks=sample_blocks)
+    assert pages == [1, 2, 3]
+
+
+@pytest.mark.fast
+def test_partition_render_skips_separates_intentional_preserved_from_fail_closed() -> None:
+    """_partition_render_skip_counts must separate intentional preserved elements
+    (policy, non_prose, chrome, footer) from true fail-closed skips (spill, no_zone, math_unrenderable)."""
+    from ubt.core.engine.stages.export import _partition_render_skip_counts
+
+    checkpoints = (
+        [{"block_id": f"p{i}", "error_flags": ["render_skip:policy"]} for i in range(56)]
+        + [{"block_id": f"n{i}", "error_flags": ["render_skip:non_prose"]} for i in range(14)]
+        + [{"block_id": "c1", "error_flags": ["render_skip:chrome"]}]
+        + [{"block_id": "c2", "error_flags": ["render_skip:chrome"]}]
+        + [{"block_id": "f1", "error_flags": ["render_skip:footer"]}]
+        + [
+            {"block_id": "fc1", "error_flags": ["render_skip:no_zone"]},
+            {"block_id": "fc2", "error_flags": ["render_skip:math_unrenderable"]},
+            {"block_id": "fc3", "error_flags": ["render_skip:spill"]},
+        ]
+    )
+    fail_closed, preserved = _partition_render_skip_counts(checkpoints)
+    assert fail_closed == 3
+    assert preserved == 73
+
+
+@pytest.mark.fast
+@pytest.mark.asyncio
+async def test_openai_responses_transport_caches_reasoning_fallback_after_first_400() -> None:
+    """Once a model on /responses returns 400 for reasoning_effort and succeeds on retry,
+    subsequent calls for that model must use the working reasoning format on the first request."""
+    from ubt.core.router.transports.openai_responses import OpenAIResponsesTransport
+
+    transport = OpenAIResponsesTransport(
+        api_key="test",
+        base_url="https://opencode.ai/zen/go/v1",
+    )
+    sent_payloads: list[dict[str, object]] = []
+
+    async def fake_request_json(_client: object, _url: str, payload: dict[str, object]) -> object:
+        sent_payloads.append(dict(payload))
+        resp = MagicMock()
+        if "reasoning_effort" in payload:
+            resp.status_code = 400
+            resp.text = '{"error": "unrecognized field reasoning_effort"}'
+        else:
+            resp.status_code = 200
+            resp.json.return_value = {
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [{"type": "output_text", "text": "translated text"}],
+                    }
+                ]
+            }
+        return resp
+
+    transport._request_json = fake_request_json  # type: ignore[method-assign]
+
+    out1, _ = await transport._generate_responses_meta(
+        prompt="hi",
+        system_prompt=None,
+        target_model="muse-spark-1.3-contributor",
+        temperature=0.1,
+        max_tokens=100,
+        reasoning_effort="low",
+    )
+    assert out1 == "translated text"
+    assert len(sent_payloads) == 2
+
+    out2, _ = await transport._generate_responses_meta(
+        prompt="hello",
+        system_prompt=None,
+        target_model="muse-spark-1.3-contributor",
+        temperature=0.1,
+        max_tokens=100,
+        reasoning_effort="low",
+    )
+    assert out2 == "translated text"
+    assert len(sent_payloads) == 3
+
+
+@pytest.mark.fast
+def test_configure_logging_quiets_pikepdf_and_pdf_oxide_bridge() -> None:
+    """pikepdf, pdf_oxide, and tiny_skia C++/Rust logger bridges must be quieted to ERROR level."""
+    import logging
+
+    from ubt.core.log_config import setup_logging
+
+    setup_logging()
+    assert logging.getLogger("pikepdf").level >= logging.ERROR
+    assert logging.getLogger("pikepdf._core").level >= logging.ERROR
+    assert logging.getLogger("pdf_oxide").level >= logging.ERROR
+    assert logging.getLogger("tiny_skia").level >= logging.ERROR
+    assert logging.getLogger("tiny_skia.painter").level >= logging.ERROR

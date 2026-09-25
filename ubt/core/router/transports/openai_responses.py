@@ -34,6 +34,7 @@ class OpenAIResponsesTransport(BaseTransport):
             provider_name=provider_name,
             **kwargs,
         )
+        self._model_reasoning_mode: dict[str, str] = {}
 
     async def generate(
         self,
@@ -117,7 +118,12 @@ class OpenAIResponsesTransport(BaseTransport):
             payload["max_output_tokens"] = max_tokens
         if reasoning_effort is not None and reasoning_effort.strip():
             eff = reasoning_effort.strip().lower()
-            if eff == "minimal" or (
+            cached_mode = self._model_reasoning_mode.get(target_model) or self._model_reasoning_mode.get("*")
+            if cached_mode == "none":
+                pass
+            elif cached_mode == "nested_minimal":
+                payload["reasoning"] = {"effort": "minimal"}
+            elif eff == "minimal" or (
                 eff == "none" and ("opencode.ai" in self._base_url or "zen" in self._base_url)
             ):
                 payload["reasoning"] = {"effort": "minimal"}
@@ -156,12 +162,19 @@ class OpenAIResponsesTransport(BaseTransport):
                     retry_payload.pop("reasoning_effort", None)
                     retry_payload["reasoning"] = {"effort": "minimal"}
                     retry_resp = await self._request_json(client, responses_url, retry_payload)
-                    response = (
-                        retry_resp
-                        if retry_resp.status_code == 200
-                        else await self._request_json(client, responses_url, _without_reasoning())
-                    )
+                    if retry_resp.status_code == 200:
+                        self._model_reasoning_mode[target_model] = "nested_minimal"
+                        self._model_reasoning_mode["*"] = "nested_minimal"
+                        response = retry_resp
+                    else:
+                        self._model_reasoning_mode[target_model] = "none"
+                        self._model_reasoning_mode["*"] = "none"
+                        response = await self._request_json(
+                            client, responses_url, _without_reasoning()
+                        )
                 else:
+                    self._model_reasoning_mode[target_model] = "none"
+                    self._model_reasoning_mode["*"] = "none"
                     response = await self._request_json(client, responses_url, _without_reasoning())
 
         if response.status_code == 429:

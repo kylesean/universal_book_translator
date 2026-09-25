@@ -37,6 +37,10 @@ _MANAGED_HANDLER_ATTR = "_ubt_managed_handler"
 # UBT_LOG_LEVEL=DEBUG, not --verbose.
 _NOISY_LOGGERS: dict[str, tuple[int, bool]] = {
     "pdf_oxide": (logging.ERROR, True),
+    "tiny_skia": (logging.ERROR, True),
+    "tiny_skia.painter": (logging.ERROR, True),
+    "pikepdf": (logging.ERROR, True),
+    "pikepdf._core": (logging.ERROR, True),
     "docling": (logging.INFO, False),
     # httpcore/httpx emit 6-8 DEBUG lines per HTTP call (send_request_headers,
     # receive_response_body, ...). With 727 draft calls at concurrency 8 those
