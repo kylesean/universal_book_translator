@@ -41,6 +41,9 @@ from ubt.core.ports import (
     get_last_render_skips,
     is_pdf_engine_adapter,
 )
+from ubt.core.qe.defect_taxonomy import (
+    INTENTIONAL_PRESERVED_SKIP_PREFIXES as _INTENTIONAL_PRESERVED_SKIP_PREFIXES,
+)
 from ubt.core.qe.defect_taxonomy import UNTRANSLATED_PREFIX
 from ubt.core.qe.term_metrics import evaluate_terms, summarize_drift
 from ubt.core.router.pricing import cache_hit_rate_from_usage, estimate_cost_usd
@@ -371,18 +374,6 @@ def _check_completion_ratio(
             f"{', '.join(untranslated[:10])}. Resume the job to retry them, "
             "or lower the floor to ship the partial book knowingly."
         )
-
-
-_INTENTIONAL_PRESERVED_SKIP_PREFIXES = (
-    "render_skip:policy",
-    "render_skip:non_prose",
-    "render_skip:chrome",
-    "render_skip:footer",
-    "inplace_skip:policy",
-    "inplace_skip:non_prose",
-    "inplace_skip:chrome",
-    "inplace_skip:footer",
-)
 
 
 def _partition_render_skip_counts(
@@ -1013,9 +1004,11 @@ async def run_export_stage(
     # render-mode override plumbing.
     secondary_path = await _render_complementary_artifact(ctx, adapter, final_blocks, target_output)
 
-    # Read here, after the visual gate and the complementary render: their VLM
-    # calls are run spend, and the report is the only place it would otherwise
-    # never appear (the terminal event is the one the budget check exempts).
+    # Persist this run's spend to the ledger before the report reads it: the
+    # visual gate and complementary render above made paid calls after the last
+    # progress event, so the ledger's lifetime figure would otherwise omit them
+    # (the terminal event is the one the budget check exempts).
+    await ctx.bill_run_usage()
     run_usage = ctx.measure_run_usage()
     report, report_path = await _build_reports(
         ctx,

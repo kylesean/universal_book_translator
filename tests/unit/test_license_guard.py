@@ -254,7 +254,7 @@ _SIZE_RATCHETS: dict[str, int] = {
     # added the rest. CI was red on both ratchets before this review. Recorded
     # consciously rather than trimming comments to satisfy a counter; the P1-B
     # run() split still owes the real repayment.
-    "ubt/core/engine/pipeline.py": 872,
+    "ubt/core/engine/pipeline.py": 885,
     "ubt/adapters/pdf/typst_reconstructor.py": 2336,
 }
 
@@ -268,7 +268,7 @@ _FUNCTION_RATCHETS: dict[str, tuple[str, int]] = {
     # _emit_block is the ONE shared emit core with pinned regression tests; a
     # 23-line extraction is deliberately deferred rather than done blind inside
     # a broad review fix. Splitting run() (P1-B) remains the tracked repayment.
-    "ubt/core/engine/pipeline.py": ("PipelineOrchestrator.run", 391),
+    "ubt/core/engine/pipeline.py": ("PipelineOrchestrator.run", 392),
     "ubt/adapters/pdf/typst_reconstructor.py": ("TypstReconstructor._emit_block", 318),
 }
 

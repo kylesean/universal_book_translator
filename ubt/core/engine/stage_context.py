@@ -58,6 +58,11 @@ from ubt.core.router.router import ModelRouter
 from ubt.core.validators.html_delta import HTMLDeltaValidator
 
 
+async def _noop_bill() -> None:
+    """Default ``StageContext.bill_run_usage`` for tests that build no driver."""
+    return None
+
+
 class EventFactory(Protocol):
     """The orchestrator's progress-event builder, bound to the live job.
 
@@ -132,6 +137,10 @@ class StageContext:
     #: Set by the driver so the export stage can bill exactly this run, at the
     #: moment it renders. A callable, not a snapshot: the numbers must be read
     measure_run_usage: Callable[[], dict[str, dict[str, int]]] = lambda: {}
+    #: Persist this run's usage to the ledger on demand. The export stage calls
+    #: it after the paid post-render visual gate so a report built from the
+    #: ledger does not omit spend made after the last progress event.
+    bill_run_usage: Callable[[], Awaitable[None]] = _noop_bill
     #: Cancellation token for cooperative early termination of long stages.
     cancel_token: asyncio.Event | None = None
 

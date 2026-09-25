@@ -33,7 +33,7 @@ from ubt.core.engine.stages import (
     run_tm_writeback_stage,
     run_triage_stage,
 )
-from ubt.core.engine.usage import bill_job_run, budget_violation
+from ubt.core.engine.usage import JobBill, bill_job_run, budget_violation
 from ubt.core.engine.writer_lock import LedgerWriterLock
 from ubt.core.exceptions import (
     BudgetExceededError,
@@ -405,6 +405,34 @@ class PipelineOrchestrator:
             return {model: dict(totals) for model, totals in self._run_usage_sink.items()}
         return self._usage_delta(self._run_usage_baseline, self.router.usage_totals_by_model())
 
+    async def _bill_run(
+        self, job_id: str, ledger: SQLiteJobLedger, *, raise_on_budget: bool
+    ) -> JobBill:
+        """Fold this run's usage into the job's absolute ledger figure once.
+
+        Shared by the progress-event path and the export-stage hook that persists
+        post-visual-gate spend before the report reads the ledger. The budget only
+        stops the job at the progress-event call site; the export event is let
+        through so the artifact and report still say what the job spent.
+        """
+        async with self._billing_lock:
+            run_usage = self._run_usage()
+            newly_spent = self._usage_delta(self._billed_run_usage, run_usage)
+            bill = await bill_job_run(
+                ledger,
+                job_id,
+                run_usage,
+                newly_spent=newly_spent,
+                base_url=self.config.base_url,
+                endpoint_map=self.config.remote_billing_models(),
+            )
+            self._billed_run_usage = run_usage
+            if raise_on_budget:
+                violation = budget_violation(bill, self.config.budget_usd, job_id)
+                if violation is not None:
+                    raise BudgetExceededError(violation)
+        return bill
+
     async def _create_progress_event(
         self,
         event_type: EventType,
@@ -440,25 +468,9 @@ class PipelineOrchestrator:
         # Only the part not billed by an earlier event is written: ``run_usage``
         # is cumulative, so passing the whole of it to an absolute write would
         # re-add every previous event's tokens.
-        async with self._billing_lock:
-            run_usage = self._run_usage()
-            newly_spent = self._usage_delta(self._billed_run_usage, run_usage)
-            bill = await bill_job_run(
-                ledger,
-                job_id,
-                run_usage,
-                newly_spent=newly_spent,
-                base_url=self.config.base_url,
-                endpoint_map=self.config.remote_billing_models(),
-            )
-            self._billed_run_usage = run_usage
-            # The budget stops the job at this one call site. The export's
-            # final event is allowed through so the artifact and report still
-            # say what the job spent.
-            if event_type is not EventType.EXPORT_COMPLETED:
-                violation = budget_violation(bill, self.config.budget_usd, job_id)
-                if violation is not None:
-                    raise BudgetExceededError(violation)
+        bill = await self._bill_run(
+            job_id, ledger, raise_on_budget=event_type is not EventType.EXPORT_COMPLETED
+        )
 
         return TranslationProgressEvent(
             event_type=event_type,
@@ -722,6 +734,7 @@ class PipelineOrchestrator:
                 # A callable, so the export stage reads the provider's counters
                 # when it renders rather than when the loop started.
                 measure_run_usage=self._run_usage,
+                bill_run_usage=lambda: self._bill_run(actual_job_id, ledger, raise_on_budget=False),
                 cancel_token=cancel_token,
             )
             logger.info(
