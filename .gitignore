@@ -34,7 +34,6 @@ docs/*.pdf
 .idea/
 .vscode/
 .DS_Store
-.github/
 .codex/
 .claude/
 .codegraph/

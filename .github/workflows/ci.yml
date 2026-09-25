@@ -1,0 +1,324 @@
+name: CI
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+permissions:
+  contents: read
+
+# The generated Typst markup — and the stderr dialect the
+# self-healing loop parses — both depend on compiler behavior. The Typst
+# binary version is pinned here; bumping it requires a golden rerun
+# (chapter-3 golden + baselines) and records the new pin in every
+# quality report (`typst_version`).
+env:
+  TYPST_VERSION: "0.15.1"
+  # pandoc is the primary LaTeX->Typst converter, and its writer vocabulary
+  # changes between releases (3.1 emits `sect`/`plus` for what 3.10 renders as
+  # `inter`/`+`). The math tests quote that vocabulary, so the version is pinned
+  # exactly like Typst's; bumping it means re-checking test_latex_math_atrack.
+  PANDOC_VERSION: "3.10.2"
+  # pdftotext/pdftoppm for the reflow and visual-gate probes. Linux takes the
+  # distro build; Windows has no apt, so the release archive is pinned instead.
+  # NOTE: poppler-windows is a third-party build (the upstream ships no Windows
+  # binaries). Pinned by version and fetched over HTTPS for reproducibility, but
+  # it is not the distro-vetted artifact the Linux job gets.
+  POPPLER_VERSION: "26.09.0-0"
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    # Wall-clock cap per job: GitHub's default is 6h, so a wedged test used to
+    # own the runner for that long. Steps below carry their own (shorter)
+    # budgets; this is the backstop that keeps a job from silently burning one.
+    timeout-minutes: 60
+    strategy:
+      # Ubuntu going red used to cancel every Windows job, so the platform that
+      # is not the runner's own never reported.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.12", "3.13"]
+
+    steps:
+      # Actions pinned to commit SHAs (mutable tags are a supply-chain risk).
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          persist-credentials: false
+        timeout-minutes: 5
+
+      - name: Install uv
+        timeout-minutes: 5
+        uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39  # v3.2.4
+        with:
+          enable-cache: true
+          version: "latest"
+
+      - name: Set up Python ${{ matrix.python-version }}
+        timeout-minutes: 5
+        run: uv python install ${{ matrix.python-version }}
+
+      # The main gate must not pull the heavy PDF extra (docling ->
+      # torch/transformers, ~140 packages). Docling-dependent tests skip
+      # cleanly without it; the dedicated `pdf` job below covers them.
+      # `--locked` keeps the job reproducible against the committed uv.lock;
+      # without it uv re-resolves and a drifting upstream release can change
+      # what `mypy --strict ubt tests` sees between local and CI.
+      - name: Install dependencies (dev only, no heavy extras)
+        timeout-minutes: 15
+        run: uv sync --extra dev --locked
+
+      - name: Install pinned Typst ${{ env.TYPST_VERSION }} (reproducible render)
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            curl -sSL -o "$RUNNER_TEMP/typst-pkg.zip" "https://github.com/typst/typst/releases/download/v${TYPST_VERSION}/typst-x86_64-pc-windows-msvc.zip"
+            unzip -q -o "$RUNNER_TEMP/typst-pkg.zip" -d "$RUNNER_TEMP/typst"
+            echo "$RUNNER_TEMP/typst/typst-x86_64-pc-windows-msvc" >> "$GITHUB_PATH"
+          else
+            mkdir -p "$HOME/.local/bin"
+            curl -sSL "https://github.com/typst/typst/releases/download/v${TYPST_VERSION}/typst-x86_64-unknown-linux-musl.tar.xz" | tar -xJ -C "$HOME/.local/bin" --strip-components=1
+            echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          fi
+          # GITHUB_PATH only applies to *later* steps, so the smoke test must
+          # invoke the binary by absolute path; relying on PATH here fails
+          # (the 2026-09 Windows-arm reds were exactly this).
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            "$RUNNER_TEMP/typst/typst-x86_64-pc-windows-msvc/typst.exe" --version
+          else
+            "$HOME/.local/bin/typst" --version
+          fi
+
+      # These tests exercise the render and extraction legs, which shell out to
+      # system tools: pdftotext (poppler-utils) for the double-slash and
+      # visual-gate probes, and a Noto CJK face that the font probe asks Typst
+      # about. None of them skip when the tool is absent — they fail — so the
+      # gate was red for missing OS packages rather than for anything in the
+      # tree. pandoc is deliberately not here: its output is version-dependent,
+      # so it gets the pinned install below instead of apt's snapshot.
+      - name: Install system tools (poppler, CJK fonts)
+        if: runner.os == 'Linux'
+        timeout-minutes: 10
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends poppler-utils fonts-noto-cjk
+          pdftotext -v 2>&1 | head -1
+          fc-list :lang=zh family | sort -u | head -3
+
+      - name: Install pinned poppler ${{ env.POPPLER_VERSION }} (Windows)
+        if: runner.os == 'Windows'
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -sSL -o "$RUNNER_TEMP/poppler.zip" "https://github.com/oschwartz10612/poppler-windows/releases/download/v${POPPLER_VERSION}/Release-${POPPLER_VERSION}.zip"
+          unzip -q -o "$RUNNER_TEMP/poppler.zip" -d "$RUNNER_TEMP/poppler"
+          # The archive nests the binaries under poppler-<ver>/Library/bin, and
+          # pdftotext.exe needs the DLLs beside it, so the whole directory goes
+          # on PATH. GITHUB_PATH only applies to later steps -- smoke-test by
+          # absolute path here, exactly as the Typst step learned to.
+          bin="$(dirname "$(find "$RUNNER_TEMP/poppler" -name pdftotext.exe -print -quit)")"
+          echo "$bin" >> "$GITHUB_PATH"
+          "$bin/pdftotext.exe" -v 2>&1 | head -1
+          ls "$bin" | grep -c '^pdf' | xargs -I{} echo "poppler tools on PATH: {}"
+
+      - name: Install pinned pandoc ${{ env.PANDOC_VERSION }} (reproducible math conversion)
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            curl -sSL -o "$RUNNER_TEMP/pandoc-pkg.zip" "https://github.com/jgm/pandoc/releases/download/${PANDOC_VERSION}/pandoc-${PANDOC_VERSION}-windows-x86_64.zip"
+            unzip -q -o "$RUNNER_TEMP/pandoc-pkg.zip" -d "$RUNNER_TEMP/pandoc"
+            # The zip nests the binary one directory deeper, and the folder name
+            # has not been stable across releases.
+            exe="$(find "$RUNNER_TEMP/pandoc" -name pandoc.exe -print -quit)"
+            echo "$(dirname "$exe")" >> "$GITHUB_PATH"
+            # GITHUB_PATH only applies to *later* steps (see the Typst note).
+            "$exe" --version | head -1
+          else
+            mkdir -p "$HOME/.local/bin"
+            curl -sSL "https://github.com/jgm/pandoc/releases/download/${PANDOC_VERSION}/pandoc-${PANDOC_VERSION}-linux-amd64.tar.gz" | tar -xz -C "$HOME/.local/bin" --strip-components=2
+            "$HOME/.local/bin/pandoc" --version | head -1
+          fi
+
+      - name: Code style check (ruff)
+        timeout-minutes: 10
+        run: uv run ruff check
+
+      - name: Format check (ruff format)
+        timeout-minutes: 10
+        run: uv run ruff format --check
+
+      - name: Strict type check (mypy)
+        timeout-minutes: 15
+        run: uv run mypy --strict ubt tests
+
+      - name: Run test suite (pytest)
+        env:
+          # Windows checks out with a cp1252 console, and pytest's capture stream
+          # inherits the locale encoding. Textual writes the CJK pre-flight panel
+          # straight to sys.stdout, so two tests died in UnicodeEncodeError on the
+          # runner and passed everywhere else. UTF-8 I/O is what the product
+          # assumes about its own output.
+          PYTHONIOENCODING: "utf-8"
+        # `-o addopts=""` overrides the default `-m 'not slow and not legacy_drift'`
+        # so the heavy typst/pandoc/EPUB cases run here too — this is the only
+        # job that gives them a home (the nightly covers integration paths, not
+        # these).
+        # Coverage was removed on 2026-09-20: an 80% statement gate measures
+        # lines touched, not risk covered, and it was paying for tests nobody
+        # would miss. The suite earns its keep on known-fragile paths instead —
+        # money/correctness, ledger state-machine integrity, fail-closed delivery.
+        #
+        # `--timeout=600` must be spelled out here: `-o addopts=""` above wipes
+        # addopts, which is where pyproject's `--timeout` lives, so without it
+        # this job would run with no per-test cap at all (pytest-timeout from
+        # the dev extra would be installed but unused). 600s is anti-hang
+        # headroom — the deterministic tier is seconds (measured 2026-09-22:
+        # slowest baseline e2e 1.41s).
+        timeout-minutes: 45
+        run: uv run pytest -o addopts="" -q --timeout=600
+
+  pdf:
+    # Heavy PDF stack (docling + its torch/transformers transitives) runs in
+    # An isolated optional job so the main matrix stays fast.
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          persist-credentials: false
+        timeout-minutes: 5
+
+      - name: Install uv
+        timeout-minutes: 5
+        uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39  # v3.2.4
+        with:
+          enable-cache: true
+          version: "latest"
+
+      - name: Set up Python
+        timeout-minutes: 5
+        run: uv python install 3.12
+
+      - name: Install dependencies (incl. pdf extra)
+        timeout-minutes: 20
+        run: uv sync --extra dev --extra pdf --locked
+
+      - name: Install pinned Typst ${{ env.TYPST_VERSION }} (reproducible render)
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.local/bin"
+          curl -sSL "https://github.com/typst/typst/releases/download/v${TYPST_VERSION}/typst-x86_64-unknown-linux-musl.tar.xz" | tar -xJ -C "$HOME/.local/bin" --strip-components=1
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          typst --version
+
+      - name: Install poppler (pdftoppm is the A/B reference rasterizer)
+        timeout-minutes: 10
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends poppler-utils
+
+      - name: Run PDF-adapter test subset
+        # `-m 'not network'`: the @network docling tests download HF weights
+        # at collection time, which is not a deterministic merge gate. They
+        # run in the nightly workflow instead.
+        # `--timeout=...` is passed explicitly because this step overrides
+        # addopts (`-o addopts=`), and that override replaces addopts wholesale —
+        # so the pyproject `--timeout` disappears with the marker filter unless
+        # it is spelled out again here.
+        timeout-minutes: 20
+        run: uv run pytest tests/unit/test_pdf_modern_adapters.py tests/unit/test_pdfium_adapter.py -o addopts="-m 'not network'" -q --timeout=300
+
+      - name: Render A/B — pdf_oxide vs pdftoppm (stage-2 adoption gate)
+        # The oxide rasterizer must match poppler pdftoppm on page size and
+        # stay inside the calibrated edge-diff envelope: size exact, mismatch
+        # ratio under the thresholds frozen from the 2026-09-20 calibration
+        # run. The thresholds and the measured ratios they carry live in the
+        # executable, scripts/oxide_render_ab.py — that file, not a design
+        # document, is what this step is gating on. Needs poppler (installed
+        # above).
+        # The corpus (docs/chapter-1-zh.pdf, docs/book2-nistir4653-artifact.pdf)
+        # is gitignored — it travels as a Release attachment, so it is NOT in
+        # the checkout. Fetch it into docs/ before this step, or the test
+        # hard-fails: a missing corpus is a broken gate, and skipping it
+        # silently is what let the adoption gate no-op in the first place.
+        # `--timeout` spelled out because `-o addopts=""` clears it (see the
+        # test job's pytest step).
+        timeout-minutes: 15
+        run: uv run pytest tests/unit/test_oxide_render_ab.py -m slow -o addopts="" -q --timeout=600
+
+  macos-portability:
+    # The review found README tells macOS users to ``brew install`` the tool
+    # chain, yet no job ever ran on macOS — the documented path was unverified.
+    # This is a *portability smoke*, not the golden-render gate: Homebrew ships
+    # unpinned typst/pandoc, so the byte-exact goldens would flake here. It
+    # instead checks the brew toolchain is discoverable, the self-check runs,
+    # and the format adapters that are pure-Python (EPUB/DOCX/HTML/Markdown +
+    # the shared sanitizer) behave identically on macOS — the ones that must
+    # not depend on the runner's OS. The version-sensitive Typst render leg
+    # stays gated on the pinned ubuntu/windows matrix above.
+    runs-on: macos-latest
+    # Same wall-clock discipline as the other jobs (GitHub default is 6h).
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          persist-credentials: false
+        timeout-minutes: 5
+
+      - name: Install uv
+        timeout-minutes: 5
+        uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39  # v3.2.4
+        with:
+          enable-cache: true
+          version: "latest"
+
+      - name: Set up Python 3.12
+        timeout-minutes: 5
+        run: uv python install 3.12
+
+      # brew can sit on a bottle for minutes without ever failing; the cap is
+      # what turns that into a readable red instead of a silent 6h job.
+      - name: Install toolchain via Homebrew (the README-documented path)
+        timeout-minutes: 20
+        run: brew install poppler pandoc typst
+
+      - name: Install dependencies (dev only, no heavy extras)
+        timeout-minutes: 15
+        run: uv sync --extra dev --locked
+
+      - name: Toolchain discoverable and versioned
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          typst --version
+          pandoc --version | head -1
+          pdftotext -v 2>&1 | head -1
+
+      - name: Environment self-check (ubt doctor)
+        timeout-minutes: 5
+        run: uv run ubt doctor
+
+      - name: Cross-platform adapter + sanitizer suite (no OS-golden dependency)
+        env:
+          PYTHONIOENCODING: "utf-8"
+        # `--timeout` spelled out because `-o addopts=""` clears it (see the
+        # test job's pytest step).
+        timeout-minutes: 20
+        run: >-
+          uv run pytest
+          tests/unit/test_epub_adapter.py
+          tests/unit/test_docx_adapter.py
+          tests/unit/test_html_adapter.py
+          tests/unit/test_markdown_adapter.py
+          tests/unit/test_cleaners.py
+          -o addopts="" -q --timeout=300
+
