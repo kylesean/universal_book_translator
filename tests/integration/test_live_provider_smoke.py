@@ -49,7 +49,9 @@ def _smoke_block() -> IRBlock:
 
 @pytest.mark.asyncio
 @requires_live_llm
-async def test_live_draft_returns_usable_translation_and_records_usage() -> None:
+async def test_live_draft_returns_usable_translation_and_records_usage(
+    live_llm_env: None,
+) -> None:
     """One real draft call: non-empty output, numbers kept, usage accounted.
 
     The usage assertion also guards the token-accounting regression live: the
@@ -123,7 +125,7 @@ def _quality_block() -> IRBlock:
 
 @pytest.mark.asyncio
 @requires_live_llm
-async def test_live_draft_meets_structural_quality_gate() -> None:
+async def test_live_draft_meets_structural_quality_gate(live_llm_env: None) -> None:
     """Real-model quality floor via the muse-spark profile (closes D1).
 
     Not a paraphrase-flaky BLEU/COMET number: the draft of the harder golden

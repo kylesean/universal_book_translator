@@ -21,10 +21,18 @@ def test_syntax_fallback_gate_allows_under_threshold():
     _enforce_syntax_fallback_gate("job1", ["line 1: foo"], cfg, rehearsal=False)
 
 
-def test_syntax_fallback_gate_rehearsal_downgrades_to_warning():
+def test_syntax_fallback_gate_rehearsal_downgrades_to_warning(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    import logging
+
     cfg = UBTConfig(export_max_syntax_fallbacks=1)
-    # mock/dry-run must not raise
-    _enforce_syntax_fallback_gate("job1", ["a", "b", "c"], cfg, rehearsal=True)
+    with caplog.at_level(logging.WARNING):
+        # mock/dry-run must not raise
+        _enforce_syntax_fallback_gate("job1", ["a", "b", "c"], cfg, rehearsal=True)
+    # The behaviour under test is the downgrade *to a warning*; deleting the
+    # warning branch must redden this, not silently pass.
+    assert any("syntax-fallback gate would have refused" in rec.message for rec in caplog.records)
 
 
 def test_syntax_fallback_gate_zero_means_fail_on_any():

@@ -452,13 +452,18 @@ def test_docling_mock_conversion(tmp_path: Path) -> None:
 async def test_docling_adapter_manifest_metadata_and_warning(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """DoclingPDFAdapter should record engine in manifest.metadata and warn upon fallback."""
+    """DoclingPDFAdapter should record engine in manifest.metadata and log the fallback."""
     pdf_path = text_pdf(tmp_path / "metadata_test.pdf", pages=1)
     adapter = DoclingPDFAdapter()
 
     import logging
 
-    with caplog.at_level(logging.WARNING):
+    # The fallback is logged at INFO (docling is an optional extra, so a warning
+    # on every PDF for installs without it would be noise). Capture INFO and
+    # assert the message the product actually emits; the previous WARNING-level
+    # capture matched nothing and reddened the main CI job, which deliberately
+    # installs dev-only (no docling).
+    with caplog.at_level(logging.INFO):
         manifest = await adapter.extract_manifest(pdf_path)
         assert "pdf_parser_engine" in manifest.metadata
 
@@ -468,7 +473,7 @@ async def test_docling_adapter_manifest_metadata_and_warning(
 
     if not adapter.is_docling_installed():
         assert manifest.metadata["pdf_parser_engine"] == "oxide_fallback"
-        assert any("Docling is not installed" in rec.message for rec in caplog.records)
+        assert any("Docling not installed" in rec.message for rec in caplog.records)
 
 
 @pytest.mark.asyncio

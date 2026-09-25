@@ -183,3 +183,19 @@ def hermetic_config() -> Iterator[None]:
         UBTConfig.model_config["env_file"] = previous_env_file
         os.environ.update(saved)
         os.environ.update(saved_proxy)
+
+
+@pytest.fixture
+def live_llm_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Restore the operator's live-provider env for one test body.
+
+    ``hermetic_config`` (autouse, above) strips every ``UBT_*`` var before each
+    test, but ``requires_live_llm`` is evaluated at collection against the real
+    environment. Without this, a configured live run was un-skipped and then ran
+    with ``mock-key`` against ``api.openai.com``. The snapshot is captured in
+    ``_live_helpers`` at import time, before any fixture runs.
+    """
+    from tests.integration._live_helpers import LIVE_ENV_SNAPSHOT
+
+    for key, value in LIVE_ENV_SNAPSHOT.items():
+        monkeypatch.setenv(key, value)

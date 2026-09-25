@@ -100,6 +100,23 @@ requires_live_llm = pytest.mark.skipif(
 )
 
 
+#: Credential/base-url env captured at import time — before the autouse
+#: ``hermetic_config`` fixture in tests/conftest.py strips every ``UBT_*`` var for
+#: each test body. ``conftest`` re-applies it through the ``live_llm_env`` fixture
+#: so a configured live run actually reaches the configured endpoint instead of
+#: falling back to ``mock-key`` against ``api.openai.com``.
+LIVE_ENV_KEYS = (
+    "UBT_LLM_API_KEY",
+    "OPENAI_API_KEY",
+    "UBT_BASE_URL",
+    "UBT_DRAFT_MODEL",
+    "UBT_REPAIR_MODEL",
+    "UBT_API_MODE",
+    "UBT_PROVIDER_PROFILE",
+)
+LIVE_ENV_SNAPSHOT = {key: os.environ[key] for key in LIVE_ENV_KEYS if os.environ.get(key)}
+
+
 def sample_corpus_sentences(
     limit_per_book: int = 12, min_chars: int = 20, max_chars: int = 240
 ) -> list[str]:
