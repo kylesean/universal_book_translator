@@ -114,6 +114,20 @@ def compare_kpis(
     )
 
 
+#: ``details`` keys that describe the run's structure rather than a KPI. They
+#: are compared exactly so a golden cannot silently record a different block
+#: count (the cogpsy golden carried ``total_blocks=16`` while the pipeline
+#: produced 17; the KPI tolerances swallowed it).
+_STRUCTURAL_DETAIL_KEYS: tuple[str, ...] = (
+    "total_blocks",
+    "skipped_blocks",
+    "needs_human_blocks",
+    "terms_audited",
+    "formula_blocks",
+    "formula_substitutions",
+)
+
+
 def compare_kpi_sets(
     baseline: KpiSet,
     candidate: KpiSet,
@@ -126,6 +140,11 @@ def compare_kpi_sets(
         baseline.kpis, candidate.kpis, tolerances=tolerances, strict_names=strict_names
     )
     violations = list(report.violations)
+    for key in _STRUCTURAL_DETAIL_KEYS:
+        base_detail = baseline.details.get(key)
+        cand_detail = candidate.details.get(key)
+        if base_detail != cand_detail:
+            violations.append(f"details.{key}: {base_detail!r} -> {cand_detail!r}")
     if baseline.schema_version != candidate.schema_version:
         violations.append(
             f"schema_version mismatch: baseline {baseline.schema_version} "

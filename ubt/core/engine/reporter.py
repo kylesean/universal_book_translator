@@ -539,9 +539,14 @@ def summarize_render_skips(defect_flags: dict[str, int]) -> tuple[int, str]:
     return total, f"{detail} — review required"
 
 
-# `math_token_corrupt missing=[..] mismatched=[..] mutated=[..]` (draft stage).
+# `math_token_corrupt missing=[..] mismatched=[..] mutated=[..] [reordered=[..]]
+# [duplicated=[..]]` (draft stage). ``reordered``/``duplicated`` are optional:
+# a block whose masked spans came back out of order or doubled is just as corrupt
+# as one with a missing span, so both must count or the KDP audit prints "Full
+# retention" while the ledger flags corruption.
 _CORRUPT_FLAG_RE = re.compile(
     r"math_token_corrupt missing=(\[.*?\]) mismatched=(\[.*?\]) mutated=(\[.*?\])"
+    r"(?: reordered=(\[.*?\]))?(?: duplicated=(\[.*?\]))?"
 )
 
 
@@ -552,6 +557,8 @@ def _parse_corrupt_count(flag: str) -> int:
         return 0
     total = 0
     for group in match.groups():
+        if group is None:
+            continue
         try:
             total += len(ast.literal_eval(group))
         except (SyntaxError, ValueError):

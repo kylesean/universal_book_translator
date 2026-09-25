@@ -10,7 +10,7 @@
     "placeholder_retention": 1.0,
     "pass_rate": 1.0,
     "avg_qe": 0.8299,
-    "repair_rate": 0.1875,
+    "repair_rate": 0.17647058823529413,
     "needs_human_rate": 0.0,
     "formula_fidelity": 1.0,
     "formula_substitutions": 0.0,
@@ -22,7 +22,7 @@
     "cost_per_1k_chars": 0.0
   },
   "details": {
-    "total_blocks": 16,
+    "total_blocks": 17,
     "terms_audited": 0,
     "terms_with_drift": 0,
     "skipped_blocks": 0,

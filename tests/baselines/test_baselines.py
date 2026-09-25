@@ -30,8 +30,8 @@ from ubt.core.router.router import ModelRouter
 
 # Deliberately NOT `slow`-marked: measured 2026-09-23 the whole tier is 5 tests /
 # 2.27 s (slowest case 1.27 s) and spawns no subprocess. It is the only tier that
-# proves the pipeline worked end to end, so it belongs in the per-edit inner loop,
-# not behind the default `-m 'not slow'`.
+# proves the pipeline worked end to end, so it belongs in the DEFAULT loop. It is
+# not in the `-m fast` per-edit loop, which collects tests/unit only.
 
 #: Set to "1" to rewrite the checked-in KPI goldens instead of gating on them.
 GOLDEN_UPDATE_ENV = "UBT_UPDATE_GOLDENS"
@@ -45,15 +45,24 @@ def assert_no_kpi_regression(output_path: Path, golden_path: Path) -> None:
     changed, not that a model got noisier. (The double carries a structural
     fidelity contract — see ``tests/mock_providers.py`` — which is what makes
     that reading safe.) Regenerate deliberately with ``UBT_UPDATE_GOLDENS=1`` and
-    review the diff: the rewrite itself is unchecked here, but
-    ``test_goldens_satisfy_absolute_bounds`` runs the same bounds over the
-    checked-in goldens in the fast tier, so a recorded defect goes red in
-    milliseconds rather than on the next slow baseline.
+    review the diff: the rewrite itself runs the absolute bounds on the candidate
+    before writing, and ``test_goldens_satisfy_absolute_bounds`` re-checks the
+    checked-in goldens in the default/CI loop, so a recorded defect goes red
+    rather than shipping.
     """
     metrics_path = sidecar_path(output_path, "metrics.json")
     assert metrics_path.exists(), f"missing KPI artifact: {metrics_path}"
     candidate = load_kpis(metrics_path)
     if os.environ.get(GOLDEN_UPDATE_ENV) == "1":
+        # A re-record must not launder a defect: run the absolute bounds on the
+        # candidate before writing, or ``UBT_UPDATE_GOLDENS=1`` would fold a
+        # leaked translation / dropped placeholder straight into the baseline.
+        candidate_bounds = check_thresholds(candidate.kpis)
+        assert not candidate_bounds, (
+            f"refusing to record {golden_path.name}: the candidate violates its own "
+            "absolute bounds (a defect cannot be recorded, only fixed):\n"
+            + "\n".join(candidate_bounds)
+        )
         # Drop the volatile job block (tmp path, timestamp): the gate compares
         # KPIs, and a checked-in golden should not carry machine-specific state.
         save_metrics_report(candidate.model_copy(update={"job": {}}), golden_path)
@@ -403,13 +412,21 @@ async def test_baseline_call_of_the_wild_streaming_e2e(tmp_path: Path) -> None:
     assert rep["summary"]["blocked_human_blocks"] == 0
     # Score metrics quantile consistency
     metrics = rep["score_metrics"]
-    assert (
-        metrics["min_qe"]
-        <= metrics["p10_qe"]
-        <= metrics["p50_qe"]
-        <= metrics["p90_qe"]
-        <= metrics["max_qe"]
-    )
+    if metrics.get("scored_blocks", 0) == 0:
+        # This baseline's mock QE runner scores nothing, so the ordering below
+        # would be `0 <= 0 <= 0 <= 0 <= 0` — true for any implementation. Assert
+        # the real invariant (an unscored run reports zeros) so the check can
+        # actually fail.
+        assert metrics["avg_qe"] == 0.0
+        assert metrics["min_qe"] == 0.0 and metrics["max_qe"] == 0.0
+    else:
+        assert (
+            metrics["min_qe"]
+            <= metrics["p10_qe"]
+            <= metrics["p50_qe"]
+            <= metrics["p90_qe"]
+            <= metrics["max_qe"]
+        )
     assert_no_kpi_regression(out_epub, BASELINES_DIR / "call-of-the-wild" / "metrics.golden.json")
 
 
@@ -421,8 +438,9 @@ def test_token_overhead_and_fast_pass_calibration() -> None:
     ``max_repair_rounds``, or enabling the LLM judge on a heuristic engine
     while ``rerank_k``>1) actually fails this test. Reading the constants
     from ``UBTConfig`` / ``RepairLoop`` instead of hard-coding them is what
-    keeps it honest; the old copy re-derived its own 0.75/0.15/0.30 numbers
-    and could never go red when the knobs drifted.
+    keeps it honest for `bottom_percentile`; the fast-pass ceiling (0.75), the
+    decay tail (0.30) and the 1.5x budget ceiling remain literals, so those three
+    still cannot go red when the product knobs drift.
     """
     from ubt.core.config import UBTConfig
 
