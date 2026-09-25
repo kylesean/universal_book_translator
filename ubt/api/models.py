@@ -1,0 +1,158 @@
+"""Pydantic models for the UBT REST API."""
+
+from datetime import datetime
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from ubt.core.config import (
+    DualMode,
+    ExecMode,
+    FormulaMode,
+    RenderEngine,
+)
+from ubt.core.engine.progress import ProgressSnapshot
+from ubt.core.job_options import LANG_CODE_PATTERN
+from ubt.core.language_profile import is_supported_lang
+from ubt.core.presets import Preset
+
+
+def _require_supported_target_lang(value: str) -> str:
+    """Reject a target language the engine has no profile for, at parse time.
+
+    ``LANG_CODE_PATTERN`` only checks the *shape*, so ``pt-BR`` used to pass the
+    API and then die inside the pipeline after a full ingest. Region/script tags
+    of a supported base language (``zh-CN``) stay accepted.
+    """
+    if not is_supported_lang(value):
+        raise ValueError(
+            f"Unsupported target language {value!r}. Supported base languages: "
+            "zh, en, ja, ko, fr, de, es, ru (region tags such as 'zh-CN' are accepted)."
+        )
+    return value
+
+
+class JobSubmitRequest(BaseModel):
+    """Payload to initiate an asynchronous translation job."""
+
+    input_path: str = Field(..., description="Path to source document file")
+    output_path: str | None = Field(
+        default=None, description="Optional target path for bilingual file"
+    )
+    target_lang: str = Field(
+        default="zh",
+        description="Target ISO language code",
+        pattern=LANG_CODE_PATTERN,
+    )
+    source_lang: str = Field(
+        default="en",
+        description="Source ISO language code",
+        pattern=LANG_CODE_PATTERN,
+    )
+    profile: str = Field(
+        default="general",
+        description="Domain profile (general, textbook, paper)",
+        pattern=r"^[a-zA-Z0-9_\-]+$",
+    )
+    draft_model: str | None = Field(default=None, description="Override draft model tier")
+    repair_model: str | None = Field(default=None, description="Override repair model tier")
+    preset: Preset | None = Field(
+        default=None, description="Quality preset (publication, standard, preview)"
+    )
+    render_engine: RenderEngine | None = Field(
+        default=None,
+        description="PDF render engine (rigid, reflow, publication, auto)",
+    )
+    dual_mode: DualMode | None = Field(
+        default=None,
+        description="Bilingual mode (inline, alternating, facing, monolingual, auto)",
+    )
+    pages: str | None = Field(default=None, description="Page range filter (e.g. 1-10)")
+    exec_mode: ExecMode | None = Field(
+        default=None, description="Execution mode (auto, short, long)"
+    )
+    formula_mode: FormulaMode | None = Field(
+        default=None, description="Formula handling (strict, readable)"
+    )
+    # Idempotency / resume: resubmitting the same job_id returns the existing
+    # job instead of starting (and billing) a duplicate run.
+    job_id: str | None = Field(default=None, description="Optional stable job id (idempotency key)")
+    # Queue mode scheduling: higher runs sooner; ignored by embedded mode.
+    priority: int = Field(default=0, ge=0, le=100, description="Queue priority (higher = sooner)")
+    # Rehearsal: run the full pipeline against the deterministic echo provider
+    # (zero token spend). Explicit dry_run=True required for mock translation.
+    dry_run: bool = Field(default=False, description="Zero-token rehearsal run (echo provider)")
+    # Resume controls (UBTConfig fields, forwarded by overrides_from_request).
+    fresh: bool = Field(default=False, description="Discard prior ledger state instead of resuming")
+    start_chapter: int | None = Field(
+        default=None, ge=1, description="First chapter of the window (run-only key)"
+    )
+    max_chapters: int | None = Field(
+        default=None, ge=1, description="Chapter-window length (run-only key)"
+    )
+    # Reject unknown fields to fail fast on typos and prevent unwanted parameter injection.
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("target_lang")
+    @classmethod
+    def _validate_target_lang(cls, value: str) -> str:
+        return _require_supported_target_lang(value)
+
+
+class JobAssessRequest(BaseModel):
+    """Payload to assess a cold document without translating."""
+
+    input_path: str = Field(..., description="Path to source document file")
+    deep: bool = Field(default=False, description="Run deep real adapter ingest for exact counts")
+    target_lang: str = Field(
+        default="zh",
+        description="Target ISO language code",
+        pattern=LANG_CODE_PATTERN,
+    )
+    source_lang: str = Field(
+        default="en",
+        description="Source ISO language code",
+        pattern=LANG_CODE_PATTERN,
+    )
+    preset: Preset | None = Field(
+        default=None, description="Quality preset (publication, standard, preview)"
+    )
+
+    @field_validator("target_lang")
+    @classmethod
+    def _validate_target_lang(cls, value: str) -> str:
+        return _require_supported_target_lang(value)
+
+
+class JobSubmitResponse(BaseModel):
+    """Response returned upon successful job enqueueing."""
+
+    job_id: str
+    status: str
+    stream_url: str
+    status_url: str
+    # True when this job will run as a zero-token rehearsal (echo provider)
+    # instead of a billed translation — set explicitly via dry_run=true or
+    # auto-set at intake when no provider key is configured, so a keyless
+    # server can never report a mock run as a real delivery.
+    rehearsal: bool = False
+
+
+class JobStatusResponse(ProgressSnapshot):
+    """Real-time job status and metric counters.
+
+    The telemetry fields are the shared :class:`ProgressSnapshot` -- one
+    definition for the queue row, the in-memory record and this response.
+    """
+
+    job_id: str
+    # One vocabulary (ubt.core.engine.job_queue.JobStatus): "submitted"
+    # is the in-memory manager's accepted state; queue mode reports "queued".
+    status: str
+    created_at: datetime
+    error: str | None = None
+    # Queue mode only: 1-based position among queued jobs (None = not queued).
+    queue_position: int | None = None
+    # True when the job ran (is running) as a zero-token rehearsal instead of a
+    # billed translation — surfaced so a keyless server can never report a mock
+    # run as a finished delivery without saying so.
+    rehearsal: bool = False

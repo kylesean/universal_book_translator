@@ -1,0 +1,280 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["ubt"]
+
+# The sdist has no install use beyond source builds, so keep it to what a
+# distributor actually needs. Without this it bundled 174 tests/ entries
+# (including the 11 MB tests/baselines/standard-alice EPUB), making every PyPI
+# sdist download ~13 MB.
+#
+# ``docs/`` is deliberately NOT excluded: ``README.md`` is the sdist readme and
+# links into it, so the ~356 KB of tracked markdown must ship or those links
+# dangle in the tarball. The 16 MB of PDFs under ``docs/`` are gitignored
+# generated artifacts, so they are absent from the VCS file list hatchling
+# selects from — and from a filesystem-walk fallback, which also honours
+# ``.gitignore``.
+[tool.hatch.build.targets.sdist]
+exclude = [
+    "tests/",
+    "dist/",
+    "output/",
+    "scratch/",
+    "tmp/",
+    "deploy/",
+]
+
+
+[project]
+name = "universal-book-translator"
+version = "0.1.0"
+description = "Industrial-grade universal bilingual book translation engine with decoupled IR and 4-layer consistency defense."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+dependencies = [
+    "pydantic>=2.7.0",
+    "pydantic-settings>=2.2.0",
+    # Required, not optional: UBTConfig sets ``env_file=".env"`` and installs a
+    # custom DotEnvSettingsSource, so pydantic-settings imports python-dotenv on
+    # every settings construction. It used to arrive only transitively, which
+    # meant a resolver change could break `.env` support with no declared
+    # dependency to notice. pydantic-settings ships it under its [dotenv] extra;
+    # name it directly instead.
+    "python-dotenv>=1.0.0",
+    "httpx>=0.27.0",
+    "beautifulsoup4>=4.12.0",
+    "typer>=0.12.0",
+    "rich>=13.7.0",
+    "textual>=3.7,<4.0",
+    "fastapi>=0.111.0",
+    "uvicorn>=0.30.0",
+    # Replaces the runtime pypdf leg and the poppler pdftoppm subprocess:
+    # page raster + text extraction (ubt/adapters/pdf/oxide_render.py).
+    # Zero transitive deps, single 26MB abi3 wheel, MIT/Apache dual — the same
+    # license profile as pypdfium2. The <0.4 ceiling is deliberate: the 0.3.x
+    # bindings drift against their own README (PyPI's `page.text` does not
+    # exist in 0.3.78) — re-probe with dir() introspection before any bump.
+    "pdf-oxide>=0.3.78,<0.4",
+    "pypdfium2>=4.30.0",
+    "pyahocorasick>=2.1.0",
+    "rapidfuzz>=3.9.0",
+    "python-docx>=1.1.0",
+    "fonttools>=4.64.0",
+    "pillow>=12.3.0",
+    "lxml>=6.1.3",
+    "pikepdf>=10.13.0.post1",
+    "socksio>=1.0.0",
+]
+
+[project.scripts]
+ubt = "ubt.cli.main:app"
+ubt-api = "ubt.api.app:run_server"
+ubt-mcp = "ubt.mcp._entrypoint:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2.0",
+    "pytest-asyncio>=0.23.0",
+    # Anti-hang: pairs with the `--timeout=600` in [tool.pytest.ini_options].
+    # Without it a single wedged test can sit until the runner's own wall-clock
+    # cap (6h on GitHub Actions). 600s rather than 300s: the deterministic tier
+    # is seconds (measured 2026-09-22: slowest baseline e2e = 1.41s), but the
+    # slow-marked live neural-QE cases inherit addopts whenever addopts is not
+    # overridden, and a CometKiwi subprocess has already blown a 300s budget in
+    # this repo's own notes (tests/integration/test_local_model_baseline.py).
+    # Anyone running the live tiers should pass `-o addopts=""`, which clears
+    # the timeout along with the marker filter (it replaces addopts wholesale).
+    "pytest-timeout>=2.3,<3.0",
+    "mypy>=1.10.0",
+    "ruff>=0.4.8",
+    # CI parity: ubt/mcp/server.py imports mcp at module scope and
+    # tests/unit/test_mcp_server.py imports that module, so the `dev` env used
+    # by the CI matrix must carry it. Without this pin `uv sync --extra dev`
+    # left mcp absent, and `mypy --strict ubt tests` failed with
+    # import-not-found on ubt/mcp/server.py while pytest errored at
+    # collection. Kept in lockstep with the `mcp` extra below on purpose —
+    # optional-dependencies cannot reference another extra.
+    "mcp>=2.0.0",
+    # Fixture PDFs are written with pypdf (tests/pdf_builders.py) — a
+    # deliberately independent, permissive writer so the extraction tests
+    # are not also testing the extraction engine under test. Runtime pypdf
+    # was retired in the pdf_oxide adoption (stage 2 completion).
+    "pypdf>=4.0.0",
+]
+# Agent entry point: MCP stdio server (Cursor/Codex call ubt_* tools).
+mcp = [
+    "mcp>=2.0.0",
+]
+pdf = [
+    "docling>=2.0.0",
+]
+# P9 scan core: classical detector OCR (CPU-capable, bundled ONNX models).
+ocr = [
+    "rapidocr>=3.9.0",
+    "onnxruntime>=1.29.0",
+    # Imported directly by rapidocr_driver.recognize to convert the page image
+    # to the BGR ndarray rapidocr's ONNX models expect. rapidocr currently
+    # depends on numpy, but the driver imports it by name, so it is declared
+    # here rather than relied on transitively.
+    "numpy>=1.26.0",
+]
+# P9 second witness: DeepSeek-OCR VLM (proofread grade, ~7 GB weights,
+# needs ~9 GB free VRAM — stop ollama residents first).
+#
+# No `ocr-vlm` extra: its driver (ubt/adapters/pdf/vlm/drivers/deepseek_driver.py)
+# imports torch and transformers, and an extra that pulled those would drag ~2 GB
+# of CUDA wheels into `uv sync --extra ocr-vlm` for a path most installs never
+# take. The previous extra listed addict/easydict/einops/matplotlib, none of
+# which is imported anywhere in ubt/ — installing it produced a driver that
+# died on first use. Install the stack yourself when you want this path:
+#
+#     pip install torch transformers huggingface_hub accelerate addict \
+#                 easydict einops matplotlib
+#
+# The driver raises a clear ModuleNotFoundError naming the missing package.
+# P11 nightly QE: reference-free COMET-Kiwi. setuptools<81 keeps the
+# pkg_resources shim that unbabel-comet 2.2.7's torchmetrics still imports;
+# drop the pin when comet moves off torchmetrics 0.x.
+qe = [
+    "unbabel-comet>=2.2.0",
+    "setuptools<81",
+]
+
+[dependency-groups]
+dev = [
+    "pytest-xdist>=3.8.0",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings
+    "F",     # pyflakes
+    "I",     # isort automatic import sorting
+    "B",     # flake8-bugbear common traps
+    "UP",    # pyupgrade modern Python syntax
+    "SIM",   # flake8-simplify code simplification
+    "ASYNC", # flake8-async concurrency safety
+    "PTH",   # flake8-use-pathlib enforce pathlib
+    "C4",    # flake8-comprehensions comprehension optimization
+]
+ignore = ["E501", "ASYNC240"]
+
+[tool.ruff.lint.per-file-ignores]
+# FastAPI's dependency-injection idiom requires File(...)/Form(...) as
+# argument defaults; B008 is a false positive there.
+"deploy/docker/ocr-sidecar/server.py" = ["B008"]
+# Dynamic monkey-patching of third-party transformers cache without type stubs
+"ubt/adapters/pdf/vlm/drivers/deepseek_driver.py" = ["B010"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_return_any = true
+
+[[tool.mypy.overrides]]
+# pypdfium2 ships no py.typed marker (P1-3 PDF fast path).
+module = [
+    "pypdfium2.*",
+    "pypdfium2_raw.*",
+]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# fontTools ships no py.typed marker (in-place width metrics).
+module = "fontTools.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# lxml ships no inline types / py.typed marker; the DOCX footnote/endnote raw
+# blob handling parses via lxml.etree directly.
+module = "lxml.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Optional heavy/OCR extras: absent from the default `uv sync --extra dev`
+# Environment by design, so the main mypy gate must not require them.
+module = [
+    "docling.*",
+    "docling_core.*",
+    "torch.*",
+    "transformers.*",
+    "huggingface_hub.*",
+    "numpy.*",
+    "rapidocr.*",
+    "rapidocr_onnxruntime.*",
+    "onnxruntime.*",
+    # The packaged CometKiwi scorer (ubt/core/qe/comet_score_ipc.py) imports
+    # `comet` lazily; the neural-QE extra is absent from the dev env.
+    "comet.*",
+    # scripts/oxide_render_ab.py is imported through a sys.path insert by the
+    # gated A/B test; mypy has no MYPYPATH entry for scripts/.
+    "oxide_render_ab",
+]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# The OCR-VLM driver needs a narrow `type: ignore[no-untyped-call]` when
+# transformers IS installed (torch/transformers are installed manually for the
+# OCR-VLM path, not via an extra), but with transformers absent the
+# `ignore_missing_imports` override above makes AutoTokenizer `Any`, the
+# call becomes well-typed, and `warn_unused_ignores` turns that same ignore into
+# a hard error. The dev-only CI env therefore failed on the very ignore that
+# keeps a full local env clean, so unused-ignore reporting is disabled for this
+# one module instead of dropping the ignore (which would break local runs).
+module = [
+    "ubt.adapters.pdf.vlm.drivers.deepseek_driver",
+    "ubt.adapters.pdf.vlm.drivers.deepseek_worker",
+]
+warn_unused_ignores = false
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+# Default loop runs the fast subset; heavy integration/baselines opt in via
+# `pytest -o addopts=""` (everything) or `-m slow` (slow only). The nightly
+# workflow overrides addopts explicitly; CI runs the full suite without a
+# coverage gate (removed 2026-09-20 — see the comment on the ci.yml test job).
+#
+# `--timeout=600` (pytest-timeout, dev extra) caps any single test: a hang fails
+# in 10 minutes instead of sitting until the runner's wall-clock cap. It rides
+# in addopts, so `-o addopts=""` also clears it — that is deliberate, and is how
+# the multi-minute live tiers (local MT + CometKiwi) are meant to be run.
+addopts = "-m 'not slow and not legacy_drift' --timeout=600"
+markers = [
+    "network: marks tests that require network access (e.g. Docling HuggingFace model downloads)",
+    "slow: marks tests that spawn heavy subprocesses (typst compiles, pandoc, pdftoppm) or the oxide/pdftoppm render A/B comparison; deselect with -m 'not slow'",
+    "fast: pure-logic unit tests cheap enough for the per-edit inner loop; `pytest -m fast` runs the whole tier in ~2 s",
+    # AGENTS.md §2: a legacy check that blocks work and costs more than 15 min of
+    # archaeology moves here instead of being deleted or left red. Quarantine is not
+    # amnesty — CI keeps running it (its `-o addopts=""` clears this filter), and
+    # every use must name what it is waiting on in the marker's reason argument.
+    "legacy_drift: quarantined legacy check, deselected from the inner loop but still run by CI",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning:pydantic.*",
+    "ignore::DeprecationWarning:docling.*",
+    "ignore::DeprecationWarning:starlette.*",
+    "ignore::DeprecationWarning:anyio.*",
+    "ignore::starlette.exceptions.StarletteDeprecationWarning",
+]

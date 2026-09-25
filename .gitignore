@@ -1,0 +1,40 @@
+# Python & virtualenv
+__pycache__/
+*.egg-info/
+dist/
+.venv/
+.env*
+!.env.example
+
+# Caches & tests
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage*
+htmlcov/
+
+# UBT state & output
+.ubt/
+.ubt_cache/
+*.sqlite*
+*.db*
+output/
+tmp/
+scratch/
+scripts/mathjax/node_modules/
+
+# Generated docs & deliverables
+docs/*.pdf
+/out*
+/*_bilingual.*
+/*_quality_report.*
+/*_visual_report.*
+
+# Editors & OS
+.idea/
+.vscode/
+.DS_Store
+.github/
+.codex/
+.claude/
+.codegraph/

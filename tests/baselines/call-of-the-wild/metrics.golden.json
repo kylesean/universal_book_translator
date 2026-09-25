@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "job": {},
+  "kpis": {
+    "term_consistency": 1.0,
+    "term_precision": 0.0,
+    "term_fuzzy_precision": 0.0,
+    "term_recall": 0.0,
+    "render_skip_rate": 0.0,
+    "placeholder_retention": 1.0,
+    "pass_rate": 1.0,
+    "avg_qe": 0.0,
+    "repair_rate": 0.0,
+    "needs_human_rate": 0.0,
+    "formula_fidelity": 1.0,
+    "formula_substitutions": 0.0,
+    "visual_critical_rate": 0.0,
+    "visual_major_rate": 0.0,
+    "fidelity_non_text_residual": 0.0,
+    "rigid_painted_coverage": 0.0,
+    "untranslated_leak_rate": 0.0,
+    "cost_per_1k_chars": 0.0
+  },
+  "details": {
+    "total_blocks": 408,
+    "terms_audited": 0,
+    "terms_with_drift": 0,
+    "skipped_blocks": 0,
+    "skip_families": {},
+    "formula_blocks": 0,
+    "formula_substitutions": 0,
+    "visual_report": false,
+    "visual_pages": 0,
+    "visual_findings": {
+      "info": 0,
+      "major": 0,
+      "critical": 0
+    },
+    "needs_human_blocks": 0,
+    "chars": 196601,
+    "estimated_cost_usd": null
+  }
+}

@@ -1,0 +1,174 @@
+"""Anchored render fail-closed + loss-visibility guards.
+
+Two confirmed defects:
+* A page-level overlay compile failure was recorded as ``("page:N",
+  "overlay_compile")`` and the adapter filtered those entries out, so whole
+  pages reverted to source with no trace in the quality report.
+* A zero-bbox decode path (pypdf/pdfium fallback) produced no zones and the
+  engine emitted an unmodified copy of the source PDF as the "translation".
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from ubt.adapters.pdf.rigid.typesetter import (
+    RigidReport,
+    RigidTypesetter,
+    _assert_paintable,
+    _demote_page_blocks,
+    _with_list_marker,
+)
+from ubt.core.exceptions import DocumentParseError
+from ubt.core.ir.models import BlockType, IRBlock
+
+
+def test_zero_zone_render_fails_closed() -> None:
+    report = RigidReport()
+    report.skipped.append(("b1", "no_zone"))
+    report.skipped.append(("b2", "no_zone"))
+    with pytest.raises(DocumentParseError, match="no paintable zones"):
+        _assert_paintable({}, report)
+
+
+def test_zero_zone_allows_empty_document() -> None:
+    # No prose blocks at all (nothing skipped as no_zone) is not a failure.
+    report = RigidReport()
+    report.skipped.append(("b1", "non_prose"))
+    _assert_paintable({}, report)
+
+
+def test_paintable_render_is_not_blocked() -> None:
+    report = RigidReport()
+    report.skipped.append(("b1", "no_zone"))
+    _assert_paintable({1: [(None, 10.0, ["x"])]}, report)  # type: ignore[list-item]
+
+
+def test_failed_page_overlay_demotes_blocks_to_render_skips() -> None:
+    report = RigidReport()
+    report.rendered_blocks.extend(["b1", "b2"])
+    report.blocks_by_page[3] = ["b1", "b2"]
+    _demote_page_blocks(report, 3)
+    assert report.rendered_blocks == []
+    assert ("b1", "overlay_compile") in report.skipped
+    assert ("b2", "overlay_compile") in report.skipped
+
+
+def test_demote_ignores_other_pages() -> None:
+    report = RigidReport()
+    report.rendered_blocks.extend(["b1", "b9"])
+    report.blocks_by_page[3] = ["b1"]
+    _demote_page_blocks(report, 3)
+    assert report.rendered_blocks == ["b9"]
+
+
+def _blk(block_type: BlockType, text: str) -> IRBlock:
+    from ubt.core.ir.models import FlowID
+
+    return IRBlock(
+        id="b1",
+        flow_id=FlowID.MAIN_STORY,
+        spine_index=1,
+        block_type=block_type,
+        source_text=text,
+        target_text=text,
+    )
+
+
+def test_list_item_gets_its_bullet_restored() -> None:
+    """A translated LIST_ITEM whose bullet glyph was dropped at extraction
+    gets a bullet back so the overlay keeps the list structure."""
+    from ubt.core.ir.models import BlockType
+
+    block = _blk(BlockType.LIST_ITEM, "Breadth expands hypothesis coverage.")
+    assert _with_list_marker(block, "广度拓展假设的覆盖范围。") == "• 广度拓展假设的覆盖范围。"
+
+
+def test_list_marker_not_doubled_when_model_already_emitted_one() -> None:
+    from ubt.core.ir.models import BlockType
+
+    block = _blk(BlockType.LIST_ITEM, "item")
+    assert _with_list_marker(block, "• already bulleted") == "• already bulleted"
+    assert _with_list_marker(block, "1. numbered item") == "1. numbered item"
+
+
+def test_narrative_block_never_gets_a_bullet() -> None:
+    from ubt.core.ir.models import BlockType
+
+    block = _blk(BlockType.NARRATIVE, "just a paragraph")
+    assert _with_list_marker(block, "只是一个段落") == "只是一个段落"
+
+
+def test_page_overlay_disables_cjk_latin_spacing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The rigid width model is only conservative with CJK/Latin spacing off.
+
+    ``font_metrics.text_width_pt`` sums glyph advances, so Typst's default
+    ``cjk-latin-spacing`` adds a gap the model never measured. The zone is
+    emitted with ``clip: true``, so the overflow would be truncated silently
+    rather than overlap-flagged — the overlay must turn the spacing off.
+    """
+    from ubt.adapters.pdf.rigid.typesetter import RigidTypesetter
+    from ubt.adapters.pdf.rigid.zones import PageFacts
+
+    typesetter = RigidTypesetter()
+    monkeypatch.setattr(typesetter, "_font_tuple", lambda: '"Noto Serif CJK SC"')
+    overlay = typesetter._page_overlay(PageFacts(page=1, width=595.0, height=842.0), [])
+    assert "cjk-latin-spacing: none" in overlay
+
+
+def test_geometry_less_blocks_are_recorded_as_skips() -> None:
+    """A block with no bbox must be a recorded skip, not a silent drop.
+
+    ``render_coverage`` counts rendered vs planned blocks; a block dropped
+    without a skip entry was counted as rendered.
+    """
+    from ubt.adapters.pdf.rigid.typesetter import RigidTypesetter
+    from ubt.core.ir.models import BlockType, BoundingBox, IRBlock
+
+    typesetter = RigidTypesetter()
+    no_bbox = IRBlock(id="b1", spine_index=0, block_type=BlockType.NARRATIVE, source_text="x")
+    off_page = IRBlock(
+        id="b2",
+        spine_index=1,
+        block_type=BlockType.NARRATIVE,
+        source_text="y",
+        bbox=BoundingBox(page=99, x0=0.0, y0=0.0, x1=10.0, y1=10.0),
+    )
+    _paints, report = typesetter._plan_blocks([no_bbox, off_page], {}, {})
+    assert (no_bbox.id, "no_bbox") in report.skipped
+    assert (off_page.id, "no_page_height") in report.skipped
+
+
+def test_unrenderable_inline_math_is_a_visible_block_skip() -> None:
+    """Never ship a translated box whose math fell back to raw LaTeX.
+
+    The ledger may contain an unsupported command after a model/parser failure.
+    Keeping the source paragraph and reporting ``math_unrenderable`` is honest;
+    silently painting ``$\\foo{x}$`` as escaped text is not a translation.
+    """
+    from ubt.adapters.pdf.rigid.zones import Zone
+    from ubt.core.ir.models import BoundingBox
+
+    typesetter = RigidTypesetter()
+    block = IRBlock(
+        id="bad-math",
+        spine_index=0,
+        block_type=BlockType.NARRATIVE,
+        source_text="An unsupported expression.",
+        target_text=r"译文含 $\foo{x}$。",
+        bbox=BoundingBox(page=1, x0=60.0, y0=600.0, x1=520.0, y1=680.0),
+    )
+    zone = Zone(
+        block_id=block.id,
+        page=1,
+        x0=60.0,
+        y0=600.0,
+        x1=520.0,
+        y1=680.0,
+        base_size=10.0,
+    )
+
+    paints, report = typesetter._plan_blocks([block], {block.id: (zone,)}, {1: 842.0})
+
+    assert paints == {}
+    assert (block.id, "math_unrenderable") in report.skipped

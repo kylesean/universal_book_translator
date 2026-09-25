@@ -1,0 +1,95 @@
+/* Wizard Screen Cockpit */
+#wiz-root {
+    height: 1fr;
+    padding: 1 2;
+}
+#wiz-title {
+    height: 1;
+    margin-bottom: 1;
+    text-style: bold;
+}
+#wiz-body {
+    height: 1fr;
+}
+#wiz-left {
+    width: 50%;
+    height: 1fr;
+    padding-right: 1;
+}
+#wiz-right {
+    width: 50%;
+    height: 1fr;
+    padding-left: 1;
+}
+.wiz-card {
+    border: round $muted;
+    padding: 0 1;
+    margin-bottom: 1;
+}
+.wiz-card:focus-within {
+    border: round $accent;
+}
+.wiz-card > Label {
+    text-style: bold;
+    color: $accent;
+    margin-top: 0;
+    margin-bottom: 0;
+}
+#card-files {
+    height: 13;
+}
+#file-list {
+    height: 6;
+    border: none;
+}
+#path-input {
+    height: 3;
+    border: round $muted;
+    margin-top: 0;
+}
+#path-input:focus {
+    border: round $accent;
+}
+#card-config {
+    height: 11;
+}
+#preset-select, #dual-select {
+    height: 3;
+    border: round $muted;
+    margin-bottom: 0;
+}
+#preset-select:focus, #dual-select:focus {
+    border: round $accent;
+}
+#card-env {
+    height: 3;
+    padding: 0 1;
+}
+#card-probe {
+    height: 1fr;
+}
+#probe-scroll {
+    height: 1fr;
+}
+#wiz-bottom {
+    height: auto;
+    margin-top: 0;
+}
+#wiz-actions {
+    height: 3;
+    margin-top: 1;
+}
+#wiz-actions Button {
+    margin-right: 1;
+    border: round $muted;
+}
+#wiz-actions Button:focus {
+    border: round $accent;
+    text-style: bold;
+}
+#wiz-status {
+    height: 1;
+    color: $warn;
+    text-style: bold;
+    padding-left: 1;
+}

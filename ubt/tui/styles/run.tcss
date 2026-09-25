@@ -1,0 +1,87 @@
+/* Run Screen Monitor */
+#run-root {
+    height: 1fr;
+}
+#run-header {
+    height: 1;
+    padding: 0 1;
+    text-style: bold;
+}
+#header-rule {
+    color: $muted;
+}
+#run-body {
+    height: 1fr;
+}
+#run-side {
+    width: 24%;
+    padding: 0 1;
+}
+#run-center {
+    width: 1fr;
+    padding: 0 1;
+}
+#run-right {
+    width: 28%;
+    padding: 0 1;
+}
+#job-list {
+    height: 1fr;
+    min-height: 3;
+    border: round $muted;
+    margin-bottom: 1;
+}
+#run-files {
+    height: 1fr;
+    min-height: 3;
+    border: round $muted;
+}
+#preview-scroll {
+    height: 1fr;
+    border: round $muted;
+    padding: 0 1;
+}
+#preview-scroll:focus-within {
+    border: round $accent;
+}
+#failure-list {
+    height: auto;
+    max-height: 5;
+    color: $err;
+}
+#engine-notes {
+    height: auto;
+    color: $muted;
+}
+#telemetry {
+    border: round $muted;
+    padding: 0 1;
+}
+#run-footer {
+    height: auto;
+    padding-top: 0;
+}
+#event-log {
+    height: 7;
+    border: round $muted;
+    margin-bottom: 0;
+}
+#event-log:focus {
+    border: round $accent;
+}
+#cmd-input {
+    height: 3;
+    border: round $muted;
+}
+#cmd-input:focus {
+    border: round $accent;
+}
+#run-hints {
+    height: 1;
+    color: $muted;
+    padding-left: 1;
+}
+#too-small {
+    height: auto;
+    padding: 1 2;
+}

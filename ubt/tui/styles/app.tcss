@@ -1,0 +1,297 @@
+/* Semantic color tokens */
+$accent: cyan;
+$ok: green;
+$warn: yellow;
+$err: red;
+$muted: grey;
+
+/* ========================================================================= */
+/* Run Screen Monitor                                                        */
+/* ========================================================================= */
+#run-root {
+    height: 1fr;
+}
+#run-header {
+    height: 1;
+    padding: 0 1;
+    text-style: bold;
+}
+#header-rule {
+    color: $muted;
+}
+#run-body {
+    height: 1fr;
+}
+#run-side {
+    width: 24%;
+    padding: 0 1;
+}
+#run-center {
+    width: 1fr;
+    padding: 0 1;
+}
+#run-right {
+    width: 28%;
+    padding: 0 1;
+}
+#job-list {
+    height: 6;
+    min-height: 3;
+    border: round $muted;
+    margin-bottom: 1;
+}
+#chapter-label {
+    height: 1;
+    text-style: bold;
+    color: $accent;
+}
+#chapter-tree-scroll {
+    height: 1fr;
+    min-height: 5;
+    border: round $muted;
+    padding: 0 1;
+    margin-bottom: 1;
+}
+#chapter-tree-scroll:focus-within {
+    border: round $accent;
+}
+#run-files {
+    height: auto;
+    max-height: 3;
+    display: none;
+}
+#preview-scroll {
+    height: 1fr;
+    border: round $muted;
+    padding: 0 1;
+}
+#preview-scroll:focus-within {
+    border: round $accent;
+}
+#failure-list {
+    height: auto;
+    max-height: 5;
+    color: $err;
+}
+#engine-notes {
+    height: auto;
+    color: $muted;
+}
+#telemetry {
+    border: round $muted;
+    padding: 0 1;
+}
+#run-footer {
+    height: auto;
+    padding-top: 0;
+}
+#event-log {
+    height: 7;
+    border: round $muted;
+    margin-bottom: 0;
+}
+#event-log:focus {
+    border: round $accent;
+}
+#cmd-input {
+    height: 3;
+    border: round $muted;
+}
+#cmd-input:focus {
+    border: round $accent;
+}
+#run-hints {
+    height: 1;
+    color: $muted;
+    padding-left: 1;
+}
+#too-small {
+    height: auto;
+    padding: 1 2;
+}
+
+/* ========================================================================= */
+/* Wizard Screen Cockpit                                                     */
+/* ========================================================================= */
+#wiz-root {
+    height: 1fr;
+    padding: 1 2;
+}
+#wiz-title {
+    height: 1;
+    margin-bottom: 1;
+    text-style: bold;
+}
+#wiz-body {
+    height: 1fr;
+}
+#wiz-left {
+    width: 50%;
+    height: 1fr;
+    padding-right: 1;
+}
+#wiz-right {
+    width: 50%;
+    height: 1fr;
+    padding-left: 1;
+}
+.wiz-card {
+    border: round $muted;
+    padding: 0 1;
+    margin-bottom: 1;
+}
+.wiz-card:focus-within {
+    border: round $accent;
+}
+.wiz-card > Label {
+    text-style: bold;
+    color: $accent;
+    margin-top: 0;
+    margin-bottom: 0;
+}
+#card-files {
+    height: 13;
+}
+#file-list {
+    height: 6;
+    border: none;
+}
+#path-input {
+    height: 3;
+    border: round $muted;
+    margin-top: 0;
+}
+#path-input:focus {
+    border: round $accent;
+}
+#card-config {
+    height: 11;
+}
+#preset-select, #dual-select {
+    height: 3;
+    border: round $muted;
+    margin-bottom: 0;
+}
+#preset-select:focus, #dual-select:focus {
+    border: round $accent;
+}
+#card-env {
+    height: 3;
+    padding: 0 1;
+}
+#card-probe {
+    height: 1fr;
+}
+#probe-scroll {
+    height: 1fr;
+}
+#wiz-bottom {
+    height: auto;
+    margin-top: 0;
+}
+#wiz-actions {
+    height: 3;
+    margin-top: 1;
+}
+#wiz-actions Button {
+    margin-right: 1;
+    border: round $muted;
+}
+#wiz-actions Button:focus {
+    border: round $accent;
+    text-style: bold;
+}
+#wiz-status {
+    height: 1;
+    color: $warn;
+    text-style: bold;
+    padding-left: 1;
+}
+
+/* ========================================================================= */
+/* Modals & Dialogs                                                          */
+/* ========================================================================= */
+#help-box, #cf-box, #doc-box, #rep-box, #palette-box, #job-detail-box, #pe-box {
+    width: 82;
+    max-width: 92%;
+    height: auto;
+    max-height: 85%;
+    border: round $accent;
+    padding: 1 2;
+    background: $surface;
+}
+
+#doc-scroll, #rep-scroll, #job-detail-scroll {
+    height: 1fr;
+    max-height: 22;
+    border: round $muted;
+    margin-bottom: 1;
+    padding: 0 1;
+}
+
+#palette-input {
+    margin-bottom: 1;
+    border: round $muted;
+}
+#palette-input:focus {
+    border: round $accent;
+}
+#palette-list {
+    height: 12;
+    border: round $muted;
+}
+#job-detail-text {
+    margin-bottom: 1;
+}
+#job-detail-actions Button {
+    margin-right: 1;
+    border: round $muted;
+}
+
+/* PE Modal */
+#pe-box {
+    width: 86;
+    max-width: 95%;
+    height: 85%;
+    max-height: 35;
+    border: round $accent;
+    padding: 1 2;
+    background: $surface;
+}
+#pe-scroll {
+    height: 1fr;
+    border: round $muted;
+    padding: 0 1;
+    margin-bottom: 1;
+}
+#pe-target-input {
+    height: 8;
+    border: round $accent;
+    margin-top: 1;
+    margin-bottom: 1;
+}
+#pe-actions {
+    height: 3;
+    align: right middle;
+}
+#pe-actions Button {
+    margin-left: 1;
+    border: round $muted;
+}
+
+/* ========================================================================= */
+/* Shared Components                                                         */
+/* ========================================================================= */
+ListView:focus {
+    background: $boost;
+}
+ListView ListItem {
+    height: 1;
+    padding: 0 1;
+}
+Button:focus {
+    text-style: bold;
+}
+Select:focus {
+    border: round $accent;
+}
