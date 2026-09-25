@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import random
+import re
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
@@ -176,7 +177,11 @@ def _is_rate_limit_error(exc: BaseException) -> bool:
     matched unrelated messages and fed bogus backoff/AIMD signals.
     """
     details = getattr(exc, "details", None) or {}
-    return details.get("status_code") == 429 or "rate limit" in str(exc).lower()
+    if details.get("status_code") == 429:
+        return True
+    # Word-boundary phrases only: a 5xx/408 body that merely mentions a
+    # ``rate_limit`` request field must not trigger the 429 AIMD/backoff path.
+    return re.search(r"\brate[- ]?limit(?:ed|ing)?\b", str(exc), re.IGNORECASE) is not None
 
 
 def classify_provider_error(exc: BaseException) -> ProviderErrorAction:
@@ -341,24 +346,41 @@ class ModelRouter:
     # ------------------------------------------------------------------
     # Real usage / cost accounting
     # ------------------------------------------------------------------
-    def usage_totals(self) -> dict[str, int]:
-        """Aggregate token usage across all provider calls (empty when unsupported).
-
-        Supports both property and callable implementations of ``usage_totals``.
-        """
-        totals = getattr(self.provider, "usage_totals", None)
+    def _usage_totals_of(self, provider: object) -> dict[str, int]:
+        totals = getattr(provider, "usage_totals", None)
         if callable(totals):
             totals = totals()
         return dict(totals) if isinstance(totals, dict) else {}
 
-    def usage_totals_by_model(self) -> dict[str, dict[str, int]]:
-        """Per-model token usage (empty when the provider does not track it)."""
-        by_model = getattr(self.provider, "usage_totals_by_model", None)
+    def _usage_by_model_of(self, provider: object) -> dict[str, dict[str, int]]:
+        by_model = getattr(provider, "usage_totals_by_model", None)
         if callable(by_model):
             by_model = by_model()
         if not isinstance(by_model, dict):
             return {}
         return {str(model): dict(totals) for model, totals in by_model.items()}
+
+    def usage_totals(self) -> dict[str, int]:
+        """Aggregate token usage across all provider calls (empty when unsupported).
+
+        Includes the lazily built self-hosted fallback provider: its calls are
+        real spend, so a router-level read must not under-report them.
+        """
+        totals = self._usage_totals_of(self.provider)
+        if self._fallback_provider is not None:
+            for key, value in self._usage_totals_of(self._fallback_provider).items():
+                totals[key] = totals.get(key, 0) + value
+        return totals
+
+    def usage_totals_by_model(self) -> dict[str, dict[str, int]]:
+        """Per-model token usage (empty when the provider does not track it)."""
+        merged = self._usage_by_model_of(self.provider)
+        if self._fallback_provider is not None:
+            for model, totals in self._usage_by_model_of(self._fallback_provider).items():
+                bucket = merged.setdefault(model, {})
+                for key, value in totals.items():
+                    bucket[key] = bucket.get(key, 0) + value
+        return merged
 
     def begin_usage_sink(self) -> dict[str, dict[str, int]] | None:
         """Attach a per-run usage bucket, or None when the provider can't attribute.
@@ -590,8 +612,15 @@ class ModelRouter:
                 max_tokens=max_tokens,
             )
         except Exception as local_exc:
+            # Forward the local failure's structured details so
+            # ``classify_provider_error`` sees the real status (e.g. a terminal
+            # 404) instead of an unknown error it would keep retrying. Without
+            # this a terminal local rejection re-ran the gateway + local call
+            # max_retries+1 times and surfaced only the local message.
+            local_details = getattr(local_exc, "details", None) or {}
             raise ModelProviderError(
-                f"Local self-hosted fallback failed for {model}: {local_exc}"
+                f"Local self-hosted fallback failed for {model}: {local_exc}",
+                details=dict(local_details),
             ) from exc
 
     @overload
@@ -719,9 +748,8 @@ class ModelRouter:
         effective_temp = temperature if profile.supports_temperature else None
 
         retries = 0
-        last_error: Exception | None = None
 
-        while retries <= self.max_retries:
+        while True:
             # The TPM bucket consumes the estimated request size —
             # ~4 characters per token is the standard English/zh heuristic.
             # Reserve the completion too: provider TPM counts prompt+output, and
@@ -772,10 +800,17 @@ class ModelRouter:
                         effective_temp,
                         max_tokens,
                     )
-                if hasattr(self.rate_limiter, "report_success_async"):
-                    await self.rate_limiter.report_success_async()
-                else:
-                    self.rate_limiter.report_success()
+                # Rate-limiter bookkeeping must never be misread as a provider
+                # failure: an exception here used to fall into the broad handler
+                # below, re-run the already-billed request, and relabel the cause
+                # as "Unexpected provider error". Log and continue.
+                try:
+                    if hasattr(self.rate_limiter, "report_success_async"):
+                        await self.rate_limiter.report_success_async()
+                    else:
+                        self.rate_limiter.report_success()
+                except Exception:
+                    logger.warning("rate limiter success bookkeeping failed", exc_info=True)
                 # "length" means the output hit the token limit — continue
                 # tail-anchored instead of silently shipping half a block.
                 if finish_reason == "length":
@@ -788,7 +823,6 @@ class ModelRouter:
                     )
                 return result
             except ModelProviderError as exc:
-                last_error = exc
                 details = exc.details or {}
                 retry_after_header = details.get("retry_after")
                 # Fail-fast: 400/401/402/403 raise immediately instead of
@@ -828,14 +862,11 @@ class ModelRouter:
                     base = 0.2 * retries
                     await asyncio.sleep(base + random.uniform(0, base))
             except Exception as exc:
-                last_error = exc
                 retries += 1
                 if retries > self.max_retries:
                     raise ModelProviderError(f"Unexpected provider error: {exc}") from exc
                 base = 0.2 * retries
                 await asyncio.sleep(base + random.uniform(0, base))
-
-        raise ModelProviderError(f"Exceeded max retries ({self.max_retries}): {last_error}")
 
     async def _continue_truncated_output(
         self,
@@ -879,10 +910,13 @@ class ModelRouter:
                     model=model,
                     temperature=temperature,
                 )
-                if hasattr(self.rate_limiter, "report_success_async"):
-                    await self.rate_limiter.report_success_async()
-                else:
-                    self.rate_limiter.report_success()
+                try:
+                    if hasattr(self.rate_limiter, "report_success_async"):
+                        await self.rate_limiter.report_success_async()
+                    else:
+                        self.rate_limiter.report_success()
+                except Exception:
+                    logger.warning("continuation limiter bookkeeping failed", exc_info=True)
             except ModelProviderError as exc:
                 if _is_rate_limit_error(exc):
                     if hasattr(self.rate_limiter, "report_429_async"):

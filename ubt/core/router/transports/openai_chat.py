@@ -47,7 +47,13 @@ class OpenAIChatTransport(BaseTransport):
         return True
 
     def _batch_headers(self) -> dict[str, str]:
-        headers = {"Authorization": f"Bearer {self._api_key}"}
+        # Match ``_auth_headers``: a key that already carries the ``Bearer``
+        # prefix must not gain a second one, or every /files and /batches call
+        # 401s and the run silently falls back to full-price interactive.
+        api_key = self._api_key
+        if not api_key.lower().startswith("bearer "):
+            api_key = f"Bearer {api_key}"
+        headers = {"Authorization": api_key}
         if self._extra_headers:
             headers.update(self._extra_headers)
         return headers

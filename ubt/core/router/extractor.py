@@ -30,7 +30,11 @@ class TranslationOutputExtractor:
         flags=re.IGNORECASE,
     )
     _UNCLOSED_REASONING_PATTERN = re.compile(
-        r"<\s*(?:think|thought|thinking|reasoning)[^>]*>[\s\S]*$",
+        # Anchored at the start: an unclosed reasoning tag is a leaked preamble
+        # when it opens the output, but a mid-prose mention ('To enable
+        # <reasoning> mode, set the flag. …') is real content. The previous
+        # unanchored DOTALL form deleted everything from the mention to EOF.
+        r"^\s*<\s*(?:think|thought|thinking|reasoning)[^>]*>[\s\S]*$",
         flags=re.IGNORECASE,
     )
 
@@ -106,11 +110,20 @@ class TranslationOutputExtractor:
         for pat in cls._CONVERSATIONAL_PREFIX_PATTERNS:
             cleaned = pat.sub("", cleaned).strip()
 
-        # Clean orphan translation tag remnants e.g. '</translation>'. A leading
-        # '>' is deliberately NOT stripped: in translated prose it is a genuine
-        # blockquote marker, and removing it silently alters the passage.
+        # Clean orphan translation tag remnants at the edges only. Mid-text
+        # '<translation></translation>' is a mention in real prose (a book about
+        # prompting), and removing it silently deletes the author's words.
         cleaned = re.sub(
-            r"</?(?:translation|final_translation)[^>]*>", "", cleaned, flags=re.IGNORECASE
+            r"^(?:\s*</?(?:translation|final_translation)[^>]*>)+",
+            "",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+        cleaned = re.sub(
+            r"(?:</?(?:translation|final_translation)[^>]*>\s*)+$",
+            "",
+            cleaned,
+            flags=re.IGNORECASE,
         ).strip()
         return cleaned
 
