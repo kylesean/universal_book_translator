@@ -165,3 +165,13 @@ def test_healer_version_probe_caches(monkeypatch: pytest.MonkeyPatch) -> None:
     assert healer.compiler_version() == "0.15.1"
     assert healer.compiler_version() == "0.15.1"
     assert len(calls) == 1
+
+
+def test_persistent_comment_heal_reports_every_nullified_line() -> None:
+    from ubt.adapters.pdf.typst_healer import _heal_persistent_comment_error
+
+    lines = ["// already commented $x$", "", 'a = "unclosed', "", "", "// error line $y$"]
+    audit: list[str] = []
+    assert _heal_persistent_comment_error(lines, 5, audit)
+    # The culprit (line 3) and the error line (line 6) both lose their content.
+    assert audit == ['line 3: a = "unclosed', "line 6: // error line $y$"]

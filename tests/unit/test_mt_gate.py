@@ -6,6 +6,10 @@ from typing import Any
 import pytest
 
 from ubt.core.ir.models import BlockType, FlowID, IRBlock
+from ubt.core.policy.layout_policy import NON_TEXT_BLOCK_TYPES
+from ubt.core.policy.verdict import judge_block
+from ubt.core.qe.defect_taxonomy import STRUCTURAL_DEFECT_MARKERS
+from ubt.core.qe.fast_pass import FastPassFilter
 from ubt.core.qe.mt_gate import count_sentences, is_mt_suitable
 from ubt.core.router.provider import MockModelProvider
 from ubt.core.router.router import ModelRouter
@@ -194,3 +198,63 @@ async def test_draft_prompt_no_token_leak() -> None:
     )
     await router.draft(block, model="translategemma-test")
     assert "gpt-4" not in provider.call_history[0]["prompt"]
+
+
+_r0918_TABLE_OK = "| 单元格 | 阿尔法 | Beta 值 |\n| --- | --- | --- |\n| 12 | 34 | 56 |"
+
+_r0918_TABLE_SRC = "| Cell | Alpha | Beta Value |\n| --- | --- | --- |\n| 12 | 34 | 56 |"
+
+
+def test_untranslated_table_no_longer_passes_the_script_density_gate() -> None:
+    assert (
+        not FastPassFilter(source_lang="en", target_lang="zh")
+        .evaluate(_r0918_TABLE_SRC, _r0918_TABLE_SRC)
+        .passed
+    )
+
+
+def test_translated_table_with_identifier_carryovers_still_passes() -> None:
+    assert (
+        FastPassFilter(source_lang="en", target_lang="zh")
+        .evaluate(_r0918_TABLE_SRC, _r0918_TABLE_OK)
+        .passed
+    )
+
+
+_r0918b_GRID_REASON = "Table grid mismatch"
+
+
+def _r0918b_fp(source_lang: str, target_lang: str) -> FastPassFilter:
+    return FastPassFilter(source_lang=source_lang, target_lang=target_lang)
+
+
+def _r0918b_irblock(**kwargs: object) -> IRBlock:
+    base: dict[str, object] = {
+        "id": "t1",
+        "spine_index": 0,
+        "source_text": "| Cell | Alpha | Beta |\n| --- | --- | --- |\n| 1 | 2 | 3 |",
+    }
+    base.update(kwargs)
+    return IRBlock(**base)  # type: ignore[arg-type]
+
+
+def test_tables_are_translation_content_not_verbatim_residue() -> None:
+    """The parser marks tables ``skip=False`` and the QE layer requires a
+    translated table, but the verdict kept them out of the model entirely while
+    ingest stamped them MTQE_PASSED/1.0."""
+    assert BlockType.TABLE not in NON_TEXT_BLOCK_TYPES
+    verdict = judge_block(_r0918b_irblock(block_type=BlockType.TABLE))
+    assert verdict.translate is True
+    for keep in (BlockType.FORMULA, BlockType.CODE, BlockType.IMAGE):
+        assert judge_block(_r0918b_irblock(block_type=keep)).translate is False
+
+
+def test_translated_table_grid_passes_and_a_mangled_one_does_not() -> None:
+    src = "| Cell | Alpha | Beta Value |\n| --- | --- | --- |\n| 12 | 34 | 56 |"
+    translated = "| 单元格 | 阿尔法 | Beta 值 |\n| --- | --- | --- |\n| 12 | 34 | 56 |"
+    dropped_column = "| 单元格 | 阿尔法 |\n| --- | --- |\n| 12 | 34 |"
+    fp = _r0918b_fp("en", "zh")
+    assert fp.evaluate(src, translated, block_type=BlockType.TABLE).passed
+    decision = fp.evaluate(src, dropped_column, block_type=BlockType.TABLE)
+    assert not decision.passed and _r0918b_GRID_REASON in decision.reason
+    assert any(m in decision.reason for m in STRUCTURAL_DEFECT_MARKERS)

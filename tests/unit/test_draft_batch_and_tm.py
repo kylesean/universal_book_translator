@@ -8,13 +8,25 @@ from typing import Any
 import httpx
 import pytest
 
-from tests.stage_ctx_factory import build_stage_ctx
+from tests.stage_ctx_factory import build_stage_ctx, inert_event
+from ubt.core.cleaners.citation_masker import CitationMasker
+from ubt.core.cleaners.code_masker import CodeMasker
 from ubt.core.config import UBTConfig
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.stages.draft import run_draft_stage
+from ubt.core.engine.stages.tm_writeback import writeback_tm_from_ledger
 from ubt.core.exceptions import BudgetExceededError, ModelProviderError
-from ubt.core.ir.models import BlockStatus, BookManifest, ChapterMeta, DocumentIR, FlowID, IRBlock
+from ubt.core.ir.models import (
+    BlockStatus,
+    BookManifest,
+    ChapterIR,
+    ChapterMeta,
+    DocumentIR,
+    FlowID,
+    IRBlock,
+)
 from ubt.core.memory.tm import PROMPT_VERSION, TMPendingEntry, TranslationMemory, compute_tm_context
+from ubt.core.qe.fast_pass import FastPassFilter
 from ubt.core.router.capabilities import ExtractionStrategy
 from ubt.core.router.provider import MockModelProvider, OpenAICompatibleProvider
 from ubt.core.router.registry import ModelCapabilityRegistry
@@ -1346,3 +1358,277 @@ def test_openai_batch_results_reads_error_file_id() -> None:
     assert "req-1" in results
     assert results["req-1"]["content"] is None
     assert "Maximum context length exceeded" in results["req-1"]["error"]
+
+
+_d2echo_CLEAN_SRC = "The channel voltage is set to the source voltage in this model."
+
+_d2echo_CLEAN_TGT = "在本模型中，沟道电压被设置为源端电压，用于计算源端表面势。"
+
+_d2echo_CTX_RENAMES = {
+    "actual_job_id": "job_id",
+    "create_event_fn": "create_event",
+    "all_blocks_count": "block_count",
+}
+
+_d2echo_ECHO_SRC = "".join(
+    (
+        "where ψ pert is given by ψ 2 evaluated at x = T fin /2. ",
+        "Eq. (3.11) is an implicit equation in β which must be solved using numerical methods, ",
+        "then, once β is calculated, the surface potential and the charge in the channel ",
+        "can be obtained. ",
+        "Fig. 3.5 shows the surface potential obtained from Eq. (3.11) and the numerical ",
+        "solution of Eq. (3.1) for different doping concentrations. ",
+        "The amount of doping in the channel determines the threshold voltage of the device ",
+        "as shown in Fig. 3.6, which represents the mobile charge density obtained from the ",
+        "proposed compact model and the numerical solution of Eq. (3.1) for different ",
+        "doping concentrations. ",
+        "In the case of lightly doped DG FinFETs, the thickness of the channel determines ",
+        "the amount of mobile carrier charge density in the channel in a linear manner, ",
+        "as shown in Fig. 3.7.",
+    )
+)
+
+_d2echo_ECHO_TGT = "".join(
+    (
+        "式 (3.7) 和 (2.2) 可以合并为一个方程：\n\n",
+        "使用数值方法求解式 (3.11) 在紧凑建模应用中并不实际，因为其使用会增加计算时间并可能导致",
+        "发散问题 [2]。因此，首先通过解析近似法获得初始猜测值，随后对式 (3.11) 进行求解。",
+        "一旦计算出 β 值，即可获得表面势和沟道中的电荷。图 3.5 展示了由式 (3.11) 得到的表面势以及",
+        "对式 (3.1) 进行数值求解在不同掺杂浓度下的结果。如图 3.6 所示，沟道中的掺杂量决定了器件的",
+        "阈值电压，该图表示了由所提出的紧凑模型和对式 (3.1) 进行数值求解在不同掺杂浓度下得到的",
+        "可移动电荷密度。在轻掺杂的 DG FinFET（双栅鳍式场效应晶体管）情况下，沟道厚度以线性方式",
+        "决定了沟道中的可移动载流子电荷密度，如图 3.7 所示。",
+    )
+)
+
+
+def _d2echo_block(bid: str, spine: int, source: str) -> IRBlock:
+    return IRBlock(id=bid, flow_id=FlowID.MAIN_STORY, spine_index=spine, source_text=source)
+
+
+def _d2echo_config() -> UBTConfig:
+    return UBTConfig(batch_limit=30, max_concurrency=4, batch_enabled=False)
+
+
+def _d2echo_doc(blocks: list[IRBlock]) -> DocumentIR:
+    return DocumentIR(
+        doc_id="d2_doc",
+        source_path="/tmp/synthetic-duo.pdf",
+        format_type="pdf",
+        metadata={},
+        blocks=blocks,
+    )
+
+
+def _d2echo_drain_draft(
+    ledger: SQLiteJobLedger, job_id: str, tm: TranslationMemory, response: str
+) -> None:
+    router = ModelRouter(provider=MockModelProvider(default_response=response), draft_model="m")
+    asyncio.run(
+        _d2echo_drain_stage(
+            ledger=ledger,
+            actual_job_id=job_id,
+            manifest=_d2echo_manifest(),
+            profile_name="general",
+            target_lang="zh",
+            source_lang="en",
+            router=router,
+            code_masker=CodeMasker(),
+            citation_masker=CitationMasker(),
+            config=_d2echo_config(),
+            all_blocks_count=1,
+            glossary_dicts=[],
+            abbreviation_entries=[],
+            concurrency_sem=asyncio.Semaphore(4),
+            create_event_fn=inert_event,
+            tm=tm,
+            fast_pass=FastPassFilter(),
+        )
+    )
+
+
+async def _d2echo_drain_stage(**kwargs: Any) -> None:
+    """Old-style keywords in, one StageContext out.
+
+    The draft stage takes the run's context now; this keeps the single call site
+    in this file written the way it read before, and any keyword that is not a
+    context field fails in the constructor rather than being ignored.
+    """
+    ctx = build_stage_ctx(**{_d2echo_CTX_RENAMES.get(k, k): v for k, v in kwargs.items()})
+    async for _event in run_draft_stage(ctx):
+        pass
+
+
+def _d2echo_manifest() -> BookManifest:
+    return BookManifest(
+        doc_id="d2_doc",
+        title="D2",
+        source_path="/tmp/synthetic-duo.pdf",
+        source_lang="en",
+        target_lang="zh",
+        chapters=[ChapterMeta(chapter_id="pdf_main", title="chapter-3", spine_index=1)],
+        metadata={},
+    )
+
+
+def _d2echo_seed_tm(tm: TranslationMemory, target: str) -> None:
+    tm.writeback(
+        [
+            TMPendingEntry(
+                "en",
+                "zh",
+                _d2echo_CLEAN_SRC,
+                target,
+                context_hash=compute_tm_context(PROMPT_VERSION, "general", "", "en", "zh"),
+            )
+        ]
+    )
+
+
+def test_tm_writeback_refuses_the_echo_and_keeps_the_clean_pair(tmp_path: Path) -> None:
+    """Drives writeback_tm_from_ledger: terminal status is not a correctness proof."""
+    ledger = SQLiteJobLedger(tmp_path / "job.sqlite")
+    ledger.init_job(
+        "job_wb",
+        _d2echo_doc(
+            [
+                _d2echo_block("pdf_main#b_echo", 1, _d2echo_ECHO_SRC),
+                _d2echo_block("pdf_main#b_ok", 2, _d2echo_CLEAN_SRC),
+            ]
+        ),
+        target_lang="zh",
+    )
+    # The exact legacy state: the echo was marked MTQE_PASSED, so before this fix
+    # the writeback promoted it into reusable memory.
+    for bid, _src, tgt in (
+        ("pdf_main#b_echo", _d2echo_ECHO_SRC, _d2echo_ECHO_TGT),
+        ("pdf_main#b_ok", _d2echo_CLEAN_SRC, _d2echo_CLEAN_TGT),
+    ):
+        ledger.save_checkpoint(
+            block_id=bid, status=BlockStatus.MTQE_PASSED, target_text=tgt, draft_text=tgt
+        )
+
+    tm = TranslationMemory(tmp_path / "tm.sqlite")
+    written = writeback_tm_from_ledger(ledger, "job_wb", tm, "en", "zh")
+
+    assert written == 1, "only the clean pair may be promoted"
+    assert tm.lookup_exact("en", "zh", _d2echo_ECHO_SRC, domain=None) is None
+    assert tm.lookup_exact("en", "zh", _d2echo_CLEAN_SRC, domain=None) is not None
+    assert tm.entry_count() == 1
+    tm.close()
+    ledger.close()
+
+
+def test_clean_tm_entry_is_still_served(tmp_path: Path) -> None:
+    """Positive control: the TM read path really does run in this harness."""
+    ledger = SQLiteJobLedger(tmp_path / "job.sqlite")
+    ledger.init_job(
+        "job_tm_ok",
+        _d2echo_doc([_d2echo_block("pdf_main#b1", 1, _d2echo_CLEAN_SRC)]),
+        target_lang="zh",
+    )
+    tm = TranslationMemory(tmp_path / "tm.sqlite")
+    # Long enough to clear the length-ratio floor, distinct from the mock's
+    # response so the assertion can tell which source supplied the text.
+    _d2echo_seed_tm(tm, "这是翻译记忆库中已经存在的既有译文内容，用于验证读取路径确实生效。")
+
+    _d2echo_drain_draft(ledger, "job_tm_ok", tm, response="【LLM】不应被调用")
+
+    block = ledger.get_block("pdf_main#b1")
+    assert block is not None
+    assert block.target_text == "这是翻译记忆库中已经存在的既有译文内容，用于验证读取路径确实生效。"
+    assert block.status is BlockStatus.MTQE_PASSED
+    tm.close()
+    ledger.close()
+
+
+def test_poisoned_tm_entry_is_rejected_and_redrafted(tmp_path: Path) -> None:
+    """The read-side trust boundary, proven by contrast with the test above.
+
+    Same harness, same source, same clean LLM response — the only difference is
+    that the stored TM target carries a citation the source never had. If the
+    hit were still trusted, the block would hold the poisoned text.
+    """
+    ledger = SQLiteJobLedger(tmp_path / "job.sqlite")
+    ledger.init_job(
+        "job_tm_bad",
+        _d2echo_doc([_d2echo_block("pdf_main#b1", 1, _d2echo_CLEAN_SRC)]),
+        target_lang="zh",
+    )
+    tm = TranslationMemory(tmp_path / "tm.sqlite")
+    poisoned = "在本模型中，沟道电压被设置为源端电压，用于计算源端表面势 [25]。"
+    _d2echo_seed_tm(tm, poisoned)
+
+    # The added-content gate is the one that rejects it: validate_structural_invariants
+    # (which hosts it) runs before the numeric and length gates, so a reason from
+    # the numeric validator could not appear first.
+    rejection = FastPassFilter().evaluate(_d2echo_CLEAN_SRC, poisoned)
+    assert not rejection.passed
+    assert rejection.reason.startswith("Added reference(s)"), rejection.reason
+
+    _d2echo_drain_draft(ledger, "job_tm_bad", tm, response=_d2echo_CLEAN_TGT)
+
+    block = ledger.get_block("pdf_main#b1")
+    assert block is not None
+    assert "[25]" not in (block.target_text or ""), (
+        "the poisoned TM entry was served — the read-side boundary is not wired"
+    )
+    assert block.target_text == _d2echo_CLEAN_TGT, "the hit should have fallen through to the LLM"
+
+    # And the freshly drafted text is clean, so it may enter the TM on writeback.
+    assert writeback_tm_from_ledger(ledger, "job_tm_bad", tm, "en", "zh") >= 0
+    tm.close()
+    ledger.close()
+
+
+def test_preceding_context_carries_the_translation(tmp_path: Path) -> None:
+    """The prose before a block is the prose the model is continuing.
+
+    Both directions of the neighbor window read ``source_text``, so an English
+    book being rendered into Chinese was handed English context for a paragraph
+    it had already translated: register, term choice and sentence rhythm were
+    re-decided per block instead of carried forward. The *following* excerpt must
+    stay source-side -- that text has no translation yet.
+    """
+    from ubt.core.engine.ledger import SQLiteJobLedger
+    from ubt.core.ir.models import BookManifest
+
+    ledger = SQLiteJobLedger(tmp_path / "ctx.sqlite")
+    job_id = "job_ctx"
+    ledger.init_job_from_manifest(job_id, BookManifest(doc_id="d1", title="T", source_path="x"))
+    blocks = [
+        IRBlock(
+            id="ch01#b1",
+            flow_id=FlowID.MAIN_STORY,
+            spine_index=1,
+            source_text="The elf closed the door quietly.",
+            target_text="L'elfe ferma la porte en silence.",
+        ),
+        IRBlock(
+            id="ch01#b2",
+            flow_id=FlowID.MAIN_STORY,
+            spine_index=2,
+            source_text="Nobody heard it.",
+        ),
+    ]
+    ledger.append_chapter(
+        job_id, ChapterIR(doc_id="d1", chapter_id="ch01", title="c", spine_index=1, blocks=blocks)
+    )
+
+    preceding = ledger.get_preceding_text_tail(
+        job_id=job_id, flow_id=FlowID.MAIN_STORY, before_spine_index=2
+    )
+    assert "L'elfe ferma la porte" in preceding
+    assert "closed the door" not in preceding
+
+    following = ledger.get_following_text_head(
+        job_id=job_id, flow_id=FlowID.MAIN_STORY, after_spine_index=1
+    )
+    assert following == "Nobody heard it."
+
+    # Untranslated neighbours still provide their source rather than nothing.
+    untranslated = ledger.get_preceding_text_tail(
+        job_id=job_id, flow_id=FlowID.MAIN_STORY, before_spine_index=3
+    )
+    assert "Nobody heard it." in untranslated and "L'elfe" in untranslated
+    ledger.close()

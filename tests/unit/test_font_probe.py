@@ -23,6 +23,7 @@ from ubt.adapters.pdf.font_probe import (
     needs_cjk,
     resolve_font_stack,
 )
+from ubt.adapters.pdf.typst_fragments import sanitize_font_family
 from ubt.core.language_profile import resolve_font_config
 
 ZH_STACK = [
@@ -402,3 +403,21 @@ def test_installed_requested_family_is_not_substituted_away() -> None:
     got = resolve_font_stack(ZH_STACK, target_lang="zh", available=avail)
     assert got.substituted == ()
     assert got.families == ("Noto Sans CJK SC",)
+
+
+def test_font_family_reaches_both_render_engines() -> None:
+    """Before: the pipeline assigned ``adapter.font_family`` while the render
+    strategy and the emitter each kept their own construction-time ``None``."""
+    from ubt.adapters.pdf.docling_adapter import DoclingPDFAdapter
+
+    adapter = DoclingPDFAdapter()
+    assert adapter.font_family is None
+    adapter.font_family = "Noto Serif Test"
+    assert adapter._renderer.font_family == "Noto Serif Test"
+    assert adapter.reconstructor.font_family == "Noto Serif Test"
+
+    # A family name is interpolated into ``#set text(font: "...")``.
+    assert sanitize_font_family('x") #import "evil') is None
+    adapter.font_family = 'x") #import "evil'
+    assert adapter.font_family is None
+    assert adapter._renderer.font_family is None

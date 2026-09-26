@@ -958,3 +958,18 @@ def test_translate_cli_and_main_share_same_rich_console() -> None:
     import ubt.cli.main as main_mod
 
     assert translate_mod.console is main_mod.console
+
+
+def test_server_bind_flags_are_actually_parsed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sys
+
+    from ubt.api.app import _resolve_bind
+
+    monkeypatch.setattr(sys, "argv", ["ubt-api", "--host", "0.0.0.0", "--port", "9000"])
+    assert _resolve_bind(None, None) == ("0.0.0.0", 9000)
+    monkeypatch.setattr(sys, "argv", ["ubt-api"])
+    assert _resolve_bind(None, None) == ("127.0.0.1", 8000)
+    # Explicit arguments still win (the bind-guard regression calls this way).
+    assert _resolve_bind("0.0.0.0", 1) == ("0.0.0.0", 1)

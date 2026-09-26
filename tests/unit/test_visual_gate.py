@@ -1,6 +1,8 @@
 """Unit tests for the post-render visual gate (T0/T1/T2, warn-only)."""
 
 from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
@@ -386,3 +388,51 @@ async def test_visual_gate_suppresses_declared_padding_pages(tmp_path: Path) -> 
     assert 1 in declared_blank
     assert 2 not in declared_blank
     assert 3 not in declared_blank
+
+
+def test_source_bboxes_only_gate_the_engine_that_keeps_them() -> None:
+    """T1 compares source-page rectangles against the output mediabox.
+
+    Meaningful for the anchored overlay (its canvas is the original page) and
+    for the alternating zipper (its pages *are* the source pages); the reflow
+    engine rebuilds at A4, so a US-Letter full-bleed table is flagged "major"
+    on a perfectly rendered book -- and that finding drives a whole-book re-render
+    plus quarantine of the blocks it names.
+    """
+    from ubt.adapters.pdf.visual_gate import blocks_out_of_bounds_findings
+    from ubt.core.engine.reflow_loop import ReflowControlLoop
+
+    letter_block = [
+        SimpleNamespace(
+            id="tbl1", bbox=SimpleNamespace(page=1, x0=6.0, y0=90.0, x1=606.0, y1=300.0)
+        )
+    ]
+    a4 = {1: (595.276, 841.89)}
+    letter = {1: (612.0, 792.0)}
+    assert [f.code for f in blocks_out_of_bounds_findings(letter_block, a4)] == [
+        "block_out_of_bounds"
+    ], "the false positive this guard exists for"
+    assert blocks_out_of_bounds_findings(letter_block, letter) == []
+
+    def loop_with(metadata: object, run_engine: str | None = None) -> ReflowControlLoop:
+        return cast(
+            "ReflowControlLoop",
+            SimpleNamespace(
+                manifest=SimpleNamespace(
+                    metadata=metadata,
+                    run=SimpleNamespace(render_engine_effective=run_engine),
+                )
+            ),
+        )
+
+    keeps = ReflowControlLoop._output_keeps_source_geometry
+    # The typed run field is the source of truth; the metadata copy is the
+    # fallback for manifests that predate it (or never had it as a dict).
+    assert keeps(loop_with({"render_engine_effective": "publication"})) is False
+    assert keeps(loop_with({"render_engine_effective": "rigid"})) is True
+    assert keeps(loop_with(None)) is True
+    assert keeps(loop_with({})) is True
+    # The typed field wins over the metadata copy, and a typed "publication"
+    # is honored even when metadata is missing entirely.
+    assert keeps(loop_with({"render_engine_effective": "publication"}, run_engine="rigid")) is True
+    assert keeps(loop_with(None, run_engine="publication")) is False

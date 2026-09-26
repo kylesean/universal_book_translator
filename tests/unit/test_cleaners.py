@@ -4,6 +4,8 @@ import re
 
 import pytest
 
+from ubt.adapters.epub.adapter import BLOCK_TAGS, is_leaf_block
+from ubt.adapters.html.adapter import HTMLAdapter
 from ubt.core.cleaners.code_masker import CodeMasker
 from ubt.core.cleaners.lnds_pruner import (
     LNDSPageCleaner,
@@ -15,6 +17,7 @@ from ubt.core.cleaners.lnds_pruner import (
     normalize_academic_pdf_math,
 )
 from ubt.core.ir.models import BoundingBox, IRBlock
+from ubt.core.router.extractor import TranslationOutputExtractor
 
 pytestmark = pytest.mark.fast
 
@@ -558,3 +561,73 @@ def test_normalize_academic_pdf_math_heals_soft_hyphen_word_splits() -> None:
     raw = "spatiotemporal compos\xad ability and transfor\xad mation in orches\xad trate"
     cleaned = normalize_academic_pdf_math(raw)
     assert cleaned == "spatiotemporal composability and transformation in orchestrate"
+
+
+def _a0920_html_leaves(markup: str) -> list[str]:
+    from bs4 import BeautifulSoup
+
+    adapter = HTMLAdapter()
+    soup = BeautifulSoup(markup, "html.parser")
+    return [f"{tag.name}:{tag.get_text(' ', strip=True)}" for tag in adapter._leaf_blocks(soup)]
+
+
+def test_wrapper_div_is_not_mined_alongside_its_code_block() -> None:
+    """A ``<div>`` wrapping ``<pre>`` used to look like a leaf.
+
+    ``is_leaf_block`` searched a hand-written descendant list that omitted
+    ``pre``/headings/cells, so the same code text was mined twice: once as
+    NARRATIVE (sent to the model and injected into the finished book) and once
+    as CODE (verbatim). ``<p>`` nesting already excluded the parent, so the fix
+    is one vocabulary for both questions, not a new rule.
+    """
+    leaves = _a0920_html_leaves("<div><pre>int x = 1;</pre></div>")
+    assert leaves == ["pre:int x = 1;"], leaves
+
+    # Headings and definition lists behave the same way (both are BLOCK_TAGS).
+    assert _a0920_html_leaves("<div><h2>Results</h2></div>") == ["h2:Results"]
+    assert _a0920_html_leaves("<div><dl><dt>Term</dt><dd>Body</dd></dl></div>") == [
+        "dt:Term",
+        "dd:Body",
+    ]
+
+
+def test_nested_check_uses_the_same_vocabulary_as_the_mining_set() -> None:
+    """The leaf predicate and the mining set may never disagree again."""
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(
+        "<div><pre>x</pre><h1>t</h1><table><tr><td>c</td></tr></table></div>", "html.parser"
+    )
+    block_names = set(BLOCK_TAGS)
+    wrapper = soup.find("div")
+    assert wrapper is not None
+    assert not is_leaf_block(wrapper, block_names)
+
+
+_r0918_LEAD_INS = [
+    ("Translation: 从前有一座山。", "从前有一座山。"),
+    ("这是中文翻译：从前有一座山。", "从前有一座山。"),
+    ("以下是最终精修中文翻译：从前有一座山。", "从前有一座山。"),
+    ("Here is the final translation: Once upon a time.", "Once upon a time."),
+]
+
+_r0918_MUST_SURVIVE = [
+    "翻译过程中的注意事项：见下文。",
+    "Translations of the term appear below.",
+    "翻译如下所示。这是一段完整的译文。",
+]
+
+
+@pytest.mark.parametrize(("raw", "expected"), _r0918_LEAD_INS)
+def test_conversational_lead_in_is_still_stripped(raw: str, expected: str) -> None:
+    assert TranslationOutputExtractor.extract(raw) == expected
+
+
+@pytest.mark.parametrize("text", _r0918_MUST_SURVIVE)
+def test_prose_that_only_resembles_a_lead_in_is_untouched(text: str) -> None:
+    # Pre-fix, the optional colon let these match and lose their first words.
+    assert TranslationOutputExtractor.extract(text) == text
+
+
+def test_leading_blockquote_marker_is_preserved() -> None:
+    assert TranslationOutputExtractor.extract("> 引用的原文块。") == "> 引用的原文块。"

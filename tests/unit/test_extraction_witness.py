@@ -9,9 +9,11 @@ control) at most 2 — the witness must not be a detector that fires everywhere.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
+from tests.stage_ctx_factory import build_stage_ctx
 from ubt.adapters.pdf.extraction_witness import (
     PageVerdict,
     annotate_blocks,
@@ -20,7 +22,17 @@ from ubt.adapters.pdf.extraction_witness import (
     inspect_pdf,
     summarize,
 )
-from ubt.core.ir.models import BoundingBox, IRBlock
+from ubt.core.engine.ledger import SQLiteJobLedger
+from ubt.core.engine.stages import advisory as advisory_stage
+from ubt.core.ir.models import (
+    BlockStatus,
+    BlockType,
+    BookManifest,
+    BoundingBox,
+    ChapterIR,
+    ChapterMeta,
+    IRBlock,
+)
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -149,3 +161,85 @@ class TestDocumentIsClosed:
         with pytest.raises(RuntimeError):
             inspect_pdf(pdf)
         assert closed == [True]
+
+
+_r0921_SRC = "The quick brown fox jumps over the lazy dog near the river bank."
+
+_r0921_ZH = "那只敏捷的棕色狐狸跃过河边懒狗。"
+
+
+def _r0921_block(
+    block_id: str,
+    *,
+    source: str = _r0921_SRC,
+    target: str | None = _r0921_ZH,
+    draft: str | None = None,
+    status: BlockStatus = BlockStatus.MTQE_PASSED,
+) -> IRBlock:
+    return IRBlock(
+        id=block_id,
+        spine_index=1,
+        block_type=BlockType.NARRATIVE,
+        source_text=source,
+        target_text=target,
+        draft_text=draft,
+        status=status,
+    )
+
+
+def _r0921_manifest(doc_id: str = "doc_review") -> BookManifest:
+    return BookManifest(
+        doc_id=doc_id,
+        title="t",
+        source_path="book.epub",
+        chapters=[ChapterMeta(chapter_id="c1", title="c1", spine_index=1, source_file="c1.xhtml")],
+    )
+
+
+def _r0921_seed_blocks(ledger: SQLiteJobLedger, job_id: str, *blocks: IRBlock) -> None:
+    """Put blocks in the ledger with their source text (checkpoints cannot)."""
+    ledger.append_chapter(
+        job_id,
+        ChapterIR(
+            doc_id=job_id,
+            chapter_id="c1",
+            title="c1",
+            spine_index=1,
+            blocks=list(blocks),
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_extraction_witness_forces_a_fresh_block_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P1-5, witness half: this stage fills the cache and mutates flags on disk.
+
+    Reading through the default cache handed the *next* stage the pre-witness
+    snapshot, so the flags this stage just wrote were invisible to it.
+    """
+    ctx = build_stage_ctx(tmp_path, job_id="job_witness")
+    ctx.ledger.init_job_from_manifest("job_witness", _r0921_manifest("job_witness"))
+    _r0921_seed_blocks(ctx.ledger, "job_witness", _r0921_block("b1"))
+
+    monkeypatch.setattr(advisory_stage, "inspect_font_encoding_damage", lambda _p: {})
+    monkeypatch.setattr(
+        advisory_stage,
+        "summarize_font_encoding_damage",
+        lambda _v: {"pages": 0, "confirmed_pages": 0, "residue_chars": 0},
+    )
+    seen: list[list[IRBlock]] = []
+
+    def _flag(blocks: list[IRBlock], _verdicts: Any) -> list[IRBlock]:
+        seen.append(list(blocks))
+        return []
+
+    monkeypatch.setattr(advisory_stage, "flag_font_encoding_damage", _flag)
+    ctx.input_path = tmp_path / "book.pdf"  # the witness only runs for PDFs
+    ctx.source_pdf_path  # noqa: B018 - documents that the guard reads input_path
+    ctx._blocks = ([], ctx.ledger.blocks_seq - 1)  # stale prime
+
+    await advisory_stage.run_extraction_witness_stage(ctx)
+
+    assert seen and {b.id for b in seen[0]} == {"b1"}

@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from ubt.core.engine.pipeline import derive_job_id
 from ubt.core.job_options import default_output_path
 
 
@@ -69,3 +70,26 @@ def test_explicit_output_path_is_untouched(tmp_path: Path, monkeypatch: pytest.M
     assert resolve_target_output(str(tmp_path / "dir") + "/", "book.pdf") == (
         tmp_path / "dir" / "book_bilingual.pdf"
     )
+
+
+def test_mock_run_namespaces_the_derived_ledger_id() -> None:
+    """Before: a ``--dry-run`` pass wrote ``mtqe_passed``/``[模拟翻译]`` rows into
+    ``job_<doc>_<lang>``, and the next real run made zero API calls, exported
+    the mock text and printed "completed"."""
+
+    def derive(**kw: object) -> str:
+        base: dict[str, object] = {
+            "doc_id": "0" * 64,
+            "target_lang": "zh",
+            "pages": None,
+            "start_chapter": 1,
+            "max_chapters": None,
+        }
+        base.update(kw)
+        return derive_job_id(**base)  # type: ignore[arg-type]
+
+    derived = derive()
+    assert derived == f"job_{'0' * 12}_zh"
+    assert derive(mock_run=True) == f"{derived}_mock"
+    # The window suffixes and the mock suffix compose in either order.
+    assert derive(pages="3-5", mock_run=True) == f"{derived}_p3_5_mock"

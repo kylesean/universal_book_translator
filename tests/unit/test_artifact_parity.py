@@ -20,6 +20,7 @@ from ubt.adapters.pdf.artifact_parity import (
     target_script_counts,
     target_script_ratio,
 )
+from ubt.core.job_options import artifact_and_report_paths, sidecar_path
 
 HAS_POPPLER = shutil.which("pdftotext") is not None and shutil.which("pdfinfo") is not None
 
@@ -137,3 +138,29 @@ class TestFindingShape:
         f = ParityFinding("critical", "target_language_absent", "msg")
         assert (f.severity, f.code, f.message) == ("critical", "target_language_absent", "msg")
         assert getattr(f, "page", None) is None
+
+
+def test_deliverables_sharing_a_stem_do_not_share_a_report(tmp_path: Path) -> None:
+    """``book.epub`` and ``book.md`` are two documents, not two names for one.
+
+    Sidecar names used to hang off the bare stem, so both defaults
+    (``book_bilingual.epub`` / ``book_bilingual.md``, and the same trap for a
+    zh-then-ja re-run of one file) resolved to a single
+    ``book_bilingual_quality_report.json``. Whichever run finished last owned
+    the name: the other's report was overwritten by a document whose
+    ``output_path`` pointed at a file no reader finds beside it, while
+    ``artifact_and_report_paths`` kept handing both jobs the same JSON.
+    """
+    epub = sidecar_path(tmp_path / "book_bilingual.epub", "quality_report.json")
+    markdown = sidecar_path(tmp_path / "book_bilingual.md", "quality_report.json")
+    assert epub != markdown, f"two deliverables share {epub.name}"
+
+    # The reader resolves the same names the writers use.
+    epub.touch()
+    _, report, _ = artifact_and_report_paths(tmp_path / "book_bilingual.epub")
+    assert report == epub
+    _, missing, _ = artifact_and_report_paths(tmp_path / "book_bilingual.md")
+    assert missing is None, "the reader crossed over into the other document's report"
+
+    metrics = sidecar_path(tmp_path / "book_bilingual.epub", "metrics.json")
+    assert metrics.name == "book_bilingual_epub_metrics.json"

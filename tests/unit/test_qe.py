@@ -8,7 +8,14 @@ from typing import Any
 import pytest
 
 from ubt.core.config import packaged_comet_script
+from ubt.core.ir.models import BlockType
 from ubt.core.qe.comet_runner import MockQERunner, SubprocessQERunner
+from ubt.core.qe.defect_taxonomy import (
+    CRITICAL_DEFECT_MARKERS,
+    ECHO_MARKER,
+    NEAR_ECHO_MARKER,
+    STRUCTURAL_DEFECT_MARKERS,
+)
 from ubt.core.qe.fast_pass import FastPassFilter
 
 pytestmark = pytest.mark.fast
@@ -746,3 +753,23 @@ def test_repeated_source_line_is_not_a_hallucination_loop() -> None:
     )
     assert not decision.passed
     assert "Repetitive" in decision.reason
+
+
+_a0920_SOURCE_PARAGRAPH = (
+    "The device operates in inversion when the gate exceeds the threshold "
+    "voltage across the oxide layer here."
+)
+
+
+def test_both_echo_phrasings_are_registered_in_every_defect_table() -> None:
+    """The reason strings and the tables must not be able to drift apart."""
+    from ubt.core.qe.fast_pass import FastPassFilter as _FP
+
+    for marker in (ECHO_MARKER, NEAR_ECHO_MARKER):
+        assert marker in STRUCTURAL_DEFECT_MARKERS, marker
+        assert marker in CRITICAL_DEFECT_MARKERS, marker
+
+    exact = _FP(target_lang="zh").evaluate(
+        _a0920_SOURCE_PARAGRAPH, _a0920_SOURCE_PARAGRAPH, block_type=BlockType.NARRATIVE
+    )
+    assert exact.reason.startswith(ECHO_MARKER)

@@ -34,25 +34,25 @@
 判断标准始终是：如果这行代码明天写错，这个用例会变红吗？会 → 留；不会 → 它不是
 测试，是负载。
 
-## 现状（2026-09-25 复核）
+## 现状（2026-09-26 完成）
 
-目录里共 **11 个**仍带审查轮次/日期标识的文件。它们不是"内容重复"（跨文件几乎
-没有同名用例），而是**组织散射**：同一模块的守卫被拆进了多个 review 文件。
+**所有日期/轮次名文件已并回 `test_<模块>.py`。** 本目录现在只剩本说明和
+`__init__.py`，不再有任何测试文件。
 
-- **规则确立前的存量 —— 豁免但冻结**（下次触碰其模块时并走）：
-  `test_audit_2026_09_20_regressions.py`、`test_review_2026_09_17_regressions.py`、
-  `test_review_2026_09_18_regressions.py`、`test_review_2026_09_18_round2_regressions.py`、
-  `test_review_2026_09_21_pdf_adapters.py`、`test_review_2026_09_21_regressions.py`、
-  `test_review_2026_09_22_regressions.py`。
-- **规则确立之后新增的违例**（证明"只写文档挡不住下一次"）：
-  `test_review_2026_09_25_final_round.py`、`test_review_2026_09_25_regressions.py`。
-  它们**没有豁免**，必须并回 `test_<模块>.py`。
-- **不以日期命名、但仍按"缺陷来源"归档**：`test_d2_echo_regression.py`、
-  `test_review_security_and_isolation.py`（后者应按被测模块重命名）。
+并回分四批完成，每批单独提交、`pytest` 全绿、用例总数不变（仅位置变化）：
 
-`tests/unit/` 下另有 8 个同类轮次/修复名文件（`test_review_2026_09_24_fixes.py`、
-`test_round2_*_fixes.py`、`test_rigid_coverage_fixes.py`、`test_reflow_guardrails_and_fixes.py`），
-同样违反"按被测模块命名"。
+1. `test_review_2026_09_25_{regressions,final_round}.py` → 语言档案 / 成本预检 /
+   added-content gate / rigid visibility / ledger flusher / QE / validators …
+2. 五个 `test_round2_*_fixes.py` → cleaners / engine stages / PDF adapters /
+   transports / OCR drivers …
+3. `test_review_2026_09_24_fixes.py`、`test_reflow_guardrails_and_fixes.py`、
+   `test_rigid_coverage_fixes.py` → 各被测模块。
+4. 其余 9 个 `regressions/` 存量（audit / d2_echo / 09_17 / 09_18 / 09_18_round2 /
+   09_21 / 09_21_pdf_adapters / 09_22 / security_and_isolation）→ 各被测模块。
 
-**不要再新增日期名文件。** 测试组织约束的权威出处是仓库根目录 `AGENTS.md`
+并回时同步修正了两个迁移陷阱：跨文件同名 helper（按来源加前缀重命名），以及
+`Path(__file__).parents[N]` 的目录深度假设（从 `regressions/` 移到 `tests/unit/`
+后 `parents[3]` 失效，改为 `parents[2]`）。
+
+**不要再新增日期名文件。** 约束的权威出处是仓库根目录 `AGENTS.md`
 （§1 "One Behavior, One Home"）；本文件只记录 `regressions/` 的历史与例外。

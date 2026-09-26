@@ -7,6 +7,7 @@ from unittest.mock import patch
 import pytest
 
 from tests.corpus_markers import requires_synthetic_mono
+from ubt.adapters.factory import _PDF_ENGINE_REGISTRY, get_adapter_for_path
 from ubt.adapters.pdf.engine_selector import (
     PageIngestPlan,
     PDFRoutePlan,
@@ -14,6 +15,8 @@ from ubt.adapters.pdf.engine_selector import (
     build_page_ingest_plans,
     inspect_pdf_route_plan,
 )
+from ubt.core.config import UBTConfig
+from ubt.core.exceptions import UnsupportedDocumentFormatError
 
 
 @requires_synthetic_mono
@@ -116,3 +119,29 @@ def test_engine_selector_pikepdf_does_not_shadow_pdfium(tmp_path: Path) -> None:
         plan = engine_selector.inspect_pdf_route_plan(pdf_path)
         assert plan is not None
         assert len(closed_docs) == 1, "Outer pdfium document must be closed in finally block"
+
+
+def test_every_registered_pdf_engine_is_selectable_from_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The config layer must not keep its own copy of the engine names.
+
+    ``PdfEngine`` used to be a Literal duplicating ``_PDF_ENGINE_REGISTRY`` and
+    silently rejected ``typst`` and ``modern``, which the factory does serve.
+    Iterating the registry keeps this guard from becoming a second drift source.
+    """
+    assert _PDF_ENGINE_REGISTRY, "registry is empty; the loop below would prove nothing"
+    for name in sorted(_PDF_ENGINE_REGISTRY):
+        monkeypatch.setenv("UBT_PDF_ENGINE", name)
+        assert UBTConfig.from_env().pdf_engine == name
+
+
+def test_unknown_pdf_engine_reports_the_live_registry(tmp_path: Path) -> None:
+    """Typo-safety moved here from the Literal, so it has to list the real options."""
+    with pytest.raises(UnsupportedDocumentFormatError) as exc:
+        get_adapter_for_path(tmp_path / "book.pdf", pdf_engine="doclin")
+
+    message = str(exc.value)
+    assert "Available:" in message
+    for name in _PDF_ENGINE_REGISTRY:
+        assert name in message

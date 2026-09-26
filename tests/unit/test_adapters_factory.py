@@ -1,6 +1,8 @@
 """Tests for adapter factory resolution."""
 
+from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -10,9 +12,18 @@ from ubt.adapters import (
     EPUBAdapter,
     HTMLAdapter,
     MarkdownAdapter,
-    get_adapter_for_path,
 )
+from ubt.adapters.base import BaseDocumentAdapter
+from ubt.adapters.factory import (
+    _ADAPTER_REGISTRY,
+    _PDF_ENGINE_REGISTRY,
+    get_adapter_for_path,
+    register_adapter,
+    register_pdf_engine,
+)
+from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.exceptions import UnsupportedDocumentFormatError
+from ubt.core.ir.models import BookManifest, ChapterIR
 
 
 def test_get_adapter_for_path_resolves_epub() -> None:
@@ -104,3 +115,85 @@ def test_forced_pdfium_missing_path_no_probe_crash() -> None:
 
     adapter = get_adapter_for_path("ghost.pdf", pdf_engine="pdfium")
     assert isinstance(adapter, PDFiumAdapter)
+
+
+def test_adapters_declare_the_suffixes_they_write() -> None:
+    from ubt.adapters.base import BaseDocumentAdapter, BasePDFEngineAdapter
+    from ubt.adapters.epub.adapter import EPUBAdapter
+    from ubt.adapters.markdown.adapter import MarkdownAdapter
+
+    assert BaseDocumentAdapter.output_suffixes == frozenset()
+    assert BasePDFEngineAdapter.output_suffixes == frozenset({".pdf"})
+    assert MarkdownAdapter.output_suffixes == frozenset({".md", ".markdown", ".txt"})
+    assert EPUBAdapter.output_suffixes == frozenset({".epub"})
+
+
+def test_adapter_registry_extensibility() -> None:
+    """Verify that new adapters and PDF engines can be registered without modifying core factory."""
+
+    class CustomXYZAdapter(BaseDocumentAdapter):
+        async def extract_manifest(self, input_path: Path) -> BookManifest:
+            return BookManifest(
+                doc_id="xyz_doc",
+                title="XYZ",
+                source_path=str(input_path),
+                source_lang="en",
+                target_lang="zh",
+                chapters=[],
+            )
+
+        async def parse_stream(
+            self, input_path: Path, pages: set[int] | None = None
+        ) -> AsyncIterator[ChapterIR]:
+            yield ChapterIR(
+                doc_id="xyz_doc", chapter_id="xyz_ch1", title="XYZ", spine_index=1, blocks=[]
+            )
+
+        async def render_output(
+            self,
+            manifest: BookManifest,
+            ledger: SQLiteJobLedger,
+            target_lang: str,
+            output_path: Path,
+            job_id: str | None = None,
+            bilingual_mode: str | None = None,
+            **kwargs: Any,
+        ) -> Path:
+            return output_path
+
+            # Register a custom mock adapter factory
+
+    @register_adapter([".xyz", ".zyx"])
+    def make_xyz_adapter(pdf_engine: str, path: Path) -> BaseDocumentAdapter:
+        return CustomXYZAdapter()
+
+        # Verify lookup succeeds for both extensions
+
+    adapter_xyz = get_adapter_for_path(Path("sample.xyz"))
+    assert isinstance(adapter_xyz, CustomXYZAdapter)
+
+    adapter_zyx = get_adapter_for_path(Path("sample.zyx"))
+    assert isinstance(adapter_zyx, CustomXYZAdapter)
+
+    # Register a custom PDF engine
+    @register_pdf_engine(["custom_pdf_engine"])
+    def create_custom_engine() -> Any:
+        return CustomXYZAdapter()
+
+    custom_pdf = get_adapter_for_path(Path("sample.pdf"), pdf_engine="custom_pdf_engine")
+    assert isinstance(custom_pdf, CustomXYZAdapter)
+
+    # Verify unsupported extension raises UnsupportedDocumentFormatError
+    with pytest.raises(UnsupportedDocumentFormatError) as exc:
+        get_adapter_for_path(Path("file.unknown_ext"))
+    assert "No adapter registered" in str(exc.value)
+
+    # Verify unsupported PDF engine raises UnsupportedDocumentFormatError
+    with pytest.raises(UnsupportedDocumentFormatError) as exc:
+        get_adapter_for_path(Path("file.pdf"), pdf_engine="nonexistent_engine")
+    assert "Unsupported or unregistered PDF engine" in str(exc.value)
+
+    # Clean up registries
+    _ADAPTER_REGISTRY.pop(".xyz", None)
+    _ADAPTER_REGISTRY.pop(".zyx", None)
+    _PDF_ENGINE_REGISTRY.pop("custom_pdf_engine", None)

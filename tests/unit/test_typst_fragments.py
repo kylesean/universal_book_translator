@@ -1,5 +1,6 @@
 """Regression tests for Typst image-ref sanitization and asset staging."""
 
+import time
 from pathlib import Path
 
 import pytest
@@ -231,3 +232,23 @@ def test_prose_to_typst_handles_spaced_inline_latex_and_single_digit_math() -> N
     out = _prose_to_typst(text)
     assert "\\$" not in out, f"Leaked escaped dollar sign in Typst output: {out!r}"
     assert "Gamma" in out
+
+
+def test_repeated_trailing_equation_numbers_are_stripped() -> None:
+    from ubt.adapters.pdf.typst_math import _clean_ocr_formula
+
+    assert _clean_ocr_formula("f(x) = 1 (1)  (2)  (3)  ") == "f(x)=1"
+    assert _clean_ocr_formula("v = a + b \\\\ (2.14) \\\\") == "v = a + b \\\\"
+    assert _clean_ocr_formula("E = mc^2") == "E = mc^2"
+
+
+def test_trailing_equation_number_run_is_matched_in_linear_time() -> None:
+    """The nested quantifiers used to backtrack exponentially on a near-miss."""
+    from ubt.adapters.pdf.typst_math import _clean_ocr_formula
+
+    adversarial = "x = y " + "(1)  " * 16 + "X"
+    start = time.perf_counter()
+    _clean_ocr_formula(adversarial)
+    elapsed = time.perf_counter() - start
+    # Measured 12.1 s pre-fix; the linear peel is sub-millisecond.
+    assert elapsed < 2.0, f"equation-number strip took {elapsed:.3f}s"

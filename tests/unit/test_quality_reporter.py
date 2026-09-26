@@ -1,15 +1,22 @@
 """Unit tests for QualityReport generator."""
 
 from pathlib import Path
+from typing import Any
 
 from ubt.core.engine.ledger import SQLiteJobLedger
-from ubt.core.engine.reporter import QualityReport, build_quality_report, save_quality_report
+from ubt.core.engine.reporter import (
+    QualityReport,
+    build_quality_report,
+    render_kdp_audit_markdown,
+    save_quality_report,
+)
 from ubt.core.ir.models import (
     BlockStatus,
     BlockType,
     BookManifest,
     ChapterIR,
     ChapterMeta,
+    DocumentIR,
     FlowID,
     IRBlock,
 )
@@ -475,3 +482,195 @@ def test_kdp_metric_table_survives_the_mtqe_note(tmp_path: Path) -> None:
         "Estimated Token Cost",
     ):
         assert f"| **{metric}** |" in "\n".join(lines)
+
+
+def _a0920_ledger_with_targets(tmp_path: Path, *, translated: int, total: int) -> SQLiteJobLedger:
+    job_id = "job_coverage"
+    ledger = SQLiteJobLedger(tmp_path / f"{job_id}.sqlite")
+    blocks = [
+        IRBlock(
+            id=f"b{idx}",
+            spine_index=idx,
+            block_type=BlockType.NARRATIVE,
+            flow_id=FlowID.MAIN_STORY,
+            source_text=f"Source paragraph number {idx}.",
+        )
+        for idx in range(1, total + 1)
+    ]
+    ledger.init_job(
+        job_id,
+        DocumentIR(
+            doc_id=job_id,
+            source_path=str(tmp_path / "book.md"),
+            format_type="markdown",
+            blocks=blocks,
+        ),
+        target_lang="zh",
+    )
+    for block in blocks[:translated]:
+        ledger.save_checkpoint(
+            block_id=block.id,
+            status=BlockStatus.MTQE_PASSED,
+            target_text=f"译文 {block.id}",
+        )
+    for block in blocks[translated:]:
+        ledger.save_checkpoint(block_id=block.id, status=BlockStatus.FAILED)
+    return ledger
+
+
+def test_unpriced_model_reports_unknown_not_zero(tmp_path: Path) -> None:
+    """A model missing from the price table must not read as a $0 delivery.
+
+    The price table deliberately covers only the benchmarked models, so most
+    operators' models are unpriced (the shipping default is explicitly priced at
+    0.0). The pricing layer already returns ``None``; the report layer was
+    the one collapsing it to 0.0, in a footnote that admitted "0 = unknown".
+    """
+    from ubt.core.engine.reporter import build_quality_report, render_kdp_audit_markdown
+
+    ledger = _a0920_ledger_with_targets(tmp_path, translated=2, total=2)
+    manifest = BookManifest(
+        doc_id="job_coverage",
+        title="Cost",
+        source_path=str(tmp_path / "book.md"),
+        target_lang="zh",
+        source_lang="en",
+    )
+
+    unpriced = build_quality_report(ledger, "job_coverage", manifest, tmp_path / "out.md")
+    assert unpriced.summary.estimated_cost_usd is None
+    assert "unknown" in render_kdp_audit_markdown(unpriced)
+
+    priced = build_quality_report(
+        ledger, "job_coverage", manifest, tmp_path / "out.md", token_cost_usd=0.5
+    )
+    assert priced.summary.estimated_cost_usd == 0.5
+    assert "$0.50000" in render_kdp_audit_markdown(priced)
+
+
+def _r0917_clean_report(tmp_path: Path, filename: str, route_mode: str | None) -> Any:
+    """A passing report whose manifest records the given route mode."""
+    metadata: dict[str, Any] = {}
+    if route_mode is not None:
+        metadata["route_decision"] = {"mode": route_mode, "pages": 5, "chars": 100}
+    ledger = SQLiteJobLedger(tmp_path / f"{filename}.sqlite")
+    manifest = _r0917_manifest(**metadata)
+    ledger.init_job_from_manifest(filename, manifest)
+    ledger.append_chapter(
+        filename,
+        ChapterIR(
+            doc_id="d1",
+            chapter_id="c1",
+            title="Chapter One",
+            spine_index=1,
+            blocks=[
+                IRBlock(
+                    id="b1",
+                    flow_id=FlowID.MAIN_STORY,
+                    spine_index=1,
+                    source_text="The gate oxide is 2 nm thick.",
+                    target_text="栅氧化层厚度为 2 nm。",
+                    status=BlockStatus.MTQE_PASSED,
+                    mtqe_score=0.92,
+                )
+            ],
+        ),
+    )
+    return build_quality_report(
+        ledger=ledger,
+        job_id=filename,
+        manifest=manifest,
+        output_path=tmp_path / f"{filename}_bilingual.md",
+    )
+
+
+def _r0917_manifest(**metadata: Any) -> BookManifest:
+    """Run decisions go on the typed contract; source keys stay in the dict."""
+    run_keys = {k: v for k, v in metadata.items() if k in RunMetadata.model_fields}
+    artifact = {k: v for k, v in metadata.items() if k not in RunMetadata.model_fields}
+    return BookManifest(
+        doc_id="d1",
+        title="Regression",
+        source_path="/tmp/regression.md",
+        chapters=[ChapterMeta(chapter_id="c1", title="Chapter One", spine_index=1)],
+        metadata=artifact,
+        run=RunMetadata(**run_keys),
+    )
+
+
+def test_reported_average_excludes_unscored_placeholders(tmp_path: Path) -> None:
+    """A mostly-skip job must not report ~1.0 as if every block was scored.
+
+    499 skips + one 0.30 defect used to average 0.9994 — an almost perfect book
+    built from a single defective sample.
+    """
+    ledger = SQLiteJobLedger(tmp_path / "honest_avg.sqlite")
+    manifest = _r0917_manifest()
+    ledger.init_job_from_manifest("job_skip", manifest)
+    blocks = [
+        IRBlock(
+            id=f"skip{i:02d}",
+            flow_id=FlowID.MAIN_STORY,
+            spine_index=i,
+            source_text=f"Verbatim source line {i}.",
+            target_text=f"Verbatim source line {i}.",
+            status=BlockStatus.MTQE_PASSED,
+            skip_translate=True,
+            mtqe_score=1.0,  # placeholder, never met the QE gate
+        )
+        for i in range(1, 21)
+    ]
+    blocks.append(
+        IRBlock(
+            id="defect",
+            flow_id=FlowID.MAIN_STORY,
+            spine_index=99,
+            source_text="The value is 42 units.",
+            target_text="该值很大。",
+            status=BlockStatus.REPAIR_PENDING,
+            mtqe_score=0.30,
+            error_flags=["Numeric fidelity failure: missing 42"],
+        )
+    )
+    ledger.append_chapter(
+        "job_skip",
+        ChapterIR(doc_id="d1", chapter_id="c1", title="Chapter One", spine_index=1, blocks=blocks),
+    )
+
+    report = build_quality_report(
+        ledger=ledger,
+        job_id="job_skip",
+        manifest=manifest,
+        output_path=tmp_path / "out_bilingual.md",
+    )
+    assert report.score_metrics.scored_blocks == 1
+    assert report.score_metrics.avg_qe == 0.30
+    assert report.score_metrics.max_qe == 0.30
+    # The number cannot be read as covering the whole book any more.
+    markdown = render_kdp_audit_markdown(report)
+    assert "Over 1 QE-scored block(s)" in markdown
+    assert "Scored Population" in markdown
+
+
+def test_compliance_verdict_does_not_claim_enforcement_that_was_off(tmp_path: Path) -> None:
+    """B4: the Aho-Corasick enforcer runs on the SHORT chain only.
+
+    The pipeline sets ``deterministic_glossary_enforce=short_chain``, so a long
+    chain job (the default for any book over the short-page cut-off) validates
+    without enforcing. The KDP/compliance artifact nevertheless asserted
+    "Enforced deterministically via Aho-Corasick glossary enforcer at export" for
+    every clean job — claiming a control that was never switched on, in the one
+    document a compliance reviewer would read.
+    """
+    long_md = render_kdp_audit_markdown(_r0917_clean_report(tmp_path, "longjob", "long"))
+    assert "Enforced deterministically via Aho-Corasick" not in long_md
+    assert "short chain only" in long_md
+    assert "long" in long_md  # states the route this job actually took
+
+    # The short chain genuinely does enforce deterministically.
+    short_md = render_kdp_audit_markdown(_r0917_clean_report(tmp_path, "shortjob", "short"))
+    assert "Enforced deterministically via Aho-Corasick" in short_md
+
+    # An unknown route must not be upgraded into an enforcement claim either.
+    unknown_md = render_kdp_audit_markdown(_r0917_clean_report(tmp_path, "noroute", None))
+    assert "Enforced deterministically via Aho-Corasick" not in unknown_md

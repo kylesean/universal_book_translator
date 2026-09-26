@@ -147,3 +147,39 @@ def test_explicit_prompt_strategy_beats_the_preset(sample_md: Path, tmp_path: Pa
 def test_without_preset_the_engine_default_survives(sample_md: Path, tmp_path: Path) -> None:
     snapshot = _dry_run(sample_md, tmp_path, [])
     assert snapshot["prompt_strategy"] == "auto"
+
+
+def test_preset_engine_knobs_apply_only_after_an_explicit_pick() -> None:
+    """An unpicked preset must not rewrite the user's ``UBT_*`` environment.
+
+    A preset-applying surface used to merge
+    ``PRESETS[STANDARD].engine_overrides()`` unconditionally, and overrides beat
+    the environment — so ``UBT_RENDER_ENGINE`` / ``UBT_MATH_BACKEND`` /
+    ``UBT_PROMPT_STRATEGY`` set by the operator were silently replaced on every
+    run, the same class of bug the 2026-09 review removed for translate_chrome /
+    cover_mode / formula_mode.
+
+    The TUI surface this was originally written against no longer exists, so the
+    invariant is asserted on the function that actually owns the decision —
+    :func:`ubt.core.presets.resolve_engine_params`, the single place that ranks
+    explicit flags over the preset bundle over the engine default. The
+    assertions below are the original ones, unchanged in strength.
+    """
+    engine_keys = set(PRESETS[Preset.STANDARD].engine_overrides())
+    assert engine_keys
+
+    # Nothing picked, nothing passed: the resolver must inject nothing, so
+    # ``UBT_*`` keeps precedence. (This is the regression the old assertion
+    # ``not (engine_keys & set(untouched))`` pinned.)
+    assert resolve_engine_params(None, dict.fromkeys(engine_keys)) == {}
+
+    # An explicit pick contributes the whole bundle...
+    resolved = resolve_engine_params(Preset.PUBLICATION, dict.fromkeys(engine_keys))
+    assert engine_keys <= set(resolved)
+    assert resolved["prompt_strategy"] == PRESETS[Preset.PUBLICATION].prompt_strategy
+
+    # ...and an explicit flag still beats the bundle.
+    assert (
+        resolve_engine_params(Preset.PUBLICATION, {"prompt_strategy": "minimal"})["prompt_strategy"]
+        == "minimal"
+    )

@@ -20,6 +20,7 @@ from ubt.adapters.pdf.typst_reconstructor import (
     _resolve_content,
 )
 from ubt.core.ir import BlockStatus, BlockType, BoundingBox, IRBlock
+from ubt.core.ir.models import FlowID
 
 
 def test_heal_persistent_comment_error_finds_unclosed_quote() -> None:
@@ -727,3 +728,83 @@ def test_page_strict_keeps_column_reading_order() -> None:
 
     order = [code.index(text) for _, _, _, text in columns]
     assert order == sorted(order), "interior page emitted out of reading order"
+
+
+@pytest.mark.parametrize(
+    ("target_lang", "expected"),
+    [
+        ("zh", "表 3.1"),
+        ("zh-tw", "表 3.1"),
+        ("ja", "表 3.1"),
+        ("ko", "표 3.1"),
+        ("en", "Table 3.1"),
+        ("fr", "Tableau 3.1"),
+        ("de", "Tabelle 3.1"),
+        ("es", "Tabla 3.1"),
+        ("ru", "Таблица 3.1"),
+    ],
+)
+def test_table_label_follows_the_target_language(target_lang: str, expected: str) -> None:
+    """``TABLE 3.1`` was rewritten with a hard-coded Chinese literal.
+
+    A French or English target book therefore shipped a Chinese "表" in its
+    table captions, while the figure label beside it was already localized from
+    the per-language profile.
+    """
+    from ubt.adapters.pdf.typst_reconstructor import _polish_target_text
+
+    assert _polish_target_text("TABLE 3.1 Devices.", target_lang).startswith(expected)
+
+
+def _r0918b_block() -> IRBlock:
+    return IRBlock(
+        id="b1",
+        spine_index=0,
+        block_type=BlockType.NARRATIVE,
+        source_text="Hello world.",
+        target_text="Bonjour le monde.",
+    )
+
+
+def test_reflow_preamble_puts_the_override_first_and_keeps_the_fallbacks(
+    noto_cjk_installed: None,
+) -> None:
+    from ubt.adapters.pdf.typst_reconstructor import TypstReconstructor
+
+    with_override = TypstReconstructor()
+    with_override.font_family = "My Body Font"
+    default = TypstReconstructor()
+    doc = with_override.generate_typst_source([_r0918b_block()], target_lang="zh")
+    plain = default.generate_typst_source([_r0918b_block()], target_lang="zh")
+    line = next(ln for ln in doc.splitlines() if ln.startswith("#set text(font:"))
+    assert line.index('"My Body Font"') < line.index('"Noto'), "override must come first"
+    assert line.count('"') >= 6, "the language fallback stack was replaced"
+    assert "My Body Font" not in plain
+
+
+def test_reflow_records_the_images_it_could_not_stage(tmp_path: Path) -> None:
+    """A dropped figure left only a ``//`` comment in the Typst source.
+
+    Invisible in the PDF, so ``render_coverage`` stayed at 100% and ``--strict``
+    passed a book whose figures never shipped. The anchored engine has always
+    reported these through ``last_render_skips``; the reflow path now feeds the
+    same channel.
+    """
+    from ubt.adapters.pdf.typst_reconstructor import TypstReconstructor
+    from ubt.core.ir.models import BoundingBox, IRBlock
+
+    reconstructor = TypstReconstructor()
+    image_block = IRBlock(
+        id="pg1#img9",
+        spine_index=1,
+        flow_id=FlowID.MAIN_STORY,
+        block_type=BlockType.IMAGE,
+        source_text="Figure 1: architecture",
+        bbox=BoundingBox(page=1, x0=0.0, y0=0.0, x1=100.0, y1=100.0),
+    )
+    reconstructor.generate_typst_source([image_block], target_lang="zh")
+    assert reconstructor.last_image_skips == [("pg1#img9", "missing_asset")]
+
+    # A second render must not inherit the first one's ledger.
+    reconstructor.generate_typst_source([image_block], target_lang="zh")
+    assert len(reconstructor.last_image_skips) == 1

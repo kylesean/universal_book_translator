@@ -6,6 +6,7 @@ discourage inline interleave; clean prose must pass it.
 """
 
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -13,8 +14,18 @@ import pytest
 from tests.stage_ctx_factory import build_stage_ctx
 from ubt.core.config import UBTConfig
 from ubt.core.engine.ledger import SQLiteJobLedger
+from ubt.core.engine.stages import advisory as advisory_stage
 from ubt.core.engine.stages.advisory import run_difficulty_advisory_stage
-from ubt.core.ir.models import BlockStatus, BlockType, BookManifest, BoundingBox, FlowID, IRBlock
+from ubt.core.ir.models import (
+    BlockStatus,
+    BlockType,
+    BookManifest,
+    BoundingBox,
+    ChapterIR,
+    ChapterMeta,
+    FlowID,
+    IRBlock,
+)
 from ubt.core.policy.bilingual_advisor import (
     Advisory,
     ModeScore,
@@ -235,3 +246,96 @@ async def test_forced_reflow_on_formula_dense_pdf_enables_companion_rigid_delive
     events = [ev async for ev in run_mode_advisory_stage(ctx)]
     assert len(events) == 1
     assert manifest.run.emit_secondary_engine == "rigid"
+
+
+_r0921_SRC = "The quick brown fox jumps over the lazy dog near the river bank."
+
+_r0921_ZH = "那只敏捷的棕色狐狸跃过河边懒狗。"
+
+
+def _r0921_block(
+    block_id: str,
+    *,
+    source: str = _r0921_SRC,
+    target: str | None = _r0921_ZH,
+    draft: str | None = None,
+    status: BlockStatus = BlockStatus.MTQE_PASSED,
+) -> IRBlock:
+    return IRBlock(
+        id=block_id,
+        spine_index=1,
+        block_type=BlockType.NARRATIVE,
+        source_text=source,
+        target_text=target,
+        draft_text=draft,
+        status=status,
+    )
+
+
+def _r0921_manifest(doc_id: str = "doc_review") -> BookManifest:
+    return BookManifest(
+        doc_id=doc_id,
+        title="t",
+        source_path="book.epub",
+        chapters=[ChapterMeta(chapter_id="c1", title="c1", spine_index=1, source_file="c1.xhtml")],
+    )
+
+
+def _r0921_seed_blocks(ledger: SQLiteJobLedger, job_id: str, *blocks: IRBlock) -> None:
+    """Put blocks in the ledger with their source text (checkpoints cannot)."""
+    ledger.append_chapter(
+        job_id,
+        ChapterIR(
+            doc_id=job_id,
+            chapter_id="c1",
+            title="c1",
+            spine_index=1,
+            blocks=list(blocks),
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_mode_advisory_forces_a_fresh_block_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P1-5: repair/consistency/triage mutate blocks before this stage reads them.
+
+    The stage used to call ``ctx.current_blocks()`` with the default cache, so it
+    scored the post-ingest snapshot. It must pass ``force_refresh=True``, and the
+    proof is that the ledger's current rows — not the stale empty snapshot primed
+    below — reach ``advise_layout``.
+    """
+    ctx = build_stage_ctx(tmp_path, job_id="job_advisory")
+    ctx.ledger.init_job_from_manifest("job_advisory", _r0921_manifest("job_advisory"))
+    _r0921_seed_blocks(ctx.ledger, "job_advisory", _r0921_block("b1"))
+
+    seen: list[list[IRBlock]] = []
+
+    def _record(blocks: list[IRBlock], requested: str = "inline", **_kwargs: Any) -> Advisory:
+        seen.append(list(blocks))
+        return Advisory(
+            requested=requested,  # type: ignore[arg-type]
+            tier="ok",
+            ranking=(ModeScore(mode=requested, score=1.0),),  # type: ignore[arg-type]
+            reasons=(),
+        )
+
+    monkeypatch.setattr(advisory_stage, "advise_layout", _record)
+
+    refresh_flags: list[bool] = []
+    real_current_blocks = ctx.current_blocks
+
+    async def _spy(force_refresh: bool = False) -> list[IRBlock]:
+        refresh_flags.append(force_refresh)
+        return await real_current_blocks(force_refresh=force_refresh)
+
+    ctx.current_blocks = _spy  # type: ignore[method-assign]
+    # Stale prime tagged with an obsolete revision: the fix must ignore it.
+    ctx._blocks = ([], ctx.ledger.blocks_seq - 1)
+
+    events = [event async for event in advisory_stage.run_mode_advisory_stage(ctx)]
+
+    assert refresh_flags == [True], "the advise read must force a refresh"
+    assert events, "the stage still emits its MODE_ADVISED event"
+    assert seen and {b.id for b in seen[0]} == {"b1"}, "the ledger's current rows must be used"

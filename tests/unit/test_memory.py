@@ -191,3 +191,25 @@ def test_neighbor_window_fallback_next_text() -> None:
     )
     assert "[READ-ONLY SUBSEQUENT CONTEXT: DO NOT TRANSLATE OR ECHO]" in ctx
     assert "Next batch lookahead paragraph." in ctx
+
+
+def test_in_batch_neighbor_window_prefers_the_finished_target() -> None:
+    from ubt.core.memory.neighbor_window import NeighborContextBuilder
+
+    builder = NeighborContextBuilder(neighbor_chars=200)
+    prev = IRBlock(
+        id="n1",
+        flow_id=FlowID.MAIN_STORY,
+        spine_index=1,
+        source_text="The elf closed the door quietly.",
+        target_text="L'elfe ferma la porte en silence.",
+    )
+    current = IRBlock(
+        id="n2",
+        flow_id=FlowID.MAIN_STORY,
+        spine_index=2,
+        source_text="Nobody heard it.",
+    )
+    ctx = builder.extract_from_blocks(current, [prev, current])
+    assert "L'elfe ferma la porte" in ctx
+    assert "PRECEDING CONTEXT" in ctx

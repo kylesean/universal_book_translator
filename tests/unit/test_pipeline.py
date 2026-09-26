@@ -7,14 +7,32 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from tests.mock_providers import TokenEchoMockProvider
+from tests.stage_ctx_factory import build_stage_ctx
+from ubt.adapters.markdown.adapter import MarkdownAdapter
 from ubt.core.config import UBTConfig
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.pipeline import PipelineOrchestrator, derive_job_id
-from ubt.core.ir.models import BookManifest, ChapterMeta
+from ubt.core.engine.repair_loop import RepairLoop
+from ubt.core.engine.stages.export import run_export_stage
+from ubt.core.exceptions import IntegrityViolationError
+from ubt.core.ir.models import (
+    BlockStatus,
+    BlockType,
+    BookManifest,
+    ChapterMeta,
+    DocumentIR,
+    FlowID,
+    IRBlock,
+)
+from ubt.core.job_options import sidecar_path
 from ubt.core.qe.comet_runner import MockQERunner
-from ubt.core.router.provider import BaseModelProvider, MockModelProvider
+from ubt.core.qe.fast_pass import FastPassFilter
+from ubt.core.router.provider import BaseModelProvider, MockModelProvider, OpenAICompatibleProvider
+from ubt.core.router.rate_limiter import AdaptiveTokenBucket
 from ubt.core.router.router import ModelRouter
+from ubt.core.validators.html_delta import HTMLDeltaValidator
 
 
 @pytest.fixture
@@ -1215,3 +1233,295 @@ async def test_pipeline_orchestrator_marks_cancelled_on_keyboard_interrupt(tmp_p
     check_ledger = SQLiteJobLedger(cfg.db_dir / "job_kb_int.sqlite", read_only=True)
     assert check_ledger.get_job_status("job_kb_int") == "cancelled"
     check_ledger.close()
+
+
+def _a0920_ledger_with_targets(tmp_path: Path, *, translated: int, total: int) -> SQLiteJobLedger:
+    job_id = "job_coverage"
+    ledger = SQLiteJobLedger(tmp_path / f"{job_id}.sqlite")
+    blocks = [
+        IRBlock(
+            id=f"b{idx}",
+            spine_index=idx,
+            block_type=BlockType.NARRATIVE,
+            flow_id=FlowID.MAIN_STORY,
+            source_text=f"Source paragraph number {idx}.",
+        )
+        for idx in range(1, total + 1)
+    ]
+    ledger.init_job(
+        job_id,
+        DocumentIR(
+            doc_id=job_id,
+            source_path=str(tmp_path / "book.md"),
+            format_type="markdown",
+            blocks=blocks,
+        ),
+        target_lang="zh",
+    )
+    for block in blocks[:translated]:
+        ledger.save_checkpoint(
+            block_id=block.id,
+            status=BlockStatus.MTQE_PASSED,
+            target_text=f"译文 {block.id}",
+        )
+    for block in blocks[translated:]:
+        ledger.save_checkpoint(block_id=block.id, status=BlockStatus.FAILED)
+    return ledger
+
+
+async def _a0920_run_export(ledger: SQLiteJobLedger, tmp_path: Path, *, ratio: float) -> Path:
+    job_id = "job_coverage"
+    manifest = BookManifest(
+        doc_id=job_id,
+        title="Coverage",
+        source_path=str(tmp_path / "book.md"),
+        target_lang="zh",
+        source_lang="en",
+    )
+    (tmp_path / "book.md").write_text(
+        "# Coverage\n\nSource paragraph number 1.\n", encoding="utf-8"
+    )
+
+    async def _event(*args: Any, **kwargs: Any) -> None:
+        return None
+
+    ctx = build_stage_ctx(
+        tmp_path,
+        # The coverage floor is a config knob now; the stage has no shadow
+        # default of its own to keep in step with it.
+        config=UBTConfig(db_dir=tmp_path, export_min_completion_ratio=ratio),
+        ledger=ledger,
+        job_id=job_id,
+        manifest=manifest,
+        adapter=MarkdownAdapter(),
+        output_path=tmp_path / "out.md",
+        input_path=tmp_path / "book.md",
+        target_lang="zh",
+        source_lang="en",
+        glossary_dicts=[],
+        html_validator=HTMLDeltaValidator(),
+        create_event=_event,
+    )
+    _events = [e async for e in run_export_stage(ctx)]
+    assert ctx.output_path is not None
+    return Path(ctx.output_path)
+
+
+@pytest.mark.asyncio
+async def test_export_refuses_a_book_where_most_blocks_have_no_target(tmp_path: Path) -> None:
+    """All-failed used to render source text and finalize the job as completed."""
+    ledger = _a0920_ledger_with_targets(tmp_path, translated=1, total=4)
+    with pytest.raises(IntegrityViolationError, match="carry a translation"):
+        await _a0920_run_export(ledger, tmp_path, ratio=0.5)
+    assert ledger.get_job_stats("job_coverage")["completed"] == 1
+
+
+@pytest.mark.asyncio
+async def test_coverage_gate_floor_is_configurable(tmp_path: Path) -> None:
+    """The gate must be liftable to 0 for a knowingly-partial delivery."""
+    ledger = _a0920_ledger_with_targets(tmp_path, translated=1, total=4)
+    out = await _a0920_run_export(ledger, tmp_path, ratio=0.0)
+    assert out.is_file()
+
+
+def test_orchestrator_honours_an_injected_shared_rate_limiter() -> None:
+    from pydantic import SecretStr
+
+    from ubt.core.config import MOCK_API_KEY, UBTConfig
+    from ubt.core.engine.pipeline import PipelineOrchestrator
+    from ubt.core.router.rate_limiter import AdaptiveTokenBucket
+
+    shared = AdaptiveTokenBucket(initial_rpm=7, max_rpm=7)
+    orchestrator = PipelineOrchestrator(
+        config=UBTConfig(api_key=SecretStr(MOCK_API_KEY)), rate_limiter=shared
+    )
+    assert orchestrator.router.rate_limiter is shared
+
+
+def _r0918b_counting_router(calls: list[object]) -> ModelRouter:
+    class _Counting(MockModelProvider):
+        async def generate(
+            self,
+            prompt: str,
+            system_prompt: str | None = None,
+            model: str | None = None,
+            temperature: float | None = 0.3,
+            max_tokens: int | None = None,
+            reasoning_effort: str | None = None,
+        ) -> str:
+            calls.append(prompt)
+            return "[TRANSLATED]"
+
+    return ModelRouter(
+        provider=_Counting(),
+        rate_limiter=AdaptiveTokenBucket(initial_rpm=60, max_rpm=60),
+        draft_model="counting",
+    )
+
+
+async def _r0918b_drain(orchestrator: PipelineOrchestrator, source: Path, out: Path) -> None:
+    async for _ in orchestrator.run(
+        input_path=source, output_path=out, target_lang="fr", source_lang="en"
+    ):
+        pass
+
+
+def test_orchestrator_detects_a_simulated_run_from_the_provider() -> None:
+    """``--dry-run`` keeps a real ``api_key`` in config and swaps only the
+    router's provider, so a config-based check would miss every dry run."""
+    limiter = AdaptiveTokenBucket(initial_rpm=60, max_rpm=60)
+    mock = ModelRouter(provider=MockModelProvider(), rate_limiter=limiter, draft_model="m")
+    real = ModelRouter(
+        provider=OpenAICompatibleProvider(api_key="sk-real", base_url="http://127.0.0.1:9/v1"),
+        rate_limiter=limiter,
+        draft_model="m",
+    )
+    assert PipelineOrchestrator(config=UBTConfig(), router=mock)._is_mock_run is True
+    assert PipelineOrchestrator(config=UBTConfig(), router=real)._is_mock_run is False
+
+
+def test_pipeline_refuses_a_contradicting_output_before_any_work(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ubt.core.exceptions import UnsupportedDocumentFormatError
+    from ubt.core.ports import resolve_adapter
+
+    source = tmp_path / "book.md"
+    source.write_text("# Chapter One\n\nHello world.\n", encoding="utf-8")
+    calls: list[object] = []
+    monkeypatch.setattr(
+        "ubt.core.engine.pipeline.resolve_adapter",
+        lambda *a, **k: resolve_adapter(*a, **k),
+    )
+    orchestrator = PipelineOrchestrator(
+        config=UBTConfig(db_dir=tmp_path / "db"),
+        router=_r0918b_counting_router(calls),
+    )
+    with pytest.raises(UnsupportedDocumentFormatError) as exc:
+        asyncio.run(_r0918b_drain(orchestrator, source, tmp_path / "book.pdf"))
+    assert ".md" in str(exc.value)
+    assert calls == [], "the refusal must happen before the first model call"
+
+
+_r0922_BOOK = """# Chapter One
+
+The mill ran through the night, and the river carried the noise away.
+
+# Chapter Two
+
+By morning the wheel had stopped, and the builder came down to look at it.
+"""
+
+
+def _r0922_sidecars(out: Path) -> list[Path]:
+    return [
+        sidecar_path(out, "quality_report.json"),
+        sidecar_path(out, "metrics.json"),
+        sidecar_path(out, "visual_report.json"),
+    ]
+
+
+async def _r0922_translate(
+    src: Path, out: Path, db_dir: Path, job_id: str, *, reply: str = "离线译文段落。"
+) -> None:
+    router = ModelRouter(
+        provider=TokenEchoMockProvider(default_response=reply),
+        draft_model="mock-draft",
+        repair_model="mock-repair",
+        rate_limiter=AdaptiveTokenBucket(
+            initial_rpm=1_000_000,
+            max_rpm=1_000_000,
+            initial_tpm=1_000_000_000,
+            max_tpm=1_000_000_000,
+        ),
+    )
+    orchestrator = PipelineOrchestrator(
+        config=UBTConfig(db_dir=db_dir, rate_limit_rpm=100_000, tm_enabled=False),
+        router=router,
+        qe_runner=MockQERunner(default_score=0.92),
+    )
+    async for _ in orchestrator.run(
+        input_path=src, output_path=out, target_lang="zh", job_id=job_id
+    ):
+        pass
+
+
+@pytest.mark.asyncio
+async def test_interrupted_export_leaves_no_report_for_a_deliverable_it_never_saw(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A run that dies after the render must not leave the last run's reports.
+
+    Reproduction of the round-5 finding: the deliverable is written first and the
+    reports later, so an interrupt (or the blocking visual gate raising) in that
+    window left a ``*_quality_report.json`` claiming a finished book whose text it
+    had never seen -- and ``artifact_and_report_paths`` re-attaches those names to
+    later runs, so the stale report outlived the process that orphaned it.
+    """
+    src = tmp_path / "book.md"
+    src.write_text(_r0922_BOOK, encoding="utf-8")
+    out = tmp_path / "out_bilingual.md"
+
+    await _r0922_translate(src, out, tmp_path / "db1", "job_sidecar_first")
+    written = [path for path in _r0922_sidecars(out) if path.exists()]
+    assert written, "the first run wrote no sidecar reports; the test proves nothing"
+    first_deliverable = out.read_bytes()
+
+    async def _die(*args: object, **kwargs: object) -> None:
+        raise KeyboardInterrupt("operator stopped the run after the render")
+
+    monkeypatch.setattr(
+        "ubt.core.engine.stages.export._build_reports",
+        _die,
+        raising=True,
+    )
+    with pytest.raises(BaseException):  # noqa: B017 - KeyboardInterrupt is the point
+        await _r0922_translate(
+            src, out, tmp_path / "db2", "job_sidecar_second", reply="第二轮离线译文。"
+        )
+
+    assert out.read_bytes() != first_deliverable, "the second run never replaced the deliverable"
+    survivors = [path.name for path in _r0922_sidecars(out) if path.exists()]
+    assert not survivors, f"stale reports describe the new deliverable: {survivors}"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_stateless_fast_pass_and_repair() -> None:
+    """Verify PipelineOrchestrator does not mutate shared state during execution."""
+    router = ModelRouter(provider=MockModelProvider())
+    repair_loop = RepairLoop(router=router, qe_runner=MockQERunner())
+
+    initial_fast_pass = FastPassFilter(source_lang="en", target_lang="zh")
+    repair_loop.fast_pass = initial_fast_pass
+
+    orchestrator = PipelineOrchestrator(
+        router=router,
+        repair_loop=repair_loop,
+        qe_runner=MockQERunner(),
+    )
+    # The orchestrator no longer carries a language-blind
+    # fast_pass attribute at all — filters are per-stage, per-language.
+    assert not hasattr(orchestrator, "fast_pass")
+
+    # Ensure repair_single_block accepts explicit fast_pass
+    custom_fast_pass = FastPassFilter(source_lang="ja", target_lang="en")
+    block = IRBlock(
+        id="repair_b1",
+        spine_index=1,
+        source_text="こんにちは世界",
+        target_text="Bonjour le monde",
+        status=BlockStatus.REPAIR_PENDING,
+        repair_rounds=0,
+    )
+
+    repaired = await repair_loop.repair_single_block(
+        block=block,
+        glossary_table="",
+        target_lang="en",
+        source_lang="ja",
+        fast_pass=custom_fast_pass,
+    )
+    assert repaired.repair_rounds == 1
+
+    # Verify instance fast_pass was not clobbered
+    assert repair_loop.fast_pass is initial_fast_pass

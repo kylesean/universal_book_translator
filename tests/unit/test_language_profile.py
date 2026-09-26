@@ -9,6 +9,7 @@ from ubt.core.language_profile import (
     get_profile,
     is_supported_lang,
     normalize_lang_code,
+    resolve_font_config,
 )
 from ubt.core.memory.bible import clean_bible_entry
 from ubt.core.memory.cjk_matcher import count_term_in_text
@@ -237,3 +238,11 @@ def test_fast_pass_filter_accepts_region_tag_target() -> None:
         "心理学研究表明，睡眠不足会损害认知能力。",
     )
     assert decision.passed is True
+
+
+def test_every_language_profile_names_both_labels() -> None:
+    """A table prefix that silently equals the English default is the same bug."""
+    for code in ("zh", "zh-tw", "ja", "ko", "fr", "de", "es", "ru"):
+        config = resolve_font_config(code)
+        assert config.table_prefix not in ("Table", ""), code
+        assert config.figure_prefix not in ("Fig.", ""), code

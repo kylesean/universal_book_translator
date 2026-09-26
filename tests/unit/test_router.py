@@ -1627,3 +1627,34 @@ def test_provider_aclose_closes_all_transports() -> None:
     m1.assert_awaited_once()
     m2.assert_awaited_once()
     m3.assert_awaited_once()
+
+
+def test_draft_source_is_recovered_from_every_builder() -> None:
+    import inspect
+
+    from ubt.core.router.prompts import (
+        build_hybrid_draft_prompt,
+        build_minimal_draft_prompt,
+        build_rich_draft_prompt,
+        draft_source_from_prompt,
+    )
+
+    source = "This block has 250万 pixels.\n\nSecond paragraph."
+    for builder in (
+        build_minimal_draft_prompt,
+        build_hybrid_draft_prompt,
+        build_rich_draft_prompt,
+    ):
+        params = inspect.signature(builder).parameters
+        kwargs = {
+            "source_text": source,
+            "target_lang": "zh",
+            "source_lang": "en",
+            "glossary_table": "node | 节点",
+            "global_glossary": "FET | 场效应管",
+            "few_shot_reference": "EN: x\nZH: y",
+            "genre_profile": "textbook",
+        }
+        _, user_prompt = builder(**{k: v for k, v in kwargs.items() if k in params})
+        recovered = draft_source_from_prompt(user_prompt)
+        assert recovered == source.strip(), f"{builder.__name__} leaked: {recovered[:60]!r}"

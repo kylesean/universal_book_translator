@@ -18,6 +18,7 @@ from ubt.adapters.pdf.vlm.registry import (
     register_driver,
 )
 from ubt.adapters.pdf.vlm.types import PageTranscript, VlmLine
+from ubt.core.config import UBTConfig
 from ubt.core.exceptions import DocumentParseError
 from ubt.core.ir.models import BlockType, BoundingBox, FlowID, IRBlock
 
@@ -725,3 +726,105 @@ def test_cloud_driver_measured_boxes_synchronized_in_init() -> None:
     assert driver.measured_boxes is False, (
         "OpenAI endpoint must set measured_boxes=False in __init__"
     )
+
+
+_r0921_SRC = "The quick brown fox jumps over the lazy dog near the river bank."
+
+
+def _r0921_capture_probe(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+    from ubt.adapters.pdf.vlm import registry
+
+    seen: dict[str, object] = {}
+
+    def _probe(
+        mode: str = "auto",
+        endpoint: str | None = None,
+        api_key: str | None = None,
+        model: str | None = None,
+        allow_page_upload: bool = False,
+    ) -> tuple[None, None]:
+        seen["allow_page_upload"] = allow_page_upload
+        seen["model"] = model
+        return (None, None)
+
+    monkeypatch.setattr(registry, "probe_effective_driver", _probe)
+    return seen
+
+
+def _r0921_page_two_block() -> IRBlock:
+    """One block on page 2, so page 1 is "missing" but the book isn't empty."""
+    return IRBlock(
+        id="b2",
+        spine_index=1,
+        block_type=BlockType.NARRATIVE,
+        source_text=_r0921_SRC,
+        bbox=BoundingBox(page=2, x0=0.0, y0=0.0, x1=1.0, y1=1.0),
+    )
+
+
+def _r0921_two_page_pdf(tmp_path: Path) -> Path:
+    import pypdf
+
+    pdf = tmp_path / "two_pages.pdf"
+    writer = pypdf.PdfWriter()
+    writer.add_blank_page(width=612, height=792)
+    writer.add_blank_page(width=612, height=792)
+    with pdf.open("wb") as fh:
+        writer.write(fh)
+    return pdf
+
+
+def test_dry_run_closes_every_page_egress_path() -> None:
+    """A rehearsal must not make a real cloud call off the operator's config.
+
+    ``ocr_mode``/``allow_page_upload``/``visual_judge_enabled`` are read from
+    the adapter config, not the router, so a "zero-spend" dry run with OCR on
+    still called the cloud endpoint with the operator's key and uploaded
+    manuscript pages.
+    """
+    from ubt.core.engine.dry_run import create_dry_run_orchestrator
+
+    config = UBTConfig(ocr_mode="vlm", allow_page_upload=True, visual_judge_enabled=True)
+    orchestrator = create_dry_run_orchestrator(config)
+
+    assert orchestrator.config.ocr_mode == "off"
+    assert orchestrator.config.allow_page_upload is False
+    assert orchestrator.config.visual_judge_enabled is False
+    # The caller's config is untouched — the rehearsal works on a copy.
+    assert config.ocr_mode == "vlm"
+    assert config.allow_page_upload is True
+    assert config.visual_judge_enabled is True
+
+
+def test_page_upload_gate_prefers_the_resolved_config_over_the_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ubt.adapters.pdf import docling_parser
+
+    pdf = _r0921_two_page_pdf(tmp_path)
+    seen = _r0921_capture_probe(monkeypatch)
+    monkeypatch.setenv("UBT_VLM_SCAN_FALLBACK", "missing")
+    monkeypatch.setenv("UBT_ALLOW_PAGE_UPLOAD", "true")
+
+    docling_parser.vlm_fallback_missing_pages(
+        pdf, [_r0921_page_two_block()], ocr_mode="vlm", allow_page_upload=False
+    )
+
+    assert seen["allow_page_upload"] is False, "env must not override the resolved config"
+    assert seen["model"] is None, "no model configured must not invent one"
+
+
+def test_page_upload_gate_falls_back_to_env_without_a_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``None`` is the direct-caller path (tests, library use): keep the env read."""
+    from ubt.adapters.pdf import docling_parser
+
+    pdf = _r0921_two_page_pdf(tmp_path)
+    seen = _r0921_capture_probe(monkeypatch)
+    monkeypatch.setenv("UBT_VLM_SCAN_FALLBACK", "missing")
+    monkeypatch.setenv("UBT_ALLOW_PAGE_UPLOAD", "true")
+
+    docling_parser.vlm_fallback_missing_pages(pdf, [_r0921_page_two_block()], ocr_mode="vlm")
+
+    assert seen["allow_page_upload"] is True

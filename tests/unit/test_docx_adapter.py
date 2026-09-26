@@ -1,5 +1,6 @@
 """Unit tests for the DOCX adapter."""
 
+import base64
 import tempfile
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -573,3 +574,84 @@ def test_docx_populate_runs_sets_east_asia_font() -> None:
     assert rfonts is not None
     assert rfonts.get(qn("w:ascii")) == "Calibri"
     assert rfonts.get(qn("w:eastAsia")) == "SimSun"
+
+
+def _a0920_build_docx_with_link_and_picture(path: Path) -> Path:
+    """One linked-heading paragraph plus one paragraph carrying a picture."""
+    from docx import Document
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    png = path.parent / "dot.png"
+    png.write_bytes(
+        base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ"
+            "AAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+        )
+    )
+    doc = Document()
+    paragraph = doc.add_paragraph("original linked title")
+    link = OxmlElement("w:hyperlink")
+    link.set(qn("w:anchor"), "_Toc1")
+    for child in list(paragraph._p):
+        if child.tag == qn("w:r"):
+            paragraph._p.remove(child)
+            link.append(child)
+    paragraph._p.append(link)
+    picture_para = doc.add_paragraph("see figure here")
+    picture_para.add_run().add_picture(str(png))
+    doc.save(str(path))
+    return path
+
+
+def _a0920_docx_body_facts(path: Path) -> tuple[list[str], int, int]:
+    from docx import Document
+    from docx.oxml.ns import qn
+
+    doc = Document(str(path))
+    body = doc.element.body
+    texts = [p.text for p in doc.paragraphs if p.text.strip()]
+    return (
+        texts,
+        len(list(body.iter(qn("w:drawing")))),
+        len(list(body.iter(qn("w:hyperlink")))),
+    )
+
+
+@pytest.mark.asyncio
+async def test_docx_monolingual_keeps_pictures_and_links_and_drops_source(
+    tmp_path: Path,
+) -> None:
+    """A "monolingual" DOCX still shipped the source sentence, minus its art.
+
+    ``_replace_paragraph_in_place`` removed only ``w:r`` children: a hyperlink
+    is a direct child of ``w:p``, so its source text survived the rewrite, while
+    the runs it did remove were the ones carrying ``w:drawing`` — every inline
+    picture in the paragraph went with them.
+    """
+
+    from ubt.adapters.docx.adapter import DOCXAdapter
+
+    source = _a0920_build_docx_with_link_and_picture(tmp_path / "book.docx")
+    adapter = DOCXAdapter()
+    manifest = await adapter.extract_manifest(source)
+    blocks: list[IRBlock] = []
+    async for chapter in adapter.parse_stream(source):
+        blocks.extend(chapter.blocks)
+    assert blocks, "the fixture must yield blocks"
+    translated = [
+        block.model_copy(update={"target_text": "译文本", "skip_translate": False})
+        for block in blocks
+    ]
+
+    out = tmp_path / "mono.docx"
+    await adapter.render_blocks(manifest, translated, "zh", out, bilingual_mode="monolingual")
+    texts, drawings, hyperlinks = _a0920_docx_body_facts(out)
+    assert all(text == "译文本" for text in texts), texts
+    assert drawings == 1, "inline pictures must survive a monolingual rewrite"
+    assert hyperlinks == 1, "the hyperlink must survive, wrapping the translation"
+
+    both = tmp_path / "bilingual.docx"
+    await adapter.render_blocks(manifest, translated, "zh", both, bilingual_mode="bilingual")
+    _texts, bilingual_drawings, _links = _a0920_docx_body_facts(both)
+    assert bilingual_drawings == 1

@@ -11,11 +11,16 @@ It was then written into the shared Translation Memory and served verbatim on
 every later run (``use_count`` 6-9 for the affected entries).
 """
 
+import asyncio
 from pathlib import Path
 
 import pytest
 
+from tests.stage_ctx_factory import build_stage_ctx, drain, inert_event
+from ubt.core.cleaners.math_masker import extract_math_spans
+from ubt.core.config import UBTConfig
 from ubt.core.engine.ledger import SQLiteJobLedger
+from ubt.core.engine.stages.quality_gate import run_quality_gate_stage
 from ubt.core.engine.stages.tm_writeback import tm_writeback_eligible
 from ubt.core.ir.models import BlockStatus, BlockType, DocumentIR, FlowID, IRBlock
 from ubt.core.memory.tm import (
@@ -28,7 +33,18 @@ from ubt.core.qe.added_content import (
     markdown_headings,
     reference_tokens,
 )
+from ubt.core.qe.comet_runner import QE_SCORE_FABRICATED, HeuristicQERunner
+from ubt.core.qe.defect_taxonomy import (
+    CRITICAL_DEFECT_MARKERS,
+    NEAR_ECHO_MARKER,
+    STRUCTURAL_DEFECT_MARKERS,
+    has_structural_defect,
+    is_transient_failure,
+)
 from ubt.core.qe.fast_pass import FastPassFilter
+from ubt.core.qe.omission import OmissionGate
+from ubt.core.validators.consistency import NumericConsistencyValidator
+from ubt.core.validators.html_delta import HTMLDeltaValidator
 
 # ---------------------------------------------------------------------------
 # Real chapter-3 payloads, trimmed to the parts that carry the signal.
@@ -341,3 +357,324 @@ def test_added_content_fullwidth_parentheses() -> None:
     decision_bad = gate.evaluate(src, tgt_bad)
     assert not decision_bad.passed
     assert "2.2" in decision_bad.fabricated_refs
+
+
+_a0920_SOURCE_PARAGRAPH = (
+    "The device operates in inversion when the gate exceeds the threshold "
+    "voltage across the oxide layer here."
+)
+
+
+def test_near_echo_is_the_same_defect_class_as_an_exact_echo() -> None:
+    """An almost-verbatim target is an untranslated paragraph, not "other".
+
+    The near-echo reason matched none of the score classifier's keywords, so it
+    landed on ``QE_SCORE_STRUCTURAL_OTHER`` (0.70) — within 0.05 of the default
+    threshold — and carried no structural marker, so the quality gate released
+    a never-translated paragraph as ``MTQE_PASSED``.
+    """
+    near_echo = _a0920_SOURCE_PARAGRAPH.replace("layer", "layers")
+    decision = FastPassFilter(target_lang="zh").evaluate(
+        _a0920_SOURCE_PARAGRAPH, near_echo, block_type=BlockType.NARRATIVE
+    )
+    assert not decision.passed
+    assert decision.reason.startswith(NEAR_ECHO_MARKER)
+    assert HeuristicQERunner.score_from_decision_reason(decision.reason) == QE_SCORE_FABRICATED
+    assert has_structural_defect([decision.reason])
+    assert any(marker in decision.reason for marker in CRITICAL_DEFECT_MARKERS)
+
+
+_d2echo_CLEAN_SRC = "The channel voltage is set to the source voltage in this model."
+
+_d2echo_CLEAN_TGT = "在本模型中，沟道电压被设置为源端电压，用于计算源端表面势。"
+
+_d2echo_ECHO_SRC = "".join(
+    (
+        "where ψ pert is given by ψ 2 evaluated at x = T fin /2. ",
+        "Eq. (3.11) is an implicit equation in β which must be solved using numerical methods, ",
+        "then, once β is calculated, the surface potential and the charge in the channel ",
+        "can be obtained. ",
+        "Fig. 3.5 shows the surface potential obtained from Eq. (3.11) and the numerical ",
+        "solution of Eq. (3.1) for different doping concentrations. ",
+        "The amount of doping in the channel determines the threshold voltage of the device ",
+        "as shown in Fig. 3.6, which represents the mobile charge density obtained from the ",
+        "proposed compact model and the numerical solution of Eq. (3.1) for different ",
+        "doping concentrations. ",
+        "In the case of lightly doped DG FinFETs, the thickness of the channel determines ",
+        "the amount of mobile carrier charge density in the channel in a linear manner, ",
+        "as shown in Fig. 3.7.",
+    )
+)
+
+_d2echo_ECHO_TGT = "".join(
+    (
+        "式 (3.7) 和 (2.2) 可以合并为一个方程：\n\n",
+        "使用数值方法求解式 (3.11) 在紧凑建模应用中并不实际，因为其使用会增加计算时间并可能导致",
+        "发散问题 [2]。因此，首先通过解析近似法获得初始猜测值，随后对式 (3.11) 进行求解。",
+        "一旦计算出 β 值，即可获得表面势和沟道中的电荷。图 3.5 展示了由式 (3.11) 得到的表面势以及",
+        "对式 (3.1) 进行数值求解在不同掺杂浓度下的结果。如图 3.6 所示，沟道中的掺杂量决定了器件的",
+        "阈值电压，该图表示了由所提出的紧凑模型和对式 (3.1) 进行数值求解在不同掺杂浓度下得到的",
+        "可移动电荷密度。在轻掺杂的 DG FinFET（双栅鳍式场效应晶体管）情况下，沟道厚度以线性方式",
+        "决定了沟道中的可移动载流子电荷密度，如图 3.7 所示。",
+    )
+)
+
+
+def _d2echo_block(bid: str, spine: int, source: str) -> IRBlock:
+    return IRBlock(id=bid, flow_id=FlowID.MAIN_STORY, spine_index=spine, source_text=source)
+
+
+def _d2echo_doc(blocks: list[IRBlock]) -> DocumentIR:
+    return DocumentIR(
+        doc_id="d2_doc",
+        source_path="/tmp/synthetic-duo.pdf",
+        format_type="pdf",
+        metadata={},
+        blocks=blocks,
+    )
+
+
+def _d2echo_run_quality_gate(
+    tmp_path: Path,
+    ledger: SQLiteJobLedger,
+    job_id: str,
+    qe_threshold: float = 0.75,
+) -> None:
+    ctx = build_stage_ctx(
+        tmp_path,
+        ledger=ledger,
+        job_id=job_id,
+        fast_pass=FastPassFilter(),
+        qe_runner=HeuristicQERunner(),
+        create_event=inert_event,
+        config=UBTConfig(qe_threshold=qe_threshold),
+    )
+    asyncio.run(drain(run_quality_gate_stage(ctx)))
+
+
+def test_quality_gate_sends_the_production_echo_to_repair(tmp_path: Path) -> None:
+    """Drives run_quality_gate_stage: the echoed block must not become MTQE_PASSED."""
+    ledger = SQLiteJobLedger(tmp_path / "job.sqlite")
+    ledger.init_job(
+        "job_d2",
+        _d2echo_doc(
+            [
+                _d2echo_block("pdf_main#b_echo", 1, _d2echo_ECHO_SRC),
+                _d2echo_block("pdf_main#b_ok", 2, _d2echo_CLEAN_SRC),
+            ]
+        ),
+        target_lang="zh",
+    )
+    ledger.save_checkpoint(
+        block_id="pdf_main#b_echo",
+        status=BlockStatus.DRAFTED,
+        target_text=_d2echo_ECHO_TGT,
+        draft_text=_d2echo_ECHO_TGT,
+    )
+    ledger.save_checkpoint(
+        block_id="pdf_main#b_ok",
+        status=BlockStatus.DRAFTED,
+        target_text=_d2echo_CLEAN_TGT,
+        draft_text=_d2echo_CLEAN_TGT,
+    )
+    _d2echo_run_quality_gate(tmp_path, ledger, "job_d2")
+
+    by_id = {b.id: b for b in ledger.get_all_blocks("job_d2")}
+    echo = by_id["pdf_main#b_echo"]
+    assert echo.status is BlockStatus.REPAIR_PENDING, (
+        "the production echo reached MTQE_PASSED — the gate is not wired into the stage"
+    )
+    assert any("Added reference" in f for f in echo.error_flags), echo.error_flags
+    # No false positive on the clean sibling.
+    assert by_id["pdf_main#b_ok"].status is BlockStatus.MTQE_PASSED
+    ledger.close()
+
+
+def test_the_same_payload_passes_every_pre_existing_gate() -> None:
+    """Documents the blind spot, and proves the new gate is what changed the verdict.
+
+    Every check the fast-pass chain ran before this fix passes on the echoed
+    pair. Without this control, test 1 could be read as "some gate fired" rather
+    than "the added-content gate is the one that fired".
+    """
+    src, tgt = _d2echo_ECHO_SRC, _d2echo_ECHO_TGT
+
+    assert HTMLDeltaValidator().validate(src, tgt).is_valid
+    assert sorted(extract_math_spans(src)) == sorted(extract_math_spans(tgt))
+    assert NumericConsistencyValidator().validate(src, tgt).is_valid
+    # The omission gate reads only the LOW side of the length band — and the
+    # invented sentences push the sentence count back up, so the source sentence
+    # they displaced stays invisible.
+    assert OmissionGate(target_lang="zh").evaluate(src, tgt).passed
+
+    # The only complaint the chain has left is the new one.
+    decision = FastPassFilter().evaluate(src, tgt)
+    assert not decision.passed
+    assert decision.reason.startswith("Added reference(s)"), decision.reason
+
+
+def test_added_content_classifies_as_fabrication_not_as_generic() -> None:
+    """Class mapping: fabrication is band 0.15, not the 0.70 fallback.
+
+    0.70 means "no specific classifier matched". It sits 0.05 below the default
+    threshold, so the verdict would flip for anyone running at <= 0.70 — and the
+    report's score distribution would read it as a generic structural problem.
+    """
+    reason = AddedContentGate().evaluate(_d2echo_ECHO_SRC, _d2echo_ECHO_TGT).reason
+    assert has_structural_defect([reason]), "fabrication must be a structural defect"
+    assert HeuristicQERunner.score_from_decision_reason(reason) == 0.15
+
+    heading_reason = AddedContentGate().evaluate("Plain prose.", "### 源段落翻译\n正文。").reason
+    assert has_structural_defect([heading_reason])
+    # Prompt-template leak keeps its own band.
+    assert HeuristicQERunner.score_from_decision_reason(heading_reason) == 0.10
+
+
+def test_echo_verdict_survives_a_permissive_qe_threshold(tmp_path: Path) -> None:
+    """Regression for a real hole in the first version of this fix.
+
+    ``run_quality_gate_stage`` marks a block MTQE_PASSED **and wipes its error
+    flags** once the QE score clears the threshold. Two layers have to hold:
+
+    * the 0.15 band mapping (``score_from_decision_reason``) keeps the score
+      below any sane threshold — but a threshold at or under 0.15 would still
+      release it;
+    * the ``STRUCTURAL_DEFECT_MARKERS`` entry makes the verdict fatal at *any*
+      threshold, which is the invariant ``defect_taxonomy`` documents.
+
+    The threshold below is deliberately absurd: it isolates the marker.
+    """
+    ledger = SQLiteJobLedger(tmp_path / "job.sqlite")
+    ledger.init_job(
+        "job_perm",
+        _d2echo_doc([_d2echo_block("pdf_main#b_echo", 1, _d2echo_ECHO_SRC)]),
+        target_lang="zh",
+    )
+    ledger.save_checkpoint(
+        block_id="pdf_main#b_echo",
+        status=BlockStatus.DRAFTED,
+        target_text=_d2echo_ECHO_TGT,
+        draft_text=_d2echo_ECHO_TGT,
+    )
+    _d2echo_run_quality_gate(tmp_path, ledger, "job_perm", qe_threshold=0.05)
+
+    block = ledger.get_block("pdf_main#b_echo")
+    assert block is not None
+    assert block.status is BlockStatus.REPAIR_PENDING, (
+        "a permissive QE threshold released the echoed block — the defect taxonomy "
+        "is not treating fabrication as structural"
+    )
+    assert any("Added reference" in f for f in block.error_flags)
+    ledger.close()
+
+
+def test_masked_token_corruption_is_fatal_and_survives_the_gate(tmp_path: Path) -> None:
+    """Masked-token loss must stay structural at any QE threshold.
+
+    The draft stage records ``math_token_corrupt`` / ``soup_token_corrupt`` when
+    a protected span is lost or mutated, but the fast-pass text itself can look
+    clean — only the marker table keeps the block out of auto-pass, and the flag
+    must survive the stage so the coverage report can count the corrupt spans.
+    """
+    for marker, flag in (
+        (
+            "math_token_corrupt",
+            "math_token_corrupt missing=['⟦MATH_MASK_0001⟧'] mismatched=[] mutated=[]",
+        ),
+        ("soup_token_corrupt", "soup_token_corrupt missing=['βSI=e−ψpert'] mismatched=[]"),
+    ):
+        assert has_structural_defect([flag]), marker
+        ledger = SQLiteJobLedger(tmp_path / f"{marker}.sqlite")
+        ledger.init_job(
+            "job_tok",
+            _d2echo_doc([_d2echo_block("pdf_main#b_tok", 1, _d2echo_CLEAN_SRC)]),
+            target_lang="zh",
+        )
+        ledger.save_checkpoint(
+            block_id="pdf_main#b_tok",
+            status=BlockStatus.DRAFTED,
+            target_text=_d2echo_CLEAN_TGT,
+            draft_text=_d2echo_CLEAN_TGT,
+            error_flags=[flag],
+        )
+        _d2echo_run_quality_gate(tmp_path, ledger, "job_tok", qe_threshold=0.05)
+
+        block = ledger.get_block("pdf_main#b_tok")
+        assert block is not None
+        assert block.status is BlockStatus.REPAIR_PENDING, marker
+        assert any(marker in f for f in block.error_flags), block.error_flags
+        ledger.close()
+
+
+_r0918b_ECHO_REASON = "Target identical to source"
+
+_r0918b_SRC_EN = "The quick brown fox jumps over the lazy dog near the river bank."
+
+
+def _r0918b_fp(source_lang: str, target_lang: str) -> FastPassFilter:
+    return FastPassFilter(source_lang=source_lang, target_lang=target_lang)
+
+
+def test_verbatim_echo_is_rejected_for_same_script_pairs() -> None:
+    """Before: ``en->fr``/``de->en``/``ja->zh`` echoes returned passed=True
+    with "Flawless", and the quality gate released them as MTQE_PASSED because
+    the only identity check lived in a scorer that branch never calls."""
+    for src_lang, tgt_lang in (("en", "fr"), ("de", "en"), ("en", "en"), ("ja", "zh")):
+        decision = _r0918b_fp(src_lang, tgt_lang).evaluate(
+            _r0918b_SRC_EN, _r0918b_SRC_EN, block_type=BlockType.NARRATIVE
+        )
+        assert not decision.passed, f"{src_lang}->{tgt_lang} shipped an echo: {decision.reason}"
+        assert _r0918b_ECHO_REASON in decision.reason
+
+
+def test_real_translation_still_passes_and_echo_class_is_fabricated() -> None:
+    ok = "Le renard brun rapide saute par-dessus le chien paresseux pres de la riviere."
+    decision = _r0918b_fp("en", "fr").evaluate(_r0918b_SRC_EN, ok, block_type=BlockType.NARRATIVE)
+    assert decision.passed, decision.reason
+    # One rule, one band: ``score_pairs`` used to carry a second copy of the
+    # identity check with its own length/format exemptions.
+    echo = _r0918b_fp("en", "fr").evaluate(
+        _r0918b_SRC_EN, _r0918b_SRC_EN, block_type=BlockType.NARRATIVE
+    )
+    assert HeuristicQERunner.score_from_decision_reason(echo.reason) == pytest.approx(0.15)
+    assert asyncio.run(
+        HeuristicQERunner().score_pairs([{"src": _r0918b_SRC_EN, "mt": _r0918b_SRC_EN}])
+    ) == [pytest.approx(0.15)]
+
+
+def test_echo_gate_exempts_the_blocks_that_keep_origin_by_contract() -> None:
+    """Verbatim ships must not be routed into repair (which ignores
+    ``skip_translate`` and used to leave them stale-FAILED)."""
+    assert (
+        _r0918b_fp("en", "fr").evaluate(_r0918b_SRC_EN, _r0918b_SRC_EN, skip_translate=True).passed
+    )
+    assert (
+        _r0918b_fp("en", "fr")
+        .evaluate(_r0918b_SRC_EN, _r0918b_SRC_EN, block_type=BlockType.CODE)
+        .passed
+    )
+    assert (
+        _r0918b_fp("en", "fr")
+        .evaluate(_r0918b_SRC_EN, _r0918b_SRC_EN, block_type=BlockType.FORMULA)
+        .passed
+    )
+    # Short and wordless blocks legitimately survive the trip unchanged.
+    assert (
+        _r0918b_fp("en", "fr").evaluate("Fig. 3", "Fig. 3", block_type=BlockType.NARRATIVE).passed
+    )
+    assert _r0918b_fp("en", "fr").evaluate(
+        "1234 5678 9", "1234 5678 9", block_type=BlockType.HEADING
+    )
+
+
+def test_echo_marker_is_fatal_but_never_a_transient_failure() -> None:
+    """The marker must survive any QE threshold *and* must not be re-queued on
+    resume: ``is_transient_failure`` matches the lowercase ``untranslated:``
+    lifecycle prefix, so a near-miss in casing would silently change the
+    resume semantics of every echoed block."""
+    flag = f"{_r0918b_ECHO_REASON}: the passage was not translated"
+    assert flag in STRUCTURAL_DEFECT_MARKERS or any(m in flag for m in STRUCTURAL_DEFECT_MARKERS), (
+        "echo must be fatal"
+    )
+    assert any(m in flag for m in CRITICAL_DEFECT_MARKERS), "an unrepaired echo is Critical"
+    assert not is_transient_failure([flag])

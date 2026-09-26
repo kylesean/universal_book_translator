@@ -1,14 +1,18 @@
 """Unit tests for render-hygiene fixes: native SVG sizing, chrome-video
 dedup, footnote-anchor guard (p3/p33 screenshot defects)."""
 
+import subprocess
 from pathlib import Path
 
 import pytest
 
-from ubt.adapters.pdf.typst_fragments import _reference_numbers
+from ubt.adapters.pdf.font_probe import available_font_families, is_cjk_capable
+from ubt.adapters.pdf.overlay_text import typst_escape as overlay_escape
+from ubt.adapters.pdf.typst_fragments import _escape_typst_markup, _reference_numbers
 from ubt.adapters.pdf.typst_reconstructor import (
     TypstReconstructor,
     _image_size_spec,
+    _prose_to_typst,
     _svg_native_size,
 )
 from ubt.core.ir.models import BlockStatus, BlockType, BoundingBox, FlowID, IRBlock
@@ -405,3 +409,59 @@ def test_reference_numbers_ignores_toc_references_and_resets_on_body_chapters() 
     ref_map = _reference_numbers(blocks)
     assert "b3" not in ref_map, "Body chapter bullet list item must not be numbered as a reference"
     assert ref_map.get("b5") == "[1]", "Real terminal bibliography entry must be numbered [1]"
+
+
+def test_overlay_renderer_passes_the_target_language_through() -> None:
+    """The anchored/overlay path hardcoded zh, so a Korean book lost its spaces twice."""
+    from ubt.adapters.pdf.overlay_text import prepare_overlay_text
+
+    korean = "이것은 테스트 입니다."
+    assert prepare_overlay_text(korean, target_lang="ko") == korean
+    assert prepare_overlay_text("中 文 书", target_lang="zh") == "中文书"
+
+
+_r0918b_NOTO_CJK_INSTALLED = any(
+    "noto" in f.casefold() and is_cjk_capable(f) for f in (available_font_families() or frozenset())
+)
+
+
+@pytest.mark.skipif(
+    not _r0918b_NOTO_CJK_INSTALLED,
+    reason=(
+        "round-trips CJK through typst embedding + pdftotext extraction, so it measures "
+        "the installed face's ToUnicode as much as the emitter; the golden-adjacent "
+        "escape logic is asserted without rendering in the two asserts above"
+    ),
+)
+def test_double_slash_survives_the_reflow_emitter(tmp_path: Path) -> None:
+    """Before: ``typst compile`` exited 0 and the text after ``//`` was gone --
+    Typst read it as a line comment. The anchored path already guarded with a
+    zero-width space; the reflow emitter did not."""
+    text = "段落前的文字 // 后半句不能消失"
+    escaped = _escape_typst_markup(text)
+    assert escaped != text, "// reached Typst unescaped"
+    assert "//" not in escaped
+    document = _prose_to_typst(text)
+    typst = tmp_path / "doc.typ"
+    pdf = tmp_path / "doc.pdf"
+    typst.write_text(document + "\n", encoding="utf-8")
+    subprocess.run(
+        ["typst", "compile", str(typst), str(pdf)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    rendered = subprocess.run(
+        ["pdftotext", str(pdf), "-"], check=True, capture_output=True, text=True
+    ).stdout
+    assert "后半句不能消失" in rendered.replace("​", "")
+
+
+def test_double_slash_guard_has_one_owner_in_both_engines() -> None:
+    """Both emitters must break the comment token the same way, or the two
+    engines disagree about what a ``//`` means."""
+    guard = "/​/"
+    assert guard in _escape_typst_markup("a//b")
+    assert guard in overlay_escape("a//b")
+    # URLs stay readable (one invisible character inside the scheme separator).
+    assert "https:/​/example.com" in _escape_typst_markup("see https://example.com/x")

@@ -1,8 +1,23 @@
 """Unit tests for 0-Token validators: HTML delta, numeric, and glossary consistency."""
 
+import asyncio
+from pathlib import Path
+from typing import Any
+
 import pytest
 
+from tests.stage_ctx_factory import build_stage_ctx, drain, inert_event
+from ubt.core.engine.ledger import SQLiteJobLedger
+from ubt.core.engine.stages.quality_gate import run_quality_gate_stage
+from ubt.core.ir.models import BlockStatus, BookManifest, ChapterIR, ChapterMeta, FlowID, IRBlock
+from ubt.core.ir.run_metadata import RunMetadata
 from ubt.core.language_profile import FR, ZH
+from ubt.core.qe.comet_runner import (
+    GLOSSARY_VIOLATION_MARKER,
+    QE_SCORE_GLOSSARY_VIOLATION,
+    HeuristicQERunner,
+)
+from ubt.core.qe.fast_pass import FastPassFilter
 from ubt.core.validators.consistency import (
     GlossaryConsistencyValidator,
     NumericConsistencyValidator,
@@ -679,3 +694,137 @@ def test_canonicalize_numeric_token_preserves_zero_leading_three_digit_decimals(
     assert canonicalize_numeric_token("0.500") == "0.5"
     assert canonicalize_numeric_token("1.500") == "1500"
     assert canonicalize_numeric_token("1,500") == "1500"
+
+
+_r0917_BAD_TARGET = "当沟道长度缩短至 20 nm 时，短沟道效应会加剧。"
+
+_r0917_GLOSSARY: list[dict[str, Any]] = [
+    {"source": "subthreshold swing", "translation": "亚阈值摆幅", "aliases": []}
+]
+
+_r0917_GOOD_TARGET = "当沟道长度缩短至 20 nm 时，亚阈值摆幅会退化。"
+
+_r0917_SRC = "The subthreshold swing degrades as the channel length shrinks to 20 nm."
+
+
+def _r0917_manifest(**metadata: Any) -> BookManifest:
+    """Run decisions go on the typed contract; source keys stay in the dict."""
+    run_keys = {k: v for k, v in metadata.items() if k in RunMetadata.model_fields}
+    artifact = {k: v for k, v in metadata.items() if k not in RunMetadata.model_fields}
+    return BookManifest(
+        doc_id="d1",
+        title="Regression",
+        source_path="/tmp/regression.md",
+        chapters=[ChapterMeta(chapter_id="c1", title="Chapter One", spine_index=1)],
+        metadata=artifact,
+        run=RunMetadata(**run_keys),
+    )
+
+
+def test_quality_gate_flags_glossary_violation(tmp_path: Path) -> None:
+    """A fluent target that alters an enforced term cannot auto-pass.
+
+    Ensures terminology violations are scored and routed to repair rather than auto-passing.
+    """
+    ledger = SQLiteJobLedger(tmp_path / "glossary_gate.sqlite")
+    manifest = _r0917_manifest()
+    ledger.init_job_from_manifest("job_gloss", manifest)
+    blocks = [
+        IRBlock(
+            id="b1",
+            flow_id=FlowID.MAIN_STORY,
+            spine_index=1,
+            source_text=_r0917_SRC,
+            target_text=_r0917_GOOD_TARGET,
+            status=BlockStatus.DRAFTED,
+        ),
+        IRBlock(
+            id="b2",
+            flow_id=FlowID.MAIN_STORY,
+            spine_index=2,
+            source_text=_r0917_SRC,
+            target_text=_r0917_BAD_TARGET,
+            status=BlockStatus.DRAFTED,
+        ),
+    ]
+    ledger.append_chapter(
+        "job_gloss",
+        ChapterIR(doc_id="d1", chapter_id="c1", title="Chapter One", spine_index=1, blocks=blocks),
+    )
+
+    ctx = build_stage_ctx(
+        tmp_path,
+        ledger=ledger,
+        job_id="job_gloss",
+        fast_pass=FastPassFilter(source_lang="en", target_lang="zh"),
+        qe_runner=HeuristicQERunner(),
+        create_event=inert_event,
+        glossary_dicts=_r0917_GLOSSARY,
+    )
+    asyncio.run(drain(run_quality_gate_stage(ctx)))
+
+    by_id = {b.id: b for b in ledger.get_all_blocks("job_gloss")}
+    assert by_id["b1"].status is BlockStatus.MTQE_PASSED
+    assert by_id["b2"].status is BlockStatus.REPAIR_PENDING
+    assert any(GLOSSARY_VIOLATION_MARKER in f for f in by_id["b2"].error_flags)
+    assert by_id["b2"].mtqe_score == QE_SCORE_GLOSSARY_VIOLATION
+    assert (by_id["b2"].mtqe_score or 0.0) < 0.75  # below the auto-pass band
+    # The correct rendering is untouched by the new signal.
+    assert by_id["b1"].mtqe_score is None
+
+
+def test_structural_only_verdict_still_passes_without_glossary(tmp_path: Path) -> None:
+    """With no glossary threaded in, clean blocks auto-pass without flags."""
+    ledger = SQLiteJobLedger(tmp_path / "no_glossary.sqlite")
+    ledger.init_job_from_manifest("job_plain", _r0917_manifest())
+    blocks = [
+        IRBlock(
+            id="b1",
+            flow_id=FlowID.MAIN_STORY,
+            spine_index=1,
+            source_text=_r0917_SRC,
+            target_text=_r0917_BAD_TARGET,
+            status=BlockStatus.DRAFTED,
+        )
+    ]
+    ledger.append_chapter(
+        "job_plain",
+        ChapterIR(doc_id="d1", chapter_id="c1", title="Chapter One", spine_index=1, blocks=blocks),
+    )
+    ctx = build_stage_ctx(
+        tmp_path,
+        ledger=ledger,
+        job_id="job_plain",
+        fast_pass=FastPassFilter(source_lang="en", target_lang="zh"),
+        qe_runner=HeuristicQERunner(),
+        create_event=inert_event,
+    )
+    asyncio.run(drain(run_quality_gate_stage(ctx)))
+    by_id = {b.id: b for b in ledger.get_all_blocks("job_plain")}
+    assert by_id["b1"].status is BlockStatus.MTQE_PASSED
+    assert by_id["b1"].error_flags == []
+
+
+def test_scale_rewriting_is_accepted_and_real_omissions_are_not() -> None:
+    from ubt.core.validators.consistency import NumericConsistencyValidator
+
+    validator = NumericConsistencyValidator()
+    # (source, target, must_pass). Measured against the pre-fix code: both
+    # scale cases reported a missing number and were caught below.
+    cases = [
+        (
+            "该产品配备250万像素摄像头，售价1,200元。",
+            "The device features a 2.5-megapixel camera priced at 1,200 yuan.",
+            True,
+        ),
+        ("The device has a 2.5 million pixel camera.", "该产品配备250万像素摄像头。", True),
+        ("a 150 million person country", "一个1.5亿人口的国家", True),
+        ("a 30 millisecond delay", "30ms 延迟", True),
+        # A genuinely dropped number stays a defect.
+        ("a 2.5-megapixel camera and 7 sensors", "a camera with 7 sensors", False),
+        ("配备250万像素摄像头", "配备摄像头", False),
+        ("in 1984 the ratio was 15.6", "八十年代的比率", False),
+    ]
+    for source, target, must_pass in cases:
+        result = validator.validate(source, target)
+        assert result.is_valid is must_pass, f"{source!r} -> {target!r}: {result.message}"

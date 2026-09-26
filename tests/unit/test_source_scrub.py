@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from ubt.core.cleaners.html_sanitizer import scrub_source_document
+from ubt.core.cleaners.html_sanitizer import sanitize_html_fragment, scrub_source_document
 
 
 def test_script_element_is_dropped_with_its_content() -> None:
@@ -149,3 +149,29 @@ def test_html_sanitizer_cdata_and_processing_instructions() -> None:
     scrubbed_pi = scrub_source_document(pi_doc)
     assert '<?custom-pi note="a > b" ?>' in scrubbed_pi
     assert "<p>Body</p>" in scrubbed_pi
+
+
+_r0918_CONTROL_CHAR_URLS = [
+    '<a href="java\tscript:alert(1)">x</a>',
+    '<a href="java\nscript:alert(1)">x</a>',
+    '<a href="HTM\x00L:alert(1)">x</a>',
+    '<a href="vbscript:msgbox(1)">x</a>',
+]
+
+
+@pytest.mark.parametrize("fragment", _r0918_CONTROL_CHAR_URLS)
+def test_scheme_split_by_control_characters_is_dropped(fragment: str) -> None:
+    # Pre-fix the scheme never matched the anchored regex, so the URL was
+    # treated as a relative link and emitted verbatim.
+    assert "href" not in sanitize_html_fragment(fragment)
+
+
+def test_data_url_is_refused_for_navigation_but_allowed_for_images() -> None:
+    assert "href" not in sanitize_html_fragment('<a href="data:text/html,<b>x</b>">x</a>')
+    img = '<img src="data:image/png;base64,iVBORw0KGgo=" alt="i">'
+    assert "data:image/png" in sanitize_html_fragment(img)
+
+
+def test_legitimate_relative_and_absolute_links_survive() -> None:
+    for href in ("chapter1.xhtml", "#anchor", "../img/a.png", "https://ok.example/x"):
+        assert f'href="{href}"' in sanitize_html_fragment(f'<a href="{href}">x</a>')

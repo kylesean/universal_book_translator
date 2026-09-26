@@ -292,3 +292,54 @@ def test_tiered_runner_binds_glossary_to_heuristic() -> None:
 
     bound = tiered.with_glossary([{"source": "term", "target": "术语"}])
     assert bound.is_glossary_aware() is True
+
+
+@pytest.mark.asyncio
+async def test_paid_judge_follows_defect_class_and_sampled_passes() -> None:
+    from ubt.core.qe.comet_runner import (
+        QE_SCORE_EMPTY,
+        QE_SCORE_LEAK,
+        QE_SCORE_PASS,
+        QE_SCORE_STRUCTURAL_OTHER,
+        HeuristicQERunner,
+    )
+    from ubt.core.qe.llm_judge import LLMJudgeQERunner, TieredQERunner
+
+    class _ClassedHeuristic(HeuristicQERunner):
+        """Emit a chosen defect class per pair instead of deriving it from content."""
+
+        def __init__(self, scores: list[float]) -> None:
+            super().__init__()
+            self._scores = scores
+
+        async def score_pairs(self, pairs: list[dict[str, str]]) -> list[float]:
+            return self._scores[: len(pairs)]
+
+    scores = [QE_SCORE_PASS, QE_SCORE_STRUCTURAL_OTHER, QE_SCORE_LEAK, QE_SCORE_EMPTY]
+    pairs = [{"src": f"seg-{i}", "mt": "译文"} for i in range(len(scores))]
+    judged: list[str] = []
+
+    async def fake_judge(**kwargs: object) -> str:
+        judged.append(str(kwargs.get("user_prompt", "")))
+        return "score: 30"
+
+    def _tiered(pass_sample: float) -> TieredQERunner:
+        return TieredQERunner(
+            heuristic=_ClassedHeuristic(scores),
+            judge=LLMJudgeQERunner(judge_fn=fake_judge),
+            pass_sample=pass_sample,
+        )
+
+    runner = _tiered(0.0)
+    out = await runner.score_pairs(pairs)
+    # Only the unclassified structural class is ambiguous enough to be worth asking.
+    assert len(judged) == 1 and runner.judge_calls == 1
+    assert out[0] == QE_SCORE_PASS, "a clean pass must not move without being sampled"
+
+    judged.clear()
+    runner = _tiered(1.0)
+    out = await runner.score_pairs(pairs)
+    # Sampling passes lets the judge lower a pass that merely broke no invariant;
+    # hard defects still never reach it (a judge cannot un-drop a number).
+    assert len(judged) == 2 and runner.judge_calls == 2
+    assert out[0] == 0.30 and out[2] == QE_SCORE_LEAK and out[3] == QE_SCORE_EMPTY

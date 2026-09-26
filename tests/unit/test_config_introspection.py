@@ -83,3 +83,50 @@ def test_config_command_redacts_secrets(
     rows: list[dict[str, Any]] = json.loads(out)
     api_key = next(row for row in rows if row["field"] == "api_key")
     assert api_key["value"].startswith("<set:")
+
+
+_r0918_ubt_root = Path(__file__).resolve().parents[2]
+
+
+def test_render_engine_is_canonically_rigid_and_old_spellings_are_gone() -> None:
+    from ubt.core.config import canonical_render_engine
+
+    # `rigid` is the single canonical name for the source-geometry route (the
+    # old anchored/overlay duality was collapsed with zero backward compat).
+    assert canonical_render_engine("rigid") == "rigid"
+    assert canonical_render_engine("reflow") == "publication"
+    owner = "ubt/core/config.py"
+    offenders = [
+        path.relative_to(_r0918_ubt_root).as_posix()
+        for path in sorted((_r0918_ubt_root / "ubt").rglob("*.py"))
+        if path.relative_to(_r0918_ubt_root).as_posix() != owner
+        and (
+            '"anchored"' in path.read_text(encoding="utf-8")
+            or '"overlay"' in path.read_text(encoding="utf-8")
+        )
+    ]
+    assert offenders == [], f"retired render-engine spellings re-spelled in {offenders}"
+
+
+def test_job_id_pattern_and_default_output_path_have_one_owner() -> None:
+    import importlib
+
+    api_app = importlib.import_module("ubt.api.app")
+    mcp_server = importlib.import_module("ubt.mcp.server")
+    from ubt.core.job_options import JOB_ID_RE, default_output_dir, default_output_path
+
+    assert api_app.JOB_ID_RE is JOB_ID_RE
+    assert mcp_server.JOB_ID_RE is JOB_ID_RE
+    assert default_output_path("docs/synthetic-duo.pdf") == (
+        default_output_dir() / "synthetic-duo_bilingual.pdf"
+    )
+    assert default_output_path("/x/book.epub") == (default_output_dir() / "book_bilingual.epub")
+    # Every surface derives the same name; nothing may hardcode the directory.
+    owner = "ubt/core/job_options.py"
+    spellers = [
+        path.relative_to(_r0918_ubt_root).as_posix()
+        for path in sorted((_r0918_ubt_root / "ubt").rglob("*.py"))
+        if path.relative_to(_r0918_ubt_root).as_posix() != owner
+        and 'Path("tmp/output")' in path.read_text(encoding="utf-8")
+    ]
+    assert spellers == [], f"tmp/output re-derived in {spellers}"

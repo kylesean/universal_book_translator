@@ -396,3 +396,26 @@ def test_stream_frequency_survives_a_flush_boundary() -> None:
 
     stream = mine_characters_stream([first, second], chunk_chars=1000, tail_chars=200, min_freq=1)
     assert freq(stream) == freq(mine_characters(first + "\n" + second, min_freq=1)) == [1]
+
+
+def test_general_relative_phrase_is_not_mined_as_person() -> None:
+    """ "General Relativity" produced kind=person entry "Relativity"."""
+    text = (
+        "General Relativity is a theory of gravitation. "
+        "General Relativity predicts the precession of Mercury. "
+        "General Relativity has been tested repeatedly."
+    )
+    entries = mine_characters(text, min_freq=99)
+    assert not [e for e in entries if e["source"].startswith("General")]
+    _, prompt = build_backfill_prompt(entries, "zh")
+    assert "Relativity" not in prompt
+
+
+def test_honorific_plus_surname_still_mined_as_person() -> None:
+    """The courtesy-title → surname path keeps extracting valid individuals."""
+    entries = mine_characters("Dr. Smith arrived. Dr. Smith left again.", min_freq=99)
+    smith = next(e for e in entries if e["source"] == "Dr. Smith")
+    assert smith["kind"] == "person"
+    assert smith["aliases"] == ["Smith"]
+    _, prompt = build_backfill_prompt(entries, "zh")
+    assert "Smith — Dr. Smith (person name)" in prompt

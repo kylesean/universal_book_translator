@@ -171,3 +171,15 @@ def test_cjk_spacing_protects_code_spans() -> None:
     assert "`x--`" in result
     assert "foo (1)" not in result
     assert "x——" not in result
+
+
+def test_cjk_space_removal_only_fires_for_spaceless_targets() -> None:
+    from ubt.core.cleaners.cjk_spacing import normalize_publishing_cjk
+
+    korean = "이것은 테스트 입니다."
+    assert normalize_publishing_cjk(korean, target_lang="ko") == korean
+    assert normalize_publishing_cjk(korean, target_lang="en") == korean
+    # Chinese still loses the stray space between Han characters.
+    assert normalize_publishing_cjk("中 文 书", target_lang="zh") == "中文书"
+    # Trailing whitespace before a newline is noise in any language.
+    assert normalize_publishing_cjk("il y a  \nrien", target_lang="fr") == "il y a\nrien"

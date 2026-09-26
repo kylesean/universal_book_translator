@@ -1497,3 +1497,106 @@ def test_ledger_get_conn_initializes_inside_lock(tmp_path: Path) -> None:
         "_init_connection must be called inside `with self._lock:` in _get_conn()"
     )
     ledger.close()
+
+
+def test_metadata_write_for_unknown_job_leaves_no_transaction_open(tmp_path: Path) -> None:
+    from ubt.core.engine.ledger import SQLiteJobLedger
+    from ubt.core.exceptions import LedgerError
+
+    ledger = SQLiteJobLedger(tmp_path / "ghost.sqlite")
+    # Pre-fix: the second call raised "cannot start a transaction within a
+    # transaction" and a second connection saw "database is locked". The
+    # rollback-on-missing-row remains; the write now *also* surfaces (P1-12: a
+    # silently-swallowed source_fingerprint write let the next resume clear the
+    # whole book), so we expect LedgerError while still asserting no dangling
+    # transaction/lock is left behind.
+    with pytest.raises(LedgerError):
+        ledger.set_job_metadata_value("ghost", "output_file", "/tmp/a.pdf")
+    with pytest.raises(LedgerError):
+        ledger.set_job_metadata_value("ghost", "report_file", "/tmp/a.md")
+        # A second connection can still use the DB: proves no write lock leaked.
+    ledger.close()
+    reopened = SQLiteJobLedger(tmp_path / "ghost.sqlite")
+    try:
+        assert reopened.get_job_status("ghost") is None
+    finally:
+        reopened.close()
+
+
+def test_ledger_strict_job_isolation_for_same_doc_id(tmp_path: Path) -> None:
+    """Verify that multiple jobs for the same doc_id never mix blocks."""
+    db_path = tmp_path / "multi_job_ledger.sqlite3"
+    ledger = SQLiteJobLedger(db_path=db_path)
+
+    doc_id = "shared_book_doc"
+    job_1 = "job_v1_run"
+    job_2 = "job_v2_run"
+
+    # Manifest for shared book
+    manifest = BookManifest(
+        doc_id=doc_id,
+        title="Shared Book",
+        source_path="/dummy/book.epub",
+        source_lang="en",
+        target_lang="zh",
+        chapters=[ChapterMeta(chapter_id="ch_1", title="Chapter One", spine_index=1)],
+    )
+
+    # Init both jobs
+    ledger.init_job_from_manifest(job_1, manifest)
+    ledger.init_job_from_manifest(job_2, manifest)
+
+    # Job 1 blocks
+    ch1_blocks = [
+        IRBlock(id="j1_b1", spine_index=1, source_text="J1 Block 1", status=BlockStatus.PENDING),
+        IRBlock(id="j1_b2", spine_index=2, source_text="J1 Block 2", status=BlockStatus.DRAFTED),
+    ]
+    ch1 = ChapterIR(
+        doc_id=doc_id, chapter_id="ch_1", title="Chapter 1", spine_index=1, blocks=ch1_blocks
+    )
+    ledger.append_chapter(job_1, ch1)
+
+    # Job 2 blocks
+    ch2_blocks = [
+        IRBlock(id="j2_b1", spine_index=1, source_text="J2 Block 1", status=BlockStatus.PENDING),
+        IRBlock(id="j2_b2", spine_index=2, source_text="J2 Block 2", status=BlockStatus.DRAFTED),
+        IRBlock(
+            id="j2_b3", spine_index=3, source_text="J2 Block 3", status=BlockStatus.REPAIR_PENDING
+        ),
+    ]
+    ch2 = ChapterIR(
+        doc_id=doc_id, chapter_id="ch_1", title="Chapter 1", spine_index=1, blocks=ch2_blocks
+    )
+    ledger.append_chapter(job_2, ch2)
+
+    # 1. Verify get_all_blocks isolation
+    j1_all = ledger.get_all_blocks(job_1)
+    j2_all = ledger.get_all_blocks(job_2)
+
+    assert len(j1_all) == 2
+    assert [b.id for b in j1_all] == ["j1_b1", "j1_b2"]
+
+    assert len(j2_all) == 3
+    assert [b.id for b in j2_all] == ["j2_b1", "j2_b2", "j2_b3"]
+
+    # 2. Verify fetch_blocks_by_status isolation
+    j1_drafted = ledger.fetch_blocks_by_status(job_1, BlockStatus.DRAFTED)
+    assert len(j1_drafted) == 1
+    assert j1_drafted[0].id == "j1_b2"
+
+    j2_drafted = ledger.fetch_blocks_by_status(job_2, BlockStatus.DRAFTED)
+    assert len(j2_drafted) == 1
+    assert j2_drafted[0].id == "j2_b2"
+
+    # 3. Verify fetch_repair_eligible_blocks isolation
+    j1_repair = ledger.fetch_repair_eligible_blocks(job_1)
+    assert len(j1_repair) == 2  # pending and drafted are non-terminal
+
+    j2_repair = ledger.fetch_repair_eligible_blocks(job_2)
+    assert len(j2_repair) == 3
+
+    # 4. Verify resolving by doc_id resolves ONLY to the most recent job (not a union)
+    doc_blocks = ledger.get_all_blocks(doc_id)
+    # job_2 was initialized second, so doc_blocks must contain only job_2 blocks
+    assert len(doc_blocks) == 3
+    assert [b.id for b in doc_blocks] == ["j2_b1", "j2_b2", "j2_b3"]

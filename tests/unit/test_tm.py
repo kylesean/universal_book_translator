@@ -651,3 +651,85 @@ def test_tm_writeback_retries_on_transient_lock(
         assert attempts == 2
     finally:
         tm_inst.close()
+
+
+_r0918_TM_SRC = "The kernel caches key-value tensors across decoding steps."
+
+_r0918_TM_NEAR = _r0918_TM_SRC.replace("decoding", "decode")
+
+_r0918_TM_ZH = "内核在解码步之间缓存键值张量。"
+
+
+def test_tm_refuses_passthrough_rows_on_both_read_paths(tmp_path: Path) -> None:
+    tm = TranslationMemory(tmp_path / "tm.sqlite")
+    try:
+        tm.writeback(
+            [
+                TMPendingEntry(
+                    "en", "zh", _r0918_TM_SRC, _r0918_TM_SRC, provenance=PROVENANCE_MACHINE
+                )
+            ]
+        )
+        assert tm.entry_count() == 1  # write behaviour is unchanged by design
+        assert tm.lookup_exact("en", "zh", _r0918_TM_SRC) is None
+        assert tm.lookup_fuzzy("en", "zh", _r0918_TM_NEAR, threshold=0.7) is None
+
+        # Control: the same two lookups succeed once a real translation lands.
+        tm.writeback(
+            [
+                TMPendingEntry(
+                    "en", "zh", _r0918_TM_SRC, _r0918_TM_ZH, provenance=PROVENANCE_HUMAN_PE
+                )
+            ]
+        )
+        assert tm.lookup_exact("en", "zh", _r0918_TM_SRC) is not None
+        assert tm.lookup_fuzzy("en", "zh", _r0918_TM_NEAR, threshold=0.7) is not None
+    finally:
+        tm.close()
+
+
+_r0921_SRC = "The quick brown fox jumps over the lazy dog near the river bank."
+
+_r0921_ZH = "那只敏捷的棕色狐狸跃过河边懒狗。"
+
+
+def test_tm_pool_revalidates_per_pair_not_whole_cache(tmp_path: Path) -> None:
+    """Per-pair generations replaced the whole-cache clear, because of its cost.
+
+    This test pinned the opposite choice (review 2026-09-21 §6.1): ``PRAGMA
+    data_version`` moves on any connection's commit — including the ``use_count``
+    bump both lookup paths write — and every cached pool was dropped on that
+    signal. It was defended as churn because "real pools are small". Measured on
+    this checkout a reload costs 0.4 ms at 500 rows, 4 ms at 5k and 17 ms at 19k,
+    while reading one pair's generation costs ~1 µs; a shared ``tm.sqlite``
+    crosses 5k rows after a couple of books, and every hit re-dirties the signal,
+    so each fuzzy lookup was paying a rescan. What freshness still has to
+    survive is asserted below: a foreign commit that adds a row to THIS pair
+    reloads it, a use_count bump and a write to ANOTHER pair do not.
+    """
+    db = tmp_path / "tm.sqlite"
+    writer = TranslationMemory(db)
+    reader = TranslationMemory(db)
+    try:
+        writer.writeback([TMPendingEntry("en", "zh", _r0921_SRC, _r0921_ZH, "machine")])
+        cached = reader._pool("en", "zh")
+
+        assert writer.lookup_exact("en", "zh", _r0921_SRC) is not None
+        assert reader._pool("en", "zh") is cached, "a use_count bump changed no source"
+
+        writer.writeback([TMPendingEntry("fr", "zh", _r0921_SRC, _r0921_ZH, "machine")])
+        assert reader._pool("en", "zh") is cached, "another pair must not evict this one"
+
+        writer.writeback([TMPendingEntry("en", "zh", "Second sentence.", "第二句。")])
+        reloaded = reader._pool("en", "zh")
+        assert reloaded is not cached, "a row added to this pair must reach a live reader"
+        assert len(reloaded[1]) == 2
+
+        # The pool and the count are filled on different calls, so reading the
+        # count must not certify the pool as fresh.
+        writer.writeback([TMPendingEntry("en", "zh", "Third sentence.", "第三句。")])
+        assert reader.entry_count("en", "zh") == 3
+        assert len(reader._pool("en", "zh")[1]) == 3
+    finally:
+        writer.close()
+        reader.close()

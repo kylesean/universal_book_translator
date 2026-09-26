@@ -6,6 +6,8 @@ import io
 import os
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
@@ -21,6 +23,7 @@ from ubt.adapters.pdf.svg_diagram import (
     localize_diagram_svg,
     render_diagram_svg,
 )
+from ubt.core.ir.models import BlockType, FlowID, IRBlock
 
 KV_PDF = Path(
     os.environ.get(
@@ -549,3 +552,63 @@ def test_svg_diagram_cm_matrix_multiplication() -> None:
     r0 = rects[0]
     assert r0[0] == pytest.approx(20.0), f"Expected x0=20.0, got {r0[0]}"
     assert r0[2] == pytest.approx(60.0), f"Expected x1=60.0, got {r0[2]}"
+
+
+def test_diagram_vectorization_does_not_append_to_the_callers_list(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Export hands the same ``final_blocks`` to every render of the run.
+
+    The academic-figure path appended ``pdf_main#fig_*`` straight into the
+    caller's list, so a second render (visual-gate reflow, ``--emit-both``)
+    shipped each figure twice under a duplicated block id.
+    """
+    import ubt.adapters.pdf.asset_extractor as asset_extractor
+    import ubt.adapters.pdf.svg_diagram as svg_diagram
+    from ubt.adapters.pdf.docling_render import DoclingRenderStrategy
+    from ubt.core.ir.models import BoundingBox
+
+    source_pdf = Path(__file__).resolve().parents[2] / "docs" / "synthetic-mono.pdf"
+    if not source_pdf.is_file():
+        pytest.skip(f"{source_pdf.name} fixture missing")
+
+    monkeypatch.setattr(svg_diagram, "is_svg_backend_available", lambda: False)
+    monkeypatch.setattr(svg_diagram, "is_svg_rendering_supported", lambda: False)
+    monkeypatch.setattr(svg_diagram, "detect_diagram_regions", lambda *a, **k: [])
+
+    fig_png = tmp_path / "fig.png"
+    fig_png.write_bytes(b"\x89PNG\r\n\x1a\n")
+    figure = asset_extractor.ExtractedFigure(
+        fig_id="1",
+        caption_en="FIG. 1: demo",
+        page=1,
+        image_path=fig_png,
+        relative_path="assets/fig.png",
+        bbox=(0.0, 0.0, 100.0, 100.0),
+    )
+    monkeypatch.setattr(asset_extractor, "extract_pdf_figures", lambda *a, **k: {"1": figure})
+
+    strategy = DoclingRenderStrategy(
+        reconstructor=SimpleNamespace(),  # type: ignore[arg-type]
+        alternator=SimpleNamespace(),  # type: ignore[arg-type]
+        diagram_localizer=cast("Any", SimpleNamespace(get_page_height=lambda _src, _page: 800.0)),
+    )
+    narrative = IRBlock(
+        id="pdf_main#b001",
+        spine_index=1,
+        block_type=BlockType.NARRATIVE,
+        flow_id=FlowID.MAIN_STORY,
+        source_text="Body text.",
+        bbox=BoundingBox(page=1, x0=0.0, y0=0.0, x1=100.0, y1=100.0),
+    )
+    blocks = [narrative]
+
+    first, _ = strategy._vectorize_diagrams_sync(source_pdf, blocks, tmp_path / "assets", "zh")
+    second, _ = strategy._vectorize_diagrams_sync(source_pdf, blocks, tmp_path / "assets", "zh")
+
+    def figures(result: list[IRBlock]) -> list[str]:
+        return [b.id for b in result if b.id.startswith("pdf_main#fig_")]
+
+    assert len(blocks) == 1, "the caller's list must survive the render untouched"
+    assert figures(first), "the fixture must actually exercise the figure-append path"
+    assert figures(first) == figures(second), "two renders must produce two identical results"

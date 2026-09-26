@@ -7,10 +7,18 @@ from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from pydantic import SecretStr, ValidationError
 
-from ubt.api.app import JobManager, JobRecord, JobSubmitRequest, create_app
+from ubt.api.app import (
+    JobManager,
+    JobRecord,
+    JobSubmitRequest,
+    create_app,
+    resolve_secure_path,
+    validate_job_id,
+)
 from ubt.core.config import UBTConfig
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.progress import ProgressSnapshot
@@ -1399,3 +1407,207 @@ async def test_sse_stream_releases_global_slot_when_response_not_iterated(tmp_pa
     await resp.background()
     assert sum(getattr(global_subscribers, "_counts", {}).values()) == 0
     assert len(record.subscribers) == 0
+
+
+def test_api_rejects_values_its_enums_do_not_define() -> None:
+    from pydantic import ValidationError
+
+    from ubt.api.app import JobSubmitRequest
+
+    accepted = JobSubmitRequest.model_validate(
+        {"input_path": "/tmp/a.pdf", "preset": "publication"}
+    )
+    assert accepted.preset == "publication"
+    for bad in ({"preset": "draft"}, {"target_lang": 'zh") #import "x'}, {"formula_mode": "raw"}):
+        payload = {"input_path": "/tmp/a.pdf", **bad}
+        with pytest.raises(ValidationError):
+            JobSubmitRequest.model_validate(payload)
+
+
+@pytest.mark.asyncio
+async def test_a_field_that_fails_to_map_fails_the_job_not_the_server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+    import importlib
+    from typing import Any
+
+    from pydantic import SecretStr
+
+    api_module = importlib.import_module("ubt.api.app")
+    from ubt.api.app import JobManager, JobSubmitRequest
+    from ubt.core.config import MOCK_API_KEY, UBTConfig
+    from ubt.core.engine.events import TranslationProgressEvent
+
+    def _unmapable(_request: Any) -> dict[str, Any]:
+        raise ValueError("a request field no config accepts")
+
+    monkeypatch.setattr(api_module, "overrides_from_request", _unmapable)
+    manager = JobManager()
+    record = manager.create_job(
+        JobSubmitRequest(input_path="/tmp/nowhere.pdf"), job_id="stranded-guard"
+    )
+    subscriber: asyncio.Queue[TranslationProgressEvent | None] = asyncio.Queue()
+    record.subscribers.append(subscriber)
+
+    await manager.execute_job(record, UBTConfig(api_key=SecretStr(MOCK_API_KEY)))
+
+    assert record.status == "failed"
+    assert record.error is not None and "stranded-guard" in record.error
+    # The termination sentinel must reach subscribers, or the SSE client hangs.
+    assert subscriber.get_nowait() is None
+
+
+def test_containment_denial_does_not_leak_server_paths(tmp_path: Path) -> None:
+    """Risk: the 403 body echoed the server's absolute allowed bases, disclosing
+    the host's directory layout to any caller of a route that is unauthenticated
+    by default."""
+    base = tmp_path / "books"
+    base.mkdir()
+    config = UBTConfig(allowed_dirs=str(base), db_dir=tmp_path / "ledgers")
+
+    with pytest.raises(HTTPException) as exc:
+        resolve_secure_path(tmp_path / "outside_doc.md", must_exist=False, config=config)
+    assert exc.value.status_code == 403
+    detail = str(exc.value.detail)
+    assert str(tmp_path) not in detail
+    assert str(base) not in detail
+    assert "outside_doc" not in detail
+
+
+def test_validate_job_id_format() -> None:
+    """Verify job_id validation prevents path traversal and SQL injection characters."""
+    valid_ids = ["job_123", "job-abc-456", "ABC_xyz-001", "simple1"]
+    for jid in valid_ids:
+        assert validate_job_id(jid) == jid
+
+    invalid_ids = [
+        "../traversal",
+        "job/123",
+        "job\\123",
+        "job;drop table",
+        "job' or '1'='1",
+        "job with space",
+        "",
+        "job@name",
+    ]
+    for jid in invalid_ids:
+        with pytest.raises(HTTPException) as exc:
+            validate_job_id(jid)
+        assert exc.value.status_code == 400
+        assert "Invalid job_id format" in exc.value.detail
+
+
+def test_submit_job_persists_resolved_output_path(tmp_path: Path, system_probe_path: str) -> None:
+    """Verify submit_job resolves output_path safely and captures it in the background task."""
+    input_file = tmp_path / "book.md"
+    input_file.write_text("# Test Title\n\nHello world", encoding="utf-8")
+    out_file = tmp_path / "sub_dir" / "translated.md"
+
+    db_dir = tmp_path / "ledgers"
+    config = UBTConfig(db_dir=db_dir, allowed_dirs=str(tmp_path))
+    app = create_app(config=config)
+    client = TestClient(app)
+
+    # 1. Traversal attempt in output_path
+    resp = client.post(
+        "/jobs/submit",
+        json={
+            "input_path": str(input_file),
+            # Next to the platform's own system probe, so the deny list (not the
+            # containment fallback) is what answers on every OS.
+            "output_path": str(Path(system_probe_path).with_name("evil_output.md")),
+            "target_lang": "zh",
+        },
+    )
+    assert resp.status_code == 403
+    assert "restricted system directory" in resp.text
+
+    # 2. Sensitive file in output_path
+    resp = client.post(
+        "/jobs/submit",
+        json={
+            "input_path": str(input_file),
+            "output_path": str(tmp_path / ".bashrc"),
+            "target_lang": "zh",
+        },
+    )
+    assert resp.status_code == 403
+    assert "sensitive configuration" in resp.text
+
+    # 3. Valid submission
+    resp = client.post(
+        "/jobs/submit",
+        json={
+            "input_path": str(input_file),
+            "output_path": str(out_file),
+            "target_lang": "zh",
+        },
+    )
+    assert resp.status_code == 202
+    resp.json()["job_id"]
+
+    # Verify status endpoint rejects invalid job IDs
+    resp_bad = client.get("/jobs/../bad_id/status")
+    # FastAPI path routing or validate_job_id returns 400/404
+    assert resp_bad.status_code in (400, 404)
+
+
+def test_default_sandbox_confines_to_cwd_and_db_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Empty UBT_ALLOWED_DIRS must not disable the containment check."""
+    monkeypatch.chdir(tmp_path)
+    cfg = UBTConfig(db_dir=tmp_path / "ledgers")
+
+    outside = tmp_path.parent / "ubt_outside_secret.txt"
+    outside.write_text("secret", encoding="utf-8")
+    try:
+        with pytest.raises(HTTPException) as exc:
+            resolve_secure_path(outside, must_exist=True, config=cfg)
+        assert exc.value.status_code == 403
+    finally:
+        outside.unlink(missing_ok=True)
+
+    (tmp_path / "ledgers").mkdir()
+    inside = tmp_path / "ledgers" / "note.txt"
+    inside.write_text("ok", encoding="utf-8")
+    assert resolve_secure_path(inside, must_exist=True, config=cfg) == inside.resolve()
+
+
+def test_non_loopback_bind_refused_without_isolation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import importlib
+
+    app_module = importlib.import_module("ubt.api.app")
+    for name in ("UBT_API_KEY", "UBT_ALLOWED_DIRS", "UBT_ALLOWED_DIR", "UBT_ALLOW_INSECURE_BIND"):
+        monkeypatch.delenv(name, raising=False)
+    with pytest.raises(SystemExit, match="refusing to bind"):
+        app_module.run_server(host="0.0.0.0", port=1)
+
+
+def test_health_is_open_but_other_routes_are_gated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("UBT_API_KEY", "secret-key")
+    config = UBTConfig(db_dir=tmp_path / "ledgers")
+    client = TestClient(create_app(config=config))
+    # Liveness probes cannot carry credentials.
+    assert client.get("/health").status_code == 200
+    assert client.get("/jobs/job_x/status").status_code == 401
+    assert client.get("/jobs/job_x/status", headers={"X-API-Key": "secret-key"}).status_code == 404
+
+
+def test_job_id_length_is_bounded() -> None:
+    with pytest.raises(HTTPException) as exc:
+        validate_job_id("a" * 129)
+    assert exc.value.status_code == 400
+
+
+def test_page_range_size_is_bounded() -> None:
+    from ubt.core.config import parse_page_ranges
+
+    with pytest.raises(ValueError, match="too large"):
+        parse_page_ranges("1-999999999")
+    assert parse_page_ranges("1-3,5") == {1, 2, 3, 5}

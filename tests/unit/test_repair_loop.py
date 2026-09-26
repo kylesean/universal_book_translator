@@ -1,10 +1,12 @@
+import asyncio
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.repair_loop import RepairLoop
-from ubt.core.ir.models import BlockStatus, BlockType, IRBlock
+from ubt.core.ir.models import BlockStatus, BlockType, ChapterIR, DocumentIR, IRBlock
 from ubt.core.qe.base import BaseQERunner
 from ubt.core.qe.comet_runner import MockQERunner
 from ubt.core.router.provider import BaseModelProvider, MockModelProvider
@@ -746,3 +748,157 @@ async def test_rerank_surfaces_short_score_reply() -> None:
     )
     with pytest.raises(MTQEEvaluationError, match="1 score"):
         await loop.repair_single_block(block)
+
+
+@pytest.mark.asyncio
+async def test_visual_crop_runs_off_the_event_loop(monkeypatch: pytest.MonkeyPatch) -> None:
+    import threading
+    from typing import Any
+
+    import ubt.core.ports as ports
+    from ubt.core.engine.repair_loop import RepairLoop
+    from ubt.core.ir.models import BlockStatus, BoundingBox, IRBlock
+    from ubt.core.qe.comet_runner import MockQERunner
+    from ubt.core.router.provider import MockModelProvider
+    from ubt.core.router.router import ModelRouter
+
+    loop_thread = threading.current_thread()
+    seen: dict[str, threading.Thread] = {}
+
+    def _fake_crop(pdf_path: Any, block: Any, dpi: int = 150) -> None:
+        seen["thread"] = threading.current_thread()
+        return None
+
+    monkeypatch.setattr(ports, "crop_block_image", _fake_crop)
+    monkeypatch.setattr(ports, "is_visual_scalpel_applicable", lambda *a, **k: True)
+
+    repair_loop = RepairLoop(
+        router=ModelRouter(provider=MockModelProvider()), qe_runner=MockQERunner(default_score=0.9)
+    )
+    block = IRBlock(
+        id="b_crop",
+        spine_index=1,
+        source_text="E = mc^2 broken",
+        draft_text="质能方程",
+        status=BlockStatus.REPAIR_PENDING,
+        mtqe_score=0.2,
+        error_flags=["formula_corrupted"],
+        bbox=BoundingBox(page=1, x0=0, y0=0, x1=100, y1=20),
+    )
+    await repair_loop.repair_single_block(block, source_pdf_path=Path("docs/synthetic-duo.pdf"))
+
+    assert "thread" in seen, "visual crop never ran"
+    assert seen["thread"] is not loop_thread
+
+
+class _r0922_OneFastThenHangingRepairLoop:
+    """Repairs one block immediately and never returns for the rest."""
+
+    def __init__(self, fast_block_id: str) -> None:
+        self._fast = fast_block_id
+
+    def select_repair_candidates(self, eligible: list[Any]) -> list[Any]:
+        return list(eligible)
+
+    async def repair_single_block(self, *, block: Any, **kwargs: Any) -> Any:
+        if block.id != self._fast:
+            await asyncio.Event().wait()  # never resolves: the round is cancelled
+        return block.model_copy(
+            update={
+                "target_text": "已付费的修复译文。",
+                "status": BlockStatus.MTQE_PASSED,
+                "repair_rounds": 1,
+                "mtqe_score": 0.82,
+            }
+        )
+
+
+def _r0922_doc_ir(count: int) -> tuple[DocumentIR, ChapterIR]:
+    """A one-chapter document whose block ids match what the tests stamp."""
+    chapter = ChapterIR(
+        doc_id="reg_doc",
+        chapter_id="ch01",
+        title="One",
+        spine_index=1,
+        blocks=[
+            IRBlock(id=f"ch01#b{i:03d}", spine_index=i, source_text=f"Paragraph {i}.")
+            for i in range(1, count + 1)
+        ],
+    )
+    return (
+        DocumentIR(
+            doc_id="reg_doc",
+            source_path="/tmp/reg.md",
+            format_type="markdown",
+            blocks=chapter.blocks,
+        ),
+        chapter,
+    )
+
+
+@pytest.mark.asyncio
+async def test_cancel_mid_repair_round_keeps_the_repairs_already_paid_for(
+    tmp_path: Path,
+) -> None:
+    """A cancel must not throw away a repair the provider already charged for.
+
+    The round used to collect every candidate's update in memory and write them
+    in one batch after ``gather`` returned, so cancelling (or any failure that
+    aborted the round) discarded the completed ones: the block stayed
+    REPAIR_PENDING with its old draft and the resume re-sent the identical
+    prompt. Each candidate is recorded the moment it returns now.
+    """
+    from tests.stage_ctx_factory import build_stage_ctx
+    from ubt.core.engine.stages.repair import run_repair_stage
+
+    doc, chapter = _r0922_doc_ir(3)
+    ledger = SQLiteJobLedger(tmp_path / "repair.sqlite")
+    ledger.init_job("job_repair", doc, target_lang="zh")
+    ledger.append_chapter("job_repair", chapter)
+    ledger.save_checkpoints_batch(
+        [
+            {
+                "block_id": f"ch01#b00{i}",
+                "status": BlockStatus.REPAIR_PENDING,
+                "target_text": f"OLD DRAFT {i}",
+                "mtqe_score": 0.31,
+            }
+            for i in (1, 2, 3)
+        ]
+    )
+    ctx = build_stage_ctx(
+        tmp_path,
+        ledger=ledger,
+        job_id="job_repair",
+        repair_loop=_r0922_OneFastThenHangingRepairLoop("ch01#b001"),
+    )
+
+    async def _drain() -> None:
+        async for _ in run_repair_stage(ctx, defer_unresolved_to_triage=True):
+            pass
+
+    async def _first_persisted_target() -> str:
+        """Wait for b001's repair to reach the ledger (or time out)."""
+        for _ in range(200):
+            await asyncio.sleep(0.01)
+            rows_now = {b.id: b for b in ledger.get_all_blocks("job_repair")}
+            if rows_now["ch01#b001"].target_text != "OLD DRAFT 1":
+                return str(rows_now["ch01#b001"].target_text)
+        return ""
+
+    task = asyncio.create_task(_drain())
+    # The scenario only exists once the first paid repair has landed; before
+    # that there is nothing for the cancel to lose.
+    assert await _first_persisted_target() == "已付费的修复译文。", (
+        "the round's first paid repair never reached the ledger"
+    )
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    rows = {b.id: b for b in ledger.get_all_blocks("job_repair")}
+    assert rows["ch01#b001"].target_text == "已付费的修复译文。", (
+        "the paid repair was lost with the cancel, so a resume bills it again"
+    )
+    assert rows["ch01#b002"].target_text == "OLD DRAFT 2"
+    ledger.close()
