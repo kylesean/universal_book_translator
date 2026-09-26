@@ -681,3 +681,27 @@ async def test_docx_failed_block_stays_labelled(tmp_path: Path) -> None:
     text = "\n".join(p.text for p in Document(str(out)).paragraphs)
     assert "[UBT]" in text, text
     assert "<mark" not in text, text
+
+
+def test_docx_iter_body_items_walks_content_controls() -> None:
+    """Paragraphs inside ``w:sdt/w:sdtContent`` must be extracted, not dropped.
+
+    Content controls are nested under w:sdt rather than direct body children, so
+    the old direct-iteration shipped them untranslated.
+    """
+    from docx.oxml.ns import qn
+
+    from ubt.adapters.docx.adapter import _iter_body_items
+
+    doc = Document()
+    para = doc.add_paragraph("Inside a content control")
+    body = doc.element.body
+    sdt = body.makeelement(qn("w:sdt"), {})
+    content = body.makeelement(qn("w:sdtContent"), {})
+    body.remove(para._p)
+    content.append(para._p)
+    sdt.append(content)
+    body.append(sdt)
+
+    texts = [getattr(item, "text", "") for item in _iter_body_items(doc)]
+    assert any("Inside a content control" in t for t in texts)

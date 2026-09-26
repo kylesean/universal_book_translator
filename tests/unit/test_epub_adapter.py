@@ -805,6 +805,33 @@ def test_epub_bilingual_ordered_list_injects_inside_li() -> None:
 
 
 @pytest.mark.fast
+def test_epub_bilingual_unordered_list_injects_inside_li() -> None:
+    """A <ul> item is an internal container too; the old guard allowed only <ol>."""
+    html = b"""<?xml version="1.0" encoding="utf-8"?>
+    <html xmlns="http://www.w3.org/1999/xhtml">
+    <head><title>Test</title></head>
+    <body>
+    <ul>
+        <li>Item One</li>
+        <li>Item Two</li>
+    </ul>
+    </body>
+    </html>"""
+
+    adapter = EPUBAdapter()
+    translation_map = {"ch001#p0000": "A.\n\nB.", "ch001#p0001": "第二项"}
+    block_names = {"p", "li", "td", "th", "h1", "h2", "h3", "h4", "h5", "h6"}
+    out_bytes, _count = adapter._inject_bilingual_dom(
+        html, "ch001", translation_map, block_names, bilingual_mode="bilingual"
+    )
+    out_str = out_bytes.decode("utf-8")
+    # One translation per <li>: a multi-paragraph target nests inside its own
+    # item instead of adding bullets.
+    assert out_str.count("<li") == 2, out_str
+    assert "A." in out_str and "B." in out_str
+
+
+@pytest.mark.fast
 def test_epub_and_html_nested_list_direct_text_preserved() -> None:
     # A list item having direct text AND a nested list
     html = b"""<?xml version="1.0" encoding="utf-8"?>

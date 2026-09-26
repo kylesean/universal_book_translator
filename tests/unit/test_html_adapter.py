@@ -207,6 +207,41 @@ async def test_html_adapter_monolingual_mode() -> None:
     assert "Source english paragraph." not in content
 
 
+async def test_html_adapter_monolingual_keeps_multiple_paragraphs() -> None:
+    """Monolingual output must split on blank lines like the bilingual branch.
+
+    Emitting the whole sanitized fragment as one text node let HTML collapse the
+    paragraph breaks, losing structure.
+    """
+    tmp = Path(tempfile.mkdtemp())
+    src_html = tmp / "index.html"
+    src_html.write_text("<html><body><p>Source.</p></body></html>", encoding="utf-8")
+    manifest = BookManifest(
+        doc_id="test_html",
+        title="HTML Test",
+        source_path=str(src_html),
+        chapters=[
+            ChapterMeta(
+                chapter_id="ch001", title="Chapter 1", spine_index=1, source_file="index.html"
+            )
+        ],
+    )
+    blocks = [
+        IRBlock(
+            id="ch001#p00000",
+            spine_index=1,
+            flow_id=FlowID.MAIN_STORY,
+            source_text="Source.",
+            target_text="第一段。\n\n第二段。",
+        )
+    ]
+    out = tmp / "out_multi.html"
+    await HTMLAdapter().render_blocks(manifest, blocks, "zh", out, bilingual_mode="monolingual")
+    content = out.read_text(encoding="utf-8")
+    assert "第一段。" in content and "第二段。" in content
+    assert content.count("<p") == 2, content
+
+
 async def test_html_adapter_preserves_angle_bracket_prose() -> None:
     """Regression (H1): translated technical prose containing ``List<T>``,
     ``<stdio.h>`` or ``a<b`` must survive to the output instead of being

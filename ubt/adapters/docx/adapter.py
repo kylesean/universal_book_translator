@@ -75,13 +75,26 @@ def _resolve_east_asia_font(target_lang: str | None) -> str | None:
 
 
 def _iter_body_items(doc: DocumentObject) -> list[Paragraph | Table]:
-    """Body items in true document order (paragraphs and top-level tables)."""
+    """Body items in true document order (paragraphs and top-level tables).
+
+    Recurses into ``w:sdt`` content controls: their paragraphs/tables are nested
+    under ``w:sdt/w:sdtContent`` rather than direct body children, so a document
+    built from content controls used to be extracted (and shipped) untranslated.
+    """
     items: list[Paragraph | Table] = []
-    for child in doc.element.body.iterchildren():
-        if child.tag == qn("w:p"):
-            items.append(Paragraph(child, doc))
-        elif child.tag == qn("w:tbl"):
-            items.append(Table(child, doc))
+
+    def _walk(container: Any) -> None:
+        for child in container.iterchildren():
+            if child.tag == qn("w:p"):
+                items.append(Paragraph(child, doc))
+            elif child.tag == qn("w:tbl"):
+                items.append(Table(child, doc))
+            elif child.tag == qn("w:sdt"):
+                content = child.find(qn("w:sdtContent"))
+                if content is not None:
+                    _walk(content)
+
+    _walk(doc.element.body)
     return items
 
 
@@ -710,6 +723,11 @@ class DOCXAdapter(BaseDocumentAdapter):
             "w", dir=output_path.parent, suffix=".docx", delete=False
         ) as tf:
             temp_name = tf.name
-        doc.save(temp_name)
-        Path(temp_name).replace(output_path)
+        try:
+            doc.save(temp_name)
+            Path(temp_name).replace(output_path)
+        except Exception:
+            # A failed save must not leave an orphan .docx temp next to the output.
+            Path(temp_name).unlink(missing_ok=True)
+            raise
         return injected

@@ -350,6 +350,36 @@ async def test_monolingual_markdown_keeps_heading_structure(tmp_path: Path) -> N
 
 
 @pytest.mark.asyncio
+async def test_markdown_render_removes_temp_file_when_write_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed write must not leave an orphan temp file in the output directory."""
+    import ubt.adapters.markdown.adapter as md_adapter
+
+    adapter = MarkdownAdapter()
+    manifest = BookManifest(doc_id="md_fail", title="Test", source_path="book.md")
+    blocks = [
+        IRBlock(
+            id="b1",
+            spine_index=1,
+            flow_id=FlowID.MAIN_STORY,
+            source_text="Hello.",
+            target_text="你好。",
+        )
+    ]
+    out = tmp_path / "out.md"
+
+    def _boom(_fd: int) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(md_adapter.os, "fsync", _boom)
+    with pytest.raises(OSError):
+        await adapter.render_blocks(manifest, blocks, "zh", out, bilingual_mode="target")
+    leftovers = [p.name for p in tmp_path.iterdir() if p.name != "out.md"]
+    assert leftovers == [], leftovers
+
+
+@pytest.mark.asyncio
 async def test_markdown_adapter_heading_not_merged_with_prose(tmp_path: Path) -> None:
     md_content = "# Title\nFirst line of body prose without blank line.\nSecond line.\n"
     f_path = tmp_path / "heading_prose.md"

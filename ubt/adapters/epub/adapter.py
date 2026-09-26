@@ -644,7 +644,7 @@ class EPUBAdapter(BaseDocumentAdapter):
                     # Sanitize every paragraph exactly like the
                     # single-paragraph path below, so LLM inline markup is
                     # parsed consistently instead of rendering literally.
-                    in_cell = leaf.name in ("td", "th")
+                    in_cell = leaf.name in ("td", "th", "li")
                     last_node: Tag = leaf
                     for i, p_text in enumerate(paras):
                         sanitized = sanitize_html_fragment(p_text)
@@ -685,9 +685,7 @@ class EPUBAdapter(BaseDocumentAdapter):
             # as formatting instead of literal text.
             if "\n\n" in target_text:
                 paras = [p.strip() for p in target_text.split("\n\n") if p.strip()]
-                is_internal_child = leaf.name in ("td", "th") or (
-                    leaf.name == "li" and leaf.parent and leaf.parent.name == "ol"
-                )
+                is_internal_child = leaf.name in ("td", "th", "li")
                 if is_internal_child:
                     # Inside a table cell or ordered list item: append inside the element,
                     # never as a sibling (a sibling cell doubles column count, sibling li
@@ -716,9 +714,7 @@ class EPUBAdapter(BaseDocumentAdapter):
                 # before any HTML parsing so <script>/handlers/javascript:
                 # URLs can never reach the stored EPUB.
                 sanitized_target = sanitize_html_fragment(target_text)
-                is_internal_child = leaf.name in ("td", "th") or (
-                    leaf.name == "li" and leaf.parent and leaf.parent.name == "ol"
-                )
+                is_internal_child = leaf.name in ("td", "th", "li")
                 # Inside a table cell or ordered list: append a <div> *inside* the element so the
                 # row/column structure and list numbering are preserved; otherwise match leaf tag.
                 new_tag = soup.new_tag("div") if is_internal_child else soup.new_tag(leaf.name)

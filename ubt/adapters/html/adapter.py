@@ -169,20 +169,37 @@ class HTMLAdapter(BaseDocumentAdapter):
                     continue
 
                 if is_monolingual:
+                    # Split on blank lines like the bilingual branch: emitting the
+                    # whole fragment let HTML collapse the paragraph breaks.
+                    paras = [p.strip() for p in target_text.split("\n\n") if p.strip()] or [
+                        target_text
+                    ]
+                    is_internal_child = leaf.name in ("td", "th", "li")
                     leaf.clear()
-                    # Always parse: sanitize_html_fragment already neutralised
-                    # stray ``<`` into ``&lt;`` entities, so assigning to
-                    # .string would double-escape them.
-                    parsed_fragment = BeautifulSoup(target_text, "html.parser")
-                    for child in list(parsed_fragment.contents):
-                        leaf.append(child)
+                    last_node: Tag = leaf
+                    for i, p_text in enumerate(paras):
+                        parsed_fragment = BeautifulSoup(p_text, "html.parser")
+                        if i == 0:
+                            container: Tag = leaf
+                        elif is_internal_child:
+                            # Inside a cell / list item extra paragraphs nest as a
+                            # <div>; a sibling <li> would add list items.
+                            container = soup.new_tag("div")
+                        else:
+                            container = soup.new_tag(leaf.name if leaf.name else "p")
+                        for child in list(parsed_fragment.contents):
+                            container.append(child)
+                        if i > 0:
+                            if is_internal_child:
+                                leaf.append(container)
+                            else:
+                                last_node.insert_after(container)
+                        last_node = container
                 else:
-                    # Inside a table cell or ordered list item, append a <div> *inside* the element
+                    # Inside a table cell or list item, append a <div> *inside* the element
                     # instead of a sibling <td>/<th>/<li> — a sibling cell would double the column count
-                    # and a sibling <li> would double ordered list item counters.
-                    is_internal_child = leaf.name in ("td", "th") or (
-                        leaf.name == "li" and leaf.parent and leaf.parent.name == "ol"
-                    )
+                    # and a sibling <li> would add list items.
+                    is_internal_child = leaf.name in ("td", "th", "li")
                     source_classes = list(leaf.get("class") or [])
                     target_classes = source_classes + [_TARGET_CSS_CLASS]
 
@@ -197,7 +214,7 @@ class HTMLAdapter(BaseDocumentAdapter):
                                     target_tag.append(child)
                                 leaf.append(target_tag)
                         else:
-                            last_node: Tag = leaf
+                            last_node = leaf
                             for p_text in paras:
                                 tag_name = leaf.name if leaf.name else "p"
                                 target_tag = soup.new_tag(tag_name)
@@ -229,8 +246,12 @@ class HTMLAdapter(BaseDocumentAdapter):
         # so it goes through the same L-4 scrub the EPUB members get: target
         # text is already sanitized, but a dirty *source* would otherwise ship
         # <script>, onload= handlers and javascript: links to the reader.
-        tmp_path.write_text(scrub_source_document(str(soup)), encoding="utf-8")
-        tmp_path.replace(output_path)
+        try:
+            tmp_path.write_text(scrub_source_document(str(soup)), encoding="utf-8")
+            tmp_path.replace(output_path)
+        except Exception:
+            tmp_path.unlink(missing_ok=True)
+            raise
 
         if injected == 0:
             logger.warning(

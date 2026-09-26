@@ -442,16 +442,23 @@ class MarkdownAdapter(BaseDocumentAdapter):
         full_content = "\n\n".join(rendered_sections) + "\n"
 
         # Atomic POSIX write
-        with tempfile.NamedTemporaryFile(
-            "w",
-            dir=output_path.parent,
-            delete=False,
-            encoding="utf-8",
-        ) as tf:
-            tf.write(full_content)
-            tf.flush()
-            os.fsync(tf.fileno())
-            temp_name = tf.name
-
-        Path(temp_name).replace(output_path)
+        temp_name = ""
+        try:
+            with tempfile.NamedTemporaryFile(
+                "w",
+                dir=output_path.parent,
+                delete=False,
+                encoding="utf-8",
+            ) as tf:
+                temp_name = tf.name
+                tf.write(full_content)
+                tf.flush()
+                os.fsync(tf.fileno())
+            Path(temp_name).replace(output_path)
+        except Exception:
+            # A failed write/fsync/replace must not leave an orphan temp file in
+            # the output directory.
+            if temp_name:
+                Path(temp_name).unlink(missing_ok=True)
+            raise
         return output_path
