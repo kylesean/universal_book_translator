@@ -905,3 +905,32 @@ async def test_cancel_mid_repair_round_keeps_the_repairs_already_paid_for(
     )
     assert rows["ch01#b002"].target_text == "OLD DRAFT 2"
     ledger.close()
+
+
+@pytest.mark.asyncio
+async def test_glossary_aware_low_rescore_does_not_erase_violation() -> None:
+    """A surviving glossary violation caps the re-score at its own band (0.25).
+
+    That can still exceed a *lower* hard-defect band the draft carried (here
+    0.10), so ``cleaned`` was True and a glossary-aware runner wiped the marker —
+    erasing the evidence before triage could classify it Major. Only a re-score
+    at/above the pass line is evidence the term came back.
+    """
+    from ubt.core.qe.comet_runner import GLOSSARY_VIOLATION_MARKER
+
+    router = ModelRouter(provider=MockModelProvider(default_response="网络模型"))
+    qe = GlossaryAwareScoreQERunner(next_scores=[0.25])
+    repair_loop = RepairLoop(router=router, qe_runner=qe, qe_threshold=0.75, max_rounds=2)
+
+    block = IRBlock(
+        id="b_low",
+        spine_index=1,
+        source_text="We use a neural network.",
+        draft_text="我们用了网络模型。",
+        status=BlockStatus.REPAIR_PENDING,
+        mtqe_score=0.10,
+        repair_rounds=0,
+        error_flags=[f"{GLOSSARY_VIOLATION_MARKER}: dropped 'neural network'"],
+    )
+    repaired = await repair_loop.repair_single_block(block)
+    assert any(GLOSSARY_VIOLATION_MARKER in f for f in repaired.error_flags)

@@ -884,3 +884,29 @@ def test_fallback_score_flags_an_opening_translation_tag_leak() -> None:
 
     assert calculate_fallback_score("some source text here", "<translation>leak") == 0.20
     assert calculate_fallback_score("some source text here", "clean target text") > 0.20
+
+
+def test_comet_checkpoint_load_failure_degrades_to_heuristic(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed checkpoint load must fall back, not exit(3) and kill the job's QE.
+
+    Only reachable when torch/comet are installed (the qe extra); the default
+    dev env hits the ImportError branch instead.
+    """
+    import argparse
+
+    pytest.importorskip("torch")
+    pytest.importorskip("comet")
+
+    from ubt.core.qe import comet_score_ipc
+
+    def _boom(_model: str) -> str:
+        raise RuntimeError("corrupt checkpoint")
+
+    monkeypatch.setattr(comet_score_ipc, "resolve_checkpoint", _boom)
+    score, engine = comet_score_ipc.build_scorer(
+        argparse.Namespace(mock=False, model="whatever", batch_size=8)
+    )
+    assert engine == "heuristic_fallback"
+    assert score([{"src": "a", "mt": "b"}])[0] > 0

@@ -453,7 +453,14 @@ class RepairLoop:
                     # pass line, so ``cleaned`` is False), which means its clean
                     # re-score *is* evidence — clearing the marker there is what
                     # lets a genuinely fixed term reach REPAIRED.
-                    if self.qe_runner.is_glossary_aware():
+                    if self.qe_runner.is_glossary_aware() and new_score >= self.qe_threshold:
+                        # A glossary-aware re-score is evidence only when it
+                        # reaches the pass line. A surviving violation caps the
+                        # score at its own band (0.25), which can still exceed a
+                        # *lower* hard-defect band carried by the draft (leak
+                        # 0.10, fabricated 0.15, repetition 0.20) — so `cleaned`
+                        # alone is not evidence and must not erase the violation
+                        # before triage can classify it Major.
                         block.error_flags = []
                     else:
                         block.error_flags = [

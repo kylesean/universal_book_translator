@@ -59,6 +59,16 @@ def build_scorer(
             "Falling back to deterministic heuristic scorer.\n"
         )
         return _fallback_score, "heuristic_fallback"
+    except Exception as exc:
+        # A corrupt/undownloadable checkpoint, a CUDA OOM, or an incompatible
+        # torch build must degrade to the deterministic scorer this module
+        # documents — not propagate to ``serve``'s exit(3), which kills the
+        # whole job's QE/repair pass.
+        sys.stderr.write(
+            f"Warning: COMET checkpoint load failed ({type(exc).__name__}: {exc}); "
+            "falling back to deterministic heuristic scorer.\n"
+        )
+        return _fallback_score, "heuristic_fallback"
 
     def score(pairs: list[dict[str, Any]]) -> list[float]:
         data = [{"src": str(p.get("src", "")), "mt": str(p.get("mt", ""))} for p in pairs]
