@@ -62,3 +62,23 @@ def test_backticked_references_resolve() -> None:
                     )
                     break
     assert not problems, "stale code references:\n" + "\n".join(problems)
+
+
+#: A test file is named for the module it pins, never for the review activity that
+#: produced it (AGENTS.md §1 "One Behavior, One Home"). Review/round/date names
+#: scatter one module's coverage across files and hide it from the next reviewer.
+_ACTIVITY_NAMED = re.compile(
+    r"(review|audit|round\d|phase\d)|(_\d{4}_\d{2}_\d{2})|(_fixes?|_regressions?)$"
+)
+
+
+def test_test_files_are_named_for_their_module() -> None:
+    offenders = sorted(
+        str(path.relative_to(_REPO_ROOT))
+        for path in (_REPO_ROOT / "tests").rglob("test_*.py")
+        if _ACTIVITY_NAMED.search(path.stem)
+    )
+    assert not offenders, (
+        "test files named for the review that produced them instead of the module "
+        "they pin; move each case into its module's canonical file:\n" + "\n".join(offenders)
+    )
