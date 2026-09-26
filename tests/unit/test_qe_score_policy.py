@@ -72,7 +72,8 @@ def _placeholder_sample() -> list[IRBlock]:
             mtqe_score=PLACEHOLDER_MTQE_SCORE,
             skip_translate=True,
         ),
-        # TM exact hit: same placeholder, not a skip.
+        # TM exact hit: same stamp, but excluded by provenance (tm_hit), not by
+        # the magic score value.
         IRBlock(
             id="s04",
             flow_id=FlowID.MAIN_STORY,
@@ -82,6 +83,7 @@ def _placeholder_sample() -> list[IRBlock]:
             target_text="重复的句子。",
             status=BlockStatus.MTQE_PASSED,
             mtqe_score=PLACEHOLDER_MTQE_SCORE,
+            tm_hit=True,
         ),
         # Never scored (FastPass-cleared style): NULL, excluded everywhere.
         IRBlock(
@@ -138,6 +140,7 @@ def test_status_and_report_averages_agree_on_a_placeholder_sample(tmp_path: Path
             mtqe_score=b.mtqe_score,
             repair_rounds=b.repair_rounds,
             error_flags=b.error_flags,
+            tm_hit=b.tm_hit,
         )
 
     report = build_quality_report(
@@ -178,6 +181,28 @@ def test_status_and_report_averages_agree_on_a_placeholder_sample(tmp_path: Path
     assert round(float(naive["avg"]), 4) == 0.805
     assert round(float(naive["avg"]), 4) != report_avg
     ledger.close()
+
+
+def test_a_genuine_perfect_score_is_counted_not_mistaken_for_a_placeholder() -> None:
+    """A real 1.0 (neural/LLM judge, or a repair boost) must not be dropped.
+
+    The old value-based filter (``score != 1.0``) could not tell a genuine
+    perfect score from the skip/TM stamp, so it silently removed every real
+    1.0 from ``avg_qe`` / ``min_qe`` / the percentiles.
+    """
+    real_perfect = IRBlock(
+        id="perfect",
+        flow_id=FlowID.MAIN_STORY,
+        spine_index=1,
+        block_type=BlockType.NARRATIVE,
+        source_text="A flawless paragraph.",
+        target_text="一段完美的译文。",
+        status=BlockStatus.MTQE_PASSED,
+        mtqe_score=1.0,
+    )
+    assert is_qe_scored(real_perfect) is True
+    assert qe_scored_values([real_perfect]) == [1.0]
+    assert average_qe_scored([real_perfect]) == 1.0
 
 
 def test_empty_population_reports_zero_not_a_fabricated_score() -> None:

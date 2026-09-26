@@ -141,6 +141,10 @@ class IRBlock(BaseModel):
     # Status and quality metrics
     status: BlockStatus = BlockStatus.PENDING
     skip_translate: bool = False  # Code or formulas skipped from translation
+    #: Exact translation-memory hit: ``mtqe_score`` is a pass stamp, not a
+    #: measurement, so score aggregates exclude it by provenance (see
+    #: ``ubt.core.qe.score_policy``) rather than by a magic score value.
+    tm_hit: bool = False
     glossary_hits: list[str] = Field(default_factory=list)  # Matched glossary terms
     mtqe_score: float | None = None  # Quality metric score (0.00 ~ 1.00)
     repair_rounds: int = 0  # Completed targeted repair iterations (max 2)
