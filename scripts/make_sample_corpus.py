@@ -404,8 +404,11 @@ def make_damaged_variant(src: Path, dst: Path) -> None:
                 except Exception:
                     continue
         tmp = dst.with_name(f"{dst.name}.tmp{os.getpid()}.pdf")
-        pdf.save(tmp)
-        tmp.replace(dst)
+        try:
+            pdf.save(tmp)
+            tmp.replace(dst)
+        finally:
+            tmp.unlink(missing_ok=True)
 
 
 #: Files that make up the corpus; used by the pytest self-heal completeness check.
@@ -458,6 +461,7 @@ def main() -> int:
     print(f"synthetic-duo.pdf: {n2} pages (target 26)")
     if n1 != 13 or n2 != 26:
         print("page-count contract NOT met - tune npad and re-run", file=sys.stderr)
+        return 1
     return 0
 
 

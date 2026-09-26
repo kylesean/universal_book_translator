@@ -23,7 +23,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from oxide_render_ab import DPIS, PAGES, compare_pair  # noqa: E402
+from oxide_render_ab import DPIS, PAGES, compare_pair, main  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 # The original real documents were removed in the 2026-09 legal review; the
@@ -71,3 +71,9 @@ def test_render_pair_matches(pdf: Path, dpi: int) -> None:
             f"{pdf.name} p{page}@{dpi}: mismatch ratio {result.mismatch_ratio:.4f} "
             f"> {result.threshold}"
         )
+
+
+def test_main_rejects_a_missing_input_path() -> None:
+    """A nonexistent path must fail the gate, not be filtered into a green 0."""
+    rc = main(["oxide_render_ab.py", str(REPO_ROOT / "does-not-exist.pdf")])
+    assert rc == 2

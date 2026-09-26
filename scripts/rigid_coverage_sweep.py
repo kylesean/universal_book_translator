@@ -158,7 +158,11 @@ def main() -> int:
     args = parser.parse_args()
 
     ledger = SQLiteJobLedger(args.ledger, read_only=True)
-    base = ledger.get_all_blocks(args.job_id)
+    try:
+        base = ledger.get_all_blocks(args.job_id)
+    finally:
+        # Close the sqlite connection/handle; the ledger is used no further.
+        ledger.close()
     if not base:
         print(f"no blocks for {args.job_id!r} in {args.ledger}", file=sys.stderr)
         return 2

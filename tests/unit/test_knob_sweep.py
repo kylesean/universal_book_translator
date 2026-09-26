@@ -86,17 +86,20 @@ def test_int_knobs_do_not_sweep_as_floats() -> None:
     assert ratio.value_at(1 / 1.5) == pytest.approx(ROW_MERGE_Y_TOL / 1.5)
 
 
-def test_parse_failures_extracts_nodeids_only() -> None:
+def test_parse_failures_extracts_failed_and_error_nodeids() -> None:
+    """ERROR lines are real measurements: a knob that breaks collection must be
+    seen, not read as "no reaction" (`INVISIBLE`)."""
     stdout = (
         ".....................\n"
         "FAILED tests/unit/test_text_fit.py::test_squeezed_width - assert 0.0 > 0\n"
         "FAILED tests/baselines/test_baselines.py::test_baseline_call_of_the_wild\n"
         "ERROR tests/unit/test_broken.py\n"
-        "2 failed, 21 passed in 3.45s\n"
+        "1 failed, 1 error, 21 passed in 3.45s\n"
     )
     assert sweep.parse_failures(stdout) == {
         "tests/unit/test_text_fit.py::test_squeezed_width",
         "tests/baselines/test_baselines.py::test_baseline_call_of_the_wild",
+        "tests/unit/test_broken.py",
     }
 
 

@@ -5,6 +5,8 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
+import pytest
+
 _MODULE_PATH = Path(__file__).resolve().parents[2] / "scripts" / "fidelity_baseline.py"
 _spec = importlib.util.spec_from_file_location("fidelity_baseline", _MODULE_PATH)
 assert _spec is not None and _spec.loader is not None
@@ -50,3 +52,26 @@ def test_format_summary_empty_is_safe() -> None:
     s = fb.format_summary([])
     assert s["documents_measured"] == 0
     assert s["non_text_residual_mean"] is None
+
+
+def test_main_fails_when_no_page_is_measurable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A document that measured nothing must not print a perfect 0.0 and exit 0.
+
+    compute_render_fidelity selects pages from the block list; with none it
+    returns pages_measured=0 and residual 0.0 for a measurement that never ran.
+    """
+    src = tmp_path / "src"
+    art = tmp_path / "out"
+    src.mkdir()
+    art.mkdir()
+    (src / "a.pdf").write_bytes(b"%PDF")
+    (art / "a.pdf").write_bytes(b"%PDF")
+
+    monkeypatch.setattr(
+        "ubt.adapters.pdf.render_fidelity.compute_render_fidelity",
+        lambda *_a, **_k: {"pages_measured": 0, "skipped_reason": "no_measurable_pages"},
+    )
+    rc = fb.main(["--source-dir", str(src), "--artifact-dir", str(art)])
+    assert rc == 1

@@ -28,8 +28,11 @@ dashboard.
 
 import argparse
 import asyncio
+import atexit
 import json
+import os
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -123,8 +126,29 @@ def estimate_cost(calls: list[dict], p_in: float, p_hit: float, p_out: float) ->
     return total
 
 
+def _resolve_prices(args: argparse.Namespace) -> tuple[float, float, float, bool]:
+    """``(input, cache_hit, output, priced)`` from args.
+
+    ``None`` means "the operator supplied no rate", which is what makes a run
+    *unpriced*; the truthiness of a defaulted 0.27 never could (it was always
+    truthy, so the null-cost branch was dead and every model was billed at
+    DeepSeek rates). DeepSeek's deepseek-chat rates are the fallback.
+    """
+    price_input = args.price_input if args.price_input is not None else 0.27
+    price_cache_hit = args.price_cache_hit if args.price_cache_hit is not None else 0.07
+    price_output = args.price_output if args.price_output is not None else 1.10
+    priced = (
+        args.price_input is not None
+        or args.price_cache_hit is not None
+        or args.price_output is not None
+    )
+    return price_input, price_cache_hit, price_output, priced
+
+
 async def run(args: argparse.Namespace) -> None:
     api_key = require_api_key()
+
+    price_input, price_cache_hit, price_output, _ = _resolve_prices(args)
 
     src = Path(args.input)
     if not src.exists():
@@ -132,7 +156,14 @@ async def run(args: argparse.Namespace) -> None:
 
     tmp_truncated: Path | None = None
     if args.max_chapters and src.suffix.lower() in (".md", ".txt"):
-        tmp_truncated = Path(f"/tmp/ubt_benchmark_{src.stem}_c{args.max_chapters}{src.suffix}")
+        # Unique path (concurrent runs must not share one) cleaned up at exit
+        # (the script has no single try/finally around the whole run).
+        fd, tmp_name = tempfile.mkstemp(
+            prefix=f"ubt_benchmark_{src.stem}_c{args.max_chapters}_", suffix=src.suffix
+        )
+        os.close(fd)
+        tmp_truncated = Path(tmp_name)
+        atexit.register(tmp_truncated.unlink, missing_ok=True)
         src = truncate_markdown_chapters(src, args.max_chapters, tmp_truncated)
         print(f"[benchmark] truncated to first {args.max_chapters} chapters -> {src}")
 
@@ -217,14 +248,14 @@ async def run(args: argparse.Namespace) -> None:
         print(f"{kind:<10} {len(cs):>6} {avg_lat:>10.2f}s {pt:>11} {ct:>10}")
 
     totals = provider.usage_totals
-    cost = estimate_cost(calls, args.price_input, args.price_cache_hit, args.price_output)
+    cost = estimate_cost(calls, price_input, price_cache_hit, price_output)
     cache_hit = sum(c.get("prompt_cache_hit_tokens", 0) or 0 for c in calls)
     print(
         f"\ntotals: {totals['calls']} calls, {totals['prompt_tokens']} prompt tok "
         f"(cache-hit {cache_hit}), {totals['completion_tokens']} completion tok"
     )
     print(
-        f"estimated cost: ${cost:.4f}  (in ${args.price_input}/M, hit ${args.price_cache_hit}/M, out ${args.price_output}/M)"
+        f"estimated cost: ${cost:.4f}  (in ${price_input}/M, hit ${price_cache_hit}/M, out ${price_output}/M)"
     )
 
     report_path = out_path.with_name(f"{out_path.stem}_quality_report.json")
@@ -286,7 +317,7 @@ def _write_committed_metrics(
     # A run against a model this tool has no rate for must write null, not 0.0:
     # the pipeline's own cost KPI already collapses to a fake zero for exactly
     # this case, and a committed benchmark must not repeat it.
-    priced = bool(args.price_input or args.price_cache_hit or args.price_output)
+    price_input, price_cache_hit, price_output, priced = _resolve_prices(args)
     out.write_text(
         json.dumps(
             {
@@ -303,9 +334,9 @@ def _write_committed_metrics(
                 "models": {"draft": args.draft_model, "repair": args.repair_model},
                 "prices_usd_per_mtok": (
                     {
-                        "input": args.price_input,
-                        "cache_hit": args.price_cache_hit,
-                        "output": args.price_output,
+                        "input": price_input,
+                        "cache_hit": price_cache_hit,
+                        "output": price_output,
                     }
                     if priced
                     else None
@@ -358,9 +389,9 @@ def build_args(argv: list[str]) -> argparse.Namespace:
     ap.add_argument("--repair-model", default="deepseek-chat")
     ap.add_argument("--base-url", default="https://api.deepseek.com")
     ap.add_argument("--api-mode", default="chat", choices=["chat", "responses"])
-    ap.add_argument("--price-input", type=float, default=0.27)
-    ap.add_argument("--price-cache-hit", type=float, default=0.07)
-    ap.add_argument("--price-output", type=float, default=1.10)
+    ap.add_argument("--price-input", type=float, default=None)
+    ap.add_argument("--price-cache-hit", type=float, default=None)
+    ap.add_argument("--price-output", type=float, default=None)
     ap.add_argument("--job-id", default=None)
     ap.add_argument(
         "--metrics-dir",

@@ -81,11 +81,21 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     results: list[dict[str, object]] = []
+    failures = 0
     for src, art in pairs:
-        # blocks=[] means mask nothing (compare whole page); for a true
-        # coverage number pass the block IR. The harness focuses on the
-        # non-text residual invariant, which needs no boxes.
+        # compute_render_fidelity selects pages from ``blocks``; an empty list
+        # means *no pages are compared*, not "compare the whole page", and it
+        # returns residual 0.0 — a perfect score for a measurement that never
+        # ran. Fail loudly rather than printing a false 0.0000.
         stats = compute_render_fidelity(src, art, [], dpi=args.dpi, max_pages=args.pages)
+        if not stats.get("pages_measured", 0):
+            print(
+                f"{src.name}: ERROR — no measurable pages "
+                f"({stats.get('skipped_reason') or 'unknown'})",
+                file=sys.stderr,
+            )
+            failures += 1
+            continue
         stats["document"] = src.name
         results.append(stats)
         print(
@@ -102,7 +112,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"wrote {args.output}")
     else:
         print(text)
-    return 0
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":

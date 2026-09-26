@@ -125,7 +125,9 @@ def parse_failures(pytest_stdout: str) -> set[str]:
     found: set[str] = set()
     for line in pytest_stdout.splitlines():
         parts = line.split()
-        if line.startswith("FAILED ") and len(parts) > 1:
+        # ERROR too: a collection/import/setup error previously read as
+        # "no reaction", a false measurement.
+        if line.startswith(("FAILED ", "ERROR ")) and len(parts) > 1:
             found.add(parts[1])
     return found
 
@@ -160,6 +162,10 @@ def run_cell(label: str, env: dict[str, str], targets: tuple[str, ...], timeout:
     lines = (completed.stdout or "").splitlines()
     result.failures = parse_failures(completed.stdout or "")
     result.summary = lines[-1].strip() if lines else "no output"
+    if completed.returncode not in (0, 1):
+        # 0 = pass, 1 = test failures; 2+ = collection/internal error or "no
+        # tests ran". A knob that breaks collection must not read as "no reaction".
+        result.error = f"pytest exited {completed.returncode}: {result.summary}"
     return result
 
 

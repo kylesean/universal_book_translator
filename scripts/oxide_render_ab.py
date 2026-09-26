@@ -124,7 +124,16 @@ def main(argv: list[str]) -> int:
         print("pdftoppm unavailable — cannot A/B", file=sys.stderr)
         return 2
     pdfs = [Path(a) for a in argv[1:]] if len(argv) > 1 else list(DEFAULT_PDFS)
-    pdfs = [p for p in pdfs if p.exists()]
+    # A missing path must fail the gate, not be silently dropped: filtering it
+    # out made a run that compared nothing print "0 failure(s)" and exit 0.
+    missing = [p for p in pdfs if not p.exists()]
+    if missing:
+        for p in missing:
+            print(f"missing input PDF: {p}", file=sys.stderr)
+        return 2
+    if not pdfs:
+        print("no input PDFs to compare", file=sys.stderr)
+        return 2
     failures = 0
     print(
         f"{'pdf':38} {'pg':>3} {'dpi':>4}  {'oxide':>11} {'pdftoppm':>11}  "
