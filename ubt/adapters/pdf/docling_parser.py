@@ -196,11 +196,26 @@ def configure_hf_environment(*, enrich: bool = False) -> None:
                 "ALL_PROXY",
             )
         )
+        mirror_opted_in = os.environ.get("UBT_ALLOW_HF_MIRROR", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        )
         if not has_proxy and "HF_ENDPOINT" not in os.environ:
-            os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
-            logger.info(
-                "Auto-configured HF_ENDPOINT=https://hf-mirror.com for Hugging Face model downloads"
-            )
+            if mirror_opted_in:
+                os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+                logger.info(
+                    "HF_ENDPOINT=https://hf-mirror.com for Hugging Face model downloads "
+                    "(UBT_ALLOW_HF_MIRROR is set)."
+                )
+            else:
+                # Repointing model downloads at a third party is an egress
+                # decision the operator must make: same posture as the offline
+                # retry ladder below, which only switches with the opt-in.
+                logger.info(
+                    "Uncached Docling models will download from huggingface.co; set "
+                    "UBT_ALLOW_HF_MIRROR=1 to use https://hf-mirror.com instead."
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -484,6 +499,7 @@ def extract_with_docling(
             # subprocess_env()) would otherwise use it silently.
             endpoint_before = os.environ.get("HF_ENDPOINT")
             try:
+                retry_succeeded = False
                 if "OfflineMode" in str(type(exc)) or "offline" in str(exc).lower():
                     os.environ.pop("HF_HUB_OFFLINE", None)
                     proxied = any(
@@ -524,10 +540,18 @@ def extract_with_docling(
                     converter = _make_converter(options)
                     try:
                         doc = _convert()
+                        retry_succeeded = True
                     except Exception as retry_exc:
                         exc = retry_exc
+                # A successful offline retry already produced the enriched
+                # document. Falling into the enrichment fallback below (keyed
+                # on the stale offline `exc`) discarded it and re-converted with
+                # the VLM disabled — untested because every offline-ladder case
+                # used enrich=False.
+                if retry_succeeded:
+                    pass
                 # Graceful degradation: if formula enrichment caused failure/OOM, fallback to plain extraction
-                if options.do_formula_enrichment:
+                elif options.do_formula_enrichment:
                     logger.warning(
                         "Docling formula enrichment failed (%s); gracefully falling back to extraction without VLM (do_formula_enrichment=False)",
                         exc,
