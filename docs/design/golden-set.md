@@ -1,8 +1,10 @@
 # Golden Set (baseline corpora & KPI goldens)
 
+> **Status**: 🟢 living document (updated with the test tiers; code symbols are authoritative)
+
 The baseline contract for this repository. When
 `tests/baselines/standard-alice/SOURCE.md` says "the baseline contract is now
-owned by `tests/baselines/test_baselines.py` and `docs/golden-set.md`", this is
+owned by `tests/baselines/test_baselines.py` and `docs/design/golden-set.md`", this is
 the second half of that sentence: what the golden set *is*, what a red run means,
 and how to change it without laundering a regression into the new baseline.
 
@@ -54,9 +56,10 @@ Rules that make a regeneration honest (KPI added ⇒ re-record in the same chang
 under `strict_names`; review the diff; gate ratios not counts) are owned by §5 —
 read them there; do not restate them here.
 
-Measured 2026-09-25: the full baselines tier is 6 tests / 2.39 s wall (slowest
-case 1.29 s) and spawns no subprocess, so it carries no `slow` marker and runs
-inside the default inner loop. `slow` is reserved for the heavy-subprocess tiers
+The full baselines tier collects a handful of tests and spawns no subprocess, so
+it carries no `slow` marker and runs inside the default inner loop (the current
+count and wall time come from `uv run pytest tests/baselines --collect-only` and
+a run, not from this sentence). `slow` is reserved for the heavy-subprocess tiers
 (typst/pandoc/pdftoppm) and the live-model boundary.
 
 ## 4. `standard-alice`: how a false marker left a corpus undefended
@@ -115,6 +118,6 @@ side effect of an unrelated change is a regression signal.
 
 ## 6. Related documents
 
-- [AGENTS.md](../AGENTS.md) — the repository's testing constraints, which take precedence over any other testing doc.
-- [evaluation-and-comparison-guide.md](evaluation-and-comparison-guide.md) — live/real-model evaluation (the non-golden half).
+- [AGENTS.md](../../AGENTS.md) — the repository's testing constraints, which take precedence over any other testing doc.
+- [evaluation-and-comparison-guide.md](../guides/evaluation-and-comparison-guide.md) — live/real-model evaluation (the non-golden half).
 - [knob-calibration-protocol.md](knob-calibration-protocol.md) — how knob changes must re-measure against these baselines.

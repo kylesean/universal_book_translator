@@ -1,6 +1,6 @@
 # 版面保持 / 出版级翻译 — 总体方案 (LAYOUT PRESERVATION MASTERPLAN)
 
-日期：2026-09-20 ｜ 状态：活文档 ｜ 目标：长短文档、主流格式，通用 / 工业 / 出版级翻译
+日期：2026-09-20 ｜ 状态：🟢 活文档 ｜ 目标：长短文档、主流格式，通用 / 工业 / 出版级翻译
 
 ## 0. 一句话现状
 
@@ -36,13 +36,13 @@ UBT 的路线 A（现名 **`rigid`**：保留源页几何、就地把译文重�
 ### 3.3 像素级 fidelity 度量（advisory）
 - `adapters/pdf/render_fidelity.py`：源页/译文页**同一 pdfium 引擎、300 DPI** 整页栅格化，按 `PROSE_BLOCK_TYPES` 的 bbox 建掩膜（复用 `visual_scalpel._compute_crop_coords`），**Pillow-only**（`ImageChops` + 直方图，零新依赖）比对掩膜外区域。产出 `non_text_diff_ratio`（非文字残差，应≈0）与 `masked_coverage_ratio`（涂写覆盖率，正面量化 42% 问题）。纯函数 `diff_outside_masks` 可单测。
 - advisory 接线：`reflow_loop.run` 在 parity 合并后、仅当 `_output_keeps_source_geometry()` 时计算，把数值折进 `gate.stats`、以 `info` 级并入 findings，**绝不碰 `gate.passed`**，并落 `manifest.metadata["fidelity"]` → `visual_report.json`。
-- 结构化 + KPI：`reporter.QualityReport.fidelity`（`ReportFidelity`）；`metrics` 新增 `fidelity_non_text_residual`（越低越好）、`rigid_painted_coverage`（越高越好）。`SCHEMA_VERSION` 暂不升（新增 key 在对比中被忽略，避免波及既有 golden 的再生成清扫）。
+- 结构化 + KPI：`reporter.QualityReport.fidelity`（`ReportFidelity`）；`metrics` 新增 `fidelity_non_text_residual`（越低越好）、`rigid_painted_coverage`（越高越好）。`SCHEMA_VERSION` 当时不升（新增 key 在对比中被忽略，避免波及既有 golden 的再生成清扫）。**2026-09-26 对齐**：随后因 `render_skip_rate` 公式变更并新增 `render_preserved_rate`/`blocked_human_rate`，`SCHEMA_VERSION` 已升到 2 并重录 golden（`ubt/core/metrics/schema.py`，commit `46223e8`）。
 
 ### 3.4 M1 覆盖率测量（2026-09-26，基线 commit `82fc3b5`）
 
 rigid 的覆盖率此前只有一个正文数字与一句杠杆断言，两者都被换成可复跑的工具与可复核的结论：
 
-- **工具**：`scripts/rigid_coverage_sweep.py` —— 把 coverage 拆成「目标长度比 × `RIGID_MIN_FONT_PT`」矩阵，并按引擎自己的 `INTENTIONAL_PRESERVED_SKIP_PREFIXES` 分出 preserved / fail-closed 家族。退出码恒为 0（测量而非门禁，与 `scripts/knob_sweep.py` 同契约）。
+- **工具**：`scripts/rigid_coverage_sweep.py` —— 把 coverage 拆成「目标长度比 × `RIGID_MIN_FONT_PT`」矩阵，并按 `ubt.core.qe.defect_taxonomy.INTENTIONAL_PRESERVED_SKIP_PREFIXES`（`scripts/rigid_coverage_sweep.py` 复用）分出 preserved / fail-closed 家族。退出码恒为 0（测量而非门禁，与 `scripts/knob_sweep.py` 同契约）。
 - **为什么不是 `--dry-run`**：rehearsal provider（`ubt.core.router.provider.MockModelProvider`）返回固定短串，其目标远短于原文，恰好掩盖本测量要量的长度驱动跳过。故直调纯决策函数 `RigidTypesetter._plan_blocks`（无 Typst 编译、无写盘），几何取自真实运行账本。
 - **两个效度注记**（漏掉任一结论就会错）：① `skip_reason`（`ubt.adapters.pdf.rigid.gate`）对「目标 == 原文」返回 `verbatim` 并刻意不覆盖，扫描器必须绕开这个**正确**的守卫；② 两种填充模式分别模拟膨胀译向（`latin`）与 en→zh（`cjk`，UBT 主战场）。
 - **结论**：损失几乎全是 `spill`；`no_zone` 与长度无关（一个恒定的几何小缺陷，随 M2 一并排）；`margin_reclaim_pt` 的回收量是个位数；覆盖率随 `RIGID_MIN_FONT_PT` **单调移动**，悬崖位置精确跟随该下限——而该旋钮在注册表里自述 **"never swept"**。
@@ -51,7 +51,7 @@ rigid 的覆盖率此前只有一个正文数字与一句杠杆断言，两者�
 
 ## 4. 尚未做（里程碑，按 ROI 排序）
 
-- **M1 收紧 fidelity 基线**：**coverage 这半已交付**（2026-09-26，基线 commit `82fc3b5`）——`scripts/rigid_coverage_sweep.py` 把 coverage 拆成「目标长度比 × 字号下限」矩阵，并按引擎自己的 `INTENTIONAL_PRESERVED_SKIP_PREFIXES` 分出 preserved / fail-closed 家族；方法学与效度注记见 §3.4。**残余**：ForMaT 子集上的逐文档 `residual` 基线（`scripts/biou_score.py` 已有 BabelDOC 方法论级评测骨架）。
+- **M1 收紧 fidelity 基线**：**coverage 这半已交付**（2026-09-26，基线 commit `82fc3b5`）——`scripts/rigid_coverage_sweep.py` 把 coverage 拆成「目标长度比 × 字号下限」矩阵，并按 `ubt.core.qe.defect_taxonomy.INTENTIONAL_PRESERVED_SKIP_PREFIXES`（`scripts/rigid_coverage_sweep.py` 复用）分出 preserved / fail-closed 家族；方法学与效度注记见 §3.4。**残余**：ForMaT 子集上的逐文档 `residual` 基线（`scripts/biou_score.py` 已有 BabelDOC 方法论级评测骨架）。
 - **M2 `rigid` 闭环扩框**：~~解除 `reflow_loop` 对 `rigid` 的自我排除（缺陷 B2，`_typography_retune_possible`）；溢出时受控"向空白 margin 借空间"~~ —— **这两步定性已被代码与测量同时推翻（依据见 §3.4）**：
   - `_typography_retune_possible` 返回 False 是**刻意且正确**的：rigid 的字号取自源 zone 的中位行高，`reconstructor.font_size_pt` / `leading_em` 改不动任何一个字形，解除排除只会白烧一次全量重渲并谎报一次不可能发生的 heal。要的不是"解除排除"，而是给 rigid **它自己的**补救通道。
   - "向空白 margin 借空间"这个杠杆已被测量证伪：`margin_reclaim_pt` 只回收个位数块，覆盖率真正跟随的是 `RIGID_MIN_FONT_PT`。

@@ -1,5 +1,7 @@
 # Universal Book Translator (UBT) 用户指南与参考手册
 
+> **状态**：🟢 活文档（随代码演进更新；引用前以代码符号为准）
+
 本文档提供 `universal_book_translator` (UBT) 项目的完整使用指南，涵盖核心架构原理解析、排版引擎决策树、三重自愈系统、CLI 完整命令集、配置字典、服务端/智能体接口及典型生产实践。
 
 ---
@@ -70,7 +72,7 @@ flowchart LR
 
 ### 1. 六阶段流水线流转
 1. **Stage 1: Ingest（全格式解析入库）**
-   - 多格式统一转换为中间表达（`DocumentIR`）；
+   - 多格式统一转换为中间表达（`BookManifest` / `ChapterIR` / `IRBlock`，旧称 `DocumentIR` 已移除）；
    - PDF 解析双引擎智能路由：纯文本快速解析走 `PDFium`，多栏复杂版面走 `IBM Docling`；页面光栅与纯文本兜底提取由基础依赖 `pdf-oxide` 进程内完成（无 poppler `pdftoppm` 等系统二进制）；
    - 提取段落、数学公式、表格、图表矢量区域并生成唯一稳定的 `FlowID`。
 2. **Stage 2: Bible & Memory（术语提炼与记忆唤醒）**
@@ -95,7 +97,7 @@ flowchart LR
 6. **Stage 6: Export & Typesetting（排版编译与组装）**
    - 装配目标文档：EPUB 按源文件 OPF 版本原样重打包（不强制升级 3.0）；
    - PDF 走 **Typst 全局流式重排** 或 **原位底板覆盖**；
-   - 启动 **TypstHealer 语法自愈引擎** 兜底，输出最终高保真交付文件。
+   - 启动 **TypstDiagnosticHealer 语法自愈引擎** 兜底，输出最终高保真交付文件。
 
 ### 2. SQLite WAL 账本与断点续跑机制
 - 每个翻译任务在 `.ubt/ledgers/<job_id>.sqlite` 拥有独立的 SQLite 数据库文件；
@@ -275,6 +277,7 @@ uv run ubt translate <input_path> [OPTIONS]
 - `--api-key` / `--base-url` / `--api-mode` / `--provider-profile` (`str`)：凭据三元组与 profile 选择，语义同第六节（命令行传密钥会进 shell 历史并对本机 `ps` 可见，仅限一次性覆盖）。
 - `--db-dir` (`Path`，默认：跟随配置链 `UBT_DB_DIR`/`ubt.toml`)：本命令读写的账本目录。不传时**不是**硬编码 `.ubt/ledgers`，而是走配置链——显式注入字面默认会把账本放在别处的作业报成"不存在"。
 - `--dry-run` (`bool`，默认：`False`)：本地模拟演练模式，使用内置模拟引擎，零外部 API 消耗。
+- `-y, --yes` (`bool`，默认：`False`)：非交互确认——pre-flight 版面取舍告警不再暂停等待（CI/脚本用；不改变任何翻译行为）。
 
 #### ③ 执行链路与全格式自适应智能路由
 - `--mode, --exec-mode` (`Enum`，默认：`"auto"`)：执行流水线路由：
@@ -412,8 +415,9 @@ uv run ubt config [--set-only] [--json]
 ### 11. `ubt recheck-gates`
 对账本中被隔离块的**当前草稿**按今日门禁重新质检（门禁逻辑升级后复核历史隔离是否仍然成立）：
 ```bash
-uv run ubt recheck-gates <job_id> [--db-dir DIR] [--json]
+uv run ubt recheck-gates <job_id> [--db-dir DIR] [--limit N] [--json]
 ```
+`--limit N`（默认 `20`）限制明细表最多列出多少条仍失败的块（汇总计数不受限）。
 
 ---
 
@@ -471,18 +475,18 @@ uv run ubt api [--host HOST] [--port PORT]
 | **`UBT_FONT_FAMILY`** | `None` | 自定义排版字体名称（默认采用学术宋体）。 |
 | **`UBT_FORMULA_ENRICHMENT`**| `"auto"` | 公式识别策略：`auto` / `on` / `off`。 |
 | **`UBT_DB_DIR`** | `".ubt/ledgers"` | 账本数据库文件存储路径。 |
-| **`UBT_OUTPUT_DIR`** | `<文档目录>/UBT` | 未传 `--output` 时成品的落盘根目录。解析顺序：`UBT_OUTPUT_DIR` > `XDG_DOCUMENTS_DIR` > `~/Documents`，统一追加 `UBT/` 子目录。成品为 `<书名>_bilingual<原后缀>`，质量/指标/视觉报告作为 sidecar 挂在同一目录下。此前默认是**相对 CWD** 的 `tmp/output/`，同一条命令在不同目录执行会写到不同位置，且 `tmp/` 易与构建目录撞名。显式 `--output` 始终优先，不受本变量影响。 |
+| **`UBT_OUTPUT_DIR`** | `<文档目录>/UBT` | 未传 `--output` 时成品的落盘根目录。解析顺序：`UBT_OUTPUT_DIR` > `XDG_DOCUMENTS_DIR` > `~/Documents`；后两者追加 `UBT/` 子目录，显式 `UBT_OUTPUT_DIR` 原样使用（不再追加 `UBT/`）。成品为 `<书名>_bilingual<原后缀>`，质量/指标/视觉报告作为 sidecar 挂在同一目录下。此前默认是**相对 CWD** 的 `tmp/output/`，同一条命令在不同目录执行会写到不同位置，且 `tmp/` 易与构建目录撞名。显式 `--output` 始终优先，不受本变量影响。 |
 | **`UBT_TM_ENABLED`** | `True` | 是否启用全局翻译记忆库 (`tm.sqlite`)。 |
 | **`UBT_TM_FUZZY_THRESHOLD`** | `0.85` | 翻译记忆模糊匹配及格阈值。 |
 | **`UBT_VISUAL_GATE_ENABLED`** | `True` | 是否启用排版后视觉门禁审查。 |
 | **`UBT_EXPORT_MIN_COMPLETION_RATIO`** | `0.5` | 导出前的最低完成率闸门：账本里带译文的块必须占到该比例，否则直接中止导出（渲染器对空译文会回落到源文，闸门缺失时整本失败也会产出"成品书"并记为 completed）。抛错时账本原样保留，修好后重跑同一 job 即续译缺的块；确要交付部分成品时设为 `0` 关闭。 |
 | **`UBT_EXPORT_MAX_SYNTAX_FALLBACKS`** | `5` | Typst 自愈允许注释掉的最大译文行数：超过即拒收导出（报告已落盘，账本不标 completed）。0 表示任何移除都拒收；mock 干跑只告警不抛错。 |
 | **`UBT_PDF_ENGINE`** | `"auto"` | PDF 解析引擎：`auto`（首页启发式路由）、`pdfium`（纯文本极速）、`docling`（复杂排版），以及注册表中的其余引擎。取值以 `ubt.adapters.factory._PDF_ENGINE_REGISTRY` 为准，可经同进程注册扩充，见[第十节](#十-扩展挂载自定义适配器与-pdf-引擎)。 |
-| **`UBT_PDFIUM_FONT_DIRS`** | `None` | pdfium 字体替换表使用的钉扎字体目录（`os.pathsep` 分隔）。默认自动探测 `liberation`/`gsfonts`/`dejavu`/`noto-cjk`（Linux）；目录全不存在时退回宿主扫描。**语义为替换**：设置后 pdfium 不再遍历系统字体目录，渲染结果与宿主机字体安装情况解耦（容器部署建议显式设置）。由 `ubt/adapters/pdf/pdfium_gate.py` 在 pypdfium2 首次导入前注入，背景见 `docs/PDFIUM_THREAD_SAFETY_2026-09-20.md`。 |
+| **`UBT_PDFIUM_FONT_DIRS`** | `None` | pdfium 字体替换表使用的钉扎字体目录（`os.pathsep` 分隔）。默认自动探测 `liberation`/`gsfonts`/`dejavu`/`noto-cjk`（Linux）；目录全不存在时退回宿主扫描。**语义为替换**：设置后 pdfium 不再遍历系统字体目录，渲染结果与宿主机字体安装情况解耦（容器部署建议显式设置）。由 `ubt/adapters/pdf/pdfium_gate.py` 在 pypdfium2 首次导入前注入，背景见 `docs/assessments/PDFIUM_THREAD_SAFETY_2026-09-20.md`。 |
 
 ### 1b. 其余旋钮（按组补全）
 
-上表之外，以下旋钮同样经 `UBTConfig` 生效（默认值即代码字段默认）：
+上表之外，以下旋钮同样经 `UBTConfig` 生效（默认值即代码字段默认）。**例外**：`UBT_ALLOW_INSECURE_BIND` 与 `UBT_LOCAL_FALLBACK_BASE_URL` 由 `os.environ` 直接读取，不是 `UBTConfig` 字段，因此不会出现在 `ubt config` 输出中：
 
 | 组 | 环境变量 | 默认 | 说明 |
 | :--- | :--- | :--- | :--- |
@@ -506,7 +510,8 @@ uv run ubt api [--host HOST] [--port PORT]
 | 服务队列 | `UBT_JOB_MODE` | `embedded` | `queue` 时作业经共享队列表 + `ubt worker` 消费 |
 | 服务队列 | `UBT_JOB_QUEUE_PATH` | `None`（账本目录内） | 共享队列 SQLite 路径 |
 | 服务队列 | `UBT_JOB_MAX_RUNNING` / `UBT_JOB_TENANT_MAX_RUNNING` / `UBT_JOB_MAX_QUEUED` | `8` / `4` / `1000` | 服务端并发与排队限额 |
-| 服务安全 | `UBT_ALLOW_INSECURE_BIND` | `false` | 非回环绑定逃生阀：显式设 `true` 可跳过"缺护栏拒启动"检查（危险，仅限受控网络） |
+| 服务安全 | `UBT_ALLOW_INSECURE_BIND` | `false` | 非回环绑定逃生阀：显式设 `true` 可跳过"缺护栏拒启动"检查（危险，仅限受控网络）。由 `os.environ` 直接读取，非 `UBTConfig` 字段 |
+| 服务安全 | `UBT_ALLOW_NO_AUTH` | `false` | 允许**无鉴权**启动 API 的逃生阀（`UBT_API_KEY` 为空时）；不设则 `run_server()` 拒绝无钥启动。由 `os.environ` 直接读取 |
 | 服务安全 | `UBT_STRICT_AUTH` / `UBT_ENV` | `false` / `development` | 生产环境强化鉴权开关 / 运行环境标记 |
 | 服务安全 | `UBT_ALLOWED_DIR` / `UBT_ALLOWED_DIRS` | `""` | 作业读写路径白名单（单目录 `UBT_ALLOWED_DIR`，或多目录 `UBT_ALLOWED_DIRS`，`os.pathsep`/逗号分隔）；非回环绑定需至少配置其一 |
 | 审校队列 | `UBT_PE_QUEUE_ENABLED` / `UBT_PE_EXPORT_FORMAT` | `false` / `csv` | 人工隔离队列文件导出（`csv`/`xliff`/`none`），默认不导出 |
@@ -516,7 +521,7 @@ uv run ubt api [--host HOST] [--port PORT]
 | 公式 | `UBT_C_TEXT_ENABLED` | `false` | 公式内 `\text{}` 自然语言 span 进翻译管线（Gate 3 骨架不变式保护） |
 | 追溯 | `UBT_OPENCODE_SESSION_ID` | 自动 | OpenCode 会话关联 id（仅 OPENCODE 凭据族用到） |
 
-> 📋 **规划中、尚不存在的字段**：`UBT_PRICES_FILE`（外置 `prices.toml` 价格表）目前仍是设计项（见 [COST-ACCOUNTING-DESIGN.md](COST-ACCOUNTING-DESIGN.md) 的 P1 期），**代码中尚无该配置字段**，设置该变量不会生效；当前价格源仍是内置价表 `ubt/core/router/pricing.py::MODEL_PRICES_USD_PER_MTOK`，自托管端点判定与未知价处理见上表"计费"组。
+> 📋 **规划中、尚不存在的字段**：`UBT_PRICES_FILE`（外置 `prices.toml` 价格表）目前仍是设计项（见 [COST-ACCOUNTING-DESIGN.md](../design/COST-ACCOUNTING-DESIGN.md) 的 P1 期），**代码中尚无该配置字段**，设置该变量不会生效；当前价格源仍是内置价表 `ubt/core/router/pricing.py::MODEL_PRICES_USD_PER_MTOK`，自托管端点判定与未知价处理见上表"计费"组。
 
 ### 1c. 完整环境变量索引
 
@@ -661,7 +666,7 @@ uv run ubt translate book.pdf \
 uv run ubt-api                       # 默认 127.0.0.1:8000
 uv run ubt-api --host 0.0.0.0        # 仅在反向代理之后，且必须先配护栏
 ```
-`--host/--port` 由 `run_server()` 提供（入口脚本 `ubt-api`），没有 `python -m ubt.api.app` 这种调用方式。非回环地址会触发启动自检：缺少 `UBT_API_KEY`（`X-API-Key` 鉴权）或 `UBT_ALLOWED_DIRS`（作业读写路径白名单）时直接拒绝启动——作业提交的是服务器本机路径而非 HTTP 上传，因此路径白名单不可省。确需在受控网络里裸绑，显式设 `UBT_ALLOW_INSECURE_BIND=1`（跳过护栏检查，风险自担）。
+`--host/--port` 由 `run_server()` 提供（入口脚本 `ubt-api`），没有 `python -m ubt.api.app` 这种调用方式。非回环地址会触发启动自检：缺少 `UBT_API_KEY`（`X-API-Key` 鉴权）或 `UBT_ALLOWED_DIRS`（作业读写路径白名单）时直接拒绝启动——作业提交的是服务器本机路径而非 HTTP 上传，因此路径白名单不可省。确需在受控网络里裸绑，显式设 `UBT_ALLOW_INSECURE_BIND=1`（跳过护栏检查，风险自担）。鉴权缺省强制：未配 `UBT_API_KEY` 且未设 `UBT_ALLOW_NO_AUTH=1` 时 `run_server()` 拒绝启动；`UBT_STRICT_AUTH=1`/`UBT_ENV=production` 下缺 `UBT_API_KEY` 会**启动即失败**，而不是静默起一个每个请求都 500 的服务。
 
 - `POST /jobs/submit`：异步提交翻译任务（请求体接受核心作业字段，未声明字段将被忽略；返回 `job_id`）。可选传入 `job_id` 作为幂等键：重复提交同一 `job_id` 直接返回已有作业，不会重复计费。
 - `POST /jobs/assess`：译前报价的 HTTP 入口（零 token；参数同 `ubt assess`，返回与 CLI `--json` 相同的评估对象）。
@@ -684,16 +689,16 @@ uv run ubt-mcp
 
 ## 八、 辅助脚本库 (`scripts/` 目录)
 
-- `scripts/run_real_benchmark.sh`：端到端评测驱动脚本，自动探测本地环境并执行全链路评测（各模式、判据与"待跑"项见 [docs/evaluation-and-comparison-guide.md](evaluation-and-comparison-guide.md)）。
+- `scripts/run_real_benchmark.sh`：端到端评测驱动脚本，自动探测本地环境并执行全链路评测（各模式、判据与"待跑"项见 [docs/guides/evaluation-and-comparison-guide.md](evaluation-and-comparison-guide.md)）。
 - `scripts/formula_matrix.sh`：公式渲染矩阵对比测试（mathjax / typst / image）。
-- `scripts/cost_benchmark.py`：Token 与计费测算评估工具。除 `/tmp` 下的完整产物外，还会把一份**只含计数、不含书稿文本**的成本记录写入 `--metrics-dir`（默认 `docs/benchmarks/`，目录不存在时脚本自行创建，传空串跳过；落点完全由 `--metrics-dir` 决定）：语料 sha256、模型与单价、墙钟、分阶段调用数/token/延迟、cache-hit 量、估算美元与块的完成/失败计数。这份 JSON 是刻意要落进仓库的——没有可复现的真实账单，`--budget-usd` 就无从校准、价表错价也无处对账（该目录的约定见 [docs/benchmarks/README.md](benchmarks/README.md)）。
+- `scripts/cost_benchmark.py`：Token 与计费测算评估工具。除 `/tmp` 下的完整产物外，还会把一份**只含计数、不含书稿文本**的成本记录写入 `--metrics-dir`（默认 `docs/benchmarks/`，目录不存在时脚本自行创建，传空串跳过；落点完全由 `--metrics-dir` 决定）：语料 sha256、模型与单价、墙钟、分阶段调用数/token/延迟、cache-hit 量、估算美元与块的完成/失败计数。这份 JSON 是刻意要落进仓库的——没有可复现的真实账单，`--budget-usd` 就无从校准、价表错价也无处对账（该目录的约定见 [docs/benchmarks/README.md](../benchmarks/README.md)）。
 - `scripts/export_pdf_to_markdown.py`：利用底层解析器将 PDF 抽取为 Markdown 格式。
 - `scripts/biou_score.py`：计算视觉版面边界重合度的评估工具。
 - `ubt/core/qe/comet_score_ipc.py`：以隔离子进程运行 CometKiwi 神经网络打分（随包安装，不再位于 `scripts/`；wheel 用户可直接使用）。
 - `scripts/fidelity_baseline.py`：刚性渲染保真度基线——对语料（源 PDF 与产物成对）跑像素级忠实度标尺，产出可 diff 的 JSON 基线。
 - `scripts/oxide_render_ab.py`：pdf-oxide 与光栅基准的 A/B 等价性判据（尺寸/失配像素率阈值），页面光栅迁移的定谳证据。
-- `scripts/knob_sweep.py`：对可调旋钮做 ×/÷ 容差带扫描，把测试红→绿映射回具体数字（配合 `docs/knob-calibration-protocol.md`）。
-- `scripts/rigid_coverage_sweep.py`：rigid 覆盖率矩阵扫描——「目标长度比 × `RIGID_MIN_FONT_PT`」，按引擎自己的 preserved/fail-closed 家族分类。纯测量、退出码恒 0；用法与测量效度注记见 [LAYOUT_PRESERVATION_MASTERPLAN §3.4](LAYOUT_PRESERVATION_MASTERPLAN_2026-09.md)。
+- `scripts/knob_sweep.py`：对可调旋钮做 ×/÷ 容差带扫描，把测试红→绿映射回具体数字（配合 `docs/design/knob-calibration-protocol.md`）。
+- `scripts/rigid_coverage_sweep.py`：rigid 覆盖率矩阵扫描——「目标长度比 × `RIGID_MIN_FONT_PT`」，按引擎自己的 preserved/fail-closed 家族分类。纯测量、退出码恒 0；用法与测量效度注记见 [LAYOUT_PRESERVATION_MASTERPLAN §3.4](../design/LAYOUT_PRESERVATION_MASTERPLAN_2026-09.md)。
 - `scripts/make_sample_corpus.py`：生成 `docs/synthetic-*.pdf` 合成语料（版权安全回归样本）。
 
 ---

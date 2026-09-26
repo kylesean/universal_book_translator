@@ -3,12 +3,12 @@
 > **⚠️ SUPERSEDED（2026-09-22 归档）。** 本 PRD 的 pdf_oxide destructive-redact 主路线**从未实现**，
 > 桌面工作台（Tauri/pdf.js/审校写回）零行代码落地。它要解决的"保版导出"需求已由另一条路线交付：
 > `rigid` 引擎（pikepdf 内容流删字 + Typst 译文叠层 + add_overlay 合成），定案过程见
-> [docs/LAYOUT_PRESERVATION_MASTERPLAN_2026-09.md](../LAYOUT_PRESERVATION_MASTERPLAN_2026-09.md)，
+> [docs/design/LAYOUT_PRESERVATION_MASTERPLAN_2026-09.md](../design/LAYOUT_PRESERVATION_MASTERPLAN_2026-09.md)，
 > 实现见 `ubt/adapters/pdf/rigid/`。照本文开发会与 license guard（禁 PyMuPDF）及现役引擎直接冲突。
 > 保留价值：§2 用户场景与 FR-1~16 需求清单仍是未来桌面工作台的唯一成文需求资产。
 - 状态: ~~待评审~~ → 已归档（原 pdf_oxide 路线被 masterplan 改道为 rigid 路线）
-- 关联: INPLACE_TECH_SURVEY_2026.md（选型证据）· INPLACE_WORKBENCH_TECH_DESIGN_V1.md（同归档）
-  · TUI_V2_PRD.md · atelier_ui_and_publishing_suite_prd.md (memory) · PDF_AGENT_SKILLS_VS_UBT.md（该文档已删除）
+- 关联: docs/assessments/INPLACE_TECH_SURVEY_2026.md（选型证据）· INPLACE_WORKBENCH_TECH_DESIGN_V1.md（同归档）
+  · TUI_V2_PRD.md (memory) · atelier_ui_and_publishing_suite_prd.md (memory) · PDF_AGENT_SKILLS_VS_UBT.md（该文档已删除）
 - 日期: 2026-09-19
 - 目标形态: Rust + React/Vue 桌面版 (Tauri) 的关键产品能力
 

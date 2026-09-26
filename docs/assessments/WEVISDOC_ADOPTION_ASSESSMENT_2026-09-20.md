@@ -48,10 +48,10 @@
 结论:"有没有接入位"——**有,且是现成插件槽**。
 
 1. **驱动契约**(`ubt/adapters/pdf/vlm/types.py:34`):`VlmDriver` Protocol——`recognize(image, page_size_pt, scale) -> PageTranscript`,注释明确"**no geometry promises**":检测器驱动(rapidocr)可带 `measured_box`;**LLM-VLM 驱动必须留 None**("hallucinated coordinates are worse than none",P9 锚定规则)。DeepSeek-OCR driver 即此模式(`measured_boxes = False`)。WeVisDoc 天然落入同一档。
-2. **注册表**(`vlm/registry.py`):`register_driver(name, factory)`,已注册 `rapidocr` / `deepseek-ocr` / `sidecar` / `cloud`(两种)。**fail-closed**:未知名字抛 KeyError。新增驱动零侵入。
+2. **注册表**(`vlm/registry.py`):`register_driver(name, factory)`。**2026-09-26 对齐**：当前注册名为 `rapidocr` / `deepseek-ocr` / `sidecar` / `http` / `cloud` / `vlm`（以该模块源现值为准）。**fail-closed**:未知名字抛 KeyError。新增驱动零侵入。
 3. **锚定融合**(`vlm/anchor.py:56` + `transcribe.py:159`):VLM 行与 pdfium 文本行做 NFKC 归一的**包含匹配**(`_best_match`),产出 `AnchoredLine{provenance: "pdfium" | "pdfium+proofread" | "vlm-measured"}` 与 `AnchorStats{matched, vlm_only, pdfium_only}`——**双见证结构内建**。文本层存在时 VLM 只做 proofread(保 pdfium 几何),这是测试钉死的行为(`test_vlm_core.py`:proofread 丢插入行、recognition 拒收幻觉几何)。
 4. **接入形态**:现成 sidecar 体系(`deploy/docker/ocr-sidecar/server.py`,FastAPI,`POST /v1/ocr` + `/health`,UBT 侧 `SidecarOcrDriver` 走 httpx + `PageBBoxResolver` 坐标归一)。WeVisDoc 官方支持 vLLM serving → 可仿该模板做 GPU sidecar。
-5. **触发路由**:`page_profiler.PageKind.SCAN_IMAGE` → `engine_selector` → 扫描引擎链;`docling_parser.vlm_fallback_missing_pages`(docling_parser.py:661)在 docling 漏页时兜底调 VLM。
+5. **触发路由**:`page_profiler.PageKind.SCAN_IMAGE` → `engine_selector` → 扫描引擎链;`docling_parser.vlm_fallback_missing_pages` 在 docling 漏页时兜底调 VLM（符号名定位，行号易漂移）。
 6. **公式线现状**(评估方案 B 的关键):
    - `formula_witness.py` docstring 自标定:检**布局级损伤**(一行源公式重排成两行、项丢失、9×9 数独级结构),**检不出单字形替换 V_fb→V_h**,"需要 gray-zone VLM tier,**not implemented here**";设计哲学是 fail-open + 零 token,**检出即换源图裁剪(lossless)**。
    - `page_profiler.formula_debris_share(text)`:现有公式残骸信号是**纯文本启发式**。
@@ -92,7 +92,7 @@
 
 ### 方案 D:方法论移植(零依赖)—— **无条件推荐,立即执行**
 
-1. **分类别残差度量**:把"整页编辑距离掩盖局部损伤"的教训落到 UBT——黄金基线(`metrics.golden.json`)与 extraction_witness 打分改为 **text-edit / (1−TEDS) / (1−CDM) 三通道分别对齐计分**。这直接服务于 `PDF_OXIDE_ADOPTION_ASSESSMENT`(已随 `62fcd75` 删除,见 git 历史) §6 保真度判据的落地:pdf_oxide"静默丢公式"担忧已在 v3.2 §5.2 定谳为**可见题注跨四 API 丢失**,与 WeVisDoc 团队"公式没了整页分看不出来"完全同构,分通道指标让这类丢失可测。UBT 已有 `formula_debris_share`(page_profiler:170)这一按类别信号先例,是自然延伸。
+1. **分类别残差度量**:把"整页编辑距离掩盖局部损伤"的教训落到 UBT——黄金基线(`metrics.golden.json`)与 extraction_witness 打分改为 **text-edit / (1−TEDS) / (1−CDM) 三通道分别对齐计分**。这直接服务于 `PDF_OXIDE_ADOPTION_ASSESSMENT`(已随 `62fcd75` 删除,见 git 历史) §6 保真度判据的落地:pdf_oxide"静默丢公式"担忧已在 v3.2 §5.2 定谳为**可见题注跨四 API 丢失**,与 WeVisDoc 团队"公式没了整页分看不出来"完全同构,分通道指标让这类丢失可测。UBT 已有 `formula_debris_share`（定义于 `ubt/core/policy/layout_policy.py`，`page_profiler` 导入复用）这一按类别信号先例,是自然延伸。
 2. **三引擎分层复核**:MinerU/PaddleOCR-VL/dots.mocr 交叉标注、"两同一异→图像验证、三异→更强模型+人工"的分流,可映射进 UBT 的 triage 成本策略(与 witness 面板现有 matched/vlm_only/pdfium_only 计数合流)。
 3. **合成数据双编译模式**(DOM→图 + DOM→精确标注):若 UBT 未来做公式/表格的模型侧评测集,这是免标注 ground truth 的现成配方。
 
@@ -237,8 +237,8 @@
 | proofread/recognition 锚定语义(测试钉死) | `vlm/anchor.py`、`vlm/transcribe.py:125-204`、`tests/unit/test_vlm_core.py` 符号表 |
 | formula_witness 能力边界("V_fb→V_h 检不出、灰区 VLM 层未实现") | `ubt/adapters/pdf/formula_witness.py` docstring(全文) |
 | sidecar 接入形态 | `deploy/docker/ocr-sidecar/server.py`(`POST /v1/ocr`、/health)、`vlm/drivers/sidecar_driver.py` |
-| DeepSeek-OCR 运维先例(8GB floor、prompt 模式) | `vlm/drivers/deepseek_driver.py:30-34,136-167` |
-| 扫描路由 | `page_profiler.py`(PageKind.SCAN_IMAGE、formula_debris_share)、`docling_parser.py:661` |
+| DeepSeek-OCR 运维先例(8GB floor、prompt 模式) | `vlm/drivers/deepseek_driver.py`（`MIN_FREE_BYTES` 等，符号名定位） |
+| 扫描路由 | `page_profiler.py`（`PageKind.SCAN_IMAGE`）、`docling_parser.vlm_fallback_missing_pages`（符号名定位） |
 | §8.1 悬案同构性 | `PDF_OXIDE_ADOPTION_ASSESSMENT_2026-09-19.md` v3.2 §5.2(定谳;文档已随 `62fcd75` 删除,见 git 历史) |
 | **(v2)LightOnOCR-2 画像/数字/变体/语言表** | HF 模型卡 raw README 全文一手抓取(2026-09-20) |
 | **(v2)RLVR/IoU 奖励/蒸馏 mix/merging 训练配方** | arXiv 2601.14251 摘要一手抓取;OlmOCR-Bench 83.2±0.9 与速度倍数:官方博客正文 |

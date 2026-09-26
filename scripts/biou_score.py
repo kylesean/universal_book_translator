@@ -11,7 +11,7 @@ Purpose: offline calibration objective for the bilingual-mode advisory
 thresholds (``ubt/core/policy/bilingual_advisor.py``) and for comparing
 render modes (inline vs alternating vs monolingual) on golden documents.
 It is NOT a translation-quality metric — pair it with human readability
-review (see ``docs/evaluation-and-comparison-guide.md``).
+review (see ``docs/guides/evaluation-and-comparison-guide.md``).
 
 Scope notes (v1, documented limitations):
 

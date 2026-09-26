@@ -1,5 +1,7 @@
 # UBT 可借鉴清单：来自 `pdf` skill 的硬化设计
 
+> **状态**：🟢 活文档（D1–D11 的权威定义处，随实现状态更新；引用前以代码符号为准）
+
 > **语料出处说明（2026-09-19）**：文中对 `chapter-1.pdf` / `chapter-3.pdf` 的引用基于当时的 Elsevier
 > 版权样本；该样本已因合规撤换为 `docs/synthetic-*.pdf` 合成语料，历史测量结论不受影响。
 
@@ -327,7 +329,7 @@ warning: no whitespace before raw text              #text(...)[为了求解 #box
 
 > **v3 补充：不要靠"体积/性能"否定 overlay 路线，要靠覆盖率。** 在密排书版上，覆盖回填路线**双方实测都不可交付**：
 > - 对方侧：`MIMO/scripts/overlay_text.py:198` 是单行 `drawString`（无换行、无 autofit），`:149-165` 断言**同页任意两框不得重叠**；`PDFKIT/overlay_text.py:196-207` 字号 `max(6, rect_h*0.9)` 且无换行 → 整段变成一个超宽白块。
-> - **UBT 侧同一结论**：`output/ch3-best-anchored_quality_report.md:29` → **Render Coverage 42.1%（88/209 on page），116 块露出源文**（chrome×8、non_prose×74、policy×34）。
+> - **UBT 侧同一结论**：当时的质量报告实测 Render Coverage ≈42%（88/209 on page）、116 块露出源文（chrome×8、non_prose×74、policy×34）。**2026-09-26 对齐**：该 `output/` 报告已不在仓库；可复跑的证据是 `scripts/rigid_coverage_sweep.py`（正文数字已按引用规约 §3.6 撤除）。
 >
 > 所以正确表述是"**overlay 路线在 26 页书版正文上已被双方实测共同排除**"，而不是"overlay 路线成本太高所以不用"。附带好处：这条否定不再依赖那个被 §4 限定过的 8.4 MB 数字。
 
@@ -425,7 +427,7 @@ p9: p##################### ψ s ðyÞ$ψ B $Vch ðyÞ
 
 > **v3 更新：这条建议已经有了答案，而且答案是负的。** 账本记录 `job_fc1d7bd7b799_zh`（chapter-3，209 块）状态为 `failed`，日志两次于 Stage 6 Typst 编译 exit 1（见 §7.1）。**在修好该崩溃之前，"用一份完整章节验实 Typst 路线"这个动作本身就会失败。**
 
-**悬空文档引用（v3：已修；2026-09-22 再清）。** 原引用的 `docs/pdf-layout-comparison-and-sota-architecture.md`（`visual_gate.py` docstring）、`docs/formula-engine-acceptance-plan.md` 与 `tests/fixtures/formula_ocr_damage.json`（`scripts/formula_matrix.sh`）**均不存在**。曾改指 `docs/PDF_AGENT_SKILLS_VS_UBT.md`，该文档亦已于 2026-09-22 删除——相关代码注释（`visual_gate.py`、`formula_matrix.sh`）已改为自含表述。`formula_ocr_damage.json` 仍未补写（那是 fixture，属 D2′ 落地时一并生成，见 §7.3）。
+**悬空文档引用（v3：已修；2026-09-22 再清）。** 原引用的 `docs/pdf-layout-comparison-and-sota-architecture.md`（`visual_gate.py` docstring）、`docs/formula-engine-acceptance-plan.md` 与 `tests/fixtures/formula_ocr_damage.json`（`scripts/formula_matrix.sh`）**均不存在**。曾改指 `docs/PDF_AGENT_SKILLS_VS_UBT.md`，该文档亦已于 2026-09-22 删除——相关代码注释（`visual_gate.py`、`formula_matrix.sh`）已改为自含表述。`formula_ocr_damage.json` **不会再补写**——D2′ 已实现，用例内联在 `tests/unit/test_formula_ocr_damage.py`（`tests/fixtures/` 已于 `13568a7` 删除）。
 
 ---
 

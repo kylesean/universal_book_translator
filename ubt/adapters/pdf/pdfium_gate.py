@@ -9,7 +9,7 @@ libpdfium concurrently (UBT dispatches pdfium work through many
 the native heap — observed as SIGSEGV in ``__tree_balance_after_insert``
 and as glibc ``double free or corruption (!prev)`` aborts, both during
 the export stage of a multi-page paper (see
-``docs/PDFIUM_THREAD_SAFETY_2026-09-20.md``).
+``docs/assessments/PDFIUM_THREAD_SAFETY_2026-09-20.md``).
 
 Two defenses, matching the production pdfium paradigm:
 

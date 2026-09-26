@@ -1,8 +1,10 @@
 # Evaluation & Comparison Guide
 
+> **Status**: 🟢 living document (updated with the pipeline; code symbols are authoritative)
+
 Which tool answers which evaluation question, what each one costs to run, and —
 honestly — what is still uncalibrated. This is the file `scripts/run_real_benchmark.sh`
-(head: "Reference: docs/evaluation-and-comparison-guide.md"), `scripts/biou_score.py`
+(head: "Reference: docs/guides/evaluation-and-comparison-guide.md"), `scripts/biou_score.py`
 ("pair it with human readability review (see …)") and
 `tests/integration/test_local_model_baseline.py` ("… still lists L3 judge
 calibration as 待跑") all point at, so all three references resolve here.
@@ -84,7 +86,7 @@ L1-pass/L2-low, share of blocks that would hit the judge):
 | Item | Owner / runner | Status |
 | --- | --- | --- |
 | L1↔L2 agreement report + gray-zone sizing | `tests/integration/test_qe_calibration.py`, nightly `live-local` job | ✅ runs (nightly + `--qe-calib`) |
-| **L3 judge calibration** (judge verdicts vs a reviewed sample; does `[0.4,0.8)` actually catch what it claims?) | nobody yet | **待跑** |
+| **L3 judge calibration** (judge verdicts vs a reviewed sample; does `[0.7,0.8)` actually catch what it claims?) | nobody yet | **待跑** |
 | MT tier structural acceptance (`misrouting < 2%`) | `tests/integration/test_mt_tier_live.py` | ⚠️ needs llama-swap + CometKiwi |
 | MT vs cloud-LLM paired comparison | `tests/integration/test_mt_vs_llm_compare.py` | ⚠️ needs llama-swap + `UBT_OPENCODE_SESSION_ID` |
 
@@ -181,7 +183,7 @@ reports per-stage call counts, latency, tokens and estimated USD, plus what the
 artifact meant to be committed is the **text-free** metrics JSON
 (corpus sha256, models, prices, wall clock, per-stage counts, cache hits, cost,
 block completion/failure counts) written to `--metrics-dir`
-(default `docs/benchmarks/`, see [its README](benchmarks/README.md)):
+(default `docs/benchmarks/`, see [its README](../benchmarks/README.md)):
 
 ```bash
 export DEEPSEEK_API_KEY=sk-...
@@ -198,6 +200,6 @@ against the provider dashboard.
 ## 6. Where the deterministic evidence lives
 
 Golden corpora, KPI goldens, the tier-level golden rules and how to run each
-tier: [docs/golden-set.md](golden-set.md) plus the `uv run pytest` recipes in
-[AGENTS.md](../AGENTS.md). Testing constraints that outrank every doc
-here: [AGENTS.md](../AGENTS.md).
+tier: [docs/design/golden-set.md](../design/golden-set.md) plus the `uv run pytest` recipes in
+[AGENTS.md](../../AGENTS.md). Testing constraints that outrank every doc
+here: [AGENTS.md](../../AGENTS.md).

@@ -1,4 +1,4 @@
-"""Guards for the PdfiumGateway contract (docs/PDFIUM_THREAD_SAFETY_2026-09-20.md).
+"""Guards for the PdfiumGateway contract (docs/assessments/PDFIUM_THREAD_SAFETY_2026-09-20.md).
 
 pdfium's lazy global font-table build and page parsing are not thread
 safe; every in-process entry to libpdfium must hold
@@ -67,7 +67,7 @@ def test_pdfium_importers_hold_the_gate(py_file: Path) -> None:
     assert gate_imported, (
         f"{py_file}: imports pypdfium2 without ubt.adapters.pdf.pdfium_gate — "
         "all pdfium entry points must hold PDFIUM_LOCK and install the "
-        "font policy (see docs/PDFIUM_THREAD_SAFETY_2026-09-20.md)"
+        "font policy (see docs/assessments/PDFIUM_THREAD_SAFETY_2026-09-20.md)"
     )
     # Gate import must precede pypdfium2 imports at the source level so the
     # font policy installs before the library initializes.

@@ -1,7 +1,7 @@
 # 类 Jev 类型化决策模型作为翻译 QE 层评估（含 Jev 本体引入决策）
 
 > **文档类型**：技术调研 / 模型引入决策支持
-> **日期**：2026-09-25 · **基线**：当前工作区（仓库未含 `.git` 元数据；按 `docs/README.md` §3 一律以符号名引用）
+> **日期**：2026-09-25 · **基线**：当前工作区（本文按 `docs/README.md` §3 一律以符号名引用；**2026-09-26 对齐**：仓库为 git 检出，文中 commit 哈希均可解析）
 > **评估对象**：
 > 1. **TypeSafe AI Jev**（System One Model，闭源云 API，2026-09-15 发布）；
 > 2. **开源复刻权重**（Open-Jev / SemIf / JEV-CPU / NanoJev / JevLite / Jev-Style 等）；
@@ -162,7 +162,7 @@ UBT 的 QE 已经是一条**分层、成本分级、fail-closed** 的级联，�
 | `omission.py` / `added_content.py` / `term_drift.py` / `term_metrics.py` | 专项 QE | 漏译/增译/术语漂移 | 目前以规则 + 神经/LLM 混合 |
 | `stages/triage.py` | 分级 | MQM 严重度 → HITL/PE 队列；critical escape rate 0 | 分级 + fail-closed 人工 |
 | `qe/mt_gate.py` | 路由 | `is_mt_suitable` 精度优先硬 AND（**尚未接线**） | 脆布尔，最适合作概率化的对象 |
-| `docs/golden-set.md` + `tests/baselines/` | 数据 | 4 语料 golden + `TokenEchoMockProvider`/`MockQERunner` | **确定性、离线、可复算的标定底座** |
+| `docs/design/golden-set.md` + `tests/baselines/` | 数据 | 4 语料 golden + `TokenEchoMockProvider`（`tests/mock_providers.py`）/`MockQERunner`（`ubt/core/qe/comet_runner.py`） | **确定性、离线、可复算的标定底座** |
 
 **结论：UBT 的"复杂 QE 设计"不是过度工程，而是主流 QE 级联的完整实现**（确定性门 + 学习式 QE + LLM judge + 分级 + 成本策略 + 人工路由）。类 Jev 的落点是**插入**，不是**替换**。
 
@@ -255,7 +255,7 @@ LLM-as-judge（贵、慢、不校准）
 
 ## 10. 决策门与实验方案
 
-**门 1（核心，先跑再说）**：在 `tests/baselines` + `docs/golden-set.md` 的确定性底座上，比较三档：
+**门 1（核心，先跑再说）**：在 `tests/baselines` + `docs/design/golden-set.md` 的确定性底座上，比较三档：
 
 - **基线 A（免费）**：`FastPassFilter` + `HeuristicQERunner`
 - **基线 B（贵）**：`LLMJudgeQERunner`
@@ -272,7 +272,7 @@ LLM-as-judge（贵、慢、不校准）
 
 **通过条件**：候选 C 在语义缺陷召回上显著优于 A，且接近 B；成本/延迟至少比 B 低一个数量级；ECE 可接受；命名敏感性不导致系统性反转；弃权率可控（<=20%，且弃权全部 fail-closed）。全部满足才考虑 P0 接线。
 
-**门 2**：`mt_gate` 概率化 A/B（`NOT_WIRED` 阶段先做实验台）；
+**门 2**：`mt_gate` 概率化 A/B（该 gate 目前尚未接线，先在实验台做）；
 **门 3**：`triage` 严重度 `Choice` 可行性。
 
 ---
@@ -306,8 +306,8 @@ LLM-as-judge（贵、慢、不校准）
 | QE 选择失败模式（错语言排高） | arXiv `2609.13611` *In the Blind* |
 | 充分性必须对照源文 | arXiv `2608.20925` *Source-Free MT Evaluation Is Not MT Evaluation* |
 | UBT QE 分层与契约 | `ubt/core/qe/{base,fast_pass,llm_judge,comet_runner,score_policy,defect_taxonomy,mt_gate}.py`、`ubt/core/engine/stages/triage.py` |
-| UBT 标定底座 | `docs/golden-set.md`、`tests/baselines/`、`tests/mock_providers.py` |
-| 方法论移植先例 | `docs/WEVISDOC_ADOPTION_ASSESSMENT_2026-09-20.md` §5 方案 D |
+| UBT 标定底座 | `docs/design/golden-set.md`、`tests/baselines/`、`tests/mock_providers.py`、`ubt/core/qe/comet_runner.py`（`MockQERunner`） |
+| 方法论移植先例 | `docs/assessments/WEVISDOC_ADOPTION_ASSESSMENT_2026-09-20.md` §5 方案 D |
 | LensVLM 对照（同批调研，未落盘为独立文档） | 结论：模型本体否决（`apple-amlr` 非商用、能力域错配），仅方法论移植（廉价全局视觉定位→选择性重处理） |
 
 > **报告结束。** 核心结论两句话：**类 Jev 不是"最终一次性 QE 方案"，而是 UBT QE 级联里一个有价值的可校准非生成中间层；它能取代的是"又贵又不校准的 LLM judge 判定"，取代不了确定性门，也取代不了整条 QE 架构。** 引入前必须过 golden-set 基准门与选项命名敏感性测试，且所有低置信度一律 fail-closed 到人工。

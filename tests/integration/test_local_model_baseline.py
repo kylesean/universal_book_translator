@@ -13,7 +13,7 @@ this environment (the same reason moved that case out of the unit
 suite), so paying it again would recreate the cost F8 removed. Neural profiles
 stay where they already are — ``tests/integration/test_qe_calibration.py``, run
 by the nightly ``live-local`` job — and remain uncalibrated
-(``docs/evaluation-and-comparison-guide.md`` still lists L3 judge calibration as
+(``docs/guides/evaluation-and-comparison-guide.md`` still lists L3 judge calibration as
 待跑), so nothing gates on them.
 
 Zero API cost — the local llama-swap MT backend plus the cached CometKiwi

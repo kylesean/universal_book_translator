@@ -404,7 +404,7 @@ def test_sdist_ships_every_file_its_own_contents_reference() -> None:
     relative links must resolve inside the tarball — excluding the whole of
     ``docs/`` broke three of them; (2) hatchling copies a tracked symlink
     verbatim, so its target must be shipped too (``USAGE.md`` used to point at
-    an excluded ``docs/USER_GUIDE.md``).
+    an excluded ``docs/guides/USER_GUIDE.md``).
     """
     shipped = _sdist_shipped_paths()
     problems: list[str] = []

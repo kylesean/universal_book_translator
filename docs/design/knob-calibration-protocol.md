@@ -1,5 +1,7 @@
 # Knob 校准协议（规范本体）
 
+> **状态**：🟢 活文档（随 `layout_policy.py` 演进更新；引用前以代码符号为准）
+
 > **文档类型**：制度规范（normative）。本文重建 `ubt/core/policy/layout_policy.py` docstring 引用、
 > 却在 `13568a7` 批量删除中丢失、引用一直没跟着清理的那份本体（来历见 §7）；
 > 存量清点在本文**附录 B**（原独立文档 `KNOB_HARDCODE_AUDIT_2026-09-20.md` 已于 2026-09-22 并入此处并删除）。
@@ -71,8 +73,7 @@
 **现状必须先说清楚，否则这一节是空头支票**：目前只有 **5 个** knob 有覆盖点 ——
 `UBT_PUNCT_SQUEEZE_CAP`、`UBT_PUNCT_SQUEEZE_PER_PUNCT`、`UBT_ROW_MERGE_GAP_PT`、
 `UBT_ROW_MERGE_Y_TOL`（均在 `layout_policy.py`，经 `_env_float` 读取）、
-`UBT_SHORT_MAX_PAGES`。表内条目的精确数**以 `calibration_summary()` 现值为准**
-（2026-09-22：84 条，其中 proven 32 / single_doc 32 / hypothesis 20）；
+`UBT_SHORT_MAX_PAGES`。表内条目的精确数**以 `calibration_summary()` 现值为准**；
 未接 `_env_*` 覆盖点的条目一律**扫不动**。K-1（扰动测试）的第一批产出就是把 policy 层的 knob 接上覆盖点。
 
 ### 4.1 一次扫描的最小闭环
@@ -171,8 +172,9 @@ lint 规则塞进 pytest。代价有三条，都落在日常开发上——
    `test_core_ports_isolation` / `test_run_metadata_contract` / `test_cost_benchmark`。
    **2026-09-22 复核：这份清单曾经过期，别再照抄。** 六个里三个（`test_sys_modules_guard` /
    `test_license_guard` / `test_core_ports_isolation`）后来被恢复，现都在 `tests/unit/`
-   （`test_license_guard.py:13` 自述 "Restored after commit 0492c7d"）；另外三个
-   （`test_doc_references` / `test_run_metadata_contract` / `test_cost_benchmark`）确实仍不存在。
+   （`test_license_guard.py:13` 自述 "Restored after commit 0492c7d"）；另外两个
+   （`test_doc_references` / `test_run_metadata_contract`）确实仍不存在；
+   `test_cost_benchmark.py` 之后也已在 `tests/unit/` 恢复（覆盖 `scripts/cost_benchmark.py` 的价格解析）。
 
 撤销**不等于**"never inline"条文作废。条文仍在
 `ubt/core/policy/layout_policy.py` 模块 docstring，`CALIBRATION` 表仍在，
@@ -188,13 +190,7 @@ lint 规则塞进 pytest。代价有三条，都落在日常开发上——
 
 ## 6. 晋升与销账
 
-`calibration_summary()`（`layout_policy.py` 末尾的燃尽函数）是燃尽指标，**2026-09-22 实测**：
-
-```
-proven 32 · single_doc 32 · hypothesis 20   （合计 84）
-```
-
-（本表数字随条目增删漂移，引用前先跑一次 `calibration_summary()`；2026-09-20 的"79 条"与同期另一份快照的"33+ 条"分别对应全表与 policy 层早期子集，均为当时实数。）
+`calibration_summary()`（`layout_policy.py` 末尾的燃尽函数）是燃尽指标。数字随条目增删漂移，**引用前先当场跑一次 `calibration_summary()`**，本文不写死现值（引用规约 §3.6）；2026-09-20 的"79 条"与同期另一份快照的"33+ 条"分别对应全表与 policy 层早期子集，均为当时实数。
 
 - **晋升**只能由证据触发：`SINGLE_DOC → PROVEN` 需要第二篇不同语料（或 §4 的耐受带记录 + 合成属性测试）；**never by feel**。
 - **`HYPOTHESIS` 不得长存**：一个从未被 §4 扫过的 `HYPOTHESIS`，要么补证据、要么删掉。审计口径下当前 20 条全部属于"有原理无实证"。
@@ -205,7 +201,7 @@ proven 32 · single_doc 32 · hypothesis 20   （合计 84）
 
 ## 7. 本文的来历，以及它没写完的那半件事
 
-**这份文档不是新写的。** 仓库里原本就有一份 `docs/knob-calibration-protocol.md`（156 行，含 2026-09-09 的 9 格矩阵首轮结果），连同 40 个其它文档在 `13568a7 "update"` 里被一次批量删除（该提交：41 文件、6898 行删除、11 行新增，顺带删掉了 `tools/calibrate_knobs.py`、`tools/collect_knob_metrics.py`、`inplace_engine.py`、`docs/golden/manifest.json` 与两本真实语料 PDF）。审计 §2.4 说"该文件全仓不存在"，是对的 —— 但它**曾经存在**，而代码里的引用一直没跟着删。
+**这份文档不是新写的。** 仓库里原本就有一份 `docs/design/knob-calibration-protocol.md`（156 行，含 2026-09-09 的 9 格矩阵首轮结果），连同 40 个其它文档在 `13568a7 "update"` 里被一次批量删除（该提交：41 文件、6898 行删除、11 行新增，顺带删掉了 `tools/calibrate_knobs.py`、`tools/collect_knob_metrics.py`、`inplace_engine.py`、`docs/golden/manifest.json` 与两本真实语料 PDF）。审计 §2.4 说"该文件全仓不存在"，是对的 —— 但它**曾经存在**，而代码里的引用一直没跟着删。
 
 所以本文的正文是重写，附录 A 是从被删版本里抢救回来的首轮测量记录（那是若干 `SINGLE_DOC` rationale 唯一的证据来源；不救回来，那些 rationale 就变成指向虚无的引用）。
 
@@ -216,7 +212,7 @@ proven 32 · single_doc 32 · hypothesis 20   （合计 84）
 
 ---
 
-## 附录 A：2026-09-09 首轮标定记录（自 `13568a7^:docs/knob-calibration-protocol.md` 抢救）
+## 附录 A：2026-09-09 首轮标定记录（自 `13568a7^:docs/design/knob-calibration-protocol.md` 抢救）
 
 `CALIBRATION` 里若干 rationale 写着 "matrix 9-cell sweep shows zero delta"、
 "calibrated 2026-09-09: matrix per01==base on books 2+3" —— **它们指向的就是这张表**。
@@ -236,7 +232,7 @@ proven 32 · single_doc 32 · hypothesis 20   （合计 84）
 - **`PUNCT_SQUEEZE_CAP` 留 `HYPOTHESIS`**：全零 delta 不代表无效，是**没测到** —— 语料只有 3 个溢出块，layer 1 无施展空间。等 stress 语料（K-4）。
 - **`PUNCT_SQUEEZE_PER_PUNCT` 升 `SINGLE_DOC`**：`per01 == base`，速率项理论上就不敏感，矩阵只是确认。
 - **`REFLOW_MAX_EXTRA_LINES` 曾升 `SINGLE_DOC`**（`reflow1 == reflow5 == base`，3 行封顶在天花板之上）—— 但该旋钮**已随 inplace 引擎删除**，今天源码里只剩一个陈旧 `.pyc` 命中。别去找它。
-- **`REROUTE_GAP_PT` 留 `HYPOTHESIS`，且值本身不可信**：`gap3` 的 −1 不是"挤坏了版面"。15 页像素 diff 显示 base 与 gap3 只差在 p6，而差异**不在**页底续排条 —— 两版都没有可见续排条，"膏药感"前提不成立。真实机制：base 的文本层里有续排译文（y≈80/756）被空白盖板闷住，即**幽灵续排：文本层有名、视觉无文**。协议因此**不以 gap 值作晋升依据**，改为加一条可见性断言 `_veto_buried_strips`（strip 文字盒与任一 cover 相交超 1pt² 即整块否决回 overflow）。
+- **`REROUTE_GAP_PT` 留 `HYPOTHESIS`，且值本身不可信**：`gap3` 的 −1 不是"挤坏了版面"。15 页像素 diff 显示 base 与 gap3 只差在 p6，而差异**不在**页底续排条 —— 两版都没有可见续排条，"膏药感"前提不成立。真实机制：base 的文本层里有续排译文（y≈80/756）被空白盖板闷住，即**幽灵续排：文本层有名、视觉无文**。协议因此**不以 gap 值作晋升依据**，当时提出改为加一条可见性断言 `_veto_buried_strips`（strip 文字盒与任一 cover 相交超 1pt² 即整块否决回 overflow）—— 该断言**最终未实现**，且 `REROUTE_GAP_PT` 本身也已随引擎重构删除，此处仅存当时的方法论结论。
   → 本轮唯一的方法论收获：**目检否定的不是数字，是"这个数字在测什么"的假设。**
 
 采集陷阱（重跑前必读）：pipeline 默认 WARNING 级，per-page 的 INFO 计数行**落不了盘**；首轮是改用 harness 直调 render 函数取报告对象（跳过 export 门禁 —— 影响绝对值，不影响组间 delta）。
@@ -253,10 +249,10 @@ proven 32 · single_doc 32 · hypothesis 20   （合计 84）
 | 覆盖点仅 5 处 | 同文件 grep `_env_float\|_env_int` |
 | 表内自洽测试 | `tests/unit/test_layout_policy.py::test_every_knob_has_calibration` |
 | 增量执法 + 豁免登记 | **已于 2026-09-20 撤销**，见 §5 |
-| 黄金基线与 KPI golden | `tests/baselines/test_baselines.py`（无 `slow` 标记，2026-09-23 实测 5 例 2.27s，属于每编辑一次的快档）、`tests/baselines/*/metrics.golden.json` |
+| 黄金基线与 KPI golden | `tests/baselines/test_baselines.py`（无 `slow` 标记，属于每编辑一次的快档；用例数与耗时以 `pytest tests/baselines --collect-only` 与实跑为准）、`tests/baselines/*/metrics.golden.json` |
 | rigid 计划黄金 | 数据在 `tests/baselines/rigid/plan.golden.json`（原 `anchored-overlay/` 已随 rigid 更名迁走），**执行**在 `tests/unit/test_rigid_overlay_golden.py` |
 | 存量清点（制度外数字债务） | 本文**附录 B**（原独立文档 `KNOB_HARDCODE_AUDIT_2026-09-20.md` 已并入并删除） |
-| 被删原版（本文附录 A 的出处） | `git show 13568a7^:docs/knob-calibration-protocol.md` |
+| 被删原版（本文附录 A 的出处） | `git show 13568a7^:docs/design/knob-calibration-protocol.md` |
 
 ---
 

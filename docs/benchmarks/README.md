@@ -27,5 +27,5 @@ uv run python scripts/cost_benchmark.py path/to/book.md --metrics-dir docs/bench
 ```
 
 字段语义、评测判据与 L1/L2/L3 质量分层见
-[evaluation-and-comparison-guide.md](../evaluation-and-comparison-guide.md) §5；
-成本核算的分层设计与不变量见 [COST-ACCOUNTING-DESIGN.md](../COST-ACCOUNTING-DESIGN.md)。
+[evaluation-and-comparison-guide.md](../guides/evaluation-and-comparison-guide.md) §5；
+成本核算的分层设计与不变量见 [COST-ACCOUNTING-DESIGN.md](../design/COST-ACCOUNTING-DESIGN.md)。

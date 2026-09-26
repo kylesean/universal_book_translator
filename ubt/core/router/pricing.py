@@ -206,7 +206,7 @@ CACHED_INPUT_PRICES_USD_PER_MTOK: dict[str, float] = {
     "deepseek": 0.028,
     # Anthropic publishes a cache-*read* rate of 10% of the input price, and the
     # project's own price sheet already fixes the family default at 0.30 (see
-    # docs/COST-ACCOUNTING-DESIGN.md, ``[prices.claude] cached_input``). Without
+    # docs/design/COST-ACCOUNTING-DESIGN.md, ``[prices.claude] cached_input``). Without
     # these entries a cache-heavy Claude run billed reads at the full input rate
     # (10x) and could trip UBT_BUDGET_USD early.
     "claude-3-5-sonnet": 0.30,

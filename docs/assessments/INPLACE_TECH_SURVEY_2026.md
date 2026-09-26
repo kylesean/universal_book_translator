@@ -2,13 +2,13 @@
 
 - 状态: Final (S1/S2 实验闭环；S3/S4 待 M1) — **2026-09-22 勘误见下**
 - 日期: 2026-09-19
-- 关联: [docs/history/INPLACE_WORKBENCH_PRD_V1.md](history/INPLACE_WORKBENCH_PRD_V1.md)（已归档）· PDF_AGENT_SKILLS_VS_UBT.md（已删除）
+- 关联: [docs/history/INPLACE_WORKBENCH_PRD_V1.md](../history/INPLACE_WORKBENCH_PRD_V1.md)（已归档）· PDF_AGENT_SKILLS_VS_UBT.md（已删除）
 - 方法: 并行 web 检索代理 × 2 + 本地 spike 实验（venv `/tmp/spike_venv`，证据文件 `/tmp/e2e*.pdf|png`）
 
 > **2026-09-22 跟进勘误。** ① 本调研判定的主路线（pdf_oxide destructive redact + text_in_rect）
 > **最终未采纳**：保版导出实际走 pikepdf stream-strip + Typst overlay 的 `rigid` 路线，
 > pdf_oxide 在仓内只承担渲染/提取/探测（`ubt/adapters/pdf/oxide_render.py`），定案过程见
-> [LAYOUT_PRESERVATION_MASTERPLAN_2026-09.md](LAYOUT_PRESERVATION_MASTERPLAN_2026-09.md)。
+> [LAYOUT_PRESERVATION_MASTERPLAN_2026-09.md](../design/LAYOUT_PRESERVATION_MASTERPLAN_2026-09.md)。
 > ② 版本号至今未漂移：`pdf_oxide 0.3.78`、`pikepdf >=10.13` 与 `uv.lock`/`pyproject.toml` 一致，
 > "pikepdf 无 redact API"的更正仍成立；`<0.4` 封顶与"升版前必须 dir() 重探"的告诫仍然有效。
 > ③ 第一/二部分的论文综述（BabelDOC 方法论、ABBOR/BBox IoU、HOMURA 预算思路）仍是
@@ -81,7 +81,7 @@
 | 生态对比 | lopdf(MIT) 仅低层对象；printpdf 偏创建无 redact；pdf-writer 只写；qpdf(Apache) **无 redact**（见 §2.3）| README 基准表 + 本地验证 |
 
 **风险登记**：项目仅 10 个月历史、240 open issues、发版极快（API 可能震荡）——
-必须**锁版本 + vendor 适配层**（把 pdf_oxide 调用收敛到 `ubt/adapters/pdf_oxide/` 单点），
+必须**锁版本 + vendor 适配层**（把 pdf_oxide 调用收敛到 `ubt/adapters/pdf/oxide_render.py` 单点；初稿误写作 `ubt/adapters/pdf_oxide/`，该目录不存在 —— 见文首勘误），
 且 PyMuPDF 商业授权作为 30 分钟可切换的逃生门。
 
 ### 2.2 pikepdf —— 从"主路线候选"降级为"合成工具"

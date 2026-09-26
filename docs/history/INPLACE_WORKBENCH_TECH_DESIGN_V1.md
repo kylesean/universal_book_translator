@@ -4,12 +4,12 @@
 > `adapters/pdfops/`、`composers/inplace.py`、`quality/abbor.py`、`desktop/`）零落地；
 > pdf_oxide redact/text_in_rect 主路线已被 `rigid` 引擎的 pikepdf stream-strip + Typst overlay
 > 取代（见 `ubt/adapters/pdf/rigid/`、`ubt/adapters/pdf/stream_strip.py` 与
-> [docs/LAYOUT_PRESERVATION_MASTERPLAN_2026-09.md](../LAYOUT_PRESERVATION_MASTERPLAN_2026-09.md)）。
+> [docs/design/LAYOUT_PRESERVATION_MASTERPLAN_2026-09.md](../design/LAYOUT_PRESERVATION_MASTERPLAN_2026-09.md)）。
 > §8.3 的离散步长字号策略与实现相反（实际为二分搜索 + fontTools 字宽，见 `text_fit.py`）；
 > PyMuPDF"逃生门"被 license guard 测试明令禁止。仅存设计推理参考价值。
 - 状态: ~~Final (开发依据文档)~~ → 已归档，勿作为开发输入
 - 日期: 2026-09-19
-- 上游: INPLACE_WORKBENCH_PRD_V1.md (需求与验收) · INPLACE_TECH_SURVEY_2026.md (选型证据)
+- 上游: INPLACE_WORKBENCH_PRD_V1.md (需求与验收) · docs/assessments/INPLACE_TECH_SURVEY_2026.md (选型证据)
 - 读者: 引擎( Python )、桌面(Rust/Tauri)、前端(React) 三条开发线
 
 ---

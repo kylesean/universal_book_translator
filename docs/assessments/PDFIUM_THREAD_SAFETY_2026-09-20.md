@@ -56,7 +56,7 @@ Python `thread_run` 起的工作线程（ctypes → `FPDF_LoadPage`）。
 
 ## 3. 已实施：双层防御
 
-`ubt/adapters/pdf/pdfium_gate.py` 是唯一的 pdfium 闸口（PdfiumGateway）。
+`ubt/adapters/pdf/pdfium_gate.py` 是唯一的 pdfium 闸口（概念名 "PdfiumGateway"；可导入的 API 为 `PDFIUM_LOCK`、`pdfium_serialized`、`open_document`、`install_font_policy`、`unify_docling_pdfium_lock`）。
 新代码的规范入口是 `open_document(path)` 上下文管理器；存量入口按下面
 两种模式收口。
 

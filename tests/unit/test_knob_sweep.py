@@ -4,7 +4,7 @@ Two distinct failure modes are being guarded here. The scanner can drift from th
 source (report a knob as sweepable when it has no override point, so a "band" gets
 measured against a value nothing reads), and the classifier can call an
 unmeasurable knob clean — the exact mistake recorded in
-``docs/knob-calibration-protocol.md`` 附录 B (the 2026-09-20 hardcode audit) as what
+``docs/design/knob-calibration-protocol.md`` 附录 B (the 2026-09-20 hardcode audit) as what
 the current defences make.
 """
 
@@ -51,7 +51,7 @@ def test_scanner_finds_every_override_point_and_agrees_with_the_module() -> None
     }
     found = {k.name: k for k in sweep.sweepable_knobs()}
     assert found.keys() == live.keys(), (
-        "the protocol's sweepable set drifted; docs/knob-calibration-protocol.md §4 "
+        "the protocol's sweepable set drifted; docs/design/knob-calibration-protocol.md §4 "
         "states this list and its count"
     )
     for name, value in live.items():

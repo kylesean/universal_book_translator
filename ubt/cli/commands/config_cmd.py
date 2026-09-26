@@ -2,7 +2,7 @@
 
 The env-var list is derived from the model schema, so a field cannot be added
 without appearing here. This is the live counterpart to the hand-maintained
-table in ``docs/USER_GUIDE.md`` (a test pins the two together), and the way to
+table in ``docs/guides/USER_GUIDE.md`` (a test pins the two together), and the way to
 answer "which env var sets X?" without grepping the codebase.
 """
 

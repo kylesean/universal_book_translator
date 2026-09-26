@@ -13,7 +13,7 @@ Each knob carries a calibration status (see :data:`CALIBRATION`):
   before anyone "tunes" it for another book;
 - ``HYPOTHESIS`` — principled default with no empirical backing yet.
 
-Discipline (docs/knob-calibration-protocol.md §3): new knobs land HERE with
+Discipline (docs/design/knob-calibration-protocol.md §3): new knobs land HERE with
 status + rationale, never inline in a module. P11 promotes statuses by evidence,
 never by feel.
 """
@@ -110,7 +110,7 @@ EM_SPACE_ADV = 0.32
 def _env_float(name: str, default: float) -> float:
     """Calibration override: env wins, otherwise the frozen default.
 
-    Lets the knob matrix (docs/knob-calibration-protocol.md) sweep values
+    Lets the knob matrix (docs/design/knob-calibration-protocol.md) sweep values
     without touching source defaults — the default stays the object under
     test. Invalid values fall back silently so a typo never breaks a run.
     """

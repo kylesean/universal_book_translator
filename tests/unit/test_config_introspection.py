@@ -20,7 +20,7 @@ from ubt.core.config import UBTConfig, UBTEnvSettingsSource, env_var_names
 pytestmark = pytest.mark.fast
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_USER_GUIDE = _REPO_ROOT / "docs" / "USER_GUIDE.md"
+_USER_GUIDE = _REPO_ROOT / "docs" / "guides" / "USER_GUIDE.md"
 
 
 def test_env_var_names_match_pydantic_settings() -> None:
@@ -47,7 +47,7 @@ def test_every_field_env_var_is_documented() -> None:
         for name in UBTConfig.model_fields
         if not any(re.search(rf"\b{re.escape(env)}\b", guide) for env in env_var_names(name))
     ]
-    assert not missing, f"undocumented env vars (add them to docs/USER_GUIDE.md): {missing}"
+    assert not missing, f"undocumented env vars (add them to docs/guides/USER_GUIDE.md): {missing}"
 
 
 def test_config_command_lists_every_field(capsys: pytest.CaptureFixture[str]) -> None:
