@@ -231,8 +231,12 @@ class JobQueue:
     ) -> QueuedJob:
         """Persist a queued job; idempotent on ``job_id``.
 
-        A resubmitted id returns the existing row untouched (whatever its
-        status), matching the API's submit idempotency contract.
+        A resubmitted id whose row is still live (queued/running/submitted) or
+        already ``completed`` returns the existing row untouched, matching the
+        API's submit idempotency contract. A ``failed``/``cancelled`` row is
+        re-queued in place with the new payload: resubmitting a dead id is a
+        request to run it again, and returning the dead status left the caller
+        holding an id that would never execute.
 
         Raises :class:`QueueDepthExceededError` when this would be a *new* row
         and the queue already holds ``max_queued`` QUEUED jobs. The count and
@@ -245,7 +249,7 @@ class JobQueue:
             conn.execute("BEGIN IMMEDIATE;")
             try:
                 already = conn.execute(
-                    "SELECT 1 FROM job_queue WHERE job_id = ?", (job_id,)
+                    "SELECT status, tenant_id FROM job_queue WHERE job_id = ?", (job_id,)
                 ).fetchone()
                 if already is None:
                     queued = conn.execute(
@@ -258,23 +262,55 @@ class JobQueue:
                             f"(max_queued={self.max_queued}). Let the workers drain "
                             "before submitting more, or raise UBT_JOB_MAX_QUEUED."
                         )
-                conn.execute(
-                    """
-                    INSERT OR IGNORE INTO job_queue
-                        (job_id, tenant_id, priority, status, attempts, max_attempts,
-                         payload_json, enqueued_at)
-                    VALUES (?, ?, ?, ?, 0, ?, ?, ?)
-                    """,
-                    (
-                        job_id,
-                        tenant_id,
-                        int(priority),
-                        JobStatus.QUEUED.value,
-                        int(attempts_cap),
-                        json.dumps(dict(payload)),
-                        ts,
-                    ),
-                )
+                    conn.execute(
+                        """
+                        INSERT OR IGNORE INTO job_queue
+                            (job_id, tenant_id, priority, status, attempts, max_attempts,
+                             payload_json, enqueued_at)
+                        VALUES (?, ?, ?, ?, 0, ?, ?, ?)
+                        """,
+                        (
+                            job_id,
+                            tenant_id,
+                            int(priority),
+                            JobStatus.QUEUED.value,
+                            int(attempts_cap),
+                            json.dumps(dict(payload)),
+                            ts,
+                        ),
+                    )
+                elif (
+                    str(already["status"])
+                    in (
+                        JobStatus.FAILED.value,
+                        JobStatus.CANCELLED.value,
+                    )
+                    and str(already["tenant_id"]) == tenant_id
+                ):
+                    # Re-run a dead job in place: the ledger holds its prior
+                    # progress, so the next claim resumes rather than restarts.
+                    conn.execute(
+                        """
+                        UPDATE job_queue
+                        SET status = ?, attempts = 0, max_attempts = ?,
+                            payload_json = ?, tenant_id = ?, priority = ?,
+                            error = NULL, worker_id = NULL, started_at = NULL,
+                            finished_at = NULL, lease_expires_at = NULL,
+                            heartbeat_at = NULL, cancel_requested = 0,
+                            enqueued_at = ?, progress_json = '{}'
+                        WHERE job_id = ?
+                        """,
+                        (
+                            JobStatus.QUEUED.value,
+                            int(attempts_cap),
+                            json.dumps(dict(payload)),
+                            tenant_id,
+                            int(priority),
+                            ts,
+                            job_id,
+                        ),
+                    )
+                # else: live or completed -> idempotent no-op.
                 conn.execute("COMMIT;")
             except BaseException:
                 self._safe_rollback()

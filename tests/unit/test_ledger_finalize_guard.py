@@ -76,10 +76,36 @@ def test_finalize_completed_cannot_overwrite_cancelled(tmp_path: Path) -> None:
     assert ledger.get_job_status("j1") == "cancelled"
 
 
-def test_finalize_completed_cannot_overwrite_failed(tmp_path: Path) -> None:
-    """Lease loss / abort marks the ledger failed; a late export must not flip it."""
+def test_finalize_completed_supersedes_an_earlier_failure(tmp_path: Path) -> None:
+    """A real completion must supersede a non-authoritative ``failed``.
+
+    That failure can come from a stale owner whose lease was reclaimed, or from
+    a previous attempt the user resumed. Refusing the override left delivered
+    jobs reading ``failed`` and made every resume re-run the paid export.
+    """
     ledger = SQLiteJobLedger(tmp_path / "l.sqlite")
     seed_job(ledger, "j1", _doc(2), target_lang="zh")
     ledger.finalize_job("j1", status="failed")
+    _all_terminal(ledger)
     ledger.finalize_job("j1", status="completed")
-    assert ledger.get_job_status("j1") == "failed"
+    assert ledger.get_job_status("j1") == "completed"
+
+
+def _all_terminal(ledger: "SQLiteJobLedger") -> None:
+    ledger.save_checkpoints_batch(
+        [
+            {"block_id": "b001", "status": BlockStatus.MTQE_PASSED.value, "target_text": "t1"},
+            {"block_id": "b002", "status": BlockStatus.REPAIRED.value, "target_text": "t2"},
+        ]
+    )
+
+
+def test_stale_failure_cannot_overwrite_completed(tmp_path: Path) -> None:
+    """A stale owner's abort write must not re-mark a job the new owner finished."""
+    ledger = SQLiteJobLedger(tmp_path / "l.sqlite")
+    seed_job(ledger, "j1", _doc(2), target_lang="zh")
+    _all_terminal(ledger)
+    ledger.finalize_job("j1", status="completed")
+
+    ledger.finalize_job("j1", status="failed")
+    assert ledger.get_job_status("j1") == "completed"

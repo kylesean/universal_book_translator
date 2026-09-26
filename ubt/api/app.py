@@ -468,11 +468,16 @@ def create_app(
         resolved_in = resolve_secure_path(req.input_path, must_exist=True, config=app_config)
         requested_id = validate_job_id(req.job_id) if req.job_id else None
 
-        # Submit idempotency: if this job_id is already known, return it before
-        # checking output collisions (a completed run's output file already exists).
+        # Submit idempotency: if this job_id is already known and still live (or
+        # completed), return it before checking output collisions (a completed
+        # run's output file already exists). A failed/cancelled id falls through
+        # so ``enqueue`` re-runs it instead of handing back a dead job.
         if job_queue is not None and requested_id is not None:
             existing_queued = await asyncio.to_thread(job_queue.get, requested_id)
-            if existing_queued is not None:
+            if existing_queued is not None and existing_queued.status not in (
+                JobStatus.FAILED,
+                JobStatus.CANCELLED,
+            ):
                 # Tenant isolation: a cross-tenant probe must not learn the job
                 # exists (the read routes already return 404, but idempotency
                 # here returned it outright — an existence/status oracle).

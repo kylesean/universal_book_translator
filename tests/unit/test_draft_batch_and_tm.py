@@ -719,11 +719,31 @@ def test_ledger_batch_jobs_roundtrip(tmp_path: Path) -> None:
     ledger.register_batch_job("batch-1", "job1", "key-abc", status="submitted")
     ledger.update_batch_job_status("batch-1", "in_progress")
     assert ledger.find_live_batch_by_idempotency_key("key-abc") == "batch-1"
-    # Terminal status must not be resumed.
+    # ``completed`` is the provider's terminal status but the batch is not yet
+    # consumed: results are not fetched/persisted. It must still resume or a
+    # crash in that window re-creates (and re-bills) the identical payload.
     ledger.update_batch_job_status("batch-1", "completed")
+    assert ledger.find_live_batch_by_idempotency_key("key-abc") == "batch-1"
+    # ``consumed`` is the true terminal: results have been taken.
+    ledger.update_batch_job_status("batch-1", "consumed")
     assert ledger.find_live_batch_by_idempotency_key("key-abc") is None
     # Unknown key never resumes.
     assert ledger.find_live_batch_by_idempotency_key("key-other") is None
+    ledger.close()
+
+
+def test_reserve_batch_job_resumes_completed_unconsumed(tmp_path: Path) -> None:
+    """A crash between completed and consumed must resume, never re-create.
+
+    Pre-fix the resumed reservation saw no ``LIVE`` row, inserted a fresh
+    sentinel and returned ("create", None) -> the same batch was submitted and
+    billed a second time.
+    """
+    ledger = SQLiteJobLedger(tmp_path / "job.sqlite")
+    ledger.register_batch_job("batch-c", "job1", "key-c", status="submitted")
+    ledger.update_batch_job_status("batch-c", "completed")
+
+    assert ledger.reserve_batch_job("key-c", "job2") == ("resume", "batch-c")
     ledger.close()
 
 

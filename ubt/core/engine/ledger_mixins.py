@@ -461,16 +461,34 @@ class LedgerJobsMixin(LedgerBase):
             if row is None:
                 conn.execute("ROLLBACK;")
                 raise LedgerError(f"finalize_job: unknown job '{job_id}'")
-            if status == "completed" and str(row["status"]) in _TERMINAL_JOB_STATUSES:
-                # ``completed`` must never overwrite a terminal status: export
-                # finalizes on its own timeline, so a cancel/lease-loss that
-                # landed first would otherwise be rewritten to a false success.
-                # Idempotent no-op (not an error) so the export stage does not
-                # crash after a concurrent abort won the race.
+            existing = str(row["status"])
+            if status == "completed" and existing in ("cancelled",):
+                # A cancel is authoritative: an export that finishes afterwards
+                # must not rewrite it to a false success. Idempotent no-op (not
+                # an error) so the export stage does not crash after losing the
+                # race.
                 logger.warning(
-                    "finalize_job('completed') ignored for '%s': already %s",
+                    "finalize_job('completed') ignored for '%s': already cancelled", actual_id
+                )
+                conn.execute("ROLLBACK;")
+                return
+            if status == "completed" and existing == "failed":
+                # ``failed`` is not authoritative against a real completion: a
+                # job marked failed by a stale owner (its lease was reclaimed)
+                # or by a previous attempt that the user resumed can still reach
+                # export. Refusing here left delivered jobs reading ``failed``
+                # and made every resume re-run the paid export. To get this far
+                # the pipeline must have passed the non-terminal-block check
+                # below, i.e. the work really is done.
+                logger.info("finalize_job('completed') supersedes a failure for '%s'", actual_id)
+            elif status in ("failed", "cancelled") and existing == "completed":
+                # The mirror race: a stale owner's abort must not re-mark a job
+                # the reclaiming worker already completed. ``failed``/``cancelled``
+                # stay permissive only against non-terminal rows.
+                logger.warning(
+                    "finalize_job(%r) ignored for '%s': already completed",
+                    status,
                     actual_id,
-                    row["status"],
                 )
                 conn.execute("ROLLBACK;")
                 return
@@ -1290,6 +1308,15 @@ class LedgerBatchMixin(LedgerBase):
         {"submitted", "validating", "in_progress", "finalizing"}
     )
 
+    # Statuses a restart must *resume* rather than re-create. ``completed`` is
+    # the provider's terminal status but the batch is not yet consumed: results
+    # have not been fetched and persisted (the router writes ``completed``
+    # during polling and ``consumed`` only after it reaps the output file). A
+    # crash in that window that re-created the batch would re-submit the same
+    # payload and double-bill it, so ``completed`` resumes and the poll loop
+    # re-fetches.
+    RESUMABLE_BATCH_STATUSES: frozenset[str] = LIVE_BATCH_STATUSES | {"completed"}
+
     def register_batch_job(
         self,
         batch_id: str,
@@ -1319,7 +1346,7 @@ class LedgerBatchMixin(LedgerBase):
         restart that re-proposes the same batch resumes polling the original
         provider job instead of paying for a duplicate submission.
         """
-        placeholders = ",".join("?" * len(self.LIVE_BATCH_STATUSES))
+        placeholders = ",".join("?" * len(self.RESUMABLE_BATCH_STATUSES))
         with self._get_conn() as conn:
             row = conn.execute(
                 f"""
@@ -1328,7 +1355,7 @@ class LedgerBatchMixin(LedgerBase):
                 ORDER BY created_at ASC
                 LIMIT 1
                 """,
-                (idempotency_key, *sorted(self.LIVE_BATCH_STATUSES)),
+                (idempotency_key, *sorted(self.RESUMABLE_BATCH_STATUSES)),
             ).fetchone()
             return str(row["batch_id"]) if row else None
 
@@ -1364,7 +1391,9 @@ class LedgerBatchMixin(LedgerBase):
 
         Returns ``(outcome, batch_id)``:
 
-        - ``("resume", batch_id)`` — a live batch already exists; poll it.
+        - ``("resume", batch_id)`` — a live or completed-but-unconsumed batch
+          already exists; poll (and, when completed, fetch) it instead of
+          re-creating and re-billing the same payload.
         - ``("create", None)`` — the caller owns the create (fresh reservation,
           or a stale one handed over from a worker that died mid-create).
         - ``("pending", None)`` — another worker holds a fresh reservation and
@@ -1376,7 +1405,7 @@ class LedgerBatchMixin(LedgerBase):
         """
         sentinel = f"creating:{idempotency_key}"
         horizon = self.BATCH_CREATING_LEASE_SECONDS if lease_seconds is None else lease_seconds
-        live_placeholders = ",".join("?" * len(self.LIVE_BATCH_STATUSES))
+        live_placeholders = ",".join("?" * len(self.RESUMABLE_BATCH_STATUSES))
         with self._get_conn() as conn:
             conn.execute("BEGIN IMMEDIATE;")
             try:
@@ -1387,7 +1416,7 @@ class LedgerBatchMixin(LedgerBase):
                     ORDER BY created_at ASC
                     LIMIT 1
                     """,
-                    (idempotency_key, *sorted(self.LIVE_BATCH_STATUSES)),
+                    (idempotency_key, *sorted(self.RESUMABLE_BATCH_STATUSES)),
                 ).fetchone()
                 if live is not None:
                     conn.execute("COMMIT;")

@@ -54,6 +54,32 @@ def test_enqueue_is_idempotent_on_job_id(queue: JobQueue) -> None:
     assert again.worker_id == "w1"
 
 
+def test_enqueue_requeues_a_failed_job(queue: JobQueue) -> None:
+    """Resubmitting a dead id must run it again, not hand back a dead row."""
+    _enqueue(queue, "j1")
+    _claim(queue, "w1", now=1.0)
+    queue.complete("j1", "w1", status=JobStatus.FAILED, error="boom")
+
+    again = queue.enqueue("j1", {"input": "/new/j1.pdf"}, tenant_id="default", now=5.0)
+
+    assert again.status is JobStatus.QUEUED
+    assert again.attempts == 0
+    assert again.payload == {"input": "/new/j1.pdf"}
+    assert again.error is None
+    assert again.worker_id is None
+
+
+def test_enqueue_leaves_a_completed_job_untouched(queue: JobQueue) -> None:
+    _enqueue(queue, "j1")
+    _claim(queue, "w1", now=1.0)
+    queue.complete("j1", "w1", status=JobStatus.COMPLETED)
+
+    again = queue.enqueue("j1", {"input": "/new/j1.pdf"}, tenant_id="default", now=5.0)
+
+    assert again.status is JobStatus.COMPLETED
+    assert again.payload == {"input": "/x/j1.pdf"}
+
+
 def test_claim_orders_by_priority_then_fifo(queue: JobQueue) -> None:
     _enqueue(queue, "low", priority=0, now=1.0)
     _enqueue(queue, "high", priority=5, now=2.0)
