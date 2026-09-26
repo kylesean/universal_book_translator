@@ -177,7 +177,13 @@ class JobSubmitRequest(BaseModel):
     # (zero token spend). Explicit dry_run=True required for mock translation.
     dry_run: bool = Field(default=False, description="Zero-token rehearsal run (echo provider)")
     # Resume controls (UBTConfig fields, forwarded by overrides_from_request).
-    fresh: bool = Field(default=False, description="Discard prior ledger state instead of resuming")
+    # ``None`` (not ``False``) so a client that omits the field leaves the
+    # operator's UBT_FRESH in force: overrides_from_request only applies non-None
+    # values, and a concrete False silently erased the environment setting.
+    fresh: bool | None = Field(
+        default=None,
+        description="Discard prior ledger state instead of resuming (unset follows UBT_FRESH)",
+    )
     start_chapter: int | None = Field(
         default=None, ge=1, description="First chapter of the window (run-only key)"
     )

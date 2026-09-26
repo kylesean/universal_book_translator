@@ -458,3 +458,13 @@ async def test_openai_responses_transport_caches_reasoning_fallback_after_first_
     )
     assert out2 == "translated text"
     assert len(sent_payloads) == 3
+
+
+def test_zen_detection_is_host_based_not_substring() -> None:
+    """``"zen" in base_url`` matched unrelated hosts like api.frozen.example.com."""
+    from ubt.core.router.transports.openai_responses import _is_opencode_zen_endpoint
+
+    assert _is_opencode_zen_endpoint("https://opencode.ai/zen/go/v1")
+    assert _is_opencode_zen_endpoint("https://api.opencode.ai/v1")
+    assert not _is_opencode_zen_endpoint("https://api.frozen.example.com/v1")
+    assert not _is_opencode_zen_endpoint("https://zenith.internal/v1")

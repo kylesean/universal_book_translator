@@ -55,8 +55,17 @@ MODEL_PRICES_USD_PER_MTOK: dict[str, tuple[float, float]] = {
     "muse-": (0.0, 0.0),
     # Gemini flash family
     "gemini-2.0-flash": (0.10, 0.40),
+    "gemini-2.0-flash-lite": (0.075, 0.30),
     "gemini-2.5-flash-lite": (0.10, 0.40),
     "gemini-2.5-flash": (0.30, 2.50),
+    "gemini-2.5-pro": (1.25, 10.00),
+    # Gemini 1.5 entries: without these the broad "gemini" key (1.25/10.00)
+    # caught gemini-1.5-flash at ~16x/33x its published rate and mis-fed the
+    # budget gate. Longest-prefix match means every flash/lite variant needs
+    # its own key or it silently inherits the legacy pro rate.
+    "gemini-1.5-flash-8b": (0.0375, 0.15),
+    "gemini-1.5-flash": (0.075, 0.30),
+    "gemini-1.5-pro": (1.25, 5.00),
     "gemini": (1.25, 10.00),
     # OpenAI. Longest-prefix match means a more specific family MUST have its
     # own key or it silently inherits the shorter legacy rate: without the
@@ -259,6 +268,13 @@ def has_price_entry(model: str) -> bool:
     candidates = [normalized]
     if "/" in normalized:
         candidates.append(normalized.split("/", 1)[-1])
+        # Mirrors ``resolve_model_prices``: a nested namespace
+        # (``openrouter/google/gemini-2.0-flash``) only resolves through the
+        # last path segment, so the two predicates must consider the same
+        # candidates or a priced model reports as unknown.
+        last_segment = normalized.rsplit("/", 1)[-1]
+        if last_segment not in candidates:
+            candidates.append(last_segment)
     return any(cand.startswith(key) for cand in candidates for key in MODEL_PRICES_USD_PER_MTOK)
 
 

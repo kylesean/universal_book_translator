@@ -112,7 +112,12 @@ def profile_repair_is_independent(profile: Mapping[str, Any]) -> bool:
     return "repair_model" in profile and profile.get("repair_model") != profile.get("draft_model")
 
 
-def merge_provider_profile(explicit: Mapping[str, Any], profile_name: str) -> dict[str, Any]:
+def merge_provider_profile(
+    explicit: Mapping[str, Any],
+    profile_name: str,
+    *,
+    env_supplied: frozenset[str] | set[str] | None = None,
+) -> dict[str, Any]:
     """Layer a provider profile under explicit field values; one profile semantics.
 
     Explicit values win over the profile. ``repair_model`` follows the effective
@@ -120,10 +125,20 @@ def merge_provider_profile(explicit: Mapping[str, Any], profile_name: str) -> di
     is independent and kept); when neither side pins a repair, the model
     validator syncs it to the draft. Shared by ``from_env`` and the request
     override path so the same request yields the same models on both.
+
+    ``env_supplied`` names fields the operator set via the real environment or
+    ``.env``. Those outrank the profile: without this, a profile's default
+    ``draft_model`` in the project ubt.toml silently overwrote
+    ``UBT_DRAFT_MODEL``, contradicting ``from_env``'s "explicit env wins"
+    contract.
     """
     from ubt.core.profiles import load_provider_profile
 
     profile = dict(load_provider_profile(profile_name))
+    if env_supplied:
+        for key in list(profile):
+            if key in env_supplied:
+                profile.pop(key, None)
     merged = {**profile, **explicit}
     if (
         "draft_model" in explicit
@@ -166,6 +181,22 @@ def _default_api_key() -> SecretStr:
     from a name this module declares; see the ``api_key`` aliases.
     """
     return SecretStr(MOCK_API_KEY)
+
+
+def _url_hostname(url: str) -> str:
+    """Lowercased hostname of a URL, tolerating a missing scheme.
+
+    Endpoint-family detection must be host-based: a bare
+    ``"api.anthropic.com" in base_url`` also matched a host like
+    ``api.anthropic.com.evil.example``.
+    """
+    candidate = (url or "").strip()
+    if "://" not in candidate:
+        candidate = "https://" + candidate
+    try:
+        return (urlsplit(candidate).hostname or "").lower()
+    except ValueError:
+        return ""
 
 
 def _default_base_url() -> str:
@@ -1008,7 +1039,7 @@ class UBTConfig(BaseSettings):
         raw_base = self.base_url.strip()
         if raw_base.lower() == "gemini":
             self.base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
-        elif "generativelanguage.googleapis.com" in raw_base:
+        elif _url_hostname(raw_base) == "generativelanguage.googleapis.com":
             base_clean = raw_base.rstrip("/")
             if not base_clean.endswith("/openai"):
                 if base_clean.endswith("/v1beta"):
@@ -1051,7 +1082,7 @@ class UBTConfig(BaseSettings):
                 derived_api_mode = "responses"
             # Anthropic wins when both signals hold, ensuring the endpoint
             # check takes priority over the model prefix.
-            if "api.anthropic.com" in self.base_url:
+            if _url_hostname(self.base_url) == "api.anthropic.com":
                 derived_api_mode = "anthropic"
             if derived_api_mode != self.api_mode:
                 self.api_mode = derived_api_mode
@@ -1103,8 +1134,29 @@ class UBTConfig(BaseSettings):
 
                 profile_name = dotenv_values(str(env_file)).get("UBT_PROVIDER_PROFILE")
         if profile_name:
-            clean = merge_provider_profile(clean, profile_name)
+            clean = merge_provider_profile(
+                clean, profile_name, env_supplied=_env_supplied_field_names()
+            )
         return cls(**clean)
+
+
+def _env_supplied_field_names() -> set[str]:
+    """Field names the operator set via the real environment or the dotenv file.
+
+    Feeds ``merge_provider_profile`` so a profile's default cannot override an
+    explicit ``UBT_*`` setting — the precedence ``from_env`` documents.
+    """
+    supplied: set[str] = set()
+    env_file = UBTConfig.model_config.get("env_file")
+    file_values: dict[str, Any] = {}
+    if env_file and Path(str(env_file)).exists():
+        from dotenv import dotenv_values
+
+        file_values = dict(dotenv_values(str(env_file)))
+    for name in UBTConfig.model_fields:
+        if any(var in os.environ or var in file_values for var in env_var_names(name)):
+            supplied.add(name)
+    return supplied
 
 
 def env_var_names(field_name: str) -> list[str]:

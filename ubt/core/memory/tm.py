@@ -107,13 +107,13 @@ def _polarity_diverges(query_source: str, reference_source: str) -> bool:
 
 # Scale-up knobs for the FTS5 prefilter path.
 #
-# The rapidfuzz scan is linear in the pool and the trigram prefilter's price is
-# dominated by its fixed 64-term OR MATCH (it does not shrink with the pool), so
-# the scan wins below ~a million rows per language pair and the crossover sets
-# the threshold; a too-low threshold selects a path slower than the one it
-# replaces, on every block. The index stays for the day a corpus is large
-# enough for it to pay.
-FTS_PREFILTER_MIN_POOL = 20_000
+# The rapidfuzz scan is linear in the pool, while the trigram prefilter's price
+# is dominated by its fixed 64-term OR MATCH (it does not shrink with the pool),
+# so the scan is the cheaper path until the pool is genuinely large. A too-low
+# threshold picks a path slower than the one it replaces on every block; the
+# previous 20_000 contradicted this comment's own crossover claim. Recalibrate
+# with scripts/knob_sweep.py rather than trusting a hand-written number.
+FTS_PREFILTER_MIN_POOL = 1_000_000
 FTS_PREFILTER_LIMIT = 200
 _FTS_QUERY_MAX_TERMS = 64
 _FTS_SCHEMA_VERSION = 1
@@ -156,7 +156,6 @@ def compute_tm_context(
 # provenance values
 PROVENANCE_MACHINE = "machine"
 PROVENANCE_HUMAN_PE = "human_pe"
-PROVENANCE_IMPORTED = "imported"
 
 
 def normalize_for_tm(text: str) -> str:

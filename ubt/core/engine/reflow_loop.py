@@ -133,7 +133,11 @@ class ReflowControlLoop:
         typ_sidecar = pdf_path.with_suffix(".typ")
         if typ_sidecar.exists():
             with suppress(Exception):
-                typ_text = typ_sidecar.read_text(encoding="utf-8", errors="replace")[:200_000]
+                typ_text = (
+                    await asyncio.to_thread(
+                        typ_sidecar.read_text, encoding="utf-8", errors="replace"
+                    )
+                )[:200_000]
 
         facing_spread = False
         if self.manifest and self.manifest.metadata:
@@ -444,10 +448,8 @@ class ReflowControlLoop:
             ],
         }
         visual_report_path = sidecar_path(rendered_path, "visual_report.json")
-        visual_report_path.write_text(
-            json.dumps(report_dict, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        payload = json.dumps(report_dict, ensure_ascii=False, indent=2)
+        await asyncio.to_thread(visual_report_path.write_text, payload, encoding="utf-8")
 
         await asyncio.to_thread(self.ledger.record_visual_report, self.job_id, report_dict)
 

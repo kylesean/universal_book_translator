@@ -157,11 +157,14 @@ class JobQueue:
 
     @contextmanager
     def _get_conn(self) -> Iterator[sqlite3.Connection]:
-        if self._conn is None:
-            self._init_connection()
-        if self._conn is None:  # explicit: -O strips asserts
-            raise RuntimeError("job queue connection failed to initialize")
         with self._lock:
+            # Initialize inside the lock: a concurrent first-use after close()
+            # could otherwise build two connections, leak one, and leave the
+            # other thread's queries on an orphaned handle.
+            if self._conn is None:
+                self._init_connection()
+            if self._conn is None:  # explicit: -O strips asserts
+                raise RuntimeError("job queue connection failed to initialize")
             try:
                 yield self._conn
             except sqlite3.Error:

@@ -42,7 +42,7 @@ from ubt.core.exceptions import (
     UBTError,
     UnsupportedDocumentFormatError,
 )
-from ubt.core.fs_perms import world_readable_files
+from ubt.core.fs_perms import warn_world_readable
 from ubt.core.job_options import default_output_dir_for_scan
 from ubt.core.memory.tm import (
     TranslationMemory,
@@ -521,24 +521,11 @@ class PipelineOrchestrator:
         # and target text, and files created before UBT restricted its own
         # artifacts are still group/other-readable. New runs cannot fix them
         # silently (that would be an unasked-for chmod), so say it out loud.
-        # Also scan docling cache + deliverable trees (job_options.default_output_dir).
+        # Runs off-loop: the recursive scan would otherwise stall heartbeats.
         scan_dirs = [Path(".ubt/docling_cache"), default_output_dir_for_scan()]
         if output_path is not None:
             scan_dirs.append(Path(output_path).parent)
-        exposed = world_readable_files(self.config.db_dir, extra_dirs=scan_dirs)
-        if exposed:
-            # The exposed files may live outside db_dir (deliverables, caches), so
-            # name their real parents: the old message told operators to chmod
-            # db_dir, which was already owner-only and changed nothing.
-            parents = sorted({str(path.parent) for path in exposed})
-            target = " ".join(f"'{parent}'" for parent in parents)
-            logger.warning(
-                "%d file(s) carry book text but are readable by group/other "
-                "(first: %s). Tighten them with: chmod -R go-rwx %s",
-                len(exposed),
-                exposed[0],
-                target,
-            )
+        await asyncio.to_thread(warn_world_readable, self.config.db_dir, scan_dirs)
         # Bill this run alone: take a provider-side sink when the provider can
         # attribute per run, otherwise a snapshot to diff the shared counters in.
         self._run_usage_sink = self.router.begin_usage_sink()
@@ -809,10 +796,20 @@ class PipelineOrchestrator:
             # metadata failure must not flip a completed job to failed.
             if self.finalize_job is not None and export_completed_event is not None:
                 with suppress(Exception):
-                    self.finalize_job(export_completed_event)
+                    # Off-loop: the hook opens a SQLite ledger and writes metadata.
+                    await asyncio.to_thread(self.finalize_job, export_completed_event)
 
+        except GeneratorExit:
+            # Consumer closed the generator early (job_worker's ``aclosing`` on a
+            # lost lease, or any caller that stops iterating). NOT proof the user
+            # cancelled — a lease loss lands here too — so mark failed, not
+            # cancelled; the worker rewrites it with the real reason.
+            logger.warning("Pipeline generator closed early for job %s", actual_job_id)
+            await asyncio.shield(
+                _mark_failed_unless_completed(ledger, actual_job_id, status="failed")
+            )
+            raise
         except (
-            GeneratorExit,
             asyncio.CancelledError,
             JobInterruptedError,
             KeyboardInterrupt,

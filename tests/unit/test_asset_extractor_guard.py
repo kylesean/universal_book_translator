@@ -28,6 +28,11 @@ class _FakeBitmap:
         class _Img:
             size = (10, 10)
 
+            def convert(self, _mode: str) -> Any:
+                # Stands in for the production ``.convert("RGB")`` copy that
+                # detaches the PIL image from the native bitmap buffer.
+                return self
+
             def save(self, path: Path) -> None:
                 Path(path).write_bytes(b"png")
 

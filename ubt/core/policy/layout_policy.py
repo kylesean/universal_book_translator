@@ -84,10 +84,6 @@ PROSE_BLOCK_TYPES = frozenset({BlockType.HEADING, BlockType.NARRATIVE, BlockType
 # ``PROSE_BLOCK_TYPES`` only), which is that engine's stated contract.
 NON_TEXT_BLOCK_TYPES = frozenset({BlockType.FORMULA, BlockType.CODE, BlockType.IMAGE})
 NON_PROSE_FLOWS = frozenset({FlowID.FOOTNOTE, FlowID.CAPTION, FlowID.TABLE_GRID})
-# Regions must not paint over these (their lines stay source-visible).
-MERGE_BARRIER_REASONS = frozenset(
-    {"caption", "header_band", "footer_band", "footer", "non_prose", "chrome", "policy"}
-)
 CAPTION_RE = re.compile(r"^(FIG\.|Fig\.|Figure|Table|TAB\.|图|表)\s*[A-Za-z0-9]", re.IGNORECASE)
 FOOTER_PATTERNS = re.compile(r"copyright|©|doi\.org|rights reserved|Elsevier", re.IGNORECASE)
 # Chrome bands: short text hugging the page edges (points + chars).

@@ -339,15 +339,28 @@ class MathjaxRenderer:
         meta, svg_path, png_path = self._cache_paths(key)
         try:
             restrict_dir_to_owner(MATH_CACHE_DIR)
-            svg_path.write_text(result.svg, encoding="utf-8")
+            # Atomic per file: a concurrent reader otherwise sees a half-written
+            # SVG (empty/truncated) and embeds it in the PDF.
+            _atomic_write(svg_path, result.svg.encode("utf-8"))
             if result.png is not None:
-                png_path.write_bytes(result.png)
-            meta.write_text(
-                json.dumps({"width": result.width, "height": result.height}),
-                encoding="utf-8",
+                _atomic_write(png_path, result.png)
+            _atomic_write(
+                meta,
+                json.dumps({"width": result.width, "height": result.height}).encode("utf-8"),
             )
         except OSError as exc:
             logger.debug("MathJax cache write skipped: %s", exc)
+
+
+def _atomic_write(path: Path, data: bytes) -> None:
+    """Write ``data`` to ``path`` via a temp file + rename (crash/concurrency safe)."""
+    tmp = path.with_name(f"{path.name}.tmp{os.getpid()}")
+    try:
+        tmp.write_bytes(data)
+        tmp.replace(path)
+    finally:
+        with contextlib.suppress(OSError):
+            tmp.unlink(missing_ok=True)
 
 
 def _cache_key(

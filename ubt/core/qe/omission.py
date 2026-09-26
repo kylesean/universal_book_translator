@@ -206,11 +206,6 @@ def _match_term_surfaces(term: str, target: str, source: str = "") -> list[str] 
     return None
 
 
-def _term_present_verbatim(term: str, target: str, source: str = "") -> bool:
-    """Case-sensitive whole-token presence of an identifier in the target."""
-    return _match_term_surfaces(term, target, source) is not None
-
-
 def _char_ngrams(text: str, sizes: tuple[int, ...]) -> Counter[str]:
     grams: Counter[str] = Counter()
     for size in sizes:

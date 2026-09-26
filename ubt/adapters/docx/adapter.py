@@ -35,6 +35,7 @@ from docx.text.paragraph import Paragraph
 from lxml import etree
 
 from ubt.adapters.base import BaseDocumentAdapter
+from ubt.adapters.unresolved import failure_note, is_unresolved
 from ubt.core.cleaners.html_sanitizer import sanitize_html_fragment, strip_html_mark_tags
 from ubt.core.exceptions import DocumentParseError
 from ubt.core.ir.models import (
@@ -588,11 +589,18 @@ class DOCXAdapter(BaseDocumentAdapter):
         if bilingual_mode is None and manifest and manifest.run:
             bilingual_mode = manifest.run.bilingual_mode
 
-        targets = {
-            b.id: strip_html_mark_tags(str(b.target_text))
-            for b in blocks
-            if not b.skip_translate and b.target_text
-        }
+        targets: dict[str, str] = {}
+        for b in blocks:
+            if b.skip_translate or not b.target_text:
+                continue
+            text = strip_html_mark_tags(str(b.target_text))
+            if is_unresolved(b.status):
+                # DOCX cannot store the export stage's ``<mark>`` wrapper, so a
+                # failed draft would otherwise be indistinguishable from a
+                # finished translation. Append the shared unresolved note.
+                note = failure_note(b.status)
+                text = f"{text}\n\n{note}".strip()
+            targets[b.id] = text
 
         loop = asyncio.get_running_loop()
         injected = await loop.run_in_executor(

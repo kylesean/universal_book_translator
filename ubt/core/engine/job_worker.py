@@ -128,6 +128,42 @@ class JobWorker:
         """
         return await asyncio.to_thread(fn, *args, **kwargs)
 
+    async def _write_abort_ledger(
+        self,
+        job: QueuedJob,
+        job_config: UBTConfig | None,
+        *,
+        status: str,
+        reason: str,
+    ) -> None:
+        """Land the abort's terminal ledger status, distinct from the queue's.
+
+        The pipeline can only mark a bare ``failed`` when its generator is
+        closed early — it cannot tell a user cancel from a lost lease. The
+        worker does know, so it rewrites the ledger here: cancel ->
+        ``cancelled``; lease loss -> ``failed`` with an ``abort_reason``. The
+        queue row stays the source of truth for slot accounting; this is
+        best-effort and never raises.
+        """
+        cfg = job_config or self.config
+        db_path = Path(cfg.db_dir) / f"{job.job_id}.sqlite"
+
+        def _write() -> None:
+            from ubt.core.engine.ledger import SQLiteJobLedger
+
+            if not db_path.exists():
+                return
+            try:
+                with SQLiteJobLedger(db_path) as ledger:
+                    if ledger.get_job_status(job.job_id) == "completed":
+                        return
+                    ledger.set_job_metadata_value(job.job_id, "abort_reason", reason)
+                    ledger.finalize_job(job.job_id, status=status)
+            except Exception as exc:  # best-effort terminal write
+                logger.debug("Could not write abort ledger for %s: %s", job.job_id, exc)
+
+        await asyncio.to_thread(_write)
+
     async def _heartbeat_loop(
         self,
         job_id: str,
@@ -193,6 +229,7 @@ class JobWorker:
             self._heartbeat_loop(job.job_id, owner, lease_lost, cancel_token)
         )
         progress: dict[str, Any] = {}
+        job_config: UBTConfig | None = None
         try:
             # Config construction is inside the try on purpose (same shape as
             # api/manager and mcp/server): the queue payload persists across
@@ -255,12 +292,25 @@ class JobWorker:
                     progress=progress,
                 )
             )
+            with suppress(Exception):
+                await asyncio.shield(
+                    self._write_abort_ledger(
+                        job, job_config, status="cancelled", reason="cancelled_by_task"
+                    )
+                )
             logger.info("Job %s cancelled (task)", job.job_id)
             raise
         except LeaseLostError:
-            # No terminal write: the new owner is still running this job, and
-            # completing it here would make that worker's complete() fail.
-            logger.warning("Job %s: lease lost, stopping without a terminal write", job.job_id)
+            # The new owner is still running this job, so the QUEUE row must get
+            # no terminal write (that worker's complete() owns it). The LEDGER,
+            # though, was marked a bare ``failed`` by the pipeline's early-close
+            # handler; rewrite it with the real reason so infrastructure
+            # failure is distinguishable from a user cancel.
+            with suppress(Exception):
+                await self._write_abort_ledger(
+                    job, job_config, status="failed", reason="lease_lost"
+                )
+            logger.warning("Job %s: lease lost, stopping without a queue terminal write", job.job_id)
         except JobInterruptedError:
             await self._q(
                 self.queue.complete,
@@ -269,6 +319,10 @@ class JobWorker:
                 status=JobStatus.CANCELLED,
                 progress=progress,
             )
+            with suppress(Exception):
+                await self._write_abort_ledger(
+                    job, job_config, status="cancelled", reason="cancelled_by_request"
+                )
             logger.info("Job %s cancelled by request", job.job_id)
         except LedgerWriterLockConflictError as exc:
             # Another process currently holds the writer lock on disk (e.g. former worker

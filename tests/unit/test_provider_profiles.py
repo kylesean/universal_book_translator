@@ -259,3 +259,19 @@ def test_model_profiles_post_forbids_overriding_builtin_profiles() -> None:
         json={"model_pattern": "deepseek", "prompt_strategy": "minimal"},
     )
     assert res_conflict.status_code == 409
+
+
+def test_env_supplied_field_outranks_profile(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An explicit UBT_* setting must not be silently replaced by a profile default."""
+    from ubt.core import config as config_mod
+
+    monkeypatch.setattr(
+        "ubt.core.profiles.load_provider_profile",
+        lambda name: {
+            "draft_model": "profile-draft",
+            "base_url": "https://profile.example/v1",
+        },
+    )
+    merged = config_mod.merge_provider_profile({}, "test", env_supplied={"draft_model"})
+    assert "draft_model" not in merged
+    assert merged["base_url"] == "https://profile.example/v1"

@@ -357,3 +357,46 @@ async def test_poison_payload_fails_job_not_worker(queue: JobQueue) -> None:
     assert job is not None
     assert job.status is JobStatus.FAILED
     assert "ultra" in (job.error or "")
+
+
+@pytest.mark.asyncio
+async def test_lease_loss_writes_failed_ledger_with_reason(
+    queue: JobQueue, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A lost lease is infrastructure failure, not a user cancel.
+
+    The pipeline can only write a bare ``failed`` when its generator closes
+    early; the worker knows the real reason and must persist it instead of
+    leaving the misclassification as ``cancelled``.
+    """
+    from ubt.core.engine.ledger import SQLiteJobLedger
+    from ubt.core.ir.models import BookManifest
+
+    db_dir = tmp_path / "db"
+    db_dir.mkdir()
+    job_id = "job_lease_ledger"
+    with SQLiteJobLedger(db_dir / f"{job_id}.sqlite") as ledger:
+        ledger.init_job_from_manifest(
+            job_id, BookManifest(doc_id="d", title="t", source_path="x.pdf")
+        )
+
+    config = UBTConfig(db_dir=db_dir)
+    queue.enqueue(job_id, {"input_path": "x.pdf"}, tenant_id="default")
+    claimed = queue.claim("w1")
+    assert claimed is not None
+    monkeypatch.setattr(queue, "heartbeat", lambda *a, **k: False)
+
+    async def _slow(
+        job: QueuedJob, _config: UBTConfig
+    ) -> AsyncGenerator[TranslationProgressEvent, None]:
+        for _ in range(5):
+            await asyncio.sleep(0.02)
+            yield _event(job.job_id)
+
+    worker = JobWorker(queue, config, worker_id="w1", event_source=_slow)
+    worker._heartbeat_interval = 0.005
+    await worker.execute(claimed)
+
+    with SQLiteJobLedger(db_dir / f"{job_id}.sqlite") as ledger:
+        assert ledger.get_job_status(job_id) == "failed"
+        assert ledger.get_job_metadata_value(job_id, "abort_reason") == "lease_lost"

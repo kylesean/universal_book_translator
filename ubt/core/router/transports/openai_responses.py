@@ -9,9 +9,15 @@ from ubt.core.exceptions import ModelProviderError
 from ubt.core.router.transports.base import (
     BaseTransport,
     _extract_cached_tokens,
+    host_is,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _is_opencode_zen_endpoint(base_url: str) -> bool:
+    """Whether ``base_url`` points at the OpenCode Zen gateway (host-based)."""
+    return host_is(base_url, "opencode.ai")
 
 
 class OpenAIResponsesTransport(BaseTransport):
@@ -126,10 +132,10 @@ class OpenAIResponsesTransport(BaseTransport):
             elif (
                 cached_mode == "nested_minimal"
                 or eff == "minimal"
-                or (eff == "none" and ("opencode.ai" in self._base_url or "zen" in self._base_url))
+                or (eff == "none" and _is_opencode_zen_endpoint(self._base_url))
             ):
                 payload["reasoning"] = {"effort": "minimal"}
-            elif "opencode.ai" in self._base_url or "zen" in self._base_url:
+            elif _is_opencode_zen_endpoint(self._base_url):
                 payload["reasoning_effort"] = eff
             else:
                 payload["reasoning"] = {"effort": eff}
@@ -159,7 +165,7 @@ class OpenAIResponsesTransport(BaseTransport):
                     dropped.pop("reasoning", None)
                     return dropped
 
-                if "opencode.ai" in self._base_url or "zen" in self._base_url:
+                if _is_opencode_zen_endpoint(self._base_url):
                     retry_payload = dict(payload)
                     retry_payload.pop("reasoning_effort", None)
                     retry_payload["reasoning"] = {"effort": "minimal"}

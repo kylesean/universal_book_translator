@@ -234,3 +234,45 @@ async def test_explicit_reflow_advisory_not_surfaced(tmp_path: Path) -> None:
     manifest = await _run_pipeline_advisory(tmp_path, render_engine="reflow")
     assert manifest.run.delivery_status != "LAYOUT_TRADEOFF_ADVISORY"
     assert not (manifest.run.delivery_status or "").startswith("LAYOUT_TRADEOFF_ADVISORY")
+
+
+def test_inline_math_in_prose_does_not_route_to_rigid() -> None:
+    """One inline ``$x$`` must not flip a prose book to the monolingual rigid engine.
+
+    ``has_math`` used to fire on any inline math span, and rigid forces
+    monolingual — so a 300-page prose book with a single formula silently lost
+    the requested bilingual delivery.
+    """
+    from ubt.core.ir.models import BlockType, BoundingBox, FlowID, IRBlock
+    from ubt.core.policy.adaptive_policy import resolve_pdf_engine
+
+    blocks = [
+        IRBlock(
+            id=f"b{i}",
+            flow_id=FlowID.MAIN_STORY,
+            spine_index=i,
+            block_type=BlockType.NARRATIVE,
+            source_text="The relation $x^2$ appears in this paragraph.",
+            bbox=BoundingBox(page=1, x0=0, y0=0, x1=100, y1=20),
+        )
+        for i in range(5)
+    ]
+    assert resolve_pdf_engine("auto", blocks) == "publication"
+
+
+def test_formula_block_routes_to_rigid() -> None:
+    """An explicit FORMULA block is the signal rigid exists for."""
+    from ubt.core.ir.models import BlockType, BoundingBox, FlowID, IRBlock
+    from ubt.core.policy.adaptive_policy import resolve_pdf_engine
+
+    blocks = [
+        IRBlock(
+            id="f0",
+            flow_id=FlowID.MAIN_STORY,
+            spine_index=0,
+            block_type=BlockType.FORMULA,
+            source_text="E = mc^2",
+            bbox=BoundingBox(page=1, x0=0, y0=0, x1=100, y1=20),
+        )
+    ]
+    assert resolve_pdf_engine("auto", blocks) == "rigid"

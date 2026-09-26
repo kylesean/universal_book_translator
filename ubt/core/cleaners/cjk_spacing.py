@@ -69,8 +69,6 @@ _TABLE_SEP_RE = re.compile(r"[ \t]*(?:\|?[ \t]*:?-+:?[ \t]*)+\|?[ \t]*")
 
 
 _LATIN_OR_NUM = r"[a-zA-Z0-9]"
-# Any protected span (masker tokens, code spans, or math):
-_MATH_OR_MASK = r"⟦[^⟧]*⟧|`[^`\n]+`|\$\$[^\$]+\$\$|\$[^\$\n]+\$"
 _OPEN_BRACKET = r"[\(\[\{]"
 _CLOSE_BRACKET = r"[\)\]\}]"
 

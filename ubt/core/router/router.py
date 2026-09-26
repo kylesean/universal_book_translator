@@ -577,7 +577,11 @@ class ModelRouter:
         if not any(phrase in str(exc).lower() for phrase in _MODEL_IDENTITY_PHRASES):
             return False
         primary_base = getattr(self.provider, "_base_url", "") or ""
-        return "localhost" not in primary_base and "127.0.0.1" not in primary_base
+        from ubt.core.router.transports.base import hostname_of
+
+        # Host compare, not substring: ``"localhost" in base_url`` also matched
+        # e.g. ``my-localhost-proxy.example.com``.
+        return hostname_of(primary_base) not in ("localhost", "127.0.0.1", "::1", "0.0.0.0")
 
     async def _generate_via_local_fallback(
         self,
@@ -861,6 +865,14 @@ class ModelRouter:
                     # retry in lockstep and re-create the herd.
                     base = 0.2 * retries
                     await asyncio.sleep(base + random.uniform(0, base))
+            except (ValueError, TypeError) as exc:
+                # A 200 whose body is not the declared JSON (a proxy error page,
+                # a truncated stream) is deterministic: retrying the same request
+                # only burns quota and then rewraps the real cause as "unexpected".
+                # Fail this model fast; the fallback chain still gets its turn.
+                raise ModelProviderError(
+                    f"Provider response could not be parsed: {type(exc).__name__}: {exc}"
+                ) from exc
             except Exception as exc:
                 retries += 1
                 if retries > self.max_retries:

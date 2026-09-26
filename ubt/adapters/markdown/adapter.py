@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from ubt.adapters.base import BaseDocumentAdapter
+from ubt.adapters.unresolved import UNRESOLVED_STATUSES, failure_note_markdown
 from ubt.core.cleaners.html_sanitizer import strip_html_mark_tags
 from ubt.core.exceptions import DocumentParseError
 from ubt.core.ir.models import (
@@ -29,15 +30,9 @@ _GUTENBERG_MARKER = re.compile(r"^\[(Illustration|Footnote)\b", re.IGNORECASE)
 
 # Blocks that left the pipeline without an approved translation must stay
 # visible in the rendered document (the <mark> wrapper is what flags them).
-_UNRESOLVED_STATUSES = frozenset(
-    {BlockStatus.FAILED, BlockStatus.NEEDS_HUMAN, BlockStatus.BLOCKED_HUMAN}
-)
-
-_FAILURE_NOTES: dict[BlockStatus, str] = {
-    BlockStatus.FAILED: "Translation FAILED quality gates — unresolved machine draft kept for review only:",
-    BlockStatus.NEEDS_HUMAN: "Flagged NEEDS_HUMAN by quality triage — machine draft for human post-editing:",
-    BlockStatus.BLOCKED_HUMAN: "Blocked from machine translation by quality gates — source kept, human translation required.",
-}
+# The status set and notes are shared with every other adapter via
+# ``ubt.adapters.unresolved`` so the formats cannot drift apart.
+_UNRESOLVED_STATUSES = UNRESOLVED_STATUSES
 
 
 def _with_heading_marker(block: IRBlock, target: str) -> str:
@@ -56,8 +51,7 @@ def _with_heading_marker(block: IRBlock, target: str) -> str:
 
 
 def _format_failure_note(status: BlockStatus) -> str:
-    note = _FAILURE_NOTES.get(status, "Translation unresolved — manual review required:")
-    return f"> ⚠️ **[UBT] {note}**"
+    return failure_note_markdown(status)
 
 
 def _format_blockquoted(text: str) -> str:

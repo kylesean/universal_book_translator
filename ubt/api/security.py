@@ -69,6 +69,39 @@ def _log_startup_auth_warning(config: UBTConfig | None = None) -> None:
     )
 
 
+#: Explicit opt-out for a throwaway local server. The old "open by default"
+#: behaviour is now a deliberate, named decision rather than a silent default.
+_NO_AUTH_OVERRIDE_ENV = "UBT_ALLOW_NO_AUTH"
+
+
+def _no_auth_allowed() -> bool:
+    return os.getenv(_NO_AUTH_OVERRIDE_ENV, "").strip().lower() in ("1", "true", "yes")
+
+
+def _require_api_key_gate(config: UBTConfig | None = None) -> None:
+    """Refuse to boot the API without an auth gate unless explicitly overridden.
+
+    Default-secure now: the REST surface can read any parseable text under its
+    sandbox, so it must not start unauthenticated by accident. ``UBT_API_KEY``
+    (or strict mode) enables the gate; ``UBT_ALLOW_NO_AUTH=1`` is the named
+    escape hatch for a local, throwaway server.
+    """
+    cfg = config or UBTConfig.from_env()
+    if cfg.service_api_key.get_secret_value().strip() or cfg.is_strict_auth():
+        return
+    if _no_auth_allowed():
+        logger.warning(
+            "%s is set: booting the UBT API WITHOUT an API key (local/development only).",
+            _NO_AUTH_OVERRIDE_ENV,
+        )
+        return
+    raise SystemExit(
+        "refusing to start the UBT API without authentication: set UBT_API_KEY to "
+        "enable the X-API-Key gate, or set UBT_ALLOW_NO_AUTH=1 to run open on "
+        "localhost (development only)."
+    )
+
+
 def verify_api_key(
     x_api_key: str | None = Header(default=None),
     _config: UBTConfig | None = None,

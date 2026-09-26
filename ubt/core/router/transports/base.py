@@ -18,6 +18,31 @@ from ubt.core.router.registry import get_default_registry
 
 logger = logging.getLogger(__name__)
 
+
+def hostname_of(url: str) -> str:
+    """Lowercased hostname of a URL, tolerating a missing scheme.
+
+    The one place endpoint families (Anthropic, OpenCode Zen, Gemini) must be
+    recognized: a bare ``"zen" in base_url`` substring check also matched
+    ``api.frozen.example.com`` and sent it another family's wire payload.
+    """
+    from urllib.parse import urlsplit
+
+    candidate = (url or "").strip()
+    if "://" not in candidate:
+        candidate = "https://" + candidate
+    try:
+        return (urlsplit(candidate).hostname or "").lower()
+    except ValueError:
+        return ""
+
+
+def host_is(url: str, host: str) -> bool:
+    """True when ``url``'s hostname equals ``host`` or is a subdomain of it."""
+    actual = hostname_of(url)
+    target = host.lower()
+    return actual == target or actual.endswith("." + target)
+
 # Usage attribution for concurrent jobs. A long-lived API server drives several
 # PipelineOrchestrators over ONE provider instance, so process-wide counters
 # cannot say which job spent which tokens; a run attaches a private dict here

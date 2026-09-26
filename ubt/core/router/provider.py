@@ -19,6 +19,7 @@ from ubt.core.router.transports.base import (
     _extract_cached_tokens,
     _usage_sink,
     attach_usage_sink,
+    host_is,
     new_usage_totals,
     record_external_usage,
     sanitize_thought_output,
@@ -292,7 +293,7 @@ class OpenAICompatibleProvider(BaseModelProvider):
         self._name = provider_name
         self._transport = transport
         # Auto-detect Anthropic if base_url points to Anthropic and api_mode is default
-        if "api.anthropic.com" in self._base_url and api_mode == "chat":
+        if host_is(self._base_url, "api.anthropic.com") and api_mode == "chat":
             api_mode = "anthropic"
         if default_model.startswith("muse-") and api_mode == "chat":
             api_mode = "responses"

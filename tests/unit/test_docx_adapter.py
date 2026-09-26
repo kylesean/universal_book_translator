@@ -655,3 +655,29 @@ async def test_docx_monolingual_keeps_pictures_and_links_and_drops_source(
     await adapter.render_blocks(manifest, translated, "zh", both, bilingual_mode="bilingual")
     _texts, bilingual_drawings, _links = _a0920_docx_body_facts(both)
     assert bilingual_drawings == 1
+
+
+@pytest.mark.asyncio
+async def test_docx_failed_block_stays_labelled(tmp_path: Path) -> None:
+    """DOCX cannot store the export ``<mark>``; a failed draft must stay labelled.
+
+    It used to strip the failure mark and ship the raw machine draft as a
+    finished translation — indistinguishable from an approved one.
+    """
+    doc = Document()
+    doc.add_paragraph("Original text")
+    path = tmp_path / "failed.docx"
+    doc.save(str(path))
+
+    adapter = DOCXAdapter()
+    manifest = await adapter.extract_manifest(path)
+    blocks = (await _collect(adapter.parse_stream(path)))[0].blocks
+    blocks[0].target_text = '<mark class="ubt-failed-draft" title="failed">機器草稿</mark>'
+    blocks[0].status = BlockStatus.FAILED
+
+    out = tmp_path / "failed_out.docx"
+    await adapter.render_blocks(manifest, blocks, "zh", out, bilingual_mode="monolingual")
+
+    text = "\n".join(p.text for p in Document(str(out)).paragraphs)
+    assert "[UBT]" in text, text
+    assert "<mark" not in text, text

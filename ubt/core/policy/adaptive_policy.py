@@ -167,12 +167,13 @@ def resolve_pdf_engine(
     has_math = False
     struct_share = 0.0
     if materialized:
-        from ubt.core.cleaners.math_masker import count_math_spans
-
-        has_math = any(
-            b.block_type == BlockType.FORMULA or count_math_spans(b.source_text or "") > 0
-            for b in materialized
-        )
+        # ``has_math`` is driven by explicit FORMULA blocks only. An inline
+        # ``$x$`` anywhere in prose used to flip this True via
+        # ``count_math_spans``, which routed a whole 300-page prose book to the
+        # rigid engine -- and rigid is monolingual, so the requested bilingual
+        # delivery silently became mono. Reflow renders inline math fine;
+        # display/formula blocks are the extraction risk rigid exists for.
+        has_math = any(b.block_type == BlockType.FORMULA for b in materialized)
         struct_share = sum(
             1
             for b in materialized

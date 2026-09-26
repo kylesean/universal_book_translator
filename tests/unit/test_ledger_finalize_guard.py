@@ -64,3 +64,21 @@ def test_finalize_failed_allows_non_terminal(tmp_path: Path) -> None:
     ledger.init_job("j1", _doc(2), target_lang="zh")
     ledger.finalize_job("j1", status="failed")
     assert ledger.get_job_status("j1") == "failed"
+
+
+def test_finalize_completed_cannot_overwrite_cancelled(tmp_path: Path) -> None:
+    """An export that finishes after a concurrent cancel must not report success."""
+    ledger = SQLiteJobLedger(tmp_path / "l.sqlite")
+    ledger.init_job("j1", _doc(2), target_lang="zh")
+    ledger.finalize_job("j1", status="cancelled")
+    ledger.finalize_job("j1", status="completed")
+    assert ledger.get_job_status("j1") == "cancelled"
+
+
+def test_finalize_completed_cannot_overwrite_failed(tmp_path: Path) -> None:
+    """Lease loss / abort marks the ledger failed; a late export must not flip it."""
+    ledger = SQLiteJobLedger(tmp_path / "l.sqlite")
+    ledger.init_job("j1", _doc(2), target_lang="zh")
+    ledger.finalize_job("j1", status="failed")
+    ledger.finalize_job("j1", status="completed")
+    assert ledger.get_job_status("j1") == "failed"

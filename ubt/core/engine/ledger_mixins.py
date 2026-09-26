@@ -36,6 +36,10 @@ from ubt.core.qe.defect_taxonomy import (
 )
 from ubt.core.qe.score_policy import QE_SCORED_SQL
 
+#: Terminal ``job_meta.status`` values. A ``completed`` finalize must not
+#: overwrite any of these (the string mirror of the queue's terminal set).
+_TERMINAL_JOB_STATUSES = frozenset({"completed", "failed", "cancelled"})
+
 
 def _chapter_match(chapter_id: str) -> tuple[str, tuple[str, ...]]:
     """SQL fragment + params selecting every block that belongs to one chapter.
@@ -473,19 +477,34 @@ class LedgerJobsMixin(LedgerBase):
     def finalize_job(self, job_id: str, status: str = "completed") -> None:
         """Mark job metadata as completed or terminated.
 
-        Fail-closed on ``completed``: refuses when the job row is missing or
-        when non-terminal blocks remain, so a crashed stage can never ship
-        as success. ``failed``/``cancelled`` stay permissive by design —
-        the abort path must land a terminal write even mid-flight.
+        Fail-closed on ``completed``: refuses when the job row is missing, when
+        non-terminal blocks remain, or when the job is already terminal (a
+        concurrent cancel/lease-loss must not be rewritten to a false success).
+        ``failed``/``cancelled`` stay permissive by design — the abort path must
+        land a terminal write even mid-flight.
         """
         with self._get_conn() as conn:
             actual_id = self._resolve_actual_job_id(conn, job_id)
             conn.execute("BEGIN IMMEDIATE;")
             row = conn.execute(
-                "SELECT job_id FROM job_meta WHERE job_id = ?", (actual_id,)
+                "SELECT job_id, status FROM job_meta WHERE job_id = ?", (actual_id,)
             ).fetchone()
             if row is None:
+                conn.execute("ROLLBACK;")
                 raise LedgerError(f"finalize_job: unknown job '{job_id}'")
+            if status == "completed" and str(row["status"]) in _TERMINAL_JOB_STATUSES:
+                # ``completed`` must never overwrite a terminal status: export
+                # finalizes on its own timeline, so a cancel/lease-loss that
+                # landed first would otherwise be rewritten to a false success.
+                # Idempotent no-op (not an error) so the export stage does not
+                # crash after a concurrent abort won the race.
+                logger.warning(
+                    "finalize_job('completed') ignored for '%s': already %s",
+                    actual_id,
+                    row["status"],
+                )
+                conn.execute("ROLLBACK;")
+                return
             if status == "completed":
                 placeholders = ",".join("?" * len(NON_TERMINAL_STATUSES))
                 stale = conn.execute(

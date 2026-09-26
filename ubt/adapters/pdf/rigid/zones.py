@@ -217,10 +217,6 @@ def _edge_row(row: LineBox, source: str) -> bool:
     return prec >= 0.5 and alpha_hits >= needed
 
 
-def _overlap(a: Rect, b: Rect) -> bool:
-    return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
-
-
 def _rect_of(lines: tuple[LineBox, ...]) -> Rect:
     return (
         min(ln.rect[0] for ln in lines) - ZONE_PAD_PT,

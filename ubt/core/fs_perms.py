@@ -141,7 +141,8 @@ def world_readable_files(directory: Path, extra_dirs: Iterable[Path] = ()) -> li
 
     ``extra_dirs`` extends the scan to artifact trees the same caller owns but
     the default check never walked: the pipeline's export report only scans
-    ``db_dir`` (``engine/pipeline.py::world_readable_files``), so rendered
+    ``db_dir`` (see :func:`world_readable_files`'s caller in
+    ``ubt/core/engine/pipeline.py``), so rendered
     PDFs, quality reports and the Docling conversion cache — all of which hold
     the manuscript text — were invisible to it. Passing them here keeps one
     definition of "exposed"; the empty default preserves the original
@@ -160,3 +161,25 @@ def world_readable_files(directory: Path, extra_dirs: Iterable[Path] = ()) -> li
             # the permission report itself.
             continue
     return sorted(found)
+
+
+def warn_world_readable(directory: Path, extra_dirs: Iterable[Path] = ()) -> None:
+    """Warn once about book-text files that group/other users can still read.
+
+    The scan is recursive (``rglob`` + ``stat``), so callers must run it off the
+    event loop. The warning names each exposed file's real parent — the exposed
+    files may live outside ``directory`` (deliverables, caches), and pointing the
+    operator at the already-owner-only ``directory`` changed nothing.
+    """
+    exposed = world_readable_files(directory, extra_dirs=extra_dirs)
+    if not exposed:
+        return
+    parents = sorted({str(path.parent) for path in exposed})
+    target = " ".join(f"'{parent}'" for parent in parents)
+    logger.warning(
+        "%d file(s) carry book text but are readable by group/other "
+        "(first: %s). Tighten them with: chmod -R go-rwx %s",
+        len(exposed),
+        exposed[0],
+        target,
+    )

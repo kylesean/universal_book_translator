@@ -491,10 +491,23 @@ def test_explicit_render_engine_passes_through(requested: str, expected: str) ->
     assert resolve_pdf_engine(requested, blocks) == expected
 
 
-def test_auto_sends_math_dense_document_to_overlay() -> None:
-    """A $ in prose is enough: reflow must rebuild only what it can extract."""
+def test_auto_keeps_inline_math_prose_on_reflow() -> None:
+    """An inline ``$…$`` must not flip a prose book to the mono rigid engine.
+
+    `has_math` used to fire on any inline math span; rigid then forced mono, so
+    one formula in a 300-page book silently dropped the bilingual delivery.
+    """
     blocks = _blocks(
         ("The field $E_{th}$ governs the regime.", BlockType.NARRATIVE),
+        ("Ordinary narrative prose about the method.", BlockType.NARRATIVE),
+    )
+    assert resolve_pdf_engine("auto", blocks) == "publication"
+
+
+def test_auto_sends_formula_block_document_to_overlay() -> None:
+    """An explicit FORMULA block is the extraction risk rigid exists for."""
+    blocks = _blocks(
+        ("E = mc^2", BlockType.FORMULA),
         ("Ordinary narrative prose about the method.", BlockType.NARRATIVE),
     )
     assert resolve_pdf_engine("auto", blocks) == "rigid"

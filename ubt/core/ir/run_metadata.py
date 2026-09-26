@@ -123,8 +123,10 @@ class RunMetadata(BaseModel):
     def to_metadata_dict(self) -> dict[str, Any]:
         """Only the fields this run actually set, as JSON-native values.
 
-        The ledger persists ``**manifest.run.to_metadata_dict()`` next to the
-        artifact keys, so this is the single place the typed view turns back into
-        the job's metadata JSON.
+        ``exclude_none`` (not ``exclude_unset``): ``validate_assignment`` marks a
+        field "set" the moment anything assigns it — including assigning ``None``
+        back — so ``exclude_unset`` leaked explicit ``null``s the contract says
+        must stay absent. ``None`` is the "never decided" sentinel here; the one
+        intentional empty value (``emit_secondary_mode``'s ``''``) is kept.
         """
-        return self.model_dump(exclude_unset=True, mode="json")
+        return self.model_dump(exclude_none=True, mode="json")

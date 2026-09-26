@@ -30,6 +30,7 @@ from ubt.api.security import (
     SYSTEM_DISALLOWED_PREFIXES,
     _build_system_disallowed_prefixes,
     _log_startup_auth_warning,
+    _require_api_key_gate,
     _tenant_from_header,
     effective_allowed_bases,
     resolve_secure_path,
@@ -1157,19 +1158,22 @@ def _resolve_bind(host: str | None, port: int | None) -> tuple[str, int]:
 def run_server(host: str | None = None, port: int | None = None) -> None:
     """CLI helper to boot uvicorn server.
 
-    Defaults to binding localhost only. Override ``host`` (e.g. "0.0.0.0") only behind a
-    trusted reverse proxy, and set ``UBT_API_KEY`` to require authentication.
+    Defaults to binding localhost only. The service now refuses to start without
+    an API key gate: set ``UBT_API_KEY`` (or ``UBT_STRICT_AUTH=1``). For a local,
+    throwaway server, ``UBT_ALLOW_NO_AUTH=1`` restores the old open behaviour.
     """
     host, port = _resolve_bind(host, port)
     setup_logging()
+    server_config = UBTConfig.from_env()
     if host not in _LOOPBACK_HOSTS:
-        missing = _bind_isolation_gaps(UBTConfig())
+        missing = _bind_isolation_gaps(server_config)
         if missing and not _insecure_bind_allowed():
             raise SystemExit(
                 f"refusing to bind non-loopback host {host!r} without full isolation: "
                 f"missing {', '.join(missing)}. Set them, or set "
                 "UBT_ALLOW_INSECURE_BIND=1 to override (not recommended)."
             )
+    _require_api_key_gate(server_config)
     import uvicorn
 
     uvicorn.run("ubt.api.app:app", host=host, port=port, reload=False)

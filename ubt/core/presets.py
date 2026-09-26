@@ -120,14 +120,6 @@ PRESETS: dict[Preset, PresetPolicy] = {
 }
 
 
-def preset_options() -> list[tuple[str, str, str]]:
-    """Interactive-select options for the preset menu (key, label, description)."""
-    return [
-        (policy.key.value, policy.label, f"{policy.tagline}（{policy.description}）")
-        for policy in PRESETS.values()
-    ]
-
-
 def resolve_engine_params(
     preset: Preset | None,
     explicit: dict[str, Any],

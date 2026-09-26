@@ -45,14 +45,7 @@ from ubt.core.cleaners.html_sanitizer import strip_html_mark_tags
 from ubt.core.cleaners.math_masker import MathMasker
 
 _CJK = r"一-鿿㐀-䶿豈-﫿぀-ヿ가-힯"
-_WS = r"[ \t\u3000]+"
-# Latin-side of a CJK boundary: ASCII letters/digits plus the brackets
-# wrapping typical references (``式 (A.6)``) and Greek math letters (``对 β 的``).
-_LAT = r"A-Za-z0-9\(\[\（\u0370-\u03FF"
-_RAT = r"A-Za-z0-9\)\]\）\u0370-\u03FF"
-_CJK_LATIN_L = re.compile(f"([{_CJK}]){_WS}([{_LAT}])")
-_CJK_LATIN_R = re.compile(f"([{_RAT}]){_WS}([{_CJK}])")
-_WS_BEFORE_NEWLINE = re.compile(r"[ \t\u3000]+\n")
+_CJK = r"一-鿿㐀-䶿豈-﫿぀-ヿ가-힯"
 
 
 def typst_escape(text: str) -> str:

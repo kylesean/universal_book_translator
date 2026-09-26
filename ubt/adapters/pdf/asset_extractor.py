@@ -17,10 +17,6 @@ from ubt.adapters.pdf.pdfium_gate import pdfium_serialized
 
 logger = logging.getLogger(__name__)
 
-_FIG_CAPTION_RE = re.compile(
-    r"(?:^|\n)\s*(FIG(?:URE)?\.?\s*([0-9A-Z]+(?:\.[0-9A-Z]+)?)[^\n]*)",
-    re.IGNORECASE,
-)
 _FIG_ID_RE = re.compile(r"([0-9A-Z]+\.[0-9A-Z]+)", re.IGNORECASE)
 _SENTENCE_VERBS_RE = re.compile(
     r"^(?:shows?|illustrates?|displays?|depicts?|is|are|was|were|presents?|compares?|gives?|can)\b",
@@ -269,7 +265,10 @@ def extract_pdf_figures(
                     try:
                         bitmap = page.render(scale=dpi / 72.0, crop=crop)
                         try:
-                            pil_img = bitmap.to_pil()
+                            # ``convert`` copies off the native buffer: without it
+                            # a bit_depth/mode that makes ``to_pil`` share memory
+                            # would be a use-after-free once the bitmap closes.
+                            pil_img = bitmap.to_pil().convert("RGB")
                         finally:
                             _close_handles(bitmap)
                         img_name = f"fig_{safe_id}.png"

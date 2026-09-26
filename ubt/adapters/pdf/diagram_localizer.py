@@ -116,7 +116,7 @@ class DiagramLocalizer:
             for k, v in custom_glossary.items():
                 self.glossary[k.lower().strip()] = v
         self.fill_color = fill_color
-        self._page_heights_cache: OrderedDict[str, dict[int, float]] = OrderedDict()
+        self._page_heights_cache: OrderedDict[tuple[str, int, int], dict[int, float]] = OrderedDict()
 
     def _find_default_cjk_font(self) -> str | None:
         candidates = [
@@ -176,16 +176,27 @@ class DiagramLocalizer:
         return (r, g, b)
 
     def get_page_height(self, pdf_path: Path | str, page_no: int) -> float:
-        """Dynamically detect page height from PDF mediabox with a bounded LRU cache."""
-        pdf_str = str(Path(pdf_path).resolve())
-        per_page = self._page_heights_cache.get(pdf_str)
+        """Dynamically detect page height from PDF mediabox with a bounded LRU cache.
+
+        The cache key carries the file's mtime/size: a same-path PDF replaced by
+        a re-render or a batch overwrite otherwise kept serving the old height,
+        mis-cropping every diagram on the page.
+        """
+        path = Path(pdf_path).resolve()
+        pdf_str = str(path)
+        try:
+            st = path.stat()
+            key: tuple[str, int, int] = (pdf_str, st.st_mtime_ns, st.st_size)
+        except OSError:
+            key = (pdf_str, 0, 0)
+        per_page = self._page_heights_cache.get(key)
         if per_page is not None:
-            self._page_heights_cache.move_to_end(pdf_str)
+            self._page_heights_cache.move_to_end(key)
             if page_no in per_page:
                 return per_page[page_no]
         else:
             per_page = {}
-            self._page_heights_cache[pdf_str] = per_page
+            self._page_heights_cache[key] = per_page
 
         while len(self._page_heights_cache) > _MAX_HEIGHT_CACHE_ENTRIES:
             self._page_heights_cache.popitem(last=False)

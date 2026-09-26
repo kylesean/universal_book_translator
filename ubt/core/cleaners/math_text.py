@@ -39,9 +39,6 @@ def get_math_text_system_prompt(source_lang: str = "en", target_lang: str = "zh"
     )
 
 
-MATH_TEXT_SYSTEM_PROMPT = get_math_text_system_prompt("en", "zh")
-
-_COMMANDS = ("text", "mathrm", "operatorname", "textrm", "mbox")
 _COMMAND_RE = re.compile(r"\\(text|mathrm|operatorname|textrm|mbox)\s*\{")
 _FORBIDDEN_INNER_RE = re.compile(r"[\\{}$^_&%#]")
 _MAX_INNER_LEN = 120

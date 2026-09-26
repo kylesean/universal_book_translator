@@ -106,3 +106,12 @@ def test_the_exception_lists_have_not_gone_stale() -> None:
         assert reason, knob
         assert knob in mcp, f"{knob!r} is no longer an MCP config knob"
         assert knob not in api, f"{knob!r} is now on REST; drop the exception"
+
+
+def test_fresh_none_does_not_override_environment() -> None:
+    """REST's concrete ``fresh=False`` silently erased ``UBT_FRESH``; None must be skipped."""
+    from ubt.core.job_options import overrides_from_request
+
+    assert "fresh" not in overrides_from_request({"input_path": "x.pdf", "fresh": None})
+    explicit = overrides_from_request({"input_path": "x.pdf", "fresh": True})
+    assert explicit["fresh"] is True

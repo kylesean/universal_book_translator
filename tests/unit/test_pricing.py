@@ -395,3 +395,21 @@ def test_pricing_multi_segment_namespace() -> None:
     namespaced = resolve_model_prices("openrouter/anthropic/claude-3-5-sonnet")
     assert standard != (0.0, 0.0)
     assert namespaced == standard, f"Namespaced model prices {namespaced} should match {standard}"
+
+
+@pytest.mark.fast
+def test_gemini_flash_does_not_inherit_legacy_gemini_rate() -> None:
+    """A flash/lite variant must not silently inherit the legacy ``gemini`` rate."""
+    assert resolve_model_prices("gemini-1.5-flash") == (0.075, 0.30)
+    assert resolve_model_prices("gemini-2.5-flash") == (0.30, 2.50)
+    assert resolve_model_prices("gemini-1.5-flash") != resolve_model_prices("gemini")
+
+
+@pytest.mark.fast
+def test_has_price_entry_matches_resolve_for_nested_namespace() -> None:
+    """The two predicates must consider the same candidates (rsplit segment)."""
+    from ubt.core.router.pricing import has_price_entry
+
+    model = "openrouter/google/gemini-2.0-flash"
+    assert resolve_model_prices(model) != (0.0, 0.0)
+    assert has_price_entry(model) is True
