@@ -79,7 +79,7 @@ AST 守护为准；2026-09-22 实测 pypdfium2 实例化 16 处，另有 docling
   `docling_parser` VLM fallback 的 probe 段、`formula_witness` 栅格化段
   （typst 子进程在锁外）、`render_fidelity`（源页与产物页两束光栅在
   `with PDFIUM_LOCK:` 内完成，2026-09-22 补录——首版清单未含此新增点）、
-  页面采样链 `tui.advisor` → `ubt/core/archetype.py::sample_document` →
+  页面采样链 `core.advisor` → `ubt/core/archetype.py::sample_document` →
   `ubt/core/ports.py::sample_pdf_pages` → `plain_text_extractor`（经
   `open_document` 持锁；2026-09-20 起逐层下沉，锁语义不变）。
 

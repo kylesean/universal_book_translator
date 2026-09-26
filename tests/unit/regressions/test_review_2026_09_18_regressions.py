@@ -357,12 +357,10 @@ def test_job_id_pattern_and_default_output_path_have_one_owner() -> None:
 
     api_app = importlib.import_module("ubt.api.app")
     mcp_server = importlib.import_module("ubt.mcp.server")
-    tui_state = importlib.import_module("ubt.tui.state")
     from ubt.core.job_options import JOB_ID_RE, default_output_dir, default_output_path
 
     assert api_app.JOB_ID_RE is JOB_ID_RE
     assert mcp_server.JOB_ID_RE is JOB_ID_RE
-    assert tui_state.JOB_ID_RE is JOB_ID_RE
     assert default_output_path("docs/synthetic-duo.pdf") == (
         default_output_dir() / "synthetic-duo_bilingual.pdf"
     )
@@ -397,7 +395,7 @@ def test_orchestrator_honours_an_injected_shared_rate_limiter() -> None:
 
 
 # --- 15. the visual repair crop rasterized a PDF page on the event loop,
-#          freezing SSE, the TUI and the queue heartbeat
+#          freezing SSE and the queue heartbeat
 
 
 @pytest.mark.asyncio

@@ -173,8 +173,7 @@ class StageContext:
         """Whether the provider produces simulated text.
 
         Read off the provider rather than stored, so a caller that swaps the
-        router's provider (``--dry-run``, the TUI rehearsal) cannot leave a stale
-        flag behind.
+        router's provider (``--dry-run``) cannot leave a stale flag behind.
         """
         return self.router.provider.is_mock
 

@@ -440,24 +440,13 @@ def translate(
             help="Enable verbose DEBUG logging to stderr.",
         ),
     ] = False,
-    interactive: Annotated[
-        bool,
-        typer.Option(
-            "--interactive",
-            "-i",
-            help="Launch interactive TUI wizard with intelligent recommendation and visual tuning.",
-        ),
-    ] = False,
 ) -> None:
     """Translate an entire book end-to-end with 4-layer defense and live dual dashboard."""
     # The shared job-request surface (ubt.core.job_options): keys are
     # UBTConfig field names (plus the ``glossary`` alias), ``None`` means
     # "flag not passed" and falls through to env/preset. CLI flag names
-    # that differ from the config field are mapped here, once. Built up
-    # front because both execution modes consume it: the batch path
-    # forwards it to the orchestrator, the interactive path seeds the
-    # wizard (dropping every flag but the input was a silent betrayal of
-    # ``ubt translate -i --preset publication``).
+    # that differ from the config field are mapped here, once, and the
+    # orchestrator consumes the mapping as-is.
     request: dict[str, Any] = {
         "target_lang": target_lang,
         "source_lang": source_lang,
@@ -564,17 +553,6 @@ def translate(
             )
         raise typer.Exit(code=1)
 
-    if interactive:
-        from ubt.tui import launch_tui
-
-        launch_tui(
-            file_path=input_path if input_path.exists() else None,
-            dry_run=dry_run,
-            db_dir=db_dir,
-            request={**request, "output_path": output},
-        )
-        return
-
     if verbose:
         setup_logging(verbose=True, console=None if json_output else console)
     elif json_output:
@@ -600,7 +578,7 @@ def translate(
         if input_path.suffix.lower() == ".pdf" and render_engine in ("reflow", "publication"):
             pre_adv = None
             try:
-                from ubt.tui.advisor import DocumentAdvisor
+                from ubt.core.advisor import DocumentAdvisor
 
                 pre_adv = DocumentAdvisor.analyze(input_path)
             except Exception:

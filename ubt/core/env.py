@@ -1,6 +1,6 @@
 """Host-environment probes and the environment handed to child processes.
 
-Lives in ``core`` (not the adapters) so callers such as the TUI can probe without
+Lives in ``core`` (not the adapters) so callers such as the advisor can probe without
 importing a PDF adapter — ``docling_adapter`` pulled in the whole Docling/torch
 import graph just to answer "is there a GPU". The probe itself is pure torch and
 must stay import-cheap, which is also why :func:`subprocess_env` is stdlib-only.

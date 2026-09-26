@@ -1,7 +1,8 @@
-"""Pure document-archetype detection, shared by the TUI advisor and the assess quote.
+"""Pure document-archetype detection, shared by the advisor and the assess quote.
 
 Lives in ``core`` because neither consumer may reach into the other's layer:
-the TUI renders this data, ``ubt.core.assess`` consumes it machine-readably.
+:mod:`ubt.core.advisor` turns this data into recommendations and
+``ubt.core.assess`` consumes it machine-readably.
 Detection is zero-token and, for PDF, only ever touches pdfium through the
 serialized gate reached via ``ubt.core.ports`` (this module names no adapter
 module and no heavy PDF dependency directly).
@@ -199,7 +200,7 @@ def detect_math_density(text: str) -> MathDensity:
     # alone is not enough to call a book math-heavy: a long technical
     # document easily accumulates six incidental subscript-shaped tokens, so
     # the hits>=6 shortcut must still clear a minimum density. Otherwise the
-    # TUI would pre-select the heavy publication preset for a prose book.
+    # advisor would pre-select the heavy publication preset for a prose book.
     density = (hits / max(len(text), 1)) * 1000
     if density >= 2.0 or (hits >= 6 and density >= 0.5):
         return MathDensity.HIGH

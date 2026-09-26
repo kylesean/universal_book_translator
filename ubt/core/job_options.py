@@ -249,7 +249,7 @@ def sidecar_path(artifact: str | Path, kind: SidecarKind) -> Path:
     nobody finds beside it. The format tag is what keeps them apart.
 
     Every writer and reader of these names goes through here: the report is
-    written by the export stage, looked up by the API/TUI/CLI status paths, and
+    written by the export stage, looked up by the API/CLI status paths, and
     swept by :func:`_drop_stale_run_reports`, and a second copy of the rule is
     how the two halves stop agreeing.
     """

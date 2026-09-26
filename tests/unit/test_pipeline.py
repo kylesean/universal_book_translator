@@ -1040,7 +1040,7 @@ def test_budget_preflight_opt_out_and_bypasses(tmp_path: Path) -> None:
 
     # Explicit opt-out keeps the warning-only behavior.
     _preflight_orchestrator(tmp_path, allow_unpriced_budget=True)._preflight_budget_pricing()
-    # Uncapped runs and mock (dry-run/TUI) runs are untouched.
+    # Uncapped runs and mock (dry-run) runs are untouched.
     uncapped = PipelineOrchestrator(
         config=UBTConfig(db_dir=tmp_path / "ledgers", budget_usd=None),
         router=ModelRouter(provider=_BillableMockProvider(), draft_model="unheard-of-llm-v9"),

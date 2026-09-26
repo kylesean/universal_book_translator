@@ -1,7 +1,7 @@
 """Boundary guard for the mock provider, and the tests it exists for (P1-7).
 
 ``MockModelProvider`` lives in the production package because production code
-ships it: ``--dry-run`` rehearsal, the API's mock mode, the TUI rehearsal and
+ships it: ``--dry-run`` rehearsal, the API's mock mode and
 the credential-free cost assessment all assemble a router around it. Relocating
 it to ``tests/`` would therefore break real features.
 

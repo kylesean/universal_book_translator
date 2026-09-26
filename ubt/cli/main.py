@@ -144,8 +144,8 @@ async def _run_translation(
     """Async execution wrapper with rich interactive dual-dashboard.
 
     The keyword surface is the shared job-request mapping
-    (:func:`ubt.core.job_options.overrides_from_request`) that API, MCP and
-    TUI already submit through: request keys are UBTConfig field names
+    (:func:`ubt.core.job_options.overrides_from_request`) that API and
+    MCP already submit through: request keys are UBTConfig field names
     (plus ``glossary`` -> ``glossary_path``), unset flags arrive as ``None``
     and are skipped so ``UBT_*`` env keeps precedence. A hand-mirrored
     48-parameter copy used to live here; the request keys drifted exactly
@@ -156,7 +156,7 @@ async def _run_translation(
         raise UBTError(
             f"Invalid --job-id {job_id!r}: use letters, digits, '-' or '_' "
             f"(up to {JOB_ID_MAX_LEN} characters; the shared rule in "
-            "ubt.core.job_options, same as API/MCP/TUI)"
+            "ubt.core.job_options, same as API/MCP)"
         )
     # Language codes reach the ledger file name (derive_job_id) and, after
     # sanitizing, Typst markup; the API and MCP surfaces already reject
@@ -459,46 +459,6 @@ def metrics_compare(
         raise typer.Exit(code=1)
 
 
-@app.command(name="tui")
-def tui_command(
-    file_path: Annotated[
-        Path | None,
-        typer.Argument(
-            help="Optional path to book/document to open directly in the TUI wizard.",
-        ),
-    ] = None,
-    dry_run: Annotated[
-        bool,
-        typer.Option(
-            "--dry-run",
-            help="Simulate translation using mock provider without external LLM API spend.",
-        ),
-    ] = False,
-) -> None:
-    """Launch the interactive Terminal User Interface (fullscreen)."""
-    from ubt.tui import launch_tui
-
-    launch_tui(file_path=file_path, dry_run=dry_run)
-
-
-@app.command(name="interactive", hidden=True)
-def interactive_alias(
-    file_path: Annotated[Path | None, typer.Argument(help="Optional path to document")] = None,
-    dry_run: bool = False,
-) -> None:
-    """Alias for 'ubt tui'."""
-    tui_command(file_path=file_path, dry_run=dry_run)
-
-
-@app.command(name="ui", hidden=True)
-def ui_alias(
-    file_path: Annotated[Path | None, typer.Argument(help="Optional path to document")] = None,
-    dry_run: bool = False,
-) -> None:
-    """Alias for 'ubt tui'."""
-    tui_command(file_path=file_path, dry_run=dry_run)
-
-
 # Register modular subcommands
 @app.command(name="api")
 def api_command(
@@ -537,9 +497,6 @@ __all__ = [
     "worker_command",
     "config_command",
     "version",
-    "tui_command",
-    "interactive_alias",
-    "ui_alias",
     "_build_config",
     "_resolve_db_dir",
     "_strict_failures",

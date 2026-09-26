@@ -1,4 +1,4 @@
-"""Archetype detection lives in core now; the advisor re-exports must keep working."""
+"""Archetype detection lives in ``ubt.core.archetype``; ``ubt.core.advisor`` re-exports it."""
 
 from pathlib import Path
 
@@ -15,9 +15,9 @@ from ubt.core.archetype import (
 
 
 def test_advisor_reexports_are_the_same_objects() -> None:
-    # Layering moved the enums to core; TUI-facing import paths stay valid.
-    from ubt.tui.advisor import DocCategory as AdvisorDocCategory
-    from ubt.tui.advisor import MathDensity as AdvisorMathDensity
+    # The recommendation layer must not fork the enums it classifies with.
+    from ubt.core.advisor import DocCategory as AdvisorDocCategory
+    from ubt.core.advisor import MathDensity as AdvisorMathDensity
 
     assert AdvisorDocCategory is DocCategory
     assert AdvisorMathDensity is MathDensity

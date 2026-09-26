@@ -466,41 +466,6 @@ def test_json_mode_repoints_logs_from_stdout_to_stderr() -> None:
 
 
 # ---------------------------------------------------------------------------
-# LOG-2: the TUI's console-detach scan read only ``handler.stream``, which a
-# RichHandler does not have — its destination is ``handler.console.file`` — so
-# the CLI's RichHandler survived into the alternate screen and log records were
-# drawn into the live TUI.
-# ---------------------------------------------------------------------------
-
-
-def test_tui_detaches_a_rich_console_handler(tmp_path) -> None:
-    import logging
-    import sys
-
-    from rich.console import Console
-    from rich.logging import RichHandler
-
-    from ubt.tui.logsetup import route_logs_to_file
-
-    root = logging.getLogger()
-    saved = list(root.handlers)
-    root.handlers.clear()
-    try:
-        rich_handler = RichHandler(console=Console(file=sys.stderr))
-        root.addHandler(rich_handler)
-
-        route_logs_to_file(tmp_path)
-
-        assert rich_handler not in root.handlers
-        assert not any(isinstance(h, RichHandler) for h in root.handlers)
-    finally:
-        for handler in list(root.handlers):
-            if handler not in saved:
-                root.removeHandler(handler)
-        root.handlers[:] = saved
-
-
-# ---------------------------------------------------------------------------
 # API-1: with no UBT_ALLOWED_DIRS (the default deployment) a submit that omits
 # output_path 403'd, because the derived default deliverable lives in
 # ~/Documents/UBT while resolve_secure_path confines to cwd + db_dir.

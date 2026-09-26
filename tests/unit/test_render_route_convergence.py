@@ -1,7 +1,7 @@
 """One render-route decision: the quoted route must be the route that runs.
 
 The rigid/reflow choice used to be re-derived in three places — the runtime
-dispatcher, the assessor and the TUI advisor — with different criteria. The
+dispatcher, the assessor and the advisor — with different criteria. The
 assessor's recommendation becomes an explicit ``--render-engine`` flag
 (``cli/commands/assess.py``), so a divergence meant the user was quoted one
 route and the pipeline ran another. These tests pin the convergence onto
@@ -131,19 +131,19 @@ def test_scanned_pdf_still_recommends_rigid() -> None:
 
 
 # ---------------------------------------------------------------------------
-# TUI advisor follows the same resolver
+# The advisor follows the same resolver
 # ---------------------------------------------------------------------------
 
 
 def test_advisor_academic_pdf_without_math_reflows(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from ubt.tui.advisor import DocumentAdvisor
+    from ubt.core.advisor import DocumentAdvisor
 
     doc = tmp_path / "paper.pdf"
     doc.write_bytes(b"%PDF-1.4 fake")
     monkeypatch.setattr(
-        "ubt.tui.advisor.analyze_archetype",
+        "ubt.core.advisor.analyze_archetype",
         lambda _p: _arch(
             page_or_ch_count=30,
             detected_domain="general",
@@ -152,7 +152,7 @@ def test_advisor_academic_pdf_without_math_reflows(
         ),
     )
     monkeypatch.setattr(
-        "ubt.tui.advisor.decide_route",
+        "ubt.core.advisor.decide_route",
         lambda *a, **k: RouteDecision(
             mode="long", pages=30, chars=90_000, has_scan=False, formula_heavy=False, reason="long"
         ),

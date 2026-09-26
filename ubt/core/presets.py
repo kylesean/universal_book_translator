@@ -10,7 +10,7 @@ vector figures (arXiv 2609.20519). The render engine stays with
 ``--render-engine`` and the ``auto`` dispatch in
 :func:`ubt.core.policy.adaptive_policy.resolve_pdf_engine`.
 
-Shared by the TUI wizard and the CLI ``--preset`` layer: the CLI
+Shared by the advisor and the CLI ``--preset`` layer: the CLI
 resolves explicit flags over the preset bundle over the engine defaults.
 """
 

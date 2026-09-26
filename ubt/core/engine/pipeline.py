@@ -68,8 +68,8 @@ from ubt.core.router_mode import decide
 
 logger = logging.getLogger(__name__)
 
-# Ledger namespace for runs driven by a mock provider (``--dry-run``, the TUI's
-# 演练模式). See the suffix application in ``run``.
+# Ledger namespace for runs driven by a mock provider (``--dry-run``). See the
+# suffix application in ``run``.
 _MOCK_JOB_SUFFIX = "_mock"
 
 
@@ -281,8 +281,8 @@ class PipelineOrchestrator:
     def _is_mock_run(self) -> bool:
         """Whether the injected provider produces simulated text.
 
-        Detected on the provider, not the config: ``--dry-run`` and the TUI keep
-        a real ``api_key`` in config and only swap the router's provider.
+        Detected on the provider, not the config: ``--dry-run`` keeps a real
+        ``api_key`` in config and only swaps the router's provider.
         """
         return self.router.provider.is_mock
 

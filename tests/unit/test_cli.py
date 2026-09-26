@@ -773,47 +773,6 @@ def test_cli_request_surface_is_recognized_by_job_options(
     assert not unknown, f"CLI forwards request keys the shared mapping drops: {sorted(unknown)}"
 
 
-def test_interactive_forwards_parsed_flags(
-    tmp_path: Path,
-    sample_book_md: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """``ubt translate -i`` used to hand the wizard only the file and the
-    dry-run bit, so ``--preset/-l/--fresh/--db-dir`` were silently ignored
-    (2026-09 review L17)."""
-    import ubt.tui as tui_pkg
-
-    captured: dict[str, object] = {}
-    monkeypatch.setattr(tui_pkg, "launch_tui", lambda **kwargs: captured.update(kwargs) or 0)
-    db = tmp_path / "ledgers"
-    result = runner.invoke(
-        app,
-        [
-            "translate",
-            "-i",
-            str(sample_book_md),
-            "-l",
-            "ja",
-            "--preset",
-            "publication",
-            "--fresh",
-            "--db-dir",
-            str(db),
-            "-o",
-            str(tmp_path / "out.md"),
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    assert captured["dry_run"] is False
-    assert captured["db_dir"] == db
-    req = captured["request"]
-    assert isinstance(req, dict)
-    assert req["target_lang"] == "ja"
-    assert str(req["preset"]) == "publication"
-    assert req["fresh"] is True
-    assert req["output_path"] == tmp_path / "out.md"
-
-
 def test_translate_rejects_malformed_lang_codes(sample_book_md: Path) -> None:
     """API and MCP reject non-ISO-ish language tags up front; the CLI used
     to pass them into derive_job_id / the ledger file name and fail deep

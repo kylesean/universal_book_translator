@@ -196,7 +196,7 @@ class RepairLoop:
 
                 if is_visual_scalpel_applicable(block, source_pdf_path=source_pdf_path):
                     # Renders the page at 150 dpi and PNG-optimizes the crop: CPU
-                    # work that would freeze the event loop (SSE, TUI, queue
+                    # work that would freeze the event loop (SSE, queue
                     # heartbeat) for every formula/table repair candidate.
                     image_b64 = await asyncio.to_thread(crop_block_image, source_pdf_path, block)
             except Exception as exc:

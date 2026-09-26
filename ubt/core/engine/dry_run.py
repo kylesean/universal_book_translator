@@ -4,7 +4,7 @@ A dry run exercises the whole pipeline (ingest, bible, draft, QE, repair,
 render) against a deterministic echo provider so a book can be validated
 without spending tokens or needing an API key. Every surface assembles its
 router/QE runner pair through this module, so the echo format cannot drift
-between the CLI and the TUI.
+between the CLI, the API and the MCP server.
 """
 
 from __future__ import annotations

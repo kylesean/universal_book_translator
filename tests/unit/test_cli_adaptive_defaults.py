@@ -119,7 +119,7 @@ def test_preflight_panel_formats_adaptive_dual_mode_without_none(
     """Pre-flight layout tradeoff panel must not display '--dual-mode None' and must reflect adaptive dual-mode."""
     from unittest.mock import MagicMock
 
-    from ubt.tui.advisor import DocumentAdvisor
+    from ubt.core.advisor import DocumentAdvisor
 
     pdf_file = tmp_path / "dense_math.pdf"
     pdf_file.write_bytes(b"%PDF-1.4\n%dense\n")
@@ -148,7 +148,7 @@ def test_preflight_panel_option1_heals_conflicting_output_filename(
     """Choosing option [1] (rigid) must heal contradictory output filename containing reflow/bilingual."""
     from unittest.mock import MagicMock
 
-    from ubt.tui.advisor import DocumentAdvisor
+    from ubt.core.advisor import DocumentAdvisor
 
     pdf_file = tmp_path / "dense_math.pdf"
     pdf_file.write_bytes(b"%PDF-1.4\n%dense\n")
@@ -201,7 +201,7 @@ def test_preflight_panel_option2_guarantees_companion_rigid_flag(
     """Choosing option [2] (keep reflow + companion) must set emit_companion_rigid on config."""
     from unittest.mock import MagicMock
 
-    from ubt.tui.advisor import DocumentAdvisor
+    from ubt.core.advisor import DocumentAdvisor
 
     pdf_file = tmp_path / "dense_math.pdf"
     pdf_file.write_bytes(b"%PDF-1.4\n%dense\n")

@@ -223,7 +223,7 @@ def test_cli_preflight_guardrail_warns_and_interrupts_on_forced_reflow(
     from typer.testing import CliRunner
 
     from ubt.cli.main import app
-    from ubt.tui.advisor import DocumentAdvisor
+    from ubt.core.advisor import DocumentAdvisor
 
     pdf_file = tmp_path / "dense_paper.pdf"
     pdf_file.write_bytes(b"%PDF-1.4\n%fake\n")

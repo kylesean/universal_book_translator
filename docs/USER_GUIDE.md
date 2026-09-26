@@ -1,6 +1,6 @@
 # Universal Book Translator (UBT) 用户指南与参考手册
 
-本文档提供 `universal_book_translator` (UBT) 项目的完整使用指南，涵盖核心架构原理解析、排版引擎决策树、三重自愈系统、交互向导、CLI 完整命令集、配置字典、服务端/智能体接口及典型生产实践。
+本文档提供 `universal_book_translator` (UBT) 项目的完整使用指南，涵盖核心架构原理解析、排版引擎决策树、三重自愈系统、CLI 完整命令集、配置字典、服务端/智能体接口及典型生产实践。
 
 ---
 
@@ -23,16 +23,15 @@
   - [1. ubt doctor (环境与凭据检查)](#1-ubt-doctor)
   - [2. ubt assess (译前报价与体检)](#2-ubt-assess)
   - [3. ubt translate (核心翻译排版)](#3-ubt-translate)
-  - [4. ubt tui (交互向导与快捷键)](#4-ubt-tui)
-  - [5. ubt inspect (结构与状态检查)](#5-ubt-inspect)
-  - [6. ubt status (作业账本查询)](#6-ubt-status)
-  - [7. ubt pe-import (人工审校回灌)](#7-ubt-pe-import)
-  - [8. ubt worker (后台工作进程)](#8-ubt-worker)
-  - [9. ubt version (版本信息)](#9-ubt-version)
-  - [10. ubt metrics (KPI 度量与回归比对门禁)](#10-ubt-metrics)
-  - [11. ubt config (配置字段权威清单)](#11-ubt-config)
-  - [12. ubt recheck-gates (隔离块质检复跑)](#12-ubt-recheck-gates)
-  - [13. ubt api (服务端入口别名)](#13-ubt-api)
+  - [4. ubt inspect (结构与状态检查)](#4-ubt-inspect)
+  - [5. ubt status (作业账本查询)](#5-ubt-status)
+  - [6. ubt pe-import (人工审校回灌)](#6-ubt-pe-import)
+  - [7. ubt worker (后台工作进程)](#7-ubt-worker)
+  - [8. ubt version (版本信息)](#8-ubt-version)
+  - [9. ubt metrics (KPI 度量与回归比对门禁)](#9-ubt-metrics)
+  - [10. ubt config (配置字段权威清单)](#10-ubt-config)
+  - [11. ubt recheck-gates (隔离块质检复跑)](#11-ubt-recheck-gates)
+  - [12. ubt api (服务端入口别名)](#12-ubt-api)
 - [六、 全局环境变量与配置字典 (UBTConfig)](#六-全局环境变量与配置字典-ubtconfig)
 - [七、 服务端与智能体服务](#七-服务端与智能体服务)
   - [1. ubt-api (FastAPI REST/SSE)](#1-ubt-api)
@@ -49,7 +48,7 @@
 
 | 场景 | 推荐入口 | 核心优势 |
 | :--- | :--- | :--- |
-| **日常使用 / 人工交互** | `uv run ubt tui <file>` 或 `uv run ubt translate <file> -i` | **最推荐**。自动探测文档类型、公式密度、版面特征并推荐最佳排版策略，可视化实时监控。 |
+| **日常使用 / 译前体检** | `uv run ubt translate <file> [options]`（先跑 `ubt assess <file>` 更省心） | 自动探测文档类型、公式密度与版面特征，给出译前报价、排版引擎建议与 Pre-Flight 风险预警。 |
 | **自动化 / 批处理脚本** | `uv run ubt translate <file> [options]` | 原生断点续跑、并发限流、质量评估闭环（QE）、Pre-flight 诊断预警、SQLite 账本存储。 |
 | **微服务 / 智能体集成** | `uv run ubt-api` 或 `uv run ubt-mcp` | 提供标准异步 REST 接口、SSE 实时事件流推送，或接入 Cursor/Claude 智能体。 |
 
@@ -334,32 +333,12 @@ uv run ubt translate <input_path> [OPTIONS]
 - `--ocr-api-key` (`str`，默认：`None`)：云端 Cloud OCR 或视觉 LLM 的 API 密钥（亦可用 `UBT_OCR_API_KEY`）。
 
 #### ⑦ 交互与格式输出
-- `-i, --interactive` (`bool`，默认：`False`)：直接启动 TUI 交互向导。
 - `--json` (`bool`，默认：`False`)：纯 JSON 机器输出模式（用于管道集成，关闭终端样式）。
 - `-v, --verbose` (`bool`，默认：`False`)：在 stderr 中输出 DEBUG 调试日志。
 
 ---
 
-### 4. `ubt tui`
-启动基于 Textual 的全屏沉浸式终端向导：
-```bash
-uv run ubt tui [file_path] [--dry-run]
-```
-- **核心界面与交互**：
-  - **文档预检卡片**：扫描并展示篇幅与章节规模、文本类型、公式密度、领域与术语表情况、运行环境（GPU / Typst / API 密钥是否就绪）与预计路由，并据此给出档位建议（建议仅供参考——只有你主动选定档位后，该档的引擎参数才会生效）；
-  - **三栏式监控控制台**：
-    - 左栏：当前文件与历史任务（账本）列表，配阶段步进器；
-    - 中栏：事件流，以及当前块的实时双语比对预览卡片；
-    - 右栏：翻译形态、平均质量分与末位 15% 分位、完成/修复/失败块数、累计花费（USD）、耗时与均速；缓存命中率与质量趋势不在这一栏，用 `/report` 查看；
-- **键盘快捷键**：
-  - 全局：`?` 帮助面板；`Tab` / `Shift+Tab` 在各面板与控件间切换焦点；`Ctrl+Q`（或 `Ctrl+C`）安全退出；
-  - 向导页：`1` / `2` / `3` 选质量档（出版级 / 标准 / 预览）；`b` / `f` / `m` 切换行内双语 / 左右对照 / 纯单语；`p` 预检当前文档；`d` 切换演练模式；`r` 切换重译模式；`Ctrl+P` 聚焦路径输入；
-  - 运行页：`/` 打开命令行；`Ctrl+K` 命令面板；`r` 重试失败块；`o` 打开产物；`d` 查看质量报告；`m` 切换双语 / 单语；`Esc` 返回向导；
-  - 流水线没有"暂停/恢复"单键：`/cancel` 立即终止当前运行——账本已落盘的进度不丢，之后重开向导选中同一作业即可断点续跑（已译块零重复计费）。
-
----
-
-### 5. `ubt inspect`
+### 4. `ubt inspect`
 查看文档章节结构、Token 规模或查询已有作业：
 ```bash
 uv run ubt inspect <input_path_or_job_id> [--json]
@@ -367,7 +346,7 @@ uv run ubt inspect <input_path_or_job_id> [--json]
 
 ---
 
-### 6. `ubt status`
+### 5. `ubt status`
 从 SQLite 账本读取作业当前执行进度与统计数据：
 ```bash
 uv run ubt status <job_id> [--db-dir .ubt/ledgers] [--json]
@@ -375,7 +354,7 @@ uv run ubt status <job_id> [--db-dir .ubt/ledgers] [--json]
 
 ---
 
-### 7. `ubt pe-import`
+### 6. `ubt pe-import`
 人工审校修订回灌 (Human-in-the-loop Post-Editing)：
 ```bash
 uv run ubt pe-import <job_id> -f revised.csv [--no-write-tm]
@@ -385,7 +364,7 @@ uv run ubt pe-import <job_id> -f revised.csv [--no-write-tm]
 
 ---
 
-### 8. `ubt worker`
+### 7. `ubt worker`
 后台任务轮询消费工作进程：
 ```bash
 uv run ubt worker [--db-dir DIR] [--concurrency 1] [--poll-interval 2.0]
@@ -397,12 +376,12 @@ uv run ubt worker [--db-dir DIR] [--concurrency 1] [--poll-interval 2.0]
 
 ---
 
-### 9. `ubt version`
+### 8. `ubt version`
 打印引擎版本号与当前运行时环境支持情况。
 
 ---
 
-### 10. `ubt metrics`
+### 9. `ubt metrics`
 版本化 KPI 度量与回归防劣化门禁 (KPI Regression Gate)：
 ```bash
 # 1. 查看系统 KPI 注册表（名称、单位、劣化方向、容差带与定义）
@@ -419,7 +398,7 @@ uv run ubt metrics compare <golden_baseline.json> <candidate_metrics.json> [--fa
 
 ---
 
-### 11. `ubt config`
+### 10. `ubt config`
 列出全部配置字段的环境变量名、当前生效值与默认值（直接从 `UBTConfig` schema 派生，字段新增即出现）：
 ```bash
 uv run ubt config [--set-only] [--json]
@@ -430,7 +409,7 @@ uv run ubt config [--set-only] [--json]
 
 ---
 
-### 12. `ubt recheck-gates`
+### 11. `ubt recheck-gates`
 对账本中被隔离块的**当前草稿**按今日门禁重新质检（门禁逻辑升级后复核历史隔离是否仍然成立）：
 ```bash
 uv run ubt recheck-gates <job_id> [--db-dir DIR] [--json]
@@ -438,7 +417,7 @@ uv run ubt recheck-gates <job_id> [--db-dir DIR] [--json]
 
 ---
 
-### 13. `ubt api`
+### 12. `ubt api`
 与 `ubt-api` 入口脚本等价的进程内别名，启动 FastAPI REST & SSE 服务（见第七节）：
 ```bash
 uv run ubt api [--host HOST] [--port PORT]
@@ -508,7 +487,7 @@ uv run ubt api [--host HOST] [--port PORT]
 | 组 | 环境变量 | 默认 | 说明 |
 | :--- | :--- | :--- | :--- |
 | 限流 | `UBT_RATE_LIMIT_MAX_RPM` | `240` | AIMD 自适应限流的 RPM 上升上限 |
-| 质检 | `UBT_BOTTOM_PERCENTILE` | `0.15` | 每批末位多少比例进入修复（TUI/assess 文案里的"末位 15%"即此） |
+| 质检 | `UBT_BOTTOM_PERCENTILE` | `0.15` | 每批末位多少比例进入修复（assess 文案里的"末位 15%"即此） |
 | 质检 | `UBT_QE_JUDGE_ENABLED` | `false` | LLM-as-Judge 总开关（`tiered` 引擎必须显式开启，否则与 heuristic 等价） |
 | 质检 | `UBT_QE_JUDGE_MODEL` | `None` | 评审模型（缺省取 draft_model） |
 | 质检 | `UBT_QE_JUDGE_GRAY_LOW` / `_GRAY_HIGH` | `0.7` / `0.8` | 灰区带：低于 high 高于 low 的样本送 judge |
@@ -831,5 +810,5 @@ def make_xyz_adapter(pdf_engine: str, path):
 
 注册后 `UBT_PDF_ENGINE=<引擎名>` 即可选中自定义引擎；可用取值以 `_PDF_ENGINE_REGISTRY` 为准，配置层不再维护第二份名单。
 
-- **自定义扩展名**：`get_adapter_for_path` 按后缀查表，不经过配置校验层，注册后 CLI 可直接 `ubt translate book.xyz`。但两处会退化：`ubt/core/router_mode.py` 的探测只认识内置格式，未知后缀回落 `(1页, 0字, 1章)` 从而偏向短链；TUI 的 `ubt/tui/probe.py` 与 `commands.py` 里是硬编码后缀白名单，自定义文件不会被扫描和补全。
+- **自定义扩展名**：`get_adapter_for_path` 按后缀查表，不经过配置校验层，注册后 CLI 可直接 `ubt translate book.xyz`。但会退化：`ubt/core/router_mode.py` 的探测只认识内置格式，未知后缀回落 `(1页, 0字, 1章)` 从而偏向短链。
 - 注册表是**进程级全局字典**，扩展名与引擎名一律按小写比较；写入与内置同名的键即覆盖内置实现。

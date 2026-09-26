@@ -1,8 +1,11 @@
-"""Intelligent document diagnostic and configuration advisor for UBT TUI.
+"""Document diagnostic and configuration advisor (presentation-free).
 
 The archetype detection itself lives in ``ubt.core.archetype`` (shared with the
 ``ubt assess`` quote engine); this module adds only the recommendation layer.
-The re-exports below keep ``from ubt.tui.advisor import DocCategory`` working.
+It renders nothing and imports no presentation library, so every front end
+(CLI pre-flight panel today, a web or desktop client later) can consume the
+same advice over the same engine seams. The re-exports below keep
+``from ubt.core.advisor import DocCategory`` working.
 """
 
 from __future__ import annotations
@@ -42,8 +45,8 @@ from ubt.core.config import (
 )
 from ubt.core.env import has_accelerator as _has_accelerator
 from ubt.core.policy.adaptive_policy import resolve_render_engine_from_signals
+from ubt.core.presets import Preset
 from ubt.core.router_mode import decide as decide_route
-from ubt.tui.presets import Preset
 
 
 @dataclass(frozen=True)

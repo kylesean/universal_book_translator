@@ -162,8 +162,8 @@ async def run_triage_stage(
         """One throttled in-stage progress event on the shared channels.
 
         Reuses ``EventType.REPAIR_BATCH_COMPLETED`` (the escalated repair this
-        stage runs *is* repair; adding a TRIAGE_PROGRESS enum would land on
-        tui/events.py, outside this change's file domain) and reaches the
+        stage runs *is* repair; adding a TRIAGE_PROGRESS enum would widen the
+        published event contract for one internal heartbeat) and reaches the
         consumer through the generator's own yield, exactly like the batch
         emits of the draft stage. Counters on the event still come from the
         real stats query, so the heartbeat can never misreport ledger state —

@@ -32,7 +32,7 @@ from ubt.core.ir.models import (
     IRBlock,
 )
 from ubt.core.language_profile import resolve_font_config
-from ubt.core.presets import PRESETS, Preset
+from ubt.core.presets import PRESETS, Preset, resolve_engine_params
 from ubt.core.qe.comet_runner import QE_SCORE_FABRICATED, HeuristicQERunner
 from ubt.core.qe.defect_taxonomy import (
     CRITICAL_DEFECT_MARKERS,
@@ -43,7 +43,6 @@ from ubt.core.qe.defect_taxonomy import (
 )
 from ubt.core.qe.fast_pass import FastPassFilter
 from ubt.core.validators.html_delta import HTMLDeltaValidator
-from ubt.tui.state import SessionState
 
 _SOURCE_PARAGRAPH = (
     "The device operates in inversion when the gate exceeds the threshold "
@@ -228,29 +227,43 @@ def test_both_echo_phrasings_are_registered_in_every_defect_table() -> None:
     assert exact.reason.startswith(ECHO_MARKER)
 
 
-# --- TUI preset ownership ---------------------------------------------------
+# --- Preset ownership -------------------------------------------------------
 
 
 def test_preset_engine_knobs_apply_only_after_an_explicit_pick() -> None:
-    """The untouched default preset used to rewrite the user's ``UBT_*`` env.
+    """An unpicked preset must not rewrite the user's ``UBT_*`` environment.
 
-    ``to_overrides`` always merged ``PRESETS[STANDARD].engine_overrides()``, and
-    overrides beat the environment — so ``UBT_RENDER_ENGINE`` /
-    ``UBT_MATH_BACKEND`` / ``UBT_PROMPT_STRATEGY`` set by the user were silently
-    replaced on every TUI run, the same class of bug the 2026-09 review removed
-    for translate_chrome / cover_mode / formula_mode.
+    A preset-applying surface used to merge
+    ``PRESETS[STANDARD].engine_overrides()`` unconditionally, and overrides beat
+    the environment — so ``UBT_RENDER_ENGINE`` / ``UBT_MATH_BACKEND`` /
+    ``UBT_PROMPT_STRATEGY`` set by the operator were silently replaced on every
+    run, the same class of bug the 2026-09 review removed for translate_chrome /
+    cover_mode / formula_mode.
+
+    The TUI surface this was originally written against no longer exists, so the
+    invariant is asserted on the function that actually owns the decision —
+    :func:`ubt.core.presets.resolve_engine_params`, the single place that ranks
+    explicit flags over the preset bundle over the engine default. The
+    assertions below are the original ones, unchanged in strength.
     """
     engine_keys = set(PRESETS[Preset.STANDARD].engine_overrides())
     assert engine_keys
 
-    untouched = SessionState().to_overrides()
-    assert not (engine_keys & set(untouched)), untouched
+    # Nothing picked, nothing passed: the resolver must inject nothing, so
+    # ``UBT_*`` keeps precedence. (This is the regression the old assertion
+    # ``not (engine_keys & set(untouched))`` pinned.)
+    assert resolve_engine_params(None, dict.fromkeys(engine_keys)) == {}
 
-    chosen = SessionState()
-    chosen.choose_preset(Preset.PUBLICATION)
-    overrides = chosen.to_overrides()
-    assert overrides["prompt_strategy"] == PRESETS[Preset.PUBLICATION].prompt_strategy
-    assert engine_keys <= set(overrides)
+    # An explicit pick contributes the whole bundle...
+    resolved = resolve_engine_params(Preset.PUBLICATION, dict.fromkeys(engine_keys))
+    assert engine_keys <= set(resolved)
+    assert resolved["prompt_strategy"] == PRESETS[Preset.PUBLICATION].prompt_strategy
+
+    # ...and an explicit flag still beats the bundle.
+    assert (
+        resolve_engine_params(Preset.PUBLICATION, {"prompt_strategy": "minimal"})["prompt_strategy"]
+        == "minimal"
+    )
 
 
 # --- Export coverage gate ---------------------------------------------------

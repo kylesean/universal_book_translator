@@ -1,6 +1,6 @@
 """Owner-only permissions for the on-disk artifacts that carry manuscript text.
 
-Ledgers, translation memory and TUI logs store the full source *and* target of
+Ledgers, translation memory and API/CLI logs store the full source *and* target of
 every paragraph of an unpublished book, and SQLite plus ``RotatingFileHandler``
 both create their files with ``0666 & ~umask`` — i.e. ``0644`` under a normal
 umask, world-readable on any shared host, CI runner or multi-user GPU box. The
