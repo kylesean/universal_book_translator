@@ -479,14 +479,15 @@ def column_order(lines: Sequence[LineBox], page_width: float) -> list[LineBox]:
     if span <= 0.0:
         return sorted(work, key=lambda ln: (-ln.rect[3], ln.rect[0]))
 
-    deferred: list[int] = []
+    # Full-width lines (w > 0.7 * span) are not column candidates; they are
+    # routed by the caller's unassigned path. (A ``deferred`` list used to
+    # collect their indices and was never read.)
     candidates: list[int] = []
     for idx, ln in enumerate(work):
         w = ln.rect[2] - ln.rect[0]
         if w > 0.7 * span:
-            deferred.append(idx)
-        else:
-            candidates.append(idx)
+            continue
+        candidates.append(idx)
 
     # Connected-component clustering of horizontal spans: merge all overlapping intervals
     clusters: list[list[Any]] = []  # [x0, x1, [indices]]

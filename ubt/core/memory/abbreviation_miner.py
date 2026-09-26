@@ -78,6 +78,10 @@ def _scan_abbreviations(text: str) -> dict[str, dict[str, Any]]:
     found: dict[str, dict[str, Any]] = {}
     for match in _ACRONYM_IN_PARENS.finditer(text):
         acronym = match.group(1)
+        # The char class admits a digit so the *shape* matches, but a
+        # digit-bearing acronym (G5, FT0N) is deliberately rejected as
+        # version/model noise rather than terminology — pinned by
+        # test_rejects_digit_acronyms.
         if acronym in _STOP_ACRONYMS or re.search(r"\d", acronym):
             continue
         start_window = max(0, match.start() - 300)

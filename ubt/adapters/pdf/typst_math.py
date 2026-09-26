@@ -606,7 +606,6 @@ def _normalize_docling_math(s: str) -> str:
         masked = head + "{" + bodies[int(index)] + "}" + tail
     s = masked
     s = re.sub(r"_\s*\{\s*", "_{", s)
-    s = re.sub(r"_\s*\{\s*", "_{", s)
     s = re.sub(r"\^\s*\{\s*", "^{", s)
     s = re.sub(r"\s*\}\s*", "}", s)
     return s
