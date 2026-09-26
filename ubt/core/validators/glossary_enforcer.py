@@ -305,10 +305,13 @@ class DeterministicGlossaryEnforcer:
 
         # Idempotency guard:
         # On resume/re-run the enforcer sees text that already contains its own
-        # substitutions. Skip a match when it overlaps ANY existing occurrence
-        # of its canonical replacement — not merely prefix-aligned ones
-        # (handles patterns that are substrings of their replacement, e.g.
-        # '网络' inside '神经网络').
+        # substitutions. Skip a match only when an occurrence of its canonical
+        # replacement *contains* the match span — that is the precise signal the
+        # text at this location was produced by a prior substitution. The old
+        # "overlaps from outside" heuristic also skipped a legitimate match that
+        # merely shared a boundary character with an incidental replacement
+        # elsewhere ('甲乙丙' with 甲乙->乙丙 was left unenforced), so
+        # consistency enforcement silently stopped enforcing.
         filtered_matches: list[tuple[int, int, str, str, str]] = []
         for start, end, pattern, repl, rule in raw_matches:
             scan_start = max(0, start - len(repl) + 1)
@@ -320,14 +323,7 @@ class DeterministicGlossaryEnforcer:
                 if rel < 0:
                     break
                 repl_start, repl_end = rel, rel + len(repl)
-                overlaps = repl_start < end and repl_end > start
-                inside_match = repl_start >= start and repl_end <= end
-                # Skip only when an applied replacement overlaps the match
-                # from OUTSIDE it. An occurrence fully contained in the match
-                # span (the replacement text being a substring of the source
-                # pattern, e.g. '工作记忆' inside '短时工作记忆') is inherent
-                # to the pattern, not evidence of a prior substitution.
-                if overlaps and not inside_match:
+                if repl_start <= start and end <= repl_end:
                     skip_match = True
                     break
                 search_from = rel + 1

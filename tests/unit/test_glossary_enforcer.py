@@ -390,3 +390,38 @@ def test_term_drift_and_validator_inflected_variants() -> None:
     validator = GlossaryConsistencyValidator(glossary)
     result = validator.validate(src, tgt)
     assert result.is_valid, f"Validator failed: {result.message}"
+
+
+def _entry(source: str, translation: str) -> dict[str, object]:
+    return {
+        "source": source,
+        "translation": translation,
+        "aliases": [source],
+        "inflected_variants": [],
+        "kind": "term",
+    }
+
+
+def test_incidental_boundary_shared_with_replacement_does_not_skip() -> None:
+    """A match sharing a boundary char with an incidental replacement still fires.
+
+    '甲乙' -> '乙丙' on '甲乙丙': the old overlap heuristic saw '乙丙' overlap the
+    match from outside and treated it as an already-applied substitution, so the
+    term was silently left unenforced.
+    """
+    enforcer = DeterministicGlossaryEnforcer(
+        glossary=[_entry("甲乙", "乙丙")], target_lang="zh", source_lang="en"
+    )
+    corrected, records = enforcer.enforce("甲乙丙")
+    assert records, "term was silently not enforced"
+    assert corrected == "乙丙丙"
+
+
+def test_replacement_containing_the_match_is_still_idempotent() -> None:
+    """A match fully inside an existing replacement must not re-substitute."""
+    enforcer = DeterministicGlossaryEnforcer(
+        glossary=[_entry("网络", "神经网络")], target_lang="zh", source_lang="en"
+    )
+    corrected, records = enforcer.enforce("神经网络")
+    assert corrected == "神经网络"
+    assert records == []

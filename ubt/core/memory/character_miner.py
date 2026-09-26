@@ -819,7 +819,9 @@ _ZH_CONFIG = SourceMiningConfig(
     # Name core = up to 4 CJK chars immediately followed by an honorific.
     # 4 characters covers native single/compound surnames (e.g. 诸葛孔明) and common
     # transliterations; strip_prefixes shaves off any attached function words.
-    honorific_pattern=re.compile(r"([一-龥]{1,4})(?:" + "|".join(_ZH_HONORIFICS) + r")"),
+    # Non-greedy core: a greedy ``{1,4}`` spanned across a following honorific
+    # ("和先生和先生" -> core "先生和") and manufactured a bogus person entry.
+    honorific_pattern=re.compile(r"([一-龥]{1,4}?)(?:" + "|".join(_ZH_HONORIFICS) + r")"),
     bare_token_pattern=None,
     min_core_len=1,
     strip_prefixes=(*_ZH_STRIP_WORDS, *_ZH_STRIP_CHARS),

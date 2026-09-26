@@ -419,3 +419,18 @@ def test_honorific_plus_surname_still_mined_as_person() -> None:
     assert smith["aliases"] == ["Smith"]
     _, prompt = build_backfill_prompt(entries, "zh")
     assert "Smith — Dr. Smith (person name)" in prompt
+
+
+def test_honorific_core_never_spans_a_following_honorific() -> None:
+    """Greedy core capture manufactured '先生和' from adjacent 先生 honorifics."""
+    from ubt.core.memory.character_miner import mine_characters
+
+    mined = mine_characters("和先生和先生和先生", source_lang="zh", min_freq=1)
+    assert all("先生" not in str(entry.get("source", "")) for entry in mined), mined
+
+
+def test_honorific_core_still_mines_a_normal_name() -> None:
+    from ubt.core.memory.character_miner import mine_characters
+
+    mined = mine_characters("王先生来了。王先生走了。", source_lang="zh", min_freq=2)
+    assert any(str(entry.get("source", "")) == "王" for entry in mined), mined
