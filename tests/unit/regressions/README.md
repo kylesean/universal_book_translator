@@ -34,10 +34,25 @@
 判断标准始终是：如果这行代码明天写错，这个用例会变红吗？会 → 留；不会 → 它不是
 测试，是负载。
 
-## 现状（2026-09-22 清点）
+## 现状（2026-09-25 复核）
 
-目录里仍有 **7 个遗留日期名文件**（`test_review_2026_09_17/09_18/09_18_round2/09_21/09_21_pdf_adapters/09_22_regressions.py`、
-`test_audit_2026_09_20_regressions.py`）——它们是规则确立前的存量，**豁免但冻结**：
-下次触碰其中某个用例指向的模块时，把它并进对应的 `test_<模块>.py`。
-**不要再新增日期名文件**（`test_review_2026_09_22_regressions.py` 是最后一批违例，
-此后再有就是明知故犯）。测试约束的权威出处是仓库根目录的 `AGENTS.md`。
+目录里共 **11 个**仍带审查轮次/日期标识的文件。它们不是"内容重复"（跨文件几乎
+没有同名用例），而是**组织散射**：同一模块的守卫被拆进了多个 review 文件。
+
+- **规则确立前的存量 —— 豁免但冻结**（下次触碰其模块时并走）：
+  `test_audit_2026_09_20_regressions.py`、`test_review_2026_09_17_regressions.py`、
+  `test_review_2026_09_18_regressions.py`、`test_review_2026_09_18_round2_regressions.py`、
+  `test_review_2026_09_21_pdf_adapters.py`、`test_review_2026_09_21_regressions.py`、
+  `test_review_2026_09_22_regressions.py`。
+- **规则确立之后新增的违例**（证明"只写文档挡不住下一次"）：
+  `test_review_2026_09_25_final_round.py`、`test_review_2026_09_25_regressions.py`。
+  它们**没有豁免**，必须并回 `test_<模块>.py`。
+- **不以日期命名、但仍按"缺陷来源"归档**：`test_d2_echo_regression.py`、
+  `test_review_security_and_isolation.py`（后者应按被测模块重命名）。
+
+`tests/unit/` 下另有 8 个同类轮次/修复名文件（`test_review_2026_09_24_fixes.py`、
+`test_round2_*_fixes.py`、`test_rigid_coverage_fixes.py`、`test_reflow_guardrails_and_fixes.py`），
+同样违反"按被测模块命名"。
+
+**不要再新增日期名文件。** 测试组织约束的权威出处是仓库根目录 `AGENTS.md`
+（§1 "One Behavior, One Home"）；本文件只记录 `regressions/` 的历史与例外。
