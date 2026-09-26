@@ -275,7 +275,9 @@ async def test_language_bound_heuristic_qe_scores_actual_target_script() -> None
 
 
 @pytest.mark.asyncio
-async def test_pipeline_anchored_advisory_emits_mono_downgrade(tmp_path: Path) -> None:
+async def test_pipeline_anchored_advisory_emits_mono_downgrade(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     """Stage 1.5 downgrades a bilingual request on the monolingual anchored engine."""
     from collections.abc import AsyncIterator
 
@@ -343,19 +345,24 @@ async def test_pipeline_anchored_advisory_emits_mono_downgrade(tmp_path: Path) -
     pdf_file.write_bytes(b"%PDF-1.4 mock")
 
     events = []
-    async for event in orchestrator.run(
-        input_path=pdf_file,
-        output_path=tmp_path / "out.pdf",
-        job_id="job_pdf_advisory",
-    ):
-        events.append(event)
-        if event.event_type == EventType.MODE_ADVISED:
-            break
+    with caplog.at_level("WARNING", logger="ubt.core.engine.stages.advisory"):
+        async for event in orchestrator.run(
+            input_path=pdf_file,
+            output_path=tmp_path / "out.pdf",
+            job_id="job_pdf_advisory",
+        ):
+            events.append(event)
+            if event.event_type == EventType.MODE_ADVISED:
+                break
 
     advisory_events = [e for e in events if e.event_type == EventType.MODE_ADVISED]
     assert len(advisory_events) == 1
     assert "Render-engine advisory" in advisory_events[0].message
     assert "downgraded to 'monolingual'" in advisory_events[0].message
+    # The drop is a WARNING, not INFO: the default `auto` engine can route a
+    # dense PDF to rigid without the CLI's explicit-rigid warning, so the runtime
+    # log is the only place a silently lost bilingual mode is visible.
+    assert "Render-engine advisory: 'rigid' is monolingual" in caplog.text
 
 
 # ---------------------------------------------------------------------------

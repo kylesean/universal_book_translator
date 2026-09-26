@@ -173,7 +173,7 @@ async def run_mode_advisory_stage(ctx: StageContext) -> AsyncIterator[Translatio
             f"'monolingual'. Use --render-engine reflow (or --preset publication) "
             "for bilingual output."
         )
-        logger.info("Job %s: %s", ctx.job_id, engine_advisory_msg)
+        logger.warning("Job %s: %s", ctx.job_id, engine_advisory_msg)
     elif (
         ctx.source_pdf_path is not None
         and canonical_render_engine(config.render_engine) == "publication"

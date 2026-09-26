@@ -81,7 +81,22 @@ def doctor_command() -> None:
     else:
         record("API key", "OK", "configured")
     record("Base URL", "OK", config.base_url)
-    record("Models", "OK", f"draft={config.draft_model} repair={config.repair_model}")
+    shipped_defaults = {
+        UBTConfig.model_fields[name].default for name in ("draft_model", "repair_model")
+    }
+    shipped = sorted(
+        {model for model in (config.draft_model, config.repair_model) if model in shipped_defaults}
+    )
+    if shipped:
+        record(
+            "Models",
+            "WARN",
+            f"still the shipped benchmark default ({', '.join(shipped)}) — almost no "
+            "credential can call it; set --draft-model/--repair-model or a provider "
+            "profile before translating",
+        )
+    else:
+        record("Models", "OK", f"draft={config.draft_model} repair={config.repair_model}")
     local_endpoint = endpoint_is_local(config.base_url) and not (
         billing_enabled_for_local_endpoints()
     )

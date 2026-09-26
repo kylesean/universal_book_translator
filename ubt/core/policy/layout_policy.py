@@ -501,11 +501,14 @@ CALIBRATION: dict[str, KnobMeta] = {
     "RIGID_MIN_FONT_PT": KnobMeta(
         S,
         "7.5 rigid-engine floor extracted from the typesetter's inline literal "
-        "(in force on every rigid render, chapter-1 evidence). Swept by "
-        "scripts/rigid_coverage_sweep.py (target-length-ratio x floor matrix, "
-        "baseline 2026-09-26): coverage moves monotonically with this floor and "
-        "the spill cliff tracks it exactly, so it — not margin_reclaim_pt — is "
-        "the rigid capacity knob (LAYOUT_PRESERVATION_MASTERPLAN section 3.4)",
+        "(in force on every rigid render). Matrix sweep by "
+        "scripts/rigid_coverage_sweep.py on synthetic-mono (251 blocks / 13 pp, "
+        "2026-09-27): latin expansion holds ~74% coverage to ratio 1.4 at floor "
+        "7.0 but falls 74%->26% above ratio 1.15 at this 7.5 default, and the cjk "
+        "en->zh case drops 74%->27% above ratio 0.6 — so the default sits past "
+        "the knee, and this floor (not margin_reclaim_pt) is the rigid capacity "
+        "knob. Lowering it is a value change that needs a golden re-record plus "
+        "the section 4.4 visual veto (LAYOUT_PRESERVATION_MASTERPLAN section 3.4)",
     ),
     "ROW_MERGE_GAP_PT": KnobMeta(
         H,

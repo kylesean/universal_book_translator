@@ -173,11 +173,31 @@ def test_cli_translate_with_chapter_bounds(sample_book_md: Path, tmp_path: Path)
 
 def test_doctor_ok_with_api_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("UBT_LLM_API_KEY", "test-key-12345678")
+    # An explicit model: the shipped benchmark default is now a deliberate WARN
+    # (test_doctor_warns_when_models_are_the_shipped_default), so a healthy run
+    # means the operator has actually chosen one.
+    monkeypatch.setenv("UBT_DRAFT_MODEL", "deepseek-chat")
+    monkeypatch.setenv("UBT_REPAIR_MODEL", "deepseek-chat")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.chdir(tmp_path)
     result = runner.invoke(app, ["doctor"])
     assert result.exit_code == 0
     assert "All checks passed" in result.stdout
+
+
+def test_doctor_warns_when_models_are_the_shipped_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The shipped default names the author's benchmark target, not a model a
+    normal credential can call; leaving it in place must be called out, not
+    printed as OK."""
+    monkeypatch.setenv("UBT_LLM_API_KEY", "test-key-12345678")
+    monkeypatch.delenv("UBT_DRAFT_MODEL", raising=False)
+    monkeypatch.delenv("UBT_REPAIR_MODEL", raising=False)
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, ["doctor"])
+    assert result.exit_code == 0
+    assert "shipped benchmark default" in result.stdout
 
 
 def test_doctor_fails_without_api_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
