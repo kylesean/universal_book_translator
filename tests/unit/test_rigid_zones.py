@@ -55,6 +55,53 @@ _LONG = (
 _NEXT = "A.1 Continuous starting function"
 
 
+def test_own_zone_paints_a_table_cell_inside_its_own_bbox() -> None:
+    """A table row extracted as prose sits on ``table_band`` lines, which
+    ``visual_rows`` drops, so ``own_zone`` found no seed and the cell failed
+    closed (source-visible). Its bbox is authoritative: paint strictly inside it,
+    never expanding into the next column."""
+    from ubt.adapters.pdf.rigid.zones import own_zone
+
+    facts = PageFacts(
+        page=1,
+        width=460.0,
+        height=660.0,
+        lines=(
+            # A non-table row keeps ``rows`` non-empty, so the empty-page
+            # ``_bbox_zone`` shortcut does not mask the fallback under test.
+            LineBox("unrelated body prose on the page", (100.0, 100.0, 400.0, 109.0)),
+            LineBox("ℓ screening length", (193.0, 512.0, 280.0, 521.0), table_band=True),
+            LineBox("22 nm", (318.0, 514.0, 350.0, 521.0), table_band=True),
+            LineBox("assumed", (380.0, 514.0, 413.0, 521.0), table_band=True),
+        ),
+    )
+    block = _block(
+        "cell",
+        "ℓ screening length 22 nm assumed",
+        y0=512.0,
+        y1=521.0,
+        btype=BlockType.HEADING,
+        x0=193.0,
+        x1=413.0,
+    )
+    zone = own_zone(block, facts)
+    assert zone is not None
+    assert (zone.x0, zone.x1) == (193.0, 413.0), "cell must not expand into the next column"
+    assert zone.y0 <= 512.0 and zone.y1 >= 521.0
+
+    # A block whose text matches no table row still fails closed.
+    stranger = _block(
+        "cell2",
+        "completely different words entirely",
+        y0=512.0,
+        y1=521.0,
+        btype=BlockType.HEADING,
+        x0=193.0,
+        x1=413.0,
+    )
+    assert own_zone(stranger, facts) is None
+
+
 def test_own_zone_grows_over_paragraph_and_stops_at_foreign_row() -> None:
     facts = PageFacts(
         page=1,

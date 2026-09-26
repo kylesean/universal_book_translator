@@ -454,7 +454,40 @@ def own_zone(
             if candidate_gap < gap:
                 best_run, gap = run_candidate, candidate_gap
         if best_run is None or gap > CONNECT_H_FACTOR * h:
-            return None
+            # A prose block sitting on table bands — a table row/cell extracted as
+            # prose — gets no seed because ``rows`` drops table rows. Its bbox is
+            # still authoritative, so paint it strictly inside that box: no growth
+            # and no right-margin expansion into the next column, which is exactly
+            # the overlap a table cell must not cause.
+            table_rows = [
+                ln
+                for ln in facts.lines
+                if ln.table_band
+                and ln.rect[3] > bbox.y0
+                and ln.rect[1] < bbox.y1
+                and ln.rect[0] < bbox.x1
+                and ln.rect[2] > bbox.x0
+                and (_row_matches(ln.text or "", source) or _edge_row(ln, source))
+            ]
+            if not table_rows:
+                return None
+            ty0, ty1 = _clamp_window(block, facts, (bbox.y0, bbox.y1), allow_chrome_bands)
+            if ty1 - ty0 < 1.0 or bbox.x1 - bbox.x0 < 1.0:
+                return None
+            is_bold, is_italic = _zone_style(block, tuple(table_rows))
+            return Zone(
+                block_id=block.id,
+                page=facts.page,
+                x0=bbox.x0,
+                y0=ty0,
+                x1=bbox.x1,
+                y1=ty1,
+                base_size=_base_size(tuple(table_rows)),
+                rows=(),
+                kind="own",
+                bold=is_bold,
+                italic=is_italic,
+            )
         seed = best_run
     run = list(seed)
     bottom = min(ln.rect[1] for ln in run)
