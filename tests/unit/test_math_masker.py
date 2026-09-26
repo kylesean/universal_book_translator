@@ -336,3 +336,26 @@ def test_math_masker_namespaced_prefix_fuzzy_unmask() -> None:
     unmasked = masker.unmask(draft, mapping)
     assert "$x^2 + y^2 = z^2$" in unmasked
     assert "[" not in unmasked and "UBT:MATH" not in unmasked
+
+
+@pytest.mark.fast
+def test_math_masker_currency_range_not_masked() -> None:
+    """Currency chains ($10-$20, $5–$10, $10-20$) must not be treated as math formulas."""
+    masker = MathMasker()
+    # 1. $10-$20
+    text1 = "The subscription fee is $10-$20 per month."
+    masked1, mapping1 = masker.mask(text1)
+    assert mapping1 == {}, f"Unexpected math masking: {mapping1}"
+    assert masked1 == text1
+
+    # 2. $5–$10 (en-dash)
+    text2 = "Entry costs $5–$10 depending on age."
+    masked2, mapping2 = masker.mask(text2)
+    assert mapping2 == {}, f"Unexpected math masking: {mapping2}"
+    assert masked2 == text2
+
+    # 3. $10-20$ (price range in dollars)
+    text3 = "Tickets are $10-20$ each."
+    masked3, mapping3 = masker.mask(text3)
+    assert mapping3 == {}, f"Unexpected math masking: {mapping3}"
+    assert masked3 == text3

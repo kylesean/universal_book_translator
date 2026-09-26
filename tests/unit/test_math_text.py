@@ -2,11 +2,14 @@
 
 import asyncio
 
+import pytest
+
 from tests.stage_ctx_factory import build_stage_ctx
 from ubt.core.cleaners.math_text import (
     extract_text_spans,
     is_translatable_text,
     reassemble,
+    skeleton,
     skeleton_holds,
     translate_math_text,
 )
@@ -202,3 +205,16 @@ def test_c_text_stage_skips_already_translated(tmp_path) -> None:  # type: ignor
     assert events == []
     assert {b.id: b for b in ledger.get_all_blocks(job)}["ch01#b001"].target_text == accepted
     ledger.close()
+
+
+@pytest.mark.fast
+def test_math_text_nested_spans() -> None:
+    """extract_text_spans skips inner matches to avoid overlapping spans and corrupted skeletons."""
+    latex = r"\text{outer \text{inner} text}"
+    spans = extract_text_spans(latex)
+    # Should only return the outermost span, not overlapping inner spans
+    assert len(spans) == 1
+    assert spans[0].inner == "outer \\text{inner} text"
+    skel = skeleton(latex)
+    assert "\x00SPAN0\x00" in skel
+    assert skel == "\x00SPAN0\x00"

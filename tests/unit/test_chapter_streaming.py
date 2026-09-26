@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -12,6 +14,7 @@ from ubt.core.config import UBTConfig
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.pipeline import PipelineOrchestrator
+from ubt.core.engine.stage_context import StageContext
 from ubt.core.engine.stages.chapter_streaming import run_chapter_streaming_pipeline
 from ubt.core.ir.models import (
     BlockStatus,
@@ -353,3 +356,61 @@ async def test_hard_task_cancellation_marks_job_cancelled(tmp_path: Path) -> Non
         assert probe.get_job_status("job_hard_cancel") == "cancelled"
     finally:
         probe.close()
+
+
+@pytest.mark.fast
+async def test_chapter_streaming_filters_chapters_by_window(tmp_path: Path) -> None:
+    """run_chapter_streaming_pipeline filters chapters according to ctx.start_chapter and max_chapters."""
+    config = UBTConfig()
+    manifest = BookManifest(
+        doc_id="doc1",
+        title="Title",
+        source_path=str(tmp_path / "input.epub"),
+        chapters=[
+            ChapterMeta(chapter_id="ch1", title="Chapter 1", spine_index=0),
+            ChapterMeta(chapter_id="ch2", title="Chapter 2", spine_index=1),
+            ChapterMeta(chapter_id="ch3", title="Chapter 3", spine_index=2),
+            ChapterMeta(chapter_id="ch4", title="Chapter 4", spine_index=3),
+        ],
+    )
+    ledger = SQLiteJobLedger(tmp_path / "test.sqlite")
+    ledger.init_job_from_manifest("job_test", manifest)
+
+    ctx = build_stage_ctx(
+        tmp_path,
+        job_id="job_test",
+        input_path=tmp_path / "input.epub",
+        config=config,
+        manifest=manifest,
+        ledger=ledger,
+        start_chapter=2,
+        max_chapters=2,
+    )
+
+    drafted_chapters: list[str] = []
+
+    async def fake_draft_stage(ctx: StageContext, chapter_id: str | None = None) -> Any:
+        if chapter_id:
+            drafted_chapters.append(chapter_id)
+        if False:
+            yield None
+
+    async def fake_stage(ctx: StageContext, chapter_id: str | None = None) -> Any:
+        if False:
+            yield None
+
+    with (
+        patch(
+            "ubt.core.engine.stages.chapter_streaming.run_draft_stage", side_effect=fake_draft_stage
+        ),
+        patch(
+            "ubt.core.engine.stages.chapter_streaming.run_quality_gate_stage",
+            side_effect=fake_stage,
+        ),
+        patch("ubt.core.engine.stages.chapter_streaming.run_repair_stage", side_effect=fake_stage),
+    ):
+        async for _ in run_chapter_streaming_pipeline(ctx):
+            pass
+
+    # Should only draft ch2 and ch3 (start_chapter=2, max_chapters=2)
+    assert drafted_chapters == ["ch2", "ch3"]

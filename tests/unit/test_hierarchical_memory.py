@@ -6,8 +6,10 @@ review round that produced it. Nothing else in the suite exercised this class.
 
 from __future__ import annotations
 
+import pytest
+
 from ubt.core.ir.models import BlockType, IRBlock
-from ubt.core.memory.hierarchical_memory import HierarchicalMemoryManager
+from ubt.core.memory.hierarchical_memory import HierarchicalMemoryManager, StepSnapshot
 
 
 async def test_hierarchical_memory_step_trigger() -> None:
@@ -237,3 +239,49 @@ async def test_l3_epoch_stable_across_later_steps() -> None:
     cumulative = mgr.get_l3_summary()
     assert closed_epoch_text in cumulative
     assert mgr.epochs[-1].summary_text in cumulative
+
+
+@pytest.mark.fast
+def test_hierarchical_memory_macro_context_spine_boundary() -> None:
+    """get_macro_context_for_block enforces snap.end_spine <= block.spine_index."""
+    mgr = HierarchicalMemoryManager()
+
+    # Pre-populate two snapshots
+    snap1 = StepSnapshot(
+        step_index=0,
+        start_spine=0,
+        end_spine=5,
+        char_count=100,
+        summary_text="Chapter 1 part 1 summary",
+        chapter_id="ch01",
+    )
+    snap2 = StepSnapshot(
+        step_index=1,
+        start_spine=6,
+        end_spine=10,
+        char_count=100,
+        summary_text="Chapter 1 part 2 summary",
+        chapter_id="ch01",
+    )
+    mgr._snapshots.extend([snap1, snap2])
+
+    # Block at spine_index 3 (in chapter 1) should NOT see snap2 (end_spine=10)
+    # It shouldn't even see snap1 if snap1.end_spine > 3
+    early_block = IRBlock(
+        id="ch01#b002",
+        spine_index=3,
+        block_type=BlockType.NARRATIVE,
+        source_text="Early paragraph",
+    )
+    ctx_early = mgr.get_macro_context_for_block(early_block)
+    assert ctx_early == "", f"Early block leaked future snapshot: {ctx_early}"
+
+    # Block at spine_index 7 should see snap1 (end_spine=5 <= 7), but NOT snap2 (end_spine=10 > 7)
+    mid_block = IRBlock(
+        id="ch01#b007",
+        spine_index=7,
+        block_type=BlockType.NARRATIVE,
+        source_text="Mid paragraph",
+    )
+    ctx_mid = mgr.get_macro_context_for_block(mid_block)
+    assert ctx_mid == "Chapter 1 part 1 summary"

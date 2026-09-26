@@ -10,8 +10,10 @@ from typing import Any
 import pytest
 
 from ubt.core.engine.ledger import SQLiteJobLedger
+from ubt.core.engine.ledger_base import _upsert_blocks_batch
 from ubt.core.ir.models import (
     BlockStatus,
+    BlockType,
     BookManifest,
     ChapterIR,
     ChapterMeta,
@@ -1427,3 +1429,45 @@ def test_chapter_filter_does_not_over_match_like_wildcards(tmp_path: Path) -> No
         "ch_101#b1"
     ]
     ledger.close()
+
+
+@pytest.mark.fast
+def test_ledger_upsert_blocks_batch_includes_mqm_fields(tmp_path: Path) -> None:
+    """_upsert_blocks_batch writes mqm_severity and mqm_spans_json."""
+    db_path = tmp_path / "test_ledger.sqlite"
+    ledger = SQLiteJobLedger(db_path)
+    job_id = "job_mqm"
+    manifest = BookManifest(
+        doc_id="doc1", title="Title", source_path=str(tmp_path / "doc.txt"), chapters=[]
+    )
+    ledger.init_job_from_manifest(job_id, manifest)
+
+    span = {
+        "start": 5,
+        "end": 10,
+        "severity": "critical",
+        "category": "accuracy",
+        "explanation": "Mistranslation",
+    }
+    block = IRBlock(
+        id="b001",
+        spine_index=0,
+        flow_id=FlowID.MAIN_STORY,
+        block_type=BlockType.NARRATIVE,
+        source_text="Hello world",
+        target_text="你好世界",
+        status=BlockStatus.DRAFTED,
+        mqm_severity="critical",
+        mqm_spans=[span],
+    )
+
+    with ledger._get_conn() as conn:
+        cursor = conn.cursor()
+        _upsert_blocks_batch(cursor, job_id, [block])
+
+    loaded = ledger.get_block("b001")
+    assert loaded is not None
+    assert loaded.mqm_severity == "critical"
+    assert len(loaded.mqm_spans) == 1
+    assert loaded.mqm_spans[0]["severity"] == "critical"
+    assert loaded.mqm_spans[0]["category"] == "accuracy"

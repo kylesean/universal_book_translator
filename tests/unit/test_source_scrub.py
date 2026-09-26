@@ -131,3 +131,21 @@ def test_benign_paired_tags_are_dropped_not_escaped() -> None:
     # A dangerous container is still dropped together with its content.
     dropped = sanitize_html_fragment("<div>ok<script>alert(1)</script></div>")
     assert "ok" in dropped and "alert" not in dropped
+
+
+@pytest.mark.fast
+def test_html_sanitizer_cdata_and_processing_instructions() -> None:
+    """_SourceTagScrubber.scan must support CDATA ending at ]]> and PI ending at ?>."""
+    # 1. CDATA containing internal '>' and tags that shouldn't be parsed as HTML elements
+    cdata_doc = (
+        '<root><![CDATA[ <div title="a">x > y</div> <script>test</script> ]]><p>Hello</p></root>'
+    )
+    scrubbed = scrub_source_document(cdata_doc)
+    assert '<![CDATA[ <div title="a">x > y</div> <script>test</script> ]]>' in scrubbed
+    assert "<p>Hello</p>" in scrubbed
+
+    # 2. Processing instruction containing '>'
+    pi_doc = '<root><?custom-pi note="a > b" ?><p>Body</p></root>'
+    scrubbed_pi = scrub_source_document(pi_doc)
+    assert '<?custom-pi note="a > b" ?>' in scrubbed_pi
+    assert "<p>Body</p>" in scrubbed_pi

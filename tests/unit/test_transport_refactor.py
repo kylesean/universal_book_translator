@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
 
+from ubt.core.exceptions import ModelProviderError
 from ubt.core.router.provider import create_model_provider
 from ubt.core.router.transports import (
     AnthropicMessagesTransport,
@@ -190,3 +193,212 @@ def test_httpx_socks_proxy_support(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("all_proxy", "socks5h://127.0.0.1:10808")
     client = httpx.AsyncClient()
     assert client is not None
+
+
+@pytest.mark.fast
+def test_responses_api_reasoning_nested_format() -> None:
+    transport = OpenAIResponsesTransport(api_key="mock", base_url="https://api.openai.com/v1")
+    captured_payloads: list[dict[str, Any]] = []
+
+    mock_client = AsyncMock()
+
+    async def fake_post(url: str, **kwargs: Any) -> MagicMock:
+        json_payload = kwargs.get("json")
+        if isinstance(json_payload, dict):
+            captured_payloads.append(json_payload)
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {
+            "status": "completed",
+            "output": [
+                {
+                    "type": "message",
+                    "content": [{"type": "output_text", "text": "Hello"}],
+                }
+            ],
+        }
+        return resp
+
+    mock_client.post = fake_post
+    mock_client.is_closed = False
+    transport._client = mock_client
+    transport._owned_client = False
+
+    asyncio.run(
+        transport.generate(
+            prompt="test",
+            model="o3-mini",
+            reasoning_effort="high",
+        )
+    )
+
+    assert len(captured_payloads) == 1
+    payload = captured_payloads[0]
+    assert "reasoning_effort" not in payload, (
+        "Responses API must not have top-level reasoning_effort"
+    )
+    assert payload.get("reasoning") == {"effort": "high"}
+
+
+@pytest.mark.fast
+def test_responses_api_incomplete_reasoning_returns_length_finish() -> None:
+    transport = OpenAIResponsesTransport(api_key="mock", base_url="https://api.openai.com/v1")
+    mock_client = AsyncMock()
+
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.return_value = {
+        "status": "incomplete",
+        "incomplete_details": {"reason": "max_output_tokens"},
+        "output": [
+            {
+                "type": "reasoning",
+                "content": [{"type": "reasoning_text", "text": "still thinking..."}],
+            }
+        ],
+    }
+    mock_client.post.return_value = resp
+    mock_client.is_closed = False
+    transport._client = mock_client
+    transport._owned_client = False
+
+    result, finish_reason = asyncio.run(
+        transport.generate_with_finish_reason(
+            prompt="test",
+            model="o3-mini",
+        )
+    )
+    assert finish_reason == "length"
+    assert result == ""
+
+
+@pytest.mark.fast
+def test_openai_chat_batch_input_file_cleanup_on_error() -> None:
+    transport = OpenAIChatTransport(api_key="mock", base_url="https://api.openai.com/v1")
+    mock_client = AsyncMock()
+
+    # Upload succeeds
+    upload_resp = MagicMock()
+    upload_resp.status_code = 200
+    upload_resp.json.return_value = {"id": "file-12345"}
+
+    # Batch creation fails with 400
+    create_resp = MagicMock()
+    create_resp.status_code = 400
+    create_resp.text = "Invalid batch"
+
+    mock_client.post.side_effect = [upload_resp, create_resp]
+    delete_called_with = []
+
+    async def fake_delete(url: str, **kwargs: object) -> MagicMock:
+        delete_called_with.append(url)
+        del_resp = MagicMock()
+        del_resp.status_code = 200
+        return del_resp
+
+    mock_client.delete = fake_delete
+    mock_client.is_closed = False
+    transport._client = mock_client
+    transport._owned_client = False
+
+    with pytest.raises(ModelProviderError):
+        asyncio.run(
+            transport.create_batch_job(
+                [
+                    {
+                        "custom_id": "c1",
+                        "body": {
+                            "model": "gpt-4o",
+                            "messages": [{"role": "user", "content": "hi"}],
+                        },
+                    }
+                ],
+            )
+        )
+
+    assert any("file-12345" in url for url in delete_called_with), (
+        "file_id must be cleaned up on batch creation failure"
+    )
+
+
+@pytest.mark.fast
+def test_openai_chat_batch_cleanup_handles_error_file_id() -> None:
+    transport = OpenAIChatTransport(api_key="mock", base_url="https://api.openai.com/v1")
+    mock_client = AsyncMock()
+
+    job_status_resp = MagicMock()
+    job_status_resp.status_code = 200
+    job_status_resp.json.return_value = {
+        "id": "batch_abc",
+        "input_file_id": "file-in",
+        "output_file_id": "file-out",
+        "error_file_id": "file-err",
+        "error": None,
+    }
+    mock_client.get.return_value = job_status_resp
+
+    deleted_urls = []
+
+    async def fake_delete(url: str, **kwargs: object) -> MagicMock:
+        deleted_urls.append(url)
+        del_resp = MagicMock()
+        del_resp.status_code = 200
+        return del_resp
+
+    mock_client.delete = fake_delete
+    mock_client.is_closed = False
+    transport._client = mock_client
+    transport._owned_client = False
+
+    asyncio.run(transport.cleanup_batch_files("batch_abc"))
+    assert any("file-err" in url for url in deleted_urls), (
+        "error_file_id must be deleted during batch cleanup"
+    )
+
+
+@pytest.mark.fast
+def test_openai_chat_batch_result_preserves_http_error() -> None:
+    transport = OpenAIChatTransport(api_key="mock", base_url="https://api.openai.com/v1")
+    mock_client = AsyncMock()
+
+    batch_status_resp = MagicMock()
+    batch_status_resp.status_code = 200
+    batch_status_resp.json.return_value = {
+        "id": "batch_abc",
+        "status": "completed",
+        "output_file_id": "file-out",
+    }
+
+    # One line failed with HTTP 400
+    line_json = {
+        "custom_id": "req-1",
+        "response": {
+            "status_code": 400,
+            "body": {
+                "error": {
+                    "message": "Context length exceeded",
+                    "type": "invalid_request_error",
+                }
+            },
+        },
+        "error": None,
+    }
+    file_content_resp = MagicMock()
+    file_content_resp.status_code = 200
+    file_content_resp.text = json.dumps(line_json) + "\n"
+
+    async def fake_get(url: str, **kwargs: object) -> MagicMock:
+        if "/batches/" in url:
+            return batch_status_resp
+        return file_content_resp
+
+    mock_client.get = fake_get
+    mock_client.is_closed = False
+    transport._client = mock_client
+    transport._owned_client = False
+
+    results = asyncio.run(transport.fetch_batch_results("batch_abc"))
+    assert "req-1" in results
+    err = results["req-1"].get("error")
+    assert err is not None
+    assert "Context length exceeded" in err, f"Expected actual error message, got {err}"

@@ -9,6 +9,7 @@ absent or newer than the breakage.
 import sys
 import types
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -285,4 +286,18 @@ def test_close_worker_kill_path_survives_a_wait_timeout(tmp_path: Path) -> None:
     driver = _driver(tmp_path, "wedged_worker.py", "import time\n\ntime.sleep(300)\n")
     driver._proc = _Wedged()  # type: ignore[assignment]
     driver._close_worker(kill_now=True)
+    assert driver._proc is None
+
+
+@pytest.mark.fast
+def test_deepseek_driver_close_kills_worker() -> None:
+    driver = DeepSeekOcrDriver()
+    mock_proc = MagicMock()
+    mock_proc.poll.return_value = None
+    mock_proc.stdin = MagicMock()
+    mock_proc.stdout = MagicMock()
+    driver._proc = mock_proc
+
+    driver.close()
+    mock_proc.kill.assert_called_once()
     assert driver._proc is None

@@ -375,3 +375,32 @@ def test_sqlite_token_bucket_reseed_when_row_deleted(tmp_path: Path) -> None:
         state, last_update = bucket._load(conn)
         assert state.rpm_capacity == 60
         assert state.rpm_tokens == 60
+
+
+@pytest.mark.fast
+def test_sqlite_token_bucket_preserves_negative_debt_on_429(tmp_path: Path) -> None:
+    db_path = tmp_path / "rate_limiter.sqlite"
+    bucket = SqliteTokenBucket(
+        path=db_path,
+        initial_rpm=60,
+        initial_tpm=100000,
+        min_rpm=10,
+        min_tpm=1000,
+    )
+    # Put bucket into debt
+    with bucket._txn() as conn:
+        state, last_update = bucket._load(conn)
+        state.rpm_tokens = -15.0
+        state.tpm_tokens = -5000.0
+        bucket._store(conn, state, last_update)
+
+    bucket.report_429()
+
+    with bucket._txn() as conn:
+        state, _ = bucket._load(conn)
+        assert state.rpm_tokens <= -10.0 or state.rpm_tokens < 0.0, (
+            f"Expected rpm_tokens to retain negative debt, got {state.rpm_tokens}"
+        )
+        assert state.tpm_tokens <= -2000.0 or state.tpm_tokens < 0.0, (
+            f"Expected tpm_tokens to retain negative debt, got {state.tpm_tokens}"
+        )

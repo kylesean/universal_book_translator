@@ -322,3 +322,22 @@ def test_spaced_three_level_reference_is_seen() -> None:
         "如第 3.4.1 节所述，该方法得到了推广。",
     )
     assert decision.passed, decision.reason
+
+
+@pytest.mark.fast
+def test_added_content_fullwidth_parentheses() -> None:
+    """Equation references with full-width parentheses （3.11） are recognized."""
+    src = "As shown in Eq. (3.11), the rate is constant."
+    tgt = "如式（3.11）所示，速率是恒定的。"
+
+    gate = AddedContentGate()
+    decision = gate.evaluate(src, tgt)
+    assert decision.passed, f"Gate failed unexpectedly: {decision.reason}"
+    assert "3.11" in decision.source_refs
+    assert "3.11" in decision.target_refs
+
+    # Conversely, a fabricated fullwidth reference should be caught
+    tgt_bad = "如式（2.2）所示，速率是恒定的。"
+    decision_bad = gate.evaluate(src, tgt_bad)
+    assert not decision_bad.passed
+    assert "2.2" in decision_bad.fabricated_refs

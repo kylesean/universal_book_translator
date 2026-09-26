@@ -1,6 +1,8 @@
 """Tests for engine_selector PageIngestPlan and PDFRoutePlan."""
 
 from pathlib import Path
+from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -82,3 +84,35 @@ def test_route_plan_probe_does_not_profile_every_page_by_default(
     # And the opt-in still works for callers that do want the plans.
     inspect_pdf_route_plan(pdf, cache_dir=tmp_path / ".ubt_cache", include_page_plans=True)
     assert calls == [pdf]
+
+
+@pytest.mark.fast
+def test_engine_selector_pikepdf_does_not_shadow_pdfium(tmp_path: Path) -> None:
+    import pypdfium2 as pdfium
+
+    from ubt.adapters.pdf import engine_selector
+
+    pdf = pdfium.PdfDocument.new()
+    pdf.new_page(width=200, height=200)
+    pdf_path = tmp_path / "probe_test.pdf"
+    pdf.save(str(pdf_path))
+    pdf.close()
+
+    closed_docs: list[Any] = []
+    real_pdfium_doc = pdfium.PdfDocument
+
+    def monitored_pdf_doc(*args: Any, **kwargs: Any) -> Any:
+        doc = real_pdfium_doc(*args, **kwargs)
+        real_close = doc.close
+
+        def _close() -> None:
+            closed_docs.append(doc)
+            real_close()
+
+        doc.close = _close
+        return doc
+
+    with patch("pypdfium2.PdfDocument", side_effect=monitored_pdf_doc):
+        plan = engine_selector.inspect_pdf_route_plan(pdf_path)
+        assert plan is not None
+        assert len(closed_docs) == 1, "Outer pdfium document must be closed in finally block"

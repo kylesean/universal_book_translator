@@ -3,6 +3,7 @@
 import asyncio
 from pathlib import Path
 from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -425,3 +426,42 @@ def test_draft_fail_fast_circuit_aborts_job(tmp_path: Path) -> None:
     # Aborted after the first 30-block batch; the remaining 10 were never drafted.
     assert router.calls == 30
     ledger.close()
+
+
+@pytest.mark.fast
+async def test_draft_stage_restores_memory_on_fresh_job(tmp_path: Path) -> None:
+    """run_draft_stage restores rolling memory even if config.fresh is True."""
+    from ubt.core.engine.stages.draft import run_draft_stage
+
+    config = UBTConfig(fresh=True, enable_rolling_summary=True)
+    manifest = BookManifest(
+        doc_id="doc1",
+        title="Title",
+        source_path=str(tmp_path / "input.epub"),
+        chapters=[
+            ChapterMeta(chapter_id="ch1", title="Chapter 1", spine_index=0),
+            ChapterMeta(chapter_id="ch2", title="Chapter 2", spine_index=1),
+        ],
+    )
+    ledger = SQLiteJobLedger(tmp_path / "test.sqlite")
+    ledger.init_job_from_manifest("job_test", manifest)
+
+    ctx = build_stage_ctx(
+        tmp_path,
+        job_id="job_test",
+        input_path=tmp_path / "input.epub",
+        config=config,
+        manifest=manifest,
+        ledger=ledger,
+    )
+
+    restore_mock = MagicMock()
+    with (
+        patch("ubt.core.engine.stages.draft._restore_memory_state", restore_mock),
+        patch("ubt.core.engine.stages.draft.resolve_draft_policy", return_value=(True, False, 10)),
+        patch.object(ledger, "fetch_pending_blocks", return_value=[]),
+    ):
+        async for _ in run_draft_stage(ctx, chapter_id="ch2"):
+            pass
+
+    restore_mock.assert_called_once()

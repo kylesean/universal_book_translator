@@ -13,6 +13,7 @@ from tests.corpus_markers import requires_synthetic_mono
 from tests.stage_ctx_factory import build_stage_ctx, drain
 from ubt.adapters.pdf.vlm.anchor import anchor_transcript
 from ubt.adapters.pdf.vlm.registry import get_driver, list_drivers, register_driver
+from ubt.adapters.pdf.vlm.transcribe import transcribe_page_to_blocks
 from ubt.adapters.pdf.vlm.types import PageTranscript, VlmLine
 
 
@@ -595,3 +596,23 @@ def test_fallback_keeps_column_order_of_untouched_pages(
     out = vlm_fallback_missing_pages(pdf_path, blocks)
 
     assert [b.source_text for b in out] == ["L1", "L2", "R1", "R2", "scanned page 2"]
+
+
+@pytest.mark.fast
+def test_transcribe_page_bounds_check(tmp_path: Path) -> None:
+    # Create a minimal 1-page PDF using pypdfium2
+    import pypdfium2 as pdfium
+
+    pdf = pdfium.PdfDocument.new()
+    pdf.new_page(width=100, height=100)
+    pdf_path = tmp_path / "test.pdf"
+    pdf.save(str(pdf_path))
+    pdf.close()
+
+    # page_no = 0 must raise IndexError, not access pdf[-1]
+    with pytest.raises(IndexError):
+        transcribe_page_to_blocks(pdf_path, page_no=0)
+
+    # page_no > total pages must raise IndexError
+    with pytest.raises(IndexError):
+        transcribe_page_to_blocks(pdf_path, page_no=5)

@@ -1,5 +1,7 @@
 """Unit tests for TranslationOutputExtractor (2026 Semantic XML standard)."""
 
+import pytest
+
 from ubt.core.router.extractor import TranslationOutputExtractor
 
 
@@ -96,3 +98,25 @@ def test_extractor_specialized_mt_fast_path() -> None:
         TranslationOutputExtractor.extract(raw_specialized, is_specialized_mt=True)
         == raw_specialized
     )
+
+
+@pytest.mark.fast
+def test_extractor_prioritizes_final_translation() -> None:
+    text = (
+        "Here is my thinking:\n"
+        "<translation>粗糙草稿：这是测试</translation>\n"
+        "After careful reflection, I should improve this:\n"
+        "<final_translation>精修定稿：这是高保真测试</final_translation>\n"
+    )
+    extracted = TranslationOutputExtractor.extract(text, strategy="xml_tags")
+    assert extracted == "精修定稿：这是高保真测试"
+
+
+@pytest.mark.fast
+def test_extractor_cleans_reasoning_with_attributes_and_whitespace() -> None:
+    text = (
+        '<think class="r1">\nStep 1: analyze.\nStep 2: conclude.\n</think >\n这是真正的翻译输出。'
+    )
+    extracted = TranslationOutputExtractor.extract(text, strategy="raw")
+    assert extracted == "这是真正的翻译输出。"
+    assert "Step 1" not in extracted

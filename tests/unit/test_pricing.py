@@ -387,3 +387,11 @@ def test_gpt_41_does_not_inherit_legacy_gpt4_rates() -> None:
     assert resolve_model_prices("gpt-4.1") == (2.00, 8.00)
     assert resolve_model_prices("gpt-4.1-mini") == (0.40, 1.60)
     assert resolve_model_prices("gpt-4.1") != resolve_model_prices("gpt-4")
+
+
+@pytest.mark.fast
+def test_pricing_multi_segment_namespace() -> None:
+    standard = resolve_model_prices("claude-3-5-sonnet")
+    namespaced = resolve_model_prices("openrouter/anthropic/claude-3-5-sonnet")
+    assert standard != (0.0, 0.0)
+    assert namespaced == standard, f"Namespaced model prices {namespaced} should match {standard}"

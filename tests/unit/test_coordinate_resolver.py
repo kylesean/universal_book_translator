@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from ubt.adapters.pdf.coordinate_resolver import (
     PageBBoxResolver,
     synthesize_line_boxes_for_blocks,
@@ -177,3 +179,15 @@ async def test_scanned_pdf_anchored_rendering(tmp_path: Path) -> None:
 
     assert Path(result_path).exists()
     assert "scan_p01_b01" in report.rendered_blocks
+
+
+@pytest.mark.fast
+def test_coordinate_resolver_auto_1000_large_page() -> None:
+    # Large poster page: 1200 x 1600 pt
+    # Box has coordinates (100, 200, 500, 800) in PDF points
+    resolver = PageBBoxResolver(page_width=1200.0, page_height=1600.0)
+    # Under 'auto', since 500 <= 1200 and 800 <= 1600, it must NOT treat this as normalized_1000!
+    box = resolver.resolve_bbox([100, 200, 500, 800], coord_system="auto", origin="bottom-left")
+    assert box is not None
+    # x0 should be ~100 pt, NOT 100/1000 * 1200 = 120 pt
+    assert box[0] == pytest.approx(100.0), f"Expected native 100.0 pt, got {box[0]}"

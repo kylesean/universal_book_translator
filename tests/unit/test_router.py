@@ -1,7 +1,9 @@
 """Unit tests for ModelRouter and prompt construction."""
 
+import asyncio
 import json
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 from pydantic import SecretStr
@@ -14,7 +16,7 @@ from ubt.core.router.capabilities import (
     PromptStrategy,
 )
 from ubt.core.router.pricing import cache_hit_rate_from_usage
-from ubt.core.router.provider import BaseModelProvider, MockModelProvider
+from ubt.core.router.provider import BaseModelProvider, MockModelProvider, OpenAICompatibleProvider
 from ubt.core.router.rate_limiter import AdaptiveTokenBucket
 from ubt.core.router.registry import ModelCapabilityRegistry
 from ubt.core.router.router import ModelRouter
@@ -1604,3 +1606,24 @@ async def test_continuation_reserves_prompt_sized_tpm(
     assert acquires[0] == primary_tokens * 2  # completion fallback mirrors prompt
     continuation_tokens = (len("sys") + len(long_prompt) + 3) // 4
     assert acquires[1] >= continuation_tokens * 2  # superset prompt, >= primary
+
+
+@pytest.mark.fast
+def test_provider_aclose_closes_all_transports() -> None:
+    provider = OpenAICompatibleProvider(api_key="mock", base_url="https://api.openai.com/v1")
+    t1 = provider._chat_transport
+    t2 = provider._anthropic_transport
+    t3 = provider._responses_transport
+
+    m1 = AsyncMock()
+    m2 = AsyncMock()
+    m3 = AsyncMock()
+    t1.__dict__["aclose"] = m1
+    t2.__dict__["aclose"] = m2
+    t3.__dict__["aclose"] = m3
+
+    asyncio.run(provider.aclose())
+
+    m1.assert_awaited_once()
+    m2.assert_awaited_once()
+    m3.assert_awaited_once()

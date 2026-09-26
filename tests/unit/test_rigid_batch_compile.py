@@ -7,6 +7,7 @@ import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
+from unittest.mock import MagicMock
 
 import pikepdf
 import pytest
@@ -159,3 +160,24 @@ def test_rigid_batch_compile_fallback_on_page_failure(
     assert rendered.exists()
     assert len(report.rendered_blocks) == 3
     assert len(report.skipped) == 0
+
+
+@pytest.mark.fast
+def test_rigid_batch_overlay_no_extra_pagebreak() -> None:
+    typesetter = RigidTypesetter()
+    facts_p1 = MagicMock(width=500.0, height=700.0, bg=False)
+    facts_p2 = MagicMock(width=500.0, height=700.0, bg=False)
+    pages: dict[int, Any] = {1: facts_p1, 2: facts_p2}
+    zone1 = MagicMock(x0=10.0, y1=50.0, width=100.0, height=40.0)
+    zone2 = MagicMock(x0=10.0, y1=50.0, width=100.0, height=40.0)
+    paints: dict[int, list[Any]] = {
+        1: [MagicMock(zone=zone1, height=700.0, text="hello", size=10.0)],
+        2: [MagicMock(zone=zone2, height=700.0, text="world", size=10.0)],
+    }
+
+    overlay_src, compiled = typesetter._batch_page_overlay(pages, paints)
+    # Typst #set page(...) automatically creates a pagebreak when preceded by content.
+    # An explicit #pagebreak() directly before #set page(...) causes an extra blank page.
+    assert not (
+        "#pagebreak()\n#set page" in overlay_src or "#pagebreak()\r\n#set page" in overlay_src
+    ), "Overlay Typst source must not have #pagebreak() immediately preceding #set page"

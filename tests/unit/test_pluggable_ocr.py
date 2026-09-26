@@ -663,3 +663,65 @@ def test_unmeasured_vlm_driver_is_not_scan_capable() -> None:
 
     assert _driver_can_transcribe_scans(CloudOcrDriver(provider="vlm")) is False
     assert _driver_can_transcribe_scans(CloudOcrDriver(provider="cloud")) is True
+
+
+@pytest.mark.fast
+def test_sidecar_is_healthy_passes_api_key() -> None:
+    with patch("httpx.Client") as mock_client_cls:
+        mock_client = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_client.get.return_value = mock_resp
+        mock_client.__enter__.return_value = mock_client
+        mock_client_cls.return_value = mock_client
+
+        healthy = SidecarOcrDriver.is_healthy("http://localhost:8765", api_key="secret-tok")
+        assert healthy is True
+        mock_client.get.assert_called_once()
+        _, kwargs = mock_client.get.call_args
+        assert kwargs.get("headers") == {"Authorization": "Bearer secret-tok"}
+
+
+@pytest.mark.fast
+def test_registry_auto_probe_passes_api_key_to_sidecar_health() -> None:
+    with patch.object(SidecarOcrDriver, "is_healthy", return_value=True) as mock_health:
+        probe_effective_driver(
+            mode="auto", endpoint="http://localhost:8765", api_key="my-key", allow_page_upload=True
+        )
+        mock_health.assert_called_once()
+        _, kwargs = mock_health.call_args
+        assert kwargs.get("api_key") == "my-key" or mock_health.call_args[0][1] == "my-key"
+
+
+@pytest.mark.fast
+def test_sidecar_recognize_computes_measured_boxes_dynamically() -> None:
+    driver = SidecarOcrDriver(endpoint="http://localhost:8765")
+    img = Image.new("RGB", (100, 100), color="white")
+
+    # 1. Sidecar returns lines without bounding boxes
+    payload_no_boxes = {
+        "lines": [{"text": "Hello world"}],
+        "coord_system": "auto",
+    }
+    with patch("httpx.Client") as mock_client_cls:
+        mock_client = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = payload_no_boxes
+        mock_client.post.return_value = mock_resp
+        mock_client.__enter__.return_value = mock_client
+        mock_client_cls.return_value = mock_client
+
+        transcript = driver.recognize(img, (100.0, 100.0), scale=1.0)
+        assert transcript.measured_boxes is False, (
+            "Sidecar without boxes must set measured_boxes=False"
+        )
+
+
+@pytest.mark.fast
+def test_cloud_driver_measured_boxes_synchronized_in_init() -> None:
+    # When endpoint is OpenAI or chat/completions, driver is vision LLM (measured_boxes=False)
+    driver = CloudOcrDriver(endpoint="https://api.openai.com/v1")
+    assert driver.measured_boxes is False, (
+        "OpenAI endpoint must set measured_boxes=False in __init__"
+    )

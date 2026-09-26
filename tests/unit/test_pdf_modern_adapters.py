@@ -709,3 +709,53 @@ def test_eyebrow_fusion_keeps_the_fused_headings_counter_updates() -> None:
     assert "#counter(heading).update(5)" in source
     assert "#counter(heading).update(6)" in source, "the fused chapter lost its counter"
     assert "Chapter 6: Decoding costs" in source
+
+
+@pytest.mark.fast
+def test_sample_pdf_pages_closes_handles(tmp_path: Path) -> None:
+    import pypdfium2 as pdfium
+
+    from ubt.adapters.pdf.plain_text_extractor import sample_pdf_pages
+
+    pdf = pdfium.PdfDocument.new()
+    pdf.new_page(width=100, height=100)
+    pdf_path = tmp_path / "test_sample.pdf"
+    pdf.save(str(pdf_path))
+    pdf.close()
+
+    closed_pages = []
+    closed_textpages = []
+    orig_page_close = pdfium.PdfPage.close
+    orig_textpage_close = pdfium.PdfTextPage.close
+
+    def mock_page_close(self: object) -> None:
+        closed_pages.append(self)
+        orig_page_close(self)
+
+    def mock_textpage_close(self: object) -> None:
+        closed_textpages.append(self)
+        orig_textpage_close(self)
+
+    with (
+        patch.object(pdfium.PdfPage, "close", mock_page_close),
+        patch.object(pdfium.PdfTextPage, "close", mock_textpage_close),
+    ):
+        page_count, is_scanned, sample = sample_pdf_pages(pdf_path)
+        assert len(closed_pages) >= 1, "PdfPage.close must be called in sample_pdf_pages"
+        assert len(closed_textpages) >= 1, "PdfTextPage.close must be called in sample_pdf_pages"
+
+
+@pytest.mark.fast
+def test_docling_adapter_extract_sync_not_serialized() -> None:
+    from ubt.adapters.pdf.docling_adapter import DoclingPDFAdapter
+
+    adapter = DoclingPDFAdapter()
+    fn = adapter._extract_blocks_sync
+    # Verify that the function is NOT wrapped by pdfium_serialized (which wraps with PDFIUM_LOCK)
+    # Functions wrapped with @pdfium_serialized have '__wrapped__' or closure holding PDFIUM_LOCK
+    import inspect
+
+    closure_vars = inspect.getclosurevars(fn)
+    assert "PDFIUM_LOCK" not in closure_vars.nonlocals, (
+        "_extract_blocks_sync must not be decorated with @pdfium_serialized holding global PDFIUM_LOCK"
+    )

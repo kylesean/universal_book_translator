@@ -435,3 +435,37 @@ async def test_resume_after_hash_unavailable_does_not_clear_translated_blocks(
         )
     )
     assert ledger.get_job_stats("job_1")["total"] == 1
+
+
+@pytest.mark.fast
+async def test_ingest_stage_raises_document_parse_error_on_zero_blocks(tmp_path: Path) -> None:
+    """run_ingest_stage raises DocumentParseError when 0 blocks are parsed."""
+    config = UBTConfig()
+    input_file = tmp_path / "empty.txt"
+    input_file.write_text("")
+    manifest = BookManifest(doc_id="doc1", title="Title", source_path=str(input_file), chapters=[])
+    ledger = SQLiteJobLedger(tmp_path / "test.sqlite")
+    ledger.init_job_from_manifest("job_test", manifest)
+
+    ctx = build_stage_ctx(
+        tmp_path,
+        job_id="job_test",
+        input_path=input_file,
+        config=config,
+        manifest=manifest,
+        ledger=ledger,
+    )
+
+    class DummyAdapter:
+        async def parse_stream(self, path: Path, selected_pages: Any = None) -> Any:
+            from ubt.core.ir.models import ChapterIR
+
+            yield ChapterIR(
+                doc_id="doc1", chapter_id="ch0", spine_index=0, title="Empty", blocks=[]
+            )
+
+    ctx.__dict__["require_adapter"] = lambda: DummyAdapter()
+
+    with pytest.raises(DocumentParseError, match="0 content blocks"):
+        async for _ in run_ingest_stage(ctx):
+            pass

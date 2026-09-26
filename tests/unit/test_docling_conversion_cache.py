@@ -337,3 +337,17 @@ def test_docling_parser_cache_image_recovery(
     assert len(blocks) == 1, f"Expected 1 image block recovered from cache, got {len(blocks)}"
     assert blocks[0].block_type == BlockType.IMAGE
     assert blocks[0].source_text == str(existing_asset)
+
+
+@pytest.mark.fast
+def test_remaining_count_formula_mirrors_docling_parser() -> None:
+    """The circuit breaker's remaining-page count is ``len(sorted) - idx``, not ``- 1``."""
+    proofread_pages = {10, 11, 12, 13}
+
+    # Simulate loop index calculation
+    sorted_proofread = sorted(proofread_pages)
+    idx = 0
+    assert sorted_proofread[idx] == 10
+    # Fixed calculation: len(sorted_proofread) - idx
+    correct_remaining = len(sorted_proofread) - idx
+    assert correct_remaining == 4

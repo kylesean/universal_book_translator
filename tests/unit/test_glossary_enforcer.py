@@ -8,6 +8,8 @@ subtle bug silently rewrites a book, so it belongs with the module.
 
 import pytest
 
+from ubt.core.qe.term_drift import detect_term_drift
+from ubt.core.validators.consistency import GlossaryConsistencyValidator
 from ubt.core.validators.glossary_enforcer import DeterministicGlossaryEnforcer
 
 pytestmark = pytest.mark.fast
@@ -338,3 +340,38 @@ def test_find_term_occurrences_case_insensitive_keeps_original_offsets() -> None
     assert text[case_folded[1][0] : case_folded[1][1]] == "FinFET"
     # Latin word boundaries still apply when folding case.
     assert find_term_occurrences("confinfet", "finfet", case_insensitive=True) == []
+
+
+@pytest.mark.fast
+def test_glossary_enforcer_multiple_occurrences_in_window() -> None:
+    """Enforcer checks all occurrences in search window for outside overlap."""
+    glossary = [{"source": "net", "translation": "neural net", "aliases": ["net"]}]
+    enforcer = DeterministicGlossaryEnforcer(glossary=glossary)
+    text = "neural net neural net"
+    res, records = enforcer.enforce(text)
+    assert res == "neural net neural net"
+    assert records == []
+
+
+@pytest.mark.fast
+def test_term_drift_and_validator_inflected_variants() -> None:
+    """detect_term_drift and GlossaryConsistencyValidator honor inflected_variants."""
+    glossary = [
+        {
+            "source": "memory",
+            "translation": "内存",
+            "aliases": [],
+            "inflected_variants": ["存储器", "记忆"],
+        }
+    ]
+    # Source has 'memory', target uses inflected variant '存储器'
+    src = "The system allocates memory dynamically."
+    tgt = "系统动态分配存储器。"
+
+    findings = detect_term_drift(src, tgt, glossary)
+    assert len(findings) == 1
+    assert not findings[0].drifted, "Inflected variant should be recognized as valid target form"
+
+    validator = GlossaryConsistencyValidator(glossary)
+    result = validator.validate(src, tgt)
+    assert result.is_valid, f"Validator failed: {result.message}"

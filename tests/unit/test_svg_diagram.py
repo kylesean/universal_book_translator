@@ -12,6 +12,7 @@ import pytest
 from ubt.adapters.pdf import svg_diagram
 from ubt.adapters.pdf.svg_diagram import (
     LocalizedSpan,
+    _parse_content_drawings,
     detect_diagram_regions,
     export_page_svg,
     is_docling_direct_image,
@@ -534,3 +535,17 @@ def test_detect_rejects_page_background_fill() -> None:
     # Source p2 paints `0 0 540 665.972 re` (page background): it must not
     # come back as a near-full-page "diagram" thumbnail.
     assert detect_diagram_regions(src, 2) == []
+
+
+@pytest.mark.fast
+def test_svg_diagram_cm_matrix_multiplication() -> None:
+    # A path preceded by translation and scaling:
+    # cm: scale by 2 (2 0 0 2 0 0)
+    # 10 10 20 20 re -> transformed to (20, 20, 60, 60)
+    stream = b"q\n2 0 0 2 0 0 cm\n10 10 20 20 re\nS\nQ\n"
+    rects = _parse_content_drawings(stream)
+    assert len(rects) >= 1
+    # x0 should be 20.0, x1 should be 60.0
+    r0 = rects[0]
+    assert r0[0] == pytest.approx(20.0), f"Expected x0=20.0, got {r0[0]}"
+    assert r0[2] == pytest.approx(60.0), f"Expected x1=60.0, got {r0[2]}"

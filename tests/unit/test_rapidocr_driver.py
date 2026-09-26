@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
+from unittest.mock import MagicMock
 
 import pytest
 from PIL import Image
@@ -41,3 +42,20 @@ def test_recognize_converts_rgb_to_bgr() -> None:
     arr = captured[0]
     assert list(arr[0, 0]) == [30, 20, 10]
     assert list(arr[0, 1]) == [60, 50, 40]
+
+
+@pytest.mark.fast
+def test_rapidocr_driver_empty_box_does_not_crash() -> None:
+    # numpy ships in the optional `ocr` extra (see test_rapidocr_driver.py for
+    # why the skip stays in-test rather than at module level).
+    pytest.importorskip("numpy", reason="numpy ships in the optional `ocr` extra")
+    driver = RapidOcrDriver()
+    mock_engine = MagicMock()
+    # Box is empty list []
+    mock_engine.return_value = ([[[], "sample text", 0.95]], 0.05)
+    driver._engine = mock_engine
+
+    img = Image.new("RGB", (100, 100), color="white")
+    # Must not raise ValueError: min() arg is an empty sequence
+    transcript = driver.recognize(img, (100.0, 100.0), scale=1.0)
+    assert len(transcript.lines) == 0

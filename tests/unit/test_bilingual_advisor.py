@@ -5,9 +5,18 @@ Calibration anchors: a formula/figure-dense technical handbook must
 discourage inline interleave; clean prose must pass it.
 """
 
-from ubt.core.ir.models import BlockStatus, BlockType, BoundingBox, FlowID, IRBlock
+from pathlib import Path
+
+import pytest
+
+from tests.stage_ctx_factory import build_stage_ctx
+from ubt.core.config import UBTConfig
+from ubt.core.engine.ledger import SQLiteJobLedger
+from ubt.core.engine.stages.advisory import run_difficulty_advisory_stage
+from ubt.core.ir.models import BlockStatus, BlockType, BookManifest, BoundingBox, FlowID, IRBlock
 from ubt.core.policy.bilingual_advisor import (
     Advisory,
+    ModeScore,
     advise_layout,
     assess_difficulty,
     downgrade_mode,
@@ -140,3 +149,38 @@ def test_advisory_serializes_for_report() -> None:
         "signals",
     }
     assert payload["ranking"][0]["mode"] == "inline"
+
+
+@pytest.mark.fast
+async def test_advisory_rigid_engine_monolingual_in_difficulty_stage(tmp_path: Path) -> None:
+    """run_difficulty_advisory_stage preserves 'monolingual' for rigid engines under auto mode."""
+    config = UBTConfig(render_engine="rigid", dual_mode="auto")
+    manifest = BookManifest(
+        doc_id="doc1", title="Title", source_path=str(tmp_path / "input.pdf"), chapters=[]
+    )
+    ledger = SQLiteJobLedger(tmp_path / "test.sqlite")
+    ledger.init_job_from_manifest("job_test", manifest)
+
+    ctx = build_stage_ctx(
+        tmp_path,
+        job_id="job_test",
+        input_path=tmp_path / "input.pdf",
+        config=config,
+        manifest=manifest,
+        ledger=ledger,
+        short_chain=False,
+    )
+    ctx.tier_basis = "inline"
+    ctx.enforcement = "auto"
+    ctx.advisory = Advisory(
+        requested="inline",
+        tier="ok",
+        ranking=(ModeScore(mode="inline", score=1.0),),
+        reasons=(),
+    )
+    manifest.run.effective_dual_mode = "monolingual"
+
+    await run_difficulty_advisory_stage(ctx)
+
+    # For rigid engine, effective_mode must remain monolingual, never inline
+    assert manifest.run.effective_dual_mode == "monolingual"
