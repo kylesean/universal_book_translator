@@ -66,13 +66,16 @@ def recheck_gates(job_id: str, *, db_dir: Any = None) -> dict[str, Any]:
             *ledger.fetch_blocks_by_status(job_id, BlockStatus.BLOCKED_HUMAN),
             *ledger.fetch_blocks_by_status(job_id, BlockStatus.NEEDS_HUMAN),
         ]
+        # The gate is language-pair specific: without the job's own target the
+        # filter used the zh default and mis-scored, say, an en→ja job's drafts.
+        target_lang = ledger.get_job_target_lang(job_id)
     except Exception as exc:
         report["error"] = str(exc)
         return report
     finally:
         ledger.close()
 
-    gate = FastPassFilter()
+    gate = FastPassFilter(target_lang=target_lang) if target_lang else FastPassFilter()
     for block in quarantined:
         report["total"] += 1
         # draft_text, never target_text — see the docstring.
@@ -80,6 +83,8 @@ def recheck_gates(job_id: str, *, db_dir: Any = None) -> dict[str, Any]:
         if not draft.strip() or "ubt-blocked-human" in draft:
             report["no_draft"] += 1
             continue
+        # Structural recheck by contract (see the command's test): reading
+        # draft_text is what lets a Unicode-aware structural fix show through.
         decision = gate.validate_structural_invariants(block.source_text or "", draft)
         if decision.passed:
             report["would_pass"] += 1

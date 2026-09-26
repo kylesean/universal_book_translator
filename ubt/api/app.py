@@ -539,11 +539,8 @@ def create_app(
         # auto-set rehearsal so every downstream surface (submit response,
         # status, queue payload, worker) labels it instead of silently
         # reporting a mock delivery as a real one.
-        if (
-            not safe_req.dry_run
-            and router is None
-            and app_config.api_key.get_secret_value() == MOCK_API_KEY
-        ):
+        app_key = app_config.api_key.get_secret_value()
+        if not safe_req.dry_run and router is None and (not app_key or app_key == MOCK_API_KEY):
             safe_req = safe_req.model_copy(update={"dry_run": True})
             logger.warning(
                 "No API key configured: auto-setting dry_run rehearsal for input %s",

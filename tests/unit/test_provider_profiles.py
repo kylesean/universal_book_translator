@@ -111,6 +111,34 @@ def test_apply_config_overrides_with_provider_profile(
     assert cfg2.api_key.get_secret_value() == "sk-override-key"
 
 
+def test_apply_config_overrides_lets_env_outrank_the_profile(
+    sample_toml_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A profile must not clobber a field the operator pinned in the environment.
+
+    ``from_env`` guards this via ``merge_provider_profile(env_supplied=...)``;
+    the request path used to skip that guard, so ``--provider-profile claude``
+    silently replaced ``UBT_DRAFT_MODEL``/``UBT_BASE_URL``.
+    """
+    monkeypatch.setattr("ubt.core.profiles.DEFAULT_CONFIG_LOCATIONS", (sample_toml_file,))
+    monkeypatch.setenv("UBT_DRAFT_MODEL", "custom-env-model")
+    monkeypatch.setenv("UBT_BASE_URL", "https://env.example/v1")
+    base_cfg = UBTConfig.from_env()
+    assert base_cfg.draft_model == "custom-env-model"
+
+    cfg = apply_config_overrides(base_cfg, {"provider_profile": "claude"})
+    assert cfg.draft_model == "custom-env-model"
+    assert cfg.base_url == "https://env.example/v1"
+    # Non-env fields still come from the profile.
+    assert cfg.api_mode == "anthropic"
+
+    # An explicit request flag still outranks the environment.
+    explicit = apply_config_overrides(
+        base_cfg, {"provider_profile": "claude", "draft_model": "flag-model"}
+    )
+    assert explicit.draft_model == "flag-model"
+
+
 def test_ubt_config_from_env_with_provider_profile(
     sample_toml_file: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

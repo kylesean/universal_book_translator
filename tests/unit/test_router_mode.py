@@ -49,3 +49,30 @@ def test_short_max_pages_config_override_honoured(
     assert decide(pdf).mode == "long"  # 10 pages > 5
     monkeypatch.setenv("UBT_SHORT_MAX_PAGES", "20")
     assert decide(pdf).mode == "short"  # 10 pages <= 20
+
+
+def test_markdown_counts_all_heading_levels(tmp_path: Path) -> None:
+    """An H2-only multi-chapter document must not read as one short chapter."""
+    md = tmp_path / "book.md"
+    md.write_text(
+        "\n\n".join(f"## Chapter {i}\n" + "word " * 400 for i in range(1, 6)),
+        encoding="utf-8",
+    )
+    assert decide(md).chapters == 5
+
+
+def test_html_strip_markup_ignores_script_and_style(tmp_path: Path) -> None:
+    """<script>/<style> bodies are not prose; counting them inflated the estimate."""
+    html = tmp_path / "page.html"
+    html.write_text(
+        "<html><head><style>"
+        + "body{color:red;}" * 500
+        + "</style><script>"
+        + "var x=1;" * 500
+        + "</script></head><body><h2>Real</h2><p>"
+        + "word " * 50
+        + "</p></body></html>",
+        encoding="utf-8",
+    )
+    # Only the visible prose counts; the ~6 KB of script/style noise must be gone.
+    assert decide(html).chars < 2000

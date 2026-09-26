@@ -63,6 +63,22 @@ def test_assess_invalid_config_exits_2(md_book: Path, monkeypatch: pytest.Monkey
     assert d["code"] == "INVALID_CONFIG"
 
 
+def test_assess_bad_provider_profile_is_json_not_traceback(
+    md_book: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A missing profile raises ProfileNotFoundError (a UBTError), not a
+    ValidationError; it must still honour the one-object --json contract."""
+    empty_toml = tmp_path / "ubt.toml"
+    empty_toml.write_text("", encoding="utf-8")
+    monkeypatch.setattr("ubt.core.profiles.DEFAULT_CONFIG_LOCATIONS", (empty_toml,))
+    result = runner.invoke(
+        app, ["assess", str(md_book), "--provider-profile", "does-not-exist", "--json"]
+    )
+    assert result.exit_code == 2
+    d = json.loads(result.stdout.strip())  # exactly one object, no traceback
+    assert d["code"] == "INVALID_CONFIG"
+
+
 def test_assess_preset_changes_quoted_policy(md_book: Path) -> None:
     base = runner.invoke(app, ["assess", str(md_book), "--json"])
     preview = runner.invoke(app, ["assess", str(md_book), "--preset", "preview", "--json"])

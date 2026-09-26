@@ -43,6 +43,19 @@ def test_unknown_profiles_get_no_seeds() -> None:
     assert seed_entries_for_profile("") == []
 
 
+def test_seed_entries_for_profile_rejects_path_traversal(tmp_path: Path) -> None:
+    """A profile is a single resource-dir name; a path must not escape the tree."""
+    evil = tmp_path / "evil"
+    evil.mkdir()
+    (evil / "en-zh.json").write_text(
+        '[{"source": "SECRET_TOKEN", "target": "泄密"}]', encoding="utf-8"
+    )
+    # The absolute dir would reset the joined path and read our file — the
+    # prompt-injection escape the guard must close.
+    assert seed_entries_for_profile(str(evil)) == []
+    assert seed_entries_for_profile("../evil") == []
+
+
 def test_semiconductor_profiles_have_seeds() -> None:
     assert len(seed_entries_for_profile("semiconductor")) == 43
     assert len(seed_entries_for_profile("semiconductor_paper")) == 43

@@ -212,9 +212,15 @@ async def _run_translation(
             "Use --render-engine reflow for a bilingual artifact."
         )
 
-    if not dry_run and config.api_key.get_secret_value() == MOCK_API_KEY:
+    if not dry_run:
+        api_key_missing = not config.api_key.get_secret_value() or (
+            config.api_key.get_secret_value() == MOCK_API_KEY
+        )
+    else:
+        api_key_missing = False
+    if api_key_missing:
         raise RuntimeError(
-            "UBT_LLM_API_KEY/OPENAI_API_KEY is not configured (using mock-key). "
+            "UBT_LLM_API_KEY/OPENAI_API_KEY is not configured (empty or mock-key). "
             "Set UBT_LLM_API_KEY or run with --dry-run for zero-token validation."
         )
 

@@ -87,7 +87,8 @@ def _require_api_key_gate(config: UBTConfig | None = None) -> None:
     escape hatch for a local, throwaway server.
     """
     cfg = config or UBTConfig.from_env()
-    if cfg.service_api_key.get_secret_value().strip() or cfg.is_strict_auth():
+    has_service_key = bool(cfg.service_api_key.get_secret_value().strip())
+    if has_service_key:
         return
     if _no_auth_allowed():
         logger.warning(
@@ -95,6 +96,13 @@ def _require_api_key_gate(config: UBTConfig | None = None) -> None:
             _NO_AUTH_OVERRIDE_ENV,
         )
         return
+    if cfg.is_strict_auth():
+        # Strict mode with no key would boot a server that 500s every request
+        # (and exposes /docs): fail fast instead of starting unusable.
+        raise SystemExit(
+            "UBT_STRICT_AUTH is set but UBT_API_KEY is empty: set a key, or "
+            "UBT_ALLOW_NO_AUTH=1 for a local, throwaway server."
+        )
     raise SystemExit(
         "refusing to start the UBT API without authentication: set UBT_API_KEY to "
         "enable the X-API-Key gate, or set UBT_ALLOW_NO_AUTH=1 to run open on "

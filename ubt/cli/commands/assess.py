@@ -16,6 +16,7 @@ from rich.table import Table
 from ubt.core.assess import SCHEMA_VERSION as ASSESS_SCHEMA_VERSION
 from ubt.core.assess import AssessmentError, assess_document
 from ubt.core.engine.pipeline import derive_job_id
+from ubt.core.exceptions import UBTError
 from ubt.core.ir.serializer import compute_file_sha256
 from ubt.core.presets import Preset, resolve_engine_params
 
@@ -124,7 +125,10 @@ def assess_cmd(
 
     try:
         config = _build_config(overrides)
-    except ValidationError as exc:
+    except (ValidationError, UBTError) as exc:
+        # A bad --provider-profile raises ProfileNotFoundError (a UBTError), not
+        # a ValidationError; without this the --json contract broke with a raw
+        # traceback and empty stdout.
         if json_output:
             print(
                 json.dumps(

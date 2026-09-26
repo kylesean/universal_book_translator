@@ -585,6 +585,10 @@ def test_parse_page_ranges_unit(monkeypatch: pytest.MonkeyPatch) -> None:
         parse_page_ranges("0-2")
     with pytest.raises(ValueError, match="Invalid page range specification"):
         parse_page_ranges("abc-xyz")
+    # The materialized set is bounded in TOTAL, not just per contiguous span:
+    # a comma list of many distinct integers must not allocate them all.
+    with pytest.raises(ValueError, match="Too many pages"):
+        parse_page_ranges(",".join(str(i) for i in range(1, 100_002)))
 
 
 def test_cli_translate_help_lists_credential_options() -> None:

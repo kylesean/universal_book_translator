@@ -23,6 +23,7 @@ import json
 import logging
 from pathlib import Path
 
+from ubt.core.job_options import profile_name_is_valid
 from ubt.core.memory.bible import BibleEntry, clean_bible_entry
 
 logger = logging.getLogger(__name__)
@@ -168,6 +169,12 @@ def seed_entries_for_profile(
     Falls back to built-in seeds if present.
     """
     clean_prof = (profile_name or "").lower().split("_")[0]
+    if profile_name and not profile_name_is_valid(profile_name):
+        # A profile names one packaged directory; a separator or ``..`` would
+        # escape ``ubt/resources/glossaries/`` (an absolute component resets the
+        # joined path). Never read outside the packaged tree.
+        logger.warning("Rejecting unsafe glossary profile name %r", profile_name)
+        return []
     resource_path = (
         Path(__file__).parent.parent.parent
         / "resources"

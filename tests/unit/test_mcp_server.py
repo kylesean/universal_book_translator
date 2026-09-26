@@ -189,6 +189,20 @@ async def test_translate_book_rejects_bad_lang() -> None:
         await ubt_translate_book(input_path="/any/book.pdf", source_lang="$(x)")
 
 
+async def test_translate_book_rejects_path_shaped_profile() -> None:
+    """A profile names a resource dir, never a path (prompt-injection escape).
+
+    Without this, ``profile="/tmp/x"`` reached ``seed_entries_for_profile`` and
+    read ``/tmp/x/en-zh.json`` outside the MCP path sandbox.
+    """
+    from ubt.mcp.server import ubt_translate_book
+
+    with pytest.raises(Exception, match="Invalid profile"):
+        await ubt_translate_book(input_path="/any/book.pdf", profile="/tmp/evil")
+    with pytest.raises(Exception, match="Invalid profile"):
+        await ubt_translate_book(input_path="/any/book.pdf", profile="../evil")
+
+
 async def test_translate_book_caps_concurrency(monkeypatch: pytest.MonkeyPatch) -> None:
     """§10.3-#4: MCP honours a max_running_jobs ceiling like the REST API."""
     import ubt.mcp.server as srv

@@ -18,7 +18,7 @@ from ubt.core.config import (
     RenderEngine,
 )
 from ubt.core.engine.progress import ProgressSnapshot
-from ubt.core.job_options import LANG_CODE_PATTERN
+from ubt.core.job_options import LANG_CODE_PATTERN, PROFILE_NAME_PATTERN
 from ubt.core.language_profile import is_supported_lang
 from ubt.core.presets import Preset
 
@@ -58,7 +58,7 @@ class JobSubmitRequest(BaseModel):
     profile: str = Field(
         default="general",
         description="Domain profile (general, textbook, paper)",
-        pattern=r"^[a-zA-Z0-9_\-]+$",
+        pattern=PROFILE_NAME_PATTERN,
     )
     draft_model: str | None = Field(default=None, description="Override draft model tier")
     repair_model: str | None = Field(default=None, description="Override repair model tier")
@@ -201,6 +201,8 @@ class JobSubmitRequest(BaseModel):
 
 class JobAssessRequest(BaseModel):
     """Payload to assess a cold document without translating."""
+
+    model_config = ConfigDict(extra="forbid")
 
     input_path: str = Field(..., description="Path to source document file")
     deep: bool = Field(default=False, description="Run deep real adapter ingest for exact counts")

@@ -3,6 +3,7 @@
 import asyncio
 import contextlib
 import json
+import logging
 import os
 import sys
 from pathlib import Path
@@ -553,7 +554,10 @@ def translate(
             )
         raise typer.Exit(code=1)
 
-    if verbose:
+    # ``verbose`` is this command's own flag, but the global ``-v`` (main
+    # callback) also enables DEBUG; re-calling setup_logging here with
+    # verbose=False used to reset the level to INFO, silently discarding it.
+    if verbose or logging.getLogger().isEnabledFor(logging.DEBUG):
         setup_logging(verbose=True, console=None if json_output else console)
     elif json_output:
         setup_logging(level="WARNING")

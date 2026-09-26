@@ -73,12 +73,27 @@ class RouteDecision:
 class _TextExtractor(HTMLParser):
     """Collect visible text from an (X)HTML document, ignoring markup."""
 
+    _SKIP_TAGS = frozenset({"script", "style"})
+
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self._parts: list[str] = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in self._SKIP_TAGS:
+            self._skip_depth += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in self._SKIP_TAGS and self._skip_depth:
+            self._skip_depth -= 1
 
     def handle_data(self, data: str) -> None:
-        self._parts.append(data)
+        # Skip <script>/<style> bodies: they are not prose, and counting them
+        # inflated the token/page estimate and forced short articles onto the
+        # long chain.
+        if self._skip_depth == 0:
+            self._parts.append(data)
 
     @property
     def text(self) -> str:
@@ -115,7 +130,12 @@ def _probe_non_pdf(path: Path) -> tuple[int, int, int]:
         try:
             text = path.read_text(encoding="utf-8", errors="ignore")
             chars = len(text)
-            headings = sum(1 for line in text.splitlines() if line.strip().startswith("# "))
+            # Any ATX heading level counts, matching the DOCX branch's "any
+            # heading style": counting only "# " sent an H2-only multi-chapter
+            # document to the short chain.
+            headings = sum(
+                1 for line in text.splitlines() if re.match(r"^#{1,6}\s", line.strip())
+            )
             chapters = max(1, headings)
             estimated_pages = max(1, chars // 1500)
             return estimated_pages, chars, chapters
@@ -126,7 +146,8 @@ def _probe_non_pdf(path: Path) -> tuple[int, int, int]:
         try:
             raw = path.read_text(encoding="utf-8", errors="ignore")
             chars = len(_strip_markup(raw))
-            headings = len(re.findall(r"<h1[^>]*>", raw, re.IGNORECASE))
+            # Any heading level counts (see the Markdown branch above).
+            headings = len(re.findall(r"<h[1-6][\s>]", raw, re.IGNORECASE))
             chapters = max(1, headings)
             estimated_pages = max(1, chars // 1500)
             return estimated_pages, chars, chapters

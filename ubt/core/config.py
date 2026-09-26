@@ -292,6 +292,12 @@ def parse_page_ranges(pages_str: str | None) -> set[int] | None:
             if val < 1:
                 raise ValueError(f"Page numbers must be >= 1, got '{val}'")
             pages.add(val)
+    # Cap the whole materialized set, not just one contiguous span: a comma list
+    # of millions of distinct integers would otherwise allocate them all.
+    if len(pages) > _MAX_PAGE_RANGE:
+        raise ValueError(
+            f"Too many pages requested ({len(pages)}); limit is {_MAX_PAGE_RANGE}"
+        )
     return pages
 
 

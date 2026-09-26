@@ -12,7 +12,7 @@ from rich.markup import escape
 from rich.table import Table
 
 from ubt.core.config import MOCK_API_KEY, UBTConfig
-from ubt.core.exceptions import DocumentParseError
+from ubt.core.exceptions import DocumentParseError, UBTError
 from ubt.core.fs_perms import world_readable_files
 from ubt.core.job_options import default_output_dir_for_scan
 from ubt.core.router.pricing import (
@@ -44,6 +44,11 @@ def doctor_command() -> None:
         for err in exc.errors():
             loc = ".".join(str(part) for part in err["loc"])
             console.print(f"  [red]\u2022[/] {loc}: {err['msg']}")
+        raise typer.Exit(code=2) from exc
+    except UBTError as exc:
+        # e.g. a malformed UBT_PROVIDER_PROFILE raises ProfileNotFoundError; the
+        # diagnostic command must explain it, not die with a traceback.
+        console.print(f"[bold red]Configuration invalid:[/] {exc}")
         raise typer.Exit(code=2) from exc
 
     rows: list[tuple[str, str, str]] = []

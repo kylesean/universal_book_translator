@@ -805,6 +805,37 @@ def test_api_assess_job(tmp_path: Path) -> None:
     assert data["document"]["format_ext"] == "txt"
 
 
+def test_api_assess_rejects_unknown_field(tmp_path: Path) -> None:
+    """JobAssessRequest is extra="forbid": a typo must 422, not silently drop.
+
+    Without it, ``deeep=True`` was accepted and the client got the cheap shallow
+    quote while believing it had asked for the expensive exact one.
+    """
+    sample_file = tmp_path / "sample.txt"
+    sample_file.write_text("Hello world.", encoding="utf-8")
+    config = UBTConfig(db_dir=tmp_path, allowed_dirs=str(tmp_path))
+    client = TestClient(create_app(config=config))
+    resp = client.post(
+        "/jobs/assess",
+        json={"input_path": str(sample_file), "deeep": True},  # typo for "deep"
+    )
+    assert resp.status_code == 422
+
+
+def test_strict_auth_without_key_refuses_to_boot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Strict/production with an empty key must fail fast, not 500 every request."""
+    from ubt.api.security import _require_api_key_gate
+
+    cfg = UBTConfig(strict_auth=True)  # service_api_key defaults to empty
+    with pytest.raises(SystemExit):
+        _require_api_key_gate(cfg)
+    # The named escape hatch still works.
+    monkeypatch.setenv("UBT_ALLOW_NO_AUTH", "1")
+    _require_api_key_gate(cfg)  # no raise
+
+
 @pytest.mark.asyncio
 async def test_deep_assess_is_capped_at_the_job_ceiling(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

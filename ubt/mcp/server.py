@@ -74,6 +74,7 @@ from ubt.core.job_options import (
     apply_config_overrides,
     job_id_is_valid,
     overrides_from_request,
+    profile_name_is_valid,
     run_kwargs_from_request,
 )
 from ubt.core.job_options import (
@@ -143,6 +144,21 @@ def _check_lang(code: str, field: str) -> str:
             "zh, en, ja, ko, fr, de, es, ru (region tags such as 'zh-CN' are accepted)."
         )
     return code
+
+
+def _check_profile(profile: str) -> str:
+    """Entry-layer guard: a profile names a packaged resource dir, never a path.
+
+    Same shape the REST ``JobSubmitRequest.profile`` enforces. Without it, a
+    prompt-injected agent could pass ``/tmp/x`` and read ``/tmp/x/en-zh.json``
+    through ``seed_entries_for_profile``, escaping the MCP path sandbox.
+    """
+    if not profile_name_is_valid(profile):
+        raise UBTError(
+            f"Invalid profile {profile!r}: letters/digits/-/_ only "
+            "(e.g. general, textbook, paper)."
+        )
+    return profile
 
 
 def _sandbox_path(raw: str, *, must_exist: bool) -> Path:
@@ -332,6 +348,7 @@ async def ubt_translate_book(
     """Translate a document end to end. Returns immediately with a job_id; poll ubt_job_status."""
     _check_lang(target_lang, "target_lang")
     _check_lang(source_lang, "source_lang")
+    profile = _check_profile(profile)
     _prune_jobs()
     running = sum(
         1 for rec in _JOBS.values() if rec.status in (JobStatus.SUBMITTED, JobStatus.RUNNING)
@@ -349,7 +366,8 @@ async def ubt_translate_book(
     # Rehearsal when asked, or when no key is configured: a keyless stdio
     # server must label mock output instead of returning it as a delivery
     # (same rule as the REST intake).
-    rehearsal = dry_run or UBTConfig.from_env().api_key.get_secret_value() == MOCK_API_KEY
+    _key = UBTConfig.from_env().api_key.get_secret_value()
+    rehearsal = dry_run or not _key or _key == MOCK_API_KEY
     _JOBS[jid].rehearsal = rehearsal
     payload: dict[str, Any] = {
         "input_path": str(resolved),

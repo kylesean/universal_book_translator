@@ -31,6 +31,11 @@ JOB_ID_MAX_LEN = 128
 # so anything but an ISO-ish tag is markup in disguise.
 LANG_CODE_RE = re.compile(r"[A-Za-z]{2,3}(?:[_-][A-Za-z0-9]{2,4})?")
 LANG_CODE_PATTERN = rf"^{LANG_CODE_RE.pattern}$"
+#: Domain-profile names index a packaged resource directory
+#: (``ubt/resources/glossaries/<profile>/<src>-<tgt>.json``), so they must be a
+#: single safe path component — a separator or ``..`` would escape the tree.
+PROFILE_NAME_RE = re.compile(r"[A-Za-z0-9_-]+")
+PROFILE_NAME_PATTERN = rf"^{PROFILE_NAME_RE.pattern}$"
 
 
 def job_id_is_valid(job_id: str) -> bool:
@@ -38,6 +43,11 @@ def job_id_is_valid(job_id: str) -> bool:
     return (
         bool(job_id) and len(job_id) <= JOB_ID_MAX_LEN and JOB_ID_RE.fullmatch(job_id) is not None
     )
+
+
+def profile_name_is_valid(profile: str) -> bool:
+    """Whether ``profile`` is a single safe resource-directory component."""
+    return bool(profile) and PROFILE_NAME_RE.fullmatch(profile) is not None
 
 
 # Request keys whose name differs from the UBTConfig field they set.
@@ -118,15 +128,22 @@ def apply_config_overrides(base: UBTConfig, overrides: Mapping[str, Any]) -> UBT
 
     profile_name = overrides.get("provider_profile")
     prof_dict: dict[str, Any] = {}
+    effective: Mapping[str, Any] = overrides
     if profile_name:
+        from ubt.core.config import _env_supplied_field_names, merge_provider_profile
         from ubt.core.profiles import load_provider_profile
 
         prof_dict = dict(load_provider_profile(str(profile_name)))
-        for key, value in prof_dict.items():
-            if value is not None and key in valid_fields:
-                setattr(job_config, key, _coerce_field(key, value))
+        # Layer the profile UNDER the request's explicit values and let fields
+        # the operator pinned in the real environment outrank it — the same
+        # precedence ``from_env`` documents. Without the env guard a
+        # ``--provider-profile`` silently replaced UBT_DRAFT_MODEL/UBT_BASE_URL
+        # (potentially pointing the run at a different endpoint).
+        effective = merge_provider_profile(
+            overrides, str(profile_name), env_supplied=_env_supplied_field_names()
+        )
 
-    for key, value in overrides.items():
+    for key, value in effective.items():
         if value is not None and key in valid_fields:
             setattr(job_config, key, _coerce_field(key, value))
 
