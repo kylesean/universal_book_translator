@@ -185,6 +185,8 @@ class JobWorker:
                     # the same rows.
                     logger.warning("Job %s: lease lost, stopping heartbeats", job_id)
                     lost.set()
+                    if cancel_token is not None:
+                        cancel_token.set()
                     return
                 if cancel_token is not None and await self._q(
                     self.queue.is_cancel_requested, job_id, worker_id
@@ -206,6 +208,8 @@ class JobWorker:
             # reclaim. Treat every unexpected heartbeat failure as lease loss;
             # the main loop will stop the generator at its next event.
             lost.set()
+            if cancel_token is not None:
+                cancel_token.set()
             logger.warning(
                 "Job %s: heartbeat failed; treating lease as lost: %s",
                 job_id,

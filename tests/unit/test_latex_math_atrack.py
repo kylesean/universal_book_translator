@@ -641,3 +641,14 @@ def test_normalize_docling_math_nested_braces() -> None:
     normalized = _normalize_docling_math(input_math)
     assert r"\in" not in normalized
     assert "plug in" in normalized
+
+
+def test_clean_ocr_formula_preserves_function_arguments() -> None:
+    """_clean_ocr_formula must not strip trailing function arguments like P(0) or x(0)."""
+    from ubt.adapters.pdf.typst_math import _clean_ocr_formula
+
+    assert _clean_ocr_formula("P(0)") == "P(0)"
+    assert _clean_ocr_formula("x(0)") == "x(0)"
+    assert _clean_ocr_formula("f(1)") == "f(1)"
+    assert _clean_ocr_formula(r"y(t) = x(0)") == r"y(t) = x(0)"
+    assert _clean_ocr_formula(r"P(A|B) = P(0)") == r"P(A|B) = P(0)"

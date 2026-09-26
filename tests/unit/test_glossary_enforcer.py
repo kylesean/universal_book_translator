@@ -50,6 +50,17 @@ def test_alias_equal_to_another_entry_canonical_is_not_a_violation() -> None:
     assert detect_target_term_violations("Beta", glossary) == ()
 
 
+def test_source_leak_equal_to_another_entry_canonical_is_not_a_violation() -> None:
+    """A source term that matches another entry's canonical rendering must not be flagged as a leak."""
+    from ubt.core.qe.term_drift import detect_target_term_violations
+
+    glossary = [
+        {"source": "Beta", "translation": "乙", "aliases": []},
+        {"source": "secondary", "translation": "Beta", "aliases": []},
+    ]
+    assert detect_target_term_violations("This is Beta.", glossary) == ()
+
+
 def test_glossary_enforcer_alias_canonicalization() -> None:
     """Verify that non-preferred aliases and synonyms are replaced by canonical translations."""
     glossary = [
@@ -133,6 +144,28 @@ def test_glossary_enforcer_word_boundary_safety() -> None:
     assert corrected == "The 猫 ran to concatenate the data in each category."
     assert len(records) == 1
     assert records[0].start_pos == 4
+
+
+def test_glossary_enforcer_cyrillic_word_boundary_safety() -> None:
+    """Verify Cyrillic word boundary checks prevent sub-token false positive replacements."""
+    glossary = [
+        {
+            "source": "current",
+            "translation": "электрический ток",
+            "aliases": ["ток"],
+            "inflected_variants": [],
+            "kind": "term",
+        }
+    ]
+
+    enforcer = DeterministicGlossaryEnforcer(glossary=glossary, target_lang="ru", source_lang="en")
+
+    # Should replace standalone "ток", but MUST NOT touch "поток", "источник", "желток", "восток"
+    input_text = "В источнике поток электронов порождает ток."
+    corrected, records = enforcer.enforce(input_text)
+
+    assert corrected == "В источнике поток электронов порождает электрический ток."
+    assert len(records) == 1
 
 
 def test_glossary_enforcer_longest_match_disambiguation() -> None:

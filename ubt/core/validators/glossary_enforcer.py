@@ -53,17 +53,14 @@ def is_cjk_char(ch: str) -> bool:
 
 
 def _is_latin_word_char(ch: str) -> bool:
-    """Check whether a character is a Latin/alphabetic word character or connector."""
+    """Check whether a character is an alphabetic/alphanumeric word character or connector."""
     if ch in ("_", "-"):
         return True
     if ch.isascii():
         return ch.isalnum()
     cat = unicodedata.category(ch)
     if cat.startswith(("L", "N")):
-        if is_cjk_char(ch):
-            return False
-        name = unicodedata.name(ch, "")
-        return "LATIN" in name or "CYRILLIC" in name or "GREEK" in name
+        return not is_cjk_char(ch)
     return False
 
 
@@ -117,7 +114,7 @@ def find_term_occurrences(
     """
     if not text or not term:
         return []
-    is_latin = bool(re.search(r"[A-Za-z]", term)) and not any(is_cjk_char(c) for c in term)
+    is_latin = not any(is_cjk_char(c) for c in term)
     if protected is None:
         protected = extract_protected_spans(text)
     flags = re.IGNORECASE if case_insensitive else 0
@@ -192,16 +189,15 @@ class DeterministicGlossaryEnforcer:
             for alias in entry.get("aliases") or []:
                 a_clean = str(alias).strip()
                 if a_clean and a_clean != target and a_clean not in self._approved_target_forms:
-                    is_latin = bool(re.search(r"[A-Za-z]", a_clean)) and not any(
-                        is_cjk_char(c) for c in a_clean
-                    )
+                    is_latin = not any(is_cjk_char(c) for c in a_clean)
                     self._rules[a_clean] = (target, f"alias:{source}->{target}", is_latin)
 
             # 2. Map untranslated source term -> canonical target (if scripts differ or leak enforcement enabled)
             if self.enforce_source_leak_replacement and source and source != target:
-                # If source is Latin and target has non-Latin (or CJK), replacing untranslated English in Chinese text is critical
-                is_latin_src = bool(re.search(r"[A-Za-z]", source))
+                # Replacing untranslated source in target text is critical
+                is_latin_src = not any(is_cjk_char(c) for c in source)
                 # Avoid adding very short English words (1-2 chars) as source leaks unless uppercase acronyms
+
                 if (
                     len(source) > 2 or source.isupper()
                 ) and source not in self._approved_target_forms:

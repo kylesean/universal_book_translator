@@ -400,3 +400,36 @@ async def test_lease_loss_writes_failed_ledger_with_reason(
     with SQLiteJobLedger(db_dir / f"{job_id}.sqlite") as ledger:
         assert ledger.get_job_status(job_id) == "failed"
         assert ledger.get_job_metadata_value(job_id, "abort_reason") == "lease_lost"
+
+
+@pytest.mark.asyncio
+async def test_lease_loss_signals_cancel_token(
+    queue: JobQueue, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When a worker loses its lease, cancel_token must be set immediately so pipeline stops drafting."""
+    job_id = "job_lease_cancel"
+    queue.enqueue(job_id, {"input_path": "x.pdf"}, tenant_id="default")
+    claimed = queue.claim("w1")
+    assert claimed is not None
+    monkeypatch.setattr(queue, "heartbeat", lambda *a, **k: False)
+
+    token_was_set = False
+
+    async def _inspect_token(
+        job: QueuedJob, _config: UBTConfig, cancel_token: asyncio.Event | None = None
+    ) -> AsyncGenerator[TranslationProgressEvent, None]:
+        nonlocal token_was_set
+        for _ in range(10):
+            await asyncio.sleep(0.01)
+            if cancel_token is not None and cancel_token.is_set():
+                token_was_set = True
+                break
+        yield _event(job.job_id)
+
+    worker = JobWorker(
+        queue, UBTConfig(db_dir=tmp_path), worker_id="w1", event_source=_inspect_token
+    )
+    worker._heartbeat_interval = 0.005
+    await worker.execute(claimed)
+
+    assert token_was_set is True, "cancel_token must be set when lease is lost"

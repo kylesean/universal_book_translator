@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ubt.core.assess import AssessmentError, CostQuote, assess_document
+from ubt.core.assess import AssessmentError, CostQuote, assess_document, assess_document_async
 from ubt.core.config import UBTConfig
 from ubt.core.router.pricing import MODEL_PRICES_USD_PER_MTOK
 
@@ -553,3 +553,17 @@ def test_rollup_pricing_honours_the_recommended_profile() -> None:
     academic = quote("textbook")
     assert academic.rollup_calls == 0
     assert academic.rollup_cost_usd is None
+
+
+@pytest.mark.asyncio
+async def test_assess_document_respects_language_pair_for_token_estimation(tmp_path: Path) -> None:
+    doc = tmp_path / "book.md"
+    doc.write_text("# Title\n\n" + "This is a sentence for translation. " * 50, encoding="utf-8")
+    cfg = UBTConfig.from_env()
+
+    report_en_zh = await assess_document_async(doc, cfg, source_lang="en", target_lang="zh")
+    report_zh_en = await assess_document_async(doc, cfg, source_lang="zh", target_lang="en")
+
+    # en -> zh ratio is 1.25, zh -> en ratio is 0.85
+    # Completion tokens must be distinct and reflect the language pair
+    assert report_en_zh.cost.completion_tokens > report_zh_en.cost.completion_tokens

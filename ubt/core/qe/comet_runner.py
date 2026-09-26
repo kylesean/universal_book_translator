@@ -687,10 +687,12 @@ class HeuristicQERunner(BaseQERunner):
         class (leak 0.10, fabrication 0.15, repetition 0.20) keeps its existing
         value, so every non-terminology condition is unchanged.
         """
-        score = cls.score_from_decision_reason(flags[0] if flags else "")
+        if not flags:
+            return cls.score_from_decision_reason("")
+        scores = [cls.score_from_decision_reason(flag) for flag in flags]
         if any(GLOSSARY_VIOLATION_MARKER in flag for flag in flags):
-            return min(score, QE_SCORE_GLOSSARY_VIOLATION)
-        return score
+            scores.append(QE_SCORE_GLOSSARY_VIOLATION)
+        return min(scores)
 
     async def score_pairs(self, pairs: list[dict[str, str]]) -> list[float]:
         scores: list[float] = []

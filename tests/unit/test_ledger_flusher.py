@@ -356,3 +356,65 @@ async def test_flusher_applies_backoff_on_transient_failure_and_drains_on_task_e
     blocks = {b.id: b for b in ledger.get_all_blocks("job_backoff")}
     assert blocks["b_001"].target_text == "译文1"
     ledger.close()
+
+
+@pytest.mark.fast
+@pytest.mark.asyncio
+async def test_flush_all_synchronizes_with_in_flight_background_save(tmp_path: Path) -> None:
+    """flush_all() must serialize with and wait for any background _save in progress."""
+    ledger = SQLiteJobLedger(tmp_path / "ledger.sqlite")
+    seed_job(ledger, "job_sync", _make_test_doc(), target_lang="zh")
+    original_save = ledger.save_checkpoints_batch
+
+    in_save = asyncio.Event()
+    release_save = asyncio.Event()
+    save_concurrent = False
+    active_saves = 0
+
+    def slow_save(updates: list[dict[str, Any]], **kwargs: Any) -> int:
+        nonlocal save_concurrent, active_saves
+        active_saves += 1
+        if active_saves > 1:
+            save_concurrent = True
+        try:
+            # Signal we are inside save
+            in_save.set()
+            # Wait for release
+            start_t = time.time()
+            while not release_save.is_set() and time.time() - start_t < 1.0:
+                time.sleep(0.01)
+            return original_save(updates, **kwargs)
+        finally:
+            active_saves -= 1
+
+    ledger.__dict__["save_checkpoints_batch"] = slow_save
+    flusher = CheckpointBatchFlusher(ledger, flush_interval=0.01, max_batch_size=1)
+
+    # Enqueue item 1 to trigger background worker
+    await flusher.enqueue(
+        {"block_id": "b_001", "target_text": "译文1", "status": BlockStatus.DRAFTED}
+    )
+
+    # Wait until background worker enters slow_save
+    await in_save.wait()
+
+    # Now enqueue item 2 and call flush_all() while background save is in flight
+    await flusher.enqueue(
+        {"block_id": "b_002", "target_text": "译文2", "status": BlockStatus.DRAFTED}
+    )
+
+    flush_task = asyncio.create_task(flusher.flush_all())
+    await asyncio.sleep(0.05)
+    # flush_all should NOT have finished yet because background save is still blocked
+    assert not flush_task.done()
+
+    # Release slow_save
+    release_save.set()
+    await flush_task
+
+    assert not save_concurrent, "Two _save operations must not execute concurrently"
+    blocks = {b.id: b for b in ledger.get_all_blocks("job_sync")}
+    assert blocks["b_001"].target_text == "译文1"
+    assert blocks["b_002"].target_text == "译文2"
+    await flusher.close()
+    ledger.close()

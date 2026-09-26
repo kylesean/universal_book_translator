@@ -5,7 +5,22 @@ import re
 import sys
 
 from ubt.core.cleaners.boilerplate_catalog import BoilerplateCatalog
+from ubt.core.cleaners.math_masker import (
+    _DISPLAY_DOLLAR_PATTERN,
+    _INLINE_DOLLAR_PATTERN,
+    _is_math_content,
+)
 from ubt.core.ir.models import BlockStatus, BlockType, IRBlock
+
+
+def _has_dollar_math(content: str) -> bool:
+    """True when text contains display or inline LaTeX math delimited by $."""
+    if "$" not in content:
+        return False
+    if _DISPLAY_DOLLAR_PATTERN.search(content):
+        return True
+    return any(_is_math_content(m.group(1)) for m in _INLINE_DOLLAR_PATTERN.finditer(content))
+
 
 # Extraction-debris control chars: never legitimate prose, not even inside
 # formulas (b0030-class ``T si  L g`` junk survived into translation).
@@ -314,7 +329,7 @@ def strip_textbook_ocr_artifacts(content: str, source_lang: str = "en") -> str:
     # '/C2' -> '×' / '/C0' -> '-' rewrites would corrupt code fences
     # ('/C2/data') and inline math ('$x /C2 y$').
     if (
-        "$" in content
+        _has_dollar_math(content)
         or "\\begin" in content
         or "```" in content
         or "`" in content

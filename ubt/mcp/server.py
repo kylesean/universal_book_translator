@@ -23,6 +23,7 @@ surfacing this module's import guard as a traceback.
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 import shutil
 import uuid
@@ -32,6 +33,7 @@ from typing import Any
 
 try:
     from mcp.server.mcpserver import MCPServer
+    from mcp.server.mcpserver.exceptions import ToolError
 except ModuleNotFoundError as exc:  # pragma: no cover - install-shape guard
     # Only a missing ``mcp`` itself means the extra is absent. A transitive
     # import that fails *inside* an installed mcp (e.g. jsonschema) must keep
@@ -91,6 +93,22 @@ from ubt.core.language_profile import is_supported_lang
 from ubt.core.policy.layout_policy import MCP_MAX_RUNNING_JOBS as MCP_MAX_RUNNING_JOBS
 
 mcp = MCPServer(name="ubt")
+
+
+def _mcp_error_boundary(func: Any) -> Any:
+    """Decorator converting anticipated domain errors into ToolError for clean MCP error responses."""
+
+    @functools.wraps(func)
+    async def wrapper(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return await func(*args, **kwargs)
+        except ToolError:
+            raise
+        except (UBTError, ValueError, FileNotFoundError) as err:
+            raise ToolError(str(err)) from err
+
+    return wrapper
+
 
 logger = logging.getLogger(__name__)
 
@@ -323,6 +341,7 @@ async def _execute(job_id: str, payload: dict[str, Any]) -> None:
 
 
 @mcp.tool()
+@_mcp_error_boundary
 async def ubt_translate_book(
     input_path: str,
     target_lang: str = "zh",
@@ -392,7 +411,12 @@ async def ubt_translate_book(
             "wait for one to finish before submitting another."
         )
     resolved = _resolve_input(input_path)
-    if output_path is None:
+    if output_path is not None:
+        resolved_out = _safe_output_path(output_path)
+        if resolved_out.exists() and not fresh:
+            raise ToolError(f"output_path already exists; refusing to overwrite it: {output_path}")
+        output_path = str(resolved_out)
+    else:
         # The implicit deliverable defaults to ~/Documents/UBT, which is outside
         # the MCP sandbox; REST relocates it inside the allowlist, so MCP must
         # too instead of writing outside its own contract. Relocate into the
@@ -465,6 +489,7 @@ async def ubt_translate_book(
 
 
 @mcp.tool()
+@_mcp_error_boundary
 async def ubt_job_status(job_id: str, db_dir: str | None = None) -> dict[str, Any]:
     """Poll translation progress. Falls back to the SQLite ledger when the job is unknown in memory."""
     jid = _check_job_id(job_id)
@@ -541,6 +566,7 @@ async def ubt_job_status(job_id: str, db_dir: str | None = None) -> dict[str, An
 
 
 @mcp.tool()
+@_mcp_error_boundary
 async def ubt_inspect_book(input_path: str) -> dict[str, Any]:
     """Return a document manifest (title/doc_id/chapters) as JSON-serializable dict."""
     resolved = _resolve_input(input_path)
@@ -559,6 +585,7 @@ async def ubt_inspect_book(input_path: str) -> dict[str, Any]:
 
 
 @mcp.tool()
+@_mcp_error_boundary
 async def ubt_assess_book(
     input_path: str,
     target_lang: str = "zh",
@@ -591,6 +618,7 @@ async def ubt_assess_book(
 
 
 @mcp.tool()
+@_mcp_error_boundary
 async def ubt_doctor() -> dict[str, Any]:
     """Preflight checks: API key, writable ledger dir, key optional deps."""
     config = UBTConfig.from_env()

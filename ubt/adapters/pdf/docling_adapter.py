@@ -279,16 +279,19 @@ class DoclingPDFAdapter(BasePDFEngineAdapter):
 
         # Fast geometric extraction fallback via pypdfium2 (MIT/Apache-2.0, Zero-PyTorch)
         try:
-            from ubt.adapters.pdf.pdfium_adapter import extract_blocks_with_pdfium
+            from ubt.adapters.pdf.pdfium_adapter import (
+                _block_page_in_range,
+                extract_blocks_with_pdfium,
+            )
 
             logger.info(
                 "Docling not installed; using lightweight geometric extraction (pypdfium2) for '%s'.",
                 path.name,
             )
-            blocks = extract_blocks_with_pdfium(path)
+            blocks = extract_blocks_with_pdfium(path, page_range)
             if page_range is not None:
                 first, last = page_range
-                blocks = [b for b in blocks if b.bbox is None or first <= b.bbox.page <= last]
+                blocks = [b for b in blocks if _block_page_in_range(b, first, last)]
             return blocks
         except Exception as exc:
             logger.warning(

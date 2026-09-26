@@ -274,3 +274,17 @@ def test_duplicated_citation_flags_reach_the_block_error_flags(tmp_path: Path) -
     assert block.status is BlockStatus.REPAIR_PENDING
     assert ledger.fetch_blocks_by_status(_JOB_ID, BlockStatus.DRAFTED) == []
     ledger.close()
+
+
+def test_math_closed_interval_not_intercepted_by_citation_masker(tmp_path: Path) -> None:
+    """Mathematical intervals like $x in [0, 1]$ must be masked as math, not as citations."""
+    source = "In $x \\in [0, 1]$, see [12] for details."
+    # With Math before Citation:
+    # 1. math_masker masks `$x \in [0, 1]$` -> ⟦MATH_MASK_...⟧
+    # 2. citation_masker only sees `[12]` -> ⟦CITE_MASK_...⟧
+    # The citation mapping must NOT contain `[0, 1]`!
+    ledger = _draft(tmp_path, source, response="在 $x \\in [0, 1]$ 中，参见 [12] 获取细节。")
+    block = ledger.get_block(_BLOCK_ID)
+    assert block is not None
+    # Block drafted cleanly
+    ledger.close()

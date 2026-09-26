@@ -418,6 +418,17 @@ def test_glossary_violation_band_is_structural_and_caps_the_score() -> None:
         HeuristicQERunner.score_from_flags(["Added reference(s): ['3.5']", flag])
         == QE_SCORE_FABRICATED
     )
+    # Severe defects must take precedence regardless of flag ordering in the list
+    assert (
+        HeuristicQERunner.score_from_flags([flag, "Repetitive loop hallucination detected"])
+        == QE_SCORE_REPETITION
+    )
+    assert (
+        HeuristicQERunner.score_from_flags(
+            ["HTML delta failure: mismatch", "Repetitive loop hallucination detected"]
+        )
+        == QE_SCORE_REPETITION
+    )
 
 
 def test_fast_pass_markdown_table_immunity() -> None:

@@ -374,3 +374,39 @@ def test_factory_explicit_docling_unchanged() -> None:
     adapter = get_adapter_for_path("paper.pdf", pdf_engine="docling")
     assert isinstance(adapter, DoclingPDFAdapter)
     assert adapter.engine_name == "docling"
+
+
+def test_page_range_filtering_does_not_leak_bbox_less_blocks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    adapter = PDFiumAdapter()
+    from ubt.core.ir.models import BoundingBox, IRBlock
+
+    blocks = [
+        IRBlock(
+            id="b1",
+            spine_index=1,
+            source_text="p1",
+            bbox=BoundingBox(page=1, x0=0, y0=0, x1=1, y1=1),
+        ),
+        IRBlock(
+            id="b2",
+            spine_index=2,
+            source_text="p2",
+            bbox=BoundingBox(page=2, x0=0, y0=0, x1=1, y1=1),
+        ),
+        IRBlock(id="b3", spine_index=3, source_text="p5_nobbox", bbox=None, provenance={"page": 5}),
+        IRBlock(id="b4", spine_index=4, source_text="p_unknown", bbox=None, provenance={}),
+        IRBlock(
+            id="b5",
+            spine_index=5,
+            source_text="p2_nobbox",
+            bbox=None,
+            provenance={"source_page": 2},
+        ),
+    ]
+
+    monkeypatch.setattr(adapter, "_extract_with_pdfium", lambda path, page_range=None: blocks)
+    filtered = adapter._extract_blocks_sync(tmp_path / "dummy.pdf", page_range=(2, 3))
+    ids = [b.id for b in filtered]
+    assert ids == ["b2", "b5"]

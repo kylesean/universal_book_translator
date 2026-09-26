@@ -69,7 +69,7 @@ _VERSION_SPACING_RE = re.compile(r"(\d)(?:\.(?=\d)|\s+\.\s+)(?=\d)")
 # Missing this is what produced the one false positive in calibration: a source
 # reading "Figs. 3.14 and 3.15" yielded only 3.14, so the correct 3.15 looked
 # fabricated.
-_LIST_SEP = r"(?:\s*(?:,|，|、|和|and|或|or)\s*)"
+_LIST_SEP = r"(?:\s*(?:,|，|、|和|and|或|or|[-–—~～至到]|to)\s*)"
 _REF_RUN_RE = re.compile(
     rf"{_REF_KEYWORD}\.?\s*[\(（]?\s*({_VERSION_NUM}(?:{_LIST_SEP}[\(（]?{_VERSION_NUM}[\)）]?)*)",
     re.IGNORECASE,
@@ -84,8 +84,10 @@ _CN_SECTION_RE = re.compile(rf"第\s*({_VERSION_NUM}|\d{{1,3}})\s*(?:章|节|節
 # Any version-shaped number in the raw text, for the parenthesised-number
 # false-positive exemption below.
 _VERSION_NUMBER_RE = re.compile(_VERSION_NUM, re.IGNORECASE)
-# Citation marker: "[25]", "[27,28]".
-_CITATION_RE = re.compile(r"\[\s*(\d{1,3}(?:\s*[,，]\s*\d{1,3})*)\s*\]")
+# Citation marker: "[25]", "[27,28]", "[25-28]".
+_CITATION_SEP = r"(?:\s*(?:[,，]|[-–—~～]|to|至|到)\s*)"
+_CITATION_RE = re.compile(rf"\[\s*(\d{{1,3}}(?:{_CITATION_SEP}\d{{1,3}})*)\s*\]")
+_CITATION_RANGE_RE = re.compile(r"(\d{1,3})\s*(?:[-–—~～]|to|至|到)\s*(\d{1,3})")
 _NUM_RE = re.compile(_VERSION_NUM, re.IGNORECASE)
 
 # ATX markdown heading, 0-3 leading spaces per CommonMark. Setext underlines
@@ -140,6 +142,13 @@ def _reference_token_sets(text: str) -> tuple[frozenset[str], frozenset[str]]:
     anchored.update(cn_sections)
     for group in _CITATION_RE.findall(text):
         found = set(re.findall(r"\d{1,3}", group))
+        for m in _CITATION_RANGE_RE.finditer(group):
+            try:
+                start_n, end_n = int(m.group(1)), int(m.group(2))
+                if 0 <= end_n - start_n <= 50:
+                    found.update(str(i) for i in range(start_n, end_n + 1))
+            except ValueError:
+                pass
         all_tokens.update(found)
         anchored.update(found)
     return frozenset(all_tokens), frozenset(anchored)

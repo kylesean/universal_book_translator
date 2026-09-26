@@ -104,6 +104,16 @@ class TestReferenceExtraction:
         assert reference_tokens("the ratio is 1.5 for all samples") == set()
         assert reference_tokens("see (2.2)") == {"2.2"}
 
+    def test_range_references_and_citations(self) -> None:
+        """Ranges like 'Figs. 3.14-3.16' and '[25-28]' must extract all endpoint/range tokens."""
+        assert reference_tokens("see Figs. 3.14-3.16 for comparison") == {"3.14", "3.16"}
+        assert reference_tokens("see Figs. 3.14–3.16 for comparison") == {"3.14", "3.16"}
+        assert reference_tokens("见图 3.14 至 3.16") == {"3.14", "3.16"}
+        assert reference_tokens("见图 3.14 到 3.16") == {"3.14", "3.16"}
+        assert reference_tokens("见图 3.14~3.16") == {"3.14", "3.16"}
+        assert reference_tokens("reported in [25-28]") == {"25", "26", "27", "28"}
+        assert reference_tokens("reported in [25–28]") == {"25", "26", "27", "28"}
+
 
 class TestAddedContentGate:
     def test_clean_pair_passes(self) -> None:

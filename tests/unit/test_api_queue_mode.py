@@ -272,3 +272,53 @@ def test_api_queue_progress_frame_satisfies_schema() -> None:
     assert data["completed_blocks"] == 0
     assert data["status"] == "queued"
     assert "progress_percent" in data
+
+
+def test_queued_job_download_and_report_returns_400_not_404(
+    tmp_path: Path, queue: JobQueue, sample_doc: Path
+) -> None:
+    """When a job is still queued or running, /download and /report must return HTTP 400 (not ready),
+    never HTTP 404 (not found)."""
+    client = _client(tmp_path, queue)
+    resp = client.post(
+        "/jobs/submit",
+        json={"input_path": str(sample_doc), "job_id": "job_pending", "target_lang": "zh"},
+    )
+    assert resp.status_code == 202
+
+    dl_resp = client.get("/jobs/job_pending/download")
+    assert dl_resp.status_code == 400
+    assert "not ready" in dl_resp.json()["detail"].lower()
+
+    rpt_resp = client.get("/jobs/job_pending/report")
+    assert rpt_resp.status_code == 400
+    assert "not yet generated" in rpt_resp.json()["detail"].lower()
+
+
+def test_cross_tenant_cannot_probe_or_reclaim_failed_job(
+    tmp_path: Path, queue: JobQueue, sample_doc: Path
+) -> None:
+    """A cross-tenant submit must get HTTP 404 even if the target job is in FAILED or CANCELLED status."""
+    client = _client(tmp_path, queue)
+    resp = client.post(
+        "/jobs/submit",
+        json={"input_path": str(sample_doc), "job_id": "job_failed_a", "target_lang": "zh"},
+        headers={"X-UBT-Tenant": "tenant_a"},
+    )
+    assert resp.status_code == 202
+
+    # Cancel the job in the queue as tenant_a
+    cancel_resp = client.post(
+        "/jobs/job_failed_a/cancel",
+        headers={"X-UBT-Tenant": "tenant_a"},
+    )
+    assert cancel_resp.status_code == 200
+
+    # Tenant B attempts to submit with the same job_id
+    cross_resp = client.post(
+        "/jobs/submit",
+        json={"input_path": str(sample_doc), "job_id": "job_failed_a", "target_lang": "zh"},
+        headers={"X-UBT-Tenant": "tenant_b"},
+    )
+    assert cross_resp.status_code == 404
+    assert "Job not found" in cross_resp.json()["detail"]

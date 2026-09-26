@@ -177,6 +177,31 @@ def test_shared_form_xobject_is_not_rewritten() -> None:
     assert b"Shared Form Text" in form.read_bytes()
 
 
+def test_shared_form_skipped_does_not_mutate_page_contents() -> None:
+    """When a page has shared Form XObjects that cannot be stripped, the page
+    Contents must not be mutated (preventing half-stripped pages where the overlay
+    is skipped)."""
+    pdf = pikepdf.new()
+    p1 = pdf.add_blank_page(page_size=(600, 800))
+    p2 = pdf.add_blank_page(page_size=(600, 800))
+    form = _make_form(pdf, b"BT /F1 12 Tf 100 500 Td (Shared Form Text) Tj ET\n")
+    p1_orig = b"BT /F1 12 Tf 100 400 Td (Regular Page Body Text) Tj ET\n/Fm1 Do\n"
+    for page in (p1, p2):
+        page.Resources = pikepdf.Dictionary({"/XObject": pikepdf.Dictionary({"/Fm1": form})})
+    p1.Contents = pdf.make_stream(p1_orig)
+    p2.Contents = pdf.make_stream(b"/Fm1 Do\n")
+
+    shared = shared_form_objgens(pdf)
+    stats = strip_page_text_pikepdf(
+        p1,
+        [(80.0, 380.0, 300.0, 530.0)],
+        page_no=1,
+        shared_forms=shared,
+    )
+    assert stats.shared_forms_skipped >= 1
+    assert b"Regular Page Body Text" in p1.Contents.read_bytes()
+
+
 def test_nested_shared_form_is_detected() -> None:
     """A Form reached through another Form and drawn by two pages is shared.
 

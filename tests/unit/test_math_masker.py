@@ -44,6 +44,16 @@ def test_latex_paren_bracket_groups_masked() -> None:
     assert _masker().unmask(masked, mapping) == src
 
 
+def test_latex_bracket_multiline_display_math_masked() -> None:
+    src = "Consider the following formula:\n\\[\n\\int_0^\\infty e^{-x} dx = 1\n\\]\nwhich evaluates to one."
+    masked, mapping = _masker().mask(src)
+    assert len(mapping) == 1
+    assert r"\[" not in masked
+    assert _masker().unmask(masked, mapping) == src
+    assert count_math_spans(src) == 1
+    assert extract_math_spans(src) == ["\\[\n\\int_0^\\infty e^{-x} dx = 1\n\\]"]
+
+
 def test_currency_never_masked() -> None:
     for src in [
         "It costs $5 today.",

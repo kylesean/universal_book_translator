@@ -295,8 +295,13 @@ def detect_target_term_violations(
                         hits=hits,
                     )
                 )
-        if term.source not in approved_target and len(term.source) > 2:
+        if (
+            term.source not in approved_target
+            and term.source not in globally_approved
+            and (len(term.source) > 2 or term.source.isupper())
+        ):
             hits = tuple(find_term_occurrences(target_text, term.source, target_protected))
+
             if hits:
                 violations.append(
                     TargetTermViolation(

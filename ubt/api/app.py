@@ -472,22 +472,23 @@ def create_app(
         # so ``enqueue`` re-runs it instead of handing back a dead job.
         if job_queue is not None and requested_id is not None:
             existing_queued = await asyncio.to_thread(job_queue.get, requested_id)
-            if existing_queued is not None and existing_queued.status not in (
-                JobStatus.FAILED,
-                JobStatus.CANCELLED,
-            ):
+            if existing_queued is not None:
                 # Tenant isolation: a cross-tenant probe must not learn the job
                 # exists (the read routes already return 404, but idempotency
                 # here returned it outright — an existence/status oracle).
                 if existing_queued.tenant_id != _tenant_from_header(x_ubt_tenant):
                     raise _cross_tenant_404(requested_id)
-                return JobSubmitResponse(
-                    job_id=existing_queued.job_id,
-                    status=existing_queued.status.value,
-                    stream_url=f"/jobs/{existing_queued.job_id}/stream",
-                    status_url=f"/jobs/{existing_queued.job_id}/status",
-                    rehearsal=bool(existing_queued.payload.get("dry_run", False)),
-                )
+                if existing_queued.status not in (
+                    JobStatus.FAILED,
+                    JobStatus.CANCELLED,
+                ):
+                    return JobSubmitResponse(
+                        job_id=existing_queued.job_id,
+                        status=existing_queued.status.value,
+                        stream_url=f"/jobs/{existing_queued.job_id}/stream",
+                        status_url=f"/jobs/{existing_queued.job_id}/status",
+                        rehearsal=bool(existing_queued.payload.get("dry_run", False)),
+                    )
         if requested_id is not None:
             existing = manager.get_job(requested_id)
             if existing is not None:
@@ -926,9 +927,15 @@ def create_app(
         if not report_file:
             report_file = await _artifact_path_async(valid_id, "report_file")
         if not report_file or not Path(report_file).exists():
+            in_queue = (
+                job_queue is not None
+                and (await asyncio.to_thread(job_queue.get, valid_id)) is not None
+            )
             known = (
                 record is not None
+                or in_queue
                 or (await _artifact_path_async(valid_id, "output_file")) is not None
+                or (app_config.db_dir / f"{valid_id}.sqlite").exists()
             )
             raise HTTPException(
                 status_code=404 if not known else 400,
@@ -1045,7 +1052,11 @@ def create_app(
             output_file = await _artifact_path_async(valid_id, "output_file")
         if not output_file:
             db_path = app_config.db_dir / f"{valid_id}.sqlite"
-            job_exists = (record is not None) or db_path.exists()
+            in_queue = (
+                job_queue is not None
+                and (await asyncio.to_thread(job_queue.get, valid_id)) is not None
+            )
+            job_exists = (record is not None) or in_queue or db_path.exists()
             raise HTTPException(
                 status_code=400 if job_exists else 404,
                 detail=(

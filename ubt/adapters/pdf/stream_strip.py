@@ -993,7 +993,7 @@ def strip_page_text_pikepdf(
             shared_forms=shared_forms,
         )
 
-        if dropped > 0:
+        if dropped > 0 and stats.shared_forms_skipped == 0:
             unparsed = pikepdf.unparse_content_stream(new_ops)
             page.Contents.write(unparsed)
 

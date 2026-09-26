@@ -524,7 +524,7 @@ class TypstDiagnosticHealer:
     def probe_single_math(self, math_line: str) -> bool:
         """Compile one math line alone; True iff it compiles."""
         try:
-            clean_math = re.sub(r"#footnote\[.*?\]", "", math_line)
+            clean_math = re.sub(r"#footnote\[.*?\]", "", math_line, flags=re.DOTALL)
             with tempfile.TemporaryDirectory(prefix="ubt-math-probe-") as tmp:
                 probe = Path(tmp) / "probe.typ"
                 probe.write_text(

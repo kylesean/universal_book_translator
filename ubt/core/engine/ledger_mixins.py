@@ -29,6 +29,7 @@ from ubt.core.ir.models import (
 )
 from ubt.core.qe.defect_taxonomy import (
     DRAFTING_ERROR_PREFIX,
+    TRANSIENT_FAILURE_PREFIXES,
     has_triage_verdict,
     is_repair_only_transient_failure,
     is_transient_failure,
@@ -1025,27 +1026,49 @@ class LedgerBlocksMixin(LedgerBase):
             scope_clause = " AND job_id = ?" if scope is not None else ""
             rows = conn.execute(
                 f"""
-                SELECT block_id FROM blocks
+                SELECT block_id, error_flags_json FROM blocks
                  WHERE block_id IN ({placeholders}){scope_clause}
                    AND (target_text IS NOT NULL OR draft_text IS NOT NULL)
                 """,
                 [*block_ids, *([scope] if scope is not None else [])],
             ).fetchall()
-            requeued = [str(row["block_id"]) for row in rows]
-            if requeued:
-                marks = ",".join("?" * len(requeued))
-                conn.execute(
+            requeued: list[str] = []
+            updates: list[tuple[Any, ...]] = []
+            for row in rows:
+                b_id = str(row["block_id"])
+                requeued.append(b_id)
+                raw = row["error_flags_json"]
+                new_flags_json = None
+                if raw:
+                    with suppress(json.JSONDecodeError):
+                        loaded = json.loads(raw)
+                        if isinstance(loaded, list):
+                            new_flags = [
+                                str(f)
+                                for f in loaded
+                                if not any(
+                                    str(f).startswith(prefix)
+                                    for prefix in TRANSIENT_FAILURE_PREFIXES
+                                )
+                            ]
+                            if new_flags:
+                                new_flags_json = json.dumps(new_flags, ensure_ascii=False)
+                param_row = (
+                    BlockStatus.REPAIR_PENDING.value,
+                    new_flags_json,
+                    b_id,
+                    *([scope] if scope is not None else []),
+                )
+                updates.append(param_row)
+            if updates:
+                conn.executemany(
                     f"""
                     UPDATE blocks
-                       SET status = ?, error_flags_json = NULL,
+                       SET status = ?, error_flags_json = ?,
                            updated_at = CURRENT_TIMESTAMP
-                     WHERE block_id IN ({marks}){scope_clause}
+                     WHERE block_id = ?{scope_clause}
                     """,
-                    [
-                        BlockStatus.REPAIR_PENDING.value,
-                        *requeued,
-                        *([scope] if scope is not None else []),
-                    ],
+                    updates,
                 )
             conn.execute("COMMIT;")
             self._mark_blocks_changed()

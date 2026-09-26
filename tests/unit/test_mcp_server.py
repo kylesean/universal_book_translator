@@ -584,3 +584,41 @@ async def test_translate_book_rejects_unknown_enum_upfront(
     monkeypatch.setattr(srv, "_sandbox_path", lambda raw, *, must_exist: src)
     with pytest.raises(Exception, match="Invalid render_engine"):
         await ubt_translate_book(input_path=str(src), target_lang="zh", render_engine="bogus")
+
+
+async def test_translate_book_refuses_to_overwrite_existing_output_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """If output_path already exists and fresh is False, refuse to overwrite it upfront."""
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    from ubt.mcp.server import ubt_translate_book
+
+    src = tmp_path / "book.md"
+    src.write_text("# T\n\nHello.\n", encoding="utf-8")
+    existing_out = tmp_path / "existing.md"
+    existing_out.write_text("already exists", encoding="utf-8")
+
+    monkeypatch.setenv("UBT_ALLOWED_DIRS", str(tmp_path))
+    with pytest.raises(ToolError, match="output_path already exists"):
+        await ubt_translate_book(
+            input_path=str(src),
+            output_path=str(existing_out),
+            target_lang="zh",
+        )
+
+
+async def test_mcp_tools_raise_tool_error_on_anticipated_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Tool failures must surface as ToolError so the MCP framework reports is_error=True with the message."""
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    from ubt.mcp.server import ubt_inspect_book
+
+    monkeypatch.setenv("UBT_ALLOWED_DIRS", str(tmp_path))
+    with pytest.raises(ToolError, match="not found"):
+        await ubt_inspect_book(str(tmp_path / "nonexistent.pdf"))
+
+    with pytest.raises(ToolError, match="outside the allowed directories"):
+        await ubt_inspect_book("/tmp/outside_sandbox_never_allowed.pdf")

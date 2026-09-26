@@ -82,3 +82,21 @@ def test_detect_math_density_recognizes_unicode_type_theory_and_greek_math() -> 
         "f ∘ g = id_Γ for all α, β ∈ Φ(Γ) and ∀x ∈ Δ, ρ(x) ≤ σ(x)."
     )
     assert detect_math_density(sample) == MathDensity.HIGH
+
+
+def test_analyze_archetype_on_html_and_markdown(tmp_path: Path) -> None:
+    html_f = tmp_path / "article.html"
+    html_f.write_text(
+        "<html><body><h1>Chapter 1</h1><p>Prose content here.</p></body></html>", encoding="utf-8"
+    )
+    arch = analyze_archetype(html_f)
+    assert arch.format_ext == "html"
+    assert arch.sample_chars > 0
+    assert arch.category is DocCategory.LITERATURE
+
+    md_f = tmp_path / "book.markdown"
+    md_f.write_text("# Chapter 1\n\nSome great literature.", encoding="utf-8")
+    arch_md = analyze_archetype(md_f)
+    assert arch_md.format_ext == "markdown"
+    assert arch_md.sample_chars > 0
+    assert arch_md.category is DocCategory.LITERATURE

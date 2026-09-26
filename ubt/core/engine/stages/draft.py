@@ -149,6 +149,8 @@ class DraftRuntime:
     # failures trip the breaker; any drafted block resets it.
     fail_fast_consecutive: int = 0
     last_fail_fast_reason: str = ""
+    ctx: StageContext | None = None
+    create_event_fn: Any = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -333,15 +335,15 @@ class _DraftProcessor:
             src: str,
         ) -> tuple[str, dict[str, str], dict[str, str], dict[str, str], dict[str, str]]:
             m1, code_map = self.runtime.code_masker.mask(src)
-            m2, cite_map = self.runtime.citation_masker.mask(m1)
-            # Gate 2 (math isolation): inline math is masked last so the LLM
-            # translates around an opaque placeholder; unmasked first below.
-            # No hint instruction is sent (BabelDOC lesson: hints degrade quality).
-            m3, math_map = self.runtime.math_masker.mask(m2)
+            # Gate 2 (math isolation): inline math is masked before citations so
+            # mathematical intervals (e.g. $x \in [0, 1]$) or matrix brackets
+            # are protected as math atoms and never intercepted by citation_masker.
+            m2, math_map = self.runtime.math_masker.mask(m1)
             # Gate 2b (soup isolation): delimiter-free unicode math merged into
             # narrative by docling (psi_pert, cos(beta), beta2) is masked behind
             # its own token namespace; restored verbatim below.
-            m4, soup_map = self.runtime.soup_masker.mask(m3)
+            m3, soup_map = self.runtime.soup_masker.mask(m2)
+            m4, cite_map = self.runtime.citation_masker.mask(m3)
             return m4, code_map, cite_map, math_map, soup_map
 
         # Off-loop: regex/parse-heavy masking would otherwise serialize the
@@ -381,17 +383,17 @@ class _DraftProcessor:
         self.runtime.fail_fast_consecutive = 0
 
         def _unmask_all(raw: str) -> tuple[Any, Any, Any, Any, str]:
-            # Restore in reverse masking order (code -> citation -> math ->
-            # soup), so every namespace is verified with the same checksummed
+            # Restore in reverse masking order (citation -> soup -> math -> code),
+            # so every namespace is verified with the same checksummed
             # ``unmask_checked`` contract. The weak ``unmask`` variants return a
             # bare string, so a dropped inline-code or citation token would be
             # invisible to the quality gate.
-            soup_report = self.runtime.soup_masker.unmask_checked(raw, inputs.soup_map or {})
-            math_report = self.runtime.math_masker.unmask_checked(soup_report.text, inputs.math_map)
-            cite_report = self.runtime.citation_masker.unmask_checked(
-                math_report.text, inputs.cite_map
+            cite_report = self.runtime.citation_masker.unmask_checked(raw, inputs.cite_map)
+            soup_report = self.runtime.soup_masker.unmask_checked(
+                cite_report.text, inputs.soup_map or {}
             )
-            code_report = self.runtime.code_masker.unmask_checked(cite_report.text, inputs.code_map)
+            math_report = self.runtime.math_masker.unmask_checked(soup_report.text, inputs.math_map)
+            code_report = self.runtime.code_masker.unmask_checked(math_report.text, inputs.code_map)
             return soup_report, math_report, cite_report, code_report, code_report.text
 
         soup_report, math_report, cite_report, code_report, final_draft = await asyncio.to_thread(
@@ -571,6 +573,24 @@ class _DraftProcessor:
         if not prepared:
             return True
 
+        async def _batch_status_callback(status: str, job_dict: dict[str, Any]) -> None:
+            if self.runtime.ctx is not None:
+                self.runtime.ctx.check_cancelled()
+            logger.info(
+                "Batch draft job %s poll status: %s (counts=%s)",
+                self.runtime.actual_job_id,
+                status,
+                job_dict.get("request_counts"),
+            )
+            if self.runtime.create_event_fn:
+                await self.runtime.create_event_fn(
+                    EventType.DRAFT_BATCH_COMPLETED,
+                    self.runtime.actual_job_id,
+                    self.runtime.ledger,
+                    message=f"Batch draft job status: {status}",
+                    active_block_id=prepared[0][0].id if prepared else None,
+                )
+
         try:
             batch_results = await self.runtime.router.draft_batch(
                 [
@@ -595,7 +615,10 @@ class _DraftProcessor:
                 ledger=self.runtime.ledger,
                 job_id=self.runtime.actual_job_id,
                 cleanup_files=self.policy.batch_delete_files,
+                status_callback=_batch_status_callback,
             )
+        except (BudgetExceededError, JobInterruptedError, asyncio.CancelledError):
+            raise
         except BatchTranslationError as exc:
             logger.warning(
                 "Batch draft unavailable (%s); falling back to interactive for %d blocks",
@@ -630,13 +653,20 @@ class _DraftProcessor:
                 "Batch job returned %d unusable lines; redrafting interactively",
                 len(retriable),
             )
-            await asyncio.gather(
+            results = await asyncio.gather(
                 *[
                     self.draft_single_block(b, current_batch, rolling_prev_summary, inp)
                     for b, inp in retriable
                 ],
                 return_exceptions=True,
             )
+            for res in results:
+                if isinstance(
+                    res, (BudgetExceededError, JobInterruptedError, asyncio.CancelledError)
+                ):
+                    raise res
+                if isinstance(res, Exception):
+                    logger.warning("Interactive redraft failed for block: %s", res)
         return True
 
     async def run_whole_book_batch(
@@ -764,7 +794,7 @@ class _DraftProcessor:
                 len(retriable),
             )
             if self.policy.macro_chunk_size <= 1:
-                await asyncio.gather(
+                results = await asyncio.gather(
                     *[self.draft_single_block(b, [b], "", inp) for b, inp in retriable],
                     return_exceptions=True,
                 )
@@ -773,13 +803,20 @@ class _DraftProcessor:
                     retriable[i : i + self.policy.macro_chunk_size]
                     for i in range(0, len(retriable), self.policy.macro_chunk_size)
                 ]
-                await asyncio.gather(
+                results = await asyncio.gather(
                     *[
                         self.draft_macro_chunk_group(chunk, [b for b, _ in chunk], "")
                         for chunk in chunks
                     ],
                     return_exceptions=True,
                 )
+            for res in results:
+                if isinstance(
+                    res, (BudgetExceededError, JobInterruptedError, asyncio.CancelledError)
+                ):
+                    raise res
+                if isinstance(res, Exception):
+                    logger.warning("Whole-book interactive fallback failed: %s", res)
 
         if self.runtime.flusher is not None:
             await self.runtime.flusher.flush_all()
@@ -881,6 +918,8 @@ class _DraftProcessor:
         if self.runtime.batch_active and len(blocks) >= self.policy.batch_min_blocks:
             try:
                 handled = await self.try_batch_draft(blocks, current_batch, rolling_prev_summary)
+            except (BudgetExceededError, JobInterruptedError, asyncio.CancelledError):
+                raise
             except Exception as exc:  # defensive: batch must never kill the stage
                 logger.warning("Batch draft crashed (%s); interactive fallback", exc)
                 handled = False
@@ -1141,6 +1180,8 @@ async def run_draft_stage(
             counters=counters,
             flusher=flusher,
             batch_active=batch_active,
+            ctx=ctx,
+            create_event_fn=create_event_fn,
         ),
         policy=DraftPolicy(
             glossary_dicts=glossary_dicts,

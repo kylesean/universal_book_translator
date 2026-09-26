@@ -15,6 +15,7 @@ retry budget is spent the flusher dies loudly (the error surfaces at the next
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from typing import Any
 
@@ -54,6 +55,7 @@ class CheckpointBatchFlusher:
         self._closed = False
         self._failures = 0
         self._retry_base_delay = 0.02
+        self._save_lock = asyncio.Lock()
 
     def start(self) -> None:
         """Start the background flusher task if not already running.
@@ -102,21 +104,24 @@ class CheckpointBatchFlusher:
         re-queue the batch (a cancelled ``to_thread`` that had not started
         would otherwise drop it).
         """
-        try:
-            await asyncio.to_thread(self.ledger.save_checkpoints_batch, batch)
-        except Exception as exc:
-            self._failures += 1
-            logger.error(
-                "Failed to flush %d checkpoint(s) to ledger (consecutive failure %d/%d): %s",
-                len(batch),
-                self._failures,
-                _MAX_CONSECUTIVE_FAILURES,
-                exc,
-            )
-            self._retry_batches.insert(0, batch)
-            return False
-        self._failures = 0
-        return True
+        if not batch:
+            return True
+        async with self._save_lock:
+            try:
+                await asyncio.to_thread(self.ledger.save_checkpoints_batch, batch)
+            except Exception as exc:
+                self._failures += 1
+                logger.error(
+                    "Failed to flush %d checkpoint(s) to ledger (consecutive failure %d/%d): %s",
+                    len(batch),
+                    self._failures,
+                    _MAX_CONSECUTIVE_FAILURES,
+                    exc,
+                )
+                self._retry_batches.insert(0, batch)
+                return False
+            self._failures = 0
+            return True
 
     async def _run_flusher(self) -> None:
         """Continuously collect and flush queued updates to SQLite."""
@@ -191,6 +196,9 @@ class CheckpointBatchFlusher:
         batch = self._drain_nowait()
         if batch:
             await self._save(batch)
+        else:
+            async with self._save_lock:
+                pass
 
     async def close(self) -> None:
         """Stop the background worker after all pending checkpoints landed.
@@ -207,11 +215,14 @@ class CheckpointBatchFlusher:
         if task is not None:
             self._queue.put_nowait(_WAKE)
             try:
-                await task
+                await asyncio.shield(task)
             except asyncio.CancelledError:
-                pass
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await asyncio.shield(task)
             except BaseException as exc:
                 task_exc = exc
+
         pending = self._drain_nowait()
         if pending:
             save_task = asyncio.ensure_future(self._save(pending))

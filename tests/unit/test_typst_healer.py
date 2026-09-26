@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -175,3 +176,28 @@ def test_persistent_comment_heal_reports_every_nullified_line() -> None:
     assert _heal_persistent_comment_error(lines, 5, audit)
     # The culprit (line 3) and the error line (line 6) both lose their content.
     assert audit == ['line 3: a = "unclosed', "line 6: // error line $y$"]
+
+
+def test_probe_single_math_strips_multiline_footnote(monkeypatch: pytest.MonkeyPatch) -> None:
+    healer = TypstDiagnosticHealer()
+    written_text: list[str] = []
+
+    def _intercept_write(self: Path, data: str, *args: Any, **kwargs: Any) -> int:
+        if self.name == "probe.typ":
+            written_text.append(data)
+        return len(data)
+
+    monkeypatch.setattr(Path, "write_text", _intercept_write)
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="", stderr=""
+        ),
+    )
+
+    math_with_multiline_footnote = "$ x = y #footnote[\n  multiline footnote\n  content\n] $"
+    result = healer.probe_single_math(math_with_multiline_footnote)
+    assert result is True
+    assert len(written_text) == 1
+    assert "footnote" not in written_text[0]

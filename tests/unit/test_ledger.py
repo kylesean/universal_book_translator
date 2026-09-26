@@ -313,6 +313,30 @@ def test_resume_keeps_the_paid_draft_of_a_repair_only_failure(
     assert ledger.reset_transient_failures("job_repair_requeue") == []
 
 
+def test_reset_blocks_to_repair_preserves_structural_error_flags(
+    tmp_path: Path, sample_doc_ir: SeedDoc
+) -> None:
+    """Re-queueing to REPAIR_PENDING must preserve structural defect flags (e.g. numeric_distortion)
+    while stripping transient retry errors."""
+    ledger = SQLiteJobLedger(tmp_path / "ledger_flags.sqlite")
+    seed_job(ledger, "job_flags", sample_doc_ir, target_lang="zh")
+    ledger.save_checkpoint(
+        block_id="ch01#b001",
+        status=BlockStatus.NEEDS_HUMAN,
+        target_text="paid translation with numbers",
+        error_flags=["numeric_distortion", "Repair error: 504 Gateway Timeout"],
+    )
+
+    reset_ids = ledger.reset_transient_failures("job_flags")
+    assert reset_ids == ["ch01#b001"]
+
+    b1 = ledger.get_block("ch01#b001")
+    assert b1 is not None
+    assert b1.status == BlockStatus.REPAIR_PENDING
+    assert b1.error_flags == ["numeric_distortion"]
+    ledger.close()
+
+
 def test_resume_keeps_the_paid_draft_of_an_untranslated_sweep(
     tmp_path: Path, sample_doc_ir: SeedDoc
 ) -> None:

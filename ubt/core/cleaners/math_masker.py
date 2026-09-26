@@ -87,7 +87,7 @@ _MATH_ENV_PATTERN = re.compile(
 )
 # LaTeX \(...\) and \[...\] groups (single-line; display blocks are FORMULA).
 _PAREN_MATH_PATTERN = re.compile(r"\\\((.+?)\\\)")
-_BRACKET_MATH_PATTERN = re.compile(r"\\\[(.+?)\\\]")
+_BRACKET_MATH_PATTERN = re.compile(r"\\\[(.+?)\\\]", re.DOTALL)
 # Inline $...$: neither delimiter may touch whitespace (excludes "$5 and $10"
 # chains where the inner edge hits a space).
 _INLINE_DOLLAR_PATTERN = re.compile(r"\$(?!\s)([^$\n]+?)(?<!\s)\$")

@@ -454,6 +454,8 @@ def _build_cost(
     route_mode: str,
     profile_name: str,
     warnings: list[AssessmentWarning],
+    source_lang: str = "en",
+    target_lang: str = "zh",
 ) -> CostQuote:
     """Draft (measured tooling) + config-driven fan-out, all labeled expected."""
     # Shared with the engine so the rollup gate cannot drift from the
@@ -519,6 +521,8 @@ def _build_cost(
         macro_chunk_size=macro_chunk_size,
         batch_discount=batch_discount,
         base_url=config.base_url,
+        source_lang=source_lang,
+        target_lang=target_lang,
     )
     draft_calls = math.ceil(billable_blocks / macro_chunk_size) if billable_blocks else 0
 
@@ -555,6 +559,8 @@ def _build_cost(
             prefix_tokens=prefix,
             macro_chunk_size=1,
             base_url=config.base_url,
+            source_lang=source_lang,
+            target_lang=target_lang,
         )
     else:
         repair_blocks = 0
@@ -565,6 +571,8 @@ def _build_cost(
             draft_model=config.repair_model,
             prefix_tokens=prefix,
             base_url=config.base_url,
+            source_lang=source_lang,
+            target_lang=target_lang,
         )
 
     qe_calls = 0
@@ -858,7 +866,9 @@ async def assess_document_async(
         fallback_chars = route.chars
     else:
         chapters = (
-            arch.page_or_ch_count if ext in ("epub", "md", "txt", "html", "htm", "docx") else 1
+            arch.page_or_ch_count
+            if ext in ("epub", "md", "markdown", "txt", "html", "htm", "docx")
+            else 1
         )
         fallback_chars = arch.sample_chars
     source_chars = int(pdf.get("probed_chars") or fallback_chars)
@@ -938,6 +948,8 @@ async def assess_document_async(
         # profile would price work the recommended run never does.
         profile_name=rec.recommended_profile,
         warnings=warnings,
+        source_lang=source_lang,
+        target_lang=target_lang,
     )
     draft_calls = cost.draft_calls
     total_calls = (

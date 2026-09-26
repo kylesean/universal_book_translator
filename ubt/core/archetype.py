@@ -142,10 +142,26 @@ def sample_document(path: Path, ext: str) -> tuple[int, bool, str]:
         from ubt.core.ports import sample_pdf_pages
 
         return sample_pdf_pages(path)
-    elif ext in ("md", "txt"):
+    elif ext in ("md", "markdown", "txt"):
         try:
             text = path.read_text(encoding="utf-8", errors="ignore")
             ch_count = max(1, len(re.findall(r"^#+\s+", text, re.MULTILINE)))
+            return ch_count, False, text[:15000]
+        except Exception:
+            return 1, False, ""
+    elif ext in ("html", "htm"):
+        try:
+            raw = path.read_text(encoding="utf-8", errors="ignore")
+            try:
+                from bs4 import BeautifulSoup
+
+                soup = BeautifulSoup(raw, "html.parser")
+                text = soup.get_text()
+                headings = len(soup.find_all(re.compile(r"^h[1-6]$", re.I)))
+            except Exception:
+                text = re.sub(r"<[^>]+>", " ", raw)
+                headings = len(re.findall(r"<h[1-6][\s>]", raw, re.IGNORECASE))
+            ch_count = max(1, headings)
             return ch_count, False, text[:15000]
         except Exception:
             return 1, False, ""
@@ -238,7 +254,11 @@ def classify_category(ext: str, math_density: MathDensity, domain: str, pages: i
         if pages <= 30:
             return DocCategory.ACADEMIC_PAPER
         return DocCategory.TECHNICAL_BOOK
-    if ext in ("epub", "md") and domain == "general" and math_density == MathDensity.NONE:
+    if (
+        ext in ("epub", "md", "markdown", "html", "htm", "txt")
+        and domain == "general"
+        and math_density == MathDensity.NONE
+    ):
         return DocCategory.LITERATURE
     return DocCategory.GENERAL
 

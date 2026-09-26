@@ -224,6 +224,22 @@ def test_code_and_math_immune_to_cmap_glyph_rewrites() -> None:
     assert "$x /C0 y$" in strip_textbook_ocr_artifacts("$x /C0 y$")
 
 
+def test_currency_does_not_abort_textbook_ocr_cleaning() -> None:
+    """Ordinary currency amounts (e.g. $5) must not bypass OCR cleanup."""
+    from ubt.core.cleaners.lnds_pruner import strip_textbook_ocr_artifacts
+
+    sample = (
+        "Page 42\n"
+        "The standard subscription costs $5 per month, or $50 annually.\n"
+        "Copyright 2017 Cengage Learning. All Rights Reserved."
+    )
+    cleaned = strip_textbook_ocr_artifacts(sample)
+    assert "Page 42" not in cleaned
+    assert "Cengage Learning" not in cleaned
+    assert "$5 per month" in cleaned
+    assert "$50 annually" in cleaned
+
+
 def test_lnds_preserves_toc_and_numbered_list_items() -> None:
     """TOC section numbers and list numbers must not be pruned as page numbers."""
     toc_lines = [

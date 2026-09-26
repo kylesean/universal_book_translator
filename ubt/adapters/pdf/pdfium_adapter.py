@@ -52,8 +52,24 @@ def _paragraph_bbox(
     return BoundingBox(page=page_num, x0=x0, y0=y0, x1=x1, y1=y1)
 
 
+def _block_page_in_range(b: IRBlock, first: int, last: int) -> bool:
+    """True when a block's page (from bbox or provenance) falls within [first, last]."""
+    if b.bbox is not None:
+        return first <= b.bbox.page <= last
+    page = b.provenance.get("page")
+    if page is None:
+        page = b.provenance.get("source_page")
+    if isinstance(page, int):
+        return first <= page <= last
+    if isinstance(page, str) and page.isdigit():
+        return first <= int(page) <= last
+    return False
+
+
 @pdfium_serialized
-def extract_blocks_with_pdfium(path: Path) -> list[IRBlock]:
+def extract_blocks_with_pdfium(
+    path: Path, page_range: tuple[int, int] | None = None
+) -> list[IRBlock]:
     """Column-aware geometric line harvesting: reading order preserved across columns."""
     import pypdfium2 as pdfium
 
@@ -67,7 +83,13 @@ def extract_blocks_with_pdfium(path: Path) -> list[IRBlock]:
     finally:
         pdf.close()
 
-    for page_num in range(1, total_pages + 1):
+    start_page = 1
+    end_page = total_pages
+    if page_range is not None:
+        start_page = max(1, page_range[0])
+        end_page = min(total_pages, page_range[1])
+
+    for page_num in range(start_page, end_page + 1):
         try:
             lines, size = extract_lines(path, page_num)
         except Exception as exc:
@@ -145,7 +167,7 @@ class PDFiumAdapter(DoclingPDFAdapter):
     ) -> list[IRBlock]:
         """pypdfium2 geometric extraction; degrade to plain pdf_oxide on failure."""
         try:
-            blocks = self._extract_with_pdfium(path)
+            blocks = self._extract_with_pdfium(path, page_range)
         except Exception as exc:
             logger.warning(
                 "pypdfium2 extraction failed on '%s' (%s); falling back to the "
@@ -156,10 +178,12 @@ class PDFiumAdapter(DoclingPDFAdapter):
             blocks = self._extract_with_oxide(path)
         if page_range is not None:
             first, last = page_range
-            blocks = [b for b in blocks if b.bbox is None or first <= b.bbox.page <= last]
+            blocks = [b for b in blocks if _block_page_in_range(b, first, last)]
         return blocks
 
     @pdfium_serialized
-    def _extract_with_pdfium(self, path: Path) -> list[IRBlock]:
+    def _extract_with_pdfium(
+        self, path: Path, page_range: tuple[int, int] | None = None
+    ) -> list[IRBlock]:
         """Geometric line harvesting with column-aware reading order."""
-        return extract_blocks_with_pdfium(path)
+        return extract_blocks_with_pdfium(path, page_range)

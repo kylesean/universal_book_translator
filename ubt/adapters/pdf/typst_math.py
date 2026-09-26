@@ -1154,7 +1154,7 @@ _OCR_PROSE_CONNECTOR_RE = re.compile(
 # once the final ``$`` fails — a measured 12 s for 16 repeats. Repeats are
 # peeled one at a time in the caller instead, which is linear.
 _EQ_NUM_TAIL_RE = re.compile(
-    r"(?:[&\s]|\\quad|\\qquad)*"
+    r"(?:^|(?:\s|&|\\quad|\\qquad)+)"
     r"\(\s*(?:[A-Za-z]\s*[.\-]\s*)?\d[\d.A-Za-z\s\-–]*\)\s*"
     r"(?:\\\\(?:\\\\[&\s]*)?)?$"
 )

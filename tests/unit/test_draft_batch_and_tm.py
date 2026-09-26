@@ -432,6 +432,89 @@ def test_draft_stage_batch_failure_falls_back_interactively(tmp_path: Path) -> N
     ledger.close()
 
 
+def test_draft_stage_batch_cancelled_in_status_callback_raises(tmp_path: Path) -> None:
+    """When a job is cancelled, status_callback inside try_batch_draft must detect it and raise JobInterruptedError
+    immediately instead of proceeding to interactive fallback."""
+    from ubt.core.exceptions import JobInterruptedError
+
+    ledger = SQLiteJobLedger(tmp_path / "job_cancel.sqlite")
+    seed_job(ledger, "job_cancel", _make_doc_ir(6), target_lang="zh")
+
+    cancel_token = asyncio.Event()
+
+    class InProgressBatchProvider(MockModelProvider):
+        @property
+        def supports_batch_api(self) -> bool:
+            return True
+
+        async def create_batch_job(self, requests: list[dict[str, Any]]) -> str:
+            return "batch-in-progress"
+
+        async def get_batch_job(self, batch_id: str) -> dict[str, Any]:
+            # Trigger cancellation during status polling
+            cancel_token.set()
+            return {"status": "in_progress"}
+
+    provider = InProgressBatchProvider()
+    router = ModelRouter(provider=provider, draft_model="batch-test-model")
+
+    with pytest.raises(JobInterruptedError):
+        asyncio.run(
+            _drain_stage(
+                ledger=ledger,
+                actual_job_id="job_cancel",
+                manifest=_make_manifest(),
+                router=router,
+                config=_base_config(batch_enabled=True, batch_poll_interval=0.01),
+                all_blocks_count=6,
+                concurrency_sem=asyncio.Semaphore(4),
+                cancel_token=cancel_token,
+            )
+        )
+    # Interactive path must not have been invoked
+    assert provider.call_history == []
+    ledger.close()
+
+
+def test_draft_stage_batch_budget_exceeded_in_status_callback_raises(tmp_path: Path) -> None:
+    """When budget is exceeded, try_batch_draft must not fall back to interactive drafting."""
+    ledger = SQLiteJobLedger(tmp_path / "job_budget.sqlite")
+    seed_job(ledger, "job_budget", _make_doc_ir(6), target_lang="zh")
+
+    class InProgressBatchProvider(MockModelProvider):
+        @property
+        def supports_batch_api(self) -> bool:
+            return True
+
+        async def create_batch_job(self, requests: list[dict[str, Any]]) -> str:
+            return "batch-in-progress"
+
+        async def get_batch_job(self, batch_id: str) -> dict[str, Any]:
+            return {"status": "in_progress"}
+
+    provider = InProgressBatchProvider()
+    router = ModelRouter(provider=provider, draft_model="batch-test-model")
+
+    async def _failing_create_event(*args: Any, **kwargs: Any) -> Any:
+        raise BudgetExceededError("batch draft exceeded budget")
+
+    with pytest.raises(BudgetExceededError, match="batch draft exceeded budget"):
+        asyncio.run(
+            _drain_stage(
+                ledger=ledger,
+                actual_job_id="job_budget",
+                manifest=_make_manifest(),
+                router=router,
+                config=_base_config(batch_enabled=True, batch_poll_interval=0.01),
+                all_blocks_count=6,
+                concurrency_sem=asyncio.Semaphore(4),
+                create_event_fn=_failing_create_event,
+            )
+        )
+    assert provider.call_history == []
+    ledger.close()
+
+
 def test_draft_stage_batch_disabled_uses_interactive(tmp_path: Path) -> None:
     ledger = SQLiteJobLedger(tmp_path / "job.sqlite")
     seed_job(ledger, "job_off", _make_doc_ir(6), target_lang="zh")
