@@ -2,4 +2,4 @@
 
 Industrial-grade universal bilingual book translation engine with decoupled IR and 4-layer consistency defense.
 
-See the [User Guide](docs/guides/USER_GUIDE.md) and [Architecture & Routing Guide](docs/guides/ENGINE_ROUTING_AND_DISASTER_PREVENTION_GUIDE.md) for full documentation.
+See the User Guide and Architecture & Routing Guide under `docs/` for full documentation. (Docs are maintained locally and intentionally not versioned.)

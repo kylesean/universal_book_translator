@@ -10,14 +10,16 @@ packages = ["ubt"]
 # (including the 11 MB tests/baselines/standard-alice EPUB), making every PyPI
 # sdist download ~13 MB.
 #
-# ``docs/`` is deliberately NOT excluded: ``README.md`` is the sdist readme and
-# links into it, so the ~356 KB of tracked markdown must ship or those links
-# dangle in the tarball. The generated synthetic corpus lives under
-# ``tests/fixtures/``, which is both gitignored and covered by the ``tests/``
-# exclude below, so no regenerated PDF can reach the archive.
+# ``docs/`` is intentionally unversioned (gitignored) and changes too often to
+# track, so it is excluded from the sdist too. ``README.md`` no longer links
+# into it, so the archive stays self-consistent without it. The generated
+# synthetic corpus lives under ``tests/fixtures/``, which is both gitignored and
+# covered by the ``tests/`` exclude below, so no regenerated PDF can reach the
+# archive.
 [tool.hatch.build.targets.sdist]
 exclude = [
     "tests/",
+    "docs/",
     "dist/",
     "output/",
     "scratch/",
