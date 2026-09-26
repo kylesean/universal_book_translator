@@ -3,7 +3,7 @@
 > **Status**: 🟢 living document (updated with the test tiers; code symbols are authoritative)
 
 The baseline contract for this repository. When
-`tests/baselines/standard-alice/SOURCE.md` says "the baseline contract is now
+`tests/baselines/README.md` (standard-alice section) says "the baseline contract is now
 owned by `tests/baselines/test_baselines.py` and `docs/design/golden-set.md`", this is
 the second half of that sentence: what the golden set *is*, what a red run means,
 and how to change it without laundering a regression into the new baseline.
@@ -21,9 +21,9 @@ and the tier-level rules that make a red baseline readable (§5).
 | `standard-alice/` | Standard Ebooks EPUB, 20 chapters / 45 illustrations | `metrics.golden.json` |
 | `rigid/` | rigid-engine plan golden (the `rigid` render path's committed plan) | `plan.golden.json` |
 
-Every corpus directory carries a `SOURCE.md` provenance note (origin, why it is
-in the set, what was removed in the doc cleanups and where to find it in git
-history).
+Provenance for every corpus is consolidated in `tests/baselines/README.md`
+(origin, why it is in the set, what was removed in the doc cleanups and where to
+find it in git history).
 
 ## 2. What makes a run comparable
 
@@ -83,11 +83,10 @@ uv run pytest tests/baselines -o addopts="" -q --durations=3
 # 6 passed in 2.39s                            <- and it is cheap enough to gate on
 ```
 
-Its `SOURCE.md` also records what was removed in the 2026-09-17 doc cleanup
+`tests/baselines/README.md` also records what was removed in the 2026-09-17 doc cleanup
 (the pre-UBT "skill" pipeline record and its `scripts/convert.py` /
 `scripts/merge_and_build.py` instructions) — those scripts no longer exist; the
-historical record remains in git history (`git log --follow
-tests/baselines/standard-alice/SOURCE.md`).
+historical record remains in git history (`git log -- tests/baselines/standard-alice/SOURCE.md`).
 
 ## 5. Tier-level golden rules
 

@@ -482,7 +482,7 @@ uv run ubt api [--host HOST] [--port PORT]
 | **`UBT_EXPORT_MIN_COMPLETION_RATIO`** | `0.5` | 导出前的最低完成率闸门：账本里带译文的块必须占到该比例，否则直接中止导出（渲染器对空译文会回落到源文，闸门缺失时整本失败也会产出"成品书"并记为 completed）。抛错时账本原样保留，修好后重跑同一 job 即续译缺的块；确要交付部分成品时设为 `0` 关闭。 |
 | **`UBT_EXPORT_MAX_SYNTAX_FALLBACKS`** | `5` | Typst 自愈允许注释掉的最大译文行数：超过即拒收导出（报告已落盘，账本不标 completed）。0 表示任何移除都拒收；mock 干跑只告警不抛错。 |
 | **`UBT_PDF_ENGINE`** | `"auto"` | PDF 解析引擎：`auto`（首页启发式路由）、`pdfium`（纯文本极速）、`docling`（复杂排版），以及注册表中的其余引擎。取值以 `ubt.adapters.factory._PDF_ENGINE_REGISTRY` 为准，可经同进程注册扩充，见[第十节](#十-扩展挂载自定义适配器与-pdf-引擎)。 |
-| **`UBT_PDFIUM_FONT_DIRS`** | `None` | pdfium 字体替换表使用的钉扎字体目录（`os.pathsep` 分隔）。默认自动探测 `liberation`/`gsfonts`/`dejavu`/`noto-cjk`（Linux）；目录全不存在时退回宿主扫描。**语义为替换**：设置后 pdfium 不再遍历系统字体目录，渲染结果与宿主机字体安装情况解耦（容器部署建议显式设置）。由 `ubt/adapters/pdf/pdfium_gate.py` 在 pypdfium2 首次导入前注入，背景见 `docs/assessments/PDFIUM_THREAD_SAFETY_2026-09-20.md`。 |
+| **`UBT_PDFIUM_FONT_DIRS`** | `None` | pdfium 字体替换表使用的钉扎字体目录（`os.pathsep` 分隔）。默认自动探测 `liberation`/`gsfonts`/`dejavu`/`noto-cjk`（Linux）；目录全不存在时退回宿主扫描。**语义为替换**：设置后 pdfium 不再遍历系统字体目录，渲染结果与宿主机字体安装情况解耦（容器部署建议显式设置）。由 `ubt/adapters/pdf/pdfium_gate.py` 在 pypdfium2 首次导入前注入，契约与并发背景见该模块 docstring。 |
 
 ### 1b. 其余旋钮（按组补全）
 

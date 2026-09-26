@@ -8,8 +8,9 @@ libpdfium concurrently (UBT dispatches pdfium work through many
 ``asyncio.to_thread`` call sites on the shared default executor) corrupt
 the native heap — observed as SIGSEGV in ``__tree_balance_after_insert``
 and as glibc ``double free or corruption (!prev)`` aborts, both during
-the export stage of a multi-page paper (see
-``docs/assessments/PDFIUM_THREAD_SAFETY_2026-09-20.md``).
+the export stage of a multi-page paper (core-dump stacks land in
+``__tree_balance_after_insert``; a crash here takes the whole process
+down, not just the worker thread).
 
 Two defenses, matching the production pdfium paradigm:
 
@@ -52,7 +53,8 @@ call sites are individually locked and may migrate to it incrementally.
 
 Longer term (crash isolation): move rasterization behind a subprocess
 boundary like ``vlm/drivers/sidecar_driver.py`` — a pdfium segfault then
-kills only the child. Tracked in the design doc.
+kills only the child. Not implemented; this docstring is the contract (there
+is no separate design doc).
 """
 
 from __future__ import annotations

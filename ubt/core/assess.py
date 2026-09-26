@@ -78,7 +78,8 @@ QE_GRAY_FRACTION = 0.25
 _VLM_PROMPT_TOKENS = 1500
 _VLM_COMPLETION_TOKENS = 300
 # Pages whose drawing-row count is this high make textgeom's line merge
-# quadratic-slow (documented defect, PDFIUM_THREAD_SAFETY note): deep mode
+# quadratic-slow (documented defect: textgeom's row merge is quadratic on
+# rect-heavy pages): deep mode
 # on such a document can take minutes.
 PATHOLOGICAL_RECT_ROWS = 2000
 

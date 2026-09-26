@@ -1,14 +1,21 @@
 # docs/ — 文档索引与引用规约
 
-本目录按**文档角色**分组：
+本目录只保留**随代码维护的活文档**，按角色分组：
 
-- `guides/` — 随代码更新的**使用/操作指南**（活文档，标 🟢）。
-- `design/` — 随代码更新的**设计/契约/规范**（活文档，标 🟢）。
-- `assessments/` — **成文当日的时点评估**，不随后续演进更新。
-- `history/` — **已归档 / 被取代**的 PRD 与技术设计稿。
+- `guides/` — 使用/操作指南（活文档，顶部标 🟢）。
+- `design/` — 设计/契约/规范（活文档，顶部标 🟢）。
 - `benchmarks/` — 可提交的**无正文成本度量记录**（约定见其 README）。
+- `synthetic-*.pdf` — **不是文档**：合成测试语料，由
+  `scripts/make_sample_corpus.py` 生成、`tests/conftest.py` 在 pytest 启动时按需重建，
+  且被 `.gitignore`（`docs/*.pdf`）忽略，**不随仓库分发**。
 
-## 1. 活文档（随代码演进更新）
+> **历史评估与已废弃的设计稿不再保留在树内**（原 `assessments/`、`history/`：
+> INPLACE_WORKBENCH PRD/设计、INPLACE_TECH_SURVEY、WEVISDOC、JEV、
+> PDFIUM_THREAD_SAFETY）。需要时用 git 历史检索：
+> `git log --diff-filter=D --name-only -- docs/`。在役契约一律内联到代码符号或本目录
+> 活文档，不再依赖时点快照。
+
+## 1. 活文档
 
 | 目录 | 文档 | 内容 |
 | --- | --- | --- |
@@ -18,50 +25,37 @@
 | design/ | [golden-set.md](design/golden-set.md) | 基线语料与 KPI golden 的契约与再生成规约 |
 | design/ | [knob-calibration-protocol.md](design/knob-calibration-protocol.md) | 可调旋钮标定与晋升协议 |
 | design/ | [COST-ACCOUNTING-DESIGN.md](design/COST-ACCOUNTING-DESIGN.md) | 成本核算分层设计与重构路线 |
-| design/ | [LAYOUT_PRESERVATION_MASTERPLAN_2026-09.md](design/LAYOUT_PRESERVATION_MASTERPLAN_2026-09.md) | 版面保持 / 出版级翻译总体方案（rigid/reflow 里程碑；**名字带日期但持续更新**，故列此处） |
+| design/ | [LAYOUT_PRESERVATION_MASTERPLAN_2026-09.md](design/LAYOUT_PRESERVATION_MASTERPLAN_2026-09.md) | 版面保持 / 出版级翻译总体方案（rigid/reflow 里程碑） |
 | design/ | [PDF_SKILL_BORROWINGS.md](design/PDF_SKILL_BORROWINGS.md) | 从 `pdf` skill 抽取的硬化设计 D1–D11 权威定义 |
 | benchmarks/ | [benchmarks/](benchmarks/) | 可提交的无正文成本度量记录（约定见其 README） |
 
-## 2. 时点快照与历史归档
-
-`assessments/` 与 `history/` 下的文档是**成文当日的记录**，不随后续演进更新；引用其中的数字与结论前先对照代码现状。按 §3.3，若当前机制已改变，需在案例旁加"当时机制 vs 现在判据"的对齐说明。
-
-| 目录 | 文档 | 内容 |
-| --- | --- | --- |
-| assessments/ | [PDFIUM_THREAD_SAFETY_2026-09-20.md](assessments/PDFIUM_THREAD_SAFETY_2026-09-20.md) | pdfium 线程安全契约（docling-parse 静态链接、字体钉扎） |
-| assessments/ | [WEVISDOC_ADOPTION_ASSESSMENT_2026-09-20.md](assessments/WEVISDOC_ADOPTION_ASSESSMENT_2026-09-20.md) | WeVisDoc 借鉴评估 |
-| assessments/ | [JEV_DECISION_MODEL_ASSESSMENT_2026-09-25.md](assessments/JEV_DECISION_MODEL_ASSESSMENT_2026-09-25.md) | 类 Jev 决策模型作为 QE 层的引入评估 |
-| assessments/ | [INPLACE_TECH_SURVEY_2026.md](assessments/INPLACE_TECH_SURVEY_2026.md) | 保版翻译技术调研（含 2026-09-22 勘误） |
-| history/ | [INPLACE_WORKBENCH_PRD_V1.md](history/INPLACE_WORKBENCH_PRD_V1.md) | 已归档：原位翻译工作台 PRD（pdf_oxide 路线未实现） |
-| history/ | [INPLACE_WORKBENCH_TECH_DESIGN_V1.md](history/INPLACE_WORKBENCH_TECH_DESIGN_V1.md) | 已归档：原位翻译工作台技术设计 |
-
-## 3. 引用规约
+## 2. 引用规约
 
 指向代码优先用 **符号名**（函数/类/字段/常量）+ 基线 commit。确需定位时可附
 `file:line`，但行号是全仓最易漂移的引用形式：改动涉及该行时必须同步更新，且不得
 让它成为唯一的定位手段（符号名必须同时在场）。
 
-### 3.1 状态行可复核
+### 2.1 状态行可复核
 活文档顶部若标注状态（如"决策已定/重构未开始"），改状态时必须附依据：符号名或
 commit，使读者可以当场验证，而不是相信一句无法核对的话。
 
-### 3.2 悬空引用即债务
+### 2.2 悬空引用即债务
 文档引用另一个文件/符号前，先确认它存在。引用被删对象的句子要么随删并清理，
-要么改写为自述——不留下指向虚无的链接。
+要么改写为自述——不留下指向虚无的链接。删除文档时，必须同时清理代码/测试/其他
+文档中对它的引用（`tests/unit/test_reference_resolvability.py` 会扫描 `ubt/`、`tests/`
+里反引号包裹的 `docs/...` 路径）。
 
-### 3.3 案例与现状分层
-事故复盘、翻车案例保留其历史叙事，但若当前实现已改变案例机制（修复、调度变更），
-必须在案例旁加对齐说明，注明"当时的机制"与"现在的判据"。
+### 2.3 在役契约内联，不留时点快照
+需要在代码里长期遵守的契约（并发、字体策略、计价、路由）应写进**代码 docstring 或
+活文档**，而不是某份带日期的评估；评估类文档一旦其结论被采纳或推翻，即可删除，
+git 历史保留证据。
 
-### 3.4 代码与文档的权威序
+### 2.4 代码与文档的权威序
 两者不一致时，以代码符号为准修文档；只有代码确实错了才修代码，并同步更新文档。
 
-### 3.5 活文档的状态标记
-活文档（`guides/`、`design/` 下）顶部标注 🟢；`assessments/`、`history/` 下的快照文档标注日期。不要让快照冒充活文档，也不要给活文档留下已失效的段落。
-
-### 3.6 数值不写快照值
+### 2.5 数值不写快照值
 易变的度量（条目数、耗时、覆盖率、测试用例数）不写死进正文——引用产生它的符号或目录
 （如 `calibration_summary()`、`_SIZE_RATCHETS`、`pytest --collect-only`），需要数字时当场跑一次。
 
-## 4. 测试权威
+## 3. 测试权威
 测试约束以仓库根 [AGENTS.md](../AGENTS.md) 为准，优先级高于本文与任何其他文档。
