@@ -295,6 +295,38 @@ async def ubt_translate_book(
     preset: str | None = None,
     glossary: str | None = None,
     pages: str | None = None,
+    # Run scoping and resume controls — the same keys the REST payload carries.
+    # ``start_chapter``/``max_chapters`` are run-only: they ride into
+    # ``orchestrator.run`` via the shared ``run_kwargs_from_request``. ``fresh``
+    # is a UBTConfig field (discard prior ledger state instead of resuming).
+    start_chapter: int | None = None,
+    max_chapters: int | None = None,
+    fresh: bool | None = None,
+    # Engine knobs — parity with the REST ``JobSubmitRequest``, which carries
+    # the same set. None-defaults for the same reason as above; note that a
+    # ``False`` default on a bool would be a *silent override* of the
+    # operator's ``UBT_*`` environment, so the optionals stay ``bool | None``.
+    budget_usd: float | None = None,
+    max_concurrency: int | None = None,
+    batch_limit: int | None = None,
+    macro_chunk_size: int | None = None,
+    short_max_pages: int | None = None,
+    enable_rolling_summary: bool | None = None,
+    chapter_streaming_enabled: bool | None = None,
+    offline_batch_enabled: bool | None = None,
+    qe_engine: str | None = None,
+    visual_judge_enabled: bool | None = None,
+    visual_judge_model: str | None = None,
+    prompt_strategy: str | None = None,
+    translate_chrome: bool | None = None,
+    facing_spread: bool | None = None,
+    emit_both: bool | None = None,
+    cover_mode: str | None = None,
+    formula_enrichment: str | None = None,
+    formula_render: str | None = None,
+    math_backend: str | None = None,
+    ocr_mode: str | None = None,
+    domain: str | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
     """Translate a document end to end. Returns immediately with a job_id; poll ubt_job_status."""
@@ -335,6 +367,30 @@ async def ubt_translate_book(
         "preset": preset,
         "glossary_path": str(_resolve_input(glossary)) if glossary else None,
         "pages": pages,
+        "start_chapter": start_chapter,
+        "max_chapters": max_chapters,
+        "fresh": fresh,
+        "budget_usd": budget_usd,
+        "max_concurrency": max_concurrency,
+        "batch_limit": batch_limit,
+        "macro_chunk_size": macro_chunk_size,
+        "short_max_pages": short_max_pages,
+        "enable_rolling_summary": enable_rolling_summary,
+        "chapter_streaming_enabled": chapter_streaming_enabled,
+        "offline_batch_enabled": offline_batch_enabled,
+        "qe_engine": qe_engine,
+        "visual_judge_enabled": visual_judge_enabled,
+        "visual_judge_model": visual_judge_model,
+        "prompt_strategy": prompt_strategy,
+        "translate_chrome": translate_chrome,
+        "facing_spread": facing_spread,
+        "emit_both": emit_both,
+        "cover_mode": cover_mode,
+        "formula_enrichment": formula_enrichment,
+        "formula_render": formula_render,
+        "math_backend": math_backend,
+        "ocr_mode": ocr_mode,
+        "domain": domain,
         "dry_run": rehearsal,
     }
     _JOBS[jid].task = asyncio.create_task(_execute(jid, payload))

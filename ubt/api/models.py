@@ -5,9 +5,16 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ubt.core.config import (
+    CoverMode,
     DualMode,
     ExecMode,
+    FormulaEnrichment,
     FormulaMode,
+    FormulaRender,
+    MathBackend,
+    OcrMode,
+    PromptStrategyName,
+    QeEngine,
     RenderEngine,
 )
 from ubt.core.engine.progress import ProgressSnapshot
@@ -72,6 +79,94 @@ class JobSubmitRequest(BaseModel):
     )
     formula_mode: FormulaMode | None = Field(
         default=None, description="Formula handling (strict, readable)"
+    )
+    # Engine knobs. The CLI builds 40+ request keys and the shared mapping
+    # (``ubt.core.job_options.overrides_from_request``) accepts any of them that
+    # names a ``UBTConfig`` field — so a key absent from *this* model is not
+    # "ignored", it is a 422 before a job ever exists. A narrower model meant a
+    # REST client could not cap spend, raise the concurrency ceiling, pick the
+    # OCR engine or pin the formula policy at all. Provider credentials and
+    # endpoints are deliberately NOT fields here: they may only come from the
+    # operator's environment (defence in depth with ``allow_provider_keys=False``).
+    #
+    # Bounds below mirror the config's own (``gt=0``, ``le=30``). They exist for
+    # a fast 422; the authoritative check still happens when the override is
+    # assigned onto ``UBTConfig`` at job start, so a config-side tightening is
+    # enforced there rather than silently diverging here.
+    #
+    # Cost and throughput ceilings.
+    budget_usd: float | None = Field(
+        default=None,
+        gt=0,
+        description="Hard USD cap for this job across every resume; the run fails once priced cost exceeds it",
+    )
+    max_concurrency: int | None = Field(
+        default=None, gt=0, description="Concurrent LLM requests for this job"
+    )
+    batch_limit: int | None = Field(default=None, gt=0, description="Blocks per draft batch")
+    macro_chunk_size: int | None = Field(
+        default=None,
+        ge=1,
+        le=30,
+        description="Consecutive micro-blocks packed into one draft request (1 = single block)",
+    )
+    short_max_pages: int | None = Field(
+        default=None, gt=0, description="Page ceiling for the short execution chain"
+    )
+    # Long-chain behaviour.
+    enable_rolling_summary: bool | None = Field(
+        default=None, description="Carry a rolling chapter summary across draft batches"
+    )
+    chapter_streaming_enabled: bool | None = Field(
+        default=None, description="Translate chapter-by-chapter as discovery lands"
+    )
+    offline_batch_enabled: bool | None = Field(
+        default=None, description="Route drafting through the provider's offline batch API"
+    )
+    qe_engine: QeEngine | None = Field(
+        default=None,
+        description="QE runner (heuristic, comet, cometkiwi, neural, subprocess, tiered)",
+    )
+    # Quality gates.
+    visual_judge_enabled: bool | None = Field(
+        default=None, description="Enable the VLM visual judge over rendered pages"
+    )
+    visual_judge_model: str | None = Field(
+        default=None, description="Model the visual judge runs on"
+    )
+    prompt_strategy: PromptStrategyName | None = Field(
+        default=None, description="Prompt depth (auto, minimal, hybrid, rich)"
+    )
+    # Output shape.
+    translate_chrome: bool | None = Field(
+        default=None, description="Translate running heads, footers and page chrome"
+    )
+    facing_spread: bool | None = Field(
+        default=None, description="Lay the bilingual output out as facing pages"
+    )
+    emit_both: bool | None = Field(
+        default=None, description="Emit both the reflow and the rigid deliverable"
+    )
+    cover_mode: CoverMode | None = Field(
+        default=None, description="Cover handling (auto, always, never)"
+    )
+    # Formula pipeline.
+    formula_enrichment: FormulaEnrichment | None = Field(
+        default=None, description="Formula enrichment (auto, on, off)"
+    )
+    formula_render: FormulaRender | None = Field(
+        default=None, description="Formula rendering (native, image, witness)"
+    )
+    math_backend: MathBackend | None = Field(
+        default=None, description="Math typesetting backend (typst, mathjax, image)"
+    )
+    # OCR engine selection. ``ocr_endpoint`` / ``ocr_api_key`` stay operator-only.
+    ocr_mode: OcrMode | None = Field(
+        default=None, description="OCR engine (auto, sidecar, cloud, vlm, rapidocr, off)"
+    )
+    # Content selection.
+    domain: str | None = Field(
+        default=None, description="Domain descriptor used for glossary and chrome hints"
     )
     # Idempotency / resume: resubmitting the same job_id returns the existing
     # job instead of starting (and billing) a duplicate run.

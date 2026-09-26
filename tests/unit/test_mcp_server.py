@@ -358,3 +358,126 @@ def test_mcp_in_memory_status_includes_report_fields() -> None:
         assert status_res.get("avg_qe_score") == 0.95
     finally:
         _JOBS.pop(job_id, None)
+
+
+# ---------------------------------------------------------------------------
+# Engine-knob parity with the REST payload surface
+# ---------------------------------------------------------------------------
+
+
+#: The knob families an agent may set. Kept in step with the REST
+#: ``JobSubmitRequest`` test (``tests/unit/test_api.py``) so the two shells
+#: cannot drift apart again: the CLI could always set these, and only the
+#: payload-gated surfaces lagged.
+_MCP_ENGINE_KNOBS: dict[str, Any] = {
+    # Resume control (a UBTConfig field, unlike the two below).
+    "fresh": True,
+    "budget_usd": 5.0,
+    "max_concurrency": 8,
+    "batch_limit": 3,
+    "macro_chunk_size": 12,
+    "short_max_pages": 12,
+    "enable_rolling_summary": True,
+    "chapter_streaming_enabled": True,
+    "offline_batch_enabled": True,
+    "qe_engine": "tiered",
+    "visual_judge_enabled": True,
+    "visual_judge_model": "gpt-4o-mini",
+    "prompt_strategy": "rich",
+    "translate_chrome": True,
+    "facing_spread": True,
+    "emit_both": True,
+    "cover_mode": "never",
+    "formula_enrichment": "on",
+    "formula_render": "image",
+    "math_backend": "mathjax",
+    "ocr_mode": "rapidocr",
+    "domain": "semiconductor",
+}
+
+
+async def test_translate_book_carries_the_engine_knobs_into_the_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The tool signature *is* the payload, so a missing arg is a missing feature.
+
+    ``_execute`` feeds the payload straight into the shared
+    ``overrides_from_request`` mapping, so a knob absent from this signature is
+    a knob an agent cannot ask for at all — the same defect the REST
+    ``JobSubmitRequest`` had, where ``extra="forbid"`` turned it into a 422.
+
+    Asserted on the config handed to the orchestrator, i.e. after
+    payload -> overrides -> UBTConfig, so a knob that is accepted but then
+    silently dropped fails here too.
+    """
+    import ubt.mcp.server as srv
+    from ubt.core.engine.events import EventType, TranslationProgressEvent
+
+    monkeypatch.setenv("UBT_ALLOWED_DIRS", str(tmp_path))
+    doc = tmp_path / "mcp_knobs.md"
+    doc.write_text("# C1\n\nBody text.\n", encoding="utf-8")
+
+    captured: dict[str, Any] = {}
+
+    class CapturingOrchestrator:
+        def __init__(self, config: Any, **_kwargs: object) -> None:
+            captured["config"] = config
+
+        async def run(self, **kwargs: object) -> AsyncIterator[TranslationProgressEvent]:
+            captured["run_kwargs"] = kwargs
+            yield TranslationProgressEvent(
+                event_type=EventType.JOB_STARTED,
+                job_id="mcp_knobs",
+                total_blocks=1,
+                completed_blocks=0,
+            )
+
+    # dry_run keeps this off the real provider stack; the config build happens
+    # before the dry-run branch, so the assertion still covers the real path.
+    monkeypatch.setattr(srv, "create_dry_run_orchestrator", CapturingOrchestrator)
+
+    result = await srv.ubt_translate_book(
+        input_path=str(doc),
+        dry_run=True,
+        start_chapter=2,
+        max_chapters=3,
+        **_MCP_ENGINE_KNOBS,
+    )
+    await srv._JOBS[result["job_id"]].task
+
+    config = captured["config"]
+    for key, expected in _MCP_ENGINE_KNOBS.items():
+        assert getattr(config, key) == expected, (
+            f"{key!r}: tool arg {expected!r} did not reach UBTConfig (got {getattr(config, key)!r})"
+        )
+
+    # The chapter window is run-only: it must reach ``orchestrator.run``, which
+    # ``run_kwargs_from_request`` is the single owner of.
+    run_kwargs = captured["run_kwargs"]
+    assert run_kwargs["start_chapter"] == 2
+    assert run_kwargs["max_chapters"] == 3
+
+
+def test_translate_book_signature_admits_no_credential_keys() -> None:
+    """Widening the engine surface must not widen the credential surface.
+
+    MCP has no request model with ``extra="forbid"``; its guard *is* the fixed
+    signature, so the absence of these parameter names is the defence.
+    ``overrides_from_request(allow_provider_keys=False)`` is the second,
+    shared with REST — and it is what would fail loudly if one were added.
+    """
+    import inspect
+
+    import ubt.mcp.server as srv
+
+    params = set(inspect.signature(srv.ubt_translate_book).parameters)
+    forbidden = {
+        "api_key",
+        "base_url",
+        "api_mode",
+        "ocr_api_key",
+        "ocr_endpoint",
+        "service_api_key",
+        "provider_profile",
+    }
+    assert not (params & forbidden), sorted(params & forbidden)

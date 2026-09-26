@@ -7,7 +7,7 @@ from typing import Any
 import httpx
 import pytest
 from fastapi.testclient import TestClient
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 
 from ubt.api.app import JobManager, JobRecord, JobSubmitRequest, create_app
 from ubt.core.config import UBTConfig
@@ -27,41 +27,41 @@ def sample_api_doc(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def test_client(tmp_path: Path) -> TestClient:
+def api_client(tmp_path: Path) -> TestClient:
     db_dir = tmp_path / "api_ledgers"
     config = UBTConfig(db_dir=db_dir, rate_limit_rpm=600, allowed_dirs=str(tmp_path))
     app = create_app(config=config)
     return TestClient(app)
 
 
-def test_health_check(test_client: TestClient) -> None:
-    resp = test_client.get("/health")
+def test_health_check(api_client: TestClient) -> None:
+    resp = api_client.get("/health")
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "healthy"
     assert data["service"] == "universal-book-translator"
 
 
-def test_submit_job_missing_file_fails(test_client: TestClient) -> None:
+def test_submit_job_missing_file_fails(api_client: TestClient) -> None:
     payload = {
         "input_path": "/nonexistent/path/nowhere.epub",
         "target_lang": "zh",
     }
-    resp = test_client.post("/jobs/submit", json=payload)
+    resp = api_client.post("/jobs/submit", json=payload)
     # Missing file outside the sandbox is denied (403) before existence (400).
     assert resp.status_code in (400, 403)
     assert "Source file not found" in resp.text or "Access denied" in resp.text
 
 
 def test_submit_job_success_and_query_status(
-    test_client: TestClient, sample_api_doc: Path, tmp_path: Path
+    api_client: TestClient, sample_api_doc: Path, tmp_path: Path
 ) -> None:
     payload = {
         "input_path": str(sample_api_doc),
         "output_path": str(tmp_path / "api_out.md"),
         "target_lang": "zh",
     }
-    resp = test_client.post("/jobs/submit", json=payload)
+    resp = api_client.post("/jobs/submit", json=payload)
     assert resp.status_code == 202
     data = resp.json()
     job_id = data["job_id"]
@@ -70,7 +70,7 @@ def test_submit_job_success_and_query_status(
     assert "/status" in data["status_url"]
 
     # Query status
-    status_resp = test_client.get(f"/jobs/{job_id}/status")
+    status_resp = api_client.get(f"/jobs/{job_id}/status")
     assert status_resp.status_code == 200
     status_data = status_resp.json()
     assert status_data["job_id"] == job_id
@@ -82,37 +82,37 @@ def test_submit_job_success_and_query_status(
     assert status_data["status"] in ("submitted", "running", "completed", "cancelled")
 
 
-def test_status_nonexistent_job_returns_404(test_client: TestClient) -> None:
-    resp = test_client.get("/jobs/ghost_job/status")
+def test_status_nonexistent_job_returns_404(api_client: TestClient) -> None:
+    resp = api_client.get("/jobs/ghost_job/status")
     assert resp.status_code == 404
     assert "Job not found" in resp.text
 
 
-def test_report_and_download_nonexistent_job_returns_404(test_client: TestClient) -> None:
-    resp1 = test_client.get("/jobs/ghost_job/report")
+def test_report_and_download_nonexistent_job_returns_404(api_client: TestClient) -> None:
+    resp1 = api_client.get("/jobs/ghost_job/report")
     assert resp1.status_code == 404
 
-    resp2 = test_client.get("/jobs/ghost_job/download")
+    resp2 = api_client.get("/jobs/ghost_job/download")
     assert resp2.status_code == 404
 
 
-def test_visual_report_unknown_job_returns_404(test_client: TestClient) -> None:
-    resp = test_client.get("/jobs/ghost_job/visual-report")
+def test_visual_report_unknown_job_returns_404(api_client: TestClient) -> None:
+    resp = api_client.get("/jobs/ghost_job/visual-report")
     assert resp.status_code == 404
 
 
 def test_visual_report_no_report_returns_400(
-    test_client: TestClient, sample_api_doc: Path, tmp_path: Path
+    api_client: TestClient, sample_api_doc: Path, tmp_path: Path
 ) -> None:
     payload = {
         "input_path": str(sample_api_doc),
         "output_path": str(tmp_path / "api_out_vis.md"),
         "target_lang": "zh",
     }
-    resp = test_client.post("/jobs/submit", json=payload)
+    resp = api_client.post("/jobs/submit", json=payload)
     assert resp.status_code == 202
     job_id = resp.json()["job_id"]
-    vis_resp = test_client.get(f"/jobs/{job_id}/visual-report")
+    vis_resp = api_client.get(f"/jobs/{job_id}/visual-report")
     assert vis_resp.status_code == 400
 
 
@@ -373,11 +373,11 @@ async def test_full_job_lifecycle_via_api(sample_api_doc: Path, tmp_path: Path) 
         assert len(download_resp.content) > 0
 
 
-def test_sandbox_denial_body_has_no_server_paths(test_client: TestClient, tmp_path: Path) -> None:
+def test_sandbox_denial_body_has_no_server_paths(api_client: TestClient, tmp_path: Path) -> None:
     """Risk: a sandbox 403 used to interpolate the server's absolute allowed
     bases into ``detail``, handing the host's directory layout to any caller of
     a service that is unauthenticated by default."""
-    resp = test_client.post(
+    resp = api_client.post(
         "/jobs/submit",
         json={"input_path": str(tmp_path.parent / "elsewhere.md"), "target_lang": "zh"},
     )
@@ -518,35 +518,35 @@ def test_report_outside_sandbox_is_not_masked_as_a_500(
         outside_report.unlink(missing_ok=True)
 
 
-def test_path_traversal_rejection(test_client: TestClient) -> None:
+def test_path_traversal_rejection(api_client: TestClient) -> None:
     """Ensure directory traversal patterns ('..') are blocked with 403 Forbidden."""
     payload = {
         "input_path": "../../../../etc/passwd",
         "target_lang": "zh",
     }
-    resp = test_client.post("/jobs/submit", json=payload)
+    resp = api_client.post("/jobs/submit", json=payload)
     assert resp.status_code == 403
     assert "Directory traversal" in resp.json()["detail"]
 
 
-def test_sensitive_system_path_rejection(test_client: TestClient, system_probe_path: str) -> None:
+def test_sensitive_system_path_rejection(api_client: TestClient, system_probe_path: str) -> None:
     """Ensure direct absolute paths to system directories are blocked."""
     payload = {
         "input_path": system_probe_path,
         "target_lang": "zh",
     }
-    resp = test_client.post("/jobs/submit", json=payload)
+    resp = api_client.post("/jobs/submit", json=payload)
     assert resp.status_code == 403
     assert "restricted system directory" in resp.json()["detail"]
 
 
-def test_sensitive_dotdir_rejection(test_client: TestClient) -> None:
+def test_sensitive_dotdir_rejection(api_client: TestClient) -> None:
     """Ensure access to credentials/ssh dirs is blocked."""
     payload = {
         "input_path": "/home/user/.ssh/id_rsa",
         "target_lang": "zh",
     }
-    resp = test_client.post("/jobs/submit", json=payload)
+    resp = api_client.post("/jobs/submit", json=payload)
     assert resp.status_code == 403
     assert "Accessing sensitive configuration directory" in resp.json()["detail"]
 
@@ -710,7 +710,7 @@ def test_status_corrupted_ledger_returns_500(
 
 
 def test_submit_job_id_is_idempotent(
-    test_client: TestClient, sample_api_doc: Path, tmp_path: Path
+    api_client: TestClient, sample_api_doc: Path, tmp_path: Path
 ) -> None:
     """Resubmitting a stable job_id returns the existing job, not a duplicate."""
     payload = {
@@ -719,22 +719,22 @@ def test_submit_job_id_is_idempotent(
         "target_lang": "zh",
         "job_id": "job_idem_fixed_1",
     }
-    first = test_client.post("/jobs/submit", json=payload)
+    first = api_client.post("/jobs/submit", json=payload)
     assert first.status_code == 202
     assert first.json()["job_id"] == "job_idem_fixed_1"
 
-    second = test_client.post("/jobs/submit", json=payload)
+    second = api_client.post("/jobs/submit", json=payload)
     assert second.status_code == 202
     assert second.json()["job_id"] == "job_idem_fixed_1"
 
 
-def test_cancel_unknown_job_returns_404(test_client: TestClient) -> None:
-    resp = test_client.post("/jobs/ghost_job/cancel")
+def test_cancel_unknown_job_returns_404(api_client: TestClient) -> None:
+    resp = api_client.post("/jobs/ghost_job/cancel")
     assert resp.status_code == 404
 
 
 def test_cancel_known_job_reaches_terminal_state(
-    test_client: TestClient, sample_api_doc: Path, tmp_path: Path
+    api_client: TestClient, sample_api_doc: Path, tmp_path: Path
 ) -> None:
     payload = {
         "input_path": str(sample_api_doc),
@@ -742,8 +742,8 @@ def test_cancel_known_job_reaches_terminal_state(
         "target_lang": "zh",
         "job_id": "job_cancel_fixed_1",
     }
-    assert test_client.post("/jobs/submit", json=payload).status_code == 202
-    resp = test_client.post("/jobs/job_cancel_fixed_1/cancel")
+    assert api_client.post("/jobs/submit", json=payload).status_code == 202
+    resp = api_client.post("/jobs/job_cancel_fixed_1/cancel")
     assert resp.status_code == 200
     assert resp.json()["status"] in ("cancelled", "completed", "failed")
 
@@ -949,7 +949,7 @@ def test_cancel_cannot_rewrite_a_completed_ledger(
 
 
 def test_submit_job_id_is_stored_as_validated(
-    test_client: TestClient, sample_api_doc: Path, tmp_path: Path
+    api_client: TestClient, sample_api_doc: Path, tmp_path: Path
 ) -> None:
     """L3: ``validate_job_id`` strips, so ``create_job`` must get its return value.
 
@@ -964,15 +964,15 @@ def test_submit_job_id_is_stored_as_validated(
         "target_lang": "zh",
         "job_id": "  job_padded_1  ",
     }
-    first = test_client.post("/jobs/submit", json=payload)
+    first = api_client.post("/jobs/submit", json=payload)
     assert first.status_code == 202
     assert first.json()["job_id"] == "job_padded_1"
 
     # The record lives under the validated id, so lookups resolve...
-    assert test_client.get("/jobs/job_padded_1/status").status_code == 200
+    assert api_client.get("/jobs/job_padded_1/status").status_code == 200
     # ...and the resubmit hits the idempotency branch instead of forking a
     # second job under a whitespace-variant key.
-    second = test_client.post("/jobs/submit", json=payload)
+    second = api_client.post("/jobs/submit", json=payload)
     assert second.status_code == 202
     assert second.json()["job_id"] == "job_padded_1"
 
@@ -1176,3 +1176,146 @@ def test_api_download_job_exists_not_ready_returns_400(tmp_path: Path) -> None:
     resp = client.get(f"/jobs/{job_id}/download")
     assert resp.status_code == 400
     assert "not ready" in resp.json()["detail"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Engine-knob parity: the job payload surface must not be narrower than the CLI
+# ---------------------------------------------------------------------------
+
+
+def test_submit_request_carries_every_engine_knob_into_the_config() -> None:
+    """A knob missing from ``JobSubmitRequest`` is a 422, not a silent default.
+
+    The model is ``extra="forbid"``, so a REST/queue/MCP client cannot merely
+    *fail to set* a knob the CLI can set — the submit is rejected outright
+    before a job exists. The CLI built 40+ request keys while this model carried
+    19, which meant a web client could not cap spend, raise the concurrency
+    ceiling, choose the OCR engine or pin the formula policy at all.
+
+    The test walks the exact production path — ``request.model_dump()`` ->
+    ``overrides_from_request(..., allow_provider_keys=False)`` ->
+    ``apply_config_overrides`` (``ubt/api/manager.py::execute_job``) — so a knob
+    that parses but never reaches ``UBTConfig`` fails here too.
+    """
+    from ubt.core.job_options import apply_config_overrides, overrides_from_request
+
+    payload = {
+        "input_path": "book.md",
+        # Cost and throughput ceilings.
+        "budget_usd": 5.0,
+        "max_concurrency": 8,
+        "batch_limit": 3,
+        "macro_chunk_size": 12,
+        "short_max_pages": 12,
+        # Long-chain behaviour.
+        "enable_rolling_summary": True,
+        "chapter_streaming_enabled": True,
+        "offline_batch_enabled": True,
+        "qe_engine": "tiered",
+        # Quality gates.
+        "visual_judge_enabled": True,
+        "visual_judge_model": "gpt-4o-mini",
+        "prompt_strategy": "rich",
+        # Output shape.
+        "translate_chrome": True,
+        "facing_spread": True,
+        "emit_both": True,
+        "cover_mode": "never",
+        # Formulas and OCR.
+        "formula_enrichment": "on",
+        "formula_render": "image",
+        "math_backend": "mathjax",
+        "ocr_mode": "rapidocr",
+        # Content.
+        "domain": "semiconductor",
+    }
+    request = JobSubmitRequest.model_validate(payload)
+    overrides = overrides_from_request(request.model_dump(), allow_provider_keys=False)
+    config = apply_config_overrides(UBTConfig.from_env(), overrides)
+
+    for key, expected in payload.items():
+        if key == "input_path":
+            continue
+        assert getattr(config, key) == expected, (
+            f"{key!r}: payload value {expected!r} did not reach UBTConfig "
+            f"(got {getattr(config, key)!r}; override={overrides.get(key)!r})"
+        )
+
+
+def test_submit_request_still_refuses_credentials_and_server_owned_keys() -> None:
+    """Widening the engine surface must not widen the credential surface.
+
+    Two independent defences guard provider credentials: this model's
+    ``extra="forbid"`` (the key is not a field at all) and
+    ``overrides_from_request(allow_provider_keys=False)`` (defence in depth for
+    a payload written by an older/other surface). Both must hold, or a job
+    payload could redirect the provider endpoint or spend a key the operator
+    never handed the service.
+    """
+    from ubt.core.exceptions import UBTError
+    from ubt.core.job_options import overrides_from_request
+
+    for key in (
+        "api_key",
+        "base_url",
+        "api_mode",
+        "ocr_api_key",
+        "ocr_endpoint",
+        "service_api_key",
+        # Server-owned state: the service picks its own storage and profile.
+        "db_dir",
+        "provider_profile",
+        # A filesystem path: it needs the same sandbox as ``input_path`` before
+        # it can be accepted, so it stays out until that is wired (see
+        # ``resolve_secure_path`` in the submit handler).
+        "glossary",
+    ):
+        with pytest.raises(ValidationError):
+            JobSubmitRequest.model_validate({"input_path": "book.md", key: "probe"})
+
+    # Defence in depth: the shared mapping rejects the credential family even
+    # when a caller bypasses the model (e.g. a queue row from an older release).
+    with pytest.raises(UBTError):
+        overrides_from_request({"api_key": "sk-leaked"}, allow_provider_keys=False)
+
+
+def test_submit_accepts_the_engine_knobs_over_http(
+    api_client: TestClient, sample_api_doc: Path, tmp_path: Path
+) -> None:
+    """Shares the knob set with the mapping test, over the real HTTP contract.
+
+    ``extra="forbid"`` made every knob the model omitted a *rejection*, so a web
+    client's first submit carrying a spend cap failed before a job existed. The
+    422-versus-202 boundary is the entire user-visible defect, and only a real
+    request through the app exercises it (routing, sandbox, intake, response).
+    """
+    payload = {
+        "input_path": str(sample_api_doc),
+        "output_path": str(tmp_path / "knobs_out.md"),
+        "target_lang": "zh",
+        "budget_usd": 5.0,
+        "max_concurrency": 4,
+        "batch_limit": 2,
+        "macro_chunk_size": 3,
+        "short_max_pages": 10,
+        "enable_rolling_summary": True,
+        "chapter_streaming_enabled": True,
+        "offline_batch_enabled": True,
+        "qe_engine": "heuristic",
+        "visual_judge_enabled": True,
+        "visual_judge_model": "gpt-4o-mini",
+        "prompt_strategy": "rich",
+        "translate_chrome": True,
+        "facing_spread": True,
+        "emit_both": True,
+        "cover_mode": "never",
+        "formula_enrichment": "on",
+        "formula_render": "image",
+        "math_backend": "mathjax",
+        "ocr_mode": "rapidocr",
+        "domain": "semiconductor",
+        "dry_run": True,
+    }
+    resp = api_client.post("/jobs/submit", json=payload)
+    assert resp.status_code == 202, resp.text
+    assert resp.json()["job_id"].startswith("job_")
