@@ -241,6 +241,99 @@ def _url_scheme_allowed(name: str, value: str) -> bool:
     return slash != -1 and slash < colon
 
 
+def _srcset_allowed(value: str) -> bool:
+    """Every URL candidate in a ``srcset`` must pass the scheme gate.
+
+    ``srcset`` is ``url [descriptor], url [descriptor], …``; the legacy
+    single-scheme check only looked at the first token, so a later
+    ``javascript:``/``data:`` candidate shipped untouched.
+    """
+    for candidate in value.split(","):
+        stripped = candidate.strip()
+        if not stripped:
+            continue
+        url = stripped.split()[0]
+        if not _url_scheme_allowed("src", url):
+            return False
+    return True
+
+
+def _style_value_allowed(value: str) -> bool:
+    """Inline ``style`` may stay only when it loads no disallowed URL and runs no code."""
+    if _CSS_EXPRESSION_RE.search(value):
+        return False
+    for match in _CSS_URL_RE.finditer(value):
+        url = match.group(2).strip()
+        if url and not _url_scheme_allowed("src", url):
+            return False
+    return True
+
+
+def _url_is_remote(value: str) -> bool:
+    """True for an absolute/protocol-relative URL (anything that leaves the package)."""
+    probe = _URL_CONTROL_RE.sub("", value).strip()
+    return probe.startswith("//") or bool(_SCHEME_RE.match(probe))
+
+
+def _scrub_style_body(css: str) -> str:
+    """Drop remote/unsafe ``@import`` and neutralise ``url()``/``expression()``.
+
+    A kept stylesheet cannot execute in an EPUB reading system, but a *remote*
+    ``@import`` fetches from the network (tracking, and CSS attribute-selector
+    exfiltration), so remote targets go while relative in-package ones stay.
+    """
+    lowered = css.lower()
+    if "@import" not in lowered and "url(" not in lowered and "expression" not in lowered:
+        return css
+
+    def _import(match: re.Match[str]) -> str:
+        target = (match.group(2) or match.group(4) or "").strip()
+        if not target:
+            return ""
+        if not _url_scheme_allowed("src", target) or _url_is_remote(target):
+            return ""
+        return match.group(0)
+
+    css = _CSS_IMPORT_RE.sub(_import, css)
+    css = _CSS_EXPRESSION_RE.sub("/*expression*/(", css)
+
+    def _gated(match: re.Match[str]) -> str:
+        url = match.group(2).strip()
+        if not url or _url_scheme_allowed("src", url):
+            return match.group(0)
+        return 'url("")'
+
+    return _CSS_URL_RE.sub(_gated, css)
+
+
+def _is_refresh_meta(attrs: list[tuple[str, str | None]]) -> bool:
+    for name, value in attrs:
+        if name.lower() == "http-equiv" and value:
+            return re.sub(r"\s+", "", value).lower() == "refresh"
+    return False
+
+
+def _link_loads_resource(attrs: list[tuple[str, str | None]]) -> bool:
+    """True for a ``<link>`` with an unsafe href, or a *remote* resource link.
+
+    A relative ``<link rel="stylesheet" href="book.css">`` stays (the EPUB
+    renderer itself emits one); only network-fetching targets go.
+    """
+    rels: set[str] = set()
+    href: str = ""
+    for name, value in attrs:
+        if not value:
+            continue
+        lowered = name.lower()
+        if lowered == "rel":
+            rels |= set(value.lower().split())
+        elif lowered == "href":
+            href = value
+    if href and not _url_scheme_allowed("href", href):
+        return True
+    return bool(rels & _LINK_RESOURCE_RELS and _url_is_remote(href))
+
+
 def _attr_allowed(tag: str, name: str, value: str | None) -> bool:
     allowed = ALLOWED_ATTRS.get(tag)
     if not allowed or name not in allowed:
@@ -534,7 +627,37 @@ _MARK_TAG_RE = re.compile(r"</?mark\b[^>]*>")
 
 
 #: Attributes whose value is a URL a reading system may navigate or fetch.
-_URL_ATTR_NAMES = frozenset({"href", "src", "poster", "action", "formaction", "data"})
+#: ``xlink:href`` is the standard SVG/XML link attribute and is activatable;
+#: ``srcset``/``imagesrcset`` carry a comma-separated candidate list that a
+#: single-scheme check cannot validate, so they are handled separately below.
+_URL_ATTR_NAMES = frozenset({"href", "src", "poster", "action", "formaction", "data", "xlink:href"})
+_SRCSET_ATTR_NAMES = frozenset({"srcset", "imagesrcset"})
+
+#: Void elements dropped on sight: ``<base>`` rewrites how every relative URL
+#: in the member resolves, so a malicious source can reroute all links.
+_SOURCE_DROP_TAGS = frozenset({"base"})
+
+#: ``<link>`` rel values that load a remote resource (CSS, prefetch, icons).
+_LINK_RESOURCE_RELS = frozenset(
+    {
+        "stylesheet",
+        "preload",
+        "prefetch",
+        "preconnect",
+        "dns-prefetch",
+        "modulepreload",
+        "icon",
+        "apple-touch-icon",
+        "manifest",
+    }
+)
+
+_CSS_IMPORT_RE = re.compile(
+    r"@import\s+(?:url\(\s*(['\"]?)(.*?)\1\s*\)|(['\"])(.*?)\3)\s*[^;]*;?",
+    re.IGNORECASE,
+)
+_CSS_URL_RE = re.compile(r"url\(\s*(['\"]?)(.*?)\1\s*\)", re.IGNORECASE | re.DOTALL)
+_CSS_EXPRESSION_RE = re.compile(r"expression\s*\(", re.IGNORECASE)
 
 #: Containers dropped *with their content* from a source document.
 #:
@@ -651,6 +774,14 @@ class _SourceTagScrubber:
             if match.group(1) == "/":
                 out.append(raw_tag)
                 continue
+            if name in _SOURCE_DROP_TAGS:
+                # Void tag: skip the tag only, never ``_skip_element`` (which
+                # would hunt a nonexistent end tag and drop the document tail).
+                continue
+            if name == "meta" and _is_refresh_meta(_collect_tag_attrs(raw_tag)):
+                continue
+            if name == "link" and _link_loads_resource(_collect_tag_attrs(raw_tag)):
+                continue
             if name in _SOURCE_DROP_WITH_CONTENT:
                 index = cls._skip_element(markup, index, name)
                 continue
@@ -672,10 +803,13 @@ class _SourceTagScrubber:
         """
         closing = re.compile(rf"</\s*{name}\b[^>]*>", re.IGNORECASE)
         match = closing.search(markup, start)
+        transform = _scrub_style_body if name == "style" else None
         if match is None:
-            out.append(markup[start:])
+            body = markup[start:]
+            out.append(transform(body) if transform is not None else body)
             return len(markup)
-        out.append(markup[start : match.start()])
+        body = markup[start : match.start()]
+        out.append(transform(body) if transform is not None else body)
         out.append(match.group(0))
         return match.end()
 
@@ -805,9 +939,16 @@ def _scrub_attr_list(
     removed = False
     for name, value in attrs:
         lowered = name.lower()
-        if lowered.startswith("on") or (
-            lowered in _URL_ATTR_NAMES and value and not _url_scheme_allowed(lowered, value)
-        ):
+        if lowered.startswith("on"):
+            removed = True
+            continue
+        if value and lowered in _SRCSET_ATTR_NAMES and not _srcset_allowed(value):
+            removed = True
+            continue
+        if value and lowered in _URL_ATTR_NAMES and not _url_scheme_allowed(lowered, value):
+            removed = True
+            continue
+        if value and lowered == "style" and not _style_value_allowed(value):
             removed = True
             continue
         kept.append((name, value))

@@ -117,6 +117,59 @@ def test_url_bearing_attributes_are_scheme_gated(attr: str) -> None:
     assert "javascript" not in out, attr
 
 
+def test_xlink_href_javascript_is_dropped() -> None:
+    """SVG links use ``xlink:href``; it is the standard activatable link attr."""
+    out = scrub_source_document('<a xlink:href="javascript:alert(1)">x</a>')
+    assert "javascript" not in out
+    assert ">x</a>" in out
+
+
+def test_srcset_with_a_javascript_candidate_is_dropped() -> None:
+    out = scrub_source_document('<img srcset="a.png 1x, javascript:alert(1) 2x" alt="ok">')
+    assert "javascript" not in out
+    assert 'alt="ok"' in out
+
+
+def test_base_refresh_meta_and_remote_link_are_dropped() -> None:
+    """``<base>`` hijacks every relative link; ``<meta refresh>``/remote ``<link>`` fetch."""
+    out = scrub_source_document(
+        '<head><base href="https://evil.example/"><meta http-equiv="refresh" '
+        'content="0;url=https://evil.example/"><link rel="stylesheet" '
+        'href="https://evil.example/x.css"></head><body>b</body>'
+    )
+    assert "evil.example" not in out
+    assert "<base" not in out.lower()
+    assert "http-equiv" not in out.lower()
+    assert "<link" not in out.lower()
+    assert "<body>b</body>" in out
+
+
+def test_style_import_is_stripped_but_css_kept() -> None:
+    out = scrub_source_document(
+        '<style>@import url("https://evil.example/x.css");p{color:red}</style>'
+    )
+    assert "evil.example" not in out
+    assert "p{color:red}" in out
+
+
+def test_legitimate_link_and_style_survive() -> None:
+    src = '<link rel="record" href="onix.xml"><style>p{background:url(fig.png)}</style>'
+    assert scrub_source_document(src) == src
+
+
+def test_local_stylesheet_link_and_import_survive() -> None:
+    """Only *remote* resource links/imports are egress; relative ones must stay.
+
+    The EPUB renderer emits its own ``<link rel="stylesheet" href="ubt-bilingual.css">``
+    into every chapter head — a blanket resource-rel drop removed it.
+    """
+    src = (
+        '<link rel="stylesheet" href="ubt-bilingual.css">'
+        '<style>@import "chapter.css"; p{color:red}</style>'
+    )
+    assert scrub_source_document(src) == src
+
+
 def test_benign_paired_tags_are_dropped_not_escaped() -> None:
     import html
 
