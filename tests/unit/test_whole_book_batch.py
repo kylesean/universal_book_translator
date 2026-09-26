@@ -1,10 +1,10 @@
 """Unit and integration tests for Phase 4: Whole-Book Offline Batch API Mode."""
-
 import asyncio
 from pathlib import Path
 from typing import Any
 
 from tests.stage_ctx_factory import build_stage_ctx
+from tests.unit.ir_seed import SeedDoc, seed_job
 from ubt.core.config import UBTConfig
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.stages.draft import run_draft_stage
@@ -14,7 +14,6 @@ from ubt.core.ir.models import (
     BlockType,
     BookManifest,
     ChapterMeta,
-    DocumentIR,
     FlowID,
     IRBlock,
 )
@@ -78,7 +77,7 @@ class BrokenBatchProvider(MockModelProvider):
         raise ModelProviderError("500 Batch API service unavailable")
 
 
-def _make_multi_chapter_ir(total_blocks: int, num_chapters: int = 3) -> DocumentIR:
+def _make_multi_chapter_ir(total_blocks: int, num_chapters: int = 3) -> SeedDoc:
     blocks: list[IRBlock] = []
     blocks_per_ch = total_blocks // num_chapters
     for i in range(total_blocks):
@@ -93,7 +92,7 @@ def _make_multi_chapter_ir(total_blocks: int, num_chapters: int = 3) -> Document
                 status=BlockStatus.PENDING,
             )
         )
-    return DocumentIR(
+    return SeedDoc(
         doc_id="test_whole_book_doc",
         source_path="/tmp/test_book.epub",
         format_type="epub",
@@ -145,7 +144,7 @@ def test_whole_book_batch_single_job_for_entire_book(tmp_path: Path) -> None:
     db_path = tmp_path / "job.sqlite"
     ledger = SQLiteJobLedger(db_path)
     doc_ir = _make_multi_chapter_ir(60, num_chapters=3)
-    ledger.init_job("job_wb_1", doc_ir, target_lang="zh")
+    seed_job(ledger, "job_wb_1", doc_ir, target_lang="zh")
 
     provider = WholeBookBatchProvider()
     router = ModelRouter(provider=provider, draft_model="test-batch-model")
@@ -182,7 +181,7 @@ def test_whole_book_batch_with_skips_and_tm(tmp_path: Path) -> None:
     doc_ir.blocks[1].block_type = BlockType.FORMULA
     # Block 2 without digits for TM exact hit and FastPass
     doc_ir.blocks[2].source_text = "Standard paragraph without digits."
-    ledger.init_job("job_wb_skips", doc_ir, target_lang="zh")
+    seed_job(ledger, "job_wb_skips", doc_ir, target_lang="zh")
 
     # Seed TM with exact hit for block 2
     tm = TranslationMemory(tmp_path / "tm.sqlite")
@@ -231,7 +230,7 @@ def test_whole_book_batch_fallback_on_provider_error(tmp_path: Path) -> None:
     db_path = tmp_path / "job.sqlite"
     ledger = SQLiteJobLedger(db_path)
     doc_ir = _make_multi_chapter_ir(10, num_chapters=2)
-    ledger.init_job("job_wb_err", doc_ir, target_lang="zh")
+    seed_job(ledger, "job_wb_err", doc_ir, target_lang="zh")
 
     provider = BrokenBatchProvider()
     router = ModelRouter(provider=provider, draft_model="test-batch-model")
@@ -260,7 +259,7 @@ def test_whole_book_batch_partial_failures_redrafted_interactively(tmp_path: Pat
     db_path = tmp_path / "job.sqlite"
     ledger = SQLiteJobLedger(db_path)
     doc_ir = _make_multi_chapter_ir(12, num_chapters=2)
-    ledger.init_job("job_wb_partial", doc_ir, target_lang="zh")
+    seed_job(ledger, "job_wb_partial", doc_ir, target_lang="zh")
 
     failed_ids = {doc_ir.blocks[2].id, doc_ir.blocks[5].id}
     provider = WholeBookBatchProvider(partial_fail_ids=failed_ids)
@@ -293,7 +292,7 @@ def test_whole_book_batch_idempotent_resume(tmp_path: Path) -> None:
     db_path = tmp_path / "job.sqlite"
     ledger = SQLiteJobLedger(db_path)
     doc_ir = _make_multi_chapter_ir(10, num_chapters=1)
-    ledger.init_job("job_wb_resume", doc_ir, target_lang="zh")
+    seed_job(ledger, "job_wb_resume", doc_ir, target_lang="zh")
 
     class ResumeBatchProvider(WholeBookBatchProvider):
         def __init__(self) -> None:

@@ -4,9 +4,10 @@ from typing import Any
 
 import pytest
 
+from tests.unit.ir_seed import SeedDoc, seed_job
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.repair_loop import RepairLoop
-from ubt.core.ir.models import BlockStatus, BlockType, ChapterIR, DocumentIR, IRBlock
+from ubt.core.ir.models import BlockStatus, BlockType, ChapterIR, IRBlock
 from ubt.core.qe.base import BaseQERunner
 from ubt.core.qe.comet_runner import MockQERunner
 from ubt.core.router.provider import BaseModelProvider, MockModelProvider
@@ -813,7 +814,7 @@ class _r0922_OneFastThenHangingRepairLoop:
         )
 
 
-def _r0922_doc_ir(count: int) -> tuple[DocumentIR, ChapterIR]:
+def _r0922_doc_ir(count: int) -> tuple[SeedDoc, ChapterIR]:
     """A one-chapter document whose block ids match what the tests stamp."""
     chapter = ChapterIR(
         doc_id="reg_doc",
@@ -826,7 +827,7 @@ def _r0922_doc_ir(count: int) -> tuple[DocumentIR, ChapterIR]:
         ],
     )
     return (
-        DocumentIR(
+        SeedDoc(
             doc_id="reg_doc",
             source_path="/tmp/reg.md",
             format_type="markdown",
@@ -853,7 +854,7 @@ async def test_cancel_mid_repair_round_keeps_the_repairs_already_paid_for(
 
     doc, chapter = _r0922_doc_ir(3)
     ledger = SQLiteJobLedger(tmp_path / "repair.sqlite")
-    ledger.init_job("job_repair", doc, target_lang="zh")
+    seed_job(ledger, "job_repair", doc, target_lang="zh")
     ledger.append_chapter("job_repair", chapter)
     ledger.save_checkpoints_batch(
         [

@@ -1,9 +1,8 @@
 """Unit tests for Semantic Flow-Isolated IR models."""
-
 import pytest
 
+from tests.unit.ir_seed import SeedDoc
 from ubt.core.ir.models import (
-    DocumentIR,
     FlowID,
     IRBlock,
 )
@@ -12,7 +11,7 @@ pytestmark = pytest.mark.fast
 
 
 def test_flow_isolation_filtering() -> None:
-    """Validate that DocumentIR strictly isolates different semantic flows."""
+    """Validate that SeedDoc strictly isolates different semantic flows."""
     main_block = IRBlock(
         id="ch01#p001",
         flow_id=FlowID.MAIN_STORY,
@@ -32,7 +31,7 @@ def test_flow_isolation_filtering() -> None:
         source_text="See Festinger (1957) for details.",
     )
 
-    doc = DocumentIR(
+    doc = SeedDoc(
         doc_id="test_hash_12345",
         source_path="/path/to/book.epub",
         format_type="epub",

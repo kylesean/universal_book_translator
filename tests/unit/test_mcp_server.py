@@ -1,5 +1,4 @@
 """MCP server tools: direct-function tests (protocol framing covered by mcp lib)."""
-
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -7,6 +6,7 @@ from typing import Any
 import pytest
 
 from tests.pdf_builders import text_pdf
+from tests.unit.ir_seed import SeedDoc, seed_job
 from ubt.mcp.server import ubt_doctor, ubt_inspect_book, ubt_job_status
 
 
@@ -300,16 +300,15 @@ async def test_mcp_server_job_status_disk_fallback_has_output_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from ubt.core.engine.ledger import SQLiteJobLedger
-    from ubt.core.ir.models import DocumentIR
     from ubt.mcp.server import ubt_job_status
 
     monkeypatch.setenv("UBT_ALLOWED_DIRS", str(tmp_path))
     db_path = tmp_path / "job_mcp_test.sqlite"
-    doc_ir = DocumentIR(
+    doc_ir = SeedDoc(
         doc_id="doc1", source_path=str(tmp_path / "book.pdf"), format_type="pdf", blocks=[]
     )
     with SQLiteJobLedger(db_path) as ledger:
-        ledger.init_job("job_mcp_test", doc_ir, "zh")
+        seed_job(ledger, "job_mcp_test", doc_ir, "zh")
         ledger.set_job_metadata_value(
             "job_mcp_test", "output_file", str(tmp_path / "book_bilingual.pdf")
         )

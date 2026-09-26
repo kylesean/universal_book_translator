@@ -1,5 +1,4 @@
 """Unit tests for CheckpointBatchFlusher."""
-
 import asyncio
 import sqlite3
 import threading
@@ -9,12 +8,13 @@ from typing import Any, cast
 
 import pytest
 
+from tests.unit.ir_seed import SeedDoc, seed_job
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.ledger_flusher import CheckpointBatchFlusher
-from ubt.core.ir.models import BlockStatus, DocumentIR, FlowID, IRBlock
+from ubt.core.ir.models import BlockStatus, FlowID, IRBlock
 
 
-def _make_test_doc() -> DocumentIR:
+def _make_test_doc() -> SeedDoc:
     blocks = [
         IRBlock(
             id=f"b_{i:03d}",
@@ -24,7 +24,7 @@ def _make_test_doc() -> DocumentIR:
         )
         for i in range(1, 11)
     ]
-    return DocumentIR(
+    return SeedDoc(
         doc_id="test_flusher_doc",
         source_path="/tmp/test.epub",
         format_type="epub",
@@ -36,7 +36,7 @@ def _make_test_doc() -> DocumentIR:
 @pytest.mark.asyncio
 async def test_flusher_commits_enqueued_checkpoints(tmp_path: Path) -> None:
     ledger = SQLiteJobLedger(tmp_path / "ledger.sqlite")
-    ledger.init_job("job_flush", _make_test_doc(), target_lang="zh")
+    seed_job(ledger, "job_flush", _make_test_doc(), target_lang="zh")
 
     flusher = CheckpointBatchFlusher(ledger, flush_interval=0.05, max_batch_size=5)
 
@@ -65,7 +65,7 @@ async def test_flusher_commits_enqueued_checkpoints(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_flusher_flush_all_drains_immediately(tmp_path: Path) -> None:
     ledger = SQLiteJobLedger(tmp_path / "ledger2.sqlite")
-    ledger.init_job("job_flush2", _make_test_doc(), target_lang="zh")
+    seed_job(ledger, "job_flush2", _make_test_doc(), target_lang="zh")
 
     # Long flush interval so timer doesn't trigger
     flusher = CheckpointBatchFlusher(ledger, flush_interval=60.0, max_batch_size=100)
@@ -96,7 +96,7 @@ async def test_flusher_flush_all_drains_immediately(tmp_path: Path) -> None:
 async def test_flusher_survives_transient_save_failure(tmp_path: Path) -> None:
     """One failed batch goes back to the queue and is persisted on retry."""
     ledger = SQLiteJobLedger(tmp_path / "ledger_transient.sqlite")
-    ledger.init_job("job_transient", _make_test_doc(), target_lang="zh")
+    seed_job(ledger, "job_transient", _make_test_doc(), target_lang="zh")
     original = ledger.save_checkpoints_batch
 
     attempts: list[int] = []
@@ -131,7 +131,7 @@ async def test_flusher_persistent_failure_raises_at_close_without_loss(tmp_path:
     """Repeated save failures must surface (never a silent drop); the queued
     checkpoints survive for a retry once the ledger is healthy again."""
     ledger = SQLiteJobLedger(tmp_path / "ledger_fatal.sqlite")
-    ledger.init_job("job_fatal", _make_test_doc(), target_lang="zh")
+    seed_job(ledger, "job_fatal", _make_test_doc(), target_lang="zh")
     original = ledger.save_checkpoints_batch
 
     def boom(updates: list[dict[str, Any]], **kwargs: Any) -> int:
@@ -168,7 +168,7 @@ async def test_close_is_final_start_does_not_resurrect(tmp_path: Path) -> None:
     closed upstream and its failure goes unretrieved, dropping checkpoints
     silently. close() is terminal; enqueue() falls back to a sync commit."""
     ledger = SQLiteJobLedger(tmp_path / "ledger.sqlite")
-    ledger.init_job("job_final", _make_test_doc(), target_lang="zh")
+    seed_job(ledger, "job_final", _make_test_doc(), target_lang="zh")
     flusher = CheckpointBatchFlusher(ledger, flush_interval=0.05, max_batch_size=5)
 
     await flusher.enqueue({"block_id": "b_001", "status": BlockStatus.DRAFTED.value})
@@ -203,7 +203,7 @@ async def test_close_does_not_wait_out_the_flush_interval(tmp_path: Path) -> Non
     set it to 300.
     """
     ledger = SQLiteJobLedger(tmp_path / "ledger_close.sqlite")
-    ledger.init_job("job_close", _make_test_doc(), target_lang="zh")
+    seed_job(ledger, "job_close", _make_test_doc(), target_lang="zh")
     flusher = CheckpointBatchFlusher(ledger, flush_interval=10.0, max_batch_size=10)
     await flusher.enqueue(
         {
@@ -308,7 +308,7 @@ async def test_flusher_applies_backoff_on_transient_failure_and_drains_on_task_e
     """[CRITICAL-T1-1] Flusher must backoff between consecutive failures and
     close() must drain remaining items even if the background task died."""
     ledger = SQLiteJobLedger(tmp_path / "ledger.sqlite")
-    doc = DocumentIR(
+    doc = SeedDoc(
         doc_id="doc_backoff",
         source_path="/tmp/test.epub",
         format_type="epub",
@@ -318,7 +318,7 @@ async def test_flusher_applies_backoff_on_transient_failure_and_drains_on_task_e
             IRBlock(id="b_002", flow_id=FlowID.MAIN_STORY, spine_index=2, source_text="Two"),
         ],
     )
-    ledger.init_job("job_backoff", doc, target_lang="zh")
+    seed_job(ledger, "job_backoff", doc, target_lang="zh")
     original_save = ledger.save_checkpoints_batch
 
     # Part 1: Verify retry backoff delay is > 0 when _save fails transiently

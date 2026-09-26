@@ -13,11 +13,11 @@ spelled out in the test docstring:
   the restore character-perfect and every bucket empty, so the reference
   shipped twice (review defect 10.4-3, fail-open restoration).
 """
-
 import asyncio
 from pathlib import Path
 
 from tests.stage_ctx_factory import build_stage_ctx, inert_event
+from tests.unit.ir_seed import SeedDoc, seed_job
 from ubt.core.cleaners.citation_masker import CitationMasker
 from ubt.core.cleaners.code_masker import CodeMasker
 from ubt.core.cleaners.math_masker import MathMasker
@@ -28,7 +28,6 @@ from ubt.core.ir.models import (
     BlockStatus,
     BookManifest,
     ChapterMeta,
-    DocumentIR,
     FlowID,
     IRBlock,
 )
@@ -44,9 +43,9 @@ _CODE_SRC = "Call `foo()` before the run."
 def _draft(tmp_path: Path, source: str, response: str) -> SQLiteJobLedger:
     """Drive the real draft stage over one block with a canned model reply."""
     ledger = SQLiteJobLedger(tmp_path / "placeholder.sqlite")
-    ledger.init_job(
+    seed_job(ledger,
         _JOB_ID,
-        DocumentIR(
+        SeedDoc(
             doc_id="placeholder_doc",
             source_path="/tmp/placeholder.epub",
             format_type="epub",

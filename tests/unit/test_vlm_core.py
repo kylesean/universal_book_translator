@@ -3,7 +3,6 @@
 The rapidocr driver needs model downloads + a GPU/CPU OCR stack, so it is
 exercised by smoke scripts (/tmp), never here.
 """
-
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -12,6 +11,7 @@ import pytest
 
 from tests.corpus_markers import requires_synthetic_mono
 from tests.stage_ctx_factory import build_stage_ctx, drain
+from tests.unit.ir_seed import SeedDoc, seed_job
 from ubt.adapters.pdf.docling_parser import vlm_fallback_missing_pages
 from ubt.adapters.pdf.vlm.anchor import anchor_transcript
 from ubt.adapters.pdf.vlm.registry import get_driver, list_drivers, register_driver
@@ -330,7 +330,7 @@ async def test_quality_gate_anchor_stats_weighting(tmp_path: Path) -> None:
     from ubt.core.engine.events import EventType, TranslationProgressEvent
     from ubt.core.engine.ledger import SQLiteJobLedger
     from ubt.core.engine.stages.quality_gate import run_quality_gate_stage
-    from ubt.core.ir.models import BlockStatus, BlockType, BoundingBox, DocumentIR, FlowID, IRBlock
+    from ubt.core.ir.models import BlockStatus, BlockType, BoundingBox, FlowID, IRBlock
     from ubt.core.qe.base import BaseQERunner
     from ubt.core.qe.fast_pass import FastPassFilter
 
@@ -372,13 +372,13 @@ async def test_quality_gate_anchor_stats_weighting(tmp_path: Path) -> None:
         },
     )
 
-    doc = DocumentIR(
+    doc = SeedDoc(
         doc_id=job_id,
         source_path="test.pdf",
         format_type="pdf",
         blocks=[b1, b2],
     )
-    ledger.init_job(job_id, doc, target_lang="zh")
+    seed_job(ledger, job_id, doc, target_lang="zh")
 
     # Mark both blocks as DRAFTED for quality gate
     ledger.save_checkpoints_batch(

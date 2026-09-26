@@ -1,11 +1,11 @@
 """Unit tests for the human PE queue exporters: CSV + XLIFF 2.1."""
-
 import csv
 import json
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
+from tests.unit.ir_seed import SeedDoc, seed_job
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.pe_queue import (
     CSV_COLUMNS,
@@ -19,7 +19,6 @@ from ubt.core.ir.models import (
     BlockStatus,
     BookManifest,
     ChapterMeta,
-    DocumentIR,
     FlowID,
     IRBlock,
 )
@@ -227,7 +226,7 @@ def test_job_stats_and_report_surface_human_queue_counts(tmp_path: Path) -> None
         _queue_block("b2", BlockStatus.NEEDS_HUMAN, spine_index=2),
         _queue_block("b3", BlockStatus.BLOCKED_HUMAN, severity="critical", spine_index=3),
     ]
-    doc_ir = DocumentIR(
+    doc_ir = SeedDoc(
         doc_id="test_doc_sha256",
         source_path="/tmp/test_book.epub",
         format_type="epub",
@@ -235,7 +234,7 @@ def test_job_stats_and_report_surface_human_queue_counts(tmp_path: Path) -> None
         blocks=blocks,
     )
     ledger = SQLiteJobLedger(tmp_path / "job.sqlite")
-    ledger.init_job("job_pe", doc_ir, target_lang="zh")
+    seed_job(ledger, "job_pe", doc_ir, target_lang="zh")
     ledger.save_checkpoints_batch(
         [
             {"block_id": "b1", "status": BlockStatus.MTQE_PASSED, "mtqe_score": 0.9},

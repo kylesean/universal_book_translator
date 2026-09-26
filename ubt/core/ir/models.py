@@ -274,24 +274,6 @@ def _structure_role_from_block_type(block_type: BlockType) -> StructureRole:
     return mapping[block_type]
 
 
-class DocumentIR(BaseModel):
-    """Full in-memory intermediate representation for a document."""
-
-    doc_id: str  # SHA-256 fingerprint of the source document
-    source_path: str  # Path string of the original source file
-    format_type: str  # epub, pdf, md, txt
-    metadata: dict[str, Any] = Field(default_factory=dict)
-    blocks: list[IRBlock] = Field(default_factory=list)
-
-    def get_blocks_by_flow(self, flow_id: FlowID) -> list[IRBlock]:
-        """Filter blocks belonging strictly to a given semantic flow."""
-        return [b for b in self.blocks if b.flow_id == flow_id]
-
-    @property
-    def total_blocks(self) -> int:
-        return len(self.blocks)
-
-
 class ChapterMeta(BaseModel):
     """Lightweight metadata for a document chapter or spine item."""
 

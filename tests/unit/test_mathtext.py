@@ -1,10 +1,10 @@
 """Inline-math overlay rendering + undelimited-math gate (ch3 Fth,SI class)."""
-
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from tests.unit.ir_seed import SeedDoc, seed_job
 from ubt.adapters.pdf.overlay_text import (
     prepare_overlay_text,
     render_overlay_line,
@@ -424,12 +424,12 @@ def _quarantined_ledger(tmp_path: Path, *, source: str, draft: str) -> None:
     draft in draft_text, an HTML placeholder in target_text. The file is named
     ``<job_id>.sqlite`` because that is what the ledger consumers resolve."""
     from ubt.core.engine.ledger import SQLiteJobLedger
-    from ubt.core.ir.models import BlockStatus, DocumentIR
+    from ubt.core.ir.models import BlockStatus
 
     ledger = SQLiteJobLedger(tmp_path / "job_q.sqlite")
-    ledger.init_job(
+    seed_job(ledger,
         "job_q",
-        DocumentIR(
+        SeedDoc(
             doc_id="d1",
             source_path="x.pdf",
             format_type="pdf",

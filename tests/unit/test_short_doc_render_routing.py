@@ -1,5 +1,4 @@
 """Unit tests for render-engine routing on short documents and adaptive policy."""
-
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -8,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from tests.stage_ctx_factory import build_stage_ctx
+from tests.unit.ir_seed import SeedDoc, seed_job
 from ubt.adapters.base import BaseDocumentAdapter
 from ubt.adapters.markdown.adapter import MarkdownAdapter
 from ubt.core.config import UBTConfig
@@ -303,7 +303,6 @@ async def test_export_stage_non_destructive_glossary_validation(tmp_path: Path) 
     """Verify export stage performs non-destructive validation by default instead of destructive string replacement."""
     from ubt.core.engine.ledger import SQLiteJobLedger
     from ubt.core.engine.stages.export import run_export_stage
-    from ubt.core.ir.models import DocumentIR
     from ubt.core.validators.html_delta import HTMLDeltaValidator
 
     db_path = tmp_path / "ledger.db"
@@ -314,7 +313,7 @@ async def test_export_stage_non_destructive_glossary_validation(tmp_path: Path) 
     # A destructive Aho-Corasick canonicalizer might corrupt it or overwrite it unexpectedly.
     # Non-destructive mode should preserve the LLM's draft and flag inconsistency.
     glossary = [{"source": "neural network", "translation": "神经网络", "target": "神经网络"}]
-    doc_ir = DocumentIR(
+    doc_ir = SeedDoc(
         doc_id=job_id,
         source_path=str(tmp_path / "book.md"),
         format_type="markdown",
@@ -330,7 +329,7 @@ async def test_export_stage_non_destructive_glossary_validation(tmp_path: Path) 
             )
         ],
     )
-    ledger.init_job(job_id, doc_ir, target_lang="zh")
+    seed_job(ledger, job_id, doc_ir, target_lang="zh")
 
     # Mark block as MTQE_PASSED in ledger
     ledger.save_checkpoint(
@@ -387,11 +386,10 @@ async def test_export_stage_reraises_cancellation_from_visual_gate(tmp_path: Pat
     from ubt.core.engine.ledger import SQLiteJobLedger
     from ubt.core.engine.stages.export import run_export_stage
     from ubt.core.exceptions import JobInterruptedError
-    from ubt.core.ir.models import DocumentIR
 
     job_id = "job_cancel_gate"
     ledger = SQLiteJobLedger(tmp_path / "ledger_cancel.db")
-    doc_ir = DocumentIR(
+    doc_ir = SeedDoc(
         doc_id=job_id,
         source_path=str(tmp_path / "book.md"),
         format_type="markdown",
@@ -407,7 +405,7 @@ async def test_export_stage_reraises_cancellation_from_visual_gate(tmp_path: Pat
             )
         ],
     )
-    ledger.init_job(job_id, doc_ir, target_lang="zh")
+    seed_job(ledger, job_id, doc_ir, target_lang="zh")
 
     manifest = BookManifest(
         doc_id=job_id,

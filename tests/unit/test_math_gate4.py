@@ -5,11 +5,11 @@ restored verbatim after unmasking. A dropped ⟦MATH_MASK_*⟧ token surfaces as
 a span multiset mismatch → REPAIR_PENDING (fatal: QE score cannot auto-pass
 it) → repair re-masks from source (self-healing).
 """
-
 import asyncio
 from pathlib import Path
 
 from tests.stage_ctx_factory import build_stage_ctx, drain, inert_event
+from tests.unit.ir_seed import SeedDoc, seed_job
 from ubt.adapters.pdf.typst_reconstructor import (
     _balanced_delimiters,
     _emit_formula_math,
@@ -20,7 +20,6 @@ from ubt.core.ir.models import (
     BlockStatus,
     BookManifest,
     ChapterMeta,
-    DocumentIR,
     FlowID,
     IRBlock,
 )
@@ -76,8 +75,8 @@ def test_emit_formula_math_empty_falls_back_loud() -> None:
     assert "b3" in line  # block id preserved for traceability
 
 
-def _make_doc() -> DocumentIR:
-    return DocumentIR(
+def _make_doc() -> SeedDoc:
+    return SeedDoc(
         doc_id="gate4",
         source_path="/tmp/gate4.epub",
         format_type="epub",
@@ -102,7 +101,7 @@ def _make_doc() -> DocumentIR:
 def test_quality_gate_math_mismatch_is_repair_pending(tmp_path: Path) -> None:
     """End of the closed loop: dropped math cannot QE-pass into release."""
     ledger = SQLiteJobLedger(tmp_path / "gate4.sqlite")
-    ledger.init_job("job_gate4", _make_doc(), target_lang="zh")
+    seed_job(ledger, "job_gate4", _make_doc(), target_lang="zh")
     manifest = BookManifest(
         doc_id="gate4",
         title="Gate4",
@@ -152,7 +151,7 @@ def test_quality_gate_rejects_mismatched_score_count(tmp_path: Path) -> None:
             return []
 
     ledger = SQLiteJobLedger(tmp_path / "short_scores.sqlite")
-    ledger.init_job("job_short_scores", _make_doc(), target_lang="zh")
+    seed_job(ledger, "job_short_scores", _make_doc(), target_lang="zh")
     ledger.save_checkpoint(
         block_id="ch01#b001",
         target_text="当增长时,缓存增长。",
@@ -182,7 +181,7 @@ def test_quality_gate_numeric_defect_never_auto_passes(tmp_path: Path) -> None:
         async def score_pairs(self, pairs: list[dict[str, str]]) -> list[float]:
             return [0.95] * len(pairs)
 
-    doc = DocumentIR(
+    doc = SeedDoc(
         doc_id="gate4num",
         source_path="/tmp/gate4num.epub",
         format_type="epub",
@@ -197,7 +196,7 @@ def test_quality_gate_numeric_defect_never_auto_passes(tmp_path: Path) -> None:
         ],
     )
     ledger = SQLiteJobLedger(tmp_path / "numeric.sqlite")
-    ledger.init_job("job_numeric", doc, target_lang="zh")
+    seed_job(ledger, "job_numeric", doc, target_lang="zh")
     ledger.save_checkpoint(
         block_id="ch01#b001",
         target_text="缓存存储 43 个状态。",

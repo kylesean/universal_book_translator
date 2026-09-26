@@ -1,5 +1,4 @@
 """Integration tests for Batch API drafting and the TM funnel."""
-
 import asyncio
 import json
 from pathlib import Path
@@ -9,6 +8,7 @@ import httpx
 import pytest
 
 from tests.stage_ctx_factory import build_stage_ctx, inert_event
+from tests.unit.ir_seed import SeedDoc, seed_job
 from ubt.core.cleaners.citation_masker import CitationMasker
 from ubt.core.cleaners.code_masker import CodeMasker
 from ubt.core.config import UBTConfig
@@ -21,7 +21,6 @@ from ubt.core.ir.models import (
     BookManifest,
     ChapterIR,
     ChapterMeta,
-    DocumentIR,
     FlowID,
     IRBlock,
 )
@@ -275,7 +274,7 @@ def test_router_batch_transport_failure_keeps_batch_id_for_abandon() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _make_doc_ir(n_blocks: int) -> DocumentIR:
+def _make_doc_ir(n_blocks: int) -> SeedDoc:
     # Deliberately dissimilar sentences so TM fuzzy matching only hits the
     # intended block (default test threshold is 0.85).
     contents = [
@@ -295,7 +294,7 @@ def _make_doc_ir(n_blocks: int) -> DocumentIR:
         )
         for i in range(1, n_blocks + 1)
     ]
-    return DocumentIR(
+    return SeedDoc(
         doc_id="test_doc_sha256",
         source_path="/tmp/test_book.epub",
         format_type="epub",
@@ -384,7 +383,7 @@ class BatchBrokenProvider(MockModelProvider):
 
 def test_draft_stage_batch_success_path(tmp_path: Path) -> None:
     ledger = SQLiteJobLedger(tmp_path / "job.sqlite")
-    ledger.init_job("job_batch", _make_doc_ir(6), target_lang="zh")
+    seed_job(ledger, "job_batch", _make_doc_ir(6), target_lang="zh")
     provider = BatchSuccessProvider()
     router = ModelRouter(provider=provider, draft_model="batch-test-model")
 
@@ -410,7 +409,7 @@ def test_draft_stage_batch_success_path(tmp_path: Path) -> None:
 
 def test_draft_stage_batch_failure_falls_back_interactively(tmp_path: Path) -> None:
     ledger = SQLiteJobLedger(tmp_path / "job.sqlite")
-    ledger.init_job("job_fb", _make_doc_ir(6), target_lang="zh")
+    seed_job(ledger, "job_fb", _make_doc_ir(6), target_lang="zh")
     provider = BatchBrokenProvider()
     router = ModelRouter(provider=provider, draft_model="batch-test-model")
 
@@ -434,7 +433,7 @@ def test_draft_stage_batch_failure_falls_back_interactively(tmp_path: Path) -> N
 
 def test_draft_stage_batch_disabled_uses_interactive(tmp_path: Path) -> None:
     ledger = SQLiteJobLedger(tmp_path / "job.sqlite")
-    ledger.init_job("job_off", _make_doc_ir(6), target_lang="zh")
+    seed_job(ledger, "job_off", _make_doc_ir(6), target_lang="zh")
     provider = BatchSuccessProvider()
     router = ModelRouter(provider=provider, draft_model="batch-test-model")
 
@@ -457,7 +456,7 @@ def test_draft_stage_batch_disabled_uses_interactive(tmp_path: Path) -> None:
 
 def test_draft_stage_tm_exact_hit_skips_llm(tmp_path: Path) -> None:
     ledger = SQLiteJobLedger(tmp_path / "job.sqlite")
-    ledger.init_job("job_tm", _make_doc_ir(5), target_lang="zh")
+    seed_job(ledger, "job_tm", _make_doc_ir(5), target_lang="zh")
     tm = TranslationMemory(tmp_path / "tm.sqlite")
     # P8: the staged entry must carry the same context fingerprint the draft
     # stage computes (PROMPT_VERSION + profile + glossary table + abbreviation
@@ -508,7 +507,7 @@ def test_draft_stage_tm_exact_hit_skips_llm(tmp_path: Path) -> None:
 
 def test_draft_stage_tm_fuzzy_hit_injects_few_shot(tmp_path: Path) -> None:
     ledger = SQLiteJobLedger(tmp_path / "job.sqlite")
-    ledger.init_job("job_fz", _make_doc_ir(5), target_lang="zh")
+    seed_job(ledger, "job_fz", _make_doc_ir(5), target_lang="zh")
     tm = TranslationMemory(tmp_path / "tm.sqlite")
     # Fuzzy hits are context-gated like the exact path — the staged
     # entry must carry the draft stage's context fingerprint to be reusable.
@@ -565,7 +564,7 @@ def test_registry_profiles_supported_for_batch_tests() -> None:
 def test_draft_stage_routes_all_blocks_through_llm(tmp_path: Path) -> None:
     """All blocks route uniformly through the LLM draft model (no MT tier is wired in)."""
     ledger = SQLiteJobLedger(tmp_path / "job.sqlite")
-    ledger.init_job("job_mt", _make_doc_ir(6), target_lang="zh")
+    seed_job(ledger, "job_mt", _make_doc_ir(6), target_lang="zh")
     provider = MockModelProvider(default_response="[LLM-DRAFT]")
     router = ModelRouter(provider=provider, draft_model="batch-test-model")
 
@@ -623,7 +622,7 @@ def test_draft_stage_retries_transient_failures(tmp_path: Path) -> None:
             )
 
     ledger = SQLiteJobLedger(tmp_path / "job.sqlite")
-    ledger.init_job("job_mtfb", _make_doc_ir(6), target_lang="zh")
+    seed_job(ledger, "job_mtfb", _make_doc_ir(6), target_lang="zh")
     provider = TransientFailingProvider()
     router = ModelRouter(provider=provider, draft_model="batch-test-model")
 
@@ -652,7 +651,7 @@ def test_draft_stage_retries_transient_failures(tmp_path: Path) -> None:
 def test_draft_stage_keeps_term_blocks_on_llm(tmp_path: Path) -> None:
     """All blocks draft through the LLM with terminology preserved directly in the prompt."""
     ledger = SQLiteJobLedger(tmp_path / "job.sqlite")
-    ledger.init_job("job_mtterm", _make_doc_ir(6), target_lang="zh")
+    seed_job(ledger, "job_mtterm", _make_doc_ir(6), target_lang="zh")
     provider = MockModelProvider(default_response="[DRAFT]")
     router = ModelRouter(provider=provider, draft_model="batch-test-model")
     # "Paragraph 3" appears verbatim in block ch01#b003 only.
@@ -685,7 +684,7 @@ def test_draft_stage_keeps_term_blocks_on_llm(tmp_path: Path) -> None:
 def test_draft_stage_without_mt_tier_keeps_llm_path(tmp_path: Path) -> None:
     """Without a dedicated MT tier the pipeline routes uniformly through the LLM."""
     ledger = SQLiteJobLedger(tmp_path / "job.sqlite")
-    ledger.init_job("job_mtoff", _make_doc_ir(6), target_lang="zh")
+    seed_job(ledger, "job_mtoff", _make_doc_ir(6), target_lang="zh")
     provider = MockModelProvider(default_response="[TRANSLATED]")
     router = ModelRouter(provider=provider, draft_model="batch-test-model")
 
@@ -1046,7 +1045,7 @@ def test_router_draft_batch_reaps_files_and_marks_consumed(tmp_path: Path) -> No
     provider = ReapingBatchProvider()
     router = ModelRouter(provider=provider, draft_model="m")
     ledger = SQLiteJobLedger(tmp_path / "l.db")
-    ledger.init_job("job-1", _make_doc_ir(1), target_lang="zh")
+    seed_job(ledger, "job-1", _make_doc_ir(1), target_lang="zh")
     asyncio.run(
         router.draft_batch(
             [BatchDraftRequest(custom_id="a", source_text="A")],
@@ -1137,7 +1136,7 @@ def test_draft_stage_batch_budget_stop_aborts_not_falls_back(tmp_path: Path) -> 
     from ubt.core.ir.models import BlockStatus as _BS
 
     ledger = SQLiteJobLedger(tmp_path / "job.sqlite")
-    ledger.init_job("job_budget", _make_doc_ir(6), target_lang="zh")
+    seed_job(ledger, "job_budget", _make_doc_ir(6), target_lang="zh")
     provider = BatchSuccessProvider()
     router = ModelRouter(provider=provider, draft_model="batch-test-model")
 
@@ -1294,7 +1293,7 @@ def test_draft_stage_redrafts_batch_lines_that_came_back_empty(tmp_path: Path) -
             return {cid: {"content": "", "error": None} for cid in self.submissions[-1]}
 
     ledger = SQLiteJobLedger(tmp_path / "job.sqlite")
-    ledger.init_job("job_empty", _make_doc_ir(3), target_lang="zh")
+    seed_job(ledger, "job_empty", _make_doc_ir(3), target_lang="zh")
     provider = BatchEmptyLineProvider()
     router = ModelRouter(provider=provider, draft_model="batch-test-model")
     asyncio.run(
@@ -1410,8 +1409,8 @@ def _d2echo_config() -> UBTConfig:
     return UBTConfig(batch_limit=30, max_concurrency=4, batch_enabled=False)
 
 
-def _d2echo_doc(blocks: list[IRBlock]) -> DocumentIR:
-    return DocumentIR(
+def _d2echo_doc(blocks: list[IRBlock]) -> SeedDoc:
+    return SeedDoc(
         doc_id="d2_doc",
         source_path="/tmp/synthetic-duo.pdf",
         format_type="pdf",
@@ -1488,7 +1487,7 @@ def _d2echo_seed_tm(tm: TranslationMemory, target: str) -> None:
 def test_tm_writeback_refuses_the_echo_and_keeps_the_clean_pair(tmp_path: Path) -> None:
     """Drives writeback_tm_from_ledger: terminal status is not a correctness proof."""
     ledger = SQLiteJobLedger(tmp_path / "job.sqlite")
-    ledger.init_job(
+    seed_job(ledger,
         "job_wb",
         _d2echo_doc(
             [
@@ -1522,7 +1521,7 @@ def test_tm_writeback_refuses_the_echo_and_keeps_the_clean_pair(tmp_path: Path) 
 def test_clean_tm_entry_is_still_served(tmp_path: Path) -> None:
     """Positive control: the TM read path really does run in this harness."""
     ledger = SQLiteJobLedger(tmp_path / "job.sqlite")
-    ledger.init_job(
+    seed_job(ledger,
         "job_tm_ok",
         _d2echo_doc([_d2echo_block("pdf_main#b1", 1, _d2echo_CLEAN_SRC)]),
         target_lang="zh",
@@ -1550,7 +1549,7 @@ def test_poisoned_tm_entry_is_rejected_and_redrafted(tmp_path: Path) -> None:
     hit were still trusted, the block would hold the poisoned text.
     """
     ledger = SQLiteJobLedger(tmp_path / "job.sqlite")
-    ledger.init_job(
+    seed_job(ledger,
         "job_tm_bad",
         _d2echo_doc([_d2echo_block("pdf_main#b1", 1, _d2echo_CLEAN_SRC)]),
         target_lang="zh",

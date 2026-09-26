@@ -1,9 +1,9 @@
 """Tests for SQLiteJobLedger record_visual_report and get_visual_report."""
-
 from pathlib import Path
 
+from tests.unit.ir_seed import SeedDoc, seed_job
 from ubt.core.engine.ledger import SQLiteJobLedger
-from ubt.core.ir.models import DocumentIR, FlowID, IRBlock
+from ubt.core.ir.models import FlowID, IRBlock
 
 
 def test_ledger_record_and_get_visual_report(tmp_path: Path) -> None:
@@ -11,13 +11,13 @@ def test_ledger_record_and_get_visual_report(tmp_path: Path) -> None:
     ledger = SQLiteJobLedger(db_path)
     job_id = "job_vis_001"
 
-    doc_ir = DocumentIR(
+    doc_ir = SeedDoc(
         doc_id="doc_vis_001",
         source_path="test.pdf",
         format_type="pdf",
         blocks=[IRBlock(id="b1", flow_id=FlowID.MAIN_STORY, spine_index=1, source_text="hello")],
     )
-    ledger.init_job(job_id, doc_ir, target_lang="zh")
+    seed_job(ledger, job_id, doc_ir, target_lang="zh")
 
     # Initial report is None
     assert ledger.get_visual_report(job_id) is None

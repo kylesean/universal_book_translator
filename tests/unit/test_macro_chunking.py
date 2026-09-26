@@ -1,16 +1,16 @@
 """Unit tests for Phase 2: Structured Macro-Chunking (Pack-by-Macro-Block)."""
-
 import asyncio
 from pathlib import Path
 
 import pytest
 
 from tests.stage_ctx_factory import build_stage_ctx
+from tests.unit.ir_seed import SeedDoc, seed_job
 from ubt.core.config import UBTConfig
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.stages.draft import run_draft_stage
 from ubt.core.exceptions import ModelProviderError
-from ubt.core.ir.models import BlockStatus, BookManifest, ChapterMeta, DocumentIR, FlowID, IRBlock
+from ubt.core.ir.models import BlockStatus, BookManifest, ChapterMeta, FlowID, IRBlock
 from ubt.core.router.extractor import TranslationOutputExtractor
 from ubt.core.router.prompts import build_macro_chunk_draft_prompt
 from ubt.core.router.provider import MockModelProvider
@@ -96,7 +96,7 @@ def test_extract_macro_blocks() -> None:
     assert extracted["ch1_b2"] == "第二段中文译文。"
 
 
-def _make_doc(count: int) -> DocumentIR:
+def _make_doc(count: int) -> SeedDoc:
     blocks = [
         IRBlock(
             id=f"ch01#b{i:03d}",
@@ -106,7 +106,7 @@ def _make_doc(count: int) -> DocumentIR:
         )
         for i in range(1, count + 1)
     ]
-    return DocumentIR(
+    return SeedDoc(
         doc_id="macro_doc",
         source_path="/tmp/macro.epub",
         format_type="epub",
@@ -131,7 +131,7 @@ def _make_manifest() -> BookManifest:
 async def test_draft_stage_with_macro_chunking(tmp_path: Path) -> None:
     """With macro_chunk_size=5, 10 blocks are translated in exactly 2 LLM requests."""
     ledger = SQLiteJobLedger(tmp_path / "job.sqlite")
-    ledger.init_job("job_macro", _make_doc(10), target_lang="zh")
+    seed_job(ledger, "job_macro", _make_doc(10), target_lang="zh")
 
     provider = MockModelProvider(default_response="宏块译文")
     router = ModelRouter(provider=provider, draft_model="test-model")
@@ -168,7 +168,7 @@ async def test_draft_stage_with_macro_chunking(tmp_path: Path) -> None:
 async def test_macro_chunk_partial_omission_falls_back(tmp_path: Path) -> None:
     """If the LLM omits one block in the macro response, that block falls back to single draft."""
     ledger = SQLiteJobLedger(tmp_path / "job_fallback.sqlite")
-    ledger.init_job("job_fb", _make_doc(3), target_lang="zh")
+    seed_job(ledger, "job_fb", _make_doc(3), target_lang="zh")
 
     # Custom provider that omits b002 in the macro response
     class OmissionProvider(MockModelProvider):
@@ -230,7 +230,7 @@ async def test_macro_chunk_total_failure_falls_back_without_deadlock(
     non-reentrant semaphore — with ``max_concurrency=1`` the stage hung
     forever after logging the fallback (regression guard)."""
     ledger = SQLiteJobLedger(tmp_path / "job_hang.sqlite")
-    ledger.init_job("job_hang", _make_doc(3), target_lang="zh")
+    seed_job(ledger, "job_hang", _make_doc(3), target_lang="zh")
 
     class ExplodingMacroProvider(MockModelProvider):
         async def generate(

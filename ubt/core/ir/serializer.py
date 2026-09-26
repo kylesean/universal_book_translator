@@ -4,7 +4,7 @@ Note: the former JSON IR serialization functions
 (``serialize_ir`` / ``deserialize_ir`` / ``save_ir_atomic`` /
 ``load_ir_file`` / ``compute_block_hash``) were removed — the production
 persistence contract is the SQLite ledger schema, and no production code
-serialized DocumentIR to JSON.
+serialized a whole in-memory IR to JSON.
 """
 
 import hashlib

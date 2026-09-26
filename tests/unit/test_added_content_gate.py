@@ -10,19 +10,19 @@ band the invented sentences actively masked the source sentence they displaced.
 It was then written into the shared Translation Memory and served verbatim on
 every later run (``use_count`` 6-9 for the affected entries).
 """
-
 import asyncio
 from pathlib import Path
 
 import pytest
 
 from tests.stage_ctx_factory import build_stage_ctx, drain, inert_event
+from tests.unit.ir_seed import SeedDoc, seed_job
 from ubt.core.cleaners.math_masker import extract_math_spans
 from ubt.core.config import UBTConfig
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.stages.quality_gate import run_quality_gate_stage
 from ubt.core.engine.stages.tm_writeback import tm_writeback_eligible
-from ubt.core.ir.models import BlockStatus, BlockType, DocumentIR, FlowID, IRBlock
+from ubt.core.ir.models import BlockStatus, BlockType, FlowID, IRBlock
 from ubt.core.memory.tm import (
     PROVENANCE_MACHINE,
     TMPendingEntry,
@@ -239,9 +239,9 @@ class TestLedgerRequeue:
             block_type=BlockType.NARRATIVE,
             source_text=_B0045_SRC,
         )
-        ledger.init_job(
+        seed_job(ledger,
             "job_x",
-            DocumentIR(
+            SeedDoc(
                 doc_id="test_doc_sha256",
                 source_path="/tmp/synthetic-duo.pdf",
                 format_type="pdf",
@@ -424,8 +424,8 @@ def _d2echo_block(bid: str, spine: int, source: str) -> IRBlock:
     return IRBlock(id=bid, flow_id=FlowID.MAIN_STORY, spine_index=spine, source_text=source)
 
 
-def _d2echo_doc(blocks: list[IRBlock]) -> DocumentIR:
-    return DocumentIR(
+def _d2echo_doc(blocks: list[IRBlock]) -> SeedDoc:
+    return SeedDoc(
         doc_id="d2_doc",
         source_path="/tmp/synthetic-duo.pdf",
         format_type="pdf",
@@ -455,7 +455,7 @@ def _d2echo_run_quality_gate(
 def test_quality_gate_sends_the_production_echo_to_repair(tmp_path: Path) -> None:
     """Drives run_quality_gate_stage: the echoed block must not become MTQE_PASSED."""
     ledger = SQLiteJobLedger(tmp_path / "job.sqlite")
-    ledger.init_job(
+    seed_job(ledger,
         "job_d2",
         _d2echo_doc(
             [
@@ -545,7 +545,7 @@ def test_echo_verdict_survives_a_permissive_qe_threshold(tmp_path: Path) -> None
     The threshold below is deliberately absurd: it isolates the marker.
     """
     ledger = SQLiteJobLedger(tmp_path / "job.sqlite")
-    ledger.init_job(
+    seed_job(ledger,
         "job_perm",
         _d2echo_doc([_d2echo_block("pdf_main#b_echo", 1, _d2echo_ECHO_SRC)]),
         target_lang="zh",
@@ -585,7 +585,7 @@ def test_masked_token_corruption_is_fatal_and_survives_the_gate(tmp_path: Path) 
     ):
         assert has_structural_defect([flag]), marker
         ledger = SQLiteJobLedger(tmp_path / f"{marker}.sqlite")
-        ledger.init_job(
+        seed_job(ledger,
             "job_tok",
             _d2echo_doc([_d2echo_block("pdf_main#b_tok", 1, _d2echo_CLEAN_SRC)]),
             target_lang="zh",

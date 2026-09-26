@@ -1,15 +1,15 @@
 """Unit tests for human PE revision re-import: ledger update + TM human_pe."""
-
 import csv
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pytest
 
+from tests.unit.ir_seed import SeedDoc, seed_job
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.pe_import import PEImportError, import_pe_revisions
 from ubt.core.engine.pe_queue import export_pe_queue_csv, export_pe_queue_xliff
-from ubt.core.ir.models import BlockStatus, DocumentIR, FlowID, IRBlock
+from ubt.core.ir.models import BlockStatus, FlowID, IRBlock
 from ubt.core.memory.tm import TranslationMemory
 
 _XLIFF_NS = "urn:oasis:names:tc:xliff:document:2.1"
@@ -47,9 +47,9 @@ def _blocks() -> list[IRBlock]:
 
 def _ledger(tmp_path: Path) -> SQLiteJobLedger:
     ledger = SQLiteJobLedger(tmp_path / "job.sqlite")
-    ledger.init_job(
+    seed_job(ledger,
         "job_pe",
-        DocumentIR(
+        SeedDoc(
             doc_id="test_doc_sha256",
             source_path="/tmp/test_book.epub",
             format_type="epub",

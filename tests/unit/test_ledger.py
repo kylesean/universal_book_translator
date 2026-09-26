@@ -1,5 +1,4 @@
 """Unit and performance tests for SQLiteJobLedger."""
-
 import concurrent.futures
 import logging
 import sqlite3
@@ -9,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from tests.unit.ir_seed import SeedDoc, seed_job
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.ledger_base import _upsert_blocks_batch
 from ubt.core.ir.models import (
@@ -17,7 +17,6 @@ from ubt.core.ir.models import (
     BookManifest,
     ChapterIR,
     ChapterMeta,
-    DocumentIR,
     FlowID,
     IRBlock,
     LayoutRole,
@@ -31,8 +30,8 @@ def _manifest_stub() -> BookManifest:
 
 
 @pytest.fixture
-def sample_doc_ir() -> DocumentIR:
-    """Fixture providing a sample DocumentIR with 5 blocks across flows."""
+def sample_doc_ir() -> SeedDoc:
+    """Fixture providing a sample SeedDoc with 5 blocks across flows."""
     blocks = [
         IRBlock(
             id=f"ch01#b{i:03d}",
@@ -42,7 +41,7 @@ def sample_doc_ir() -> DocumentIR:
         )
         for i in range(1, 6)
     ]
-    return DocumentIR(
+    return SeedDoc(
         doc_id="test_doc_sha256",
         source_path="/tmp/test_book.epub",
         format_type="epub",
@@ -51,22 +50,22 @@ def sample_doc_ir() -> DocumentIR:
     )
 
 
-def test_ledger_init_and_idempotence(tmp_path: Path, sample_doc_ir: DocumentIR) -> None:
+def test_ledger_init_and_idempotence(tmp_path: Path, sample_doc_ir: SeedDoc) -> None:
     """Test ledger schema initialization and idempotent re-initialization."""
     db_path = tmp_path / "ledger.db"
     ledger = SQLiteJobLedger(db_path)
 
-    ledger.init_job("job_001", sample_doc_ir, target_lang="zh")
+    seed_job(ledger, "job_001", sample_doc_ir, target_lang="zh")
     blocks = ledger.get_all_blocks("job_001")
     assert len(blocks) == 5
 
     # Re-initialization with same job_id must be completely idempotent and not crash
-    ledger.init_job("job_001", sample_doc_ir, target_lang="zh")
+    seed_job(ledger, "job_001", sample_doc_ir, target_lang="zh")
     blocks_after = ledger.get_all_blocks("job_001")
     assert len(blocks_after) == 5
 
 
-def test_single_checkpoint_and_resume(tmp_path: Path, sample_doc_ir: DocumentIR) -> None:
+def test_single_checkpoint_and_resume(tmp_path: Path, sample_doc_ir: SeedDoc) -> None:
     """Test single block checkpoint update and resume filtering.
 
     Resume semantics follow the production primitive ``fetch_pending_blocks``:
@@ -76,7 +75,7 @@ def test_single_checkpoint_and_resume(tmp_path: Path, sample_doc_ir: DocumentIR)
     ledger = SQLiteJobLedger(db_path)
     job_id = "job_002"
 
-    ledger.init_job(job_id, sample_doc_ir, target_lang="zh")
+    seed_job(ledger, job_id, sample_doc_ir, target_lang="zh")
 
     # Initial state: all 5 blocks should be pending for drafting
     resume_initial = ledger.fetch_pending_blocks(job_id, limit=50)
@@ -116,12 +115,12 @@ def test_single_checkpoint_and_resume(tmp_path: Path, sample_doc_ir: DocumentIR)
     assert all(b.id != "ch01#b001" for b in resume_after)
 
 
-def test_batch_checkpoint_and_reassemble(tmp_path: Path, sample_doc_ir: DocumentIR) -> None:
+def test_batch_checkpoint_and_reassemble(tmp_path: Path, sample_doc_ir: SeedDoc) -> None:
     """Test batch checkpoints persist and read back with full state."""
     db_path = tmp_path / "ledger.db"
     ledger = SQLiteJobLedger(db_path)
     job_id = "job_003"
-    ledger.init_job(job_id, sample_doc_ir, target_lang="zh")
+    seed_job(ledger, job_id, sample_doc_ir, target_lang="zh")
 
     updates = [
         {
@@ -153,7 +152,7 @@ def test_batch_checkpoint_and_reassemble(tmp_path: Path, sample_doc_ir: Document
 
 
 def test_save_checkpoints_batch_clears_verdicts_in_the_same_call(
-    tmp_path: Path, sample_doc_ir: DocumentIR
+    tmp_path: Path, sample_doc_ir: SeedDoc
 ) -> None:
     """Human PE import needs the new text and the verdict reset together (X17).
 
@@ -165,7 +164,7 @@ def test_save_checkpoints_batch_clears_verdicts_in_the_same_call(
     ledger = SQLiteJobLedger(tmp_path / "ledger_verdict.db")
     job_id = "job_verdict"
     try:
-        ledger.init_job(job_id, sample_doc_ir, target_lang="zh")
+        seed_job(ledger, job_id, sample_doc_ir, target_lang="zh")
         ledger.save_checkpoints_batch(
             [
                 {
@@ -200,7 +199,7 @@ def test_save_checkpoints_batch_clears_verdicts_in_the_same_call(
 
 
 def test_reset_transient_failures_requeues_only_transient(
-    tmp_path: Path, sample_doc_ir: DocumentIR
+    tmp_path: Path, sample_doc_ir: SeedDoc
 ) -> None:
     """Resume recovery: transient drafting/repair failures are
     re-queued; quality escalations stay terminal.
@@ -211,7 +210,7 @@ def test_reset_transient_failures_requeues_only_transient(
     (``Drafting error:`` / ``Repair error:``) may loop back to pending.
     """
     ledger = SQLiteJobLedger(tmp_path / "ledger.db")
-    ledger.init_job("job_recover", sample_doc_ir, target_lang="zh")
+    seed_job(ledger, "job_recover", sample_doc_ir, target_lang="zh")
 
     ledger.save_checkpoint(
         block_id="ch01#b001",
@@ -257,7 +256,7 @@ def test_reset_transient_failures_requeues_only_transient(
 
 
 def test_resume_keeps_the_paid_draft_of_a_repair_only_failure(
-    tmp_path: Path, sample_doc_ir: DocumentIR
+    tmp_path: Path, sample_doc_ir: SeedDoc
 ) -> None:
     """A repair-stage outage must not throw away the draft it already paid for.
 
@@ -269,7 +268,7 @@ def test_resume_keeps_the_paid_draft_of_a_repair_only_failure(
     full reset.
     """
     ledger = SQLiteJobLedger(tmp_path / "ledger.db")
-    ledger.init_job("job_repair_requeue", sample_doc_ir, target_lang="zh")
+    seed_job(ledger, "job_repair_requeue", sample_doc_ir, target_lang="zh")
 
     ledger.save_checkpoint(
         block_id="ch01#b001",
@@ -313,7 +312,7 @@ def test_resume_keeps_the_paid_draft_of_a_repair_only_failure(
 
 
 def test_resume_keeps_the_paid_draft_of_an_untranslated_sweep(
-    tmp_path: Path, sample_doc_ir: DocumentIR
+    tmp_path: Path, sample_doc_ir: SeedDoc
 ) -> None:
     """Export's ``untranslated:`` sweep marks still-nonterminal DRAFTED rows
     FAILED *without* clearing their paid text.
@@ -324,7 +323,7 @@ def test_resume_keeps_the_paid_draft_of_an_untranslated_sweep(
     and no drafting marker, so it must go back to repair with its text intact.
     """
     ledger = SQLiteJobLedger(tmp_path / "ledger.db")
-    ledger.init_job("job_untranslated", sample_doc_ir, target_lang="zh")
+    seed_job(ledger, "job_untranslated", sample_doc_ir, target_lang="zh")
 
     ledger.save_checkpoint(
         block_id="ch01#b001",
@@ -343,7 +342,7 @@ def test_resume_keeps_the_paid_draft_of_an_untranslated_sweep(
 
 
 def test_reset_transient_failures_keeps_non_retryable_draft_failures(
-    tmp_path: Path, sample_doc_ir: DocumentIR
+    tmp_path: Path, sample_doc_ir: SeedDoc
 ) -> None:
     """A 401/402/400 recurs on every resume, so it must not be re-queued.
 
@@ -353,7 +352,7 @@ def test_reset_transient_failures_keeps_non_retryable_draft_failures(
     from ubt.core.qe.defect_taxonomy import NON_RETRYABLE_DRAFT_PREFIX
 
     ledger = SQLiteJobLedger(tmp_path / "ledger.db")
-    ledger.init_job("job_nonretry", sample_doc_ir, target_lang="zh")
+    seed_job(ledger, "job_nonretry", sample_doc_ir, target_lang="zh")
     ledger.save_checkpoint(
         block_id="ch01#b001",
         status=BlockStatus.FAILED,
@@ -372,14 +371,14 @@ def test_reset_transient_failures_keeps_non_retryable_draft_failures(
 
 
 def test_reset_transient_failures_exempts_triaged_blocks(
-    tmp_path: Path, sample_doc_ir: DocumentIR
+    tmp_path: Path, sample_doc_ir: SeedDoc
 ) -> None:
     """E2 (option B): triage keeps the original transient marker when
     upgrading to NEEDS_HUMAN, so the prefix alone cannot tell "never
     reviewed" from "reviewed, awaiting a human". Rows carrying a triage
     verdict stay terminal — the PE queue must not lose members on resume."""
     ledger = SQLiteJobLedger(tmp_path / "ledger.db")
-    ledger.init_job("job_pe", sample_doc_ir, target_lang="zh")
+    seed_job(ledger, "job_pe", sample_doc_ir, target_lang="zh")
 
     # Triaged Major: transient history + verdict + severity -> stays.
     ledger.save_checkpoint(
@@ -435,7 +434,7 @@ def test_job_metadata_roundtrip_and_cache_invalidation(tmp_path: Path) -> None:
 
 
 def test_batch_update_preserves_error_flags_when_key_omitted(
-    tmp_path: Path, sample_doc_ir: DocumentIR
+    tmp_path: Path, sample_doc_ir: SeedDoc
 ) -> None:
     """Omitting ``error_flags`` must preserve stored flags.
 
@@ -447,7 +446,7 @@ def test_batch_update_preserves_error_flags_when_key_omitted(
     """
     ledger = SQLiteJobLedger(tmp_path / "ledger.db")
     job_id = "job_flags"
-    ledger.init_job(job_id, sample_doc_ir, target_lang="zh")
+    seed_job(ledger, job_id, sample_doc_ir, target_lang="zh")
 
     ledger.save_checkpoint(
         block_id="ch01#b001",
@@ -509,7 +508,7 @@ def test_high_throughput_batch_writes(tmp_path: Path) -> None:
         )
         for i in range(num_blocks)
     ]
-    doc = DocumentIR(
+    doc = SeedDoc(
         doc_id="perf_sha256",
         source_path="perf.txt",
         format_type="txt",
@@ -517,7 +516,7 @@ def test_high_throughput_batch_writes(tmp_path: Path) -> None:
     )
 
     t0 = time.perf_counter()
-    ledger.init_job(job_id, doc, target_lang="zh")
+    seed_job(ledger, job_id, doc, target_lang="zh")
     init_duration = time.perf_counter() - t0
     init_tps = num_blocks / init_duration
 
@@ -548,12 +547,12 @@ def test_high_throughput_batch_writes(tmp_path: Path) -> None:
     assert landed.target_text == "高吞吐压力测试中文译文第 4999 条记录。"
 
 
-def test_concurrent_reads_and_writes_no_lock(tmp_path: Path, sample_doc_ir: DocumentIR) -> None:
+def test_concurrent_reads_and_writes_no_lock(tmp_path: Path, sample_doc_ir: SeedDoc) -> None:
     """Validate thread-safe concurrent reads and non-conflicting writes in WAL mode."""
     db_path = tmp_path / "concurrent_ledger.db"
     ledger = SQLiteJobLedger(db_path)
     job_id = "job_concurrent"
-    ledger.init_job(job_id, sample_doc_ir, target_lang="zh")
+    seed_job(ledger, job_id, sample_doc_ir, target_lang="zh")
 
     errors: list[Exception] = []
 
@@ -681,12 +680,12 @@ def test_v2_to_v3_migration_adds_tm_hit_and_defaults_existing_rows(tmp_path: Pat
     assert row["tm_hit"] == 0
 
 
-def test_upsert_non_destructive_semantics(tmp_path: Path, sample_doc_ir: DocumentIR) -> None:
+def test_upsert_non_destructive_semantics(tmp_path: Path, sample_doc_ir: SeedDoc) -> None:
     """Validate that ON CONFLICT DO UPDATE SET avoids DELETE+INSERT destruction of custom fields."""
     db_path = tmp_path / "upsert_test.db"
     with SQLiteJobLedger(db_path) as ledger:
         job_id = "job_upsert"
-        ledger.init_job(job_id, sample_doc_ir, target_lang="zh")
+        seed_job(ledger, job_id, sample_doc_ir, target_lang="zh")
 
         # Simulate checkpointing block 1 with drafted content and score
         ledger.save_checkpoint(
@@ -697,7 +696,7 @@ def test_upsert_non_destructive_semantics(tmp_path: Path, sample_doc_ir: Documen
         )
 
         # Re-initialize or append again with same block_id
-        ledger.init_job(job_id, sample_doc_ir, target_lang="zh")
+        seed_job(ledger, job_id, sample_doc_ir, target_lang="zh")
 
         # Drafted text and score must NOT be wiped out by destructive REPLACE!
         b1 = ledger.get_block("ch01#b001")
@@ -774,12 +773,12 @@ def test_skip_stable_resume_keeps_existing_target(tmp_path: Path) -> None:
 
 
 def test_reset_blocks_to_pending_clears_mqm_triage(
-    tmp_path: Path, sample_doc_ir: DocumentIR
+    tmp_path: Path, sample_doc_ir: SeedDoc
 ) -> None:
     """Re-queued blocks must not keep the stale MQM severity/spans of the
     discarded draft (regression: reset cleared text/flags but left triage)."""
     ledger = SQLiteJobLedger(tmp_path / "ledger.db")
-    ledger.init_job("job_mqm", sample_doc_ir, target_lang="zh")
+    seed_job(ledger, "job_mqm", sample_doc_ir, target_lang="zh")
     ledger.save_checkpoint(
         block_id="ch01#b001",
         status=BlockStatus.NEEDS_HUMAN,
@@ -812,8 +811,8 @@ def test_keyset_pagination_never_skips_duplicate_spine_indices(tmp_path: Path) -
         IRBlock(id="b5b", flow_id=FlowID.MAIN_STORY, spine_index=5, source_text="c"),
         IRBlock(id="b9", flow_id=FlowID.MAIN_STORY, spine_index=9, source_text="d"),
     ]
-    doc = DocumentIR(doc_id="dup", source_path="t.txt", format_type="txt", blocks=blocks)
-    ledger.init_job("job_dup", doc, target_lang="zh")
+    doc = SeedDoc(doc_id="dup", source_path="t.txt", format_type="txt", blocks=blocks)
+    seed_job(ledger, "job_dup", doc, target_lang="zh")
 
     # Batch 1 with limit=2: returns exactly 2 blocks ("b1", "b5a"), strictly honoring limit
     batch1 = ledger.fetch_pending_blocks("job_dup", limit=2)
@@ -857,13 +856,13 @@ def test_keyset_pagination_prevents_offset_drift(tmp_path: Path) -> None:
             )
             for i in range(1, 11)
         ]
-        doc = DocumentIR(
+        doc = SeedDoc(
             doc_id="keyset_doc",
             source_path="test.txt",
             format_type="txt",
             blocks=blocks,
         )
-        ledger.init_job(job_id, doc, target_lang="zh")
+        seed_job(ledger, job_id, doc, target_lang="zh")
 
         # Pull batch 1 of 3 blocks
         batch1 = ledger.fetch_pending_blocks(job_id, limit=3)
@@ -943,7 +942,7 @@ def test_v7_migration_retires_lease_columns_and_releases_claimed_rows(tmp_path: 
 
 
 def test_transaction_rollback_does_not_poison_connection(
-    tmp_path: Path, sample_doc_ir: DocumentIR
+    tmp_path: Path, sample_doc_ir: SeedDoc
 ) -> None:
     """Regression: a manual transaction must roll back on a non-SQLite error.
 
@@ -956,7 +955,7 @@ def test_transaction_rollback_does_not_poison_connection(
     db_path = tmp_path / "ledger.db"
     ledger = SQLiteJobLedger(db_path)
     job_id = "job_rollback"
-    ledger.init_job(job_id, sample_doc_ir, target_lang="zh")
+    seed_job(ledger, job_id, sample_doc_ir, target_lang="zh")
 
     malformed = [{"status": BlockStatus.DRAFTED, "target_text": "x"}]  # missing "block_id"
     with pytest.raises(KeyError):
@@ -988,7 +987,7 @@ def test_v5_contract_columns_round_trip(tmp_path: Path) -> None:
         policy_reason="verdict:short_label",
         provenance={"page_kind": "mixed_complex", "continuation": {"group_id": "g1"}},
     )
-    doc = DocumentIR(
+    doc = SeedDoc(
         doc_id="v5",
         source_path="/tmp/v5.pdf",
         format_type="pdf",
@@ -996,7 +995,7 @@ def test_v5_contract_columns_round_trip(tmp_path: Path) -> None:
         blocks=[block],
     )
     with SQLiteJobLedger(db_path) as ledger:
-        ledger.init_job("job_v5", doc, target_lang="zh")
+        seed_job(ledger, "job_v5", doc, target_lang="zh")
         got = ledger.get_block("ch01#b001")
     assert got is not None
     assert got.layout_role == LayoutRole.BODY
@@ -1058,11 +1057,11 @@ def test_job_fingerprint_corrupt_row_raises_instead_of_none(tmp_path: Path) -> N
 
 
 def test_clear_job_blocks_resets_for_fresh_ingest(
-    tmp_path: Path, sample_doc_ir: DocumentIR
+    tmp_path: Path, sample_doc_ir: SeedDoc
 ) -> None:
     """clear_job_blocks removes blocks but keeps the job row resumable."""
     ledger = SQLiteJobLedger(tmp_path / "ledger.db")
-    ledger.init_job("job_001", sample_doc_ir, target_lang="zh")
+    seed_job(ledger, "job_001", sample_doc_ir, target_lang="zh")
     assert len(ledger.get_all_blocks("job_001")) == 5
     removed = ledger.clear_job_blocks("job_001")
     assert removed == 5
@@ -1072,7 +1071,7 @@ def test_clear_job_blocks_resets_for_fresh_ingest(
 
 
 def test_fresh_reingest_interrupted_still_forces_a_full_reparse(
-    tmp_path: Path, sample_doc_ir: DocumentIR
+    tmp_path: Path, sample_doc_ir: SeedDoc
 ) -> None:
     """The resume guard must not mistake a half-loaded ``--fresh`` job for done.
 
@@ -1085,7 +1084,7 @@ def test_fresh_reingest_interrupted_still_forces_a_full_reparse(
     finalizing a book whose later chapters were never loaded.
     """
     ledger = SQLiteJobLedger(tmp_path / "ledger_fresh.db")
-    ledger.init_job("job_fresh", sample_doc_ir, target_lang="zh")
+    seed_job(ledger, "job_fresh", sample_doc_ir, target_lang="zh")
     ledger.set_job_fingerprint("job_fresh", "sha256-of-the-real-file")
     ledger.clear_job_blocks("job_fresh")  # --fresh begins
     # ...and dies here, one chapter into the re-parse.
@@ -1244,7 +1243,7 @@ def test_set_job_metadata_value_raises_on_unknown_job(tmp_path: Path) -> None:
     ledger.close()
 
 
-def test_blocks_seq_tracks_block_writes_only(tmp_path: Path, sample_doc_ir: DocumentIR) -> None:
+def test_blocks_seq_tracks_block_writes_only(tmp_path: Path, sample_doc_ir: SeedDoc) -> None:
     """The revision StageContext caches against moves when block rows change.
 
     Metadata writes must not move it: they happen on every progress event, and
@@ -1252,7 +1251,7 @@ def test_blocks_seq_tracks_block_writes_only(tmp_path: Path, sample_doc_ir: Docu
     proving nothing about the blocks.
     """
     ledger = SQLiteJobLedger(tmp_path / "seq.sqlite")
-    ledger.init_job("seq_job", sample_doc_ir, target_lang="zh")
+    seed_job(ledger, "seq_job", sample_doc_ir, target_lang="zh")
     after_init = ledger.blocks_seq
     assert after_init > 0, "ingest wrote every block, so the revision must have moved"
 
@@ -1311,7 +1310,7 @@ def test_reset_transient_failures_chapter_scope(tmp_path: Path) -> None:
     target_text of earlier-chapter blocks whose draft pass is over, and no
     stage re-drafts them this run. Chapter-scoped resets must leave other
     chapters untouched."""
-    doc = DocumentIR(
+    doc = SeedDoc(
         doc_id="test_doc_sha256",
         source_path="/tmp/test_book.epub",
         format_type="epub",
@@ -1332,7 +1331,7 @@ def test_reset_transient_failures_chapter_scope(tmp_path: Path) -> None:
         ],
     )
     ledger = SQLiteJobLedger(tmp_path / "ledger.db")
-    ledger.init_job("job_scope", doc, target_lang="zh")
+    seed_job(ledger, "job_scope", doc, target_lang="zh")
     ledger.save_checkpoint(
         block_id="ch01#b001",
         status=BlockStatus.FAILED,
@@ -1382,13 +1381,13 @@ def test_ledger_following_text_head_handles_colon_delimiter(tmp_path: Path) -> N
             source_text="Following sentence in same chapter.",
         ),
     ]
-    doc_ir = DocumentIR(
+    doc_ir = SeedDoc(
         doc_id="doc1",
         source_path="/tmp/test.md",
         format_type="md",
         blocks=blocks,
     )
-    ledger.init_job(job_id, doc_ir, target_lang="zh")
+    seed_job(ledger, job_id, doc_ir, target_lang="zh")
 
     head = ledger.get_following_text_head(
         job_id=job_id,
@@ -1416,8 +1415,8 @@ def test_chapter_filter_does_not_over_match_like_wildcards(tmp_path: Path) -> No
         IRBlock(id="ch_001_aXb#b1", spine_index=1, source_text="y"),
         IRBlock(id="ch_101#b1", spine_index=2, source_text="z"),
     ]
-    doc = DocumentIR(doc_id="d", source_path="/tmp/d.pdf", format_type="pdf", blocks=blocks)
-    ledger.init_job("j1", doc, target_lang="zh")
+    doc = SeedDoc(doc_id="d", source_path="/tmp/d.pdf", format_type="pdf", blocks=blocks)
+    seed_job(ledger, "j1", doc, target_lang="zh")
 
     assert sorted(b.id for b in ledger.fetch_pending_blocks("j1", chapter_id="ch_001_a_b")) == [
         "ch_001_a_b#b1"

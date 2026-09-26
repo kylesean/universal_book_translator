@@ -1,5 +1,4 @@
 """Unit and integration tests for 6-stage PipelineOrchestrator."""
-
 import asyncio
 from pathlib import Path
 from typing import Any
@@ -9,6 +8,7 @@ import pytest
 
 from tests.mock_providers import TokenEchoMockProvider
 from tests.stage_ctx_factory import build_stage_ctx
+from tests.unit.ir_seed import SeedDoc, seed_job
 from ubt.adapters.markdown.adapter import MarkdownAdapter
 from ubt.core.config import UBTConfig
 from ubt.core.engine.events import EventType, TranslationProgressEvent
@@ -22,7 +22,6 @@ from ubt.core.ir.models import (
     BlockType,
     BookManifest,
     ChapterMeta,
-    DocumentIR,
     FlowID,
     IRBlock,
 )
@@ -422,13 +421,12 @@ def test_chapter_window_guard_records_then_refuses_a_different_window(tmp_path: 
     from ubt.core.engine.ledger import SQLiteJobLedger
     from ubt.core.engine.stages.ingest import _guard_chapter_window
     from ubt.core.exceptions import DocumentParseError
-    from ubt.core.ir.models import DocumentIR
 
     ledger = SQLiteJobLedger(tmp_path / "job.sqlite")
     try:
-        ledger.init_job(
+        seed_job(ledger,
             "job_x",
-            DocumentIR(doc_id="doc", source_path="book.md", format_type="md"),
+            SeedDoc(doc_id="doc", source_path="book.md", format_type="md"),
             "zh",
         )
 
@@ -462,13 +460,12 @@ def test_page_selection_guard_records_then_refuses_a_different_selection(tmp_pat
     from ubt.core.engine.ledger import SQLiteJobLedger
     from ubt.core.engine.stages.ingest import _guard_selected_pages
     from ubt.core.exceptions import DocumentParseError
-    from ubt.core.ir.models import DocumentIR
 
     ledger = SQLiteJobLedger(tmp_path / "p.sqlite")
     try:
-        ledger.init_job(
+        seed_job(ledger,
             "job_p",
-            DocumentIR(doc_id="doc", source_path="book.md", format_type="md"),
+            SeedDoc(doc_id="doc", source_path="book.md", format_type="md"),
             "zh",
         )
 
@@ -490,9 +487,9 @@ def test_page_selection_guard_records_then_refuses_a_different_selection(tmp_pat
 
     ledger = SQLiteJobLedger(tmp_path / "q.sqlite")
     try:
-        ledger.init_job(
+        seed_job(ledger,
             "job_q",
-            DocumentIR(doc_id="doc", source_path="book.md", format_type="md"),
+            SeedDoc(doc_id="doc", source_path="book.md", format_type="md"),
             "zh",
         )
         # A page-ranged job records its sorted selection.
@@ -1248,9 +1245,9 @@ def _a0920_ledger_with_targets(tmp_path: Path, *, translated: int, total: int) -
         )
         for idx in range(1, total + 1)
     ]
-    ledger.init_job(
+    seed_job(ledger,
         job_id,
-        DocumentIR(
+        SeedDoc(
             doc_id=job_id,
             source_path=str(tmp_path / "book.md"),
             format_type="markdown",

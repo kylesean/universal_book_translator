@@ -24,7 +24,6 @@ from ubt.core.ir.models import (
     BlockType,
     BookManifest,
     ChapterIR,
-    DocumentIR,
     FlowID,
     IRBlock,
 )
@@ -94,37 +93,6 @@ def merge_usage_totals(
 
 class LedgerJobsMixin(LedgerBase):
     """Job lifecycle, metadata, usage accounting and reporting reads."""
-
-    def init_job(self, job_id: str, doc_ir: DocumentIR, target_lang: str) -> None:
-        """Atomically initialize a translation job using ON CONFLICT DO UPDATE SET (no destructive REPLACE)."""
-        with self._get_conn() as conn:
-            conn.execute("BEGIN IMMEDIATE;")
-            cursor = conn.cursor()
-            cursor.execute("SELECT job_id FROM job_meta WHERE job_id = ?", (job_id,))
-            if cursor.fetchone() is not None:
-                conn.execute("COMMIT;")
-                return
-
-            cursor.execute(
-                """
-                INSERT INTO job_meta (
-                    job_id, doc_id, source_path, target_lang, total_blocks, status, metadata_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    job_id,
-                    doc_ir.doc_id,
-                    doc_ir.source_path,
-                    target_lang,
-                    len(doc_ir.blocks),
-                    "initialized",
-                    json.dumps(doc_ir.metadata, ensure_ascii=False),
-                ),
-            )
-
-            _upsert_blocks_batch(cursor, job_id, doc_ir.blocks)
-            conn.execute("COMMIT;")
-            self._mark_blocks_changed()
 
     def init_job_from_manifest(self, job_id: str, manifest: BookManifest) -> None:
         """Atomically initialize job metadata from a lightweight BookManifest."""

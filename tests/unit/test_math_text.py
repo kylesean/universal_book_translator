@@ -1,10 +1,10 @@
 """Unit tests for C-track math-text spans (calibrated on KV corpus)."""
-
 import asyncio
 
 import pytest
 
 from tests.stage_ctx_factory import build_stage_ctx
+from tests.unit.ir_seed import SeedDoc, seed_job
 from ubt.core.cleaners.math_text import (
     extract_text_spans,
     is_translatable_text,
@@ -90,7 +90,6 @@ def test_c_text_stage_translates_spans(tmp_path) -> None:  # type: ignore[no-unt
     from ubt.core.ir.models import (
         BlockStatus,
         BlockType,
-        DocumentIR,
         FlowID,
         IRBlock,
     )
@@ -102,7 +101,7 @@ def test_c_text_stage_translates_spans(tmp_path) -> None:  # type: ignore[no-unt
     formula_src = "K = [k_1; \\text{by terms}] + x"
     job = "job_ctrack"
     # Mimic ingest finalization: verbatim target, MTQE_PASSED, never drafted.
-    doc = DocumentIR(
+    doc = SeedDoc(
         doc_id="ctrack_doc",
         source_path="/tmp/ctrack.pdf",
         format_type="pdf",
@@ -131,7 +130,7 @@ def test_c_text_stage_translates_spans(tmp_path) -> None:  # type: ignore[no-unt
         ],
     )
     ledger = SQLiteJobLedger(Path(str(tmp_path)) / "ctrack.sqlite")
-    ledger.init_job(job, doc, target_lang="zh")
+    seed_job(ledger, job, doc, target_lang="zh")
     router = ModelRouter(
         provider=MockModelProvider(default_response="按项"),
         draft_model="mock",
@@ -161,14 +160,14 @@ def test_c_text_stage_skips_already_translated(tmp_path) -> None:  # type: ignor
 
     from ubt.core.engine.ledger import SQLiteJobLedger
     from ubt.core.engine.stages.ctext import run_c_text_stage
-    from ubt.core.ir.models import BlockStatus, BlockType, DocumentIR, FlowID, IRBlock
+    from ubt.core.ir.models import BlockStatus, BlockType, FlowID, IRBlock
     from ubt.core.router.provider import MockModelProvider
     from ubt.core.router.router import ModelRouter
 
     src = "K = [k_1; \\text{by terms}] + x"
     accepted = "K = [k_1; \\text{按项}] + x"
     job = "job_ctrack_resume"
-    doc = DocumentIR(
+    doc = SeedDoc(
         doc_id="ctrack_doc",
         source_path="/tmp/ctrack.pdf",
         format_type="pdf",
@@ -187,7 +186,7 @@ def test_c_text_stage_skips_already_translated(tmp_path) -> None:  # type: ignor
         ],
     )
     ledger = SQLiteJobLedger(Path(str(tmp_path)) / "ctrack.sqlite")
-    ledger.init_job(job, doc, target_lang="zh")
+    seed_job(ledger, job, doc, target_lang="zh")
     router = ModelRouter(
         provider=MockModelProvider(default_response="SHOULD-NOT-BE-USED"),
         draft_model="mock",

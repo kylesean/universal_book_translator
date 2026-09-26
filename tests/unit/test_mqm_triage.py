@@ -1,5 +1,4 @@
 """Unit tests for MQM severity triage: classification, escalation, quarantine."""
-
 import asyncio
 from pathlib import Path
 from typing import Any
@@ -7,13 +6,14 @@ from typing import Any
 import pytest
 
 from tests.stage_ctx_factory import build_stage_ctx, inert_event
+from tests.unit.ir_seed import SeedDoc, seed_job
 from ubt.core.config import UBTConfig
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.repair_loop import RepairLoop
 from ubt.core.engine.stage_context import StageContext
 from ubt.core.engine.stages.repair import run_repair_stage
 from ubt.core.engine.stages.triage import run_triage_stage
-from ubt.core.ir.models import BlockStatus, DocumentIR, FlowID, IRBlock
+from ubt.core.ir.models import BlockStatus, FlowID, IRBlock
 from ubt.core.qe.base import BaseQERunner
 from ubt.core.qe.comet_runner import MockQERunner
 from ubt.core.router.provider import MockModelProvider
@@ -38,8 +38,8 @@ class ControlledScoreQERunner(BaseQERunner):
         return result
 
 
-def _doc_ir(blocks: list[IRBlock]) -> DocumentIR:
-    return DocumentIR(
+def _doc_ir(blocks: list[IRBlock]) -> SeedDoc:
+    return SeedDoc(
         doc_id="test_doc_sha256",
         source_path="/tmp/test_book.epub",
         format_type="epub",
@@ -75,7 +75,7 @@ def _block(
 
 def _init_ledger(tmp_path: Path, blocks: list[IRBlock]) -> SQLiteJobLedger:
     ledger = SQLiteJobLedger(tmp_path / "job.sqlite")
-    ledger.init_job("job_triage", _doc_ir(blocks), target_lang="zh")
+    seed_job(ledger, "job_triage", _doc_ir(blocks), target_lang="zh")
     return ledger
 
 

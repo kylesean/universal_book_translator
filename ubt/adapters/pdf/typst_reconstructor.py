@@ -1,6 +1,6 @@
 """Modern publication-grade Typst document reconstructor.
 
-Converts translated DocumentIR blocks into clean Typst markup and compiles them
+Converts translated IR blocks into clean Typst markup and compiles them
 into high-aesthetic vector PDFs without squished 'ant fonts'.
 
 Fragment split: math conversion lives in :mod:`ubt.adapters.pdf.typst_math`,

@@ -1,8 +1,8 @@
 """Unit tests for QualityReport generator."""
-
 from pathlib import Path
 from typing import Any
 
+from tests.unit.ir_seed import SeedDoc, seed_job
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.reporter import (
     QualityReport,
@@ -16,7 +16,6 @@ from ubt.core.ir.models import (
     BookManifest,
     ChapterIR,
     ChapterMeta,
-    DocumentIR,
     FlowID,
     IRBlock,
 )
@@ -497,9 +496,9 @@ def _a0920_ledger_with_targets(tmp_path: Path, *, translated: int, total: int) -
         )
         for idx in range(1, total + 1)
     ]
-    ledger.init_job(
+    seed_job(ledger,
         job_id,
-        DocumentIR(
+        SeedDoc(
             doc_id=job_id,
             source_path=str(tmp_path / "book.md"),
             format_type="markdown",

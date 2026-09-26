@@ -1,5 +1,4 @@
 """Unit and integration tests for FastAPI microservice layer."""
-
 import asyncio
 from pathlib import Path
 from typing import Any
@@ -11,6 +10,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from pydantic import SecretStr, ValidationError
 
+from tests.unit.ir_seed import SeedDoc, seed_job
 from ubt.api.app import (
     JobManager,
     JobRecord,
@@ -128,19 +128,19 @@ def test_visual_report_no_report_returns_400(
 def test_visual_report_ledger_fallback(tmp_path: Path) -> None:
     """ROI-5: restarted server (no memory record) serves the persisted ledger report."""
     from ubt.core.engine.ledger import SQLiteJobLedger
-    from ubt.core.ir.models import DocumentIR, FlowID, IRBlock
+    from ubt.core.ir.models import FlowID, IRBlock
 
     db_dir = tmp_path / "api_ledgers_vis"
     db_dir.mkdir(parents=True, exist_ok=True)
     job_id = "job_vis_ledger"
     ledger = SQLiteJobLedger(db_dir / f"{job_id}.sqlite")
-    doc_ir = DocumentIR(
+    doc_ir = SeedDoc(
         doc_id="doc_vis_ledger",
         source_path="test.pdf",
         format_type="pdf",
         blocks=[IRBlock(id="b1", flow_id=FlowID.MAIN_STORY, spine_index=1, source_text="hello")],
     )
-    ledger.init_job(job_id, doc_ir, target_lang="zh")
+    seed_job(ledger, job_id, doc_ir, target_lang="zh")
     ledger.record_visual_report(job_id, {"passed": True, "findings": []})
     ledger.close()
 
@@ -165,7 +165,7 @@ def test_visual_report_rejected_path_falls_back_to_the_ledger(
     import importlib
 
     from ubt.core.engine.ledger import SQLiteJobLedger
-    from ubt.core.ir.models import DocumentIR, FlowID, IRBlock
+    from ubt.core.ir.models import FlowID, IRBlock
 
     app_module = importlib.import_module("ubt.api.app")
 
@@ -187,13 +187,13 @@ def test_visual_report_rejected_path_falls_back_to_the_ledger(
     db_dir.mkdir(parents=True, exist_ok=True)
     job_id = "job_vis_rejected"
     ledger = SQLiteJobLedger(db_dir / f"{job_id}.sqlite")
-    doc_ir = DocumentIR(
+    doc_ir = SeedDoc(
         doc_id="doc_vis_rejected",
         source_path="test.pdf",
         format_type="pdf",
         blocks=[IRBlock(id="b1", flow_id=FlowID.MAIN_STORY, spine_index=1, source_text="hello")],
     )
-    ledger.init_job(job_id, doc_ir, target_lang="zh")
+    seed_job(ledger, job_id, doc_ir, target_lang="zh")
     ledger.record_visual_report(job_id, {"passed": True, "findings": []})
     ledger.close()
 

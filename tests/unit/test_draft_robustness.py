@@ -1,5 +1,4 @@
 """High-ROI robustness tests for the draft stage and ledger resume."""
-
 import asyncio
 from pathlib import Path
 from typing import Any
@@ -8,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from tests.stage_ctx_factory import build_stage_ctx, inert_event
+from tests.unit.ir_seed import SeedDoc, seed_job
 from ubt.core.cleaners.citation_masker import CitationMasker
 from ubt.core.cleaners.code_masker import CodeMasker
 from ubt.core.config import UBTConfig
@@ -18,7 +18,6 @@ from ubt.core.ir.models import (
     BlockStatus,
     BookManifest,
     ChapterMeta,
-    DocumentIR,
     FlowID,
     IRBlock,
 )
@@ -26,7 +25,7 @@ from ubt.core.router.provider import MockModelProvider
 from ubt.core.router.router import ModelRouter
 
 
-def _make_doc(n: int, poison_idx: int | None = None) -> DocumentIR:
+def _make_doc(n: int, poison_idx: int | None = None) -> SeedDoc:
     blocks = []
     for i in range(1, n + 1):
         text = f"Test sentence number {i} for robustness drafting."
@@ -40,7 +39,7 @@ def _make_doc(n: int, poison_idx: int | None = None) -> DocumentIR:
                 source_text=text,
             )
         )
-    return DocumentIR(
+    return SeedDoc(
         doc_id="robust_doc",
         source_path="/tmp/robust.epub",
         format_type="epub",
@@ -147,7 +146,7 @@ class PoisonRouter(ModelRouter):
 def test_draft_retries_transient_failures(tmp_path: Path) -> None:
     """Fault injection: transient timeouts are retried, no block is lost."""
     ledger = SQLiteJobLedger(tmp_path / "flaky.sqlite")
-    ledger.init_job("job_flaky", _make_doc(4), target_lang="zh")
+    seed_job(ledger, "job_flaky", _make_doc(4), target_lang="zh")
     provider = FlakyOnceProvider()
     # max_retries=0: exercise the draft-stage retry (H3), not the router's.
     router = ModelRouter(provider=provider, draft_model="mock", max_retries=0)
@@ -182,7 +181,7 @@ def test_draft_retries_transient_failures(tmp_path: Path) -> None:
 def test_draft_poison_block_becomes_failed_not_lost(tmp_path: Path) -> None:
     """Fault injection: permanent failures land in FAILED with error flags."""
     ledger = SQLiteJobLedger(tmp_path / "poison.sqlite")
-    ledger.init_job("job_poison", _make_doc(4, poison_idx=2), target_lang="zh")
+    seed_job(ledger, "job_poison", _make_doc(4, poison_idx=2), target_lang="zh")
     provider = PoisonProvider()
     router = PoisonRouter(provider=provider, poison_id="ch01#b002")
 
@@ -217,7 +216,7 @@ def test_crash_kill_resume_excludes_human_queue(tmp_path: Path) -> None:
     """Crash recovery: NEEDS_HUMAN/BLOCKED_HUMAN survive restart unmodified."""
     db = tmp_path / "crash.sqlite"
     ledger = SQLiteJobLedger(db)
-    ledger.init_job("job_crash", _make_doc(6), target_lang="zh")
+    seed_job(ledger, "job_crash", _make_doc(6), target_lang="zh")
     ledger.save_checkpoint(
         block_id="ch01#b001",
         target_text="译文一",
@@ -313,7 +312,7 @@ class FailFastRouter(ModelRouter):
 def test_draft_does_not_retry_fail_fast_errors(tmp_path: Path) -> None:
     """A 401 is unrecoverable; the outer draft loop must not multiply it (N4)."""
     ledger = SQLiteJobLedger(tmp_path / "failfast.sqlite")
-    ledger.init_job("job_ff", _make_doc(1), target_lang="zh")
+    seed_job(ledger, "job_ff", _make_doc(1), target_lang="zh")
     provider = PoisonProvider()
     router = FailFastRouter(provider=provider)
 
@@ -347,7 +346,7 @@ def test_draft_respects_concurrency_limit(tmp_path: Path) -> None:
     """Backpressure: peak concurrency never exceeds the semaphore."""
     n = 12
     ledger = SQLiteJobLedger(tmp_path / "conc.sqlite")
-    ledger.init_job("job_conc", _make_doc(n), target_lang="zh")
+    seed_job(ledger, "job_conc", _make_doc(n), target_lang="zh")
     provider = CountingProvider()
     router = ModelRouter(provider=provider, draft_model="mock", max_retries=0)
 
@@ -399,7 +398,7 @@ def test_draft_fail_fast_circuit_aborts_job(tmp_path: Path) -> None:
     from ubt.core.exceptions import UBTError
 
     ledger = SQLiteJobLedger(tmp_path / "ff.sqlite")
-    ledger.init_job("job_ff", _make_doc(40), target_lang="zh")
+    seed_job(ledger, "job_ff", _make_doc(40), target_lang="zh")
     router = JobLevelFailFastRouter()
 
     with pytest.raises(UBTError, match="fail-fast circuit"):

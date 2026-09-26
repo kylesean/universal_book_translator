@@ -1,12 +1,12 @@
 """Unit tests for StageContext methods and caching behavior."""
-
 from pathlib import Path
 
 import pytest
 
 from tests.stage_ctx_factory import build_stage_ctx
+from tests.unit.ir_seed import SeedDoc, seed_job
 from ubt.core.engine.ledger import SQLiteJobLedger
-from ubt.core.ir.models import BlockStatus, DocumentIR, FlowID, IRBlock
+from ubt.core.ir.models import BlockStatus, FlowID, IRBlock
 
 
 @pytest.mark.asyncio
@@ -15,8 +15,8 @@ async def test_current_blocks_cache_and_invalidation(tmp_path: Path) -> None:
     blocks = [
         IRBlock(id="b1", flow_id=FlowID.MAIN_STORY, spine_index=1, source_text="Source 1"),
     ]
-    doc = DocumentIR(doc_id="test_doc", source_path="test.txt", format_type="txt", blocks=blocks)
-    ledger.init_job("job_ctx", doc, target_lang="zh")
+    doc = SeedDoc(doc_id="test_doc", source_path="test.txt", format_type="txt", blocks=blocks)
+    seed_job(ledger, "job_ctx", doc, target_lang="zh")
 
     ctx = build_stage_ctx(
         tmp_path,
