@@ -65,7 +65,13 @@ _PROTECTED_SPAN_RE = re.compile(
     r"(⟦[^⟧]*⟧|```[\w]*\n[\s\S]*?\n```|```[\s\S]*?```|`[^`\n]+`|\$\$[\s\S]*?\$\$|\$[^\$\n]+\$)"
 )
 # Markdown table separator row: pipes, colons, dashes and spaces only.
-_TABLE_SEP_RE = re.compile(r"[ \t]*(?:\|?[ \t]*:?-+:?[ \t]*)+\|?[ \t]*")
+#
+# Possessive quantifiers are load-bearing, not style: the non-possessive form
+# partitioned a dash run in exponentially many ways and took seconds on a long
+# never-matching line (``"-" * 26 + "x"``), which is reachable from LLM output.
+# Possessive keeps the accepted language (verified exhaustively up to length 5
+# over ``-:| \t`` plus fuzzing) while making each run consume once.
+_TABLE_SEP_RE = re.compile(r"[ \t]*+(?:(?:\|?[ \t]*+:?-++:?[ \t]*+))+\|?[ \t]*+")
 
 
 _LATIN_OR_NUM = r"[a-zA-Z0-9]"

@@ -2,6 +2,7 @@
 
 import bisect
 import re
+import sys
 
 from ubt.core.cleaners.boilerplate_catalog import BoilerplateCatalog
 from ubt.core.ir.models import BlockStatus, BlockType, IRBlock
@@ -56,11 +57,20 @@ _PAGE_SEQUENCE_MIN_RATIO = 0.5
 # character, the same trap one level below isdigit).
 _ASCII_DIGITS_RE = re.compile(r"\d+", re.ASCII)
 
+# int()-from-string is capped at this many digits (4300 by default; 0 when the
+# limit is disabled). A longer all-ASCII-digit line passed the old gate and then
+# raised ``ValueError: Exceeds the limit ...`` inside the LNDS scan, crashing
+# the cleaner and the whole chapter's ingestion. Page numbers are tiny; rejecting
+# over-long lines also keeps the docstring's "int()-safe" contract literally true.
+_MAX_INT_DIGITS = sys.get_int_max_str_digits()
+
 
 def is_ascii_digit_line(line: str) -> bool:
-    """True when the stripped line is one or more ASCII digits ([0-9], int()-safe)."""
+    """True when the stripped line is ASCII digits ([0-9]) that ``int()`` can parse."""
     s = line.strip()
-    return bool(s) and _ASCII_DIGITS_RE.fullmatch(s) is not None
+    if not s or (_MAX_INT_DIGITS and len(s) > _MAX_INT_DIGITS):
+        return False
+    return _ASCII_DIGITS_RE.fullmatch(s) is not None
 
 
 def detect_page_number_lines(

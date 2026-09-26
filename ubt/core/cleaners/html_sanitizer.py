@@ -41,6 +41,7 @@ ALLOWED_TAGS = frozenset(
         "cite",
         "code",
         "del",
+        "ellipse",
         "em",
         "figcaption",
         "figure",
@@ -94,6 +95,7 @@ ALLOWED_TAGS = frozenset(
         "tbody",
         "td",
         "text",
+        "tfoot",
         "th",
         "thead",
         "tr",
@@ -180,7 +182,6 @@ ALLOWED_ATTRS: dict[str, frozenset[str]] = {
     "math": frozenset({"xmlns", "display", "class", "id"}),
     "span": frozenset({"class", "id"}),
     "mark": frozenset({"class", "id", "title"}),
-    "div": frozenset({"class", "id"}),
     "p": frozenset({"class", "id"}),
     "code": frozenset({"class", "id"}),
     "pre": frozenset({"class", "id"}),
@@ -352,11 +353,17 @@ _TAG_NAME_RE = re.compile(r"<(/?)([a-zA-Z][a-zA-Z0-9]*)", re.IGNORECASE)
 # A well-formed tag: name plus only ``attr`` / ``attr="value"`` tokens.
 # Rejects prose that merely starts with ``<`` followed by an allowlisted letter
 # (e.g. ``a<b 且 b>c`` looks tag-like to HTMLParser but is not a tag).
+#
+# Possessive quantifiers are load-bearing: without them the attribute group
+# partitioned a long name run in exponentially many ways and spent seconds on
+# ``<b aaa...!>`` (LLM output is untrusted). The accepted set is unchanged for
+# real tags (verified against a curated corpus incl. quoted/unquoted/empty-value
+# attributes and prose bodies) while a failing body now fails in linear time.
 _TAG_STRUCT_RE = re.compile(
     r"<(/?)([a-zA-Z][a-zA-Z0-9]*)"
     r"\s*"
-    r"((?:[a-zA-Z_:][-a-zA-Z0-9_:.]*"
-    r"(?:\s*=\s*(?:\"[^\"]*\"|'[^']*'|[^\s\"'>]+))?\s*)*)"
+    r"((?:[a-zA-Z_:][-a-zA-Z0-9_:.]*+"
+    r"(?:\s*+=\s*+(?:\"[^\"]*\"|'[^']*'|[^\s\"'>]+))?\s*+)*)"
     r"(/?)>",
     re.IGNORECASE,
 )

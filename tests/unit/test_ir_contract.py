@@ -76,3 +76,16 @@ def test_validate_contract_policy_reason() -> None:
     assert any("policy_reason" in v for v in b.validate_contract())
     b.policy_reason = "header band"
     assert b.validate_contract() == []
+
+
+def test_run_and_artifact_metadata_keys_are_disjoint() -> None:
+    """One key, one home: a run decision never shares a key with artifact metadata.
+
+    The persisted job JSON merges ``run.to_metadata_dict()`` then
+    ``manifest.metadata`` (artifact telemetry wins on collision), so a key in
+    both homes would silently overwrite the decision the run recorded.
+    """
+    from ubt.core.ir.run_metadata import ARTIFACT_METADATA_KEYS, RunMetadata
+
+    overlap = set(RunMetadata.model_fields) & set(ARTIFACT_METADATA_KEYS)
+    assert overlap == set(), f"keys declared in both homes: {sorted(overlap)}"

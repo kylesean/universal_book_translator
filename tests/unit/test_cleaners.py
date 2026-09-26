@@ -631,3 +631,36 @@ def test_prose_that_only_resembles_a_lead_in_is_untouched(text: str) -> None:
 
 def test_leading_blockquote_marker_is_preserved() -> None:
     assert TranslationOutputExtractor.extract("> 引用的原文块。") == "> 引用的原文块。"
+
+
+def test_ascii_digit_line_rejects_over_long_digit_runs() -> None:
+    """A line longer than int()'s digit limit crashed the LNDS scan (ValueError),
+    failing the whole chapter's ingestion. The gate must reject it, not int()."""
+    from ubt.core.cleaners.lnds_pruner import _MAX_INT_DIGITS
+
+    if not _MAX_INT_DIGITS:
+        pytest.skip("int() digit limit disabled in this interpreter")
+    assert is_ascii_digit_line("9" * _MAX_INT_DIGITS)
+    assert not is_ascii_digit_line("9" * (_MAX_INT_DIGITS + 1))
+    # The full cleaner must not raise on the over-long line.
+    clean_calibre_and_lnds_pages("\n".join(["9" * (_MAX_INT_DIGITS + 1), "2", "3", "4"]))
+
+
+def test_sanitizer_keeps_ellipse_and_tfoot_and_bounds_long_pseudo_tag() -> None:
+    from time import perf_counter
+
+    from ubt.core.cleaners.html_sanitizer import sanitize_html_fragment
+
+    # SVG <ellipse> and table <tfoot> declare attributes; both must survive
+    # instead of being flattened (ellipse was in ALLOWED_ATTRS but not TAGS).
+    assert "<ellipse" in sanitize_html_fragment('<ellipse cx="1" cy="2" rx="3" ry="4"/>')
+    assert "<tfoot>" in sanitize_html_fragment("<tfoot><tr><td>x</td></tr></tfoot>")
+
+    # A long malformed allowlisted tag used to backtrack exponentially; it must
+    # now be treated as prose and the inner text kept.
+    tag = "<b " + "a" * 4000 + "!>keep"
+    start = perf_counter()
+    out = sanitize_html_fragment(tag)
+    assert perf_counter() - start < 2.0
+    assert "<b>" not in out
+    assert "keep" in out

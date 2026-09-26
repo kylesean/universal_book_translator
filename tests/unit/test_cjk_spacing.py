@@ -183,3 +183,24 @@ def test_cjk_space_removal_only_fires_for_spaceless_targets() -> None:
     assert normalize_publishing_cjk("中 文 书", target_lang="zh") == "中文书"
     # Trailing whitespace before a newline is noise in any language.
     assert normalize_publishing_cjk("il y a  \nrien", target_lang="fr") == "il y a\nrien"
+
+
+def test_table_separator_gate_is_linear_on_adversarial_line() -> None:
+    """A long near-miss separator row must not backtrack exponentially.
+
+    The old pattern partitioned the dash run in exponentially many ways; a
+    ~26-dash line took seconds and LLM output is untrusted.
+    """
+    from time import perf_counter
+
+    from ubt.core.cleaners.cjk_spacing import _TABLE_SEP_RE, normalize_publishing_cjk
+
+    line = "-" * 4000 + "x"
+    start = perf_counter()
+    assert _TABLE_SEP_RE.fullmatch(line) is None
+    assert perf_counter() - start < 2.0
+
+    # Real separator rows still match and stay byte-identical.
+    table = "| A | B |\n|---|---|\n| 1 | 2 |"
+    assert _TABLE_SEP_RE.fullmatch("|---|---|") is not None
+    assert normalize_publishing_cjk(table) == table
