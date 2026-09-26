@@ -310,3 +310,32 @@ def test_hierarchical_memory_get_l3_summary_retains_multi_epoch_history() -> Non
     l3 = mem.get_l3_summary()
     assert "Epoch 0: Alice enters the rabbit hole." in l3
     assert "Epoch 1: The Mad Tea-Party." in l3
+
+
+def test_l3_summary_keeps_the_earliest_epoch_over_budget() -> None:
+    """Over _MAX_L3_CHARS the clamp must keep the earliest epochs, not the tail.
+
+    The tail-keep discarded exactly the early history this slot exists for; the
+    multi-epoch test above only exercised under-budget totals.
+    """
+    from ubt.core.memory.hierarchical_memory import _MAX_L3_CHARS
+
+    mem = HierarchicalMemoryManager()
+    mem._epochs = [
+        EpochSnapshot(
+            epoch_index=0,
+            start_spine=0,
+            end_spine=9,
+            summary_text="EARLIEST-MARKER " + "a" * (_MAX_L3_CHARS - 20),
+        ),
+        EpochSnapshot(
+            epoch_index=1,
+            start_spine=10,
+            end_spine=19,
+            summary_text="LATEST-MARKER " + "z" * (_MAX_L3_CHARS - 20),
+        ),
+    ]
+    l3 = mem.get_l3_summary()
+    assert "EARLIEST-MARKER" in l3
+    assert "LATEST-MARKER" not in l3
+    assert len(l3) <= _MAX_L3_CHARS

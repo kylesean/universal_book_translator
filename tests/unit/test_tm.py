@@ -125,6 +125,9 @@ _INVERTED_PAIRS = (
     ("The rate increases with temperature.", "The rate decreases with temperature."),
     ("This is the case.", "This is not the case."),
     ("He turned left at the corner.", "He turned right at the corner."),
+    # Typographic apostrophe: real books use U+2019, and ``"n't" in "isn’t"`` is
+    # false, so the guard silently missed every curly-quoted negation.
+    ("This isn’t the case.", "This is the case."),
 )
 
 
@@ -733,3 +736,16 @@ def test_tm_pool_revalidates_per_pair_not_whole_cache(tmp_path: Path) -> None:
     finally:
         writer.close()
         reader.close()
+
+
+def test_domain_rewrite_updates_the_stored_label(tm: TranslationMemory) -> None:
+    """A rewrite under another domain must leave a domain that matches tgt_text.
+
+    The unique index omits ``domain``, so the upsert target collides and the
+    ``DO UPDATE`` used to leave the old, now-mismatched ``domain`` label.
+    """
+    tm.writeback([TMPendingEntry("en", "zh", "Hello there.", "甲。", domain="a")])
+    tm.writeback([TMPendingEntry("en", "zh", "Hello there.", "乙。", domain="b")])
+    rows = {e.source_text: e for e in tm.scan()}
+    assert rows["Hello there."].target_text == "乙。"
+    assert rows["Hello there."].domain == "b"

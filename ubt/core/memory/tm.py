@@ -47,6 +47,11 @@ logger = logging.getLogger(__name__)
 _WHITESPACE_RE = re.compile(r"\s+")
 _WORD_RE = re.compile(r"\w+", re.UNICODE)
 _TOKEN_RE = re.compile(r"[a-z]+")
+# Typographic apostrophes (and the acute/backtick stand-ins) must fold to ASCII
+# before the ``n't`` contraction check: real books use U+2019, and
+# ``"n't" in "isn’t"`` is false, so the polarity guard missed every curly-quoted
+# negation and injected an opposite-polarity fuzzy reference.
+_APOSTROPHE_RE = re.compile(r"[\u2018\u2019\u02bc\u0060\u00b4]")
 
 # ---------------------------------------------------------------------------
 # Fuzzy few-shot polarity guard
@@ -87,7 +92,7 @@ def _polarity_signature(text: str) -> tuple[str, ...]:
     group's canonical cue, so inflections ("increases"/"increased") agree.
     Word-level membership keeps "no" out of "north" and "not" out of "nothing".
     """
-    lowered = text.lower()
+    lowered = _APOSTROPHE_RE.sub("'", text.lower())
     tokens = set(_TOKEN_RE.findall(lowered))
     negated = bool(tokens & _NEGATION_CUES) or "n't" in lowered
     slots = ["neg" if negated else ""]
@@ -368,12 +373,19 @@ class TranslationMemory:
             # and match default lookups or the human_pe fallback below.
             cols = {row[1] for row in conn.execute("PRAGMA table_info(tm_entries)").fetchall()}
             if "context_hash" not in cols:
-                conn.execute(
-                    "ALTER TABLE tm_entries ADD COLUMN context_hash TEXT NOT NULL DEFAULT ''"
-                )
+                try:
+                    conn.execute(
+                        "ALTER TABLE tm_entries ADD COLUMN context_hash TEXT NOT NULL DEFAULT ''"
+                    )
+                except sqlite3.OperationalError as exc:
+                    # Two processes can open the same legacy tm.sqlite at once
+                    # (shared WAL store); the loser sees the column the winner
+                    # just added. Only that race is tolerated.
+                    if "duplicate column" not in str(exc).lower():
+                        raise
                 conn.execute("DROP INDEX IF EXISTS tm_exact")
                 conn.execute(
-                    "CREATE UNIQUE INDEX tm_exact "
+                    "CREATE UNIQUE INDEX IF NOT EXISTS tm_exact "
                     "ON tm_entries(src_lang, tgt_lang, src_hash, context_hash)"
                 )
             try:
@@ -802,6 +814,11 @@ class TranslationMemory:
                             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                             ON CONFLICT(src_lang, tgt_lang, src_hash, context_hash) DO UPDATE SET
                                 tgt_text = excluded.tgt_text,
+                                -- Keep the stored label honest: the conflict
+                                -- target does not include ``domain``, so without
+                                -- this a rewrite under another domain would leave
+                                -- a stale ``domain`` mismatched with tgt_text.
+                                domain = excluded.domain,
                                 provenance = CASE
                                     WHEN tm_entries.provenance = 'human_pe' THEN 'human_pe'
                                     ELSE excluded.provenance

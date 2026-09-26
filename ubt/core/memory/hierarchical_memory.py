@@ -73,7 +73,6 @@ class HierarchicalMemoryManager:
         self._epochs: list[EpochSnapshot] = []
         self._unsummarized_blocks: list[IRBlock] = []
         self._current_buffer_chars: int = 0
-        self._last_chapter: str = ""
         self._step_counter: int = 0
 
     @property
@@ -189,8 +188,6 @@ class HierarchicalMemoryManager:
         # Clear buffer
         self._unsummarized_blocks.clear()
         self._current_buffer_chars = 0
-        if chapter_id:
-            self._last_chapter = chapter_id
 
         return summary
 
@@ -227,14 +224,27 @@ class HierarchicalMemoryManager:
         )
 
     def get_l3_summary(self) -> str:
-        """Cumulative L3 epoch summary text across closed epochs (clamped to _MAX_L3_CHARS)."""
-        if not self._epochs:
-            return ""
+        """Cumulative L3 epoch summary text across closed epochs (clamped to _MAX_L3_CHARS).
+
+        The clamp keeps the *earliest* whole epochs: this slot is the long-range
+        anchor ("chapter 30 knows what happened in chapters 1-10"), while recent
+        context is carried by the L2 snapshots and L1 neighbours. The previous
+        tail-keep did the opposite and discarded exactly the early history this
+        exists for. Epochs are kept whole; only a single over-budget first epoch
+        is truncated.
+        """
         parts = [e.summary_text.strip() for e in self._epochs if e.summary_text.strip()]
-        combined = "\n".join(parts)
-        if len(combined) > _MAX_L3_CHARS:
-            return combined[-_MAX_L3_CHARS:]
-        return combined
+        if not parts:
+            return ""
+        kept: list[str] = []
+        used = 0
+        for part in parts:
+            extra = len(part) + (1 if kept else 0)
+            if kept and used + extra > _MAX_L3_CHARS:
+                break
+            kept.append(part)
+            used += extra
+        return "\n".join(kept)[:_MAX_L3_CHARS]
 
     def format_l3_prompt_block(self, summary_text: str) -> str:
         """Render the L3 epoch block for prompt injection (static-prefix slot)."""
@@ -259,7 +269,6 @@ class HierarchicalMemoryManager:
             "snapshots": [asdict(s) for s in self._snapshots],
             "epochs": [asdict(e) for e in self._epochs],
             "step_counter": self._step_counter,
-            "last_chapter": self._last_chapter,
         }
 
     def restore_state(self, state: dict[str, Any]) -> None:
@@ -277,7 +286,6 @@ class HierarchicalMemoryManager:
             self._step_counter = int(state.get("step_counter", len(snapshots)))
         except (TypeError, ValueError):
             self._step_counter = len(snapshots)
-        self._last_chapter = str(state.get("last_chapter", ""))
 
     def get_macro_context_for_block(self, block: IRBlock) -> str:
         """Retrieve appropriate macro context for a specific block."""
