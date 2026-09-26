@@ -9,14 +9,14 @@ from ubt.core.exceptions import UBTError
 pytestmark = pytest.mark.fast
 
 
-def test_syntax_fallback_gate_blocks_over_threshold():
+def test_syntax_fallback_gate_blocks_over_threshold() -> None:
     cfg = UBTConfig(export_max_syntax_fallbacks=2)
     fallbacks = ["line 1: foo", "line 2: bar", "line 3: baz"]
     with pytest.raises(UBTError):
         _enforce_syntax_fallback_gate("job1", fallbacks, cfg, rehearsal=False)
 
 
-def test_syntax_fallback_gate_allows_under_threshold():
+def test_syntax_fallback_gate_allows_under_threshold() -> None:
     cfg = UBTConfig(export_max_syntax_fallbacks=5)
     _enforce_syntax_fallback_gate("job1", ["line 1: foo"], cfg, rehearsal=False)
 
@@ -35,7 +35,7 @@ def test_syntax_fallback_gate_rehearsal_downgrades_to_warning(
     assert any("syntax-fallback gate would have refused" in rec.message for rec in caplog.records)
 
 
-def test_syntax_fallback_gate_zero_means_fail_on_any():
+def test_syntax_fallback_gate_zero_means_fail_on_any() -> None:
     cfg = UBTConfig(export_max_syntax_fallbacks=0)
     with pytest.raises(UBTError):
         _enforce_syntax_fallback_gate("job1", ["line 1: foo"], cfg, rehearsal=False)

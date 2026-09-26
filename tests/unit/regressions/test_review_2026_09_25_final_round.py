@@ -34,6 +34,8 @@ import sqlite3
 import subprocess
 import sys
 import threading
+from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -43,7 +45,7 @@ pytestmark = pytest.mark.fast
 # --- 1. --json stdout purity with the rigid engine --------------------------
 
 
-def test_rigid_engine_warning_keeps_json_stdout_pure(tmp_path) -> None:
+def test_rigid_engine_warning_keeps_json_stdout_pure(tmp_path: Path) -> None:
     """The advisory warning must not precede the JSON object on stdout."""
     book = tmp_path / "probe.md"
     book.write_text("# Chapter 1\n\nA short technical note.\n", encoding="utf-8")
@@ -213,7 +215,7 @@ class _FlakyBlockingLedger:
         self.calls = 0
         self.committed: list[dict[str, object]] = []
 
-    def save_checkpoints_batch(self, updates, **_kwargs):  # noqa: ANN001
+    def save_checkpoints_batch(self, updates: list[dict[str, object]], **_kwargs: object) -> int:
         self.calls += 1
         if self.calls == 1:
             self.first_entered.set()
@@ -224,11 +226,14 @@ class _FlakyBlockingLedger:
 
 
 def test_failed_batch_is_retried_before_newer_updates() -> None:
+    from ubt.core.engine.ledger import SQLiteJobLedger
     from ubt.core.engine.ledger_flusher import CheckpointBatchFlusher
 
     async def scenario() -> list[str]:
         ledger = _FlakyBlockingLedger()
-        flusher = CheckpointBatchFlusher(ledger, flush_interval=0.01, max_batch_size=50)
+        flusher = CheckpointBatchFlusher(
+            cast(SQLiteJobLedger, ledger), flush_interval=0.01, max_batch_size=50
+        )
         await flusher.enqueue({"block_id": "X", "status": "v1"})
         # Let the first save start, enqueue the newer update while it is in
         # flight, then let the save fail.
@@ -267,7 +272,7 @@ def test_superscript_seven_is_recognised_in_a_byline() -> None:
 # --- 12. metrics --json error path stays off stdout -------------------------
 
 
-def test_metrics_json_errors_go_to_stderr(tmp_path) -> None:
+def test_metrics_json_errors_go_to_stderr(tmp_path: Path) -> None:
     missing = tmp_path / "missing_metrics.json"
     commands = [
         [sys.executable, "-m", "ubt", "metrics", "show", str(missing), "--json"],

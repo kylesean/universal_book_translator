@@ -204,8 +204,8 @@ def test_single_zone_block_is_not_repeating() -> None:
 
 def test_list_item_is_never_misclassified_as_center_aligned() -> None:
     """Page 8 bug: an indented LIST_ITEM whose 3 lines span to the right margin must stay justify at x0=86.75, never center."""
-    from ubt.adapters.pdf.rigid.extract import LineBox
     from ubt.adapters.pdf.rigid.zones import PageFacts, _resolve_horizontal_span_and_align
+    from ubt.adapters.pdf.textgeom import LineBox
 
     block = IRBlock(
         id="pdf_main#b0116",
@@ -268,8 +268,8 @@ def test_ordered_list_item_restores_number_marker_from_zone_rows() -> None:
 
 def test_build_zones_does_not_claim_centered_display_equation_as_continuation() -> None:
     """Page 10 bug: orphan centered display equation (10) below Theorem 7 must not be claimed as a continuation zone."""
-    from ubt.adapters.pdf.rigid.extract import LineBox
     from ubt.adapters.pdf.rigid.zones import PageFacts, build_zones
+    from ubt.adapters.pdf.textgeom import LineBox
     from ubt.core.ir.models import BoundingBox
 
     block = IRBlock(

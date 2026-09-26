@@ -1,5 +1,7 @@
 """RED: finalize_job must not silently mark non-terminal work completed."""
 
+from pathlib import Path
+
 import pytest
 
 from ubt.core.engine.ledger import SQLiteJobLedger
@@ -9,7 +11,7 @@ from ubt.core.ir.models import BlockStatus, DocumentIR, FlowID, IRBlock
 pytestmark = pytest.mark.fast
 
 
-def _doc(n=3):
+def _doc(n: int = 3) -> DocumentIR:
     blocks = [
         IRBlock(
             id=f"b{i:03d}",
@@ -28,13 +30,13 @@ def _doc(n=3):
     )
 
 
-def test_finalize_unknown_job_raises(tmp_path):
+def test_finalize_unknown_job_raises(tmp_path: Path) -> None:
     ledger = SQLiteJobLedger(tmp_path / "l.sqlite")
     with pytest.raises(LedgerError):
         ledger.finalize_job("no_such_job", status="completed")
 
 
-def test_finalize_completed_with_non_terminal_blocks_raises(tmp_path):
+def test_finalize_completed_with_non_terminal_blocks_raises(tmp_path: Path) -> None:
     ledger = SQLiteJobLedger(tmp_path / "l.sqlite")
     ledger.init_job("j1", _doc(2), target_lang="zh")
     # default init status is pending/drafted (non-terminal)
@@ -44,7 +46,7 @@ def test_finalize_completed_with_non_terminal_blocks_raises(tmp_path):
     assert ledger.get_job_status("j1") != "completed"
 
 
-def test_finalize_completed_after_all_terminal_succeeds(tmp_path):
+def test_finalize_completed_after_all_terminal_succeeds(tmp_path: Path) -> None:
     ledger = SQLiteJobLedger(tmp_path / "l.sqlite")
     ledger.init_job("j1", _doc(2), target_lang="zh")
     ledger.save_checkpoints_batch(
@@ -57,7 +59,7 @@ def test_finalize_completed_after_all_terminal_succeeds(tmp_path):
     assert ledger.get_job_status("j1") == "completed"
 
 
-def test_finalize_failed_allows_non_terminal(tmp_path):
+def test_finalize_failed_allows_non_terminal(tmp_path: Path) -> None:
     ledger = SQLiteJobLedger(tmp_path / "l.sqlite")
     ledger.init_job("j1", _doc(2), target_lang="zh")
     ledger.finalize_job("j1", status="failed")

@@ -145,6 +145,7 @@ async def run_mode_advisory_stage(ctx: StageContext) -> AsyncIterator[Translatio
     # Rigid typesetting is monolingual: downgrade and record here so the
     # quality report and the render adapter agree on the artifact.
     engine_advisory_msg: str | None = None
+    effective_engine: str
     if config.render_engine in RIGID_ENGINES:
         effective_engine = config.render_engine
     else:
@@ -253,6 +254,7 @@ async def run_difficulty_advisory_stage(ctx: StageContext) -> None:
         )
     else:
         effective_mode = pre_downgrade  # type: ignore[assignment]
+    effective_engine: str
     if config.render_engine in RIGID_ENGINES:
         effective_engine = config.render_engine
     else:

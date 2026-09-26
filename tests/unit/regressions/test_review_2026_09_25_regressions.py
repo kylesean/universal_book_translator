@@ -6,8 +6,12 @@ outcome rather than the internals, so reverting the fix fails the test.
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import cast
+
 import pytest
 
+from ubt.core.engine.stage_context import StageContext
 from ubt.core.language_profile import (
     ZH,
     get_pair_policy,
@@ -152,7 +156,7 @@ def test_remote_endpoint_still_prices_by_name() -> None:
     assert est.cost_usd_uncached > 0
 
 
-def test_cost_preflight_does_not_refuse_a_free_local_run(tmp_path) -> None:
+def test_cost_preflight_does_not_refuse_a_free_local_run(tmp_path: Path) -> None:
     """End-to-end through the stage: a local run under a tight budget must pass."""
     import asyncio
 
@@ -167,12 +171,12 @@ def test_cost_preflight_does_not_refuse_a_free_local_run(tmp_path) -> None:
         source_lang = "en"
         target_lang = "zh"
 
-        def __init__(self, config, router, blocks):
+        def __init__(self, config: UBTConfig, router: ModelRouter, blocks: list[IRBlock]) -> None:
             self.config = config
             self.router = router
             self._blocks = blocks
 
-        async def current_blocks(self):
+        async def current_blocks(self) -> list[IRBlock]:
             return self._blocks
 
     blocks = [
@@ -196,10 +200,10 @@ def test_cost_preflight_does_not_refuse_a_free_local_run(tmp_path) -> None:
         budget_usd=0.000001,
     )
     # Must not raise: a self-hosted run is $0 by construction.
-    asyncio.run(run_cost_preflight_stage(_Ctx(config, router, blocks)))
+    asyncio.run(run_cost_preflight_stage(cast(StageContext, _Ctx(config, router, blocks))))
 
 
-def test_cost_preflight_still_refuses_a_paid_run_over_budget(tmp_path) -> None:
+def test_cost_preflight_still_refuses_a_paid_run_over_budget(tmp_path: Path) -> None:
     """Positive control: the refusal path must stay live for a paid endpoint."""
     import asyncio
 
@@ -215,12 +219,12 @@ def test_cost_preflight_still_refuses_a_paid_run_over_budget(tmp_path) -> None:
         source_lang = "en"
         target_lang = "zh"
 
-        def __init__(self, config, router, blocks):
+        def __init__(self, config: UBTConfig, router: ModelRouter, blocks: list[IRBlock]) -> None:
             self.config = config
             self.router = router
             self._blocks = blocks
 
-        async def current_blocks(self):
+        async def current_blocks(self) -> list[IRBlock]:
             return self._blocks
 
     blocks = [
@@ -244,7 +248,7 @@ def test_cost_preflight_still_refuses_a_paid_run_over_budget(tmp_path) -> None:
         budget_usd=0.000001,
     )
     with pytest.raises(UBTError, match="exceeds --budget-usd"):
-        asyncio.run(run_cost_preflight_stage(_Ctx(config, router, blocks)))
+        asyncio.run(run_cost_preflight_stage(cast(StageContext, _Ctx(config, router, blocks))))
 
 
 def test_gpt_41_does_not_inherit_legacy_gpt4_rates() -> None:
@@ -503,7 +507,9 @@ def test_tui_detaches_a_rich_console_handler(tmp_path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_submit_without_output_path_works_without_an_allowlist(tmp_path, monkeypatch) -> None:
+def test_submit_without_output_path_works_without_an_allowlist(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from fastapi.testclient import TestClient
 
     from ubt.api.app import create_app
@@ -538,7 +544,7 @@ def test_submit_without_output_path_works_without_an_allowlist(tmp_path, monkeyp
 # ---------------------------------------------------------------------------
 
 
-def test_json_stdout_is_pure_json_in_a_fresh_process(tmp_path) -> None:
+def test_json_stdout_is_pure_json_in_a_fresh_process(tmp_path: Path) -> None:
     import json
     import subprocess
     import sys

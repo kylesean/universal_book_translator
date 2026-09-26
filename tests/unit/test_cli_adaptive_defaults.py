@@ -353,6 +353,7 @@ async def test_advisory_stage_downgrades_when_adaptive_policy_resolves_rigid(
     assert manifest.run.dual_mode_downgraded == "inline"
     assert manifest.run.effective_dual_mode == "monolingual"
     assert manifest.run.bilingual_mode == "monolingual"
+    assert manifest.run.bilingual_advisory is not None
     assert manifest.run.bilingual_advisory["effective"] == "monolingual"
     assert manifest.run.bilingual_advisory["rendered_modes"] == ["monolingual"]
 

@@ -77,7 +77,7 @@ RENDER_ENGINE_LEGACY_ALIASES: dict[str, str] = {
 }
 
 
-def canonical_render_engine(value: str) -> str:
+def canonical_render_engine(value: str | None) -> str:
     """Fold a render-engine alias onto its canonical name.
 
     Folds aliases like ``inplace``/``hybrid`` to prevent unvalidated metadata

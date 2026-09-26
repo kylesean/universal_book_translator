@@ -139,8 +139,11 @@ class StageContext:
     measure_run_usage: Callable[[], dict[str, dict[str, int]]] = lambda: {}
     #: Persist this run's usage to the ledger on demand. The export stage calls
     #: it after the paid post-render visual gate so a report built from the
-    #: ledger does not omit spend made after the last progress event.
-    bill_run_usage: Callable[[], Awaitable[None]] = _noop_bill
+    #: ledger does not omit spend made after the last progress event. The
+    #: callback may return the billed ``JobBill`` (the orchestrator's
+    #: ``_bill_run`` does); the export stage ignores the return, so the field is
+    #: ``Awaitable[object]`` rather than forcing a discarding wrapper.
+    bill_run_usage: Callable[[], Awaitable[object]] = _noop_bill
     #: Cancellation token for cooperative early termination of long stages.
     cancel_token: asyncio.Event | None = None
 

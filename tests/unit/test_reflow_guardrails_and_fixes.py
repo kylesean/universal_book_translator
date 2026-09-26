@@ -349,7 +349,7 @@ async def test_openai_responses_transport_caches_reasoning_fallback_after_first_
             }
         return resp
 
-    transport._request_json = fake_request_json  # type: ignore[method-assign]
+    transport._request_json = fake_request_json  # type: ignore[assignment]
 
     out1, _ = await transport._generate_responses_meta(
         prompt="hi",
