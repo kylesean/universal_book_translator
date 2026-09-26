@@ -90,21 +90,21 @@ class TestPureLogic:
 
 class TestAcceptanceOnRealPdfs:
     @pytest.mark.skipif(
-        not (REPO / "docs/synthetic-duo-damaged.pdf").exists(), reason="fixture absent"
+        not (REPO / "tests/fixtures/synthetic-duo-damaged.pdf").exists(), reason="fixture absent"
     )
     def test_damaged_fixture_confirms_most_of_its_damaged_pages(self) -> None:
         # synthetic-duo-damaged.pdf is generated (scripts/make_sample_corpus.py)
         # with a tampered ToUnicode map — the same damage mode the retired
         # Elsevier sample carried naturally (font claims the wrong unicode,
         # extraction bleeds ¼/ð/Þ).
-        stats = summarize(inspect_pdf(REPO / "docs/synthetic-duo-damaged.pdf"))
+        stats = summarize(inspect_pdf(REPO / "tests/fixtures/synthetic-duo-damaged.pdf"))
         assert stats["pages"] == 26
         assert stats["confirmed_pages"] >= 20
         assert stats["residue_chars"] >= 200
 
-    @pytest.mark.skipif(not (REPO / "docs/synthetic-mono.pdf").exists(), reason="fixture absent")
+    @pytest.mark.skipif(not (REPO / "tests/fixtures/synthetic-mono.pdf").exists(), reason="fixture absent")
     def test_control_file_stays_clean(self) -> None:
-        stats = summarize(inspect_pdf(REPO / "docs/synthetic-mono.pdf"))
+        stats = summarize(inspect_pdf(REPO / "tests/fixtures/synthetic-mono.pdf"))
         assert stats["confirmed_pages"] <= 2
 
 

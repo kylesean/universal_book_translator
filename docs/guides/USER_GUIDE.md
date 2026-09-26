@@ -699,7 +699,7 @@ uv run ubt-mcp
 - `scripts/oxide_render_ab.py`：pdf-oxide 与光栅基准的 A/B 等价性判据（尺寸/失配像素率阈值），页面光栅迁移的定谳证据。
 - `scripts/knob_sweep.py`：对可调旋钮做 ×/÷ 容差带扫描，把测试红→绿映射回具体数字（配合 `docs/design/knob-calibration-protocol.md`）。
 - `scripts/rigid_coverage_sweep.py`：rigid 覆盖率矩阵扫描——「目标长度比 × `RIGID_MIN_FONT_PT`」，按引擎自己的 preserved/fail-closed 家族分类。纯测量、退出码恒 0；用法与测量效度注记见 [LAYOUT_PRESERVATION_MASTERPLAN §3.4](../design/LAYOUT_PRESERVATION_MASTERPLAN_2026-09.md)。
-- `scripts/make_sample_corpus.py`：生成 `docs/synthetic-*.pdf` 合成语料（版权安全回归样本）。
+- `scripts/make_sample_corpus.py`：生成 `tests/fixtures/synthetic-*.pdf` 合成语料（版权安全回归样本）。
 
 ---
 
@@ -730,7 +730,7 @@ uv run ubt translate contract.pdf \
 UBT_BASE_URL="https://opencode.ai/zen/go/v1" \
 UBT_API_MODE="responses" \
 UBT_LLM_API_KEY="<your-opencode-token>" \
-uv run ubt translate docs/synthetic-duo.pdf \
+uv run ubt translate tests/fixtures/synthetic-duo.pdf \
   --render-engine rigid \
   --draft-model muse-spark-1.3-contributor \
   --concurrency 20 \

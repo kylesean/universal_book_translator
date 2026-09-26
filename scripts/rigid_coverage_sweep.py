@@ -23,7 +23,7 @@ Geometry is real: blocks come from the ledger of an actual run, so bboxes, block
 types and zones are the ones the pipeline produces. Produce one cheaply with a
 page-limited rehearsal (zero token spend)::
 
-    uv run ubt translate docs/synthetic-duo.pdf \\
+    uv run ubt translate tests/fixtures/synthetic-duo.pdf \\
         --render-engine rigid --dual-mode monolingual --pages 1-3 --dry-run -y \\
         --job-id sweep_seed -o /tmp/sweep/out.pdf --db-dir /tmp/sweep/ledgers
 
@@ -145,7 +145,7 @@ def main() -> int:
     parser.add_argument("--ledger", type=Path, required=True, help="SQLite job ledger")
     parser.add_argument("--job-id", required=True, help="job id inside that ledger")
     parser.add_argument(
-        "--corpus", type=Path, default=Path("docs/synthetic-mono.pdf"), help="source PDF"
+        "--corpus", type=Path, default=Path("tests/fixtures/synthetic-mono.pdf"), help="source PDF"
     )
     parser.add_argument(
         "--floors",

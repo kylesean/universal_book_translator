@@ -425,9 +425,9 @@ def test_sdist_ships_every_file_its_own_contents_reference() -> None:
 
 
 def test_gitignore_does_not_un_ignore_the_generated_corpus() -> None:
-    """``docs/synthetic-*.pdf`` are generated at configure time, never committed.
+    """``tests/fixtures/synthetic-*.pdf`` are generated at configure time, never committed.
 
-    Re-adding the old ``!docs/synthetic-*.pdf`` negations would let ``git add
+    Re-adding the old ``!tests/fixtures/synthetic-*.pdf`` negations would let ``git add
     -A`` commit ~18 MB of regenerated binaries as permanent ``git status`` noise.
     """
     lines = [
@@ -435,4 +435,4 @@ def test_gitignore_does_not_un_ignore_the_generated_corpus() -> None:
     ]
     negations = [line for line in lines if line.startswith("!") and "synthetic" in line]
     assert not negations, f"generated synthetic PDFs are un-ignored again: {negations}"
-    assert "docs/*.pdf" in lines
+    assert "tests/fixtures/*.pdf" in lines

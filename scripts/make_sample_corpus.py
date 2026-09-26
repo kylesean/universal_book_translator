@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the repo's synthetic PDF corpus (docs/synthetic-*.pdf).
+"""Generate the repo's synthetic PDF corpus (tests/fixtures/synthetic-*.pdf).
 
 Replaces the retired Elsevier chapter samples (2026-09 legal review) with
 typographically equivalent fixtures that are original text owned by this
@@ -26,7 +26,7 @@ import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-DOCS = REPO / "docs"
+CORPUS_DIR = REPO / "tests" / "fixtures"
 
 # The equation helper: body on the left/center, printed tag in parentheses on
 # the right margin, mirroring the IEEE look the formula-tag recovery tests
@@ -416,7 +416,7 @@ CORPUS_NAMES = ("synthetic-mono.pdf", "synthetic-duo.pdf", "synthetic-duo-damage
 
 
 def generate_all(force: bool = False) -> list[Path]:
-    """Build any missing corpus PDF under ``DOCS``; return the paths.
+    """Build any missing corpus PDF under ``CORPUS_DIR``; return the paths.
 
     Programmatic entry shared by ``main()`` and the pytest self-heal hook
     (``tests/conftest.py``): with ``force=False`` only absent files are built,
@@ -424,9 +424,9 @@ def generate_all(force: bool = False) -> list[Path]:
     damaged variant follows its source: rebuilding ``synthetic-duo.pdf``
     invalidates it.
     """
-    DOCS.mkdir(exist_ok=True)
-    duo = DOCS / "synthetic-duo.pdf"
-    damaged = DOCS / "synthetic-duo-damaged.pdf"
+    CORPUS_DIR.mkdir(parents=True, exist_ok=True)
+    duo = CORPUS_DIR / "synthetic-duo.pdf"
+    damaged = CORPUS_DIR / "synthetic-duo-damaged.pdf"
     rebuilt: list[Path] = []
     for name, src in (
         (
@@ -445,18 +445,21 @@ def generate_all(force: bool = False) -> list[Path]:
             ),
         ),
     ):
-        out = DOCS / name
+        out = CORPUS_DIR / name
         if force or not out.exists():
             compile_pdf(src, out)
             rebuilt.append(out)
     if force or not damaged.exists() or duo in rebuilt:
         make_damaged_variant(duo, damaged)
-    return [DOCS / n for n in CORPUS_NAMES]
+    return [CORPUS_DIR / n for n in CORPUS_NAMES]
 
 
 def main() -> int:
     generate_all(force=True)
-    n1, n2 = page_count(DOCS / "synthetic-mono.pdf"), page_count(DOCS / "synthetic-duo.pdf")
+    n1, n2 = (
+        page_count(CORPUS_DIR / "synthetic-mono.pdf"),
+        page_count(CORPUS_DIR / "synthetic-duo.pdf"),
+    )
     print(f"synthetic-mono.pdf: {n1} pages (target 13)")
     print(f"synthetic-duo.pdf: {n2} pages (target 26)")
     if n1 != 13 or n2 != 26:

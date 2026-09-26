@@ -12,10 +12,9 @@ packages = ["ubt"]
 #
 # ``docs/`` is deliberately NOT excluded: ``README.md`` is the sdist readme and
 # links into it, so the ~356 KB of tracked markdown must ship or those links
-# dangle in the tarball. The 16 MB of PDFs under ``docs/`` are gitignored
-# generated artifacts, so they are absent from the VCS file list hatchling
-# selects from — and from a filesystem-walk fallback, which also honours
-# ``.gitignore``.
+# dangle in the tarball. The generated synthetic corpus lives under
+# ``tests/fixtures/``, which is both gitignored and covered by the ``tests/``
+# exclude below, so no regenerated PDF can reach the archive.
 [tool.hatch.build.targets.sdist]
 exclude = [
     "tests/",

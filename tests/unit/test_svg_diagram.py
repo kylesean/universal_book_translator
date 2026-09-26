@@ -359,7 +359,7 @@ def test_detect_drops_p33_title_panel() -> None:
     if KV_PDF.exists():
         regions = detect_diagram_regions(KV_PDF, 33)
     else:
-        # docs/synthetic-duo.pdf page 2 has background fill and text but no diagrams
+        # tests/fixtures/synthetic-duo.pdf page 2 has background fill and text but no diagrams
         regions = detect_diagram_regions(SAMPLE_PDF, 2)
     assert regions == []
 
@@ -568,7 +568,7 @@ def test_diagram_vectorization_does_not_append_to_the_callers_list(
     from ubt.adapters.pdf.docling_render import DoclingRenderStrategy
     from ubt.core.ir.models import BoundingBox
 
-    source_pdf = Path(__file__).resolve().parents[2] / "docs" / "synthetic-mono.pdf"
+    source_pdf = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "synthetic-mono.pdf"
     if not source_pdf.is_file():
         pytest.skip(f"{source_pdf.name} fixture missing")
 

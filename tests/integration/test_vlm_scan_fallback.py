@@ -1,6 +1,6 @@
 """Integration: textless-page VLM fallback through the real seam.
 
-Builds an image-only PDF (no text layer) from docs/synthetic-mono.pdf at test time —
+Builds an image-only PDF (no text layer) from tests/fixtures/synthetic-mono.pdf at test time —
 no committed image fixtures. Requires rapidocr (bundled ONNX models); skipped
 otherwise. Exercises ``DoclingPDFAdapter.parse_stream`` end to end with
 ``UBT_VLM_SCAN_FALLBACK=1``: Docling (do_ocr=False) yields zero blocks for
@@ -29,7 +29,7 @@ pytestmark = [
 ]
 
 # NOTE: tests/fixtures/book3-*.pdf was removed; any real PDF works as the raster source.
-BOOK3 = Path("docs/synthetic-mono.pdf")
+BOOK3 = Path("tests/fixtures/synthetic-mono.pdf")
 
 
 def _image_only_pdf(dst: Path) -> Path:

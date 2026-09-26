@@ -37,7 +37,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _ensure_synthetic_corpus() -> str | None:
-    """Regenerate docs/synthetic-*.pdf when the suite deleted-or-missed them.
+    """Regenerate tests/fixtures/synthetic-*.pdf when the suite deleted-or-missed them.
 
     The corpus is generated, not committed (ROI-1): ``scripts/
     make_sample_corpus.py`` is the source of truth and the acceptance runbook
@@ -49,14 +49,14 @@ def _ensure_synthetic_corpus() -> str | None:
     generator. ``generate_all()`` writes atomically, so racing xdist workers
     each see either a complete file or their own complete build.
     """
-    docs = _REPO_ROOT / "docs"
+    corpus = _REPO_ROOT / "tests" / "fixtures"
     script = _REPO_ROOT / "scripts" / "make_sample_corpus.py"
     spec = importlib.util.spec_from_file_location("ubt_make_sample_corpus", script)
     if spec is None or spec.loader is None:  # pragma: no cover - broken checkout
         return f"cannot load {script}"
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    needed: list[str] = [n for n in module.CORPUS_NAMES if not (docs / n).exists()]
+    needed: list[str] = [n for n in module.CORPUS_NAMES if not (corpus / n).exists()]
     if not needed:
         return None
     if shutil.which("typst") is None:

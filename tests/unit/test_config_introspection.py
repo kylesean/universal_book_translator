@@ -117,7 +117,7 @@ def test_job_id_pattern_and_default_output_path_have_one_owner() -> None:
 
     assert api_app.JOB_ID_RE is JOB_ID_RE
     assert mcp_server.JOB_ID_RE is JOB_ID_RE
-    assert default_output_path("docs/synthetic-duo.pdf") == (
+    assert default_output_path("tests/fixtures/synthetic-duo.pdf") == (
         default_output_dir() / "synthetic-duo_bilingual.pdf"
     )
     assert default_output_path("/x/book.epub") == (default_output_dir() / "book_bilingual.epub")

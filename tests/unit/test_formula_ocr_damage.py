@@ -1,4 +1,4 @@
-"""Regression fixtures for OCR-damaged formulas from docs/synthetic-duo.pdf.
+"""Regression fixtures for OCR-damaged formulas from tests/fixtures/synthetic-duo.pdf.
 
 The documented failure classes (b0040/b0114/b0176/b0186/b0178) come from the
 real CodeFormulaV2 output stored in job fc1d7bd7b799 and pin what the engines
@@ -18,11 +18,12 @@ from ubt.adapters.pdf.math_renderer import MathjaxRenderer
 from ubt.adapters.pdf.typst_math import _clean_ocr_formula
 
 # The case data used to live in tests/fixtures/formula_ocr_damage.json; that
-# directory was removed in 13568a7, so the cases are inlined here verbatim to
-# keep this regression file self-contained (no file I/O at collection time).
+# JSON was removed in 13568a7 (the directory now holds the generated PDF
+# corpus), so the cases are inlined here verbatim to keep this regression file
+# self-contained (no file I/O at collection time).
 _CASES_JSON = r"""{
   "version": 1,
-  "source": "docs/synthetic-duo.pdf - Docling CodeFormulaV2 OCR LaTeX from job fc1d7bd7b799. raw_latex is the ledger string; latex is what _clean_ocr_formula hands the MathJax engine.",
+  "source": "tests/fixtures/synthetic-duo.pdf - Docling CodeFormulaV2 OCR LaTeX from job fc1d7bd7b799. raw_latex is the ledger string; latex is what _clean_ocr_formula hands the MathJax engine.",
   "cases": [
     {
       "id": "pdf_main#b0030",

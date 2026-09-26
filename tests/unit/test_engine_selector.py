@@ -22,8 +22,8 @@ from ubt.core.exceptions import UnsupportedDocumentFormatError
 @requires_synthetic_mono
 def test_build_page_ingest_plans_real_pdf(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # NOTE: tests/fixtures/*.pdf were removed (HEAD "update" slimming);
-    # docs/synthetic-mono.pdf is the same 13-page sample, kept as the live fixture.
-    pdf = Path("docs/synthetic-mono.pdf").resolve()
+    # tests/fixtures/synthetic-mono.pdf is the same 13-page sample, kept as the live fixture.
+    pdf = Path("tests/fixtures/synthetic-mono.pdf").resolve()
     monkeypatch.chdir(tmp_path)
     plans = build_page_ingest_plans(pdf, cache_dir=tmp_path / ".ubt_cache")
     assert len(plans) == 13
@@ -50,7 +50,7 @@ def test_scan_detected_from_probe_uses_all_sampled_pages() -> None:
 def test_inspect_pdf_route_plan_populates_page_plans(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    pdf = Path("docs/synthetic-mono.pdf").resolve()
+    pdf = Path("tests/fixtures/synthetic-mono.pdf").resolve()
     monkeypatch.chdir(tmp_path)
     route = inspect_pdf_route_plan(pdf, cache_dir=tmp_path / ".ubt_cache", include_page_plans=True)
     assert isinstance(route, PDFRoutePlan)
@@ -70,7 +70,7 @@ def test_route_plan_probe_does_not_profile_every_page_by_default(
     """
     import ubt.adapters.pdf.engine_selector as selector
 
-    pdf = Path("docs/synthetic-mono.pdf").resolve()
+    pdf = Path("tests/fixtures/synthetic-mono.pdf").resolve()
     monkeypatch.chdir(tmp_path)
     calls: list[Path] = []
 

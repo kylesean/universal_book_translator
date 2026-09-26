@@ -32,8 +32,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # which tests/conftest.py seeds before collection — so this gate is runnable on
 # a fresh checkout without any Release attachment.
 DEFAULT_PDFS = [
-    REPO_ROOT / "docs" / "synthetic-mono.pdf",
-    REPO_ROOT / "docs" / "synthetic-duo.pdf",
+    REPO_ROOT / "tests" / "fixtures" / "synthetic-mono.pdf",
+    REPO_ROOT / "tests" / "fixtures" / "synthetic-duo.pdf",
 ]
 PAGES = (1, 3, 5)
 DPIS = (72, 300)

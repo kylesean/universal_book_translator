@@ -287,7 +287,7 @@ def test_priced_models_have_two_tier_money(model: str, md_book: Path) -> None:
 
 
 def test_real_pdf_smoke() -> None:
-    sample = UBT_PKG / "docs" / "synthetic-duo.pdf"
+    sample = UBT_PKG / "tests" / "fixtures" / "synthetic-duo.pdf"
     if not sample.exists():
         pytest.skip("synthetic sample PDF unavailable")
     report = assess_document(sample, _config())

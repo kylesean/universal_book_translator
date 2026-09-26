@@ -81,7 +81,7 @@ jobs:
           fi
           echo "::notice::real-provider smoke verified ${passed} live case(s)"
 
-      # Formula engine matrix on the committed synthetic corpus with a
+      # Formula engine matrix on the generated synthetic corpus with a
       # mock provider (zero API budget). Installs are best-effort; the test
       # self-skips when docling or Node/MathJax is unavailable.
       - name: Set up Node (MathJax engine)
@@ -104,12 +104,12 @@ jobs:
           # (the exact trap the real-provider smoke step documents above).
           uv run pytest tests/integration/test_formula_engine_matrix.py -o addopts="" -v -rs 2>&1 | tee /tmp/formula.log
           if grep -qE "corpus missing|points at a missing file" /tmp/formula.log; then
-            # The committed synthetic corpus is what makes this the project's
+            # The generated synthetic corpus is what makes this the project's
             # only end-to-end formula coverage on a clone; if it is gone, or a
             # UBT_TEST_REAL_PDF override points at nothing, the step is green
             # while testing nothing - which is exactly how the copyright sweep
             # left the old chapter-3 paths silently dead.
-            echo "::error::formula engine matrix has no corpus - regenerate docs/synthetic-*.pdf with scripts/make_sample_corpus.py or unset UBT_TEST_REAL_PDF"
+            echo "::error::formula engine matrix has no corpus - regenerate tests/fixtures/synthetic-*.pdf with scripts/make_sample_corpus.py or unset UBT_TEST_REAL_PDF"
             exit 1
           fi
           passed=$(grep -cE '^tests/.*PASSED' /tmp/formula.log || true)

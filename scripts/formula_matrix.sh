@@ -2,7 +2,7 @@
 # =============================================================================
 # Formula engine matrix runner
 #
-# Runs docs/synthetic-duo.pdf through every math_backend / formula_render
+# Runs tests/fixtures/synthetic-duo.pdf through every math_backend / formula_render
 # combination, then prints a Markdown summary of page counts, syntax
 # fallbacks, witness fallbacks and wall time per scenario.
 #
@@ -28,7 +28,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${REPO_ROOT}"
 
-SOURCE="docs/synthetic-duo.pdf"
+SOURCE="tests/fixtures/synthetic-duo.pdf"
 OUT_DIR="output/formula-matrix"
 PAGES=""
 REAL=0

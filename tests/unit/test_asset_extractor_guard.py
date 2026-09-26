@@ -257,7 +257,7 @@ def test_caption_driven_figure_crops_do_not_ship_the_same_figure_twice(
     from ubt.adapters.pdf.docling_render import DoclingRenderStrategy
     from ubt.core.ir.models import BoundingBox
 
-    source_pdf = Path(__file__).resolve().parents[2] / "docs" / "synthetic-mono.pdf"
+    source_pdf = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "synthetic-mono.pdf"
     if not source_pdf.is_file():
         pytest.skip(f"{source_pdf.name} fixture missing")
 

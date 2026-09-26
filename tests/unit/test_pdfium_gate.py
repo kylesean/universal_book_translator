@@ -158,7 +158,7 @@ def test_serialized_decorator_serializes_threads() -> None:
 
 def test_open_document_roundtrip(tmp_path: Path) -> None:
     """open_document yields a usable locked document (needs a real PDF)."""
-    sample = UBT_PKG.parent / "docs" / "synthetic-duo.pdf"
+    sample = UBT_PKG.parent / "tests" / "fixtures" / "synthetic-duo.pdf"
     if not sample.exists():
         pytest.skip("synthetic sample PDF unavailable")
     from ubt.adapters.pdf.pdfium_gate import open_document

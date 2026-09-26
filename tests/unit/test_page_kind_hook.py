@@ -23,8 +23,8 @@ def _block(bid: str, page: int) -> IRBlock:
 def test_annotate_page_kinds_real_pdf(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     adapter = DoclingPDFAdapter()
     blocks = [_block("b1", 1), _block("b2", 13)]
-    # NOTE: tests/fixtures/ removed; docs/synthetic-mono.pdf is the live 13-page sample.
-    pdf = Path("docs/synthetic-mono.pdf").absolute()
+    # tests/fixtures/synthetic-mono.pdf is the live 13-page sample (generated, gitignored).
+    pdf = Path("tests/fixtures/synthetic-mono.pdf").absolute()
     # Keep the test hermetic: profile cache goes to tmp_path's .ubt.
     monkeypatch.chdir(tmp_path)
     kinds = adapter._annotate_page_kinds(pdf, blocks)

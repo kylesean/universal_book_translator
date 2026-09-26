@@ -460,8 +460,8 @@ def test_strip_abort_reason_is_actionable() -> None:
 @requires_synthetic_mono
 def test_strip_real_chapter_page_pikepdf() -> None:
     """Verify 2D stream stripping on real book chapter page."""
-    # NOTE: tests/fixtures/ removed; docs/synthetic-mono.pdf is the live 13-page sample.
-    pdf = pikepdf.open("docs/synthetic-mono.pdf")
+    # tests/fixtures/synthetic-mono.pdf is the live 13-page sample (generated, gitignored).
+    pdf = pikepdf.open("tests/fixtures/synthetic-mono.pdf")
     page = pdf.pages[1]
     stats = strip_page_text_pikepdf(page, [(50.0, 300.0, 500.0, 600.0)], page_no=2)
     assert stats.aborted is None

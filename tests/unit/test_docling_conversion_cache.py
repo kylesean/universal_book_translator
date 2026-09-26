@@ -93,7 +93,7 @@ def test_second_ingest_reuses_the_cached_conversion(
     from docling.datamodel.pipeline_options import PdfPipelineOptions
     from docling.document_converter import DocumentConverter, PdfFormatOption
 
-    pdf = Path("docs/synthetic-mono.pdf").resolve()
+    pdf = Path("tests/fixtures/synthetic-mono.pdf").resolve()
     monkeypatch.chdir(tmp_path)
     cache = tmp_path / "docling_cache"
     monkeypatch.setattr(docling_parser, "DOCLING_CACHE_DIR", cache)

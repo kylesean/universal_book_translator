@@ -52,7 +52,7 @@ def test_match_returns_none_without_candidates() -> None:
 
 
 @pytest.mark.skipif(
-    not Path("docs/synthetic-duo.pdf").exists(), reason="docs/synthetic-duo.pdf not present"
+    not Path("tests/fixtures/synthetic-duo.pdf").exists(), reason="tests/fixtures/synthetic-duo.pdf not present"
 )
 def test_recover_synthetic_appendix_and_body_tags() -> None:
     """Golden bands from the synthetic corpus, calibrated against pdfium's
@@ -67,15 +67,15 @@ def test_recover_synthetic_appendix_and_body_tags() -> None:
             self.x1 = x1
 
     # Appendix identity (A.6) on PDF page 3.
-    assert recover_formula_tag("docs/synthetic-duo.pdf", 3, _BBox(3, 232.0, 246.0, 240.0)) == "A.6"
+    assert recover_formula_tag("tests/fixtures/synthetic-duo.pdf", 3, _BBox(3, 232.0, 246.0, 240.0)) == "A.6"
     # Body formula (3.2) on PDF page 1 (bands calibrated against pdfium).
-    assert recover_formula_tag("docs/synthetic-duo.pdf", 1, _BBox(1, 302.0, 312.0, 456.0)) == "3.2"
+    assert recover_formula_tag("tests/fixtures/synthetic-duo.pdf", 1, _BBox(1, 302.0, 312.0, 456.0)) == "3.2"
     # A tag-free band yields None instead of guessing.
-    assert recover_formula_tag("docs/synthetic-duo.pdf", 18, _BBox(18, 10.0, 20.0, 456.0)) is None
+    assert recover_formula_tag("tests/fixtures/synthetic-duo.pdf", 18, _BBox(18, 10.0, 20.0, 456.0)) is None
 
 
 @pytest.mark.skipif(
-    not Path("docs/synthetic-duo.pdf").exists(), reason="docs/synthetic-duo.pdf not present"
+    not Path("tests/fixtures/synthetic-duo.pdf").exists(), reason="tests/fixtures/synthetic-duo.pdf not present"
 )
 def test_renderer_uses_recovered_tag_in_generated_typst() -> None:
     """A formula whose OCR text has no tag still renders the author's number."""
@@ -83,7 +83,7 @@ def test_renderer_uses_recovered_tag_in_generated_typst() -> None:
     from ubt.core.ir.models import BlockType, BoundingBox, IRBlock
 
     recon = TypstReconstructor(target_lang="zh-cn")
-    recon.source_pdf = Path("docs/synthetic-duo.pdf")
+    recon.source_pdf = Path("tests/fixtures/synthetic-duo.pdf")
     recon.math_backend = "typst"
     block = IRBlock(
         id="eq-recover",

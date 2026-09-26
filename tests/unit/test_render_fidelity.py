@@ -96,7 +96,7 @@ def test_compute_render_fidelity_measures_whole_page_without_blocks() -> None:
     pytest.importorskip("pypdfium2")
     from ubt.adapters.pdf.render_fidelity import compute_render_fidelity
 
-    pdf = Path(__file__).resolve().parents[2] / "docs" / "synthetic-mono.pdf"
+    pdf = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "synthetic-mono.pdf"
     if not pdf.exists():
         pytest.skip("synthetic corpus unavailable")
     stats = compute_render_fidelity(pdf, pdf, [], dpi=72, max_pages=2)

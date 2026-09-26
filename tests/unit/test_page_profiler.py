@@ -106,8 +106,8 @@ def test_profile_properties() -> None:
 
 @requires_synthetic_mono
 def test_profile_real_pdf_and_cache(tmp_path: Path) -> None:
-    # NOTE: tests/fixtures/ removed; docs/synthetic-mono.pdf is the live 13-page sample.
-    pdf = Path("docs/synthetic-mono.pdf")
+    # tests/fixtures/synthetic-mono.pdf is the live 13-page sample (generated, gitignored).
+    pdf = Path("tests/fixtures/synthetic-mono.pdf")
     profiles = profile_pdf(pdf, cache_dir=tmp_path)
     assert len(profiles) == 13
     assert all(isinstance(p.kind, PageKind) for p in profiles)

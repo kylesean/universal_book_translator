@@ -23,8 +23,8 @@ tmp/
 scratch/
 scripts/mathjax/node_modules/
 
-# Generated docs & deliverables
-docs/*.pdf
+# Generated corpus & deliverables
+tests/fixtures/*.pdf
 /out*
 /*_bilingual.*
 /*_quality_report.*

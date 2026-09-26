@@ -4,7 +4,7 @@ Runs the full pipeline with a mock provider (no API cost) once per backend.
 Corpus selection is two-tier, because the copyright sweep (7b4c456) took the
 Elsevier chapter out of the repository while leaving its structural twin behind:
 
-* **Committed corpus** (default): ``docs/synthetic-duo.pdf``, generated from
+* **Generated corpus** (default): ``tests/fixtures/synthetic-duo.pdf``, generated from
   typst source with the same 540x665.972pt MediaBox, printed equation tags,
   IEEE reference lists and vector figure drawings. Everything this file asserts
   that is a property of the *engines* runs on it — in CI, on every clone.
@@ -53,7 +53,7 @@ REAL_PDF = (
     if os.environ.get("UBT_TEST_REAL_PDF")
     else None
 )
-SOURCE_PDF = REAL_PDF or REPO_ROOT / "docs" / "synthetic-duo.pdf"
+SOURCE_PDF = REAL_PDF or REPO_ROOT / "tests" / "fixtures" / "synthetic-duo.pdf"
 JOB_ID = "formula-engine-matrix"
 MOCK_TRANSLATION = "这是用于公式引擎矩阵测试的中文模拟译文。"
 

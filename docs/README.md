@@ -5,9 +5,11 @@
 - `guides/` — 使用/操作指南（活文档，顶部标 🟢）。
 - `design/` — 设计/契约/规范（活文档，顶部标 🟢）。
 - `benchmarks/` — 可提交的**无正文成本度量记录**（约定见其 README）。
-- `synthetic-*.pdf` — **不是文档**：合成测试语料，由
-  `scripts/make_sample_corpus.py` 生成、`tests/conftest.py` 在 pytest 启动时按需重建，
-  且被 `.gitignore`（`docs/*.pdf`）忽略，**不随仓库分发**。
+
+> 合成测试语料 `tests/fixtures/synthetic-*.pdf` **不是文档、也不在本目录**：由
+> `scripts/make_sample_corpus.py` 生成、`tests/conftest.py` 在 pytest 启动时按需重建，
+> 被 `.gitignore`（`tests/fixtures/*.pdf`）忽略，且随 `tests/` 一起被 sdist 排除，
+> **不随仓库分发**。
 
 > **历史评估与已废弃的设计稿不再保留在树内**（原 `assessments/`、`history/`：
 > INPLACE_WORKBENCH PRD/设计、INPLACE_TECH_SURVEY、WEVISDOC、JEV、

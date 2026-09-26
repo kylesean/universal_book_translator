@@ -193,11 +193,11 @@ def test_transcribe_groups_paragraphs_with_fake_driver(tmp_path: Path) -> None:
             )
 
     register_driver("fake-ocr", _FakeOcr)
-    # Textless page: rasterize docs/synthetic-mono.pdf p1 to an image-only PDF in tmp.
+    # Textless page: rasterize tests/fixtures/synthetic-mono.pdf p1 to an image-only PDF in tmp.
     # NOTE: tests/fixtures/book3-*.pdf was removed; any real PDF works as the raster source.
     import pypdfium2 as pdfium
 
-    src = pdfium.PdfDocument("docs/synthetic-mono.pdf")
+    src = pdfium.PdfDocument("tests/fixtures/synthetic-mono.pdf")
     try:
         img = src[0].render(scale=1.5).to_pil().convert("RGB")
     finally:

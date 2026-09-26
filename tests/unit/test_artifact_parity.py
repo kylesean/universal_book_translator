@@ -50,7 +50,7 @@ class TestPureParsers:
 
     @requires_synthetic_duo
     def test_page_sizes_read_from_mediabox(self) -> None:
-        sizes = read_page_sizes(REPO / "docs/synthetic-duo.pdf")
+        sizes = read_page_sizes(REPO / "tests/fixtures/synthetic-duo.pdf")
         assert len(sizes) == 26
         assert all(abs(w - 540.0) < 1.0 and abs(h - 665.972) < 1.0 for w, h in sizes)
 
@@ -71,8 +71,8 @@ class TestPureParsers:
 class TestAgainstRealRepoPdfs:
     def test_clean_render_has_no_fail_closed_findings(self) -> None:
         findings = check_artifact_parity(
-            source_pdf=REPO / "docs/synthetic-mono.pdf",
-            artifact_pdf=REPO / "docs/synthetic-mono.pdf",
+            source_pdf=REPO / "tests/fixtures/synthetic-mono.pdf",
+            artifact_pdf=REPO / "tests/fixtures/synthetic-mono.pdf",
             target_lang="en",
             keeps_source_geometry=True,
         )
@@ -85,8 +85,8 @@ class TestAgainstRealRepoPdfs:
         code never evaluated its own fail-closed condition for Latin targets.
         """
         findings = check_artifact_parity(
-            source_pdf=REPO / "docs/synthetic-mono.pdf",
-            artifact_pdf=REPO / "docs/synthetic-mono.pdf",
+            source_pdf=REPO / "tests/fixtures/synthetic-mono.pdf",
+            artifact_pdf=REPO / "tests/fixtures/synthetic-mono.pdf",
             target_lang="en",
             keeps_source_geometry=True,
         )
@@ -96,8 +96,8 @@ class TestAgainstRealRepoPdfs:
 
     def test_absent_target_language_fails_closed(self) -> None:
         findings = check_artifact_parity(
-            source_pdf=REPO / "docs/synthetic-mono.pdf",
-            artifact_pdf=REPO / "docs/synthetic-mono.pdf",  # English artifact
+            source_pdf=REPO / "tests/fixtures/synthetic-mono.pdf",
+            artifact_pdf=REPO / "tests/fixtures/synthetic-mono.pdf",  # English artifact
             target_lang="zh",
             keeps_source_geometry=True,
         )
@@ -113,8 +113,8 @@ class TestAgainstRealRepoPdfs:
         # chapter-1 (B5-ish) against chapter-3 (different page size): source and
         # artifact swapped so sizes must mismatch under keeps-source-geometry.
         findings = check_artifact_parity(
-            source_pdf=REPO / "docs/synthetic-duo.pdf",
-            artifact_pdf=REPO / "docs/synthetic-mono.pdf",
+            source_pdf=REPO / "tests/fixtures/synthetic-duo.pdf",
+            artifact_pdf=REPO / "tests/fixtures/synthetic-mono.pdf",
             target_lang="en",
             keeps_source_geometry=True,
         )
@@ -123,8 +123,8 @@ class TestAgainstRealRepoPdfs:
 
     def test_geometry_parity_skipped_for_reflow(self) -> None:
         findings = check_artifact_parity(
-            source_pdf=REPO / "docs/synthetic-duo.pdf",
-            artifact_pdf=REPO / "docs/synthetic-mono.pdf",
+            source_pdf=REPO / "tests/fixtures/synthetic-duo.pdf",
+            artifact_pdf=REPO / "tests/fixtures/synthetic-mono.pdf",
             target_lang="en",
             keeps_source_geometry=False,
         )
