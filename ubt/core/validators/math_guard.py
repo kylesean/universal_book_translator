@@ -441,14 +441,26 @@ _UNICODE_TO_LATEX = {
     "χ": "chi",
     "ψ": "psi",
     "ω": "omega",
+    # Blackboard letters keep the command for the command-set comparison, but
+    # the *letter* is tracked separately (below) — mapping every one to a bare
+    # "mathbb" made a changed letter (source ℤ, target \mathbb{R}) invisible.
     "ℝ": "mathbb",
     "ℕ": "mathbb",
     "ℤ": "mathbb",
     "ℚ": "mathbb",
     "ℂ": "mathbb",
-    "R_BLACKBOARD": "mathbb",
 }
 _UNICODE_MATH_CHARS = frozenset(_UNICODE_TO_LATEX)
+
+#: Unicode blackboard letters -> ASCII letter (the fact the number-set carries).
+_BLACKBOARD_UNICODE_LETTER: dict[str, str] = {
+    "ℝ": "R",
+    "ℕ": "N",
+    "ℤ": "Z",
+    "ℚ": "Q",
+    "ℂ": "C",
+}
+_BLACKBOARD_LATEX_LETTER_RE = re.compile(r"\\mathbb\s*\{\s*([A-Za-z])\s*\}")
 
 _UNICODE_MATH_STYLE_PREFIXES = (
     ("MATHEMATICAL BOLD ITALIC", "mathbfit"),
@@ -511,6 +523,20 @@ def novel_unsupported_latex_commands(source: str, target: str) -> list[str]:
         for cmd in sorted(set(_LATEX_CMD_RE.findall(target or "")))
         if cmd not in src_cmds and cmd not in RENDERABLE_LATEX_COMMANDS
     ]
+    # Blackboard letter identity: "mathbb" alone cannot tell ℤ from \mathbb{R}.
+    # Only compared when the source actually carries a blackboard letter, so a
+    # plain source Z never triggers a false positive.
+    src_letters = {
+        _BLACKBOARD_UNICODE_LETTER[ch] for ch in (source or "") if ch in _BLACKBOARD_UNICODE_LETTER
+    }
+    src_letters |= set(_BLACKBOARD_LATEX_LETTER_RE.findall(source or ""))
+    if src_letters:
+        novel.extend(
+            f"mathbb{{{letter}}}"
+            for letter in sorted(
+                set(_BLACKBOARD_LATEX_LETTER_RE.findall(target or "")) - src_letters
+            )
+        )
     return novel
 
 

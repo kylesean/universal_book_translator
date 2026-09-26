@@ -289,3 +289,14 @@ def test_undelimited_gate_exempts_code_identifiers_and_snake_case() -> None:
         "where A_{g0} is constant.",
         "其中 A_{g0} 是常数。",
     )
+
+
+def test_blackboard_letter_change_is_detected() -> None:
+    """Mapping every blackboard letter to a bare 'mathbb' hid a changed letter."""
+    from ubt.core.validators.math_guard import novel_unsupported_latex_commands
+
+    assert novel_unsupported_latex_commands("ℤ", r"$\mathbb{R}$")
+    assert novel_unsupported_latex_commands("ℤ", r"$\mathbb{Z}$") == []
+    # A plain (non-blackboard) source Z has no blackboard letter to compare, so
+    # the letter check must not fire (only the generic 'mathbb' novelty does).
+    assert "mathbb{R}" not in novel_unsupported_latex_commands("Z", r"$\mathbb{R}$")

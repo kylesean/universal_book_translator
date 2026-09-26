@@ -876,3 +876,11 @@ def test_both_echo_phrasings_are_registered_in_every_defect_table() -> None:
         _a0920_SOURCE_PARAGRAPH, _a0920_SOURCE_PARAGRAPH, block_type=BlockType.NARRATIVE
     )
     assert exact.reason.startswith(ECHO_MARKER)
+
+
+def test_fallback_score_flags_an_opening_translation_tag_leak() -> None:
+    """The leak check must test the opening tag the scaffold actually leaks."""
+    from ubt.core.qe.comet_score_ipc import calculate_fallback_score
+
+    assert calculate_fallback_score("some source text here", "<translation>leak") == 0.20
+    assert calculate_fallback_score("some source text here", "clean target text") > 0.20

@@ -110,7 +110,10 @@ def calculate_fallback_score(src: str, mt: str) -> float:
     """Deterministic heuristic score when PyTorch / COMET is absent or mock requested."""
     if not mt or not mt.strip():
         return 0.0
-    if "<issues>" in mt or "</translation>" in mt:
+    # Match the FastPass leak definition (fast_pass.py): the *opening* tag is
+    # what a leaked scaffold carries; checking only the closing tag let a
+    # truncated '<translation>…' leak score ~0.85 as if it were clean.
+    if "<issues>" in mt or "<translation>" in mt or "</translation>" in mt:
         return 0.20
     ratio = min(len(mt), len(src)) / max(1, max(len(mt), len(src)))
     score = min(1.0, max(0.1, 0.85 * (0.8 + 0.2 * ratio)))

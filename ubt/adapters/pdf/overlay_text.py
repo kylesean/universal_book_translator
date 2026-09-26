@@ -197,6 +197,9 @@ def _repair_once(parts: list[tuple[bool, str]]) -> list[tuple[bool, str]] | None
                 if balance < 0:
                     break
                 body = candidate
+                # The gap is now part of ``body``; keeping it would re-insert it
+                # before the next fragment and duplicate the text.
+                gap = ""
             elif _mergeable_gap(chunk):
                 gap += chunk
             else:
@@ -218,6 +221,7 @@ def _repair_once(parts: list[tuple[bool, str]]) -> list[tuple[bool, str]] | None
                 if balance > 0:
                     break
                 body = candidate
+                gap = ""
             elif _mergeable_gap(chunk):
                 gap = chunk + gap
             else:

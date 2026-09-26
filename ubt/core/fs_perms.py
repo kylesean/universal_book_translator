@@ -21,6 +21,7 @@ drifts. ``ubt.api.security`` re-exports it under its historical name.
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -149,16 +150,32 @@ def world_readable_files(directory: Path, extra_dirs: Iterable[Path] = ()) -> li
     single-directory behaviour for existing callers.
     """
     found: dict[Path, None] = {}
+
+    def _onerror(err: OSError) -> None:
+        # ``rglob`` silently skipped an unreadable directory, so a subtree of
+        # world-readable manuscript files could hide below the very report that
+        # exists to find them. Surface the gap instead of an all-clear.
+        logger.warning(
+            "world-readable permission scan could not enter %s: %s",
+            err.filename or "an unreadable path",
+            err,
+        )
+
     for root in (directory, *extra_dirs):
         try:
             if not root.is_dir():
                 continue
-            for child in root.rglob("*"):
-                if child.is_file() and child.stat().st_mode & 0o077:
-                    found[child] = None
+            for dirpath, _dirnames, filenames in os.walk(root, onerror=_onerror):
+                for name in filenames:
+                    child = Path(dirpath) / name
+                    try:
+                        if child.is_file() and child.stat().st_mode & 0o077:
+                            found[child] = None
+                    except OSError:
+                        continue
         except OSError:
-            # Unreadable subtree: report what was scanned rather than failing
-            # the permission report itself.
+            # Unreadable root itself: report what was scanned rather than
+            # failing the permission report.
             continue
     return sorted(found)
 

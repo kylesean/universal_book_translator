@@ -252,3 +252,30 @@ def test_sensitive_deny_beats_an_explicit_whitelist(tmp_path: Path) -> None:
         resolve_secure_path(secret, must_exist=True, config=config)
     assert exc.value.status_code == 403
     assert "sensitive configuration directory or file" in exc.value.detail
+
+
+def test_unreadable_subtree_is_surfaced_not_silently_skipped(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A directory the scan cannot enter must warn, not read as all-clear."""
+    import logging
+    import os
+
+    if os.geteuid() == 0:
+        pytest.skip("root bypasses directory permissions")
+    root = tmp_path / "root"
+    blocked = root / "blocked"
+    blocked.mkdir(parents=True)
+    (blocked / "hidden.txt").write_text("manuscript", encoding="utf-8")
+    (blocked / "hidden.txt").chmod(0o644)
+    visible = root / "visible.txt"
+    visible.write_text("manuscript", encoding="utf-8")
+    visible.chmod(0o644)
+    blocked.chmod(0o000)
+    try:
+        with caplog.at_level(logging.WARNING):
+            exposed = world_readable_files(root)
+        assert visible in exposed
+        assert any("could not enter" in rec.message for rec in caplog.records)
+    finally:
+        blocked.chmod(0o755)
