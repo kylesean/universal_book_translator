@@ -439,6 +439,43 @@ def test_region_floor_lets_a_small_print_block_fit(monkeypatch: pytest.MonkeyPat
     assert fitted[0].size < 7.0
 
 
+def test_plan_blocks_applies_the_region_floor(monkeypatch: pytest.MonkeyPatch) -> None:
+    """M2 end-to-end: ``_plan_blocks`` resolves the floor from ``layout_role``.
+
+    A caption whose text only fits below the body floor renders (the caption
+    floor applies) while the identical body block spills — the evidence the
+    synthetic corpora cannot provide, because captions/footnotes are classified
+    only by docling, which the ``dev`` extra does not install.
+    """
+    from ubt.adapters.pdf.rigid.typesetter import RigidTypesetter
+    from ubt.adapters.pdf.rigid.zones import build_zones
+    from ubt.core.ir.models import LayoutRole
+
+    def _fake_flow(
+        self: RigidTypesetter, text: str, boxes: object, size: float
+    ) -> list[str] | None:
+        return [text] if size <= 6.8 else None
+
+    monkeypatch.setattr(RigidTypesetter, "_flow", _fake_flow)
+    src = "Figure 1: a caption long enough to need shrinking below the body floor."
+    facts = PageFacts(
+        page=1, width=460.0, height=660.0, lines=(LineBox(src, (100.0, 400.0, 400.0, 409.0)),)
+    )
+    caption = _block("cap", src, page=1, y0=400.0, y1=409.0).model_copy(
+        update={"layout_role": LayoutRole.CAPTION}
+    )
+    body = _block("body", src, page=1, y0=400.0, y1=409.0).model_copy(
+        update={"layout_role": LayoutRole.BODY}
+    )
+
+    ts = RigidTypesetter(target_lang="zh")
+    _paints, cap_report = ts._plan_blocks([caption], build_zones({1: facts}, [caption]), {1: 660.0})
+    _paints2, body_report = ts._plan_blocks([body], build_zones({1: facts}, [body]), {1: 660.0})
+    assert "cap" in cap_report.rendered_blocks
+    assert "body" not in body_report.rendered_blocks
+    assert ("body", "spill") in body_report.skipped
+
+
 def _head_block() -> IRBlock:
     return IRBlock(
         id="h",

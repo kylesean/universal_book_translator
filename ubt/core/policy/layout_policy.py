@@ -541,14 +541,18 @@ CALIBRATION: dict[str, KnobMeta] = {
         S,
         "6.5 caption-region floor (M2 region tiering): captions are set in small "
         "type in the source, and one that cannot fit the 7.0 body floor fails "
-        "closed and leaves the source visible. Aligned with FIT_MIN_FONT_PT; no "
-        "dedicated sweep yet, so it stays single-doc",
+        "closed and leaves the source visible. Aligned with FIT_MIN_FONT_PT; the "
+        "wiring is proven end-to-end by tests/unit/test_rigid_zones.py::"
+        "test_plan_blocks_applies_the_region_floor (the synthetic corpora carry no "
+        "captions — docling-only classification), so the value itself stays "
+        "single-doc",
     ),
     "RIGID_FOOTNOTE_MIN_FONT_PT": KnobMeta(
         S,
         "6.5 footnote-region floor (M2 region tiering), reusing the FIT_MIN_FONT_PT "
         "value validated on chapter-1 tiny print; the body floor would fail "
-        "footnotes closed and leave the source visible",
+        "footnotes closed and leave the source visible. Wiring proven end-to-end "
+        "by tests/unit/test_rigid_zones.py::test_plan_blocks_applies_the_region_floor",
     ),
     "ROW_MERGE_GAP_PT": KnobMeta(
         H,
