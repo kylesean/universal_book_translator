@@ -78,10 +78,12 @@ async def test_anthropic_generate_wraps_system_prompt_with_ephemeral_cache() -> 
     mock_client.post = AsyncMock(return_value=fake_response)
     provider._client = mock_client
 
-    text, finish_reason = await provider._generate_anthropic_meta(
+    # Exercise the live transport path (the provider's redundant meta shim was
+    # removed): _select_transport routes api_mode="anthropic" here.
+    text, finish_reason = await provider._anthropic_transport.generate_with_finish_reason(
         prompt="Translate this",
         system_prompt="You are a professional translator.",
-        target_model="claude-3-5-sonnet-20241022",
+        model="claude-3-5-sonnet-20241022",
         temperature=0.3,
         max_tokens=2048,
     )

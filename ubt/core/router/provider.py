@@ -362,52 +362,6 @@ class OpenAICompatibleProvider(BaseModelProvider):
         self._anthropic_transport._client = value
         self._responses_transport._client = value
 
-    def _sync_transport_clients(self) -> None:
-        client = self._get_client()
-        self._chat_transport._client = client
-        self._anthropic_transport._client = client
-        self._responses_transport._client = client
-
-    async def _generate_anthropic_meta(
-        self,
-        prompt: str,
-        system_prompt: str | None,
-        target_model: str,
-        temperature: float | None,
-        max_tokens: int | None,
-        reasoning_effort: str | None = None,
-    ) -> tuple[str, str | None]:
-        self._sync_transport_clients()
-        return await self._anthropic_transport.generate_with_finish_reason(
-            prompt=prompt,
-            system_prompt=system_prompt,
-            model=target_model,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            reasoning_effort=reasoning_effort,
-        )
-
-    async def _generate_responses_meta(
-        self,
-        prompt: str,
-        system_prompt: str | None,
-        target_model: str,
-        temperature: float | None,
-        max_tokens: int | None,
-        reasoning_effort: str | None = None,
-        images_b64_png: list[str] | None = None,
-    ) -> tuple[str, str | None]:
-        self._sync_transport_clients()
-        return await self._responses_transport._generate_responses_meta(
-            prompt=prompt,
-            system_prompt=system_prompt,
-            target_model=target_model,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            reasoning_effort=reasoning_effort,
-            images_b64_png=images_b64_png,
-        )
-
     def _select_transport(self, model: str | None = None) -> BaseTransport:
         target_model = model or self._default_model
         eff_mode = self._api_mode
