@@ -88,7 +88,7 @@ async def test_html_bilingual_render_preserves_markup(tmp_path: Path) -> None:
     assert "<h1>Big Headline</h1>" in content
     assert "译：Big Headline" in content
     assert '<p class="lead">First paragraph with words.</p>' in content
-    assert 'class="lead ubt-target"' in content
+    assert 'class="lead ubt-bilingual-target"' in content
     # source markup untouched: <pre>/<code> preserved and NOT translated
     assert "<pre><code>const x = 1;</code></pre>" in content
     assert "译：const" not in content
@@ -126,7 +126,7 @@ async def test_html_table_injection_keeps_column_count(tmp_path: Path) -> None:
         direct_cells = tr.find_all(["td", "th"], recursive=False)
         assert len(direct_cells) == 2, direct_cells
         for cell in direct_cells:
-            target = cell.find("div", class_="ubt-target")
+            target = cell.find("div", class_="ubt-bilingual-target")
             assert target is not None, cell
             assert target.get_text().startswith("译：")
 
@@ -308,6 +308,6 @@ async def test_html_ordered_list_bilingual_injection_inside_li(tmp_path: Path) -
     assert len(direct_lis) == 2, f"Expected 2 <li> in <ol>, got {len(direct_lis)}"
     # Target translation must be injected inside each <li> as a div
     for li in direct_lis:
-        div = li.find("div", class_="ubt-target")
-        assert div is not None, f"Expected .ubt-target div inside li, got: {li}"
+        div = li.find("div", class_="ubt-bilingual-target")
+        assert div is not None, f"Expected .ubt-bilingual-target div inside li, got: {li}"
         assert div.get_text().startswith("译：")

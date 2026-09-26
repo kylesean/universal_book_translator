@@ -46,7 +46,7 @@ from ubt.core.ir.models import (
     FlowID,
     IRBlock,
 )
-from ubt.core.ir.serializer import compute_file_sha256
+from ubt.core.ir.serializer import compute_file_sha256_cached
 
 logger = logging.getLogger(__name__)
 
@@ -269,7 +269,7 @@ class DOCXAdapter(BaseDocumentAdapter):
             raise DocumentParseError(f"DOCX file not found: {input_path}")
 
         # Off-loop: compute doc_id sha in thread pool to avoid blocking the event loop on large files.
-        doc_id = await asyncio.to_thread(compute_file_sha256, input_path)
+        doc_id = await asyncio.to_thread(compute_file_sha256_cached, input_path)
         title = input_path.stem
         try:
             doc = Document(str(input_path))

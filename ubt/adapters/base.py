@@ -14,6 +14,10 @@ if TYPE_CHECKING:
     from ubt.core.engine.ledger import SQLiteJobLedger
     from ubt.core.ports import AdapterRuntimeConfig
 
+#: CSS class every adapter puts on an injected bilingual target node. One name
+#: for HTML and EPUB so a stylesheet (and any consumer) can target both.
+BILINGUAL_TARGET_CLASS = "ubt-bilingual-target"
+
 
 class BaseDocumentAdapter(ABC):
     """Unified SPI abstraction for all document format adapters.

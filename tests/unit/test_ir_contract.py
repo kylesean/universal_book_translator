@@ -62,31 +62,6 @@ def test_derive_roles_flow_mapping() -> None:
     assert formula.structure_role == StructureRole.FORMULA
 
 
-def test_derive_policy_blocks_non_text() -> None:
-    formula = _block(block_type=BlockType.FORMULA)
-    formula.derive_roles()
-    assert formula.derive_policy() is False
-    assert formula.policy_reason is not None
-    assert formula.effective_should_translate() is False
-
-
-def test_derive_policy_blocks_header_footer() -> None:
-    b = _block(layout_role=LayoutRole.FOOTER)
-    assert b.derive_policy() is False
-
-
-def test_derive_policy_keeps_prose() -> None:
-    b = _block()
-    b.derive_roles()
-    assert b.derive_policy() is True
-    assert b.policy_reason is None
-
-
-def test_derive_policy_never_overwrites_explicit() -> None:
-    b = _block(block_type=BlockType.FORMULA, policy_translate=True)
-    assert b.derive_policy() is True
-
-
 def test_validate_contract_bbox() -> None:
     bad = _block(bbox=BoundingBox(page=1, x0=10.0, y0=10.0, x1=5.0, y1=20.0))
     assert any("non-positive area" in v for v in bad.validate_contract())

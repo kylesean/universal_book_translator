@@ -18,7 +18,7 @@ from typing import Any
 from bs4 import BeautifulSoup, Tag
 from bs4.element import AttributeValueList
 
-from ubt.adapters.base import BaseDocumentAdapter
+from ubt.adapters.base import BILINGUAL_TARGET_CLASS, BaseDocumentAdapter
 from ubt.adapters.epub.adapter import (
     BLOCK_TAGS,
     determine_flow_id,
@@ -34,12 +34,12 @@ from ubt.core.ir.models import (
     ChapterMeta,
     IRBlock,
 )
-from ubt.core.ir.serializer import compute_file_sha256
+from ubt.core.ir.serializer import compute_file_sha256_cached
 
 logger = logging.getLogger(__name__)
 
 # Marker class added to injected bilingual target nodes.
-_TARGET_CSS_CLASS = "ubt-target"
+_TARGET_CSS_CLASS = BILINGUAL_TARGET_CLASS
 
 _HEADING_TAGS = {"h1", "h2", "h3", "h4", "h5", "h6"}
 
@@ -69,7 +69,7 @@ class HTMLAdapter(BaseDocumentAdapter):
         """Extract a single-chapter manifest titled from <title>."""
         # Off-loop: soup parse and sha computation run in thread pool to prevent blocking the event loop on large HTML documents.
         soup = await asyncio.to_thread(self._load_soup, input_path)
-        doc_id = await asyncio.to_thread(compute_file_sha256, input_path)
+        doc_id = await asyncio.to_thread(compute_file_sha256_cached, input_path)
 
         title_tag = soup.title
         title = title_tag.get_text().strip() if title_tag else input_path.stem

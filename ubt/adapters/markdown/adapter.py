@@ -21,7 +21,7 @@ from ubt.core.ir.models import (
     FlowID,
     IRBlock,
 )
-from ubt.core.ir.serializer import compute_file_sha256
+from ubt.core.ir.serializer import compute_file_sha256_cached
 
 # Project Gutenberg structural markers: transcribing these verbatim is the
 # only correct rendering, and LLM translation of them is wasted spend (they
@@ -119,7 +119,7 @@ class MarkdownAdapter(BaseDocumentAdapter):
             raise DocumentParseError(f"Input file not found: {input_path}")
 
         # Off-loop: sha computation and file read run in thread pool to prevent blocking the event loop on large sources.
-        doc_id = await asyncio.to_thread(compute_file_sha256, input_path)
+        doc_id = await asyncio.to_thread(compute_file_sha256_cached, input_path)
         content = await asyncio.to_thread(input_path.read_text, encoding="utf-8", errors="replace")
         lines = content.split("\n")
 

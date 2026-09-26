@@ -97,33 +97,6 @@ class StructureRole(StrEnum):
     CODE = "code"
 
 
-# Layout roles that never enter translation (policy derivation fallback).
-_NON_TRANSLATABLE_LAYOUT_ROLES = frozenset(
-    {
-        LayoutRole.HEADER,
-        LayoutRole.FOOTER,
-        LayoutRole.PAGE_NUMBER,
-    }
-)
-# Semantic roles that never enter translation (policy derivation fallback).
-_NON_TRANSLATABLE_SEMANTIC_ROLES = frozenset(
-    {
-        SemanticRole.REFERENCE,
-        SemanticRole.METADATA,
-        SemanticRole.AFFILIATION,
-    }
-)
-# Block types that keep origin unless an explicit verdict says otherwise.
-_NON_TRANSLATABLE_BLOCK_TYPES = frozenset(
-    {
-        BlockType.FORMULA,
-        BlockType.CODE,
-        BlockType.IMAGE,
-        BlockType.TABLE,
-    }
-)
-
-
 class BoundingBox(BaseModel):
     """Bounding box for fixed layout formats (e.g. PDF)."""
 
@@ -216,27 +189,6 @@ class IRBlock(BaseModel):
             self.structure_role = _structure_role_from_block_type(self.block_type)
         if self.semantic_role is None:
             self.semantic_role = SemanticRole.MAIN_TEXT
-
-    def derive_policy(self, reason: str = "derived from roles") -> bool:
-        """Derive policy_translate from roles when undecided.
-
-        Returns the effective verdict. Explicit verdicts are never
-        overwritten; non-text block types (formula/code/image/table) keep
-        origin unless a verdict says otherwise.
-        """
-        if self.policy_translate is not None:
-            return self.policy_translate
-        verdict = True
-        if (
-            self.layout_role in _NON_TRANSLATABLE_LAYOUT_ROLES
-            or self.semantic_role in _NON_TRANSLATABLE_SEMANTIC_ROLES
-            or self.block_type in _NON_TRANSLATABLE_BLOCK_TYPES
-        ):
-            verdict = False
-        self.policy_translate = verdict
-        if not verdict:
-            self.policy_reason = reason
-        return verdict
 
     def validate_contract(self) -> list[str]:
         """Check document-v1 invariants; returns violation messages (empty = ok)."""

@@ -15,7 +15,7 @@ from urllib.parse import unquote
 from bs4 import BeautifulSoup, Tag
 from bs4.element import NavigableString
 
-from ubt.adapters.base import BaseDocumentAdapter
+from ubt.adapters.base import BILINGUAL_TARGET_CLASS, BaseDocumentAdapter
 from ubt.core.cleaners.dynamic_boilerplate import (
     BoilerplateFingerprint,
     DynamicBoilerplateHarvester,
@@ -34,7 +34,7 @@ from ubt.core.ir.models import (
     FlowID,
     IRBlock,
 )
-from ubt.core.ir.serializer import compute_file_sha256
+from ubt.core.ir.serializer import compute_file_sha256_cached
 
 
 def _parse_xhtml(raw_html: str) -> BeautifulSoup:
@@ -208,7 +208,7 @@ class EPUBAdapter(BaseDocumentAdapter):
             raise DocumentParseError(f"EPUB file not found: {input_path}")
 
         # Off-loop: compute doc_id sha in thread pool to avoid blocking the event loop on multi-megabyte EPUBs.
-        doc_id = await asyncio.to_thread(compute_file_sha256, input_path)
+        doc_id = await asyncio.to_thread(compute_file_sha256_cached, input_path)
 
         try:
             with zipfile.ZipFile(input_path) as zf:
@@ -695,7 +695,7 @@ class EPUBAdapter(BaseDocumentAdapter):
                     for p_text in paras:
                         parsed_para = BeautifulSoup(sanitize_html_fragment(p_text), "html.parser")
                         new_tag = soup.new_tag("div")
-                        new_tag["class"] = "ubt-bilingual-target"
+                        new_tag["class"] = BILINGUAL_TARGET_CLASS
                         for child in list(parsed_para.contents):
                             new_tag.append(child)
                         leaf.append(new_tag)
@@ -705,7 +705,7 @@ class EPUBAdapter(BaseDocumentAdapter):
                     for p_text in paras:
                         parsed_para = BeautifulSoup(sanitize_html_fragment(p_text), "html.parser")
                         new_tag = soup.new_tag("p")
-                        new_tag["class"] = "ubt-bilingual-target"
+                        new_tag["class"] = BILINGUAL_TARGET_CLASS
                         for child in list(parsed_para.contents):
                             new_tag.append(child)
                         last_node.insert_after(new_tag)
@@ -722,7 +722,7 @@ class EPUBAdapter(BaseDocumentAdapter):
                 # Inside a table cell or ordered list: append a <div> *inside* the element so the
                 # row/column structure and list numbering are preserved; otherwise match leaf tag.
                 new_tag = soup.new_tag("div") if is_internal_child else soup.new_tag(leaf.name)
-                new_tag["class"] = "ubt-bilingual-target"
+                new_tag["class"] = BILINGUAL_TARGET_CLASS
                 parsed_fragment = BeautifulSoup(sanitized_target, "html.parser")
                 for child in list(parsed_fragment.contents):
                     new_tag.append(child)
