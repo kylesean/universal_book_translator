@@ -40,7 +40,7 @@ def test_anchored_floor_is_registered_and_in_force() -> None:
     from ubt.adapters.pdf.rigid.typesetter import RigidTypesetter
 
     anchored_default = inspect.signature(RigidTypesetter.__init__).parameters["min_font_pt"].default
-    assert anchored_default == policy.RIGID_MIN_FONT_PT == 7.5
+    assert anchored_default == policy.RIGID_MIN_FONT_PT == 7.0
     # Registered (name -> calibration note) and distinguishable from the
     # FlowFitter default the anchored engine deliberately overrides.
     assert "RIGID_MIN_FONT_PT" in CALIBRATION

@@ -140,12 +140,44 @@ def measure_ratio(
     }
 
 
+def _parse_pages(spec: str | None, total_pages: int) -> list[int]:
+    """Parse a 1-based page subset like ``1-6`` or ``1,3,5``; ``None`` = all pages.
+
+    Large two-column corpora make a full sweep take tens of minutes because
+    ``extract_pages`` runs per (floor, ratio) cell; a page subset keeps the
+    second-corpus check (protocol section 2 wants 2+ documents) tractable.
+    """
+    if spec is None:
+        return list(range(1, total_pages + 1))
+    wanted: set[int] = set()
+    for part in spec.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            lo, hi = (int(x) for x in part.split("-", 1))
+            if lo > hi:
+                raise ValueError(f"invalid page range {part!r}: {lo} > {hi}")
+            wanted.update(range(lo, hi + 1))
+        else:
+            wanted.add(int(part))
+    pages = sorted(p for p in wanted if 1 <= p <= total_pages)
+    if not pages:
+        raise ValueError(f"page selection {spec!r} selects no page in 1..{total_pages}")
+    return pages
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="rigid coverage vs target length, per font floor")
     parser.add_argument("--ledger", type=Path, required=True, help="SQLite job ledger")
     parser.add_argument("--job-id", required=True, help="job id inside that ledger")
     parser.add_argument(
         "--corpus", type=Path, default=Path("tests/fixtures/synthetic-mono.pdf"), help="source PDF"
+    )
+    parser.add_argument(
+        "--pages",
+        default=None,
+        help="1-based page subset, e.g. '1-6' or '1,3,5' (default: all pages)",
     )
     parser.add_argument(
         "--floors",
@@ -169,9 +201,15 @@ def main() -> int:
 
     with pikepdf.open(str(args.corpus)) as pdf:
         total_pages = len(pdf.pages)
-    page_numbers = list(range(1, total_pages + 1))
+    try:
+        page_numbers = _parse_pages(args.pages, total_pages)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    selected = set(page_numbers)
+    base = [b for b in base if b.bbox is None or b.bbox.page in selected]
 
-    print(f"corpus={args.corpus} pages={total_pages} blocks={len(base)}")
+    print(f"corpus={args.corpus} pages={page_numbers} blocks={len(base)}")
     print(f"types: {dict(collections.Counter(str(b.block_type) for b in base))}")
     print(f"preserved-by-design reasons (engine list): {sorted(PRESERVED)}")
 

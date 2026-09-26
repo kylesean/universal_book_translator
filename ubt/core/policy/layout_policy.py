@@ -254,7 +254,11 @@ FIT_PRECISION_PT = 0.1
 # This module's registry discipline forbids. Deliberately distinct
 # from FIT_MIN_FONT_PT: rigid paint-back shrinks text inside the source
 # page's own zones, where the 6.5pt footnote floor reads as damage.
-RIGID_MIN_FONT_PT = _read_env_float("UBT_RIGID_MIN_FONT_PT", 7.5)
+# 7.0 (2026-09-27): lowered from 7.5 after the coverage sweep showed 7.5 sits
+# past the spill cliff on two corpora (single- and two-column). Blocks that need
+# <7.5pt now render instead of failing closed to source-visible; see the
+# CALIBRATION rationale and scripts/rigid_coverage_sweep.py.
+RIGID_MIN_FONT_PT = _read_env_float("UBT_RIGID_MIN_FONT_PT", 7.0)
 # P0 complex-page nets: row-fragment glue. Thresholds measured on chapter-1
 # (good: coverage 0.77-1.0) vs book2 p31 (bad: pairs down to 0.2); gap cap
 # sits between word gaps (<10pt) and column gutters.
@@ -495,20 +499,20 @@ CALIBRATION: dict[str, KnobMeta] = {
     "FIT_MIN_FONT_PT": KnobMeta(
         S,
         "6.5 footnote floor validated on chapter-1 tiny print — FlowFitter default "
-        "only; the rigid engine runs RIGID_MIN_FONT_PT (7.5) instead",
+        "only; the rigid engine runs RIGID_MIN_FONT_PT (7.0) instead",
     ),
     "FIT_PRECISION_PT": KnobMeta(P, "0.1 matches Typst :.1f emit rounding by construction"),
     "RIGID_MIN_FONT_PT": KnobMeta(
         S,
-        "7.5 rigid-engine floor extracted from the typesetter's inline literal "
-        "(in force on every rigid render). Matrix sweep by "
-        "scripts/rigid_coverage_sweep.py on synthetic-mono (251 blocks / 13 pp, "
-        "2026-09-27): latin expansion holds ~74% coverage to ratio 1.4 at floor "
-        "7.0 but falls 74%->26% above ratio 1.15 at this 7.5 default, and the cjk "
-        "en->zh case drops 74%->27% above ratio 0.6 — so the default sits past "
-        "the knee, and this floor (not margin_reclaim_pt) is the rigid capacity "
-        "knob. Lowering it is a value change that needs a golden re-record plus "
-        "the section 4.4 visual veto (LAYOUT_PRESERVATION_MASTERPLAN section 3.4)",
+        "7.0 rigid-engine floor, lowered from 7.5 on 2026-09-27. Two-corpus matrix "
+        "sweep by scripts/rigid_coverage_sweep.py: synthetic-mono (251 blocks / "
+        "13 pp) latin expansion held ~74% to ratio 1.4 at 7.0 but fell 74%->26% "
+        "above 1.15 at 7.5; synthetic-duo pages 1-6 (201 blocks, two-column) held "
+        "56% vs 40% at latin ratio 1.2 and 41% vs 32% at cjk ratio 0.6. So 7.5 sat "
+        "past the knee; this floor, not margin_reclaim_pt, is the rigid capacity "
+        "knob. Blocks needing <7.5pt now render instead of failing closed to "
+        "source-visible. Real-corpus (ForMaT) confirmation and the section 4.4 "
+        "human visual pass remain open; override per-run with UBT_RIGID_MIN_FONT_PT",
     ),
     "ROW_MERGE_GAP_PT": KnobMeta(
         H,
