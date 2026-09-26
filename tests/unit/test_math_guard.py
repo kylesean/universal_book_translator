@@ -53,6 +53,9 @@ def test_clean_prose_and_headings_negative() -> None:
         "3 - THE MECHANISM",
         "(1) (1) Layer 1: K , V",
         "(2) (2) Layer 2: K , V",
+        # 3 letters but only ONE isolated single letter: the "3+ isolated
+        # letters" rung counted all letters and skipped a real two-word fragment.
+        "I am",
     ]:
         assert not looks_like_math_debris(sample), sample
 

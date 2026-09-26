@@ -35,6 +35,21 @@ def test_glossary_drift_detects_a_wrong_rendering() -> None:
     assert len(wrong) == 1 and wrong[0].drifted
 
 
+def test_alias_equal_to_another_entry_canonical_is_not_a_violation() -> None:
+    """A target surface that is another entry's canonical rendering is approved.
+
+    The rewriter's own global guard leaves it alone, so the span detector must
+    not disagree and ask repair to "fix" an accepted term.
+    """
+    from ubt.core.qe.term_drift import detect_target_term_violations
+
+    glossary = [
+        {"source": "alpha", "translation": "甲", "aliases": ["Beta"]},
+        {"source": "beta", "translation": "Beta", "aliases": []},
+    ]
+    assert detect_target_term_violations("Beta", glossary) == ()
+
+
 def test_glossary_enforcer_alias_canonicalization() -> None:
     """Verify that non-preferred aliases and synonyms are replaced by canonical translations."""
     glossary = [

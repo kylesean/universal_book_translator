@@ -129,9 +129,41 @@ _CN_NUMERAL_CONTEXT_RE = re.compile(
     rf"|[{_CN_NUMERAL_CHARS}]+(?={_CN_MEASURE_RE})"
     rf"|[{_CN_NUMERAL_CHARS}]{{2,}}(?![\u4e00-\u9fff])"
 )
-# Century/decade idiom: '20世纪80年代' == '1980年代' == EN 'the 1980s'.
-# (century - 1) * 100 + decade, e.g. 20世纪80年代 -> 1980年代.
-_CN_CENTURY_DECADE_RE = re.compile(r"(\d{1,2})\s*世纪\s*(\d{1,2})\s*年代")
+# Century/decade idiom: '20世纪80年代' == '二十世纪八十年代' == EN 'the 1980s'.
+# (century - 1) * 100 + decade, e.g. 20世纪80年代 -> 1980年代. Either side may be
+# written in Chinese numerals, so the character class accepts both scripts.
+_CN_CENTURY_DECADE_RE = re.compile(
+    rf"([0-9{_CN_NUMERAL_CHARS}]{{1,3}})\s*世纪\s*([0-9{_CN_NUMERAL_CHARS}]{{1,3}})\s*年代"
+)
+
+
+def _cn_or_ascii_value(s: str) -> int:
+    """Value of a run written in either ASCII digits or Chinese numerals."""
+    return int(s) if s.isdigit() else _cn_numeral_value(s)
+
+
+# Scientific notation is a *number*, not a digit run plus a stray digit: '1e5'
+# denotes 100000, so a target that writes the expanded value ('100000') is
+# correct and must not be reported as dropping '1' and '5'. Expanded for the
+# match-only view on both sides so either spelling satisfies the gate.
+_SCI_NOTATION_RE = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)[eE]([+-]?\d+)(?!\w)")
+
+
+def _expand_scientific_not(text: str) -> str:
+    """Rewrite ``NeM`` to its expanded decimal string (match-only view)."""
+
+    def _repl(match: re.Match[str]) -> str:
+        try:
+            exponent = int(match.group(2))
+            # Bound the expansion: a pathological exponent would otherwise build
+            # a multi-megabyte string (or hang) in a match-only preparation step.
+            if abs(exponent) > 1000:
+                return match.group(0)
+            return format(Decimal(match.group(1)) * (Decimal(10) ** exponent), "f")
+        except (ValueError, ArithmeticError):
+            return match.group(0)
+
+    return _SCI_NOTATION_RE.sub(_repl, text)
 
 # Locale separator canonicalization: '1,500' (EN thousands),
 # '1.500' (DE thousands) and decimal '15,6' (DE/FR) must all survive the
@@ -186,18 +218,20 @@ def normalize_for_numeric_matching(text: str, lang: str = "zh") -> str:
     canonicalization.
     """
     text = text.translate(_FULLWIDTH_DIGITS)
+    text = _expand_scientific_not(text)
     text = _SUB_SUP_DIGITS_RE.sub(lambda m: _SUB_SUP_DIGITS_MAP[m.group(0)], text)
     if lang == "zh" or any(c in text for c in _CN_DIGIT_VALUES):
-        text = _CN_NUMERAL_CONTEXT_RE.sub(lambda m: str(_cn_numeral_value(m.group(0))), text)
-        # Century/decade idiom: Chinese renders "the 1980s" as '20世纪80年代' (or
-        # '1980年代'), and both are correct. Rewriting the century form to its
-        # four-digit decade is a match-only equivalence, so the source token
-        # '1980' is found instead of the translation being reported as a dropped
-        # number. The numeric gate must accept the idiomatic form the model
-        # produces, or it quarantines a correct sentence.
+        # Century/decade idiom BEFORE the context normaliser: the latter can
+        # convert only one of the two numerals ('二十世纪八十年代' ->
+        # '20世纪八十年代'), after which neither the Chinese nor the digit-only
+        # pattern can fold the other side.
         text = _CN_CENTURY_DECADE_RE.sub(
-            lambda m: f"{(int(m.group(1)) - 1) * 100 + int(m.group(2))}年代", text
+            lambda m: (
+                f"{(_cn_or_ascii_value(m.group(1)) - 1) * 100 + _cn_or_ascii_value(m.group(2))}年代"
+            ),
+            text,
         )
+        text = _CN_NUMERAL_CONTEXT_RE.sub(lambda m: str(_cn_numeral_value(m.group(0))), text)
 
         def _scale_sequence(m: re.Match[str]) -> str:
             # Sum the whole adjacent run: "1亿2000万" is 120000000, not
@@ -464,9 +498,9 @@ class NumericConsistencyValidator(ContentValidator):
         # here: folding before tokenization would merge '10²' into the phantom
         # token '102', and since those characters are not in \d's class they
         # are simply not numeric tokens on the source side.
+        src_view = _expand_scientific_not(original.translate(_FULLWIDTH_DIGITS))
         src_nums = {
-            canonicalize_numeric_token(m)
-            for m in _NUM.findall(original.translate(_FULLWIDTH_DIGITS))
+            canonicalize_numeric_token(m) for m in _NUM.findall(src_view)
         }
         # Residual ambiguity: a dot followed by exactly three digits is
         # BOTH a German-style thousands separator and a three-decimal
@@ -478,7 +512,7 @@ class NumericConsistencyValidator(ContentValidator):
         # the target denotes either value. A genuinely different value
         # denotes neither and is still caught.
         ambiguous_readings: dict[str, set[str]] = {}
-        for match in _NUM.findall(original.translate(_FULLWIDTH_DIGITS)):
+        for match in _NUM.findall(src_view):
             if _THOUSANDS_DOT_RE.search(match):
                 readings = {_to_decimal(canonicalize_numeric_token(match)), _to_decimal(match)}
                 values = {_canon_value(v) for v in readings if v is not None}
@@ -510,7 +544,7 @@ class NumericConsistencyValidator(ContentValidator):
         exempt_numbers: set[str] = set()
         if exempt_spans:
             occurrences: dict[str, list[tuple[int, int]]] = {}
-            for m in _NUM.finditer(original.translate(_FULLWIDTH_DIGITS)):
+            for m in _NUM.finditer(src_view):
                 canon = canonicalize_numeric_token(m.group(0))
                 if canon:
                     occurrences.setdefault(canon, []).append((m.start(), m.end()))

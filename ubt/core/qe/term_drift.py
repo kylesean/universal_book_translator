@@ -269,11 +269,20 @@ def detect_target_term_violations(
     if target_protected is None:
         target_protected = extract_protected_spans(target_text)
 
+    # A surface that is another entry's canonical rendering (or inflected
+    # variant) is approved globally: the rewriter's own two-pass guard leaves it
+    # alone, so flagging it here would ask the repair model to "fix" a term the
+    # exporter deliberately accepts.
+    globally_approved: set[str] = set()
+    for other in terms:
+        globally_approved.add(other.expected)
+        globally_approved.update(other.inflected_variants)
+
     violations: list[TargetTermViolation] = []
     for term in terms:
         approved_target = {term.expected, *term.inflected_variants}
         for alias in term.aliases:
-            if alias in approved_target:
+            if alias in approved_target or alias in globally_approved:
                 continue
             hits = tuple(find_term_occurrences(target_text, alias, target_protected))
             if hits:

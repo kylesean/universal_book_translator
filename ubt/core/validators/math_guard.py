@@ -39,7 +39,6 @@ _CITATION_STRIP_RE = re.compile(r"\[\s*\d+(?:\s*[-–]\s*\d+)?(?:\s*,\s*\d+(?:\s
 # punctuation); isolated-letter density carries those cases instead.
 _MATH_STRONG_CHARS = frozenset("=^_{}[]()\\/√∫∑∏∂∞∈∀∃×÷:;…")
 _SUBSCRIPT_RE = re.compile(r"[A-Za-z]\s*[_^]")
-_ISOLATED_LETTER_RE = re.compile(r"[A-Za-z]")
 _PUNCT_STRIP = ".,;:!?()[]{}'\"-–—"
 # ASCII words (length 3+) that are ordinary prose, not equation fallout.
 # A single real word ("Layer", "Mechanism") vetoes the debris verdict —
@@ -557,7 +556,11 @@ def looks_like_math_debris(
         return True
     if _SUBSCRIPT_RE.search(t):
         return True
-    return len(_ISOLATED_LETTER_RE.findall(t)) >= _MIN_ISOLATED_LETTERS
+    # "3+ isolated letters" (the documented rung), i.e. single letters with word
+    # boundaries. Counting *all* letters (`[A-Za-z]`) misclassified wordless
+    # fragments like "I am" (3 letters, 0 math) as debris, and FORMULA blocks are
+    # skip-translate.
+    return len(_ISOLATED_LETTER_RE2.findall(t)) >= _MIN_ISOLATED_LETTERS
 
 
 def formula_target_intact(block: IRBlock) -> bool:

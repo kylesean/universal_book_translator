@@ -373,6 +373,24 @@ def test_century_decade_idiom_is_not_a_lost_number() -> None:
     assert normalize_for_numeric_matching("20世纪80年代", "zh") == "1980年代"
     # A genuinely wrong decade is still caught.
     assert not validator.validate("It happened in the 1990s.", "这发生在20世纪80年代。").is_valid
+    # Fully-Chinese numerals: '二十世纪八十年代' is the same idiom, and the
+    # context normaliser folds only one side, so the century pattern must run
+    # before it (or neither spelling matches and a correct translation is lost).
+    assert normalize_for_numeric_matching("二十世纪八十年代", "zh") == "1980年代"
+    assert validator.validate("It happened in the 1980s.", "这发生在二十世纪八十年代。").is_valid
+
+
+def test_scientific_notation_expands_to_its_value() -> None:
+    """'1e5' denotes 100000: writing the expanded value is not a dropped number.
+
+    ``_NUM`` tokenized '1e5' as '1' and '5', so a target correctly rendering
+    100000 shared no token and was quarantined as a lost number.
+    """
+    validator = NumericConsistencyValidator()
+    assert normalize_for_numeric_matching("1e5", "en") == "100000"
+    assert validator.validate("The speed is 1e5 m/s.", "速度是 100000 米/秒。").is_valid
+    # A genuinely different value is still caught.
+    assert not validator.validate("The speed is 1e5 m/s.", "速度是 1000 米/秒。").is_valid
 
 
 def test_numeric_consistency_validator_with_profiles() -> None:
