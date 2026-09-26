@@ -97,7 +97,6 @@ async def run_quality_gate_stage(
     actual_job_id = ctx.job_id
     fast_pass = ctx.fast_pass
     create_event_fn = ctx.create_event
-    qe_threshold = ctx.config.qe_threshold
     glossary_dicts = ctx.glossary_dicts or None
     qe_runner = ctx.qe_runner
     bind_glossary = getattr(qe_runner, "with_glossary", None)
@@ -186,15 +185,14 @@ async def run_quality_gate_stage(
                     b.error_flags.append("Visual witness discrepancy")
 
             b.mtqe_score = score
-            has_fatal_structural = has_structural_defect(b.error_flags)
-            if score >= qe_threshold and not has_fatal_structural:
-                b.status = BlockStatus.MTQE_PASSED
-                # Preserve the anchor-witness evidence appended above — it is
-                # provenance, not a rejection. Only the stale fast-pass reason
-                # that routed the block here is dropped, preserving the record.
-                b.error_flags = [f for f in b.error_flags if f == "Visual witness discrepancy"]
-            else:
-                b.status = BlockStatus.REPAIR_PENDING
+            # Suspicious blocks always enter repair. Every reason the FastPass
+            # filter can emit maps to a fatal structural marker, so no measured
+            # QE score may release one — the old
+            # ``score >= qe_threshold and not has_structural_defect`` branch was
+            # therefore unreachable, and its dead ``qe_threshold`` comparison
+            # only obscured the fact. The score (with the provenance boost
+            # above) is persisted for repair ranking and audit, not release.
+            b.status = BlockStatus.REPAIR_PENDING
 
             qe_updates.append(
                 {

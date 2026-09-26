@@ -339,7 +339,10 @@ async def test_quality_gate_anchor_stats_weighting(tmp_path: Path) -> None:
     job_id = "test_job_anchor"
 
     # Block 1: Suspicious by FastPass, strong anchor agreement (matched 9 / 10)
-    # MTQE base score = 0.72 (threshold is 0.75). With +0.05 boost -> 0.77 >= 0.75 -> MTQE_PASSED!
+    # MTQE base score = 0.72; the +0.05 dual-witness boost lands 0.77. The QE
+    # score is persisted for repair ranking, but a FastPass-rejected block is
+    # never released by it (`score >= qe_threshold` could not fire with the real
+    # filter), so the block goes to REPAIR_PENDING.
     b1 = IRBlock(
         id="blk_anchor_pass",
         flow_id=FlowID.MAIN_STORY,
@@ -436,7 +439,9 @@ async def test_quality_gate_anchor_stats_weighting(tmp_path: Path) -> None:
 
     updated_b1 = ledger.get_block("blk_anchor_pass")
     assert updated_b1 is not None
-    assert updated_b1.status == BlockStatus.MTQE_PASSED
+    # The dead release branch was removed: the boosted score is recorded, but a
+    # FastPass-rejected block is not released by it.
+    assert updated_b1.status == BlockStatus.REPAIR_PENDING
     assert updated_b1.mtqe_score == pytest.approx(0.77, abs=1e-3)
 
     updated_b2 = ledger.get_block("blk_anchor_review")

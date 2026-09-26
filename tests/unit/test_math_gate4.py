@@ -9,6 +9,8 @@ it) → repair re-masks from source (self-healing).
 import asyncio
 from pathlib import Path
 
+import pytest
+
 from tests.stage_ctx_factory import build_stage_ctx, drain, inert_event
 from tests.unit.ir_seed import SeedDoc, seed_job
 from ubt.adapters.pdf.typst_reconstructor import (
@@ -136,6 +138,52 @@ def test_quality_gate_math_mismatch_is_repair_pending(tmp_path: Path) -> None:
     by_id = {b.id: b for b in ledger.get_all_blocks("job_gate4")}
     assert by_id["ch01#b001"].status is BlockStatus.REPAIR_PENDING
     assert any("Math span mismatch" in f for f in by_id["ch01#b001"].error_flags)
+    assert by_id["ch01#b002"].status is BlockStatus.MTQE_PASSED
+
+
+def test_quality_gate_never_releases_on_a_high_qe_score(tmp_path: Path) -> None:
+    """A perfect QE score must not release a FastPass-rejected block.
+
+    The real ``FastPassFilter`` emits only structural-fatal reasons, so the old
+    ``score >= qe_threshold`` release branch was unreachable. This pins the
+    corrected contract with the *production* filter and a runner that awards
+    1.0: the score is recorded for repair ranking, the status stays repair.
+    """
+    from ubt.core.qe.base import BaseQERunner
+
+    class _PerfectRunner(BaseQERunner):
+        async def score_pairs(self, pairs: list[dict[str, str]]) -> list[float]:
+            return [1.0 for _ in pairs]
+
+    ledger = SQLiteJobLedger(tmp_path / "no_release.sqlite")
+    seed_job(ledger, "job_no_release", _make_doc(), target_lang="zh")
+    doc = _make_doc()
+    echo = doc.blocks[0]  # source text echoed as the target
+    ledger.save_checkpoint(
+        block_id=echo.id,
+        target_text=echo.source_text,
+        draft_text=echo.source_text,
+        status=BlockStatus.DRAFTED,
+    )
+    ledger.save_checkpoint(
+        block_id="ch01#b002",
+        target_text="没有数学的普通散文。",
+        draft_text="没有数学的普通散文。",
+        status=BlockStatus.DRAFTED,
+    )
+    ctx = build_stage_ctx(
+        tmp_path,
+        ledger=ledger,
+        job_id="job_no_release",
+        fast_pass=_fp(),
+        qe_runner=_PerfectRunner(),
+        create_event=inert_event,
+    )
+    asyncio.run(drain(run_quality_gate_stage(ctx)))
+
+    by_id = {b.id: b for b in ledger.get_all_blocks("job_no_release")}
+    assert by_id[echo.id].status is BlockStatus.REPAIR_PENDING
+    assert by_id[echo.id].mtqe_score == pytest.approx(1.0)
     assert by_id["ch01#b002"].status is BlockStatus.MTQE_PASSED
 
 
