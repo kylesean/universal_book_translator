@@ -260,7 +260,7 @@ def test_crash_kill_resume_excludes_human_queue(tmp_path: Path) -> None:
 
 def test_schema_version_matches_migrations() -> None:
     """Guard against TARGET_SCHEMA_VERSION drift (must equal latest migration)."""
-    assert TARGET_SCHEMA_VERSION == 10
+    assert TARGET_SCHEMA_VERSION == 11
 
 
 class CountingProvider(MockModelProvider):

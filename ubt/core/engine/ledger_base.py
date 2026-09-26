@@ -30,7 +30,7 @@ from ubt.core.ir.models import (
     StyleMeta,
 )
 
-TARGET_SCHEMA_VERSION = 10
+TARGET_SCHEMA_VERSION = 11
 
 # Every column ``_row_to_block`` reads by name. Kept as a literal (not derived
 # from the CREATE statement) to guarantee all required schema fields are verified
@@ -121,7 +121,7 @@ def _upsert_blocks_batch(cursor: sqlite3.Cursor, job_id: str, blocks: Sequence[I
             mqm_severity, mqm_spans_json,
             updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-        ON CONFLICT(block_id) DO UPDATE SET
+        ON CONFLICT(job_id, block_id) DO UPDATE SET
             flow_id = excluded.flow_id,
             spine_index = excluded.spine_index,
             block_type = excluded.block_type,
@@ -129,14 +129,42 @@ def _upsert_blocks_batch(cursor: sqlite3.Cursor, job_id: str, blocks: Sequence[I
             style_json = excluded.style_json,
             source_text = excluded.source_text,
             skip_translate = excluded.skip_translate,
-            -- A block that NEWLY becomes verbatim (skip rules tightened since
-            -- the first ingest) must not keep its stale translation: the
-            -- excluded row already carries source as its target. Skip flags
-            -- that were already 1 stay non-destructive for resumed content.
+            -- Skip-flag transitions must drive status/target, or a resumed job
+            -- keeps stale state in both directions:
+            --  0 -> 1 (block NEWLY verbatim, e.g. skip rules tightened): the
+            --    excluded row already carries source as its target, so adopt it.
+            --  1 -> 0 (block NEWLY translatable, e.g. --translate-chrome): the
+            --    stale source-as-target and any MTQE_PASSED status would make
+            --    the block look finished and it would never be re-drafted, so
+            --    reset it to pending and discard the source echo. The export
+            --    completion floor only checks target-is-non-empty and does not
+            --    catch this.
+            status = CASE
+                WHEN excluded.skip_translate = 0 AND blocks.skip_translate = 1
+                THEN 'pending'
+                ELSE blocks.status
+            END,
             target_text = CASE
                 WHEN excluded.skip_translate = 1 AND blocks.skip_translate = 0
                 THEN excluded.target_text
+                WHEN excluded.skip_translate = 0 AND blocks.skip_translate = 1
+                THEN NULL
                 ELSE blocks.target_text
+            END,
+            draft_text = CASE
+                WHEN excluded.skip_translate = 0 AND blocks.skip_translate = 1
+                THEN NULL
+                ELSE blocks.draft_text
+            END,
+            mtqe_score = CASE
+                WHEN excluded.skip_translate = 0 AND blocks.skip_translate = 1
+                THEN NULL
+                ELSE blocks.mtqe_score
+            END,
+            error_flags_json = CASE
+                WHEN excluded.skip_translate = 0 AND blocks.skip_translate = 1
+                THEN '[]'
+                ELSE blocks.error_flags_json
             END,
             layout_role = excluded.layout_role,
             semantic_role = excluded.semantic_role,
@@ -173,6 +201,11 @@ class LedgerBase:
         # within one process: a job's writer lock keeps other processes from
         # writing its ledger underneath it.
         self._blocks_seq = 0
+        # Owning job of this ledger file, set by ``init_job_from_manifest``. It
+        # scopes block_id-keyed writes: block ids are content-derived and repeat
+        # across jobs, so an unscoped write on a multi-job file could hit the
+        # wrong job's row.
+        self._job_scope: str | None = None
         self._init_connection()
         if not read_only:
             self._init_db_with_migrations()
@@ -296,7 +329,7 @@ class LedgerBase:
                     );
 
                     CREATE TABLE IF NOT EXISTS blocks (
-                        block_id TEXT PRIMARY KEY,
+                        block_id TEXT NOT NULL,
                         job_id TEXT NOT NULL,
                         flow_id TEXT NOT NULL,
                         spine_index INTEGER NOT NULL,
@@ -322,6 +355,7 @@ class LedgerBase:
                         policy_translate INTEGER DEFAULT NULL,
                         policy_reason TEXT DEFAULT NULL,
                         provenance_json TEXT DEFAULT NULL,
+                        PRIMARY KEY (job_id, block_id),
                         FOREIGN KEY(job_id) REFERENCES job_meta(job_id)
                     );
 
@@ -340,7 +374,7 @@ class LedgerBase:
                     CREATE INDEX IF NOT EXISTS idx_blocks_job_mtqe ON blocks(job_id, mtqe_score);
                     CREATE INDEX IF NOT EXISTS idx_blocks_pending ON blocks(job_id, status, spine_index, block_id);
                     CREATE INDEX IF NOT EXISTS idx_blocks_rollup ON blocks(job_id, skip_translate, mtqe_score, status);
-                    PRAGMA user_version = 10;
+                    PRAGMA user_version = 11;
                 """)
                 current_version = TARGET_SCHEMA_VERSION
 
@@ -460,6 +494,79 @@ class LedgerBase:
                 )
                 conn.execute("PRAGMA user_version = 10;")
 
+            # Migration to Version 11: composite primary key (job_id, block_id).
+            # ``block_id`` is content-derived (``ch_001#b0001``), so two jobs over
+            # the same document produce identical block ids. With block_id as the
+            # sole PRIMARY KEY, ingesting the second job's blocks overwrote the
+            # first job's rows and left it with none of its own. SQLite cannot
+            # alter a primary key, so the table is rebuilt (create-copy-drop-
+            # rename); every block_id-keyed write is now scoped by job_id.
+            if current_version < 11:
+                conn.executescript("""
+                    ALTER TABLE blocks RENAME TO blocks_v10;
+                    CREATE TABLE blocks (
+                        block_id TEXT NOT NULL,
+                        job_id TEXT NOT NULL,
+                        flow_id TEXT NOT NULL,
+                        spine_index INTEGER NOT NULL,
+                        block_type TEXT NOT NULL DEFAULT 'narrative',
+                        bbox_json TEXT,
+                        style_json TEXT,
+                        source_text TEXT NOT NULL,
+                        draft_text TEXT,
+                        target_text TEXT,
+                        status TEXT NOT NULL,
+                        skip_translate INTEGER DEFAULT 0,
+                        glossary_hits_json TEXT,
+                        mtqe_score REAL,
+                        repair_rounds INTEGER DEFAULT 0,
+                        error_flags_json TEXT,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        tm_hit INTEGER DEFAULT 0,
+                        mqm_severity TEXT DEFAULT NULL,
+                        mqm_spans_json TEXT DEFAULT NULL,
+                        layout_role TEXT DEFAULT NULL,
+                        semantic_role TEXT DEFAULT NULL,
+                        structure_role TEXT DEFAULT NULL,
+                        policy_translate INTEGER DEFAULT NULL,
+                        policy_reason TEXT DEFAULT NULL,
+                        provenance_json TEXT DEFAULT NULL,
+                        PRIMARY KEY (job_id, block_id),
+                        FOREIGN KEY(job_id) REFERENCES job_meta(job_id)
+                    );
+                    INSERT INTO blocks (
+                        block_id, job_id, flow_id, spine_index, block_type,
+                        bbox_json, style_json, source_text, draft_text, target_text,
+                        status, skip_translate, glossary_hits_json, mtqe_score,
+                        repair_rounds, error_flags_json, updated_at, tm_hit,
+                        mqm_severity, mqm_spans_json, layout_role, semantic_role,
+                        structure_role, policy_translate, policy_reason, provenance_json
+                    )
+                    SELECT
+                        block_id, job_id,
+                        COALESCE(flow_id, 'main_story'),
+                        COALESCE(spine_index, 0),
+                        COALESCE(block_type, 'narrative'),
+                        bbox_json, style_json,
+                        COALESCE(source_text, ''),
+                        draft_text, target_text, status,
+                        COALESCE(skip_translate, 0),
+                        glossary_hits_json, mtqe_score,
+                        COALESCE(repair_rounds, 0),
+                        error_flags_json, updated_at,
+                        COALESCE(tm_hit, 0),
+                        mqm_severity, mqm_spans_json, layout_role, semantic_role,
+                        structure_role, policy_translate, policy_reason, provenance_json
+                    FROM blocks_v10;
+                    DROP TABLE blocks_v10;
+                    CREATE INDEX IF NOT EXISTS idx_block_status ON blocks(job_id, status);
+                    CREATE INDEX IF NOT EXISTS idx_block_flow ON blocks(job_id, flow_id, spine_index);
+                    CREATE INDEX IF NOT EXISTS idx_blocks_job_mtqe ON blocks(job_id, mtqe_score);
+                    CREATE INDEX IF NOT EXISTS idx_blocks_pending ON blocks(job_id, status, spine_index, block_id);
+                    CREATE INDEX IF NOT EXISTS idx_blocks_rollup ON blocks(job_id, skip_translate, mtqe_score, status);
+                    PRAGMA user_version = 11;
+                """)
+
             # Guard against TARGET_SCHEMA_VERSION drift: migrations above must
             # land exactly on the declared target, otherwise future restarts
             # silently skip new migrations.
@@ -489,6 +596,29 @@ class LedgerBase:
                     f"file to start fresh, or restore a backup of it.",
                     details={"missing_columns": missing, "db_version": final_version},
                 )
+
+    def _block_scope(self, conn: sqlite3.Connection, job_id: str | None) -> str | None:
+        """Resolve the job that scopes a block_id-keyed write.
+
+        An explicit ``job_id`` (which may be a doc_id alias) resolves first.
+        Otherwise the ledger's own job is used. A file holding several jobs with
+        no explicit scope is refused rather than guessed: block ids repeat
+        across jobs, so an unscoped write could corrupt another job's row.
+        """
+        if job_id:
+            return self._resolve_actual_job_id(conn, job_id)
+        if self._job_scope is not None:
+            return self._job_scope
+        rows = conn.execute("SELECT DISTINCT job_id FROM blocks LIMIT 2").fetchall()
+        if len(rows) == 1:
+            self._job_scope = str(rows[0]["job_id"])
+            return self._job_scope
+        if len(rows) > 1:
+            raise LedgerError(
+                "blocks table holds multiple jobs; pass job_id to scope the write",
+                details={"db_path": str(self.db_path)},
+            )
+        return None
 
     def _resolve_actual_job_id(self, conn: sqlite3.Connection, job_id: str) -> str:
         """Resolve exact job_id, falling back to latest job_id for doc_id without cross-job mixing."""

@@ -12,6 +12,7 @@ import pytest
 from tests.unit.ir_seed import SeedDoc, seed_job
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.ledger_base import _upsert_blocks_batch
+from ubt.core.exceptions import LedgerError
 from ubt.core.ir.models import (
     BlockStatus,
     BlockType,
@@ -595,7 +596,7 @@ def test_schema_migration_versioning_and_contract_columns(tmp_path: Path) -> Non
     with SQLiteJobLedger(db_path) as ledger, ledger._get_conn() as conn:
         cursor = conn.execute("PRAGMA user_version;")
         version = cursor.fetchone()[0]
-        assert version == 10
+        assert version == 11
         # v9: the draft keyset-pagination composite index must exist on a fresh DB.
         idx = {str(row["name"]) for row in conn.execute("PRAGMA index_list(blocks);").fetchall()}
         assert "idx_blocks_pending" in idx
@@ -674,7 +675,7 @@ def test_v2_to_v3_migration_adds_tm_hit_and_defaults_existing_rows(tmp_path: Pat
     legacy.close()
 
     with SQLiteJobLedger(db_path) as ledger, ledger._get_conn() as conn:
-        assert conn.execute("PRAGMA user_version;").fetchone()[0] == 10
+        assert conn.execute("PRAGMA user_version;").fetchone()[0] == 11
         row = conn.execute("SELECT tm_hit FROM blocks WHERE block_id = 'ch01#b001'").fetchone()
     # The pre-existing row survived the migration and took the column default.
     assert row is not None
@@ -930,7 +931,7 @@ def test_v7_migration_retires_lease_columns_and_releases_claimed_rows(tmp_path: 
 
     with SQLiteJobLedger(db_path) as ledger, ledger._get_conn() as conn:
         version = conn.execute("PRAGMA user_version;").fetchone()[0]
-        assert version == 10
+        assert version == 11
         cols = {row["name"] for row in conn.execute("PRAGMA table_info(blocks);").fetchall()}
         assert "owner_id" not in cols
         assert "lease_expires_at" not in cols
@@ -1596,3 +1597,77 @@ def test_ledger_strict_job_isolation_for_same_doc_id(tmp_path: Path) -> None:
     # job_2 was initialized second, so doc_blocks must contain only job_2 blocks
     assert len(doc_blocks) == 3
     assert [b.id for b in doc_blocks] == ["j2_b1", "j2_b2", "j2_b3"]
+
+
+def test_two_jobs_with_identical_block_ids_coexist(tmp_path: Path, sample_doc_ir: SeedDoc) -> None:
+    """block_id is content-derived, so two jobs over one document share ids.
+
+    With the old ``block_id``-only PRIMARY KEY, seeding the second job's blocks
+    overwrote the first job's rows and left it with none of its own.
+    """
+    db_path = tmp_path / "multi_job.db"
+    with SQLiteJobLedger(db_path) as ledger:
+        seed_job(ledger, "job_a", sample_doc_ir, target_lang="zh")
+        ledger.save_checkpoint(
+            "ch01#b001", BlockStatus.MTQE_PASSED, target_text="A 译", job_id="job_a"
+        )
+        seed_job(ledger, "job_b", sample_doc_ir, target_lang="fr")
+
+        a = {b.id: b for b in ledger.get_all_blocks("job_a")}
+        b = {b.id: b for b in ledger.get_all_blocks("job_b")}
+
+        assert len(a) == len(b) == len(sample_doc_ir.blocks)
+        assert set(a) == set(b)  # identical content-derived ids
+        assert a["ch01#b001"].target_text == "A 译"
+        assert b["ch01#b001"].target_text != "A 译"
+
+
+def test_skip_flag_flip_back_to_translatable_requeues_block(
+    tmp_path: Path, sample_doc_ir: SeedDoc
+) -> None:
+    """A resumed run that newly translatable-izes a verbatim block must re-draft it.
+
+    Pre-fix the block kept ``MTQE_PASSED`` and its source-as-target echo, so
+    ``fetch_pending_blocks`` never returned it and export counted it complete.
+    """
+    db_path = tmp_path / "flip.db"
+    with SQLiteJobLedger(db_path) as ledger:
+        seed_job(ledger, "jf", sample_doc_ir, target_lang="zh")
+        b001 = sample_doc_ir.blocks[0]
+        # Simulate the verbatim state a previous run left behind.
+        with ledger._get_conn() as conn:
+            conn.execute("BEGIN IMMEDIATE;")
+            conn.execute(
+                "UPDATE blocks SET status = 'mtqe_passed', skip_translate = 1, "
+                "target_text = source_text WHERE block_id = ? AND job_id = ?",
+                (b001.id, "jf"),
+            )
+            conn.execute("COMMIT;")
+        ledger._mark_blocks_changed()
+
+        # Re-ingest with skip_translate now False (e.g. --translate-chrome).
+        reshaped = b001.model_copy(update={"skip_translate": False, "target_text": None})
+        with ledger._get_conn() as conn:
+            conn.execute("BEGIN IMMEDIATE;")
+            _upsert_blocks_batch(conn.cursor(), "jf", [reshaped])
+            conn.execute("COMMIT;")
+        ledger._mark_blocks_changed()
+
+        block = ledger.get_block(b001.id, job_id="jf")
+
+    assert block is not None
+    assert block.status == BlockStatus.PENDING
+    assert not block.target_text
+
+
+def test_unscoped_write_on_a_multi_job_file_is_refused(
+    tmp_path: Path, sample_doc_ir: SeedDoc
+) -> None:
+    """A fresh handle on a file with two jobs must not guess which job to write."""
+    db_path = tmp_path / "ambiguous.db"
+    with SQLiteJobLedger(db_path) as ledger:
+        seed_job(ledger, "job_a", sample_doc_ir)
+        seed_job(ledger, "job_b", sample_doc_ir)
+
+    with SQLiteJobLedger(db_path) as reopened, pytest.raises(LedgerError):
+        reopened.save_checkpoint("ch01#b001", BlockStatus.DRAFTED, draft_text="x")

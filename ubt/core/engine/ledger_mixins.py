@@ -96,6 +96,7 @@ class LedgerJobsMixin(LedgerBase):
 
     def init_job_from_manifest(self, job_id: str, manifest: BookManifest) -> None:
         """Atomically initialize job metadata from a lightweight BookManifest."""
+        self._job_scope = job_id
         with self._get_conn() as conn:
             conn.execute("BEGIN IMMEDIATE;")
             cursor = conn.cursor()
@@ -645,9 +646,9 @@ class LedgerBlocksMixin(LedgerBase):
                     SET status = 'failed',
                         error_flags_json = ?,
                         updated_at = CURRENT_TIMESTAMP
-                    WHERE block_id = ?
+                    WHERE block_id = ? AND job_id = ?
                     """,
-                    (json.dumps(flags, ensure_ascii=False), row["block_id"]),
+                    (json.dumps(flags, ensure_ascii=False), row["block_id"], actual_id),
                 )
                 failed_ids.append(str(row["block_id"]))
             conn.execute("COMMIT;")
@@ -766,10 +767,12 @@ class LedgerBlocksMixin(LedgerBase):
         tm_hit: bool | None = None,
         mqm_severity: str | None = None,
         mqm_spans: list[dict[str, Any]] | None = None,
+        job_id: str | None = None,
     ) -> bool:
         """Atomically commit progress checkpoint for a single block."""
         with self._get_conn() as conn:
             conn.execute("BEGIN IMMEDIATE;")
+            scope = self._block_scope(conn, job_id)
             updates: list[str] = [
                 "status = ?",
                 "updated_at = CURRENT_TIMESTAMP",
@@ -801,8 +804,12 @@ class LedgerBlocksMixin(LedgerBase):
                 updates.append("mqm_spans_json = ?")
                 params.append(json.dumps(mqm_spans, ensure_ascii=False))
 
+            where = "WHERE block_id = ?"
+            if scope is not None:
+                where += " AND job_id = ?"
             cursor = conn.execute(
-                f"UPDATE blocks SET {', '.join(updates)} WHERE block_id = ?", [*params, block_id]
+                f"UPDATE blocks SET {', '.join(updates)} {where}",
+                [*params, block_id, *([scope] if scope is not None else [])],
             )
             conn.execute("COMMIT;")
             self._mark_blocks_changed()
@@ -813,6 +820,7 @@ class LedgerBlocksMixin(LedgerBase):
         updates: list[dict[str, Any]],
         *,
         clear_verdict_for: list[str] | None = None,
+        job_id: str | None = None,
     ) -> int:
         """Atomically update multiple blocks in a single transactional write.
 
@@ -839,6 +847,7 @@ class LedgerBlocksMixin(LedgerBase):
 
         with self._get_conn() as conn:
             conn.execute("BEGIN IMMEDIATE;")
+            scope = self._block_scope(conn, job_id)
             cursor = conn.cursor()
             updated = 0
             for item in updates:
@@ -871,6 +880,8 @@ class LedgerBlocksMixin(LedgerBase):
                         updated_at = CURRENT_TIMESTAMP
                     WHERE block_id = ?
                 """
+                if scope is not None:
+                    query += " AND job_id = ?"
                 params: list[Any] = [
                     status_val,
                     target_text,
@@ -885,24 +896,27 @@ class LedgerBlocksMixin(LedgerBase):
                     json.dumps(mqm_spans, ensure_ascii=False) if mqm_spans is not None else None,
                     block_id,
                 ]
+                if scope is not None:
+                    params.append(scope)
                 cursor.execute(query, params)
                 updated += cursor.rowcount
             if clear_verdict_for:
                 placeholders = ",".join("?" * len(clear_verdict_for))
+                scope_clause = " AND job_id = ?" if scope is not None else ""
                 conn.execute(
                     f"""
                     UPDATE blocks
                        SET mtqe_score = NULL, mqm_severity = NULL,
                            mqm_spans_json = NULL, updated_at = CURRENT_TIMESTAMP
-                     WHERE block_id IN ({placeholders})
+                     WHERE block_id IN ({placeholders}){scope_clause}
                     """,
-                    clear_verdict_for,
+                    [*clear_verdict_for, *([scope] if scope is not None else [])],
                 )
             conn.execute("COMMIT;")
             self._mark_blocks_changed()
             return updated
 
-    def clear_machine_verdict(self, block_ids: list[str]) -> int:
+    def clear_machine_verdict(self, block_ids: list[str], job_id: str | None = None) -> int:
         """Clear machine QE/MQM verdict columns after a human revision lands.
 
         ``save_checkpoints_batch`` deliberately treats ``None`` as "leave
@@ -916,21 +930,23 @@ class LedgerBlocksMixin(LedgerBase):
             return 0
         with self._get_conn() as conn:
             conn.execute("BEGIN IMMEDIATE;")
+            scope = self._block_scope(conn, job_id)
             placeholders = ",".join("?" * len(block_ids))
+            scope_clause = " AND job_id = ?" if scope is not None else ""
             cursor = conn.execute(
                 f"""
                 UPDATE blocks
                    SET mtqe_score = NULL, mqm_severity = NULL,
                        mqm_spans_json = NULL, updated_at = CURRENT_TIMESTAMP
-                 WHERE block_id IN ({placeholders})
+                 WHERE block_id IN ({placeholders}){scope_clause}
                 """,
-                block_ids,
+                [*block_ids, *([scope] if scope is not None else [])],
             )
             conn.execute("COMMIT;")
             self._mark_blocks_changed()
             return int(cursor.rowcount)
 
-    def reset_blocks_to_pending(self, block_ids: list[str]) -> int:
+    def reset_blocks_to_pending(self, block_ids: list[str], job_id: str | None = None) -> int:
         """Re-queue blocks by clearing their translation state. Returns rows changed.
 
         Resets translation state when a target needs re-derivation:
@@ -950,7 +966,9 @@ class LedgerBlocksMixin(LedgerBase):
             return 0
         with self._get_conn() as conn:
             conn.execute("BEGIN IMMEDIATE;")
+            scope = self._block_scope(conn, job_id)
             placeholders = ",".join("?" * len(block_ids))
+            scope_clause = " AND job_id = ?" if scope is not None else ""
             cursor = conn.execute(
                 f"""
                 UPDATE blocks
@@ -958,15 +976,15 @@ class LedgerBlocksMixin(LedgerBase):
                        tm_hit = 0, mtqe_score = NULL, error_flags_json = NULL,
                        mqm_severity = NULL, mqm_spans_json = NULL,
                        repair_rounds = 0, updated_at = CURRENT_TIMESTAMP
-                 WHERE block_id IN ({placeholders})
+                 WHERE block_id IN ({placeholders}){scope_clause}
                 """,
-                [BlockStatus.PENDING.value, *block_ids],
+                [BlockStatus.PENDING.value, *block_ids, *([scope] if scope is not None else [])],
             )
             conn.execute("COMMIT;")
             self._mark_blocks_changed()
             return int(cursor.rowcount)
 
-    def reset_blocks_to_repair(self, block_ids: list[str]) -> list[str]:
+    def reset_blocks_to_repair(self, block_ids: list[str], job_id: str | None = None) -> list[str]:
         """Re-queue blocks for *repair*, preserving their already-paid draft.
 
         A transient failure in the repair stage leaves a perfectly good (and
@@ -984,14 +1002,16 @@ class LedgerBlocksMixin(LedgerBase):
             return []
         with self._get_conn() as conn:
             conn.execute("BEGIN IMMEDIATE;")
+            scope = self._block_scope(conn, job_id)
             placeholders = ",".join("?" * len(block_ids))
+            scope_clause = " AND job_id = ?" if scope is not None else ""
             rows = conn.execute(
                 f"""
                 SELECT block_id FROM blocks
-                 WHERE block_id IN ({placeholders})
+                 WHERE block_id IN ({placeholders}){scope_clause}
                    AND (target_text IS NOT NULL OR draft_text IS NOT NULL)
                 """,
-                list(block_ids),
+                [*block_ids, *([scope] if scope is not None else [])],
             ).fetchall()
             requeued = [str(row["block_id"]) for row in rows]
             if requeued:
@@ -1001,9 +1021,13 @@ class LedgerBlocksMixin(LedgerBase):
                     UPDATE blocks
                        SET status = ?, error_flags_json = NULL,
                            updated_at = CURRENT_TIMESTAMP
-                     WHERE block_id IN ({marks})
+                     WHERE block_id IN ({marks}){scope_clause}
                     """,
-                    [BlockStatus.REPAIR_PENDING.value, *requeued],
+                    [
+                        BlockStatus.REPAIR_PENDING.value,
+                        *requeued,
+                        *([scope] if scope is not None else []),
+                    ],
                 )
             conn.execute("COMMIT;")
             self._mark_blocks_changed()
@@ -1102,12 +1126,13 @@ class LedgerBlocksMixin(LedgerBase):
             # drafting/untranslated failure never produced usable text, so
             # nulling and re-drafting is correct for it.
             requeued = self.reset_blocks_to_repair(
-                [block_id for block_id in reset_ids if block_id in repair_only_ids]
+                [block_id for block_id in reset_ids if block_id in repair_only_ids],
+                job_id,
             )
             requeued_set = set(requeued)
             pending_ids = [block_id for block_id in reset_ids if block_id not in requeued_set]
             if pending_ids:
-                self.reset_blocks_to_pending(pending_ids)
+                self.reset_blocks_to_pending(pending_ids, job_id)
             logger.info(
                 "Resume recovery for %s: re-queued %d block(s) stranded by transient "
                 "errors (%d for repair keeping their draft, %d for re-draft)",
@@ -1118,10 +1143,16 @@ class LedgerBlocksMixin(LedgerBase):
             )
         return reset_ids
 
-    def get_block(self, block_id: str) -> IRBlock | None:
-        """Fetch a single block by ID."""
+    def get_block(self, block_id: str, job_id: str | None = None) -> IRBlock | None:
+        """Fetch a single block by ID (scoped to ``job_id`` when the file holds several)."""
         with self._get_conn() as conn:
-            cursor = conn.execute("SELECT * FROM blocks WHERE block_id = ?", (block_id,))
+            scope = self._block_scope(conn, job_id)
+            if scope is not None:
+                cursor = conn.execute(
+                    "SELECT * FROM blocks WHERE block_id = ? AND job_id = ?", (block_id, scope)
+                )
+            else:
+                cursor = conn.execute("SELECT * FROM blocks WHERE block_id = ?", (block_id,))
             row = cursor.fetchone()
             if not row:
                 return None
