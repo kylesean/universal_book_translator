@@ -629,11 +629,12 @@ class UBTConfig(BaseSettings):
     allow_page_upload: bool = False
     # Local VLM OCR drivers (DeepSeek-OCR) load model-repo Python through
     # transformers' ``trust_remote_code``: the checkpoint's own code executes
-    # in this process. Default true keeps the shipped recipe working; set
-    # UBT_VLM_TRUST_REMOTE_CODE=false to refuse unvetted model code — the
-    # driver then fails closed and points at a vetted offline snapshot
-    # (HF_HOME) instead.
-    vlm_trust_remote_code: bool = True
+    # in this process. Shipping arbitrary code from a downloaded repo must
+    # never be the default (same fail-closed posture as ``allow_page_upload``).
+    # Default false refuses model-supplied code; the driver then stops at load
+    # time and points at a vetted offline snapshot (HF_HOME) instead. Set
+    # UBT_VLM_TRUST_REMOTE_CODE=true to opt in and keep the recipe working.
+    vlm_trust_remote_code: bool = False
     visual_sample_pages: int = Field(default=6, ge=0, le=50)
     visual_max_vlm_pages: int = Field(default=3, ge=0, le=10)
     # Diagnostic-only: the dual-raster render-fidelity probe (source-vs-artifact

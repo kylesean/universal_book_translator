@@ -502,7 +502,7 @@ uv run ubt api [--host HOST] [--port PORT]
 | 渲染门禁 | `UBT_RENDER_PREFLIGHT_ENABLED` | `true` | 花钱前（Stage 3 计费前）用源文彩排一次真机渲染的零 token pre-flight |
 | 渲染门禁 | `UBT_RENDER_FIDELITY_ENABLED` | `false` | 像素级忠实度标尺（advisory，不拦截；见 `render_fidelity.py`） |
 | 渲染门禁 | `UBT_VISUAL_BLOCKING_GATE_ENABLED` | `false` | 长文档视觉 critical 阻断导出（短文档本就 fail-closed，见上表） |
-| 视觉隐私 | `UBT_VLM_TRUST_REMOTE_CODE` | `true` | DeepSeek-OCR 权重 `trust_remote_code` 开关；`false` 则拒绝加载该驱动 |
+| 视觉隐私 | `UBT_VLM_TRUST_REMOTE_CODE` | `false` | DeepSeek-OCR 权重 `trust_remote_code` 开关；默认 fail-closed 拒绝加载模型自带代码（与 `UBT_ALLOW_PAGE_UPLOAD` 同一姿势），设 `true` 才允许执行该驱动 |
 | 视觉隐私 | `UBT_OCR_MODEL` | `gpt-4o-mini` | cloud/vlm OCR 通道模型（影响计价与预算预检） |
 | 视觉隐私 | `UBT_OCR_MODE` | `auto` | OCR 通道选择：`auto` / `sidecar` / `cloud` / `vlm` / `rapidocr` / `off` |
 | Batch | `UBT_BATCH_ENABLED` / `_POLL_INTERVAL` / `_POLL_TIMEOUT` / `_MIN_BLOCKS` / `_DELETE_FILES` | `false` / `30.0` / `3600.0` / `5` / `true` | 云端 Batch 通道细旋钮；`_DELETE_FILES` 控制 Files API 产物是否即刻清理（隐私） |

@@ -18,6 +18,7 @@ from ubt.adapters.pdf.vlm.drivers.deepseek_driver import (
     _install_cache_compat_shim,
     _install_llama_flash_compat_shim,
 )
+from ubt.core.config import UBTConfig
 
 
 class _FakeDynamicCache:
@@ -52,17 +53,22 @@ def _fake_transformers(
     return transformers
 
 
-def _fake_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Stub ``torch``/``transformers`` so ``_ensure_loaded``'s import gate passes.
+def _fake_runtime(monkeypatch: pytest.MonkeyPatch, *, trust_remote_code: bool = True) -> None:
+    """Stub ``torch``/``transformers`` and set the trust gate for ``_ensure_loaded``.
 
     The worker protocol is the subject of these tests; the two imports are
     existence checks (``# noqa: F401``) before the subprocess starts, so a stub
     is the honest boundary and keeps the cases running without the ~2 GB torch
     stack — which the ``dev`` extra intentionally omits, so a real
     ``importorskip`` would silently drop the worker coverage from CI.
+
+    ``vlm_trust_remote_code`` defaults to ``False`` (fail-closed), so the worker
+    cases must opt in here or ``_ensure_loaded`` refuses before the subprocess
+    starts.
     """
     monkeypatch.setitem(sys.modules, "torch", types.ModuleType("torch"))
     monkeypatch.setitem(sys.modules, "transformers", types.ModuleType("transformers"))
+    monkeypatch.setenv("UBT_VLM_TRUST_REMOTE_CODE", "true" if trust_remote_code else "false")
 
 
 def test_llama_flash_shim_aliases_and_is_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -120,14 +126,25 @@ def test_trust_remote_code_gate_refuses_model_code(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """UBT_VLM_TRUST_REMOTE_CODE=false must fail before any download/import."""
-    monkeypatch.setenv("UBT_VLM_TRUST_REMOTE_CODE", "false")
-    _fake_runtime(monkeypatch)
+    _fake_runtime(monkeypatch, trust_remote_code=False)
     driver = DeepSeekOcrDriver()
     with pytest.raises(RuntimeError, match="trust_remote_code"):
         driver._ensure_loaded()
     # The refusal happens before the worker (and its snapshot_download of
     # model code) ever starts: nothing is fetched, no process is spawned.
     assert driver._proc is None
+
+
+@pytest.mark.fast
+def test_trust_remote_code_defaults_to_refusing_model_code() -> None:
+    """The shipped default must be fail-closed, not opt-out.
+
+    ``trust_remote_code`` executes the checkpoint repo's own Python in this
+    process, so a downloaded model must not run code by default — the same
+    posture as ``allow_page_upload``. Pinned at the schema level so a stray
+    ``.env`` or inherited environment cannot make the assertion vacuous.
+    """
+    assert UBTConfig.model_fields["vlm_trust_remote_code"].default is False
 
 
 # --- worker-client behavior (process wall around the torch runtime) ---------
