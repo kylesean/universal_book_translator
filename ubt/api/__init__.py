@@ -1,5 +1,25 @@
-"""Universal Book Translator FastAPI Microservice package."""
+"""Universal Book Translator FastAPI Microservice package.
 
-from ubt.api.app import app, create_app
+Lazy (PEP 562) re-exports: importing ``ubt.api`` must not build the app,
+configure logging or chmod ``.env`` as a side effect. ``create_app`` is the
+supported library entry point; ``app`` is resolved only when actually named
+(uvicorn's ``ubt.api.app:app`` target).
+"""
 
-__all__ = ["app", "create_app"]
+from __future__ import annotations
+
+from typing import Any
+
+__all__ = ["create_app"]
+
+
+def __getattr__(name: str) -> Any:
+    if name == "create_app":
+        from ubt.api.app import create_app
+
+        return create_app
+    if name == "app":
+        from ubt.api.app import _get_app
+
+        return _get_app()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -505,7 +505,9 @@ def test_docling_render_academic_figures_woven_in_order(
     monkeypatch.setattr("ubt.adapters.pdf.svg_diagram.is_svg_backend_available", lambda: False)
     monkeypatch.setattr("ubt.adapters.pdf.svg_diagram.is_svg_rendering_supported", lambda: False)
     monkeypatch.setattr("ubt.adapters.pdf.svg_diagram.detect_diagram_regions", lambda *a, **k: [])
-    monkeypatch.setattr("ubt.adapters.pdf.pdf_struct.page_count", lambda _path: 1)
+    monkeypatch.setattr(
+        "ubt.adapters.pdf.pdf_struct.page_sizes", lambda _path: {1: (612.0, 800.0)}
+    )
     monkeypatch.setattr(
         asset_extractor,
         "extract_pdf_figures",

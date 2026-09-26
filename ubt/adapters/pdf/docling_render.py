@@ -545,11 +545,12 @@ class DoclingRenderStrategy:
         try:
             from ubt.adapters.pdf import pdf_struct
 
-            page_count = pdf_struct.page_count(src_pdf_path)
+            # One document open for every page's size, not one open per page:
+            # ``get_page_height`` opened the whole PDF P times here.
             page_heights = {
-                p: self.diagram_localizer.get_page_height(src_pdf_path, p)
-                for p in range(1, page_count + 1)
+                p: h for p, (_w, h) in pdf_struct.page_sizes(src_pdf_path).items()
             }
+            page_count = len(page_heights)
         except Exception as exc:
             logger.debug("SVG detection: cannot read page count: %s", exc)
             return blocks, covered
@@ -668,7 +669,7 @@ class DoclingRenderStrategy:
                             src_pdf_path,
                             page_no=page_no,
                             bbox_bottomup=(x0, y0, x1, y1),
-                            page_height=page_heights[page_no],
+                            page_height=page_heights.get(page_no, 720.0),
                             localizer=self.diagram_localizer,
                             target_lang=target_lang,
                             work_dir=assets_dir / ".svg_work",
@@ -688,7 +689,7 @@ class DoclingRenderStrategy:
                             src_pdf_path,
                             page_no=page_no,
                             bbox_bottomup=(x0, y0, x1, y1),
-                            page_height=page_heights[page_no],
+                            page_height=page_heights.get(page_no, 720.0),
                             out_path=png_out,
                         )
                     except Exception as exc:
