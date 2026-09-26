@@ -59,10 +59,13 @@ def build_minimal_draft_prompt(
     global_glossary: str = "",
     few_shot_reference: str = "",
     genre_profile: str = "general",
+    domain: str | None = None,
 ) -> tuple[str, str]:
     """Direct, minimalist draft prompt without metaprompts.
 
     Glossary sections merge global (book-static) and per-chunk entries.
+    ``domain`` is the operator's explicit subject descriptor (``--domain``); it
+    outranks the profile-derived hint when supplied.
     """
     src_profile = PROFILES.get(source_lang.strip().lower()) if source_lang else None
     tgt_profile = PROFILES.get(target_lang.strip().lower()) if target_lang else None
@@ -82,7 +85,9 @@ def build_minimal_draft_prompt(
     if few_shot_reference.strip():
         parts.append(few_shot_reference.strip())
     domain_hint = ""
-    if genre_profile and genre_profile.lower() not in ("general", "unknown", "auto"):
+    if domain:
+        domain_hint = f" Use standard {domain} terminology."
+    elif genre_profile and genre_profile.lower() not in ("general", "unknown", "auto"):
         domain_hint = f" Use standard {genre_profile} domain terminology."
     parts.append(
         f"Translate the following {src_name} text into fluent, natural {tgt_name}.{domain_hint} Output ONLY the translation without any title, prefix, or commentary:\n\n{source_text.strip()}"
@@ -101,6 +106,7 @@ def build_hybrid_draft_prompt(
     global_glossary: str = "",
     few_shot_reference: str = "",
     epoch_summary: str = "",
+    domain: str | None = None,
 ) -> tuple[str, str]:
     """Hybrid draft prompt for instruction-tuned models requiring concise instructions.
 
@@ -141,6 +147,8 @@ def build_hybrid_draft_prompt(
             f"You are a professional book translator translating from {src_name} into {tgt_name}.\n"
             "Translate accurately while maintaining natural prose and literary flow."
         )
+    if domain:
+        style_desc += f"\nUse standard {domain} terminology."
 
     if "zh" in tgt_name.lower() or (tgt_profile and "zh" in tgt_profile.code.lower()):
         system_prompt = (
@@ -196,6 +204,7 @@ def build_rich_draft_prompt(
     global_glossary: str = "",
     few_shot_reference: str = "",
     epoch_summary: str = "",
+    domain: str | None = None,
 ) -> tuple[str, str]:
     """Construct full prompt aligned with 2024-2026 Prefix/Prompt Caching topology and XML schema."""
     src_profile = PROFILES.get(source_lang.strip().lower()) if source_lang else None
@@ -227,6 +236,8 @@ def build_rich_draft_prompt(
             f"You are a professional book translator translating from {src_name} into {tgt_name}.\n"
             "Translate accurately while maintaining natural prose and literary flow."
         )
+    if domain:
+        style_desc += f"\nUse standard {domain} terminology."
 
     # Tier 1: Static Immutable Prefix
     system_parts = [
@@ -305,6 +316,7 @@ def build_macro_chunk_draft_prompt(
     global_glossary: str = "",
     few_shot_reference: str = "",
     epoch_summary: str = "",
+    domain: str | None = None,
 ) -> tuple[str, str]:
     """Construct structured multi-block prompt for high-throughput macro-chunk drafting."""
     src_profile = PROFILES.get(source_lang.strip().lower()) if source_lang else None
@@ -336,6 +348,8 @@ def build_macro_chunk_draft_prompt(
             f"You are a professional book translator translating from {src_name} into {tgt_name}.\n"
             "Translate accurately while maintaining natural prose and literary flow."
         )
+    if domain:
+        style_desc += f"\nUse standard {domain} terminology."
 
     system_parts = [
         style_desc,

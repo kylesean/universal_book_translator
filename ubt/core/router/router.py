@@ -277,6 +277,7 @@ class BatchDraftRequest:
     few_shot_reference: str = ""
     epoch_summary: str = ""
     temperature: float = 0.3
+    domain: str | None = None
 
 
 @dataclass
@@ -512,6 +513,7 @@ class ModelRouter:
         few_shot_reference: str = "",
         epoch_summary: str = "",
         model: str | None = None,
+        domain: str | None = None,
     ) -> tuple[str, str]:
         """Construct draft prompt using strategy configured on the model capability profile."""
         profile = self._get_profile(model or self.draft_model)
@@ -524,6 +526,7 @@ class ModelRouter:
                 global_glossary=global_glossary,
                 few_shot_reference=few_shot_reference,
                 genre_profile=genre_profile,
+                domain=domain,
             )
         if profile.prompt_strategy == PromptStrategy.HYBRID:
             return build_hybrid_draft_prompt(
@@ -537,6 +540,7 @@ class ModelRouter:
                 global_glossary=global_glossary,
                 few_shot_reference=few_shot_reference,
                 epoch_summary=epoch_summary,
+                domain=domain,
             )
         return build_rich_draft_prompt(
             source_text=source_text,
@@ -549,6 +553,7 @@ class ModelRouter:
             global_glossary=global_glossary,
             few_shot_reference=few_shot_reference,
             epoch_summary=epoch_summary,
+            domain=domain,
         )
 
     def build_repair_prompt(
@@ -1085,10 +1090,12 @@ class ModelRouter:
         few_shot_reference: str = "",
         epoch_summary: str = "",
         model: str | None = None,
+        domain: str | None = None,
     ) -> str:
         """Route to draft model tier with strategy-driven prompt construction and extraction.
 
         ``model`` allows overriding the default draft model for specific blocks.
+        ``domain`` is the operator's explicit subject descriptor (``--domain``).
         """
         effective_model = model or self.draft_model
         effort = reasoning_effort or self.draft_reasoning_effort
@@ -1106,6 +1113,7 @@ class ModelRouter:
                 few_shot_reference=few_shot_reference,
                 epoch_summary=epoch_summary,
                 model=cand_model,
+                domain=domain,
             )
 
         def _calc_max_tokens(cand_model: str, cand_profile: ModelProfile) -> int | None:
@@ -1153,6 +1161,7 @@ class ModelRouter:
         few_shot_reference: str = "",
         epoch_summary: str = "",
         model: str | None = None,
+        domain: str | None = None,
     ) -> dict[str, str]:
         """Draft a group of blocks in a single structured XML prompt.
 
@@ -1176,6 +1185,7 @@ class ModelRouter:
                 global_glossary=global_glossary,
                 few_shot_reference=few_shot_reference,
                 epoch_summary=epoch_summary,
+                domain=domain,
             )
 
         def _calc_max_tokens(cand_model: str, cand_profile: ModelProfile) -> int | None:
@@ -1255,6 +1265,7 @@ class ModelRouter:
                 few_shot_reference=req.few_shot_reference,
                 epoch_summary=req.epoch_summary,
                 model=self.draft_model,
+                domain=req.domain,
             )
             messages: list[dict[str, str]] = []
             if system_prompt.strip():

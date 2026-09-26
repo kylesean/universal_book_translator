@@ -161,6 +161,7 @@ class DraftPolicy:
     source_lang: str
     target_lang: str
     profile_name: str
+    domain: str | None
     tm_fuzzy_threshold: float
     tm_context: str
     draft_max_retries: int
@@ -485,6 +486,7 @@ class _DraftProcessor:
                             target_lang=self.policy.target_lang,
                             source_lang=self.policy.source_lang,
                             genre_profile=self.policy.profile_name,
+                            domain=self.policy.domain,
                             rolling_summary=inputs.macro_ctx,
                             epoch_summary=inputs.epoch_ctx,
                             global_glossary=self.policy.global_glossary_table,
@@ -580,6 +582,7 @@ class _DraftProcessor:
                         target_lang=self.policy.target_lang,
                         source_lang=self.policy.source_lang,
                         genre_profile=self.policy.profile_name,
+                        domain=self.policy.domain,
                         rolling_summary=inp.macro_ctx,
                         epoch_summary=inp.epoch_ctx,
                         global_glossary=self.policy.global_glossary_table,
@@ -698,6 +701,7 @@ class _DraftProcessor:
                         target_lang=self.policy.target_lang,
                         source_lang=self.policy.source_lang,
                         genre_profile=self.policy.profile_name,
+                        domain=self.policy.domain,
                         rolling_summary=inp.macro_ctx,
                         epoch_summary=inp.epoch_ctx,
                         global_glossary=self.policy.global_glossary_table,
@@ -823,6 +827,7 @@ class _DraftProcessor:
                             target_lang=self.policy.target_lang,
                             source_lang=self.policy.source_lang,
                             genre_profile=self.policy.profile_name,
+                            domain=self.policy.domain,
                             rolling_summary=macro_ctx,
                             epoch_summary=epoch_ctx,
                             global_glossary=self.policy.global_glossary_table,
@@ -1144,6 +1149,7 @@ async def run_draft_stage(
             source_lang=source_lang,
             target_lang=target_lang,
             profile_name=profile_name,
+            domain=config.domain,
             tm_fuzzy_threshold=tm_fuzzy_threshold,
             tm_context=tm_context,
             draft_max_retries=draft_max_retries,

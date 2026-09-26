@@ -1755,3 +1755,51 @@ def test_estimate_cost_prices_exclusive_fallback_models_at_their_endpoint() -> N
     cost = router.estimate_cost_usd()
     assert cost is not None
     assert cost == pytest.approx(0.27)
+
+
+def test_domain_descriptor_reaches_every_draft_prompt() -> None:
+    """`--domain` was accepted on all surfaces but read by nothing (dead option)."""
+    from ubt.core.router.prompts import (
+        build_hybrid_draft_prompt,
+        build_minimal_draft_prompt,
+        build_rich_draft_prompt,
+    )
+
+    _, minimal_user = build_minimal_draft_prompt(
+        source_text="Hello.",
+        target_lang="zh",
+        source_lang="en",
+        genre_profile="general",
+        domain="semiconductor physics",
+    )
+    assert "semiconductor physics" in minimal_user
+
+    hybrid_sys, _ = build_hybrid_draft_prompt(
+        source_text="Hello.",
+        target_lang="zh",
+        source_lang="en",
+        genre_profile="general",
+        domain="semiconductor physics",
+    )
+    assert "semiconductor physics" in hybrid_sys
+
+    rich_sys, _ = build_rich_draft_prompt(
+        source_text="Hello.",
+        target_lang="zh",
+        source_lang="en",
+        genre_profile="general",
+        domain="biomedicine",
+    )
+    assert "biomedicine" in rich_sys
+
+
+def test_domain_falls_back_to_the_profile_hint() -> None:
+    from ubt.core.router.prompts import build_minimal_draft_prompt
+
+    _, user = build_minimal_draft_prompt(
+        source_text="Hello.",
+        target_lang="zh",
+        source_lang="en",
+        genre_profile="textbook",
+    )
+    assert "textbook" in user
