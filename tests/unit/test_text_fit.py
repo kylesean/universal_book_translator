@@ -27,7 +27,7 @@ def test_flow_paragraph_fits_and_overflows() -> None:
     boxes = [(0.0, 0.0, 100.0, 10.0), (0.0, 10.0, 100.0, 20.0)]
     # Full-length alignment: unused tail boxes keep "" (paint-only covers).
     assert f.flow_paragraph("汉字测试", boxes, 10.0) == ["汉字测试", ""]
-    # 25 CJK chars = 250pt > 200pt capacity -> None.
+    # 21 CJK chars = 210pt > 200pt capacity -> None.
     assert f.flow_paragraph("汉字测试内容太多放不下呀呀呀呀呀呀呀呀呀呀", boxes, 10.0) is None
 
 
@@ -47,7 +47,7 @@ def test_squeezed_width_discounts_punct_density() -> None:
 
 def test_fit_chars_kinsoku_pushes_opener_down() -> None:
     f = _fitter()
-    # Width fits "汉字「" raw (10+10+10=30) — the opener must not dangle.
+    # Width fits "汉字「" raw (10+10+6.2=26.2) — the opener must not dangle.
     assert f.fit_chars("汉字「测试", width_pt=30.0, size_pt=10.0) == 2
 
 
@@ -98,7 +98,7 @@ def test_flow_without_spans_unchanged() -> None:
 def test_flow_kinsoku_line_start_closer_prevented() -> None:
     """Kinsoku: a line must never start with a closer punctuation mark like '，'."""
     f = _fitter()
-    # 40pt box fits '开发完成' (4 chars x 10pt) but not comma.
+    # 46pt box fits '开发完成' (4 chars x 10pt) but not comma.
     # Hanging allows the comma to stay on line 1, never dangling onto line 2.
     text = "开发完成，并在系统测试。"
     boxes = [(0.0, 0.0, 46.0, 10.0), (0.0, 10.0, 100.0, 20.0)]

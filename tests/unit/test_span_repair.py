@@ -1,6 +1,6 @@
 """SpanRepairSplicer: infill a rejected span without rewriting the block.
 
-Split out of regressions/test_phase2_core_architecture.py. The annotator half
+Originally part of a pre-split phase-2 architecture module. The annotator half
 of ubt/core/validators/span_repair.py is covered in test_mqm_triage.py; this is
 the splice half, which previously had no canonical file.
 """

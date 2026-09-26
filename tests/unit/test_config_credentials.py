@@ -10,9 +10,9 @@ Second historical defect: every ``AliasChoices`` listed the bare, prefix-less
 field name first (``api_key`` / ``base_url`` / ``pages`` / ...), so with
 pydantic-settings' default ``case_sensitive=False`` an unrelated ``API_KEY``,
 ``BASE_URL`` or ``PAGES`` variable in the process environment hijacked the
-outbound credential, the endpoint, or the page filter. Only ``UBT_*`` names
-(plus the deliberate ``OPENAI_*`` / ``OPENCODE_SESSION_ID`` fallbacks) may
-resolve now.
+outbound credential, the endpoint, or the page filter. Only prefixed names
+(``UBT_*`` plus the deliberate ``OPENAI_*`` / ``OPENCODE_*`` / ``ANTHROPIC_*`` /
+``DEEPSEEK_*`` / ``GEMINI_*`` / ``OPENCODE_SESSION_ID`` fallbacks) may resolve now.
 """
 
 from __future__ import annotations
@@ -270,10 +270,9 @@ def test_programmatic_overrides_go_through_from_env_and_are_validated(
 ) -> None:
     """Overrides must be applied AND validated, not silently dropped.
 
-    ``from_env(**overrides)`` exists because an aliased field cannot be set by
-    its bare field name in the constructor (see the footgun test below). It is
-    the supported programmatic path for the scripts, and it must behave like the
-    CLI/API paths: every override re-runs validation, so a bad value fails fast
+    ``from_env(**overrides)`` is the supported programmatic path for the
+    scripts. Like the CLI/API paths, every override re-runs validation, so a bad
+    value fails fast
     instead of silently misconfiguring a billed run.
     """
     monkeypatch.delenv("UBT_LLM_API_KEY", raising=False)

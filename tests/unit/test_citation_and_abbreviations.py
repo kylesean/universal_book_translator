@@ -134,13 +134,7 @@ class TestAbbreviationMiner:
         text = "The Convolutional Neural Network (CNN) wins."
         assert mine_abbreviations(text), "CNN initials must match expansion"
 
-    def test_max_entries_bound(self) -> None:
-        text = " ".join(
-            f"Fake Term Number {i} (FTN{i})"
-            for i in range(20)
-            if not any(c.isdigit() for c in "FTN")
-        )
-        # All contain digits in acronym — expect zero; use clean ones instead
+    def test_digit_acronyms_are_rejected(self) -> None:
         text = " ".join(f"Fake Term Number {i} (FT{i}N)" for i in range(20))
         entries = mine_abbreviations(text)  # digits in acronym → rejected
         assert entries == []

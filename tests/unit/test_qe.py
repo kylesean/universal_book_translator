@@ -199,7 +199,7 @@ def test_subprocess_qe_parses_labelled_ipc_protocol(tmp_path: Path) -> None:
 def test_subprocess_qe_unlabelled_output_is_not_calibrated() -> None:
     """A legacy bare-array reply cannot prove neural origin: fail closed.
 
-    An external ``--comet-script-path`` running the pre-labelling script falls
+    An external ``UBT_COMET_SCRIPT_PATH`` running the pre-labelling script falls
     back to the heuristic invisibly; treating that batch as calibrated is the
     exact masquerade the engine label exists to prevent.
     """
@@ -641,7 +641,7 @@ async def test_protocol_desync_falls_back_to_per_call(tmp_path: Path) -> None:
     """A scorer that answers with the wrong request id is replaced, then given up on.
 
     The per-call fallback stays functional, so a half-speaking external
-    ``--comet-script-path`` degrades throughput, never correctness.
+    ``UBT_COMET_SCRIPT_PATH`` degrades throughput, never correctness.
     """
     stub = tmp_path / "desync_scorer.py"
     stub.write_text(

@@ -1,7 +1,7 @@
 """Unit tests verifying the bidirectional multilingual translation architecture.
 
 Covers:
-1. BoilerplateCatalog declarative multilingual rules (EN, FR, DE, ES, JA, ZH, RU).
+1. BoilerplateCatalog declarative multilingual rules (EN, FR, DE, ES, JA, KO, ZH, RU).
 2. LanguagePairPolicy matrix, dynamic length expansion/contraction ratio bounds, and script identity gates.
 3. FastPassFilter pair-aware 0-token evaluations for forward and reverse language pairs.
 4. ModelRouter bidirectional prompt assembly for arbitrary (source, target) combinations.

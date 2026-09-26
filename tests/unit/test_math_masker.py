@@ -127,7 +127,7 @@ def test_multiline_align_env_masked_as_unit() -> None:
 def test_starred_and_nested_envs() -> None:
     src = "$x = \\begin{cases} a & b \\\\ c & d \\end{cases}$ and\n\\begin{align*} y &= 1 \\\\ z &= 2 \\end{align*}"
     masked, mapping = _masker().mask(src)
-    # Inner cases masked first, outer $...$ second, align* third.
+    # Env pass: cases first, align* second; the surviving outer $...$ is picked up last.
     assert len(mapping) == 3
     assert "cases" not in masked and "align*" not in masked
     assert _masker().unmask(masked, mapping) == src

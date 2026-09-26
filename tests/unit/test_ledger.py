@@ -307,7 +307,7 @@ def test_resume_keeps_the_paid_draft_of_a_repair_only_failure(
     assert b3.status == BlockStatus.PENDING
 
     # Second run is a no-op (nothing transient left).
-    assert ledger.reset_transient_failures("job_recover") == []
+    assert ledger.reset_transient_failures("job_repair_requeue") == []
 
 
 def test_resume_keeps_the_paid_draft_of_an_untranslated_sweep(
@@ -943,7 +943,7 @@ def test_v7_migration_retires_lease_columns_and_releases_claimed_rows(tmp_path: 
 def test_transaction_rollback_does_not_poison_connection(
     tmp_path: Path, sample_doc_ir: DocumentIR
 ) -> None:
-    """Regression for.
+    """Regression: a manual transaction must roll back on a non-SQLite error.
 
     A non-SQLite exception raised inside a manual transaction (here a malformed
     batch missing ``block_id``) must roll back so the shared connection is not left
@@ -1109,7 +1109,7 @@ def test_legacy_table_without_current_columns_fails_at_open(tmp_path: Path) -> N
 
     ``user_version`` 0 takes the initialize branch, whose CREATE is
     ``IF NOT EXISTS``: an existing legacy ``blocks`` table is left alone and
-    stamped version 8, and because ``current_version`` is then set to the target,
+    stamped version 10, and because ``current_version`` is then set to the target,
     every ``if current_version < N`` migration is skipped. The missing columns
     used to surface as ``IndexError: No item with that key`` from
     ``_row_to_block`` -- after parsing, after the bible stage, and after a paid

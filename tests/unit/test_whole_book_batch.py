@@ -289,7 +289,7 @@ def test_whole_book_batch_partial_failures_redrafted_interactively(tmp_path: Pat
 
 
 def test_whole_book_batch_idempotent_resume(tmp_path: Path) -> None:
-    """When an interrupted run resumes, it reconnects to the live batch without re-creating."""
+    """A re-run over an already-drafted job creates no new batch (idempotent resume)."""
     db_path = tmp_path / "job.sqlite"
     ledger = SQLiteJobLedger(db_path)
     doc_ir = _make_multi_chapter_ir(10, num_chapters=1)

@@ -224,12 +224,12 @@ async def test_internal_not_implemented_error_is_not_a_legacy_fallback(tmp_path:
         ledger.close()
 
 
-def test_config_render_engine_supports_anchored_and_auto() -> None:
-    """Verify UBTConfig accepts the 'anchored' and 'auto' render engines."""
+def test_config_render_engine_supports_rigid_and_auto() -> None:
+    """Verify UBTConfig accepts the 'rigid' and 'auto' render engines."""
     from ubt.core.config import UBTConfig
 
-    cfg_anchored = UBTConfig(render_engine="rigid")
-    assert cfg_anchored.render_engine == "rigid"
+    cfg_rigid = UBTConfig(render_engine="rigid")
+    assert cfg_rigid.render_engine == "rigid"
 
     cfg_auto = UBTConfig(render_engine="auto")
     assert cfg_auto.render_engine == "auto"

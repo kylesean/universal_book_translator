@@ -264,7 +264,7 @@ async def test_run_visual_gate_vlm_fail_is_major(
         assert "verdict" in prompt.lower()
         return "verdict: FAIL\nissues: overlapping text"
 
-    # Bypass the poppler dependency in CI with a stub PNG.
+    # Bypass real pdf_oxide rendering in CI with a stub PNG.
     png = tmp_path / "p1-1.png"
     png.write_bytes(b"fakepng")
     monkeypatch.setattr(
@@ -320,8 +320,8 @@ async def test_mock_provider_vision_records_call() -> None:
 async def test_visual_gate_offloads_blocking_render_to_thread(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Render_pages_to_png rasterizes up to 6 pages in-process (oxide,
-    timeout=60 each) — it must run off the event loop via asyncio.to_thread so a
+    """Render_pages_to_png rasterizes up to 6 pages in-process via pdf_oxide —
+    it must run off the event loop via asyncio.to_thread so a
     concurrent SSE stream / lease renewal is never frozen. We confirm the render
     callback executes on a worker thread, not the event-loop (main) thread.
     """
@@ -341,13 +341,7 @@ async def test_visual_gate_offloads_blocking_render_to_thread(
 
 async def test_visual_gate_facing_spread_flyleaf_exempt(tmp_path: Path) -> None:
     """Verify that page 1 intentional blank flyleaf in facing spread mode is not flagged as defect."""
-    from PIL import Image
-
     pdf = _write_pdf(tmp_path / "facing.pdf", 2)
-
-    # Make page 1 image pure white (mean=255.0)
-    png1 = tmp_path / "page_1.png"
-    Image.new("L", (100, 100), color=255).save(png1)
 
     # Without facing_spread, page 1 blank is flagged
     res_normal = await run_visual_gate(pdf, blocks=[], facing_spread=False)

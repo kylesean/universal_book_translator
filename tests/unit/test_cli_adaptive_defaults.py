@@ -358,7 +358,11 @@ async def test_advisory_stage_downgrades_when_adaptive_policy_resolves_rigid(
 
 
 def test_export_document_label_is_adaptive() -> None:
-    """Export stage and CLI summary must distinguish monolingual vs bilingual outputs."""
+    """Spec of the document-label predicate: monolingual vs bilingual outputs.
+
+    The production label is computed inline in the export stage and the CLI
+    summary; this pins the predicate both must implement.
+    """
     from ubt.core.ir.models import BookManifest
 
     manifest_mono = BookManifest(doc_id="m1", title="Mono", source_path="mono.pdf")

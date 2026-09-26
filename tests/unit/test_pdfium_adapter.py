@@ -170,8 +170,8 @@ async def test_pdfium_heading_and_list_typing(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_pdfium_corrupt_file_falls_back_to_pypdf(tmp_path: Path) -> None:
-    """pdfium extraction failure degrades to pypdf; complete corruption raises DocumentParseError."""
+async def test_pdfium_corrupt_file_falls_back_to_pdf_oxide(tmp_path: Path) -> None:
+    """pdfium extraction failure degrades to pdf_oxide; complete corruption raises DocumentParseError."""
     from ubt.core.exceptions import DocumentParseError
 
     bad = tmp_path / "corrupt.pdf"

@@ -666,8 +666,8 @@ def test_toc_labels_match_percent_encoded_hrefs() -> None:
 def test_toc_labels_never_leak_blocked_human_markup() -> None:
     """2026-09-22 E2E: toc.xhtml carried the literal *source* of the
     quarantine placeholder (``<mark class="ubt-blocked-human" title="...">…``)
-    as its link text — double-escaped grammar-tag leakage, which the README
-    explicitly forbids. The label must keep only the visible text."""
+    as its link text — double-escaped grammar-tag leakage that the behaviour
+    contract forbids. The label must keep only the visible text."""
     from ubt.core.engine.stages.triage import _blocked_human_target
 
     adapter = EPUBAdapter()

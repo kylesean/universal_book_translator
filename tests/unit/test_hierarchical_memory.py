@@ -1,6 +1,6 @@
 """HierarchicalMemoryManager: step/L3 epoch summarisation.
 
-Lived as part of regressions/test_phase2_core_architecture.py, filed under the
+Originally part of a pre-split phase-2 architecture module, filed under the
 review round that produced it. Nothing else in the suite exercised this class.
 """
 
@@ -29,8 +29,8 @@ async def test_hierarchical_memory_step_trigger() -> None:
     mgr.record_drafted_block(b1)
     assert not mgr.should_trigger_snapshot()
 
-    # 3. Add large block to cross 500 characters threshold
-    long_target = "这是一个非常长的段落文本。" * 25  # ~350 chars + ~20 chars > 370 chars
+    # 3. Add large blocks: b1+b2 stay under the 500-char threshold, b3 crosses it.
+    long_target = "这是一个非常长的段落文本。" * 25  # 325 chars
     b2 = IRBlock(
         id="block_002",
         spine_index=1,

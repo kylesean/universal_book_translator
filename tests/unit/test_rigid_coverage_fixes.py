@@ -267,7 +267,7 @@ def test_ordered_list_item_restores_number_marker_from_zone_rows() -> None:
 
 
 def test_build_zones_does_not_claim_centered_display_equation_as_continuation() -> None:
-    """Page 11 bug: orphan centered display equation (10) below Theorem 7 must not be claimed as a continuation zone."""
+    """Page 10 bug: orphan centered display equation (10) below Theorem 7 must not be claimed as a continuation zone."""
     from ubt.adapters.pdf.rigid.extract import LineBox
     from ubt.adapters.pdf.rigid.zones import PageFacts, build_zones
     from ubt.core.ir.models import BoundingBox

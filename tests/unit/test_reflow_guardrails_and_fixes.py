@@ -202,8 +202,8 @@ async def test_forced_reflow_on_formula_dense_pdf_enables_companion_rigid_delive
 
 @pytest.mark.fast
 def test_detect_math_density_recognizes_unicode_type_theory_and_greek_math() -> None:
-    """detect_math_density and AdvisoryReport.check_conflict must flag Unicode math
-    (Greek letters, turnstile ⊢, tensor ⊗, arrows →, Theorem/Definition) and warn when reflow is forced."""
+    """detect_math_density must flag Unicode math (Greek letters, turnstile ⊢,
+    tensor ⊗, arrows →, Theorem/Definition)."""
     from ubt.core.archetype import MathDensity, detect_math_density
 
     sample = (

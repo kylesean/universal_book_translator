@@ -303,8 +303,8 @@ async def test_router_repair_with_image_b64() -> None:
 
 
 @pytest.mark.asyncio
-async def test_router_repair_with_image_fallback_to_text() -> None:
-    """Verify that router.repair falls back cleanly to text repair if vision fails."""
+async def test_router_repair_non_vision_model_repairs_from_text() -> None:
+    """A non-vision repair model ignores the crop and repairs from text."""
 
     class UnsupportedVisionProvider(MockModelProvider):
         async def generate_with_images(self, *args: Any, **kwargs: Any) -> str:

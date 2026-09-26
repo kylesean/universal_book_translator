@@ -193,12 +193,13 @@ async def test_close_is_final_start_does_not_resurrect(tmp_path: Path) -> None:
 async def test_close_does_not_wait_out_the_flush_interval(tmp_path: Path) -> None:
     """Shutdown must not pay the configured flush interval.
 
-    The worker parks in ``wait_for(queue.get(), timeout=flush_interval)`` and
-    ``close()`` only flips ``_closed``, so the loop re-reads its exit condition
-    after that wait expires. ``ledger_flush_interval`` is user-facing with no
-    upper bound (``config.py`` ``ledger_flush_interval``), so every job end
-    blocked for one whole interval — ~10s below, ~300s for an operator who set it
-    to 300.
+    The worker parks in ``wait_for(queue.get(), timeout=flush_interval)``.
+    ``close()`` flips ``_closed`` *and* pushes the ``_WAKE`` sentinel, so the
+    loop re-reads its exit condition immediately instead of waiting out the
+    interval. ``ledger_flush_interval`` is user-facing with no upper bound
+    (``config.py`` ``ledger_flush_interval``), so a regression here would block
+    every job end for one whole interval — ~10s below, ~300s for an operator who
+    set it to 300.
     """
     ledger = SQLiteJobLedger(tmp_path / "ledger_close.sqlite")
     ledger.init_job("job_close", _make_test_doc(), target_lang="zh")

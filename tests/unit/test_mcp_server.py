@@ -268,7 +268,7 @@ def test_prune_jobs_uses_shared_terminal_statuses(monkeypatch: pytest.MonkeyPatc
 async def test_job_status_rejects_traversal_db_dir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """ubt_job_submit guards db_dir with the path sandbox; the status
+    """ubt_translate_book guards db_dir with the path sandbox; the status
     disk-fallback used to take it raw and hand SQLiteJobLedger (read-write,
     schema-init) any path an injected agent names (L20/M4)."""
     monkeypatch.setenv("UBT_ALLOWED_DIRS", str(tmp_path))

@@ -31,7 +31,7 @@ from ubt.core.qe.fast_pass import FastPassFilter
 # ---------------------------------------------------------------------------
 # Real chapter-3 payloads, trimmed to the parts that carry the signal.
 # ---------------------------------------------------------------------------
-# Source mentions 3.1/3.5/3.6/3.7 and no citations at all.
+# Source mentions 3.1/3.5/3.6/3.11 and no citations at all.
 _B0045_SRC = (
     "where psi_pert is given by psi_2 evaluated at x = T_fin/2. Eq. (3.11) is an implicit "
     "equation in beta which must be solved using numerical methods. Fig. 3.5 shows the "

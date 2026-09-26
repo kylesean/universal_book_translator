@@ -478,9 +478,10 @@ def test_safety_gates_ship_closed() -> None:
     """Three defaults that were once open, and stay shut unless asked.
 
     A blocking visual gate, page images leaving the machine, and an export that
-    would otherwise render a half-translated book and call it completed. Each is
-    read off the job's config at use time, so the only way to ship them open is
-    to change the default here — which is what this pins. The behaviour each one
+    would otherwise render a half-translated book and call it completed. The
+    visual gate is forced on for the short chain; the other two are read off the
+    job's config at use time, so shipping them open means changing the default
+    here — which is what this pins. The behaviour each one
     guards is tested where it happens (``test_audit_2026_09_20_regressions`` for
     the export completion ratio, ``test_pluggable_ocr`` for page egress).
     """

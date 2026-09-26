@@ -3,8 +3,9 @@
 Runs without network or API keys: the local llama-swap gateway plus cached
 CometKiwi weights. Skipped when the services are absent. This is the acceptance
 evidence for the ``misrouting < 2%`` target — structural pass rate must be
-100% on admitted singles; neural scores are reported (not hard-gated on
-absolute values, which are domain-sensitive).
+100% on the curated plumbing singles; the corpus sweep is report-only. Neural
+scores are reported, not hard-gated on absolute values, which are
+domain-sensitive.
 
 Run locally with:
     uv run pytest tests/integration/test_mt_tier_live.py -v -s

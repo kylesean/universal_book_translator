@@ -255,8 +255,8 @@ def test_undelimited_gate_exempts_code_identifiers_and_snake_case() -> None:
 
     Regression: b0656 (create_task) and b0784 (code_change) in 2608.25512v1 were
     flagged as undelimited math, sent to 3 repair rounds, and quarantined as
-    MQM-critical (【待人工审校】) solely due to _SOUP_RESIDUE_RE matching standard
-    identifier names.
+    MQM-critical (【待人工审校】) solely due to the math-soup residue check
+    (``_has_math_soup_residue``) matching standard identifier names.
     """
     from ubt.core.validators.math_guard import target_missing_math_delimiters
 

@@ -189,7 +189,7 @@ def test_transcribe_groups_paragraphs_with_fake_driver(tmp_path: Path) -> None:
             )
 
     register_driver("fake-ocr", _FakeOcr)
-    # Textless page: rasterize docs/chapter-1 p1 to an image-only PDF in tmp.
+    # Textless page: rasterize docs/synthetic-mono.pdf p1 to an image-only PDF in tmp.
     # NOTE: tests/fixtures/book3-*.pdf was removed; any real PDF works as the raster source.
     import pypdfium2 as pdfium
 

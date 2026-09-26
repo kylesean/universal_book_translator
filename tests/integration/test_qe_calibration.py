@@ -2,7 +2,7 @@
 
 Scores live TranslateGemma outputs with both runners and prints the
 calibration evidence used to set ``qe_threshold`` (0.75) and the L3 gray
-zone [0.4, 0.8): agreement rate, danger quadrant (L1-pass/L2-low), and the
+zone [0.7, 0.8): agreement rate, danger quadrant (L1-pass/L2-low), and the
 share of blocks that would actually hit the LLM judge. Reports only —
 absolute neural values are domain-sensitive and must not be hard-gated.
 
@@ -34,7 +34,7 @@ from ubt.core.router.router import ModelRouter
 pytestmark = pytest.mark.slow  # live QE/COMET backend calls
 
 CLEAN_KWARGS = {"has_terms": False, "has_few_shot": False, "has_masked_spans": False}
-GRAY_LOW, GRAY_HIGH = 0.4, 0.8
+GRAY_LOW, GRAY_HIGH = 0.7, 0.8
 
 
 @requires_local_mt

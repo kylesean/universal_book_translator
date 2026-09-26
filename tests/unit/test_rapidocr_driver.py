@@ -9,7 +9,7 @@ from PIL import Image
 
 from ubt.adapters.pdf.vlm.drivers.rapidocr_driver import RapidOcrDriver
 
-if TYPE_CHECKING:  # Numpy ships in the optional `ocr`/`ocr-vlm` extras
+if TYPE_CHECKING:  # Numpy ships in the optional `ocr` extra
     import numpy as np
 
 

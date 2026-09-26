@@ -1169,8 +1169,8 @@ async def test_run_screen_toggle_dual_shortcut() -> None:
         assert _dual_choice(state) == "monolingual"
 
 
-def test_echo_generate_never_leaks_prompt_instructions() -> None:
-    """_echo_generate in mock mode must extract clean source and never leak prompt text."""
+def test_translation_output_extractor_never_leaks_prompt_instructions() -> None:
+    """The extractor must recover clean source and never leak prompt instructions."""
     from ubt.core.router.extractor import TranslationOutputExtractor
 
     prompt = (

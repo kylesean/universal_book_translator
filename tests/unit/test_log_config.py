@@ -164,8 +164,8 @@ def test_setup_logging_installs_the_docling_aggregator() -> None:
 def test_docling_stage_timings_stay_out_of_a_verbose_run() -> None:
     """PIPELINE_PROFILING is docling's own tuning probe: one DEBUG line per
     page-batch per stage. It drowns UBT progress even under --verbose, so the
-    docling logger is floored at INFO and only --verbose-with-explicit-ask
-    (UBT_LOG_LEVEL=DEBUG + UBT_NOISE_LOGGERS_UNQUIET) restores it."""
+    docling logger is floored at INFO and only an explicit UBT_LOG_LEVEL=DEBUG
+    (not --verbose) restores it."""
     setup_logging(verbose=True, stream=io.StringIO())
     assert logging.getLogger("docling").level == logging.INFO
 

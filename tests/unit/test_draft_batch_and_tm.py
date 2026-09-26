@@ -312,7 +312,7 @@ _CTX_RENAMES = {
 async def _drain_stage(**kwargs: Any) -> None:
     """Old-style keywords in, one StageContext out.
 
-    The draft stage takes the run's context now; this keeps the ~30 call sites in
+    The draft stage takes the run's context now; this keeps the ~11 call sites in
     this file written the way they read before, and any keyword that is not a
     context field fails in the constructor rather than being ignored.
     """
@@ -448,7 +448,8 @@ def test_draft_stage_tm_exact_hit_skips_llm(tmp_path: Path) -> None:
     ledger.init_job("job_tm", _make_doc_ir(5), target_lang="zh")
     tm = TranslationMemory(tmp_path / "tm.sqlite")
     # P8: the staged entry must carry the same context fingerprint the draft
-    # stage computes (PROMPT_VERSION + profile + glossary table + langs).
+    # stage computes (PROMPT_VERSION + profile + glossary table + abbreviation
+    # table + langs).
     tm.writeback(
         [
             TMPendingEntry(
@@ -549,8 +550,8 @@ def test_registry_profiles_supported_for_batch_tests() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_draft_stage_mt_tier_routes_simple_blocks(tmp_path: Path) -> None:
-    """All blocks route uniformly through the LLM draft model."""
+def test_draft_stage_routes_all_blocks_through_llm(tmp_path: Path) -> None:
+    """All blocks route uniformly through the LLM draft model (no MT tier is wired in)."""
     ledger = SQLiteJobLedger(tmp_path / "job.sqlite")
     ledger.init_job("job_mt", _make_doc_ir(6), target_lang="zh")
     provider = MockModelProvider(default_response="[LLM-DRAFT]")
@@ -580,7 +581,7 @@ def test_draft_stage_mt_tier_routes_simple_blocks(tmp_path: Path) -> None:
         ledger.close()
 
 
-def test_draft_stage_mt_failure_falls_back_to_llm(tmp_path: Path) -> None:
+def test_draft_stage_retries_transient_failures(tmp_path: Path) -> None:
     """Draft stage retries on transient errors and delivers all blocks."""
 
     class TransientFailingProvider(MockModelProvider):
@@ -669,7 +670,7 @@ def test_draft_stage_keeps_term_blocks_on_llm(tmp_path: Path) -> None:
         ledger.close()
 
 
-def test_draft_stage_mt_disabled_by_default_keeps_llm_path(tmp_path: Path) -> None:
+def test_draft_stage_without_mt_tier_keeps_llm_path(tmp_path: Path) -> None:
     """Without a dedicated MT tier the pipeline routes uniformly through the LLM."""
     ledger = SQLiteJobLedger(tmp_path / "job.sqlite")
     ledger.init_job("job_mtoff", _make_doc_ir(6), target_lang="zh")

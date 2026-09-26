@@ -1,4 +1,4 @@
-"""Unit tests for Semantic Flow-Isolated IR models and serializers."""
+"""Unit tests for Semantic Flow-Isolated IR models."""
 
 import pytest
 

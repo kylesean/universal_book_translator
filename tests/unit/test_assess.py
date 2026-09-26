@@ -510,7 +510,7 @@ def test_repair_quote_scales_rerank_only_when_ranking_is_available(
 
 
 def test_page_slice_quote_is_labelled_as_the_whole_document(tmp_path: Path) -> None:
-    """``--pages 1-1`` drafts one page; the quote still covers thirteen.
+    """``--pages 1-1`` drafts one page; the quote still covers the whole document.
 
     Scale the figure or say so — a bare number next to a sliced job reads as the
     cost of that slice and is wrong by the page ratio.

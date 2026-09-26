@@ -318,10 +318,10 @@ async def test_reflow_control_loop_quarantine_persistent_failures(tmp_path: Path
 
 
 @pytest.mark.asyncio
-async def test_reflow_control_loop_no_futile_heal_for_anchored_engine(tmp_path: Path) -> None:
-    """B2: the anchored engine must not be "self-healed" by a retune it ignores.
+async def test_reflow_control_loop_no_futile_heal_for_rigid_engine(tmp_path: Path) -> None:
+    """B2: the rigid engine must not be "self-healed" by a retune it ignores.
 
-    The anchored typesetter sizes text from the source zone's median line
+    The rigid typesetter sizes text from the source zone's median line
     height and docling_adapter returns before the Typst reconstructor, so
     mutating reconstructor.font_size_pt / leading_em re-renders the identical
     PDF (pdfium re-extract + per-page Typst compile) while claiming a healing

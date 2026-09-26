@@ -28,7 +28,7 @@ from ubt.core.qe.comet_runner import MockQERunner
 from ubt.core.router.rate_limiter import AdaptiveTokenBucket
 from ubt.core.router.router import ModelRouter
 
-# Deliberately NOT `slow`-marked: measured 2026-09-23 the whole tier is 5 tests /
+# Deliberately NOT `slow`-marked: measured 2026-09-23 the whole tier is 6 tests /
 # 2.27 s (slowest case 1.27 s) and spawns no subprocess. It is the only tier that
 # proves the pipeline worked end to end, so it belongs in the DEFAULT loop. It is
 # not in the `-m fast` per-edit loop, which collects tests/unit only.
@@ -440,12 +440,12 @@ def test_token_overhead_and_fast_pass_calibration() -> None:
     """Bound the token budget using the *real* pipeline knobs, not copies.
 
     The point of the budget model is that a config change that would blow
-    the ~1.5x ceiling (a bigger ``bottom_percentile`` repair share, more
+    the ~1.6x ceiling (a bigger ``bottom_percentile`` repair share, more
     ``max_repair_rounds``, or enabling the LLM judge on a heuristic engine
     while ``rerank_k``>1) actually fails this test. Reading the constants
     from ``UBTConfig`` / ``RepairLoop`` instead of hard-coding them is what
     keeps it honest for `bottom_percentile`; the fast-pass ceiling (0.75), the
-    decay tail (0.30) and the 1.5x budget ceiling remain literals, so those three
+    decay tail (0.30) and the 1.6x budget ceiling remain literals, so those three
     still cannot go red when the product knobs drift.
     """
     from ubt.core.config import UBTConfig

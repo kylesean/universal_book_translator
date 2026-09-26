@@ -1,4 +1,4 @@
-"""Tests for the 4 Deterministic Typographic Invariants, Skeleton Bible Extraction,
+"""Tests for the 6 Deterministic Typographic Invariants, Skeleton Bible Extraction,
 and Language-Aware Token/Cost Estimation."""
 
 from __future__ import annotations

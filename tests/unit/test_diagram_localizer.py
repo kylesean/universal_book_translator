@@ -154,7 +154,7 @@ class TestDiagramLocalizerImage:
         result = loc.localize_image(img_path, spans, bbox, page_height=720)
         assert result == img_path
 
-        # Verify file was modified (size should differ from blank)
+        # Verify the image was rewritten in place (dimensions preserved)
         original_blank = Image.new("RGB", (400, 200), "white")
         modified = Image.open(img_path)
         assert modified.size == original_blank.size
@@ -173,7 +173,7 @@ class TestDiagramLocalizerImage:
         loc.localize_image(img_path, spans, bbox, page_height=720)
 
         modified = Image.open(img_path)
-        # Point inside the erased rectangle: (px0 - pad_x + 1, py0 - pad_y + 1)
+        # Point inside the erased rectangle: (px0 - pad_x + 2, py0 - pad_y + 1)
         # px0 = (150 - 100) * (400 / 400) = 50. py0 = (130 - 20) * (200 / 200) = 110.
         # Check pixel near the erased margin:
         px = modified.getpixel((49, 109))

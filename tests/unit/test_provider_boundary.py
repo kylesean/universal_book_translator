@@ -13,8 +13,8 @@ overridable contract — and these tests hold the line:
 
 1. the flag is declared on the base class and honoured by the mock;
 2. the engine no longer reaches for the concrete class at all;
-3. only the three modules that define, construct or re-export the mock may
-   import it, enforced by AST rather than by convention.
+3. only the four modules that define, subclass, construct or re-export the mock
+   may import it, enforced by AST rather than by convention.
 """
 
 import ast

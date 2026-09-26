@@ -436,8 +436,8 @@ def test_unpriced_model_reports_unknown_not_zero(tmp_path: Path) -> None:
     """A model missing from the price table must not read as a $0 delivery.
 
     The price table deliberately covers only the benchmarked models, so most
-    operators' models -- including this project's own shipping default -- are
-    unpriced. The pricing layer already returns ``None``; the report layer was
+    operators' models are unpriced (the shipping default is explicitly priced at
+    0.0). The pricing layer already returns ``None``; the report layer was
     the one collapsing it to 0.0, in a footnote that admitted "0 = unknown".
     """
     from ubt.core.engine.reporter import build_quality_report, render_kdp_audit_markdown

@@ -3,7 +3,7 @@
 Unlike ``test_added_content_gate.py`` (which exercises the gate itself), this
 file drives the REAL stages in the same order the pipeline does:
 
-    run_draft_stage  →  run_quality_gate_stage  →  _writeback_tm_from_ledger
+    run_draft_stage  →  run_quality_gate_stage  →  writeback_tm_from_ledger
 
 That distinction matters here for a concrete reason. The first version of the
 formula image fallback looked correct under a helper-only test while the real
@@ -110,8 +110,8 @@ _CTX_RENAMES = {
 async def _drain_stage(**kwargs: Any) -> None:
     """Old-style keywords in, one StageContext out.
 
-    The draft stage takes the run's context now; this keeps the ~30 call sites in
-    this file written the way they read before, and any keyword that is not a
+    The draft stage takes the run's context now; this keeps the single call site
+    in this file written the way it read before, and any keyword that is not a
     context field fails in the constructor rather than being ignored.
     """
     ctx = build_stage_ctx(**{_CTX_RENAMES.get(k, k): v for k, v in kwargs.items()})
@@ -233,7 +233,7 @@ def test_the_same_payload_passes_every_pre_existing_gate() -> None:
 # 3. The real TM writeback must refuse the echoed target
 # ---------------------------------------------------------------------------
 def test_tm_writeback_refuses_the_echo_and_keeps_the_clean_pair(tmp_path: Path) -> None:
-    """Drives _writeback_tm_from_ledger: terminal status is not a correctness proof."""
+    """Drives writeback_tm_from_ledger: terminal status is not a correctness proof."""
     ledger = SQLiteJobLedger(tmp_path / "job.sqlite")
     ledger.init_job(
         "job_wb",

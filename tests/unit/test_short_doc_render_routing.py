@@ -40,8 +40,8 @@ def test_adaptive_policy_defaults_to_micro_granularity() -> None:
     assert policy.deterministic_glossary is True
 
 
-def test_adaptive_policy_accepts_anchored_engine() -> None:
-    """Explicit anchored engine passes through the adaptive policy unchanged."""
+def test_adaptive_policy_accepts_rigid_engine() -> None:
+    """Explicit rigid engine passes through the adaptive policy unchanged."""
     config = UBTConfig(render_engine="rigid", exec_mode="short")
     route_dec = RouteDecision(
         mode="short",
@@ -78,7 +78,7 @@ def test_adaptive_policy_long_document_routing() -> None:
 
 @pytest.mark.asyncio
 async def test_pipeline_publication_executes_full_stages(tmp_path: Path) -> None:
-    """Short documents run through the unified 5-stage pipeline under micro granularity."""
+    """Short documents run through the unified 6-stage pipeline under micro granularity."""
     input_pdf = tmp_path / "short.pdf"
     input_pdf.write_bytes(b"%PDF-1.4 mock short")
     output_pdf = tmp_path / "out.pdf"
@@ -129,11 +129,11 @@ async def test_pipeline_publication_executes_full_stages(tmp_path: Path) -> None
 
 
 @pytest.mark.asyncio
-async def test_pipeline_anchored_downgrades_to_monolingual(tmp_path: Path) -> None:
-    """render_engine='anchored' is preserved and its bilingual request is downgraded."""
+async def test_pipeline_rigid_downgrades_to_monolingual(tmp_path: Path) -> None:
+    """render_engine='rigid' is preserved and its bilingual request is downgraded."""
     input_pdf = tmp_path / "resume.pdf"
     input_pdf.write_bytes(b"%PDF-1.4 mock resume")
-    output_pdf = tmp_path / "out_anchored.pdf"
+    output_pdf = tmp_path / "out_rigid.pdf"
 
     config = UBTConfig(
         render_engine="rigid",
@@ -195,7 +195,7 @@ async def test_pipeline_anchored_downgrades_to_monolingual(tmp_path: Path) -> No
 
         export_event = TranslationProgressEvent(
             event_type=EventType.EXPORT_COMPLETED,
-            job_id="test_job_anchored",
+            job_id="test_job_rigid",
             total_blocks=1,
             completed_blocks=1,
             message="Export complete",

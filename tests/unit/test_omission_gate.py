@@ -3,7 +3,7 @@
 All three metrics are 0-token (deterministic). The regression proof: a target
 that drops a whole sentence passes every pre-existing fast-pass gate
 (length ratio 0.2 floor, script density, numbers, HTML) but must FAIL the
-omission gate once is implemented.
+omission gate.
 """
 
 import pytest

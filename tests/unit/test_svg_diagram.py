@@ -202,7 +202,7 @@ def test_render_diagram_svg_end_to_end(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Content-stream vector region detection (pypdf only, no poppler needed)
+# Content-stream vector region detection (pikepdf-based, no poppler needed)
 # ---------------------------------------------------------------------------
 
 

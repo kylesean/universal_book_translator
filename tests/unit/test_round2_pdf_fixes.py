@@ -93,23 +93,9 @@ def test_sample_pdf_pages_closes_handles(tmp_path: Path) -> None:
 
 
 @pytest.mark.fast
-def test_docling_parser_circuit_breaker_remaining_count() -> None:
-
+def test_remaining_count_formula_mirrors_docling_parser() -> None:
+    """The circuit breaker's remaining-page count is ``len(sorted) - idx``, not ``- 1``."""
     proofread_pages = {10, 11, 12, 13}
-    logs = []
-
-    class MockLogger:
-        def error(self, msg: str, *args: object) -> None:
-            logs.append(msg % args if args else msg)
-
-        def warning(self, *args: object) -> None:
-            pass
-
-        def info(self, *args: object) -> None:
-            pass
-
-        def debug(self, *args: object) -> None:
-            pass
 
     # Simulate loop index calculation
     sorted_proofread = sorted(proofread_pages)

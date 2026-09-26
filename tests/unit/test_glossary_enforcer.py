@@ -1,6 +1,6 @@
 """DeterministicGlossaryEnforcer: term replacement that cannot corrupt text.
 
-Landed here as ``regressions/test_phase1_quick_wins.py`` — nine tests of one
+Landed here from an earlier review-round module — twelve tests of one
 class filed under the review round that produced them, with no canonical file
 for the class at all. Enforced term substitution is the one place where a
 subtle bug silently rewrites a book, so it belongs with the module.

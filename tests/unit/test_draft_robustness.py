@@ -144,7 +144,7 @@ class PoisonRouter(ModelRouter):
 
 
 def test_draft_retries_transient_failures(tmp_path: Path) -> None:
-    """Fault injection: transient 429s are retried, no block is lost."""
+    """Fault injection: transient timeouts are retried, no block is lost."""
     ledger = SQLiteJobLedger(tmp_path / "flaky.sqlite")
     ledger.init_job("job_flaky", _make_doc(4), target_lang="zh")
     provider = FlakyOnceProvider()
