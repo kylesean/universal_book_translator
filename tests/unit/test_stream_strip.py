@@ -177,6 +177,37 @@ def test_shared_form_xobject_is_not_rewritten() -> None:
     assert b"Shared Form Text" in form.read_bytes()
 
 
+def test_nested_shared_form_is_detected() -> None:
+    """A Form reached through another Form and drawn by two pages is shared.
+
+    ``shared_form_objgens`` only scanned page-level /XObject entries, so a
+    nested Form drawn via page-local wrappers was missed and its text erased on
+    both pages when either wrapper was rewritten.
+    """
+    pdf = pikepdf.new()
+    p1 = pdf.add_blank_page(page_size=(600, 800))
+    p2 = pdf.add_blank_page(page_size=(600, 800))
+    inner = _make_form(pdf, b"BT /F1 12 Tf 100 500 Td (Deep Shared B) Tj ET\n")
+    wrappers = []
+    for page in (p1, p2):
+        wrapper = _make_form(pdf, b"/B Do\n")
+        wrapper[pikepdf.Name("/Resources")] = pikepdf.Dictionary(
+            {"/XObject": pikepdf.Dictionary({"/B": inner})}
+        )
+        wrappers.append(wrapper)
+        page.Resources = pikepdf.Dictionary({"/XObject": pikepdf.Dictionary({"/A": wrapper})})
+        page.Contents = pdf.make_stream(b"/A Do\n")
+
+    shared = shared_form_objgens(pdf)
+
+    assert inner.objgen in shared
+    stats = strip_page_text_pikepdf(
+        p1, [(80.0, 480.0, 300.0, 530.0)], page_no=1, shared_forms=shared
+    )
+    assert stats.shared_forms_skipped >= 1
+    assert b"Deep Shared B" in inner.read_bytes()
+
+
 def test_page_private_form_is_still_stripped() -> None:
     """A form only one page draws is not 'shared' and is stripped as before."""
     pdf = pikepdf.new()

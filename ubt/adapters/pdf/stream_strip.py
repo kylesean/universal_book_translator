@@ -913,20 +913,41 @@ def shared_form_objgens(pdf: pikepdf.Pdf) -> set[tuple[int, int]]:
         resources = page.get(pikepdf.Name("/Resources"))
         if resources is None:
             continue
-        xobjects = resources.get(pikepdf.Name("/XObject"))
-        if xobjects is None:
-            continue
+        # Recurse: a Form drawn through another Form (page -> wrapper -> inner)
+        # is still shared, and rewriting the wrapper would erase the inner
+        # text on every page that reaches it.
+        _collect_form_objgens(resources, page_index, pages_drawing, set())
+    return {objgen for objgen, pages in pages_drawing.items() if len(pages) > 1}
+
+
+def _collect_form_objgens(
+    resources: Any,
+    page_index: int,
+    pages_drawing: dict[tuple[int, int], set[int]],
+    seen: set[tuple[int, int]],
+) -> None:
+    """Record every indirect Form reachable from ``resources`` on this page."""
+    xobjects = resources.get(pikepdf.Name("/XObject"))
+    if xobjects is None:
+        return
+    try:
+        items = list(xobjects.items())
+    except Exception:
+        return
+    for _name, val in items:
         try:
-            items = list(xobjects.items())
+            if val.get(pikepdf.Name("/Subtype")) != pikepdf.Name("/Form") or not val.is_indirect:
+                continue
+            objgen = val.objgen
+            pages_drawing.setdefault(objgen, set()).add(page_index)
+            if objgen in seen:
+                continue
+            seen.add(objgen)
+            child = val.get(pikepdf.Name("/Resources"))
+            if child is not None:
+                _collect_form_objgens(child, page_index, pages_drawing, seen)
         except Exception:
             continue
-        for _name, val in items:
-            try:
-                if val.get(pikepdf.Name("/Subtype")) == pikepdf.Name("/Form") and val.is_indirect:
-                    pages_drawing.setdefault(val.objgen, set()).add(page_index)
-            except Exception:
-                continue
-    return {objgen for objgen, pages in pages_drawing.items() if len(pages) > 1}
 
 
 def strip_page_text_pikepdf(

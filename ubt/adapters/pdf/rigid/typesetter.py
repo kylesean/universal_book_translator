@@ -986,15 +986,20 @@ class RigidTypesetter:
                         )
                         page_reports[page_no].stripped_ops += stats.dropped_ops
                         if stats.shared_forms_skipped:
-                            # Not an abort, but the operator must know text that
-                            # should have been erased survived: it is shared with
-                            # other pages and rewriting it would erase it there.
+                            # Forms shared with other pages are left intact (their
+                            # text would vanish everywhere otherwise), so the
+                            # source text under the erase rects survives. Painting
+                            # the overlay on top would double it, exactly like an
+                            # abort — treat it as one and keep the source page.
                             logger.warning(
                                 "rigid strip on page %d left %d page-shared Form "
-                                "XObject(s) intact to avoid erasing text on other pages",
+                                "XObject(s) intact; skipping the overlay to avoid "
+                                "doubling the surviving source text",
                                 page_no,
                                 stats.shared_forms_skipped,
                             )
+                            aborted_pages.append(page_no)
+                            continue
                         if stats.aborted:
                             # The source text could not be removed; drawing the
                             # overlay on top would double/overlap the text. Keep
