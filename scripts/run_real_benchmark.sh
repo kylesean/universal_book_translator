@@ -105,7 +105,7 @@ case "${MODE}" in
         ;;
     --all)
         echo "Running complete live suite where prerequisites are met..."
-        uv run pytest tests/integration/ -v -s -o addopts="" || true
+        uv run pytest tests/integration/ -v -s -o addopts=""
         ;;
     --summary|*)
         echo "Diagnostic mode complete. To execute specific live benchmarks, run with:"

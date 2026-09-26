@@ -64,7 +64,8 @@ function renderOne(req) {
     out.height = parseFloat(vb[4]);
   }
   if (Resvg && req.png_width) {
-    const w = Math.max(32, Math.round(Number(req.png_width)));
+    // Clamp: an unbounded width asks Resvg for a gigapixel raster (OOM).
+    const w = Math.min(4096, Math.max(32, Math.round(Number(req.png_width))));
     const r = new Resvg(svgStr, { background: "#ffffff", fitTo: { mode: "width", value: w } });
     const png = r.render().asPng();
     out.png_b64 = Buffer.from(png).toString("base64");
@@ -79,6 +80,13 @@ rl.on("line", (line) => {
     req = JSON.parse(line);
   } catch (e) {
     process.stdout.write(JSON.stringify({ ok: false, error: "bad json" }) + "\n");
+    return;
+  }
+  // JSON.parse("null")/("42")/("[]") all succeed; dereferencing req.cmd outside
+  // a try would throw from this readline callback and kill the process, so a
+  // non-object request is answered, not crashed on.
+  if (!req || typeof req !== "object") {
+    process.stdout.write(JSON.stringify({ ok: false, error: "bad request" }) + "\n");
     return;
   }
   if (req.cmd === "probe") {

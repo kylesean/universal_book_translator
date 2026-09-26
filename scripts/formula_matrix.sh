@@ -90,8 +90,16 @@ for scenario in "${SCENARIOS[@]}"; do
     echo "=== ${name}: backend=${backend} render=${render} job=${job}"
     start=$(date +%s)
     if [[ "${hide_node}" == "1" ]]; then
-        node_dir="$(dirname "$(command -v node 2>/dev/null || echo /nonexistent)")"
-        clean_path="$(echo "${PATH}" | tr ':' '\n' | grep -vF "${node_dir}" | paste -sd: -)"
+        # Filtering every PATH entry when node is absent leaves an empty value,
+        # and under `set -euo pipefail` the failing grep pipeline aborts the
+        # whole matrix. Only filter when node exists; otherwise keep PATH.
+        if command -v node >/dev/null 2>&1; then
+            node_dir="$(dirname "$(command -v node)")"
+            clean_path="$(echo "${PATH}" | tr ':' '\n' | grep -vF "${node_dir}" | paste -sd: - || true)"
+        else
+            node_dir="(none)"
+            clean_path="${PATH}"
+        fi
         if env PATH="${clean_path}" command -v node >/dev/null 2>&1; then
             echo "  warning: node still resolvable without ${node_dir}; degradation test is not isolated" >&2
         fi

@@ -10,6 +10,7 @@ Exposes:
 
 from __future__ import annotations
 
+import asyncio
 import io
 import ipaddress
 import logging
@@ -29,6 +30,13 @@ logger = logging.getLogger("ocr-sidecar")
 # into memory and decodes arbitrary pixel counts is an OOM primitive.
 MAX_UPLOAD_BYTES = int(os.environ.get("UBT_OCR_MAX_UPLOAD_BYTES", str(32 * 1024 * 1024)))
 MAX_IMAGE_PIXELS = int(os.environ.get("UBT_OCR_MAX_IMAGE_PIXELS", str(80_000_000)))
+#: Per-request inference timeout and a bounded number of concurrent OCR jobs.
+#: Without these, N stuck requests each hold a shared threadpool worker and
+#: their full decoded image in memory (a resource-exhaustion primitive for any
+#: token holder / loopback caller).
+OCR_TIMEOUT_S = float(os.environ.get("UBT_OCR_TIMEOUT_S", "120"))
+MAX_CONCURRENT_OCR = max(1, int(os.environ.get("UBT_OCR_MAX_CONCURRENCY", "2")))
+_OCR_SEM = asyncio.Semaphore(MAX_CONCURRENT_OCR)
 _CHUNK = 1024 * 1024
 # Pillow raises DecompressionBombError above 2x this value, and warns above it.
 Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
@@ -211,12 +219,22 @@ async def ocr(
     try:
         img = Image.open(io.BytesIO(contents)).convert("RGB")
     except Image.DecompressionBombError as exc:
-        raise HTTPException(status_code=413, detail=f"Image too large: {exc}") from exc
+        logger.warning("sidecar rejected an oversized image: %s", exc)
+        raise HTTPException(status_code=413, detail="Image too large") from exc
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Invalid image format: {exc}") from exc
+        # Log the internals; never echo them to the caller.
+        logger.warning("sidecar rejected an invalid image: %s", exc)
+        raise HTTPException(status_code=400, detail="Invalid image format") from exc
 
-    engine_name, engine = await run_in_threadpool(get_engine)
-    lines_out = await run_in_threadpool(_run_ocr_inference, engine_name, engine, img)
+    async with _OCR_SEM:
+        engine_name, engine = await run_in_threadpool(get_engine)
+        try:
+            lines_out = await asyncio.wait_for(
+                run_in_threadpool(_run_ocr_inference, engine_name, engine, img),
+                timeout=OCR_TIMEOUT_S,
+            )
+        except TimeoutError as exc:
+            raise HTTPException(status_code=504, detail="OCR inference timed out") from exc
 
     return {
         "engine": engine_name,

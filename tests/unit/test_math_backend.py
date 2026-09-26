@@ -312,3 +312,27 @@ class TestInlineEngine:
         rec = TypstReconstructor()
         rec.math_backend = "typst"
         assert rec._inline_math_renderer() is None
+
+
+def test_render_mjs_survives_a_non_object_request() -> None:
+    """A JSON ``null`` line must be answered, not crash the node renderer.
+
+    ``JSON.parse("null")`` succeeds, then ``null.cmd`` threw outside the try
+    guard and killed the process — the parent waiting on JSONL then hung.
+    """
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    script = Path(__file__).resolve().parents[2] / "scripts" / "mathjax" / "render.mjs"
+    if not node or not script.exists() or not (script.parent / "node_modules" / "mathjax-full").exists():
+        pytest.skip("node + pinned MathJax not available")
+    proc = subprocess.run(
+        [node, str(script)],
+        input='null\n{"cmd":"exit"}\n',
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "bad request" in proc.stdout

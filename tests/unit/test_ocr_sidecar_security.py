@@ -105,6 +105,22 @@ def test_invalid_image_rejected_with_token(monkeypatch: pytest.MonkeyPatch) -> N
         headers={"Authorization": "Bearer secret-token"},
     )
     assert resp.status_code == 400
+    # Generic detail: the raw Pillow/internal exception must not reach the caller.
+    detail = resp.json()["detail"]
+    assert detail == "Invalid image format"
+    assert "Error" not in detail and "Exception" not in detail
+
+
+def test_ocr_inference_timeout_returns_504(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A stuck inference must not hold a worker forever."""
+    import time
+
+    module = _load(monkeypatch)
+    monkeypatch.setattr(module, "OCR_TIMEOUT_S", 0.02)
+    monkeypatch.setattr(module, "_run_ocr_inference", lambda *a, **k: time.sleep(0.2) or [])
+    client = TestClient(module.app)
+    resp = client.post("/v1/ocr", files={"file": ("x.png", _png_bytes(), "image/png")})
+    assert resp.status_code == 504
 
 
 def test_oversized_upload_rejected(monkeypatch: pytest.MonkeyPatch) -> None:

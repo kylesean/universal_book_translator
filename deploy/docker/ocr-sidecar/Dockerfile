@@ -30,7 +30,7 @@ USER ubt
 EXPOSE 8765
 
 HEALTHCHECK --interval=10s --timeout=3s --retries=3 \
-  CMD curl -f http://localhost:8765/health || exit 1
+  CMD curl -fsS -H "Authorization: Bearer ${UBT_OCR_SIDECAR_TOKEN}" http://localhost:8765/health || exit 1
 
 # UBT_OCR_SIDECAR_TOKEN enables the bearer gate; set it before exposing the port.
 # Run with resource limits, e.g.:
