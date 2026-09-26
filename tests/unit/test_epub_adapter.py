@@ -994,3 +994,75 @@ def test_unsafe_epub_member_names_are_rejected() -> None:
     assert not _is_safe_epub_member_name("a/../../b.xhtml")
     assert not _is_safe_epub_member_name("/etc/passwd")
     assert not _is_safe_epub_member_name("C:evil.xhtml")
+
+
+def test_epub_named_entities_not_swallowed_during_xml_parse() -> None:
+    """EPUB XHTML parser must preserve HTML named entities instead of lxml recover swallowing them."""
+    from ubt.adapters.epub.adapter import _parse_xhtml
+
+    raw_xhtml = '<p id="p1">Hello&nbsp;world&mdash;&ldquo;Quote&rdquo;&copy;&hellip;</p>'
+    soup = _parse_xhtml(raw_xhtml)
+    text = soup.get_text()
+    assert "\xa0" in text, f"Non-breaking space was swallowed: {text!r}"
+    assert "—" in text, f"M-dash was swallowed: {text!r}"
+    assert "“" in text and "”" in text, f"Quotes were swallowed: {text!r}"
+    assert "©" in text, f"Copyright was swallowed: {text!r}"
+    assert "…" in text, f"Ellipsis was swallowed: {text!r}"
+
+
+def test_epub_injects_head_if_missing() -> None:
+    """If chapter XHTML lacks a <head>, bilingual CSS injection must create <head> and link CSS."""
+    from ubt.adapters.epub.adapter import EPUBAdapter
+
+    adapter = EPUBAdapter()
+    raw_html = b'<html xmlns="http://www.w3.org/1999/xhtml"><body><p>Hello world.</p></body></html>'
+    translation_map = {"ch01#p0000": "你好世界。"}
+    block_names = {"p"}
+
+    rewritten, count = adapter._inject_bilingual_dom(
+        raw_html=raw_html,
+        chapter_id="ch01",
+        translation_map=translation_map,
+        block_names=block_names,
+        stylesheet_href="../ubt-bilingual.css",
+    )
+    assert count == 1
+    assert b"<head>" in rewritten
+    assert b'href="../ubt-bilingual.css"' in rewritten
+
+
+def test_epub_bilingual_retains_source_classes() -> None:
+    """Bilingual sibling node in EPUB must retain source element's CSS classes."""
+    from bs4 import BeautifulSoup
+
+    from ubt.adapters.base import BILINGUAL_TARGET_CLASS
+    from ubt.adapters.epub.adapter import EPUBAdapter
+
+    adapter = EPUBAdapter()
+    raw_html = (
+        b'<html xmlns="http://www.w3.org/1999/xhtml"><head></head>'
+        b'<body><h2 class="chapter-sub title-heavy">Chapter Subtitle</h2></body></html>'
+    )
+    translation_map = {"ch01#p0000": "章节副标题"}
+    block_names = {"h2"}
+
+    rewritten, count = adapter._inject_bilingual_dom(
+        raw_html=raw_html,
+        chapter_id="ch01",
+        translation_map=translation_map,
+        block_names=block_names,
+    )
+    assert count == 1
+    soup = BeautifulSoup(rewritten, "xml")
+    h2s = soup.find_all("h2")
+    assert len(h2s) == 2
+    target_h2 = h2s[1]
+    raw_classes = target_h2.get("class")
+    classes = (
+        list(raw_classes)
+        if isinstance(raw_classes, list)
+        else (str(raw_classes).split() if raw_classes else [])
+    )
+    assert "chapter-sub" in classes
+    assert "title-heavy" in classes
+    assert BILINGUAL_TARGET_CLASS in classes

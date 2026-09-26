@@ -433,3 +433,75 @@ async def test_markdown_adapter_does_not_html_escape_math_and_code(tmp_path: Pat
     assert "$x < y$" in content
     assert "`List<T>`" in content
     assert "a & b" in content
+
+
+@pytest.mark.fast
+@pytest.mark.asyncio
+async def test_markdown_bilingual_heading_preserves_marker_when_target_omits(
+    tmp_path: Path,
+) -> None:
+    """Bilingual heading must preserve # marker even when the model translated bare text."""
+    from ubt.core.ir.models import ChapterMeta
+
+    adapter = MarkdownAdapter()
+    manifest = BookManifest(
+        doc_id="doc1",
+        title="Title",
+        source_path="test.md",
+        chapters=[
+            ChapterMeta(chapter_id="ch_001", title="Title", spine_index=1, source_file="test.md")
+        ],
+    )
+    blocks = [
+        IRBlock(
+            id="b1",
+            spine_index=1,
+            block_type=BlockType.HEADING,
+            flow_id=FlowID.MAIN_STORY,
+            source_text="# Chapter One",
+            target_text="第一章",
+        ),
+        IRBlock(
+            id="b2",
+            spine_index=2,
+            block_type=BlockType.HEADING,
+            flow_id=FlowID.MAIN_STORY,
+            source_text="## Section 1.1",
+            target_text="1.1 小节",
+        ),
+    ]
+    out_path = tmp_path / "bilingual_headings.md"
+    await adapter.render_blocks(
+        manifest, blocks, target_lang="zh", output_path=out_path, bilingual_mode="bilingual"
+    )
+    content = out_path.read_text(encoding="utf-8")
+    assert "# Chapter One\n\n# 第一章" in content
+    assert "## Section 1.1\n\n## 1.1 小节" in content
+
+
+@pytest.mark.fast
+@pytest.mark.asyncio
+async def test_markdown_table_classified_as_table_block(tmp_path: Path) -> None:
+    """Markdown tables must be classified as BlockType.TABLE and FlowID.TABLE_GRID."""
+    md_content = """# Overview
+
+| Column 1 | Column 2 |
+| :--- | ---: |
+| Value A | Value B |
+| Value C | Value D |
+
+Regular paragraph after table.
+"""
+    p = tmp_path / "table.md"
+    p.write_text(md_content, encoding="utf-8")
+
+    adapter = MarkdownAdapter()
+    blocks: list[IRBlock] = []
+    async for ch in adapter.parse_stream(p):
+        blocks.extend(ch.blocks)
+
+    table_blocks = [b for b in blocks if b.block_type == BlockType.TABLE]
+    assert len(table_blocks) == 1
+    assert table_blocks[0].flow_id == FlowID.TABLE_GRID
+    assert "Column 1" in table_blocks[0].source_text
+    assert table_blocks[0].skip_translate is False

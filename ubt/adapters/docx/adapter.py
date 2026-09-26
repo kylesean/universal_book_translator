@@ -227,7 +227,12 @@ def _walk_note_paragraphs(root: Any, tag: str) -> Iterator[tuple[str, int, int, 
 _XML_SPACE = "{http://www.w3.org/XML/1998/namespace}space"
 
 
-def _apply_note_translation(para_el: Any, translated: str, is_monolingual: bool) -> None:
+def _apply_note_translation(
+    para_el: Any,
+    translated: str,
+    is_monolingual: bool,
+    target_lang: str | None = None,
+) -> None:
     """Put ``translated`` into a footnote/endnote paragraph without breaking its
     structure.
 
@@ -250,9 +255,20 @@ def _apply_note_translation(para_el: Any, translated: str, is_monolingual: bool)
         prefix = " " if existing_text else ""
 
     run = etree.SubElement(para_el, qn("w:r"))
-    t = etree.SubElement(run, qn("w:t"))
-    t.set(_XML_SPACE, "preserve")
-    t.text = prefix + clean_text
+    east_asia_font = _resolve_east_asia_font(target_lang)
+    if east_asia_font:
+        rpr = etree.SubElement(run, qn("w:rPr"))
+        rfonts = etree.SubElement(rpr, qn("w:rFonts"))
+        rfonts.set(qn("w:eastAsia"), east_asia_font)
+
+    full_text = prefix + clean_text
+    lines = full_text.split("\n")
+    for i, line in enumerate(lines):
+        if i > 0:
+            etree.SubElement(run, qn("w:br"))
+        t = etree.SubElement(run, qn("w:t"))
+        t.set(_XML_SPACE, "preserve")
+        t.text = line
 
 
 def _classify_paragraph(para: Paragraph) -> BlockType:
@@ -516,11 +532,10 @@ class DOCXAdapter(BaseDocumentAdapter):
             return "".join(node.text or "" for node in el.iter(qn("w:t")))
 
         p = para._p
-        # A run can carry both text and inline pictures, so removing every
-        # ``w:r`` would delete the paragraph's pictures along with its source
-        # text — graphic-carrying runs are kept.
-        graphics = {child for child in p if child.tag == qn("w:r") and _carries_graphic(child)}
-        hyperlinks = p.findall(qn("w:hyperlink"))
+        # A run or hyperlink can carry drawings / pictures.
+        # Graphic-carrying children are kept so pictures and clickable images survive.
+        graphics = {child for child in p if _carries_graphic(child)}
+        hyperlinks = [h for h in p.findall(qn("w:hyperlink")) if h not in graphics]
         # A hyperlink is a direct child of ``w:p``, so its source text would
         # stay visible in a "monolingual" export unless handled here. When the
         # paragraph's text is *entirely* link text (a linked heading or a bare
@@ -533,6 +548,8 @@ class DOCXAdapter(BaseDocumentAdapter):
         )
         for child in list(p):
             if child in graphics:
+                for t in child.iter(qn("w:t")):
+                    t.text = ""
                 continue
             if child is host and host is not None:
                 for linked_run in list(host):
@@ -580,6 +597,10 @@ class DOCXAdapter(BaseDocumentAdapter):
             # part-way through a chapter.
             for break_el in copied_ppr.findall(qn("w:sectPr")):
                 copied_ppr.remove(break_el)
+            # Strip list numbering from the bilingual sibling so Word does not
+            # double-increment numbered list counters or render duplicate bullets.
+            for num_el in copied_ppr.findall(qn("w:numPr")):
+                copied_ppr.remove(num_el)
             if len(copied_ppr) or copied_ppr.attrib:
                 new_p.append(copied_ppr)
         para._p.addnext(new_p)
@@ -708,7 +729,9 @@ class DOCXAdapter(BaseDocumentAdapter):
                 translated = targets.get(block_id)
                 if not translated:
                     continue
-                _apply_note_translation(para_el, translated, is_monolingual)
+                _apply_note_translation(
+                    para_el, translated, is_monolingual, target_lang=target_lang
+                )
                 injected += 1
                 mutated = True
             if mutated:

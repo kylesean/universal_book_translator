@@ -705,3 +705,103 @@ def test_docx_iter_body_items_walks_content_controls() -> None:
 
     texts = [getattr(item, "text", "") for item in _iter_body_items(doc)]
     assert any("Inside a content control" in t for t in texts)
+
+
+@pytest.mark.asyncio
+async def test_docx_bilingual_list_item_strips_numpr(tmp_path: Path) -> None:
+    """Bilingual paragraph cloned from a numbered list item must not inherit w:numPr.
+
+    If w:numPr is preserved, Word treats the bilingual sibling as item #2 in the list,
+    double-incrementing list counters for every translated item.
+    """
+    from docx.oxml.ns import qn
+
+    doc = Document()
+    para = doc.add_paragraph("First item")
+    pPr = para._p.get_or_add_pPr()
+    numPr = pPr.makeelement(qn("w:numPr"), {})
+    ilvl = numPr.makeelement(qn("w:ilvl"), {qn("w:val"): "0"})
+    numId = numPr.makeelement(qn("w:numId"), {qn("w:val"): "1"})
+    numPr.append(ilvl)
+    numPr.append(numId)
+    pPr.append(numPr)
+
+    src_path = tmp_path / "numbered.docx"
+    doc.save(str(src_path))
+
+    adapter = DOCXAdapter()
+    manifest = await adapter.extract_manifest(src_path)
+    blocks = (await _collect(adapter.parse_stream(src_path)))[0].blocks
+    blocks[0].target_text = "第一项"
+
+    out_path = tmp_path / "numbered_bilingual.docx"
+    await adapter.render_blocks(manifest, blocks, "zh", out_path, bilingual_mode="bilingual")
+
+    out_doc = Document(str(out_path))
+    assert len(out_doc.paragraphs) == 2
+    src_para = out_doc.paragraphs[0]
+    target_para = out_doc.paragraphs[1]
+    assert src_para.text == "First item"
+    assert target_para.text == "第一项"
+    src_ppr = src_para._p.find(qn("w:pPr"))
+    assert src_ppr is not None and src_ppr.find(qn("w:numPr")) is not None
+    # The bilingual clone must NOT carry w:numPr
+    target_ppr = target_para._p.find(qn("w:pPr"))
+    assert target_ppr is None or target_ppr.find(qn("w:numPr")) is None
+
+
+@pytest.mark.asyncio
+async def test_docx_monolingual_preserves_hyperlink_with_graphic(tmp_path: Path) -> None:
+    """Clickable image wrapped in a hyperlink must not be stripped during monolingual translation."""
+    from docx.oxml.ns import qn
+
+    doc = Document()
+    para = doc.add_paragraph()
+    # Add a hyperlink containing a graphic run
+    hyperlink = para._p.makeelement(qn("w:hyperlink"), {qn("r:id"): "rId9"})
+    run = hyperlink.makeelement(qn("w:r"), {})
+    drawing = run.makeelement(qn("w:drawing"), {})
+    run.append(drawing)
+    text_node = run.makeelement(qn("w:t"), {})
+    text_node.text = "Click here"
+    run.append(text_node)
+    hyperlink.append(run)
+    para._p.append(hyperlink)
+
+    src_path = tmp_path / "graphic_link.docx"
+    doc.save(str(src_path))
+
+    adapter = DOCXAdapter()
+    manifest = await adapter.extract_manifest(src_path)
+    blocks = (await _collect(adapter.parse_stream(src_path)))[0].blocks
+    assert len(blocks) == 1
+    blocks[0].target_text = "点击这里"
+
+    out_path = tmp_path / "graphic_link_out.docx"
+    await adapter.render_blocks(manifest, blocks, "zh", out_path, bilingual_mode="monolingual")
+
+    out_doc = Document(str(out_path))
+    out_p = out_doc.paragraphs[0]._p
+    # The drawing must survive in the output paragraph
+    assert next(out_p.iter(qn("w:drawing")), None) is not None
+
+
+def test_docx_note_translation_handles_newlines_and_east_asia() -> None:
+    """Footnote translation must serialize linebreaks as <w:br/> and set East Asian font."""
+    from docx.oxml.ns import qn
+    from lxml import etree
+
+    from ubt.adapters.docx.adapter import _apply_note_translation
+
+    p_el = etree.Element(qn("w:p"))
+    t_el = etree.SubElement(etree.SubElement(p_el, qn("w:r")), qn("w:t"))
+    t_el.text = "Original note"
+
+    _apply_note_translation(p_el, "第一行\n第二行", is_monolingual=True, target_lang="zh-cn")
+
+    runs = p_el.findall(qn("w:r"))
+    assert any(len(r.findall(qn("w:br"))) > 0 for r in runs)
+    rpr_fonts = [
+        r.find(f".//{qn('w:rFonts')}") for r in runs if r.find(f".//{qn('w:rFonts')}") is not None
+    ]
+    assert any(f.get(qn("w:eastAsia")) == "SimSun" for f in rpr_fonts)

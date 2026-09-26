@@ -485,6 +485,16 @@ def _scan_tag_end(text: str, start: int) -> int:
     return -1
 
 
+def _closer_exists(name: str, text: str, start: int) -> bool:
+    """Whether a ``</name>`` close tag appears at or after ``start``."""
+    return re.search(r"</\s*" + re.escape(name) + r"\b", text[start:], re.IGNORECASE) is not None
+
+
+def _opener_exists(name: str, text: str, before: int) -> bool:
+    """Whether an ``<name`` opener appears before ``before``."""
+    return re.search(r"<" + re.escape(name) + r"[\s/>]", text[:before], re.IGNORECASE) is not None
+
+
 def _neutralize_pseudo_tags(text: str) -> str:
     """Escape ``<`` sequences that are not real, balanced inline markup.
 
@@ -531,11 +541,33 @@ def _neutralize_pseudo_tags(text: str) -> str:
         literal = "&lt;" + m.group(0)[1:]
 
         if name in DROP_WITH_CONTENT:
-            # Always keep dangerous names as markup so the parser drops them
-            # together with their content (matches prior behaviour).
+            # A dangerous name drops content only when its close tag is present:
+            # a *paired* container still reaches the parser and is dropped with
+            # its content (the XSS guarantee). An unpaired occurrence is prose
+            # about the tag (``The <script> tag loads …``) and a void name
+            # (``<embed>``) has no content at all; both are escaped to inert
+            # text so the rest of the fragment survives.
+            if is_close:
+                opts = _opener_exists(name, text, i)
+                if opts:
+                    end = _scan_tag_end(text, i)
+                    out.append(text[i:] if end == -1 else text[i : end + 1])
+                    i = n if end == -1 else end + 1
+                else:
+                    out.append(literal)
+                    i = m.end()
+                continue
             end = _scan_tag_end(text, i)
-            out.append(text[i:] if end == -1 else text[i : end + 1])
-            i = n if end == -1 else end + 1
+            if end == -1:
+                out.append(literal)
+                i = m.end()
+                continue
+            if _closer_exists(name, text, end + 1):
+                out.append(text[i : end + 1])
+                i = end + 1
+            else:
+                out.append(literal)
+                i = m.end()
             continue
 
         if is_close:
@@ -783,7 +815,15 @@ class _SourceTagScrubber:
             if name == "link" and _link_loads_resource(_collect_tag_attrs(raw_tag)):
                 continue
             if name in _SOURCE_DROP_WITH_CONTENT:
-                index = cls._skip_element(markup, index, name)
+                # Drop with content only when a close tag actually exists.
+                # Without one, ``_skip_element`` would hunt a nonexistent end
+                # tag and delete the rest of the member — the bug for void
+                # ``<embed>`` and for prose about a tag name. Escape the tag to
+                # inert text instead; a paired container still drops above.
+                if re.search(rf"</\s*{name}\b", markup[index:], re.IGNORECASE):
+                    index = cls._skip_element(markup, index, name)
+                    continue
+                out.append("&lt;" + raw_tag[1:-1] + "&gt;")
                 continue
             out.append(cls._scrub_attributes(raw_tag))
             if name in _RAW_TEXT_ELEMENTS:

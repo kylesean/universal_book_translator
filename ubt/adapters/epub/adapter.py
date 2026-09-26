@@ -14,7 +14,7 @@ from typing import Any
 from urllib.parse import unquote
 
 from bs4 import BeautifulSoup, Tag
-from bs4.element import NavigableString
+from bs4.element import AttributeValueList, NavigableString
 
 from ubt.adapters.base import BILINGUAL_TARGET_CLASS, BaseDocumentAdapter
 from ubt.core.cleaners.dynamic_boilerplate import (
@@ -58,6 +58,29 @@ def _is_safe_epub_member_name(name: str) -> bool:
     return ":" not in normalized.split("/", 1)[0]
 
 
+_NAMED_HTML_ENTITY_RE = re.compile(r"&([a-zA-Z][a-zA-Z0-9]*);")
+_EXEMPT_XML_ENTITIES = frozenset({"amp", "lt", "gt", "quot", "apos"})
+
+
+def _resolve_named_entities(raw_html: str) -> str:
+    """Pre-resolve HTML named entities (&nbsp;, &mdash;, etc.) to UTF-8 characters.
+
+    Standard XML parsers (lxml with recover=True) discard undefined named
+    entities when no DTD is bound, turning "Hello&nbsp;world" into "Helloworld".
+    The 5 standard XML predefined entities (&amp;, &lt;, &gt;, &quot;, &apos;)
+    are left intact.
+    """
+
+    def _sub(m: re.Match[str]) -> str:
+        name = m.group(1)
+        if name in _EXEMPT_XML_ENTITIES:
+            return m.group(0)
+        decoded = html.unescape(m.group(0))
+        return decoded if decoded != m.group(0) else m.group(0)
+
+    return _NAMED_HTML_ENTITY_RE.sub(_sub, raw_html)
+
+
 def _parse_xhtml(raw_html: str) -> BeautifulSoup:
     """Parse EPUB chapter markup as XML first, HTML as fallback.
 
@@ -67,10 +90,11 @@ def _parse_xhtml(raw_html: str) -> BeautifulSoup:
     (undefined entities like ``&nbsp;``, unclosed tags), so any XML parse
     failure degrades to the HTML parser instead of failing the book.
     """
+    cleaned = _resolve_named_entities(raw_html)
     try:
-        return BeautifulSoup(raw_html, "xml")
+        return BeautifulSoup(cleaned, "xml")
     except Exception:
-        return BeautifulSoup(raw_html, "html.parser")
+        return BeautifulSoup(cleaned, "html.parser")
 
 
 BLOCK_TAGS = [
@@ -770,6 +794,14 @@ class EPUBAdapter(BaseDocumentAdapter):
             # raw LLM markup must never reach the stored EPUB, and escaping
             # happens in the sanitizer, so inline <em>/<strong> still renders
             # as formatting instead of literal text.
+            raw_classes = leaf.get("class")
+            if isinstance(raw_classes, list):
+                target_classes = list(raw_classes) + [BILINGUAL_TARGET_CLASS]
+            elif raw_classes:
+                target_classes = str(raw_classes).split() + [BILINGUAL_TARGET_CLASS]
+            else:
+                target_classes = [BILINGUAL_TARGET_CLASS]
+
             if "\n\n" in target_text:
                 paras = [p.strip() for p in target_text.split("\n\n") if p.strip()]
                 is_internal_child = leaf.name in ("td", "th", "li")
@@ -780,7 +812,7 @@ class EPUBAdapter(BaseDocumentAdapter):
                     for p_text in paras:
                         parsed_para = BeautifulSoup(sanitize_html_fragment(p_text), "html.parser")
                         new_tag = soup.new_tag("div")
-                        new_tag["class"] = BILINGUAL_TARGET_CLASS
+                        new_tag["class"] = AttributeValueList(target_classes)
                         for child in list(parsed_para.contents):
                             new_tag.append(child)
                         leaf.append(new_tag)
@@ -790,7 +822,7 @@ class EPUBAdapter(BaseDocumentAdapter):
                     for p_text in paras:
                         parsed_para = BeautifulSoup(sanitize_html_fragment(p_text), "html.parser")
                         new_tag = soup.new_tag("p")
-                        new_tag["class"] = BILINGUAL_TARGET_CLASS
+                        new_tag["class"] = AttributeValueList(target_classes)
                         for child in list(parsed_para.contents):
                             new_tag.append(child)
                         last_node.insert_after(new_tag)
@@ -805,7 +837,7 @@ class EPUBAdapter(BaseDocumentAdapter):
                 # Inside a table cell or ordered list: append a <div> *inside* the element so the
                 # row/column structure and list numbering are preserved; otherwise match leaf tag.
                 new_tag = soup.new_tag("div") if is_internal_child else soup.new_tag(leaf.name)
-                new_tag["class"] = BILINGUAL_TARGET_CLASS
+                new_tag["class"] = AttributeValueList(target_classes)
                 parsed_fragment = BeautifulSoup(sanitized_target, "html.parser")
                 for child in list(parsed_fragment.contents):
                     new_tag.append(child)
@@ -816,21 +848,26 @@ class EPUBAdapter(BaseDocumentAdapter):
                     leaf.insert_after(new_tag)
                 injected_count += 1
 
-        if injected_count > 0 and soup.head:
-            # Inject styling into <head>. the stylesheet ships once
+        if injected_count > 0:
+            # Inject styling into <head>. The stylesheet ships once
             # as an OPF manifest item and is <link>ed (EPUB best practice,
             # no duplicated inline CSS per chapter); callers that don't
             # provide a package-wide href fall back to the inline <style>.
-            if stylesheet_href:
-                link_tag = soup.new_tag("link")
-                link_tag["rel"] = "stylesheet"
-                link_tag["type"] = "text/css"
-                link_tag["href"] = stylesheet_href
-                soup.head.append(link_tag)
-            else:
-                style_tag = soup.new_tag("style")
-                style_tag.string = BILINGUAL_CSS
-                soup.head.append(style_tag)
+            head = soup.head
+            if head is None and soup.html:
+                head = soup.new_tag("head")
+                soup.html.insert(0, head)
+            if head is not None:
+                if stylesheet_href:
+                    link_tag = soup.new_tag("link")
+                    link_tag["rel"] = "stylesheet"
+                    link_tag["type"] = "text/css"
+                    link_tag["href"] = stylesheet_href
+                    head.append(link_tag)
+                else:
+                    style_tag = soup.new_tag("style")
+                    style_tag.string = BILINGUAL_CSS
+                    head.append(style_tag)
 
         return str(soup).encode("utf-8"), injected_count
 

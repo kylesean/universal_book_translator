@@ -100,6 +100,19 @@ def _sanitize_markdown_content(text: str) -> str:
     return _JS_URL_RE.sub(r'\1"#"', cleaned)
 
 
+_TABLE_DELIMITER_RE = re.compile(r"^\|?(\s*:?-+:?\s*\|)+\s*:?-+:?\s*\|?$")
+
+
+def _is_markdown_table(text: str) -> bool:
+    """Return True if text is a GFM markdown table."""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if len(lines) < 2:
+        return False
+    if not all("|" in line for line in lines):
+        return False
+    return bool(_TABLE_DELIMITER_RE.match(lines[1]))
+
+
 class MarkdownAdapter(BaseDocumentAdapter):
     """Adapter for Markdown (.md) and flat text (.txt) documents."""
 
@@ -242,18 +255,25 @@ class MarkdownAdapter(BaseDocumentAdapter):
 
             if text.startswith("$$") and text.endswith("$$") and len(text) >= 4:
                 block_type = BlockType.FORMULA
+                flow_id = FlowID.MAIN_STORY
                 skip_translate = True
             elif not self._plain_text and text.startswith("#"):
                 block_type = BlockType.HEADING
+                flow_id = FlowID.MAIN_STORY
+                skip_translate = False
+            elif not self._plain_text and _is_markdown_table(text):
+                block_type = BlockType.TABLE
+                flow_id = FlowID.TABLE_GRID
                 skip_translate = False
             else:
                 block_type = BlockType.NARRATIVE
+                flow_id = FlowID.MAIN_STORY
                 skip_translate = bool(_GUTENBERG_MARKER.match(text))
 
             current_blocks.append(
                 IRBlock(
                     id=f"{current_chapter.chapter_id}#b{block_idx:04d}",
-                    flow_id=FlowID.MAIN_STORY,
+                    flow_id=flow_id,
                     spine_index=global_spine,
                     block_type=block_type,
                     source_text=text,
@@ -468,7 +488,12 @@ class MarkdownAdapter(BaseDocumentAdapter):
             else:
                 # Interleave source and target bilingual paragraphs (default: alternating)
                 # (LLM output is untrusted — strip dangerous HTML and error marks).
-                rendered_sections.append(f"{b.source_text}\n\n{clean_target}")
+                target_formatted = (
+                    _with_heading_marker(b, clean_target)
+                    if b.block_type is BlockType.HEADING
+                    else clean_target
+                )
+                rendered_sections.append(f"{b.source_text}\n\n{target_formatted}")
 
         full_content = "\n\n".join(rendered_sections) + "\n"
 

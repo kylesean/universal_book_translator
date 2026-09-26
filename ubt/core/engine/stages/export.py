@@ -671,14 +671,11 @@ async def _render_complementary_artifact(
         # produce a byte-identical mono artifact. Record the skip instead.
         logger.info("Complementary dual render skipped: 'rigid' is monolingual")
         secondary_render = ""
-    if (
-        secondary_render
-        and is_pdf_engine_adapter(adapter)
-        and target_output.suffix.lower() == ".pdf"
-    ):
+    if secondary_render:
         primary_mode = str(manifest.run.effective_dual_mode or "inline")
         suffix = SECONDARY_SUFFIX.get(cast(DualMode, primary_mode), "_secondary")
-        candidate = target_output.with_name(f"{target_output.stem}{suffix}.pdf")
+        ext = target_output.suffix
+        candidate = target_output.with_name(f"{target_output.stem}{suffix}{ext}")
         try:
             secondary_path = await _render_adapter_output(
                 adapter=adapter,

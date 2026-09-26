@@ -671,3 +671,58 @@ def test_resolve_pdf_engine_respects_manifest_formula_heavy() -> None:
     # Without manifest or formula_heavy=False, it resolves to 'publication'
     engine_plain = resolve_pdf_engine("auto", blocks)
     assert engine_plain == "publication"
+
+
+@pytest.mark.asyncio
+async def test_render_complementary_artifact_supports_non_pdf(tmp_path: Path) -> None:
+    """Non-PDF adapters (Markdown, DOCX, EPUB, HTML) must render complementary dual-mode artifacts."""
+    from ubt.core.engine.stages.export import _render_complementary_artifact
+
+    md_file = tmp_path / "doc.md"
+    md_file.write_text("# Title\n\nParagraph text.\n", encoding="utf-8")
+
+    manifest = BookManifest(
+        doc_id="test_md",
+        title="Title",
+        source_path=str(md_file),
+    )
+    manifest.run.emit_secondary_mode = "monolingual"
+    manifest.run.effective_dual_mode = "inline"
+
+    blocks = [
+        IRBlock(
+            id="b1",
+            spine_index=1,
+            block_type=BlockType.HEADING,
+            flow_id=FlowID.MAIN_STORY,
+            source_text="# Title",
+            target_text="标题",
+        ),
+        IRBlock(
+            id="b2",
+            spine_index=2,
+            block_type=BlockType.NARRATIVE,
+            flow_id=FlowID.MAIN_STORY,
+            source_text="Paragraph text.",
+            target_text="段落文本。",
+        ),
+    ]
+
+    target_output = tmp_path / "out" / "doc.md"
+    adapter = MarkdownAdapter()
+
+    ctx = MagicMock()
+    ctx.manifest = manifest
+    ctx.ledger = MagicMock()
+    ctx.target_lang = "zh"
+    ctx.job_id = "test_job"
+
+    secondary = await _render_complementary_artifact(ctx, adapter, blocks, target_output)
+    assert secondary is not None
+    assert secondary.suffix == ".md"
+    assert secondary.name == "doc_mono.md"
+    assert secondary.exists()
+    content = secondary.read_text(encoding="utf-8")
+    assert "# 标题" in content
+    assert "段落文本。" in content
+    assert "Paragraph text." not in content

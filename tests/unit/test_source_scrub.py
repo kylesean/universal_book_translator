@@ -68,10 +68,24 @@ def test_comments_and_doctype_pass_through_verbatim() -> None:
     assert scrub_source_document(src) == src
 
 
-def test_unterminated_dangerous_tag_fails_closed() -> None:
+def test_unpaired_dangerous_tag_is_escaped_but_unterminated_still_fails_closed() -> None:
+    """An unpaired ``<script>`` is escaped to inert text, not dropped-with-content.
+
+    Superseded contract (explicit product decision, 2026-09): a dangerous name
+    with no matching close tag is prose-like (``<embed src=…>`` in a caption,
+    ``<script>`` mentioned in a CS book), so escaping it preserves the rest of
+    the member instead of deleting it. Escaped text cannot execute, so the XSS
+    guarantee is unchanged. A tag whose own ``>`` never arrives still drops the
+    remainder (fail closed).
+    """
     out = scrub_source_document("<p>ok</p><script>unclosed")
-    assert "unclosed" not in out
+    assert "unclosed" in out
+    assert "<script" not in out.lower()
     assert "<p>ok</p>" in out
+    # No ``>`` for the tag itself: still fail closed, dropping the remainder.
+    out_unterminated = scrub_source_document("<p>ok</p><script unclosed")
+    assert "unclosed" not in out_unterminated
+    assert "<p>ok</p>" in out_unterminated
 
 
 def test_scrub_is_idempotent() -> None:
@@ -228,3 +242,40 @@ def test_data_url_is_refused_for_navigation_but_allowed_for_images() -> None:
 def test_legitimate_relative_and_absolute_links_survive() -> None:
     for href in ("chapter1.xhtml", "#anchor", "../img/a.png", "https://ok.example/x"):
         assert f'href="{href}"' in sanitize_html_fragment(f'<a href="{href}">x</a>')
+
+
+def test_dangerous_tag_names_in_prose_do_not_truncate_the_fragment() -> None:
+    """A translated fragment *about* a dangerous tag is prose, not a live node.
+
+    Regression: an unpaired ``<script>`` stayed markup, so the allowlist parser
+    dropped everything after it — a technical-book sentence such as
+    ``The <script> tag loads JavaScript into the page.`` was silently cut to
+    ``The ``. Only a *paired* container (a real close tag) may drop content.
+    """
+    for sentence in (
+        "The <script> tag loads JavaScript into the page.",
+        "Apply styles with a <style> block, then test.",
+        "Use the <embed> element to embed external content.",
+        "An <object> can host a plugin.",
+        "Wrap the fallback in a <noscript> element.",
+    ):
+        out = sanitize_html_fragment(sentence)
+        assert out.rstrip().endswith("."), (sentence, out)
+        assert "<script" not in out.lower()
+        assert "<embed" not in out.lower()
+    # A real, paired container still loses its content (XSS guarantee intact).
+    assert sanitize_html_fragment("a<script>alert(1)</script>b") == "ab"
+
+
+def test_source_unpaired_dangerous_tag_keeps_the_document_tail() -> None:
+    """``<embed>`` is void: it has no close tag, so hunting one deleted the tail.
+
+    Regression: ``_skip_element`` looked for ``</embed>``, never found it, and
+    returned end-of-input, dropping the rest of the member. An unpaired
+    dangerous name is now escaped to inert text; a paired one still drops its
+    content.
+    """
+    out = scrub_source_document('<p>Before</p><embed src="movie.swf"><p>AFTER BODY</p>')
+    assert "AFTER BODY" in out
+    assert "<embed" not in out.lower()
+    assert "payload" not in scrub_source_document("<div>a<embed>payload</embed>b</div>")
