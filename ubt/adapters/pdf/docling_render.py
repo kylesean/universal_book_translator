@@ -354,6 +354,20 @@ class DoclingRenderStrategy:
                 except Exception as exc:
                     logger.warning("Diagram localization failed (non-fatal): %s", exc)
 
+        # Cover subtitle/description cuts scale with the source page height, so
+        # read page 1's size to classify a non-A4 cover correctly. Best-effort:
+        # a missing/unreadable PDF leaves the A4-absolute fallback in place.
+        source_page_height: float | None = None
+        if src_pdf_path.exists() and src_pdf_path.suffix.lower() == ".pdf":
+            try:
+                from ubt.adapters.pdf import pdf_struct
+
+                page_one = pdf_struct.page_sizes(src_pdf_path).get(1)
+                if page_one is not None:
+                    source_page_height = page_one[1]
+            except Exception as exc:  # noqa: BLE001 — cover heuristic only
+                logger.debug("Could not read source page height for cover: %s", exc)
+
         # generate_typst_source walks every block through math conversion,
         # image cropping and font measurement — pure CPU work that would stall
         # the event loop for the whole document.
@@ -370,6 +384,7 @@ class DoclingRenderStrategy:
             # overflow and shift every later page.
             pagebreaks=(active_mode in ("alternating", "facing", "facing_spread")),
             target_lang=target_lang,
+            source_page_height=source_page_height,
         )
         # The reflow path's fail-closed drops are staged image assets; without
         # recording them a rigid-only skip ledger leaves ``render_coverage`` at

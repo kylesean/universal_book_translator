@@ -248,3 +248,24 @@ def test_diagram_localizer_unescapes_xml_entities_in_pdftotext_bbox(tmp_path: Pa
         )
     assert len(spans) == 1
     assert spans[0].text == "R&D <5V>"
+
+
+def test_fit_label_font_shrinks_to_fit_and_falls_back_without_a_ttf() -> None:
+    from PIL import Image, ImageDraw, ImageFont
+
+    img = Image.new("RGB", (200, 50), "white")
+    draw = ImageDraw.Draw(img)
+
+    # No TTF configured -> default bitmap font, base size unchanged.
+    loc = DiagramLocalizer()
+    loc.cjk_font_path = None
+    _font, size = loc._fit_label_font(draw, "hello world", 14, 200.0)
+    assert size == 14
+
+    ttf = loc._find_default_cjk_font()
+    if not ttf:
+        pytest.skip("no CJK TTF available")
+    loc2 = DiagramLocalizer(cjk_font_path=ttf)
+    font2, size2 = loc2._fit_label_font(draw, "这是一个非常长的图注标签", 20, 10.0)
+    assert size2 < 20
+    assert isinstance(font2, ImageFont.FreeTypeFont)

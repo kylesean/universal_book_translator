@@ -612,3 +612,13 @@ def test_diagram_vectorization_does_not_append_to_the_callers_list(
     assert len(blocks) == 1, "the caller's list must survive the render untouched"
     assert figures(first), "the fixture must actually exercise the figure-append path"
     assert figures(first) == figures(second), "two renders must produce two identical results"
+
+
+def test_fit_font_size_shrinks_a_long_label_to_the_span_width() -> None:
+    """A translation longer than its source must not overflow the span box."""
+    from ubt.adapters.pdf.svg_diagram import _estimate_text_width_em, _fit_font_size
+
+    assert _fit_font_size("x", 100.0, 12.0) == 12.0  # short label: full height
+    size = _fit_font_size("超长图注标签内容", 30.0, 12.0)
+    assert size < 12.0
+    assert _estimate_text_width_em("超长图注标签内容") * size <= 30.0 + 1e-6

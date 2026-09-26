@@ -121,6 +121,38 @@ _LABEL_PAD_PT = 1.0
 # Minimum diagram edge length; smaller regions are picture noise, not diagrams.
 _MIN_DIAGRAM_EDGE_PT = 20.0
 
+
+def _estimate_text_width_em(text: str) -> float:
+    """Rough advance-width sum in em, without a font-metrics dependency.
+
+    CJK glyphs are full-width, Latin letters/digits near half-width, spaces
+    narrower. Used only to decide whether a translated label needs shrinking.
+    """
+    total = 0.0
+    for ch in text:
+        if ch.isspace():
+            total += 0.28
+        elif ord(ch) > 0x2E80:  # CJK ideographs / full-width forms
+            total += 1.0
+        elif ch.isalnum():
+            total += 0.55
+        else:
+            total += 0.5
+    return total or 1.0
+
+
+def _fit_font_size(text: str, span_w: float, span_h: float) -> float:
+    """Largest font size <= ``span_h`` whose estimated text width fits ``span_w``.
+
+    A translated label is often longer than its source, so sizing at the span
+    height alone let it overflow into neighbouring diagram elements.
+    """
+    estimated_w = _estimate_text_width_em(text) * span_h
+    if estimated_w <= span_w:
+        return span_h
+    return span_h * (span_w / estimated_w)
+
+
 # IMAGE block ids minted directly by the Docling extraction branch
 # (``pdf_main#img_0007``). The ``_weave_harvested_images`` fallback mints
 # ``pdf_main#img_pic_pN_M`` with a *fabricated* bbox — those must never be
@@ -433,7 +465,8 @@ def localize_diagram_svg(
             },
         )
         span_h = max(span.y1 - span.y0, 1.0)
-        font_size = span_h
+        span_w = max(span.x1 - span.x0, 1.0)
+        font_size = _fit_font_size(span.translated, span_w, span_h)
         # alphabetic baseline from the span bottom (descent allowance ~18%).
         baseline = span.y1 - 0.18 * span_h
         text_el = ET.SubElement(

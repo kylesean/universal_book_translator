@@ -120,6 +120,36 @@ class DiagramLocalizer:
             OrderedDict()
         )
 
+    def _fit_label_font(
+        self,
+        draw: ImageDraw.ImageDraw,
+        text: str,
+        base_size: int,
+        max_width: float,
+    ) -> tuple[ImageFont.FreeTypeFont | ImageFont.ImageFont, int]:
+        """Largest font <= ``base_size`` whose rendered text fits ``max_width``.
+
+        A translated label is often longer than its source, so sizing purely at
+        the span height let it overflow into neighbouring diagram elements.
+        Shrinks down to a 6pt floor; falls back to the default bitmap font when
+        no TTF is configured (which cannot be resized).
+        """
+        if not self.cjk_font_path:
+            return ImageFont.load_default(), base_size
+        floor = 6
+        for size in range(base_size, floor - 1, -1):
+            try:
+                candidate = ImageFont.truetype(self.cjk_font_path, size)
+            except Exception:
+                break
+            try:
+                width = draw.textlength(text, font=candidate)
+            except Exception:
+                width = float(max_width) + 1.0
+            if width <= max_width or size == floor:
+                return candidate, size
+        return ImageFont.load_default(), base_size
+
     def _find_default_cjk_font(self) -> str | None:
         candidates = [
             "/usr/share/fonts/noto-cjk/NotoSerifCJK-Regular.ttc",
@@ -448,18 +478,11 @@ class DiagramLocalizer:
                 fill=bg_fill,
             )
 
-            # Choose font size matching the span height
-            font_size = max(11, int((py1 - py0) * 1.15))
-            font: ImageFont.FreeTypeFont | ImageFont.ImageFont | None = None
-            if self.cjk_font_path:
-                try:
-                    font = ImageFont.truetype(self.cjk_font_path, font_size)
-                except Exception:
-                    font = None
-            if font is None:
-                font = ImageFont.load_default()
+            # Match the span height, then shrink to fit the span width so a
+            # longer target label cannot bleed into neighbouring elements.
+            base_size = max(11, int((py1 - py0) * 1.15))
+            font, _ = self._fit_label_font(draw, translated, base_size, max(px1 - px0, 1.0))
 
-            # Center text within the span box
             draw.text((px0, py0 - 1), translated, fill=(0, 0, 0), font=font)
             replaced_count += 1
 

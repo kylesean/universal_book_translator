@@ -550,3 +550,40 @@ def test_verify_math_lines_maps_a_multiline_equation_to_the_right_entry() -> Non
     assert lines[0].startswith("$ alpha")
     assert lines[2].startswith("$ frac(a, b) $"), "healthy formula degraded by the offset"
     assert lines[1].lstrip().startswith("`"), "the culprit was not degraded"
+
+
+def _cover_block(spine: int, block_type: BlockType, source: str, target: str, y0: float) -> IRBlock:
+    return IRBlock(
+        id=f"cover#b{spine:04d}",
+        spine_index=spine,
+        block_type=block_type,
+        source_text=source,
+        target_text=target,
+        bbox=BoundingBox(page=1, x0=0.0, y0=y0, x1=100.0, y1=y0 + 20.0),
+    )
+
+
+def test_cover_thresholds_scale_with_source_page_height() -> None:
+    """Absolute 300/200pt cuts are A4-specific; on a short page they misclassify.
+
+    A subtitle at y0=250 is 'description' under the absolute cuts but 'subtitle'
+    once the cut scales with a 400pt page (0.356*400=142.5).
+    """
+    recon = TypstReconstructor()
+    blocks = [
+        _cover_block(1, BlockType.HEADING, "Title", "标题", 380.0),
+        _cover_block(2, BlockType.NARRATIVE, "SUB", "副标题", 250.0),
+        _cover_block(3, BlockType.NARRATIVE, "DESC", "说明", 150.0),
+    ]
+    short = recon.generate_typst_source(
+        blocks, title="T", page_strict=True, cover_mode="always", source_page_height=400.0
+    )
+    sub_line = next(ln for ln in short.splitlines() if "副标题" in ln)
+    assert "14pt" in sub_line  # subtitle style
+    desc_line = next(ln for ln in short.splitlines() if "说明" in ln)
+    assert 'style: "italic"' in desc_line  # description style
+
+    # No page height -> A4-absolute fallback keeps 250 as the description.
+    fallback = recon.generate_typst_source(blocks, title="T", page_strict=True, cover_mode="always")
+    sub_fallback = next(ln for ln in fallback.splitlines() if "副标题" in ln)
+    assert 'style: "italic"' in sub_fallback

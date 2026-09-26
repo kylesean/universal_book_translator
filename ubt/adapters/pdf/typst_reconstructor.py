@@ -90,6 +90,12 @@ _BODY_BLOCK_TYPES = frozenset(
 
 _VALID_COVER_MODES = frozenset({"auto", "always", "never"})
 
+#: Cover-page subtitle/description cuts, as fractions of the page height. These
+#: reproduce the original A4-absolute thresholds (300pt / 200pt on 842pt) while
+#: scaling to any page size; see :meth:`TypstReconstructor._emit_cover_page`.
+_COVER_SUBTITLE_FRAC = 300.0 / 842.0
+_COVER_DESC_FRAC = 200.0 / 842.0
+
 
 def normalize_cover_mode(value: object) -> str:
     """Coerce a cover_mode value to auto/always/never (unknown -> auto)."""
@@ -751,6 +757,7 @@ class TypstReconstructor:
         start_page_num: int = 1,
         font_size: float | None = None,
         leading_em: float | None = None,
+        source_page_height: float | None = None,
     ) -> str:
         """Generate clean, publication-ready Typst source code from IR blocks.
 
@@ -775,6 +782,9 @@ class TypstReconstructor:
             start_page_num: Initial page number counter value (default 1).
             font_size: Optional typography font size in pt (overrides default/instance size).
             leading_em: Optional paragraph line-spacing in em (overrides default/instance leading).
+            source_page_height: Optional source page height in pt, used only to
+                place cover-page subtitle/description cuts relative to the page
+                (does not change the output page size).
         """
         effective_target_lang = target_lang or self.target_lang
         self.target_lang = effective_target_lang
@@ -906,6 +916,7 @@ class TypstReconstructor:
                 cover_mode,
                 pagebreaks,
                 formula_map=formula_map,
+                source_page_height=source_page_height,
             )
         else:
             if title:
@@ -1528,6 +1539,7 @@ class TypstReconstructor:
         cover_mode: str = "auto",
         pagebreaks: bool = True,
         formula_map: Mapping[str, str] | None = None,
+        source_page_height: float | None = None,
     ) -> None:
         """Emit blocks grouped by original page number with strict #pagebreak() boundaries.
 
@@ -1596,7 +1608,7 @@ class TypstReconstructor:
 
             page_blocks = page_groups[page_num]
             if page_num == 1 and self._is_cover_page(page_blocks, cover_mode):
-                self._emit_cover_page(page_blocks, lines, bilingual)
+                self._emit_cover_page(page_blocks, lines, bilingual, source_page_height)
                 continue
 
             self._emit_interior_page(
@@ -1833,8 +1845,25 @@ class TypstReconstructor:
         blocks: Sequence[IRBlock],
         lines: list[str],
         bilingual: bool,
+        page_height: float | None = None,
     ) -> None:
-        """Render an elegant, publication-grade cover page."""
+        """Render an elegant, publication-grade cover page.
+
+        Subtitle/description placement keys off vertical position. The old
+        absolute cuts (``y0 > 300`` / ``> 200`` pt) are A4-specific — on a
+        shorter cover 300pt sits mid-page, so a subtitle could be mistaken for
+        a description (or vice versa). When the source page height is known the
+        cuts scale with it using the A4-equivalent fractions, preserving the
+        same reading order on any page size; without it the absolute fallback
+        keeps the previous behaviour.
+        """
+        if page_height and page_height > 0:
+            subtitle_cut = page_height * _COVER_SUBTITLE_FRAC
+            desc_cut = page_height * _COVER_DESC_FRAC
+        else:
+            subtitle_cut = 300.0
+            desc_cut = 200.0
+
         title_block: IRBlock | None = None
         subtitle_block: IRBlock | None = None
         desc_block: IRBlock | None = None
@@ -1850,9 +1879,9 @@ class TypstReconstructor:
                 # letting them fall into author_blocks prints an absolute
                 # filesystem path into the document (vec_p*_*.svg leak).
                 image_blocks.append(b)
-            elif title_block and not subtitle_block and (b.bbox and b.bbox.y0 > 300):
+            elif title_block and not subtitle_block and (b.bbox and b.bbox.y0 > subtitle_cut):
                 subtitle_block = b
-            elif title_block and not desc_block and (b.bbox and b.bbox.y0 > 200):
+            elif title_block and not desc_block and (b.bbox and b.bbox.y0 > desc_cut):
                 desc_block = b
             else:
                 author_blocks.append(b)
