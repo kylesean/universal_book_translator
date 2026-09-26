@@ -2,6 +2,7 @@
 
 import asyncio
 import html
+import logging
 import posixpath
 import re
 import shutil
@@ -35,6 +36,26 @@ from ubt.core.ir.models import (
     IRBlock,
 )
 from ubt.core.ir.serializer import compute_file_sha256_cached
+
+logger = logging.getLogger(__name__)
+
+
+def _is_safe_epub_member_name(name: str) -> bool:
+    """False for an archive member name that escapes the package.
+
+    ``render_output`` preserves each source member's ``ZipInfo`` verbatim, so a
+    name like ``../evil.xhtml`` or ``/etc/passwd`` would propagate into the
+    delivered ``.epub`` and could escape a downstream naive extractor.
+    """
+    if name in ("", ".", "..") or "\\" in name:
+        return False
+    normalized = posixpath.normpath(name)
+    if normalized in ("", ".", "..") or normalized.startswith("../"):
+        return False
+    if normalized.startswith("/"):
+        return False
+    # A drive/URN-looking first segment ("C:") is absolute on Windows.
+    return ":" not in normalized.split("/", 1)[0]
 
 
 def _parse_xhtml(raw_html: str) -> BeautifulSoup:
@@ -548,6 +569,12 @@ class EPUBAdapter(BaseDocumentAdapter):
 
                 # EPUB requirement: 'mimetype' must be the first file and ZIP_STORED (uncompressed)
                 for info in zin.infolist():
+                    if not _is_safe_epub_member_name(info.filename):
+                        # A traversal-shaped or absolute name is copied verbatim
+                        # into the deliverable by ``writestr``; a downstream
+                        # naive extract could then escape its target directory.
+                        logger.warning("EPUB: dropping member with unsafe name %r", info.filename)
+                        continue
                     if css_entry and info.filename == css_entry:
                         # Existing bilingual stylesheet will be re-written once at the end
                         continue

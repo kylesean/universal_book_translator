@@ -29,6 +29,12 @@ def _render_value(field_name: str, value: Any) -> str:
     if field_name in _SECRET_FIELDS:
         secret = value.get_secret_value() if isinstance(value, SecretStr) else str(value or "")
         return "<unset>" if not secret else f"<set: {len(secret)} chars>"
+    if field_name == "extra_headers":
+        # These headers are forwarded to the outbound provider and commonly
+        # carry a bearer/API token. Names are safe to show; values are not.
+        if not value:
+            return "<unset>"
+        return f"<{len(value)} header(s): {', '.join(sorted(value))}> (values redacted)"
     if isinstance(value, SecretStr):
         return "<set>" if value.get_secret_value() else "<unset>"
     return str(value)

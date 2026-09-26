@@ -984,3 +984,13 @@ async def test_parse_stream_runs_off_the_event_loop(
         await task
     assert calls, "parse_stream did not route through the offloaded parser"
     assert ticks >= 5, f"event loop stalled during parse_stream (ticks={ticks})"
+
+
+def test_unsafe_epub_member_names_are_rejected() -> None:
+    from ubt.adapters.epub.adapter import _is_safe_epub_member_name
+
+    assert _is_safe_epub_member_name("OEBPS/ch01.xhtml")
+    assert not _is_safe_epub_member_name("../evil.xhtml")
+    assert not _is_safe_epub_member_name("a/../../b.xhtml")
+    assert not _is_safe_epub_member_name("/etc/passwd")
+    assert not _is_safe_epub_member_name("C:evil.xhtml")

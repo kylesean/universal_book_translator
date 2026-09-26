@@ -54,9 +54,11 @@ async def test_paths_outside_the_allowlist_are_refused(
     monkeypatch.delenv("UBT_ALLOWED_DIRS", raising=False)
     with pytest.raises(Exception, match="outside the allowed directories"):
         await ubt_job_status("job_any", db_dir="/tmp/ubt_mcp_escape")
-    with pytest.raises(Exception, match="outside the allowed directories"):
+    # /etc is now refused by the shared system-directory rule (same as REST),
+    # which fires before the allowlist comparison.
+    with pytest.raises(Exception, match="restricted system directory"):
         await ubt_inspect_book("/etc/hosts")
-    with pytest.raises(Exception, match="outside the allowed directories"):
+    with pytest.raises(Exception, match="restricted system directory"):
         await ubt_translate_book(input_path="/etc/hosts")
 
 
@@ -510,3 +512,45 @@ def test_mcp_check_lang_rejects_unsupported_target() -> None:
     # Shape violations are still rejected by the regex guard.
     with pytest.raises(UBTError):
         _check_lang("not a lang!", field="target_lang")
+
+
+def test_sandbox_refuses_system_dirs_with_implicit_bases(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Implicit bases (cwd/db_dir) must not expose /etc, /var, /proc ….
+
+    REST's resolve_secure_path denies system prefixes; the MCP sandbox only had
+    the sensitive-name rule, so a db_dir under /var (or cwd at /) served
+    system paths.
+    """
+    from ubt.mcp import server
+
+    class _Cfg:
+        db_dir = Path("/var")
+
+        def allowed_base_dirs(self) -> None:
+            return None
+
+    class _StubConfig:
+        @classmethod
+        def from_env(cls) -> _Cfg:
+            return _Cfg()
+
+    monkeypatch.setattr(server, "UBTConfig", _StubConfig)
+    with pytest.raises(Exception, match="restricted system directory"):
+        server._sandbox_path("/var/lib/ubt/ledger.db", must_exist=False)
+
+    # An explicit UBT_ALLOWED_DIRS widening exempts it, matching REST.
+    class _WideCfg:
+        db_dir = Path("/var")
+
+        def allowed_base_dirs(self) -> list[Path]:
+            return [Path("/var").resolve()]
+
+    class _WideStubConfig:
+        @classmethod
+        def from_env(cls) -> _WideCfg:
+            return _WideCfg()
+
+    monkeypatch.setattr(server, "UBTConfig", _WideStubConfig)
+    assert server._sandbox_path("/var/lib/ubt/ledger.db", must_exist=False)

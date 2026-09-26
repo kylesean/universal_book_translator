@@ -10,43 +10,11 @@ from fastapi import Header, HTTPException, status
 
 from ubt.core.config import UBTConfig
 from ubt.core.fs_perms import SENSITIVE_FILENAME_PARTS as SENSITIVE_FILENAME_PARTS
+from ubt.core.fs_perms import SYSTEM_DISALLOWED_PREFIXES as SYSTEM_DISALLOWED_PREFIXES
 from ubt.core.fs_perms import is_sensitive_path_part
 from ubt.core.job_options import JOB_ID_MAX_LEN, JOB_ID_RE, job_id_is_valid
 
 logger = logging.getLogger(__name__)
-
-
-def _build_system_disallowed_prefixes() -> tuple[Path, ...]:
-    prefixes: list[Path] = [
-        Path("/etc"),
-        Path("/root"),
-        Path("/proc"),
-        Path("/sys"),
-        Path("/dev"),
-        Path("/boot"),
-        Path("/var"),
-        Path("/usr"),
-        Path("/bin"),
-        Path("/sbin"),
-        Path("/lib"),
-        Path("/opt"),
-    ]
-    if sys.platform == "win32":
-        for var in ("SystemRoot", "windir", "ProgramFiles", "ProgramFiles(x86)", "ProgramData"):
-            val = os.environ.get(var)
-            if val:
-                prefixes.append(Path(val))
-        for fallback in ("C:\\Windows", "C:\\Program Files", "C:\\Program Files (x86)"):
-            p = Path(fallback)
-            if p.exists():
-                prefixes.append(p)
-    # Resolve once, here: these prefixes are compared against the *resolved*
-    # request path, and on macOS /etc, /var and /tmp are symlinks into
-    # /private — with unresolved prefixes the whole branch never matched.
-    return tuple(p.resolve() for p in prefixes)
-
-
-SYSTEM_DISALLOWED_PREFIXES = _build_system_disallowed_prefixes()
 
 
 def _log_startup_auth_warning(config: UBTConfig | None = None) -> None:

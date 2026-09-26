@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -73,6 +74,40 @@ SENSITIVE_PARTS_CASEFOLD = frozenset(part.casefold() for part in SENSITIVE_FILEN
 def is_sensitive_path_part(part: str) -> bool:
     """Whether a resolved path component names a credential/secret location."""
     return part.casefold() in SENSITIVE_PARTS_CASEFOLD
+
+
+def system_disallowed_prefixes() -> tuple[Path, ...]:
+    """Resolved system directories no sandbox may expose (shared by REST + MCP)."""
+    prefixes: list[Path] = [
+        Path("/etc"),
+        Path("/root"),
+        Path("/proc"),
+        Path("/sys"),
+        Path("/dev"),
+        Path("/boot"),
+        Path("/var"),
+        Path("/usr"),
+        Path("/bin"),
+        Path("/sbin"),
+        Path("/lib"),
+        Path("/opt"),
+    ]
+    if sys.platform == "win32":
+        for var in ("SystemRoot", "windir", "ProgramFiles", "ProgramFiles(x86)", "ProgramData"):
+            val = os.environ.get(var)
+            if val:
+                prefixes.append(Path(val))
+        for fallback in ("C:\\Windows", "C:\\Program Files", "C:\\Program Files (x86)"):
+            p = Path(fallback)
+            if p.exists():
+                prefixes.append(p)
+    # Resolve once: compared against the *resolved* request path, and on macOS
+    # /etc, /var and /tmp are symlinks into /private.
+    return tuple(p.resolve() for p in prefixes)
+
+
+#: Precomputed so the per-request path check does not rebuild it.
+SYSTEM_DISALLOWED_PREFIXES: tuple[Path, ...] = system_disallowed_prefixes()
 
 
 def restrict_dir_to_owner(path: Path) -> Path:

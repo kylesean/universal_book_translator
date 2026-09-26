@@ -67,7 +67,11 @@ from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.pipeline import PipelineOrchestrator
 from ubt.core.engine.progress import ARTIFACT_KEYS, ProgressSnapshot
 from ubt.core.exceptions import UBTError
-from ubt.core.fs_perms import is_sensitive_path_part, restrict_env_file
+from ubt.core.fs_perms import (
+    SYSTEM_DISALLOWED_PREFIXES,
+    is_sensitive_path_part,
+    restrict_env_file,
+)
 from ubt.core.job_options import (
     JOB_ID_MAX_LEN,
     LANG_CODE_RE,
@@ -182,12 +186,22 @@ def _sandbox_path(raw: str, *, must_exist: bool) -> Path:
     if ".." in Path(candidate).parts:
         raise UBTError(f"Refusing path with '..': {raw!r}")
     config = UBTConfig.from_env()
-    bases = config.allowed_base_dirs() or [Path.cwd().resolve(), config.db_dir.resolve()]
+    configured_bases = config.allowed_base_dirs()
+    bases = configured_bases or [Path.cwd().resolve(), config.db_dir.resolve()]
     try:
         path = Path(candidate).expanduser()
         resolved = (bases[0] / path).resolve() if not path.is_absolute() else path.resolve()
     except (OSError, RuntimeError) as err:
         raise UBTError(f"Invalid path format: {err}") from err
+    # System directories are off-limits unless the operator explicitly widened
+    # the sandbox (same precedence as REST resolve_secure_path): an implicit
+    # base such as cwd=/, or a db_dir under /var, must not expose /etc, /proc….
+    if not configured_bases:
+        for disallowed in SYSTEM_DISALLOWED_PREFIXES:
+            if resolved == disallowed or disallowed in resolved.parents:
+                raise UBTError(
+                    f"Access denied: path accesses a restricted system directory: {raw!r}"
+                )
     if not any(resolved == base or base in resolved.parents for base in bases):
         # Generic wording (mirrors the REST 403): the bases are server-side
         # paths and must not be echoed to a caller — echo the caller's own

@@ -130,3 +130,12 @@ def test_job_id_pattern_and_default_output_path_have_one_owner() -> None:
         and 'Path("tmp/output")' in path.read_text(encoding="utf-8")
     ]
     assert spellers == [], f"tmp/output re-derived in {spellers}"
+
+
+def test_extra_headers_values_are_redacted() -> None:
+    """``extra_headers`` carries bearer tokens; only names may be printed."""
+    from ubt.cli.commands.config_cmd import _render_value
+
+    rendered = _render_value("extra_headers", {"Authorization": "Bearer supersecret"})
+    assert "supersecret" not in rendered
+    assert "Authorization" in rendered

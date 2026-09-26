@@ -28,7 +28,6 @@ from ubt.api.models import (
 from ubt.api.security import (
     SENSITIVE_FILENAME_PARTS,
     SYSTEM_DISALLOWED_PREFIXES,
-    _build_system_disallowed_prefixes,
     _log_startup_auth_warning,
     _require_api_key_gate,
     _tenant_from_header,
@@ -70,7 +69,6 @@ __all__ = [
     "JobStatusResponse",
     "SYSTEM_DISALLOWED_PREFIXES",
     "SENSITIVE_FILENAME_PARTS",
-    "_build_system_disallowed_prefixes",
     "_log_startup_auth_warning",
     "_tenant_from_header",
     "verify_api_key",

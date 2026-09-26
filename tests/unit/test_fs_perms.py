@@ -279,3 +279,9 @@ def test_unreadable_subtree_is_surfaced_not_silently_skipped(
         assert any("could not enter" in rec.message for rec in caplog.records)
     finally:
         blocked.chmod(0o755)
+
+
+def test_system_disallowed_prefixes_cover_etc() -> None:
+    from ubt.core.fs_perms import SYSTEM_DISALLOWED_PREFIXES
+
+    assert Path("/etc").resolve() in SYSTEM_DISALLOWED_PREFIXES
