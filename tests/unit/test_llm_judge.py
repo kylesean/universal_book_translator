@@ -343,3 +343,16 @@ async def test_paid_judge_follows_defect_class_and_sampled_passes() -> None:
     # hard defects still never reach it (a judge cannot un-drop a number).
     assert len(judged) == 2 and runner.judge_calls == 2
     assert out[0] == 0.30 and out[2] == QE_SCORE_LEAK and out[3] == QE_SCORE_EMPTY
+
+
+def test_with_languages_preserves_max_concurrency() -> None:
+    """Rebinding language labels must not silently reset the paid-call cap."""
+
+    async def _judge(_system: str, _user: str) -> str:
+        return "score: 90"
+
+    runner = LLMJudgeQERunner(judge_fn=_judge, max_concurrency=2)
+    rebound = runner.with_languages("fr", "ja")
+    assert rebound._max_concurrency == 2
+    # An unchanged pair returns the same runner.
+    assert runner.with_languages("en", "zh") is runner

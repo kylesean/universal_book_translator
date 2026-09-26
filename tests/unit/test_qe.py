@@ -674,6 +674,106 @@ else:
     await _cleanup(runner)
 
 
+@pytest.mark.asyncio
+async def test_resident_scorer_tolerates_stdout_chatter(tmp_path: Path) -> None:
+    """A progress line on stdout must not tear down the resident session.
+
+    Neural loaders print progress there; the one-shot parser was already
+    hardened against it, so the resident path must be too.
+    """
+    stub = tmp_path / "chatty_scorer.py"
+    stub.write_text(
+        """
+import json, sys
+
+if "--serve" in sys.argv:
+    while True:
+        line = sys.stdin.readline()
+        if not line:
+            break
+        req = json.loads(line)
+        sys.stdout.write("loading model...\\n")
+        sys.stdout.flush()
+        reply = {"id": req["id"], "scores": [0.5] * len(req["pairs"]), "engine": "neural"}
+        sys.stdout.write(json.dumps(reply) + "\\n")
+        sys.stdout.flush()
+else:
+    pairs = json.loads(sys.stdin.read())
+    sys.stdout.write(json.dumps({"scores": [0.5] * len(pairs), "engine": "neural"}))
+""",
+        encoding="utf-8",
+    )
+    runner = _resident_runner(tmp_path, script=stub)
+    scores = await runner.score_pairs([{"src": "a", "mt": "b"}, {"src": "c", "mt": "d"}])
+    assert scores == [0.5, 0.5]
+    assert runner._resident_broken is False, "chatter must not break residency"
+    await _cleanup(runner)
+
+
+@pytest.mark.asyncio
+async def test_resident_scorer_rejects_wrong_score_count(tmp_path: Path) -> None:
+    """A reply with the wrong number of scores must fail loudly, not misalign."""
+    from ubt.core.exceptions import MTQEEvaluationError
+
+    stub = tmp_path / "short_scorer.py"
+    stub.write_text(
+        """
+import json, sys
+
+if "--serve" in sys.argv:
+    while True:
+        line = sys.stdin.readline()
+        if not line:
+            break
+        req = json.loads(line)
+        sys.stdout.write(json.dumps({"id": req["id"], "scores": [], "engine": "neural"}) + "\\n")
+        sys.stdout.flush()
+else:
+    pairs = json.loads(sys.stdin.read())
+    sys.stdout.write(json.dumps({"scores": [], "engine": "neural"}))
+""",
+        encoding="utf-8",
+    )
+    runner = _resident_runner(tmp_path, script=stub)
+    with pytest.raises(MTQEEvaluationError, match="scores for"):
+        await runner.score_pairs([{"src": "a", "mt": "b"}, {"src": "c", "mt": "d"}])
+    await _cleanup(runner)
+
+
+def test_term_shape_halfwidth_terminators_without_space() -> None:
+    """Half-width ! / ? are terminal even with no following whitespace.
+
+    A CJK target has no whitespace after punctuation and often uses half-width
+    !/?; missing them made the omission gate reject a correct multi-sentence
+    translation.
+    """
+    from ubt.core.qe.term_shape import count_sentences
+
+    assert count_sentences("甲!乙?丙。") == 3
+    assert count_sentences("First!Second?") == 2
+    # Decimals are still not sentence breaks.
+    assert count_sentences("The value is 3.14 today.") == 1
+
+
+def test_resolve_checkpoint_does_not_recurse_on_a_checkpointless_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """UBT_COMET_MODEL_PATH pointing at a dir with no checkpoint must not loop.
+
+    The env branch recursed into ``resolve_checkpoint(env_path)``; when model_arg
+    already was that dir the call re-entered the same branch forever
+    (RecursionError surfaced as a bare exit code 3).
+    """
+    pytest.importorskip("comet")
+    from ubt.core.qe import comet_score_ipc
+
+    monkeypatch.setenv("UBT_COMET_MODEL_PATH", str(tmp_path))
+    monkeypatch.setattr(
+        "comet.download_model", lambda *_a, **_k: str(tmp_path / "fake.ckpt")
+    )
+    assert comet_score_ipc.resolve_checkpoint(str(tmp_path)) == str(tmp_path / "fake.ckpt")
+
+
 def test_comet_runner_teardown_has_newline() -> None:
     from unittest.mock import AsyncMock, MagicMock
 

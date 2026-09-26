@@ -17,10 +17,12 @@ _CAMEL_HUMP_RE = re.compile(r"[a-z][A-Z]")
 _ALL_CAPS_RE = re.compile(r"^[A-Z0-9_]+$")
 _HAS_DIGIT_RE = re.compile(r"\d")
 
-# Sentence terminators. CJK-style terminators (。！？!?) are always terminal —
-# Chinese has no whitespace after them. Latin-style (.!?) are terminal only
-# when followed by whitespace/EOL, so decimals ('3.14') never split.
-_SENT_END_RE = re.compile(r"[。！？]|[.!?]['\"”’\)\]]*(?=\s|$)")
+# Sentence terminators. CJK-style terminators (。！？) and the half-width !?
+# (common in model output, and the only form when an IME is not used) are always
+# terminal — CJK has no whitespace after them, so requiring whitespace missed
+# them. A Latin '.' is terminal only when followed by whitespace/EOL, so decimals
+# ('3.14') never split.
+_SENT_END_RE = re.compile(r"[。！？!?]|[.]['\"”’\)\]]*(?=\s|$)")
 # Academic abbreviations whose period is not a sentence break. Without this,
 # 'Eq. (3.11)' / 'Fig. 3.5' inflate the source sentence count while the zh
 # translation ('式(3.11)' / '图3.5') carries no Latin period — a systematic

@@ -150,7 +150,12 @@ def resolve_checkpoint(model_arg: str) -> str:
     env_path_str = os.getenv("UBT_COMET_MODEL_PATH")
     if env_path_str:
         env_path = Path(env_path_str).expanduser()
-        if env_path.exists():
+        # Guard against self-re-entry: when the caller's model_arg already IS the
+        # env dir (and it holds no checkpoint at the two known locations), the
+        # recursive call re-enters this same branch with the same path and never
+        # reaches the download fallback — a RecursionError surfaced as a bare
+        # exit code 3.
+        if env_path.exists() and env_path != direct_path:
             return resolve_checkpoint(str(env_path))
 
     # Check local Hugging Face cache for known mirrors/repos

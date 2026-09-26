@@ -146,6 +146,7 @@ class LLMJudgeQERunner(BaseQERunner):
         self._target_lang = target_lang
         self._source_lang = source_lang
         self._temperature = temperature
+        self._max_concurrency = max_concurrency
         self._sem = asyncio.Semaphore(max_concurrency)
 
     def with_languages(self, source_lang: str, target_lang: str) -> LLMJudgeQERunner:
@@ -162,6 +163,7 @@ class LLMJudgeQERunner(BaseQERunner):
             target_lang=target_lang,
             source_lang=source_lang,
             temperature=self._temperature,
+            max_concurrency=self._max_concurrency,
         )
 
     def is_calibrated(self) -> bool:

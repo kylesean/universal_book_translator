@@ -34,6 +34,10 @@ from ubt.core.validators.consistency import GlossaryConsistencyValidator
 
 logger = logging.getLogger(__name__)
 
+#: Non-JSON stdout lines to skip on the resident path before declaring desync.
+#: Neural loaders print progress there; the one-shot parser already tolerates it.
+_MAX_RESIDENT_CHATTER_LINES = 100
+
 # The exact score values the heuristic emits, and what each band
 # actually means. Twelve discrete values — nothing between them is reachable.
 # Single source of truth: the named constants below feed BOTH
@@ -357,13 +361,22 @@ class SubprocessQERunner(BaseQERunner):
                     )
                 )
                 await proc.stdin.drain()
-                line = await asyncio.wait_for(proc.stdout.readline(), timeout=self.timeout_seconds)
-                if not line:
-                    raise _ResidentRestart("scorer closed stdout (crashed?)")
-                try:
-                    reply = json.loads(line.decode("utf-8", errors="replace").strip())
-                except json.JSONDecodeError as err:
-                    raise _ResidentRestart(f"unparseable reply: {err}") from err
+                reply: Any = None
+                for _ in range(_MAX_RESIDENT_CHATTER_LINES):
+                    line = await asyncio.wait_for(
+                        proc.stdout.readline(), timeout=self.timeout_seconds
+                    )
+                    if not line:
+                        raise _ResidentRestart("scorer closed stdout (crashed?)")
+                    try:
+                        reply = json.loads(line.decode("utf-8", errors="replace").strip())
+                    except json.JSONDecodeError:
+                        # torch/neural loaders print progress to stdout; skip the
+                        # chatter instead of tearing the session down (the one-shot
+                        # parser was already hardened against exactly this).
+                        logger.debug("resident scorer chatter: %r", line[:120])
+                        continue
+                    break
                 if not isinstance(reply, dict) or reply.get("id") != req_id:
                     raise _ResidentRestart(f"reply id mismatch: {reply}")
                 if "error" in reply:
@@ -374,6 +387,12 @@ class SubprocessQERunner(BaseQERunner):
                         details={"reply": reply},
                     )
                 scores, engine = self._coerce_reply(reply, str(reply)[:200])
+                if len(scores) != len(pairs):
+                    raise MTQEEvaluationError(
+                        f"Resident QE scorer returned {len(scores)} scores for "
+                        f"{len(pairs)} pairs",
+                        details={"expected": len(pairs), "got": len(scores)},
+                    )
                 self._last_used = asyncio.get_running_loop().time()
                 self._note_engine(engine, len(pairs))
                 self._schedule_idle_reap()
@@ -481,6 +500,14 @@ class SubprocessQERunner(BaseQERunner):
 
             stdout_str = stdout.decode("utf-8", errors="replace").strip()
             scores, engine = self._parse_ipc_output(stdout_str)
+            if len(scores) != len(pairs):
+                # A third-party scorer need not honour the count; a short reply
+                # silently misaligned candidates downstream (IndexError in the
+                # repair rerank). Fail loudly here instead.
+                raise MTQEEvaluationError(
+                    f"QE subprocess returned {len(scores)} scores for {len(pairs)} pairs",
+                    details={"expected": len(pairs), "got": len(scores)},
+                )
             self._note_engine(
                 engine,
                 len(pairs),
