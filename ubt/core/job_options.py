@@ -18,7 +18,13 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal
 
-from ubt.core.config import UBTConfig, profile_repair_is_independent, resolve_repair_model
+from ubt.core.config import (
+    RIGID_ENGINES,
+    UBTConfig,
+    canonical_render_engine,
+    profile_repair_is_independent,
+    resolve_repair_model,
+)
 from ubt.core.exceptions import UBTError
 from ubt.core.presets import PRESET_ENGINE_FIELDS, Preset, resolve_engine_params
 
@@ -105,7 +111,38 @@ def overrides_from_request(
         field = _REQUEST_KEY_ALIASES.get(key, key)
         if field in valid_fields:
             overrides[field] = value
+    # A request that leaves dual_mode unset gets the same profile/engine-aware
+    # default on every surface. Previously only the CLI applied it, so the same
+    # job (e.g. an academic paper) rendered bilingual inline through the API/MCP
+    # and monolingual through the CLI.
+    if "dual_mode" not in overrides:
+        adaptive = adaptive_dual_mode(None, request.get("profile"), overrides.get("render_engine"))
+        if adaptive is not None:
+            overrides["dual_mode"] = adaptive
     return overrides
+
+
+def adaptive_dual_mode(
+    explicit_dual_mode: str | None,
+    profile: str | None,
+    render_engine: str | None,
+) -> str | None:
+    """Profile/engine-aware ``dual_mode`` default, shared by CLI, API and MCP.
+
+    An explicit ``dual_mode`` always wins. Otherwise:
+    - the rigid engine is monolingual-only, so it forces ``monolingual``;
+    - academic papers and fiction/novels read better monolingual;
+    - everything else stays unset to follow config / ``UBT_DUAL_MODE``.
+    """
+    if explicit_dual_mode is not None:
+        return explicit_dual_mode
+    norm_profile = (profile or "").strip().lower()
+    norm_engine = (render_engine or "").strip().lower()
+    if norm_engine in RIGID_ENGINES or canonical_render_engine(norm_engine) == "rigid":
+        return "monolingual"
+    if norm_profile in ("paper", "fiction", "novel"):
+        return "monolingual"
+    return None
 
 
 def _coerce_field(key: str, value: Any) -> Any:

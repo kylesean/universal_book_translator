@@ -16,6 +16,7 @@ from ubt.core.config import (
     PromptStrategyName,
     QeEngine,
     RenderEngine,
+    parse_page_ranges,
 )
 from ubt.core.engine.progress import ProgressSnapshot
 from ubt.core.job_options import LANG_CODE_PATTERN, PROFILE_NAME_PATTERN
@@ -74,6 +75,21 @@ class JobSubmitRequest(BaseModel):
         description="Bilingual mode (inline, alternating, facing, monolingual, auto)",
     )
     pages: str | None = Field(default=None, description="Page range filter (e.g. 1-10)")
+
+    @field_validator("pages")
+    @classmethod
+    def _validate_pages(cls, value: str | None) -> str | None:
+        # Reject a malformed range at parse time (422) instead of failing the
+        # job asynchronously after a 202, and bound the raw string before it is
+        # split (a multi-MB ``pages`` field was a body-size DoS).
+        if value is None:
+            return value
+        try:
+            parse_page_ranges(value)
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
+        return value
+
     exec_mode: ExecMode | None = Field(
         default=None, description="Execution mode (auto, short, long)"
     )

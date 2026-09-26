@@ -554,3 +554,14 @@ def test_sandbox_refuses_system_dirs_with_implicit_bases(
 
     monkeypatch.setattr(server, "UBTConfig", _WideStubConfig)
     assert server._sandbox_path("/var/lib/ubt/ledger.db", must_exist=False)
+
+
+def test_check_pages_rejects_malformed_and_oversized() -> None:
+    from ubt.mcp.server import _check_pages
+
+    assert _check_pages(None) is None
+    assert _check_pages("1-3,5") == "1-3,5"
+    with pytest.raises(Exception, match="Invalid pages"):
+        _check_pages("abc")
+    with pytest.raises(Exception, match="Invalid pages"):
+        _check_pages("1-" + "9" * 20000)

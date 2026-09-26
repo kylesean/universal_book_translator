@@ -23,7 +23,6 @@ from ubt.core.config import (
     MOCK_API_KEY,
     RIGID_ENGINES,
     UBTConfig,
-    canonical_render_engine,
 )
 from ubt.core.engine.dry_run import create_dry_run_orchestrator
 from ubt.core.engine.events import EventType, TranslationProgressEvent
@@ -123,15 +122,11 @@ def resolve_cli_adaptive_dual_mode(
     - Other combinations (e.g. 'general', 'textbook', 'humanities' on reflow) leave it
       unset to follow config / UBT_DUAL_MODE / 'inline'.
     """
-    if explicit_dual_mode is not None:
-        return explicit_dual_mode
-    norm_profile = (profile or "").strip().lower()
-    norm_engine = (render_engine or "").strip().lower()
-    if norm_engine in RIGID_ENGINES or canonical_render_engine(norm_engine) == "rigid":
-        return "monolingual"
-    if norm_profile in ("paper", "fiction", "novel"):
-        return "monolingual"
-    return None
+    # Single-sourced in ``ubt.core.job_options`` so API/MCP resolve the same
+    # default (see ``overrides_from_request``).
+    from ubt.core.job_options import adaptive_dual_mode
+
+    return adaptive_dual_mode(explicit_dual_mode, profile, render_engine)
 
 
 async def _run_translation(
@@ -177,15 +172,9 @@ async def _run_translation(
         )
     overrides: dict[str, Any] = overrides_from_request(request)
 
+    # ``overrides_from_request`` already applied the shared adaptive default, so
+    # the CLI no longer derives dual_mode here (that was the only place it did).
     explicit_dual = request.get("dual_mode")
-    adaptive_dual = resolve_cli_adaptive_dual_mode(
-        explicit_dual_mode=explicit_dual,
-        profile=request.get("profile"),
-        render_engine=request.get("render_engine"),
-    )
-    if adaptive_dual is not None:
-        overrides["dual_mode"] = adaptive_dual
-
     effective_dual = overrides.get("dual_mode") or explicit_dual
     # Do NOT mirror draft_model→repair_model here. UBTConfig already syncs
     # repair_model←draft_model *only when repair was not explicitly set*

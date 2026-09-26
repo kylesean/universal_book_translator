@@ -585,10 +585,13 @@ def test_parse_page_ranges_unit(monkeypatch: pytest.MonkeyPatch) -> None:
         parse_page_ranges("0-2")
     with pytest.raises(ValueError, match="Invalid page range specification"):
         parse_page_ranges("abc-xyz")
-    # The materialized set is bounded in TOTAL, not just per contiguous span:
-    # a comma list of many distinct integers must not allocate them all.
-    with pytest.raises(ValueError, match="Too many pages"):
+    # The raw spec is length-capped before it is split (body-size DoS guard).
+    with pytest.raises(ValueError, match="Page specification too long"):
         parse_page_ranges(",".join(str(i) for i in range(1, 100_002)))
+    # The materialized set is bounded in TOTAL, not just per contiguous span:
+    # two in-cap spans whose union exceeds the cap must still be refused.
+    with pytest.raises(ValueError, match="Too many pages"):
+        parse_page_ranges("1-60000,70000-110001")
 
 
 def test_cli_translate_help_lists_credential_options() -> None:
@@ -881,18 +884,22 @@ def test_cli_translate_domain_profile_alias_and_validation(sample_book_md: Path)
     assert res_help.exit_code == 0
     assert "--domain-profile" in res_help.stdout
 
-    # 2. Reject invalid profile
+    # 2. Reject a path-shaped profile (the shared safe-name pattern). The old
+    #    narrow allowlist rejected name-shaped profiles that the API/MCP accept
+    #    — including every profile that actually carries glossary seeds.
     res_invalid = runner.invoke(
-        app, ["translate", str(sample_book_md), "--domain-profile", "not_a_valid_profile_xyz"]
+        app, ["translate", str(sample_book_md), "--domain-profile", "../evil"]
     )
     assert res_invalid.exit_code != 0
     assert "invalid domain profile" in res_invalid.stdout.lower()
 
-    # 3. Accept valid profile via --domain-profile alias
-    res_valid = runner.invoke(
-        app, ["translate", str(sample_book_md), "--domain-profile", "textbook", "--dry-run"]
-    )
-    assert "invalid domain profile" not in res_valid.stdout.lower()
+    # 3. Accept a valid profile via --domain-profile alias, and a seeded profile
+    #    the API/MCP already accepted (parity).
+    for profile in ("textbook", "semiconductor"):
+        res_valid = runner.invoke(
+            app, ["translate", str(sample_book_md), "--domain-profile", profile, "--dry-run"]
+        )
+        assert "invalid domain profile" not in res_valid.stdout.lower(), profile
 
 
 def test_json_stdout_is_pure_json_in_a_fresh_process(tmp_path: Path) -> None:
@@ -977,3 +984,16 @@ def test_server_bind_flags_are_actually_parsed(
     assert _resolve_bind(None, None) == ("127.0.0.1", 8000)
     # Explicit arguments still win (the bind-guard regression calls this way).
     assert _resolve_bind("0.0.0.0", 1) == ("0.0.0.0", 1)
+
+
+def test_translate_accepts_a_seeded_domain_profile(tmp_path: Path) -> None:
+    """CLI's old allowlist rejected every profile that had glossary seeds.
+
+    'semiconductor' is a packaged glossary directory (seed_entries_for_profile),
+    so the CLI must accept it like the API/MCP do; the run then fails on the
+    missing input, not on the profile.
+    """
+    missing = tmp_path / "nope.md"
+    result = runner.invoke(app, ["translate", str(missing), "--profile", "semiconductor"])
+    assert "Invalid domain profile" not in result.output
+    assert "Input file not found" in result.output

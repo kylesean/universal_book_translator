@@ -115,3 +115,21 @@ def test_fresh_none_does_not_override_environment() -> None:
     assert "fresh" not in overrides_from_request({"input_path": "x.pdf", "fresh": None})
     explicit = overrides_from_request({"input_path": "x.pdf", "fresh": True})
     assert explicit["fresh"] is True
+
+
+def test_overrides_apply_shared_adaptive_dual_mode() -> None:
+    """Profile/engine-aware dual_mode default must be identical on every surface.
+
+    Only the CLI applied it before, so an academic paper rendered bilingual
+    through the API/MCP and monolingual through the CLI.
+    """
+    from ubt.core.job_options import overrides_from_request
+
+    assert overrides_from_request({"profile": "paper"})["dual_mode"] == "monolingual"
+    assert overrides_from_request({"render_engine": "rigid"})["dual_mode"] == "monolingual"
+    # General on reflow stays unset (follows config / UBT_DUAL_MODE).
+    assert "dual_mode" not in overrides_from_request({"profile": "general"})
+    # An explicit choice is never overridden.
+    assert (
+        overrides_from_request({"profile": "paper", "dual_mode": "facing"})["dual_mode"] == "facing"
+    )

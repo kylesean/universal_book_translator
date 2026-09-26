@@ -28,7 +28,7 @@ from ubt.core.config import (
     QeEngine,
     canonical_render_engine,
 )
-from ubt.core.job_options import sidecar_path
+from ubt.core.job_options import profile_name_is_valid, sidecar_path
 from ubt.core.log_config import setup_logging
 from ubt.core.presets import Preset
 
@@ -63,9 +63,13 @@ def _is_interactive() -> bool:
     return sys.stdin.isatty()
 
 
-VALID_DOMAIN_PROFILES: frozenset[str] = frozenset(
-    {"general", "textbook", "paper", "fiction", "humanities"}
-)
+#: Domain-profile names are not a closed set: ``seed_entries_for_profile`` and
+#: the packaged glossary directories key on names like ``semiconductor`` /
+#: ``semiconductor_paper``, and operators may add their own resource dirs. The
+#: only invariant is the shared safe-name pattern, so the CLI validates with
+#: ``profile_name_is_valid`` exactly like the API and MCP — the old hardcoded
+#: allowlist rejected every profile that actually had glossary seeds.
+_PROFILE_EXAMPLES = "general, textbook, paper, fiction, humanities, semiconductor"
 
 
 def translate(
@@ -90,7 +94,8 @@ def translate(
             "--profile",
             "--domain-profile",
             "-p",
-            help="Domain profile (general, textbook, paper, fiction, humanities)",
+            help="Domain profile name (e.g. general, textbook, paper, fiction, "
+            "humanities, semiconductor); also names a packaged glossary directory",
         ),
     ] = "general",
     glossary: Annotated[
@@ -540,17 +545,18 @@ def translate(
             )
         raise typer.Exit(code=1)
 
-    if profile.lower() not in VALID_DOMAIN_PROFILES:
+    if not profile_name_is_valid(profile):
         err_msg = (
-            f"Invalid domain profile: {profile!r}. "
-            f"Must be one of: {', '.join(sorted(VALID_DOMAIN_PROFILES))}."
+            f"Invalid domain profile: {profile!r}. Use a name of letters, digits, "
+            f"'-' or '_' (examples: {_PROFILE_EXAMPLES})."
         )
         if json_output:
             print(json.dumps({"status": "failed", "error": err_msg}))
         else:
             console.print(
                 f"[bold red]Invalid domain profile:[/] {escape(str(profile))!r}. "
-                f"Must be one of: {', '.join(sorted(VALID_DOMAIN_PROFILES))}."
+                f"Use a name of letters, digits, '-' or '_' "
+                f"(examples: {_PROFILE_EXAMPLES})."
             )
         raise typer.Exit(code=1)
 

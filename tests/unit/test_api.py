@@ -1643,3 +1643,16 @@ def test_page_range_size_is_bounded() -> None:
     with pytest.raises(ValueError, match="too large"):
         parse_page_ranges("1-999999999")
     assert parse_page_ranges("1-3,5") == {1, 2, 3, 5}
+
+
+def test_job_submit_request_rejects_malformed_pages() -> None:
+    """Malformed/oversized ``pages`` must 422 at parse, not fail the job later."""
+    from pydantic import ValidationError
+
+    from ubt.api.models import JobSubmitRequest
+
+    assert JobSubmitRequest(input_path="/x.pdf", pages="1-3,5").pages == "1-3,5"
+    with pytest.raises(ValidationError):
+        JobSubmitRequest(input_path="/x.pdf", pages="abc")
+    with pytest.raises(ValidationError):
+        JobSubmitRequest(input_path="/x.pdf", pages="1-" + "9" * 20000)

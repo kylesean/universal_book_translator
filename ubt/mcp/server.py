@@ -57,6 +57,7 @@ except ModuleNotFoundError as exc:  # pragma: no cover - install-shape guard
 
 from ubt.adapters import get_adapter_for_path
 from ubt.core.config import MOCK_API_KEY, UBTConfig
+from ubt.core.config import parse_page_ranges as parse_page_ranges
 from ubt.core.engine.dry_run import create_dry_run_orchestrator
 from ubt.core.engine.events import TranslationProgressEvent
 
@@ -76,6 +77,7 @@ from ubt.core.job_options import (
     JOB_ID_MAX_LEN,
     LANG_CODE_RE,
     apply_config_overrides,
+    default_output_path,
     job_id_is_valid,
     overrides_from_request,
     profile_name_is_valid,
@@ -148,6 +150,22 @@ def _check_lang(code: str, field: str) -> str:
             "zh, en, ja, ko, fr, de, es, ru (region tags such as 'zh-CN' are accepted)."
         )
     return code
+
+
+def _check_pages(pages: str | None) -> str | None:
+    """Entry-layer page-range guard, matching the REST ``JobSubmitRequest`` 422.
+
+    Without it a malformed range passed the tool and failed the job
+    asynchronously (or 500'd the assess path); a multi-MB value was also
+    materialized before the cap.
+    """
+    if pages is None:
+        return None
+    try:
+        parse_page_ranges(pages)
+    except ValueError as exc:
+        raise UBTError(f"Invalid pages {pages!r}: {exc}") from exc
+    return pages
 
 
 def _check_profile(profile: str) -> str:
@@ -362,6 +380,7 @@ async def ubt_translate_book(
     _check_lang(target_lang, "target_lang")
     _check_lang(source_lang, "source_lang")
     profile = _check_profile(profile)
+    pages = _check_pages(pages)
     _prune_jobs()
     running = sum(
         1 for rec in _JOBS.values() if rec.status in (JobStatus.SUBMITTED, JobStatus.RUNNING)
@@ -372,6 +391,18 @@ async def ubt_translate_book(
             "wait for one to finish before submitting another."
         )
     resolved = _resolve_input(input_path)
+    if output_path is None:
+        # The implicit deliverable defaults to ~/Documents/UBT, which is outside
+        # the MCP sandbox; REST relocates it inside the allowlist, so MCP must
+        # too instead of writing outside its own contract. Relocate into the
+        # ledger dir (always a sandbox base) with the same file name.
+        candidate = default_output_path(resolved)
+        try:
+            _sandbox_path(str(candidate), must_exist=False)
+            output_path = str(candidate)
+        except UBTError:
+            relocated = Path(UBTConfig.from_env().db_dir) / candidate.name
+            output_path = str(_sandbox_path(str(relocated), must_exist=False))
     jid = _check_job_id(job_id) if job_id else f"job_{uuid.uuid4().hex[:12]}"
     if jid in _JOBS and _JOBS[jid].status in (JobStatus.SUBMITTED, JobStatus.RUNNING):
         raise UBTError(f"Job {jid} is already running")

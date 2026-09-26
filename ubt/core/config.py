@@ -256,6 +256,8 @@ def _default_comet_script() -> Path | None:
 
 
 _MAX_PAGE_RANGE = 100_000
+#: Cap on the raw ``pages`` specification string itself, before it is split.
+_MAX_PAGES_SPEC_LEN = 10_000
 
 
 def parse_page_ranges(pages_str: str | None) -> set[int] | None:
@@ -266,6 +268,12 @@ def parse_page_ranges(pages_str: str | None) -> set[int] | None:
     """
     if not pages_str or not pages_str.strip():
         return None
+    # Bound the raw string before splitting it: a multi-megabyte ``pages`` field
+    # (or UBT_PAGES) otherwise materializes a millions-long list first.
+    if len(pages_str) > _MAX_PAGES_SPEC_LEN:
+        raise ValueError(
+            f"Page specification too long ({len(pages_str)} chars); limit is {_MAX_PAGES_SPEC_LEN}"
+        )
     pages: set[int] = set()
     parts = [p.strip() for p in pages_str.split(",") if p.strip()]
     for part in parts:
