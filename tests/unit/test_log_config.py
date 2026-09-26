@@ -242,3 +242,33 @@ def test_progress_bar_does_not_read_100_before_the_job_finishes() -> None:
             ),
         )
         assert progress.tasks[0].percentage == 100.0
+
+
+def test_json_mode_repoints_logs_from_stdout_to_stderr() -> None:
+    import io
+    import logging
+
+    from rich.console import Console
+
+    from ubt.core.log_config import setup_logging
+
+    root = logging.getLogger()
+    saved = list(root.handlers)
+    root.handlers.clear()
+    try:
+        stdout_buf = io.StringIO()
+        stderr_buf = io.StringIO()
+        # Human-mode CLI callback: records go through a stdout Rich console.
+        setup_logging(console=Console(file=stdout_buf))
+        # `--json` then requests stderr routing at WARNING.
+        setup_logging(level="WARNING", stream=stderr_buf)
+
+        logging.getLogger("ubt.some.module").warning("json-mode warning")
+
+        assert "json-mode warning" in stderr_buf.getvalue()
+        assert "json-mode warning" not in stdout_buf.getvalue()
+    finally:
+        for handler in list(root.handlers):
+            if handler not in saved:
+                root.removeHandler(handler)
+        root.handlers[:] = saved

@@ -378,3 +378,12 @@ def test_mixed_endpoints_bill_only_the_remote_channel() -> None:
         endpoint_map={"gpt-4o-mini": "https://api.openai.com/v1"},
     )
     assert cost == round(1_000_000 * 0.15 / 1_000_000, 6)
+
+
+def test_gpt_41_does_not_inherit_legacy_gpt4_rates() -> None:
+    """A newer family must not silently resolve to the shorter legacy prefix."""
+    from ubt.core.router.pricing import resolve_model_prices
+
+    assert resolve_model_prices("gpt-4.1") == (2.00, 8.00)
+    assert resolve_model_prices("gpt-4.1-mini") == (0.40, 1.60)
+    assert resolve_model_prices("gpt-4.1") != resolve_model_prices("gpt-4")

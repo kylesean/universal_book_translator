@@ -13,6 +13,8 @@ every later run (``use_count`` 6-9 for the affected entries).
 
 from pathlib import Path
 
+import pytest
+
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.stages.tm_writeback import tm_writeback_eligible
 from ubt.core.ir.models import BlockStatus, BlockType, DocumentIR, FlowID, IRBlock
@@ -281,3 +283,42 @@ def test_version_spacing_collapse_does_not_cross_sentence_edges() -> None:
 
     # "(2020. 5" must not fuse into the version-shaped "2020.5".
     assert "2020.5" not in reference_tokens("Published in 2020. 5 samples were used.")
+
+
+def test_appendix_and_three_level_references_are_seen() -> None:
+    from ubt.core.qe.added_content import reference_tokens
+
+    assert reference_tokens("See Appendix A.10 for the derivation.") == {"A.10"}
+    assert reference_tokens("见附录 A.10 中的推导。") == {"A.10"}
+    assert reference_tokens("Section 3.4.1 generalises Eq. (3.4).") == {"3.4.1", "3.4"}
+
+
+def test_fabricated_figure_reference_is_not_exempted_by_a_plain_source_number() -> None:
+    from ubt.core.qe.added_content import AddedContentGate
+
+    decision = AddedContentGate().evaluate(
+        "The speedup was 3.5 times.", "见图 3.5，实现了 3.5 倍的加速。"
+    )
+    assert not decision.passed
+    assert "3.5" in decision.fabricated_refs
+
+
+def test_correct_figure_reference_still_passes_when_source_has_it() -> None:
+    from ubt.core.qe.added_content import AddedContentGate
+
+    decision = AddedContentGate().evaluate(
+        "Fig. 3.5 shows the surface potential.", "图 3.5 展示了表面电势。"
+    )
+    assert decision.passed, decision.reason
+
+
+@pytest.mark.fast
+def test_spaced_three_level_reference_is_seen() -> None:
+    from ubt.core.qe.added_content import AddedContentGate, reference_tokens
+
+    assert reference_tokens("Section 3 . 4 . 1") == frozenset({"3.4.1"})
+    decision = AddedContentGate().evaluate(
+        "As described in Section 3 . 4 . 1 , the method generalises.",
+        "如第 3.4.1 节所述，该方法得到了推广。",
+    )
+    assert decision.passed, decision.reason

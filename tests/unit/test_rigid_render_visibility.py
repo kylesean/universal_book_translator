@@ -172,3 +172,27 @@ def test_unrenderable_inline_math_is_a_visible_block_skip() -> None:
 
     assert paints == {}
     assert (block.id, "math_unrenderable") in report.skipped
+
+
+@pytest.mark.fast
+def test_assert_paintable_rejects_geometry_skips() -> None:
+    """No paintable zone because no page geometry was decoded must abort."""
+    from ubt.adapters.pdf.rigid.typesetter import RigidReport, _assert_paintable
+    from ubt.core.exceptions import DocumentParseError
+
+    for reason in ("no_page_height", "no_bbox", "no_zone"):
+        report = RigidReport()
+        report.skipped.append(("b1", reason))
+        with pytest.raises(DocumentParseError):
+            _assert_paintable({}, report)
+
+
+@pytest.mark.fast
+def test_assert_paintable_allows_documents_with_nothing_to_translate() -> None:
+    """A document whose only blocks are non-prose is legitimately empty."""
+    from ubt.adapters.pdf.rigid.typesetter import RigidReport, _assert_paintable
+
+    report = RigidReport()
+    report.skipped.append(("img1", "non_prose"))
+    report.skipped.append(("fig1", "empty_target"))
+    _assert_paintable({}, report)  # must not raise

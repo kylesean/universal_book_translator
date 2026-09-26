@@ -728,3 +728,21 @@ def test_fast_pass_proper_nouns_and_tech_terms_script_density() -> None:
     tgt = "在 Linux 上使用 Prometheus 和 Grafana 配置 Kubernetes。"
     d = fp.evaluate(src, tgt)
     assert d.passed, f"Tech terms translation rejected: {d.reason}"
+
+
+@pytest.mark.fast
+def test_repeated_source_line_is_not_a_hallucination_loop() -> None:
+    from ubt.core.qe.fast_pass import FastPassFilter
+
+    fp = FastPassFilter()
+    src = "The road goes ever on and on.\n" * 4
+    tgt = "路一直向前延伸。\n" * 4
+    assert fp.evaluate(src, tgt).passed
+
+    # A target that loops while the source does not is still caught.
+    decision = fp.evaluate(
+        "Alpha line one.\nBeta line two.\nGamma line three.\nDelta line four.",
+        "Loop line here.\n" * 4,
+    )
+    assert not decision.passed
+    assert "Repetitive" in decision.reason

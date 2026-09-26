@@ -2,7 +2,14 @@
 
 import pytest
 
-from ubt.core.language_profile import PROFILES, ZH, get_profile
+from ubt.core.language_profile import (
+    PROFILES,
+    ZH,
+    get_pair_policy,
+    get_profile,
+    is_supported_lang,
+    normalize_lang_code,
+)
 from ubt.core.memory.bible import clean_bible_entry
 from ubt.core.memory.cjk_matcher import count_term_in_text
 from ubt.core.qe.fast_pass import FastPassFilter
@@ -182,3 +189,51 @@ def test_math_text_system_prompt_parameterization() -> None:
 
     prompt_de_ja = get_math_text_system_prompt("de", "ja")
     assert "German to Japanese" in prompt_de_ja
+
+
+def test_region_tag_resolves_to_base_profile() -> None:
+    """Region/script subtags must resolve to their base profile instead of crashing."""
+    assert get_profile("zh-CN") == ZH
+    assert get_profile("zh-TW") == ZH
+    assert get_profile("zh-Hans") == ZH
+    assert get_profile("en-US") == get_profile("en")
+    assert get_profile("en_GB") == get_profile("en")
+    assert normalize_lang_code("zh-Hans") == "zh"
+    assert normalize_lang_code("zh-TW") == "zh"
+
+
+def test_unsupported_base_language_still_raises() -> None:
+    """Normalization must not turn an unsupported language into a silent fallback."""
+    with pytest.raises(ValueError, match="Unknown language profile"):
+        get_profile("pt-BR")
+    with pytest.raises(ValueError, match="Unknown language profile"):
+        get_profile("klingon")
+
+
+def test_is_supported_lang_reports_entry_point_truth() -> None:
+    assert is_supported_lang("zh-CN") is True
+    assert is_supported_lang("zh-TW") is True
+    assert is_supported_lang("en-US") is True
+    assert is_supported_lang("zh") is True
+    assert is_supported_lang("pt-BR") is False
+    assert is_supported_lang("it") is False
+    assert is_supported_lang("klingon") is False
+
+
+def test_pair_policy_uses_calibrated_band_for_region_tags() -> None:
+    """en-US -> zh-CN must hit the calibrated (0.2, 1.5) band, not the generic fallback."""
+    policy = get_pair_policy("en-US", "zh-CN")
+    assert policy.target_code == "zh"
+    assert policy.source_code == "en"
+    assert (policy.min_length_ratio, policy.max_length_ratio) == (0.2, 1.5)
+
+
+def test_fast_pass_filter_accepts_region_tag_target() -> None:
+    from ubt.core.qe.fast_pass import FastPassFilter
+
+    fp = FastPassFilter(source_lang="en", target_lang="zh-CN")
+    decision = fp.evaluate(
+        "Psychological research shows that sleep deprivation impairs cognition.",
+        "心理学研究表明，睡眠不足会损害认知能力。",
+    )
+    assert decision.passed is True

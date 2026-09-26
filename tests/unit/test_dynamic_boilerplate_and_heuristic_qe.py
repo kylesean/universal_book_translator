@@ -146,3 +146,15 @@ def test_page_marker_cleaning_never_eats_a_paragraphs_own_leading_number() -> No
     assert fp.clean("Page 42\nBody text") == "Body text"
     # A block that is only a page number is left alone (nothing to strip to).
     assert fp.clean("233") == "233"
+
+
+def test_leading_page_marker_does_not_eat_english_words() -> None:
+    from ubt.core.cleaners.dynamic_boilerplate import BoilerplateFingerprint
+
+    fp = BoilerplateFingerprint()
+    for word in ("Mild", "Civil", "Dim", "Mix"):
+        text = f"{word}\nBody sentence follows here."
+        assert fp.clean_head(text)[0] == text, word
+    # Real page markers are still stripped.
+    assert fp.clean_head("xiv\nChapter body")[0] == "Chapter body"
+    assert fp.clean_head("Page 42\nBody")[0] == "Body"

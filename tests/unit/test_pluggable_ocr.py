@@ -638,3 +638,28 @@ def test_cloud_ocr_driver_accepts_extra_headers() -> None:
         extra_headers={"X-Custom-Auth": "secret", "X-Trace-Id": "123"},
     )
     assert driver.extra_headers == {"X-Custom-Auth": "secret", "X-Trace-Id": "123"}
+
+
+def test_ocr_unavailable_hint_does_not_offer_vision_llm_for_scans() -> None:
+    from ubt.adapters.pdf.docling_parser import _ocr_unavailable_hint
+
+    hint = _ocr_unavailable_hint("auto")
+    # The numbered remediation options are the "offers"; none may be the
+    # vision-LLM mode, which yields text but no geometry and so cannot
+    # transcribe a scan.
+    offered = "\n".join(ln for ln in hint.splitlines() if ln.strip()[:1].isdigit())
+    assert "--ocr vlm" not in offered
+    # A measured-box engine must be named instead.
+    assert "rapidocr" in offered
+    assert "sidecar" in offered
+    assert "--ocr cloud" in offered
+    # And the hint must say why the vision route is not the answer.
+    assert "cannot transcribe a scanned page" in hint
+
+
+def test_unmeasured_vlm_driver_is_not_scan_capable() -> None:
+    from ubt.adapters.pdf.docling_parser import _driver_can_transcribe_scans
+    from ubt.adapters.pdf.vlm.drivers.cloud_driver import CloudOcrDriver
+
+    assert _driver_can_transcribe_scans(CloudOcrDriver(provider="vlm")) is False
+    assert _driver_can_transcribe_scans(CloudOcrDriver(provider="cloud")) is True

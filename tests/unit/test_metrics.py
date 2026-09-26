@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -295,3 +297,32 @@ def test_metrics_formula_fidelity_zero_when_no_blocks_but_substitutions() -> Non
     kpis = collect_kpis(report)
     assert kpis.kpis["formula_fidelity"] == 0.0
     assert kpis.kpis["formula_substitutions"] == 2.0
+
+
+@pytest.mark.fast
+def test_metrics_json_errors_go_to_stderr(tmp_path: Path) -> None:
+    missing = tmp_path / "missing_metrics.json"
+    commands = [
+        [sys.executable, "-m", "ubt", "metrics", "show", str(missing), "--json"],
+        [
+            sys.executable,
+            "-m",
+            "ubt",
+            "metrics",
+            "compare",
+            str(missing),
+            str(missing),
+            "--json",
+        ],
+    ]
+    for command in commands:
+        proc = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            cwd=tmp_path,
+        )
+        assert proc.returncode == 1
+        assert proc.stdout.strip() == ""
+        assert "not found" in proc.stderr

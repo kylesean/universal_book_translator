@@ -451,3 +451,24 @@ def test_bibliography_section_survives_subheading_and_exits_on_appendix() -> Non
     assert states["b337"] is True
     assert states["b343"] is False
     assert states["b344"] is False
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "The 2021 IEEE Access paper spans pages 100-110.",
+        "Figure 4. Results reported by Springer in 2020, pages 12-18.",
+        "This approach was published by Springer in 2019, spanning pages 45-60.",
+    ],
+)
+def test_body_prose_with_venue_and_page_numbers_translates(text: str) -> None:
+    from ubt.core.cleaners.skip_rules import classify_skip
+
+    assert classify_skip(text) is None, text
+
+
+@pytest.mark.fast
+def test_superscript_seven_is_recognised_in_a_byline() -> None:
+    from ubt.core.cleaners.skip_rules import _is_author_byline
+
+    assert _is_author_byline("John Doe\u2077, Jane Roe\u2078") is True

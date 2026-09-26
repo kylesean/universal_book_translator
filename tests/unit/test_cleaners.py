@@ -518,3 +518,33 @@ def test_dedup_spares_same_text_in_different_places() -> None:
         _narr("p2", 2, "SoL-Pi", _bbox(2, 0, 0, 40, 10)),
     ]
     assert len(dedup_duplicate_blocks(pair)) == 2
+
+
+def test_kerning_subscript_rule_does_not_corrupt_english_prose() -> None:
+    from ubt.core.cleaners.lnds_pruner import strip_textbook_ocr_artifacts
+
+    assert strip_textbook_ocr_artifacts("I am, therefore I think.") == "I am, therefore I think."
+    assert (
+        strip_textbook_ocr_artifacts("He is a lot, more than before.")
+        == "He is a lot, more than before."
+    )
+    # A genuine flattened subscript before a math operator is still joined.
+    assert "x_i" in strip_textbook_ocr_artifacts("The term x i = 3 appears.")
+
+
+@pytest.mark.fast
+def test_ordered_list_numbers_after_an_intro_colon_survive() -> None:
+    from ubt.core.cleaners.lnds_pruner import collect_dropped_line_indices
+
+    lines = [
+        "Steps:",
+        "1",
+        "Install the package.",
+        "2",
+        "Run the tests.",
+        "3",
+        "Deploy.",
+        "4",
+        "Verify.",
+    ]
+    assert collect_dropped_line_indices(lines) == set()

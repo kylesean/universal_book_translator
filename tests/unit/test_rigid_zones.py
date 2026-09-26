@@ -316,3 +316,15 @@ def test_row_is_continuation_robust_to_math_ocr_discrepancy() -> None:
     # Negative case: completely unrelated text must NOT match
     unrelated = "This is a completely different theorem about something else entirely."
     assert not _row_is_continuation(unrelated, block_source)
+
+
+@pytest.mark.fast
+def test_latin_splits_reconstruct_the_source() -> None:
+    from ubt.adapters.pdf.rigid.rows import split_clauses, split_sentences
+
+    src = "Bonjour le monde. Ceci est un test, avec des virgules; et des deux-points: oui!"
+    assert "".join(split_clauses(src)) == src
+    assert "".join(split_sentences(src)) == src
+
+    cjk = "第一句。第二句，第三句；第四句：第五句。"
+    assert "".join(split_clauses(cjk)) == cjk

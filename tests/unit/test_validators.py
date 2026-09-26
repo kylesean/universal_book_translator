@@ -640,3 +640,32 @@ def test_unicode_script_and_fraktur_preserve_math_font_style() -> None:
     rendered = render_overlay_line("范畴 𝒞 上的单子 $(T, \\eta, \\mu)$", math_probe=lambda b: True)
     assert "$cal(C)$" in rendered
     assert "𝒞" not in rendered
+
+
+def test_numeric_idiom_exemption_is_occurrence_scoped() -> None:
+    from ubt.core.validators.consistency import NumericConsistencyValidator
+
+    v = NumericConsistencyValidator()
+    src = "The model ranks in the top 10 globally. Chapter 10 explains the method."
+    tgt = "该模型在全球排名前十。"
+    assert v.validate(src, tgt).is_valid is False
+    # The idiom on its own still passes (idiomatic rendering without the digit).
+    assert v.validate("It is in the top 10.", "它位列前十。").is_valid is True
+
+
+def test_numeric_gate_rejects_changed_decimal() -> None:
+    from ubt.core.validators.consistency import NumericConsistencyValidator
+
+    v = NumericConsistencyValidator()
+    assert v.validate("The value is 3 units.", "The value is 3.5 units.").is_valid is False
+    assert v.validate("There are 5 items.", "There are 3.5 items.").is_valid is False
+    # A sentence-final period is not a decimal: "3." is still the number 3.
+    assert v.validate("The value is 3.", "The value is 3.").is_valid is True
+
+
+@pytest.mark.fast
+def test_superscript_power_is_not_a_lost_number() -> None:
+    from ubt.core.validators.consistency import NumericConsistencyValidator
+
+    result = NumericConsistencyValidator().validate("The area is 10^2 m.", "面积为 10² 米。")
+    assert result.is_valid, result.message

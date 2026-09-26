@@ -2,9 +2,10 @@
 
 import asyncio
 import sqlite3
+import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -256,3 +257,44 @@ async def test_ledger_flusher_persists_drained_checkpoints_when_task_cancelled()
     assert mock_ledger.save_checkpoints_batch.called
     saved_batch = mock_ledger.save_checkpoints_batch.call_args[0][0]
     assert mock_checkpoint in saved_batch
+
+
+@pytest.mark.fast
+def test_failed_batch_is_retried_before_newer_updates() -> None:
+    from ubt.core.engine.ledger import SQLiteJobLedger
+    from ubt.core.engine.ledger_flusher import CheckpointBatchFlusher
+
+    async def scenario() -> list[str]:
+        ledger = _FlakyBlockingLedger()
+        flusher = CheckpointBatchFlusher(
+            cast(SQLiteJobLedger, ledger), flush_interval=0.01, max_batch_size=50
+        )
+        await flusher.enqueue({"block_id": "X", "status": "v1"})
+        # Let the first save start, enqueue the newer update while it is in
+        # flight, then let the save fail.
+        await asyncio.to_thread(ledger.first_entered.wait, 5)
+        await flusher.enqueue({"block_id": "X", "status": "v2"})
+        ledger.release_first.set()
+        await flusher.close()
+        return [str(u["status"]) for u in ledger.committed]
+
+    assert asyncio.run(scenario()) == ["v1", "v2"]
+
+
+class _FlakyBlockingLedger:
+    """First save blocks, then fails; later saves commit in call order."""
+
+    def __init__(self) -> None:
+        self.first_entered = threading.Event()
+        self.release_first = threading.Event()
+        self.calls = 0
+        self.committed: list[dict[str, object]] = []
+
+    def save_checkpoints_batch(self, updates: list[dict[str, object]], **_kwargs: object) -> int:
+        self.calls += 1
+        if self.calls == 1:
+            self.first_entered.set()
+            self.release_first.wait(timeout=5)
+            raise sqlite3.OperationalError("database is locked")
+        self.committed.extend(updates)
+        return len(updates)

@@ -1,6 +1,9 @@
 """Unit tests for Typer and Rich CLI."""
 
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -886,3 +889,62 @@ def test_cli_translate_domain_profile_alias_and_validation(sample_book_md: Path)
         app, ["translate", str(sample_book_md), "--domain-profile", "textbook", "--dry-run"]
     )
     assert "invalid domain profile" not in res_valid.stdout.lower()
+
+
+def test_json_stdout_is_pure_json_in_a_fresh_process(tmp_path: Path) -> None:
+    import json
+    import subprocess
+    import sys
+
+    book = tmp_path / "probe.md"
+    book.write_text("# Chapter 1\n\nA short technical note.\n", encoding="utf-8")
+
+    proc = subprocess.run(
+        [sys.executable, "-m", "ubt", "assess", str(book), "--json"],
+        capture_output=True,
+        text=True,
+        timeout=180,
+        cwd=tmp_path,
+    )
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout)  # exactly one object, no log preamble
+    assert payload["status"] == "ok"
+
+
+@pytest.mark.fast
+def test_rigid_engine_warning_keeps_json_stdout_pure(tmp_path: Path) -> None:
+    """The advisory warning must not precede the JSON object on stdout."""
+    book = tmp_path / "probe.md"
+    book.write_text("# Chapter 1\n\nA short technical note.\n", encoding="utf-8")
+    env = {
+        **os.environ,
+        "UBT_RENDER_ENGINE": "rigid",
+        "UBT_OUTPUT_DIR": str(tmp_path / "out"),
+    }
+    # Under Profile-Aware adaptive defaults, an unset --dual-mode adapts cleanly
+    # to 'monolingual' for rigid engines without a spurious warning. Pass
+    # '--dual-mode inline' explicitly to trigger the downgrade advisory and verify
+    # that it routes to stderr without corrupting the JSON payload on stdout.
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "ubt",
+            "translate",
+            str(book),
+            "--dual-mode",
+            "inline",
+            "--dry-run",
+            "--json",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=180,
+        cwd=tmp_path,
+        env=env,
+    )
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout)  # exactly one JSON object, no preamble
+    assert payload["status"] == "completed"
+    # The warning is still delivered -- just not on the machine-readable stream.
+    assert "monolingual-only" in proc.stderr

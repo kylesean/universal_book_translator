@@ -483,3 +483,16 @@ def test_translate_book_signature_admits_no_credential_keys() -> None:
         "provider_profile",
     }
     assert not (params & forbidden), sorted(params & forbidden)
+
+
+def test_mcp_check_lang_rejects_unsupported_target() -> None:
+    from ubt.core.exceptions import UBTError
+    from ubt.mcp.server import _check_lang
+
+    with pytest.raises(UBTError, match="[Uu]nsupported"):
+        _check_lang("pt-BR", field="target_lang")
+    # A supported region tag passes through untouched.
+    assert _check_lang("zh-CN", field="target_lang") == "zh-CN"
+    # Shape violations are still rejected by the regex guard.
+    with pytest.raises(UBTError):
+        _check_lang("not a lang!", field="target_lang")

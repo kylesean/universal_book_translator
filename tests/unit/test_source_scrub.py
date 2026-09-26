@@ -115,3 +115,19 @@ def test_case_sensitive_xml_attributes_survive_a_re_render() -> None:
 def test_url_bearing_attributes_are_scheme_gated(attr: str) -> None:
     out = scrub_source_document(f'<div {attr}="javascript:x()">t</div>')
     assert "javascript" not in out, attr
+
+
+def test_benign_paired_tags_are_dropped_not_escaped() -> None:
+    import html
+
+    from ubt.core.cleaners.html_sanitizer import sanitize_html_fragment
+
+    assert sanitize_html_fragment("<div>hi</div>") == "hi"
+    assert sanitize_html_fragment('<font color="red">hi</font>') == "hi"
+    # Unpaired pseudo-tags must still survive as literal text (escaped in the
+    # raw string, which is the sanitizer's contract; they render as-is).
+    assert "List<T>" in html.unescape(sanitize_html_fragment("List<T>"))
+    assert "<stdio.h>" in html.unescape(sanitize_html_fragment("<stdio.h>"))
+    # A dangerous container is still dropped together with its content.
+    dropped = sanitize_html_fragment("<div>ok<script>alert(1)</script></div>")
+    assert "ok" in dropped and "alert" not in dropped

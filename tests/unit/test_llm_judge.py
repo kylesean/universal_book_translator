@@ -280,3 +280,15 @@ def test_llm_judge_markdown_bold_and_fractional_scores() -> None:
     assert parse_judge_score("score: 9.5/10") == 0.95
     assert parse_judge_score("score: 9/10") == 0.90
     assert parse_judge_score("score: 4/5") == 0.80
+
+
+@pytest.mark.fast
+def test_tiered_runner_binds_glossary_to_heuristic() -> None:
+    from ubt.core.qe.comet_runner import HeuristicQERunner
+    from ubt.core.qe.llm_judge import TieredQERunner
+
+    tiered = TieredQERunner(heuristic=HeuristicQERunner())
+    assert tiered.is_glossary_aware() is False
+
+    bound = tiered.with_glossary([{"source": "term", "target": "术语"}])
+    assert bound.is_glossary_aware() is True

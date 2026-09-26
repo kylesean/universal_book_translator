@@ -1319,3 +1319,42 @@ def test_submit_accepts_the_engine_knobs_over_http(
     resp = api_client.post("/jobs/submit", json=payload)
     assert resp.status_code == 202, resp.text
     assert resp.json()["job_id"].startswith("job_")
+
+
+def test_api_rejects_unsupported_target_before_ingest() -> None:
+    from pydantic import ValidationError
+
+    from ubt.api.models import JobSubmitRequest
+
+    with pytest.raises(ValidationError):
+        JobSubmitRequest(input_path="book.md", target_lang="pt-BR")
+    # A supported region tag is accepted and preserved verbatim for font selection.
+    req = JobSubmitRequest(input_path="book.md", target_lang="zh-CN")
+    assert req.target_lang == "zh-CN"
+
+
+def test_submit_without_output_path_works_without_an_allowlist(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fastapi.testclient import TestClient
+
+    from ubt.api.app import create_app
+    from ubt.core.config import UBTConfig
+
+    monkeypatch.delenv("UBT_OUTPUT_DIR", raising=False)
+    monkeypatch.delenv("XDG_DOCUMENTS_DIR", raising=False)
+    monkeypatch.chdir(tmp_path)
+    input_file = tmp_path / "book.md"
+    input_file.write_text("# Title\n\nSome source prose.\n", encoding="utf-8")
+
+    config = UBTConfig(
+        db_dir=tmp_path / "ledgers",
+        rate_limit_rpm=600,
+        draft_model="mock-draft",
+        repair_model="mock-repair",
+    )
+    assert config.allowed_base_dirs() == []  # the bug's precondition
+
+    client = TestClient(create_app(config=config))
+    resp = client.post("/jobs/submit", json={"input_path": str(input_file), "target_lang": "zh"})
+    assert resp.status_code == 202, resp.text
