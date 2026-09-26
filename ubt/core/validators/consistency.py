@@ -286,6 +286,15 @@ def _glued_page_range_is_preserved(original: str, translated: str, num: str) -> 
 # cannot be explained by a target '2.5' (2500000 != 2.5), so real omissions are
 # still caught.
 _CN_SCALE_FACTORS: dict[str, Decimal] = {
+    # Multi-char magnitudes (百万 = 10^6, 千万 = 10^7, 万亿 = 10^12) are how a
+    # Chinese translation restates "million"/"billion"; without them a correct
+    # '12.5 million' -> '12.5 百万' read as a dropped magnitude.
+    "十万": Decimal(100_000),
+    "百万": Decimal(1_000_000),
+    "千万": Decimal(10_000_000),
+    "百亿": Decimal(10_000_000_000),
+    "千亿": Decimal(100_000_000_000),
+    "万亿": Decimal(1_000_000_000_000),
     "百": Decimal(100),
     "千": Decimal(1000),
     "万": Decimal(10000),
@@ -315,8 +324,10 @@ _SI_PREFIX_FACTORS: dict[str, Decimal] = {
 }
 _SCALE_FACTORS: dict[str, Decimal] = {**_CN_SCALE_FACTORS, **_EN_SCALE_WORDS, **_SI_PREFIX_FACTORS}
 _SCALE_ADJACENCY_RE = re.compile(
-    # CJK scale word glued to the digits: '250万'
-    r"(?P<cn>\d[\d.]*)(?P<cn_unit>[万亿千百])"
+    # CJK scale word next to the digits: '250万', '12.5 百万' (translations often
+    # put a space before the magnitude). Multi-char magnitudes first so '百万'
+    # is not read as '百'.
+    r"(?P<cn>\d[\d.]*)\s*(?P<cn_unit>万亿|千亿|百亿|千万|百万|十万|[万亿千百])"
     # Whole English scale word: '2.5 million', '250,000 pixels per inch'
     r"|(?P<en>\d[\d,]*(?:\.\d+)?)\s*[-/]?\s*"
     r"(?P<en_unit>thousand|million|billion|trillion|hundred)(?![a-z])"
@@ -368,6 +379,13 @@ def _canon_value(value: Decimal) -> str:
     return format(normalized, "f")
 
 
+#: A CJK char that turns a leading 千/百 into a *measure-unit prefix* rather
+#: than a magnitude: 千克 (kg), 千米 (km), 千字节 (kB), 百帕 (hPa), 千瓦 (kW) …
+#: '10千克' states ten kilograms, not 10000; scaling it licensed a fabricated
+#: 1000x value as "equivalent". 万/亿 are always magnitudes (250万, 1亿).
+_CN_UNIT_PREFIX_SUFFIXES = frozenset("克米字帕瓦赫秒升欧伏安焦卡吨牛贝特巴")
+
+
 def _scale_map(text: str) -> dict[str, set[str]]:
     """Map each unit-scaled number's textual form to the values it may denote here."""
     out: dict[str, set[str]] = {}
@@ -381,6 +399,11 @@ def _scale_map(text: str) -> dict[str, set[str]]:
         )
         if raw is None or unit is None:
             continue
+        if match.group("cn_unit") is not None and unit in "千百":
+            nxt = text[match.end("cn_unit") : match.end("cn_unit") + 1]
+            if nxt and nxt in _CN_UNIT_PREFIX_SUFFIXES:
+                # '10千克' — a unit prefix, not a magnitude.
+                continue
         factor = (
             _SI_SYMBOL_FACTORS.get(unit[0])
             if match.group("sym") is not None
@@ -481,6 +504,16 @@ def _has_numeric_token(target: str, num_str: str) -> bool:
     return False
 
 
+def _has_negative_token(target: str, num_str: str) -> bool:
+    """True when ``num_str`` appears in ``target`` with a leading minus/负."""
+    return bool(
+        re.search(
+            rf"(?<![\d.])[-−负]\s*{re.escape(num_str)}(?!\d)(?![.,]\d)",
+            target,
+        )
+    )
+
+
 class NumericConsistencyValidator(ContentValidator):
     """Ensures standalone numbers and years (e.g. 1984, percentages, stats) are preserved."""
 
@@ -520,6 +553,15 @@ class NumericConsistencyValidator(ContentValidator):
                         values
                     )
         src_nums.discard("")
+        # A digit run immediately preceded by a minus sign is a negative
+        # quantity; the sign is part of the fact, so a dropped '−' must fail
+        # even though the digits survive.
+        negative_tokens: set[str] = set()
+        for match in _NUM.finditer(src_view):
+            if match.start() > 0 and src_view[match.start() - 1] in "-−":
+                canon = canonicalize_numeric_token(match.group(0))
+                if canon:
+                    negative_tokens.add(canon)
 
         if not src_nums:
             return ValidationResult.success()
@@ -532,13 +574,17 @@ class NumericConsistencyValidator(ContentValidator):
         # exempt span. The previous flat set let one idiom ("top 10") exempt a
         # standalone "Chapter 10" as well, so a dropped chapter reference
         # shipped as valid.
+        # Spans must be computed on ``src_view`` (the same expanded view the
+        # token offsets come from): scientific-notation expansion ('1e5' ->
+        # '100000') changes length, so spans measured on ``original`` were
+        # shifted and a correctly exempted token elsewhere was reported lost.
         exempt_spans: list[tuple[int, int]] = []
         for pat, _nums in _NUMERIC_IDIOM_PATTERNS:
-            exempt_spans.extend((m.start(), m.end()) for m in pat.finditer(original))
+            exempt_spans.extend((m.start(), m.end()) for m in pat.finditer(src_view))
         # PDF extraction commonly flattens a superscript footnote into a
         # spaced single digit before punctuation ("plugins 5 ,"). Such a
         # reference is editorial metadata, not a numeric fact to translate.
-        exempt_spans.extend((m.start(), m.end()) for m in _FLATTENED_FOOTNOTE_RE.finditer(original))
+        exempt_spans.extend((m.start(), m.end()) for m in _FLATTENED_FOOTNOTE_RE.finditer(src_view))
 
         exempt_numbers: set[str] = set()
         if exempt_spans:
@@ -569,6 +615,22 @@ class NumericConsistencyValidator(ContentValidator):
             if num in exempt_numbers:
                 continue
             if num in compound_satisfied:
+                continue
+            # Magnitude: a source quantity written with a scale word ('250万',
+            # '2.5 million') must be restated at that magnitude. Bare surviving
+            # digits ('250') are not enough — that is a dropped x10^4..10^6.
+            scaled = src_scales.get(num)
+            if scaled is not None:
+                if num in negative_tokens:
+                    magnitude_ok = any(_has_negative_token(normalized_tgt, c) for c in scaled)
+                else:
+                    magnitude_ok = bool(scaled & tgt_values)
+                if not magnitude_ok:
+                    lost_numbers.append(num)
+                continue
+            # Sign: a dropped minus on an unscaled quantity is a changed fact.
+            if num in negative_tokens and not _has_negative_token(normalized_tgt, num):
+                lost_numbers.append(num)
                 continue
             if _RANGE_DELIMITERS.search(num):
                 sub_parts = [

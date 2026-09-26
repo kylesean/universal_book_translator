@@ -846,3 +846,35 @@ def test_scale_rewriting_is_accepted_and_real_omissions_are_not() -> None:
     for source, target, must_pass in cases:
         result = validator.validate(source, target)
         assert result.is_valid is must_pass, f"{source!r} -> {target!r}: {result.message}"
+
+
+def test_dropped_magnitude_is_rejected() -> None:
+    """A quantity scaled in the source must keep its magnitude in the target."""
+    v = NumericConsistencyValidator()
+    # Bare digits surviving must NOT satisfy a 万-scaled source quantity.
+    assert not v.validate("250万", "250").is_valid
+    assert not v.validate("2.5 million", "2.5").is_valid
+    # The value restated (same magnitude, any spelling) passes.
+    assert v.validate("250万", "2500000").is_valid
+    assert v.validate("250万", "2.5 million").is_valid
+
+
+def test_unit_prefix_is_not_a_magnitude() -> None:
+    """'千/百' inside a measure unit ('千克', '千米') is not a x1000/x100 scale."""
+    v = NumericConsistencyValidator()
+    assert not v.validate("10千克", "10000").is_valid
+    assert not v.validate("5千米", "5000").is_valid
+    assert v.validate("10千克", "10 千克").is_valid
+
+
+def test_negative_sign_is_preserved() -> None:
+    v = NumericConsistencyValidator()
+    assert not v.validate("Temperature is -5 C", "温度为 5 C").is_valid
+    assert v.validate("Temperature is -5 C", "温度为 -5 摄氏度").is_valid
+    assert v.validate("Temperature is -5 C", "温度为 −5 摄氏度").is_valid
+
+
+def test_scientific_notation_expansion_does_not_desync_exemptions() -> None:
+    """Exemption spans must be computed on the same expanded view as the tokens."""
+    v = NumericConsistencyValidator()
+    assert v.validate("Foo 1e5 plugins 5 , bar", "Foo 100000 个插件 ，bar").is_valid
