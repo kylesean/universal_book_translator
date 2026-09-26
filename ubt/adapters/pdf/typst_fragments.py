@@ -16,7 +16,11 @@ import unicodedata
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from ubt.adapters.pdf.typst_math import _latex_math_to_typst, _strip_math_delimiters
+from ubt.adapters.pdf.typst_math import (
+    _latex_math_to_typst,
+    _sanitize_math_content,
+    _strip_math_delimiters,
+)
 from ubt.core.cleaners.math_masker import MathMasker
 from ubt.core.ir.models import BlockType, IRBlock
 
@@ -334,7 +338,13 @@ def _prose_to_typst(
         inner = _strip_math_delimiters(original)
         replacement = inline_math(inner) if inline_math is not None and from_source else None
         if replacement is None:
-            replacement = "$" + _latex_math_to_typst(inner) + "$"
+            # Same code-execution guard as the display path: a source or target
+            # span like ``$#read("x")$`` must not become executable Typst code.
+            # Only the deterministic converter output is sanitized here — the
+            # ``inline_math`` engine branch emits its own ``#image`` calls that
+            # must survive untouched.
+            converted = _sanitize_math_content(_latex_math_to_typst(inner))
+            replacement = "$" + converted + "$"
         if replacement.startswith("#"):
             # When replacement is a Typst hash call (e.g. #box(...)[...]),
             # if immediately followed by '(', Typst parses '(' as a chained function call argument,

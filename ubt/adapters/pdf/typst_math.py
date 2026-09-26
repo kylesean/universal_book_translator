@@ -973,6 +973,77 @@ def _sanitize_math_content(formula: str) -> str:
     return protected.replace("#", "").replace("\x00", "#")
 
 
+# The lookahead form above only locates the ``#``; masking to end-of-call needs
+# the bracket position and a balanced scan.
+_PANDOC_TYPST_CALL_OPEN_RE = re.compile(r"#(?:scale|box|hide)\s*([\(\[])")
+
+
+def _matching_close(text: str, open_idx: int) -> int | None:
+    """Index of the bracket matching ``text[open_idx]``, or None if unbalanced."""
+    depth = 0
+    i = open_idx
+    n = len(text)
+    in_string = False
+    while i < n:
+        ch = text[i]
+        if in_string:
+            if ch == "\\":
+                i += 2
+                continue
+            if ch == '"':
+                in_string = False
+            i += 1
+            continue
+        if ch == "\\":
+            i += 2
+            continue
+        if ch == '"':
+            in_string = True
+            i += 1
+            continue
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    return None
+
+
+def _mask_pandoc_typst_calls(expr: str) -> str:
+    """Blank balanced pandoc ``#scale``/``#box``/``#hide`` calls for a syntax check.
+
+    Pandoc's Typst writer emits these as code-mode content blocks, e.g.
+    ``#box(inset: 3pt, [$ x + 1 $])``. The inner ``$`` is that block's own math
+    mode and compiles fine, but :func:`is_typst_math_well_formed` scans in math
+    mode and rejects every ``$`` — so ``\\boxed`` equations were degraded to a
+    verbatim code span. Masking the call lets Gate 4 judge the math *around* it;
+    the real, already-sanitized text is still what gets emitted.
+    """
+    if "#" not in expr:
+        return expr
+    out: list[str] = []
+    cursor = 0
+    for match in _PANDOC_TYPST_CALL_OPEN_RE.finditer(expr):
+        open_idx = match.end() - 1
+        if match.start() < cursor:
+            continue
+        close_idx = _matching_close(expr, open_idx)
+        if close_idx is None:
+            continue
+        out.append(expr[cursor : match.start()])
+        out.append("x")
+        cursor = close_idx + 1
+    out.append(expr[cursor:])
+    return "".join(out)
+
+
+def _is_emittable_math(expr: str) -> bool:
+    """Gate 4 with pandoc layout calls masked (see :func:`_mask_pandoc_typst_calls`)."""
+    return is_typst_math_well_formed(_mask_pandoc_typst_calls(expr))
+
+
 def _has_residual_latex(text: str) -> bool:
     """True when converted math still carries raw LaTeX backslash commands or escaped markup.
 
@@ -1654,7 +1725,7 @@ def _emit_formula_math(raw_content: str, block_id: str) -> str:
     if _needs_latex_conversion(clean):
         clean = _latex_math_to_typst(clean)
     clean = _sanitize_math_content(clean)
-    if not is_typst_math_well_formed(clean):
+    if not _is_emittable_math(clean):
         # Gracefully handle single unclosed/unopened trailing delimiters
         trimmed = clean.rstrip()
         if trimmed.count("(") < trimmed.count(")") and trimmed.endswith(")"):
@@ -1662,14 +1733,14 @@ def _emit_formula_math(raw_content: str, block_id: str) -> str:
             for _ in range(excess):
                 if trimmed.endswith(")"):
                     trimmed = trimmed[:-1].rstrip()
-            if is_typst_math_well_formed(trimmed):
+            if _is_emittable_math(trimmed):
                 clean = trimmed
         elif trimmed.count("[") < trimmed.count("]") and trimmed.endswith("]"):
             excess = trimmed.count("]") - trimmed.count("[")
             for _ in range(excess):
                 if trimmed.endswith("]"):
                     trimmed = trimmed[:-1].rstrip()
-            if is_typst_math_well_formed(trimmed):
+            if _is_emittable_math(trimmed):
                 clean = trimmed
 
     # Split BEFORE the Gate 4 check so the emitted line is the thing that gets
@@ -1683,7 +1754,7 @@ def _emit_formula_math(raw_content: str, block_id: str) -> str:
     # literally after the formula (chapter-3 Eq. 3.13).
     clean = _strip_trailing_typst_noise(clean)
 
-    if not is_typst_math_well_formed(clean) or _has_residual_latex(clean):
+    if not _is_emittable_math(clean) or _has_residual_latex(clean):
         logger.warning(
             "Formula block %s unusable after conversion (residual LaTeX or "
             "malformed math); emitting verbatim source",

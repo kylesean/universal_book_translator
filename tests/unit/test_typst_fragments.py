@@ -213,6 +213,28 @@ def test_decouple_inline_box_calls() -> None:
     assert "\\\\(" not in decoupled  # idempotent
 
 
+def test_prose_to_typst_neutralizes_code_in_inline_math() -> None:
+    """A book's own math span can carry ``$#read("x")$``.
+
+    In Typst math mode a bare ``#`` switches into code execution, so the prose
+    path (narrative, headings, captions, footnotes, table cells) must run the
+    same ``_sanitize_math_content`` guard the display path already applies.
+    """
+    out = tf._prose_to_typst('x $#read("/etc/passwd")$ y')
+    assert "#read" not in out, f"code injection survived: {out!r}"
+    assert "\\$" not in out, f"delimiters were escaped instead of sanitized: {out!r}"
+
+
+def test_prose_to_typst_keeps_pandoc_layout_calls() -> None:
+    """Sanitizing inline math must not strip pandoc's side-effect-free calls.
+
+    ``\\boxed`` becomes ``#box(...)`` in Typst; blanket-stripping every ``#``
+    would demote the call to literal glyphs (the chapter-3 Eq. 3.9 regression).
+    """
+    out = tf._prose_to_typst(r"a $\boxed{b}$ c")
+    assert "#box" in out, f"pandoc layout call was stripped: {out!r}"
+
+
 def test_prose_polish_does_not_rewrite_generic_assignments() -> None:
     """2026-09 review: parameter-assignment polish fired on any
     "Word = number unit" prose, rewriting general books into math mode.

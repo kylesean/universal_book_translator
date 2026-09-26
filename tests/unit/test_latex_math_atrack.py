@@ -68,6 +68,19 @@ def test_emit_formula_math_uses_pandoc_output() -> None:
     assert "K_(" in line  # attached subscript = pandoc path signature
 
 
+def test_emit_formula_math_keeps_boxed_equation() -> None:
+    r"""``\boxed`` converts to a cleartext ``#box(...)[$ … $]`` call.
+
+    Gate 4 rejects any ``$`` inside the math expression, but the inner ``$`` is
+    the content-block's own math mode — valid, compiling Typst. Rejecting it
+    degraded every boxed equation to a verbatim code span.
+    """
+    line = _emit_formula_math(r"\boxed{x+1}", "b_box")
+    assert line.startswith("$") and line.endswith("$"), f"boxed eq degraded: {line!r}"
+    assert "#box" in line
+    assert not line.startswith("`")
+
+
 def test_large_operators_are_not_quoted_as_literal_text() -> None:
     """\\sum/\\prod/\\cup/\\cap/\\infty must render as symbols, not the words.
 
