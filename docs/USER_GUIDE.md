@@ -693,6 +693,7 @@ uv run ubt-mcp
 - `scripts/fidelity_baseline.py`：刚性渲染保真度基线——对语料（源 PDF 与产物成对）跑像素级忠实度标尺，产出可 diff 的 JSON 基线。
 - `scripts/oxide_render_ab.py`：pdf-oxide 与光栅基准的 A/B 等价性判据（尺寸/失配像素率阈值），页面光栅迁移的定谳证据。
 - `scripts/knob_sweep.py`：对可调旋钮做 ×/÷ 容差带扫描，把测试红→绿映射回具体数字（配合 `docs/knob-calibration-protocol.md`）。
+- `scripts/rigid_coverage_sweep.py`：rigid 覆盖率矩阵扫描——「目标长度比 × `RIGID_MIN_FONT_PT`」，按引擎自己的 preserved/fail-closed 家族分类。纯测量、退出码恒 0；用法与测量效度注记见 [LAYOUT_PRESERVATION_MASTERPLAN §3.4](LAYOUT_PRESERVATION_MASTERPLAN_2026-09.md)。
 - `scripts/make_sample_corpus.py`：生成 `docs/synthetic-*.pdf` 合成语料（版权安全回归样本）。
 
 ---
@@ -787,7 +788,7 @@ uv run ubt translate entire_novel.epub \
 | `register_adapter(extensions)` | 文件扩展名，如 `.xyz` | `(pdf_engine, path) -> BaseDocumentAdapter` |
 | `register_pdf_engine(names)` | 引擎名，如 `my_engine` | `() -> BasePDFEngineAdapter` |
 
-适配器需实现 `BaseDocumentAdapter` 的两个抽象方法 `extract_manifest()` 与 `parse_stream()`（`BasePDFEngineAdapter` 另需 `engine_name`）。完整可运行示例见 `tests/unit/regressions/test_review_security_and_isolation.py::test_adapter_registry_extensibility`。
+适配器需实现 `BaseDocumentAdapter` 的两个抽象方法 `extract_manifest()` 与 `parse_stream()`（`BasePDFEngineAdapter` 另需 `engine_name`）。完整可运行示例见 `tests/unit/test_adapters_factory.py::test_adapter_registry_extensibility`。
 
 ### 1. 同进程注册
 

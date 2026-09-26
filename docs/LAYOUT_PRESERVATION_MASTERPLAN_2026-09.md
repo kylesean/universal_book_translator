@@ -4,7 +4,9 @@
 
 ## 0. 一句话现状
 
-UBT 的路线 A（现名 **`rigid`**：保留源页几何、就地把译文重绘回原 bbox、非文字逐像素不变）已有完整通路，本次补齐了三块地基：**命名消歧、许可/隔离守卫恢复、像素级 fidelity 度量（advisory）**。下一步是把 `rigid` 的"兜住率"从 ~42% 提到出版级，再增量补路线 B（栅格 inpaint 兜底）。
+UBT 的路线 A（现名 **`rigid`**：保留源页几何、就地把译文重绘回原 bbox、非文字逐像素不变）已有完整通路，本次补齐了三块地基：**命名消歧、许可/隔离守卫恢复、像素级 fidelity 度量（advisory）**。
+
+**下一步已由测量定案（见 §3.4）**：rigid 的覆盖率损失几乎全部是 `spill`（缩到下限后仍装不下），而决定成败的旋钮是 `RIGID_MIN_FONT_PT`——它在 `ubt.core.policy.layout_policy` 的注册表里自述 **"never swept"**，却作用在每一次 rigid 渲染上；`margin_reclaim_pt` 的贡献与之相比是个位数。所以先把字号下限做一次真正的校准（含"按区域分级下限"的形态），再增量补路线 B（栅格 inpaint 兜底）。
 
 ## 1. 两条路线的定义（命名标准）
 
@@ -21,7 +23,7 @@ UBT 的路线 A（现名 **`rigid`**：保留源页几何、就地把译文重�
 
 译文长度≠原文长度；原文本是按原文字数量身定做的几何盒子。因此"逐像素等于原页"在**被翻译文字上数学不可能**。可达目标 = **非文字区逐像素不变 + 译文落回同 bbox 同基线，仅自适应字号/换行微调**。这是 `rigid` 与 BabelDOC/PDFMathTranslate 共同的工业上限。
 
-## 3. 本次已落地（三地基）
+## 3. 本次已落地（三地基 + M1 覆盖率测量）
 
 ### 3.1 许可 / 架构隔离守卫（恢复 + 加强）
 - 恢复 `tests/unit/test_license_guard.py`（4 项 AST：全仓禁 `fitz`/`pymupdf`；`ubt/core/` 禁 `babeldoc`/`pdf2zh`/`docling`/`pypdf`/`fitz`/`pymupdf`；`pyproject` 无 AGPL；core 只能经 `ports.py` 触达 adapters）与 `tests/unit/test_core_ports_isolation.py`（运行时 + 惰性解析）。这两者被 commit `0492c7d` 删除，正是"没抄 BabelDOC"的可执行证据。
@@ -36,11 +38,25 @@ UBT 的路线 A（现名 **`rigid`**：保留源页几何、就地把译文重�
 - advisory 接线：`reflow_loop.run` 在 parity 合并后、仅当 `_output_keeps_source_geometry()` 时计算，把数值折进 `gate.stats`、以 `info` 级并入 findings，**绝不碰 `gate.passed`**，并落 `manifest.metadata["fidelity"]` → `visual_report.json`。
 - 结构化 + KPI：`reporter.QualityReport.fidelity`（`ReportFidelity`）；`metrics` 新增 `fidelity_non_text_residual`（越低越好）、`rigid_painted_coverage`（越高越好）。`SCHEMA_VERSION` 暂不升（新增 key 在对比中被忽略，避免波及既有 golden 的再生成清扫）。
 
+### 3.4 M1 覆盖率测量（2026-09-26，基线 commit `82fc3b5`）
+
+rigid 的覆盖率此前只有一个正文数字与一句杠杆断言，两者都被换成可复跑的工具与可复核的结论：
+
+- **工具**：`scripts/rigid_coverage_sweep.py` —— 把 coverage 拆成「目标长度比 × `RIGID_MIN_FONT_PT`」矩阵，并按引擎自己的 `INTENTIONAL_PRESERVED_SKIP_PREFIXES` 分出 preserved / fail-closed 家族。退出码恒为 0（测量而非门禁，与 `scripts/knob_sweep.py` 同契约）。
+- **为什么不是 `--dry-run`**：rehearsal provider（`ubt.core.router.provider.MockModelProvider`）返回固定短串，其目标远短于原文，恰好掩盖本测量要量的长度驱动跳过。故直调纯决策函数 `RigidTypesetter._plan_blocks`（无 Typst 编译、无写盘），几何取自真实运行账本。
+- **两个效度注记**（漏掉任一结论就会错）：① `skip_reason`（`ubt.adapters.pdf.rigid.gate`）对「目标 == 原文」返回 `verbatim` 并刻意不覆盖，扫描器必须绕开这个**正确**的守卫；② 两种填充模式分别模拟膨胀译向（`latin`）与 en→zh（`cjk`，UBT 主战场）。
+- **结论**：损失几乎全是 `spill`；`no_zone` 与长度无关（一个恒定的几何小缺陷，随 M2 一并排）；`margin_reclaim_pt` 的回收量是个位数；覆盖率随 `RIGID_MIN_FONT_PT` **单调移动**，悬崖位置精确跟随该下限——而该旋钮在注册表里自述 **"never swept"**。
+- **待同步**：`ubt.core.policy.layout_policy` 中 `RIGID_MIN_FONT_PT` 的 `KnobMeta` 仍写着 "never swept"，在本工具落地后该描述已过时，应在下次改动该文件时改为指向本脚本。
+- **正文数字全部撤除**：本文不再冻结任何覆盖率或长度比数值，需要数字时跑上面的脚本（依据 §3.6）。
+
 ## 4. 尚未做（里程碑，按 ROI 排序）
 
-- **M1 收紧 fidelity 基线**：跑 ForMaT 子集，锁定 `rigid` 逐文档 residual/coverage 基线数字（`docs` 记录的 `scripts/biou_score.py` 已有 BabelDOC 方法论级评测骨架）。
-- **M2 `rigid` 闭环扩框**：解除 `reflow_loop` 对 `rigid` 的自我排除（缺陷 B2，`_typography_retune_possible`），溢出时受控"向空白 margin 借空间"而非直接 `NEEDS_HUMAN`；正面攻 42% 覆盖率。
-- **M3 fit-truth 回读核对**：Python 证明容量后 Typst 仍自由断字（`clip:true` 兜底可能静默裁字）；渲染后回读实际字形 bbox 与预期比对，超出者转 M2。
+- **M1 收紧 fidelity 基线**：**coverage 这半已交付**（2026-09-26，基线 commit `82fc3b5`）——`scripts/rigid_coverage_sweep.py` 把 coverage 拆成「目标长度比 × 字号下限」矩阵，并按引擎自己的 `INTENTIONAL_PRESERVED_SKIP_PREFIXES` 分出 preserved / fail-closed 家族；方法学与效度注记见 §3.4。**残余**：ForMaT 子集上的逐文档 `residual` 基线（`scripts/biou_score.py` 已有 BabelDOC 方法论级评测骨架）。
+- **M2 `rigid` 闭环扩框**：~~解除 `reflow_loop` 对 `rigid` 的自我排除（缺陷 B2，`_typography_retune_possible`）；溢出时受控"向空白 margin 借空间"~~ —— **这两步定性已被代码与测量同时推翻（依据见 §3.4）**：
+  - `_typography_retune_possible` 返回 False 是**刻意且正确**的：rigid 的字号取自源 zone 的中位行高，`reconstructor.font_size_pt` / `leading_em` 改不动任何一个字形，解除排除只会白烧一次全量重渲并谎报一次不可能发生的 heal。要的不是"解除排除"，而是给 rigid **它自己的**补救通道。
+  - "向空白 margin 借空间"这个杠杆已被测量证伪：`margin_reclaim_pt` 只回收个位数块，覆盖率真正跟随的是 `RIGID_MIN_FONT_PT`。
+  故 M2 的正确形态 = **横向容量 + 按区域分级字号下限**，验收以 `scripts/rigid_coverage_sweep.py` 的矩阵为准（不再引用一个正文里冻结的百分比）。
+- **M3 fit-truth 回读核对**：~~Python 证明容量后 Typst 仍自由断字（`clip:true` 兜底可能静默裁字）~~ —— **机制描述有误，已订正**：全仓从不输出 `clip: true`（`RigidTypesetter._zone_typst` 只发 `clip: false`），溢出走的是 fitter 失败 → `margin_reclaim_pt` 有界的向下回收 → 仍失败则记 `spill` 并 fail-closed、根本不绘制。真正的残余在另一处：Typst 侧的自量高循环（`RigidTypesetter._typst_fit_preamble` 的 `#let ubt-fit`）在 `sz == min-sz` 时**退出而不再复验**是否装得下，随后以 `clip: false` 绘制——极端溢出会与下方内容**重叠**（overlap）而非静默裁字。故 M3 = 渲染后回读实际字形 bbox 与计划比对，超出者转 M2；overlap 比 truncation 更该被抓住，因为它看起来像排版事故而不是丢字。
 - **M4 rotation 进 IR**：`BoundingBox` 无 rotation 字段、`rigid/extract.py` 硬拒旋转页 → 补字段 + CTM 重建，消灭一类硬失败。
 - **M5 路线 B（raster inpaint 兜底）**：`visual_scalpel` 已有裁图（需提到 300 DPI）、`vlm` 已有 `measured_box`；缺**背景修复**（现仅 `diagram_localizer` 白矩形假填充）。接缝 = `docling_render.py` 的 `UBT_LOCALIZE_DIAGRAMS` 分支 + `ports` 对称的 `paste_block_image`/`InpaintPort`；许可安全选型（LaMa/Apache、Inpaint-NS/OpenCV，过 §3.1 前瞻守卫）；raster 区在 parity 里显式豁免。
 - **M6 非 PDF 格式通用化**：`docx`/`epub`/`html`/`md` 现为纯文本 thin adapter（无 bbox/无保版），"universal"实为"PDF-first"。优先做 docx/epub **结构级原位往返**（其模型本自结构化，可近 1:1），并让它们复用同一套 `policy`/QE/witness/fidelity 工具链。
