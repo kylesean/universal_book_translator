@@ -216,17 +216,20 @@ async def ocr(
             )
         chunks.append(chunk)
     contents = b"".join(chunks)
-    try:
-        img = Image.open(io.BytesIO(contents)).convert("RGB")
-    except Image.DecompressionBombError as exc:
-        logger.warning("sidecar rejected an oversized image: %s", exc)
-        raise HTTPException(status_code=413, detail="Image too large") from exc
-    except Exception as exc:
-        # Log the internals; never echo them to the caller.
-        logger.warning("sidecar rejected an invalid image: %s", exc)
-        raise HTTPException(status_code=400, detail="Invalid image format") from exc
-
     async with _OCR_SEM:
+        # Decode *inside* the slot: a decoded RGB frame is ~3 bytes/pixel, so
+        # decoding before acquiring would let every queued request hold one,
+        # which is the memory primitive the upload/pixel caps only partly close.
+        try:
+            img = Image.open(io.BytesIO(contents)).convert("RGB")
+        except Image.DecompressionBombError as exc:
+            logger.warning("sidecar rejected an oversized image: %s", exc)
+            raise HTTPException(status_code=413, detail="Image too large") from exc
+        except Exception as exc:
+            # Log the internals; never echo them to the caller.
+            logger.warning("sidecar rejected an invalid image: %s", exc)
+            raise HTTPException(status_code=400, detail="Invalid image format") from exc
+
         engine_name, engine = await run_in_threadpool(get_engine)
         try:
             lines_out = await asyncio.wait_for(
@@ -234,6 +237,8 @@ async def ocr(
                 timeout=OCR_TIMEOUT_S,
             )
         except TimeoutError as exc:
+            # The caller gets 504 now, but a worker thread is not killable: the
+            # inference may finish in the background still holding its frame.
             raise HTTPException(status_code=504, detail="OCR inference timed out") from exc
 
     return {

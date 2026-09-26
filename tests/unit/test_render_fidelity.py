@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import pytest
 from PIL import Image
 
 from ubt.adapters.pdf.render_fidelity import (
@@ -72,3 +75,30 @@ def test_good_fidelity_produces_no_findings() -> None:
 
 def test_unmeasured_stats_produce_no_findings() -> None:
     assert fidelity_findings({"pages_measured": 0}) == []
+
+
+def test_select_probe_pages_whole_page_when_no_blocks() -> None:
+    """Empty blocks must sample the common pages (whole-page compare), not zero.
+
+    The offline fidelity harness passes no IR blocks; the old page selection
+    returned an empty list, so it measured nothing and reported a perfect 0.0.
+    """
+    from ubt.adapters.pdf.render_fidelity import _select_probe_pages
+
+    assert _select_probe_pages({}, 3, 8) == [1, 2, 3]
+    assert _select_probe_pages({}, 10, 4) == [1, 2, 3, 4]
+    # With blocks, only the pages they name are sampled.
+    assert _select_probe_pages({2: [], 5: []}, 9, 8) == [2, 5]
+
+
+def test_compute_render_fidelity_measures_whole_page_without_blocks() -> None:
+    """The harness's ``blocks=[]`` path must actually measure (E2E)."""
+    pytest.importorskip("pypdfium2")
+    from ubt.adapters.pdf.render_fidelity import compute_render_fidelity
+
+    pdf = Path(__file__).resolve().parents[2] / "docs" / "synthetic-mono.pdf"
+    if not pdf.exists():
+        pytest.skip("synthetic corpus unavailable")
+    stats = compute_render_fidelity(pdf, pdf, [], dpi=72, max_pages=2)
+    assert stats["pages_measured"] > 0
+    assert stats["non_text_diff_ratio"] == 0.0

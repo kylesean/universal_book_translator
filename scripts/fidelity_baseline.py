@@ -83,10 +83,11 @@ def main(argv: list[str] | None = None) -> int:
     results: list[dict[str, object]] = []
     failures = 0
     for src, art in pairs:
-        # compute_render_fidelity selects pages from ``blocks``; an empty list
-        # means *no pages are compared*, not "compare the whole page", and it
-        # returns residual 0.0 — a perfect score for a measurement that never
-        # ran. Fail loudly rather than printing a false 0.0000.
+        # No IR blocks to pass: an empty mask set means "compare the whole
+        # page", and compute_render_fidelity samples the first ``--pages``
+        # common pages. The guard below still fails loudly if a pair yields no
+        # measurable page at all, so the harness can never print a perfect
+        # 0.0000 for a measurement that never ran.
         stats = compute_render_fidelity(src, art, [], dpi=args.dpi, max_pages=args.pages)
         if not stats.get("pages_measured", 0):
             print(

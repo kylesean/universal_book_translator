@@ -362,10 +362,16 @@ class SubprocessQERunner(BaseQERunner):
                 )
                 await proc.stdin.drain()
                 reply: Any = None
+                # ONE deadline for the whole reply. Re-arming wait_for per line
+                # would multiply the bound by the chatter cap, so a scorer that
+                # trickled junk could delay desync detection far past
+                # timeout_seconds; every line now shares the single budget.
+                deadline = asyncio.get_running_loop().time() + self.timeout_seconds
                 for _ in range(_MAX_RESIDENT_CHATTER_LINES):
-                    line = await asyncio.wait_for(
-                        proc.stdout.readline(), timeout=self.timeout_seconds
-                    )
+                    remaining = deadline - asyncio.get_running_loop().time()
+                    if remaining <= 0:
+                        raise _ResidentRestart("resident scorer reply deadline exceeded")
+                    line = await asyncio.wait_for(proc.stdout.readline(), timeout=remaining)
                     if not line:
                         raise _ResidentRestart("scorer closed stdout (crashed?)")
                     try:

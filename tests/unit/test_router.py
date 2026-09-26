@@ -1714,3 +1714,44 @@ def test_draft_source_is_recovered_from_every_builder() -> None:
         _, user_prompt = builder(**{k: v for k, v in kwargs.items() if k in params})
         recovered = draft_source_from_prompt(user_prompt)
         assert recovered == source.strip(), f"{builder.__name__} leaked: {recovered[:60]!r}"
+
+
+class _UsageProvider:
+    """Duck-typed provider exposing only the usage surface ``estimate_cost`` reads."""
+
+    is_mock = True
+
+    def __init__(self, base_url: str, by_model: dict[str, dict[str, int]]) -> None:
+        self.base_url = base_url
+        self._by = by_model
+
+    def usage_totals_by_model(self) -> dict[str, dict[str, int]]:
+        return {model: dict(totals) for model, totals in self._by.items()}
+
+    def usage_totals(self) -> dict[str, int]:
+        out: dict[str, int] = {}
+        for totals in self._by.values():
+            for key, value in totals.items():
+                out[key] = out.get(key, 0) + value
+        return out
+
+
+def test_estimate_cost_prices_exclusive_fallback_models_at_their_endpoint() -> None:
+    """A local-fallback model must be billed $0, not reported unknown.
+
+    ``estimate_cost_usd`` merged the fallback provider's usage but priced it at
+    the primary's cloud ``base_url``, so a local-only model name (absent from
+    the table) made the whole run report None instead of the real cloud spend.
+    """
+    primary = _UsageProvider(
+        "https://api.deepseek.com",
+        {"deepseek-chat": {"prompt_tokens": 1_000_000, "completion_tokens": 0}},
+    )
+    router = ModelRouter(provider=primary, draft_model="deepseek-chat")  # type: ignore[arg-type]
+    router._fallback_provider = _UsageProvider(  # type: ignore[assignment]
+        "http://127.0.0.1:11434/v1",
+        {"translategemma:4b": {"prompt_tokens": 1_000_000, "completion_tokens": 0}},
+    )
+    cost = router.estimate_cost_usd()
+    assert cost is not None
+    assert cost == pytest.approx(0.27)

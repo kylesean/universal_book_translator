@@ -126,21 +126,34 @@ def estimate_cost(calls: list[dict], p_in: float, p_hit: float, p_out: float) ->
     return total
 
 
+def _default_rate_covers(model: str) -> bool:
+    """True when the built-in rate table (DeepSeek's) applies to ``model``.
+
+    The built-in defaults ARE DeepSeek's published rates, so they are only a
+    valid stand-in for a DeepSeek model; a gpt/gemini run that supplies no
+    ``--price-*`` has no knowable rate and must write null, not DeepSeek numbers.
+    """
+    return (model or "").strip().lower().startswith("deepseek")
+
+
 def _resolve_prices(args: argparse.Namespace) -> tuple[float, float, float, bool]:
     """``(input, cache_hit, output, priced)`` from args.
 
-    ``None`` means "the operator supplied no rate", which is what makes a run
-    *unpriced*; the truthiness of a defaulted 0.27 never could (it was always
-    truthy, so the null-cost branch was dead and every model was billed at
-    DeepSeek rates). DeepSeek's deepseek-chat rates are the fallback.
+    The operator-supplied rates win; otherwise the built-in DeepSeek rates apply
+    but the run is "priced" only when the model is actually a DeepSeek one. That
+    keeps the default DeepSeek benchmark priced (so the committed artifact
+    carries the reproducible bill) while a model the built-in table cannot price
+    writes ``null`` rather than a wrong DeepSeek-rate number.
     """
     price_input = args.price_input if args.price_input is not None else 0.27
     price_cache_hit = args.price_cache_hit if args.price_cache_hit is not None else 0.07
     price_output = args.price_output if args.price_output is not None else 1.10
-    priced = (
-        args.price_input is not None
-        or args.price_cache_hit is not None
-        or args.price_output is not None
+    explicit = any(
+        value is not None
+        for value in (args.price_input, args.price_cache_hit, args.price_output)
+    )
+    priced = explicit or (
+        _default_rate_covers(args.draft_model) and _default_rate_covers(args.repair_model)
     )
     return price_input, price_cache_hit, price_output, priced
 
@@ -148,7 +161,7 @@ def _resolve_prices(args: argparse.Namespace) -> tuple[float, float, float, bool
 async def run(args: argparse.Namespace) -> None:
     api_key = require_api_key()
 
-    price_input, price_cache_hit, price_output, _ = _resolve_prices(args)
+    price_input, price_cache_hit, price_output, priced = _resolve_prices(args)
 
     src = Path(args.input)
     if not src.exists():
@@ -254,9 +267,16 @@ async def run(args: argparse.Namespace) -> None:
         f"\ntotals: {totals['calls']} calls, {totals['prompt_tokens']} prompt tok "
         f"(cache-hit {cache_hit}), {totals['completion_tokens']} completion tok"
     )
-    print(
-        f"estimated cost: ${cost:.4f}  (in ${price_input}/M, hit ${price_cache_hit}/M, out ${price_output}/M)"
-    )
+    if priced:
+        print(
+            f"estimated cost: ${cost:.4f}  (in ${price_input}/M, "
+            f"hit ${price_cache_hit}/M, out ${price_output}/M)"
+        )
+    else:
+        print(
+            f"estimated cost: unknown (the built-in DeepSeek rates do not cover "
+            f"model {args.draft_model!r}; pass --price-* to price the run)"
+        )
 
     report_path = out_path.with_name(f"{out_path.stem}_quality_report.json")
     if report_path.exists():

@@ -30,7 +30,7 @@ from ubt.adapters.pdf.visual_scalpel import _compute_crop_coords
 from ubt.core.policy.layout_policy import PROSE_BLOCK_TYPES
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
     from pathlib import Path
     from typing import Any
 
@@ -123,6 +123,23 @@ def diff_outside_masks(
     return residual, coverage
 
 
+def _select_probe_pages(
+    pages_by_no: Mapping[int, list[IRBlock]], common: int, max_pages: int
+) -> list[int]:
+    """Pages to rasterize-compare.
+
+    With prose blocks, sample the pages they name (up to ``max_pages``). With
+    none — the offline fidelity harness has no IR blocks to pass — an empty mask
+    set means "*compare the whole page*", so sample the first ``max_pages``
+    common pages instead of measuring nothing. (``blocks=[]`` used to select no
+    pages at all and return a residual of 0.0: a perfect score for a
+    measurement that never ran.)
+    """
+    if pages_by_no:
+        return sorted(pno for pno in pages_by_no if 1 <= pno <= common)[: max(1, max_pages)]
+    return list(range(1, min(common, max(1, max_pages)) + 1))
+
+
 def compute_render_fidelity(
     source_pdf: Path,
     artifact_pdf: Path,
@@ -163,9 +180,7 @@ def compute_render_fidelity(
             art_doc = pdfium.PdfDocument(str(artifact_pdf))
             try:
                 common = min(len(src_doc), len(art_doc))
-                candidates = sorted(
-                    (pno for pno in pages_by_no if 1 <= pno <= common),
-                )[: max(1, max_pages)]
+                candidates = _select_probe_pages(pages_by_no, common, max_pages)
                 residuals: list[float] = []
                 coverages: list[float] = []
                 for page_no in candidates:
@@ -179,7 +194,7 @@ def compute_render_fidelity(
                     art_img = render_page_to_pil(art_doc, idx, dpi)
                     scale = dpi / 72.0
                     rects: list[tuple[int, int, int, int]] = []
-                    for block in pages_by_no[page_no]:
+                    for block in pages_by_no.get(page_no, []):
                         bbox = block.bbox
                         if bbox is None:
                             continue

@@ -20,16 +20,21 @@ _HAS_DIGIT_RE = re.compile(r"\d")
 # Sentence terminators. Full-width CJK terminators (。！？) are always terminal.
 # A Latin . / ! / ? is terminal only when followed by whitespace/EOL (so
 # decimals like '3.14' never split). A half-width ! / ? immediately adjacent to
-# a non-ASCII (CJK) character is ALSO terminal: CJK has no whitespace after
-# punctuation, so requiring whitespace missed it — but making !/? unconditionally
-# terminal over-split English (e.g. Alice's "word!word" artifacts) and tripped
-# the omission gate, so the adjacency test is what keeps both script families
-# correct.
+# a CJK character is ALSO terminal: CJK has no whitespace after punctuation, so
+# requiring whitespace missed it — but treating !/? as unconditionally terminal
+# over-split English (e.g. Alice's "word!word" artifacts) and tripped the
+# omission gate. The adjacency test is scoped to CJK/East-Asian ranges, not
+# "any non-ASCII byte", because accented Latin (Café!Go) is whitespace-delimited
+# and must not split on '!'.
+_CJK_ADJ = (
+    r"[\u3000-\u303f\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff"
+    r"\uf900-\ufaff\uac00-\ud7af\uff00-\uffef]"
+)
 _SENT_END_RE = re.compile(
     r"[。！？]"
     r"|[.!?]['\"”’\)\]]*(?=\s|$)"
-    r"|(?<=[^\x00-\x7f])[!?]"
-    r"|[!?](?=[^\x00-\x7f])"
+    rf"|(?<={_CJK_ADJ})[!?]"
+    rf"|[!?](?={_CJK_ADJ})"
 )
 # Academic abbreviations whose period is not a sentence break. Without this,
 # 'Eq. (3.11)' / 'Fig. 3.5' inflate the source sentence count while the zh

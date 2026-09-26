@@ -45,29 +45,33 @@ def _visual_page_count(visual_report: Mapping[str, Any] | None, route_pages: int
     """The denominator for the visual rate KPIs — pages a finding could hit.
 
     Prefers the real page count when the report knows it (route_pages, or the
-    largest page number any finding names): dividing findings by the number of
-    *finding* pages understated the population and let ``visual_*_rate`` exceed
-    1.0. The fallback is the largest page index
-    seen, and only when that is unknown too does a single page stand in — with
-    no pages at all there are no findings either, so the rate is 0/1.
+    largest page number any finding names). When findings name no page and the
+    route carries no page count, there is no page population to divide by; the
+    denominator then falls back to the number of *severity-bearing* findings so
+    the rate stays a bounded share in [0, 1] rather than a count divided by a
+    single page (which let ``visual_*_rate`` exceed 1.0). Findings whose
+    severity is unrecognised are excluded so they cannot dilute the rates, and
+    a report with no counted findings keeps the historic denominator of 1.
     """
     if visual_report is None:
         return 0
     if route_pages > 0:
         return route_pages
     page_numbers: list[int] = []
+    severity_findings = 0
     for finding in visual_report.get("findings") or []:
-        page = finding.get("page") if isinstance(finding, Mapping) else None
+        if not isinstance(finding, Mapping):
+            continue
+        page = finding.get("page")
         if isinstance(page, int):
             page_numbers.append(page)
+        if str(finding.get("severity", "")) in _SEVERITIES:
+            severity_findings += 1
     if page_numbers:
         # max(), not len(): findings can repeat a page and can be numbered
         # sparsely, so the count was never the population size.
         return max(page_numbers)
-    # Findings exist but name no page (e.g. a page-less ``banned_unicode_dash``):
-    # a hard-coded 1 as the denominator let ``visual_*_rate`` exceed 1.0. Bound
-    # the denominator by the findings themselves so the rate cannot.
-    return max(1, len(visual_report.get("findings") or []))
+    return max(1, severity_findings)
 
 
 def collect_kpis(report: QualityReport, visual_report: Mapping[str, Any] | None = None) -> KpiSet:

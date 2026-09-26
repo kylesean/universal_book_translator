@@ -753,6 +753,9 @@ def test_term_shape_halfwidth_terminators_without_space() -> None:
     # English: !? still need whitespace/EOL, so no over-splitting.
     assert count_sentences("First! Second?") == 2
     assert count_sentences("First!Second?") == 1
+    # The adjacency test is CJK-scoped, not "any non-ASCII": accented Latin is
+    # whitespace-delimited and must not split on a half-width '!'.
+    assert count_sentences("Café!Go") == 1
     # Decimals are still not sentence breaks.
     assert count_sentences("The value is 3.14 today.") == 1
 

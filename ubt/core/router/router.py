@@ -439,10 +439,29 @@ class ModelRouter:
         endpoint (there is no provider bill to estimate), and None when a model
         that consumed tokens has no knowable price (unknown cost — never a
         fabricated free).
+
+        The self-hosted fallback is a *different* endpoint and may be $0 by
+        construction; pricing its models at the primary's ``base_url`` would
+        either over-bill them (cloud primary) or raise the whole run to
+        "unknown" for a model the table cannot name. Models the fallback served
+        *exclusively* are therefore billed against the fallback's endpoint.
         """
+        primary_url = getattr(self.provider, "base_url", "") or None
+        endpoint_map: dict[str, str] = {}
+        if self._fallback_provider is not None:
+            fallback_url = getattr(self._fallback_provider, "base_url", "") or None
+            if fallback_url:
+                primary_models = self._usage_by_model_of(self.provider)
+                for model in self._usage_by_model_of(self._fallback_provider):
+                    # A name served by both channels can't be split, so keep the
+                    # primary endpoint for it rather than mislabelling its cloud
+                    # spend as local/$0.
+                    if model not in primary_models:
+                        endpoint_map[model] = fallback_url
         return estimate_cost_usd(
             self.usage_totals_by_model(),
-            base_url=getattr(self.provider, "base_url", "") or None,
+            base_url=primary_url,
+            endpoint_map=endpoint_map or None,
         )
 
     async def aclose(self) -> None:

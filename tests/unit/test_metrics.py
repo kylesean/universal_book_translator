@@ -346,8 +346,21 @@ def test_missing_schema_version_is_legacy_and_mismatches() -> None:
 
 
 def test_page_less_visual_findings_cannot_exceed_a_rate_of_one() -> None:
-    """Findings that name no page must not make visual_*_rate exceed 1.0."""
+    """Findings that name no page must not make visual_*_rate exceed 1.0.
+
+    ``route=None`` (no known page population) is the branch the original
+    hard-coded denominator of 1 broke, so the test must exercise *that*, not a
+    report that already carries ``route.pages`` (which made the old test pass
+    whether or not the fix was present).
+    """
     visual = {"findings": [{"severity": "major", "flag": "banned_unicode_dash"}] * 5}
-    kpis = collect_kpis(_report(), visual).kpis
-    assert kpis["visual_major_rate"] <= 1.0
+    kpis = collect_kpis(_report(route=None), visual).kpis
+    assert kpis["visual_major_rate"] == pytest.approx(1.0)
     assert kpis["visual_critical_rate"] <= 1.0
+    # Unrecognised severities are not counted and must not dilute the rates.
+    diluted = {
+        "findings": [{"severity": "major"}] * 2 + [{"severity": "bogus"}] * 8
+    }
+    assert collect_kpis(_report(route=None), diluted).kpis["visual_major_rate"] == pytest.approx(
+        1.0
+    )
