@@ -24,6 +24,7 @@
 | guides/ | [USER_GUIDE.md](guides/USER_GUIDE.md) | 用户指南与参考手册：CLI 全命令、配置字典、服务端接口 |
 | guides/ | [ENGINE_ROUTING_AND_DISASTER_PREVENTION_GUIDE.md](guides/ENGINE_ROUTING_AND_DISASTER_PREVENTION_GUIDE.md) | 引擎全景、auto 路由决策与参数避坑 |
 | guides/ | [evaluation-and-comparison-guide.md](guides/evaluation-and-comparison-guide.md) | 真实模型评测（L1/L2/L3 分层、成本基准） |
+| guides/ | [CI_AND_QUALITY_GATES.md](guides/CI_AND_QUALITY_GATES.md) | 本地门禁与远程 CI 的分阶段落地约定（当前仅本地 pre-commit/pre-push） |
 | design/ | [golden-set.md](design/golden-set.md) | 基线语料与 KPI golden 的契约与再生成规约 |
 | design/ | [knob-calibration-protocol.md](design/knob-calibration-protocol.md) | 可调旋钮标定与晋升协议 |
 | design/ | [COST-ACCOUNTING-DESIGN.md](design/COST-ACCOUNTING-DESIGN.md) | 成本核算分层设计与重构路线 |

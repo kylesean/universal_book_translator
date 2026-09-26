@@ -13,5 +13,6 @@
 ## 2. Project Harness & Execution
 
 - **Fast Inner-Loop (< 5s)**: `uv run pytest -m fast -q`
+- **Local Gate (active)**: run `uv run pre-commit install` once; lint/format then run on every commit, and `mypy --strict ubt tests` + `pytest -m fast -q` run on every push. Remote CI is intentionally parked in `.github/workflows.disabled/` while the repo is private and iterating fast — the phased rollout is documented in `docs/guides/CI_AND_QUALITY_GATES.md`. Do not re-enable CI that is not already green locally.
 - **Final E2E Verification**: `uv run pytest tests/baselines tests/e2e -q`
 - **Expected Artifact**: a finalized `job_meta` row plus terminal `blocks` rows in `<job_id>.sqlite`, plus the bilingual artifact on disk and `*_quality_report.json`

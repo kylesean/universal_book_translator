@@ -1,0 +1,55 @@
+# Local quality gates for a private, fast-iterating repo.
+#
+# Remote CI is intentionally not enabled yet — see
+# docs/guides/CI_AND_QUALITY_GATES.md for the phased rollout. Until then these
+# hooks ARE the gate: lint/format on every commit, types + fast tests on push.
+#
+#   uv sync --extra dev          # provides pre-commit, ruff, mypy, pytest
+#   uv run pre-commit install    # installs both the pre-commit and pre-push hooks
+#   uv run pre-commit run --all-files
+#
+# Hooks use ``language: system`` + ``uv run ...`` so they reuse the project's
+# locked toolchain — one version of ruff/mypy whether run by a hook, CI, or by
+# hand. A GUI git client that lacks ``uv`` on PATH cannot run the hooks; use a
+# terminal for those commits, or ``PRE_COMMIT_ALLOW_NO_CONFIG`` is not a license
+# to bypass them (see the doc above).
+minimum_pre_commit_version: "3.7.0"
+default_install_hook_types: [pre-commit, pre-push]
+default_stages: [pre-commit]
+fail_fast: false
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check (--fix)
+        entry: uv run ruff check --fix --force-exclude
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format --force-exclude
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+
+      # Whole-tree checks: pass_filenames off so a push cannot pass just because
+      # the changed files happen to be clean. mypy resolves the whole program
+      # anyway, and the fast tier is ~6s (measured 2026-09-26), so pre-push
+      # stays well inside the inner-loop budget.
+      - id: mypy
+        name: mypy --strict (ubt + tests)
+        entry: uv run mypy --strict ubt tests
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+
+      - id: pytest-fast
+        name: pytest -m fast
+        entry: uv run pytest -m fast -q
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

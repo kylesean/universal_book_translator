@@ -1,8 +1,9 @@
 """The one test that spends real provider budget (nightly smoke job).
 
 Why this file exists (inding B5/D1): every other test that exercises the
-draft path drives ``MockModelProvider``, and the nightly "Real-provider smoke
-set" in ``.github/workflows/nightly-smoke.yml`` selected tests with
+draft path drives ``MockModelProvider``, and the nightly "Real-provider smoke"
+job (since retired 2026-09-26; recover it with
+``git log -- .github/workflows/nightly-smoke.yml``) selected tests with
 ``-k "smoke or real"`` — which matched only ``test_docling_real_paper.py``
 (matched on the module name containing "real"), a file with zero provider
 references that parses a PDF. So the job could not verify a provider even in

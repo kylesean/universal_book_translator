@@ -101,6 +101,11 @@ dev = [
     # are not also testing the extraction engine under test. Runtime pypdf
     # was retired in the pdf_oxide adoption (stage 2 completion).
     "pypdf>=4.0.0",
+    # Runs the local git hooks in `.pre-commit-config.yaml` (lint/format on
+    # commit, types + fast tests on push). This is the gate while remote CI is
+    # intentionally disabled during private rapid iteration; the phased rollout
+    # and activation triggers live in docs/guides/CI_AND_QUALITY_GATES.md.
+    "pre-commit>=4.0.0",
 ]
 # Agent entry point: MCP stdio server (Cursor/Codex call ubt_* tools).
 mcp = [
