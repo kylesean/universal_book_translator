@@ -9,7 +9,11 @@ from __future__ import annotations
 import pytest
 
 from ubt.core.ir.models import BlockType, IRBlock
-from ubt.core.memory.hierarchical_memory import HierarchicalMemoryManager, StepSnapshot
+from ubt.core.memory.hierarchical_memory import (
+    EpochSnapshot,
+    HierarchicalMemoryManager,
+    StepSnapshot,
+)
 
 
 async def test_hierarchical_memory_step_trigger() -> None:
@@ -285,3 +289,24 @@ def test_hierarchical_memory_macro_context_spine_boundary() -> None:
     )
     ctx_mid = mgr.get_macro_context_for_block(mid_block)
     assert ctx_mid == "Chapter 1 part 1 summary"
+
+
+@pytest.mark.fast
+def test_hierarchical_memory_get_l3_summary_retains_multi_epoch_history() -> None:
+    """[HIGH-T3-3] get_l3_summary must include earlier epochs (clamped to _MAX_L3_CHARS),
+    not overwrite/discard earlier epochs when a new epoch closes."""
+    mem = HierarchicalMemoryManager()
+    mem._epochs = [
+        EpochSnapshot(
+            epoch_index=0,
+            start_spine=0,
+            end_spine=9,
+            summary_text="Epoch 0: Alice enters the rabbit hole.",
+        ),
+        EpochSnapshot(
+            epoch_index=1, start_spine=10, end_spine=19, summary_text="Epoch 1: The Mad Tea-Party."
+        ),
+    ]
+    l3 = mem.get_l3_summary()
+    assert "Epoch 0: Alice enters the rabbit hole." in l3
+    assert "Epoch 1: The Mad Tea-Party." in l3

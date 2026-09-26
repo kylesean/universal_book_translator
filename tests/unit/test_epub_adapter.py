@@ -1,5 +1,6 @@
 """Unit tests for EPUBAdapter with native DOM bilingual injection."""
 
+import io
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -10,7 +11,9 @@ from bs4 import BeautifulSoup
 from tests.epub_builders import XHTML_NS, item, opf, page, write_epub
 from ubt.adapters.epub.adapter import BLOCK_TAGS, EPUBAdapter, is_leaf_block
 from ubt.core.engine.ledger import SQLiteJobLedger
+from ubt.core.exceptions import UBTError
 from ubt.core.ir.models import BlockStatus, BlockType, BookManifest, ChapterMeta, FlowID, IRBlock
+from ubt.core.job_options import overrides_from_request
 
 
 def create_mock_epub(target_path: Path) -> Path:
@@ -890,3 +893,26 @@ def test_toc_labels_with_anchors_and_subheadings() -> None:
     assert "第一章：开端" in out_ncx
     assert "第 1.1 节：基础" in out_ncx
     assert "第 1.2 节：进阶" in out_ncx
+
+
+@pytest.mark.fast
+def test_overrides_from_request_blocks_ocr_endpoint_and_epub_locates_single_quoted_opf() -> None:
+    """[MEDIUM-T4-2 & MEDIUM-T2-5] overrides_from_request must block ocr_endpoint when
+    allow_provider_keys=False, and EPUBAdapter._locate_opf must parse single-quoted full-path."""
+    with pytest.raises(UBTError, match="ocr_endpoint"):
+        overrides_from_request(
+            {"ocr_endpoint": "http://169.254.169.254/latest"}, allow_provider_keys=False
+        )
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr(
+            "META-INF/container.xml",
+            "<?xml version='1.0'?><container><rootfiles>"
+            "<rootfile full-path='OEBPS/content.opf' media-type='application/oebps-package+xml'/>"
+            "</rootfiles></container>",
+        )
+    buf.seek(0)
+    with zipfile.ZipFile(buf, "r") as zf:
+        adapter = EPUBAdapter()
+        assert adapter._locate_opf(zf) == "OEBPS/content.opf"

@@ -181,3 +181,23 @@ def test_rigid_batch_overlay_no_extra_pagebreak() -> None:
     assert not (
         "#pagebreak()\n#set page" in overlay_src or "#pagebreak()\r\n#set page" in overlay_src
     ), "Overlay Typst source must not have #pagebreak() immediately preceding #set page"
+
+
+@pytest.mark.fast
+def test_rigid_candidate_page_numbers_scopes_to_block_pages() -> None:
+    """_candidate_rigid_pages must only select block pages plus +1/+2 continuation lookahead
+    when rendering a small pre-flight sample instead of all pages of a long PDF."""
+    from ubt.adapters.pdf.rigid.typesetter import _candidate_rigid_pages
+
+    sample_blocks = [
+        IRBlock(
+            id="b1",
+            spine_index=1,
+            block_type=BlockType.NARRATIVE,
+            source_text="Hello",
+            target_text="你好",
+            bbox=BoundingBox(page=1, x0=50.0, y0=500.0, x1=300.0, y1=520.0),
+        )
+    ]
+    pages = _candidate_rigid_pages(total_pages=15, blocks=sample_blocks)
+    assert pages == [1, 2, 3]

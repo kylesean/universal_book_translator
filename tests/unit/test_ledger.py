@@ -1471,3 +1471,29 @@ def test_ledger_upsert_blocks_batch_includes_mqm_fields(tmp_path: Path) -> None:
     assert len(loaded.mqm_spans) == 1
     assert loaded.mqm_spans[0]["severity"] == "critical"
     assert loaded.mqm_spans[0]["category"] == "accuracy"
+
+
+@pytest.mark.fast
+def test_ledger_get_conn_initializes_inside_lock(tmp_path: Path) -> None:
+    """[HIGH-T1-3] _get_conn must check and call _init_connection while holding self._lock."""
+    ledger = SQLiteJobLedger(tmp_path / "lock_test.sqlite")
+    ledger.close()
+    assert ledger._conn is None
+
+    lock_held_during_init: list[bool] = []
+    orig_init = ledger._init_connection
+
+    def checked_init() -> None:
+        # RLock._is_owned() is True iff the current thread holds self._lock
+        is_owned = getattr(ledger._lock, "_is_owned", lambda: False)()
+        lock_held_during_init.append(bool(is_owned))
+        orig_init()
+
+    ledger.__dict__["_init_connection"] = checked_init
+    with ledger._get_conn() as conn:
+        assert conn is not None
+
+    assert lock_held_during_init == [True], (
+        "_init_connection must be called inside `with self._lock:` in _get_conn()"
+    )
+    ledger.close()

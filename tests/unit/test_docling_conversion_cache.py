@@ -10,10 +10,12 @@ shapes the layout changed, which is what the key tests below pin.
 import os
 from pathlib import Path
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 
 from ubt.adapters.pdf import docling_parser
+from ubt.adapters.pdf.docling_parser import _cleanup_docling_converter
 
 
 class _StubOptions:
@@ -351,3 +353,24 @@ def test_remaining_count_formula_mirrors_docling_parser() -> None:
     # Fixed calculation: len(sorted_proofread) - idx
     correct_remaining = len(sorted_proofread) - idx
     assert correct_remaining == 4
+
+
+@pytest.mark.fast
+def test_cleanup_docling_converter_releases_vlm_engine() -> None:
+    """_cleanup_docling_converter must call engine.cleanup() and null out stage.engine
+    so CodeFormulaVlmModel.__del__ is a no-op during interpreter shutdown."""
+    mock_engine = MagicMock()
+    mock_stage = MagicMock()
+    mock_stage.engine = mock_engine
+
+    mock_pipeline = MagicMock()
+    mock_pipeline.enrichment_pipe = [mock_stage]
+
+    mock_converter = MagicMock()
+    mock_converter.initialized_pipelines = {"pdf": mock_pipeline}
+
+    _cleanup_docling_converter(mock_converter)
+
+    mock_engine.cleanup.assert_called_once()
+    assert mock_stage.engine is None
+    assert mock_converter.initialized_pipelines == {}

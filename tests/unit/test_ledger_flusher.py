@@ -298,3 +298,60 @@ class _FlakyBlockingLedger:
             raise sqlite3.OperationalError("database is locked")
         self.committed.extend(updates)
         return len(updates)
+
+
+@pytest.mark.fast
+@pytest.mark.asyncio
+async def test_flusher_applies_backoff_on_transient_failure_and_drains_on_task_error(
+    tmp_path: Path,
+) -> None:
+    """[CRITICAL-T1-1] Flusher must backoff between consecutive failures and
+    close() must drain remaining items even if the background task died."""
+    ledger = SQLiteJobLedger(tmp_path / "ledger.sqlite")
+    doc = DocumentIR(
+        doc_id="doc_backoff",
+        source_path="/tmp/test.epub",
+        format_type="epub",
+        metadata={},
+        blocks=[
+            IRBlock(id="b_001", flow_id=FlowID.MAIN_STORY, spine_index=1, source_text="One"),
+            IRBlock(id="b_002", flow_id=FlowID.MAIN_STORY, spine_index=2, source_text="Two"),
+        ],
+    )
+    ledger.init_job("job_backoff", doc, target_lang="zh")
+    original_save = ledger.save_checkpoints_batch
+
+    # Part 1: Verify retry backoff delay is > 0 when _save fails transiently
+    flusher = CheckpointBatchFlusher(ledger, flush_interval=0.01, max_batch_size=10)
+    assert getattr(flusher, "_retry_base_delay", 0.0) > 0.0, (
+        "CheckpointBatchFlusher must define a positive _retry_base_delay for transient SQLite failures"
+    )
+
+    # Part 2: Simulate background task dying with RuntimeError, then ledger recovering
+    # before close() is called with additional pending items in the queue.
+    fail_now = True
+
+    def controlled_save(updates: list[dict[str, Any]], **kwargs: Any) -> int:
+        if fail_now:
+            raise sqlite3.OperationalError("database is locked")
+        return original_save(updates, **kwargs)
+
+    ledger.__dict__["save_checkpoints_batch"] = controlled_save
+    await flusher.enqueue(
+        {"block_id": "b_001", "target_text": "译文1", "status": BlockStatus.DRAFTED}
+    )
+
+    # Wait for background task to hit _MAX_CONSECUTIVE_FAILURES and terminate
+    assert flusher._flusher_task is not None
+    with pytest.raises(RuntimeError):
+        await asyncio.wait_for(asyncio.shield(flusher._flusher_task), timeout=2.0)
+
+    # Now the ledger recovers before close() is called
+    fail_now = False
+    with pytest.raises(RuntimeError):
+        await flusher.close()
+
+    # Even though close() surfaced the task RuntimeError, pending items must ALREADY be drained and saved!
+    blocks = {b.id: b for b in ledger.get_all_blocks("job_backoff")}
+    assert blocks["b_001"].target_text == "译文1"
+    ledger.close()

@@ -6,15 +6,18 @@ exercised by smoke scripts (/tmp), never here.
 
 from pathlib import Path
 from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from tests.corpus_markers import requires_synthetic_mono
 from tests.stage_ctx_factory import build_stage_ctx, drain
+from ubt.adapters.pdf.docling_parser import vlm_fallback_missing_pages
 from ubt.adapters.pdf.vlm.anchor import anchor_transcript
 from ubt.adapters.pdf.vlm.registry import get_driver, list_drivers, register_driver
 from ubt.adapters.pdf.vlm.transcribe import transcribe_page_to_blocks
 from ubt.adapters.pdf.vlm.types import PageTranscript, VlmLine
+from ubt.core.ir.models import BlockType, BoundingBox, FlowID, IRBlock
 
 
 class _FakeDriver:
@@ -616,3 +619,61 @@ def test_transcribe_page_bounds_check(tmp_path: Path) -> None:
     # page_no > total pages must raise IndexError
     with pytest.raises(IndexError):
         transcribe_page_to_blocks(pdf_path, page_no=5)
+
+
+@pytest.mark.fast
+def test_vlm_fallback_missing_pages_closes_driver_and_logs_correct_remaining_count(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """[HIGH-T2-1 & MEDIUM-T2-4] vlm_fallback_missing_pages must call driver.close() in finally
+    and log len(missing) - idx (not len(missing) - page_no + 1) when circuit breaker trips."""
+    pdf_path = tmp_path / "dummy.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4\n")
+
+    mock_driver = MagicMock()
+    mock_driver.close = MagicMock()
+
+    existing_block = IRBlock(
+        id="b1",
+        flow_id=FlowID.MAIN_STORY,
+        spine_index=1,
+        block_type=BlockType.NARRATIVE,
+        source_text="Existing page 1 text",
+        bbox=BoundingBox(page=1, x0=10, y0=10, x1=100, y1=50),
+    )
+
+    import pypdfium2 as pdfium
+
+    from ubt.adapters.pdf.vlm.transcribe import VlmFallbackMode
+
+    pdf = pdfium.PdfDocument.new()
+    for _ in range(53):
+        pdf.new_page(width=200, height=200)
+    pdf.save(str(pdf_path))
+    pdf.close()
+
+    with (
+        patch(
+            "ubt.adapters.pdf.vlm.transcribe.get_fallback_mode",
+            return_value=VlmFallbackMode.MISSING,
+        ),
+        patch(
+            "ubt.adapters.pdf.vlm.registry.probe_effective_driver",
+            return_value=("deepseek", mock_driver),
+        ),
+        patch(
+            "ubt.adapters.pdf.vlm.transcribe.transcribe_page_to_blocks",
+            side_effect=RuntimeError("VLM worker crashed"),
+        ),
+    ):
+        result = vlm_fallback_missing_pages(
+            pdf_path,
+            [existing_block],
+            ocr_mode="deepseek",
+            page_range=(50, 53),
+        )
+
+    assert len(result) == 1
+    mock_driver.close.assert_called_once()
+    # Circuit breaker trips at idx=3 (page_no=53), so remaining pages is 4 - 3 = 1 (NOT 4 - 53 + 1 = -48!)
+    assert "remaining 1 page(s)" in caplog.text

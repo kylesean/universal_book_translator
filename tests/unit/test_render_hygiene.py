@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from ubt.adapters.pdf.typst_fragments import _reference_numbers
 from ubt.adapters.pdf.typst_reconstructor import (
     TypstReconstructor,
     _image_size_spec,
@@ -357,3 +358,50 @@ def _tiny_png_bytes() -> bytes:
     return base64.b64decode(
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQH/qZ7l4wAAAABJRU5ErkJggg=="
     )
+
+
+@pytest.mark.fast
+def test_reference_numbers_ignores_toc_references_and_resets_on_body_chapters() -> None:
+    """A 'References' entry inside the Table of Contents must NOT trigger [1]..[N]
+    reference numbering for bullet lists in subsequent body chapters."""
+    blocks = [
+        IRBlock(
+            id="b1",
+            spine_index=1,
+            block_type=BlockType.HEADING,
+            source_text="References",
+            target_text="参考文献",
+            provenance={"toc_entry": True, "toc_page": "79"},
+        ),
+        IRBlock(
+            id="b2",
+            spine_index=2,
+            block_type=BlockType.HEADING,
+            source_text="1. Introduction",
+            target_text="1. 引言",
+        ),
+        IRBlock(
+            id="b3",
+            spine_index=3,
+            block_type=BlockType.LIST_ITEM,
+            source_text="Closure: the sequential composition of two effects is again an effect;",
+            target_text="封闭性：两个效应的顺序复合仍是一个效应；",
+        ),
+        IRBlock(
+            id="b4",
+            spine_index=4,
+            block_type=BlockType.HEADING,
+            source_text="References",
+            target_text="参考文献",
+        ),
+        IRBlock(
+            id="b5",
+            spine_index=5,
+            block_type=BlockType.LIST_ITEM,
+            source_text="E. Moggi, Notions of computation and monads, 1991.",
+            target_text="E. Moggi, Notions of computation and monads, 1991.",
+        ),
+    ]
+    ref_map = _reference_numbers(blocks)
+    assert "b3" not in ref_map, "Body chapter bullet list item must not be numbered as a reference"
+    assert ref_map.get("b5") == "[1]", "Real terminal bibliography entry must be numbered [1]"

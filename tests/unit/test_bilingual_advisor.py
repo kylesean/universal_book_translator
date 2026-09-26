@@ -6,6 +6,7 @@ discourage inline interleave; clean prose must pass it.
 """
 
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -184,3 +185,53 @@ async def test_advisory_rigid_engine_monolingual_in_difficulty_stage(tmp_path: P
 
     # For rigid engine, effective_mode must remain monolingual, never inline
     assert manifest.run.effective_dual_mode == "monolingual"
+
+
+@pytest.mark.fast
+@pytest.mark.asyncio
+async def test_forced_reflow_on_formula_dense_pdf_enables_companion_rigid_delivery(
+    tmp_path: Path,
+) -> None:
+    """When a user forces --render-engine reflow --dual-mode inline on a formula-dense PDF
+    where auto dispatch would select 'rigid' (and advisory tier is 'discourage'),
+    run_mode_advisory_stage must schedule emit_secondary_engine='rigid' so export
+    delivers a companion *_rigid.pdf alongside the requested reflow PDF."""
+    from ubt.core.config import UBTConfig
+    from ubt.core.engine.stages.advisory import run_mode_advisory_stage
+    from ubt.core.ir.models import BookManifest
+
+    blocks = [
+        IRBlock(
+            id=f"b{i}",
+            spine_index=i,
+            block_type=BlockType.FORMULA if i % 3 == 0 else BlockType.NARRATIVE,
+            source_text=r"x^2 + y^2 = z^2" if i % 3 == 0 else "Short fragment",
+            target_text=r"x^2 + y^2 = z^2" if i % 3 == 0 else "短片段",
+            skip_translate=(i % 3 == 0),
+            bbox=BoundingBox(page=1, x0=50.0, y0=100.0 + i * 20, x1=400.0, y1=115.0 + i * 20),
+        )
+        for i in range(1, 16)
+    ]
+    manifest = BookManifest(doc_id="doc1", title="Test", source_path=str(tmp_path / "paper.pdf"))
+    config = UBTConfig(render_engine="reflow", dual_mode="inline")
+
+    ctx = MagicMock()
+    ctx.config = config
+    ctx.manifest = manifest
+    ctx.source_pdf_path = tmp_path / "paper.pdf"
+    ctx.input_path = tmp_path / "paper.pdf"
+    ctx.profile_name = "paper"
+    ctx.job_id = "job_test"
+
+    async def _current_blocks(force_refresh: bool = False) -> list[IRBlock]:
+        return blocks
+
+    async def _create_event(*args: object, **kwargs: object) -> object:
+        return MagicMock()
+
+    ctx.current_blocks = _current_blocks
+    ctx.create_event = _create_event
+
+    events = [ev async for ev in run_mode_advisory_stage(ctx)]
+    assert len(events) == 1
+    assert manifest.run.emit_secondary_engine == "rigid"

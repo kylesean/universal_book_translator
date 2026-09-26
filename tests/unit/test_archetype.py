@@ -68,3 +68,17 @@ def test_sample_never_raises_on_garbage(tmp_path: Path, ext: str) -> None:
     f.write_bytes(b"\xff\x00binary junk")
     arch = analyze_archetype(f)  # errors="ignore" path; must still return facts
     assert arch.page_or_ch_count >= 1
+
+
+@pytest.mark.fast
+def test_detect_math_density_recognizes_unicode_type_theory_and_greek_math() -> None:
+    """detect_math_density must flag Unicode math (Greek letters, turnstile ⊢,
+    tensor ⊗, arrows →, Theorem/Definition)."""
+    from ubt.core.archetype import MathDensity, detect_math_density
+
+    sample = (
+        "1. Introduction\nWe study spatiotemporal composability.\n"
+        "Definition 2.1. A context transformation Γ ⊢ M : A ⊗ B → C ⊸ D satisfies "
+        "f ∘ g = id_Γ for all α, β ∈ Φ(Γ) and ∀x ∈ Δ, ρ(x) ≤ σ(x)."
+    )
+    assert detect_math_density(sample) == MathDensity.HIGH

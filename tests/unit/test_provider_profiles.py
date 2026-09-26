@@ -5,7 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
+from pydantic import SecretStr
 
+from ubt.api.app import create_app
 from ubt.core.config import UBTConfig
 from ubt.core.job_options import apply_config_overrides
 from ubt.core.profiles import (
@@ -14,6 +17,8 @@ from ubt.core.profiles import (
     load_all_profiles,
     load_provider_profile,
 )
+from ubt.core.router.capabilities import ModelProfile, PromptStrategy
+from ubt.core.router.registry import ModelCapabilityRegistry
 
 
 @pytest.fixture
@@ -221,3 +226,36 @@ def test_ubt_config_from_env_reads_profile_from_dotenv(
     assert cfg.base_url == "https://generativelanguage.googleapis.com/v1beta/openai"
     assert cfg.draft_model == "gemini-3.8-flash"
     assert cfg.repair_model == "gemini-3.1-pro"
+
+
+@pytest.mark.fast
+def test_model_profiles_post_forbids_overriding_builtin_profiles() -> None:
+    """[HIGH-T4-5] POST /api/v1/model-profiles must forbid overriding existing/built-in profiles
+    (override=False -> 409 Conflict) and require verify_api_key when service_api_key is configured."""
+    reg = ModelCapabilityRegistry()
+    with pytest.raises(ValueError, match="already"):
+        reg.register(
+            ModelProfile(
+                model_pattern="deepseek",
+                prompt_strategy=PromptStrategy.MINIMAL,
+            ),
+            override=False,
+        )
+
+    app = create_app(config=UBTConfig(service_api_key=SecretStr("gate-secret-123")))
+    client = TestClient(app)
+
+    # Unauthenticated request must be rejected with 401
+    res_unauth = client.post(
+        "/api/v1/model-profiles",
+        json={"model_pattern": "custom-new-model", "prompt_strategy": "minimal"},
+    )
+    assert res_unauth.status_code == 401
+
+    # Authenticated attempt to override built-in 'deepseek' must be rejected with 409 Conflict
+    res_conflict = client.post(
+        "/api/v1/model-profiles",
+        headers={"X-API-Key": "gate-secret-123"},
+        json={"model_pattern": "deepseek", "prompt_strategy": "minimal"},
+    )
+    assert res_conflict.status_code == 409

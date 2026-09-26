@@ -7,6 +7,7 @@ from ubt.core.validators.consistency import (
     GlossaryConsistencyValidator,
     NumericConsistencyValidator,
     _cn_numeral_value,
+    canonicalize_numeric_token,
     normalize_for_numeric_matching,
 )
 from ubt.core.validators.html_delta import HTMLDeltaValidator
@@ -669,3 +670,12 @@ def test_superscript_power_is_not_a_lost_number() -> None:
 
     result = NumericConsistencyValidator().validate("The area is 10^2 m.", "面积为 10² 米。")
     assert result.is_valid, result.message
+
+
+@pytest.mark.fast
+def test_canonicalize_numeric_token_preserves_zero_leading_three_digit_decimals() -> None:
+    """[HIGH-T3-2] 0.125 and 0.500 are decimals, never thousands-separated integers."""
+    assert canonicalize_numeric_token("0.125") == "0.125"
+    assert canonicalize_numeric_token("0.500") == "0.5"
+    assert canonicalize_numeric_token("1.500") == "1500"
+    assert canonicalize_numeric_token("1,500") == "1500"

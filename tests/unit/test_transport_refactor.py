@@ -402,3 +402,59 @@ def test_openai_chat_batch_result_preserves_http_error() -> None:
     err = results["req-1"].get("error")
     assert err is not None
     assert "Context length exceeded" in err, f"Expected actual error message, got {err}"
+
+
+@pytest.mark.fast
+@pytest.mark.asyncio
+async def test_openai_responses_transport_caches_reasoning_fallback_after_first_400() -> None:
+    """Once a model on /responses returns 400 for reasoning_effort and succeeds on retry,
+    subsequent calls for that model must use the working reasoning format on the first request."""
+    from ubt.core.router.transports.openai_responses import OpenAIResponsesTransport
+
+    transport = OpenAIResponsesTransport(
+        api_key="test",
+        base_url="https://opencode.ai/zen/go/v1",
+    )
+    sent_payloads: list[dict[str, object]] = []
+
+    async def fake_request_json(_client: object, _url: str, payload: dict[str, object]) -> object:
+        sent_payloads.append(dict(payload))
+        resp = MagicMock()
+        if "reasoning_effort" in payload:
+            resp.status_code = 400
+            resp.text = '{"error": "unrecognized field reasoning_effort"}'
+        else:
+            resp.status_code = 200
+            resp.json.return_value = {
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [{"type": "output_text", "text": "translated text"}],
+                    }
+                ]
+            }
+        return resp
+
+    transport._request_json = fake_request_json  # type: ignore[assignment]
+
+    out1, _ = await transport._generate_responses_meta(
+        prompt="hi",
+        system_prompt=None,
+        target_model="muse-spark-1.3-contributor",
+        temperature=0.1,
+        max_tokens=100,
+        reasoning_effort="low",
+    )
+    assert out1 == "translated text"
+    assert len(sent_payloads) == 2
+
+    out2, _ = await transport._generate_responses_meta(
+        prompt="hello",
+        system_prompt=None,
+        target_model="muse-spark-1.3-contributor",
+        temperature=0.1,
+        max_tokens=100,
+        reasoning_effort="low",
+    )
+    assert out2 == "translated text"
+    assert len(sent_payloads) == 3

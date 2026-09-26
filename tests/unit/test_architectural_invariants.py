@@ -11,6 +11,7 @@ import pytest
 from ubt.adapters.pdf.rigid.typesetter import UPSCALE_MAX, RigidTypesetter
 from ubt.adapters.pdf.rigid.zones import PageFacts, Zone, build_zones
 from ubt.adapters.pdf.textgeom import LineBox
+from ubt.adapters.pdf.typst_reconstructor import TypstReconstructor
 from ubt.core.engine.cost_estimate import (
     count_text_tokens,
     resolve_output_token_ratio,
@@ -446,3 +447,24 @@ def test_invariant6_toc_document_index_extraction_and_leader_dots() -> None:
     assert "1.1 可组合性的维度" in typst_out
     assert "box(width: 1fr, repeat(" in typst_out
     assert "4" in typst_out
+
+
+@pytest.mark.fast
+def test_toc_entry_renders_with_leader_dots_and_page_number() -> None:
+    """TOC entries (provenance.toc_entry=True) must render with leader dots and right-aligned
+    toc_page instead of giant chapter headings."""
+    reconstructor = TypstReconstructor(target_lang="zh")
+    toc_block = IRBlock(
+        id="toc_1",
+        spine_index=1,
+        block_type=BlockType.HEADING,
+        source_text="2. Preliminaries",
+        target_text="2. 预备知识",
+        provenance={"toc_entry": True, "toc_page": "7"},
+    )
+    lines: list[str] = []
+    reconstructor._emit_block(toc_block, lines, bilingual=True)
+    joined = "\n".join(lines)
+    assert "repeat[.]" in joined
+    assert "7" in joined
+    assert "== 2. 预备知识" not in joined

@@ -12,6 +12,7 @@ from ubt.core.cleaners.lnds_pruner import (
     dedup_duplicate_blocks,
     detect_page_number_lines,
     is_ascii_digit_line,
+    normalize_academic_pdf_math,
 )
 from ubt.core.ir.models import BoundingBox, IRBlock
 
@@ -548,3 +549,12 @@ def test_ordered_list_numbers_after_an_intro_colon_survive() -> None:
         "Verify.",
     ]
     assert collect_dropped_line_indices(lines) == set()
+
+
+@pytest.mark.fast
+def test_normalize_academic_pdf_math_heals_soft_hyphen_word_splits() -> None:
+    """Soft hyphens followed by spaces ('transfor\\xad mation', 'compos\\xad ability')
+    must be rejoined into whole words."""
+    raw = "spatiotemporal compos\xad ability and transfor\xad mation in orches\xad trate"
+    cleaned = normalize_academic_pdf_math(raw)
+    assert cleaned == "spatiotemporal composability and transformation in orchestrate"

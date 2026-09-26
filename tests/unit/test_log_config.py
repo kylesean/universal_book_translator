@@ -272,3 +272,46 @@ def test_json_mode_repoints_logs_from_stdout_to_stderr() -> None:
             if handler not in saved:
                 root.removeHandler(handler)
         root.handlers[:] = saved
+
+
+@pytest.mark.fast
+def test_noise_aggregator_intercepts_child_logger_orphan_pdf_cell() -> None:
+    """Child logger 'docling_ibm_models.tableformer.data_management.matching_post_processor'
+    must not bypass NoiseAggregator during propagation."""
+    import logging
+
+    from ubt.core.log_aggregate import install_noise_aggregators, noise_aggregators
+    from ubt.core.log_config import setup_logging
+
+    stream = io.StringIO()
+    setup_logging(level="INFO", stream=stream)
+    install_noise_aggregators()
+    agg = noise_aggregators()["table_structure_guess"]
+    before_seen = agg.seen
+
+    child_logger = logging.getLogger(
+        "docling_ibm_models.tableformer.data_management.matching_post_processor"
+    )
+    for cell_id in range(2277, 2282):
+        child_logger.warning(
+            "Orphan pdf_cell %d recovered to col=1 by nearest-column fallback (row=34, x=877.6, dist=156.1)",
+            cell_id,
+        )
+
+    assert agg.seen == before_seen + 5
+    assert "Orphan pdf_cell 2278" not in stream.getvalue()
+
+
+@pytest.mark.fast
+def test_configure_logging_quiets_pikepdf_and_pdf_oxide_bridge() -> None:
+    """pikepdf, pdf_oxide, and tiny_skia C++/Rust logger bridges must be quieted to ERROR level."""
+    import logging
+
+    from ubt.core.log_config import setup_logging
+
+    setup_logging()
+    assert logging.getLogger("pikepdf").level >= logging.ERROR
+    assert logging.getLogger("pikepdf._core").level >= logging.ERROR
+    assert logging.getLogger("pdf_oxide").level >= logging.ERROR
+    assert logging.getLogger("tiny_skia").level >= logging.ERROR
+    assert logging.getLogger("tiny_skia.painter").level >= logging.ERROR

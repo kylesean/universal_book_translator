@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from ubt.adapters.pdf import typst_fragments as tf
+from ubt.adapters.pdf.typst_fragments import _prose_to_typst
 
 
 def test_sanitize_image_ref_rejects_traversal() -> None:
@@ -220,3 +221,13 @@ def test_prose_polish_does_not_rewrite_generic_assignments() -> None:
     assert "Price = 30 dollars" in out
     hit = tf._prose_to_typst("TFIN = 20 nm keeps working")
     assert '$T_"FIN" = 20 "nm"$' in hit
+
+
+@pytest.mark.fast
+def test_prose_to_typst_handles_spaced_inline_latex_and_single_digit_math() -> None:
+    """Spaced inline LaTeX like '$ \\Gamma $' or '$ \\Gamma \\to \\Gamma $' and '$0$' must
+    not leak raw escaped dollar signs ('\\$') into Typst output."""
+    text = "其中 $ \\Gamma $ 为上下文类型，栖居于 $ \\Gamma \\to \\Gamma $ 中：$0$ 表示未使用，$1$ 表示线性使用。"
+    out = _prose_to_typst(text)
+    assert "\\$" not in out, f"Leaked escaped dollar sign in Typst output: {out!r}"
+    assert "Gamma" in out

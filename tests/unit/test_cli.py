@@ -948,3 +948,13 @@ def test_rigid_engine_warning_keeps_json_stdout_pure(tmp_path: Path) -> None:
     assert payload["status"] == "completed"
     # The warning is still delivered -- just not on the machine-readable stream.
     assert "monolingual-only" in proc.stderr
+
+
+@pytest.mark.fast
+def test_translate_cli_and_main_share_same_rich_console() -> None:
+    """translate.py and main.py must share one Rich Console instance so RichHandler
+    does not tear the Progress live bar."""
+    import ubt.cli.commands.translate as translate_mod
+    import ubt.cli.main as main_mod
+
+    assert translate_mod.console is main_mod.console

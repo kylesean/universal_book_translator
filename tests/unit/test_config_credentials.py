@@ -401,3 +401,13 @@ def test_apply_config_overrides_syncs_repair_model_when_unset() -> None:
     updated = apply_config_overrides(base, {"draft_model": "deepseek-chat"})
     assert updated.draft_model == "deepseek-chat"
     assert updated.repair_model == "deepseek-chat"
+
+
+@pytest.mark.fast
+def test_service_api_key_is_secret_str_and_masked_in_repr() -> None:
+    """[HIGH-T4-3] UBTConfig.service_api_key must be SecretStr so repr() and str() never leak it."""
+    cfg = UBTConfig(service_api_key=SecretStr("top-secret-inbound-gate-key"))
+    assert isinstance(cfg.service_api_key, SecretStr)
+    assert cfg.service_api_key.get_secret_value() == "top-secret-inbound-gate-key"
+    assert "top-secret-inbound-gate-key" not in repr(cfg)
+    assert "top-secret-inbound-gate-key" not in str(cfg)

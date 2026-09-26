@@ -3,13 +3,15 @@
 import asyncio
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from ubt.core.config import UBTConfig
 from ubt.core.engine.events import EventType, TranslationProgressEvent
+from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.pipeline import PipelineOrchestrator, derive_job_id
+from ubt.core.ir.models import BookManifest, ChapterMeta
 from ubt.core.qe.comet_runner import MockQERunner
 from ubt.core.router.provider import BaseModelProvider, MockModelProvider
 from ubt.core.router.router import ModelRouter
@@ -1173,3 +1175,43 @@ async def test_pipeline_finally_releases_writer_lock_on_ledger_close_failure(
                     pass
 
             assert mock_lock.release.called
+
+
+@pytest.mark.fast
+@pytest.mark.asyncio
+async def test_pipeline_orchestrator_marks_cancelled_on_keyboard_interrupt(tmp_path: Path) -> None:
+    """[HIGH-T4-4] KeyboardInterrupt during pipeline execution must mark job status as 'cancelled'."""
+    cfg = UBTConfig(db_dir=tmp_path / "ledgers")
+    cfg.db_dir.mkdir(parents=True, exist_ok=True)
+    input_file = tmp_path / "book.txt"
+    input_file.write_text("Hello world\n", encoding="utf-8")
+
+    orchestrator = PipelineOrchestrator(config=cfg)
+    ledger = SQLiteJobLedger(cfg.db_dir / "job_kb_int.sqlite")
+    manifest = BookManifest(
+        doc_id="doc_kb",
+        title="KB Test",
+        source_path=str(input_file),
+        chapters=[ChapterMeta(chapter_id="ch1", title="Ch1", spine_index=0)],
+    )
+    ledger.init_job_from_manifest("job_kb_int", manifest)
+    ledger.close()
+
+    async def raise_kb_interrupt(*args: Any, **kwargs: Any) -> Any:
+        raise KeyboardInterrupt("user pressed Ctrl+C")
+        yield  # make it an async generator
+
+    with (
+        patch("ubt.core.engine.pipeline.run_ingest_stage", side_effect=raise_kb_interrupt),
+        pytest.raises(KeyboardInterrupt),
+    ):
+        async for _ in orchestrator.run(
+            input_path=input_file,
+            output_path=tmp_path / "out.txt",
+            job_id="job_kb_int",
+        ):
+            pass
+
+    check_ledger = SQLiteJobLedger(cfg.db_dir / "job_kb_int.sqlite", read_only=True)
+    assert check_ledger.get_job_status("job_kb_int") == "cancelled"
+    check_ledger.close()

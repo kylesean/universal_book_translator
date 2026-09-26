@@ -11,6 +11,7 @@ from tests.pdf_builders import blank_pdf, text_pdf
 from ubt.adapters.factory import get_adapter_for_path
 from ubt.adapters.pdf.alternator import BilingualAlternator
 from ubt.adapters.pdf.docling_adapter import DoclingPDFAdapter
+from ubt.adapters.pdf.docling_blocks import resolve_overlapping_formula_blocks
 from ubt.adapters.pdf.typst_reconstructor import TypstReconstructor
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.exceptions import DocumentParseError, UnsupportedDocumentFormatError
@@ -759,3 +760,30 @@ def test_docling_adapter_extract_sync_not_serialized() -> None:
     assert "PDFIUM_LOCK" not in closure_vars.nonlocals, (
         "_extract_blocks_sync must not be decorated with @pdfium_serialized holding global PDFIUM_LOCK"
     )
+
+
+@pytest.mark.fast
+def test_resolve_overlapping_formula_blocks_merges_vertical_overlap() -> None:
+    """Two consecutive FORMULA blocks on the same page whose bounding boxes overlap
+    vertically (e.g. equation + commutative diagram) must merge into a single union block."""
+    f1 = IRBlock(
+        id="pdf_main#b0148",
+        spine_index=148,
+        block_type=BlockType.FORMULA,
+        flow_id=FlowID.MAIN_STORY,
+        source_text=r"\Pr_1 \circ f' = f \circ \Pr_1",
+        skip_translate=True,
+        bbox=BoundingBox(page=10, x0=200.0, y0=410.0, x1=430.0, y1=490.0),
+    )
+    f2 = IRBlock(
+        id="pdf_main#b0149",
+        spine_index=149,
+        block_type=BlockType.FORMULA,
+        flow_id=FlowID.MAIN_STORY,
+        source_text=r"\begin{array}{ccc} \Gamma \xrightarrow{f} \Gamma \end{array}",
+        skip_translate=True,
+        bbox=BoundingBox(page=10, x0=210.0, y0=360.0, x1=390.0, y1=455.0),
+    )
+    merged = resolve_overlapping_formula_blocks([f1, f2])
+    assert len(merged) == 1
+    assert merged[0].bbox == BoundingBox(page=10, x0=200.0, y0=360.0, x1=430.0, y1=490.0)

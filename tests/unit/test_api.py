@@ -3,6 +3,7 @@
 import asyncio
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
@@ -1358,3 +1359,43 @@ def test_submit_without_output_path_works_without_an_allowlist(
     client = TestClient(create_app(config=config))
     resp = client.post("/jobs/submit", json={"input_path": str(input_file), "target_lang": "zh"})
     assert resp.status_code == 202, resp.text
+
+
+@pytest.mark.fast
+@pytest.mark.asyncio
+async def test_sse_stream_releases_global_slot_when_response_not_iterated(tmp_path: Path) -> None:
+    """[CRITICAL-T4-1] StreamingResponse returned by /jobs/{job_id}/stream must attach a
+    BackgroundTask / slot guard so slots are released even if the client disconnects
+    before iterating body_iterator."""
+    cfg = UBTConfig(db_dir=tmp_path / "ledgers")
+    app = create_app(config=cfg)
+    # Locate the stream_progress route handler
+    stream_route: Any = next(
+        r for r in app.routes if getattr(r, "path", None) == "/jobs/{job_id}/stream"
+    )
+    endpoint: Any = stream_route.endpoint
+
+    # Register a dummy active job in the app's JobManager
+    closure_vars = {
+        name: cell.cell_contents
+        for name, cell in zip(
+            endpoint.__code__.co_freevars, endpoint.__closure__ or (), strict=False
+        )
+    }
+    manager = closure_vars["manager"]
+    global_subscribers = closure_vars["global_subscribers"]
+
+    record = manager.create_job("job_slot_leak_test")
+    assert record is not None
+
+    mock_req = MagicMock()
+    mock_req.is_disconnected = AsyncMock(return_value=True)
+
+    resp = await endpoint(job_id=record.job_id, request=mock_req, x_ubt_tenant=None)
+    assert resp.background is not None, (
+        "StreamingResponse must attach a BackgroundTask to release subscriber slots on abort"
+    )
+    # Execute background cleanup without ever iterating resp.body_iterator
+    await resp.background()
+    assert sum(getattr(global_subscribers, "_counts", {}).values()) == 0
+    assert len(record.subscribers) == 0

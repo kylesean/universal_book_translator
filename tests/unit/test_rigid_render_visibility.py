@@ -196,3 +196,26 @@ def test_assert_paintable_allows_documents_with_nothing_to_translate() -> None:
     report.skipped.append(("img1", "non_prose"))
     report.skipped.append(("fig1", "empty_target"))
     _assert_paintable({}, report)  # must not raise
+
+
+@pytest.mark.fast
+def test_partition_render_skips_separates_intentional_preserved_from_fail_closed() -> None:
+    """_partition_render_skip_counts must separate intentional preserved elements
+    (policy, non_prose, chrome, footer) from true fail-closed skips (spill, no_zone, math_unrenderable)."""
+    from ubt.core.engine.stages.export import _partition_render_skip_counts
+
+    checkpoints = (
+        [{"block_id": f"p{i}", "error_flags": ["render_skip:policy"]} for i in range(56)]
+        + [{"block_id": f"n{i}", "error_flags": ["render_skip:non_prose"]} for i in range(14)]
+        + [{"block_id": "c1", "error_flags": ["render_skip:chrome"]}]
+        + [{"block_id": "c2", "error_flags": ["render_skip:chrome"]}]
+        + [{"block_id": "f1", "error_flags": ["render_skip:footer"]}]
+        + [
+            {"block_id": "fc1", "error_flags": ["render_skip:no_zone"]},
+            {"block_id": "fc2", "error_flags": ["render_skip:math_unrenderable"]},
+            {"block_id": "fc3", "error_flags": ["render_skip:spill"]},
+        ]
+    )
+    fail_closed, preserved = _partition_render_skip_counts(checkpoints)
+    assert fail_closed == 3
+    assert preserved == 73

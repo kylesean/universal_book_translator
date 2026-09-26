@@ -4,6 +4,7 @@ import asyncio
 import threading
 import time
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -404,3 +405,21 @@ def test_sqlite_token_bucket_preserves_negative_debt_on_429(tmp_path: Path) -> N
         assert state.tpm_tokens <= -2000.0 or state.tpm_tokens < 0.0, (
             f"Expected tpm_tokens to retain negative debt, got {state.tpm_tokens}"
         )
+
+
+@pytest.mark.fast
+@pytest.mark.asyncio
+async def test_sqlite_token_bucket_has_async_thread_offloaded_reporters(tmp_path: Path) -> None:
+    """[CRITICAL-T3-1] SqliteTokenBucket must provide report_success_async and report_429_async
+    that offload synchronous SQLite transactions via asyncio.to_thread."""
+    bucket = SqliteTokenBucket(tmp_path / "rate.sqlite", initial_rpm=60, initial_tpm=60000)
+    assert hasattr(bucket, "report_success_async"), (
+        "Missing report_success_async on SqliteTokenBucket"
+    )
+    assert hasattr(bucket, "report_429_async"), "Missing report_429_async on SqliteTokenBucket"
+
+    with patch("asyncio.to_thread", wraps=asyncio.to_thread) as spy_to_thread:
+        await bucket.report_429_async()
+        await bucket.report_success_async()
+        assert spy_to_thread.call_count == 2
+    bucket.close()

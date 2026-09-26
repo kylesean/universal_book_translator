@@ -6,6 +6,7 @@ from collections.abc import Generator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -509,3 +510,46 @@ async def test_visual_report_persists_aggregated_table_structure_noise(tmp_path:
     # The ledger mirror must agree — it is the copy a job query reads.
     assert ledger.recorded_reports[0]["parse_noise"] == report["parse_noise"]
     noise_aggregators().clear()
+
+
+@pytest.mark.fast
+def test_cli_preflight_guardrail_warns_and_interrupts_on_forced_reflow(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """When --render-engine reflow is passed on a PDF where DocumentAdvisor recommends rigid,
+    the CLI must print the Pre-Flight warning panel and interrupt for confirmation when interactive."""
+    from typer.testing import CliRunner
+
+    from ubt.cli.main import app
+    from ubt.core.advisor import DocumentAdvisor
+
+    pdf_file = tmp_path / "dense_paper.pdf"
+    pdf_file.write_bytes(b"%PDF-1.4\n%fake\n")
+
+    fake_adv = MagicMock()
+    fake_adv.recommended_render_engine = "rigid"
+    fake_adv.math_density = "high"
+    fake_adv.category = "academic_paper"
+    fake_adv.check_conflict.return_value = ["Forced reflow on rigid-recommended document"]
+
+    monkeypatch.setattr(DocumentAdvisor, "analyze", staticmethod(lambda _p: fake_adv))
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+
+    runner = CliRunner()
+    # Simulate user typing '3' (Abort) at the interactive interruption prompt
+    result = runner.invoke(
+        app,
+        [
+            "translate",
+            str(pdf_file),
+            "--profile",
+            "paper",
+            "--render-engine",
+            "reflow",
+            "--dual-mode",
+            "inline",
+        ],
+        input="3\n",
+    )
+    assert result.exit_code != 0
+    assert "排版风险预警" in result.output or "Pre-Flight Layout Tradeoff" in result.output

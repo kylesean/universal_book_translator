@@ -227,3 +227,24 @@ class TestLocalizAllDiagrams:
         ]
         result = loc.localize_all_diagrams("/nonexistent.pdf", blocks)
         assert len(result) == 1
+
+
+@pytest.mark.fast
+def test_diagram_localizer_unescapes_xml_entities_in_pdftotext_bbox(tmp_path: Path) -> None:
+    """[MEDIUM-T2-3] DiagramLocalizer.extract_text_spans must html.unescape XML entities."""
+    localizer = DiagramLocalizer.__new__(DiagramLocalizer)
+    localizer.glossary = {"r&d <5v>": "研发 <5V>"}
+    sample_xml = (
+        '<doc><page width="200" height="200">'
+        '<word xMin="20.0" yMin="20.0" xMax="80.0" yMax="40.0">R&amp;D &lt;5V&gt;</word>'
+        "</page></doc>"
+    )
+    with patch("subprocess.check_output", return_value=sample_xml):
+        spans = localizer.extract_text_spans(
+            tmp_path / "fig.pdf",
+            page_no=1,
+            bbox=BoundingBox(page=1, x0=10, y0=10, x1=190, y1=190),
+            page_height=200.0,
+        )
+    assert len(spans) == 1
+    assert spans[0].text == "R&D <5V>"
