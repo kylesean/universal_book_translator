@@ -52,40 +52,6 @@ def _paragraph_bbox(
     return BoundingBox(page=page_num, x0=x0, y0=y0, x1=x1, y1=y1)
 
 
-def _cluster_rects_into_lines(
-    rects: Sequence[tuple[float, float, float, float]],
-    median_h: float,
-) -> list[list[tuple[float, float, float, float]]]:
-    """Cluster bounding rects into horizontal lines, sorting each line left-to-right."""
-    if not rects:
-        return []
-    sorted_rects = sorted(rects, key=lambda r: -r[3])
-    lines: list[list[tuple[float, float, float, float]]] = []
-    line_tops: list[float] = []
-
-    for r in sorted_rects:
-        left, bottom, right, top = r
-        matched_idx = None
-        for i, l_top in enumerate(line_tops):
-            if abs(l_top - top) <= 0.5 * median_h:
-                matched_idx = i
-                break
-        if matched_idx is not None:
-            lines[matched_idx].append(r)
-        else:
-            lines.append([r])
-            line_tops.append(top)
-
-    lines_with_tops = list(zip(lines, line_tops, strict=True))
-    lines_with_tops.sort(key=lambda it: -it[1])
-
-    result: list[list[tuple[float, float, float, float]]] = []
-    for line_group, _ in lines_with_tops:
-        line_group.sort(key=lambda r: r[0])
-        result.append(line_group)
-    return result
-
-
 @pdfium_serialized
 def extract_blocks_with_pdfium(path: Path) -> list[IRBlock]:
     """Column-aware geometric line harvesting: reading order preserved across columns."""

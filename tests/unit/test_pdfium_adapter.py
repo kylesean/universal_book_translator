@@ -374,22 +374,3 @@ def test_factory_explicit_docling_unchanged() -> None:
     adapter = get_adapter_for_path("paper.pdf", pdf_engine="docling")
     assert isinstance(adapter, DoclingPDFAdapter)
     assert adapter.engine_name == "docling"
-
-
-@pytest.mark.fast
-def test_pdfium_clustering_preserves_horizontal_word_order() -> None:
-    from ubt.adapters.pdf.pdfium_adapter import _cluster_rects_into_lines
-
-    # Two words on the same line with slight subpixel vertical baseline jitter
-    # Word 1 (left=10, right=50, bottom=500, top=512.0)
-    # Word 2 (left=55, right=100, bottom=500.1, top=512.3)
-    rects = [
-        (55.0, 500.1, 100.0, 512.3),  # Word 2 has higher top (512.3)
-        (10.0, 500.0, 50.0, 512.0),  # Word 1 has lower top (512.0)
-    ]
-    median_h = 12.0
-    lines = _cluster_rects_into_lines(rects, median_h)
-    assert len(lines) == 1, f"Expected 1 clustered line, got {len(lines)}"
-    # First rect in the line must be Word 1 (left=10.0), not Word 2 (left=55.0)
-    assert lines[0][0][0] == 10.0
-    assert lines[0][1][0] == 55.0

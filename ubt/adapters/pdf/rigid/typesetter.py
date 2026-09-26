@@ -387,48 +387,6 @@ class RigidTypesetter:
             return None
         return lines, "".join(clauses[:lo]), "".join(clauses[lo:])
 
-    def _fit_zone(self, text: str, zone: Zone) -> tuple[float, list[str], str, str] | None:
-        """(size, lines, remainder) for a zone: prefer whole-fit, else prefix."""
-        s_hi = min(zone.base_size * UPSCALE_MAX, MAX_SIZE_PT)
-        s_lo = self.min_font_pt
-        if s_hi < s_lo or not _boxes_for(zone, s_lo):
-            return None
-        # 1) Largest size at which the whole remaining text fits.
-        whole = self._flow(text, _boxes_for(zone, s_hi), s_hi)
-        if whole is not None:
-            return (s_hi, whole, text, "")
-        lo, hi = s_lo, s_hi
-        best: float | None = None
-        while hi - lo > FIT_STEP_PT:
-            mid = (lo + hi) / 2.0
-            if self._flow(text, _boxes_for(zone, mid), mid) is not None:
-                best, lo = mid, mid
-            else:
-                hi = mid
-        if best is not None:
-            lines = self._flow(text, _boxes_for(zone, best), best)
-            return (best, lines or [], text, "")
-        # 2) No whole-fit: fill the zone with the longest clause prefix at the
-        # largest size that fits at least one clause.
-        size: float | None = None
-        if self._flow_prefix(text, _boxes_for(zone, s_hi), s_hi) is not None:
-            size = s_hi
-        else:
-            lo, hi = s_lo, s_hi
-            while hi - lo > FIT_STEP_PT:
-                mid = (lo + hi) / 2.0
-                if self._flow_prefix(text, _boxes_for(zone, mid), mid) is not None:
-                    size, lo = mid, mid
-                else:
-                    hi = mid
-        if size is None:
-            return None
-        result = self._flow_prefix(text, _boxes_for(zone, size), size)
-        if result is None:
-            return None
-        lines, consumed, remainder = result
-        return (size, lines, consumed, remainder)
-
     def _plan_at_size(
         self, text: str, zones: tuple[Zone, ...], size: float
     ) -> list[ZonePlan] | None:

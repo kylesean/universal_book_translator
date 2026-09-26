@@ -45,7 +45,6 @@ from ubt.core.cleaners.html_sanitizer import strip_html_mark_tags
 from ubt.core.cleaners.math_masker import MathMasker
 
 _CJK = r"一-鿿㐀-䶿豈-﫿぀-ヿ가-힯"
-_CJK = r"一-鿿㐀-䶿豈-﫿぀-ヿ가-힯"
 
 
 def typst_escape(text: str) -> str:

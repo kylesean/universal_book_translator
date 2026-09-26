@@ -672,14 +672,11 @@ def build_zones(
                         if clipped.height < min_h:
                             return False
                         zone = clipped
-                elif zone.y0 >= other.y0:
-                    if zone.y0 < other.y1 + ZONE_GAP_PT:
-                        clipped = zone.with_y0(other.y1 + ZONE_GAP_PT)
-                        if clipped.height < min_h:
-                            return False
-                        zone = clipped
-                else:
-                    return False
+                elif zone.y0 >= other.y0 and zone.y0 < other.y1 + ZONE_GAP_PT:
+                    clipped = zone.with_y0(other.y1 + ZONE_GAP_PT)
+                    if clipped.height < min_h:
+                        return False
+                    zone = clipped
         accepted.setdefault(zone.page, []).append(zone)
         by_id.setdefault(zone.block_id, []).append(zone)
         return True
