@@ -841,6 +841,10 @@ class RigidTypesetter:
         """Typeset translated blocks into their rigid regions."""
         from ubt.adapters.pdf.typst_compile import typst_available, typst_compile
 
+        # Honour the call-site language: fonts and escaping read
+        # ``self.target_lang`` throughout, so a caller that passed a different
+        # value used to be silently ignored.
+        self.target_lang = target_lang
         if not typst_available(self.typst_binary):
             raise DocumentParseError(
                 f"Typst compiler binary '{self.typst_binary}' not found on system "
