@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 #: Bump when a KPI is added/removed or its formula/source changes. Golden files
 #: and CI comparisons reject mismatched versions rather than comparing
 #: incomparable numbers.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 KpiUnit = Literal["ratio", "score", "count", "usd_per_1k_chars"]
 
@@ -238,7 +238,9 @@ class KpiSet(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    schema_version: int = SCHEMA_VERSION
+    schema_version: int = 0  # 0 = legacy/unknown: a missing field must mismatch a
+    # real version (the compare gate then flags drift) instead of being stamped
+    # with the live version and silently compared.
     job: dict[str, str] = Field(default_factory=dict)
     kpis: dict[str, float] = Field(default_factory=dict)
     details: dict[str, Any] = Field(default_factory=dict)

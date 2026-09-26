@@ -8,6 +8,7 @@ never regress; pass ``strict_names=True`` to make that absence a violation.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -79,6 +80,11 @@ def compare_kpis(
             continue
         base_value = baseline[name]
         cand_value = candidate[name]
+        # NaN/inf would pass every comparison silently (all comparisons with NaN
+        # are False), so a corrupt artifact could hide a regression.
+        if not (math.isfinite(base_value) and math.isfinite(cand_value)):
+            violations.append(f"{name}: non-finite KPI ({base_value!r} -> {cand_value!r})")
+            continue
         definition = KPI_BY_NAME.get(name)
         direction = definition.direction if definition else Direction.HIGHER_IS_BETTER
         tolerance = overrides.get(name, definition.tolerance if definition else 0.0)
@@ -175,6 +181,9 @@ def check_thresholds(
         if name not in kpis:
             continue
         value = kpis[name]
+        if not math.isfinite(value):
+            violations.append(f"{name}: non-finite KPI ({value!r})")
+            continue
         floor = floors.get(name) if floors and name in floors else definition.floor
         ceiling = ceilings.get(name) if ceilings and name in ceilings else definition.ceiling
         if floor is not None and value < floor:

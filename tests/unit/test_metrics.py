@@ -326,3 +326,28 @@ def test_metrics_json_errors_go_to_stderr(tmp_path: Path) -> None:
         assert proc.returncode == 1
         assert proc.stdout.strip() == ""
         assert "not found" in proc.stderr
+
+
+def test_compare_and_thresholds_reject_non_finite_kpis() -> None:
+    """A NaN KPI must violate, not silently pass (all NaN comparisons are False)."""
+    report = compare_kpis({"avg_qe": 0.8}, {"avg_qe": float("nan")})
+    assert not report.passed
+    assert any("non-finite" in v for v in report.violations)
+    assert check_thresholds({"avg_qe": float("nan")})
+    assert any("non-finite" in v for v in check_thresholds({"avg_qe": float("nan")}))
+
+
+def test_missing_schema_version_is_legacy_and_mismatches() -> None:
+    """An artifact without schema_version must not be stamped as current."""
+    legacy = KpiSet(kpis={"avg_qe": 0.8})
+    assert legacy.schema_version == 0
+    report = compare_kpi_sets(legacy, KpiSet(schema_version=SCHEMA_VERSION, kpis={"avg_qe": 0.8}))
+    assert any("schema_version" in v for v in report.violations)
+
+
+def test_page_less_visual_findings_cannot_exceed_a_rate_of_one() -> None:
+    """Findings that name no page must not make visual_*_rate exceed 1.0."""
+    visual = {"findings": [{"severity": "major", "flag": "banned_unicode_dash"}] * 5}
+    kpis = collect_kpis(_report(), visual).kpis
+    assert kpis["visual_major_rate"] <= 1.0
+    assert kpis["visual_critical_rate"] <= 1.0

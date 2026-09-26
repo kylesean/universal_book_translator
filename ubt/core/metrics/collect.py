@@ -11,14 +11,14 @@ from pathlib import Path
 from typing import Any
 
 from ubt.core.engine.reporter import QualityReport
-from ubt.core.metrics.schema import KpiSet
+from ubt.core.metrics.schema import SCHEMA_VERSION, KpiSet
 
 _SEVERITIES = ("info", "major", "critical")
 
 
-def _div(numerator: float, denominator: float, *, default: float = 0.0) -> float:
-    """Guarded division: an empty denominator yields ``default``, never a crash."""
-    return numerator / denominator if denominator else default
+def _div(numerator: float, denominator: float) -> float:
+    """Guarded division: an empty denominator yields 0.0, never a crash."""
+    return numerator / denominator if denominator else 0.0
 
 
 def _flag_count(flags: Mapping[str, int], prefix: str) -> int:
@@ -64,7 +64,10 @@ def _visual_page_count(visual_report: Mapping[str, Any] | None, route_pages: int
         # max(), not len(): findings can repeat a page and can be numbered
         # sparsely, so the count was never the population size.
         return max(page_numbers)
-    return 1
+    # Findings exist but name no page (e.g. a page-less ``banned_unicode_dash``):
+    # a hard-coded 1 as the denominator let ``visual_*_rate`` exceed 1.0. Bound
+    # the denominator by the findings themselves so the rate cannot.
+    return max(1, len(visual_report.get("findings") or []))
 
 
 def collect_kpis(report: QualityReport, visual_report: Mapping[str, Any] | None = None) -> KpiSet:
@@ -144,7 +147,7 @@ def collect_kpis(report: QualityReport, visual_report: Mapping[str, Any] | None 
         "typst_version": report.typst_version or "",
     }
 
-    return KpiSet(job=job, kpis=kpis, details=details)
+    return KpiSet(schema_version=SCHEMA_VERSION, job=job, kpis=kpis, details=details)
 
 
 def save_metrics_report(kpis: KpiSet, path: Path | str) -> Path:
