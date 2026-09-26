@@ -274,6 +274,9 @@ class StreamStripStats:
     dropped_paths: int = 0
     form_ops: int = 0
     forms_changed: int = 0
+    #: Forms skipped because they are referenced by more than one page; rewriting
+    #: one in place would erase text on every page that draws it.
+    shared_forms_skipped: int = 0
     aborted: str | None = None
 
 
@@ -525,8 +528,16 @@ def strip_stream_instructions(
     resources: Any = None,
     recurse_forms: bool = True,
     visited_forms: set[str] | None = None,
+    shared_forms: set[tuple[int, int]] | None = None,
 ) -> tuple[list[tuple[Sequence[Any], Any]], int]:
-    """Filter content stream instructions, returning (new_instructions, dropped_count)."""
+    """Filter content stream instructions, returning (new_instructions, dropped_count).
+
+    ``shared_forms`` holds the ``objgen`` of every Form XObject referenced by
+    more than one page (see :func:`shared_form_objgens`). Such a Form is never
+    rewritten here: it is one indirect object drawn by several pages, so a
+    strip rect belonging to one page would otherwise erase the source text from
+    all of them.
+    """
     if visited_forms is None:
         visited_forms = set()
 
@@ -779,34 +790,51 @@ def strip_stream_instructions(
                     if target_xobj is not None and target_xobj.get(
                         pikepdf.Name("/Subtype")
                     ) == pikepdf.Name("/Form"):
-                        form_matrix = (
-                            matrix_from_object(target_xobj.get(pikepdf.Name("/Matrix")))
-                            or IDENTITY_MATRIX
-                        )
-                        child_ctm = mul_matrix(form_matrix, ctm)
-                        child_res = target_xobj.get(pikepdf.Name("/Resources")) or resources
-                        form_parsed = pikepdf.parse_content_stream(target_xobj)
-                        visited_forms.add(name_str)
-                        try:
-                            sub_out, sub_dropped = strip_stream_instructions(
-                                cast(list[tuple[Sequence[Any], Any]], list(form_parsed)),
-                                strip_index,
-                                protected_index,
-                                stats,
-                                initial_ctm=child_ctm,
-                                resources=child_res,
-                                recurse_forms=recurse_forms,
-                                visited_forms=visited_forms,
+                        if (
+                            shared_forms
+                            and target_xobj.is_indirect
+                            and target_xobj.objgen in shared_forms
+                        ):
+                            # The form is one indirect object drawn by several
+                            # pages; rewriting it in place would delete this
+                            # page's text from every other page too. Fail closed:
+                            # keep the source text rather than lose it elsewhere.
+                            stats.shared_forms_skipped += 1
+                            logger.debug(
+                                "stream_strip: form %s is shared across pages; "
+                                "leaving its text in place",
+                                name_str,
                             )
-                        finally:
-                            # A failed recursion must not poison the set:
-                            # without this, later same-named Forms are
-                            # skipped and their text survives (fail-open).
-                            visited_forms.remove(name_str)
-                        if sub_dropped > 0:
-                            target_xobj.write(pikepdf.unparse_content_stream(sub_out))
-                            stats.forms_changed += 1
-                            dropped_count += sub_dropped
+                        else:
+                            form_matrix = (
+                                matrix_from_object(target_xobj.get(pikepdf.Name("/Matrix")))
+                                or IDENTITY_MATRIX
+                            )
+                            child_ctm = mul_matrix(form_matrix, ctm)
+                            child_res = target_xobj.get(pikepdf.Name("/Resources")) or resources
+                            form_parsed = pikepdf.parse_content_stream(target_xobj)
+                            visited_forms.add(name_str)
+                            try:
+                                sub_out, sub_dropped = strip_stream_instructions(
+                                    cast(list[tuple[Sequence[Any], Any]], list(form_parsed)),
+                                    strip_index,
+                                    protected_index,
+                                    stats,
+                                    initial_ctm=child_ctm,
+                                    resources=child_res,
+                                    recurse_forms=recurse_forms,
+                                    visited_forms=visited_forms,
+                                    shared_forms=shared_forms,
+                                )
+                            finally:
+                                # A failed recursion must not poison the set:
+                                # without this, later same-named Forms are
+                                # skipped and their text survives (fail-open).
+                                visited_forms.remove(name_str)
+                            if sub_dropped > 0:
+                                target_xobj.write(pikepdf.unparse_content_stream(sub_out))
+                                stats.forms_changed += 1
+                                dropped_count += sub_dropped
                 except Exception as exc:
                     logger.debug("Error processing Form XObject %s: %s", name_str, exc)
 
@@ -871,16 +899,52 @@ def strip_stream_instructions(
     return output, dropped_count
 
 
+def shared_form_objgens(pdf: pikepdf.Pdf) -> set[tuple[int, int]]:
+    """Objgen of every Form XObject drawn by more than one page.
+
+    Rewriting such a Form in place while stripping page A would erase page B's
+    text too, because both pages draw the same indirect object. Callers pass the
+    result to :func:`strip_page_text_pikepdf` so those Forms are treated as
+    read-only. A form drawn twice on the *same* page counts once and is not
+    shared (rewriting it only affects that page).
+    """
+    pages_drawing: dict[tuple[int, int], set[int]] = {}
+    for page_index, page in enumerate(pdf.pages):
+        resources = page.get(pikepdf.Name("/Resources"))
+        if resources is None:
+            continue
+        xobjects = resources.get(pikepdf.Name("/XObject"))
+        if xobjects is None:
+            continue
+        try:
+            items = list(xobjects.items())
+        except Exception:
+            continue
+        for _name, val in items:
+            try:
+                if (
+                    val.get(pikepdf.Name("/Subtype")) == pikepdf.Name("/Form")
+                    and val.is_indirect
+                ):
+                    pages_drawing.setdefault(val.objgen, set()).add(page_index)
+            except Exception:
+                continue
+    return {objgen for objgen, pages in pages_drawing.items() if len(pages) > 1}
+
+
 def strip_page_text_pikepdf(
     page: pikepdf.Page,
     strip_rects: list[Rect],
     protected_rects: list[Rect] | None = None,
     page_no: int = 0,
     recurse_forms: bool = True,
+    shared_forms: set[tuple[int, int]] | None = None,
 ) -> StreamStripStats:
     """Delete source text under strip_rects in a pikepdf Page with 2D precision.
 
-    Leaves protected_rects untouched. Handles Form XObjects recursively.
+    Leaves protected_rects untouched. Handles Form XObjects recursively, except
+    forms shared across pages (``shared_forms``, from :func:`shared_form_objgens`),
+    which are left intact so their text is not erased from other pages.
     """
     stats = StreamStripStats(page=page_no)
     if not strip_rects:
@@ -908,6 +972,7 @@ def strip_page_text_pikepdf(
             initial_ctm=IDENTITY_MATRIX,
             resources=resources,
             recurse_forms=recurse_forms,
+            shared_forms=shared_forms,
         )
 
         if dropped > 0:
@@ -933,6 +998,7 @@ __all__ = [
     "StreamStripStats",
     "TextState",
     "mul_matrix",
+    "shared_form_objgens",
     "strip_page_text_pikepdf",
     "strip_stream_instructions",
     "transform_point",

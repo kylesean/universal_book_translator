@@ -14,6 +14,7 @@ from ubt.adapters.pdf.stream_strip import (
     _font_advance,
     _show_glyph_bytes,
     mul_matrix,
+    shared_form_objgens,
     strip_page_text_pikepdf,
     transform_point,
 )
@@ -139,6 +140,75 @@ def test_form_xobject_recursive_stripping() -> None:
 
     form_bytes = form.read_bytes()
     assert b"Inside Form XObject" not in form_bytes
+
+
+def _make_form(pdf: pikepdf.Pdf, content: bytes) -> Any:
+    form = pdf.make_stream(content)
+    form[pikepdf.Name("/Type")] = pikepdf.Name("/XObject")
+    form[pikepdf.Name("/Subtype")] = pikepdf.Name("/Form")
+    form[pikepdf.Name("/BBox")] = pikepdf.Array([0, 0, 600, 800])
+    form[pikepdf.Name("/Matrix")] = pikepdf.Array([1, 0, 0, 1, 0, 0])
+    return form
+
+
+def test_shared_form_xobject_is_not_rewritten() -> None:
+    """A Form drawn by two pages must not be stripped for one page's rect.
+
+    Rewriting the shared indirect object used to erase the source text on both
+    pages; the guard keeps it everywhere (fail-closed) instead.
+    """
+    pdf = pikepdf.new()
+    p1 = pdf.add_blank_page(page_size=(600, 800))
+    p2 = pdf.add_blank_page(page_size=(600, 800))
+    form = _make_form(pdf, b"BT /F1 12 Tf 100 500 Td (Shared Form Text) Tj ET\n")
+    for page in (p1, p2):
+        page.Resources = pikepdf.Dictionary(
+            {"/XObject": pikepdf.Dictionary({"/Fm1": form})}
+        )
+        page.Contents = pdf.make_stream(b"/Fm1 Do\n")
+
+    shared = shared_form_objgens(pdf)
+    assert form.objgen in shared
+
+    stats = strip_page_text_pikepdf(
+        p1, [(80.0, 480.0, 300.0, 530.0)], page_no=1, shared_forms=shared
+    )
+    assert stats.aborted is None
+    assert stats.forms_changed == 0
+    assert stats.shared_forms_skipped == 1
+    assert b"Shared Form Text" in form.read_bytes()
+
+
+def test_page_private_form_is_still_stripped() -> None:
+    """A form only one page draws is not 'shared' and is stripped as before."""
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(600, 800))
+    form = _make_form(pdf, b"BT /F1 12 Tf 100 500 Td (Private Form) Tj ET\n")
+    page.Resources = pikepdf.Dictionary({"/XObject": pikepdf.Dictionary({"/Fm1": form})})
+    page.Contents = pdf.make_stream(b"/Fm1 Do\n")
+
+    shared = shared_form_objgens(pdf)
+    assert shared == set()
+
+    stats = strip_page_text_pikepdf(
+        page, [(80.0, 480.0, 300.0, 530.0)], page_no=1, shared_forms=shared
+    )
+    assert stats.forms_changed == 1
+    assert stats.shared_forms_skipped == 0
+    assert b"Private Form" not in form.read_bytes()
+
+
+def test_form_drawn_twice_on_one_page_is_not_shared() -> None:
+    """Two draws on the *same* page are page-local; stripping one is safe."""
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(600, 800))
+    form = _make_form(pdf, b"BT /F1 12 Tf 100 500 Td (Local Twice) Tj ET\n")
+    page.Resources = pikepdf.Dictionary(
+        {"/XObject": pikepdf.Dictionary({"/Fm1": form, "/Fm2": form})}
+    )
+    page.Contents = pdf.make_stream(b"/Fm1 Do\n/Fm2 Do\n")
+
+    assert shared_form_objgens(pdf) == set()
 
 
 def test_cm_transformed_text_stripping() -> None:

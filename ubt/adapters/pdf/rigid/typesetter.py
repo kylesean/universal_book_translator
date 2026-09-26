@@ -997,11 +997,17 @@ class RigidTypesetter:
             aborted_pages: list[int] = []
 
             def _merge_sync() -> None:
-                from ubt.adapters.pdf.stream_strip import strip_page_text_pikepdf
+                from ubt.adapters.pdf.stream_strip import (
+                    shared_form_objgens,
+                    strip_page_text_pikepdf,
+                )
 
                 erase_rects = _erase_rects_by_page(zone_map, planned_rendered_ids, set(overlays))
 
                 with pikepdf.open(str(source_pdf)) as pdf:
+                    # Forms drawn by several pages must not be rewritten while
+                    # stripping one of them (their text would vanish everywhere).
+                    shared_forms = shared_form_objgens(pdf)
                     for page_no, overlay_path in sorted(overlays.items()):
                         page = pdf.pages[page_no - 1]
                         rects = erase_rects.get(page_no, [])
@@ -1014,9 +1020,23 @@ class RigidTypesetter:
                                     (block.bbox.x0, block.bbox.y0, block.bbox.x1, block.bbox.y1)
                                 )
                         stats = strip_page_text_pikepdf(
-                            page, rects, protected_rects=guards, page_no=page_no
+                            page,
+                            rects,
+                            protected_rects=guards,
+                            page_no=page_no,
+                            shared_forms=shared_forms,
                         )
                         page_reports[page_no].stripped_ops += stats.dropped_ops
+                        if stats.shared_forms_skipped:
+                            # Not an abort, but the operator must know text that
+                            # should have been erased survived: it is shared with
+                            # other pages and rewriting it would erase it there.
+                            logger.warning(
+                                "rigid strip on page %d left %d page-shared Form "
+                                "XObject(s) intact to avoid erasing text on other pages",
+                                page_no,
+                                stats.shared_forms_skipped,
+                            )
                         if stats.aborted:
                             # The source text could not be removed; drawing the
                             # overlay on top would double/overlap the text. Keep
