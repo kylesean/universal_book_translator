@@ -21,9 +21,11 @@ Options:
     --price-output USD      USD per 1M output tokens (default 1.10)
     --job-id ID             ledger job id (default: benchmark_<timestamp>)
 
-Prices default to DeepSeek's published deepseek-chat rates; override them for
-other providers. Cost figures are estimates — always cross-check the provider
-dashboard.
+Prices default to DeepSeek's published deepseek-chat rates and apply whenever
+both the draft and repair models are DeepSeek ones; override them for other
+providers. A non-DeepSeek model with no --price-* is recorded as unpriced
+(null), never at DeepSeek rates. Cost figures are estimates — always cross-check
+the provider dashboard.
 """
 
 import argparse

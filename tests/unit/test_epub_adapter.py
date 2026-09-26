@@ -943,3 +943,44 @@ def test_overrides_from_request_blocks_ocr_endpoint_and_epub_locates_single_quot
     with zipfile.ZipFile(buf, "r") as zf:
         adapter = EPUBAdapter()
         assert adapter._locate_opf(zf) == "OEBPS/content.opf"
+
+
+@pytest.mark.asyncio
+async def test_parse_stream_runs_off_the_event_loop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The per-chapter zip read + BeautifulSoup parse must not block the loop."""
+    import asyncio
+    import time
+
+    import ubt.adapters.epub.adapter as epub_mod
+
+    epub_file = create_mock_epub(tmp_path / "offload.epub")
+    calls: list[int] = []
+
+    def slow(*_args: Any, **_kwargs: Any) -> list[IRBlock]:
+        calls.append(1)
+        time.sleep(0.1)
+        return []
+
+    monkeypatch.setattr(epub_mod, "_parse_chapter_blocks", slow)
+
+    ticks = 0
+    stop = False
+
+    async def heartbeat() -> None:
+        nonlocal ticks
+        while not stop:
+            ticks += 1
+            await asyncio.sleep(0.005)
+
+    task = asyncio.create_task(heartbeat())
+    try:
+        adapter = EPUBAdapter()
+        async for _chapter in adapter.parse_stream(epub_file):
+            pass
+    finally:
+        stop = True
+        await task
+    assert calls, "parse_stream did not route through the offloaded parser"
+    assert ticks >= 5, f"event loop stalled during parse_stream (ticks={ticks})"

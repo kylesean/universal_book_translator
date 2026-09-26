@@ -211,6 +211,11 @@ class MarkdownAdapter(BaseDocumentAdapter):
         """Stream Markdown document partitioned by chapters."""
         manifest = await self.extract_manifest(input_path)
         content = await asyncio.to_thread(input_path.read_text, encoding="utf-8", errors="replace")
+        # The only blocking IO (the file read) is offloaded above. The remaining
+        # line loop is pure-Python with a small per-line cost, and it stays on
+        # the loop deliberately: moving it into a worker thread would have to
+        # buffer every chapter, breaking this generator's incremental
+        # (bounded-memory) contract for very large books.
         lines = content.split("\n")
 
         current_chapter_idx = 0
@@ -391,6 +396,32 @@ class MarkdownAdapter(BaseDocumentAdapter):
             )
 
     async def render_blocks(
+        self,
+        manifest: BookManifest,
+        blocks: list[IRBlock],
+        target_lang: str,
+        output_path: Path,
+        bilingual_mode: str | None = None,
+        render_engine: str | None = None,
+        **kwargs: Any,
+    ) -> Path:
+        """Render bilingual Markdown document interleaving source and translated paragraphs.
+
+        The render is synchronous string building + a file write; run it off the
+        event loop so a concurrent job/task is not stalled.
+        """
+        return await asyncio.to_thread(
+            self._render_blocks_sync,
+            manifest,
+            blocks,
+            target_lang,
+            output_path,
+            bilingual_mode,
+            render_engine,
+            **kwargs,
+        )
+
+    def _render_blocks_sync(
         self,
         manifest: BookManifest,
         blocks: list[IRBlock],

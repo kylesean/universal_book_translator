@@ -197,6 +197,82 @@ def _toc_label_text(text: str) -> str:
     return decoded.strip()
 
 
+def _parse_chapter_blocks(
+    zf: zipfile.ZipFile,
+    chapter: ChapterMeta,
+    block_names: set[str],
+    fp: BoilerplateFingerprint,
+    is_page_slice: bool,
+    global_spine: int,
+) -> list[IRBlock]:
+    """Parse one EPUB spine item into IR blocks (synchronous).
+
+    Runs on a worker thread via ``asyncio.to_thread`` from ``parse_stream``: the
+    zip read and BeautifulSoup parse are CPU + IO and must not block the event
+    loop. ``global_spine`` is the starting spine index; the caller advances it by
+    ``len(result)``, so this returns the blocks only.
+    """
+    assert chapter.source_file is not None  # caller guards the empty/None case
+    raw_bytes = zf.read(chapter.source_file)
+    soup = _parse_xhtml(raw_bytes.decode("utf-8", errors="ignore"))
+    wrap_nested_direct_blocks(soup)
+    body = soup.body or soup
+
+    leaves = [t for t in body.find_all(BLOCK_TAGS) if is_leaf_block(t, block_names)]
+    chapter_blocks: list[IRBlock] = []
+
+    for leaf_idx, leaf in enumerate(leaves):
+        text = leaf.get_text(" ", strip=True)
+        if not text:
+            continue
+
+        # Dynamic boilerplate cleaning on page-slice or detected books
+        if is_page_slice or fp.footer_disclaimers:
+            text = fp.clean(text)
+            if not text:
+                continue
+
+        # Classify block type
+        if leaf.name in ("h1", "h2", "h3", "h4", "h5", "h6"):
+            b_type = BlockType.HEADING
+        elif leaf.name in ("pre", "code", "tt"):
+            # See html adapter: inline <code> inside a narrative
+            # paragraph must not make the whole block CODE.
+            b_type = BlockType.CODE
+        else:
+            b_type = BlockType.NARRATIVE
+
+        flow_id = determine_flow_id(leaf)
+        block_id = f"{chapter.chapter_id}#p{leaf_idx:04d}"
+        prov: dict[str, Any] = {}
+        leaf_id: Any = leaf.get("id")
+        if not leaf_id:
+            anchor = leaf.find(["a", "span"], attrs={"id": True})
+            if anchor is not None:
+                leaf_id = anchor.get("id")
+        if not leaf_id:
+            named = leaf.find("a", attrs={"name": True})
+            if named is not None:
+                leaf_id = named.get("name")
+        if leaf_id:
+            prov["html_id"] = str(leaf_id)
+
+        chapter_blocks.append(
+            IRBlock(
+                id=block_id,
+                flow_id=flow_id,
+                spine_index=global_spine,
+                block_type=b_type,
+                source_text=text,
+                skip_translate=bool(b_type == BlockType.CODE),
+                provenance=prov,
+            )
+        )
+        global_spine += 1
+
+    return chapter_blocks
+
+
 class EPUBAdapter(BaseDocumentAdapter):
     """Adapter for EPUB books with zero-corruption DOM injection."""
 
@@ -361,62 +437,19 @@ class EPUBAdapter(BaseDocumentAdapter):
                 if not chapter.source_file or chapter.source_file not in zf.namelist():
                     continue
 
-                raw_bytes = zf.read(chapter.source_file)
-                soup = _parse_xhtml(raw_bytes.decode("utf-8", errors="ignore"))
-                wrap_nested_direct_blocks(soup)
-                body = soup.body or soup
-
-                leaves = [t for t in body.find_all(BLOCK_TAGS) if is_leaf_block(t, block_names)]
-                chapter_blocks: list[IRBlock] = []
-
-                for leaf_idx, leaf in enumerate(leaves):
-                    text = leaf.get_text(" ", strip=True)
-                    if not text:
-                        continue
-
-                    # Dynamic boilerplate cleaning on page-slice or detected books
-                    if is_page_slice or fp.footer_disclaimers:
-                        text = fp.clean(text)
-                        if not text:
-                            continue
-
-                    # Classify block type
-                    if leaf.name in ("h1", "h2", "h3", "h4", "h5", "h6"):
-                        b_type = BlockType.HEADING
-                    elif leaf.name in ("pre", "code", "tt"):
-                        # See html adapter: inline <code> inside a narrative
-                        # paragraph must not make the whole block CODE.
-                        b_type = BlockType.CODE
-                    else:
-                        b_type = BlockType.NARRATIVE
-
-                    flow_id = determine_flow_id(leaf)
-                    block_id = f"{chapter.chapter_id}#p{leaf_idx:04d}"
-                    prov: dict[str, Any] = {}
-                    leaf_id: Any = leaf.get("id")
-                    if not leaf_id:
-                        anchor = leaf.find(["a", "span"], attrs={"id": True})
-                        if anchor is not None:
-                            leaf_id = anchor.get("id")
-                    if not leaf_id:
-                        named = leaf.find("a", attrs={"name": True})
-                        if named is not None:
-                            leaf_id = named.get("name")
-                    if leaf_id:
-                        prov["html_id"] = str(leaf_id)
-
-                    chapter_blocks.append(
-                        IRBlock(
-                            id=block_id,
-                            flow_id=flow_id,
-                            spine_index=global_spine,
-                            block_type=b_type,
-                            source_text=text,
-                            skip_translate=bool(b_type == BlockType.CODE),
-                            provenance=prov,
-                        )
-                    )
-                    global_spine += 1
+                # Per-chapter zip read + BeautifulSoup parse + block build is
+                # synchronous CPU + IO; offload it so a concurrent task is not
+                # stalled once per chapter.
+                chapter_blocks = await asyncio.to_thread(
+                    _parse_chapter_blocks,
+                    zf,
+                    chapter,
+                    block_names,
+                    fp,
+                    is_page_slice,
+                    global_spine,
+                )
+                global_spine += len(chapter_blocks)
 
                 if chapter_blocks:
                     yield ChapterIR(
@@ -428,6 +461,33 @@ class EPUBAdapter(BaseDocumentAdapter):
                     )
 
     async def render_blocks(
+        self,
+        manifest: BookManifest,
+        blocks: list[IRBlock],
+        target_lang: str,
+        output_path: Path,
+        bilingual_mode: str | None = None,
+        render_engine: str | None = None,
+        **kwargs: Any,
+    ) -> Path:
+        """Inject bilingual translation nodes into original DOM (ledger-free).
+
+        DOM parsing and the zip rewrite are synchronous CPU + file IO; run them
+        off the event loop so a concurrent job/task is not stalled for the whole
+        document.
+        """
+        return await asyncio.to_thread(
+            self._render_blocks_sync,
+            manifest,
+            blocks,
+            target_lang,
+            output_path,
+            bilingual_mode,
+            render_engine,
+            **kwargs,
+        )
+
+    def _render_blocks_sync(
         self,
         manifest: BookManifest,
         blocks: list[IRBlock],

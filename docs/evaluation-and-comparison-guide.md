@@ -188,8 +188,11 @@ export DEEPSEEK_API_KEY=sk-...
 uv run python scripts/cost_benchmark.py path/to/book.md --metrics-dir docs/benchmarks
 ```
 
-Prices default to DeepSeek's published rates; override `--price-*` for other
-providers, and treat every dollar figure as an estimate to be cross-checked
+Prices default to DeepSeek's published rates and are applied whenever both the
+draft and repair models are DeepSeek ones; override `--price-*` for other
+providers. A non-DeepSeek model left unpriced records `null` (unknown) in the
+committed JSON rather than a DeepSeek-rate number, and the console prints
+"unknown" to match. Treat every dollar figure as an estimate to be cross-checked
 against the provider dashboard.
 
 ## 6. Where the deterministic evidence lives

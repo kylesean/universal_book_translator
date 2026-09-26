@@ -97,6 +97,18 @@ class HTMLAdapter(BaseDocumentAdapter):
         soup = await asyncio.to_thread(self._load_soup, input_path)
         chapter = manifest.chapters[0]
 
+        blocks = await asyncio.to_thread(self._parse_blocks_sync, soup, chapter)
+
+        yield ChapterIR(
+            doc_id=manifest.doc_id,
+            chapter_id=chapter.chapter_id,
+            title=chapter.title,
+            spine_index=chapter.spine_index,
+            blocks=blocks,
+        )
+
+    def _parse_blocks_sync(self, soup: BeautifulSoup, chapter: ChapterMeta) -> list[IRBlock]:
+        """Build the leaf blocks (synchronous: runs in a worker thread)."""
         blocks: list[IRBlock] = []
         global_spine = 1
 
@@ -127,15 +139,35 @@ class HTMLAdapter(BaseDocumentAdapter):
             )
             global_spine += 1
 
-        yield ChapterIR(
-            doc_id=manifest.doc_id,
-            chapter_id=chapter.chapter_id,
-            title=chapter.title,
-            spine_index=chapter.spine_index,
-            blocks=blocks,
-        )
+        return blocks
 
     async def render_blocks(
+        self,
+        manifest: BookManifest,
+        blocks: list[IRBlock],
+        target_lang: str,
+        output_path: Path,
+        bilingual_mode: str | None = None,
+        render_engine: str | None = None,
+        **kwargs: Any,
+    ) -> Path:
+        """Re-parse the source document and inject bilingual target siblings.
+
+        DOM parsing and the file write are synchronous CPU + IO; run them off
+        the event loop so a concurrent job/task is not stalled.
+        """
+        return await asyncio.to_thread(
+            self._render_blocks_sync,
+            manifest,
+            blocks,
+            target_lang,
+            output_path,
+            bilingual_mode,
+            render_engine,
+            **kwargs,
+        )
+
+    def _render_blocks_sync(
         self,
         manifest: BookManifest,
         blocks: list[IRBlock],

@@ -191,3 +191,20 @@ def test_coordinate_resolver_auto_1000_large_page() -> None:
     assert box is not None
     # x0 should be ~100 pt, NOT 100/1000 * 1200 = 120 pt
     assert box[0] == pytest.approx(100.0), f"Expected native 100.0 pt, got {box[0]}"
+
+
+def test_apply_rotation_exact_coordinates() -> None:
+    """Pin the rotation math exactly (the existing test only asserts ordering).
+
+    90/270 swap the page frame, so the mapped y uses the OLD width and the
+    mapped x uses the OLD height; each result must stay a valid box.
+    """
+    box = (100.0, 200.0, 300.0, 400.0)
+    r90 = PageBBoxResolver(page_width=600.0, page_height=800.0, rotation=90)
+    assert r90._apply_rotation(*box) == (200.0, 300.0, 400.0, 500.0)
+    r180 = PageBBoxResolver(page_width=600.0, page_height=800.0, rotation=180)
+    assert r180._apply_rotation(*box) == (300.0, 400.0, 500.0, 600.0)
+    r270 = PageBBoxResolver(page_width=600.0, page_height=800.0, rotation=270)
+    assert r270._apply_rotation(*box) == (400.0, 100.0, 600.0, 300.0)
+    r360 = PageBBoxResolver(page_width=600.0, page_height=800.0, rotation=360)
+    assert r360._apply_rotation(*box) == box

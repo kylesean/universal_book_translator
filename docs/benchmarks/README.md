@@ -7,7 +7,9 @@
 
 - 文件名：`<job_id>.json`（`--job-id` 缺省时为 `benchmark_<unix 时间戳>`）。
 - 每份记录只含**计数与配置**，绝不含书稿文本：语料 `sha256`、模型与单价
-  （`--price-input/--price-cache-hit/--price-output`，无价时写 `null` 而非 `0.0`）、
+  （`--price-input/--price-cache-hit/--price-output`；缺省即 DeepSeek 公布费率，
+  仅当 draft/repair 模型均为 DeepSeek 时适用；非 DeepSeek 模型未显式给价时写
+  `null` 而非 `0.0`）、
   墙钟耗时、分阶段调用数/token/延迟、cache 命中量、估算美元、块完成/失败计数。
 - 除本 JSON 外，完整产物（成品、质量报告、明细调用日志）一律落 `/tmp`，
   不进入仓库。
