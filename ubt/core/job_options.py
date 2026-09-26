@@ -16,10 +16,21 @@ import os
 import re
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 from ubt.core.config import (
     RIGID_ENGINES,
+    CoverMode,
+    DualMode,
+    ExecMode,
+    FormulaEnrichment,
+    FormulaMode,
+    FormulaRender,
+    MathBackend,
+    OcrMode,
+    PromptStrategyName,
+    QeEngine,
+    RenderEngine,
     UBTConfig,
     canonical_render_engine,
     profile_repair_is_independent,
@@ -27,6 +38,43 @@ from ubt.core.config import (
 )
 from ubt.core.exceptions import UBTError
 from ubt.core.presets import PRESET_ENGINE_FIELDS, Preset, resolve_engine_params
+
+#: Enum-typed request options and their accepted vocabulary, derived from the
+#: ``Literal`` aliases that both the CLI (typer) and the REST model (pydantic)
+#: already enforce. MCP takes plain strings, so it validates against this map at
+#: the entry point instead of letting ``validate_assignment`` reject the value
+#: inside the background task (job accepted, then fails).
+_ENUM_REQUEST_FIELDS: dict[str, tuple[str, ...]] = {
+    "render_engine": get_args(RenderEngine),
+    "dual_mode": get_args(DualMode),
+    "exec_mode": get_args(ExecMode),
+    "formula_mode": get_args(FormulaMode),
+    "qe_engine": get_args(QeEngine),
+    "prompt_strategy": get_args(PromptStrategyName),
+    "cover_mode": get_args(CoverMode),
+    "formula_enrichment": get_args(FormulaEnrichment),
+    "formula_render": get_args(FormulaRender),
+    "math_backend": get_args(MathBackend),
+    "ocr_mode": get_args(OcrMode),
+    "preset": tuple(p.value for p in Preset),
+}
+
+
+def validate_request_enums(request: Mapping[str, Any]) -> None:
+    """Reject an out-of-vocabulary enum option at the entry point, uniformly.
+
+    The CLI validates via typer's ``Literal`` annotations and the REST API via
+    its pydantic model, but MCP accepts bare strings — without this it returned
+    a job_id and only failed the job once the background task tried to apply the
+    value. Raising here gives every surface the same upfront error.
+    """
+    for key, allowed in _ENUM_REQUEST_FIELDS.items():
+        value = request.get(key)
+        if value is None:
+            continue
+        if value not in allowed:
+            raise UBTError(f"Invalid {key} {value!r}; expected one of: {', '.join(allowed)}")
+
 
 # Job ids become SQLite file names (`<job_id>.sqlite`), so this regex acts as a
 # path-traversal boundary; length cap prevents ENAMETOOLONG errors on the filesystem.
@@ -98,6 +146,7 @@ def overrides_from_request(
                 + ", ".join(leaked)
                 + " (set them via UBT_* environment variables or CLI flags)"
             )
+    validate_request_enums(request)
     overrides: dict[str, Any] = {}
     preset_raw = request.get("preset")
     preset = Preset(preset_raw) if preset_raw else None

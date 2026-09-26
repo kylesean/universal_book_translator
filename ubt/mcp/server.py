@@ -82,6 +82,7 @@ from ubt.core.job_options import (
     overrides_from_request,
     profile_name_is_valid,
     run_kwargs_from_request,
+    validate_request_enums,
 )
 from ubt.core.job_options import (
     JOB_ID_RE as JOB_ID_RE,
@@ -455,6 +456,10 @@ async def ubt_translate_book(
         "domain": domain,
         "dry_run": rehearsal,
     }
+    # Reject an out-of-vocabulary enum here, synchronously: otherwise the tool
+    # returned a job_id and the job only failed once _execute tried to apply the
+    # value (REST 422s upfront, so this restores parity).
+    validate_request_enums(payload)
     _JOBS[jid].task = asyncio.create_task(_execute(jid, payload))
     return {"job_id": jid, "status": JobStatus.SUBMITTED, "rehearsal": rehearsal}
 

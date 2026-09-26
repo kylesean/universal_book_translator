@@ -565,3 +565,22 @@ def test_check_pages_rejects_malformed_and_oversized() -> None:
         _check_pages("abc")
     with pytest.raises(Exception, match="Invalid pages"):
         _check_pages("1-" + "9" * 20000)
+
+
+async def test_translate_book_rejects_unknown_enum_upfront(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """An invalid enum must raise on the call, not fail the background job.
+
+    REST 422s at parse time; MCP previously returned a job_id and only failed
+    once _execute tried to apply the value.
+    """
+    import ubt.mcp.server as srv
+    from ubt.mcp.server import ubt_translate_book
+
+    src = tmp_path / "book.md"
+    src.write_text("# T\n\nHello.\n", encoding="utf-8")
+    monkeypatch.setattr(srv, "_resolve_input", lambda raw: src)
+    monkeypatch.setattr(srv, "_sandbox_path", lambda raw, *, must_exist: src)
+    with pytest.raises(Exception, match="Invalid render_engine"):
+        await ubt_translate_book(input_path=str(src), target_lang="zh", render_engine="bogus")

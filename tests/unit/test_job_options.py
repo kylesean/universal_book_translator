@@ -133,3 +133,31 @@ def test_overrides_apply_shared_adaptive_dual_mode() -> None:
     assert (
         overrides_from_request({"profile": "paper", "dual_mode": "facing"})["dual_mode"] == "facing"
     )
+
+
+def test_validate_request_enums_rejects_unknown_values() -> None:
+    """Shared enum validation: every surface gets the same upfront error.
+
+    CLI (typer Literal) and REST (pydantic) already rejected these; MCP took
+    bare strings and only failed the job inside its background task.
+    """
+    import pytest
+
+    from ubt.core.exceptions import UBTError
+    from ubt.core.job_options import overrides_from_request, validate_request_enums
+
+    # Known vocabulary (including the config-only 'publication' engine) passes.
+    validate_request_enums(
+        {
+            "render_engine": "publication",
+            "preset": "fast",
+            "qe_engine": "comet",
+            "dual_mode": "auto",
+        }
+    )
+    with pytest.raises(UBTError, match="Invalid render_engine"):
+        validate_request_enums({"render_engine": "bogus"})
+    with pytest.raises(UBTError, match="Invalid preset"):
+        overrides_from_request({"preset": "turbo"})
+    with pytest.raises(UBTError, match="Invalid ocr_mode"):
+        overrides_from_request({"ocr_mode": "telepathy"})
