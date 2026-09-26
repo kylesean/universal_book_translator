@@ -15,7 +15,7 @@ from typing import Any
 
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.stages.ctext import run_c_text_stage
-from ubt.core.ir.models import BlockType
+from ubt.core.ir.models import BlockType, IRBlock
 
 
 class _FakeLedger:
@@ -49,6 +49,7 @@ def _ctx(ledger: _FakeLedger) -> Any:
         target_lang="zh",
         source_lang="en",
         create_event=_create_event,
+        concurrency_sem=asyncio.Semaphore(2),
         config=SimpleNamespace(max_concurrency=2),
     )
 
@@ -73,3 +74,30 @@ def test_c_text_stage_without_chapter_fetches_job_wide() -> None:
 
     asyncio.run(_run())
     assert ledger.fetch_calls == [("j1", BlockType.FORMULA, None)]
+
+
+def test_c_text_stage_shares_the_run_wide_semaphore(monkeypatch: Any) -> None:
+    """A private semaphore let c-text exceed max_concurrency under chapter streaming."""
+    import ubt.core.engine.stages.ctext as ctext
+
+    captured: dict[str, Any] = {}
+
+    async def _fake_translate(
+        router: Any, target_lang: str, sem: Any, block: IRBlock, *, source_lang: str
+    ) -> tuple[IRBlock, str]:
+        captured["sem"] = sem
+        return block, "translated."
+
+    monkeypatch.setattr(ctext, "_translate_block", _fake_translate)
+    ledger = _FakeLedger()
+    ledger.fetch_blocks_by_type = lambda *_a, **_k: [  # type: ignore[method-assign]
+        IRBlock(id="f1", spine_index=0, source_text="$x$")
+    ]
+    ctx = _ctx(ledger)
+
+    async def _run() -> None:
+        async for _ in run_c_text_stage(ctx):
+            pass
+
+    asyncio.run(_run())
+    assert captured["sem"] is ctx.concurrency_sem

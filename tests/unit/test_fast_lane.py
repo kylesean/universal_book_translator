@@ -206,3 +206,30 @@ async def test_bible_stage_yields_its_event_both_paths(tmp_path: Path) -> None:
     # not fall silent just because the expensive mining work is skipped.
     cache_events = [e async for e in run_bible_stage(_ctx())]  # type: ignore[arg-type]
     assert any(getattr(e, "event_type", None) == EventType.BIBLE_EXTRACTED for e in cache_events)
+
+
+async def test_bible_cache_key_tracks_profile(tmp_path: Path) -> None:
+    """The persisted cache key must record profile_name.
+
+    The key omitted it, but the profile selects the mining policy
+    (is_fiction -> allow_bare_tokens), so resuming under a different profile
+    reused terminology mined under the old one.
+    """
+    from ubt.core.engine.stages.bible import _BIBLE_CACHE_KEY
+
+    text = "The subthreshold swing degrades near the drain contact."
+    manifest = BookManifest(doc_id="d1", title="t", source_path="s.pdf", chapters=[], metadata={})
+    ledger, _ = _ledger_with_block(tmp_path, "prof", text)
+    ctx = build_stage_ctx(
+        tmp_path,
+        ledger=ledger,
+        job_id="j1",
+        manifest=manifest,
+        profile_name="general",
+        target_lang="zh",
+        source_lang="en",
+    )
+    _ = [e async for e in run_bible_stage(ctx)]
+    stored = ledger.get_job_metadata_value("j1", _BIBLE_CACHE_KEY)
+    assert isinstance(stored, dict)
+    assert stored.get("profile_name") == "general"

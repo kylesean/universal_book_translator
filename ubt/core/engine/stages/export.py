@@ -422,11 +422,14 @@ async def _apply_render_skip_ledger_pass(
         for b in final_blocks
     }
     render_skip_checkpoints = apply_render_skip_flags(final_blocks, get_last_render_skips(adapter))
+    # Persist a block whose skip set *changed*, partial removals included: the
+    # old filter only wrote when every skip flag was gone, so a block that kept
+    # one current reason while losing a stale one stayed wrong in the ledger the
+    # quality report re-reads.
     cleared_skips = [
         {"block_id": b.id, "status": b.status, "error_flags": b.error_flags}
         for b in final_blocks
-        if stale_skips[b.id]
-        and not any(f.startswith(("inplace_skip:", "render_skip:")) for f in b.error_flags)
+        if any(f not in b.error_flags for f in stale_skips[b.id])
     ]
     # Length conservation: overflow skips on length-policy pages
     # (resume_dense/poster_fixed — fit-to-page, never repaginate) flip to

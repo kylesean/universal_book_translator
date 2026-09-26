@@ -95,6 +95,10 @@ async def run_bible_stage(
         "source_lang": source_lang,
         "target_lang": target_lang,
         "fast_lane": fast_lane,
+        # The profile selects the mining policy (is_fiction -> allow_bare_tokens
+        # below), so resuming the same job under a different profile must not
+        # reuse terminology mined under the old one.
+        "profile_name": profile_name,
         "glossary_fingerprint": _glossary_fingerprint(glossary_path),
     }
     cached_payload: dict[str, Any] | None = None

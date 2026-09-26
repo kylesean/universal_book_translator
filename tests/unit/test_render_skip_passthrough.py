@@ -1,6 +1,7 @@
 """Unit tests for fail-closed render skip pass-through to ledger + audit report."""
 
 from types import SimpleNamespace
+from typing import Any
 
 from ubt.core.engine.reporter import (
     QualityReport,
@@ -230,3 +231,35 @@ def test_apply_skip_flags_matches_reasons_per_block_not_globally() -> None:
     apply_render_skip_flags([stale, still_skipped], [("b2", "unmatched")])
     assert stale.error_flags == []
     assert still_skipped.error_flags == ["render_skip:unmatched"]
+
+
+def test_ledger_pass_persists_a_partial_stale_skip_removal(monkeypatch: Any) -> None:
+    """Dropping one of two stale skip flags must reach the ledger.
+
+    The old filter wrote a cleared block only when *no* skip flag remained, so a
+    block that kept one current reason kept the removed one in SQLite and the
+    quality report described an artifact that no longer existed.
+    """
+    import asyncio
+    from types import SimpleNamespace as _NS
+
+    import ubt.core.engine.stages.export as export
+
+    block = _block("b1")
+    block.error_flags = ["render_skip:spill", "render_skip:no_zone"]
+
+    saved: list[list[dict[str, object]]] = []
+    ledger = _NS(save_checkpoints_batch=lambda cps: saved.append(list(cps)))
+    ctx = _NS(job_id="j1", ledger=ledger)
+    manifest = _NS(run=_NS())
+
+    # This render skips b1 only for 'spill', so 'no_zone' is stale.
+    monkeypatch.setattr(export, "get_last_render_skips", lambda _a: [("b1", "spill")])  # type: ignore[attr-defined]
+    monkeypatch.setattr(export, "apply_length_policy_flags", lambda *a, **k: 0)  # type: ignore[attr-defined]
+
+    asyncio.run(export._apply_render_skip_ledger_pass(ctx, object(), manifest, [block]))
+
+    assert block.error_flags == ["render_skip:spill"]
+    persisted = [c for batch in saved for c in batch if c["block_id"] == "b1"]
+    assert persisted, "the partial stale-flag removal never reached the ledger"
+    assert persisted[-1]["error_flags"] == ["render_skip:spill"]

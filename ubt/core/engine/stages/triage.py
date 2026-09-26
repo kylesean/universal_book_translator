@@ -251,7 +251,14 @@ async def run_triage_stage(
                         continue
                     exc = task.exception()
                     if exc is None:
-                        escalation_results[cand.id] = task.result()
+                        result = task.result()
+                        escalation_results[cand.id] = result
+                        # Persist the paid repair as soon as it finishes. The
+                        # final batch runs only after every critical block, so a
+                        # cancel/crash in between would drop it and re-escalate
+                        # (re-bill) the same block on resume. MQM fields are
+                        # added by that final batch.
+                        await asyncio.to_thread(ledger.save_checkpoints_batch, [result])
                     else:
                         # The block still lands in BLOCKED_HUMAN below, but without a
                         # marker nobody can tell "escalation never ran" apart from

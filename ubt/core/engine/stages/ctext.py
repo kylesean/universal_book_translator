@@ -107,7 +107,6 @@ async def run_c_text_stage(
     target_lang = ctx.target_lang
     source_lang = ctx.source_lang
     create_event_fn = ctx.create_event
-    max_concurrency = ctx.config.max_concurrency
     blocks = await asyncio.to_thread(
         ledger.fetch_blocks_by_type, actual_job_id, BlockType.FORMULA, chapter_id=chapter_id
     )
@@ -116,7 +115,10 @@ async def run_c_text_stage(
     counts = {"translated": 0, "failed_closed": 0, "skipped": len(formulas) - len(pending)}
     if not pending:
         return
-    sem = asyncio.Semaphore(max(1, max_concurrency))
+    # Share the run-wide in-flight cap: a private semaphore let this stage run
+    # concurrently with the draft/QE workers in chapter streaming and exceed the
+    # configured max_concurrency by up to 2x.
+    sem = ctx.concurrency_sem
     results = await asyncio.gather(
         *(_translate_block(router, target_lang, sem, b, source_lang=source_lang) for b in pending)
     )
