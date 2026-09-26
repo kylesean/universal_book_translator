@@ -443,7 +443,9 @@ async def test_translate_book_carries_the_engine_knobs_into_the_config(
         max_chapters=3,
         **_MCP_ENGINE_KNOBS,
     )
-    await srv._JOBS[result["job_id"]].task
+    job = srv._JOBS[result["job_id"]]
+    assert job.task is not None, "the submit path must schedule the job task"
+    await job.task
 
     config = captured["config"]
     for key, expected in _MCP_ENGINE_KNOBS.items():
