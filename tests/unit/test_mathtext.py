@@ -1,4 +1,5 @@
 """Inline-math overlay rendering + undelimited-math gate (ch3 Fth,SI class)."""
+
 from pathlib import Path
 from typing import Any
 
@@ -427,7 +428,8 @@ def _quarantined_ledger(tmp_path: Path, *, source: str, draft: str) -> None:
     from ubt.core.ir.models import BlockStatus
 
     ledger = SQLiteJobLedger(tmp_path / "job_q.sqlite")
-    seed_job(ledger,
+    seed_job(
+        ledger,
         "job_q",
         SeedDoc(
             doc_id="d1",

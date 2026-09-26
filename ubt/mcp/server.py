@@ -155,8 +155,7 @@ def _check_profile(profile: str) -> str:
     """
     if not profile_name_is_valid(profile):
         raise UBTError(
-            f"Invalid profile {profile!r}: letters/digits/-/_ only "
-            "(e.g. general, textbook, paper)."
+            f"Invalid profile {profile!r}: letters/digits/-/_ only (e.g. general, textbook, paper)."
         )
     return profile
 

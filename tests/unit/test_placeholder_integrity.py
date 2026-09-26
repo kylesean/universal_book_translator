@@ -13,6 +13,7 @@ spelled out in the test docstring:
   the restore character-perfect and every bucket empty, so the reference
   shipped twice (review defect 10.4-3, fail-open restoration).
 """
+
 import asyncio
 from pathlib import Path
 
@@ -43,7 +44,8 @@ _CODE_SRC = "Call `foo()` before the run."
 def _draft(tmp_path: Path, source: str, response: str) -> SQLiteJobLedger:
     """Drive the real draft stage over one block with a canned model reply."""
     ledger = SQLiteJobLedger(tmp_path / "placeholder.sqlite")
-    seed_job(ledger,
+    seed_job(
+        ledger,
         _JOB_ID,
         SeedDoc(
             doc_id="placeholder_doc",

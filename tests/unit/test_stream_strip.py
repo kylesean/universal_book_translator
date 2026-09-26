@@ -162,9 +162,7 @@ def test_shared_form_xobject_is_not_rewritten() -> None:
     p2 = pdf.add_blank_page(page_size=(600, 800))
     form = _make_form(pdf, b"BT /F1 12 Tf 100 500 Td (Shared Form Text) Tj ET\n")
     for page in (p1, p2):
-        page.Resources = pikepdf.Dictionary(
-            {"/XObject": pikepdf.Dictionary({"/Fm1": form})}
-        )
+        page.Resources = pikepdf.Dictionary({"/XObject": pikepdf.Dictionary({"/Fm1": form})})
         page.Contents = pdf.make_stream(b"/Fm1 Do\n")
 
     shared = shared_form_objgens(pdf)

@@ -1,4 +1,5 @@
 """Unit tests for MQM severity triage: classification, escalation, quarantine."""
+
 import asyncio
 from pathlib import Path
 from typing import Any

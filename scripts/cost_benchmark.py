@@ -151,8 +151,7 @@ def _resolve_prices(args: argparse.Namespace) -> tuple[float, float, float, bool
     price_cache_hit = args.price_cache_hit if args.price_cache_hit is not None else 0.07
     price_output = args.price_output if args.price_output is not None else 1.10
     explicit = any(
-        value is not None
-        for value in (args.price_input, args.price_cache_hit, args.price_output)
+        value is not None for value in (args.price_input, args.price_cache_hit, args.price_output)
     )
     priced = explicit or (
         _default_rate_covers(args.draft_model) and _default_rate_covers(args.repair_model)

@@ -325,7 +325,11 @@ def test_render_mjs_survives_a_non_object_request() -> None:
 
     node = shutil.which("node")
     script = Path(__file__).resolve().parents[2] / "scripts" / "mathjax" / "render.mjs"
-    if not node or not script.exists() or not (script.parent / "node_modules" / "mathjax-full").exists():
+    if (
+        not node
+        or not script.exists()
+        or not (script.parent / "node_modules" / "mathjax-full").exists()
+    ):
         pytest.skip("node + pinned MathJax not available")
     proc = subprocess.run(
         [node, str(script)],

@@ -133,9 +133,7 @@ def _probe_non_pdf(path: Path) -> tuple[int, int, int]:
             # Any ATX heading level counts, matching the DOCX branch's "any
             # heading style": counting only "# " sent an H2-only multi-chapter
             # document to the short chain.
-            headings = sum(
-                1 for line in text.splitlines() if re.match(r"^#{1,6}\s", line.strip())
-            )
+            headings = sum(1 for line in text.splitlines() if re.match(r"^#{1,6}\s", line.strip()))
             chapters = max(1, headings)
             estimated_pages = max(1, chars // 1500)
             return estimated_pages, chars, chapters

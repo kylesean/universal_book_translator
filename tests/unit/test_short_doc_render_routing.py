@@ -1,4 +1,5 @@
 """Unit tests for render-engine routing on short documents and adaptive policy."""
+
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any

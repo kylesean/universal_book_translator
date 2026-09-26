@@ -395,8 +395,7 @@ class SubprocessQERunner(BaseQERunner):
                 scores, engine = self._coerce_reply(reply, str(reply)[:200])
                 if len(scores) != len(pairs):
                     raise MTQEEvaluationError(
-                        f"Resident QE scorer returned {len(scores)} scores for "
-                        f"{len(pairs)} pairs",
+                        f"Resident QE scorer returned {len(scores)} scores for {len(pairs)} pairs",
                         details={"expected": len(pairs), "got": len(scores)},
                     )
                 self._last_used = asyncio.get_running_loop().time()

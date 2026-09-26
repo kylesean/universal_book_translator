@@ -1,4 +1,5 @@
 """Integration tests for Batch API drafting and the TM funnel."""
+
 import asyncio
 import json
 from pathlib import Path
@@ -1531,7 +1532,8 @@ def _d2echo_seed_tm(tm: TranslationMemory, target: str) -> None:
 def test_tm_writeback_refuses_the_echo_and_keeps_the_clean_pair(tmp_path: Path) -> None:
     """Drives writeback_tm_from_ledger: terminal status is not a correctness proof."""
     ledger = SQLiteJobLedger(tmp_path / "job.sqlite")
-    seed_job(ledger,
+    seed_job(
+        ledger,
         "job_wb",
         _d2echo_doc(
             [
@@ -1565,7 +1567,8 @@ def test_tm_writeback_refuses_the_echo_and_keeps_the_clean_pair(tmp_path: Path) 
 def test_clean_tm_entry_is_still_served(tmp_path: Path) -> None:
     """Positive control: the TM read path really does run in this harness."""
     ledger = SQLiteJobLedger(tmp_path / "job.sqlite")
-    seed_job(ledger,
+    seed_job(
+        ledger,
         "job_tm_ok",
         _d2echo_doc([_d2echo_block("pdf_main#b1", 1, _d2echo_CLEAN_SRC)]),
         target_lang="zh",
@@ -1593,7 +1596,8 @@ def test_poisoned_tm_entry_is_rejected_and_redrafted(tmp_path: Path) -> None:
     hit were still trusted, the block would hold the poisoned text.
     """
     ledger = SQLiteJobLedger(tmp_path / "job.sqlite")
-    seed_job(ledger,
+    seed_job(
+        ledger,
         "job_tm_bad",
         _d2echo_doc([_d2echo_block("pdf_main#b1", 1, _d2echo_CLEAN_SRC)]),
         target_lang="zh",

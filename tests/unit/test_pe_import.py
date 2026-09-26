@@ -1,4 +1,5 @@
 """Unit tests for human PE revision re-import: ledger update + TM human_pe."""
+
 import csv
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -47,7 +48,8 @@ def _blocks() -> list[IRBlock]:
 
 def _ledger(tmp_path: Path) -> SQLiteJobLedger:
     ledger = SQLiteJobLedger(tmp_path / "job.sqlite")
-    seed_job(ledger,
+    seed_job(
+        ledger,
         "job_pe",
         SeedDoc(
             doc_id="test_doc_sha256",

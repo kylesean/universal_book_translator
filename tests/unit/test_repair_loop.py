@@ -786,7 +786,9 @@ async def test_visual_crop_runs_off_the_event_loop(monkeypatch: pytest.MonkeyPat
         error_flags=["formula_corrupted"],
         bbox=BoundingBox(page=1, x0=0, y0=0, x1=100, y1=20),
     )
-    await repair_loop.repair_single_block(block, source_pdf_path=Path("tests/fixtures/synthetic-duo.pdf"))
+    await repair_loop.repair_single_block(
+        block, source_pdf_path=Path("tests/fixtures/synthetic-duo.pdf")
+    )
 
     assert "thread" in seen, "visual crop never ran"
     assert seen["thread"] is not loop_thread

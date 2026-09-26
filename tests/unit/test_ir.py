@@ -1,4 +1,5 @@
 """Unit tests for Semantic Flow-Isolated IR models."""
+
 import pytest
 
 from tests.unit.ir_seed import SeedDoc

@@ -165,6 +165,7 @@ def _expand_scientific_not(text: str) -> str:
 
     return _SCI_NOTATION_RE.sub(_repl, text)
 
+
 # Locale separator canonicalization: '1,500' (EN thousands),
 # '1.500' (DE thousands) and decimal '15,6' (DE/FR) must all survive the
 # digit-presence check regardless of the target language's convention.
@@ -499,9 +500,7 @@ class NumericConsistencyValidator(ContentValidator):
         # token '102', and since those characters are not in \d's class they
         # are simply not numeric tokens on the source side.
         src_view = _expand_scientific_not(original.translate(_FULLWIDTH_DIGITS))
-        src_nums = {
-            canonicalize_numeric_token(m) for m in _NUM.findall(src_view)
-        }
+        src_nums = {canonicalize_numeric_token(m) for m in _NUM.findall(src_view)}
         # Residual ambiguity: a dot followed by exactly three digits is
         # BOTH a German-style thousands separator and a three-decimal
         # fraction. canonicalize strips it ('1.500' -> '1500'), so the

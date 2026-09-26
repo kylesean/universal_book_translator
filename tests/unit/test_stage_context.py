@@ -1,4 +1,5 @@
 """Unit tests for StageContext methods and caching behavior."""
+
 from pathlib import Path
 
 import pytest

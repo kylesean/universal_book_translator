@@ -10,6 +10,7 @@ band the invented sentences actively masked the source sentence they displaced.
 It was then written into the shared Translation Memory and served verbatim on
 every later run (``use_count`` 6-9 for the affected entries).
 """
+
 import asyncio
 from pathlib import Path
 
@@ -239,7 +240,8 @@ class TestLedgerRequeue:
             block_type=BlockType.NARRATIVE,
             source_text=_B0045_SRC,
         )
-        seed_job(ledger,
+        seed_job(
+            ledger,
             "job_x",
             SeedDoc(
                 doc_id="test_doc_sha256",
@@ -455,7 +457,8 @@ def _d2echo_run_quality_gate(
 def test_quality_gate_sends_the_production_echo_to_repair(tmp_path: Path) -> None:
     """Drives run_quality_gate_stage: the echoed block must not become MTQE_PASSED."""
     ledger = SQLiteJobLedger(tmp_path / "job.sqlite")
-    seed_job(ledger,
+    seed_job(
+        ledger,
         "job_d2",
         _d2echo_doc(
             [
@@ -545,7 +548,8 @@ def test_echo_verdict_survives_a_permissive_qe_threshold(tmp_path: Path) -> None
     The threshold below is deliberately absurd: it isolates the marker.
     """
     ledger = SQLiteJobLedger(tmp_path / "job.sqlite")
-    seed_job(ledger,
+    seed_job(
+        ledger,
         "job_perm",
         _d2echo_doc([_d2echo_block("pdf_main#b_echo", 1, _d2echo_ECHO_SRC)]),
         target_lang="zh",
@@ -585,7 +589,8 @@ def test_masked_token_corruption_is_fatal_and_survives_the_gate(tmp_path: Path) 
     ):
         assert has_structural_defect([flag]), marker
         ledger = SQLiteJobLedger(tmp_path / f"{marker}.sqlite")
-        seed_job(ledger,
+        seed_job(
+            ledger,
             "job_tok",
             _d2echo_doc([_d2echo_block("pdf_main#b_tok", 1, _d2echo_CLEAN_SRC)]),
             target_lang="zh",

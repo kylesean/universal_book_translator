@@ -116,7 +116,9 @@ class DiagramLocalizer:
             for k, v in custom_glossary.items():
                 self.glossary[k.lower().strip()] = v
         self.fill_color = fill_color
-        self._page_heights_cache: OrderedDict[tuple[str, int, int], dict[int, float]] = OrderedDict()
+        self._page_heights_cache: OrderedDict[tuple[str, int, int], dict[int, float]] = (
+            OrderedDict()
+        )
 
     def _find_default_cjk_font(self) -> str | None:
         candidates = [

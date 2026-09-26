@@ -43,6 +43,7 @@ def host_is(url: str, host: str) -> bool:
     target = host.lower()
     return actual == target or actual.endswith("." + target)
 
+
 # Usage attribution for concurrent jobs. A long-lived API server drives several
 # PipelineOrchestrators over ONE provider instance, so process-wide counters
 # cannot say which job spent which tokens; a run attaches a private dict here

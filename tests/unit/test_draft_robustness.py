@@ -1,4 +1,5 @@
 """High-ROI robustness tests for the draft stage and ledger resume."""
+
 import asyncio
 from pathlib import Path
 from typing import Any

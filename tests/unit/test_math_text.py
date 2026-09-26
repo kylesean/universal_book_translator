@@ -1,4 +1,5 @@
 """Unit tests for C-track math-text spans (calibrated on KV corpus)."""
+
 import asyncio
 
 import pytest

@@ -310,7 +310,9 @@ class JobWorker:
                 await self._write_abort_ledger(
                     job, job_config, status="failed", reason="lease_lost"
                 )
-            logger.warning("Job %s: lease lost, stopping without a queue terminal write", job.job_id)
+            logger.warning(
+                "Job %s: lease lost, stopping without a queue terminal write", job.job_id
+            )
         except JobInterruptedError:
             await self._q(
                 self.queue.complete,

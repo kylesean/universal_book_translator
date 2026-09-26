@@ -1,4 +1,5 @@
 """Tests for SQLiteJobLedger record_visual_report and get_visual_report."""
+
 from pathlib import Path
 
 from tests.unit.ir_seed import SeedDoc, seed_job

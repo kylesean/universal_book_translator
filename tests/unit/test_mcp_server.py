@@ -1,4 +1,5 @@
 """MCP server tools: direct-function tests (protocol framing covered by mcp lib)."""
+
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any

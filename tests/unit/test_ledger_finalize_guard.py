@@ -1,4 +1,5 @@
 """RED: finalize_job must not silently mark non-terminal work completed."""
+
 from pathlib import Path
 
 import pytest

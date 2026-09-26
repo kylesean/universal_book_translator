@@ -5,6 +5,7 @@ restored verbatim after unmasking. A dropped ⟦MATH_MASK_*⟧ token surfaces as
 a span multiset mismatch → REPAIR_PENDING (fatal: QE score cannot auto-pass
 it) → repair re-masks from source (self-healing).
 """
+
 import asyncio
 from pathlib import Path
 

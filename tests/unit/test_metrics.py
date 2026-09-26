@@ -358,9 +358,7 @@ def test_page_less_visual_findings_cannot_exceed_a_rate_of_one() -> None:
     assert kpis["visual_major_rate"] == pytest.approx(1.0)
     assert kpis["visual_critical_rate"] <= 1.0
     # Unrecognised severities are not counted and must not dilute the rates.
-    diluted = {
-        "findings": [{"severity": "major"}] * 2 + [{"severity": "bogus"}] * 8
-    }
+    diluted = {"findings": [{"severity": "major"}] * 2 + [{"severity": "bogus"}] * 8}
     assert collect_kpis(_report(route=None), diluted).kpis["visual_major_rate"] == pytest.approx(
         1.0
     )

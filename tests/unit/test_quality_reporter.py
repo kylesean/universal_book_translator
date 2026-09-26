@@ -1,4 +1,5 @@
 """Unit tests for QualityReport generator."""
+
 from pathlib import Path
 from typing import Any
 
@@ -496,7 +497,8 @@ def _a0920_ledger_with_targets(tmp_path: Path, *, translated: int, total: int) -
         )
         for idx in range(1, total + 1)
     ]
-    seed_job(ledger,
+    seed_job(
+        ledger,
         job_id,
         SeedDoc(
             doc_id=job_id,

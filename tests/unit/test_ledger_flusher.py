@@ -1,4 +1,5 @@
 """Unit tests for CheckpointBatchFlusher."""
+
 import asyncio
 import sqlite3
 import threading

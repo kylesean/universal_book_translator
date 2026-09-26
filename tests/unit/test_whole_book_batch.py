@@ -1,4 +1,5 @@
 """Unit and integration tests for Phase 4: Whole-Book Offline Batch API Mode."""
+
 import asyncio
 from pathlib import Path
 from typing import Any

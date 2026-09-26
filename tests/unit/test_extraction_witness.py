@@ -102,7 +102,9 @@ class TestAcceptanceOnRealPdfs:
         assert stats["confirmed_pages"] >= 20
         assert stats["residue_chars"] >= 200
 
-    @pytest.mark.skipif(not (REPO / "tests/fixtures/synthetic-mono.pdf").exists(), reason="fixture absent")
+    @pytest.mark.skipif(
+        not (REPO / "tests/fixtures/synthetic-mono.pdf").exists(), reason="fixture absent"
+    )
     def test_control_file_stays_clean(self) -> None:
         stats = summarize(inspect_pdf(REPO / "tests/fixtures/synthetic-mono.pdf"))
         assert stats["confirmed_pages"] <= 2

@@ -547,9 +547,7 @@ class DoclingRenderStrategy:
 
             # One document open for every page's size, not one open per page:
             # ``get_page_height`` opened the whole PDF P times here.
-            page_heights = {
-                p: h for p, (_w, h) in pdf_struct.page_sizes(src_pdf_path).items()
-            }
+            page_heights = {p: h for p, (_w, h) in pdf_struct.page_sizes(src_pdf_path).items()}
             page_count = len(page_heights)
         except Exception as exc:
             logger.debug("SVG detection: cannot read page count: %s", exc)

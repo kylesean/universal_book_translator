@@ -3,6 +3,7 @@
 The rapidocr driver needs model downloads + a GPU/CPU OCR stack, so it is
 exercised by smoke scripts (/tmp), never here.
 """
+
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch

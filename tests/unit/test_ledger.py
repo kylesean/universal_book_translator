@@ -1,4 +1,5 @@
 """Unit and performance tests for SQLiteJobLedger."""
+
 import concurrent.futures
 import logging
 import sqlite3
@@ -772,9 +773,7 @@ def test_skip_stable_resume_keeps_existing_target(tmp_path: Path) -> None:
     assert got.target_text == "Manual curation kept this text"
 
 
-def test_reset_blocks_to_pending_clears_mqm_triage(
-    tmp_path: Path, sample_doc_ir: SeedDoc
-) -> None:
+def test_reset_blocks_to_pending_clears_mqm_triage(tmp_path: Path, sample_doc_ir: SeedDoc) -> None:
     """Re-queued blocks must not keep the stale MQM severity/spans of the
     discarded draft (regression: reset cleared text/flags but left triage)."""
     ledger = SQLiteJobLedger(tmp_path / "ledger.db")
@@ -1056,9 +1055,7 @@ def test_job_fingerprint_corrupt_row_raises_instead_of_none(tmp_path: Path) -> N
         ledger.get_job_fingerprint("job_fp")
 
 
-def test_clear_job_blocks_resets_for_fresh_ingest(
-    tmp_path: Path, sample_doc_ir: SeedDoc
-) -> None:
+def test_clear_job_blocks_resets_for_fresh_ingest(tmp_path: Path, sample_doc_ir: SeedDoc) -> None:
     """clear_job_blocks removes blocks but keeps the job row resumable."""
     ledger = SQLiteJobLedger(tmp_path / "ledger.db")
     seed_job(ledger, "job_001", sample_doc_ir, target_lang="zh")

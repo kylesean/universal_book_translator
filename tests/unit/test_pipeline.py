@@ -1,4 +1,5 @@
 """Unit and integration tests for 6-stage PipelineOrchestrator."""
+
 import asyncio
 from pathlib import Path
 from typing import Any
@@ -424,7 +425,8 @@ def test_chapter_window_guard_records_then_refuses_a_different_window(tmp_path: 
 
     ledger = SQLiteJobLedger(tmp_path / "job.sqlite")
     try:
-        seed_job(ledger,
+        seed_job(
+            ledger,
             "job_x",
             SeedDoc(doc_id="doc", source_path="book.md", format_type="md"),
             "zh",
@@ -463,7 +465,8 @@ def test_page_selection_guard_records_then_refuses_a_different_selection(tmp_pat
 
     ledger = SQLiteJobLedger(tmp_path / "p.sqlite")
     try:
-        seed_job(ledger,
+        seed_job(
+            ledger,
             "job_p",
             SeedDoc(doc_id="doc", source_path="book.md", format_type="md"),
             "zh",
@@ -487,7 +490,8 @@ def test_page_selection_guard_records_then_refuses_a_different_selection(tmp_pat
 
     ledger = SQLiteJobLedger(tmp_path / "q.sqlite")
     try:
-        seed_job(ledger,
+        seed_job(
+            ledger,
             "job_q",
             SeedDoc(doc_id="doc", source_path="book.md", format_type="md"),
             "zh",
@@ -1245,7 +1249,8 @@ def _a0920_ledger_with_targets(tmp_path: Path, *, translated: int, total: int) -
         )
         for idx in range(1, total + 1)
     ]
-    seed_job(ledger,
+    seed_job(
+        ledger,
         job_id,
         SeedDoc(
             doc_id=job_id,

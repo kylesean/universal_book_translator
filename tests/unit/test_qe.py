@@ -773,9 +773,7 @@ def test_resolve_checkpoint_does_not_recurse_on_a_checkpointless_dir(
     from ubt.core.qe import comet_score_ipc
 
     monkeypatch.setenv("UBT_COMET_MODEL_PATH", str(tmp_path))
-    monkeypatch.setattr(
-        "comet.download_model", lambda *_a, **_k: str(tmp_path / "fake.ckpt")
-    )
+    monkeypatch.setattr("comet.download_model", lambda *_a, **_k: str(tmp_path / "fake.ckpt"))
     assert comet_score_ipc.resolve_checkpoint(str(tmp_path)) == str(tmp_path / "fake.ckpt")
 
 

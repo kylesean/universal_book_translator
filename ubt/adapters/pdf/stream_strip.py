@@ -922,10 +922,7 @@ def shared_form_objgens(pdf: pikepdf.Pdf) -> set[tuple[int, int]]:
             continue
         for _name, val in items:
             try:
-                if (
-                    val.get(pikepdf.Name("/Subtype")) == pikepdf.Name("/Form")
-                    and val.is_indirect
-                ):
+                if val.get(pikepdf.Name("/Subtype")) == pikepdf.Name("/Form") and val.is_indirect:
                     pages_drawing.setdefault(val.objgen, set()).add(page_index)
             except Exception:
                 continue
