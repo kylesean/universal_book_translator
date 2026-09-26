@@ -448,11 +448,11 @@ def localize_diagram_svg(
     root.set("height", f"{vh:g}pt")
 
     overlay = ET.SubElement(root, f"{{{_SVG_NS}}}g", {"id": "ubt-label-backfill"})
-    patched = 0
-    for span in spans:
-        if not span.translated or span.translated == span.text:
-            continue
-        # White-out the outlined English glyph paths underneath.
+    backfilled = [s for s in spans if s.translated and s.translated != s.text]
+    # Every white-out patch first, then every label: interleaving them let a
+    # later span's patch paint over an earlier span's already-drawn translation
+    # whenever the source spans overlap.
+    for span in backfilled:
         ET.SubElement(
             overlay,
             f"{{{_SVG_NS}}}rect",
@@ -464,6 +464,8 @@ def localize_diagram_svg(
                 "fill": "white",
             },
         )
+    patched = 0
+    for span in backfilled:
         span_h = max(span.y1 - span.y0, 1.0)
         span_w = max(span.x1 - span.x0, 1.0)
         font_size = _fit_font_size(span.translated, span_w, span_h)

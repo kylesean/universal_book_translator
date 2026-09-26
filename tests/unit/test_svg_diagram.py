@@ -622,3 +622,20 @@ def test_fit_font_size_shrinks_a_long_label_to_the_span_width() -> None:
     size = _fit_font_size("超长图注标签内容", 30.0, 12.0)
     assert size < 12.0
     assert _estimate_text_width_em("超长图注标签内容") * size <= 30.0 + 1e-6
+
+
+def test_localize_emits_all_whiteouts_before_labels(tmp_path: Path) -> None:
+    """A later span's white-out must not paint over an earlier translation."""
+    page_svg = _write_page_svg(tmp_path / "page_1.svg")
+    out = localize_diagram_svg(
+        page_svg,
+        bbox_topdown=(0.0, 0.0, 300.0, 300.0),
+        spans=[
+            LocalizedSpan(text="A", translated="甲", x0=10, y0=10, x1=80, y1=24),
+            LocalizedSpan(text="B", translated="乙", x0=20, y0=10, x1=90, y1=24),
+        ],
+        out_path=tmp_path / "order.svg",
+    )
+    text = out.read_text(encoding="utf-8")
+    assert text.count("<rect") == 2
+    assert text.rindex("<rect") < text.index("<text")
