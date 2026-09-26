@@ -12,11 +12,10 @@ import os
 import random
 import re
 from collections.abc import Callable
-from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol, overload
 
-from ubt.core.exceptions import BudgetExceededError, ModelProviderError
+from ubt.core.exceptions import BudgetExceededError, JobInterruptedError, ModelProviderError
 from ubt.core.ir.models import IRBlock
 from ubt.core.router.capabilities import (
     ExtractionStrategy,
@@ -182,6 +181,35 @@ def _is_rate_limit_error(exc: BaseException) -> bool:
     # Word-boundary phrases only: a 5xx/408 body that merely mentions a
     # ``rate_limit`` request field must not trigger the 429 AIMD/backoff path.
     return re.search(r"\brate[- ]?limit(?:ed|ing)?\b", str(exc), re.IGNORECASE) is not None
+
+
+def _parse_retry_after(value: str | None) -> float | None:
+    """Seconds to wait from a ``Retry-After`` header, or None when unparseable.
+
+    RFC 7231 allows ``delta-seconds`` *or* an HTTP-date. ``float()`` alone only
+    handled the first form, so a server that sent a date (``Wed, 21 Oct 2026
+    07:28:00 GMT``) was silently retried after the ~1s jittered backoff instead
+    of the requested pause.
+    """
+    if not value:
+        return None
+    text = value.strip()
+    try:
+        return max(0.0, float(text))
+    except ValueError:
+        pass
+    try:
+        from email.utils import parsedate_to_datetime
+
+        when = parsedate_to_datetime(text)
+    except (TypeError, ValueError):
+        return None
+    if when is None:
+        return None
+    import datetime as _dt
+
+    now = _dt.datetime.now(tz=when.tzinfo) if when.tzinfo else _dt.datetime.now()
+    return max(0.0, (when - now).total_seconds())
 
 
 def classify_provider_error(exc: BaseException) -> ProviderErrorAction:
@@ -854,8 +882,9 @@ class ModelRouter:
                         self.rate_limiter.report_429()
                     wait = 0.5 * (2**retries)
                     if retry_after_header:
-                        with suppress(ValueError, TypeError):
-                            wait = max(wait, float(retry_after_header))
+                        parsed_wait = _parse_retry_after(retry_after_header)
+                        if parsed_wait is not None:
+                            wait = max(wait, parsed_wait)
                     # Full jitter: without it, N concurrent workers retry in
                     # lockstep and re-create the thundering herd we just escaped.
                     wait += random.uniform(0, min(1.0, wait * 0.25))
@@ -865,11 +894,15 @@ class ModelRouter:
                     # retry in lockstep and re-create the herd.
                     base = 0.2 * retries
                     await asyncio.sleep(base + random.uniform(0, base))
-            except (ValueError, TypeError) as exc:
+            except ValueError as exc:
                 # A 200 whose body is not the declared JSON (a proxy error page,
                 # a truncated stream) is deterministic: retrying the same request
                 # only burns quota and then rewraps the real cause as "unexpected".
                 # Fail this model fast; the fallback chain still gets its turn.
+                # Narrow on purpose: a ``TypeError`` re-raised by the inner
+                # signature-missing guard (or any other programming error) must
+                # still reach the generic retry handler below, not be relabelled
+                # as an unparseable body.
                 raise ModelProviderError(
                     f"Provider response could not be parsed: {type(exc).__name__}: {exc}"
                 ) from exc
@@ -929,7 +962,12 @@ class ModelRouter:
                         self.rate_limiter.report_success()
                 except Exception:
                     logger.warning("continuation limiter bookkeeping failed", exc_info=True)
-            except ModelProviderError as exc:
+            except Exception as exc:
+                # Any failure of the *continuation* keeps the already-produced
+                # partial: the primary call succeeded and was billed, and half a
+                # block beats re-running (and re-billing) the whole generation.
+                # ``asyncio.CancelledError`` is a BaseException, so a real cancel
+                # still propagates.
                 if _is_rate_limit_error(exc):
                     if hasattr(self.rate_limiter, "report_429_async"):
                         await self.rate_limiter.report_429_async()
@@ -1305,12 +1343,14 @@ class ModelRouter:
                         res = status_callback(status, job)
                         if asyncio.iscoroutine(res):
                             await res
-                    except BudgetExceededError:
+                    except (BudgetExceededError, JobInterruptedError):
                         # The cap is a hard stop on spend and this batch *is*
                         # spend: leaving it running makes the limit a
-                        # suggestion. Cancel it here, because the caller
-                        # deliberately re-raises without falling back and so has
-                        # no cancel point of its own.
+                        # suggestion. The same holds for a cooperative cancel —
+                        # the caller re-raises without falling back, so without
+                        # this the batch keeps billing after the job is gone.
+                        # Cancel it here; the caller has no cancel point of its
+                        # own.
                         await self.abandon_batch(batch_id, ledger=ledger, job_id=job_id)
                         raise
                 if status in ("completed", "failed", "expired", "cancelled"):

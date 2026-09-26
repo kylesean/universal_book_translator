@@ -1017,6 +1017,62 @@ async def test_continuation_failure_keeps_partial_output() -> None:
 
 
 @pytest.mark.asyncio
+async def test_continuation_non_provider_error_keeps_partial_output() -> None:
+    """A malformed continuation body (``json.JSONDecodeError``) must not throw
+    away an already-billed partial.
+
+    The recovery only caught ``ModelProviderError``; a continuation whose 200
+    body failed ``response.json()`` raises ``ValueError``, escaped, and the outer
+    parse handler failed the whole model — re-running (and re-billing) the
+    primary generation on the next fallback candidate.
+    """
+
+    class MalformedContinuationProvider(MockModelProvider):
+        def __init__(self) -> None:
+            super().__init__(default_response="partial translation")
+            self.continuation_attempted = False
+
+        async def generate_with_finish_reason(
+            self,
+            prompt: str,
+            system_prompt: str | None = None,
+            model: str | None = None,
+            temperature: float | None = 0.3,
+            max_tokens: int | None = None,
+            reasoning_effort: str | None = None,
+        ) -> tuple[str, str | None]:
+            if "cut off" in prompt:
+                self.continuation_attempted = True
+                raise ValueError("Expecting value: line 1 column 1 (char 0)")
+            return "partial translation", "length"
+
+    router = ModelRouter(provider=MalformedContinuationProvider(), draft_model="d")
+    result = await router._execute_with_retry(
+        system_prompt="sys", user_prompt="x", model="d", temperature=0.3
+    )
+    assert result == "partial translation"
+    assert router.provider.continuation_attempted is True  # type: ignore[attr-defined]
+
+
+def test_parse_retry_after_handles_both_rfc_forms() -> None:
+    """``Retry-After`` may be delta-seconds or an HTTP-date (RFC 7231)."""
+    import datetime as dt
+    from email.utils import format_datetime
+
+    from ubt.core.router.router import _parse_retry_after
+
+    assert _parse_retry_after("5") == 5.0
+    assert _parse_retry_after(" 0.25 ") == 0.25
+    assert _parse_retry_after(None) is None
+    assert _parse_retry_after("not-a-date") is None
+    # An HTTP-date in the future becomes a positive wait; the date form used to
+    # be silently dropped, so the client retried after ~1s instead.
+    future = dt.datetime.now(dt.UTC) + dt.timedelta(seconds=30)
+    parsed = _parse_retry_after(format_datetime(future, usegmt=True))
+    assert parsed is not None and 20.0 < parsed <= 31.0
+
+
+@pytest.mark.asyncio
 async def test_max_tokens_reaches_provider() -> None:
     """The caller's max_tokens budget is passed through the funnel."""
 

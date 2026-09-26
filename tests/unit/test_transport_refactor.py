@@ -272,6 +272,36 @@ def test_responses_api_incomplete_reasoning_returns_length_finish() -> None:
     assert result == ""
 
 
+def test_responses_api_refusal_is_an_error_not_an_empty_success() -> None:
+    """A refusal-only message must not be returned as a finished empty block."""
+    transport = OpenAIResponsesTransport(api_key="mock", base_url="https://api.openai.com/v1")
+    mock_client = AsyncMock()
+
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.return_value = {
+        "status": "completed",
+        "output": [
+            {
+                "type": "message",
+                "content": [{"type": "refusal", "refusal": "I can't help with that."}],
+            }
+        ],
+    }
+    mock_client.post.return_value = resp
+    mock_client.is_closed = False
+    transport._client = mock_client
+    transport._owned_client = False
+
+    with pytest.raises(ModelProviderError, match="empty message"):
+        asyncio.run(
+            transport.generate_with_finish_reason(
+                prompt="test",
+                model="gpt-5-responses-preview",
+            )
+        )
+
+
 @pytest.mark.fast
 def test_openai_chat_batch_input_file_cleanup_on_error() -> None:
     transport = OpenAIChatTransport(api_key="mock", base_url="https://api.openai.com/v1")

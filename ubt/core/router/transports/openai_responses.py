@@ -172,17 +172,14 @@ class OpenAIResponsesTransport(BaseTransport):
                     retry_resp = await self._request_json(client, responses_url, retry_payload)
                     if retry_resp.status_code == 200:
                         self._model_reasoning_mode[target_model] = "nested_minimal"
-                        self._model_reasoning_mode["*"] = "nested_minimal"
                         response = retry_resp
                     else:
                         self._model_reasoning_mode[target_model] = "none"
-                        self._model_reasoning_mode["*"] = "none"
                         response = await self._request_json(
                             client, responses_url, _without_reasoning()
                         )
                 else:
                     self._model_reasoning_mode[target_model] = "none"
-                    self._model_reasoning_mode["*"] = "none"
                     response = await self._request_json(client, responses_url, _without_reasoning())
 
         if response.status_code == 429:
@@ -220,23 +217,35 @@ class OpenAIResponsesTransport(BaseTransport):
         )
         has_message = False
         text = ""
+        refusal = ""
         for item in data.get("output") or []:
             if item.get("type") != "message":
                 continue
             has_message = True
             for part in item.get("content") or []:
-                if part.get("type") == "output_text":
+                part_type = part.get("type")
+                if part_type == "output_text":
                     text += str(part.get("text", ""))
+                elif part_type == "refusal":
+                    refusal += str(part.get("refusal", ""))
         status = str(data.get("status") or "")
         incomplete_reason = str((data.get("incomplete_details") or {}).get("reason") or "")
+        # A token-limit truncation may legitimately have no text yet.
+        truncated = status == "incomplete" and incomplete_reason == "max_output_tokens"
         if not has_message:
-            if status == "incomplete" and incomplete_reason == "max_output_tokens":
+            if truncated:
                 return "", "length"
             raise ModelProviderError(f"Malformed Responses API output (no message items): {data}")
+        if not text.strip() and not truncated:
+            # A refusal-only (or otherwise empty) message is not a successful
+            # empty translation: surface it so the fallback chain can try
+            # instead of shipping "" as a finished block.
+            detail = f": {refusal.strip()}" if refusal.strip() else ""
+            raise ModelProviderError(f"Responses API returned an empty message{detail}")
         result = text.strip()
         finish_reason = (
             "length"
-            if status == "incomplete" and incomplete_reason == "max_output_tokens"
+            if truncated
             else ("stop" if status == "completed" else None)
         )
         return self._finalize_output(result, target_model), finish_reason

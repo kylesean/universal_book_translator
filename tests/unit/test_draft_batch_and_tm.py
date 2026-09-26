@@ -1264,6 +1264,50 @@ def test_budget_cap_cancels_the_still_billing_batch() -> None:
     assert provider.cancelled == ["batch-spend"]
 
 
+def test_cancel_cancels_the_still_billing_batch() -> None:
+    """A cooperative cancel must abandon the live batch, exactly like a cap.
+
+    ``ctx.check_cancelled()`` in the poll callback raises ``JobInterruptedError``;
+    it used to propagate with the batch left in_progress, so a cancelled job kept
+    billing at the provider. The router only caught ``BudgetExceededError``.
+    """
+    from ubt.core.exceptions import JobInterruptedError
+
+    class CappedBatchProvider(MockModelProvider):
+        @property
+        def supports_batch_api(self) -> bool:
+            return True
+
+        def __init__(self) -> None:
+            super().__init__(default_response="[INTERACTIVE]")
+            self.cancelled: list[str] = []
+
+        async def create_batch_job(self, requests: list[dict[str, Any]]) -> str:
+            return "batch-cancel"
+
+        async def get_batch_job(self, batch_id: str) -> dict[str, Any]:
+            return {"status": "in_progress"}
+
+        async def cancel_batch_job(self, batch_id: str) -> None:
+            self.cancelled.append(batch_id)
+
+    async def _cancelled(status: str, job: dict[str, Any]) -> None:
+        raise JobInterruptedError("job cancelled")
+
+    provider = CappedBatchProvider()
+    router = ModelRouter(provider=provider, draft_model="batch-test-model")
+    with pytest.raises(JobInterruptedError):
+        asyncio.run(
+            router.draft_batch(
+                [BatchDraftRequest(custom_id="b1", source_text="Hello.")],
+                poll_interval=0.01,
+                poll_timeout=5.0,
+                status_callback=_cancelled,
+            )
+        )
+    assert provider.cancelled == ["batch-cancel"]
+
+
 def test_draft_stage_redrafts_batch_lines_that_came_back_empty(tmp_path: Path) -> None:
     """An empty completion is a missing line, not a drafted one.
 

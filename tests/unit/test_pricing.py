@@ -33,6 +33,22 @@ def test_resolve_cached_input_price_known_and_fallback() -> None:
     assert resolve_cached_input_price("totally-unknown-model") == 0.0
 
 
+def test_resolve_cached_input_price_anthropic() -> None:
+    """Claude cache reads bill at the published ~10% rate, not the full input.
+
+    The cached-input table held only DeepSeek keys, so a cache-heavy Claude run
+    billed reads at the full input price (10x) and could trip UBT_BUDGET_USD.
+    """
+    assert resolve_cached_input_price("claude-3-5-sonnet") == 0.30
+    assert resolve_cached_input_price("claude-3-5-haiku") == 0.08
+    assert resolve_cached_input_price("claude-3-opus") == 1.50
+    # Dated / vendor-prefixed names resolve through the family prefix, and the
+    # more specific entry wins over the generic ``claude`` default.
+    assert resolve_cached_input_price("claude-3-5-sonnet-20241022") == 0.30
+    assert resolve_cached_input_price("anthropic/claude-3-5-haiku") == 0.08
+    assert resolve_cached_input_price("claude-opus-4") == 1.50
+
+
 def test_estimate_cost_usd_without_cache_hits_unchanged() -> None:
     """No cached_tokens reported -> identical to the legacy full-input formula."""
     totals = {"deepseek-chat": {"prompt_tokens": 100_000, "completion_tokens": 10_000}}
