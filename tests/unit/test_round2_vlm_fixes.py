@@ -84,6 +84,9 @@ def test_deepseek_driver_close_kills_worker() -> None:
 
 @pytest.mark.fast
 def test_rapidocr_driver_empty_box_does_not_crash() -> None:
+    # numpy ships in the optional `ocr` extra (see test_rapidocr_driver.py for
+    # why the skip stays in-test rather than at module level).
+    pytest.importorskip("numpy", reason="numpy ships in the optional `ocr` extra")
     driver = RapidOcrDriver()
     mock_engine = MagicMock()
     # Box is empty list []

@@ -51,6 +51,19 @@ def _fake_transformers(
     return transformers
 
 
+def _fake_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stub ``torch``/``transformers`` so ``_ensure_loaded``'s import gate passes.
+
+    The worker protocol is the subject of these tests; the two imports are
+    existence checks (``# noqa: F401``) before the subprocess starts, so a stub
+    is the honest boundary and keeps the cases running without the ~2 GB torch
+    stack — which the ``dev`` extra intentionally omits, so a real
+    ``importorskip`` would silently drop the worker coverage from CI.
+    """
+    monkeypatch.setitem(sys.modules, "torch", types.ModuleType("torch"))
+    monkeypatch.setitem(sys.modules, "transformers", types.ModuleType("transformers"))
+
+
 def test_llama_flash_shim_aliases_and_is_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
     _fake_transformers(monkeypatch)
     modeling = sys.modules["transformers.models.llama.modeling_llama"]
@@ -107,6 +120,7 @@ def test_trust_remote_code_gate_refuses_model_code(
 ) -> None:
     """UBT_VLM_TRUST_REMOTE_CODE=false must fail before any download/import."""
     monkeypatch.setenv("UBT_VLM_TRUST_REMOTE_CODE", "false")
+    _fake_runtime(monkeypatch)
     driver = DeepSeekOcrDriver()
     with pytest.raises(RuntimeError, match="trust_remote_code"):
         driver._ensure_loaded()
@@ -165,7 +179,10 @@ def _driver(
     return DeepSeekOcrDriver(worker_cmd=cmd)
 
 
-def test_recognize_runs_through_resident_worker(tmp_path: Path) -> None:
+def test_recognize_runs_through_resident_worker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _fake_runtime(monkeypatch)
     driver = _driver(tmp_path, "fake_ok_worker.py", _FAKE_OK)
     try:
         transcript = driver.recognize(_FakeImage(), (612.0, 792.0), 2.0)
@@ -179,11 +196,14 @@ def test_recognize_runs_through_resident_worker(tmp_path: Path) -> None:
         driver._close_worker()
 
 
-def test_close_worker_releases_the_worker_pipe_fds(tmp_path: Path) -> None:
+def test_close_worker_releases_the_worker_pipe_fds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Terminate+wait reaps the child, but its stdin/stdout are OS pipes: the
     TextIOWrappers stay open, so every worker teardown leaks two fds (and the
     GC'd-transport ResourceWarning the full suite trips on). ``_close_worker``
     must close them itself, not wait for the interpreter to do it at exit."""
+    _fake_runtime(monkeypatch)
     driver = _driver(tmp_path, "fake_ok_worker.py", _FAKE_OK)
     driver.recognize(_FakeImage(), (612.0, 792.0), 2.0)
     proc = driver._proc
@@ -196,7 +216,10 @@ def test_close_worker_releases_the_worker_pipe_fds(tmp_path: Path) -> None:
     assert proc.stdout.closed, "worker stdout pipe leaked"
 
 
-def test_worker_crash_restarts_once_then_succeeds(tmp_path: Path) -> None:
+def test_worker_crash_restarts_once_then_succeeds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _fake_runtime(monkeypatch)
     marker = tmp_path / "crash-marker"
     driver = _driver(tmp_path, "crash_worker.py", _FAKE_WORKER, extra_args=[str(marker)])
     try:
@@ -207,7 +230,10 @@ def test_worker_crash_restarts_once_then_succeeds(tmp_path: Path) -> None:
         driver._close_worker()
 
 
-def test_persistent_desync_raises_instead_of_looping(tmp_path: Path) -> None:
+def test_persistent_desync_raises_instead_of_looping(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _fake_runtime(monkeypatch)
     driver = _driver(tmp_path, "desync_worker.py", _FAKE_DESYNC)
     try:
         with pytest.raises(RuntimeError, match="desynced"):
@@ -216,12 +242,13 @@ def test_persistent_desync_raises_instead_of_looping(tmp_path: Path) -> None:
         driver._close_worker()
 
 
-def test_wedged_worker_times_out_on_write(tmp_path: Path) -> None:
+def test_wedged_worker_times_out_on_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A worker wedged before stdin draining must not hang the driver inside
     write() once the OS pipe fills: REQUEST_TIMEOUT_S has to arm the write as
     well as the reply read, or one CUDA-native stall stalls the whole export
     forever (the exact failure class the worker boundary exists to contain)."""
     _FAKE_WEDGED = "import time\n\ntime.sleep(300)\n"
+    _fake_runtime(monkeypatch)
     driver = _driver(tmp_path, "wedged_worker.py", _FAKE_WEDGED)
     driver.REQUEST_TIMEOUT_S = 0.5
     try:
