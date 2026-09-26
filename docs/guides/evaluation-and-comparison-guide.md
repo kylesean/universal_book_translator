@@ -38,6 +38,7 @@ finds (or does not find) is printed as a capability table before anything runs:
 
 ```bash
 ./scripts/run_real_benchmark.sh                # --summary: probe only, print how to run each mode
+./scripts/run_real_benchmark.sh --gate         # real-model HARD gate (fails closed if the MT gateway is absent)
 ./scripts/run_real_benchmark.sh --live-mt      # live TranslateGemma MT tier acceptance
 ./scripts/run_real_benchmark.sh --qe-calib     # L1/L2 QE consistency & calibration report
 ./scripts/run_real_benchmark.sh --compare-live # paired MT vs cloud-LLM comparison
@@ -85,7 +86,7 @@ L1-pass/L2-low, share of blocks that would hit the judge):
 
 | Item | Owner / runner | Status |
 | --- | --- | --- |
-| L1↔L2 agreement report + gray-zone sizing | `tests/integration/test_qe_calibration.py`, nightly `live-local` job | ✅ runs (nightly + `--qe-calib`) |
+| L1↔L2 agreement report + gray-zone sizing | `tests/integration/test_qe_calibration.py` via `scripts/run_real_benchmark.sh --qe-calib` | ✅ on demand (CI parked; see `docs/guides/CI_AND_QUALITY_GATES.md`) |
 | **L3 judge calibration** (judge verdicts vs a reviewed sample; does `[0.7,0.8)` actually catch what it claims?) | nobody yet | **待跑** |
 | MT tier structural acceptance (`misrouting < 2%`) | `tests/integration/test_mt_tier_live.py` | ⚠️ needs llama-swap + CometKiwi |
 | MT vs cloud-LLM paired comparison | `tests/integration/test_mt_vs_llm_compare.py` | ⚠️ needs llama-swap + `UBT_OPENCODE_SESSION_ID` |
@@ -140,8 +141,11 @@ where each `X.pdf` has a sibling `X.translated.pdf`.
 
 pdf-oxide vs poppler `pdftoppm` equivalence gate (page size must match, mismatch
 ratio must stay inside thresholds frozen from the 2026-09-20 calibration run).
-This is the stage-2 adoption evidence and is also a CI step
-(`ci.yml` → *Render A/B — pdf_oxide vs pdftoppm*).
+This is the stage-2 adoption evidence; run it on demand with
+`uv run pytest tests/unit/test_oxide_render_ab.py -m slow -o addopts=""`. It used
+to be a `ci.yml` step — CI is parked during private iteration
+(`docs/guides/CI_AND_QUALITY_GATES.md`), so it runs locally until stage 1 is
+activated.
 
 ### Formula engines — `scripts/formula_matrix.sh`
 
@@ -161,12 +165,16 @@ its findings land in `visual_report.json`.
 through the real local MT tier and hard-asserts the invariants any competent
 translation must hold: non-empty target, no placeholder residue
 (`⟦ ⟧`), no leaked prompt scaffolding, numeric fidelity, no structural
-FastPass rejection. Zero API cost (the local llama-swap gateway + cached CometKiwi),
-self-skips when either is absent, and is a **hard gate** in the nightly
-`live-local` job — unlike the report-only tiers above, a red here is a
-regression, not missing weights.
+FastPass rejection. Zero API cost (the local llama-swap gateway only — no
+CometKiwi), and self-skips when the gateway is absent so a bare machine stays
+green. Unlike the report-only tiers above, a red here is a regression, not
+missing weights, so it is run as a **fail-closed hard gate**: the wrapper
+refuses to report green when the gateway is missing, because a silently skipped
+hard gate is a no-op. CI is parked while the repo iterates privately
+(`docs/guides/CI_AND_QUALITY_GATES.md`), so this is the executor:
 
 ```bash
+./scripts/run_real_benchmark.sh --gate    # fails closed if the MT gateway is absent
 uv run pytest tests/integration/test_local_model_baseline.py -o addopts="" -v -rs
 ```
 

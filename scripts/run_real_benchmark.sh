@@ -95,6 +95,23 @@ case "${MODE}" in
             echo "⚠️ Skipping --qe-calib: CometKiwi checkpoint missing."
         fi
         ;;
+    --gate)
+        # The real-model HARD gate (review D1): test_local_model_baseline.py
+        # asserts invariants any competent MT must hold, and a red here is a
+        # regression, not missing weights. A missing prerequisite is therefore
+        # itself a failure — a hard gate that silently skips is the exact no-op
+        # this mode exists to prevent (the retired nightly job carried the same
+        # `::error::` guard). CI is parked during private iteration, so this is
+        # the executor: docs/guides/CI_AND_QUALITY_GATES.md.
+        if [ "${HAS_LOCAL_LLM}" != true ] || [ "${HAS_MT_MODEL}" != true ]; then
+            echo "❌ --gate refused: ${LOCAL_LLM_BASE_URL} is not serving translategemma:4b."
+            echo "   Start llama-swap (systemctl --user start llama-swap) and retry;"
+            echo "   a skipped hard gate is a failure, not a pass."
+            exit 1
+        fi
+        echo "Running the real-model hard gate (fixed EN→ZH corpus)..."
+        uv run pytest tests/integration/test_local_model_baseline.py -o addopts="" -v -rs
+        ;;
     --compare-live)
         if [ "${HAS_LLM_KEY}" = true ] && [ "${HAS_MT_MODEL}" = true ]; then
             echo "Running MT vs Cloud LLM Paired Comparison..."
@@ -109,6 +126,7 @@ case "${MODE}" in
         ;;
     --summary|*)
         echo "Diagnostic mode complete. To execute specific live benchmarks, run with:"
+        echo "  ./scripts/run_real_benchmark.sh --gate         # Real-model HARD gate (fails closed if MT gateway absent)"
         echo "  ./scripts/run_real_benchmark.sh --live-mt      # Real TranslateGemma local MT run"
         echo "  ./scripts/run_real_benchmark.sh --qe-calib     # Neural CometKiwi score calibration"
         echo "  ./scripts/run_real_benchmark.sh --compare-live # Paired comparison against Cloud LLM"

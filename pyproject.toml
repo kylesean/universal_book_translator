@@ -270,9 +270,10 @@ markers = [
     "fast: pure-logic unit tests cheap enough for the per-edit inner loop; `pytest -m fast` runs the whole tier in ~2 s",
     # AGENTS.md §2: a legacy check that blocks work and costs more than 15 min of
     # archaeology moves here instead of being deleted or left red. Quarantine is not
-    # amnesty — CI keeps running it (its `-o addopts=""` clears this filter), and
-    # every use must name what it is waiting on in the marker's reason argument.
-    "legacy_drift: quarantined legacy check, deselected from the inner loop but still run by CI",
+    # amnesty — the full local suite (and the stage-1 CI job once activated,
+    # docs/guides/CI_AND_QUALITY_GATES.md) runs it via `-o addopts=""`, and every
+    # use must name what it is waiting on in the marker's reason argument.
+    "legacy_drift: quarantined legacy check, deselected from the inner loop but still run in full runs",
 ]
 filterwarnings = [
     "ignore::DeprecationWarning:pydantic.*",

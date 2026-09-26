@@ -16,9 +16,12 @@ by the nightly ``live-local`` job — and remain uncalibrated
 (``docs/guides/evaluation-and-comparison-guide.md`` still lists L3 judge calibration as
 待跑), so nothing gates on them.
 
-Zero API cost — the local llama-swap MT backend plus the cached CometKiwi
-checkpoint — and self-skips when either is absent, so a bare machine stays
-green. The nightly ``live-local`` job runs this file as a hard gate.
+Zero API cost — the local llama-swap MT backend — and self-skips when it is
+absent, so a bare machine stays green. It is the project's real-model hard
+gate; run it deliberately and fail-closed with
+``scripts/run_real_benchmark.sh --gate``, which refuses to report green when
+the gateway is missing (CI is parked during private iteration —
+``docs/guides/CI_AND_QUALITY_GATES.md``).
 
 The probe targets the llama-swap gateway, not the Ollama daemon that used to
 serve this model: Ollama was retired 2026-09-23 (unit disabled, weights

@@ -377,7 +377,7 @@ warning: no whitespace before raw text              #text(...)[为了求解 #box
 
 | 阶段 | 内容 | 理由 |
 | --- | --- | --- |
-| ~~**P0-0**~~ ✅ | ~~修 §7.1 的 Typst 生成缺陷~~ → **已修（`a98a315`，11:50，本轮复核通过）**；~~遗留一条**单语全本可复现命令**~~ → 已由 `scripts/formula_matrix.sh` + `tests/integration/test_formula_engine_matrix.py`（nightly）闭合（2026-09-22 注） | 止血项已消除 |
+| ~~**P0-0**~~ ✅ | ~~修 §7.1 的 Typst 生成缺陷~~ → **已修（`a98a315`，11:50，本轮复核通过）**；~~遗留一条**单语全本可复现命令**~~ → 已由 `scripts/formula_matrix.sh` + `tests/integration/test_formula_engine_matrix.py`（公开 CI 停用期间改按需运行，见 `docs/guides/CI_AND_QUALITY_GATES.md`）闭合（2026-09-22 注） | 止血项已消除 |
 | **P0** | D1 + **D2′** + D6 | 三者零 token、零新依赖。D1 堵"内部全绿、产物全错"；D2′ 堵本类文件上**唯一真实存在**的静默退化（D2 原设计对此零命中）；D6 已被两次实测证明会烧完整本书的 token |
 | **P1** | D2（收缩后）+ D5 + D3 + D8 | D2 退守空格/词边界一类；D5 沉淀已有调试知识；D3 对齐 overlay 引擎的保真目标；D8 把 `ToUnicode` 覆盖率变成规划输入而非事后诊断 |
 | **P1** | D4 | 需要 KPI 对比实验，工作量中等 |
