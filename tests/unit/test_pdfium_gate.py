@@ -186,11 +186,13 @@ def test_unify_docling_pdfium_lock_rebinds_module_globals(
 
     docling = types.ModuleType("docling")
     locks = types.ModuleType("docling.utils.locks")
-    locks.pypdfium2_lock = threading.Lock()
+    # Dynamic module attributes, same as the production rebind in
+    # ``ubt/adapters/pdf/pdfium_gate.py`` -> ``unify_docling_pdfium_lock``.
+    locks.pypdfium2_lock = threading.Lock()  # type: ignore[attr-defined]
     backend = types.ModuleType("docling.backend.docling_parse_backend")
-    backend.pypdfium2_lock = locks.pypdfium2_lock
+    backend.pypdfium2_lock = locks.pypdfium2_lock  # type: ignore[attr-defined]
     outline = types.ModuleType("docling.utils.pdf_outline")
-    outline.pypdfium2_lock = locks.pypdfium2_lock
+    outline.pypdfium2_lock = locks.pypdfium2_lock  # type: ignore[attr-defined]
 
     monkeypatch.setitem(sys.modules, "docling", docling)
     monkeypatch.setitem(sys.modules, "docling.utils", types.ModuleType("docling.utils"))

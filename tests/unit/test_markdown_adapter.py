@@ -354,8 +354,6 @@ async def test_markdown_render_removes_temp_file_when_write_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A failed write must not leave an orphan temp file in the output directory."""
-    import ubt.adapters.markdown.adapter as md_adapter
-
     adapter = MarkdownAdapter()
     manifest = BookManifest(doc_id="md_fail", title="Test", source_path="book.md")
     blocks = [
@@ -372,7 +370,9 @@ async def test_markdown_render_removes_temp_file_when_write_fails(
     def _boom(_fd: int) -> None:
         raise OSError("disk full")
 
-    monkeypatch.setattr(md_adapter.os, "fsync", _boom)
+    # String target: ``md_adapter.os`` is the stdlib ``os`` module, which the
+    # adapter imports directly, so patching the global is the same object.
+    monkeypatch.setattr("os.fsync", _boom)
     with pytest.raises(OSError):
         await adapter.render_blocks(manifest, blocks, "zh", out, bilingual_mode="target")
     leftovers = [p.name for p in tmp_path.iterdir() if p.name != "out.md"]

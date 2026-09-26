@@ -63,7 +63,7 @@ async def test_render_blocks_runs_off_the_event_loop(
 
     async def run() -> None:
         await adapter.render_blocks(
-            None,  # type: ignore[arg-type]
+            None,
             [],
             "zh",
             Path("/tmp/ubt-offload-test.out"),

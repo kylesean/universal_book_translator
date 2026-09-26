@@ -117,7 +117,12 @@ def test_ocr_inference_timeout_returns_504(monkeypatch: pytest.MonkeyPatch) -> N
 
     module = _load(monkeypatch)
     monkeypatch.setattr(module, "OCR_TIMEOUT_S", 0.02)
-    monkeypatch.setattr(module, "_run_ocr_inference", lambda *a, **k: time.sleep(0.2) or [])
+
+    def _slow_inference(*_args: object, **_kwargs: object) -> list[object]:
+        time.sleep(0.2)
+        return []
+
+    monkeypatch.setattr(module, "_run_ocr_inference", _slow_inference)
     client = TestClient(module.app)
     resp = client.post("/v1/ocr", files={"file": ("x.png", _png_bytes(), "image/png")})
     assert resp.status_code == 504

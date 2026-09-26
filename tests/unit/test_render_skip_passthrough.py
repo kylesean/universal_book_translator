@@ -250,14 +250,17 @@ def test_ledger_pass_persists_a_partial_stale_skip_removal(monkeypatch: Any) -> 
 
     saved: list[list[dict[str, object]]] = []
     ledger = _NS(save_checkpoints_batch=lambda cps: saved.append(list(cps)))
-    ctx = _NS(job_id="j1", ledger=ledger)
-    manifest = _NS(run=_NS())
+    # Test doubles for the stage context/adapters; the pass only reads
+    # ``ctx.job_id``/``ctx.ledger`` and ``manifest.run``.
+    ctx: Any = _NS(job_id="j1", ledger=ledger)
+    manifest: Any = _NS(run=_NS())
+    adapter_double: Any = object()
 
     # This render skips b1 only for 'spill', so 'no_zone' is stale.
-    monkeypatch.setattr(export, "get_last_render_skips", lambda _a: [("b1", "spill")])  # type: ignore[attr-defined]
-    monkeypatch.setattr(export, "apply_length_policy_flags", lambda *a, **k: 0)  # type: ignore[attr-defined]
+    monkeypatch.setattr(export, "get_last_render_skips", lambda _a: [("b1", "spill")])
+    monkeypatch.setattr(export, "apply_length_policy_flags", lambda *a, **k: 0)
 
-    asyncio.run(export._apply_render_skip_ledger_pass(ctx, object(), manifest, [block]))
+    asyncio.run(export._apply_render_skip_ledger_pass(ctx, adapter_double, manifest, [block]))
 
     assert block.error_flags == ["render_skip:spill"]
     persisted = [c for batch in saved for c in batch if c["block_id"] == "b1"]
