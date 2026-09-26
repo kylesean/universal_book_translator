@@ -741,16 +741,18 @@ else:
 
 
 def test_term_shape_halfwidth_terminators_without_space() -> None:
-    """Half-width ! / ? are terminal even with no following whitespace.
+    """Half-width ! / ? next to CJK are terminal even with no whitespace.
 
     A CJK target has no whitespace after punctuation and often uses half-width
     !/?; missing them made the omission gate reject a correct multi-sentence
-    translation.
+    translation. English (whitespace-delimited) must be unaffected.
     """
     from ubt.core.qe.term_shape import count_sentences
 
     assert count_sentences("甲!乙?丙。") == 3
-    assert count_sentences("First!Second?") == 2
+    # English: !? still need whitespace/EOL, so no over-splitting.
+    assert count_sentences("First! Second?") == 2
+    assert count_sentences("First!Second?") == 1
     # Decimals are still not sentence breaks.
     assert count_sentences("The value is 3.14 today.") == 1
 

@@ -58,6 +58,18 @@ class TestSentenceRatio:
         decision = OmissionGate().evaluate(_SRC_4_SENT, merged)
         assert decision.passed, decision.reason
 
+    def test_halfwidth_cjk_terminators_are_counted(self) -> None:
+        """A correct zh translation using half-width !? must not read as omission.
+
+        CJK has no whitespace after punctuation; the counter only recognized
+        full-width 。！？, so three correct sentences counted as one and the gate
+        quarantined a correct translation.
+        """
+        src = "Alpha ran fast. Beta ran slow. Gamma won the race."
+        tgt = "阿尔法跑得很快!贝塔跑得很慢?伽马赢了比赛。"
+        decision = OmissionGate().evaluate(src, tgt)
+        assert decision.passed, decision.reason
+
     def test_short_blocks_skip_sentence_gate(self) -> None:
         """Blocks with fewer than 3 source sentences are too noisy to gate."""
         decision = OmissionGate().evaluate("He climbed the stairs. He fell asleep.", "他爬上楼梯。")
