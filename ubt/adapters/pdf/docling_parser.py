@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import re
+import sys
 from collections.abc import Callable
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -29,7 +30,7 @@ from ubt.adapters.pdf.docling_blocks import (
     split_prov_spans,
     table_to_markdown,
 )
-from ubt.adapters.pdf.pdfium_gate import PDFIUM_LOCK
+from ubt.adapters.pdf.pdfium_gate import PDFIUM_LOCK, unify_docling_pdfium_lock
 from ubt.adapters.pdf.plain_text_extractor import pages_to_blocks
 from ubt.core.cleaners.lnds_pruner import normalize_academic_pdf_math
 from ubt.core.config import RIGID_ENGINES
@@ -371,6 +372,32 @@ def _cleanup_docling_converter(converter: Any) -> None:
         logger.debug("Docling converter cleanup skipped: %s", exc)
 
 
+_DOCLING_LOCK_CHECKED = False
+
+
+def _ensure_docling_pdfium_lock() -> None:
+    """Unify docling's pypdfium2 lock with ``PDFIUM_LOCK`` once, after import.
+
+    Docling's PDF backends render through the same ``libpdfium.so`` pypdfium2
+    loads but hold their own lock (see ``pdfium_gate``). The first real
+    conversion — after ``symbols()`` has imported docling — is the earliest
+    point the lock bindings exist, so the rebind happens here and is cached only
+    on success: while docling is not yet imported nothing is latched, so a later
+    import still gets unified.
+    """
+    global _DOCLING_LOCK_CHECKED
+    if _DOCLING_LOCK_CHECKED or "docling" not in sys.modules:
+        return
+    if unify_docling_pdfium_lock():
+        _DOCLING_LOCK_CHECKED = True
+        return
+    logger.warning(
+        "docling is imported but none of its pypdfium2_lock bindings were "
+        "found; a concurrent docling render could race UBT pdfium work. "
+        "Update ubt.adapters.pdf.pdfium_gate._DOCLING_LOCK_MODULES."
+    )
+
+
 def extract_with_docling(
     path: Path,
     page_range: tuple[int, int] | None,
@@ -381,6 +408,8 @@ def extract_with_docling(
     """Extract structured blocks using IBM Docling in strict reading order."""
     configure_hf_environment(enrich=enrich)
     input_format, pipeline_options_cls, converter_cls, format_option_cls = symbols()
+    # Docling is now imported: make its pypdfium2 access share PDFIUM_LOCK.
+    _ensure_docling_pdfium_lock()
 
     options = pipeline_options_cls()
     # Born-digital academic PDFs: OCR off (fast, no false positives);

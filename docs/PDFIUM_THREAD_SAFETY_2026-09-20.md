@@ -4,6 +4,11 @@
 `render_fidelity`；本闸口的辖域是 **pypdfium2**——`pdf_oxide`（Rust/PyO3 同样封装
 pdfium）走的是另一条原生路径，线程策略不同（`&mut self` borrow → open-per-call，
 不依赖 `PDFIUM_LOCK`），见 `ubt/adapters/pdf/oxide_render.py` 模块注释。
+**2026-09-26 复核**：`docling-parse` 并非 pypdfium2 调用方——其扩展模块
+`readelf -d` 显示静态链接自带的 pdfium、无 `libpdfium.so` 依赖，故不在此锁辖域内；
+而 **docling（Python 包）自身**的 pypdfium2 路径（栅格/大纲）原用另一把
+`docling.utils.locks.pypdfium2_lock`，已通过
+`pdfium_gate.unify_docling_pdfium_lock()` 重绑为 `PDFIUM_LOCK`（见 §3）。
 状态：**已实施双层防御**（PdfiumGateway 串行闸口 + 钉扎替换字体集）；
 sidecar 进程隔离为第三层，见文末
 相关崩溃：`SIGSEGV in __tree_balance_after_insert (libpdfium.so)`、
@@ -64,7 +69,7 @@ Python `thread_run` 起的工作线程（ctypes → `FPDF_LoadPage`）。
 
 收口方式（入口**数量随重构漂移，不在此钉数**——清单以
 `grep -rn "PdfDocument(" ubt/adapters/` 与 `tests/unit/test_pdfium_gate.py` 的
-AST 守护为准；2026-09-22 实测 pypdfium2 实例化 16 处，另有 docling 内部 pdfium 路径）：
+AST 守护为准；2026-09-22 实测 pypdfium2 实例化 16 处）：
 
 - **整函数装饰**（函数体是纯 pdfium/CPU 工作）：
   `pdfium_adapter._extract_with_pdfium`、`short_doc.probe_pdf_pages`、
@@ -72,8 +77,7 @@ AST 守护为准；2026-09-22 实测 pypdfium2 实例化 16 处，另有 docling
   `textgeom.extract_lines`、`asset_extractor.extract_pdf_figures`、
   `formula_tags._page_text_boxes`
   （位于 `@lru_cache` 内侧，缓存命中不占锁）、`visual_scalpel.crop_block_pil`、
-  `extraction_witness.inspect_pdf`、`engine_selector.inspect_pdf_route_plan`、
-  `docling_adapter._extract_blocks_sync`（覆盖 docling-parse 的内部 pdfium）
+  `extraction_witness.inspect_pdf`、`engine_selector.inspect_pdf_route_plan`
 - **只锁 pdfium 区段**（函数还含网络/子进程调用，**严禁持锁等待外部服务**）：
   `vlm.transcribe.transcribe_page_to_blocks`（VLM `driver.recognize` 在锁外）、
   `docling_parser` VLM fallback 的 probe 段、`formula_witness` 栅格化段
@@ -82,6 +86,16 @@ AST 守护为准；2026-09-22 实测 pypdfium2 实例化 16 处，另有 docling
   页面采样链 `core.advisor` → `ubt/core/archetype.py::sample_document` →
   `ubt/core/ports.py::sample_pdf_pages` → `plain_text_extractor`（经
   `open_document` 持锁；2026-09-20 起逐层下沉，锁语义不变）。
+
+**docling 的两条 pdfium 路径（2026-09-26 补充）**：`docling-parse`（文本/坐标抽取）
+把 pdfium **静态链进自己的扩展模块**，与 pypdfium2 的 `libpdfium.so` 是两份独立
+原生库、独立进程状态，因此**不需要**本锁；docling（Python 包）自身的 pypdfium2
+路径（`docling.backend.*` 的页面栅格、`docling.utils.pdf_outline` 的大纲）才与本
+闸共用同一份 `libpdfium.so`，原持有的是它自带的 `threading.Lock`
+（`docling.utils.locks.pypdfium2_lock`）。两把锁守一个非线程安全库正是本闸要消除
+的竞争，故 `docling_parser.extract_with_docling` 在 docling 导入后调用
+`pdfium_gate.unify_docling_pdfium_lock()`，把 docling 各模块的 `pypdfium2_lock`
+重绑为 `PDFIUM_LOCK`（仅在原生调用期间持锁，不横跨其模型推理）。
 
 ### 第二层：钉扎替换字体集（`pdfium_gate.install_font_policy`）
 
@@ -125,7 +139,9 @@ import pypdfium2 而未先 import gate（或顺序颠倒导致字体策略错过
 ### 已知的代价
 
 - 进程内所有 pdfium 工作串行化。单 job 场景无感（瓶颈在 LLM 延迟）；
-  docling 整书转换持锁可达分钟级，期间其他线程的 pdfium 探测会被阻塞。
+  docling 的栅格/大纲等 pypdfium2 调用现与 UBT 共用一把锁（见 §3 的锁统一），
+  只在这些**原生调用**期间持锁，不横跨其模型推理——不再有"整书转换持锁
+  分钟级"的阻塞。
 - 多用户服务化时这是真实吞吐瓶颈，见下节。
 
 ## 4. 演进路线（第二阶段，未实施）

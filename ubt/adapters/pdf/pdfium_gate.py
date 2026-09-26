@@ -14,7 +14,7 @@ the export stage of a multi-page paper (see
 Two defenses, matching the production pdfium paradigm:
 
 1. **Single serial entry.** Every code path that calls into pypdfium2
-   (directly or transitively, e.g. through docling-parse) must hold
+   (directly, or through docling's own pypdfium2 backends) must hold
    ``PDFIUM_LOCK`` for the duration of the native work. Use
    ``@pdfium_serialized`` for whole-function pdfium work, or
    ``with PDFIUM_LOCK:`` when only part of the function is pdfium work
@@ -23,6 +23,18 @@ Two defenses, matching the production pdfium paradigm:
    calls (e.g. ``rigid.extract_pages`` -> ``textgeom.extract_lines``).
    The lazy font-table initialization happens under this lock, so it is
    warm-once and race-free without any separate warmup step.
+
+   ``docling-parse`` is *not* a pypdfium2 caller: its extension module
+   statically links its own pdfium and declares no ``libpdfium.so``
+   dependency (verified with ``readelf -d``), so it is a separate native
+   library with separate process state and needs no lock from here.
+   Docling's *Python* backends, however, do call the very ``libpdfium.so``
+   pypdfium2 loads — page rasterization and the outline extractor — and
+   guard it with a different ``threading.Lock``
+   (``docling.utils.locks.pypdfium2_lock``). Two locks over one
+   non-thread-safe library defeat this invariant, so
+   :func:`unify_docling_pdfium_lock` rebinds docling's module globals to
+   ``PDFIUM_LOCK`` (called once, after docling is imported).
 
 2. **Pinned substitution font set.** On Linux pdfium's default font
    provider walks whole system font directories (800+ faces on desktop
@@ -197,3 +209,52 @@ def open_document(pdf_path: Path | str) -> Iterator[Any]:
             yield doc
         finally:
             doc.close()
+
+
+#: Docling modules that bind their own ``pypdfium2_lock`` (a plain
+#: ``threading.Lock``) at import: its two PDF backends and the outline extractor
+#: all call ``libpdfium.so``. Rebinding each module's global makes them share
+#: this gate's lock.
+_DOCLING_LOCK_MODULES: tuple[str, ...] = (
+    "docling.utils.locks",
+    "docling.backend.docling_parse_backend",
+    "docling.backend.pypdfium2_backend",
+    "docling.utils.pdf_outline",
+)
+
+
+def unify_docling_pdfium_lock() -> bool:
+    """Rebind docling's ``pypdfium2_lock`` globals to :data:`PDFIUM_LOCK`.
+
+    Docling's PDF backends call the same ``libpdfium.so`` pypdfium2 loads —
+    page rasterization in ``docling.backend`` and the outline extractor — but
+    guard it with their own ``threading.Lock``. Two locks over one
+    non-thread-safe native library reintroduce the heap corruption this gate
+    exists to prevent: a docling render on one thread racing a UBT pdfium call
+    on another (reachable with ``ubt worker --concurrency > 1``). Rebinding the
+    module globals makes docling join the same serial entry, while still holding
+    the lock only around the native calls — not across docling's model
+    inference, so throughput is unaffected.
+
+    Call after importing docling, before its first conversion. Idempotent.
+
+    Returns True when there is nothing left to unify: either docling was never
+    imported in this process, or every binding found is already the gate's
+    lock. A False means docling *is* imported but none of the expected lock
+    bindings were found (an upstream rename), so the caller can warn instead of
+    silently losing serialization.
+    """
+    if "docling" not in sys.modules:
+        return True
+    unified = False
+    for name in _DOCLING_LOCK_MODULES:
+        module = sys.modules.get(name)
+        if module is None:
+            continue
+        current = getattr(module, "pypdfium2_lock", None)
+        if current is None:
+            continue
+        if current is not PDFIUM_LOCK:
+            module.pypdfium2_lock = PDFIUM_LOCK  # type: ignore[attr-defined]
+        unified = True
+    return unified

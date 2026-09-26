@@ -166,3 +166,53 @@ def test_open_document_roundtrip(tmp_path: Path) -> None:
         page = doc[0]
         assert float(page.get_width()) > 0
         page.close()
+
+
+def test_unify_docling_pdfium_lock_rebinds_module_globals(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Docling's separate pypdfium2 lock must become PDFIUM_LOCK.
+
+    docling's backends bind ``pypdfium2_lock`` by value at import; they call the
+    same ``libpdfium.so`` as UBT, so two locks would defeat single-serial-entry.
+    Fake the docling modules instead of importing the heavy real package.
+    """
+    import sys
+    import types
+
+    from ubt.adapters.pdf.pdfium_gate import PDFIUM_LOCK, unify_docling_pdfium_lock
+
+    docling = types.ModuleType("docling")
+    locks = types.ModuleType("docling.utils.locks")
+    locks.pypdfium2_lock = threading.Lock()
+    backend = types.ModuleType("docling.backend.docling_parse_backend")
+    backend.pypdfium2_lock = locks.pypdfium2_lock
+    outline = types.ModuleType("docling.utils.pdf_outline")
+    outline.pypdfium2_lock = locks.pypdfium2_lock
+
+    monkeypatch.setitem(sys.modules, "docling", docling)
+    monkeypatch.setitem(sys.modules, "docling.utils", types.ModuleType("docling.utils"))
+    monkeypatch.setitem(sys.modules, "docling.utils.locks", locks)
+    monkeypatch.setitem(sys.modules, "docling.backend", types.ModuleType("docling.backend"))
+    monkeypatch.setitem(sys.modules, "docling.backend.docling_parse_backend", backend)
+    monkeypatch.setitem(sys.modules, "docling.utils.pdf_outline", outline)
+
+    assert unify_docling_pdfium_lock() is True
+    assert locks.pypdfium2_lock is PDFIUM_LOCK
+    assert backend.pypdfium2_lock is PDFIUM_LOCK
+    assert outline.pypdfium2_lock is PDFIUM_LOCK
+    # Idempotent: a second call must not fail or re-wrap.
+    assert unify_docling_pdfium_lock() is True
+    assert locks.pypdfium2_lock is PDFIUM_LOCK
+
+
+def test_unify_docling_pdfium_lock_noop_without_docling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No docling import means nothing to unify — and no false warning."""
+    import sys
+
+    from ubt.adapters.pdf.pdfium_gate import unify_docling_pdfium_lock
+
+    monkeypatch.delitem(sys.modules, "docling", raising=False)
+    assert unify_docling_pdfium_lock() is True
