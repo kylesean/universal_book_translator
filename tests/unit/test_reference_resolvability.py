@@ -25,9 +25,7 @@ _SCAN_DIRS = (_REPO_ROOT / "ubt", _REPO_ROOT / "tests")
 #: while it is present in the working tree — a fresh clone without docs must not
 #: fail on the many ``docs/...`` references in code comments.
 _FILE_REF_ROOTS = tuple(
-    root
-    for root in ("ubt/", "tests/", "scripts/", "docs/")
-    if (_REPO_ROOT / root).exists()
+    root for root in ("ubt/", "tests/", "scripts/", "docs/") if (_REPO_ROOT / root).exists()
 )
 _FILE_REF = re.compile(r"`([A-Za-z0-9_./-]+\.(?:py|md|toml|json|sql))`")
 _DOT_REF = re.compile(r"`(ubt(?:\.[A-Za-z_][A-Za-z0-9_]*)+)`")

@@ -48,6 +48,7 @@ from ubt.core.policy.layout_policy import (
     FIT_PRECISION_PT,
     PROSE_BLOCK_TYPES,
     RIGID_MIN_FONT_PT,
+    rigid_min_font_pt_for,
 )
 
 logger = logging.getLogger(__name__)
@@ -412,7 +413,9 @@ class RigidTypesetter:
                 return pending
         return None
 
-    def _paginate(self, text: str, zones: tuple[Zone, ...]) -> list[ZonePlan] | None:
+    def _paginate(
+        self, text: str, zones: tuple[Zone, ...], min_font_pt: float | None = None
+    ) -> list[ZonePlan] | None:
         """Fill every zone at one common size (largest that holds the text).
 
         A block split across zones (page break, figure page in between) is
@@ -425,7 +428,7 @@ class RigidTypesetter:
             return self._plan_at_size(text, zones, size)
 
         s_hi = min(zones[0].base_size * UPSCALE_MAX, MAX_SIZE_PT)
-        s_lo = self.min_font_pt
+        s_lo = self.min_font_pt if min_font_pt is None else min_font_pt
         whole = plan(s_hi)
         if whole is not None:
             return whole
@@ -489,6 +492,7 @@ class RigidTypesetter:
                 # design, recorded so the audit stays complete.
                 report.skipped.append((block.id, reason))
                 continue
+            floor = rigid_min_font_pt_for(block.layout_role, default=self.min_font_pt)
             text = prepare_overlay_text(
                 (block.target_text or "").strip(), target_lang=self.target_lang
             )
@@ -525,7 +529,7 @@ class RigidTypesetter:
                 # one page showing the untranslated source head.
                 repeat: list[ZonePlan] = []
                 for zone in block_zones:
-                    zplan = self._paginate(text, (zone,))
+                    zplan = self._paginate(text, (zone,), floor)
                     if zplan is None:
                         repeat = []
                         break
@@ -533,7 +537,7 @@ class RigidTypesetter:
                 if repeat:
                     planned.append((block, text, block_zones, repeat))
                     continue
-            pending = self._paginate(text, block_zones)
+            pending = self._paginate(text, block_zones, floor)
             eff_zones = block_zones
             if pending is None and self.margin_reclaim_pt > 0:
                 # M2: the text overflows its zones; try reclaiming the
@@ -549,7 +553,7 @@ class RigidTypesetter:
                     self.margin_reclaim_pt,
                 )
                 if reclaimed_last is not last:
-                    trial = self._paginate(text, (*block_zones[:-1], reclaimed_last))
+                    trial = self._paginate(text, (*block_zones[:-1], reclaimed_last), floor)
                     if trial is not None:
                         pending = trial
                         eff_zones = (*block_zones[:-1], reclaimed_last)

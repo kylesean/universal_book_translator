@@ -48,6 +48,27 @@ def test_anchored_floor_is_registered_and_in_force() -> None:
     assert "FlowFitter default" in CALIBRATION["FIT_MIN_FONT_PT"].rationale
 
 
+def test_rigid_region_floors_tier_small_print_regions() -> None:
+    """M2 region tiering: captions/footnotes may shrink below the body floor.
+
+    Those are the source's own small-print regions; a block that cannot fit the
+    body floor fails closed and leaves the source visible, so a lower region
+    floor only ever adds delivered text.
+    """
+    from ubt.core.ir.models import LayoutRole
+
+    assert policy.rigid_min_font_pt_for(LayoutRole.BODY) == policy.RIGID_MIN_FONT_PT
+    assert policy.rigid_min_font_pt_for(LayoutRole.TITLE) == policy.RIGID_MIN_FONT_PT
+    assert policy.rigid_min_font_pt_for(None) == policy.RIGID_MIN_FONT_PT
+    assert policy.rigid_min_font_pt_for(LayoutRole.BODY, default=9.0) == 9.0
+    assert policy.rigid_min_font_pt_for(LayoutRole.CAPTION) == policy.RIGID_CAPTION_MIN_FONT_PT
+    assert policy.rigid_min_font_pt_for(LayoutRole.FOOTNOTE) == policy.RIGID_FOOTNOTE_MIN_FONT_PT
+    assert policy.RIGID_CAPTION_MIN_FONT_PT < policy.RIGID_MIN_FONT_PT
+    assert policy.RIGID_FOOTNOTE_MIN_FONT_PT < policy.RIGID_MIN_FONT_PT
+    assert "RIGID_CAPTION_MIN_FONT_PT" in CALIBRATION
+    assert "RIGID_FOOTNOTE_MIN_FONT_PT" in CALIBRATION
+
+
 def test_cjk_metrics_font_is_findable_on_every_supported_os() -> None:
     """The width-metrics font must resolve on Windows and macOS too.
 

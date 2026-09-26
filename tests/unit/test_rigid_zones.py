@@ -367,6 +367,31 @@ def _stub_typesetter() -> RigidTypesetter:
     return ts
 
 
+def test_region_floor_lets_a_small_print_block_fit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """M2: a block that fits only below the body floor still renders in a
+    small-print region, instead of failing closed to source-visible.
+
+    ``_flow`` is the fit kernel; here it accepts only sizes <= 6.8pt, so the
+    block is un-fittable at the 7.0 body floor and fittable at the 6.5 caption/
+    footnote floor. ``_paginate`` must honour the floor it is handed.
+    """
+    from ubt.adapters.pdf.rigid.typesetter import RigidTypesetter
+
+    def _fake_flow(
+        self: RigidTypesetter, text: str, boxes: object, size: float
+    ) -> list[str] | None:
+        return [text] if size <= 6.8 else None
+
+    monkeypatch.setattr(RigidTypesetter, "_flow", _fake_flow)
+    ts = RigidTypesetter(target_lang="zh")
+    zone = _rect_zone("f1", 1, 700.0, 715.0)
+
+    assert ts._paginate("脚注内容", (zone,), min_font_pt=7.0) is None
+    fitted = ts._paginate("脚注内容", (zone,), min_font_pt=6.5)
+    assert fitted is not None
+    assert fitted[0].size < 7.0
+
+
 def _head_block() -> IRBlock:
     return IRBlock(
         id="h",

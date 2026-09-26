@@ -25,7 +25,7 @@ import re
 from dataclasses import dataclass
 from enum import StrEnum
 
-from ubt.core.ir.models import BlockType, FlowID
+from ubt.core.ir.models import BlockType, FlowID, LayoutRole
 
 
 class Calibration(StrEnum):
@@ -259,6 +259,29 @@ FIT_PRECISION_PT = 0.1
 # <7.5pt now render instead of failing closed to source-visible; see the
 # CALIBRATION rationale and scripts/rigid_coverage_sweep.py.
 RIGID_MIN_FONT_PT = _read_env_float("UBT_RIGID_MIN_FONT_PT", 7.0)
+# M2 region-tiered floors: a region the source itself sets in small type may go
+# below the body floor, because the block would otherwise fail closed and leave
+# the source visible — a still-legible target beats an untranslated line. Both
+# mirror FIT_MIN_FONT_PT (6.5, validated on chapter-1 tiny print).
+RIGID_CAPTION_MIN_FONT_PT = _read_env_float("UBT_RIGID_CAPTION_MIN_FONT_PT", 6.5)
+RIGID_FOOTNOTE_MIN_FONT_PT = _read_env_float("UBT_RIGID_FOOTNOTE_MIN_FONT_PT", 6.5)
+_RIGID_REGION_FLOORS: dict[str, float] = {
+    LayoutRole.CAPTION.value: RIGID_CAPTION_MIN_FONT_PT,
+    LayoutRole.FOOTNOTE.value: RIGID_FOOTNOTE_MIN_FONT_PT,
+}
+
+
+def rigid_min_font_pt_for(layout_role: object, *, default: float = RIGID_MIN_FONT_PT) -> float:
+    """Font floor for a block's region (M2).
+
+    Body/title/header regions use the body floor; captions and footnotes — the
+    source's own small-print regions — may shrink one step further. A block that
+    cannot fit its region floor is dropped to source-visible, so a lower floor
+    there only ever adds delivered text.
+    """
+    return _RIGID_REGION_FLOORS.get(str(getattr(layout_role, "value", layout_role)), default)
+
+
 # P0 complex-page nets: row-fragment glue. Thresholds measured on chapter-1
 # (good: coverage 0.77-1.0) vs book2 p31 (bad: pairs down to 0.2); gap cap
 # sits between word gaps (<10pt) and column gutters.
@@ -514,6 +537,19 @@ CALIBRATION: dict[str, KnobMeta] = {
         "source-visible. Real-corpus (ForMaT) confirmation and the section 4.4 "
         "human visual pass remain open; override per-run with UBT_RIGID_MIN_FONT_PT",
     ),
+    "RIGID_CAPTION_MIN_FONT_PT": KnobMeta(
+        S,
+        "6.5 caption-region floor (M2 region tiering): captions are set in small "
+        "type in the source, and one that cannot fit the 7.0 body floor fails "
+        "closed and leaves the source visible. Aligned with FIT_MIN_FONT_PT; no "
+        "dedicated sweep yet, so it stays single-doc",
+    ),
+    "RIGID_FOOTNOTE_MIN_FONT_PT": KnobMeta(
+        S,
+        "6.5 footnote-region floor (M2 region tiering), reusing the FIT_MIN_FONT_PT "
+        "value validated on chapter-1 tiny print; the body floor would fail "
+        "footnotes closed and leave the source visible",
+    ),
     "ROW_MERGE_GAP_PT": KnobMeta(
         H,
         "24pt row-glue cap, set between word gaps and gutters; sensitivity sweep: 16–36pt "
@@ -621,6 +657,8 @@ def calibration_summary() -> dict[str, int]:
 
 __all__ = [
     "RIGID_MIN_FONT_PT",
+    "RIGID_CAPTION_MIN_FONT_PT",
+    "RIGID_FOOTNOTE_MIN_FONT_PT",
     "ASCII_WORD_RE",
     "BAND_TEXT_MAX_LEN",
     "BG_SAMPLE_SCALE",
