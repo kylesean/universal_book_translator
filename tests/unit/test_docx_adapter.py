@@ -850,3 +850,18 @@ async def test_docx_tracked_insertion_text_is_extracted_and_replaced(tmp_path: P
         body = zf.read("word/document.xml").decode("utf-8")
     assert "inserted" not in body, "the tracked insertion must not survive as source residue"
     assert "译文" in body
+
+
+def test_docx_populate_runs_filters_xml_illegal_control_characters(tmp_path: Path) -> None:
+    """Illegal XML 1.0 control characters must be sanitized to prevent docx save crash."""
+    doc = Document()
+    p = doc.add_paragraph()
+    raw_text = "Good text\x00with null\x07bell\x1bescape\x0cformfeed."
+    DOCXAdapter._populate_paragraph_runs(p, raw_text, None, target_lang="en")
+    save_path = tmp_path / "saved.docx"
+    doc.save(str(save_path))
+    assert save_path.exists()
+    assert "\x00" not in p.text
+    assert "\x07" not in p.text
+    assert "\x1b" not in p.text
+    assert "\x0c" not in p.text

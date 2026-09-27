@@ -18,6 +18,7 @@ Design notes:
 
 import asyncio
 import logging
+import re
 import tempfile
 from collections.abc import AsyncIterator, Iterator
 from copy import deepcopy
@@ -51,6 +52,9 @@ from ubt.core.ir.serializer import compute_file_sha256_cached
 logger = logging.getLogger(__name__)
 
 _HEADING_STYLE_PREFIXES = ("heading", "title")
+
+_XML_ILLEGAL_CHAR_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
 
 _EAST_ASIA_FONT_MAP: dict[str, str] = {
     "zh": "SimSun",
@@ -482,7 +486,10 @@ class DOCXAdapter(BaseDocumentAdapter):
         # which BeautifulSoup decodes back to literal text — so plain prose
         # like ``List<T>`` or ``a<b`` never loses characters, while real inline
         # ``<b>/<i>`` still becomes styled runs.
-        clean_text = sanitize_html_fragment(strip_html_mark_tags(translated_text))
+        clean_text = _XML_ILLEGAL_CHAR_RE.sub(
+            " ", sanitize_html_fragment(strip_html_mark_tags(translated_text))
+        )
+
         east_asia_font = _resolve_east_asia_font(target_lang)
 
         def _apply_east_asia(r: Any) -> None:
