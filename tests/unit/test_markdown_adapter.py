@@ -505,3 +505,26 @@ Regular paragraph after table.
     assert table_blocks[0].flow_id == FlowID.TABLE_GRID
     assert "Column 1" in table_blocks[0].source_text
     assert table_blocks[0].skip_translate is False
+
+
+def test_sanitizer_removes_unpaired_and_style_base_tags() -> None:
+    """The ``.md`` deliverable must drop ``<style>``/``<base>``/unclosed tags.
+
+    Regression: the local blacklist removed only *paired* ``script/iframe/…``
+    tags, so ``<style>@import …</style>``, ``<base href=…>`` and an *unclosed*
+    ``<iframe src=…>`` survived into the delivered Markdown.
+    """
+    from ubt.adapters.markdown.adapter import _sanitize_markdown_content
+
+    for payload in (
+        "<style>@import url(http://evil/t.css);</style>",
+        '<base href="http://evil/">',
+        '<iframe src="http://evil/x">',
+        "<script>alert(1)</script>",
+    ):
+        out = _sanitize_markdown_content(payload)
+        assert not any(tag in out for tag in ("<style", "<base", "<iframe", "<script")), out
+    # Markdown / LaTeX angle brackets and ampersands must survive untouched.
+    assert _sanitize_markdown_content("Use List<T> and $x < y$, a & b.") == (
+        "Use List<T> and $x < y$, a & b."
+    )

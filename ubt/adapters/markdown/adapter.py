@@ -59,8 +59,9 @@ def _format_blockquoted(text: str) -> str:
 
 
 _DANGEROUS_HTML_TAGS = re.compile(
-    r"<\s*(?:script|iframe|object|embed|applet|meta|link)\b[^>]*>[\s\S]*?<\s*/\s*(?:script|iframe|object|embed|applet|meta|link)\s*>|"
-    r"<\s*(?:script|iframe|object|embed|applet|meta|link)\b[^>]*/>",
+    r"<\s*(?:script|iframe|object|embed|applet|meta|link|style|base|form)\b[^>]*>"
+    r"[\s\S]*?<\s*/\s*(?:script|iframe|object|embed|applet|meta|link|style|base|form)\s*>|"
+    r"<\s*/?\s*(?:script|iframe|object|embed|applet|meta|link|style|base|form)\b[^>]*/?>",
     re.IGNORECASE,
 )
 
@@ -93,7 +94,15 @@ _JS_URL_RE = re.compile(
 
 
 def _sanitize_markdown_content(text: str) -> str:
-    """Strip quarantine marks and dangerous script/iframe tags without escaping Markdown/LaTeX entities."""
+    """Strip quarantine marks and dangerous HTML without escaping Markdown/LaTeX.
+
+    Removes ``script/iframe/object/embed/applet/meta/link/style/base/form`` tags
+    whether paired OR unpaired — the old pattern required a close, so an
+    *unclosed* ``<iframe src=…>`` survived — plus event-handler attributes and
+    script-bearing URL schemes. Deliberately NOT ``sanitize_html_fragment``: that
+    allowlist escapes every ``<``/``&``, mangling Markdown and ``$…$`` LaTeX
+    (``List<T>`` -> ``List&lt;T&gt;``).
+    """
     cleaned = strip_html_mark_tags(text)
     cleaned = _DANGEROUS_HTML_TAGS.sub("", cleaned)
     cleaned = _EVENT_ATTR_RE.sub("", cleaned)
