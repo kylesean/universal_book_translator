@@ -304,6 +304,26 @@ def test_author_byline_is_kept_verbatim() -> None:
         assert reason is not None and "byline" in reason, line
 
 
+def test_byline_tail_is_not_catastrophically_backtracking() -> None:
+    r"""A malformed byline-shaped line must not stall ingest.
+
+    Regression: ``_BYLINE_SEGMENT_RE`` nested ``(?:\d+|…)+`` inside ``(…)*``, so
+    ``"Aa Aa, Bb " + "1"*n + "!"`` backtracked exponentially — 11.7 s at n=18
+    and effectively unbounded above it. ``classify_skip`` runs on every ingested
+    block, so one crafted or malformed line could wedge the ingest worker. The
+    tail is now a single character class; 25 digits must be effectively instant.
+    """
+    import time
+
+    from ubt.core.cleaners.skip_rules import _is_author_byline
+
+    text = "Aa Aa, Bb " + "1" * 25 + "!"
+    start = time.monotonic()
+    _is_author_byline(text)
+    classify_skip(text)
+    assert time.monotonic() - start < 2.0
+
+
 def test_prose_and_reference_are_not_a_byline() -> None:
     # Narrative with lowercase words / verbs fails the all-names shape.
     assert (

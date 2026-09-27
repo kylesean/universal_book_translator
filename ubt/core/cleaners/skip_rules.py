@@ -112,7 +112,14 @@ _BYLINE_SEGMENT_RE = re.compile(
     r"^(?:and\s+|&\s+)?"  # trailing-list conjunction
     r"[A-Z][A-Za-z'’\-]+"  # first name token
     r"(?:[\s,]+(?:[A-Z][A-Za-z'’\-]+|Jr\.?|Sr\.?|[A-Z]\.))*"  # more name tokens / initials
-    r"(?:[\s,]*(?:\d+|[¹ⁿ]|[∗*†‡§¶])+)*$"  # affiliation markers / superscripts
+    # Affiliation markers / superscripts. Written as ONE character class, not
+    # ``(?:[\s,]*+(?:\d+|¹|ⁿ|…)+)*``: the old nested quantifiers made
+    # ``"Aa Aa, Bb " + "1"*n + "!"`` backtrack exponentially (11.7 s at n=18,
+    # far worse above) and ``classify_skip`` runs on every ingested block, so a
+    # crafted/malformed line could stall the ingest worker. The accepted set is
+    # unchanged — the tail is any run of digits, separators or affiliation
+    # symbols — and the scan is now linear.
+    r"[\s,0-9¹ⁿ∗*†‡§¶]*$"
 )
 _SUPERSCRIPT_DIGITS = "⁰¹²³⁴⁵⁶⁷⁸⁹"
 
