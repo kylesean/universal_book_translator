@@ -70,8 +70,13 @@ _VERSION_SPACING_RE = re.compile(r"(\d)(?:\.(?=\d)|\s+\.\s+)(?=\d)")
 # reading "Figs. 3.14 and 3.15" yielded only 3.14, so the correct 3.15 looked
 # fabricated.
 _LIST_SEP = r"(?:\s*(?:,|，|、|和|and|或|or|[-–—~～至到]|to)\s*)"
+# A reference number is version-shaped ("3.4.1") or a bare integer ("Chapter 5");
+# omitting the bare form made the English path asymmetric with ``_CN_SECTION_RE``.
+_REF_NUM = rf"(?:{_VERSION_NUM}|\d{{1,3}})"
+# A keyword reference may cite a bare integer ("Chapter 5") as well as a
+# version-shaped number ("3.4.1"); see ``_REF_NUM``.
 _REF_RUN_RE = re.compile(
-    rf"{_REF_KEYWORD}\.?\s*[\(（]?\s*({_VERSION_NUM}(?:{_LIST_SEP}[\(（]?{_VERSION_NUM}[\)）]?)*)",
+    rf"{_REF_KEYWORD}\.?\s*[\(（]?\s*({_REF_NUM}(?:{_LIST_SEP}[\(（]?{_REF_NUM}[\)）]?)*)",
     re.IGNORECASE,
 )
 # Bare parenthesised reference: "(3.11)" or "（3.11）" with the keyword elided.
@@ -88,7 +93,7 @@ _VERSION_NUMBER_RE = re.compile(_VERSION_NUM, re.IGNORECASE)
 _CITATION_SEP = r"(?:\s*(?:[,，]|[-–—~～]|to|至|到)\s*)"
 _CITATION_RE = re.compile(rf"\[\s*(\d{{1,3}}(?:{_CITATION_SEP}\d{{1,3}})*)\s*\]")
 _CITATION_RANGE_RE = re.compile(r"(\d{1,3})\s*(?:[-–—~～]|to|至|到)\s*(\d{1,3})")
-_NUM_RE = re.compile(_VERSION_NUM, re.IGNORECASE)
+_NUM_RE = re.compile(_REF_NUM, re.IGNORECASE)
 
 # ATX markdown heading, 0-3 leading spaces per CommonMark. Setext underlines
 # are deliberately not matched: a two-word source line followed by a rule is

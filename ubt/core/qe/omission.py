@@ -42,7 +42,10 @@ from ubt.core.qe.term_shape import count_sentences as count_sentences
 from ubt.core.qe.term_shape import is_identifier_shaped, is_verbatim_carryover
 from ubt.core.validators.consistency import (
     canonicalize_numeric_token,
+    denoted_numeric_values,
+    magnitude_rewritten,
     normalize_for_numeric_matching,
+    scale_equivalent_values,
 )
 
 # Sentence terminators and abbreviation masking live in ``term_shape`` next
@@ -351,19 +354,22 @@ class OmissionGate:
     def _number_recall(self, src: str, tgt: str) -> float:
         """Fraction of distinct source numbers preserved in the normalized target.
 
-        Mirrors NumericConsistencyValidator's matching (H11): CJK numerals,
+        Mirrors NumericConsistencyValidator's matching: CJK numerals,
         万/亿 magnitudes, full-width digits and locale separators normalize on
         both sides; compound ranges count as preserved when every sub-number
-        survives.
+        survives. Scale-word equivalence is applied too, so a correct magnitude
+        rendering ("1.5 million" -> "150万") is not read as a dropped number.
         """
         src_nums = {canonicalize_numeric_token(m) for m in _NUM_TOKEN_RE.findall(src)}
         src_nums.discard("")
         if not src_nums:
             return 1.0
         normalized_tgt = normalize_for_numeric_matching(tgt, lang=self.target_lang)
+        tgt_values = denoted_numeric_values(tgt) | denoted_numeric_values(normalized_tgt)
+        src_scales = scale_equivalent_values(src)
         preserved = 0
         for num in src_nums:
-            if num in normalized_tgt:
+            if num in tgt_values or (src_scales.get(num, set()) & tgt_values):
                 preserved += 1
                 continue
             if _RANGE_DELIMITERS_RE.search(num):
@@ -372,7 +378,9 @@ class OmissionGate:
                     for p in _RANGE_DELIMITERS_RE.split(num)
                     if p.strip()
                 ]
-                if len(sub_parts) > 1 and all(sub in normalized_tgt for sub in sub_parts):
+                if len(sub_parts) > 1 and all(
+                    sub in tgt_values or sub in normalized_tgt for sub in sub_parts
+                ):
                     preserved += 1
         return preserved / len(src_nums)
 
@@ -383,11 +391,15 @@ class OmissionGate:
         surface) and unioned — concatenating spans would create
         cross-boundary grams that no target can ever match, systematically
         deflating recall. Scoring verified surfaces (not noisy source tokens)
-        keeps plural/merge/decomposition excuses from deflating recall.
+        keeps plural/merge/decomposition excuses from deflating recall. A number
+        carrying an adjacent scale word is scored at its *value* ("1.5 million"
+        -> grams of "1500000"), so a correct "150万" rendering matches.
         """
         grams: Counter[str] = Counter()
-        for m in _NUM_TOKEN_RE.findall(src):
-            grams += _char_ngrams(canonicalize_numeric_token(m), self.ngram_sizes)
+        for m in _NUM_TOKEN_RE.findall(magnitude_rewritten(src)):
+            canon = canonicalize_numeric_token(m)
+            if canon:
+                grams += _char_ngrams(canon, self.ngram_sizes)
         for surface in surfaces:
             grams += _char_ngrams(surface, self.ngram_sizes)
         return grams
@@ -397,7 +409,13 @@ class OmissionGate:
         src_grams = self._source_residue_grams(src, surfaces)
         if not src_grams:
             return 1.0
-        normalized_tgt = normalize_for_numeric_matching(tgt, lang=self.target_lang)
-        tgt_grams = _char_ngrams(normalized_tgt, self.ngram_sizes)
+        # Rewrite magnitude-scaled numbers on the target too, so both sides of a
+        # correct magnitude rendering share a digit string. Rewrite BEFORE
+        # normalizing: the zh normalizer would otherwise read '百万' as '100万'
+        # first and lose the magnitude.
+        target_view = normalize_for_numeric_matching(
+            magnitude_rewritten(tgt), lang=self.target_lang
+        )
+        tgt_grams = _char_ngrams(target_view, self.ngram_sizes)
         overlap = sum(min(cnt, tgt_grams[gram]) for gram, cnt in src_grams.items())
         return overlap / sum(src_grams.values())

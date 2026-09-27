@@ -123,7 +123,7 @@ class TestProperNounRecall:
 
 class TestNumberRecall:
     def test_cjk_structural_numeral_keeps_recall(self) -> None:
-        """'Chapter 7' -> '第七章' must count as preserved (H11 normalization)."""
+        """'Chapter 7' -> '第七章' must count as preserved (numeral normalization)."""
         decision = OmissionGate().evaluate(
             "Chapter 7 explains the outcome. It ends with a summary. The next part is exercises.",
             "第七章解释了结果。它以一段总结收尾。接下来是练习。",
@@ -156,6 +156,15 @@ class TestChrFVerbatimRecall:
     def test_chrf_recall_perfect_on_verbatim_preserving_translation(self) -> None:
         decision = OmissionGate().evaluate(_SRC_TERMS, _TGT_TERMS_OK)
         assert decision.metrics.verbatim_chrf_recall >= 0.9
+
+    def test_magnitude_equivalent_rendering_is_not_an_omission(self) -> None:
+        """``"1.5 million"`` -> ``"150万"`` is a correct rendering, not an omission."""
+        decision = OmissionGate().evaluate(
+            "1.5 million units and 2.5 million units and 3.5 million units",
+            "150万个单位和250万个单位和350万个单位",
+        )
+        assert decision.passed, decision.reason
+        assert decision.metrics.number_recall == 1.0
 
 
 class TestDefectClassMapping:

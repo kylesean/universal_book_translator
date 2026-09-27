@@ -101,3 +101,28 @@ def test_no_math_book_not_applicable(tmp_path: Path) -> None:
     assert report.placeholder.masked_spans == 0
     markdown = render_kdp_audit_markdown(report)
     assert "not applicable" in markdown
+
+
+def test_code_and_citation_corruption_counts_toward_retention() -> None:
+    """Retention must count code/cite corruption, not only math.
+
+    ``compute_placeholder_metrics`` took ``len(math_map)`` and parsed only
+    ``math_token_corrupt``, so code/citation corruption (MQM-Critical) left
+    retention at 1.0.
+    """
+    block = IRBlock(
+        id="b_code",
+        flow_id=FlowID.MAIN_STORY,
+        spine_index=1,
+        block_type=BlockType.NARRATIVE,
+        source_text="```python\nx = 1\n```\nSee [1] and $y$.",
+        target_text="译文",
+        status=BlockStatus.MTQE_PASSED,
+        mtqe_score=0.95,
+        repair_rounds=0,
+        error_flags=["code_token_corrupt missing=[1] mismatched=[] mutated=[]"],
+    )
+    metrics = compute_placeholder_metrics([block])
+    assert metrics.masked_spans >= 2
+    assert metrics.corrupt_spans >= 1
+    assert metrics.retention_rate < 1.0

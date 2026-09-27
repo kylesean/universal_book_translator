@@ -693,3 +693,15 @@ def test_echo_marker_is_fatal_but_never_a_transient_failure() -> None:
     )
     assert any(m in flag for m in CRITICAL_DEFECT_MARKERS), "an unrepaired echo is Critical"
     assert not is_transient_failure([flag])
+
+
+def test_english_bare_integer_reference_is_recognized() -> None:
+    """A bare-integer English reference ("Chapter 5") carries a token.
+
+    ``_REF_RUN_RE`` required a dotted number, so a fabricated "Chapter 5" slipped
+    past the added-content gate while "第5章" was caught — asymmetric.
+    """
+    from ubt.core.qe.added_content import reference_tokens
+
+    assert reference_tokens("Chapter 5") == frozenset({"5"})
+    assert reference_tokens("第5章") == frozenset({"5"})
