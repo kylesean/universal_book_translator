@@ -239,15 +239,8 @@ PUNCT_SQUEEZE_PER_PUNCT = _env_float("UBT_PUNCT_SQUEEZE_PER_PUNCT", 0.02)
 # Typst emit rounding, underfill double-gate (relative + absolute so display
 # type is exempt).
 # FIT_MIN_FONT_PT is the ``FlowFitter`` DEFAULT and nothing more: the rigid
-# typesetter always passes its own floor (RIGID_MIN_FONT_PT) into the
-def _read_env_float(name: str, default: float) -> float:
-    try:
-        return float(os.environ[name])
-    except (KeyError, ValueError):
-        return default
-
-
-FIT_MIN_FONT_PT = _read_env_float("UBT_FIT_MIN_FONT_PT", 6.5)
+# typesetter always passes its own floor (RIGID_MIN_FONT_PT) into the fitter.
+FIT_MIN_FONT_PT = _env_float("UBT_FIT_MIN_FONT_PT", 6.5)
 FIT_PRECISION_PT = 0.1
 # Rigid-typesetter floor — the value actually in force for every rigid
 # page render. Was an inline literal in typesetter.py, which is exactly what
@@ -258,13 +251,13 @@ FIT_PRECISION_PT = 0.1
 # past the spill cliff on two corpora (single- and two-column). Blocks that need
 # <7.5pt now render instead of failing closed to source-visible; see the
 # CALIBRATION rationale and scripts/rigid_coverage_sweep.py.
-RIGID_MIN_FONT_PT = _read_env_float("UBT_RIGID_MIN_FONT_PT", 7.0)
+RIGID_MIN_FONT_PT = _env_float("UBT_RIGID_MIN_FONT_PT", 7.0)
 # M2 region-tiered floors: a region the source itself sets in small type may go
 # below the body floor, because the block would otherwise fail closed and leave
 # the source visible — a still-legible target beats an untranslated line. Both
 # mirror FIT_MIN_FONT_PT (6.5, validated on chapter-1 tiny print).
-RIGID_CAPTION_MIN_FONT_PT = _read_env_float("UBT_RIGID_CAPTION_MIN_FONT_PT", 6.5)
-RIGID_FOOTNOTE_MIN_FONT_PT = _read_env_float("UBT_RIGID_FOOTNOTE_MIN_FONT_PT", 6.5)
+RIGID_CAPTION_MIN_FONT_PT = _env_float("UBT_RIGID_CAPTION_MIN_FONT_PT", 6.5)
+RIGID_FOOTNOTE_MIN_FONT_PT = _env_float("UBT_RIGID_FOOTNOTE_MIN_FONT_PT", 6.5)
 _RIGID_REGION_FLOORS: dict[str, float] = {
     LayoutRole.CAPTION.value: RIGID_CAPTION_MIN_FONT_PT,
     LayoutRole.FOOTNOTE.value: RIGID_FOOTNOTE_MIN_FONT_PT,

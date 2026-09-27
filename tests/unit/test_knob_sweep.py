@@ -17,8 +17,12 @@ from types import ModuleType
 import pytest
 
 from ubt.core.policy.layout_policy import (
+    FIT_MIN_FONT_PT,
     PUNCT_SQUEEZE_CAP,
     PUNCT_SQUEEZE_PER_PUNCT,
+    RIGID_CAPTION_MIN_FONT_PT,
+    RIGID_FOOTNOTE_MIN_FONT_PT,
+    RIGID_MIN_FONT_PT,
     ROW_MERGE_GAP_PT,
     ROW_MERGE_Y_TOL,
     SHORT_CHAIN_MAX_PAGES,
@@ -43,8 +47,12 @@ sweep = _load()
 def test_scanner_finds_every_override_point_and_agrees_with_the_module() -> None:
     """A knob listed as sweepable must hold the same value the live module exports."""
     live = {
+        "FIT_MIN_FONT_PT": FIT_MIN_FONT_PT,
         "PUNCT_SQUEEZE_CAP": PUNCT_SQUEEZE_CAP,
         "PUNCT_SQUEEZE_PER_PUNCT": PUNCT_SQUEEZE_PER_PUNCT,
+        "RIGID_CAPTION_MIN_FONT_PT": RIGID_CAPTION_MIN_FONT_PT,
+        "RIGID_FOOTNOTE_MIN_FONT_PT": RIGID_FOOTNOTE_MIN_FONT_PT,
+        "RIGID_MIN_FONT_PT": RIGID_MIN_FONT_PT,
         "ROW_MERGE_GAP_PT": ROW_MERGE_GAP_PT,
         "ROW_MERGE_Y_TOL": ROW_MERGE_Y_TOL,
         "SHORT_CHAIN_MAX_PAGES": SHORT_CHAIN_MAX_PAGES,

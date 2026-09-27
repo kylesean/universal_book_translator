@@ -10,7 +10,7 @@ Validates:
 6. Debt ratchet: the god functions may not silently grow (raise consciously).
 7. Packaging hygiene: the sdist must not ship a dangling link or symlink.
 
-Restored after commit 0492c7d ("drop the repo-scanning lint guards") which had
+Restored after a change that dropped the repo-scanning lint guards and had
 removed the automated clean-room evidence. This file is that evidence: it
 proves UBT never imports AGPL PDF engines (BabelDOC/PyMuPDF/pdf2zh) and keeps
 the hexagonal core/adapters boundary by AST, not by convention alone.

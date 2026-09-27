@@ -2,7 +2,7 @@
 """A/B render equivalence: pdf_oxide ``render_page`` vs poppler ``pdftoppm``.
 
 Gate for stage 2 of the pdf_oxide adoption plan (assessment doc since removed;
-`git show 62fcd75^:docs/PDF_OXIDE_ADOPTION_ASSESSMENT_2026-09-19.md` §5.1):
+its §5.1 required this check):
 the two rasterizers must agree on output size (proves the ``-r N`` ==
 ``dpi=N`` scale assumption that svg_diagram's crop math depends on) and be
 perceptually close (different rasterization stacks hint/antialias differently,
