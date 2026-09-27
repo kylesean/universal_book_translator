@@ -256,11 +256,22 @@ def test_prose_to_typst_handles_spaced_inline_latex_and_single_digit_math() -> N
     assert "Gamma" in out
 
 
-def test_repeated_trailing_equation_numbers_are_stripped() -> None:
+def test_equation_number_is_stripped_only_after_an_explicit_separator() -> None:
+    """A parenthesized tail is stripped only when a separator precedes it.
+
+    Commit 32111ed narrowed the tail rule: a space-only tail may be content
+    (``f(x) = (1 - x)``), so only ``\\quad`` / ``\\qquad`` / ``\\\\`` followed by
+    a bare number is an equation number. A bare ``(3.2)`` with only a space
+    before it is deliberately left alone.
+    """
     from ubt.adapters.pdf.typst_math import _clean_ocr_formula
 
-    assert _clean_ocr_formula("f(x) = 1 (1)  (2)  (3)  ") == "f(x)=1"
-    assert _clean_ocr_formula("v = a + b \\\\ (2.14) \\\\") == "v = a + b \\\\"
+    # Explicit separator -> the trailing equation number is removed.
+    assert _clean_ocr_formula("E = mc^2 \\quad (3.2)") == "E = mc^2"
+    assert _clean_ocr_formula("E = mc^2 \\\\ (3.2) \\\\") == "E = mc^2"
+    # No separator -> the parenthesized tail is content and survives.
+    assert _clean_ocr_formula("f(x) = (1 - x)") == "f(x) = (1 - x)"
+    assert _clean_ocr_formula("f(x) = 1 (1)  (2)  (3)") == "f(x) = 1 (1)  (2)  (3)"
     assert _clean_ocr_formula("E = mc^2") == "E = mc^2"
 
 

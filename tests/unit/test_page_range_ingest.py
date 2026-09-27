@@ -87,7 +87,7 @@ def test_pdfium_extraction_filters_to_page_range(monkeypatch: pytest.MonkeyPatch
         )
         for page in (1, 2, 3, 4)
     ]
-    monkeypatch.setattr(adapter, "_extract_with_pdfium", lambda _path: blocks)
+    monkeypatch.setattr(adapter, "_extract_with_pdfium", lambda _path, _page_range=None: blocks)
 
     filtered = adapter._extract_blocks_sync(Path("sample.pdf"), (2, 3))
     assert [block.bbox.page for block in filtered if block.bbox is not None] == [2, 3]

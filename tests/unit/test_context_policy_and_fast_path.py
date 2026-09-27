@@ -51,7 +51,10 @@ async def test_page_slice_metadata_auto_disables_rolling_summary(tmp_path: Path)
         "# Page 1\n\nContent of scanned page 1.\n\n# Page 2\n\nContent of scanned page 2.\n",
         encoding="utf-8",
     )
-    provider = MockModelProvider(default_response="这是扫描页翻译。")
+    # The source carries page numbers ("Page 1"/"Page 2"); the reply must keep
+    # them, or the numeric fidelity gate quarantines every block and the export
+    # completion floor refuses the job before this test's assertion is reached.
+    provider = MockModelProvider(default_response="第1页与第2页的扫描翻译内容。")
     router = ModelRouter(provider=provider)
 
     class MockSliceAdapter(MarkdownAdapter):
