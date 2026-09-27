@@ -327,7 +327,7 @@ async def test_responses_api_mode_records_usage_and_text() -> None:
         api_key="k",
         base_url="https://opencode.ai/zen/go/v1",
         default_model="muse-spark-1.3-contributor",
-        api_mode="responses",
+        api_mode="openai-responses",
         transport=httpx.MockTransport(handler),
     )
     out = await provider.generate("hello", system_prompt="sys")
@@ -355,7 +355,7 @@ async def test_responses_api_mode_error_payload_raises() -> None:
     provider = OpenAICompatibleProvider(
         api_key="k",
         base_url="https://x/v1",
-        api_mode="responses",
+        api_mode="openai-responses",
         transport=httpx.MockTransport(handler),
     )
     with pytest.raises(ModelProviderError):
@@ -398,7 +398,8 @@ async def test_responses_api_mode_recovers_on_400_reasoning_effort() -> None:
         api_key="k",
         base_url="https://opencode.ai/zen/go/v1",
         default_model="muse-spark-1.3-contributor",
-        api_mode="responses",
+        api_mode="openai-responses",
+        reasoning_dialect="flat",
         transport=httpx.MockTransport(handler),
     )
     out = await provider.generate("hello", reasoning_effort="low")
@@ -443,7 +444,7 @@ async def test_responses_api_mode_passes_minimal_reasoning_directly() -> None:
         api_key="k",
         base_url="https://opencode.ai/zen/v1",
         default_model="muse-spark-1.3-contributor-free",
-        api_mode="responses",
+        api_mode="openai-responses",
         transport=httpx.MockTransport(handler),
     )
     out = await provider.generate("hello", reasoning_effort="minimal")

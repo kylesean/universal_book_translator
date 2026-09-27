@@ -7,9 +7,13 @@
 # 本地 llama-swap 网关（127.0.0.1:9090），模型名须与 config.yaml 的 models: 键一致。
 # provider 不写后端端口：后端按需加载并分配临时端口。
 
+# OpenCode Zen /go/ 拒收无 x-opencode-session 的请求；用通用 extra_headers 表达。
+[providers.opencode]
+extra_headers = { "x-opencode-session" = "${OPENCODE_SESSION_ID}" }
+
 [providers.local-gemma4]
 base_url = "http://127.0.0.1:9090/v1"
-api_mode = "chat"
+api_mode = "openai-chat"
 draft_model = "gemma4-e4b"
 repair_model = "gemma4-e4b"
 # 后端以 --reasoning off 运行，显式带上同样开关避免客户端默认打开。
@@ -17,12 +21,12 @@ chat_template_kwargs = { enable_thinking = false }
 
 [providers.local-tg]
 base_url = "http://127.0.0.1:9090/v1"
-api_mode = "chat"
+api_mode = "openai-chat"
 draft_model = "translategemma:4b"
 repair_model = "translategemma:4b"
 
 [providers.local-code]
 base_url = "http://127.0.0.1:9090/v1"
-api_mode = "chat"
+api_mode = "openai-chat"
 draft_model = "bonsai2-27b"
 repair_model = "bonsai2-27b"

@@ -5,7 +5,7 @@ blind by local CometKiwi + Heuristic. Reports cost/quality deltas;
 asserts are lenient sanity floors, the printed table is the evidence.
 
 Run locally with:
-    UBT_OPENCODE_SESSION_ID=<your-session-id> \
+    OPENCODE_SESSION_ID=<your-session-id> \
       uv run pytest tests/integration/test_mt_vs_llm_compare.py -v -s
 """
 
@@ -36,8 +36,9 @@ pytestmark = pytest.mark.slow  # live local MT backend calls
 CLEAN_KWARGS = {"has_terms": False, "has_few_shot": False, "has_masked_spans": False}
 
 requires_zen = pytest.mark.skipif(
-    not (os.getenv("UBT_OPENCODE_SESSION_ID") or os.getenv("OPENCODE_SESSION_ID")),
-    reason="set UBT_OPENCODE_SESSION_ID to route Zen chat calls (see docs)",
+    not os.getenv("OPENCODE_SESSION_ID"),
+    reason="set OPENCODE_SESSION_ID (the variable the opencode provider's "
+    "extra_headers expands) to route Zen calls (see docs)",
 )
 
 
@@ -75,6 +76,9 @@ async def test_mt_vs_llm_paired_report(tmp_path: Path) -> None:
         api_key=cfg.api_key.get_secret_value(),
         base_url=cfg.base_url,
         default_model=cfg.draft_model,
+        api_mode=cfg.api_mode,
+        extra_headers=cfg.extra_headers,
+        reasoning_dialect=cfg.reasoning_dialect,
     )
     llm_router = ModelRouter(
         provider=llm_provider, draft_model=cfg.draft_model, repair_model=cfg.repair_model

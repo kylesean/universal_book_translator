@@ -83,8 +83,12 @@ async def test_zero_friction_three_elements_arbitrary_future_model() -> None:
 
 
 @pytest.mark.asyncio
-async def test_anthropic_wire_protocol_auto_negotiation_and_translation() -> None:
-    """Verify that api.anthropic.com automatically activates native Messages API (/v1/messages)."""
+async def test_an_explicit_anthropic_mode_speaks_the_messages_wire() -> None:
+    """``api_mode="anthropic-messages"`` routes to the native Messages API.
+
+    The host alone used to select the protocol; now the choice is explicit and
+    the endpoint is merely where the request lands.
+    """
     request_bodies: list[dict[str, Any]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -111,6 +115,7 @@ async def test_anthropic_wire_protocol_auto_negotiation_and_translation() -> Non
     provider = create_model_provider(
         api_key="sk-ant-api03-secret",
         base_url="https://api.anthropic.com",
+        api_mode="anthropic-messages",
         default_model="claude-custom-unseen-model",
         transport=httpx.MockTransport(handler),
     )
@@ -167,6 +172,7 @@ async def test_anthropic_temperature_rejection_self_heals() -> None:
     provider = create_model_provider(
         api_key="sk-ant-test",
         base_url="https://api.anthropic.com",
+        api_mode="anthropic-messages",
         default_model="claude-3-7-thinking",
         transport=httpx.MockTransport(handler),
     )

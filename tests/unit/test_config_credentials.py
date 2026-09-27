@@ -140,14 +140,12 @@ def test_canonical_ubt_names_still_resolve(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setenv("UBT_PAGES", "2-4")
     monkeypatch.setenv("UBT_API_TIMEOUT", "42")
     monkeypatch.setenv("UBT_OCR_API_KEY", "ocr-k")
-    monkeypatch.setenv("UBT_OPENCODE_SESSION_ID", "ubt-session")
     cfg = _cfg()
     assert cfg.api_key.get_secret_value() == "sk-llm"
     assert cfg.base_url == "https://canonical.example/v1"
     assert cfg.pages == "2-4"
     assert cfg.api_timeout == 42.0
     assert cfg.ocr_api_key.get_secret_value() == "ocr-k"
-    assert cfg.opencode_session_id == "ubt-session"
 
 
 def test_secondary_prefixed_aliases_still_resolve(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -177,7 +175,8 @@ def test_opencode_provider_reads_the_standard_variable(monkeypatch: pytest.Monke
     cfg = UBTConfig.from_env(provider="opencode")
     assert cfg.api_key.get_secret_value() == "sk-opencode"
     assert cfg.base_url == "https://opencode.ai/zen/go/v1"
-    assert cfg.api_mode == "responses"
+    assert cfg.api_mode == "openai-responses"
+    assert cfg.reasoning_dialect == "flat"
     assert cfg.service_api_key.get_secret_value() == ""
     assert cfg.ocr_api_key.get_secret_value() == ""
 
@@ -212,14 +211,16 @@ def test_third_party_names_are_inert_without_a_provider(monkeypatch: pytest.Monk
     assert cfg.base_url == config_mod._OPENAI_BASE_URL
 
 
-def test_ambient_opencode_session_id_still_resolves(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Risk: ``OPENCODE_SESSION_ID`` is the session variable the opencode CLI
-    exports to child processes — it is a deliberate third-party fallback (never
-    the bare field name) and must keep working behind ``UBT_OPENCODE_SESSION_ID``."""
+def test_the_ambient_opencode_session_variable_is_inert(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The session id is now just an ``extra_headers`` entry, not a config field.
+
+    It used to resolve from the ambient ``OPENCODE_SESSION_ID`` the opencode CLI
+    exports. That third-party fallback is gone, so neither name reaches the
+    config: a provider block carries the header via ``extra_headers`` instead.
+    """
     monkeypatch.setenv("OPENCODE_SESSION_ID", "ambient-session")
-    assert _cfg().opencode_session_id == "ambient-session"
     monkeypatch.setenv("UBT_OPENCODE_SESSION_ID", "explicit-session")
-    assert _cfg().opencode_session_id == "explicit-session"
+    assert "opencode_session_id" not in UBTConfig.model_fields
 
 
 def test_ubt_llm_key_sets_only_outbound(monkeypatch: pytest.MonkeyPatch) -> None:

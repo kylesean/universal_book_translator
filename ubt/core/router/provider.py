@@ -19,11 +19,11 @@ from ubt.core.router.transports.base import (
     _extract_cached_tokens,
     _usage_sink,
     attach_usage_sink,
-    host_is,
     new_usage_totals,
     record_external_usage,
     sanitize_thought_output,
 )
+from ubt.core.router.transports.gemini import GeminiTransport
 from ubt.core.router.transports.openai_chat import OpenAIChatTransport
 from ubt.core.router.transports.openai_responses import OpenAIResponsesTransport
 
@@ -270,13 +270,13 @@ class OpenAICompatibleProvider(BaseModelProvider):
         timeout: float = 60.0,
         provider_name: str = "openai_compatible",
         transport: httpx.AsyncBaseTransport | None = None,
-        api_mode: str = "chat",
+        api_mode: str = "openai-chat",
         sanitize_output: bool = True,
         client: httpx.AsyncClient | None = None,
         limits: httpx.Limits | None = None,
-        opencode_session_id: str | None = None,
         extra_headers: dict[str, str] | None = None,
         chat_template_kwargs: dict[str, Any] | None = None,
+        reasoning_dialect: str = "nested",
         prompt_caching: bool = True,
     ) -> None:
         if isinstance(api_key, SecretStr) or hasattr(api_key, "get_secret_value"):
@@ -292,12 +292,9 @@ class OpenAICompatibleProvider(BaseModelProvider):
         self._timeout = timeout
         self._name = provider_name
         self._transport = transport
-        # Auto-detect Anthropic if base_url points to Anthropic and api_mode is default
-        if host_is(self._base_url, "api.anthropic.com") and api_mode == "chat":
-            api_mode = "anthropic"
-        if default_model.startswith("muse-") and api_mode == "chat":
-            api_mode = "responses"
-        self._api_mode = api_mode  # "chat", "responses", or "anthropic"
+        # The protocol is whatever the caller selected — never inferred from the
+        # endpoint or the model name. See ubt.core.config.ApiMode.
+        self._api_mode = api_mode
         self._sanitize_output = sanitize_output
         self._prompt_caching = prompt_caching
         self._owned_client_ref: httpx.AsyncClient | None = client
@@ -307,11 +304,9 @@ class OpenAICompatibleProvider(BaseModelProvider):
             max_keepalive_connections=20,
             keepalive_expiry=30.0,
         )
-        self._opencode_session_id = (opencode_session_id or "").strip()
         self._extra_headers = dict(extra_headers or {})
-        if self._opencode_session_id:
-            self._extra_headers["x-opencode-session"] = self._opencode_session_id
         self._chat_template_kwargs = chat_template_kwargs or {}
+        self._reasoning_dialect = reasoning_dialect
 
         # Shared token accounting
         self.usage_log: list[dict[str, Any]] = []
@@ -348,6 +343,13 @@ class OpenAICompatibleProvider(BaseModelProvider):
             api_key=self._api_key,
             base_url=self._base_url,
             default_model=self._default_model,
+            reasoning_dialect=self._reasoning_dialect,
+            **shared_kw,
+        )
+        self._gemini_transport = GeminiTransport(
+            api_key=self._api_key,
+            base_url=self._base_url,
+            default_model=self._default_model,
             **shared_kw,
         )
 
@@ -361,16 +363,18 @@ class OpenAICompatibleProvider(BaseModelProvider):
         self._chat_transport._client = value
         self._anthropic_transport._client = value
         self._responses_transport._client = value
+        self._gemini_transport._client = value
 
-    def _select_transport(self, model: str | None = None) -> BaseTransport:
-        target_model = model or self._default_model
-        eff_mode = self._api_mode
-        if target_model.startswith("muse-") and eff_mode == "chat":
-            eff_mode = "responses"
-        if eff_mode == "responses":
+    def _select_transport(self) -> BaseTransport:
+        # The protocol is fixed for the provider's lifetime. It takes no model:
+        # a fallback chain that lands on another model family must not silently
+        # change the wire mid-run.
+        if self._api_mode == "openai-responses":
             return self._responses_transport
-        if eff_mode == "anthropic":
+        if self._api_mode == "anthropic-messages":
             return self._anthropic_transport
+        if self._api_mode == "gemini-native":
+            return self._gemini_transport
         return self._chat_transport
 
     def begin_usage_sink(self) -> dict[str, dict[str, int]]:
@@ -398,6 +402,7 @@ class OpenAICompatibleProvider(BaseModelProvider):
         await self._chat_transport.aclose()
         await self._anthropic_transport.aclose()
         await self._responses_transport.aclose()
+        await self._gemini_transport.aclose()
         if self._owned_client and self._client is not None:
             if not self._client.is_closed:
                 await self._client.aclose()
@@ -468,7 +473,7 @@ class OpenAICompatibleProvider(BaseModelProvider):
         max_tokens: int | None = None,
         reasoning_effort: str | None = None,
     ) -> str:
-        transport = self._select_transport(model)
+        transport = self._select_transport()
         return await transport.generate(
             prompt=prompt,
             system_prompt=system_prompt,
@@ -487,7 +492,7 @@ class OpenAICompatibleProvider(BaseModelProvider):
         max_tokens: int | None = None,
         reasoning_effort: str | None = None,
     ) -> tuple[str, str | None]:
-        transport = self._select_transport(model)
+        transport = self._select_transport()
         return await transport.generate_with_finish_reason(
             prompt=prompt,
             system_prompt=system_prompt,
@@ -506,7 +511,7 @@ class OpenAICompatibleProvider(BaseModelProvider):
         temperature: float | None = 0.0,
         max_tokens: int | None = None,
     ) -> str:
-        transport = self._select_transport(model)
+        transport = self._select_transport()
         return await transport.generate_with_images(
             prompt=prompt,
             images_b64_png=images_b64_png,
@@ -521,7 +526,7 @@ class OpenAICompatibleProvider(BaseModelProvider):
     # ------------------------------------------------------------------
     @property
     def supports_batch_api(self) -> bool:
-        return self._chat_transport.supports_batch_api if self._api_mode == "chat" else False
+        return self._chat_transport.supports_batch_api if self._api_mode == "openai-chat" else False
 
     async def create_batch_job(self, requests: list[dict[str, Any]]) -> str:
         return await self._chat_transport.create_batch_job(requests)
@@ -543,10 +548,9 @@ def create_model_provider(
     api_key: str | SecretStr,
     base_url: str = "https://api.openai.com/v1",
     default_model: str = "deepseek-v4-flash",
-    api_mode: str = "chat",
+    api_mode: str = "openai-chat",
     timeout: float = 60.0,
     transport: httpx.AsyncBaseTransport | None = None,
-    opencode_session_id: str | None = None,
     extra_headers: dict[str, str] | None = None,
     client: httpx.AsyncClient | None = None,
     prompt_caching: bool = True,
@@ -554,13 +558,10 @@ def create_model_provider(
 ) -> OpenAICompatibleProvider:
     """Create an authenticated wire-protocol model provider from credentials.
 
-    Dispatches to OpenAI Chat, Anthropic Messages, or OpenAI Responses
-    protocol based on base_url and api_mode.
+    ``api_mode`` selects one of the four wire protocols; nothing about the
+    endpoint or the model name influences the choice.
     """
     mode_str = api_mode.value if hasattr(api_mode, "value") else str(api_mode)
-    headers = dict(extra_headers or {})
-    if opencode_session_id:
-        headers["x-opencode-session"] = str(opencode_session_id).strip()
 
     return OpenAICompatibleProvider(
         api_key=api_key,
@@ -569,8 +570,7 @@ def create_model_provider(
         timeout=timeout,
         transport=transport,
         api_mode=mode_str,
-        opencode_session_id=opencode_session_id,
-        extra_headers=headers,
+        extra_headers=dict(extra_headers or {}),
         client=client,
         prompt_caching=prompt_caching,
         **kwargs,

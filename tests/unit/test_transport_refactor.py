@@ -37,7 +37,7 @@ async def test_extra_headers_passed_to_requests() -> None:
     provider = create_model_provider(
         api_key="sk-test",
         base_url="https://api.custom-ai.org/v1",
-        api_mode="chat",
+        api_mode="openai-chat",
         extra_headers={
             "x-custom-tenant": "tenant-42",
             "x-request-source": "ubt-engine",
@@ -52,8 +52,13 @@ async def test_extra_headers_passed_to_requests() -> None:
 
 
 @pytest.mark.asyncio
-async def test_opencode_session_id_maps_to_extra_headers_backward_compat() -> None:
-    """Verify legacy opencode_session_id argument seamlessly maps to x-opencode-session header."""
+async def test_extra_headers_carry_an_endpoint_specific_session_id() -> None:
+    """The OpenCode session id is just an ``extra_headers`` entry now.
+
+    It used to be a first-class config field injected as ``x-opencode-session``;
+    a provider block declares it generically instead, so the header travels the
+    same way any other custom header does.
+    """
     captured_headers: dict[str, str] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -69,7 +74,7 @@ async def test_opencode_session_id_maps_to_extra_headers_backward_compat() -> No
     provider = create_model_provider(
         api_key="sk-test",
         base_url="https://api.openai.com/v1",
-        opencode_session_id="ses_abc12345",
+        extra_headers={"x-opencode-session": "ses_abc12345"},
         transport=httpx.MockTransport(handler),
     )
 
@@ -444,6 +449,7 @@ async def test_openai_responses_transport_caches_reasoning_fallback_after_first_
     transport = OpenAIResponsesTransport(
         api_key="test",
         base_url="https://opencode.ai/zen/go/v1",
+        reasoning_dialect="flat",
     )
     sent_payloads: list[dict[str, object]] = []
 
@@ -490,11 +496,86 @@ async def test_openai_responses_transport_caches_reasoning_fallback_after_first_
     assert len(sent_payloads) == 3
 
 
-def test_zen_detection_is_host_based_not_substring() -> None:
-    """``"zen" in base_url`` matched unrelated hosts like api.frozen.example.com."""
-    from ubt.core.router.transports.openai_responses import _is_opencode_zen_endpoint
+@pytest.mark.fast
+@pytest.mark.asyncio
+async def test_the_reasoning_dialect_comes_from_data_not_the_host() -> None:
+    """Two transports on the *same* host must spell an effort differently when
+    their declared dialect differs.
 
-    assert _is_opencode_zen_endpoint("https://opencode.ai/zen/go/v1")
-    assert _is_opencode_zen_endpoint("https://api.opencode.ai/v1")
-    assert not _is_opencode_zen_endpoint("https://api.frozen.example.com/v1")
-    assert not _is_opencode_zen_endpoint("https://zenith.internal/v1")
+    The Zen gateway used to be recognised by hostname and rewritten in the
+    transport; the dialect is now endpoint data, so the host is irrelevant.
+    """
+    from ubt.core.router.transports.openai_responses import OpenAIResponsesTransport
+
+    async def first_payload(dialect: str) -> dict[str, object]:
+        transport = OpenAIResponsesTransport(
+            api_key="test",
+            base_url="https://opencode.ai/zen/go/v1",
+            reasoning_dialect=dialect,
+        )
+        sent: list[dict[str, object]] = []
+
+        async def fake_request_json(
+            _client: object, _url: str, payload: dict[str, object]
+        ) -> object:
+            sent.append(dict(payload))
+            resp = MagicMock()
+            resp.status_code = 200
+            resp.json.return_value = {
+                "output": [{"type": "message", "content": [{"type": "output_text", "text": "ok"}]}]
+            }
+            return resp
+
+        transport._request_json = fake_request_json  # type: ignore[assignment]
+        await transport._generate_responses_meta(
+            prompt="hi",
+            system_prompt=None,
+            target_model="some-model",
+            temperature=0.1,
+            max_tokens=10,
+            reasoning_effort="low",
+        )
+        return sent[0]
+
+    nested = await first_payload("nested")
+    flat = await first_payload("flat")
+    assert nested["reasoning"] == {"effort": "low"}
+    assert "reasoning_effort" not in nested
+    assert flat["reasoning_effort"] == "low"
+    assert "reasoning" not in flat
+
+
+def test_the_protocol_comes_from_api_mode_alone() -> None:
+    """Each of the four protocols maps to its own transport."""
+    from ubt.core.router.provider import OpenAICompatibleProvider
+
+    provider = OpenAICompatibleProvider(api_key="k", base_url="https://x.example/v1")
+    assert provider._select_transport() is provider._chat_transport
+
+    for mode, attr in (
+        ("openai-responses", "_responses_transport"),
+        ("anthropic-messages", "_anthropic_transport"),
+        ("gemini-native", "_gemini_transport"),
+    ):
+        configured = OpenAICompatibleProvider(
+            api_key="k", base_url="https://x.example/v1", api_mode=mode
+        )
+        assert configured._select_transport() is getattr(configured, attr)
+
+
+def test_a_model_name_does_not_switch_the_transport() -> None:
+    """``muse-`` used to upgrade a chat provider to the responses wire.
+
+    A fallback chain that lands on another model family must not silently change
+    protocol mid-run, so a provider whose default model is a ``muse-`` one still
+    speaks the protocol its ``api_mode`` names.
+    """
+    from ubt.core.router.provider import OpenAICompatibleProvider
+
+    provider = OpenAICompatibleProvider(
+        api_key="k",
+        base_url="https://x.example/v1",
+        default_model="muse-spark-1.3-contributor",
+        api_mode="openai-chat",
+    )
+    assert provider._select_transport() is provider._chat_transport

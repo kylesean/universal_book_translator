@@ -51,14 +51,13 @@ if compgen -G "${HF_HUB}/models--*cometkiwi*/snapshots/*/checkpoints/model.ckpt"
     HAS_COMET_WEIGHTS=true
 fi
 
-# The names UBTConfig declares as credentials (ubt/core/config.py api_key
-# aliases). OPENCODE_API_KEY was missing, so a machine authenticated only through
-# it reported "⚠️ Unset" and --compare-live self-skipped.
+# UBT reads UBT_LLM_API_KEY, or the variable named by the selected provider's
+# api_key_env. This is a preflight hint only, so the common vendor names count
+# too.
 HAS_LLM_KEY=false
 if [ -n "${UBT_LLM_API_KEY}" ] || [ -n "${OPENCODE_API_KEY}" ] \
     || [ -n "${OPENAI_API_KEY}" ] || [ -n "${DEEPSEEK_API_KEY}" ] \
-    || [ -n "${ANTHROPIC_API_KEY}" ] || [ -n "${GEMINI_API_KEY}" ] \
-    || [ -n "${UBT_OPENCODE_SESSION_ID}" ]; then
+    || [ -n "${ANTHROPIC_API_KEY}" ] || [ -n "${GEMINI_API_KEY}" ]; then
     HAS_LLM_KEY=true
 fi
 

@@ -7,14 +7,20 @@
 #   export UBT_PROVIDER=anthropic
 #   export UBT_LLM_API_KEY=sk-ant-...
 
+# The four wire protocols: openai-chat | openai-responses | anthropic-messages |
+# gemini-native. Every provider -- gateway, relay, local server -- speaks one of
+# them, so api_mode is the only thing that selects the protocol. Never inferred
+# from the host or the model name.
+
 # A custom OpenAI-compatible endpoint:
 # [providers.my-gateway]
 # base_url = "https://llm.internal.example/v1"
-# api_mode = "chat"            # chat | responses | anthropic
+# api_mode = "openai-chat"
 # api_key_env = "MY_GATEWAY_API_KEY"
 # draft_model = "qwen3-32b"
 # repair_model = "qwen3-32b"
 # api_timeout = 300.0
+# extra_headers = { "x-tenant" = "${MY_TENANT}" }
 
 # [defaults] applies to every run, including a bare UBTConfig.from_env().
 # [defaults]

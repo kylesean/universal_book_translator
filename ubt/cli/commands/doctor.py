@@ -248,9 +248,11 @@ def doctor_command(
         base_clean = config.base_url.strip().rstrip("/")
         headers: dict[str, str] = {}
         if key_str and key_str != MOCK_API_KEY:
-            if "anthropic.com" in base_clean:
+            if config.api_mode == "anthropic-messages":
                 headers["x-api-key"] = key_str
                 headers["anthropic-version"] = "2023-06-01"
+            elif config.api_mode == "gemini-native":
+                headers["x-goog-api-key"] = key_str
             else:
                 headers["Authorization"] = f"Bearer {key_str}"
         headers.update(config.extra_headers)

@@ -47,7 +47,7 @@ def test_anthropic_auth_headers_include_prompt_caching_beta() -> None:
     provider = OpenAICompatibleProvider(
         api_key="sk-ant-test",
         base_url="https://api.anthropic.com",
-        api_mode="anthropic",
+        api_mode="anthropic-messages",
     )
     headers = provider._auth_headers()
     assert headers.get("anthropic-beta") == "prompt-caching-2024-07-31"
@@ -59,7 +59,7 @@ async def test_anthropic_generate_wraps_system_prompt_with_ephemeral_cache() -> 
     provider = OpenAICompatibleProvider(
         api_key="sk-ant-test",
         base_url="https://api.anthropic.com",
-        api_mode="anthropic",
+        api_mode="anthropic-messages",
     )
 
     fake_response = MagicMock(spec=httpx.Response)
@@ -79,7 +79,7 @@ async def test_anthropic_generate_wraps_system_prompt_with_ephemeral_cache() -> 
     provider._client = mock_client
 
     # Exercise the live transport path (the provider's redundant meta shim was
-    # removed): _select_transport routes api_mode="anthropic" here.
+    # removed): _select_transport routes api_mode="anthropic-messages" here.
     text, finish_reason = await provider._anthropic_transport.generate_with_finish_reason(
         prompt="Translate this",
         system_prompt="You are a professional translator.",
@@ -114,7 +114,7 @@ def test_create_model_provider_forwards_prompt_caching_disabled() -> None:
     provider = create_model_provider(
         api_key="sk-ant-test",
         base_url="https://api.anthropic.com",
-        api_mode="anthropic",
+        api_mode="anthropic-messages",
         prompt_caching=False,
     )
     assert provider._prompt_caching is False

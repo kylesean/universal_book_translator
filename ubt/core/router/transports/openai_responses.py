@@ -9,15 +9,9 @@ from ubt.core.exceptions import ModelProviderError
 from ubt.core.router.transports.base import (
     BaseTransport,
     _extract_cached_tokens,
-    host_is,
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _is_opencode_zen_endpoint(base_url: str) -> bool:
-    """Whether ``base_url`` points at the OpenCode Zen gateway (host-based)."""
-    return host_is(base_url, "opencode.ai")
 
 
 class OpenAIResponsesTransport(BaseTransport):
@@ -30,6 +24,7 @@ class OpenAIResponsesTransport(BaseTransport):
         default_model: str = "muse-spark-1.3-contributor",
         timeout: float = 60.0,
         provider_name: str = "openai_responses",
+        reasoning_dialect: str = "nested",
         **kwargs: Any,
     ) -> None:
         super().__init__(
@@ -40,6 +35,10 @@ class OpenAIResponsesTransport(BaseTransport):
             provider_name=provider_name,
             **kwargs,
         )
+        # "nested" spells an effort as ``reasoning: {effort}`` (OpenAI);
+        # "flat" uses ``reasoning_effort`` with a nested-minimal fallback. This
+        # is endpoint data declared on the provider, not host sniffing.
+        self._reasoning_dialect = reasoning_dialect
         self._model_reasoning_mode: dict[str, str] = {}
 
     async def generate(
@@ -129,13 +128,14 @@ class OpenAIResponsesTransport(BaseTransport):
             ) or self._model_reasoning_mode.get("*")
             if cached_mode == "none":
                 pass
-            elif (
-                cached_mode == "nested_minimal"
-                or eff == "minimal"
-                or (eff == "none" and _is_opencode_zen_endpoint(self._base_url))
-            ):
+            elif cached_mode == "nested_minimal" or eff == "minimal":
                 payload["reasoning"] = {"effort": "minimal"}
-            elif _is_opencode_zen_endpoint(self._base_url):
+            elif eff == "none":
+                # ``nested`` omits the field entirely; ``flat`` needs the
+                # nested-minimal form to turn thinking off.
+                if self._reasoning_dialect == "flat":
+                    payload["reasoning"] = {"effort": "minimal"}
+            elif self._reasoning_dialect == "flat":
                 payload["reasoning_effort"] = eff
             else:
                 payload["reasoning"] = {"effort": eff}
@@ -165,7 +165,7 @@ class OpenAIResponsesTransport(BaseTransport):
                     dropped.pop("reasoning", None)
                     return dropped
 
-                if _is_opencode_zen_endpoint(self._base_url):
+                if self._reasoning_dialect == "flat":
                     retry_payload = dict(payload)
                     retry_payload.pop("reasoning_effort", None)
                     retry_payload["reasoning"] = {"effort": "minimal"}

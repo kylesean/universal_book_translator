@@ -208,9 +208,9 @@ class PipelineOrchestrator:
                 default_model=self.config.draft_model,
                 api_mode=self.config.api_mode,
                 timeout=self.config.api_timeout,
-                opencode_session_id=self.config.opencode_session_id,
                 extra_headers=self.config.extra_headers,
                 chat_template_kwargs=self.config.chat_template_kwargs,
+                reasoning_dialect=self.config.reasoning_dialect,
                 prompt_caching=self.config.prompt_caching_enabled,
             )
             repair_provider = provider
@@ -227,14 +227,14 @@ class PipelineOrchestrator:
                     api_key=r_key,
                     base_url=str(r_fields.get("base_url", self.config.base_url)),
                     default_model=str(r_fields.get("repair_model", self.config.repair_model)),
-                    api_mode=str(r_fields.get("api_mode", "chat")),
+                    api_mode=str(r_fields.get("api_mode", self.config.api_mode)),
                     timeout=float(r_fields.get("api_timeout", self.config.api_timeout)),
-                    opencode_session_id=str(
-                        r_fields.get("opencode_session_id", self.config.opencode_session_id)
-                    ),
                     extra_headers=dict(r_fields.get("extra_headers", self.config.extra_headers)),
                     chat_template_kwargs=dict(
                         r_fields.get("chat_template_kwargs", self.config.chat_template_kwargs)
+                    ),
+                    reasoning_dialect=str(
+                        r_fields.get("reasoning_dialect", self.config.reasoning_dialect)
                     ),
                     prompt_caching=bool(
                         r_fields.get("prompt_caching_enabled", self.config.prompt_caching_enabled)

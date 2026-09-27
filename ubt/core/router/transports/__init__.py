@@ -8,6 +8,7 @@ from ubt.core.router.transports.base import (
     record_external_usage,
     sanitize_thought_output,
 )
+from ubt.core.router.transports.gemini import GeminiTransport
 from ubt.core.router.transports.openai_chat import OpenAIChatTransport
 from ubt.core.router.transports.openai_responses import OpenAIResponsesTransport
 
@@ -16,6 +17,7 @@ __all__ = [
     "OpenAIChatTransport",
     "AnthropicMessagesTransport",
     "OpenAIResponsesTransport",
+    "GeminiTransport",
     "new_usage_totals",
     "attach_usage_sink",
     "record_external_usage",

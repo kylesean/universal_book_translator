@@ -58,6 +58,7 @@ class ProviderSpec:
     capability_profile: str | None = None
     supports_temperature: bool | None = None
     supports_reasoning_effort: bool | None = None
+    reasoning_dialect: str | None = None
     repair_provider: str | None = None
 
     def as_fields(self) -> dict[str, Any]:
@@ -77,6 +78,8 @@ class ProviderSpec:
             res["supports_temperature"] = self.supports_temperature
         if self.supports_reasoning_effort is not None:
             res["supports_reasoning_effort"] = self.supports_reasoning_effort
+        if self.reasoning_dialect is not None:
+            res["reasoning_dialect"] = self.reasoning_dialect
         if self.repair_provider is not None:
             res["repair_provider"] = self.repair_provider
         return res
@@ -89,7 +92,7 @@ class ProviderSpec:
 BUILTIN_PROVIDERS: dict[str, ProviderSpec] = {
     "openai": ProviderSpec(
         "https://api.openai.com/v1",
-        "chat",
+        "openai-chat",
         "OPENAI_API_KEY",
         "gpt-4o-mini",
         "o3-mini",
@@ -97,35 +100,34 @@ BUILTIN_PROVIDERS: dict[str, ProviderSpec] = {
     ),
     "anthropic": ProviderSpec(
         "https://api.anthropic.com",
-        "anthropic",
+        "anthropic-messages",
         "ANTHROPIC_API_KEY",
         "claude-3-5-haiku",
         "claude-3-7-sonnet",
         supports_batch_api=True,
     ),
     "gemini": ProviderSpec(
-        "https://generativelanguage.googleapis.com/v1beta/openai",
-        "chat",
+        "https://generativelanguage.googleapis.com/v1beta",
+        "gemini-native",
         "GEMINI_API_KEY",
         "gemini-3.8-flash",
         "gemini-3.1-pro",
-        supports_batch_api=False,
     ),
     "deepseek": ProviderSpec(
         "https://api.deepseek.com/v1",
-        "chat",
+        "openai-chat",
         "DEEPSEEK_API_KEY",
         "deepseek-chat",
         "deepseek-reasoner",
-        supports_batch_api=False,
     ),
     "opencode": ProviderSpec(
         "https://opencode.ai/zen/go/v1",
-        "responses",
+        "openai-responses",
         "OPENCODE_API_KEY",
         "muse-spark-1.3-contributor",
         "muse-spark-1.3-contributor",
-        supports_batch_api=False,
+        cost_per_mtok=(0.0, 0.0),
+        reasoning_dialect="flat",
     ),
 }
 
@@ -146,7 +148,6 @@ PROVIDER_ALLOWED_KEYS = frozenset(
         "chat_template_kwargs",
         "extra_headers",
         "api_timeout",
-        "opencode_session_id",
         "prompt_caching_enabled",
         "supports_batch_api",
         "is_free",
@@ -154,6 +155,7 @@ PROVIDER_ALLOWED_KEYS = frozenset(
         "capability_profile",
         "supports_temperature",
         "supports_reasoning_effort",
+        "reasoning_dialect",
         "repair_provider",
     }
 )
@@ -181,7 +183,11 @@ def find_config_file(custom_path: Path | str | None = None) -> Path | None:
 
 
 def _expand_env_vars(val: Any) -> Any:
-    """Expand ``${VAR}`` / ``${VAR:-default}`` in a string value."""
+    """Expand ``${VAR}`` / ``${VAR:-default}`` in a value, recursing into tables.
+
+    A table value (``extra_headers``, ``chat_template_kwargs``) is expanded too,
+    so a header can name its variable: ``{ "x-opencode-session" = "${SID}" }``.
+    """
     if isinstance(val, str):
 
         def _repl(m: re.Match[str]) -> str:
@@ -190,6 +196,10 @@ def _expand_env_vars(val: Any) -> Any:
             return os.environ.get(var, default)
 
         return re.sub(r"\$\{([A-Za-z0-9_]+)(:-([^}]*))?\}", _repl, val)
+    if isinstance(val, Mapping):
+        return {str(k): _expand_env_vars(v) for k, v in val.items()}
+    if isinstance(val, list):
+        return [_expand_env_vars(v) for v in val]
     return val
 
 

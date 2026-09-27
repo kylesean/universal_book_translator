@@ -15,10 +15,9 @@ Design contract:
   via ``api_key_env``, and the precedence ladder in :mod:`ubt.core.providers`
   resolves it; ``UBT_LLM_API_KEY`` is the generic override that outranks any
   provider-specific variable. The settings source accepts only ``UBT_*`` names
-  (plus the ambient ``OPENCODE_SESSION_ID``), and pins ``api_key`` /
-  ``service_api_key`` to their one declared variable, so a bare or third-party
-  name in the process environment can never hijack the outbound credential, the
-  endpoint, or the inbound gate.
+  and pins ``api_key`` / ``service_api_key`` to their one declared variable, so a
+  bare or third-party name in the process environment can never hijack the
+  outbound credential, the endpoint, or the inbound gate.
 - No credential is ever scraped from another program: an outbound key resolves
   only from ``UBT_LLM_API_KEY``, a selected provider's ``api_key_env``, or the
   ``"mock-key"`` placeholder for dry-run / tests. Explicit env always wins — the
@@ -46,7 +45,9 @@ from pydantic_settings import (
     SettingsConfigDict,
 )
 
-ApiMode = Literal["chat", "responses", "anthropic"]
+#: The four LLM wire protocols UBT speaks. A provider is just an endpoint that
+#: speaks one of them — vendor identity never selects the protocol.
+ApiMode = Literal["openai-chat", "openai-responses", "anthropic-messages", "gemini-native"]
 # Deliberately open, unlike its Literal neighbours: the valid set is
 # _PDF_ENGINE_REGISTRY (plus "auto"), which in-process registrations
 # extend at runtime. Enumerating it here would be a second source of truth to drift.
@@ -141,22 +142,6 @@ def _default_api_key() -> SecretStr:
     return SecretStr(MOCK_API_KEY)
 
 
-def _url_hostname(url: str) -> str:
-    """Lowercased hostname of a URL, tolerating a missing scheme.
-
-    Endpoint-family detection must be host-based: a bare
-    ``"api.anthropic.com" in base_url`` also matched a host like
-    ``api.anthropic.com.evil.example``.
-    """
-    candidate = (url or "").strip()
-    if "://" not in candidate:
-        candidate = "https://" + candidate
-    try:
-        return (urlsplit(candidate).hostname or "").lower()
-    except ValueError:
-        return ""
-
-
 def packaged_comet_script() -> Path:
     """Absolute path to the packaged CometKiwi scorer, independent of cwd.
 
@@ -234,9 +219,9 @@ class UBTEnvSettingsSource(EnvSettingsSource):
     ``api_key`` would read ``UBT_API_KEY`` (the inbound gate's name) and
     ``service_api_key`` would read the retired ``UBT_SERVICE_API_KEY``. Those two
     resolve only from their declared alias. Every other field is limited to
-    ``UBT_*`` — plus the one deliberate ambient fallback ``OPENCODE_SESSION_ID``
-    — so a bare or third-party name in the process environment can never hijack
-    the outbound credential, the endpoint, the inbound gate, or the page filter.
+    ``UBT_*``, so a bare or third-party name in the process environment can never
+    hijack the outbound credential, the endpoint, the inbound gate, or the page
+    filter.
     """
 
     #: Credential fields whose prefix-generated name collides with another name,
@@ -251,11 +236,7 @@ class UBTEnvSettingsSource(EnvSettingsSource):
         pinned = self._ALIAS_ONLY.get(field_name)
         if pinned is not None:
             return [(k, env, is_c) for k, env, is_c in info if env.upper() == pinned]
-        return [
-            (k, env, is_c)
-            for k, env, is_c in info
-            if env.upper().startswith("UBT_") or env.upper() == "OPENCODE_SESSION_ID"
-        ]
+        return [(k, env, is_c) for k, env, is_c in info if env.upper().startswith("UBT_")]
 
 
 class UBTConfig(BaseSettings):
@@ -303,7 +284,7 @@ class UBTConfig(BaseSettings):
         default=_OPENAI_BASE_URL,
         validation_alias="UBT_BASE_URL",
     )
-    api_mode: ApiMode = "chat"
+    api_mode: ApiMode = "openai-chat"
     provider: str | None = Field(default=None, validation_alias="UBT_PROVIDER")
     repair_provider: str | None = Field(default=None, validation_alias="UBT_REPAIR_PROVIDER")
     supports_batch_api: bool = False
@@ -312,6 +293,10 @@ class UBTConfig(BaseSettings):
     capability_profile: str | None = None
     supports_temperature: bool | None = None
     supports_reasoning_effort: bool | None = None
+    # How the responses protocol spells a reasoning effort: "nested" is
+    # ``reasoning: {effort}`` (OpenAI); "flat" is ``reasoning_effort`` with a
+    # nested-minimal fallback (OpenCode Zen). Endpoint data, never host sniffing.
+    reasoning_dialect: str = "nested"
     # Chat-template flags forwarded verbatim into the chat request body for
     # llama.cpp / vLLM style servers (e.g. {"enable_thinking": false}). Populated
     # from a provider block's ``chat_template_kwargs`` table.
@@ -760,14 +745,6 @@ class UBTConfig(BaseSettings):
     allowed_dir: str = ""
     model_profiles_json: str = ""
     model_profiles_file: str = ""
-    # Empty by default: the router only sends the ``x-opencode-session`` header
-    # when this is set, so a bare config never fabricates a session id. Set
-    # ``UBT_OPENCODE_SESSION_ID`` (or the ambient ``OPENCODE_SESSION_ID`` the
-    # opencode CLI exports) to pin one.
-    opencode_session_id: str = Field(
-        default="",
-        validation_alias=AliasChoices("UBT_OPENCODE_SESSION_ID", "OPENCODE_SESSION_ID"),
-    )
 
     # -- Human PE (HITL) queue: MQM severity triage + post-editing ---------------
     # MQM severity triage (Critical -> escalated repair / BLOCKED_HUMAN;
@@ -943,20 +920,6 @@ class UBTConfig(BaseSettings):
                 "refusing to reuse one secret for both."
             )
 
-        # Provider URL normalization & protocol auto-detection
-        raw_base = self.base_url.strip()
-        if raw_base.lower() == "gemini":
-            self.base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
-        elif _url_hostname(raw_base) == "generativelanguage.googleapis.com":
-            base_clean = raw_base.rstrip("/")
-            if not base_clean.endswith("/openai"):
-                if base_clean.endswith("/v1beta"):
-                    self.base_url = f"{base_clean}/openai"
-                elif base_clean in (
-                    "https://generativelanguage.googleapis.com",
-                    "http://generativelanguage.googleapis.com",
-                ):
-                    self.base_url = f"{base_clean}/v1beta/openai"
         # The base URL selects where the bearer token goes, so a malformed one
         # must fail when the config is parsed — not as an httpx error on the
         # first request, and not as a silent no-op for a non-http scheme.
@@ -970,31 +933,6 @@ class UBTConfig(BaseSettings):
                 "llama.cpp/Ollama server use http://127.0.0.1:11434/v1, and write an IPv6 "
                 "host in brackets: http://[::1]:11434/v1)."
             )
-        # api_mode is derived from the endpoint and the model family, but only
-        # when the caller did not choose it. The derivation must not be sticky:
-        # ``apply_config_overrides`` assigns one field at a time, so a derived
-        # value recorded in ``model_fields_set`` would block re-derivation when
-        # a later override moves off a muse- model or onto the Anthropic
-        # endpoint (the api_mode latch — a chat-only model then went out on the
-        # Responses wire). Assign, then drop the derived marker so the next
-        # pass recomputes from the new inputs; an explicit api_mode is never in
-        # play here because the guard skips it.
-        if "api_mode" not in self.model_fields_set:
-            derived_api_mode: ApiMode = "chat"
-            # Only the draft model decides the wire. A muse *repair* model is
-            # still routed to Responses per call by
-            # ``Provider._select_transport`` (it upgrades muse->responses), but
-            # letting it force the whole provider onto Responses sent a
-            # non-muse draft model there too, where the endpoint 404s.
-            if self.draft_model.startswith("muse-"):
-                derived_api_mode = "responses"
-            # Anthropic wins when both signals hold, ensuring the endpoint
-            # check takes priority over the model prefix.
-            if _url_hostname(self.base_url) == "api.anthropic.com":
-                derived_api_mode = "anthropic"
-            if derived_api_mode != self.api_mode:
-                self.api_mode = derived_api_mode
-                self.model_fields_set.discard("api_mode")
 
         # Dynamic custom pricing & free endpoint registration
         if self.is_free and self.base_url:

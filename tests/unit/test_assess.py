@@ -308,12 +308,13 @@ def test_empty_file_raises_empty_file(tmp_path: Path) -> None:
 
 
 def test_macro_chunking_and_batch_api_discount(md_book: Path) -> None:
-    single = assess_document(md_book, _config(macro_chunk_size=1, api_mode="chat"))
-    batched = assess_document(md_book, _config(macro_chunk_size=5, api_mode="chat"))
+    single = assess_document(md_book, _config(macro_chunk_size=1, api_mode="openai-chat"))
+    batched = assess_document(md_book, _config(macro_chunk_size=5, api_mode="openai-chat"))
     assert batched.cost.prompt_tokens < single.cost.prompt_tokens
 
     offline_batch = assess_document(
-        md_book, _config(offline_batch_enabled=True, api_mode="chat", macro_chunk_size=1)
+        md_book,
+        _config(offline_batch_enabled=True, api_mode="openai-chat", macro_chunk_size=1),
     )
     assert any(w.code == "BATCH_DISCOUNT_APPLIED" for w in offline_batch.warnings)
     assert offline_batch.cost.draft_cost_usd_uncached is not None
@@ -328,15 +329,16 @@ def test_batch_quote_follows_the_route_that_can_actually_batch(md_book: Path) ->
     and falls back to interactive full price, and one request per block cannot
     amortise the prompt prefix the way macro chunking does.
     """
-    interactive = assess_document(md_book, _config(macro_chunk_size=1, api_mode="chat"))
+    interactive = assess_document(md_book, _config(macro_chunk_size=1, api_mode="openai-chat"))
     responses = assess_document(
-        md_book, _config(offline_batch_enabled=True, api_mode="responses", macro_chunk_size=1)
+        md_book,
+        _config(offline_batch_enabled=True, api_mode="openai-responses", macro_chunk_size=1),
     )
     assert any(w.code == "BATCH_DISCOUNT_UNAVAILABLE" for w in responses.warnings)
     assert responses.cost.draft_cost_usd_uncached == interactive.cost.draft_cost_usd_uncached
 
     batched = assess_document(
-        md_book, _config(offline_batch_enabled=True, api_mode="chat", macro_chunk_size=5)
+        md_book, _config(offline_batch_enabled=True, api_mode="openai-chat", macro_chunk_size=5)
     )
     assert batched.cost.prompt_tokens >= interactive.cost.prompt_tokens
 

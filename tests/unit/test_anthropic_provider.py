@@ -40,7 +40,7 @@ async def test_anthropic_generate_success_and_headers() -> None:
     provider = OpenAICompatibleProvider(
         api_key="sk-ant-test-key",
         base_url="https://api.anthropic.com",
-        api_mode="anthropic",
+        api_mode="anthropic-messages",
         default_model="claude-3-5-sonnet-20241022",
         transport=httpx.MockTransport(handler),
     )
@@ -100,7 +100,7 @@ async def test_anthropic_cache_creation_tokens_are_counted_in_the_prompt() -> No
     provider = OpenAICompatibleProvider(
         api_key="sk-ant-test-key",
         base_url="https://api.anthropic.com",
-        api_mode="anthropic",
+        api_mode="anthropic-messages",
         default_model="claude-3-5-sonnet-20241022",
         transport=httpx.MockTransport(handler),
     )
@@ -129,7 +129,7 @@ async def test_anthropic_truncation_detection() -> None:
     provider = OpenAICompatibleProvider(
         api_key="sk-ant-test-key",
         base_url="https://api.anthropic.com",
-        api_mode="anthropic",
+        api_mode="anthropic-messages",
         transport=httpx.MockTransport(handler),
     )
 
@@ -146,7 +146,7 @@ async def test_anthropic_rate_limit_429() -> None:
     provider = OpenAICompatibleProvider(
         api_key="sk-ant-test-key",
         base_url="https://api.anthropic.com",
-        api_mode="anthropic",
+        api_mode="anthropic-messages",
         transport=httpx.MockTransport(handler),
     )
 
@@ -177,7 +177,7 @@ async def test_anthropic_vision_call() -> None:
     provider = OpenAICompatibleProvider(
         api_key="sk-ant-test-key",
         base_url="https://api.anthropic.com",
-        api_mode="anthropic",
+        api_mode="anthropic-messages",
         transport=httpx.MockTransport(handler),
     )
 
@@ -226,7 +226,7 @@ async def test_responses_vision_call() -> None:
     provider = OpenAICompatibleProvider(
         api_key="sk-test",
         base_url="https://opencode.ai/zen/go/v1",
-        api_mode="responses",
+        api_mode="openai-responses",
         transport=httpx.MockTransport(handler),
     )
     res = await provider.generate_with_images(
@@ -264,7 +264,7 @@ async def test_anthropic_maps_reasoning_effort_to_a_thinking_budget() -> None:
     provider = OpenAICompatibleProvider(
         api_key="sk-ant-test-key",
         base_url="https://api.anthropic.com",
-        api_mode="anthropic",
+        api_mode="anthropic-messages",
         default_model="claude-3-5-sonnet-20241022",
         transport=httpx.MockTransport(handler),
     )

@@ -48,13 +48,6 @@ MODEL_PRICES_USD_PER_MTOK: dict[str, tuple[float, float]] = {
     "deepseek-chat": (0.27, 1.10),
     "deepseek-reasoner": (0.55, 2.19),
     "deepseek": (0.27, 1.10),
-    # OpenCode free tier (zero quota)
-    "opencode/": (0.0, 0.0),
-    "opencode-zen/": (0.0, 0.0),
-    # OpenCode "muse" contributor tier (zero quota). This is the shipped
-    # default draft/repair model, so without an explicit entry the default run
-    # reported "unknown" cost and UBT_BUDGET_USD enforced nothing.
-    "muse-": (0.0, 0.0),
     # Gemini flash family (including 2026 3.x models)
     "gemini-3.8-flash": (0.10, 0.40),
     "gemini-3.1-pro": (1.25, 10.00),
@@ -343,9 +336,9 @@ def has_price_entry(model: str) -> bool:
 
     This answers a model-**name** question only. A self-hosted model is usually
     absent from the table and still free, so anything deciding whether a run's
-    spend is knowable must use :func:`price_is_known` instead. Explicit 0.0
-    cloud entries (``opencode/``, ``muse-``) do count as priced: only a
-    prefix-match miss is unknown pricing.
+    spend is knowable must use :func:`price_is_known` instead. An explicit 0.0
+    entry (shipped in the table, or registered by a provider's ``cost_per_mtok``)
+    does count as priced: only a prefix-match miss is unknown pricing.
     """
     normalized = (model or "").strip().lower()
     candidates = [normalized]

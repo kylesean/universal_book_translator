@@ -197,14 +197,9 @@ async def run(args: argparse.Namespace) -> None:
         base_url=args.base_url,
         default_model=args.draft_model,
         timeout=120.0,
-        provider_name="opencode_zen"
-        if "opencode.ai" in args.base_url
-        else ("deepseek" if "deepseek" in args.base_url else "openai_compatible"),
+        provider_name=config.provider or "openai_compatible",
         api_mode=args.api_mode,
-        # opencode /go/ rejects every request without x-opencode-session, and
-        # this script builds its own provider instead of going through the
-        # pipeline's router, so the session id has to be forwarded by hand.
-        opencode_session_id=config.opencode_session_id,
+        reasoning_dialect=config.reasoning_dialect,
         # Forward the same wire knobs the pipeline's provider gets, or the
         # benchmark measures a different configuration than production (custom
         # gateway headers, vLLM chat-template overrides, prompt caching).
@@ -409,7 +404,11 @@ def build_args(argv: list[str]) -> argparse.Namespace:
     ap.add_argument("--draft-model", default="deepseek-chat")
     ap.add_argument("--repair-model", default="deepseek-chat")
     ap.add_argument("--base-url", default="https://api.deepseek.com")
-    ap.add_argument("--api-mode", default="chat", choices=["chat", "responses"])
+    ap.add_argument(
+        "--api-mode",
+        default="openai-chat",
+        choices=["openai-chat", "openai-responses", "anthropic-messages", "gemini-native"],
+    )
     ap.add_argument("--price-input", type=float, default=None)
     ap.add_argument("--price-cache-hit", type=float, default=None)
     ap.add_argument("--price-output", type=float, default=None)

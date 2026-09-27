@@ -795,7 +795,7 @@ def test_cli_translate_forwards_credentials_and_profile(
             "--base-url",
             "https://generativelanguage.googleapis.com/v1beta/openai",
             "--api-mode",
-            "chat",
+            "openai-chat",
             "--provider",
             "gemini",
         ],
@@ -803,7 +803,7 @@ def test_cli_translate_forwards_credentials_and_profile(
     assert result.exit_code == 0
     assert captured["api_key"] == "sk-custom-cli-key"
     assert captured["base_url"] == "https://generativelanguage.googleapis.com/v1beta/openai"
-    assert captured["api_mode"] == "chat"
+    assert captured["api_mode"] == "openai-chat"
     assert captured["provider"] == "gemini"
 
 

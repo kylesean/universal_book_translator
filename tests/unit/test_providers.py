@@ -53,7 +53,7 @@ def config_toml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         "\n"
         "[providers.custom]\n"
         'base_url = "https://custom.example/v1"\n'
-        'api_mode = "chat"\n'
+        'api_mode = "openai-chat"\n'
         'api_key_env = "CUSTOM_API_KEY"\n'
         'draft_model = "custom-draft"\n'
         'repair_model = "custom-repair"\n',
@@ -92,7 +92,7 @@ def test_user_block_overrides_a_builtin_field(config_toml: Path) -> None:
     # The user changed only the models; the rest still comes from the built-in.
     assert fields["draft_model"] == "gemini-user-draft"
     assert fields["repair_model"] == "gemini-user-repair"
-    assert fields["base_url"] == "https://generativelanguage.googleapis.com/v1beta/openai"
+    assert fields["base_url"] == "https://generativelanguage.googleapis.com/v1beta"
     assert api_key_env == "GEMINI_API_KEY"
 
 
@@ -101,7 +101,7 @@ def test_declared_provider_without_a_builtin_base(config_toml: Path) -> None:
     assert api_key_env == "CUSTOM_API_KEY"
     assert fields == {
         "base_url": "https://custom.example/v1",
-        "api_mode": "chat",
+        "api_mode": "openai-chat",
         "draft_model": "custom-draft",
         "repair_model": "custom-repair",
     }
@@ -112,7 +112,7 @@ def test_provider_block_supports_custom_capabilities_and_pricing(tmp_path: Path)
     path.write_text(
         "[providers.enterprise]\n"
         'base_url = "https://llm.corp.example/v1"\n'
-        'api_mode = "chat"\n'
+        'api_mode = "openai-chat"\n'
         'api_key_env = "CORP_KEY"\n'
         'draft_model = "corp-draft"\n'
         'repair_model = "corp-repair"\n'
@@ -121,7 +121,8 @@ def test_provider_block_supports_custom_capabilities_and_pricing(tmp_path: Path)
         "cost_per_mtok = [0.10, 0.40]\n"
         "supports_batch_api = true\n"
         "supports_temperature = false\n"
-        "supports_reasoning_effort = true\n",
+        "supports_reasoning_effort = true\n"
+        'reasoning_dialect = "flat"\n',
         encoding="utf-8",
     )
     fields, api_key_env = load_provider_block("enterprise", path)
@@ -132,12 +133,28 @@ def test_provider_block_supports_custom_capabilities_and_pricing(tmp_path: Path)
     assert fields["repair_provider"] == "anthropic"
     assert fields["supports_temperature"] is False
     assert fields["supports_reasoning_effort"] is True
+    assert fields["reasoning_dialect"] == "flat"
 
 
 def test_builtin_providers_batch_api_flags() -> None:
     assert BUILTIN_PROVIDERS["openai"].supports_batch_api is True
     assert BUILTIN_PROVIDERS["gemini"].supports_batch_api is False
     assert BUILTIN_PROVIDERS["deepseek"].supports_batch_api is False
+
+
+def test_builtin_gemini_speaks_the_native_protocol() -> None:
+    """Gemini's preset points at its own API, not the OpenAI-compat facade."""
+    spec = BUILTIN_PROVIDERS["gemini"]
+    assert spec.api_mode == "gemini-native"
+    assert spec.base_url == "https://generativelanguage.googleapis.com/v1beta"
+
+
+def test_builtin_opencode_declares_its_reasoning_dialect_and_zero_cost() -> None:
+    """Endpoint quirks travel as data, not as hostname branches in the transport."""
+    spec = BUILTIN_PROVIDERS["opencode"]
+    assert spec.api_mode == "openai-responses"
+    assert spec.reasoning_dialect == "flat"
+    assert spec.cost_per_mtok == (0.0, 0.0)
 
 
 def test_unknown_provider_raises_and_lists_available(config_toml: Path) -> None:
@@ -179,16 +196,20 @@ def test_block_expands_environment_references(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("TEST_URL_ENV", "https://expanded.example/v1")
+    monkeypatch.setenv("TEST_SESSION_ENV", "ses_42")
     path = tmp_path / "config.toml"
     path.write_text(
         "[providers.envtest]\n"
         'base_url = "${TEST_URL_ENV}"\n'
-        'draft_model = "${TEST_MODEL_ENV:-fallback-model}"\n',
+        'draft_model = "${TEST_MODEL_ENV:-fallback-model}"\n'
+        'extra_headers = { "x-session" = "${TEST_SESSION_ENV}" }\n',
         encoding="utf-8",
     )
     fields, _ = load_provider_block("envtest", path)
     assert fields["base_url"] == "https://expanded.example/v1"
     assert fields["draft_model"] == "fallback-model"
+    # Table values expand too, so a header can name the variable it reads from.
+    assert fields["extra_headers"] == {"x-session": "ses_42"}
 
 
 def test_defaults_block_is_validated_and_never_names_a_credential(tmp_path: Path) -> None:
@@ -285,7 +306,7 @@ def test_generic_llm_key_outranks_the_provider_variable(
 def test_from_env_applies_defaults_then_the_provider_block(config_toml: Path) -> None:
     cfg = UBTConfig.from_env(provider="gemini")
     assert cfg.api_timeout == 42.0  # from [defaults]
-    assert cfg.base_url == "https://generativelanguage.googleapis.com/v1beta/openai"
+    assert cfg.base_url == "https://generativelanguage.googleapis.com/v1beta"
     assert cfg.draft_model == "gemini-user-draft"
     assert cfg.repair_model == "gemini-user-repair"
 

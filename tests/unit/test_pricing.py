@@ -173,27 +173,42 @@ def test_free_tier_models_are_priced_zero_not_unknown() -> None:
         )
         == 0.0
     )
-    # A genuinely free CLOUD tier stays a price-table entry (OpenCode zen).
+    # A namespaced id prices as its bare segment, so a gateway prefix needs no
+    # price-table row of its own.
     assert has_price_entry("opencode/deepseek-v4-flash")
+    assert resolve_model_prices("opencode/deepseek-v4-flash") == (0.14, 0.55)
     assert not has_price_entry("brand-new-model-9000")
     # The fake model-name entries are removed, not merely shadowed.
     assert not has_price_entry("ollama/llama3")
     assert not has_price_entry("localhost")
 
 
-def test_shipped_default_muse_model_is_priced_zero() -> None:
-    """The default draft/repair model must resolve to an explicit free entry.
+def test_the_opencode_provider_declares_its_models_free() -> None:
+    """A zero price now comes from the provider's ``cost_per_mtok``, not a prefix.
 
-    With no price-table entry the default run reported "unknown" cost, so
-    UBT_BUDGET_USD silently enforced nothing out of the box.
+    The ``muse-`` / ``opencode/`` price-table prefixes were vendor sniffing in
+    the pricing layer. The built-in provider declares the cost as data instead,
+    and ``_check_invariants`` registers it for its draft/repair models, so the
+    budget gate still sees a known (zero) price.
     """
-    assert has_price_entry("muse-spark-1.3-contributor")
-    assert (
-        estimate_cost_usd(
-            {"muse-spark-1.3-contributor": {"prompt_tokens": 1000, "completion_tokens": 200}}
+    from ubt.core.config import UBTConfig
+    from ubt.core.router.pricing import reset_custom_pricing
+
+    try:
+        reset_custom_pricing()
+        # Without the provider selected, the shipped model has no price entry.
+        assert not has_price_entry("muse-spark-1.3-contributor")
+
+        UBTConfig.from_env(provider="opencode")
+        assert has_price_entry("muse-spark-1.3-contributor")
+        assert (
+            estimate_cost_usd(
+                {"muse-spark-1.3-contributor": {"prompt_tokens": 1000, "completion_tokens": 200}}
+            )
+            == 0.0
         )
-        == 0.0
-    )
+    finally:
+        reset_custom_pricing()
 
 
 def test_unpriced_model_without_usage_does_not_poison_the_total() -> None:

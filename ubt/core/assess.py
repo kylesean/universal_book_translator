@@ -486,7 +486,7 @@ def _build_cost(
     # draft line in half against a spend that never got the discount.
     batch_discount = (
         BATCH_API_DISCOUNT
-        if batch_requested and str(getattr(config, "api_mode", "chat")) == "chat"
+        if batch_requested and str(getattr(config, "api_mode", "openai-chat")) == "openai-chat"
         else 1.0
     )
     if batch_requested and batch_discount >= 1.0:
@@ -494,7 +494,7 @@ def _build_cost(
             AssessmentWarning(
                 "BATCH_DISCOUNT_UNAVAILABLE",
                 "warn",
-                "已请求批量 API，但当前 api_mode 不是 chat（批处理仅支持 "
+                "已请求批量 API，但当前 api_mode 不是 openai-chat（批处理仅支持 "
                 "chat/completions 线路）；草稿按交互全价估算。",
             )
         )
