@@ -1605,7 +1605,7 @@ async def test_pipeline_finalize_runs_before_export_completed_break(
 ) -> None:
     """finalize_job and TM writeback must run before EXPORT_COMPLETED is yielded to callers."""
     output_file = tmp_path / "final_test.md"
-    config = UBTConfig(db_dir=str(tmp_path))
+    config = UBTConfig(db_dir=tmp_path)
     provider = MockModelProvider(default_response="这是中文测试翻译。")
     router = ModelRouter(provider=provider, draft_model="mock-draft", repair_model="mock-repair")
     qe = MockQERunner(default_score=0.88)

@@ -1908,7 +1908,7 @@ async def test_cjk_output_token_budget_not_underestimated() -> None:
     router = ModelRouter(provider=provider, draft_model="d")
     cjk_text = "这是一段很长的中文文本，包含大量的汉字。" * 100  # 2300 chars
     src_tokens = count_text_tokens(cjk_text)
-    block = IRBlock(id="b1", spine_index=0, page_num=1, order_in_page=1, source_text=cjk_text)
+    block = IRBlock(id="b1", spine_index=0, source_text=cjk_text)
 
     await router.draft(block)
 

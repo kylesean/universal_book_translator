@@ -154,8 +154,6 @@ def test_render_fidelity_uses_unrotated_frame_on_rotated_page(tmp_path: Path) ->
     block = IRBlock(
         id="b1",
         spine_index=0,
-        page_num=1,
-        order_in_page=1,
         source_text="Sample text",
         bbox=BoundingBox(page=1, x0=10, y0=10, x1=150, y1=80),
     )
