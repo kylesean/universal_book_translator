@@ -134,3 +134,32 @@ def test_compute_render_fidelity_measures_whole_page_without_blocks() -> None:
     stats = compute_render_fidelity(pdf, pdf, [], dpi=72, max_pages=2)
     assert stats["pages_measured"] > 0
     assert stats["non_text_diff_ratio"] == 0.0
+
+
+def test_render_fidelity_uses_unrotated_frame_on_rotated_page(tmp_path: Path) -> None:
+    """A /Rotate page must use mediabox coordinates and unrotated raster for fidelity diffing."""
+    pypdf = pytest.importorskip("pypdf")
+    pytest.importorskip("pypdfium2")
+    from ubt.adapters.pdf.render_fidelity import compute_render_fidelity
+    from ubt.core.ir.models import BoundingBox, IRBlock
+
+    pdf_path = tmp_path / "rot90.pdf"
+    writer = pypdf.PdfWriter()
+    page = writer.add_blank_page(width=200, height=100)
+    page.rotate(90)
+    with pdf_path.open("wb") as handle:
+        writer.write(handle)
+
+    # Block covering x0=10, y0=10, x1=150, y1=80 in unrotated 200x100 space
+    block = IRBlock(
+        id="b1",
+        spine_index=0,
+        page_num=1,
+        order_in_page=1,
+        source_text="Sample text",
+        bbox=BoundingBox(page=1, x0=10, y0=10, x1=150, y1=80),
+    )
+    stats = compute_render_fidelity(pdf_path, pdf_path, [block], dpi=72, max_pages=1)
+    assert stats["pages_measured"] == 1
+    assert stats["non_text_diff_ratio"] == 0.0
+    assert stats["masked_coverage_ratio"] > 0.5

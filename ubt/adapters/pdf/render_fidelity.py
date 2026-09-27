@@ -64,6 +64,7 @@ def render_page_to_pil(
     doc: Any,
     page_index: int,
     dpi: int,
+    rotation: int = 0,
 ) -> PILImage.Image:
     """Rasterize one page (0-based) of an open pdfium doc to an RGB PIL image.
 
@@ -72,7 +73,7 @@ def render_page_to_pil(
     """
     page = doc[page_index]
     try:
-        bitmap = page.render(scale=dpi / 72.0)
+        bitmap = page.render(scale=dpi / 72.0, rotation=rotation)
         return cast("PILImage.Image", bitmap.to_pil().convert("RGB"))
     finally:
         page.close()
@@ -222,11 +223,20 @@ def compute_render_fidelity(
                     idx = page_no - 1
                     src_page = src_doc[idx]
                     try:
-                        page_w_pt, page_h_pt = src_page.get_size()
+                        mediabox = src_page.get_mediabox()
+                        page_w_pt = float(mediabox[2]) - float(mediabox[0])
+                        page_h_pt = float(mediabox[3]) - float(mediabox[1])
+                        src_rot = (360 - int(src_page.get_rotation())) % 360
                     finally:
                         src_page.close()
-                    src_img = render_page_to_pil(src_doc, idx, dpi)
-                    art_img = render_page_to_pil(art_doc, idx, dpi)
+                    art_page = art_doc[idx]
+                    try:
+                        art_rot = (360 - int(art_page.get_rotation())) % 360
+                    finally:
+                        art_page.close()
+                    src_img = render_page_to_pil(src_doc, idx, dpi, rotation=src_rot)
+                    art_img = render_page_to_pil(art_doc, idx, dpi, rotation=art_rot)
+
                     scale = dpi / 72.0
                     rects: list[tuple[int, int, int, int]] = []
                     for block in pages_by_no.get(page_no, []):
