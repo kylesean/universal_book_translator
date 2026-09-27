@@ -546,10 +546,27 @@ def column_order(lines: Sequence[LineBox], page_width: float) -> list[LineBox]:
     if best_split is None or best_crossings > 0.25 * len(candidates):
         return sorted(work, key=lambda ln: (-ln.rect[3], ln.rect[0]))
 
-    order = sorted(
-        range(len(work)),
-        key=lambda i: (0 if center(i) < best_split else 1, -work[i].rect[3]),
+    left_cands = [i for i in candidates if center(i) < best_split]
+    right_cands = [i for i in candidates if center(i) >= best_split]
+    top_ceiling = min(
+        max(work[i].rect[3] for i in left_cands), max(work[i].rect[3] for i in right_cands)
     )
+    bottom_floor = max(
+        min(work[i].rect[1] for i in left_cands), min(work[i].rect[1] for i in right_cands)
+    )
+
+    def sort_key(i: int) -> tuple[int, int, float, float]:
+        ln = work[i]
+        # Lines placed above both columns (banners/headings) read first.
+        if ln.rect[1] >= top_ceiling:
+            return (0, 0, -ln.rect[3], ln.rect[0])
+        # Lines placed below both columns (footers/notes) read last.
+        if ln.rect[3] <= bottom_floor:
+            return (2, 0, -ln.rect[3], ln.rect[0])
+        col = 0 if center(i) < best_split else 1
+        return (1, col, -ln.rect[3], ln.rect[0])
+
+    order = sorted(range(len(work)), key=sort_key)
     return [work[i] for i in order]
 
 

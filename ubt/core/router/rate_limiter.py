@@ -130,9 +130,9 @@ class AdaptiveTokenBucket:
             self.tokens = min(self.capacity, self.tokens + elapsed * self.fill_rate)
             self.tpm_tokens = min(self.tpm_capacity, self.tpm_tokens + elapsed * self.tpm_fill_rate)
             self.consecutive_429 += 1
-            if self.consecutive_429 > 1:
-                return
             if (now - self.last_backoff_monotonic) < self.backoff_cooldown_sec:
+                return
+            if self.backoff_cooldown_sec == 0.0 and self.consecutive_429 > 1:
                 return
             self.last_backoff_monotonic = now
             new_rpm = max(float(self.min_rpm), self.capacity * 0.5)
@@ -433,10 +433,10 @@ class SqliteTokenBucket(AdaptiveTokenBucket):
             now = time.time()
             self._refill(state, now, last_update)
             state.consecutive_429 += 1
-            if state.consecutive_429 > 1:
+            if (now - state.last_backoff) < self.backoff_cooldown_sec:
                 self._store(conn, state, now)
                 return
-            if (now - state.last_backoff) < self.backoff_cooldown_sec:
+            if self.backoff_cooldown_sec == 0.0 and state.consecutive_429 > 1:
                 self._store(conn, state, now)
                 return
             state.last_backoff = now

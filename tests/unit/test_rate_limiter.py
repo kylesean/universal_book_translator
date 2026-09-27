@@ -454,3 +454,23 @@ async def test_sqlite_token_bucket_has_async_thread_offloaded_reporters(tmp_path
         await bucket.report_success_async()
         assert spy_to_thread.call_count == 2
     bucket.close()
+
+
+@pytest.mark.fast
+def test_repeated_429_after_cooldown_halves_capacity_again() -> None:
+    """Repeated 429s after the backoff cooldown window must continue multiplicative decrease.
+
+    A 429 episode only debounces concurrent reports within backoff_cooldown_sec.
+    When a provider continues to throttle after the cooldown window, capacity must
+    continue halving toward min_rpm rather than getting stuck.
+    """
+    bucket = AdaptiveTokenBucket(
+        initial_rpm=100,
+        min_rpm=10,
+        backoff_cooldown_sec=0.05,
+    )
+    bucket.report_429()
+    assert bucket.capacity == 50.0
+    time.sleep(0.06)
+    bucket.report_429()
+    assert bucket.capacity == 25.0

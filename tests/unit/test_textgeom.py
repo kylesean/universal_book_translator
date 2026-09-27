@@ -33,6 +33,8 @@ def test_centered_banner_does_not_bridge_two_columns() -> None:
     assert [t for t in order if t in {"R0", "R1"}] == ["R0", "R1"], order
     # No interleaving: every left-column line precedes every right-column line.
     assert order.index("L1") < order.index("R0"), order
+    # Banner placed above both columns must be read before the columns.
+    assert order.index("TITLE") < order.index("L0"), order
 
 
 def test_two_columns_read_left_before_right() -> None:
