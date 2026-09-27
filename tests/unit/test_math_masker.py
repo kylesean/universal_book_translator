@@ -263,7 +263,7 @@ def test_unmask_checked_tolerates_checksumless_echo() -> None:
 
 
 def test_dropping_one_of_two_identical_math_is_flagged_missing() -> None:
-    """§10.4-3: a checker that fails closed must not open on duplicate spans.
+    """A checker that fails closed must not open on duplicate spans.
 
     Two identical ``$x^2$`` mask to two tokens. If the draft drops one entirely,
     the surviving copy used to vouch for both (global ``original in restored``),

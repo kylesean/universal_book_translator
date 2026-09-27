@@ -1,4 +1,4 @@
-"""M2: rigid margin-reclaim geometry (pure, no PDF/Typst)."""
+"""Rigid margin-reclaim geometry (pure, no PDF/Typst)."""
 
 from __future__ import annotations
 

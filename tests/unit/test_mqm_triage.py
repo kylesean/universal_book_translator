@@ -703,7 +703,7 @@ def test_mqm_span_annotator_numeric_discrepancy() -> None:
 
 
 def test_mqm_span_annotator_ignores_thousands_separator_variance() -> None:
-    """§10.4-8: '1,234' vs '1234' is one figure, not a numeric error.
+    """'1,234' vs '1234' is one figure, not a numeric error.
 
     span_repair used to diff raw strings, so a locale-thousands difference was
     escalated critical while consistency.py already treated it equal — the same

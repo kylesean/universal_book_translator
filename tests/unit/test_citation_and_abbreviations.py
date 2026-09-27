@@ -52,7 +52,7 @@ class TestCitationMasker:
         assert report.missing == [1]
 
     def test_bare_token_without_checksum_is_not_restored(self) -> None:
-        """Regression M8: an echoed checksum-less token stays masked.
+        """An echoed checksum-less token stays masked.
 
         If the model drops the ``-abc`` suffix (or emits ``CITE_MASK_0001`` as
         ordinary text), restoring it to a real citation could inject the wrong
@@ -188,7 +188,7 @@ class TestAbbreviationStreamMiner:
 
 
 def test_citation_drop_of_one_duplicate_is_flagged_missing() -> None:
-    """§10.4-3: dropping 1 of two identical ``[12]`` must not read as clean.
+    """Dropping 1 of two identical ``[12]`` must not read as clean.
 
     The old ``missing`` predicate used a global ``original not in restored``, so
     one surviving copy vouched for both and the silent loss opened the
@@ -205,7 +205,7 @@ def test_citation_drop_of_one_duplicate_is_flagged_missing() -> None:
 
 
 def test_code_drop_of_one_duplicate_is_flagged_missing() -> None:
-    """Same fail-open, code spans (CODE_REVIEW §10.4-3)."""
+    """Same fail-open, code spans."""
     from ubt.core.cleaners.code_masker import CodeMasker
 
     masker = CodeMasker()
@@ -217,7 +217,7 @@ def test_code_drop_of_one_duplicate_is_flagged_missing() -> None:
 
 
 def test_code_echo_detected_via_duplicated_count() -> None:
-    """§10.4-4: code masker must flag the model emitting a span twice.
+    """Code masker must flag the model emitting a span twice.
 
     Echo twin of the drop check: both tokens restored PLUS a leaked literal
     copy puts the restored count above the token count.
@@ -233,7 +233,7 @@ def test_code_echo_detected_via_duplicated_count() -> None:
 
 
 def test_math_echo_detected_via_duplicated_count() -> None:
-    """§10.4-4: math masker must flag a doubled formula (echo direction)."""
+    """Math masker must flag a doubled formula (echo direction)."""
     from ubt.core.cleaners.math_masker import MathMasker
 
     masker = MathMasker()

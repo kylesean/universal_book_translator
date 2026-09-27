@@ -54,7 +54,7 @@ def _image_only_pdf(dst: Path) -> Path:
 def test_fallback_off_fail_loud_on_textless_book(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Old contract was ``blocks == []`` (the silent-empty-book defect, §10.5-A4)."""
+    """Old contract was ``blocks == []`` (the silent-empty-book defect)."""
     monkeypatch.delenv(FALLBACK_ENV_VAR, raising=False)
     pdf = _image_only_pdf(tmp_path)
     with pytest.raises(DocumentParseError, match="No content could be parsed"):

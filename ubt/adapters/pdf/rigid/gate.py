@@ -76,7 +76,7 @@ def skip_reason(
             return "header_band"
         if y0 < FOOTER_BAND_PT and len(src) < BAND_TEXT_MAX_LEN:
             return "footer_band"
-    # R2: verbatim pairs need no paint. When the pipeline kept the
+    # Verbatim pairs need no paint. When the pipeline kept the
     # source (references/verbatim policy, target == source), emitting a
     # cover would only strip pristine source text and repaint it in the
     # overlay font — readers lose nothing, the page risks everything.

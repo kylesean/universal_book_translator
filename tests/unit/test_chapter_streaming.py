@@ -307,7 +307,7 @@ async def test_chapter_streaming_cancellation(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_hard_task_cancellation_marks_job_cancelled(tmp_path: Path) -> None:
-    """P1-1: task.cancel() (Ctrl-C / server shutdown) must persist a terminal
+    """task.cancel() (Ctrl-C / server shutdown) must persist a terminal
     status. CancelledError is a BaseException, so without a dedicated handler in
     PipelineOrchestrator.run the ``except Exception`` branch never fires, the
     ledger row stays "running", and JobManager counts it forever against

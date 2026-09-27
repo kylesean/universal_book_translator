@@ -44,9 +44,9 @@ from ubt.core.validators.consistency import NumericConsistencyValidator
 pytestmark = pytest.mark.slow  # spawns the local model
 
 # A FIXED corpus, not a sampled one: a baseline is only a regression signal if the
-# inputs are identical across runs. It deliberately covers the failure classes the
-# Review found by inspection — plain numbers (A4), a year, a decimal+unit, a
-# sentence with no numbers at all, and a technical term — so a regression in the
+# inputs are identical across runs. It deliberately covers the failure classes this
+# gate has missed — plain numbers, a year, a decimal+unit, a sentence with no
+# numbers at all, and a technical term — so a regression in the
 # numeric gate or the mask/restore round trip shows up here.
 BASELINE_CORPUS: tuple[str, ...] = (
     "The gate oxide thickness is 2 nanometers.",

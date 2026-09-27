@@ -32,7 +32,7 @@ _ARXIV_RE = re.compile(r"arXiv:\d{4}\.\d+", re.IGNORECASE)
 # uppercase letter or opening quote, never a lowercase verb like "[3] yield...").
 _BRACKET_REF_RE = re.compile(r"^\[\d+\]\s+[A-Z“\"‘'《]")
 _ONLINE_BIB_RE = re.compile(r"\[Online\]\.?\s*Available:\s*https?://", re.IGNORECASE)
-# Label-free bibliography entry (R2): segmentation often drops the "[n]"
+# Label-free bibliography entry: segmentation often drops the "[n]"
 
 # label, so the bracket rule above cannot fire. Two precision-first tiers —
 #   A: multi-author ("et al." or >=2 author-initial tokens) + year + venue;

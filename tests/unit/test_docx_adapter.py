@@ -166,7 +166,7 @@ async def test_docx_blank_paragraphs_do_not_shift_block_ids() -> None:
 
 @pytest.mark.asyncio
 async def test_docx_table_cell_paragraph_index_mirror() -> None:
-    """Regression H3: extraction and render must number cell paragraphs identically.
+    """Extraction and render must number cell paragraphs identically.
 
     Both sides ``enumerate(cell.paragraphs)`` and skip empties *after* computing
     the block id, so an empty leading paragraph consumes an index on both sides.
@@ -251,7 +251,7 @@ async def test_docx_bilingual_render_parses_html_formatting_without_tag_leak() -
 
 @pytest.mark.asyncio
 async def test_docx_render_preserves_angle_bracket_prose_without_content_loss() -> None:
-    """Regression (H1): translated technical prose containing ``List<T>``,
+    """Translated technical prose containing ``List<T>``,
     ``<stdio.h>`` or ``a<b`` must reach the Word paragraph intact instead of
     being swallowed as HTML tags by the run builder, while a genuine inline
     ``<b>`` still becomes a bold run."""
@@ -436,7 +436,7 @@ async def test_docx_footnotes_are_extracted_and_translated(tmp_path: Path) -> No
 
 
 def test_docx_declares_output_suffixes() -> None:
-    """§10.3: an empty output_suffixes means "no validation", so a docx written
+    """An empty output_suffixes means "no validation", so a docx written
     to a .pdf/.txt path reported success on a mislabelled file. The pipeline
     guard (engine/pipeline.py getattr(type(adapter), "output_suffixes")) only
     fires when the adapter declares them."""

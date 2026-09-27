@@ -105,7 +105,7 @@ def test_glossary_consistency_validator() -> None:
 
 
 def test_glossary_expected_side_is_case_and_boundary_tolerant() -> None:
-    """Regression M3: the target side must match like the source side.
+    """The target side must match like the source side.
 
     The expected-rendering check used a bare case-sensitive substring test, so a
     Latin term with an ordinary surrounding space (or different case) was flagged
@@ -707,7 +707,7 @@ def test_superscript_power_is_not_a_lost_number() -> None:
 
 @pytest.mark.fast
 def test_canonicalize_numeric_token_preserves_zero_leading_three_digit_decimals() -> None:
-    """[HIGH-T3-2] 0.125 and 0.500 are decimals, never thousands-separated integers."""
+    """0.125 and 0.500 are decimals, never thousands-separated integers."""
     assert canonicalize_numeric_token("0.125") == "0.125"
     assert canonicalize_numeric_token("0.500") == "0.5"
     assert canonicalize_numeric_token("1.500") == "1500"

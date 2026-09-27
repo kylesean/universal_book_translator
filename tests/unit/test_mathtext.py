@@ -295,7 +295,7 @@ def test_math_probe_normalizes_enclosing_dollars() -> None:
 def test_math_probe_compiles_with_the_configured_binary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """§10.2-#1: the probe must use the same typst as the real compile.
+    """The probe must use the same typst as the real compile.
 
     A probe pinned to PATH ``typst`` while the document honors
     ``UBT_TYPST_BINARY`` reports a false negative for every formula whenever

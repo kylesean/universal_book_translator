@@ -109,7 +109,7 @@ class FlakyOnceProvider(MockModelProvider):
             # NOTE: deliberately NOT a 429/rate-limit message: those trigger
             # the router's 429 backoff (1s+) and rate-limiter penalty, which
             # would make this unit test sleep ~50s. A plain timeout exercises
-            # the draft-stage retry (H3) without the slow path.
+            # the draft-stage retry without the slow path.
             raise ModelProviderError("transient timeout")
         return await super().generate(
             prompt,
@@ -149,7 +149,7 @@ def test_draft_retries_transient_failures(tmp_path: Path) -> None:
     ledger = SQLiteJobLedger(tmp_path / "flaky.sqlite")
     seed_job(ledger, "job_flaky", _make_doc(4), target_lang="zh")
     provider = FlakyOnceProvider()
-    # max_retries=0: exercise the draft-stage retry (H3), not the router's.
+    # max_retries=0: exercise the draft-stage retry, not the router's.
     router = ModelRouter(provider=provider, draft_model="mock", max_retries=0)
 
     asyncio.run(
@@ -311,7 +311,7 @@ class FailFastRouter(ModelRouter):
 
 
 def test_draft_does_not_retry_fail_fast_errors(tmp_path: Path) -> None:
-    """A 401 is unrecoverable; the outer draft loop must not multiply it (N4)."""
+    """A 401 is unrecoverable; the outer draft loop must not multiply it."""
     ledger = SQLiteJobLedger(tmp_path / "failfast.sqlite")
     seed_job(ledger, "job_ff", _make_doc(1), target_lang="zh")
     provider = PoisonProvider()
@@ -391,7 +391,7 @@ class JobLevelFailFastRouter(ModelRouter):
 
 
 def test_draft_fail_fast_circuit_aborts_job(tmp_path: Path) -> None:
-    """P1-2: consecutive non-retryable failures must trip a job-level breaker.
+    """Consecutive non-retryable failures must trip a job-level breaker.
 
     Without it, a bad credential makes every one of a book's blocks walk the
     draft retry chain for nothing; with it, the draft stage aborts after the

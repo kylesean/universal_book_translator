@@ -174,7 +174,7 @@ def test_cancel_queued_vs_running(queue: JobQueue) -> None:
 def test_cancel_while_running_then_worker_dies_requeues_as_cancelled(
     queue: JobQueue,
 ) -> None:
-    """§10.3-#3: a cancel during a crashed run must not be silently dropped.
+    """A cancel during a crashed run must not be silently dropped.
 
     The user cancels while the job is RUNNING (flag set), then the worker dies
     and its lease lapses. Reclaiming must honour the cancel — the old path
@@ -246,7 +246,7 @@ def test_position_and_depth(queue: JobQueue) -> None:
 
 
 def test_enqueue_refuses_past_the_depth_cap(tmp_path: Path) -> None:
-    """Intake is bounded; resubmitting a known id stays idempotent (review-2 X6).
+    """Intake is bounded; resubmitting a known id stays idempotent.
 
     ``claim`` caps how many jobs run at once, not how many pile up, so an
     uncapped ``enqueue`` let ``POST /jobs/submit`` in a loop grow the queue's

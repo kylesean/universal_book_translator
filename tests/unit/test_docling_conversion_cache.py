@@ -125,7 +125,7 @@ def test_second_ingest_reuses_the_cached_conversion(
 def test_asset_dir_lives_under_the_cache_root_and_follows_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """§10.5-A6: ledger IMAGE blocks store these paths, so they must share the
+    """Ledger IMAGE blocks store these paths, so they must share the
     cache's home — deletable together, resumable together — and a redirected
     cache must redirect its assets too (read at call time, not import time)."""
     sha = "ab" * 32

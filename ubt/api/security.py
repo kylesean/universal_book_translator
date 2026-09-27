@@ -206,7 +206,7 @@ def resolve_secure_path(
        a whitelisted secret file on purpose, not by bug.
 
     Component matching is casefolded: ``.SSH`` and ``.ssh`` are the same
-    directory on a case-insensitive filesystem (review L1).
+    directory on a case-insensitive filesystem.
     """
     path_str = str(raw_path).strip()
     if not path_str:

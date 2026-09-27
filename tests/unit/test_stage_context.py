@@ -32,7 +32,7 @@ async def test_current_blocks_cache_and_invalidation(tmp_path: Path) -> None:
 
     # A ledger write moves the block revision, so the snapshot above is no
     # longer answerable: the next default read comes from the database. This is
-    # the 2026-09 review P1-11 contract — a stage must not need to remember to
+    # the contract — a stage must not need to remember to
     # refresh after another stage wrote blocks.
     ledger.save_checkpoint("b1", status=BlockStatus.MTQE_PASSED, target_text="Target 1")
     refreshed = await ctx.current_blocks()

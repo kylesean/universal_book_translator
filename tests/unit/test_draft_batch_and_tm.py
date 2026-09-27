@@ -248,7 +248,7 @@ def test_router_batch_wraps_provider_errors() -> None:
 
 
 def test_router_batch_transport_failure_keeps_batch_id_for_abandon() -> None:
-    """P1-7: when a batch was already created and a later transport call fails,
+    """When a batch was already created and a later transport call fails,
     the repacked BatchTranslationError must carry batch_id, or draft.py cannot
     abandon_batch and the submitted job keeps billing while interactive drafting
     re-translates (double-charges) the same blocks."""

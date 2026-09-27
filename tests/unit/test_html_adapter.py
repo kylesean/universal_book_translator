@@ -167,7 +167,7 @@ async def test_html_missing_file_raises(tmp_path: Path) -> None:
 
 
 def test_html_declares_output_suffixes() -> None:
-    """§10.3: HTMLAdapter must declare its output suffixes so the pipeline
+    """HTMLAdapter must declare its output suffixes so the pipeline
     extension guard rejects writing HTML to a non-HTML path (see docx twin)."""
     assert HTMLAdapter.output_suffixes == frozenset({".html", ".htm"})
 
@@ -281,7 +281,7 @@ async def test_html_adapter_monolingual_keeps_multiple_paragraphs() -> None:
 
 
 async def test_html_adapter_preserves_angle_bracket_prose() -> None:
-    """Regression (H1): translated technical prose containing ``List<T>``,
+    """Translated technical prose containing ``List<T>``,
     ``<stdio.h>`` or ``a<b`` must survive to the output instead of being
     swallowed as (illegal/unpaired) HTML tags, while a genuine inline ``<b>``
     still renders as bold."""

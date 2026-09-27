@@ -164,7 +164,7 @@ async def test_repair_mode_retranslates_only_the_drifted_block(
 
 @pytest.mark.asyncio
 async def test_repair_mode_skips_human_and_failed_blocks(tmp_path: Path) -> None:
-    """P1-5: a resumed ledger may already hold BLOCKED_HUMAN / NEEDS_HUMAN /
+    """A resumed ledger may already hold BLOCKED_HUMAN / NEEDS_HUMAN /
     FAILED blocks whose target is a quarantine placeholder (or a rejected
     draft). Re-translating them and stamping REPAIRED would drop them out of
     the human queue (triage later re-reads only REPAIR_PENDING/FAILED), letting

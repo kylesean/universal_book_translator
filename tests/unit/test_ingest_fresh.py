@@ -317,7 +317,7 @@ async def test_resume_with_non_object_metadata_raises_ledger_error(tmp_path: Pat
 
 @pytest.mark.asyncio
 async def test_ingest_fresh_restarts_with_a_different_page_selection(tmp_path: Path) -> None:
-    """--fresh must also lift the selected-pages resume guard (2026-09 review B3).
+    """--fresh must also lift the selected-pages resume guard.
 
     The selection is part of the resume identity like the chapter window:
     changing it without --fresh refuses instead of silently re-exporting the
@@ -497,7 +497,7 @@ async def test_resume_after_hash_unavailable_does_not_clear_translated_blocks(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Regression (P0-2 / 2026-09 review): when hashing fails at ingest the
+    """Regression: when hashing fails at ingest the
     job must record the ``fingerprint_unavailable`` sentinel, and a later
     resume whose hash *succeeds* must NOT be treated as "crashed mid-ingest"
     (which cleared every block and re-billed a fully translated book)."""

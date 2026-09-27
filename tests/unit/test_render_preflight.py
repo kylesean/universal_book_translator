@@ -174,7 +174,7 @@ def test_unrelated_exception_propagates_uncaught() -> None:
 
 @pytest.mark.asyncio
 async def test_internal_not_implemented_error_is_not_a_legacy_fallback(tmp_path: Path) -> None:
-    """Only the base stub's signal means "legacy adapter" (review-2 X16).
+    """Only the base stub's signal means "legacy adapter".
 
     The export stage fell back to the legacy ``render_output`` contract on any
     ``NotImplementedError``, so one raised *inside* a working adapter's render

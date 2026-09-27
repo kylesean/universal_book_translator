@@ -1,4 +1,4 @@
-"""Guards for the monotone progress projection (2026-09-22 review round).
+"""Guards for the monotone progress projection.
 
 The old display numerator was ``completed + drafted``: it read 100% while the
 draft stage was still running and fell back to ``0/12 0%`` on the export event

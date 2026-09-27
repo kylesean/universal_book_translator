@@ -191,7 +191,7 @@ async def test_sse_stream_emits_terminal_event_in_queue_mode(
 
 
 def test_queue_subscriber_counter_caps_per_job() -> None:
-    """Queue mode needs the same subscriber ceiling as embedded (review-2 X5).
+    """Queue mode needs the same subscriber ceiling as embedded.
 
     Every open stream polls the queue from a worker thread once a second, so N
     subscribers occupy N threads of the shared default executor and stall every

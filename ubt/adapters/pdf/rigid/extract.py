@@ -79,7 +79,7 @@ def extract_pages(
                 continue
             rotation = _page_rotation(pdf, page_no)
             if rotation:
-                # M4: a rotated page's coordinate frames disagree with pdfium
+                # A rotated page's coordinate frames disagree with pdfium
                 # text rects, so rigid cannot place it. Demote just this page to
                 # source-visible (its blocks get no zone → a no_zone skip) rather
                 # than aborting the whole render; the rest of the book still ships

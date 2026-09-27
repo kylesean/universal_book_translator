@@ -699,7 +699,7 @@ _r0921_ZH = "那只敏捷的棕色狐狸跃过河边懒狗。"
 def test_tm_pool_revalidates_per_pair_not_whole_cache(tmp_path: Path) -> None:
     """Per-pair generations replaced the whole-cache clear, because of its cost.
 
-    This test pinned the opposite choice (review 2026-09-21 §6.1): ``PRAGMA
+    This test pinned the opposite choice: ``PRAGMA
     data_version`` moves on any connection's commit — including the ``use_count``
     bump both lookup paths write — and every cached pool was dropped on that
     signal. It was defended as churn because "real pools are small". Measured on

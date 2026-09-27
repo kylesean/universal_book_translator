@@ -320,7 +320,7 @@ def test_vlm_fallback_fail_loud_on_empty_book(
 ) -> None:
     """A scanned PDF with OCR off/unavailable must raise, not export an empty book.
 
-    User-visible failure prevented (review §10.5-A4): the old contract handed
+    User-visible failure prevented: the old contract handed
     zero blocks downstream, every stage "succeeded" on nothing, and --strict
     counters all read zero while the job reported completion.
     """
@@ -343,7 +343,7 @@ def test_vlm_proofread_keeps_table_image_formula_blocks(
 ) -> None:
     """A weak/all upgrade must not delete the originals it cannot re-create.
 
-    User-visible failure prevented (review §10.5-A1): proofread used to swap
+    User-visible failure prevented: proofread used to swap
     the whole page for VLM narrative blocks, vaporizing TABLE/IMAGE/FORMULA
     blocks together with their skip flags — tables evaporated and upgraded
     titles were re-typed as body text.
@@ -431,7 +431,7 @@ def test_vlm_circuit_breaker_stops_billing_after_failures(
 ) -> None:
     """Three failed paid calls must break the loop, not bill all N pages.
 
-    User-visible failure prevented (review §10.5-A3): a dead endpoint or
+    User-visible failure prevented: a dead endpoint or
     revoked key burned its provider timeout once per page across a whole
     scanned book, with no document-level stop.
     """
@@ -456,7 +456,7 @@ def test_vlm_circuit_breaker_stops_billing_after_failures(
 def test_auto_mode_warns_before_selecting_paid_engine(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """A silent auto pick of a paid vision model is a surprise bill (§10.5-A3)."""
+    """A silent auto pick of a paid vision model is a surprise bill."""
     import sys
 
     monkeypatch.setenv("OPENAI_API_KEY", "sk-proj-test")

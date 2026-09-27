@@ -73,7 +73,7 @@ class JobManager:
         self.rate_limiter = rate_limiter
 
     def create_job(self, request: JobSubmitRequest, job_id: str | None = None) -> JobRecord:
-        # H9: cap concurrent running jobs — each job is a full pipeline with
+        # Cap concurrent running jobs — each job is a full pipeline with
         # provider connections; an unbounded intake would exhaust memory and
         # hammer the translation provider's rate limits.
         running = sum(
@@ -172,7 +172,7 @@ class JobManager:
                 # Update state: one fold, one owner (ubt.core.engine.progress).
                 record.progress = ProgressSnapshot.from_event(event)
 
-                # Fan-out event to active subscribers (non-blocking, H8)
+                # Fan-out event to active subscribers (non-blocking)
                 for sub_q in list(record.subscribers):
                     self._enqueue(sub_q, event)
             record.status = JobStatus.COMPLETED
@@ -191,7 +191,7 @@ class JobManager:
             logger.exception("Job %s failed: %s", record.job_id, exc)
             record.error = f"{type(exc).__name__} (see server logs; job_id={record.job_id})"
         finally:
-            # Broadcast termination sentinel (non-blocking, H8)
+            # Broadcast termination sentinel (non-blocking)
             for sub_q in list(record.subscribers):
                 self._enqueue(sub_q, None)
 

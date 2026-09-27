@@ -212,7 +212,7 @@ def test_pipeline_wiring_judge_enabled() -> None:
 
 
 def test_build_judge_prompts_labels_both_languages() -> None:
-    """P1-6: the source language must not be hardcoded to 'en'."""
+    """The source language must not be hardcoded to 'en'."""
     from ubt.core.qe.llm_judge import build_judge_prompts
 
     _, user = build_judge_prompts("Bonjour", "こんにちは", target_lang="ja", source_lang="fr")
@@ -223,7 +223,7 @@ def test_build_judge_prompts_labels_both_languages() -> None:
 
 @pytest.mark.asyncio
 async def test_tiered_with_languages_rebinds_judge() -> None:
-    """P1-6: TieredQERunner.with_languages previously rebound only the heuristic
+    """TieredQERunner.with_languages previously rebound only the heuristic
     and passed the judge through, so a non-en/zh run judged with a mislabeled
     (en/zh) prompt. The judge must be rebound too."""
     captured: list[str] = []

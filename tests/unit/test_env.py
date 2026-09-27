@@ -1,7 +1,7 @@
 """``subprocess_env``: the credential denylist handed to every external binary.
 
-Review 2026-09-19 §7.1 H-2: typst/node/pandoc/pdftocairo/the COMET scorer all
-inherit the parent environment, so the spawn sites pass ``env=subprocess_env()``
+Every external binary (typst/node/pandoc/pdftocairo/the COMET scorer) inherits
+the parent environment, so the spawn sites pass ``env=subprocess_env()``
 instead. The two properties that matter are *secrets are stripped* and *the
 child still works* — an allowlist would satisfy the first by breaking the
 second, which is why these tests pin both directions.
@@ -32,8 +32,8 @@ SAMPLE = {
     "DB_PASSWORD": "pw",
     "APP_PASSWD": "pw",
     "OAUTH_CLIENT_SECRET": "cs",
-    # `*SECRET_KEY` matched neither the markers nor the `_SECRET` suffix before
-    # review-2 X32, so a Django/Rails-style key reached every child spawn.
+    # `*SECRET_KEY` used to match neither the markers nor the `_SECRET` suffix,
+    # so a Django/Rails-style key reached every child spawn.
     "DJANGO_SECRET_KEY": "cs",
     "GH_CREDENTIALS": "cred",
     "SLACK_API_TOKEN": "xoxp-parent",
@@ -68,7 +68,7 @@ def test_functional_names_survive(sample_env: None) -> None:
 
 
 def test_secret_key_shaped_names_are_stripped(sample_env: None) -> None:
-    """``*SECRET_KEY`` is a credential too (review-2 X32).
+    """``*SECRET_KEY`` is a credential too.
 
     The markers covered ``API_KEY``/``ACCESS_KEY``/``PRIVATE_KEY`` and the
     suffixes covered ``_SECRET``, so ``DJANGO_SECRET_KEY`` — a ``_KEY`` name that

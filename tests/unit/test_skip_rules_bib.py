@@ -1,4 +1,4 @@
-"""R2: label-free bibliography detection (references stay in English).
+"""Label-free bibliography detection (references stay in English).
 
 Industry standard (GB/T 7714 practice, "外文文献一般对原始文献不作翻译"):
 author names, venues, publishers, years, pages, and DOIs are never

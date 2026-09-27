@@ -37,7 +37,7 @@ def test_factory_defaults_to_docling_for_pdf() -> None:
     assert isinstance(get_adapter_for_path("paper.pdf", pdf_engine="docling"), DoclingPDFAdapter)
 
     # The old typst/modern aliases pointed at the same class and made one engine
-    # look like three; they are removed (L7) so they now resolve as unknown.
+    # look like three; they are removed so they now resolve as unknown.
     for alias in ("typst", "modern"):
         with pytest.raises(UnsupportedDocumentFormatError, match="unregistered PDF engine"):
             get_adapter_for_path("paper.pdf", pdf_engine=alias)

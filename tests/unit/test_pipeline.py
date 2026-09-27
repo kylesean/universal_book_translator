@@ -461,7 +461,7 @@ def test_chapter_window_guard_records_then_refuses_a_different_window(tmp_path: 
 def test_page_selection_guard_records_then_refuses_a_different_selection(tmp_path: Path) -> None:
     """``--pages`` needs the same resume guard as the chapter window.
 
-    Regression for the 2026-09 review B3: ingest skips parsing whenever the
+    Regression: ingest skips parsing whenever the
     ledger already holds blocks, so resuming a ``--pages 7-9`` ledger with
     ``--pages 10-12`` (or without ``--pages`` at all) silently re-exported the
     OLD selection while reporting "completed".
@@ -654,7 +654,7 @@ async def test_progress_event_prices_the_job_across_resumes(tmp_path: Path) -> N
 
 @pytest.mark.asyncio
 async def test_repeated_progress_events_do_not_double_count_spend(tmp_path: Path) -> None:
-    """Billing is idempotent against a cumulative snapshot (review-2 X1).
+    """Billing is idempotent against a cumulative snapshot.
 
     ``_run_usage()`` returns this run's *cumulative* usage while
     ``record_job_usage`` writes an absolute figure, so folding the whole of it
@@ -835,7 +835,7 @@ async def test_usage_sinks_split_a_shared_provider_between_concurrent_jobs() -> 
     The API server shares a single provider across concurrent jobs, and cost came
     from process-wide counters diffed against a start-of-run snapshot: every job
     was charged the blended spend of all of them, which both overstated reports
-    and tripped --budget-usd on money another job spent (2026-09 review, P1-8).
+    and tripped --budget-usd on money another job spent.
     """
     import asyncio
 
@@ -905,8 +905,8 @@ async def test_billing_starts_over_after_fresh_discards_the_old_bill(tmp_path: P
 
     ``--fresh`` zeroes the job's recorded usage during ingest; the prior bill used
     to be snapshotted at run() entry, so the first priced event resurrected the
-    numbers the run had just thrown away (2026-09 review, P1-21 moved the read to
-    billing time, after ingest).
+    numbers the run had just thrown away (the read moved to billing time, after
+    ingest).
     """
     from ubt.core.engine.ledger import SQLiteJobLedger
     from ubt.core.engine.usage import bill_job_run
@@ -1206,7 +1206,7 @@ async def test_pipeline_finally_releases_writer_lock_on_ledger_close_failure(
 @pytest.mark.fast
 @pytest.mark.asyncio
 async def test_pipeline_orchestrator_marks_cancelled_on_keyboard_interrupt(tmp_path: Path) -> None:
-    """[HIGH-T4-4] KeyboardInterrupt during pipeline execution must mark job status as 'cancelled'."""
+    """KeyboardInterrupt during pipeline execution must mark job status as 'cancelled'."""
     cfg = UBTConfig(db_dir=tmp_path / "ledgers")
     cfg.db_dir.mkdir(parents=True, exist_ok=True)
     input_file = tmp_path / "book.txt"

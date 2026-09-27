@@ -100,7 +100,7 @@ class CitationMasker:
         wrong checksum (renumbered token) and a checksum-less bare token are both
         left in place: a leftover mask is reported unverified and quarantined,
         whereas silently restoring a citation the model merely echoed back would
-        corrupt the book (M8).
+        corrupt the book.
         """
         result = text
         for token, original in mapping.items():

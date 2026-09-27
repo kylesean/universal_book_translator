@@ -175,7 +175,7 @@ async def test_bible_stage_yields_its_event_both_paths(tmp_path: Path) -> None:
     """The bible stage must yield BIBLE_EXTRACTED on both the fresh-mine and the
     cache-reuse path. The generator's yield is the only progress channel, so a
     consumer that iterates the pipeline must see the event during the
-    multi-minute mining + backfill phase (2026-09 review L13)."""
+    multi-minute mining + backfill phase."""
     from ubt.core.engine.events import EventType
 
     text = "The subthreshold swing degrades near the drain contact."

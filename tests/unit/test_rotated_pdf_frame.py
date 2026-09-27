@@ -4,7 +4,7 @@ pdfium's ``get_rect`` returns unrotated user-space rects while
 ``get_width/height`` return the rotated display size. Mixing them (as the
 geometry layer used to) clips zones and misplaces the anchored overlay. The
 line extractor now reports the unrotated mediabox size, and the rigid
-engine skips rotated pages outright (M4: demote to source-visible, never abort
+engine skips rotated pages outright (demote to source-visible, never abort
 the whole book).
 """
 
@@ -36,7 +36,7 @@ def test_extract_lines_reports_unrotated_mediabox(tmp_path: Path) -> None:
 
 
 def test_extract_pages_skips_rotated_pages(tmp_path: Path) -> None:
-    # M4: a rotated page is demoted to source-visible (omitted from facts),
+    # A rotated page is demoted to source-visible (omitted from facts),
     # NOT a whole-book abort — the rest of the document still renders rigid.
     pdf_path = _make_pdf(tmp_path / "rot270.pdf", rotation=270)
     facts = extract_pages(pdf_path, [1])

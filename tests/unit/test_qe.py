@@ -228,7 +228,7 @@ def test_subprocess_qe_unlabelled_output_is_not_calibrated() -> None:
 
 @pytest.mark.asyncio
 async def test_subprocess_qe_reports_a_missing_script_instead_of_unbound_proc() -> None:
-    """A scorer that never starts must raise MTQEEvaluationError (review-2 X3).
+    """A scorer that never starts must raise MTQEEvaluationError.
 
     ``proc`` used to be bound inside the ``try``, so when
     ``create_subprocess_exec`` itself failed the handlers reaped an unbound name
@@ -350,7 +350,7 @@ def test_heuristic_scores_enforced_term_violation_below_pass() -> None:
     ]
 
     # Without a glossary the altered term is structurally clean — exactly the
-    # Hole the review found (0.92, never judged).
+    # The hole: 0.92 is never judged.
     blind = asyncio.run(HeuristicQERunner().score_pairs(pairs))
     assert blind == [QE_SCORE_PASS, QE_SCORE_PASS]
 

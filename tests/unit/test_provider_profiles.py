@@ -258,7 +258,7 @@ def test_ubt_config_from_env_reads_profile_from_dotenv(
 
 @pytest.mark.fast
 def test_model_profiles_post_forbids_overriding_builtin_profiles() -> None:
-    """[HIGH-T4-5] POST /api/v1/model-profiles must forbid overriding existing/built-in profiles
+    """POST /api/v1/model-profiles must forbid overriding existing/built-in profiles
     (override=False -> 409 Conflict) and require verify_api_key when service_api_key is configured."""
     reg = ModelCapabilityRegistry()
     with pytest.raises(ValueError, match="already"):

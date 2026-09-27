@@ -163,8 +163,8 @@ def extract_pdf_figures(
                     # count_rects with a char range RE-SCOPES the rect array to that
                     # segment: the get_rect(0) below returns the caption hit's own
                     # first rect, NOT the page's first line (verified against
-                    # pypdfium2 with a two-line fixture — a review round misread
-                    # this as systematic caption mis-anchoring; do not "fix" it).
+                    # pypdfium2 with a two-line fixture; reading this as systematic
+                    # caption mis-anchoring is wrong — do not "fix" it).
                     textpage.count_rects(match[0], match[1])
                     r = textpage.get_rect(0)
                     cap_info.append(

@@ -216,7 +216,7 @@ def _r0921_seed_blocks(ledger: SQLiteJobLedger, job_id: str, *blocks: IRBlock) -
 async def test_extraction_witness_forces_a_fresh_block_read(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """P1-5, witness half: this stage fills the cache and mutates flags on disk.
+    """Witness half: this stage fills the cache and mutates flags on disk.
 
     Reading through the default cache handed the *next* stage the pre-witness
     snapshot, so the flags this stage just wrote were invisible to it.

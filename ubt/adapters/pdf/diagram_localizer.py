@@ -263,7 +263,7 @@ class DiagramLocalizer:
         )
         cmd = ["pdftotext", "-bbox", "-f", str(page_no), "-l", str(page_no), str(pdf_path), "-"]
         try:
-            # H6: a wedged pdftotext process must not hang the pipeline forever.
+            # A wedged pdftotext process must not hang the pipeline forever.
             raw_xml = subprocess.check_output(
                 cmd,
                 text=True,

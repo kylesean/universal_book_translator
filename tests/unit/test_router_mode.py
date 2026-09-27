@@ -79,7 +79,7 @@ def test_html_strip_markup_ignores_script_and_style(tmp_path: Path) -> None:
 
 
 def test_non_pdf_token_estimate_is_script_aware(tmp_path: Path) -> None:
-    """A CJK source must not be priced as if it were English (N12).
+    """A CJK source must not be priced as if it were English.
 
     ``_probe_non_pdf`` used ``chars // 4`` (the ASCII rule), under-counting a
     Chinese markdown book by ~3x, so ``ubt assess`` quoted a fraction of the

@@ -1,7 +1,6 @@
 """HierarchicalMemoryManager: step/L3 epoch summarisation.
 
-Originally part of a pre-split phase-2 architecture module, filed under the
-review round that produced it. Nothing else in the suite exercised this class.
+Nothing else in the suite exercised this class.
 """
 
 from __future__ import annotations
@@ -236,8 +235,8 @@ async def test_l3_epoch_stable_across_later_steps() -> None:
     assert len(mgr.epochs) == 2
     # Captured while epoch 1 was still open: later steps must not rewrite it.
     assert mgr.epochs[0].summary_text == closed_epoch_text
-    # get_l3_summary is cumulative across closed epochs (2026-09-24 HIGH-T3-3:
-    # closing a new epoch must not discard the earlier ones), so the closed
+    # get_l3_summary is cumulative across closed epochs (closing a new epoch
+    # must not discard the earlier ones), so the closed
     # epoch's text has to survive in it rather than be replaced by the latest
     # epoch alone.
     cumulative = mgr.get_l3_summary()
@@ -293,7 +292,7 @@ def test_hierarchical_memory_macro_context_spine_boundary() -> None:
 
 @pytest.mark.fast
 def test_hierarchical_memory_get_l3_summary_retains_multi_epoch_history() -> None:
-    """[HIGH-T3-3] get_l3_summary must include earlier epochs (clamped to _MAX_L3_CHARS),
+    """get_l3_summary must include earlier epochs (clamped to _MAX_L3_CHARS),
     not overwrite/discard earlier epochs when a new epoch closes."""
     mem = HierarchicalMemoryManager()
     mem._epochs = [

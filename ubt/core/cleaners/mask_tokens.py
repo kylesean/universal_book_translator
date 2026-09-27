@@ -5,7 +5,7 @@ checksum-tagged token before drafting and verify the echo on restore. The
 integrity machinery — the short checksum, the positional ordering, the
 inversion detector, and the :class:`UnmaskReport` verdict — is mask-agnostic, so
 it lives here rather than being reached into from ``math_masker``'s private
-namespace by its siblings (M5: cross-module private coupling).
+namespace by its siblings.
 """
 
 import hashlib

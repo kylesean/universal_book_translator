@@ -48,7 +48,7 @@ class TestDiagramLocalizerGlossary:
         assert loc.translate_phrase("Layer 3") == "第 3 层"
 
     def test_builtin_glossary_not_applied_to_non_chinese_targets(self) -> None:
-        """§10.5-A8: the EN->ZH vocabulary must not paint Chinese on other targets.
+        """The EN->ZH vocabulary must not paint Chinese on other targets.
 
         The built-in glossary and the Layer formatting are English->Chinese.
         Before the fix a French/Japanese/German target still got '注意力'/'第 2 层',
@@ -231,7 +231,7 @@ class TestLocalizAllDiagrams:
 
 @pytest.mark.fast
 def test_diagram_localizer_unescapes_xml_entities_in_pdftotext_bbox(tmp_path: Path) -> None:
-    """[MEDIUM-T2-3] DiagramLocalizer.extract_text_spans must html.unescape XML entities."""
+    """DiagramLocalizer.extract_text_spans must html.unescape XML entities."""
     localizer = DiagramLocalizer.__new__(DiagramLocalizer)
     localizer.glossary = {"r&d <5v>": "研发 <5V>"}
     sample_xml = (

@@ -272,7 +272,7 @@ _RIGID_REGION_FLOORS: dict[str, float] = {
 
 
 def rigid_min_font_pt_for(layout_role: object, *, default: float = RIGID_MIN_FONT_PT) -> float:
-    """Font floor for a block's region (M2).
+    """Font floor for a block's region.
 
     Body/title/header regions use the body floor; captions and footnotes — the
     source's own small-print regions — may shrink one step further. A block that
@@ -428,7 +428,7 @@ CONT_LABEL_BARRIER_RE = re.compile(
 )
 CONT_LIST_MARKER_RE = re.compile(r"^(\d+[.)、]|[•·\-–—*]|\([a-z0-9]+\))\s+")
 # Leading section number on headings ("1.1 ", "2.2.1 ") — universal numbering
-# the overlay carries over when the translation dropped it (R1).
+# the overlay carries over when the translation dropped it.
 HEADING_NUMBER_RE = re.compile(r"^(\d+(?:\.\d+)*)\s+")
 # Target already numbered: same dotted pattern, or CJK section word up front.
 # ("21世纪" does NOT count — bare digits without dot/space are content.)

@@ -1,11 +1,11 @@
-"""Boundary guard for the mock provider, and the tests it exists for (P1-7).
+"""Boundary guard for the mock provider, and the tests it exists for.
 
 ``MockModelProvider`` lives in the production package because production code
 ships it: ``--dry-run`` rehearsal, the API's mock mode and
 the credential-free cost assessment all assemble a router around it. Relocating
 it to ``tests/`` would therefore break real features.
 
-What the review is right about is the *boundary*: the engine used to answer "is
+The point is the *boundary*: the engine used to answer "is
 this a rehearsal run?" with ``isinstance(provider, MockModelProvider)``, which
 made every production hot path import the test-double class and left the
 distinction implicit. That is now ``BaseModelProvider.is_mock`` — a declared,
@@ -95,7 +95,7 @@ def _module_level_references(path: Path) -> bool:
 
 
 def test_only_the_declared_modules_reference_the_mock_provider() -> None:
-    """The engine asks the contract, never the class (P1-7).
+    """The engine asks the contract, never the class.
 
     Editing the allowlist is the conscious act: adding an entry means a
     production module has taken a hard dependency on simulated text, which is

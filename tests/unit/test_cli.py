@@ -733,7 +733,7 @@ def test_doctor_reports_local_endpoint_as_free_not_unpriced(
 
 
 def test_over_long_job_id_is_refused_on_every_surface() -> None:
-    """The length cap is shared, not API-only (review-2 X34).
+    """The length cap is shared, not API-only.
 
     ``job_options`` claimed "each keeps its own length cap", but only the REST
     API had one. A 100k-char ``--job-id`` became ``<job_id>.sqlite`` and failed
@@ -838,7 +838,7 @@ def test_cli_request_surface_is_recognized_by_job_options(
 def test_translate_rejects_malformed_lang_codes(sample_book_md: Path) -> None:
     """API and MCP reject non-ISO-ish language tags up front; the CLI used
     to pass them into derive_job_id / the ledger file name and fail deep
-    with an opaque sqlite or Typst error (L18)."""
+    with an opaque sqlite or Typst error."""
     for bad in ("zh ;", "../../etc/passwd", "中文"):
         result = runner.invoke(app, ["translate", str(sample_book_md), "-l", bad])
         assert result.exit_code != 0

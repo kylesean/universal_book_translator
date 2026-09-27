@@ -157,7 +157,7 @@ async def test_bilingual_multiparagraph_targets_are_sanitized(tmp_path: Path) ->
     The single-paragraph branches sanitize before DOM injection; the
     ``\\n\\n`` split branches used to set ``new_tag.string`` from raw LLM
     output, so a prompt-injected ``<script>`` or ``onclick=`` survived into
-    the stored EPUB. Regression for CODE_REVIEW 2026-09-19 #4.
+    the stored EPUB.
     """
     epub_file = tmp_path / "mock_book.epub"
     create_mock_epub(epub_file)
@@ -924,7 +924,7 @@ def test_toc_labels_with_anchors_and_subheadings() -> None:
 
 @pytest.mark.fast
 def test_overrides_from_request_blocks_ocr_endpoint_and_epub_locates_single_quoted_opf() -> None:
-    """[MEDIUM-T4-2 & MEDIUM-T2-5] overrides_from_request must block ocr_endpoint when
+    """overrides_from_request must block ocr_endpoint when
     allow_provider_keys=False, and EPUBAdapter._locate_opf must parse single-quoted full-path."""
     with pytest.raises(UBTError, match="ocr_endpoint"):
         overrides_from_request(

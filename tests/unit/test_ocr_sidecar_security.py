@@ -48,7 +48,7 @@ def test_token_required_when_configured(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_ocr_requires_loopback_when_no_token(monkeypatch: pytest.MonkeyPatch) -> None:
-    """M5: the no-token posture must be "loopback only", not "open".
+    """The no-token posture must be "loopback only", not "open".
 
     ``require_token`` used to ``return`` when no token was configured, so
     ``/v1/ocr`` served unauthenticated LAN callers while ``/health`` already
@@ -140,7 +140,7 @@ def test_oversized_upload_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_ocr_offloads_blocking_work_to_threadpool(monkeypatch: pytest.MonkeyPatch) -> None:
-    """§10.5: the model load and inference must not run on the event loop.
+    """The model load and inference must not run on the event loop.
 
     Inline they starve /health and let the container HEALTHCHECK kill a busy
     sidecar. Pin that both get_engine and the inference go through

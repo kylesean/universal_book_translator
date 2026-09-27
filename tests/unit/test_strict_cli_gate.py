@@ -67,7 +67,7 @@ def test_render_skips_fail(tmp_path: Path) -> None:
 
 
 def test_missing_or_malformed_report_fails_the_gate(tmp_path: Path) -> None:
-    """An unverifiable report must fail, not pass (review-2 X22).
+    """An unverifiable report must fail, not pass.
 
     ``--strict`` exists to refuse shipping when integrity cannot be verified.
     Returning ``[]`` for an absent or corrupt report made the gate pass in
@@ -97,7 +97,7 @@ def test_missing_or_malformed_report_fails_the_gate(tmp_path: Path) -> None:
 # survive the command's own broad ``except Exception``. typer.Exit subclasses
 # RuntimeError, so the handler used to swallow the gate's exit and print a
 # second, fabricated JSON object on stdout — breaking the one-JSON-object
-# contract that --json consumers rely on. (2026-09 review B1)
+# contract that --json consumers rely on.
 # ---------------------------------------------------------------------------
 
 runner = CliRunner()
@@ -137,7 +137,7 @@ def test_strict_json_failure_prints_exactly_one_json_object(
 ) -> None:
     """--strict --json must emit ONE object: strict_failed, then exit 1.
 
-    Regression for the 2026-09 review B1: the swallowed typer.Exit printed a
+    Regression: the swallowed typer.Exit printed a
     second {"status": "failed"} line after the strict_failed one.
     """
     result = _run_translate_with_failing_report(tmp_path, monkeypatch, json_output=True)

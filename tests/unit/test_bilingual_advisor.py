@@ -299,7 +299,7 @@ def _r0921_seed_blocks(ledger: SQLiteJobLedger, job_id: str, *blocks: IRBlock) -
 async def test_mode_advisory_forces_a_fresh_block_read(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """P1-5: repair/consistency/triage mutate blocks before this stage reads them.
+    """Repair/consistency/triage mutate blocks before this stage reads them.
 
     The stage used to call ``ctx.current_blocks()`` with the default cache, so it
     scored the post-ingest snapshot. It must pass ``force_refresh=True``, and the

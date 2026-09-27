@@ -365,7 +365,7 @@ def test_dotenv_never_supplies_an_outbound_credential(
 
 
 def test_repair_model_follows_draft_only_when_never_set(monkeypatch: pytest.MonkeyPatch) -> None:
-    """P1-9 invariant owner: when draft_model is configured but repair_model
+    """Invariant owner: when draft_model is configured but repair_model
     never is, repair follows draft (single source: UBTConfig)."""
     monkeypatch.setenv("UBT_LLM_API_KEY", "sk-test")
     monkeypatch.delenv("UBT_REPAIR_MODEL", raising=False)
@@ -376,7 +376,7 @@ def test_repair_model_follows_draft_only_when_never_set(monkeypatch: pytest.Monk
 def test_explicit_repair_model_not_overridden_by_draft(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """P1-9: a request-level draft_model override (what `--draft-model` becomes)
+    """A request-level draft_model override (what `--draft-model` becomes)
     must NOT silently override an explicitly-configured UBT_REPAIR_MODEL. The
     CLI used to pre-mirror draft→repair, making CLI disagree with API/MCP on the
     same request; the mirror is gone and config owns the sync."""
@@ -405,7 +405,7 @@ def test_apply_config_overrides_syncs_repair_model_when_unset() -> None:
 
 @pytest.mark.fast
 def test_service_api_key_is_secret_str_and_masked_in_repr() -> None:
-    """[HIGH-T4-3] UBTConfig.service_api_key must be SecretStr so repr() and str() never leak it."""
+    """UBTConfig.service_api_key must be SecretStr so repr() and str() never leak it."""
     cfg = UBTConfig(service_api_key=SecretStr("top-secret-inbound-gate-key"))
     assert isinstance(cfg.service_api_key, SecretStr)
     assert cfg.service_api_key.get_secret_value() == "top-secret-inbound-gate-key"

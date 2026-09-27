@@ -631,7 +631,7 @@ def test_transcribe_page_bounds_check(tmp_path: Path) -> None:
 def test_vlm_fallback_missing_pages_closes_driver_and_logs_correct_remaining_count(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """[HIGH-T2-1 & MEDIUM-T2-4] vlm_fallback_missing_pages must call driver.close() in finally
+    """vlm_fallback_missing_pages must call driver.close() in finally
     and log len(missing) - idx (not len(missing) - page_no + 1) when circuit breaker trips."""
     pdf_path = tmp_path / "dummy.pdf"
     pdf_path.write_bytes(b"%PDF-1.4\n")

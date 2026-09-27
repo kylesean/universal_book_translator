@@ -1,4 +1,4 @@
-"""Guards for the shared QE-score population policy (2026-09-22 review round).
+"""Guards for the shared QE-score population policy.
 
 The report's ``score_metrics`` excludes skip/TM 1.0 placeholders while the
 ledger's status-side ``AVG(mtqe_score)`` historically did not, so the two
