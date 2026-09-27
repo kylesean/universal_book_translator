@@ -22,7 +22,7 @@ from ubt.core.qe.score_policy import qe_scored_values
 
 #: Bump when QualityReport's serialized shape changes so downstream consumers
 #: can validate schema compatibility.
-QUALITY_REPORT_SCHEMA_VERSION: int = 1
+QUALITY_REPORT_SCHEMA_VERSION: int = 2
 
 
 class ReportSummary(BaseModel):
@@ -101,24 +101,25 @@ class ReportRepairBreakdown(BaseModel):
 
 
 class ReportRenderCoverage(BaseModel):
-    """How much of the completed pipeline actually reached the rendered page.
+    """How much of the pipeline completed, and how much of that was delivered.
 
-    ``pass_rate`` measures pipeline completion (blocks reaching a terminal
-    translated status); render coverage measures delivery (translated blocks
-    minus fail-closed ``render_skip:*`` source-visible留源). The two are
-    equal for reflow engines (publication/Typst — nothing is left in place);
-    they diverge for the overlay engine (rigid) where geometry,
-    policy or overflow keeps source text on the page. Both are reported side
-    by side so ``pass_rate 1.0`` cannot masquerade as full delivery.
+    ``render_coverage`` is the *translation-completion* ratio
+    (``completed / total``), not a pixel/placement measure: for reflow engines
+    (publication/Typst) nothing is left in place so it is also the delivery
+    ratio, while the overlay engine (rigid) can keep source text on the page.
+    Those delivery gaps are carried by ``fail_closed_blocks`` / ``skip_families``
+    (and, for rigid, by the separate per-page render-visibility report) — never
+    folded into this ratio, so a caller that wants "was every translation
+    placed" must read ``fail_closed_blocks`` too.
     """
 
     model_config = ConfigDict(frozen=True)
 
-    rendered_blocks: int  # completed blocks delivered on page (== summary.completed)
+    rendered_blocks: int  # completed blocks (== summary.completed); see fail_closed_blocks
     skipped_blocks: int  # render_skip:* occurrences (fail-closed + intentional)
     fail_closed_blocks: int = 0  # source left visible; a translation could not be placed
     preserved_blocks: int = 0  # chrome/non-prose/policy/footer kept in place by design
-    render_coverage: float  # rendered / total; 1.0 when nothing was skipped
+    render_coverage: float  # completed / total; 1.0 when every block completed
     skip_families: dict[str, int] = Field(default_factory=dict)
 
 
@@ -219,6 +220,11 @@ class QualityReport(BaseModel):
         )
     )
     defect_flags: dict[str, int] = Field(default_factory=dict)
+    #: Spans the deterministic glossary enforcer rewrote before the terminology
+    #: metrics ran. The report measures the *delivered* (enforced) text while the
+    #: translation memory keeps the unenforced draft, so a reader can discount
+    #: this many mechanically-corrected spans when comparing the two.
+    enforced_spans: int = 0
     # Render delivery audit (fail-closed overlay skips vs pipeline completion).
     render_coverage: ReportRenderCoverage = Field(
         default_factory=lambda: ReportRenderCoverage(
@@ -304,6 +310,7 @@ def build_quality_report(
     cache_hit_rate: float | None = None,
     terminology_metrics: ReportTerminologyMetrics | None = None,
     entity_consistency: ReportEntityConsistency | None = None,
+    enforced_spans: int = 0,
 ) -> QualityReport:
     """Analyze all ledger blocks for a job and construct a comprehensive QualityReport.
 
@@ -475,6 +482,7 @@ def build_quality_report(
         ),
         placeholder=compute_placeholder_metrics(all_blocks),
         defect_flags=flag_counts,
+        enforced_spans=enforced_spans,
         render_coverage=ReportRenderCoverage(
             rendered_blocks=rendered_blocks,
             skipped_blocks=skipped_blocks,

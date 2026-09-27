@@ -329,6 +329,7 @@ def _minimal_report(
     name: str,
     metadata: dict[str, object],
     job_metadata: dict[str, object] | None = None,
+    enforced_spans: int = 0,
 ) -> QualityReport:
     """Build a one-block quality report with the given manifest metadata.
 
@@ -385,6 +386,7 @@ def _minimal_report(
         job_id=job_id,
         manifest=manifest,
         output_path=tmp_path / f"{name}.pdf",
+        enforced_spans=enforced_spans,
     )
 
 
@@ -400,12 +402,12 @@ def test_quality_report_carries_schema_version_and_top_level_avg_qe(tmp_path: Pa
 
     # schema_version: field on the model, filled by build_quality_report,
     # and present in the serialized artifact.
-    assert report.schema_version == QUALITY_REPORT_SCHEMA_VERSION == 1
+    assert report.schema_version == QUALITY_REPORT_SCHEMA_VERSION
     dumped = report.model_dump()
-    assert dumped["schema_version"] == 1
+    assert dumped["schema_version"] == QUALITY_REPORT_SCHEMA_VERSION
     saved = save_quality_report(report, tmp_path / "versioned_report.json")
     on_disk = json.loads(saved.read_text(encoding="utf-8"))
-    assert on_disk["schema_version"] == 1
+    assert on_disk["schema_version"] == QUALITY_REPORT_SCHEMA_VERSION
 
     # avg_qe: read-only alias of score_metrics.avg_qe — serialized at the
     # top level, never accepted as constructor input, never able to drift.
@@ -675,3 +677,14 @@ def test_compliance_verdict_does_not_claim_enforcement_that_was_off(tmp_path: Pa
     # An unknown route must not be upgraded into an enforcement claim either.
     unknown_md = render_kdp_audit_markdown(_r0917_clean_report(tmp_path, "noroute", None))
     assert "Enforced deterministically via Aho-Corasick" not in unknown_md
+
+
+def test_quality_report_surfaces_enforced_spans(tmp_path: Path) -> None:
+    """The report measures the enforced text while TM keeps the draft.
+
+    Surface the mechanically-corrected span count so a reader comparing the two
+    can discount it (F4).
+    """
+    report = _minimal_report(tmp_path, "enforced", {}, enforced_spans=7)
+    assert report.enforced_spans == 7
+    assert report.model_dump()["enforced_spans"] == 7

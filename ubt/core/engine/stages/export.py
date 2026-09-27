@@ -831,6 +831,7 @@ async def _build_reports(
         cache_hit_rate=cache_hit_rate,
         terminology_metrics=terminology_metrics,
         entity_consistency=entity_consistency,
+        enforced_spans=enforced_spans,
     )
     if report.summary.failed_blocks > 0:
         logger.warning(
