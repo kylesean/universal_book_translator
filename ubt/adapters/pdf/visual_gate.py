@@ -174,8 +174,13 @@ def _geometry_pages(total: int) -> list[int]:
     if total <= MAX_ARTIFACT_GEOMETRY_PAGES:
         return list(range(1, total + 1))
     step = total / MAX_ARTIFACT_GEOMETRY_PAGES
+    # Anchor both ends explicitly. The even spread alone lands its last probe at
+    # ``round(1 + 119*step)``, which is below ``total`` once total > ~180, so the
+    # final pages were never geometry-checked (the pixel/VLM sampler already
+    # anchors the tail via ``select_sample_pages``).
     return sorted(
-        {min(total, max(1, round(1 + i * step))) for i in range(MAX_ARTIFACT_GEOMETRY_PAGES)}
+        {1, total}
+        | {min(total, max(1, round(1 + i * step))) for i in range(MAX_ARTIFACT_GEOMETRY_PAGES)}
     )
 
 

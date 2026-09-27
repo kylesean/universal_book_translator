@@ -473,3 +473,22 @@ async def test_visual_gate_reports_artifact_unverified_when_no_text(tmp_path: Pa
     pdf = _write_pdf(tmp_path / "blank.pdf", 1)
     res = await run_visual_gate(pdf, blocks=[], sample_pages=0)
     assert any(f.code == "artifact_unverified" for f in res.findings)
+
+
+@pytest.mark.fast
+def test_geometry_sampling_always_includes_the_final_page() -> None:
+    """The even artifact-geometry sample must never drop the last page.
+
+    The pixel/VLM sampler anchors the tail (``select_sample_pages``), but the
+    geometry sample used ``round(1 + i*step)`` and above ~180 pages its last
+    probe landed before ``total`` -- so a long book's final pages were never
+    checked for overlap / out-of-bounds.
+    """
+    from ubt.adapters.pdf.visual_gate import MAX_ARTIFACT_GEOMETRY_PAGES, _geometry_pages
+
+    for total in (121, 240, 1000):
+        pages = _geometry_pages(total)
+        assert pages[0] == 1
+        assert pages[-1] == total, f"last page missing from geometry sample (total={total})"
+        assert len(pages) <= MAX_ARTIFACT_GEOMETRY_PAGES + 1
+        assert pages == sorted(set(pages))
