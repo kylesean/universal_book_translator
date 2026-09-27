@@ -140,43 +140,6 @@ def restrict_sqlite_family(path: Path) -> None:
         restrict_file_to_owner(candidate)
 
 
-def restrict_env_file(path: Path | None = None) -> Path | None:
-    """Converge the dotenv file that carries credentials to ``0600``.
-
-    ``.env`` is where ``UBT_LLM_API_KEY`` / ``UBT_API_KEY`` /
-    ``UBT_OCR_SIDECAR_TOKEN`` live, and editors, ``cp`` and ``git checkout``
-    create it as ``0666 & ~umask`` — ``0644``, i.e. world-readable on any
-    shared host, CI runner or multi-user GPU box (the same incident class this
-    module exists for). The process
-    entry points call this once at boot, before the config layer reads the file.
-
-    ``path`` defaults to ``.env`` in the working directory, which is where
-    pydantic-settings resolves ``env_file=".env"``. An absent file returns
-    ``None``; a refused chmod warns instead of raising — a read-only or foreign
-    mount must not stop a translation run or a server boot.
-    """
-    target = Path.cwd() / ".env" if path is None else Path(path)
-    try:
-        if not target.is_file():
-            return None
-        previous = target.stat().st_mode & 0o777
-        target.chmod(BOOK_TEXT_FILE_MODE)
-    except OSError as exc:
-        logger.warning("Could not restrict %s to owner-only permissions: %s", target, exc)
-        return None
-    if previous != BOOK_TEXT_FILE_MODE:
-        # Warning, once: the old mode was the exposure (credentials readable by
-        # every account on the host) and the fix is not durable across an
-        # editor that rewrites the file with its own mode.
-        logger.warning(
-            "Tightened %s from %04o to %04o: .env carries API credentials and must stay owner-only",
-            target,
-            previous,
-            BOOK_TEXT_FILE_MODE,
-        )
-    return target
-
-
 def world_readable_files(directory: Path, extra_dirs: Iterable[Path] = ()) -> list[Path]:
     """Files under ``directory`` — plus any ``extra_dirs`` — that group or other users could still read.
 

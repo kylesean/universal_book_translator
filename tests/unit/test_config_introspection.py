@@ -70,7 +70,9 @@ def test_config_command_defaults_are_never_pydantic_undefined(
     rows = json.loads(capsys.readouterr().out)
     by_field = {row["field"]: row for row in rows}
     assert all("PydanticUndefined" not in row["default"] for row in rows)
-    assert by_field["base_url"]["default"] == "<dynamic>"
+    # A static default renders its value; only a factory field shows "<dynamic>".
+    assert by_field["base_url"]["default"] == "https://api.openai.com/v1"
+    assert by_field["api_key"]["default"] == "<dynamic>"
     assert by_field["draft_model"]["default"] == "muse-spark-1.3-contributor"
 
 

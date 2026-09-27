@@ -10,9 +10,14 @@ Second historical defect: every ``AliasChoices`` listed the bare, prefix-less
 field name first (``api_key`` / ``base_url`` / ``pages`` / ...), so with
 pydantic-settings' default ``case_sensitive=False`` an unrelated ``API_KEY``,
 ``BASE_URL`` or ``PAGES`` variable in the process environment hijacked the
-outbound credential, the endpoint, or the page filter. Only prefixed names
-(``UBT_*`` plus the deliberate ``OPENAI_*`` / ``OPENCODE_*`` / ``ANTHROPIC_*`` /
-``DEEPSEEK_*`` / ``GEMINI_*`` / ``OPENCODE_SESSION_ID`` fallbacks) may resolve now.
+outbound credential, the endpoint, or the page filter. The settings source now
+accepts only ``UBT_*`` names (plus the ambient ``OPENCODE_SESSION_ID``).
+
+Third: the third-party vendor names (``OPENAI_API_KEY`` / ``DEEPSEEK_API_KEY`` /
+...) used to be ``api_key`` / ``base_url`` aliases, and the endpoint was guessed
+from whichever of them happened to be set. They are no longer aliases — a
+provider block names the variable holding its credential via ``api_key_env``,
+so the key and the endpoint always come from the *same* provider.
 """
 
 from __future__ import annotations
@@ -27,6 +32,7 @@ from ubt.core.config import MOCK_API_KEY, UBTConfig
 
 _CRED_ENV = (
     "UBT_LLM_API_KEY",
+    "UBT_PROVIDER",
     "OPENAI_API_KEY",
     "OPENCODE_API_KEY",
     "DEEPSEEK_API_KEY",
@@ -41,8 +47,7 @@ _CRED_ENV = (
     "ANTHROPIC_BASE_URL",
 )
 
-# Every env name a field USED to accept without the UBT_ prefix, plus the
-# deliberate third-party fallbacks (which must keep resolving).
+# Every env name a field USED to accept without the UBT_ prefix. None may resolve.
 _BARE_ALIAS_ENV = (
     "API_KEY",
     "BASE_URL",
@@ -57,7 +62,7 @@ _STRAY = "stray-injected-value"
 
 
 @pytest.fixture(autouse=True)
-def _isolate(monkeypatch: pytest.MonkeyPatch) -> None:
+def _isolate(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     for name in (*_CRED_ENV, *_BARE_ALIAS_ENV, *_AMBIENT_COMPAT_ENV):
         monkeypatch.delenv(name, raising=False)
     for name in (
@@ -69,6 +74,11 @@ def _isolate(monkeypatch: pytest.MonkeyPatch) -> None:
         "UBT_MAX_CONCURRENCY",
     ):
         monkeypatch.delenv(name, raising=False)
+    # Hermetic: the repository's own ubt.toml must not leak a provider block
+    # into a ``from_env`` assertion here.
+    empty = tmp_path / "config.toml"
+    empty.write_text("", encoding="utf-8")
+    monkeypatch.setattr("ubt.core.providers.DEFAULT_CONFIG_LOCATIONS", (empty,))
 
 
 def _cfg() -> UBTConfig:
@@ -94,7 +104,6 @@ def test_foreign_credential_stores_are_never_read(
     (tmp_path / ".config").mkdir(parents=True, exist_ok=True)
     (tmp_path / ".config/deepseek_key").write_text("sk-deepseek-file", encoding="utf-8")
     (tmp_path / ".deepseek_key").write_text("sk-deepseek-home", encoding="utf-8")
-    (tmp_path / ".env").write_text("OPENCODE_API_KEY=sk-dotenv\n", encoding="utf-8")
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.chdir(tmp_path)
 
@@ -152,61 +161,54 @@ def test_secondary_prefixed_aliases_still_resolve(monkeypatch: pytest.MonkeyPatc
     assert cfg.api_timeout == 11.0
 
 
-def test_openai_compat_fallbacks_still_resolve(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Risk: the documented OpenAI-standard fallbacks are deliberate; dropping
-    them would break every deployment that only sets ``OPENAI_API_KEY`` /
-    ``OPENAI_BASE_URL`` for the outbound provider."""
+def test_openai_provider_reads_the_standard_variable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A selected provider resolves its credential from its ``api_key_env``."""
     monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
-    monkeypatch.setenv("OPENAI_BASE_URL", "https://openai.example/v1")
-    cfg = _cfg()
+    cfg = UBTConfig.from_env(provider="openai")
     assert cfg.api_key.get_secret_value() == "sk-openai"
-    assert cfg.base_url == "https://openai.example/v1"
-    # ...but the OpenAI names stay out of the inbound gate and the OCR key.
+    assert cfg.base_url == "https://api.openai.com/v1"
+    # ...but the vendor name stays out of the inbound gate and the OCR key.
     assert cfg.service_api_key.get_secret_value() == ""
     assert cfg.ocr_api_key.get_secret_value() == ""
 
 
-def test_opencode_compat_fallbacks_still_resolve(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Risk: OPENCODE_API_KEY / OPENCODE_BASE_URL fallbacks must resolve."""
+def test_opencode_provider_reads_the_standard_variable(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENCODE_API_KEY", "sk-opencode")
-    monkeypatch.setenv("OPENCODE_BASE_URL", "https://opencode.example/v1")
-    cfg = _cfg()
+    cfg = UBTConfig.from_env(provider="opencode")
     assert cfg.api_key.get_secret_value() == "sk-opencode"
-    assert cfg.base_url == "https://opencode.example/v1"
+    assert cfg.base_url == "https://opencode.ai/zen/go/v1"
+    assert cfg.api_mode == "responses"
     assert cfg.service_api_key.get_secret_value() == ""
     assert cfg.ocr_api_key.get_secret_value() == ""
 
 
-def test_credential_and_endpoint_resolve_to_the_same_provider(
+def test_credential_and_endpoint_come_from_the_same_provider(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The key and the URL must never come from different providers.
 
-    ``api_key`` prefers DEEPSEEK over GEMINI, but ``_default_base_url`` used to
-    prefer GEMINI, so with both set the DeepSeek secret was sent to Google.
+    Both are supplied by the selected provider block, so with DEEPSEEK_API_KEY
+    and GEMINI_API_KEY both set, selecting deepseek sends the DeepSeek secret to
+    the DeepSeek endpoint — the old implicit sniffing paired the key from one
+    vendor with the host of another.
     """
     monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-deepseek")
     monkeypatch.setenv("GEMINI_API_KEY", "gm-key")
-    cfg = _cfg()
+    cfg = UBTConfig.from_env(provider="deepseek")
     assert cfg.api_key.get_secret_value() == "sk-deepseek"
     assert "deepseek" in cfg.base_url
 
 
-def test_endpoint_follows_credential_precedence(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Provider-specific endpoint detection follows the api_key alias order."""
-    # DEEPSEEK outranks ANTHROPIC and GEMINI in the credential aliases.
-    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-deepseek")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant")
-    assert "deepseek" in _cfg().base_url
-    monkeypatch.delenv("DEEPSEEK_API_KEY")
-    # ...and ANTHROPIC outranks GEMINI.
-    monkeypatch.setenv("GEMINI_API_KEY", "gm-key")
-    assert "anthropic" in _cfg().base_url
-    # A generic key outranks every provider-specific one and names no endpoint,
-    # so the URL falls back to the OpenAI default.
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
+def test_third_party_names_are_inert_without_a_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only ``UBT_LLM_API_KEY`` / ``UBT_BASE_URL`` configure the wire by default.
+
+    A vendor variable is meaningful only once its provider is selected; on its
+    own it must not redirect the endpoint or supply a credential.
+    """
+    for name in ("DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY"):
+        monkeypatch.setenv(name, "sk-ignored")
     cfg = _cfg()
-    assert cfg.api_key.get_secret_value() == "sk-openai"
+    assert cfg.api_key.get_secret_value() == MOCK_API_KEY
     assert cfg.base_url == config_mod._OPENAI_BASE_URL
 
 
@@ -218,14 +220,6 @@ def test_ambient_opencode_session_id_still_resolves(monkeypatch: pytest.MonkeyPa
     assert _cfg().opencode_session_id == "ambient-session"
     monkeypatch.setenv("UBT_OPENCODE_SESSION_ID", "explicit-session")
     assert _cfg().opencode_session_id == "explicit-session"
-
-
-def test_openai_key_sets_only_outbound(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-outbound")
-    cfg = _cfg()
-    assert cfg.api_key.get_secret_value() == "sk-outbound"
-    assert cfg.service_api_key.get_secret_value() == ""
-    assert cfg.ocr_api_key.get_secret_value() == ""
 
 
 def test_ubt_llm_key_sets_only_outbound(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -307,61 +301,6 @@ def test_constructor_kwargs_for_aliased_fields_are_supported(
 
     assert UBTConfig(api_key=SecretStr("custom")).api_key.get_secret_value() == "custom"
     assert UBTConfig.from_env(api_key=SecretStr("custom")).api_key.get_secret_value() == "custom"
-
-
-def test_dotenv_file_is_read_and_the_real_environment_wins(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """``.env`` in the working directory is an actual config source.
-
-    ``.env.example`` shipped a file this class never opened: the dotenv source
-    sits in ``settings_customise_sources`` but is inert without ``env_file``, so
-    every line of that example was ignored. Precedence stays
-    explicit init > environment > file.
-    """
-    (tmp_path / ".env").write_text(
-        "UBT_QE_THRESHOLD=0.42\nUBT_DRAFT_MODEL=from-dotenv\n"
-        "UBT_LLM_API_KEY=sk-prefixed-file\n"
-        "OPENAI_API_KEY=sk-from-file\nAPI_KEY=sk-bare\nBASE_URL=https://hijack\n",
-        encoding="utf-8",
-    )
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setitem(UBTConfig.model_config, "env_file", ".env")
-
-    cfg = UBTConfig()
-    assert cfg.qe_threshold == 0.42
-    assert cfg.draft_model == "from-dotenv"
-    assert cfg.api_key.get_secret_value() == "sk-prefixed-file"
-    assert cfg.base_url != "https://hijack"
-
-    monkeypatch.setenv("UBT_QE_THRESHOLD", "0.9")
-    assert UBTConfig().qe_threshold == 0.9
-
-    monkeypatch.setattr(UBTConfig, "model_config", {**UBTConfig.model_config, "env_file": None})
-    assert UBTConfig().qe_threshold == 0.9
-
-
-def test_dotenv_never_supplies_an_outbound_credential(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """``.env`` is a config file, not a credential store.
-
-    The dotenv source resolved fields through the same ``AliasChoices`` as the
-    real environment, so a bare ``OPENAI_API_KEY=`` line in a working-directory
-    ``.env`` silently became the *outbound* key -- manuscript text then went to
-    whichever endpoint the file named, from a file users were told holds no
-    credentials. ``.env.example`` and ``UBTConfig``'s own comment both promised
-    ``UBT_``-prefixed names only; only the prefixed form may resolve now.
-    """
-    (tmp_path / ".env").write_text(
-        "OPENAI_API_KEY=sk-from-file\nOPENCODE_API_KEY=sk-opencode-file\n"
-        "DEEPSEEK_API_KEY=sk-deepseek-file\nANTHROPIC_API_KEY=sk-ant-file\n",
-        encoding="utf-8",
-    )
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setitem(UBTConfig.model_config, "env_file", ".env")
-
-    assert UBTConfig().api_key.get_secret_value() == MOCK_API_KEY
 
 
 def test_repair_model_follows_draft_only_when_never_set(monkeypatch: pytest.MonkeyPatch) -> None:

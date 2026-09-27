@@ -42,7 +42,6 @@ from ubt.core.engine.job_queue import TERMINAL_JOB_STATUSES, JobQueue, JobStatus
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.progress import ARTIFACT_KEYS, ProgressSnapshot
 from ubt.core.exceptions import UBTError
-from ubt.core.fs_perms import restrict_env_file
 from ubt.core.job_options import (
     JOB_ID_RE,
     LANG_CODE_PATTERN,
@@ -1207,18 +1206,13 @@ def _bootstrap_asgi_app() -> FastAPI:
     """
     if not logging.getLogger().handlers:
         setup_logging()
-    # Converge ``.env`` to 0600 before the config layer reads it: dotenv files
-    # are created 0644 by editors/cp and hold the API credentials. Warn-only inside, so a
-    # read-only mount never blocks a boot; `run_server` reaches this too because
-    # uvicorn reuses the already-imported module.
-    restrict_env_file()
     return create_app()
 
 
 # Module-level app is built lazily via PEP 562 ``__getattr__``. Importing this
 # module (e.g. ``from ubt.api.app import create_app``) must not configure the
-# host's logging, chmod ``.env`` or build a FastAPI app as a side effect; only an
-# actual ``ubt.api.app:app`` access (uvicorn's string target, ``from ubt.api.app
+# host's logging or build a FastAPI app as a side effect; only an actual
+# ``ubt.api.app:app`` access (uvicorn's string target, ``from ubt.api.app
 # import app``) pays for it, and only once.
 _APP: FastAPI | None = None
 

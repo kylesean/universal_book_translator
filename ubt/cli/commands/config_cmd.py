@@ -44,9 +44,9 @@ def _render_default(field_name: str, field: Any) -> str:
     """Render a field's default without invoking dynamic factories.
 
     ``field.default`` is ``PydanticUndefined`` for a ``default_factory`` field,
-    which printed literally; several factories are also env-dependent or
-    side-effecting (base-url sniffing, opencode session id) and a secret
-    factory would print a fake credential. Show a stable marker instead.
+    which printed literally; several factories are also side-effecting (the
+    packaged-script probe) and the secret factory would print a fake credential.
+    Show a stable marker instead.
     """
     if field.is_required():
         return "<required>"
@@ -58,7 +58,7 @@ def _render_default(field_name: str, field: Any) -> str:
 def config_command(
     json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON."),
     set_only: bool = typer.Option(
-        False, "--set-only", help="Show only fields set from the environment or a profile."
+        False, "--set-only", help="Show only fields set from the environment or a provider block."
     ),
 ) -> None:
     """List every configuration field with its env var(s), current value and default.

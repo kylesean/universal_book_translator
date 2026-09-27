@@ -72,7 +72,6 @@ from ubt.core.exceptions import UBTError
 from ubt.core.fs_perms import (
     SYSTEM_DISALLOWED_PREFIXES,
     is_sensitive_path_part,
-    restrict_env_file,
 )
 from ubt.core.job_options import (
     JOB_ID_MAX_LEN,
@@ -597,7 +596,7 @@ async def ubt_doctor() -> dict[str, Any]:
 
     key = config.api_key.get_secret_value()
     if not key or key == MOCK_API_KEY:
-        _record("api_key", "FAIL", "set UBT_LLM_API_KEY or OPENAI_API_KEY")
+        _record("api_key", "FAIL", "set UBT_LLM_API_KEY or select a provider (UBT_PROVIDER)")
     else:
         _record("api_key", "OK", f"base={config.base_url}")
     try:
@@ -627,9 +626,6 @@ async def ubt_doctor() -> dict[str, Any]:
 
 def main() -> None:
     """Stdio entry point (``ubt-mcp`` script + ``python -m ubt.mcp``)."""
-    # Same ``.env`` convergence as the API bootstrap: every tool
-    # builds ``UBTConfig.from_env()``, which reads ``.env`` from the cwd.
-    restrict_env_file()
     mcp.run(transport="stdio")
 
 

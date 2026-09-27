@@ -5,21 +5,23 @@ Design contract:
   field name), resolved declaratively by ``pydantic-settings`` — there are no
   dual keys. The role-based names (``draft_*`` / ``repair_*``, matching
   :class:`ModelRouter` parameters and CLI flags) are the only names.
-- Distinct credentials never share an env name:
-  ``UBT_LLM_API_KEY`` (outbound LLM key) falls back to the OpenAI-standard
-  ``OPENAI_API_KEY``; ``UBT_API_KEY`` is the inbound HTTP gate only; and
-  ``UBT_OCR_API_KEY`` is the OCR/vision key only. Sharing a name across these
-  three silently couples the inbound gate to the outbound provider secret
-  (a security defect — see ``_check_invariants``). ``UBT_BASE_URL`` falls back
-  to ``OPENAI_BASE_URL``. Declared via :class:`AliasChoices`, no manual
-  ``os.getenv`` chains.
-- Every alias is prefixed or a deliberate third-party name: a bare, prefix-less
-  field name (``API_KEY``, ``BASE_URL``, ``PAGES``, ...) is NEVER an env name,
-  so an unrelated variable in the process environment cannot hijack the
-  outbound credential, the endpoint, or the inbound gate.
+- Distinct credentials never share an env name: ``UBT_LLM_API_KEY`` is the
+  outbound LLM key, ``UBT_API_KEY`` the inbound HTTP gate, and
+  ``UBT_OCR_API_KEY`` the OCR/vision key. Sharing a name across these three
+  silently couples the inbound gate to the outbound provider secret (a security
+  defect — see ``_check_invariants``).
+- Third-party vendor names (``OPENAI_API_KEY``, ``ANTHROPIC_BASE_URL``, ...) are
+  NOT field aliases. A provider block names the variable holding its credential
+  via ``api_key_env``, and the precedence ladder in :mod:`ubt.core.providers`
+  resolves it; ``UBT_LLM_API_KEY`` is the generic override that outranks any
+  provider-specific variable. The settings source accepts only ``UBT_*`` names
+  (plus the ambient ``OPENCODE_SESSION_ID``), and pins ``api_key`` /
+  ``service_api_key`` to their one declared variable, so a bare or third-party
+  name in the process environment can never hijack the outbound credential, the
+  endpoint, or the inbound gate.
 - No credential is ever scraped from another program: an outbound key resolves
-  only from ``UBT_LLM_API_KEY`` or the explicit third-party names below, and
-  ``"mock-key"`` stands in for dry-run / tests. Explicit env always wins — the
+  only from ``UBT_LLM_API_KEY``, a selected provider's ``api_key_env``, or the
+  ``"mock-key"`` placeholder for dry-run / tests. Explicit env always wins — the
   settings layer resolves env before the factory ever runs, so factories never
   peek at other fields' env vars.
 - Closed value sets are :data:`Literal` types (fail fast with a clear error
@@ -31,8 +33,6 @@ from __future__ import annotations
 
 import logging
 import os
-import uuid
-from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, ClassVar, Literal
 from urllib.parse import urlsplit
@@ -41,7 +41,6 @@ from pydantic import AliasChoices, Field, SecretStr, field_validator, model_vali
 from pydantic.fields import FieldInfo
 from pydantic_settings import (
     BaseSettings,
-    DotEnvSettingsSource,
     EnvSettingsSource,
     PydanticBaseSettingsSource,
     SettingsConfigDict,
@@ -98,57 +97,13 @@ def resolve_repair_model(
     """Return the repair model, following the draft unless repair was chosen alone.
 
     "Alone" means configured independently of the draft: an explicit repair
-    value, a provider profile whose repair differs from its draft, or a base
+    value, a provider block whose repair differs from its draft, or a base
     config whose repair already differs from its draft. When repair only ever
     inherited the draft, moving the draft must move repair with it. This is the
     single owner of the draft->repair default; the env constructor, the request
     override path and the model validator all call it.
     """
     return repair_model if repair_is_independent else draft_model
-
-
-def profile_repair_is_independent(profile: Mapping[str, Any]) -> bool:
-    """Whether a provider profile chose a repair model distinct from its draft."""
-    return "repair_model" in profile and profile.get("repair_model") != profile.get("draft_model")
-
-
-def merge_provider_profile(
-    explicit: Mapping[str, Any],
-    profile_name: str,
-    *,
-    env_supplied: frozenset[str] | set[str] | None = None,
-) -> dict[str, Any]:
-    """Layer a provider profile under explicit field values; one profile semantics.
-
-    Explicit values win over the profile. ``repair_model`` follows the effective
-    draft unless the profile chose a repair distinct from its own draft (then it
-    is independent and kept); when neither side pins a repair, the model
-    validator syncs it to the draft. Shared by ``from_env`` and the request
-    override path so the same request yields the same models on both.
-
-    ``env_supplied`` names fields the operator set via the real environment or
-    ``.env``. Those outrank the profile: without this, a profile's default
-    ``draft_model`` in the project ubt.toml silently overwrote
-    ``UBT_DRAFT_MODEL``, contradicting ``from_env``'s "explicit env wins"
-    contract.
-    """
-    from ubt.core.profiles import load_provider_profile
-
-    profile = dict(load_provider_profile(profile_name))
-    if env_supplied:
-        for key in list(profile):
-            if key in env_supplied:
-                profile.pop(key, None)
-    merged = {**profile, **explicit}
-    if (
-        "draft_model" in explicit
-        and "repair_model" not in explicit
-        and not profile_repair_is_independent(profile)
-    ):
-        # Drop the profile's inherited repair so the validator re-syncs it to
-        # the caller's draft instead of leaving a stale profile draft value.
-        merged.pop("repair_model", None)
-    return merged
 
 
 CoverMode = Literal["auto", "always", "never"]
@@ -161,7 +116,9 @@ FormulaRender = Literal["native", "image", "witness"]
 MathBackend = Literal["typst", "mathjax", "image"]
 GranularityMode = Literal["micro", "macro"]
 
-_ZEN_BASE_URL = "https://opencode.ai/zen/go/v1"
+#: Default endpoint when no provider is selected and no UBT_BASE_URL is set.
+#: The provider registry (``ubt/core/providers.py``) carries the vendor-specific
+#: endpoints; this one keeps a bare ``UBTConfig()`` usable against the OpenAI API.
 _OPENAI_BASE_URL = "https://api.openai.com/v1"
 
 # Placeholder used when no real credential is configured (dry-run / tests).
@@ -178,7 +135,8 @@ def _default_api_key() -> SecretStr:
     doing so would translate a whole book through a third-party account the
     user never selected and never saw named (``doctor`` prints only "API key
     OK", correctly refusing to echo a key fragment). A credential comes only
-    from a name this module declares; see the ``api_key`` aliases.
+    from ``UBT_LLM_API_KEY`` or a selected provider's ``api_key_env``; see the
+    ``api_key`` field.
     """
     return SecretStr(MOCK_API_KEY)
 
@@ -197,45 +155,6 @@ def _url_hostname(url: str) -> str:
         return (urlsplit(candidate).hostname or "").lower()
     except ValueError:
         return ""
-
-
-def _default_base_url() -> str:
-    # Runs only when no base_url alias (UBT_BASE_URL / OPENAI_BASE_URL /
-    # ANTHROPIC_BASE_URL / OPENCODE_BASE_URL) is set.
-    import os
-
-    opencode_url = os.getenv("OPENCODE_BASE_URL")
-    if opencode_url:
-        return opencode_url
-
-    # Provider-specific endpoints MUST follow the same order the ``api_key``
-    # aliases use (UBT_LLM > OPENAI > OPENCODE > DEEPSEEK > ANTHROPIC > GEMINI).
-    # Deriving the URL in a different order sent a credential to a host it did
-    # not belong to: with DEEPSEEK_API_KEY and GEMINI_API_KEY both set the key
-    # resolved to DeepSeek while the URL resolved to Google. The generic
-    # UBT_LLM/OPENAI keys name no endpoint, so they fall through to the OpenAI
-    # default rather than guessing a provider.
-    if os.getenv("UBT_LLM_API_KEY") or os.getenv("OPENAI_API_KEY"):
-        return _OPENAI_BASE_URL
-    if os.getenv("OPENCODE_API_KEY"):
-        return _ZEN_BASE_URL
-    if os.getenv("DEEPSEEK_API_KEY"):
-        return "https://api.deepseek.com/v1"
-    if os.getenv("ANTHROPIC_API_KEY"):
-        return "https://api.anthropic.com"
-    if os.getenv("GEMINI_API_KEY"):
-        return "https://generativelanguage.googleapis.com/v1beta/openai"
-    return _OPENAI_BASE_URL
-
-
-def _default_opencode_session_id() -> str:
-    # Runs only when neither UBT_OPENCODE_SESSION_ID nor OPENCODE_SESSION_ID is set.
-    import os
-
-    sid = os.getenv("UBT_OPENCODE_SESSION_ID") or os.getenv("OPENCODE_SESSION_ID")
-    if sid:
-        return sid
-    return f"ses_{uuid.uuid4().hex[:16]}" if os.getenv("OPENCODE_API_KEY") else ""
 
 
 def packaged_comet_script() -> Path:
@@ -308,59 +227,35 @@ def parse_page_ranges(pages_str: str | None) -> set[int] | None:
 
 
 class UBTEnvSettingsSource(EnvSettingsSource):
-    """Custom environment settings source for UBTConfig.
+    """Environment source that honours only UBT-owned names.
 
-    Ensures:
-    1. Outbound api_key only reads UBT_LLM_API_KEY / OPENAI_API_KEY from environment,
-       never the inbound service key UBT_API_KEY or bare API_KEY.
-    2. Bare prefix-less environment names (API_KEY, BASE_URL, PAGES, etc.) are never
-       read from environment variables.
+    ``populate_by_name=True`` makes pydantic-settings also accept
+    ``UBT_<FIELD_NAME>`` for every field, which collides for the credentials:
+    ``api_key`` would read ``UBT_API_KEY`` (the inbound gate's name) and
+    ``service_api_key`` would read the retired ``UBT_SERVICE_API_KEY``. Those two
+    resolve only from their declared alias. Every other field is limited to
+    ``UBT_*`` — plus the one deliberate ambient fallback ``OPENCODE_SESSION_ID``
+    — so a bare or third-party name in the process environment can never hijack
+    the outbound credential, the endpoint, the inbound gate, or the page filter.
     """
+
+    #: Credential fields whose prefix-generated name collides with another name,
+    #: pinned to their one legitimate variable.
+    _ALIAS_ONLY: ClassVar[dict[str, str]] = {
+        "api_key": "UBT_LLM_API_KEY",
+        "service_api_key": "UBT_API_KEY",
+    }
 
     def _extract_field_info(self, field: FieldInfo, field_name: str) -> list[tuple[str, str, bool]]:
         info = super()._extract_field_info(field, field_name)
-        if field_name == "api_key":
-            return [
-                (k, env, is_c)
-                for k, env, is_c in info
-                if env.upper()
-                in (
-                    "UBT_LLM_API_KEY",
-                    "OPENAI_API_KEY",
-                    "OPENCODE_API_KEY",
-                    "DEEPSEEK_API_KEY",
-                    "ANTHROPIC_API_KEY",
-                    "GEMINI_API_KEY",
-                )
-            ]
-        if field_name == "service_api_key":
-            return [(k, env, is_c) for k, env, is_c in info if env.upper() == "UBT_API_KEY"]
+        pinned = self._ALIAS_ONLY.get(field_name)
+        if pinned is not None:
+            return [(k, env, is_c) for k, env, is_c in info if env.upper() == pinned]
         return [
             (k, env, is_c)
             for k, env, is_c in info
-            if env.upper().startswith("UBT_")
-            or env.upper().startswith("OPENAI_")
-            or env.upper().startswith("ANTHROPIC_")
-            or env.upper().startswith("OPENCODE_")
-            or env.upper() == "OPENCODE_SESSION_ID"
+            if env.upper().startswith("UBT_") or env.upper() == "OPENCODE_SESSION_ID"
         ]
-
-
-class UBTDotEnvSettingsSource(DotEnvSettingsSource):
-    """Read only ``UBT_``-prefixed names out of ``.env``.
-
-    ``DotEnvSettingsSource`` resolves fields through the same ``AliasChoices``
-    the real environment does, so a bare ``OPENAI_API_KEY=`` line in ``.env``
-    would quietly become an *outbound* credential — sending an unpublished
-    manuscript to whichever endpoint the file also named, from a file users
-    expect to hold no credentials. Credentials belong in the real environment,
-    where :class:`UBTEnvSettingsSource` enforces the inbound/outbound split; a
-    repository- or cwd-local ``.env`` stays a plain config file.
-    """
-
-    def _extract_field_info(self, field: FieldInfo, field_name: str) -> list[tuple[str, str, bool]]:
-        info = super()._extract_field_info(field, field_name)
-        return [(k, env, is_c) for k, env, is_c in info if env.upper().startswith("UBT_")]
 
 
 class UBTConfig(BaseSettings):
@@ -368,14 +263,11 @@ class UBTConfig(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="UBT_",
-        # The dotenv source is wired in ``settings_customise_sources`` but is
-        # inert without an ``env_file``, so this line is what activates
-        # file-based config. Precedence is explicit init > real environment >
-        # .env, so an exported variable still wins over the file. Only
-        # ``UBT_``-prefixed names are read from the file -- bare provider keys
-        # such as OPENAI_API_KEY work as real environment variables, not from
-        # .env.
-        env_file=".env",
+        # The process environment is the only external source: there is no
+        # dotenv file. Provider selection and its non-secret settings live in
+        # the TOML provider registry, and credentials come from the environment
+        # (``UBT_LLM_API_KEY`` or the selected provider's ``api_key_env``).
+        # Precedence is explicit init > real environment > field default.
         env_ignore_empty=True,
         extra="ignore",
         populate_by_name=True,
@@ -394,36 +286,28 @@ class UBTConfig(BaseSettings):
         return (
             init_settings,
             UBTEnvSettingsSource(settings_cls, env_prefix="UBT_"),
-            UBTDotEnvSettingsSource(settings_cls, env_prefix="UBT_"),
             file_secret_settings,
         )
 
     # -- API credentials and endpoints -------------------------------------
+    # One canonical env name per field. The third-party names (OPENAI_API_KEY,
+    # ANTHROPIC_BASE_URL, ...) are NOT aliases: a provider block names the
+    # variable holding its credential via ``api_key_env``, and the ladder in
+    # ``providers.py`` resolves it. ``UBT_LLM_API_KEY`` is the generic override
+    # that outranks any provider-specific variable.
     api_key: SecretStr = Field(
         default_factory=_default_api_key,
-        validation_alias=AliasChoices(
-            "UBT_LLM_API_KEY",
-            "OPENAI_API_KEY",
-            "OPENCODE_API_KEY",
-            "DEEPSEEK_API_KEY",
-            "ANTHROPIC_API_KEY",
-            "GEMINI_API_KEY",
-        ),
+        validation_alias="UBT_LLM_API_KEY",
     )
     base_url: str = Field(
-        default_factory=_default_base_url,
-        validation_alias=AliasChoices(
-            "UBT_BASE_URL",
-            "OPENAI_BASE_URL",
-            "ANTHROPIC_BASE_URL",
-            "OPENCODE_BASE_URL",
-        ),
+        default=_OPENAI_BASE_URL,
+        validation_alias="UBT_BASE_URL",
     )
     api_mode: ApiMode = "chat"
-    provider_profile: str | None = None
+    provider: str | None = Field(default=None, validation_alias="UBT_PROVIDER")
     # Chat-template flags forwarded verbatim into the chat request body for
     # llama.cpp / vLLM style servers (e.g. {"enable_thinking": false}). Populated
-    # from a provider profile's ``chat_template_kwargs`` table.
+    # from a provider block's ``chat_template_kwargs`` table.
     chat_template_kwargs: dict[str, Any] = Field(default_factory=dict)
     extra_headers: dict[str, str] = Field(
         default_factory=dict,
@@ -438,8 +322,7 @@ class UBTConfig(BaseSettings):
 
     # -- Inbound service auth (X-API-Key gate, opt-in) -------------------------
     # Distinct from outbound ``api_key`` above (which resolves from
-    # UBT_LLM_API_KEY / OPENAI_API_KEY / the other declared provider names for
-    # LLM calls). The service gate
+    # UBT_LLM_API_KEY or the selected provider's api_key_env). The service gate
     # must ONLY honor an explicitly configured UBT_API_KEY — it must never
     # read the outbound LLM credential or un-prefixed keys. Empty = open (development mode).
     service_api_key: SecretStr = Field(
@@ -870,8 +753,12 @@ class UBTConfig(BaseSettings):
     allowed_dir: str = ""
     model_profiles_json: str = ""
     model_profiles_file: str = ""
+    # Empty by default: the router only sends the ``x-opencode-session`` header
+    # when this is set, so a bare config never fabricates a session id. Set
+    # ``UBT_OPENCODE_SESSION_ID`` (or the ambient ``OPENCODE_SESSION_ID`` the
+    # opencode CLI exports) to pin one.
     opencode_session_id: str = Field(
-        default_factory=_default_opencode_session_id,
+        default="",
         validation_alias=AliasChoices("UBT_OPENCODE_SESSION_ID", "OPENCODE_SESSION_ID"),
     )
 
@@ -1045,8 +932,8 @@ class UBTConfig(BaseSettings):
         if raw_service_key and raw_service_key == self.api_key.get_secret_value():
             raise ValueError(
                 "UBT_API_KEY (inbound X-API-Key gate) must differ from the outbound "
-                "LLM key (UBT_LLM_API_KEY / OPENAI_API_KEY); refusing to reuse one "
-                "secret for both."
+                "LLM key (UBT_LLM_API_KEY or the selected provider's api_key_env); "
+                "refusing to reuse one secret for both."
             )
 
         # Provider URL normalization & protocol auto-detection
@@ -1134,41 +1021,34 @@ class UBTConfig(BaseSettings):
 
     @classmethod
     def from_env(cls, **overrides: Any) -> UBTConfig:
-        """Canonical constructor: environment + fallbacks, profile, then validated overrides.
+        """Canonical constructor: ``[defaults]``, provider block, env, then overrides.
 
         None values are skipped, so optional CLI flags can be passed straight
-        through without erasing an environment-provided value.
-        """
-        clean = {k: v for k, v in overrides.items() if v is not None}
-        profile_name = clean.get("provider_profile") or os.getenv("UBT_PROVIDER_PROFILE")
-        if not profile_name:
-            env_file = cls.model_config.get("env_file")
-            if env_file and Path(str(env_file)).exists():
-                from dotenv import dotenv_values
+        through without erasing an environment-provided value. One precedence
+        ladder, shared with ``apply_config_overrides``:
 
-                profile_name = dotenv_values(str(env_file)).get("UBT_PROVIDER_PROFILE")
-        if profile_name:
-            clean = merge_provider_profile(
-                clean, profile_name, env_supplied=_env_supplied_field_names()
-            )
+        ``overrides > process env > [providers.<name>] > [defaults] > field default``
+        """
+        from ubt.core.providers import load_layer, merge_provider_under
+
+        clean = {k: v for k, v in overrides.items() if v is not None}
+        provider_name = clean.get("provider") or os.getenv("UBT_PROVIDER")
+        fields, api_key_env = load_layer(str(provider_name) if provider_name else None)
+        clean = merge_provider_under(
+            clean, fields, api_key_env, env_supplied=_env_supplied_field_names()
+        )
         return cls(**clean)
 
 
 def _env_supplied_field_names() -> set[str]:
-    """Field names the operator set via the real environment or the dotenv file.
+    """Field names the operator set in the process environment.
 
-    Feeds ``merge_provider_profile`` so a profile's default cannot override an
-    explicit ``UBT_*`` setting — the precedence ``from_env`` documents.
+    Feeds ``merge_provider_under`` so a provider block's default cannot override
+    an explicit ``UBT_*`` setting — the precedence ``from_env`` documents.
     """
     supplied: set[str] = set()
-    env_file = UBTConfig.model_config.get("env_file")
-    file_values: dict[str, Any] = {}
-    if env_file and Path(str(env_file)).exists():
-        from dotenv import dotenv_values
-
-        file_values = dict(dotenv_values(str(env_file)))
     for name in UBTConfig.model_fields:
-        if any(var in os.environ or var in file_values for var in env_var_names(name)):
+        if any(var in os.environ for var in env_var_names(name)):
             supplied.add(name)
     return supplied
 
@@ -1200,15 +1080,17 @@ def env_var_names(field_name: str) -> list[str]:
 def require_api_key(config: UBTConfig | None = None) -> str:
     """Return the configured API key, or fail fast with an actionable message.
 
-    Single source of truth for scripts and one-off tools: honors the canonical
-    precedence (``UBT_LLM_API_KEY`` > ``OPENAI_API_KEY`` > the other declared
-    names) and refuses to silently run live workloads against the ``mock-key``
-    placeholder. Raises :class:`SystemExit` (exit code 2) when unconfigured.
+    Single source of truth for scripts and one-off tools: resolves through the
+    canonical ladder (``UBT_LLM_API_KEY``, or the selected provider's
+    ``api_key_env``) and refuses to silently run live workloads against the
+    ``mock-key`` placeholder. Raises :class:`SystemExit` (exit code 2) when
+    unconfigured.
     """
-    key = (config or UBTConfig()).api_key.get_secret_value()
+    key = (config or UBTConfig.from_env()).api_key.get_secret_value()
     if not key or key == MOCK_API_KEY:
         raise SystemExit(
-            "error: no API key configured — set UBT_LLM_API_KEY (or one of the "
-            "declared provider names, or a profile in ubt.toml) in the environment"
+            "error: no API key configured — set UBT_LLM_API_KEY, or select a "
+            "provider (UBT_PROVIDER / --provider) whose api_key_env names the "
+            "variable holding the key"
         )
     return key

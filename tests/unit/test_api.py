@@ -1216,25 +1216,6 @@ def test_status_never_echoes_host_absolute_paths(
     assert str(tmp_path) not in fallback.text, "host path leaked via the ledger fallback"
 
 
-def test_bootstrap_converges_env_file_permissions(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The ASGI entry point must chmod ``.env`` to 0600 before config reads it.
-
-    dotenv files are created ``0644`` by editors and ``cp`` while holding the
-    API credentials. Unit behaviour lives in
-    ``tests/unit/test_fs_perms.py``; this pins the *wiring*.
-    """
-    import importlib
-
-    app_module = importlib.import_module("ubt.api.app")
-    calls: list[object] = []
-    monkeypatch.setattr(app_module, "restrict_env_file", lambda *a, **k: calls.append(a))
-    monkeypatch.setattr(app_module, "setup_logging", lambda *a, **k: None)
-    app_module._bootstrap_asgi_app()
-    assert calls, "_bootstrap_asgi_app() must converge .env before create_app()"
-
-
 def test_api_status_clamps_an_orphaned_embedded_job(tmp_path: Path) -> None:
     """A crash mid-run leaves the row "initialized"; nothing will move it again.
 
@@ -1382,7 +1363,7 @@ def test_submit_request_still_refuses_credentials_and_server_owned_keys() -> Non
         "service_api_key",
         # Server-owned state: the service picks its own storage and profile.
         "db_dir",
-        "provider_profile",
+        "provider",
     ):
         with pytest.raises(ValidationError):
             JobSubmitRequest.model_validate({"input_path": "book.md", key: "probe"})
@@ -1755,3 +1736,37 @@ def test_submit_job_existing_output_path_rejected_unless_fresh(
     }
     resp_fresh = api_client.post("/jobs/submit", json=payload_fresh)
     assert resp_fresh.status_code == 202
+
+
+def test_model_profiles_post_forbids_overriding_builtins() -> None:
+    """POST /api/v1/model-profiles must refuse to overwrite a built-in profile.
+
+    ``override=False`` is the registry's fail-closed default (409 Conflict), and
+    the endpoint sits behind the inbound ``X-API-Key`` gate when one is set.
+    """
+    from ubt.core.router.capabilities import ModelProfile, PromptStrategy
+    from ubt.core.router.registry import ModelCapabilityRegistry
+
+    reg = ModelCapabilityRegistry()
+    with pytest.raises(ValueError, match="already"):
+        reg.register(
+            ModelProfile(model_pattern="deepseek", prompt_strategy=PromptStrategy.MINIMAL),
+            override=False,
+        )
+
+    client = TestClient(create_app(config=UBTConfig(service_api_key=SecretStr("gate-secret-123"))))
+
+    # Unauthenticated request is rejected before the registry is consulted.
+    res_unauth = client.post(
+        "/api/v1/model-profiles",
+        json={"model_pattern": "custom-new-model", "prompt_strategy": "minimal"},
+    )
+    assert res_unauth.status_code == 401
+
+    # An authenticated attempt to override built-in 'deepseek' conflicts.
+    res_conflict = client.post(
+        "/api/v1/model-profiles",
+        headers={"X-API-Key": "gate-secret-123"},
+        json={"model_pattern": "deepseek", "prompt_strategy": "minimal"},
+    )
+    assert res_conflict.status_code == 409

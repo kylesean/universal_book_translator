@@ -1,16 +1,14 @@
 """Keep the suite independent of the machine it runs on.
 
-``UBTConfig`` deliberately honors two ambient sources: ``UBT_*`` process
-environment variables, and a ``.env`` in the working directory
-(pydantic-settings resolves the file against the CWD). Both are what a real run
-should do -- and both make "assert the default" a statement about the
-developer's laptop. A local ``.env`` carrying ``UBT_API_MODE=responses`` turned
-nine credential-isolation tests red with nothing wrong in the code, which is
-exactly the kind of failure that teaches people to ignore red.
+``UBTConfig`` deliberately honors ambient ``UBT_*`` process environment
+variables -- what a real run should do, and what makes "assert the default" a
+statement about the developer's laptop. An ambient ``UBT_API_MODE=responses``
+turned nine credential-isolation tests red with nothing wrong in the code, which
+is exactly the kind of failure that teaches people to ignore red.
 
-Every test therefore runs with the ambient credential/config variables removed
-and the dotenv file disabled; a test that wants a value sets it explicitly, as
-most already do through ``monkeypatch.setenv``.
+Every test therefore runs with the ambient credential/config variables removed;
+a test that wants a value sets it explicitly, as most already do through
+``monkeypatch.setenv``.
 
 The console is pinned plain for the same reason. Typer forces a colour terminal
 whenever ``GITHUB_ACTIONS`` is set, and rich's option-name highlighter then
@@ -30,7 +28,6 @@ from pathlib import Path
 import pytest
 
 from tests.stage_ctx_factory import build_stage_ctx
-from ubt.core.config import UBTConfig
 from ubt.core.engine.stage_context import StageContext
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -173,14 +170,9 @@ def hermetic_config() -> Iterator[None]:
     }
     for name in saved:
         os.environ.pop(name, None)
-    # ``env_file`` is consulted per instantiation, so clearing it here is enough
-    # to keep a working-directory .env out of the result.
-    previous_env_file = UBTConfig.model_config.get("env_file")
-    UBTConfig.model_config["env_file"] = None
     try:
         yield
     finally:
-        UBTConfig.model_config["env_file"] = previous_env_file
         os.environ.update(saved)
         os.environ.update(saved_proxy)
 

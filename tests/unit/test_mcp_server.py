@@ -164,17 +164,6 @@ async def test_deep_assess_is_capped_at_two_and_queues(
     assert (await srv.ubt_assess_book(str(doc), deep=False))["status"] == "ok"
 
 
-def test_main_converges_env_file_permissions(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``ubt-mcp`` must chmod ``.env`` to 0600 before the tools read it."""
-    import ubt.mcp.server as srv
-
-    calls: list[object] = []
-    monkeypatch.setattr(srv, "restrict_env_file", lambda *a, **k: calls.append(a))
-    monkeypatch.setattr(srv.mcp, "run", lambda **_k: None)
-    srv.main()
-    assert calls, "main() must converge .env to owner-only before serving"
-
-
 async def test_doctor_shape() -> None:
     out = await ubt_doctor()
     assert isinstance(out["ok"], bool)
@@ -521,7 +510,7 @@ def test_translate_book_signature_admits_no_credential_keys() -> None:
         "ocr_api_key",
         "ocr_endpoint",
         "service_api_key",
-        "provider_profile",
+        "provider",
     }
     assert not (params & forbidden), sorted(params & forbidden)
 

@@ -232,6 +232,27 @@ def test_doctor_warns_when_models_are_the_shipped_default(
     assert "shipped benchmark default" in result.stdout
 
 
+def test_doctor_accepts_a_providers_own_default_models(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A selected provider supplies its models on purpose — even when they match
+    the shipped default (opencode's do), which is not an oversight to WARN about."""
+    monkeypatch.setenv("UBT_LLM_API_KEY", "test-key-12345678")
+    monkeypatch.setenv("UBT_PROVIDER", "opencode")
+    monkeypatch.delenv("UBT_DRAFT_MODEL", raising=False)
+    monkeypatch.delenv("UBT_REPAIR_MODEL", raising=False)
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["doctor", "--json"])
+
+    payload = json.loads(result.stdout)
+    models = next(check for check in payload["checks"] if check["name"] == "Models")
+    assert models["status"] == "OK"
+    assert models["detail"] == (
+        "draft=muse-spark-1.3-contributor repair=muse-spark-1.3-contributor"
+    )
+
+
 def test_doctor_fails_without_api_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("UBT_LLM_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
@@ -247,6 +268,104 @@ def test_doctor_rejects_invalid_config(monkeypatch: pytest.MonkeyPatch) -> None:
     result = runner.invoke(app, ["doctor"])
     assert result.exit_code == 2
     assert "qe_engine" in result.stdout
+
+
+def test_doctor_json_emits_one_object_with_checks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``--json`` must put exactly one parseable object on stdout, no Rich chrome.
+
+    Doctor was the only command with no machine-readable mode, so a CI gate had
+    to scrape the human checklist to learn whether the environment was ready.
+    """
+    monkeypatch.setenv("UBT_LLM_API_KEY", "test-key-12345678")
+    monkeypatch.setenv("UBT_DRAFT_MODEL", "deepseek-chat")
+    monkeypatch.setenv("UBT_REPAIR_MODEL", "deepseek-chat")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["doctor", "--json"])
+
+    # json.loads raises if any table border / summary line leaked into stdout.
+    payload = json.loads(result.stdout)
+    assert result.exit_code == 0
+    assert payload["status"] != "fail"
+    assert payload["summary"]["fail"] == 0
+    assert payload["summary"]["ok"] > 0
+    names = {check["name"] for check in payload["checks"]}
+    assert {"API key", "Base URL", "Models"} <= names
+    for check in payload["checks"]:
+        assert {"name", "status", "detail"} <= set(check)
+
+
+def test_doctor_json_reports_fail_and_keeps_exit_code(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("UBT_LLM_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENCODE_API_KEY", raising=False)
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["doctor", "--json"])
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "fail"
+    assert payload["summary"]["fail"] >= 1
+    api_key = next(check for check in payload["checks"] if check["name"] == "API key")
+    assert api_key["status"] == "FAIL"
+
+
+def test_doctor_json_on_invalid_config_is_one_error_object(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A config error under ``--json`` is still one object, not a traceback."""
+    monkeypatch.setenv("UBT_QE_ENGINE", "bogus")
+
+    result = runner.invoke(app, ["doctor", "--json"])
+
+    assert result.exit_code == 2
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "error"
+    assert payload["code"] == "config_invalid"
+    assert "qe_engine" in result.stdout
+
+
+def test_doctor_collapses_ledger_fix_to_scan_roots(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The chmod fix names the scan roots, not every per-asset hash directory.
+
+    The docling cache keeps one hash directory per asset, so listing each
+    exposed file's immediate parent printed a near-identical long path per
+    asset and buried the one command the operator must actually run. The root
+    also stays correct as new hash directories appear.
+    """
+    monkeypatch.setenv("UBT_LLM_API_KEY", "test-key-12345678")
+    monkeypatch.setenv("UBT_DRAFT_MODEL", "deepseek-chat")
+    monkeypatch.setenv("UBT_REPAIR_MODEL", "deepseek-chat")
+    monkeypatch.chdir(tmp_path)
+    output_dir = tmp_path / "output"
+    monkeypatch.setenv("UBT_OUTPUT_DIR", str(output_dir))
+
+    cache_asset = tmp_path / ".ubt" / "docling_cache" / "assets" / "deadbeef"
+    cache_asset.mkdir(parents=True)
+    (cache_asset / "page.png").write_text("x", encoding="utf-8")
+    (cache_asset / "page.png").chmod(0o644)
+    output_dir.mkdir()
+    (output_dir / "book_bilingual.md").write_text("x", encoding="utf-8")
+    (output_dir / "book_bilingual.md").chmod(0o644)
+
+    result = runner.invoke(app, ["doctor"])
+
+    # Strip every whitespace run, not just newlines: Rich folds long paths
+    # mid-word at the terminal width, so a " ".join would re-split them.
+    compact = "".join(result.stdout.split())
+    assert "chmod-Rgo-rwx" in compact
+    fix_command = compact.split("chmod-Rgo-rwx", 1)[1]
+    assert "'.ubt/docling_cache'" in fix_command
+    assert f"'{output_dir}'" in fix_command
+    assert "deadbeef" not in fix_command
 
 
 def test_require_api_key_strict(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -652,7 +771,7 @@ def test_cli_translate_help_lists_credential_options() -> None:
     assert "--api-key" in result.stdout
     assert "--base-url" in result.stdout
     assert "--api-mode" in result.stdout
-    assert "--provider-profile" in result.stdout
+    assert "--provider" in result.stdout
 
 
 def test_cli_translate_forwards_credentials_and_profile(
@@ -677,7 +796,7 @@ def test_cli_translate_forwards_credentials_and_profile(
             "https://generativelanguage.googleapis.com/v1beta/openai",
             "--api-mode",
             "chat",
-            "--provider-profile",
+            "--provider",
             "gemini",
         ],
     )
@@ -685,7 +804,7 @@ def test_cli_translate_forwards_credentials_and_profile(
     assert captured["api_key"] == "sk-custom-cli-key"
     assert captured["base_url"] == "https://generativelanguage.googleapis.com/v1beta/openai"
     assert captured["api_mode"] == "chat"
-    assert captured["provider_profile"] == "gemini"
+    assert captured["provider"] == "gemini"
 
 
 def test_doctor_warns_when_configured_models_are_unpriced(

@@ -1013,7 +1013,7 @@ async def assess_document_async(
             "prompt_strategy": config.prompt_strategy,
             "ocr_mode": config.ocr_mode,
             "formula_enrichment": config.formula_enrichment,
-            "provider_profile": config.provider_profile,
+            "provider": config.provider,
         },
     )
     return report

@@ -48,8 +48,8 @@ class AdapterRuntimeConfig:
     #: Vision model the OCR/VLM channel bills. Owned by ``UBTConfig.ocr_model``
     #: and carried here for the same reason ``ocr_endpoint`` is: the assessor
     #: and the spend pre-flight price *this* model, so the driver must bill it
-    #: too. Reading it from ``os.environ`` at the driver instead would let a
-    #: ``.env``-only setting quote one model and pay for another.
+    #: too. Reading it from ``os.environ`` at the driver instead would let an
+    #: environment-only setting quote one model and pay for another.
     ocr_model: str
     formula_enrichment: str
     render_engine: str

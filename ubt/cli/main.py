@@ -28,7 +28,6 @@ from ubt.core.engine.dry_run import create_dry_run_orchestrator
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.pipeline import PipelineOrchestrator
 from ubt.core.exceptions import UBTError
-from ubt.core.fs_perms import restrict_env_file
 from ubt.core.job_options import (
     JOB_ID_MAX_LEN,
     apply_config_overrides,
@@ -79,10 +78,6 @@ def main_callback(
     # Rich Live progress bar (translate) re-route records onto the shared stdout
     # console just before the bar starts, which is the only way a log line and
     # the bar can share one terminal region without tearing.
-    # The API and MCP entry points converge ``.env`` to owner-only at boot; the
-    # CLI is the primary surface that reads it, so it must too, or a credential
-    # file left at 0644 by an editor/copy stays world-readable with no warning.
-    restrict_env_file()
     setup_logging(verbose=verbose)
 
 
@@ -209,8 +204,9 @@ async def _run_translation(
         api_key_missing = False
     if api_key_missing:
         raise RuntimeError(
-            "UBT_LLM_API_KEY/OPENAI_API_KEY is not configured (empty or mock-key). "
-            "Set UBT_LLM_API_KEY or run with --dry-run for zero-token validation."
+            "No LLM credential is configured (empty or mock-key). Set "
+            "UBT_LLM_API_KEY, or select a provider whose api_key_env names the "
+            "variable holding the key; run with --dry-run for zero-token validation."
         )
 
     if dry_run:

@@ -41,11 +41,11 @@ def assess_cmd(
             show_default=False,
         ),
     ] = None,
-    provider_profile: Annotated[
+    provider: Annotated[
         str | None,
         typer.Option(
-            "--provider-profile",
-            help="按该 provider 档案（模型/端点）报价",
+            "--provider",
+            help="按该 provider（模型/端点）报价",
             show_default=False,
         ),
     ] = None,
@@ -116,8 +116,8 @@ def assess_cmd(
         raise typer.Exit(code=2)
 
     overrides: dict[str, Any] = {}
-    if provider_profile is not None:
-        overrides["provider_profile"] = provider_profile
+    if provider is not None:
+        overrides["provider"] = provider
     # assess sets no explicit engine flag: quote the preset, or — with no
     # preset — the engine default (an all-None table was just {} in disguise).
     overrides.update(resolve_engine_params(preset, {}))
@@ -126,7 +126,7 @@ def assess_cmd(
     try:
         config = _build_config(overrides)
     except (ValidationError, UBTError) as exc:
-        # A bad --provider-profile raises ProfileNotFoundError (a UBTError), not
+        # A bad --provider raises ProviderNotFoundError (a UBTError), not
         # a ValidationError; without this the --json contract broke with a raw
         # traceback and empty stdout.
         if json_output:
@@ -195,8 +195,8 @@ def assess_cmd(
     # recommended one is only reproducible if the command carries it.
     if report.route.recommended_profile != "general":
         command_parts += ["--profile", shlex.quote(report.route.recommended_profile)]
-    if provider_profile:
-        command_parts += ["--provider-profile", shlex.quote(provider_profile)]
+    if provider:
+        command_parts += ["--provider", shlex.quote(provider)]
     report = replace(report, next_step_command=" ".join(command_parts))
 
     if json_output:

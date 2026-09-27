@@ -126,8 +126,9 @@ def translate(
         typer.Option(
             "--api-key",
             help=(
-                "Outbound LLM API key (overrides UBT_LLM_API_KEY / OPENAI_API_KEY / Profile). "
-                "Prefer the env var: argv is visible in `ps` and shell history"
+                "Outbound LLM API key (overrides UBT_LLM_API_KEY and the selected "
+                "provider's api_key_env). Prefer the env var: argv is visible in "
+                "`ps` and shell history"
             ),
         ),
     ] = None,
@@ -145,11 +146,11 @@ def translate(
             help="API protocol mode: 'chat' (OpenAI/Gemini/DeepSeek), 'responses' (OpenAI Responses API), or 'anthropic' (Anthropic Messages API)",
         ),
     ] = None,
-    provider_profile: Annotated[
+    provider: Annotated[
         str | None,
         typer.Option(
-            "--provider-profile",
-            help="Provider profile name from ubt.toml / ~/.ubt/config.toml (e.g. 'gemini', 'claude', 'deepseek')",
+            "--provider",
+            help="Provider name — built-in (openai/anthropic/gemini/deepseek/opencode) or declared in ubt.toml / ~/.ubt/config.toml (e.g. 'local-gemma4')",
         ),
     ] = None,
     visual_judge: Annotated[
@@ -495,7 +496,7 @@ def translate(
         "api_key": api_key,
         "base_url": base_url,
         "api_mode": api_mode,
-        "provider_profile": provider_profile,
+        "provider": provider,
         "visual_judge_enabled": visual_judge,
         "visual_judge_model": visual_judge_model,
     }

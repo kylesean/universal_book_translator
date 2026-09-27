@@ -4,7 +4,6 @@ __pycache__/
 dist/
 .venv/
 .env*
-!.env.example
 
 # Caches & tests
 .pytest_cache/

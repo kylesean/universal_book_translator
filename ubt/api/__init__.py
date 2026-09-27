@@ -1,9 +1,9 @@
 """Universal Book Translator FastAPI Microservice package.
 
-Lazy (PEP 562) re-exports: importing ``ubt.api`` must not build the app,
-configure logging or chmod ``.env`` as a side effect. ``create_app`` is the
-supported library entry point; ``app`` is resolved only when actually named
-(uvicorn's ``ubt.api.app:app`` target).
+Lazy (PEP 562) re-exports: importing ``ubt.api`` must not build the app or
+configure logging as a side effect. ``create_app`` is the supported library
+entry point; ``app`` is resolved only when actually named (uvicorn's
+``ubt.api.app:app`` target).
 """
 
 from __future__ import annotations

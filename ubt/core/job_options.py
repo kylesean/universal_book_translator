@@ -33,8 +33,6 @@ from ubt.core.config import (
     RenderEngine,
     UBTConfig,
     canonical_render_engine,
-    profile_repair_is_independent,
-    resolve_repair_model,
 )
 from ubt.core.exceptions import UBTError
 from ubt.core.presets import PRESET_ENGINE_FIELDS, Preset, resolve_engine_params
@@ -137,12 +135,20 @@ def overrides_from_request(
     if not allow_provider_keys:
         leaked = sorted(
             key
-            for key in ("base_url", "api_key", "ocr_api_key", "ocr_endpoint", "service_api_key")
+            for key in (
+                "provider",
+                "base_url",
+                "api_mode",
+                "api_key",
+                "ocr_api_key",
+                "ocr_endpoint",
+                "service_api_key",
+            )
             if request.get(key) is not None
         )
         if leaked:
             raise UBTError(
-                "Provider credential keys are not accepted in job payloads: "
+                "Provider selection/credential keys are not accepted in job payloads: "
                 + ", ".join(leaked)
                 + " (set them via UBT_* environment variables or CLI flags)"
             )
@@ -209,47 +215,25 @@ def apply_config_overrides(base: UBTConfig, overrides: Mapping[str, Any]) -> UBT
     Assignment goes through pydantic (``validate_assignment=True``), so an
     invalid enum/int is rejected here rather than surfacing mid-run.
     """
+    from ubt.core.config import _env_supplied_field_names
+    from ubt.core.providers import load_layer, merge_provider_under
+
     job_config = base.model_copy(deep=True)
     valid_fields = set(UBTConfig.model_fields)
 
-    profile_name = overrides.get("provider_profile")
-    prof_dict: dict[str, Any] = {}
-    effective: Mapping[str, Any] = overrides
-    if profile_name:
-        from ubt.core.config import _env_supplied_field_names, merge_provider_profile
-        from ubt.core.profiles import load_provider_profile
-
-        prof_dict = dict(load_provider_profile(str(profile_name)))
-        # Layer the profile UNDER the request's explicit values and let fields
-        # the operator pinned in the real environment outrank it — the same
-        # precedence ``from_env`` documents. Without the env guard a
-        # ``--provider-profile`` silently replaced UBT_DRAFT_MODEL/UBT_BASE_URL
-        # (potentially pointing the run at a different endpoint).
-        effective = merge_provider_profile(
-            overrides, str(profile_name), env_supplied=_env_supplied_field_names()
-        )
+    provider_name = overrides.get("provider") or os.getenv("UBT_PROVIDER")
+    # The same ladder ``from_env`` uses: ``[defaults]`` + provider block, under
+    # the request's explicit values, with environment-pinned fields above it.
+    # ``repair_model`` follows the effective draft via ``_check_invariants``,
+    # which assignment re-runs — one owner, so both paths agree.
+    fields, api_key_env = load_layer(str(provider_name) if provider_name else None)
+    effective = merge_provider_under(
+        overrides, fields, api_key_env, env_supplied=_env_supplied_field_names()
+    )
 
     for key, value in effective.items():
         if value is not None and key in valid_fields:
             setattr(job_config, key, _coerce_field(key, value))
-
-    if "draft_model" in overrides:
-        # Repair follows the new draft unless repair was chosen on its own: an
-        # explicit repair override, a profile repair distinct from its draft, or
-        # a base whose repair was set explicitly (``model_fields_set`` — the same
-        # predicate ``_check_invariants`` uses, so the env and request paths agree
-        # even when the explicit repair happens to equal the draft). One rule,
-        # owned by ``resolve_repair_model``.
-        repair_is_independent = (
-            "repair_model" in overrides
-            or profile_repair_is_independent(prof_dict)
-            or "repair_model" in base.model_fields_set
-        )
-        job_config.repair_model = resolve_repair_model(
-            str(overrides["draft_model"]),
-            job_config.repair_model,
-            repair_is_independent=repair_is_independent,
-        )
     return job_config
 
 

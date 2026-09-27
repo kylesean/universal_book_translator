@@ -78,19 +78,21 @@ requires_cometkiwi = pytest.mark.skipif(
 
 
 def live_llm_configured() -> bool:
-    """True when a real outbound LLM credential is EXPLICITLY configured.
+    """True when the config ladder resolves a real outbound LLM credential.
 
-    Only the two explicit env names count, even though ``UBTConfig`` would also
-    resolve a declared third-party name: this marker gates the only test that
-    spends real money, so it must be opted into — the same convention as
-    ``test_mt_vs_llm_compare.py``, which needs an explicit session id. Without
-    this, merely having a provider login in the environment would silently bill
-    a call on every full-suite run.
+    This marker gates the only test that spends real money, so it must be opted
+    into: a bare third-party variable (``OPENAI_API_KEY`` and friends) is inert
+    on its own, and only ``UBT_LLM_API_KEY`` or a selected provider's
+    ``api_key_env`` supplies the credential. A malformed provider name must not
+    break collection, so the probe degrades to "not configured".
     """
-    from ubt.core.config import MOCK_API_KEY
+    from ubt.core.config import MOCK_API_KEY, UBTConfig
 
-    explicit = os.getenv("UBT_LLM_API_KEY") or os.getenv("OPENAI_API_KEY") or ""
-    return bool(explicit) and explicit != MOCK_API_KEY
+    try:
+        key = UBTConfig.from_env().api_key.get_secret_value()
+    except Exception:
+        return False
+    return bool(key) and key != MOCK_API_KEY
 
 
 requires_live_llm = pytest.mark.skipif(
@@ -112,7 +114,7 @@ LIVE_ENV_KEYS = (
     "UBT_DRAFT_MODEL",
     "UBT_REPAIR_MODEL",
     "UBT_API_MODE",
-    "UBT_PROVIDER_PROFILE",
+    "UBT_PROVIDER",
 )
 LIVE_ENV_SNAPSHOT = {key: os.environ[key] for key in LIVE_ENV_KEYS if os.environ.get(key)}
 

@@ -1,76 +1,55 @@
-# Universal Book Translator (UBT) - Project Configuration
-# Protocol-First Provider Profiles
+# Universal Book Translator (UBT) - 本机 provider 注册表
 #
-# NOTE: there is no `provider_name` key. UBTConfig has no such field and profiles
-# are parsed with extra="ignore", so a `provider_name = "..."` line is silently
-# dropped — the wire protocol comes from `base_url` + `api_mode`, the models from
-# `draft_model` / `repair_model`. Every such line was removed on 2026-09-24 so the
-# file stops implying it selects a backend.
-
-[profiles.default]
-base_url = "https://opencode.ai/zen/go/v1"
-draft_model = "muse-spark-1.3-contributor"
-repair_model = "muse-spark-1.3-contributor"
-api_mode = "responses"
-draft_reasoning_effort = "low"
-repair_reasoning_effort = "high"
-
-[profiles.opencode-go]
-base_url = "https://opencode.ai/zen/go/v1"
-draft_model = "muse-spark-1.3-contributor"
-repair_model = "muse-spark-1.3-contributor"
-api_mode = "responses"
-draft_reasoning_effort = "low"
-repair_reasoning_effort = "high"
-
-[profiles.muse-spark]
-base_url = "https://opencode.ai/zen/go/v1"
-draft_model = "muse-spark-1.3-contributor"
-repair_model = "muse-spark-1.3-contributor"
-api_mode = "responses"
-draft_reasoning_effort = "low"
-repair_reasoning_effort = "high"
-
-# ---- Local self-hosted stack: llama-swap gateway + llama.cpp backends --------
-# Everything local answers on ONE endpoint: llama-swap at 127.0.0.1:9090. It
-# loads a backend on demand and hands it an ephemeral port (10001+), so a
-# profile must never name a backend port. The standalone 8081/8082/8083 servers
-# and the Ollama daemon on :11434 (retired 2026-09-23, unit disabled, weights
-# deleted) are all dead endpoints — see ~/data/llm/README.md.
+# 用途：声明「去哪里、用什么协议调用模型」。密钥永不写在这里（写了会被拒绝加载），
+# 只写承载密钥的环境变量名 `api_key_env`。完整 schema 见 ubt.toml.example。
 #
-# Model names must match the keys under `models:` in llama-swap's config.yaml:
+# 选中方式：export UBT_PROVIDER=<名字>  或  ubt translate ... --provider <名字>
+# 优先级（高→低）：CLI 参数 > 环境变量 UBT_* > [providers.<name>] > [defaults] > 字段默认值
+#
+# 内置 provider，无需在此声明：openai / anthropic / gemini / deepseek / opencode
+#
+# 本机常用：OpenCode Zen 订阅（端点 opencode.ai/zen/go/v1，模型 muse-spark-1.3-contributor）
+#   export UBT_PROVIDER=opencode
+#   export UBT_LLM_API_KEY=...        # 通用键；或 export OPENCODE_API_KEY=...
+#
+# 注意：不要把本机端点/模型放进 [defaults]。[defaults] 作用于每一次运行，包括测试里
+# 裸构造的 UBTConfig.from_env()，会让测试结果依赖本机配置。
+
+# ---- 本地自部署：llama-swap 网关 + llama.cpp 后端 ---------------------------
+# 所有本地后端共用一个入口：llama-swap 在 127.0.0.1:9090，按需加载后端并分配
+# 临时端口（10001+），所以 provider 绝不能写后端端口。8081/8082/8083 与 Ollama
+# 的 :11434 都已停用（2026-09-23 关单元、删权重）——见 ~/data/llm/README.md。
+#
+# 模型名必须与 llama-swap config.yaml 里 `models:` 的键一致：
 #   gemma4-e4b        出版级翻译流水线（术语强制 / 结构化输出 / 工具调用）
 #   translategemma:4b 专用 MT（浏览器插件、字幕这类"简单提示词直出"）
 #   bonsai2-27b       编码 agent（code 组，与 translate 组互斥）
 
-[profiles.local-gemma4]
+[providers.local-gemma4]
 base_url = "http://127.0.0.1:9090/v1"
 api_mode = "chat"
 draft_model = "gemma4-e4b"
 repair_model = "gemma4-e4b"
-# The backend runs `--reasoning off`: Gemma-4 thinking costs 10x on the same
-# sentence (37 -> 405 tokens). Send the matching flag so no client-side default
-# can silently turn it back on.
+# 后端以 `--reasoning off` 运行：Gemma-4 开思考在同句上贵 10 倍（37 -> 405 tokens）。
+# 显式带上同样的开关，避免客户端默认把它又打开。
 chat_template_kwargs = { enable_thinking = false }
 
-[profiles.local-tg]
+[providers.local-tg]
 base_url = "http://127.0.0.1:9090/v1"
 api_mode = "chat"
 draft_model = "translategemma:4b"
 repair_model = "translategemma:4b"
 
-[profiles.local-code]
+[providers.local-code]
 base_url = "http://127.0.0.1:9090/v1"
 api_mode = "chat"
 draft_model = "bonsai2-27b"
 repair_model = "bonsai2-27b"
 
-# Rollback only — Ollama is retired (unit disabled, ~/.ollama holds no weights):
-#   systemctl --user enable --now ollama && ollama pull <model>
-# then uncomment and name the model you pulled.
-# [profiles.local-ollama]
+# ---- 回滚用：Ollama（已停用） ----------------------------------------------
+# systemctl --user enable --now ollama && ollama pull <model>，然后取消注释：
+# [providers.local-ollama]
 # base_url = "http://127.0.0.1:11434/v1"
 # api_mode = "chat"
 # draft_model = "gemma3:12b"
 # repair_model = "gemma3:12b"
-
