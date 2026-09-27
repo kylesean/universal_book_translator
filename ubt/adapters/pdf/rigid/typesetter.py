@@ -665,8 +665,10 @@ class RigidTypesetter:
 
         ``#ubt-fit`` uses Typst's own ``context { measure(...) }`` to verify
         that the shaped block fits within ``zone.height`` and steps down by
-        0.4pt down to ``min_font_pt`` if HarfBuzz wraps an extra line, avoiding
-        destructive ``clip: true`` truncation.
+        0.4pt down to ``min_font_pt`` if HarfBuzz wraps an extra line. A block
+        that still overflows at the floor is clipped to the zone's 2.5pt slack
+        (within the 3.5pt inter-zone gap) instead of overprinting the block
+        below.
         """
         from ubt.adapters.pdf.docling_blocks import parse_toc_entry_line
         from ubt.adapters.pdf.overlay_text import restore_zone_superscripts, typst_escape
@@ -771,7 +773,11 @@ class RigidTypesetter:
             "    sz = calc.max(min-sz, sz - 0.4pt)\n"
             "    b = block(width: w, inset: (top: inset-top, bottom: 0pt, x: 0pt), text(size: sz, body))\n"
             "  }\n"
-            "  block(width: w, inset: (top: inset-top, bottom: 0pt, x: 0pt), clip: false, text(size: sz, body))\n"
+            "  // A fitted block may overhang by up to 2.5pt (within the 3.5pt\n"
+            "  // inter-zone gap). At the floor it can still exceed the zone, so clip\n"
+            "  // to that slack instead of overprinting the block below.\n"
+            "  let over = measure(b).height > h + 2.5pt\n"
+            "  block(width: w, height: if over { h + 2.5pt } else { auto }, inset: (top: inset-top, bottom: 0pt, x: 0pt), clip: over, text(size: sz, body))\n"
             "}"
         )
 
