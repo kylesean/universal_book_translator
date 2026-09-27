@@ -86,7 +86,9 @@ def test_cli_dry_run_writes_a_ledger_and_real_artifacts(tmp_path: Path) -> None:
     report_path = Path(payload["quality_report"])
     assert report_path.exists(), "quality report missing beside the deliverable"
     report = json.loads(report_path.read_text(encoding="utf-8"))
-    assert report["schema_version"] == 1
+    from ubt.core.engine.reporter import QUALITY_REPORT_SCHEMA_VERSION
+
+    assert report["schema_version"] == QUALITY_REPORT_SCHEMA_VERSION
     summary = report["summary"]
     total = summary["total_blocks"]
     assert total >= 1

@@ -78,7 +78,7 @@ def test_html_strip_markup_ignores_script_and_style(tmp_path: Path) -> None:
     assert decide(html).chars < 2000
 
 
-def test_non_pdf_token_estimate_is_script_aware(tmp_path) -> None:
+def test_non_pdf_token_estimate_is_script_aware(tmp_path: Path) -> None:
     """A CJK source must not be priced as if it were English (N12).
 
     ``_probe_non_pdf`` used ``chars // 4`` (the ASCII rule), under-counting a
