@@ -742,3 +742,13 @@ def test_code_block_still_gets_boilerplate_stripped() -> None:
     assert "`x`" in out  # the code span itself is untouched
     # The CMap normalizer must still be skipped for code (original intent).
     assert "/C2/data" in strip_textbook_ocr_artifacts("```python\npath = '/C2/data'\n```", "en")
+
+
+def test_running_header_does_not_swallow_prose() -> None:
+    """Running header glued to prose must not backtrack and eat following sentences."""
+    from ubt.core.cleaners.lnds_pruner import strip_textbook_ocr_artifacts
+
+    text = "10 CHAPTER 1 Principles of Software Architecture When designing systems, engineers must consider trade-offs."
+    cleaned = strip_textbook_ocr_artifacts(text, "en")
+    assert "When designing systems, engineers must consider trade-offs." in cleaned
+    assert not cleaned.startswith("s, engineers")

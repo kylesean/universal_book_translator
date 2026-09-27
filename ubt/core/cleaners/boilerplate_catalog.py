@@ -56,8 +56,8 @@ _CATALOG: dict[str, LanguageBoilerplate] = {
             # The trailing page number must not be a 4-digit year: a chapter
             # title like "CHAPTER 5 Overview of 2020" otherwise matched the
             # running-header shape and the whole line was deleted.
-            r"^\s*(?:[A-Za-z]+(?:[^\S\n]+[A-Za-z]+)*[^\w\s]?[^\S\n]*CHAPTER[^\S\n]+\d+[^\S\n]+(?!(?:1[89]|20)\d{2}\b)\d+|\d+[^\S\n]+CHAPTER[^\S\n]+\d+[^\w\s]?[^\S\n]*[A-Za-z]+(?:[^\S\n]+[A-Za-z]+)*)[^\S\n]*(?=[A-Z])",
-            r"^\s*CHAPTER[^\S\n]+\d+[^\w\s]?[^\S\n]*[A-Za-z]+(?:[^\S\n]+[A-Za-z]+)*[^\S\n]*(?!(?:1[89]|20)\d{2}\b)\d+[^\S\n]*",
+            r"^\s*(?:[A-Za-z]+(?:[^\S\n]+[A-Za-z]+){0,5}[^\w\s]?[^\S\n]*CHAPTER[^\S\n]+\d+[^\S\n]+(?!(?:1[89]|20)\d{2}\b)\d+|\d+[^\S\n]+CHAPTER[^\S\n]+\d+[^\w\s]?(?:[^\S\n]+[A-Za-z]+){0,5})[^\S\n]*(?=(?-i:[A-Z])|$)",
+            r"^\s*CHAPTER[^\S\n]+\d+[^\w\s]?[^\S\n]*(?:[A-Za-z]+(?:[^\S\n]+[A-Za-z]+){0,5})?[^\S\n]*(?!(?:1[89]|20)\d{2}\b)\d+[^\S\n]*",
         ),
         page_markers=(r"^\s*Page\s+\d+\s*\n*",),
         photo_credits=(
@@ -75,7 +75,7 @@ _CATALOG: dict[str, LanguageBoilerplate] = {
             r"Imprim[eé]\s+en\s+[A-Za-zÀ-ÿ]+.*",
         ),
         running_headers=(
-            r"^\s*(?:[A-Za-zÀ-ÿ]+(?:[^\S\n]+[A-Za-zÀ-ÿ]+)*[^\w\s]?[^\S\n]*CHAPITRE[^\S\n]+\d+[^\S\n]+\d+|\d+[^\S\n]+CHAPITRE[^\S\n]+\d+[^\w\s]?[^\S\n]*[A-Za-zÀ-ÿ]+(?:[^\S\n]+[A-Za-zÀ-ÿ]+)*)[^\S\n]*(?=[A-ZÀ-ÿ])",
+            r"^\s*(?:[A-Za-zÀ-ÿ]+(?:[^\S\n]+[A-Za-zÀ-ÿ]+){0,5}[^\w\s]?[^\S\n]*CHAPITRE[^\S\n]+\d+[^\S\n]+\d+|\d+[^\S\n]+CHAPITRE[^\S\n]+\d+[^\w\s]?(?:[^\S\n]+[A-Za-zÀ-ÿ]+){0,5})[^\S\n]*(?=(?-i:[A-ZÀ-ÿ])|$)",
         ),
         page_markers=(r"^\s*Page\s+\d+\s*\n*",),
         photo_credits=(r"\s*(?:Cr[eé]dit\s+photo\s*:?.*?|Photo\s*:?.*?)\s*$",),
@@ -91,7 +91,7 @@ _CATALOG: dict[str, LanguageBoilerplate] = {
             r"Gedruckt\s+in\s+[A-Za-zÄÖÜäöüß]+.*",
         ),
         running_headers=(
-            r"^\s*(?:[A-Za-zÄÖÜäöüß]+(?:[^\S\n]+[A-Za-zÄÖÜäöüß]+)*[^\w\s]?[^\S\n]*KAPITEL[^\S\n]+\d+[^\S\n]+\d+|\d+[^\S\n]+KAPITEL[^\S\n]+\d+[^\w\s]?[^\S\n]*[A-Za-zÄÖÜäöüß]+(?:[^\S\n]+[A-Za-zÄÖÜäöüß]+)*)[^\S\n]*(?=[A-ZÄÖÜ])",
+            r"^\s*(?:[A-Za-zÄÖÜäöüß]+(?:[^\S\n]+[A-Za-zÄÖÜäöüß]+){0,5}[^\w\s]?[^\S\n]*KAPITEL[^\S\n]+\d+[^\S\n]+\d+|\d+[^\S\n]+KAPITEL[^\S\n]+\d+[^\w\s]?(?:[^\S\n]+[A-Za-zÄÖÜäöüß]+){0,5})[^\S\n]*(?=(?-i:[A-ZÄÖÜ])|$)",
         ),
         page_markers=(r"^\s*Seite\s+\d+\s*\n*",),
         photo_credits=(r"\s*(?:Bildnachweis\s*:?.*?|Foto\s*:?.*?)\s*$",),
@@ -108,7 +108,7 @@ _CATALOG: dict[str, LanguageBoilerplate] = {
             r"Edici[oó]n\s+digital\s*:?.*",
         ),
         running_headers=(
-            r"^\s*(?:[A-Za-zÁÉÍÓÚáéíóúñ]+(?:[^\S\n]+[A-Za-zÁÉÍÓÚáéíóúñ]+)*[^\w\s]?[^\S\n]*CAP[IÍ]TULO[^\S\n]+\d+[^\S\n]+\d+|\d+[^\S\n]+CAP[IÍ]TULO[^\S\n]+\d+[^\w\s]?[^\S\n]*[A-Za-zÁÉÍÓÚáéíóúñ]+(?:[^\S\n]+[A-Za-zÁÉÍÓÚáéíóúñ]+)*)[^\S\n]*(?=[A-ZÁÉÍÓÚ])",
+            r"^\s*(?:[A-Za-zÁÉÍÓÚáéíóúñ]+(?:[^\S\n]+[A-Za-zÁÉÍÓÚáéíóúñ]+){0,5}[^\w\s]?[^\S\n]*CAP[IÍ]TULO[^\S\n]+\d+[^\S\n]+\d+|\d+[^\S\n]+CAP[IÍ]TULO[^\S\n]+\d+[^\w\s]?(?:[^\S\n]+[A-Za-zÁÉÍÓÚáéíóúñ]+){0,5})[^\S\n]*(?=(?-i:[A-ZÁÉÍÓÚ])|$)",
         ),
         page_markers=(
             r"^\s*P[aá]gina\s+\d+\s*\n*",
@@ -176,7 +176,7 @@ _CATALOG: dict[str, LanguageBoilerplate] = {
             r"Отпечатано\s+в\s+.*",
         ),
         running_headers=(
-            r"^\s*(?:[А-Яа-я]+(?:[^\S\n]+[А-Яа-я]+)*[^\w\s]?[^\S\n]*ГЛАВА[^\S\n]+\d+[^\S\n]+\d+|\d+[^\S\n]+ГЛАВА[^\S\n]+\d+[^\w\s]?[^\S\n]*[А-Яа-я]+(?:[^\S\n]+[А-Яа-я]+)*)[^\S\n]*(?=[А-Я])",
+            r"^\s*(?:[А-Яа-я]+(?:[^\S\n]+[А-Яа-я]+){0,5}[^\w\s]?[^\S\n]*ГЛАВА[^\S\n]+\d+[^\S\n]+\d+|\d+[^\S\n]+ГЛАВА[^\S\n]+\d+[^\w\s]?(?:[^\S\n]+[А-Яа-я]+){0,5})[^\S\n]*(?=(?-i:[А-Я])|$)",
         ),
         page_markers=(r"^\s*(?:Стр(?:\.|аница)\s*\d+)\s*\n*",),
         photo_credits=(r"\s*(?:Фото\s*:?.*?|Иллюстрации\s*:?.*?)\s*$",),
