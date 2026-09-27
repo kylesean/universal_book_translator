@@ -236,7 +236,7 @@ def test_prose_to_typst_keeps_pandoc_layout_calls() -> None:
 
 
 def test_prose_polish_does_not_rewrite_generic_assignments() -> None:
-    """2026-09 review: parameter-assignment polish fired on any
+    """Parameter-assignment polish fired on any
     "Word = number unit" prose, rewriting general books into math mode.
     It now requires a physics-quantity variable AND a known SI unit."""
     out = tf._prose_to_typst("Price = 30 dollars, and team_size = 5 people.")

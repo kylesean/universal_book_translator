@@ -6,7 +6,7 @@ this module is collected as a test (underscore prefix).
 
 The MT tier runs on the llama-swap gateway (``127.0.0.1:9090``), which loads
 the ``translategemma:4b`` backend on demand. The Ollama daemon that used to
-serve it was retired on 2026-09-23 (unit disabled, weights deleted), so probing
+serve it was retired (unit disabled, weights deleted), so probing
 ``:11434`` would silently skip this tier forever. Point ``UBT_LIVE_MT_BASE_URL``
 somewhere else when the stack runs on another host or port.
 """

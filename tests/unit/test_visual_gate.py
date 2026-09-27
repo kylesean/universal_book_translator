@@ -90,7 +90,7 @@ def test_blocking_gate_tripped() -> None:
     assert blocking_gate_tripped([crit], 0, True) == []
     assert blocking_gate_tripped([], 10, True) == []
     # Defect A7: an unreadable PDF (pdf_page_count sentinel -1) fails closed,
-    # even when the opt-in D1 gate is off.
+    # even when the opt-in visual gate is off.
     assert blocking_gate_tripped([crit, major], -1, True) == [crit]
     assert blocking_gate_tripped([crit], -1, False) == [crit]
     assert blocking_gate_tripped([major], -1, True) == []
@@ -149,7 +149,7 @@ async def test_unreadable_pdf_trips_blocking_gate(tmp_path: Path) -> None:
     tripped = blocking_gate_tripped(res.findings, total_pages, True)
     assert [f.code for f in tripped] == ["unreadable_pdf"]
     # Structural failure, not a quality warning: the refusal holds even with
-    # the opt-in D1 gate disabled.
+    # the opt-in visual gate disabled.
     assert blocking_gate_tripped(res.findings, total_pages, False) == list(res.findings)
 
 
@@ -442,7 +442,7 @@ def test_source_bboxes_only_gate_the_engine_that_keeps_them() -> None:
 
 
 def test_visual_gate_measures_the_artifact_not_the_ir(tmp_path: Path) -> None:
-    """F3b: geometry is read from the delivered PDF, not the IR's source boxes.
+    """Geometry is read from the delivered PDF, not the IR's source boxes.
 
     Two text runs rendered on top of each other are invisible to the IR (whose
     bboxes are fine) but obvious in the artifact. The gate must read the

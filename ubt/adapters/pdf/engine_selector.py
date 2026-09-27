@@ -7,7 +7,7 @@ Signals (cheap pypdfium2 probe of sampled pages):
 - right-column edge share — multi-column layouts need Docling's
   reading-order reconstruction; pdfium's rect rows would interleave the
   columns and scramble the translation stream;
-- formula-fragment density (F1) — technical books whose body pages carry
+- formula-fragment density — technical books whose body pages carry
   math/table symbol debris (isolated single-letter tokens from shattered
   equations) need Docling's FORMULA / TABLE / LIST_ITEM classification;
   pdfium's heading-vs-narrative split mangles them into phantom headings,

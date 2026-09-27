@@ -93,7 +93,7 @@ def test_pdf_oxide_tolerated_object_warnings_are_quieted() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Noise aggregation (2026-09-24): a third-party logger that emits one WARNING
+# Noise aggregation: a third-party logger that emits one WARNING
 # per recoverable object must collapse into a tiered summary, never into silence.
 # ---------------------------------------------------------------------------
 

@@ -1,8 +1,8 @@
 """The one test that spends real provider budget (nightly smoke job).
 
-Why this file exists (inding B5/D1): every other test that exercises the
+Why this file exists: every other test that exercises the
 draft path drives ``MockModelProvider``, and the nightly "Real-provider smoke"
-job (since retired 2026-09-26; recover it with
+job (since retired; recover it with
 ``git log -- .github/workflows/nightly-smoke.yml``) selected tests with
 ``-k "smoke or real"`` — which matched only ``test_docling_real_paper.py``
 (matched on the module name containing "real"), a file with zero provider
@@ -12,7 +12,7 @@ principle, and its ``grep -c PASSED`` gate could never be satisfied by
 
 Deliberately tiny (one or two calls, cents at most) and deliberately lenient: it
 asserts invariants that must hold for ANY competent provider. The structural
-*quality floor* (the golden review's D1, once deferred) is covered by
+*quality floor* (once deferred) is covered by
 ``test_live_draft_meets_structural_quality_gate`` below: the draft must clear the
 pipeline's own zero-token FastPassFilter gate. It self-skips without a real
 credential, so a local run stays free.
@@ -127,7 +127,7 @@ def _quality_block() -> IRBlock:
 @pytest.mark.asyncio
 @requires_live_llm
 async def test_live_draft_meets_structural_quality_gate(live_llm_env: None) -> None:
-    """Real-model quality floor via the muse-spark profile (closes D1).
+    """Real-model quality floor via the muse-spark profile.
 
     Not a paraphrase-flaky BLEU/COMET number: the draft of the harder golden
     above must (a) come back in the *target* script and (b) clear the *same*

@@ -103,7 +103,7 @@ class RunMetadata(BaseModel):
     formula_mode: str | None = None
     selected_pages: list[int] | None = None
     extraction_witness: dict[str, Any] | None = Field(
-        default=None, description="font-encoding damage summary (D2'), zero tokens"
+        default=None, description="font-encoding damage summary, zero tokens"
     )
 
     # --- OCR egress disclosure --------------------------------------------

@@ -4,7 +4,7 @@ These three ran inline in ``PipelineOrchestrator.run()``, which is why the
 generator was 800+ lines: none of them is a translation step, all three are
 zero-token judgements about the artifact, and they read only post-ingest IR.
 
-- :func:`run_extraction_witness_stage` (D2') flags pages whose math was already
+- :func:`run_extraction_witness_stage` flags pages whose math was already
   broken by the extractor's font encoding, before anything is translated.
 - :func:`run_mode_advisory_stage` scores the requested render mode against the
   layout the document actually has, applies the rigid-engine downgrade, and

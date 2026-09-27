@@ -71,7 +71,7 @@ def test_comments_and_doctype_pass_through_verbatim() -> None:
 def test_unpaired_dangerous_tag_is_escaped_but_unterminated_still_fails_closed() -> None:
     """An unpaired ``<script>`` is escaped to inert text, not dropped-with-content.
 
-    Superseded contract (explicit product decision, 2026-09): a dangerous name
+    Superseded contract (explicit product decision): a dangerous name
     with no matching close tag is prose-like (``<embed src=…>`` in a caption,
     ``<script>`` mentioned in a CS book), so escaping it preserves the rest of
     the member instead of deleting it. Escaped text cannot execute, so the XSS

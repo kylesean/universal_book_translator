@@ -131,7 +131,7 @@ async def test_pipeline_locks_character_rendering_across_chapters(tmp_path: Path
 
 
 def test_mines_all_surface_variants_of_same_core() -> None:
-    """Mr. Bingley and Miss Bingley must both be mined (drift fix, 2026-09 bench)."""
+    """Mr. Bingley and Miss Bingley must both be mined."""
     text = "Mr. Bingley arrived. Miss Bingley followed. Mr. Bingley smiled."
     entries = mine_characters(text, min_freq=99)
     sources = {e["source"] for e in entries}

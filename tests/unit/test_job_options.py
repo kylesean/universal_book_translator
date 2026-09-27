@@ -14,7 +14,7 @@ from either is a knob that shell's caller simply cannot ask for:
   into a 422 before a job exists), and
 - the MCP ``ubt_translate_book`` signature (its parameters *are* the payload).
 
-Both were found narrow in 2026-09: the REST model carried 19 of the CLI's 40+
+Both were found narrow: the REST model carried 19 of the CLI's 40+
 keys and the MCP tool carried 17, so neither could cap spend, raise the
 concurrency ceiling, choose the OCR engine or pin the formula policy. These
 assertions are the guard against a third occurrence.

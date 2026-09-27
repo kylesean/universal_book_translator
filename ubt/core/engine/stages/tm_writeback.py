@@ -129,7 +129,7 @@ async def run_tm_writeback_stage(ctx: StageContext) -> None:
             build_global_glossary_table(ctx.glossary_dicts, ctx.config.glossary_max_global_entries),
             ctx.source_lang,
             ctx.target_lang,
-            # F5: same abbreviation channel the draft stage hashed.
+            # Same abbreviation channel the draft stage hashed.
             format_abbreviations_markdown_table(ctx.abbreviation_entries),
         )
         written = await asyncio.to_thread(

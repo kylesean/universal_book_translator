@@ -1,4 +1,4 @@
-"""Tests for the renderer-facing font probe (D10).
+"""Tests for the renderer-facing font probe.
 
 The behavior that matters: a family the compiler cannot resolve is dropped from
 the emitted stack, and a machine with no CJK font at all is reported instead of
@@ -354,7 +354,7 @@ def test_gothic_and_mincho_are_style_words_before_they_are_scripts(
 
 @pytest.mark.parametrize("lang", ["zh", "ja", "ko"])
 def test_stock_windows_gets_a_face_that_can_actually_render_the_script(lang: str) -> None:
-    """The regression the 2026-09-20 Windows CI run exposed.
+    """The regression the Windows CI run exposed.
 
     Before, all three languages resolved to ``("Franklin Gothic",)`` — readable in
     the log, blank on the page.

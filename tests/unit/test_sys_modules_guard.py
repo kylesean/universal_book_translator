@@ -8,7 +8,7 @@ that the module swap had left behind — crashing the interpreter *after* a gree
 run (exit 139, no traceback). The fix is a lazy import seam
 (``_docling_symbols``) that tests patch directly.
 
-The same class of mutation came back on 2026-09-21 as exit-134 SIGABRT, from a
+The same class of mutation came back as exit-134 SIGABRT, from a
 direction no test authored: ``--cov=ubt.adapters.pdf.typst_reconstructor`` makes
 coverage import that dotted source just to locate it, then remove everything the
 import touched (``coverage.misc.sys_modules_saved``). ``ubt/adapters/pdf/__init__``

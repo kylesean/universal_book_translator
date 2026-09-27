@@ -1,4 +1,4 @@
-"""Tests for artifact parity — physical evidence against the source (D1).
+"""Tests for artifact parity — physical evidence against the source.
 
 The pure parsers get fabricated poppler output; the aggregate check runs
 against real repo PDFs when poppler is installed (CI pins the binaries).
@@ -110,7 +110,7 @@ class TestAgainstRealRepoPdfs:
         )
 
     def test_geometry_parity_fires_for_wrong_size(self) -> None:
-        # chapter-1 (B5-ish) against chapter-3 (different page size): source and
+        # chapter-1 against chapter-3 (different page size): source and
         # artifact swapped so sizes must mismatch under keeps-source-geometry.
         findings = check_artifact_parity(
             source_pdf=REPO / "tests/fixtures/synthetic-duo.pdf",

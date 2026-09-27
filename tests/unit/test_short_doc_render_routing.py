@@ -377,7 +377,7 @@ async def test_export_stage_non_destructive_glossary_validation(tmp_path: Path) 
 
 
 async def test_export_stage_reraises_cancellation_from_visual_gate(tmp_path: Path) -> None:
-    """P0 regression: a cancel landing inside the visual gate must abort export.
+    """Regression: a cancel landing inside the visual gate must abort export.
 
     ``ReflowControlLoop.run`` raises ``JobInterruptedError``; the gate's
     blanket ``except Exception`` used to log it as "non-fatal" and continue,

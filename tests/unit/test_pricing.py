@@ -156,7 +156,7 @@ def test_unpriced_model_with_usage_reports_unknown_not_zero(
 
 
 def test_free_tier_models_are_priced_zero_not_unknown() -> None:
-    """Re-specified 2026-09-24: zero pricing is an ENDPOINT fact.
+    """Zero pricing is an ENDPOINT fact.
 
     The table used to carry ``ollama/``, ``localhost`` and
     ``host.docker.internal`` as if they were model names, so a real self-hosted
@@ -264,7 +264,7 @@ def test_pricing_strips_provider_prefix() -> None:
 
 # ---------------------------------------------------------------------------
 # "Free" is a property of WHERE the request went, not of what the model is
-# called (2026-09-24). Self-hosting is the common case for this project, and
+# called. Self-hosting is the common case for this project, and
 # every self-hosted user was either mis-billed or refused at startup.
 # ---------------------------------------------------------------------------
 

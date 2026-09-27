@@ -1,4 +1,4 @@
-"""P2(c): a missing ``mcp`` extra is a catchable error, not ``SystemExit``.
+"""A missing ``mcp`` extra is a catchable error, not ``SystemExit``.
 
 ``ubt.mcp.server`` imports the optional ``mcp`` package at module scope. That
 guard used to ``raise SystemExit``, which kills the whole process: a library

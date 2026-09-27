@@ -122,7 +122,7 @@ def test_create_model_provider_forwards_prompt_caching_disabled() -> None:
 
 
 def test_orchestrator_wires_config_prompt_caching_to_provider(tmp_path: Path) -> None:
-    """P1 regression: UBTConfig.prompt_caching_enabled was a dead switch — the
+    """Regression: UBTConfig.prompt_caching_enabled was a dead switch — the
     orchestrator built its provider without it, so disabling it via env/config
     had no effect. The value must now reach the provider."""
     off = UBTConfig.from_env(

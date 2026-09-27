@@ -79,7 +79,7 @@ async def test_qe_l1_l2_agreement_report(tmp_path: Path) -> None:
     finally:
         # The resident scorer is a real child process. Without this teardown
         # its transport outlives the event loop, and GC then raises
-        # "Event loop is closed" during a later test (2026-09 full-suite
+        # "Event loop is closed" during a later test (a full-suite
         # PytestUnraisableExceptionWarning), while the worker holds its fds.
         await l2_runner.aclose()
 

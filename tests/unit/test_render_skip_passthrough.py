@@ -114,7 +114,7 @@ def test_length_policy_flips_resume_poster_to_human() -> None:
     assert resume.status == BlockStatus.NEEDS_HUMAN
     assert poster.status == BlockStatus.NEEDS_HUMAN
     assert "length_overflow:overflow(base=10.0)" in resume.error_flags
-    # Non-policy pages keep flag-only P7 behaviour.
+    # Non-policy pages keep flag-only behaviour.
     assert prose.status == BlockStatus.MTQE_PASSED
     assert all(not f.startswith("length_overflow:") for f in prose.error_flags)
     # Unknown ids ignored; statuses stay terminal.

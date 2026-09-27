@@ -1,4 +1,4 @@
-"""Unit tests for F2 skip classification and F3 QE short-block calibration."""
+"""Unit tests for skip classification and QE short-block calibration."""
 
 import pytest
 
@@ -13,7 +13,7 @@ def _fp() -> FastPassFilter:
 
 
 # ---------------------------------------------------------------------------
-# F2: skip_translate pre-classification
+# skip_translate pre-classification
 # ---------------------------------------------------------------------------
 
 
@@ -68,7 +68,7 @@ def test_skip_rules_does_not_skip_narrative_prose_with_etal_or_url() -> None:
 
 
 # ---------------------------------------------------------------------------
-# F3: script-density measured over the translatable residue
+# script-density measured over the translatable residue
 # ---------------------------------------------------------------------------
 
 
@@ -131,7 +131,7 @@ def _fp_latin_pair() -> FastPassFilter:
 
 def test_near_verbatim_echo_rejects_untranslated_latin_passage() -> None:
     """A one-character-retouched English echo into German must not ride the
-    Latin->Latin blind spot to a flawless pass (2026-09 review)."""
+    Latin->Latin blind spot to a flawless pass."""
     src = "The transistor characteristics were measured at room temperature across the entire sample set."
     near = "The transistor characteristics were measured at room temperature across the entire sample seri!"
     d = _fp_latin_pair().evaluate(src, near)

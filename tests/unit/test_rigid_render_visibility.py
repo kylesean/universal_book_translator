@@ -224,7 +224,7 @@ def test_partition_render_skips_separates_intentional_preserved_from_fail_closed
 
 
 def test_ubt_fit_clips_at_the_floor_instead_of_overprinting(tmp_path: Path) -> None:
-    """F2: a block that cannot fit even at the floor must not overprint the next.
+    """A block that cannot fit even at the floor must not overprint the next.
 
     ``#ubt-fit`` shrank to ``min-sz`` and then emitted ``clip: false``
     unconditionally, so an oversized block flowed past its zone and garbled the

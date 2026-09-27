@@ -129,7 +129,7 @@ class StageContext:
     #: The raw-completion channel the bible backfill asks the provider for.
     #: Overridable so a test can make backfill a no-op without a fake router.
     complete_raw_fn: Callable[..., Awaitable[str]] | None = None
-    #: Whether the orchestrator was handed a QE runner / repair loop (F3: only a
+    #: Whether the orchestrator was handed a QE runner / repair loop (only a
     #: runner this pipeline built itself may be re-bound to the run's
     #: terminology, and an injected loop must stay exactly as it was given).
     qe_runner_explicit: bool = False

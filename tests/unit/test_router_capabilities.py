@@ -336,7 +336,7 @@ async def test_router_repair_non_vision_model_repairs_from_text() -> None:
 async def test_router_repair_never_egresses_pages_when_upload_disabled() -> None:
     """allow_page_upload=false must skip the visual crop even for a
     vision-capable repair model and degrade to text repair (privacy
-    kill-switch, 2026-09 review)."""
+    kill-switch)."""
     from ubt.core.exceptions import ModelProviderError
 
     class ExplodingVisionProvider(MockModelProvider):
@@ -370,7 +370,7 @@ async def test_router_repair_never_egresses_pages_when_upload_disabled() -> None
 
 
 def test_provider_sanitize_respects_xml_tag_and_raw_profiles() -> None:
-    """Regression (2026-09 review): provider-side AUTO unwrap used to run
+    """Regression: provider-side AUTO unwrap used to run
     before the router's strategy-aware extraction, so an XML_TAG profile saw
     no tags left to find and got "" — an empty translation for the whole
     book. RAW profiles were likewise rewritten (prefix stripped) despite
@@ -469,7 +469,7 @@ async def test_vision_channel_uses_the_rate_limiter(fail: bool) -> None:
     ``complete_with_images`` used to call the provider directly: no token
     reserved, no 429 fed back, and repair() swallowed the failure into a log line
     — so the most expensive channel neither respected nor influenced the AIMD
-    throttling the text path relied on (2026-09 review).
+    throttling the text path relied on.
     """
     from ubt.core.router.router import _VISION_TOKENS_PER_PAGE_IMAGE
 

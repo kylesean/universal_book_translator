@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 from oxide_render_ab import DPIS, PAGES, compare_pair, main  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-# The original real documents were removed in the 2026-09 legal review; the
+# The original real documents were removed for legal reasons; the
 # gate now runs on the generated, copyright-safe synthetic corpus
 # (scripts/make_sample_corpus.py), which tests/conftest.py seeds before
 # collection.

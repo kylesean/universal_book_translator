@@ -1,4 +1,4 @@
-"""Curated seed glossaries by domain profile (P11 term-consistency lever).
+"""Curated seed glossaries by domain profile.
 
 Miners + LLM backfill start from zero every book (chapter-1 bible held ~2
 abbreviation pairs → glossary_hits 0/98 → terminology drift like

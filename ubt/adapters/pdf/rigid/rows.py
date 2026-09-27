@@ -85,7 +85,7 @@ _CLAIM_STOPWORDS = frozenset(
 
 _CJK_RE = re.compile("[\u4e00-\u9fff]")
 _MIN_CLAIM_CHARS = 3
-# P0 breaker: isolated equation numbers (e.g. "(3.1)"), citation brackets
+# Breaker: isolated equation numbers (e.g. "(3.1)"), citation brackets
 # (e.g. "[1]"), or bare numbers must never be reclaimed as narrative
 # continuation.
 _RECLAIM_EXCLUDE_RE = re.compile(
@@ -128,7 +128,7 @@ def content_token_count(line_text: str) -> int:
 
 
 def _reclaimable(line: LineBox) -> bool:
-    """Row-level eligibility mirroring the row-match P0 exclusions."""
+    """Row-level eligibility mirroring the row-match exclusions."""
 
     if line.table_band:
         return False

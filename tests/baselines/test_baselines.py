@@ -28,7 +28,7 @@ from ubt.core.qe.comet_runner import MockQERunner
 from ubt.core.router.rate_limiter import AdaptiveTokenBucket
 from ubt.core.router.router import ModelRouter
 
-# Deliberately NOT `slow`-marked: measured 2026-09-23 the whole tier is 6 tests /
+# Deliberately NOT `slow`-marked: the whole tier is 6 tests /
 # 2.27 s (slowest case 1.27 s) and spawns no subprocess. It is the only tier that
 # proves the pipeline worked end to end, so it belongs in the DEFAULT loop. It is
 # not in the `-m fast` per-edit loop, which collects tests/unit only.
@@ -361,7 +361,7 @@ async def test_baseline_standard_alice_epub_e2e(tmp_path: Path) -> None:
     # length cap, so the mock violated its own sentence-parity contract and the
     # omission gate fired on the fixture. The mock now falls back to its micro
     # filler before giving up; the whole novel delivers with nothing quarantined.
-    # Gate wired 2026-09-23 and its golden recorded in the same round (8bef284).
+    # Gate wired and its golden recorded in the same round (8bef284).
     # The corpus used to be excused as `network`-marked, which was untrue (local
     # EPUB, offline double) — that false marker is why it ran undefended for a week.
     assert_no_kpi_regression(out_epub, BASELINES_DIR / "standard-alice" / "metrics.golden.json")

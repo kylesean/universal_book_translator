@@ -156,7 +156,7 @@ def test_preset_engine_knobs_apply_only_after_an_explicit_pick() -> None:
     ``PRESETS[STANDARD].engine_overrides()`` unconditionally, and overrides beat
     the environment — so ``UBT_RENDER_ENGINE`` / ``UBT_MATH_BACKEND`` /
     ``UBT_PROMPT_STRATEGY`` set by the operator were silently replaced on every
-    run, the same class of bug the 2026-09 review removed for translate_chrome /
+    run, the same class of bug removed for translate_chrome /
     cover_mode / formula_mode.
 
     The TUI surface this was originally written against no longer exists, so the

@@ -96,7 +96,7 @@ class DocSignals:
     interruption_per_page: float = 0.0  # formula+table+image+code blocks / page
     struct_block_share: float = 0.0  # formula+table+image+code / total
     figure_page_share: float = 0.0  # pages carrying figures / page_count
-    skip_share: float = 0.0  # F2 skip_translate / total
+    skip_share: float = 0.0  # skip_translate / total
     fragment_share: float = 0.0  # source chars < 25 / total
     prose_char_share: float = 0.0  # narrative+heading+list chars / chars
 
