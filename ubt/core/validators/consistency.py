@@ -601,6 +601,26 @@ class NumericConsistencyValidator(ContentValidator):
         # Scale equivalence is computed once per pair: the values the source
         # states next to a scale word, and every value the target states.
         src_scales = _scale_map(original)
+        # Canonical digit runs that occur *bare* somewhere (not part of a scale
+        # match). ``src_scales`` is keyed by the digits, so a bare '250' and a
+        # scaled '250万' collapse to one key; without this set the loop below
+        # checked that key against the magnitude only and skipped the bare
+        # occurrence, so a dropped (or altered) bare number shipped as valid.
+        # Spans are measured on ``src_view`` so they line up with ``_NUM``'s
+        # tokens -- the same view ``src_nums`` came from.
+        scaled_spans: list[tuple[int, int]] = []
+        for scale_match in _SCALE_ADJACENCY_RE.finditer(src_view):
+            for group in ("cn", "en", "si", "sym"):
+                if scale_match.group(group) is not None:
+                    scaled_spans.append(scale_match.span(group))
+                    break
+        bare_numbers: set[str] = set()
+        for num_match in _NUM.finditer(src_view):
+            if any(s <= num_match.start() and num_match.end() <= e for s, e in scaled_spans):
+                continue
+            bare_canon = canonicalize_numeric_token(num_match.group(0))
+            if bare_canon:
+                bare_numbers.add(bare_canon)
         source_compounds = _cn_compound_runs(original.translate(_FULLWIDTH_DIGITS))
         tgt_values = _denoted_values(translated) | _denoted_values(normalized_tgt)
         tgt_values |= {
@@ -611,6 +631,43 @@ class NumericConsistencyValidator(ContentValidator):
         compound_satisfied = {
             token for tokens, total in source_compounds if total in tgt_values for token in tokens
         }
+
+        def _bare_satisfied(num: str) -> bool:
+            """Whether ``num``'s own (unsigned, unscaled) occurrence is honoured."""
+            # Sign: a dropped minus on an unscaled quantity is a changed fact.
+            if num in negative_tokens and not _has_negative_token(normalized_tgt, num):
+                return False
+            if _RANGE_DELIMITERS.search(num):
+                sub_parts = [
+                    canonicalize_numeric_token(p) for p in _RANGE_DELIMITERS.split(num) if p.strip()
+                ]
+                if sub_parts and all(p in exempt_numbers for p in sub_parts):
+                    return True
+            if _has_numeric_token(normalized_tgt, num):
+                return True
+            # A broken PDF text layer can concatenate a two-page range
+            # ("pp. 40–46" -> "pp. 4046"). Accept only when the source has
+            # the explicit plural-page cue and the target restores that exact
+            # pair as a range.
+            if _glued_page_range_is_preserved(original, normalized_tgt, num):
+                return True
+            # If num is a compound range (e.g. 1984-1985, 10/20), check if all sub-numbers are preserved
+            if _RANGE_DELIMITERS.search(num):
+                sub_parts = [
+                    canonicalize_numeric_token(p) for p in _RANGE_DELIMITERS.split(num) if p.strip()
+                ]
+                if len(sub_parts) > 1 and all(
+                    _has_numeric_token(normalized_tgt, sub) for sub in sub_parts
+                ):
+                    return True
+            # A bare quantity restated at the same value but spelled out shares
+            # no digit string, so the textual check above cannot see it.
+            if num in tgt_values:
+                return True
+            # A thousands-dot/three-decimals token ('1.500') is satisfied by
+            # either of its two readings, not only the stripped integer form.
+            return bool((ambiguous_readings.get(num) or set()) & tgt_values)
+
         for num in sorted(src_nums):
             if num in exempt_numbers:
                 continue
@@ -627,44 +684,16 @@ class NumericConsistencyValidator(ContentValidator):
                     magnitude_ok = bool(scaled & tgt_values)
                 if not magnitude_ok:
                     lost_numbers.append(num)
-                continue
-            # Sign: a dropped minus on an unscaled quantity is a changed fact.
-            if num in negative_tokens and not _has_negative_token(normalized_tgt, num):
+                    continue
+                # The same digit run may also occur bare elsewhere. The
+                # magnitude satisfies only the scaled occurrence; the bare one
+                # still needs its own value, so fall through to the bare check
+                # rather than waving the whole key through.
+                if num not in bare_numbers or _bare_satisfied(num):
+                    continue
                 lost_numbers.append(num)
                 continue
-            if _RANGE_DELIMITERS.search(num):
-                sub_parts = [
-                    canonicalize_numeric_token(p) for p in _RANGE_DELIMITERS.split(num) if p.strip()
-                ]
-                if sub_parts and all(p in exempt_numbers for p in sub_parts):
-                    continue
-            if _has_numeric_token(normalized_tgt, num):
-                continue
-            # A broken PDF text layer can concatenate a two-page range
-            # ("pp. 40–46" -> "pp. 4046"). Accept only when the source has
-            # the explicit plural-page cue and the target restores that exact
-            # pair as a range.
-            if _glued_page_range_is_preserved(original, normalized_tgt, num):
-                continue
-            # If num is a compound range (e.g. 1984-1985, 10/20), check if all sub-numbers are preserved
-            if _RANGE_DELIMITERS.search(num):
-                sub_parts = [
-                    canonicalize_numeric_token(p) for p in _RANGE_DELIMITERS.split(num) if p.strip()
-                ]
-                if len(sub_parts) > 1 and all(
-                    _has_numeric_token(normalized_tgt, sub) for sub in sub_parts
-                ):
-                    continue
-            # A quantity re-expressed through a unit word ('250万' ->
-            # '2.5-megapixel') shares no digit string with its own value, so the
-            # textual check above cannot see it. Accept it only when the two
-            # sides denote the same value, which a genuinely dropped number
-            # cannot do.
-            if num in tgt_values or (src_scales.get(num) or set()) & tgt_values:
-                continue
-            # A thousands-dot/three-decimals token ('1.500') is satisfied by
-            # either of its two readings, not only the stripped integer form.
-            if (ambiguous_readings.get(num) or set()) & tgt_values:
+            if _bare_satisfied(num):
                 continue
             lost_numbers.append(num)
 

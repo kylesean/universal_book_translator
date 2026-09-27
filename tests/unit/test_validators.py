@@ -859,6 +859,26 @@ def test_dropped_magnitude_is_rejected() -> None:
     assert v.validate("250万", "2.5 million").is_valid
 
 
+def test_bare_number_alongside_a_same_key_scaled_number_is_still_required() -> None:
+    """A digit run that occurs both bare and with a magnitude word keeps both
+    obligations. The scale map is keyed by the canonical digits, so a bare
+    ``250`` and a scaled ``250万`` collapsed to one entry and the bare
+    occurrence was checked only against the magnitude -- a dropped *or changed*
+    bare number then shipped as valid. The magnitude must still be restated even
+    when the bare digits survive.
+    """
+    v = NumericConsistencyValidator()
+    src = "共 250 项，另一处 250万。"
+    # Both obligations met: the bare digit is kept and the magnitude restated.
+    assert v.validate(src, "共 250 items, i.e. 2.5 million.").is_valid
+    # Bare number dropped while the magnitude survives.
+    assert not v.validate(src, "共 2.5 million.").is_valid
+    # Bare number altered while the magnitude survives.
+    assert not v.validate(src, "共 251 items, i.e. 2.5 million.").is_valid
+    # Magnitude dropped while the bare number survives (pre-existing guard).
+    assert not v.validate(src, "共 250 items.").is_valid
+
+
 def test_unit_prefix_is_not_a_magnitude() -> None:
     """'千/百' inside a measure unit ('千克', '千米') is not a x1000/x100 scale."""
     v = NumericConsistencyValidator()
