@@ -103,6 +103,38 @@ def test_cli_pe_import_rejects_a_traversal_job_id(tmp_path: Path) -> None:
     assert outside.read_bytes() == before, "the traversal target was opened and mutated"
 
 
+def test_cli_pe_import_refuses_while_another_writer_holds_the_lock(tmp_path: Path) -> None:
+    """``pe-import`` writes paid block state, so it must take the job writer lock.
+
+    Regression: it opened the ledger directly and could race a concurrent resume
+    — its human revisions and the pipeline's checkpoints overwriting one another.
+    """
+    from ubt.core.engine.writer_lock import LedgerWriterLock
+
+    db_dir = tmp_path / "ledgers"
+    db_dir.mkdir()
+    job_id = "job_locked01"
+    db_path = db_dir / f"{job_id}.sqlite"
+    # A present-but-empty ledger file is enough to reach the lock acquisition.
+    db_path.write_bytes(b"")
+
+    pe_file = tmp_path / "pe.csv"
+    pe_file.write_text("block_id,revised_translation\nb1,译文\n", encoding="utf-8")
+
+    holder = LedgerWriterLock(db_path, job_id)
+    holder.acquire()
+    try:
+        result = runner.invoke(
+            app,
+            ["pe-import", job_id, "--file", str(pe_file), "--db-dir", str(db_dir)],
+        )
+    finally:
+        holder.release()
+
+    assert result.exit_code == 1
+    assert "being written by another process" in result.stdout
+
+
 def test_cli_translate_dry_run(sample_book_md: Path, tmp_path: Path) -> None:
     out_file = tmp_path / "cli_out.md"
     db_dir = tmp_path / "cli_ledgers"

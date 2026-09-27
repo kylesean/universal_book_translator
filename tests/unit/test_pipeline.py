@@ -1534,3 +1534,33 @@ async def test_pipeline_stateless_fast_pass_and_repair() -> None:
 
     # Verify instance fast_pass was not clobbered
     assert repair_loop.fast_pass is initial_fast_pass
+
+
+def test_completion_floor_counts_blocked_human_placeholders_as_untranslated() -> None:
+    """A quarantined book must not pass the completion floor on placeholders.
+
+    ``BLOCKED_HUMAN`` carries a non-empty ``<mark>`` source wrapper, so counting
+    "has a target" let an all-quarantined book finalize as completed.
+    """
+    from ubt.core.engine.stages.export import _check_completion_ratio
+
+    blocks = [
+        IRBlock(
+            id="a",
+            spine_index=1,
+            block_type=BlockType.NARRATIVE,
+            source_text="One.",
+            target_text="一。",
+            status=BlockStatus.MTQE_PASSED,
+        ),
+        IRBlock(
+            id="b",
+            spine_index=2,
+            block_type=BlockType.NARRATIVE,
+            source_text="Two.",
+            target_text="<mark>Two.</mark>",
+            status=BlockStatus.BLOCKED_HUMAN,
+        ),
+    ]
+    with pytest.raises(IntegrityViolationError):
+        _check_completion_ratio("job", blocks, 0.9)

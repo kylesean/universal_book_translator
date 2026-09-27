@@ -357,12 +357,19 @@ def _check_completion_ratio(
     target, so a run in which most blocks failed would finalize as
     "completed" with an untranslated book. Refusing here keeps the ledger
     intact, so a resume retries exactly the blocks that have no target.
+
+    ``BLOCKED_HUMAN`` blocks carry a non-empty ``<mark>`` placeholder wrapping
+    the *source*, not a translation, so they must not count as delivered — an
+    all-quarantined book would otherwise pass a completion floor of 1.0.
     """
     if min_completion_ratio <= 0 or not final_blocks:
         return
 
     untranslated = [
-        fb.id for fb in final_blocks if not fb.skip_translate and not (fb.target_text or "")
+        fb.id
+        for fb in final_blocks
+        if not fb.skip_translate
+        and (not (fb.target_text or "") or fb.status == BlockStatus.BLOCKED_HUMAN)
     ]
     completed_ratio = 1.0 - len(untranslated) / len(final_blocks)
     if completed_ratio < min_completion_ratio:

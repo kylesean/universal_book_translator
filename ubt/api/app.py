@@ -625,13 +625,42 @@ def create_app(
             try:
                 db_path = app_config.db_dir / f"{valid_id}.sqlite"
                 if db_path.exists():
-                    ledger_cls = _get_ledger_cls()
-                    with ledger_cls(db_path) as ledger:
-                        # Prevent rewriting a finished job to CANCELLED if it already
-                        # reached a terminal status.
-                        if ledger.get_job_status(valid_id) in TERMINAL_JOB_STATUSES:
-                            return
-                        ledger.finalize_job(valid_id, status=JobStatus.CANCELLED)
+                    import time
+
+                    from ubt.core.engine.writer_lock import LedgerWriterLock
+                    from ubt.core.exceptions import LedgerWriterLockConflictError
+
+                    # The pipeline holds the job-level writer lock for the whole
+                    # run; taking it here too is what stops a cancellation from
+                    # clobbering a still-writing pipeline's checkpoints (and vice
+                    # versa). Wait briefly for the cancelled task to release it,
+                    # then finalize; if it is still held, the pipeline itself
+                    # will land the terminal status.
+                    lock = LedgerWriterLock(db_path, valid_id)
+                    deadline = time.monotonic() + 10.0
+                    while True:
+                        try:
+                            lock.acquire()
+                            break
+                        except LedgerWriterLockConflictError:
+                            if time.monotonic() >= deadline:
+                                logger.debug(
+                                    "Cancellation for %s: writer lock still held; "
+                                    "the running pipeline will finalize it.",
+                                    valid_id,
+                                )
+                                return
+                            time.sleep(0.1)
+                    try:
+                        ledger_cls = _get_ledger_cls()
+                        with ledger_cls(db_path) as ledger:
+                            # Prevent rewriting a finished job to CANCELLED if it
+                            # already reached a terminal status.
+                            if ledger.get_job_status(valid_id) in TERMINAL_JOB_STATUSES:
+                                return
+                            ledger.finalize_job(valid_id, status=JobStatus.CANCELLED)
+                    finally:
+                        lock.release()
             except Exception as exc:
                 logger.debug("Could not persist cancellation for %s: %s", valid_id, exc)
 

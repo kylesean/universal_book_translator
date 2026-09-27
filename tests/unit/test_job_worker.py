@@ -103,7 +103,11 @@ async def test_failed_job_is_terminal_with_error(queue: JobQueue) -> None:
     job = queue.get("j1")
     assert job is not None
     assert job.status is JobStatus.FAILED
-    assert "provider exploded" in (job.error or "")
+    # The raw message must not leak to clients: provider error bodies can carry
+    # source book text or host paths. The class name + a server-log pointer is
+    # the product guarantee (same as the embedded API manager).
+    assert "RuntimeError" in (job.error or "")
+    assert "provider exploded" not in (job.error or "")
 
 
 @pytest.mark.asyncio
@@ -217,7 +221,8 @@ async def test_writer_lock_conflict_yields_back_to_queued(queue: JobQueue) -> No
     assert row.status is JobStatus.QUEUED
     assert row.attempts == 0  # rolled back attempt
     assert row.worker_id is None
-    assert row.error is not None and "Yielded on writer lock contention" in row.error
+    assert row.error is not None and "writer lock held" in row.error
+    assert "LedgerWriterLockConflictError" in row.error
 
 
 @pytest.mark.asyncio
@@ -356,7 +361,10 @@ async def test_poison_payload_fails_job_not_worker(queue: JobQueue) -> None:
     job = queue.get("j-poison")
     assert job is not None
     assert job.status is JobStatus.FAILED
-    assert "ultra" in (job.error or "")
+    # The raw validation message (which can quote payload/paths) must not leak;
+    # the class name + server-log pointer is the client contract.
+    assert "see server logs" in (job.error or "")
+    assert "ultra" not in (job.error or "")
 
 
 @pytest.mark.asyncio

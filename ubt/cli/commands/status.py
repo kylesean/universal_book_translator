@@ -14,7 +14,8 @@ from rich.table import Table
 from ubt.core.config import UBTConfig
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.pe_import import PEImportError, import_pe_revisions
-from ubt.core.exceptions import DocumentParseError
+from ubt.core.engine.writer_lock import LedgerWriterLock
+from ubt.core.exceptions import DocumentParseError, LedgerWriterLockConflictError
 from ubt.core.ir.models import BlockStatus
 from ubt.core.job_options import JOB_ID_MAX_LEN, job_id_is_valid
 
@@ -440,6 +441,19 @@ def pe_import(
 
     ledger = SQLiteJobLedger(db_path)
     tm = None
+    # ``pe-import`` writes paid block state (``target_text``/``status``) straight
+    # into the ledger, so it is a writer like the orchestrator: it must take the
+    # same job-level lock, or it can race a concurrent resume and have its human
+    # revisions overwritten (or overwrite the pipeline's checkpoints).
+    writer_lock = LedgerWriterLock(db_path, job_id)
+    try:
+        writer_lock.acquire()
+    except LedgerWriterLockConflictError as exc:
+        console.print(
+            f"[bold red]Job {job_id} is being written by another process; "
+            f"refusing to import PE revisions concurrently.[/] {escape(str(exc))}"
+        )
+        raise typer.Exit(code=1) from exc
     try:
         if write_tm:
             from ubt.core.memory.tm import TranslationMemory
@@ -459,6 +473,7 @@ def pe_import(
         ledger.close()
         if tm is not None:
             tm.close()
+        writer_lock.release()
 
     table = Table(title=f"PE Re-import: {job_id}", border_style="green")
     table.add_column("Metric", style="bold cyan")

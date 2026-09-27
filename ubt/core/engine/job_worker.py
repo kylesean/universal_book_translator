@@ -150,8 +150,22 @@ class JobWorker:
 
         def _write() -> None:
             from ubt.core.engine.ledger import SQLiteJobLedger
+            from ubt.core.engine.writer_lock import LedgerWriterLock
+            from ubt.core.exceptions import LedgerWriterLockConflictError
 
             if not db_path.exists():
+                return
+            # Job-level mutual exclusion: if another worker has already
+            # reclaimed this job (lease expiry) it owns the ledger now, so this
+            # best-effort terminal write must not race its checkpoints.
+            lock = LedgerWriterLock(db_path, job.job_id)
+            try:
+                lock.acquire()
+            except LedgerWriterLockConflictError:
+                logger.debug(
+                    "Abort ledger write skipped for %s: another writer holds the lock",
+                    job.job_id,
+                )
                 return
             try:
                 with SQLiteJobLedger(db_path) as ledger:
@@ -161,6 +175,8 @@ class JobWorker:
                     ledger.finalize_job(job.job_id, status=status)
             except Exception as exc:  # best-effort terminal write
                 logger.debug("Could not write abort ledger for %s: %s", job.job_id, exc)
+            finally:
+                lock.release()
 
         await asyncio.to_thread(_write)
 
@@ -344,7 +360,7 @@ class JobWorker:
                 self.queue.release_claim,
                 job.job_id,
                 owner,
-                error=f"Yielded on writer lock contention: {exc}",
+                error=f"{type(exc).__name__}: writer lock held (slot requeued)",
                 decrement_attempt=True,
             )
             # Back off before the slot re-claims. The job is QUEUED again and
@@ -362,7 +378,11 @@ class JobWorker:
                 job.job_id,
                 owner,
                 status=JobStatus.FAILED,
-                error=str(exc),
+                # Never echo ``str(exc)``: provider error bodies and parse
+                # failures can carry source book text or host paths. The full
+                # detail is logged above; the client gets the class + job id
+                # (same product guarantee the embedded API manager applies).
+                error=f"{type(exc).__name__} (see server logs; job_id={job.job_id})",
                 progress=progress,
             )
         finally:
