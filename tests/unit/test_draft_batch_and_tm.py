@@ -166,6 +166,9 @@ def test_router_draft_batch_extracts_and_reports_missing_lines() -> None:
     assert provider.submitted[0][0]["custom_id"] == "req-1"
     body = provider.submitted[0][0]["body"]
     assert body["model"] == "batch-test-model"
+    # A bounded output budget mirrors the interactive path, so a long block is
+    # not silently truncated at the provider's default cap.
+    assert body["max_tokens"] >= 1024
     assert "Hello." in body["messages"][-1]["content"]
     assert results[0].text == "译文一"
     assert results[1].text is None
@@ -1782,3 +1785,58 @@ def test_preceding_context_carries_the_translation(tmp_path: Path) -> None:
     )
     assert "Nobody heard it." in untranslated and "L'elfe" in untranslated
     ledger.close()
+
+
+def test_router_batch_flags_a_length_truncated_answer_as_an_error() -> None:
+    """A ``finish_reason=length`` batch answer must not ship as a translation.
+
+    Regression: the batch parser read ``message.content`` and ignored
+    ``finish_reason``, so a max-token-truncated answer was accepted as a
+    complete translation (the interactive path has a continuation loop; batch
+    has none).
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/v1/files":
+            return httpx.Response(200, json={"id": "file-1"})
+        if path == "/v1/batches" and request.method == "POST":
+            return httpx.Response(200, json={"id": "batch-1", "status": "validating"})
+        if path == "/v1/batches/batch-1":
+            return httpx.Response(
+                200, json={"id": "batch-1", "status": "completed", "output_file_id": "out-1"}
+            )
+        if path == "/v1/files/out-1/content":
+            line = {
+                "custom_id": "b-1",
+                "response": {
+                    "status_code": 200,
+                    "body": {
+                        "choices": [
+                            {
+                                "finish_reason": "length",
+                                "message": {"content": "半句被打断的译文"},
+                            }
+                        ]
+                    },
+                },
+            }
+            return httpx.Response(200, text=json.dumps(line) + "\n")
+        return httpx.Response(404, text="not found")
+
+    provider = OpenAICompatibleProvider(
+        api_key="k",
+        base_url="http://test/v1",
+        transport=httpx.MockTransport(handler),
+        sanitize_output=False,
+    )
+    router = ModelRouter(provider=provider, draft_model="batch-test-model")
+    results = asyncio.run(
+        router.draft_batch(
+            [BatchDraftRequest(custom_id="b-1", source_text="Hello world. " * 20)],
+            poll_interval=0.01,
+            cleanup_files=False,
+        )
+    )
+    assert results and results[0].error
+    assert "finish_reason=length" in results[0].error

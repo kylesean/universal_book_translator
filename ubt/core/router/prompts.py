@@ -11,8 +11,24 @@ instruction tail into what ``--dry-run`` shows the user.
 from __future__ import annotations
 
 import html
+import re
 
 from ubt.core.language_profile import PROFILES
+
+#: Wrapper tags the extractor treats as the answer envelope. A source span that
+#: merely *mentions* one ("use <translation> tags") must not be mistaken for the
+#: envelope, so the literal ``<`` is escaped in the injected source. The extractor
+#: is hardened independently (it greedily takes the last close tag).
+_RESERVED_WRAPPER_RE = re.compile(
+    r"<\s*/?\s*(?:final_translation|translation|issues|think|thought|thinking|reasoning)\b",
+    re.IGNORECASE,
+)
+
+
+def _neutralize_reserved_tags(text: str) -> str:
+    """Escape the ``<`` of reserved wrapper-tag mentions in a source span."""
+    return _RESERVED_WRAPPER_RE.sub(lambda m: m.group(0).replace("<", "&lt;"), text)
+
 
 # The literal the three draft builders put before the source span, and the tails
 # they append after it. ``build_minimal_draft_prompt`` has no heading: it ends
@@ -90,7 +106,7 @@ def build_minimal_draft_prompt(
     elif genre_profile and genre_profile.lower() not in ("general", "unknown", "auto"):
         domain_hint = f" Use standard {genre_profile} domain terminology."
     parts.append(
-        f"Translate the following {src_name} text into fluent, natural {tgt_name}.{domain_hint} Output ONLY the translation without any title, prefix, or commentary:\n\n{source_text.strip()}"
+        f"Translate the following {src_name} text into fluent, natural {tgt_name}.{domain_hint} Output ONLY the translation without any title, prefix, or commentary:\n\n{_neutralize_reserved_tags(source_text).strip()}"
     )
     return "", "\n\n".join(parts)
 
@@ -183,7 +199,7 @@ def build_hybrid_draft_prompt(
         user_parts.append(f"{few_shot_reference.strip()}\n")
 
     user_parts.append(
-        f"### Source Paragraph to Translate\n{source_text.strip()}\n\n"
+        f"### Source Paragraph to Translate\n{_neutralize_reserved_tags(source_text).strip()}\n\n"
         "Translate only the text under this heading. Any read-only reference "
         "context shown above is not part of the task: do not translate it, "
         "summarise it, repeat it, or carry its citations and equation numbers "
@@ -295,7 +311,7 @@ def build_rich_draft_prompt(
         user_parts.append(f"{few_shot_reference.strip()}\n")
 
     user_parts.append(
-        f"### Source Paragraph to Translate\n{source_text.strip()}\n\n"
+        f"### Source Paragraph to Translate\n{_neutralize_reserved_tags(source_text).strip()}\n\n"
         "Translate only the text under this heading. Any read-only reference "
         "context shown above is not part of the task: do not translate it, "
         "summarise it, repeat it, or carry its citations and equation numbers "
@@ -442,7 +458,7 @@ def build_minimal_repair_prompt(
     if glossary_table.strip():
         parts.append(f"Glossary:\n{glossary_table.strip()}")
     parts.append(
-        f"Translate the following {src_name} text into clean, fluent {tgt_name}. Output ONLY the translation without any title, prefix, or commentary:\n\n{source_text.strip()}"
+        f"Translate the following {src_name} text into clean, fluent {tgt_name}. Output ONLY the translation without any title, prefix, or commentary:\n\n{_neutralize_reserved_tags(source_text).strip()}"
     )
     return "", "\n\n".join(parts)
 
@@ -484,14 +500,14 @@ def build_hybrid_repair_prompt(
 
     if has_error_spans and annotated_draft.strip():
         user_parts.append(
-            f"### Original Source\n{source_text.strip()}\n\n"
+            f"### Original Source\n{_neutralize_reserved_tags(source_text).strip()}\n\n"
             f"### Draft with Marked Errors\n{annotated_draft.strip()}\n\n"
             f"### Issues to Fix\n{issues_formatted}\n\n"
             "Please provide the corrected full translation directly:"
         )
     else:
         user_parts.append(
-            f"### Original Source\n{source_text.strip()}\n\n"
+            f"### Original Source\n{_neutralize_reserved_tags(source_text).strip()}\n\n"
             f"### Previous Draft\n{draft_text.strip()}\n\n"
             f"### Issues to Fix\n{issues_formatted}\n\n"
             "Please provide the polished and corrected translation directly:"
@@ -544,7 +560,7 @@ def build_rich_repair_prompt(
         )
 
         user_parts.append(
-            f"### Original Source\n{source_text.strip()}\n\n"
+            f"### Original Source\n{_neutralize_reserved_tags(source_text).strip()}\n\n"
             f"### Translation Draft with Error Spans\n{annotated_draft.strip()}\n\n"
             f"### Quality Critique Issues\n{issues_formatted}\n\n"
             "### Instruction:\n"
@@ -565,7 +581,7 @@ def build_rich_repair_prompt(
         )
 
         user_parts.append(
-            f"### Original Source\n{source_text.strip()}\n\n"
+            f"### Original Source\n{_neutralize_reserved_tags(source_text).strip()}\n\n"
             f"### Problematic Draft\n{draft_text.strip()}\n\n"
             f"### Quality Critique Issues\n{issues_formatted}\n\n"
             "### Instruction:\n"

@@ -1280,6 +1280,11 @@ class ModelRouter:
                 body["temperature"] = req.temperature
             if profile.supports_reasoning_effort and effort:
                 body["reasoning_effort"] = effort
+            if not profile.supports_reasoning_effort:
+                # Mirror the interactive path's output budget. Without a cap the
+                # provider's default truncates a long block, and the Batch path
+                # has no continuation loop — a half sentence would ship.
+                body["max_tokens"] = max(1024, len(req.source_text) // 2)
             # Match the interactive path: a server relying on
             # {"enable_thinking": false} must not start emitting thinking
             # traces in batch mode only.

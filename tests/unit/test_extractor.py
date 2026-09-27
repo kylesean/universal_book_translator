@@ -120,3 +120,27 @@ def test_extractor_cleans_reasoning_with_attributes_and_whitespace() -> None:
     extracted = TranslationOutputExtractor.extract(text, strategy="raw")
     assert extracted == "这是真正的翻译输出。"
     assert "Step 1" not in extracted
+
+
+def test_extractor_keeps_a_translation_that_mentions_the_wrapper_tag() -> None:
+    """A literal ``<translation>`` mention must not truncate the answer.
+
+    Regression: the tag pattern was non-greedy to the FIRST close tag, so an
+    answer that mentions the tag ("使用 <translation> 标签") was cut at the
+    mention, losing everything after it.
+    """
+    raw = (
+        "<translation>使用 <translation> 标签来包裹输出，"
+        "例如 <translation>译文</translation>。</translation>"
+    )
+    result = TranslationOutputExtractor.extract(raw)
+    assert result.startswith("使用")
+    assert result.endswith("。")
+
+
+def test_extractor_does_not_treat_mid_prose_tag_mention_as_a_wrapper() -> None:
+    """An unclosed mid-prose mention is content, not a truncated wrapper."""
+    raw = "使用 <translation> 标签来包裹输出，没有闭合标签的时候不应截断。"
+    result = TranslationOutputExtractor.extract(raw)
+    assert "使用" in result
+    assert "不应截断" in result

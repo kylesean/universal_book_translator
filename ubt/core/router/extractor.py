@@ -13,14 +13,27 @@ class TranslationOutputExtractor:
     configurable ExtractionStrategy (RAW, XML_TAG, CONVERSATIONAL_PREFIX, AUTO).
     """
 
-    # Matches <final_translation>...</final_translation> (higher priority) or <translation>...</translation>
-    # Gracefully matches unclosed trailing tag if output was truncated at max_tokens
+    # Matches <final_translation>...</final_translation> (higher priority) or
+    # <translation>...</translation>. GREEDY to the LAST close tag: a translation
+    # that itself *mentions* the tag ("use <translation> tags") would otherwise
+    # be truncated at the first literal close.
     _FINAL_TAG_PATTERN = re.compile(
-        r"<\s*final_translation[^>]*>\s*([\s\S]*?)(?:<\s*/\s*final_translation\s*>|$)",
+        r"<\s*final_translation[^>]*>([\s\S]*)<\s*/\s*final_translation\s*>",
         flags=re.IGNORECASE,
     )
     _TAG_PATTERN = re.compile(
-        r"<\s*translation[^>]*>\s*([\s\S]*?)(?:<\s*/\s*translation\s*>|$)",
+        r"<\s*translation[^>]*>([\s\S]*)<\s*/\s*translation\s*>",
+        flags=re.IGNORECASE,
+    )
+    # Unclosed trailing tag (output truncated at max_tokens). Only accepted when
+    # the tag OPENS the output — a literal tag mentioned mid-prose is content,
+    # not a wrapper, and must never swallow the prefix.
+    _FINAL_TAG_OPEN_PATTERN = re.compile(
+        r"^\s*<\s*final_translation[^>]*>\s*([\s\S]*)$",
+        flags=re.IGNORECASE,
+    )
+    _TAG_OPEN_PATTERN = re.compile(
+        r"^\s*<\s*translation[^>]*>\s*([\s\S]*)$",
         flags=re.IGNORECASE,
     )
 
@@ -88,11 +101,23 @@ class TranslationOutputExtractor:
 
     @classmethod
     def _extract_xml_tag(cls, text: str) -> str | None:
-        """Extract content inside <final_translation> or <translation> tag."""
-        for pattern in (cls._FINAL_TAG_PATTERN, cls._TAG_PATTERN):
-            match = pattern.search(text)
-            if match and match.group(1).strip() and match.group(1).strip() not in ("...", "…"):
+        """Extract content inside <final_translation> or <translation> tag.
+
+        Tries the closed wrapper first (greedy to the last close tag) and only
+        then the start-anchored unclosed form, so a literal tag mention inside
+        the translation cannot truncate it.
+        """
+        for closed, opened in (
+            (cls._FINAL_TAG_PATTERN, cls._FINAL_TAG_OPEN_PATTERN),
+            (cls._TAG_PATTERN, cls._TAG_OPEN_PATTERN),
+        ):
+            for pattern in (closed, opened):
+                match = pattern.search(text)
+                if not match:
+                    continue
                 extracted = match.group(1).strip()
+                if not extracted or extracted in ("...", "…"):
+                    continue
                 fence_match = cls._CODE_FENCE_PATTERN.match(extracted)
                 if fence_match:
                     extracted = fence_match.group(1).strip()

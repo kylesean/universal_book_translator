@@ -1803,3 +1803,16 @@ def test_domain_falls_back_to_the_profile_hint() -> None:
         genre_profile="textbook",
     )
     assert "textbook" in user
+
+
+def test_draft_prompt_neutralizes_reserved_wrapper_tag_mentions() -> None:
+    """A source that mentions ``<translation>`` must not inject a wrapper token.
+
+    The source span is interpolated into the prompt; a literal wrapper tag made
+    the model emit a real one, which the extractor then treated as the envelope.
+    """
+    from ubt.core.router.prompts import build_minimal_draft_prompt
+
+    _, user = build_minimal_draft_prompt("Use <translation> tags to wrap output.")
+    assert "<translation>" not in user
+    assert "&lt;translation>" in user
