@@ -14,6 +14,9 @@ from ubt.core.router.transports.base import (
 
 logger = logging.getLogger(__name__)
 
+#: ``reasoning_effort`` -> Anthropic extended-thinking token budget.
+_REASONING_EFFORT_BUDGETS: dict[str, int] = {"low": 1024, "medium": 4096, "high": 8192}
+
 
 class AnthropicMessagesTransport(BaseTransport):
     """Transport for Anthropic Claude native Messages API (/v1/messages)."""
@@ -97,6 +100,18 @@ class AnthropicMessagesTransport(BaseTransport):
                 payload["system"] = system_prompt
         if temperature is not None:
             payload["temperature"] = temperature
+        if reasoning_effort:
+            budget = _REASONING_EFFORT_BUDGETS.get(reasoning_effort.lower())
+            if budget is not None:
+                # Anthropic expresses reasoning as an extended-thinking token
+                # budget, not an "effort" enum, so the parameter used to be
+                # silently dropped. Anthropic requires
+                # ``max_tokens > budget_tokens`` and forbids a custom temperature
+                # alongside thinking; the response parser reads only ``text``
+                # blocks, so the extra thinking block is ignored.
+                payload["thinking"] = {"type": "enabled", "budget_tokens": budget}
+                payload["max_tokens"] = max(int(payload["max_tokens"]), budget + 1024)
+                payload.pop("temperature", None)
 
         client = self._get_client()
         url = self._messages_url()

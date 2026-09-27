@@ -225,6 +225,10 @@ class BaseTransport(ABC):
         self._extra_headers = dict(extra_headers or {})
         self._chat_template_kwargs = dict(chat_template_kwargs or {})
         self._sanitize_output = sanitize_output
+        # NOTE: only the Anthropic transport reads this. The OpenAI
+        # chat/responses transports leave it inert — real OpenAI caches a static
+        # prefix automatically, and a compat server that does not is simply not
+        # cache-optimised. Kept on the base so providers share one constructor.
         self._prompt_caching = prompt_caching
 
         # Per-call token accounting (can be shared with parent provider)

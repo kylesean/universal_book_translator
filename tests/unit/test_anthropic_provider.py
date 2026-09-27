@@ -243,3 +243,32 @@ async def test_responses_vision_call() -> None:
     assert parts[0]["type"] == "input_text" and parts[0]["text"] == "QA this page"
     assert parts[1]["type"] == "input_image"
     assert parts[1]["image_url"].startswith("data:image/png;base64,")
+
+
+@pytest.mark.asyncio
+async def test_anthropic_maps_reasoning_effort_to_a_thinking_budget() -> None:
+    """``reasoning_effort`` must reach Anthropic as a thinking budget."""
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(request.content.decode("utf-8")))
+        return httpx.Response(
+            200,
+            json={
+                "content": [{"type": "text", "text": "ok"}],
+                "stop_reason": "end_turn",
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            },
+        )
+
+    provider = OpenAICompatibleProvider(
+        api_key="sk-ant-test-key",
+        base_url="https://api.anthropic.com",
+        api_mode="anthropic",
+        default_model="claude-3-5-sonnet-20241022",
+        transport=httpx.MockTransport(handler),
+    )
+    await provider.generate("hi", reasoning_effort="high")
+    assert captured["thinking"] == {"type": "enabled", "budget_tokens": 8192}
+    assert captured["max_tokens"] > 8192
+    assert "temperature" not in captured

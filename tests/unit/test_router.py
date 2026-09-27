@@ -1658,10 +1658,42 @@ async def test_continuation_reserves_prompt_sized_tpm(
         system_prompt="sys", user_prompt=long_prompt, model="d", temperature=0.3
     )
     assert len(acquires) == 2
-    primary_tokens = (len("sys") + len(long_prompt) + 3) // 4
+    from ubt.core.engine.cost_estimate import count_text_tokens
+
+    primary_tokens = count_text_tokens("sys") + count_text_tokens(long_prompt)
     assert acquires[0] == primary_tokens * 2  # completion fallback mirrors prompt
-    continuation_tokens = (len("sys") + len(long_prompt) + 3) // 4
+    continuation_tokens = count_text_tokens("sys") + count_text_tokens(long_prompt)
     assert acquires[1] >= continuation_tokens * 2  # superset prompt, >= primary
+
+
+@pytest.mark.fast
+@pytest.mark.asyncio
+async def test_cjk_prompt_reserves_script_aware_tokens(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A CJK prompt must reserve ~0.85 tokens/char, not ``chars/4``.
+
+    Regression: the router reserved ``(len+3)//4`` for every script, so a zh
+    source under-reserved ~3.4x; the TPM bucket believed it had budget while
+    the provider returned 429, and AIMD then halved capacity for a
+    self-inflicted breach.
+    """
+    from ubt.core.engine.cost_estimate import count_text_tokens
+
+    router = ModelRouter(provider=MockModelProvider(default_response="译文"), draft_model="d")
+    acquires: list[int] = []
+
+    async def _capture(*, estimated_tokens: int = 500) -> None:
+        acquires.append(estimated_tokens)
+
+    monkeypatch.setattr(router.rate_limiter, "acquire", _capture)
+    zh = "这是一段中文测试文本，用于验证令牌计数。" * 3
+    await router._execute_with_retry(system_prompt="", user_prompt=zh, model="d", temperature=0.0)
+
+    naive = (len(zh) + 3) // 4
+    assert acquires, "the router never reserved TPM for the call"
+    assert acquires[0] >= count_text_tokens(zh)
+    assert acquires[0] > naive * 2  # ~3.4x, comfortably above the old heuristic
 
 
 @pytest.mark.fast
@@ -1816,3 +1848,33 @@ def test_draft_prompt_neutralizes_reserved_wrapper_tag_mentions() -> None:
     _, user = build_minimal_draft_prompt("Use <translation> tags to wrap output.")
     assert "<translation>" not in user
     assert "&lt;translation>" in user
+
+
+def test_billing_endpoint_map_attributes_fallback_only_models() -> None:
+    """A model served only by the fallback bills at the fallback URL."""
+    from typing import Any, cast
+
+    from ubt.core.router.provider import BaseModelProvider
+
+    class _FakeProvider:
+        is_mock = False
+
+        def __init__(self, base_url: str, models: list[str]) -> None:
+            self.base_url = base_url
+            self._models = models
+
+        def usage_totals_by_model(self) -> dict[str, dict[str, int]]:
+            return {m: {"calls": 1} for m in self._models}
+
+    router = ModelRouter(
+        provider=cast(
+            BaseModelProvider, _FakeProvider("https://primary", ["shared", "primary-only"])
+        ),
+        draft_model="d",
+    )
+    router._fallback_provider = cast(
+        Any, _FakeProvider("http://localhost:9090", ["shared", "local-only"])
+    )
+    # A name served by both channels keeps the primary endpoint; only the
+    # fallback-exclusive model is attributed to the fallback.
+    assert router.billing_endpoint_map() == {"local-only": "http://localhost:9090"}

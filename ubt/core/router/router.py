@@ -168,6 +168,19 @@ def _is_chain_fail_fast(exc: ModelProviderError) -> bool:
 _VISION_TOKENS_PER_PAGE_IMAGE = 1024
 
 
+def _estimate_prompt_tokens(*texts: str) -> int:
+    """Script-aware token count for TPM reservation, imported lazily.
+
+    ``ubt.core.engine.cost_estimate`` imports ``ubt.core.router.pricing``, which
+    triggers the ``ubt.core.router`` package initializer (and thus this module),
+    so a module-level import here closes a cycle at CLI startup. Deferring it to
+    call time is safe: every module is initialized before the first request.
+    """
+    from ubt.core.engine.cost_estimate import count_text_tokens
+
+    return sum(count_text_tokens(text) for text in texts)
+
+
 def _is_rate_limit_error(exc: BaseException) -> bool:
     """True when the provider said "slow down" (HTTP 429, or its text equivalent).
 
@@ -302,6 +315,8 @@ class BatchJobStore(Protocol):
 
     def find_live_batch_by_idempotency_key(self, idempotency_key: str) -> str | None: ...
 
+    def find_live_batch_for_job(self, job_id: str, *, exclude_key: str) -> str | None: ...
+
     def reserve_batch_job(self, idempotency_key: str, job_id: str) -> tuple[str, str | None]: ...
 
     def finalize_batch_job(
@@ -327,6 +342,11 @@ class ModelRouter:
         fallback_models: list[str] | None = None,
         prompt_strategy_override: str | None = None,
         allow_page_upload: bool = False,
+        # AIMD oscillation guard for the limiter this router builds when the
+        # caller does not inject one. Mirrors the UBTConfig default (3.0); a
+        # bare ``AdaptiveTokenBucket()`` defaulted it to 0.0, so a router built
+        # outside the pipeline (library/MCP use) lost the guard silently.
+        backoff_cooldown_sec: float = 3.0,
     ) -> None:
         self.provider = provider
         # Master gate for shipping rendered PAGE IMAGES of the book to model
@@ -366,7 +386,7 @@ class ModelRouter:
         elif provider.is_mock:
             self.rate_limiter = NullRateLimiter()
         else:
-            self.rate_limiter = AdaptiveTokenBucket()
+            self.rate_limiter = AdaptiveTokenBucket(backoff_cooldown_sec=backoff_cooldown_sec)
         self.max_retries = max_retries
         self.draft_reasoning_effort = draft_reasoning_effort
         self.repair_reasoning_effort = repair_reasoning_effort
@@ -448,22 +468,29 @@ class ModelRouter:
         *exclusively* are therefore billed against the fallback's endpoint.
         """
         primary_url = getattr(self.provider, "base_url", "") or None
+        return estimate_cost_usd(
+            self.usage_totals_by_model(),
+            base_url=primary_url,
+            endpoint_map=self.billing_endpoint_map() or None,
+        )
+
+    def billing_endpoint_map(self) -> dict[str, str]:
+        """Models billed through an endpoint other than the primary ``base_url``.
+
+        Only models the self-hosted fallback served *exclusively* are attributed
+        to the fallback URL (a name served by both channels can't be split, so it
+        keeps the primary endpoint). The budget ledger consumes this so a
+        fallback-served model is not priced at the primary endpoint.
+        """
         endpoint_map: dict[str, str] = {}
         if self._fallback_provider is not None:
             fallback_url = getattr(self._fallback_provider, "base_url", "") or None
             if fallback_url:
                 primary_models = self._usage_by_model_of(self.provider)
                 for model in self._usage_by_model_of(self._fallback_provider):
-                    # A name served by both channels can't be split, so keep the
-                    # primary endpoint for it rather than mislabelling its cloud
-                    # spend as local/$0.
                     if model not in primary_models:
                         endpoint_map[model] = fallback_url
-        return estimate_cost_usd(
-            self.usage_totals_by_model(),
-            base_url=primary_url,
-            endpoint_map=endpoint_map or None,
-        )
+        return endpoint_map
 
     async def aclose(self) -> None:
         """Release the underlying provider's HTTP connection pool."""
@@ -806,12 +833,15 @@ class ModelRouter:
         retries = 0
 
         while True:
-            # The TPM bucket consumes the estimated request size —
-            # ~4 characters per token is the standard English/zh heuristic.
+            # The TPM bucket consumes the estimated request size. Count it with
+            # the script-aware estimator, NOT ``chars/4``: the flat heuristic
+            # under-reserves CJK ~3.4x (zh averages ~0.85 tok/char), so the
+            # bucket believed it was idle while the provider returned 429 — and
+            # AIMD then halved capacity for a self-inflicted breach.
             # Reserve the completion too: provider TPM counts prompt+output, and
             # for translation the output is comparable to the input. Reserving
             # only the prompt under-enforced TPM by ~2x.
-            prompt_tokens = (len(system_prompt) + len(user_prompt) + 3) // 4
+            prompt_tokens = _estimate_prompt_tokens(system_prompt, user_prompt)
             completion_tokens = max_tokens if max_tokens else prompt_tokens
             estimated_tokens = prompt_tokens + max(completion_tokens, 0)
             await self.rate_limiter.acquire(estimated_tokens=estimated_tokens)
@@ -971,7 +1001,7 @@ class ModelRouter:
                 # an order of magnitude on long macro-chunks — the provider
                 # 429s while the bucket believes it is idle, and AIMD halves
                 # capacity for a self-inflicted breach.
-                prompt_tokens = (len(system_prompt) + len(continuation_prompt) + 3) // 4
+                prompt_tokens = _estimate_prompt_tokens(system_prompt, continuation_prompt)
                 await self.rate_limiter.acquire(estimated_tokens=prompt_tokens * 2)
                 continuation, finish_reason = await self.provider.generate_with_finish_reason(
                     prompt=continuation_prompt,
@@ -1050,9 +1080,9 @@ class ModelRouter:
         # reserve tokens, report 429, and let the AIMD loop learn the provider
         # is throttling it. Base64 characters are not text tokens, so a page
         # image is charged at the tile count a vision encoder spends on it.
-        estimated_tokens = (
-            len(prompt) + len(system_prompt or "")
-        ) // 4 + _VISION_TOKENS_PER_PAGE_IMAGE * max(1, len(images_b64_png))
+        estimated_tokens = _estimate_prompt_tokens(prompt, system_prompt or "") + (
+            _VISION_TOKENS_PER_PAGE_IMAGE * max(1, len(images_b64_png))
+        )
         await self.rate_limiter.acquire(estimated_tokens=estimated_tokens)
         try:
             result = await generate_vision(
@@ -1335,6 +1365,18 @@ class ModelRouter:
                     )
             if batch_id is None:
                 # Own the create (fresh reservation, or adopted a stale one).
+                # A changed payload yields a new idempotency key, so a
+                # prior live batch for this job would otherwise keep billing and
+                # never be cancelled. Abandon it before creating the new one.
+                if ledger is not None and job_id is not None:
+                    superseded = await asyncio.to_thread(
+                        ledger.find_live_batch_for_job, job_id, exclude_key=idempotency_key
+                    )
+                    if superseded:
+                        logger.warning(
+                            "Abandoning superseded live batch %s for job %s", superseded, job_id
+                        )
+                        await self.abandon_batch(superseded, ledger=ledger, job_id=job_id)
                 batch_id = await self.provider.create_batch_job(jsonl_requests)
                 if ledger is not None and job_id is not None:
                     await asyncio.to_thread(ledger.finalize_batch_job, idempotency_key, batch_id)

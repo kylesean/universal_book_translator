@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from ubt.core.router.provider import MockModelProvider
+from ubt.core.router.provider import MockModelProvider, OpenAICompatibleProvider
 from ubt.core.router.rate_limiter import AdaptiveTokenBucket, SqliteTokenBucket
 
 
@@ -217,13 +217,28 @@ def test_max_rpm_respected_in_additive_increase() -> None:
     assert bucket.capacity == 35.0
 
 
+@pytest.mark.fast
+def test_default_max_tpm_allows_growth_past_the_starting_budget() -> None:
+    """A bare bucket's TPM ceiling must exceed its initial budget.
+
+    Regression: ``max_tpm`` defaulted to ``initial_tpm``, so the TPM side could
+    never recover past the starting value after a 429 halved it.
+    """
+    bucket = AdaptiveTokenBucket(initial_rpm=60, initial_tpm=100_000)
+    assert bucket.max_tpm == 600_000.0
+    bucket.report_429()  # halves TPM capacity to 50k
+    for _ in range(100):
+        bucket.report_success()
+    assert bucket.tpm_capacity > 100_000.0
+
+
 def test_429_burst_collapses_capacity_once_per_episode() -> None:
     """One TPM-limit hit arrives as ``max_concurrency`` simultaneous 429s.
 
     Halving per report turned that single event into 60 rpm -> 5 rpm (the floor)
     and ~25k tpm, and the additive climb of +1 rpm per success needed 55
     successes at 5 rpm to get back — over ten minutes of crawling for an
-    ordinary limit (2026-09 review).
+    ordinary limit.
     """
     bucket = AdaptiveTokenBucket(initial_rpm=60, initial_tpm=100_000, min_rpm=5)
 
@@ -279,7 +294,7 @@ async def test_sqlite_acquire_runs_its_transaction_off_the_event_loop(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """§10.1: BEGIN IMMEDIATE can wait the whole busy_timeout; not on the loop.
+    """BEGIN IMMEDIATE can wait the whole busy_timeout; not on the loop.
 
     The shared bucket used to run its read-modify-write inline in the
     coroutine, so a contended write-lock froze every other coroutine on the
@@ -355,6 +370,22 @@ def test_explicit_limiter_wins_even_for_mock() -> None:
     router = ModelRouter(provider=MockModelProvider(), rate_limiter=limiter)
     assert router.rate_limiter is limiter
     assert not isinstance(router.rate_limiter, NullRateLimiter)
+
+
+@pytest.mark.fast
+def test_default_router_limiter_carries_backoff_cooldown() -> None:
+    """A router built without an injected limiter must still get the AIMD guard.
+
+    Regression: the bare ``AdaptiveTokenBucket()`` at router construction left
+    ``backoff_cooldown_sec`` at its 0.0 class default, so a ``ModelRouter``
+    built outside the pipeline (library / MCP) silently lost the oscillation
+    guard that the pipeline path passes from ``UBTConfig`` (default 3.0).
+    """
+    from ubt.core.router.router import ModelRouter
+
+    provider = OpenAICompatibleProvider(api_key="k", base_url="https://api.deepseek.com")
+    router = ModelRouter(provider=provider, draft_model="deepseek-chat")
+    assert router.rate_limiter.backoff_cooldown_sec == 3.0
 
 
 @pytest.mark.fast

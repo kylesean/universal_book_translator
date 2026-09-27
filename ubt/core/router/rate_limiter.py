@@ -24,6 +24,10 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+#: AIMD TPM ceiling as a multiple of ``initial_tpm`` for a bare bucket (no
+#: explicit ``max_tpm``). Matches UBTConfig's 600k / 100k default.
+_DEFAULT_MAX_TPM_MULTIPLIER = 6
+
 
 class AdaptiveTokenBucket:
     """Adaptive dual token bucket (RPM + TPM) with AIMD on HTTP 429s."""
@@ -59,7 +63,11 @@ class AdaptiveTokenBucket:
         self.tpm_capacity: float = float(tpm)
         self.tpm_tokens: float = float(tpm)
         self.tpm_fill_rate: float = float(tpm) / 60.0  # tokens per second
-        self.max_tpm = max_tpm if max_tpm is not None else tpm
+        # Default the TPM ceiling to 6x the starting budget (matching UBTConfig's
+        # 600k/100k). Capping it at ``initial_tpm`` meant a bare bucket could
+        # never grow its TPM side past the starting value after a 429 halved it;
+        # production paths pass an explicit ``max_tpm``.
+        self.max_tpm = max_tpm if max_tpm is not None else tpm * _DEFAULT_MAX_TPM_MULTIPLIER
         # --- shared state ---
         self.backoff_cooldown_sec = backoff_cooldown_sec
         self.last_backoff_monotonic = 0.0
