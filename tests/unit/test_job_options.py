@@ -1,6 +1,6 @@
 """``ubt.core.job_options`` is the single owner of the request-key contract.
 
-This is its canonical test file (AGENTS.md §1 "One Behavior, One Home"). That
+This is its canonical test file (AGENTS.md "One Behavior, One Home"). That
 module decides which request keys become ``UBTConfig`` overrides — a key is
 recognised exactly when it names a config field or a ``RUN_ONLY_KEYS`` entry —
 and it exists precisely because hand-maintained per-surface copies drift. What

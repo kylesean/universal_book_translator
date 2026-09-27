@@ -114,7 +114,7 @@ def test_doc_markdown_links_resolve() -> None:
 
 
 #: A test file is named for the module it pins, never for the review activity that
-#: produced it (AGENTS.md §1 "One Behavior, One Home"). Review/round/date names
+#: produced it (AGENTS.md "One Behavior, One Home"). Review/round/date names
 #: scatter one module's coverage across files and hide it from the next reviewer.
 _ACTIVITY_NAMED = re.compile(
     r"(review|audit|round\d|phase\d)|(_\d{4}_\d{2}_\d{2})|(_fixes?|_regressions?)$"

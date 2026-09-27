@@ -51,7 +51,7 @@ def test_scanner_finds_every_override_point_and_agrees_with_the_module() -> None
     }
     found = {k.name: k for k in sweep.sweepable_knobs()}
     assert found.keys() == live.keys(), (
-        "the protocol's sweepable set drifted; docs/design/knob-calibration-protocol.md §4 "
+        "the protocol's sweepable set drifted; see docs/design/knob-calibration-protocol.md "
         "states this list and its count"
     )
     for name, value in live.items():

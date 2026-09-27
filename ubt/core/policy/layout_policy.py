@@ -13,7 +13,7 @@ Each knob carries a calibration status (see :data:`CALIBRATION`):
   before anyone "tunes" it for another book;
 - ``HYPOTHESIS`` — principled default with no empirical backing yet.
 
-Discipline (docs/design/knob-calibration-protocol.md §3): new knobs land HERE with
+Discipline (see docs/design/knob-calibration-protocol.md): new knobs land HERE with
 status + rationale, never inline in a module. Statuses are promoted by evidence,
 never by feel.
 """
