@@ -32,6 +32,11 @@ from ubt.core.policy.layout_policy import (
     URL_DOI_RE,
 )
 
+# Two or more purely-lowercase words read as prose ("effective mobility"), not
+# as a figure/table label ("B1", "Fig. 3", "kg"). Rule 10 kept such prose in the
+# source language; only genuine short labels should be kept.
+_PROSE_PHRASE_RE = re.compile(r"\b[a-z]{2,}\b[ _]+\b[a-z]{2,}\b")
+
 
 @dataclass(frozen=True)
 class Verdict:
@@ -116,6 +121,7 @@ def judge_block(block: IRBlock, *, translate_chrome: bool = False) -> Verdict:
         block.flow_id in NON_PROSE_FLOWS
         and len(stripped) <= SHORT_LABEL_MAX_LEN
         and SHORT_LABEL_RE.match(stripped)
+        and not _PROSE_PHRASE_RE.search(stripped)
     ):
         return Verdict(False, "verdict:short_label")
     return Verdict(True, "verdict:translate", should_call_model=True)

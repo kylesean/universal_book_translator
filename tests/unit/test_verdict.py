@@ -108,6 +108,25 @@ def test_short_label_in_caption_keep() -> None:
     assert judge_block(_block(source_text="B1")).translate is True
 
 
+def test_short_label_does_not_keep_prose_table_cells() -> None:
+    """A multi-word prose label must be translated, not kept as a label.
+
+    ``SHORT_LABEL_RE`` matched any alnum run <=24 chars, so a TABLE_GRID cell
+    like "effective mobility" was kept in the source language.
+    """
+    prose = _block(source_text="effective mobility", flow_id=FlowID.TABLE_GRID)
+    assert judge_block(prose).translate is True
+    # A genuine label (single token / mixed case / unit) is still kept.
+    assert (
+        judge_block(_block(source_text="B1", flow_id=FlowID.CAPTION)).reason
+        == "verdict:short_label"
+    )
+    assert (
+        judge_block(_block(source_text="Fig. 3", flow_id=FlowID.CAPTION)).reason
+        == "verdict:short_label"
+    )
+
+
 def test_rule_order_chrome_before_hexdump() -> None:
     blob = " ".join(f"{i:02x}" for i in range(48))
     v = judge_block(_block(source_text=blob, layout_role=LayoutRole.HEADER))
