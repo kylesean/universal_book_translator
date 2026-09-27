@@ -1,9 +1,7 @@
 """DeterministicGlossaryEnforcer: term replacement that cannot corrupt text.
 
-Landed here from an earlier review-round module — twelve tests of one
-class filed under the review round that produced them, with no canonical file
-for the class at all. Enforced term substitution is the one place where a
-subtle bug silently rewrites a book, so it belongs with the module.
+Enforced term substitution is the one place where a subtle bug silently
+rewrites a book, so it belongs with the module it exercises.
 """
 
 import pytest
@@ -277,9 +275,14 @@ def test_glossary_enforcer_alias_prefix_idempotent() -> None:
     assert len(rec) == 0
 
 
-def test_glossary_enforcer_alias_expansion_with_unrelated_flank() -> None:
-    """A deprecated alias whose canonical replacement shares no text with the
-    alias must still be corrected inside a CJK run (overlap-aware guard)."""
+def test_glossary_enforcer_alias_full_swap_is_not_corrupted_inside_a_cjk_run() -> None:
+    """A CJK alias flanked by CJK must not be swapped into a compound.
+
+    ``关注度很高`` is one word; swapping the ``关注`` alias for ``注意力`` made
+    ``注意力度很高``. The flank guard now covers full swaps too, not only
+    expansions whose replacement contains the alias. A Latin leak (``attention``)
+    is not CJK-flanked and is still corrected.
+    """
     glossary = [
         {
             "source": "attention",
@@ -291,11 +294,13 @@ def test_glossary_enforcer_alias_expansion_with_unrelated_flank() -> None:
     ]
     enforcer = DeterministicGlossaryEnforcer(glossary=glossary, target_lang="zh", source_lang="en")
 
+    assert enforcer.enforce("关注度很高")[0] == "关注度很高"
+
     corrected, records = enforcer.enforce("请关注这个attention模块")
 
-    assert corrected == "请注意力这个注意力模块"
-    assert "关注" not in corrected
-    assert len(records) == 2
+    assert corrected == "请关注这个注意力模块"
+    assert "关注" in corrected
+    assert len(records) == 1
 
 
 def test_glossary_enforcer_protected_structures() -> None:

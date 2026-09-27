@@ -276,18 +276,19 @@ class DeterministicGlossaryEnforcer:
         if not raw_matches:
             return target_text, []
 
-        # H12: CJK compound guard — an EXPANSION rule (replacement longer than
-        # the pattern, e.g. alias '网络' -> '神经网络') inserts characters into
-        # the surrounding text. When the match sits inside a CJK run, that
-        # insertion corrupts correct compounds ('计算机网络' becomes
-        # '计算机神经网络'). The hazard only exists when the pattern is already
-        # part of its own canonical replacement; a full swap that shares no
-        # text with the pattern ('关注' -> '注意力') cannot merge with flanks,
-        # so it stays enabled to enforce correct term replacement.
-        # Equal-length swaps and contractions never insert either.
+        # CJK compound guard. A CJK alias inside a larger CJK run is almost
+        # always part of a longer word ('关注' in '关注度很高'), so swapping it
+        # for a LONGER rendering ('注意力') produces garbage ('注意力度很高').
+        # Skip any CJK-pattern match flanked by CJK when the replacement is
+        # longer than the pattern. The guard used to also require the pattern to
+        # be contained in its own replacement, so a full swap ('关注' ->
+        # '注意力') was still corrupted. Equal-length swaps ('操作记忆' ->
+        # '工作记忆', '甲乙' -> '乙丙') are unaffected, so running-text
+        # enforcement — the enforcer's core use — is preserved.
         filtered_by_compound: list[tuple[int, int, str, str, str]] = []
         for start, end, pattern, repl, rule in raw_matches:
-            if len(repl) > len(pattern) and pattern in repl:
+            cjk_pattern = bool(pattern) and all(is_cjk_char(ch) for ch in pattern)
+            if cjk_pattern and len(repl) > len(pattern):
                 flanked = (start > 0 and is_cjk_char(target_text[start - 1])) or (
                     end < len(target_text) and is_cjk_char(target_text[end])
                 )

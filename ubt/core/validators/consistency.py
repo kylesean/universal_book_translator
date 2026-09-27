@@ -429,6 +429,50 @@ def _denoted_values(text: str) -> set[str]:
     return values
 
 
+def scale_equivalent_values(text: str) -> dict[str, set[str]]:
+    """Public view of :func:`_scale_map`: number token -> values it may denote.
+
+    A scale word restates a magnitude ("1.5 million" == "150万" == "1500000"),
+    so a correct rendering shares no raw digit string with the source. Consumers
+    outside the numeric validator (the omission gate's number metric and chrF
+    residue) need the same equivalence.
+    """
+    return _scale_map(text)
+
+
+def denoted_numeric_values(text: str) -> set[str]:
+    """Public view of :func:`_denoted_values`: every value the text states."""
+    return _denoted_values(text)
+
+
+def magnitude_rewritten(text: str) -> str:
+    """Rewrite each magnitude-scaled number to its value (``"12.5 million"`` -> ``"12500000"``).
+
+    A magnitude word restates the number itself, so the omission gate scores a
+    scale-scoped source number at its value and must rewrite the target the same
+    way — otherwise a correct ``"12.5 百万"`` rendering shares no digit string
+    with the source ``"12.5 million"``. SI prefixes are left alone: ``20 nm``
+    keeps the number literal on both sides.
+    """
+
+    def _repl(match: re.Match[str]) -> str:
+        raw = match.group("cn") or match.group("en")
+        unit = match.group("cn_unit") or match.group("en_unit")
+        if raw is None or unit is None:
+            return match.group(0)  # SI prefix/symbol: the number stays literal.
+        if match.group("cn_unit") is not None and unit in "千百":
+            nxt = text[match.end("cn_unit") : match.end("cn_unit") + 1]
+            if nxt and nxt in _CN_UNIT_PREFIX_SUFFIXES:
+                return match.group(0)  # '10千克' — a unit prefix, not a magnitude.
+        factor = _SCALE_FACTORS.get(unit.lower())
+        value = _to_decimal(canonicalize_numeric_token(raw))
+        if factor is None or value is None:
+            return match.group(0)
+        return _canon_value(value * factor)
+
+    return _SCALE_ADJACENCY_RE.sub(_repl, text)
+
+
 # Compound Chinese magnitudes ('3亿5000万','1万2千') are several digit+unit pairs
 # that together state one value. Neither constituent matches a target written as
 # a plain number ('350000000'), so without this the per-token check reports both
