@@ -567,3 +567,16 @@ async def test_assess_document_respects_language_pair_for_token_estimation(tmp_p
     # en -> zh ratio is 1.25, zh -> en ratio is 0.85
     # Completion tokens must be distinct and reflect the language pair
     assert report_en_zh.cost.completion_tokens > report_zh_en.cost.completion_tokens
+
+
+@pytest.mark.asyncio
+async def test_assess_document_uses_cjk_token_estimation_for_prompt_tokens(tmp_path: Path) -> None:
+    """Assess document must forward CJK script-aware token estimation to cost calculations."""
+    doc = tmp_path / "cjk_book.md"
+    cjk_text = "这是用于测试的中文长句子，包含非常多的中文字符和表达方式。" * 50  # ~1500 CJK chars
+    doc.write_text("# 标题\n\n" + cjk_text, encoding="utf-8")
+    cfg = UBTConfig.from_env()
+
+    report = await assess_document_async(doc, cfg, source_lang="zh", target_lang="en")
+    # For ~1500 CJK chars with zh->en ratio 0.85, completion tokens must be > 700, not 1500 // 4 * 0.85 = 309.
+    assert report.cost.completion_tokens > 700

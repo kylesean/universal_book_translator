@@ -456,6 +456,7 @@ def _build_cost(
     warnings: list[AssessmentWarning],
     source_lang: str = "en",
     target_lang: str = "zh",
+    estimated_tokens: int | None = None,
 ) -> CostQuote:
     """Draft (measured tooling) + config-driven fan-out, all labeled expected."""
     # Shared with the engine so the rollup gate cannot drift from the
@@ -523,6 +524,7 @@ def _build_cost(
         base_url=config.base_url,
         source_lang=source_lang,
         target_lang=target_lang,
+        source_tokens_override=estimated_tokens,
     )
     draft_calls = math.ceil(billable_blocks / macro_chunk_size) if billable_blocks else 0
 
@@ -552,6 +554,11 @@ def _build_cost(
         )
         rerank_mult = config.rerank_k if rerank_on else 1
         repair_calls = repair_blocks * rerank_mult
+        repair_tokens = (
+            math.ceil((estimated_tokens * repair_blocks) / billable_blocks)
+            if (estimated_tokens is not None and billable_blocks)
+            else None
+        )
         repair = estimate_draft_cost_from_totals(
             billable_blocks=repair_blocks * rerank_mult,
             source_chars=avg_block_chars * repair_blocks * rerank_mult,
@@ -561,7 +568,9 @@ def _build_cost(
             base_url=config.base_url,
             source_lang=source_lang,
             target_lang=target_lang,
+            source_tokens_override=repair_tokens,
         )
+
     else:
         repair_blocks = 0
         repair_calls = 0
@@ -950,7 +959,9 @@ async def assess_document_async(
         warnings=warnings,
         source_lang=source_lang,
         target_lang=target_lang,
+        estimated_tokens=estimated_tokens,
     )
+
     draft_calls = cost.draft_calls
     total_calls = (
         draft_calls
