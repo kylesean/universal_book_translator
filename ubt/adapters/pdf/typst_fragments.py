@@ -16,6 +16,7 @@ import unicodedata
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
+from ubt.adapters.pdf.overlay_text import escape_line_start_markup
 from ubt.adapters.pdf.typst_math import (
     _latex_math_to_typst,
     _sanitize_math_content,
@@ -366,6 +367,9 @@ def _escape_typst_markup(text: str) -> str:
     result = text
     for ch in _MARKUP_SPECIALS:
         result = result.replace(ch, "\\" + ch)
+    # Block markers (``=``/``+``/``-``/``N.``) are only special at line start;
+    # escape them there so an embedded newline cannot re-open Typst structure.
+    result = escape_line_start_markup(result)
     # In Typst content blocks, a leading "/" is parsed as a line-break marker.
     # Escape it only at the start so URLs mid-text stay intact.
     if result.startswith("/"):

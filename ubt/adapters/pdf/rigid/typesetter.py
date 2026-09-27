@@ -21,7 +21,7 @@ import logging
 import os
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -132,6 +132,11 @@ class ZonePlan:
     size: float
     lines: list[str]
     text: str
+    #: Per-region font floor for the emitter's ``#ubt-fit`` min-sz. Captions and
+    #: footnotes may go below the body floor, so the emitter must use this (not
+    #: the instance-global ``RigidTypesetter.min_font_pt``), or ``min-sz`` can
+    #: exceed ``size`` and Typst's fit loop never shrinks.
+    min_font_pt: float = RIGID_MIN_FONT_PT
 
 
 # Skip reasons that mean "the decoder gave us no geometry to paint into". Any
@@ -427,11 +432,20 @@ class RigidTypesetter:
         def plan(size: float) -> list[ZonePlan] | None:
             return self._plan_at_size(text, zones, size)
 
+        floor = self.min_font_pt if min_font_pt is None else min_font_pt
+
+        def _stamp(plans: list[ZonePlan] | None) -> list[ZonePlan] | None:
+            # Carry the region floor onto every plan so the emitter's ``#ubt-fit``
+            # min-sz matches what was planned.
+            if plans is None:
+                return None
+            return [replace(p, min_font_pt=floor) for p in plans]
+
         s_hi = min(zones[0].base_size * UPSCALE_MAX, MAX_SIZE_PT)
-        s_lo = self.min_font_pt if min_font_pt is None else min_font_pt
+        s_lo = floor
         whole = plan(s_hi)
         if whole is not None:
-            return whole
+            return _stamp(whole)
         lo, hi = s_lo, s_hi
         best: list[ZonePlan] | None = None
         while hi - lo > FIT_STEP_PT:
@@ -445,7 +459,7 @@ class RigidTypesetter:
             # Line capacity is discrete (``height // pitch``): the floor can
             # add the line that no mid-grid size reaches.
             best = plan(s_lo)
-        return best
+        return _stamp(best)
 
     # -- planning ---------------------------------------------------------
     def _plan_blocks(
@@ -720,7 +734,7 @@ class RigidTypesetter:
             f"#place(top + left, dx: {zone.x0:.2f}pt, dy: {page_h - zone.y1:.2f}pt)"
             f"[{text_set}\n{align_set}\n"
             f"#ubt-fit({zone.width:.2f}pt, {zone.height:.2f}pt, {entry.size:.1f}pt, "
-            f"{self.min_font_pt:.1f}pt, {ZONE_INSET_TOP_PT:.1f}pt)[{body}]]"
+            f"{entry.min_font_pt:.1f}pt, {ZONE_INSET_TOP_PT:.1f}pt)[{body}]]"
         )
 
     def _zone_cover(self, zone: Zone, facts: PageFacts) -> str:

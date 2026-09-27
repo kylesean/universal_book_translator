@@ -485,12 +485,13 @@ def _join_fragments_with_superscripts(kept: Sequence[LineBox], main_fsz: float) 
 
 
 def column_order(lines: Sequence[LineBox], page_width: float) -> list[LineBox]:
-    """Column-aware reading order: cluster lines by x-overlap, then read.
+    """Column-aware reading order: split at the gutter, then read left-to-right.
 
-    Full-width lines (headings, captions) never define clusters — they would
-    bridge the gutter and collapse everything into one column; they join the
-    nearest cluster by x-center instead. Clusters go left-to-right, lines
-    inside top-down. Single-column layouts strictly preserve top-down reading.
+    A line only defines column membership when it does not span the gutter;
+    full-width lines (headings, captions) are routed to the nearer column by
+    x-center so they cannot bridge the two columns into one. Clusters go
+    left-to-right, lines inside top-down. Single-column layouts strictly
+    preserve top-down reading.
     """
     if len(lines) <= 1:
         return list(lines)
@@ -501,61 +502,53 @@ def column_order(lines: Sequence[LineBox], page_width: float) -> list[LineBox]:
     if span <= 0.0:
         return sorted(work, key=lambda ln: (-ln.rect[3], ln.rect[0]))
 
-    # Full-width lines (w > 0.7 * span) are not column candidates; they are
-    # routed by the caller's unassigned path. (A ``deferred`` list used to
-    # collect their indices and was never read.)
-    candidates: list[int] = []
-    for idx, ln in enumerate(work):
-        w = ln.rect[2] - ln.rect[0]
-        if w > 0.7 * span:
-            continue
-        candidates.append(idx)
-
-    # Connected-component clustering of horizontal spans: merge all overlapping intervals
-    clusters: list[list[Any]] = []  # [x0, x1, [indices]]
-    for idx in candidates:
-        x0, _, x1, _ = work[idx].rect
-        matching = [i for i, c in enumerate(clusters) if not (x1 < c[0] or x0 > c[1])]
-        if not matching:
-            clusters.append([x0, x1, [idx]])
-        else:
-            new_x0 = min(x0, min(clusters[m][0] for m in matching))
-            new_x1 = max(x1, max(clusters[m][1] for m in matching))
-            new_indices = [idx]
-            for m in matching:
-                new_indices.extend(clusters[m][2])
-            for m in sorted(matching, reverse=True):
-                del clusters[m]
-            clusters.append([new_x0, new_x1, new_indices])
-
-    # Valid multi-column layout requires at least 2 distinct non-overlapping columns
-    # with substantial span width (> 15% of span) and line membership.
-    valid_cols = [c for c in clusters if (c[1] - c[0]) > 0.15 * span and len(c[2]) >= 1]
-    if len(valid_cols) < 2:
+    # Full-width lines (w > 0.7 * span) are never column candidates: they would
+    # bridge the gutter. They are routed by x-center below.
+    candidates = [idx for idx, ln in enumerate(work) if (ln.rect[2] - ln.rect[0]) <= 0.7 * span]
+    if len(candidates) < 2:
         return sorted(work, key=lambda ln: (-ln.rect[3], ln.rect[0]))
 
-    valid_cols.sort(key=lambda c: c[0])
-    assign: list[int] = [-1] * len(work)
-    for c_idx, c in enumerate(valid_cols):
-        for idx in c[2]:
-            assign[idx] = c_idx
+    def center(idx: int) -> float:
+        return (work[idx].rect[0] + work[idx].rect[2]) / 2.0
 
-    unassigned = [i for i in range(len(work)) if assign[i] < 0]
-    for idx in unassigned:
-        cx = (work[idx].rect[0] + work[idx].rect[2]) / 2
-        best = min(
-            range(len(valid_cols)),
-            key=lambda i: (
-                0.0
-                if valid_cols[i][0] <= cx <= valid_cols[i][1]
-                else min(abs(cx - valid_cols[i][0]), abs(cx - valid_cols[i][1]))
-            ),
-        )
-        assign[idx] = best
+    def crossings(split: float) -> int:
+        return sum(1 for idx in candidates if work[idx].rect[0] < split < work[idx].rect[2])
+
+    def side_span(idxs: list[int]) -> float:
+        if not idxs:
+            return 0.0
+        return max(work[i].rect[2] for i in idxs) - min(work[i].rect[0] for i in idxs)
+
+    # The gutter is the x crossed by the fewest candidate lines. A single-column
+    # page has no low-crossing cut (any mid-column split severs many lines); a
+    # two-column page dips sharply at the real gutter. The old connected-component
+    # clustering merged every overlapping interval, so a single gutter-spanning
+    # line (a centered caption, a hanging-indented equation line) chained the two
+    # columns into one component and collapsed the page to top-down reading order.
+    split_points = sorted(
+        {work[idx].rect[0] for idx in candidates} | {work[idx].rect[2] for idx in candidates}
+    )
+    best_split: float | None = None
+    best_crossings = len(candidates) + 1
+    for split in split_points:
+        left = [i for i in candidates if center(i) < split]
+        right = [i for i in candidates if center(i) >= split]
+        if not left or not right:
+            continue
+        if side_span(left) <= 0.15 * span or side_span(right) <= 0.15 * span:
+            continue
+        crossed = crossings(split)
+        if crossed < best_crossings:
+            best_crossings = crossed
+            best_split = split
+    # A real gutter is crossed by few lines; a mid-column cut is not. Without a
+    # low-crossing split this is a single-column page: keep top-down order.
+    if best_split is None or best_crossings > 0.25 * len(candidates):
+        return sorted(work, key=lambda ln: (-ln.rect[3], ln.rect[0]))
 
     order = sorted(
         range(len(work)),
-        key=lambda i: (valid_cols[assign[i]][0], -work[i].rect[3]),
+        key=lambda i: (0 if center(i) < best_split else 1, -work[i].rect[3]),
     )
     return [work[i] for i in order]
 

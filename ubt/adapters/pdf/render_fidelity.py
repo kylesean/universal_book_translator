@@ -52,6 +52,12 @@ _MASK_BLEED_PT: float = 4.0
 # Advisory thresholds (first calibration; revisit after ForMaT baseline).
 _RESIDUAL_WARN = 0.005  # >0.5% of non-text pixels changed
 _COVERAGE_WARN = 0.06  # <6% of the page area was painted text
+# In-box ink retention: a clipped rigid block loses glyphs, so the artifact's
+# ink inside a painted text box is a fraction of the source's. This is the only
+# signal that sees *inside* the mask (``diff_outside_masks`` zeroes it), but it
+# is coarse — target scripts differ in glyph density — so it is advisory only.
+_IN_BOX_INK_WARN = 0.5
+_INK_LUMINANCE = 128
 
 
 def render_page_to_pil(
@@ -123,6 +129,33 @@ def diff_outside_masks(
     return residual, coverage
 
 
+def in_box_ink_retention(
+    source_img: PILImage.Image,
+    artifact_img: PILImage.Image,
+    mask_rects: Sequence[tuple[int, int, int, int]],
+) -> float:
+    """Fraction of the source's in-box ink the artifact still shows.
+
+    Counts dark pixels inside each painted text box. A correct translation
+    changes the glyphs, so absolute pixels differ, but a ``clip:true`` overflow
+    destroys ink outright — a large drop is the one truncation signal visible
+    inside the mask. Returns 1.0 when the boxes carry no source ink (or there
+    are none), so it never manufactures a finding out of nothing.
+    """
+    if source_img.size != artifact_img.size:
+        return 0.0
+    src = source_img.convert("L")
+    art = artifact_img.convert("L")
+    src_ink = 0
+    art_ink = 0
+    for box in mask_rects:
+        src_ink += src.crop(box).point(lambda v: 255 if v < _INK_LUMINANCE else 0).histogram()[255]
+        art_ink += art.crop(box).point(lambda v: 255 if v < _INK_LUMINANCE else 0).histogram()[255]
+    if src_ink == 0:
+        return 1.0
+    return art_ink / src_ink
+
+
 def _select_probe_pages(
     pages_by_no: Mapping[int, list[IRBlock]], common: int, max_pages: int
 ) -> list[int]:
@@ -158,6 +191,7 @@ def compute_render_fidelity(
     stats: dict[str, Any] = {
         "non_text_diff_ratio": 0.0,
         "masked_coverage_ratio": 0.0,
+        "in_box_ink_retention": 1.0,
         "pages_measured": 0,
         "skipped_reason": None,
     }
@@ -183,6 +217,7 @@ def compute_render_fidelity(
                 candidates = _select_probe_pages(pages_by_no, common, max_pages)
                 residuals: list[float] = []
                 coverages: list[float] = []
+                retentions: list[float] = []
                 for page_no in candidates:
                     idx = page_no - 1
                     src_page = src_doc[idx]
@@ -213,6 +248,7 @@ def compute_render_fidelity(
                     residual, coverage = diff_outside_masks(src_img, art_img, rects)
                     residuals.append(residual)
                     coverages.append(coverage)
+                    retentions.append(in_box_ink_retention(src_img, art_img, rects))
                     src_img.close()
                     art_img.close()
             finally:
@@ -229,6 +265,7 @@ def compute_render_fidelity(
 
     stats["non_text_diff_ratio"] = round(sum(residuals) / len(residuals), 6)
     stats["masked_coverage_ratio"] = round(sum(coverages) / len(coverages), 6)
+    stats["in_box_ink_retention"] = round(sum(retentions) / len(retentions), 6)
     stats["pages_measured"] = len(residuals)
     return stats
 
@@ -256,6 +293,16 @@ def fidelity_findings(stats: dict[str, Any]) -> list[ParityFinding]:
                 "fidelity_low_coverage",
                 f"only {coverage:.2%} of the page area was painted prose; most "
                 "content may still be showing source text.",
+            )
+        )
+    retention = float(stats.get("in_box_ink_retention", 1.0))
+    if retention < _IN_BOX_INK_WARN:
+        findings.append(
+            ParityFinding(
+                "info",
+                "fidelity_in_box_ink_loss",
+                f"only {retention:.0%} of the source's in-box ink survived; a "
+                "painted block may be clipped (clip:true) or lost.",
             )
         )
     return findings

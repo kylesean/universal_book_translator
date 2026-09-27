@@ -238,6 +238,36 @@ def _page_raster(pdf_path: Path | str, page_no: int) -> Image.Image | None:
         return None
 
 
+def _sample_diagram_background(
+    pdf_path: Path | str,
+    page_no: int,
+    bbox_topdown: tuple[float, float, float, float],
+) -> str:
+    """Modal colour of the diagram region, as a CSS ``rgb()`` string.
+
+    A hard-coded white white-out patch left a white block over a dark figure;
+    the modal colour of the region is its background in practice.
+    """
+    im = _page_raster(pdf_path, page_no)
+    if im is None:
+        return "white"
+    scale = _RASTER_DPI / 72.0
+    x0, y0, x1, y1 = bbox_topdown
+    box = (
+        max(0, int(x0 * scale)),
+        max(0, int(y0 * scale)),
+        min(im.width, int(x1 * scale)),
+        min(im.height, int(y1 * scale)),
+    )
+    if box[2] <= box[0] or box[3] <= box[1]:
+        return "white"
+    colors = im.convert("RGB").crop(box).getcolors(maxcolors=1_000_000)
+    if not colors:
+        return "white"
+    rgb: Any = max(colors, key=lambda c: c[0])[1]
+    return f"rgb({rgb[0]},{rgb[1]},{rgb[2]})"
+
+
 def render_diagram_png(
     pdf_path: Path | str,
     *,
@@ -420,6 +450,7 @@ def localize_diagram_svg(
     bbox_topdown: tuple[float, float, float, float],
     spans: list[LocalizedSpan],
     out_path: Path | str,
+    background: str = "white",
 ) -> Path:
     """Crop a page SVG to a diagram rect and backfill translated labels.
 
@@ -461,7 +492,7 @@ def localize_diagram_svg(
                 "y": f"{span.y0 - _LABEL_PAD_PT:g}",
                 "width": f"{span.x1 - span.x0 + 2 * _LABEL_PAD_PT:g}",
                 "height": f"{span.y1 - span.y0 + 2 * _LABEL_PAD_PT:g}",
-                "fill": "white",
+                "fill": background,
             },
         )
     patched = 0
@@ -546,7 +577,10 @@ def render_diagram_svg(
         # Crop to top-down SVG user space.
         rect = (bx0, page_height - by1, bx1, page_height - by0)
         dest = Path(out_path) if out_path else (work / f"diagram_p{page_no}.svg")
-        return localize_diagram_svg(page_svg, bbox_topdown=rect, spans=localized, out_path=dest)
+        background = _sample_diagram_background(pdf_path, page_no, rect)
+        return localize_diagram_svg(
+            page_svg, bbox_topdown=rect, spans=localized, out_path=dest, background=background
+        )
     except Exception as exc:
         logger.debug("SVG diagram vectorization failed (p%d): %s", page_no, exc)
         return None

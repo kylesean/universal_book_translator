@@ -171,8 +171,8 @@ def test_rigid_batch_overlay_no_extra_pagebreak() -> None:
     zone1 = MagicMock(x0=10.0, y1=50.0, width=100.0, height=40.0)
     zone2 = MagicMock(x0=10.0, y1=50.0, width=100.0, height=40.0)
     paints: dict[int, list[Any]] = {
-        1: [MagicMock(zone=zone1, height=700.0, text="hello", size=10.0)],
-        2: [MagicMock(zone=zone2, height=700.0, text="world", size=10.0)],
+        1: [MagicMock(zone=zone1, height=700.0, text="hello", size=10.0, min_font_pt=7.0)],
+        2: [MagicMock(zone=zone2, height=700.0, text="world", size=10.0, min_font_pt=7.0)],
     }
 
     overlay_src, compiled = typesetter._batch_page_overlay(pages, paints)

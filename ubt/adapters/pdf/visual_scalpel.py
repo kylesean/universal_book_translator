@@ -114,8 +114,17 @@ def crop_block_pil(
                 raise IndexError(f"Page number {page_num} out of bounds (1..{len(pdf)})")
             page = pdf[page_num - 1]
             try:
-                page_width_pt, page_height_pt = float(page.get_width()), float(page.get_height())
-                bitmap = page.render(scale=scale)
+                # ``bbox`` comes from ``textgeom`` in the UNROTATED frame
+                # (``get_rect`` / ``get_mediabox``), so rasterize unrotated too.
+                # ``render``'s ``rotation`` is additive to the page's /Rotate, so
+                # pass its complement; the old ``get_width/height`` (display
+                # frame) + default render cropped the wrong region on a /Rotate
+                # page.
+                mediabox = page.get_mediabox()
+                page_width_pt = float(mediabox[2]) - float(mediabox[0])
+                page_height_pt = float(mediabox[3]) - float(mediabox[1])
+                rotation = (360 - int(page.get_rotation())) % 360
+                bitmap = page.render(scale=scale, rotation=rotation)
                 full_img = bitmap.to_pil().convert("RGB")
             finally:
                 page.close()

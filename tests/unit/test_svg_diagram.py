@@ -639,3 +639,16 @@ def test_localize_emits_all_whiteouts_before_labels(tmp_path: Path) -> None:
     text = out.read_text(encoding="utf-8")
     assert text.count("<rect") == 2
     assert text.rindex("<rect") < text.index("<text")
+
+
+def test_diagram_background_is_sampled_from_the_raster(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A dark figure gets a matching patch, not a hard-coded white block."""
+    from PIL import Image
+
+    from ubt.adapters.pdf import svg_diagram as mod
+
+    dark = Image.new("RGB", (200, 200), (12, 12, 12))
+    monkeypatch.setattr(mod, "_page_raster", lambda *a, **k: dark)
+    assert mod._sample_diagram_background("x.pdf", 1, (0.0, 0.0, 40.0, 40.0)) == "rgb(12,12,12)"

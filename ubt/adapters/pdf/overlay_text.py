@@ -47,6 +47,31 @@ from ubt.core.cleaners.math_masker import MathMasker
 _CJK = r"一-鿿㐀-䶿豈-﫿぀-ヿ가-힯"
 
 
+_LINE_START_MARKUP_RE = re.compile(r"(?m)^([ \t]*)(=|\+|-|\d+\.)(?=\s|$)")
+
+
+def escape_line_start_markup(text: str) -> str:
+    """Escape Typst block markers that are special only at the start of a line.
+
+    ``=``/``+``/``-``/``N.`` open a heading/list/enum in Typst *only* at line
+    start, so they are deliberately absent from the mid-line escape sets
+    (escaping them everywhere would litter ordinary prose and maths). A
+    translated paragraph can still carry a newline immediately before such a
+    marker, which silently re-lays-out the page as a heading or list; escape
+    the marker (and, for ``N.``, its dot) so it renders as literal text.
+    """
+
+    # The marker must be followed by whitespace or end-of-line: ``12.5`` is a
+    # decimal, not an enumerated-list item, and must be left untouched.
+    def _repl(m: re.Match[str]) -> str:
+        lead, marker = m.group(1), m.group(2)
+        if marker.endswith("."):
+            return f"{lead}{marker[:-1]}\\."
+        return f"{lead}\\{marker}"
+
+    return _LINE_START_MARKUP_RE.sub(_repl, text)
+
+
 def typst_escape(text: str) -> str:
     text = strip_html_mark_tags(text)
     out: list[str] = []
@@ -65,7 +90,8 @@ def typst_escape(text: str) -> str:
     # [#text[...]] content, swallowing the closing brackets and failing the
     # whole overlay compile. A zero-width space breaks the comment token
     # while rendering invisibly (URLs stay copyable modulo one ZWSP).
-    return "".join(out).replace("//", "/\u200b/")
+    escaped = escape_line_start_markup("".join(out))
+    return escaped.replace("//", "/\u200b/")
 
 
 _BARE_NUMBER_RE = re.compile(r"^\d[\d,.]*$")

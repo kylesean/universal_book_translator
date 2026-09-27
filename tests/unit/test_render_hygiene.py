@@ -316,6 +316,25 @@ def test_typst_escape_matches_fragment_markup_set() -> None:
     assert typst_escape("a~b") == "a\\~b"
 
 
+def test_line_start_markup_escaped_in_both_engines() -> None:
+    """A newline before ``=``/``+``/``-``/``N.`` must not re-open Typst markup.
+
+    Regression: both escapers covered their special set everywhere but never a
+    line-leading block marker, so a translated paragraph carrying a newline
+    before ``= heading`` (etc.) was parsed as a heading/list and silently
+    re-laid-out the page.
+    """
+    from ubt.adapters.pdf.overlay_text import typst_escape
+    from ubt.adapters.pdf.typst_fragments import _escape_typst_markup
+
+    expected = {"= h": "\\= h", "+ h": "\\+ h", "- h": "\\- h", "1. h": "1\\. h"}
+    for esc in (_escape_typst_markup, typst_escape):
+        for src, want in expected.items():
+            assert esc(f"body\n{src}") == f"body\n{want}"
+        # A decimal at line start is not an enum marker and must be left alone.
+        assert esc("body\n12.5 units") == "body\n12.5 units"
+
+
 def test_page_strict_books_only_the_images_it_could_not_stage(tmp_path: Path) -> None:
     """A rendered figure must not also be reported as a lost asset.
 

@@ -9,9 +9,11 @@ from PIL import Image
 
 from ubt.adapters.pdf.render_fidelity import (
     _COVERAGE_WARN,
+    _IN_BOX_INK_WARN,
     _RESIDUAL_WARN,
     diff_outside_masks,
     fidelity_findings,
+    in_box_ink_retention,
 )
 
 
@@ -59,6 +61,36 @@ def test_findings_report_bad_residual_and_low_coverage_as_advisory() -> None:
     codes = {f.code for f in findings}
     assert {"fidelity_non_text_residual", "fidelity_low_coverage"} <= codes
     # Advisory: never escalate above info, so delivery is never blocked.
+    assert all(f.severity == "info" for f in findings)
+
+
+def test_in_box_ink_loss_is_measured() -> None:
+    """In-box ink retention drops when the artifact lost glyphs inside a box."""
+    src = Image.new("RGB", (40, 40), (255, 255, 255))
+    art = Image.new("RGB", (40, 40), (255, 255, 255))
+    for y in range(10, 30):
+        for x in range(5, 35):
+            src.putpixel((x, y), (0, 0, 0))
+    for y in range(10, 15):  # only a quarter of the ink survives (clipped block)
+        for x in range(5, 35):
+            art.putpixel((x, y), (0, 0, 0))
+    assert in_box_ink_retention(src, art, [(0, 0, 40, 40)]) < 0.5
+    # Identical ink is a perfect score; a box with no source ink is neutral.
+    assert in_box_ink_retention(src, src, [(0, 0, 40, 40)]) == 1.0
+    assert in_box_ink_retention(src, art, []) == 1.0
+
+
+def test_in_box_ink_loss_finding_is_advisory() -> None:
+    """A severe in-box ink drop is reported, but never escalates above info."""
+    findings = fidelity_findings(
+        {
+            "pages_measured": 1,
+            "non_text_diff_ratio": 0.0,
+            "masked_coverage_ratio": 0.9,
+            "in_box_ink_retention": _IN_BOX_INK_WARN * 0.5,
+        }
+    )
+    assert "fidelity_in_box_ink_loss" in {f.code for f in findings}
     assert all(f.severity == "info" for f in findings)
 
 

@@ -26,6 +26,25 @@ def _create_test_pdf(path: Path, num_pages: int = 2) -> Path:
     return path
 
 
+def test_crop_block_pil_uses_the_unrotated_frame(tmp_path: Path) -> None:
+    """A /Rotate page must be cropped in the bbox's (unrotated) frame.
+
+    ``IRBlock.bbox`` comes from ``textgeom`` in the unrotated frame, but the
+    cropper used ``get_width/height`` (display frame) plus the default rotated
+    render, so a rotated page was cropped at the wrong coordinates (or raised).
+    """
+    pdf_path = tmp_path / "rot90.pdf"
+    writer = pypdf.PdfWriter()
+    page = writer.add_blank_page(width=200, height=100)
+    page.rotate(90)
+    with pdf_path.open("wb") as handle:
+        writer.write(handle)
+
+    img = crop_block_pil(pdf_path, 1, BoundingBox(page=1, x0=0, y0=0, x1=200, y1=100), dpi=72)
+    # The bbox is the whole unrotated page, so the crop is the unrotated raster.
+    assert img.size == (200, 100)
+
+
 def test_compute_crop_coords_invert_y() -> None:
     """PDF origin bottom-left should correctly invert to raster image origin top-left."""
     # Box at x=[100, 200], y=[700, 750] (near top of page 800pt high)
@@ -140,7 +159,7 @@ def test_is_visual_scalpel_applicable(tmp_path: Path) -> None:
 def test_repeated_crops_reuse_one_page_raster(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Cropping one page several times rasterizes it once (2026-09 review, P1-16).
+    """Cropping one page several times rasterizes it once.
 
     A full-page raster costs ~50 ms against a 0.3 ms crop, so formula mode
     "image" — one crop per display equation — paid the whole render per equation.

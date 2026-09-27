@@ -476,6 +476,40 @@ def test_plan_blocks_applies_the_region_floor(monkeypatch: pytest.MonkeyPatch) -
     assert ("body", "spill") in body_report.skipped
 
 
+def test_plan_blocks_stamps_the_region_floor_for_the_emitter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The per-region floor must reach the emitted ``#ubt-fit`` min-sz.
+
+    Regression: planning used the caption/footnote floor (6.5) but ``_zone_typst``
+    emitted the *global* ``self.min_font_pt`` (7.0) as ``min-sz``, so
+    ``min-sz > base-sz`` and Typst's fit loop never shrank — the safety net was
+    inert exactly where it was needed and overflow was clipped.
+    """
+    from ubt.adapters.pdf.rigid.typesetter import RigidTypesetter
+    from ubt.adapters.pdf.rigid.zones import build_zones
+    from ubt.core.ir.models import LayoutRole
+
+    def _fake_flow(
+        self: RigidTypesetter, text: str, boxes: object, size: float
+    ) -> list[str] | None:
+        return [text] if size <= 6.8 else None
+
+    monkeypatch.setattr(RigidTypesetter, "_flow", _fake_flow)
+    src = "Figure 1: a caption long enough to need shrinking below the body floor."
+    facts = PageFacts(
+        page=1, width=460.0, height=660.0, lines=(LineBox(src, (100.0, 400.0, 400.0, 409.0)),)
+    )
+    caption = _block("cap", src, page=1, y0=400.0, y1=409.0).model_copy(
+        update={"layout_role": LayoutRole.CAPTION}
+    )
+    ts = RigidTypesetter(target_lang="zh")
+    paints, _ = ts._plan_blocks([caption], build_zones({1: facts}, [caption]), {1: 660.0})
+    plan = paints[1][0]
+    assert plan.min_font_pt == 6.5  # caption region floor, not the 7.0 body default
+    assert plan.min_font_pt <= plan.size  # min-sz must not exceed base-sz
+
+
 def _head_block() -> IRBlock:
     return IRBlock(
         id="h",
