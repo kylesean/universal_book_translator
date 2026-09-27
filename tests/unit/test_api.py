@@ -1729,3 +1729,29 @@ def test_job_submit_request_rejects_malformed_pages() -> None:
         JobSubmitRequest(input_path="/x.pdf", pages="abc")
     with pytest.raises(ValidationError):
         JobSubmitRequest(input_path="/x.pdf", pages="1-" + "9" * 20000)
+
+
+def test_submit_job_existing_output_path_rejected_unless_fresh(
+    api_client: TestClient, sample_api_doc: Path, tmp_path: Path
+) -> None:
+    """Existing output_path must be rejected with 409 unless fresh=True is specified."""
+    out_file = tmp_path / "already_exists.md"
+    out_file.write_text("prior output", encoding="utf-8")
+
+    payload_default = {
+        "input_path": str(sample_api_doc),
+        "output_path": str(out_file),
+        "target_lang": "zh",
+    }
+    resp = api_client.post("/jobs/submit", json=payload_default)
+    assert resp.status_code == 409
+    assert "output_path already exists" in resp.json()["detail"]
+
+    payload_fresh = {
+        "input_path": str(sample_api_doc),
+        "output_path": str(out_file),
+        "target_lang": "zh",
+        "fresh": True,
+    }
+    resp_fresh = api_client.post("/jobs/submit", json=payload_fresh)
+    assert resp_fresh.status_code == 202

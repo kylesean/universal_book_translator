@@ -531,7 +531,7 @@ def create_app(
 
         if req.output_path:
             resolved_out = resolve_secure_path(req.output_path, must_exist=False, config=app_config)
-            if resolved_out is not None and resolved_out.exists():
+            if resolved_out is not None and resolved_out.exists() and not req.fresh:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="output_path already exists; refusing to overwrite it",
@@ -556,7 +556,7 @@ def create_app(
             except Exception:
                 pass
             resolved_out = resolve_secure_path(default_out, must_exist=False, config=app_config)
-            if resolved_out is not None and resolved_out.exists():
+            if resolved_out is not None and resolved_out.exists() and not req.fresh:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="output_path already exists; refusing to overwrite it",
