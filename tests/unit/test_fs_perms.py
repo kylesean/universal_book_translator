@@ -1,10 +1,9 @@
 """``fs_perms``: owner-only modes for the files that carry manuscript text.
 
-Covers the two additions from the 2026-09 review: ``.env`` convergence (M1 —
-dotenv files are created 0644 by editors/``cp`` while holding API credentials)
-and the ``extra_dirs`` extension of the world-readable scan (M2 — the pipeline
-only ever walked ``db_dir``, so exported PDFs and quality reports were never
-reported).
+Covers ``.env`` convergence (dotenv files are created 0644 by editors/``cp``
+while holding API credentials) and the ``extra_dirs`` extension of the
+world-readable scan (the pipeline only ever walked ``db_dir``, so exported PDFs
+and quality reports were never reported).
 """
 
 from __future__ import annotations
@@ -106,12 +105,18 @@ def test_world_readable_files_scans_extra_dirs(tmp_path: Path) -> None:
 
 
 def test_sensitive_path_parts_are_casefolded() -> None:
-    """L1: the deny list is matched casefolded — ``.SSH`` is ``.ssh`` on a
+    """The deny list is matched casefolded — ``.SSH`` is ``.ssh`` on a
     case-insensitive filesystem, and the old ``in`` check allowed the read."""
     for name in (".ssh", ".SSH", ".Env", "CREDENTIALS.JSON", ".Git-Credentials"):
         assert is_sensitive_path_part(name), name
     assert not is_sensitive_path_part("book.pdf")
     assert not is_sensitive_path_part("credentials.json.bak")
+
+
+def test_per_environment_dotenv_variants_are_sensitive() -> None:
+    """``.env.production`` / ``.envrc`` hold the same secrets as ``.env``."""
+    for name in (".env.production", ".env.development", ".envrc", ".env.example"):
+        assert is_sensitive_path_part(name), name
 
 
 def test_validate_safe_path_security_checks(tmp_path: Path) -> None:
@@ -192,7 +197,7 @@ def test_system_deny_prefixes_are_pre_resolved() -> None:
 
 
 def test_sensitive_list_is_casefolded_and_complete(tmp_path: Path) -> None:
-    """L1: the deny list must cover today's credential stores, case-insensitively.
+    """The deny list must cover today's credential stores, case-insensitively.
 
     Two gaps: the comparison was case-sensitive (so ``.SSH``/``.ENV`` slipped
     through on case-insensitive filesystems), and the list predated
@@ -210,7 +215,7 @@ def test_sensitive_list_is_casefolded_and_complete(tmp_path: Path) -> None:
         "secrets.env",
         "credentials.json",
     }
-    assert required <= set(SENSITIVE_FILENAME_PARTS), "review L1 additions went missing"
+    assert required <= set(SENSITIVE_FILENAME_PARTS), "sensitive-name additions went missing"
 
     probes = [
         ".SSH/id_rsa",
@@ -230,7 +235,7 @@ def test_sensitive_list_is_casefolded_and_complete(tmp_path: Path) -> None:
 
 
 def test_sensitive_deny_beats_an_explicit_whitelist(tmp_path: Path) -> None:
-    """The precedence is deliberate, not a contradiction (review L1).
+    """The precedence is deliberate, not a contradiction.
 
     ``resolve_secure_path`` docstring point 3 exempts a whitelisted path from
     the *system* deny list; point 4 says the *sensitive-name* deny list still

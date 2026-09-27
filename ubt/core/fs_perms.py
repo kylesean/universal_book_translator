@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 #: file. Matched (casefolded) against every component of a resolved path, so
 #: ``/home/u/.ssh/id_rsa`` is refused because of ``.ssh`` — and so is
 #: ``/home/u/.SSH/id_rsa``: the check is casefolded because Windows and macOS
-#: resolve both spellings to the same file (review L1).
+#: resolve both spellings to the same file.
 SENSITIVE_FILENAME_PARTS = (
     ".ssh",
     ".aws",
@@ -73,7 +73,12 @@ SENSITIVE_PARTS_CASEFOLD = frozenset(part.casefold() for part in SENSITIVE_FILEN
 
 def is_sensitive_path_part(part: str) -> bool:
     """Whether a resolved path component names a credential/secret location."""
-    return part.casefold() in SENSITIVE_PARTS_CASEFOLD
+    folded = part.casefold()
+    if folded in SENSITIVE_PARTS_CASEFOLD:
+        return True
+    # Per-environment dotenv variants (``.env.production``) and ``.envrc`` hold
+    # the same secrets as ``.env``; exact matching let them through.
+    return folded == ".envrc" or folded.startswith(".env.")
 
 
 def system_disallowed_prefixes() -> tuple[Path, ...]:
