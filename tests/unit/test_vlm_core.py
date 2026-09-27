@@ -683,3 +683,19 @@ def test_vlm_fallback_missing_pages_closes_driver_and_logs_correct_remaining_cou
     mock_driver.close.assert_called_once()
     # Circuit breaker trips at idx=3 (page_no=53), so remaining pages is 4 - 3 = 1 (NOT 4 - 53 + 1 = -48!)
     assert "remaining 1 page(s)" in caplog.text
+
+
+def test_ocr_endpoint_local_check_is_not_a_hostname_prefix_match() -> None:
+    """``allow_page_upload=false`` must not be defeated by a ``127.``-prefixed
+    DNS name: only a genuine loopback address (or .localhost) stays local."""
+    from ubt.adapters.pdf.vlm.registry import _endpoint_is_local
+
+    assert _endpoint_is_local("http://127.0.0.1:8765")
+    assert _endpoint_is_local("127.0.0.1:8765")
+    assert _endpoint_is_local("http://localhost:8765")
+    assert _endpoint_is_local("http://[::1]:8765")
+    assert _endpoint_is_local(None)
+    # A remote host that merely starts with "127." is NOT local.
+    assert not _endpoint_is_local("http://127.0.0.1.attacker.example:80")
+    assert not _endpoint_is_local("http://127.ocr.internal")
+    assert not _endpoint_is_local("https://ocr.example.com")

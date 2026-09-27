@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import os
 from collections.abc import Callable
@@ -13,7 +14,12 @@ logger = logging.getLogger(__name__)
 
 
 def _endpoint_is_local(endpoint: str | None) -> bool:
-    """True when the OCR endpoint stays on this machine (or is unset)."""
+    """True when the OCR endpoint stays on this machine (or is unset).
+
+    Judged from the resolved host, not a string prefix: a DNS name like
+    ``127.0.0.1.attacker.example`` is a *remote* host, and treating it as local
+    would let ``allow_page_upload=false`` send page images off the machine.
+    """
     if not endpoint:
         return True
     # A schemeless host like "127.0.0.1:8765" parses with no hostname under
@@ -22,7 +28,12 @@ def _endpoint_is_local(endpoint: str | None) -> bool:
     if "://" not in endpoint:
         endpoint = "http://" + endpoint
     host = (urlparse(endpoint).hostname or "").lower()
-    return host in ("localhost", "::1") or host.startswith("127.")
+    if host == "localhost" or host.endswith(".localhost"):
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 _FACTORIES: dict[str, Callable[[], VlmDriver]] = {}
