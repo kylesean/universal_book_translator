@@ -76,3 +76,20 @@ def test_html_strip_markup_ignores_script_and_style(tmp_path: Path) -> None:
     )
     # Only the visible prose counts; the ~6 KB of script/style noise must be gone.
     assert decide(html).chars < 2000
+
+
+def test_non_pdf_token_estimate_is_script_aware(tmp_path) -> None:
+    """A CJK source must not be priced as if it were English (N12).
+
+    ``_probe_non_pdf`` used ``chars // 4`` (the ASCII rule), under-counting a
+    Chinese markdown book by ~3x, so ``ubt assess`` quoted a fraction of the
+    real cost.
+    """
+    from ubt.core.router_mode import decide
+
+    md = tmp_path / "book.md"
+    text = "# 标题\n\n" + ("这是一段中文文本，用来测试分词估算。" * 200)
+    md.write_text(text, encoding="utf-8")
+
+    decision = decide(doc_path=md)
+    assert decision.estimated_tokens > len(text) // 4

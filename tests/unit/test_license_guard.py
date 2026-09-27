@@ -261,7 +261,10 @@ _SIZE_RATCHETS: dict[str, int] = {
     # run() split still owes the real repayment.
     # 2026-09-26 (usage persist): 869→885 — the run-usage persist change grew the
     # file again; recorded here so the cap tracks the shipped size.
-    "ubt/core/engine/pipeline.py": 885,
+    # 2026-09-27 (job-id identity): 885→927 — ``derive_job_id`` gained the genre
+    # profile + non-default engine-knob signature (and its helper), so a resume
+    # under a different --profile/--preset cannot reuse the wrong ledger.
+    "ubt/core/engine/pipeline.py": 927,
     "ubt/adapters/pdf/typst_reconstructor.py": 2336,
 }
 

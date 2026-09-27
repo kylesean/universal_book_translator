@@ -118,13 +118,29 @@ def _strip_markup(raw: str) -> str:
     return parser.text
 
 
-def _probe_non_pdf(path: Path) -> tuple[int, int, int]:
-    """Probe a non-PDF document for (estimated_pages, char_count, chapter_count).
+def _script_aware_tokens(text: str | None, chars: int) -> int:
+    """Token estimate for a sampled text, falling back to ``chars // 4``.
 
-    Uses standard library only.
+    ``count_text_tokens`` is the canonical script-aware counter (CJK ~0.85
+    tok/char vs ASCII ~0.25), so a Chinese/Japanese source is not priced as if
+    it were English. Imported lazily: it lives in the engine layer and this
+    probe must stay importable from core without a load-time cycle.
+    """
+    if text:
+        from ubt.core.engine.cost_estimate import count_text_tokens
+
+        return count_text_tokens(text)
+    return chars // 4
+
+
+def _probe_non_pdf(path: Path) -> tuple[int, int, int, int]:
+    """Probe a non-PDF document for (pages, chars, chapters, estimated_tokens).
+
+    Uses standard library only; the token estimate is script-aware so a CJK
+    source is not under-counted by the ASCII 4-chars/token rule.
     """
     if not path.is_file():
-        return 0, 0, 0
+        return 0, 0, 0, 0
     ext = path.suffix.lower()
     if ext in (".md", ".markdown", ".txt"):
         try:
@@ -136,27 +152,29 @@ def _probe_non_pdf(path: Path) -> tuple[int, int, int]:
             headings = sum(1 for line in text.splitlines() if re.match(r"^#{1,6}\s", line.strip()))
             chapters = max(1, headings)
             estimated_pages = max(1, chars // 1500)
-            return estimated_pages, chars, chapters
+            return estimated_pages, chars, chapters, _script_aware_tokens(text, chars)
         except Exception:
-            return 1, 0, 1
+            return 1, 0, 1, 0
 
     if ext in (".html", ".htm"):
         try:
             raw = path.read_text(encoding="utf-8", errors="ignore")
-            chars = len(_strip_markup(raw))
+            stripped = _strip_markup(raw)
+            chars = len(stripped)
             # Any heading level counts (see the Markdown branch above).
             headings = len(re.findall(r"<h[1-6][\s>]", raw, re.IGNORECASE))
             chapters = max(1, headings)
             estimated_pages = max(1, chars // 1500)
-            return estimated_pages, chars, chapters
+            return estimated_pages, chars, chapters, _script_aware_tokens(stripped, chars)
         except Exception:
-            return 1, 0, 1
+            return 1, 0, 1, 0
 
     if ext == ".epub":
         try:
             with zipfile.ZipFile(path, "r") as zf:
                 spine_count = 0
                 total_chars = 0
+                total_tokens = 0
                 opf_names = [n for n in zf.namelist() if n.endswith(".opf")]
                 if opf_names:
                     try:
@@ -170,12 +188,14 @@ def _probe_non_pdf(path: Path) -> tuple[int, int, int]:
                 if spine_count <= 0:
                     spine_count = len(html_files)
                 for hf in html_files:
-                    total_chars += len(_strip_markup(zf.read(hf).decode("utf-8", errors="ignore")))
+                    stripped = _strip_markup(zf.read(hf).decode("utf-8", errors="ignore"))
+                    total_chars += len(stripped)
+                    total_tokens += _script_aware_tokens(stripped, len(stripped))
                 chapters = max(1, spine_count)
                 estimated_pages = max(1, total_chars // 1500)
-                return estimated_pages, total_chars, chapters
+                return estimated_pages, total_chars, chapters, total_tokens
         except Exception:
-            return 1, 0, 1
+            return 1, 0, 1, 0
 
     if ext == ".docx":
         try:
@@ -186,7 +206,8 @@ def _probe_non_pdf(path: Path) -> tuple[int, int, int]:
                     text_parts = [
                         elem.text for elem in tree.iter() if elem.tag.endswith("}t") and elem.text
                     ]
-                    chars = sum(len(t) for t in text_parts)
+                    text = "".join(text_parts)
+                    chars = len(text)
                     headings = 0
                     for elem in tree.iter():
                         if elem.tag.endswith("}pStyle"):
@@ -198,11 +219,11 @@ def _probe_non_pdf(path: Path) -> tuple[int, int, int]:
                                 headings += 1
                     chapters = max(1, headings)
                     estimated_pages = max(1, chars // 1500)
-                    return estimated_pages, chars, chapters
+                    return estimated_pages, chars, chapters, _script_aware_tokens(text, chars)
         except Exception:
-            return 1, 0, 1
+            return 1, 0, 1, 0
 
-    return 1, 0, 1
+    return 1, 0, 1, 0
 
 
 def decide(
@@ -234,8 +255,7 @@ def decide(
 
     # 1. Non-PDF formats (flow documents: Markdown, HTML, EPUB, DOCX)
     if path.suffix.lower() != ".pdf":
-        pages, chars, chapters = _probe_non_pdf(path)
-        est_tokens = chars // 4
+        pages, chars, chapters, est_tokens = _probe_non_pdf(path)
 
         if exec_mode == "short":
             return RouteDecision(
