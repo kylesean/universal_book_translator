@@ -454,6 +454,106 @@ def metrics_compare(
         raise typer.Exit(code=1)
 
 
+tm_app = typer.Typer(
+    name="tm",
+    help="Translation-memory audit: list reusable entries and evict poisoned ones.",
+    no_args_is_help=True,
+)
+app.add_typer(tm_app, name="tm")
+
+
+@tm_app.command(name="scan")
+def tm_scan(
+    db_dir: Annotated[
+        Path | None,
+        typer.Option("--db-dir", help="Directory holding tm.sqlite (default: config/UBT_DB_DIR)"),
+    ] = None,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit entries as JSON")] = False,
+    limit: Annotated[int, typer.Option("--limit", help="Max rows to show (0 = all)")] = 50,
+) -> None:
+    """List reusable translation-memory entries (id, pair, provenance, reuse)."""
+    from ubt.core.memory.tm import TranslationMemory
+
+    tm_path = _resolve_db_dir(db_dir) / "tm.sqlite"
+    if not tm_path.exists():
+        _err_console.print(f"[bold red]Error:[/] translation memory not found: {tm_path}")
+        raise typer.Exit(code=1)
+    tm = TranslationMemory(tm_path)
+    try:
+        entries = tm.scan()
+    finally:
+        tm.close()
+    shown = entries if limit <= 0 else entries[:limit]
+    if json_output:
+        print(
+            json.dumps(
+                [
+                    {
+                        "id": e.id,
+                        "src_lang": e.src_lang,
+                        "tgt_lang": e.tgt_lang,
+                        "provenance": e.provenance,
+                        "domain": e.domain,
+                        "use_count": e.use_count,
+                        "source_text": e.source_text,
+                        "target_text": e.target_text,
+                    }
+                    for e in shown
+                ],
+                ensure_ascii=False,
+            )
+        )
+        return
+    table = Table(title=f"Translation memory: {len(entries)} entries")
+    table.add_column("id", justify="right", style="bold cyan")
+    table.add_column("pair")
+    table.add_column("provenance")
+    table.add_column("reuse", justify="right")
+    table.add_column("source", overflow="fold")
+    for e in shown:
+        preview = e.source_text.replace("\n", " ")[:60]
+        table.add_row(
+            str(e.id), f"{e.src_lang}->{e.tgt_lang}", e.provenance, str(e.use_count), preview
+        )
+    console.print(table)
+    if limit > 0 and len(entries) > limit:
+        console.print(f"[dim]… {len(entries) - limit} more; use --limit 0 for all.[/]")
+
+
+@tm_app.command(name="evict")
+def tm_evict(
+    ids: Annotated[list[int], typer.Argument(help="Translation-memory entry ids to delete")],
+    db_dir: Annotated[
+        Path | None,
+        typer.Option("--db-dir", help="Directory holding tm.sqlite (default: config/UBT_DB_DIR)"),
+    ] = None,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation prompt")] = False,
+) -> None:
+    """Delete poisoned/stale translation-memory entries by id.
+
+    A poisoned entry is worse than a missing one: ``lookup_exact`` serves it
+    verbatim on every later run, so one bad generation becomes the permanent,
+    authoritative translation.
+    """
+    from ubt.core.memory.tm import TranslationMemory
+
+    if not ids:
+        _err_console.print("[bold red]Error:[/] no entry ids given")
+        raise typer.Exit(code=1)
+    tm_path = _resolve_db_dir(db_dir) / "tm.sqlite"
+    if not tm_path.exists():
+        _err_console.print(f"[bold red]Error:[/] translation memory not found: {tm_path}")
+        raise typer.Exit(code=1)
+    if not yes:
+        typer.confirm(f"Delete {len(set(ids))} translation-memory entr(y/ies)?", abort=True)
+    tm = TranslationMemory(tm_path)
+    try:
+        removed = tm.evict_ids(ids)
+    finally:
+        tm.close()
+    console.print(f"[bold green]✓ Evicted {removed} entr(y/ies).[/]")
+
+
 # Register modular subcommands
 @app.command(name="api")
 def api_command(

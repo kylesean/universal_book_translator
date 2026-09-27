@@ -1049,3 +1049,48 @@ def test_translate_accepts_a_seeded_domain_profile(tmp_path: Path) -> None:
     result = runner.invoke(app, ["translate", str(missing), "--profile", "semiconductor"])
     assert "Invalid domain profile" not in result.output
     assert "Input file not found" in result.output
+
+
+def test_cli_tm_scan_and_evict_round_trip(tmp_path: Path) -> None:
+    """F5: ``TM.scan()``/``evict_ids()`` are reachable from the CLI.
+
+    Reusable memory that can only grow and never be corrected is a liability; a
+    poisoned entry is served verbatim on every later run.
+    """
+    import json
+
+    from ubt.core.memory.tm import TMPendingEntry, TranslationMemory
+
+    db_dir = tmp_path / "ledgers"
+    db_dir.mkdir()
+    tm = TranslationMemory(db_dir / "tm.sqlite")
+    try:
+        tm.writeback(
+            [
+                TMPendingEntry(
+                    src_lang="en",
+                    tgt_lang="zh",
+                    source_text="A poisoned source.",
+                    target_text="被污染的译文。",
+                )
+            ]
+        )
+        entries = tm.scan()
+    finally:
+        tm.close()
+    assert len(entries) == 1
+    entry_id = entries[0].id
+
+    scanned = runner.invoke(app, ["tm", "scan", "--db-dir", str(db_dir), "--json"])
+    assert scanned.exit_code == 0, scanned.stdout
+    payload = json.loads(scanned.stdout.strip().splitlines()[-1])
+    assert payload[0]["source_text"] == "A poisoned source."
+
+    evicted = runner.invoke(app, ["tm", "evict", str(entry_id), "--db-dir", str(db_dir), "--yes"])
+    assert evicted.exit_code == 0, evicted.stdout
+    assert "Evicted 1" in evicted.stdout
+    tm2 = TranslationMemory(db_dir / "tm.sqlite")
+    try:
+        assert tm2.scan() == []
+    finally:
+        tm2.close()
