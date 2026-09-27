@@ -584,3 +584,44 @@ async def test_ingest_stage_raises_document_parse_error_on_zero_blocks(tmp_path:
     with pytest.raises(DocumentParseError, match="0 content blocks"):
         async for _ in run_ingest_stage(ctx):
             pass
+
+
+@pytest.mark.fast
+async def test_ingest_stage_rejects_an_adapter_that_yields_no_chapters(tmp_path: Path) -> None:
+    """A zero-chapter adapter (empty Markdown/TXT) must fail, not export empty.
+
+    The sibling test above yields one *empty* chapter (``parsed_count == 1``);
+    this one yields *no chapter at all*, which is what
+    ``MarkdownAdapter.parse_stream`` does for an empty or whitespace-only
+    ``.md``/``.txt`` — it only yields once a chapter has blocks. The empty-book
+    guard must catch this shape too, or the pipeline finalizes "completed"
+    with an empty deliverable and ``--strict`` still exits 0.
+    """
+    config = UBTConfig()
+    input_file = tmp_path / "empty.txt"
+    input_file.write_text("")
+    manifest = BookManifest(doc_id="doc1", title="Title", source_path=str(input_file), chapters=[])
+    ledger = SQLiteJobLedger(tmp_path / "test.sqlite")
+    ledger.init_job_from_manifest("job_test", manifest)
+
+    ctx = build_stage_ctx(
+        tmp_path,
+        job_id="job_test",
+        input_path=input_file,
+        config=config,
+        manifest=manifest,
+        ledger=ledger,
+    )
+
+    class NoChapterAdapter:
+        async def parse_stream(self, path: Path, selected_pages: Any = None) -> Any:
+            # An async generator that yields nothing (``for _ in ()`` keeps the
+            # generator shape without an unreachable ``yield``).
+            for _ in ():
+                yield _
+
+    ctx.__dict__["require_adapter"] = lambda: NoChapterAdapter()
+
+    with pytest.raises(DocumentParseError, match="0 content blocks"):
+        async for _ in run_ingest_stage(ctx):
+            pass

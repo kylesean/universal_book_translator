@@ -130,3 +130,34 @@ def test_cli_dry_run_writes_a_ledger_and_real_artifacts(tmp_path: Path) -> None:
     assert set(statuses) <= TERMINAL_STATUSES, sorted(
         s.value for s in set(statuses) - TERMINAL_STATUSES
     )
+
+
+def test_cli_empty_document_fails_loudly_and_writes_no_deliverable(tmp_path: Path) -> None:
+    """An empty ``.md``/``.txt`` is a hard failure, never a "completed" empty book.
+
+    ``MarkdownAdapter.parse_stream`` yields no chapter for empty content, so the
+    ingest empty-book guard must still fire. Before the fix the run finalized
+    ``completed`` with a ~1-byte deliverable and ``--strict`` exited 0 — a
+    silent false success on a truncated download or a mistyped path.
+    """
+    source = tmp_path / "empty.md"
+    source.write_text("", encoding="utf-8")
+    output = tmp_path / "out" / "empty_bilingual.md"
+    job_id = "e2e-cli-empty"
+
+    result = _run_cli(
+        ["translate", str(source), "--dry-run", "--strict", "--job-id", job_id, "-o", str(output)],
+        tmp_path,
+    )
+    assert result.returncode != 0, (
+        "an empty document must not report success:\n"
+        f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    )
+    assert not output.exists(), "no deliverable may be written for an empty document"
+
+    # The ledger must record the failure, not a completed job.
+    db = tmp_path / ".ubt" / "ledgers" / f"{job_id}.sqlite"
+    assert db.exists(), "pipeline never opened a ledger"
+    with sqlite3.connect(db) as conn:
+        row = conn.execute("SELECT status FROM job_meta WHERE job_id = ?", (job_id,)).fetchone()
+    assert row is not None and row[0] == "failed", f"job not marked failed: {row}"

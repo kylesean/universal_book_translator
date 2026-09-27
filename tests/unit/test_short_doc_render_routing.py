@@ -107,6 +107,30 @@ async def test_pipeline_publication_executes_full_stages(tmp_path: Path) -> None
         mock_adapter = MagicMock(spec=BaseDocumentAdapter)
         mock_adapter.extract_manifest = AsyncMock(return_value=mock_manifest)
         mock_adapter.render_blocks = AsyncMock(return_value=output_pdf)
+        # A short *document* has content. The run now refuses to finalize a job
+        # that ends ingest with zero blocks (an empty book must fail, not export
+        # an empty deliverable), so the fixture yields one real chapter/block
+        # instead of leaving ``parse_stream`` as an unconfigured MagicMock that
+        # yielded nothing and silently relied on the old empty-book behavior.
+
+        async def _parse_stream(*_args: Any, **_kwargs: Any) -> AsyncIterator[Any]:
+            from ubt.core.ir.models import ChapterIR
+
+            yield ChapterIR(
+                doc_id="doc1",
+                chapter_id="ch1",
+                title="c",
+                spine_index=1,
+                blocks=[
+                    IRBlock(
+                        id="ch1#b0001",
+                        spine_index=1,
+                        source_text="Alpha paragraph one is here.",
+                    )
+                ],
+            )
+
+        mock_adapter.parse_stream = _parse_stream
         mock_resolve.return_value = mock_adapter
 
         mock_decide.return_value = RouteDecision(

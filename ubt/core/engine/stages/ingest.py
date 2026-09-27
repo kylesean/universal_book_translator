@@ -437,7 +437,19 @@ async def run_ingest_stage(
                 break
 
     final_stats = await asyncio.to_thread(ledger.get_job_stats, actual_job_id)
-    if parsed_count > 0 and int(final_stats.get("total", 0)) == 0:
+    # A job that ends ingest with zero blocks is an empty book however it got
+    # there, and must fail here instead of exporting an empty deliverable:
+    #   * an adapter that streams chapters whose blocks all cleaned or filtered
+    #     away (a fully scanned PDF with OCR off, a --pages window over nothing);
+    #   * an adapter that streams *no chapter at all* — MarkdownAdapter only
+    #     yields a chapter once it has blocks, so an empty or whitespace-only
+    #     .md/.txt reaches here with parsed_count == 0.
+    # The former ``parsed_count > 0`` guard let the second family through (its
+    # adapter yielded nothing, the guard never fired, and the run finalized
+    # "completed" with an empty deliverable). A legitimate resume is not caught
+    # by dropping the condition: the fast path skips parsing only when the
+    # ledger already holds blocks, so total is > 0 on every resume.
+    if int(final_stats.get("total", 0)) == 0:
         raise DocumentParseError(
             f"Document {input_path.name} produced 0 content blocks after cleaning; "
             "cannot translate an empty document."
