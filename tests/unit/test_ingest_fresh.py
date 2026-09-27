@@ -15,6 +15,8 @@ from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.stages.ingest import run_ingest_stage
 from ubt.core.exceptions import DocumentParseError, LedgerError
 from ubt.core.ir.models import BookManifest, ChapterIR, IRBlock
+from ubt.core.router.provider import MockModelProvider
+from ubt.core.router.router import ModelRouter
 
 
 def _manifest(doc_id: str = "jobtest", source_path: str = "/tmp/src.pdf") -> BookManifest:
@@ -375,6 +377,119 @@ async def test_ingest_fresh_restarts_with_a_different_page_selection(tmp_path: P
         )
     )
     assert adapter2.last_pages == {4}
+
+
+class _RealProvider(MockModelProvider):
+    """A mock's echo transport that reports ``is_mock = False`` (a real run)."""
+
+    is_mock = False
+
+
+@pytest.mark.asyncio
+async def test_resume_with_a_different_domain_profile_is_refused(tmp_path: Path) -> None:
+    """Explicit-id resume must not mix output written under another --profile.
+
+    The genre profile is part of a derived job id's namespace; an explicit
+    ``--job-id`` skips that, so the ledger records it and refuses a resume that
+    changes it (an earlier run's translations would otherwise be kept).
+    """
+    src = tmp_path / "book.pdf"
+    src.write_bytes(b"v1-bytes")
+    ledger = SQLiteJobLedger(tmp_path / "ledger.db")
+    manifest = _manifest(source_path=str(src))
+    await _drain(
+        run_ingest_stage(
+            build_stage_ctx(
+                tmp_path,
+                adapter=_StubAdapter(["Hello world, this is a test paragraph."]),
+                input_path=src,
+                ledger=ledger,
+                job_id="job_1",
+                manifest=manifest,
+                source_lang="en",
+                profile_name="general",
+            )
+        )
+    )
+    with pytest.raises(DocumentParseError, match="--fresh"):
+        await _drain(
+            run_ingest_stage(
+                build_stage_ctx(
+                    tmp_path,
+                    adapter=_StubAdapter(["other"]),
+                    input_path=src,
+                    ledger=ledger,
+                    job_id="job_1",
+                    manifest=manifest,
+                    source_lang="en",
+                    profile_name="textbook",
+                )
+            )
+        )
+    assert ledger.get_job_stats("job_1")["total"] == 1
+    # The advertised escape works: --fresh restarts under the new profile.
+    await _drain(
+        run_ingest_stage(
+            build_stage_ctx(
+                tmp_path,
+                adapter=_StubAdapter(["Fresh run under the new profile."]),
+                input_path=src,
+                ledger=ledger,
+                job_id="job_1",
+                manifest=manifest,
+                source_lang="en",
+                profile_name="textbook",
+                config=UBTConfig(fresh=True),
+            )
+        )
+    )
+
+
+@pytest.mark.asyncio
+async def test_resume_of_a_rehearsal_as_a_real_run_is_refused(tmp_path: Path) -> None:
+    """A ``--dry-run`` ledger must not be resumed as a real run.
+
+    The rehearsal writes echo text as the translation; resuming it as a real run
+    would keep that echo and finalize it as a translated book.
+    """
+    src = tmp_path / "book.pdf"
+    src.write_bytes(b"v1-bytes")
+    ledger = SQLiteJobLedger(tmp_path / "ledger.db")
+    manifest = _manifest(source_path=str(src))
+    await _drain(
+        run_ingest_stage(
+            build_stage_ctx(
+                tmp_path,
+                adapter=_StubAdapter(["Hello world, this is a test paragraph."]),
+                input_path=src,
+                ledger=ledger,
+                job_id="job_1",
+                manifest=manifest,
+                source_lang="en",
+            )
+        )
+    )
+    real_router = ModelRouter(
+        provider=_RealProvider(default_response="translated"),
+        draft_model="mock-draft",
+        repair_model="mock-repair",
+    )
+    with pytest.raises(DocumentParseError, match="--fresh"):
+        await _drain(
+            run_ingest_stage(
+                build_stage_ctx(
+                    tmp_path,
+                    router=real_router,
+                    adapter=_StubAdapter(["other"]),
+                    input_path=src,
+                    ledger=ledger,
+                    job_id="job_1",
+                    manifest=manifest,
+                    source_lang="en",
+                )
+            )
+        )
+    assert ledger.get_job_stats("job_1")["total"] == 1
 
 
 @pytest.mark.asyncio

@@ -134,6 +134,66 @@ def _guard_selected_pages(
         )
 
 
+#: One metadata key holding the identity a *derived* job id already namespaces
+#: (genre profile / engine knobs / rehearsal mode). An explicit ``--job-id``
+#: skips that namespacing, so the guard below records and compares it instead.
+_RUN_IDENTITY_KEY = "run_identity"
+
+
+def _run_identity(profile_name: str, engine_sig: str, mock_run: bool) -> dict[str, object]:
+    return {"profile_name": profile_name, "engine_signature": engine_sig, "mock_run": mock_run}
+
+
+def _record_run_identity(
+    ledger: SQLiteJobLedger,
+    job_id: str,
+    profile_name: str,
+    engine_sig: str,
+    mock_run: bool,
+) -> None:
+    """Overwrite the recorded identity (used by the ``--fresh`` restart path)."""
+    ledger.set_job_metadata_value(
+        job_id, _RUN_IDENTITY_KEY, _run_identity(profile_name, engine_sig, mock_run)
+    )
+
+
+def _guard_run_identity(
+    ledger: SQLiteJobLedger,
+    job_id: str,
+    profile_name: str,
+    engine_sig: str,
+    mock_run: bool,
+) -> None:
+    """Record this job's profile/engine/rehearsal identity, or refuse a resume
+    that asks for another.
+
+    Derived job ids already namespace all three, so this mainly protects an
+    explicit ``--job-id`` (mirrors :func:`_guard_chapter_window`). Without it a
+    resume under a different ``--profile`` keeps the earlier run's translations
+    in place, and a rehearsal (``--dry-run``) ledger resumed as a real run ships
+    the echo text as the translation. A ledger written before this guard has no
+    key: the current values are recorded rather than blocked, so older jobs stay
+    resumable (the same forward-compatible rule as the window guard).
+    """
+    requested = _run_identity(profile_name, engine_sig, mock_run)
+    stored = ledger.get_job_metadata_value(job_id, _RUN_IDENTITY_KEY)
+    if stored is None:
+        ledger.set_job_metadata_value(job_id, _RUN_IDENTITY_KEY, requested)
+        return
+    # Stored rows or external ledger inputs may hold an unexpected shape; only a
+    # dict is comparable, anything else counts as unknown rather than a mismatch
+    # that would block a legitimate resume.
+    if not isinstance(stored, dict):
+        return
+    if stored != requested:
+        raise DocumentParseError(
+            f"Job {job_id} was created with {stored} but is being resumed with "
+            f"{requested}. A different profile, engine preset, or rehearsal mode "
+            "would mix its output into this ledger. Use a different --job-id, "
+            "re-run with the original settings, or add --fresh to restart the job."
+        )
+
+
 def _reset_job_for_fresh_run(
     ledger: SQLiteJobLedger,
     job_id: str,
@@ -176,6 +236,14 @@ async def run_ingest_stage(
         manifest.run.selected_pages = sorted(selected_pages)
     target_lang = ctx.target_lang
     translate_chrome = ctx.config.translate_chrome
+    # Identity a derived job id already namespaces; recorded so an explicit
+    # ``--job-id`` resume cannot silently change it. Imported lazily because the
+    # pipeline module imports this stage (a module-level import would cycle).
+    from ubt.core.engine.pipeline import engine_signature
+
+    profile_name = ctx.profile_name
+    engine_sig = engine_signature(ctx.config)
+    mock_run = ctx.is_mock_run
     if selected_pages and not getattr(adapter, "supports_page_selection", True):
         # A page-ranged request against an adapter that declares no page
         # geometry would be silently ignored (its blocks have no ``bbox.page``),
@@ -204,6 +272,9 @@ async def run_ingest_stage(
             _guard_chapter_window, ledger, actual_job_id, start_chapter, max_chapters
         )
         await asyncio.to_thread(_guard_selected_pages, ledger, actual_job_id, selected_pages)
+        await asyncio.to_thread(
+            _guard_run_identity, ledger, actual_job_id, profile_name, engine_sig, mock_run
+        )
     else:
         await asyncio.to_thread(
             _reset_job_for_fresh_run,
@@ -212,6 +283,9 @@ async def run_ingest_stage(
             start_chapter,
             max_chapters,
             selected_pages,
+        )
+        await asyncio.to_thread(
+            _record_run_identity, ledger, actual_job_id, profile_name, engine_sig, mock_run
         )
 
     if create_event_fn:
