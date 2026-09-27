@@ -37,7 +37,7 @@ import base64
 import logging
 import shutil
 import tempfile
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -154,10 +154,15 @@ def pdf_page_count(pdf_path: Path) -> int:
         return -1
 
 
-def page_dimensions(pdf_path: Path) -> dict[int, tuple[float, float]]:
-    """Return 1-indexed {page_no: (width_pt, height_pt)} via pikepdf."""
+def page_bounds(pdf_path: Path) -> dict[int, tuple[float, float, float, float]]:
+    """Return 1-indexed {page_no: (x0, y0, x1, y1)} MediaBoxes via pikepdf.
+
+    The origin is kept, not just the size: a page whose MediaBox is
+    ``[10 10 610 810]`` is 600x800 like ``[0 0 600 800]``, but its right edge is
+    at x=610 -- comparing text boxes against the size alone flags visible text.
+    """
     try:
-        return pdf_struct.page_sizes(pdf_path)
+        return pdf_struct.page_boxes(pdf_path)
     except Exception as exc:
         logger.debug("Visual gate: cannot read dimensions of %s: %s", pdf_path, exc)
         return {}
@@ -293,9 +298,14 @@ def block_overlap_findings(blocks: Sequence[object]) -> list[VisualFinding]:
 
 
 def blocks_out_of_bounds_findings(
-    blocks: Sequence[object], dims: dict[int, tuple[float, float]]
+    blocks: Sequence[object], boxes: Mapping[int, tuple[float, float, float, float]]
 ) -> list[VisualFinding]:
-    """T1: flag blocks placed outside the page mediabox (clipped text)."""
+    """T1: flag blocks placed outside the page mediabox (clipped text).
+
+    ``boxes`` maps a 1-based page number to its MediaBox ``(x0, y0, x1, y1)``.
+    The origin matters: comparing against the width/height alone flags a fully
+    visible run on a page whose MediaBox does not start at (0, 0).
+    """
     findings: list[VisualFinding] = []
     for block in blocks:
         bbox = getattr(block, "bbox", None)
@@ -311,19 +321,19 @@ def blocks_out_of_bounds_findings(
             )
         except (AttributeError, TypeError, ValueError):
             continue
-        size = dims.get(page)
-        if size is None:
+        box = boxes.get(page)
+        if box is None:
             continue
-        width, height = size
+        bx0, by0, bx1, by1 = box
         tol = OUT_OF_BOUNDS_TOLERANCE_PT
-        if x0 < -tol or y0 < -tol or x1 > width + tol or y1 > height + tol:
+        if x0 < bx0 - tol or y0 < by0 - tol or x1 > bx1 + tol or y1 > by1 + tol:
             findings.append(
                 VisualFinding(
                     severity="major",
                     code="block_out_of_bounds",
                     message=(
                         f"Block {getattr(block, 'id', '?')} exceeds page "
-                        f"{page} mediabox {width:.0f}x{height:.0f}pt"
+                        f"{page} mediabox {bx1 - bx0:.0f}x{by1 - by0:.0f}pt"
                     ),
                     page=page,
                 )
@@ -660,10 +670,10 @@ async def run_visual_gate(
     # clean pass.
     geometry_pages = _geometry_pages(total)
     artifact_boxes = await asyncio.to_thread(artifact_text_boxes, pdf_path, geometry_pages)
-    dims = await asyncio.to_thread(page_dimensions, pdf_path)
+    bounds = await asyncio.to_thread(page_bounds, pdf_path)
     if artifact_boxes:
         findings.extend(block_overlap_findings(artifact_boxes))
-        findings.extend(blocks_out_of_bounds_findings(artifact_boxes, dims))
+        findings.extend(blocks_out_of_bounds_findings(artifact_boxes, bounds))
         if len(geometry_pages) < total:
             findings.append(
                 VisualFinding(
@@ -678,7 +688,7 @@ async def run_visual_gate(
     else:
         if blocks:
             findings.extend(block_overlap_findings(blocks))
-            findings.extend(blocks_out_of_bounds_findings(blocks, dims))
+            findings.extend(blocks_out_of_bounds_findings(blocks, bounds))
         findings.append(
             VisualFinding(
                 severity="info",

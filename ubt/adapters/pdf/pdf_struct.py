@@ -31,6 +31,8 @@ __all__ = [
     "content_stream_bytes",
     "count_ops",
     "open_pdf",
+    "page_box",
+    "page_boxes",
     "page_count",
     "page_size",
     "page_sizes",
@@ -64,6 +66,23 @@ def page_sizes(path: Path | str) -> dict[int, tuple[float, float]]:
     """1-indexed ``{page_no: (width_pt, height_pt)}`` for every page."""
     with pikepdf.open(str(path)) as pdf:
         return {idx: page_size(page) for idx, page in enumerate(pdf.pages, start=1)}
+
+
+def page_box(page: Page) -> tuple[float, float, float, float]:
+    """(x0, y0, x1, y1) MediaBox of one page, inheritance-resolved.
+
+    Unlike :func:`page_size` this keeps the origin, which a bounds check needs:
+    a MediaBox of ``[10 10 610 810]`` is the same 600x800 size as ``[0 0 600 800]``
+    but its visible right edge is at x=610, not x=600.
+    """
+    x0, y0, x1, y1 = (float(v) for v in page.MediaBox)
+    return x0, y0, x1, y1
+
+
+def page_boxes(path: Path | str) -> dict[int, tuple[float, float, float, float]]:
+    """1-indexed ``{page_no: (x0, y0, x1, y1)}`` MediaBoxes for every page."""
+    with pikepdf.open(str(path)) as pdf:
+        return {idx: page_box(page) for idx, page in enumerate(pdf.pages, start=1)}
 
 
 def count_ops(page: Page, opnames: Iterable[str]) -> int:

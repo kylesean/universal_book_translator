@@ -223,8 +223,10 @@ def test_block_overlap_and_oob() -> None:
     small = _block("c", 2, 10.0, 10.0, 60.0, 30.0)
     assert block_overlap_findings([small]) == []
     oob = _block("d", 1, -50.0, 10.0, 60.0, 30.0)
-    dims = {1: (595.0, 842.0)}
-    assert any(f.code == "block_out_of_bounds" for f in blocks_out_of_bounds_findings([oob], dims))
+    bounds = {1: (0.0, 0.0, 595.0, 842.0)}
+    assert any(
+        f.code == "block_out_of_bounds" for f in blocks_out_of_bounds_findings([oob], bounds)
+    )
 
 
 def test_blank_page_candidates_text_level(tmp_path: Path) -> None:
@@ -408,8 +410,8 @@ def test_source_bboxes_only_gate_the_engine_that_keeps_them() -> None:
             id="tbl1", bbox=SimpleNamespace(page=1, x0=6.0, y0=90.0, x1=606.0, y1=300.0)
         )
     ]
-    a4 = {1: (595.276, 841.89)}
-    letter = {1: (612.0, 792.0)}
+    a4 = {1: (0.0, 0.0, 595.276, 841.89)}
+    letter = {1: (0.0, 0.0, 612.0, 792.0)}
     assert [f.code for f in blocks_out_of_bounds_findings(letter_block, a4)] == [
         "block_out_of_bounds"
     ], "the false positive this guard exists for"
@@ -473,6 +475,57 @@ async def test_visual_gate_reports_artifact_unverified_when_no_text(tmp_path: Pa
     pdf = _write_pdf(tmp_path / "blank.pdf", 1)
     res = await run_visual_gate(pdf, blocks=[], sample_pages=0)
     assert any(f.code == "artifact_unverified" for f in res.findings)
+
+
+@pytest.mark.fast
+def test_oob_uses_the_mediabox_origin_not_just_its_size() -> None:
+    """A visible box on a non-zero-origin MediaBox is not out of bounds.
+
+    T1 compared against the MediaBox *size* only, so on a page whose box is
+    ``[10 10 610 810]`` a run ending at x=608.9 (inside the visible page, which
+    reaches 610) was flagged 'major' because 608.9 > width(600) + tol.
+    """
+    from ubt.adapters.pdf.visual_gate import blocks_out_of_bounds_findings
+
+    box = {1: (10.0, 10.0, 610.0, 810.0)}
+    visible = [
+        SimpleNamespace(
+            id="p1", bbox=SimpleNamespace(page=1, x0=20.0, y0=400.0, x1=608.9, y1=410.0)
+        )
+    ]
+    assert blocks_out_of_bounds_findings(visible, box) == []
+    # A box past the true right edge is still flagged.
+    outside = [
+        SimpleNamespace(
+            id="p2", bbox=SimpleNamespace(page=1, x0=20.0, y0=400.0, x1=625.0, y1=410.0)
+        )
+    ]
+    assert [f.code for f in blocks_out_of_bounds_findings(outside, box)] == ["block_out_of_bounds"]
+
+
+@pytest.mark.fast
+def test_oob_reads_a_real_offset_mediabox_artifact(tmp_path: Path) -> None:
+    """End-to-end: a real PDF with MediaBox ``[10 10 610 810]`` whose text is
+    fully visible must not trip the out-of-bounds check."""
+    import pikepdf
+    from pikepdf import Array, Dictionary, Name
+
+    from ubt.adapters.pdf.visual_gate import page_bounds
+
+    pdf = pikepdf.Pdf.new()
+    page = pdf.add_blank_page(page_size=(600, 800))
+    page.obj["/MediaBox"] = Array([10, 10, 610, 810])
+    page.obj["/Contents"] = pdf.make_stream(b"BT /F1 12 Tf 582 400 Td (Hello) Tj ET")
+    page.obj["/Resources"] = Dictionary(
+        Font=Dictionary(F1=Dictionary(Type=Name.Font, Subtype=Name.Type1, BaseFont=Name.Helvetica))
+    )
+    out = tmp_path / "offset.pdf"
+    pdf.save(str(out))
+    pdf.close()
+
+    boxes = artifact_text_boxes(out, [1])
+    assert boxes, "pdfium must read the text"
+    assert blocks_out_of_bounds_findings(boxes, page_bounds(out)) == []
 
 
 @pytest.mark.fast
