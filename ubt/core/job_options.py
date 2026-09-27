@@ -137,6 +137,7 @@ def overrides_from_request(
             key
             for key in (
                 "provider",
+                "repair_provider",
                 "base_url",
                 "api_mode",
                 "api_key",

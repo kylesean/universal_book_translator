@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated
 
+import httpx
 import typer
 from pydantic import ValidationError
 from rich.console import Console
@@ -150,6 +151,13 @@ def doctor_command(
         bool,
         typer.Option("--json", help="Emit the checks as a single JSON object on stdout."),
     ] = False,
+    probe: Annotated[
+        bool,
+        typer.Option(
+            "--probe",
+            help="Live network probe: check endpoint connectivity, measure RTT, and verify models via /v1/models.",
+        ),
+    ] = False,
 ) -> None:
     """Self-check configuration, credentials, and local environment.
 
@@ -234,6 +242,83 @@ def doctor_command(
     else:
         record("API key", "OK", "configured")
     record("Base URL", "OK", config.base_url)
+
+    if probe:
+        key_str = config.api_key.get_secret_value()
+        base_clean = config.base_url.strip().rstrip("/")
+        headers: dict[str, str] = {}
+        if key_str and key_str != MOCK_API_KEY:
+            if "anthropic.com" in base_clean:
+                headers["x-api-key"] = key_str
+                headers["anthropic-version"] = "2023-06-01"
+            else:
+                headers["Authorization"] = f"Bearer {key_str}"
+        headers.update(config.extra_headers)
+
+        import time
+
+        start_time = time.perf_counter()
+        try:
+            with httpx.Client(timeout=5.0) as client:
+                models_url = f"{base_clean}/models"
+                resp = client.get(models_url, headers=headers)
+                rtt_ms = (time.perf_counter() - start_time) * 1000
+
+                if resp.status_code == 200:
+                    try:
+                        data = resp.json().get("data", [])
+                        available = [
+                            str(m.get("id")) for m in data if isinstance(m, dict) and "id" in m
+                        ]
+                    except Exception:
+                        available = []
+                    if available:
+                        if config.draft_model in available:
+                            record(
+                                "Live Endpoint Probe",
+                                "OK",
+                                f"{base_clean} reachable ({rtt_ms:.0f}ms); draft model '{config.draft_model}' confirmed online",
+                            )
+                        else:
+                            preview = ", ".join(available[:6])
+                            record(
+                                "Live Endpoint Probe",
+                                "WARN",
+                                f"{base_clean} reachable ({rtt_ms:.0f}ms), but draft model '{config.draft_model}' not found in {len(available)} model(s). Available: {preview}",
+                                fix=f"choose from: {preview}",
+                            )
+                    else:
+                        record(
+                            "Live Endpoint Probe",
+                            "OK",
+                            f"{base_clean} reachable ({rtt_ms:.0f}ms)",
+                        )
+                elif resp.status_code in (401, 403):
+                    record(
+                        "Live Endpoint Probe",
+                        "FAIL",
+                        f"Endpoint {base_clean} returned {resp.status_code} (Authentication failed)",
+                        fix=f"check credential for {config.provider or 'current provider'}",
+                    )
+                elif resp.status_code == 404:
+                    record(
+                        "Live Endpoint Probe",
+                        "WARN",
+                        f"Endpoint {base_clean} reachable ({rtt_ms:.0f}ms), but /models returned 404",
+                    )
+                else:
+                    record(
+                        "Live Endpoint Probe",
+                        "WARN",
+                        f"Endpoint {base_clean} returned HTTP {resp.status_code} ({rtt_ms:.0f}ms)",
+                    )
+        except Exception as exc:
+            record(
+                "Live Endpoint Probe",
+                "FAIL",
+                f"Cannot connect to {base_clean}: {exc}",
+                fix="verify endpoint URL, network connection, or local model server status",
+            )
     shipped_defaults = {
         UBTConfig.model_fields[name].default for name in ("draft_model", "repair_model")
     }

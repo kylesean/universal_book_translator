@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 from collections.abc import AsyncIterator, Callable
 from contextlib import suppress
@@ -212,8 +213,36 @@ class PipelineOrchestrator:
                 chat_template_kwargs=self.config.chat_template_kwargs,
                 prompt_caching=self.config.prompt_caching_enabled,
             )
+            repair_provider = provider
+            if self.config.repair_provider and self.config.repair_provider != self.config.provider:
+                from ubt.core.providers import load_layer
+
+                r_fields, r_key_env = load_layer(self.config.repair_provider)
+                r_key = (
+                    os.environ.get(r_key_env or "")
+                    or os.environ.get("UBT_LLM_API_KEY")
+                    or self.config.api_key.get_secret_value()
+                )
+                repair_provider = create_model_provider(
+                    api_key=r_key,
+                    base_url=str(r_fields.get("base_url", self.config.base_url)),
+                    default_model=str(r_fields.get("repair_model", self.config.repair_model)),
+                    api_mode=str(r_fields.get("api_mode", "chat")),
+                    timeout=float(r_fields.get("api_timeout", self.config.api_timeout)),
+                    opencode_session_id=str(
+                        r_fields.get("opencode_session_id", self.config.opencode_session_id)
+                    ),
+                    extra_headers=dict(r_fields.get("extra_headers", self.config.extra_headers)),
+                    chat_template_kwargs=dict(
+                        r_fields.get("chat_template_kwargs", self.config.chat_template_kwargs)
+                    ),
+                    prompt_caching=bool(
+                        r_fields.get("prompt_caching_enabled", self.config.prompt_caching_enabled)
+                    ),
+                )
             self.router = ModelRouter(
                 provider=provider,
+                repair_provider=repair_provider,
                 draft_model=self.config.draft_model,
                 repair_model=self.config.repair_model,
                 rate_limiter=rate_limiter,

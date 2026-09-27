@@ -49,6 +49,14 @@ def assess_cmd(
             show_default=False,
         ),
     ] = None,
+    repair_provider: Annotated[
+        str | None,
+        typer.Option(
+            "--repair-provider",
+            help="按该 repair provider 报价",
+            show_default=False,
+        ),
+    ] = None,
     target_lang: Annotated[
         str, typer.Option("--target-lang", "-l", help="目标语言（影响报价与 job-id）")
     ] = "zh",
@@ -118,6 +126,8 @@ def assess_cmd(
     overrides: dict[str, Any] = {}
     if provider is not None:
         overrides["provider"] = provider
+    if repair_provider is not None:
+        overrides["repair_provider"] = repair_provider
     # assess sets no explicit engine flag: quote the preset, or — with no
     # preset — the engine default (an all-None table was just {} in disguise).
     overrides.update(resolve_engine_params(preset, {}))

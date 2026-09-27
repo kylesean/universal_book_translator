@@ -60,6 +60,42 @@ class ModelCapabilityRegistry:
                 display_name="OpenAI o3 reasoning",
             ),
             ModelProfile(
+                model_pattern="o4",
+                prompt_strategy=PromptStrategy.RICH,
+                extraction_strategy=ExtractionStrategy.AUTO,
+                supports_reasoning_effort=True,
+                supports_system_prompt=True,
+                supports_temperature=False,
+                display_name="OpenAI o4 reasoning",
+            ),
+            ModelProfile(
+                model_pattern="claude-3-7",
+                prompt_strategy=PromptStrategy.RICH,
+                extraction_strategy=ExtractionStrategy.AUTO,
+                supports_reasoning_effort=True,
+                supports_system_prompt=True,
+                supports_temperature=True,
+                display_name="Anthropic Claude 3.7 hybrid reasoning",
+            ),
+            ModelProfile(
+                model_pattern="claude",
+                prompt_strategy=PromptStrategy.RICH,
+                extraction_strategy=ExtractionStrategy.AUTO,
+                supports_reasoning_effort=False,
+                supports_system_prompt=True,
+                supports_temperature=True,
+                display_name="Anthropic Claude series",
+            ),
+            ModelProfile(
+                model_pattern="qwen",
+                prompt_strategy=PromptStrategy.RICH,
+                extraction_strategy=ExtractionStrategy.AUTO,
+                supports_reasoning_effort=True,
+                supports_system_prompt=True,
+                supports_temperature=True,
+                display_name="Qwen series",
+            ),
+            ModelProfile(
                 model_pattern="muse-spark",
                 prompt_strategy=PromptStrategy.RICH,
                 extraction_strategy=ExtractionStrategy.AUTO,
@@ -67,6 +103,42 @@ class ModelCapabilityRegistry:
                 supports_system_prompt=True,
                 supports_temperature=True,
                 display_name="Meta Muse Spark (Zen responses-only)",
+            ),
+            ModelProfile(
+                model_pattern="deepseek-reasoner",
+                prompt_strategy=PromptStrategy.RICH,
+                extraction_strategy=ExtractionStrategy.AUTO,
+                supports_reasoning_effort=True,
+                supports_system_prompt=True,
+                supports_temperature=False,
+                display_name="DeepSeek Reasoner",
+            ),
+            ModelProfile(
+                model_pattern="deepseek-r1",
+                prompt_strategy=PromptStrategy.RICH,
+                extraction_strategy=ExtractionStrategy.AUTO,
+                supports_reasoning_effort=True,
+                supports_system_prompt=True,
+                supports_temperature=False,
+                display_name="DeepSeek R1 series",
+            ),
+            ModelProfile(
+                model_pattern="reasoning",
+                prompt_strategy=PromptStrategy.RICH,
+                extraction_strategy=ExtractionStrategy.AUTO,
+                supports_reasoning_effort=True,
+                supports_system_prompt=True,
+                supports_temperature=False,
+                display_name="Reasoning model",
+            ),
+            ModelProfile(
+                model_pattern="reasoner",
+                prompt_strategy=PromptStrategy.RICH,
+                extraction_strategy=ExtractionStrategy.AUTO,
+                supports_reasoning_effort=True,
+                supports_system_prompt=True,
+                supports_temperature=False,
+                display_name="Reasoner model",
             ),
             ModelProfile(
                 model_pattern="deepseek",
@@ -201,6 +273,20 @@ class ModelCapabilityRegistry:
                     best = profile
             if best is not None:
                 return best
+
+        # Heuristic inference for modern reasoning models (e.g. custom/unknown models with reasoning/r1 tokens)
+        if name_lower and any(
+            token in name_lower for token in ("reasoner", "reasoning", "thinking", "r1")
+        ):
+            return ModelProfile(
+                model_pattern=name_lower,
+                prompt_strategy=PromptStrategy.RICH,
+                extraction_strategy=ExtractionStrategy.AUTO,
+                supports_reasoning_effort=True,
+                supports_system_prompt=True,
+                supports_temperature=False,
+                display_name=f"Heuristic Reasoning ({model_name or 'unspecified'})",
+            )
 
         # Unknown model safe fallback: rich prompt + auto extraction, no assumed reasoning_effort
         return ModelProfile(

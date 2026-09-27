@@ -71,6 +71,42 @@ async def test_model_router_draft_and_repair_tier_dispatch() -> None:
     assert "<final_translation>" in mock_provider.call_history[1]["prompt"]
 
 
+@pytest.mark.asyncio
+async def test_model_router_heterogeneous_repair_provider() -> None:
+    """Verify distinct draft and repair providers receive respective requests."""
+    draft_provider = MockModelProvider(prefix="[DRAFT] ")
+    repair_provider = MockModelProvider(prefix="[REPAIR] ")
+    router = ModelRouter(
+        provider=draft_provider,
+        repair_provider=repair_provider,
+        draft_model="local-vllm",
+        repair_model="claude-3-7-sonnet",
+    )
+    block = IRBlock(
+        id="b01",
+        flow_id=FlowID.MAIN_STORY,
+        spine_index=1,
+        block_type=BlockType.NARRATIVE,
+        source_text="The sky was dark.",
+        status=BlockStatus.PENDING,
+    )
+    draft_res = await router.draft(block=block, glossary_table="", target_lang="zh")
+    assert "[DRAFT]" in draft_res
+    assert len(draft_provider.call_history) == 1
+    assert len(repair_provider.call_history) == 0
+
+    repair_res = await router.repair(
+        block=block,
+        draft_text=draft_res,
+        error_flags=["grammar"],
+        glossary_table="",
+        target_lang="zh",
+    )
+    assert "[REPAIR]" in repair_res
+    assert len(draft_provider.call_history) == 1
+    assert len(repair_provider.call_history) == 1
+
+
 class FailingThenSucceedingProvider(BaseModelProvider):
     """Simulates transient 429 then success."""
 

@@ -43,6 +43,8 @@ BATCH_API_DISCOUNT = 0.5
 # USD per 1M tokens: (input, output)
 MODEL_PRICES_USD_PER_MTOK: dict[str, tuple[float, float]] = {
     # DeepSeek (published rates used by scripts/cost_benchmark.py)
+    "deepseek-v4-flash": (0.14, 0.55),
+    "deepseek-v4": (0.27, 1.10),
     "deepseek-chat": (0.27, 1.10),
     "deepseek-reasoner": (0.55, 2.19),
     "deepseek": (0.27, 1.10),
@@ -53,7 +55,11 @@ MODEL_PRICES_USD_PER_MTOK: dict[str, tuple[float, float]] = {
     # default draft/repair model, so without an explicit entry the default run
     # reported "unknown" cost and UBT_BUDGET_USD enforced nothing.
     "muse-": (0.0, 0.0),
-    # Gemini flash family
+    # Gemini flash family (including 2026 3.x models)
+    "gemini-3.8-flash": (0.10, 0.40),
+    "gemini-3.1-pro": (1.25, 10.00),
+    "gemini-3-flash": (0.10, 0.40),
+    "gemini-3-pro": (1.25, 10.00),
     "gemini-2.0-flash": (0.10, 0.40),
     "gemini-2.0-flash-lite": (0.075, 0.30),
     "gemini-2.5-flash-lite": (0.10, 0.40),
@@ -86,7 +92,11 @@ MODEL_PRICES_USD_PER_MTOK: dict[str, tuple[float, float]] = {
     "o3-mini": (1.10, 4.40),
     "o3": (2.00, 8.00),
     "o4-mini": (1.10, 4.40),
-    # Anthropic
+    "o4": (2.50, 10.00),
+    # Anthropic (including 2026 Claude 3.7 and Claude 4)
+    "claude-3-7-sonnet": (3.00, 15.00),
+    "claude-sonnet-4": (3.00, 15.00),
+    "claude-opus-4": (15.00, 75.00),
     "claude-3-5-sonnet": (3.00, 15.00),
     "claude-3-5-haiku": (0.80, 4.00),
     "claude-3-opus": (15.00, 75.00),
@@ -98,6 +108,7 @@ MODEL_PRICES_USD_PER_MTOK: dict[str, tuple[float, float]] = {
     "claude": (3.00, 15.00),
     # Qwen
     "qwen3-mt": (0.50, 1.50),
+    "qwen3": (0.50, 1.50),
     "qwen": (0.50, 1.50),
 }
 
@@ -128,6 +139,44 @@ def _declared_local_hostnames() -> set[str]:
     return {part.strip().lower() for part in parts if part.strip()}
 
 
+_CUSTOM_PRICES: dict[str, tuple[float, float]] = {}
+_CUSTOM_CACHED_PRICES: dict[str, float] = {}
+_CUSTOM_FREE_ENDPOINTS: set[str] = set()
+
+
+def register_custom_model_pricing(
+    model_prefix: str,
+    prices: tuple[float, float],
+    cached_input: float | None = None,
+) -> None:
+    """Register or override a custom model pricing entry."""
+    norm = model_prefix.strip().lower()
+    _CUSTOM_PRICES[norm] = prices
+    if cached_input is not None:
+        _CUSTOM_CACHED_PRICES[norm] = cached_input
+
+
+def declare_custom_free_endpoint(base_url: str) -> None:
+    """Declare a base_url as an internal free endpoint."""
+    if base_url:
+        _CUSTOM_FREE_ENDPOINTS.add(base_url.strip().rstrip("/").lower())
+
+
+def reset_custom_pricing() -> None:
+    """Clear all registered custom prices and free endpoints."""
+    _CUSTOM_PRICES.clear()
+    _CUSTOM_CACHED_PRICES.clear()
+    _CUSTOM_FREE_ENDPOINTS.clear()
+
+
+def endpoint_is_free(base_url: str | None) -> bool:
+    """True when base_url has been declared free via declare_custom_free_endpoint."""
+    if not base_url:
+        return False
+    norm = base_url.strip().rstrip("/").lower()
+    return any(norm == ep or norm.startswith(ep + "/") for ep in _CUSTOM_FREE_ENDPOINTS)
+
+
 def billing_enabled_for_local_endpoints() -> bool:
     """True when the operator opted loopback back INTO billing.
 
@@ -149,6 +198,8 @@ def endpoint_is_local(base_url: str | None) -> bool:
     """
     if not base_url:
         return False
+    if endpoint_is_free(base_url):
+        return True
     host = (urlsplit(base_url.strip()).hostname or "").lower()
     if not host:
         return False
@@ -201,14 +252,24 @@ def price_is_known(
 # one. DeepSeek's published cache-hit rate is roughly a tenth of its input
 # price; absent an entry, the full input price applies (no discount assumed).
 CACHED_INPUT_PRICES_USD_PER_MTOK: dict[str, float] = {
+    "deepseek-v4-flash": 0.014,
     "deepseek-chat": 0.028,
     "deepseek-reasoner": 0.11,
     "deepseek": 0.028,
-    # Anthropic publishes a cache-*read* rate of 10% of the input price, and the
-    # project's own price sheet already fixes the family default at 0.30 (see
-    # docs/design/COST-ACCOUNTING-DESIGN.md, ``[prices.claude] cached_input``). Without
-    # these entries a cache-heavy Claude run billed reads at the full input rate
-    # (10x) and could trip UBT_BUDGET_USD early.
+    # Gemini prompt caching
+    "gemini-3.8-flash": 0.025,
+    "gemini-3.1-pro": 0.3125,
+    "gemini-3-flash": 0.025,
+    "gemini-3-pro": 0.3125,
+    "gemini-2.5-pro": 0.3125,
+    "gemini-2.5-flash": 0.075,
+    "gemini-2.0-flash": 0.025,
+    "gemini-1.5-pro": 0.3125,
+    "gemini-1.5-flash": 0.01875,
+    # Anthropic publishes a cache-*read* rate of 10% of the input price
+    "claude-3-7-sonnet": 0.30,
+    "claude-sonnet-4": 0.30,
+    "claude-opus-4": 1.50,
     "claude-3-5-sonnet": 0.30,
     "claude-3-5-haiku": 0.08,
     "claude-3-opus": 1.50,
@@ -218,6 +279,12 @@ CACHED_INPUT_PRICES_USD_PER_MTOK: dict[str, float] = {
     "claude-sonnet": 0.30,
     "claude-opus": 1.50,
     "claude": 0.30,
+    # OpenAI o4 / o3 / gpt-5
+    "o4-mini": 0.275,
+    "o4": 0.625,
+    "o3-mini": 0.275,
+    "gpt-5-mini": 0.0625,
+    "gpt-5": 0.3125,
 }
 
 
@@ -232,8 +299,9 @@ def resolve_model_prices(model: str) -> tuple[float, float]:
             candidates.append(last_segment)
     best_key = ""
     best_prices = (0.0, 0.0)
+    merged_prices = {**MODEL_PRICES_USD_PER_MTOK, **_CUSTOM_PRICES}
     for cand in candidates:
-        for key, prices in MODEL_PRICES_USD_PER_MTOK.items():
+        for key, prices in merged_prices.items():
             if cand.startswith(key) and len(key) > len(best_key):
                 best_key = key
                 best_prices = prices
@@ -258,8 +326,9 @@ def resolve_cached_input_price(model: str) -> float:
             candidates.append(last_segment)
     best_key = ""
     best_cached = -1.0
+    merged_cached = {**CACHED_INPUT_PRICES_USD_PER_MTOK, **_CUSTOM_CACHED_PRICES}
     for cand in candidates:
-        for key, cached_price in CACHED_INPUT_PRICES_USD_PER_MTOK.items():
+        for key, cached_price in merged_cached.items():
             if cand.startswith(key) and len(key) > len(best_key):
                 best_key = key
                 best_cached = cached_price
@@ -289,7 +358,8 @@ def has_price_entry(model: str) -> bool:
         last_segment = normalized.rsplit("/", 1)[-1]
         if last_segment not in candidates:
             candidates.append(last_segment)
-    return any(cand.startswith(key) for cand in candidates for key in MODEL_PRICES_USD_PER_MTOK)
+    merged_keys = set(MODEL_PRICES_USD_PER_MTOK) | set(_CUSTOM_PRICES)
+    return any(cand.startswith(key) for cand in candidates for key in merged_keys)
 
 
 def estimate_cost_usd(

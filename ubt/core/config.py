@@ -305,6 +305,13 @@ class UBTConfig(BaseSettings):
     )
     api_mode: ApiMode = "chat"
     provider: str | None = Field(default=None, validation_alias="UBT_PROVIDER")
+    repair_provider: str | None = Field(default=None, validation_alias="UBT_REPAIR_PROVIDER")
+    supports_batch_api: bool = False
+    is_free: bool = False
+    cost_per_mtok: tuple[float, float] | None = None
+    capability_profile: str | None = None
+    supports_temperature: bool | None = None
+    supports_reasoning_effort: bool | None = None
     # Chat-template flags forwarded verbatim into the chat request body for
     # llama.cpp / vLLM style servers (e.g. {"enable_thinking": false}). Populated
     # from a provider block's ``chat_template_kwargs`` table.
@@ -988,6 +995,51 @@ class UBTConfig(BaseSettings):
             if derived_api_mode != self.api_mode:
                 self.api_mode = derived_api_mode
                 self.model_fields_set.discard("api_mode")
+
+        # Dynamic custom pricing & free endpoint registration
+        if self.is_free and self.base_url:
+            from ubt.core.router.pricing import declare_custom_free_endpoint
+
+            declare_custom_free_endpoint(self.base_url)
+        if self.cost_per_mtok is not None:
+            from ubt.core.router.pricing import register_custom_model_pricing
+
+            if self.draft_model:
+                register_custom_model_pricing(self.draft_model, self.cost_per_mtok)
+            if self.repair_model and self.repair_model != self.draft_model:
+                register_custom_model_pricing(self.repair_model, self.cost_per_mtok)
+
+        # Dynamic model capability profile registration
+        if (
+            self.capability_profile
+            or self.supports_temperature is not None
+            or self.supports_reasoning_effort is not None
+        ):
+            from ubt.core.router.capabilities import ModelProfile
+            from ubt.core.router.registry import get_default_registry
+
+            reg = get_default_registry()
+            for m_name in {self.draft_model, self.repair_model}:
+                if m_name:
+                    base_prof = reg.resolve(self.capability_profile or m_name)
+                    new_prof = ModelProfile(
+                        model_pattern=m_name,
+                        prompt_strategy=base_prof.prompt_strategy,
+                        extraction_strategy=base_prof.extraction_strategy,
+                        supports_reasoning_effort=(
+                            self.supports_reasoning_effort
+                            if self.supports_reasoning_effort is not None
+                            else base_prof.supports_reasoning_effort
+                        ),
+                        supports_system_prompt=base_prof.supports_system_prompt,
+                        supports_temperature=(
+                            self.supports_temperature
+                            if self.supports_temperature is not None
+                            else base_prof.supports_temperature
+                        ),
+                        display_name=f"Config Custom ({m_name})",
+                    )
+                    reg.register(new_prof, override=True)
 
         return self
 

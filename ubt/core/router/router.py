@@ -347,8 +347,10 @@ class ModelRouter:
         # bare ``AdaptiveTokenBucket()`` defaulted it to 0.0, so a router built
         # outside the pipeline (library/MCP use) lost the guard silently.
         backoff_cooldown_sec: float = 3.0,
+        repair_provider: BaseModelProvider | None = None,
     ) -> None:
         self.provider = provider
+        self.repair_provider = repair_provider or provider
         # Master gate for shipping rendered PAGE IMAGES of the book to model
         # endpoints (visual-scalpel repair, VLM judge passthrough). Text
         # prompts stay unaffected. Off unless the caller (the pipeline, from
@@ -392,6 +394,12 @@ class ModelRouter:
         self.repair_reasoning_effort = repair_reasoning_effort
         self.registry = registry or ModelCapabilityRegistry()
 
+    def _provider_for(self, model: str | None = None) -> BaseModelProvider:
+        """Select primary provider or specialized repair provider based on target model."""
+        if model is not None and model == self.repair_model and self.repair_provider is not None:
+            return self.repair_provider
+        return self.provider
+
     # ------------------------------------------------------------------
     # Real usage / cost accounting
     # ------------------------------------------------------------------
@@ -416,6 +424,9 @@ class ModelRouter:
         real spend, so a router-level read must not under-report them.
         """
         totals = self._usage_totals_of(self.provider)
+        if self.repair_provider is not None and self.repair_provider is not self.provider:
+            for key, value in self._usage_totals_of(self.repair_provider).items():
+                totals[key] = totals.get(key, 0) + value
         if self._fallback_provider is not None:
             for key, value in self._usage_totals_of(self._fallback_provider).items():
                 totals[key] = totals.get(key, 0) + value
@@ -424,6 +435,11 @@ class ModelRouter:
     def usage_totals_by_model(self) -> dict[str, dict[str, int]]:
         """Per-model token usage (empty when the provider does not track it)."""
         merged = self._usage_by_model_of(self.provider)
+        if self.repair_provider is not None and self.repair_provider is not self.provider:
+            for model, totals in self._usage_by_model_of(self.repair_provider).items():
+                bucket = merged.setdefault(model, {})
+                for key, value in totals.items():
+                    bucket[key] = bucket.get(key, 0) + value
         if self._fallback_provider is not None:
             for model, totals in self._usage_by_model_of(self._fallback_provider).items():
                 bucket = merged.setdefault(model, {})
@@ -483,6 +499,10 @@ class ModelRouter:
         fallback-served model is not priced at the primary endpoint.
         """
         endpoint_map: dict[str, str] = {}
+        if self.repair_provider is not None and self.repair_provider is not self.provider:
+            repair_url = getattr(self.repair_provider, "base_url", "") or None
+            if repair_url:
+                endpoint_map[self.repair_model] = repair_url
         if self._fallback_provider is not None:
             fallback_url = getattr(self._fallback_provider, "base_url", "") or None
             if fallback_url:
@@ -497,6 +517,10 @@ class ModelRouter:
         closer = getattr(self.provider, "aclose", None)
         if callable(closer):
             await closer()
+        if self.repair_provider is not None and self.repair_provider is not self.provider:
+            repair_closer = getattr(self.repair_provider, "aclose", None)
+            if callable(repair_closer):
+                await repair_closer()
         if self._fallback_provider is not None:
             fallback_closer = getattr(self._fallback_provider, "aclose", None)
             if callable(fallback_closer):
@@ -845,9 +869,10 @@ class ModelRouter:
             completion_tokens = max_tokens if max_tokens else prompt_tokens
             estimated_tokens = prompt_tokens + max(completion_tokens, 0)
             await self.rate_limiter.acquire(estimated_tokens=estimated_tokens)
+            active_provider = self._provider_for(model)
             try:
                 try:
-                    result, finish_reason = await self.provider.generate_with_finish_reason(
+                    result, finish_reason = await active_provider.generate_with_finish_reason(
                         prompt=effective_user_prompt,
                         system_prompt=effective_system_prompt,
                         model=model,
@@ -865,7 +890,7 @@ class ModelRouter:
                         and "unexpected keyword argument" in str(type_err).lower()
                     )
                     if signature_missing:
-                        result, finish_reason = await self.provider.generate_with_finish_reason(
+                        result, finish_reason = await active_provider.generate_with_finish_reason(
                             prompt=effective_user_prompt,
                             system_prompt=effective_system_prompt,
                             model=model,
@@ -1003,7 +1028,8 @@ class ModelRouter:
                 # capacity for a self-inflicted breach.
                 prompt_tokens = _estimate_prompt_tokens(system_prompt, continuation_prompt)
                 await self.rate_limiter.acquire(estimated_tokens=prompt_tokens * 2)
-                continuation, finish_reason = await self.provider.generate_with_finish_reason(
+                active_provider = self._provider_for(model)
+                continuation, finish_reason = await active_provider.generate_with_finish_reason(
                     prompt=continuation_prompt,
                     system_prompt=system_prompt,
                     model=model,
@@ -1072,7 +1098,8 @@ class ModelRouter:
                 "page-image egress disabled (UBT_ALLOW_PAGE_UPLOAD=false): "
                 "re-enable it or use a text-only route"
             )
-        generate_vision = getattr(self.provider, "generate_with_images", None)
+        active_provider = self._provider_for(model or self.repair_model)
+        generate_vision = getattr(active_provider, "generate_with_images", None)
         if not callable(generate_vision):
             raise ModelProviderError("Bound provider does not support vision input")
         # This channel carries the run's heaviest requests (a 150 dpi page crop

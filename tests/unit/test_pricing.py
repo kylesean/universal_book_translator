@@ -15,8 +15,10 @@ from ubt.core.router.pricing import (
 
 def test_resolve_model_prices_longest_prefix() -> None:
     assert resolve_model_prices("deepseek-chat") == (0.27, 1.10)
-    # Family prefix resolves derivatives without exhaustive enumeration.
-    assert resolve_model_prices("deepseek-v4-flash-0715") == (0.27, 1.10)
+    # Specific tier prefix (deepseek-v4-flash) wins over the general deepseek family prefix.
+    assert resolve_model_prices("deepseek-v4-flash-0715") == (0.14, 0.55)
+    # General family prefix resolves other derivatives without exhaustive enumeration.
+    assert resolve_model_prices("deepseek-coder-0715") == (0.27, 1.10)
     assert resolve_model_prices("deepseek-reasoner-x") == (0.55, 2.19)
     # Unknown model -> (0, 0): reportable "unknown", not a fabricated number.
     assert resolve_model_prices("totally-unknown-model") == (0.0, 0.0)
@@ -429,3 +431,60 @@ def test_has_price_entry_matches_resolve_for_nested_namespace() -> None:
     model = "openrouter/google/gemini-2.0-flash"
     assert resolve_model_prices(model) != (0.0, 0.0)
     assert has_price_entry(model) is True
+
+
+@pytest.mark.fast
+def test_2026_contemporary_models_priced_correctly() -> None:
+    """Verify contemporary 2026 models resolve to expected prices and cached prices."""
+    # Gemini 3.x
+    assert resolve_model_prices("gemini-3.8-flash") == (0.10, 0.40)
+    assert resolve_model_prices("gemini-3.1-pro") == (1.25, 10.00)
+    assert resolve_cached_input_price("gemini-3.8-flash") == 0.025
+    assert resolve_cached_input_price("gemini-3.1-pro") == 0.3125
+
+    # Anthropic 3.7 / 4
+    assert resolve_model_prices("claude-3-7-sonnet") == (3.00, 15.00)
+    assert resolve_cached_input_price("claude-3-7-sonnet") == 0.30
+    assert resolve_model_prices("claude-sonnet-4") == (3.00, 15.00)
+
+    # DeepSeek v4
+    assert resolve_model_prices("deepseek-v4-flash") == (0.14, 0.55)
+    assert resolve_cached_input_price("deepseek-v4-flash") == 0.014
+    assert resolve_model_prices("deepseek-v4") == (0.27, 1.10)
+
+    # OpenAI o4
+    assert resolve_model_prices("o4-mini") == (1.10, 4.40)
+    assert resolve_model_prices("o4") == (2.50, 10.00)
+
+
+@pytest.mark.fast
+def test_custom_pricing_and_free_endpoints() -> None:
+    """Verify custom pricing registration and declared free endpoints."""
+    from ubt.core.router.pricing import (
+        declare_custom_free_endpoint,
+        register_custom_model_pricing,
+        reset_custom_pricing,
+    )
+
+    try:
+        # Before registration, custom model is unknown
+        assert (
+            price_is_known("my-custom-model", base_url="https://llm.internal.example/v1") is False
+        )
+        assert resolve_model_prices("my-custom-model") == (0.0, 0.0)
+
+        # Register custom pricing
+        register_custom_model_pricing("my-custom-model", (0.20, 0.80), cached_input=0.05)
+        assert resolve_model_prices("my-custom-model") == (0.20, 0.80)
+        assert resolve_cached_input_price("my-custom-model") == 0.05
+        assert price_is_known("my-custom-model", base_url="https://llm.internal.example/v1") is True
+
+        # Custom free endpoint
+        assert price_is_known("another-unknown", base_url="https://free.internal.corp/v1") is False
+        declare_custom_free_endpoint("https://free.internal.corp/v1")
+        assert price_is_known("another-unknown", base_url="https://free.internal.corp/v1") is True
+        # Spending estimation on free endpoint should be 0.0
+        totals = {"another-unknown": {"prompt_tokens": 10000, "completion_tokens": 5000}}
+        assert estimate_cost_usd(totals, base_url="https://free.internal.corp/v1") == 0.0
+    finally:
+        reset_custom_pricing()

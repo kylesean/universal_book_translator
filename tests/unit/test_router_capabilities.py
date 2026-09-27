@@ -494,3 +494,27 @@ async def test_vision_channel_uses_the_rate_limiter(fail: bool) -> None:
     # Base64 characters are not text tokens: the reservation must be dominated
     # by the per-image tile allowance, not by len(images) // 4.
     assert limiter.acquired[0] >= _VISION_TOKENS_PER_PAGE_IMAGE
+
+
+def test_registry_2026_profiles_and_reasoning_heuristics() -> None:
+    """Verify contemporary 2026 models and reasoning heuristics in capability registry."""
+    reg = ModelCapabilityRegistry()
+
+    # Built-in o4
+    o4_prof = reg.resolve("o4-mini")
+    assert o4_prof.supports_reasoning_effort is True
+    assert o4_prof.supports_temperature is False
+
+    # Built-in Claude 3.7 hybrid reasoning
+    c37_prof = reg.resolve("claude-3-7-sonnet")
+    assert c37_prof.supports_reasoning_effort is True
+    assert c37_prof.supports_temperature is True
+
+    # Heuristic reasoning model (e.g. unknown proprietary model with reasoner/r1 in name)
+    custom_reasoner = reg.resolve("qwen-plus-reasoning")
+    assert custom_reasoner.supports_reasoning_effort is True
+    assert custom_reasoner.supports_temperature is False
+
+    custom_r1 = reg.resolve("deepseek-r1-distill-qwen-32b")
+    assert custom_r1.supports_reasoning_effort is True
+    assert custom_r1.supports_temperature is False

@@ -107,6 +107,39 @@ def test_declared_provider_without_a_builtin_base(config_toml: Path) -> None:
     }
 
 
+def test_provider_block_supports_custom_capabilities_and_pricing(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(
+        "[providers.enterprise]\n"
+        'base_url = "https://llm.corp.example/v1"\n'
+        'api_mode = "chat"\n'
+        'api_key_env = "CORP_KEY"\n'
+        'draft_model = "corp-draft"\n'
+        'repair_model = "corp-repair"\n'
+        'repair_provider = "anthropic"\n'
+        "is_free = true\n"
+        "cost_per_mtok = [0.10, 0.40]\n"
+        "supports_batch_api = true\n"
+        "supports_temperature = false\n"
+        "supports_reasoning_effort = true\n",
+        encoding="utf-8",
+    )
+    fields, api_key_env = load_provider_block("enterprise", path)
+    assert api_key_env == "CORP_KEY"
+    assert fields["is_free"] is True
+    assert fields["cost_per_mtok"] == [0.10, 0.40]
+    assert fields["supports_batch_api"] is True
+    assert fields["repair_provider"] == "anthropic"
+    assert fields["supports_temperature"] is False
+    assert fields["supports_reasoning_effort"] is True
+
+
+def test_builtin_providers_batch_api_flags() -> None:
+    assert BUILTIN_PROVIDERS["openai"].supports_batch_api is True
+    assert BUILTIN_PROVIDERS["gemini"].supports_batch_api is False
+    assert BUILTIN_PROVIDERS["deepseek"].supports_batch_api is False
+
+
 def test_unknown_provider_raises_and_lists_available(config_toml: Path) -> None:
     with pytest.raises(ProviderNotFoundError, match="Available providers"):
         load_provider_block("does-not-exist", config_toml)

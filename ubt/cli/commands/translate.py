@@ -153,6 +153,13 @@ def translate(
             help="Provider name — built-in (openai/anthropic/gemini/deepseek/opencode) or declared in ubt.toml / ~/.ubt/config.toml (e.g. 'local-gemma4')",
         ),
     ] = None,
+    repair_provider: Annotated[
+        str | None,
+        typer.Option(
+            "--repair-provider",
+            help="Secondary provider name for repair tier (defaults to primary provider)",
+        ),
+    ] = None,
     visual_judge: Annotated[
         bool | None,
         typer.Option(
@@ -497,6 +504,7 @@ def translate(
         "base_url": base_url,
         "api_mode": api_mode,
         "provider": provider,
+        "repair_provider": repair_provider,
         "visual_judge_enabled": visual_judge,
         "visual_judge_model": visual_judge_model,
     }

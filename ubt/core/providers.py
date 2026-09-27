@@ -52,14 +52,34 @@ class ProviderSpec:
     api_key_env: str
     draft_model: str
     repair_model: str
+    supports_batch_api: bool = False
+    is_free: bool = False
+    cost_per_mtok: tuple[float, float] | None = None
+    capability_profile: str | None = None
+    supports_temperature: bool | None = None
+    supports_reasoning_effort: bool | None = None
+    repair_provider: str | None = None
 
     def as_fields(self) -> dict[str, Any]:
-        return {
+        res: dict[str, Any] = {
             "base_url": self.base_url,
             "api_mode": self.api_mode,
             "draft_model": self.draft_model,
             "repair_model": self.repair_model,
+            "supports_batch_api": self.supports_batch_api,
+            "is_free": self.is_free,
         }
+        if self.cost_per_mtok is not None:
+            res["cost_per_mtok"] = self.cost_per_mtok
+        if self.capability_profile is not None:
+            res["capability_profile"] = self.capability_profile
+        if self.supports_temperature is not None:
+            res["supports_temperature"] = self.supports_temperature
+        if self.supports_reasoning_effort is not None:
+            res["supports_reasoning_effort"] = self.supports_reasoning_effort
+        if self.repair_provider is not None:
+            res["repair_provider"] = self.repair_provider
+        return res
 
 
 #: Vendor presets. Selecting one (``UBT_PROVIDER=anthropic``) is enough to point
@@ -68,7 +88,12 @@ class ProviderSpec:
 #: or a ``[providers.<name>]`` block when a vendor ships a newer tier.
 BUILTIN_PROVIDERS: dict[str, ProviderSpec] = {
     "openai": ProviderSpec(
-        "https://api.openai.com/v1", "chat", "OPENAI_API_KEY", "gpt-4o-mini", "o3-mini"
+        "https://api.openai.com/v1",
+        "chat",
+        "OPENAI_API_KEY",
+        "gpt-4o-mini",
+        "o3-mini",
+        supports_batch_api=True,
     ),
     "anthropic": ProviderSpec(
         "https://api.anthropic.com",
@@ -76,6 +101,7 @@ BUILTIN_PROVIDERS: dict[str, ProviderSpec] = {
         "ANTHROPIC_API_KEY",
         "claude-3-5-haiku",
         "claude-3-7-sonnet",
+        supports_batch_api=True,
     ),
     "gemini": ProviderSpec(
         "https://generativelanguage.googleapis.com/v1beta/openai",
@@ -83,6 +109,7 @@ BUILTIN_PROVIDERS: dict[str, ProviderSpec] = {
         "GEMINI_API_KEY",
         "gemini-3.8-flash",
         "gemini-3.1-pro",
+        supports_batch_api=False,
     ),
     "deepseek": ProviderSpec(
         "https://api.deepseek.com/v1",
@@ -90,6 +117,7 @@ BUILTIN_PROVIDERS: dict[str, ProviderSpec] = {
         "DEEPSEEK_API_KEY",
         "deepseek-chat",
         "deepseek-reasoner",
+        supports_batch_api=False,
     ),
     "opencode": ProviderSpec(
         "https://opencode.ai/zen/go/v1",
@@ -97,6 +125,7 @@ BUILTIN_PROVIDERS: dict[str, ProviderSpec] = {
         "OPENCODE_API_KEY",
         "muse-spark-1.3-contributor",
         "muse-spark-1.3-contributor",
+        supports_batch_api=False,
     ),
 }
 
@@ -119,6 +148,13 @@ PROVIDER_ALLOWED_KEYS = frozenset(
         "api_timeout",
         "opencode_session_id",
         "prompt_caching_enabled",
+        "supports_batch_api",
+        "is_free",
+        "cost_per_mtok",
+        "capability_profile",
+        "supports_temperature",
+        "supports_reasoning_effort",
+        "repair_provider",
     }
 )
 

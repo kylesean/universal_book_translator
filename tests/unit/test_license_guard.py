@@ -266,7 +266,9 @@ _SIZE_RATCHETS: dict[str, int] = {
     # under a different --profile/--preset cannot reuse the wrong ledger.
     # 2026-09-27: 927→933 — the budget path merges the router's
     # fallback-endpoint attribution into ``endpoint_map``.
-    "ubt/core/engine/pipeline.py": 933,
+    # 2026-09-28: 933→959 — PipelineOrchestrator.__init__ gained heterogeneous
+    # cross-provider repair_provider instantiation.
+    "ubt/core/engine/pipeline.py": 959,
     "ubt/adapters/pdf/typst_reconstructor.py": 2336,
 }
 
