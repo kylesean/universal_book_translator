@@ -231,22 +231,8 @@ def _terminology_and_structure_pass(
         # creates Chinglish mash ("A. Vaswani et al. 注意力 Is All You
         # Need"), so both enforcement and validation skip them.
         if fb.target_text and not fb.skip_translate:
-            # 0. CJK spacing and publishing punctuation normalization
-            spaced = normalize_publishing_cjk(fb.target_text, target_lang=target_lang)
-            if spaced != fb.target_text:
-                fb.target_text = spaced
-                modified_checkpoints.append(
-                    {
-                        "block_id": fb.id,
-                        "target_text": fb.target_text,
-                        "status": fb.status,
-                        "error_flags": fb.error_flags,
-                    }
-                )
-
-            # 1. Glossary enforcement (opt-in) or non-destructive consistency verification
-            # Publishing editorial philosophy: avoid violent in-place Aho-Corasick text corruption
-            # at export time. Instead, flag glossary inconsistencies for human review or repair.
+            # 0. Glossary enforcement (opt-in)
+            # Establish canonical terminology first so subsequent publishing polish formats it properly.
             if glossary_enforcer:
                 enforced_text, records = glossary_enforcer.enforce(fb.target_text)
                 if records:
@@ -260,6 +246,19 @@ def _terminology_and_structure_pass(
                             "error_flags": fb.error_flags,
                         }
                     )
+
+            # 1. CJK spacing and publishing punctuation normalization
+            spaced = normalize_publishing_cjk(fb.target_text, target_lang=target_lang)
+            if spaced != fb.target_text:
+                fb.target_text = spaced
+                modified_checkpoints.append(
+                    {
+                        "block_id": fb.id,
+                        "target_text": fb.target_text,
+                        "status": fb.status,
+                        "error_flags": fb.error_flags,
+                    }
+                )
 
             glossary_res = glossary_validator.validate(fb.source_text, fb.target_text)
             if not glossary_res.is_valid:
