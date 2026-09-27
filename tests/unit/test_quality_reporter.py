@@ -714,7 +714,7 @@ def test_reported_average_excludes_unscored_placeholders(tmp_path: Path) -> None
 
 
 def test_compliance_verdict_does_not_claim_enforcement_that_was_off(tmp_path: Path) -> None:
-    """B4: the Aho-Corasick enforcer runs on the SHORT chain only.
+    """The Aho-Corasick enforcer runs on the SHORT chain only.
 
     The pipeline sets ``deterministic_glossary_enforce=short_chain``, so a long
     chain job (the default for any book over the short-page cut-off) validates
@@ -741,7 +741,7 @@ def test_quality_report_surfaces_enforced_spans(tmp_path: Path) -> None:
     """The report measures the enforced text while TM keeps the draft.
 
     Surface the mechanically-corrected span count so a reader comparing the two
-    can discount it (F4).
+    can discount it.
     """
     report = _minimal_report(tmp_path, "enforced", {}, enforced_spans=7)
     assert report.enforced_spans == 7

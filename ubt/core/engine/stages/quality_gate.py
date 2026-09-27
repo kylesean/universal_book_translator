@@ -46,7 +46,7 @@ def _fast_pass_screen(
             block_type=b.block_type,
             skip_translate=b.skip_translate,
         )
-        # F3: terminology runs before the verdict. Verbatim ships are exempt
+        # Terminology runs before the verdict. Verbatim ships are exempt
         # (the export stage skips them too: substituting terms into a kept
         # bibliography produces Chinglish mash).
         if glossary_validator is not None and b.target_text and not b.skip_translate:
@@ -114,7 +114,7 @@ async def run_quality_gate_stage(
 ) -> AsyncIterator[TranslationProgressEvent]:
     """Evaluate drafted blocks with FastPassFilter and score suspicious blocks via QE runner.
 
-    F3 first: the run's enforced terminology is bound to the heuristic runner
+    Terminology first: the run's enforced terminology is bound to the heuristic runner
     here (and to the repair loop that shares it) because this is the first stage
     that scores, and only the bible stage could have produced a glossary. An
     explicitly injected runner keeps its own scoring policy.
@@ -177,7 +177,7 @@ async def run_quality_gate_stage(
 
     if suspicious_blocks:
         if isinstance(qe_runner, HeuristicQERunner):
-            # F3: score_from_flags caps a glossary violation at its own band
+            # score_from_flags caps a glossary violation at its own band
             # while every other defect class keeps its existing value.
             scores = [HeuristicQERunner.score_from_flags(b.error_flags) for b in suspicious_blocks]
         else:

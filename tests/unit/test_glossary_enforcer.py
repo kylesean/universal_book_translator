@@ -224,7 +224,7 @@ def test_glossary_enforcer_respects_inflected_variants() -> None:
 
 
 def test_glossary_enforcer_idempotent_no_cyclic_resubstitution() -> None:
-    """Regression test for P0 #3: a source term that is a prefix of its canonical target must
+    """A source term that is a prefix of its canonical target must
     not be re-substituted, otherwise re-running enforce on already-correct text explodes
     (e.g. "AI技术" -> "AI技术技术" -> "AI技术技术技术").
 

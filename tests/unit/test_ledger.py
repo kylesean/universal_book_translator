@@ -399,7 +399,7 @@ def test_reset_transient_failures_keeps_non_retryable_draft_failures(
 def test_reset_transient_failures_exempts_triaged_blocks(
     tmp_path: Path, sample_doc_ir: SeedDoc
 ) -> None:
-    """E2 (option B): triage keeps the original transient marker when
+    """Triage keeps the original transient marker when
     upgrading to NEEDS_HUMAN, so the prefix alone cannot tell "never
     reviewed" from "reviewed, awaiting a human". Rows carrying a triage
     verdict stay terminal — the PE queue must not lose members on resume."""
@@ -635,7 +635,7 @@ def test_schema_migration_versioning_and_contract_columns(tmp_path: Path) -> Non
         assert "tm_hit" in cols
         assert "mqm_severity" in cols
         assert "mqm_spans_json" in cols
-        # V5 document-v1 contract columns
+        # document-v1 contract columns
         assert "layout_role" in cols
         assert "semantic_role" in cols
         assert "structure_role" in cols
@@ -1495,7 +1495,7 @@ def test_ledger_upsert_blocks_batch_includes_mqm_fields(tmp_path: Path) -> None:
 
 @pytest.mark.fast
 def test_ledger_get_conn_initializes_inside_lock(tmp_path: Path) -> None:
-    """[HIGH-T1-3] _get_conn must check and call _init_connection while holding self._lock."""
+    """_get_conn must check and call _init_connection while holding self._lock."""
     ledger = SQLiteJobLedger(tmp_path / "lock_test.sqlite")
     ledger.close()
     assert ledger._conn is None

@@ -165,7 +165,7 @@ async def test_deep_assess_is_capped_at_two_and_queues(
 
 
 def test_main_converges_env_file_permissions(monkeypatch: pytest.MonkeyPatch) -> None:
-    """M1: ``ubt-mcp`` must chmod ``.env`` to 0600 before the tools read it."""
+    """``ubt-mcp`` must chmod ``.env`` to 0600 before the tools read it."""
     import ubt.mcp.server as srv
 
     calls: list[object] = []

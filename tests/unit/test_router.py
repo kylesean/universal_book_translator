@@ -702,7 +702,7 @@ def test_classify_provider_error_taxonomy() -> None:
     assert classify_provider_error(ModelProviderError("timed out after 60s")).retryable is True
     assert classify_provider_error(TimeoutError()).retryable is True
     assert classify_provider_error(ConnectionError("reset")).retryable is True
-    # Unknown failures stay retryable (pre-P8 behavior preserved).
+    # Unknown failures stay retryable.
     assert classify_provider_error(ModelProviderError("weird")).retryable is True
 
 
@@ -743,7 +743,7 @@ async def test_router_402_raises_top_up_hint() -> None:
 
 @pytest.mark.asyncio
 async def test_fallback_chain_skips_on_billing_error() -> None:
-    """R2: 402 billing cannot resolve by renaming the model — one call, no chain walk."""
+    """402 billing cannot resolve by renaming the model — one call, no chain walk."""
     provider = AlwaysFailingProvider(
         ModelProviderError("Insufficient balance", details={"status_code": 402})
     )
@@ -759,7 +759,7 @@ async def test_fallback_chain_skips_on_billing_error() -> None:
 
 @pytest.mark.asyncio
 async def test_fallback_chain_skips_on_credential_401() -> None:
-    """R2: a credential-side 401 (no model-identity phrase) fails fast."""
+    """A credential-side 401 (no model-identity phrase) fails fast."""
     provider = AlwaysFailingProvider(
         ModelProviderError("Incorrect API key provided", details={"status_code": 401})
     )

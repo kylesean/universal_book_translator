@@ -306,7 +306,7 @@ class _FlakyBlockingLedger:
 async def test_flusher_applies_backoff_on_transient_failure_and_drains_on_task_error(
     tmp_path: Path,
 ) -> None:
-    """[CRITICAL-T1-1] Flusher must backoff between consecutive failures and
+    """Flusher must backoff between consecutive failures and
     close() must drain remaining items even if the background task died."""
     ledger = SQLiteJobLedger(tmp_path / "ledger.sqlite")
     doc = SeedDoc(

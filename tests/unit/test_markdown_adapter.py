@@ -12,7 +12,7 @@ from ubt.core.ir.models import BlockStatus, BlockType, BookManifest, FlowID, IRB
 
 @pytest.mark.asyncio
 async def test_plaintext_mode_ignores_markdown_syntax(tmp_path: Path) -> None:
-    """Regression M10: a .txt line starting with ``#`` is a comment, not a chapter.
+    """Regression: a .txt line starting with ``#`` is a comment, not a chapter.
 
     Logs and configs route through this adapter in plain-text mode; without the
     mode, ``# TODO`` split the document into chapters and turned the line into a
@@ -25,7 +25,7 @@ async def test_plaintext_mode_ignores_markdown_syntax(tmp_path: Path) -> None:
     md = MarkdownAdapter()
     plain = MarkdownAdapter(plain_text=True)
 
-    # Markdown mode fragments on the ``#`` line (the behaviour M10 removes for .txt).
+    # Markdown mode fragments on the ``#`` line (the behaviour removed for .txt).
     assert len((await md.extract_manifest(txt)).chapters) == 1  # only one h1 -> no preface split
     md_chapters = [ch async for ch in md.parse_stream(txt)]
     md_types = [b.block_type for ch in md_chapters for b in ch.blocks]

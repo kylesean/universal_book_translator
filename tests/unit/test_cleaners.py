@@ -387,7 +387,7 @@ def test_normalize_academic_pdf_math_cmap_and_subscripts() -> None:
     # Ordinary vulgar fraction in non-equation context preserved
     assert normalize_academic_pdf_math("add ¼ cup of sugar") == "add ¼ cup of sugar"
 
-    # P0: block-global ¼ evidence used to rewrite currency in the same block
+    # Block-global ¼ evidence used to rewrite currency in the same block
     # ("paid $5" -> "paid -5"). Evidence now requires equation-shaped ¼.
     assert (
         normalize_academic_pdf_math("Add ¼ cup sugar, paid $5 for milk")

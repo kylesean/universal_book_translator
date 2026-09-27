@@ -108,7 +108,7 @@ class RigidReport:
     pages: list[RigidPageReport] = field(default_factory=list)
     rendered_blocks: list[str] = field(default_factory=list)
     skipped: list[tuple[str, str]] = field(default_factory=list)
-    # Blocks that only fit after M2 margin reclaim — counted so the quality
+    # Blocks that only fit after margin reclaim — counted so the quality
     # report can show how much coverage reclaim bought.
     reclaimed_blocks: list[str] = field(default_factory=list)
     # page number -> block ids planned for that page. A page-level overlay
@@ -246,7 +246,7 @@ def _reclaim_zone_down(
     max_reclaim_pt: float,
     gap_pt: float = RECLAIM_GAP_PT,
 ) -> Zone:
-    """Extend a zone downward into adjacent confirmed-blank space (M2).
+    """Extend a zone downward into adjacent confirmed-blank space.
 
     The overlay fails closed when a block's translated text will not fit its
     zones even at the font floor — most often a short paragraph with extra
@@ -331,7 +331,7 @@ class RigidTypesetter:
         self.min_font_pt = min_font_pt
         self.backfill_captions = backfill_captions
         self.translate_chrome = translate_chrome
-        # M2 margin reclaim: how far an overflowing block may extend downward
+        # Margin reclaim: how far an overflowing block may extend downward
         # into adjacent confirmed-blank space before it fails closed. On by
         # default (only consulted for blocks that would otherwise spill, so it
         # only ever adds coverage); set UBT_RIGID_MARGIN_RECLAIM_PT=0 to disable
@@ -554,7 +554,7 @@ class RigidTypesetter:
             pending = self._paginate(text, block_zones, floor)
             eff_zones = block_zones
             if pending is None and self.margin_reclaim_pt > 0:
-                # M2: the text overflows its zones; try reclaiming the
+                # The text overflows its zones; try reclaiming the
                 # confirmed-blank margin directly below the last zone before
                 # failing closed. build_zones already excludes figures/other
                 # blocks, and _reclaim_zone_down stops at the nearest occupied

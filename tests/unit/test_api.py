@@ -173,7 +173,7 @@ def test_visual_report_no_report_returns_400(
 
 
 def test_visual_report_ledger_fallback(tmp_path: Path) -> None:
-    """ROI-5: restarted server (no memory record) serves the persisted ledger report."""
+    """A restarted server (no memory record) serves the persisted ledger report."""
     from ubt.core.engine.ledger import SQLiteJobLedger
     from ubt.core.ir.models import FlowID, IRBlock
 
@@ -1219,7 +1219,7 @@ def test_status_never_echoes_host_absolute_paths(
 def test_bootstrap_converges_env_file_permissions(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """M1: the ASGI entry point must chmod ``.env`` to 0600 before config reads it.
+    """The ASGI entry point must chmod ``.env`` to 0600 before config reads it.
 
     dotenv files are created ``0644`` by editors and ``cp`` while holding the
     API credentials. Unit behaviour lives in
@@ -1477,7 +1477,7 @@ def test_submit_without_output_path_works_without_an_allowlist(
 @pytest.mark.fast
 @pytest.mark.asyncio
 async def test_sse_stream_releases_global_slot_when_response_not_iterated(tmp_path: Path) -> None:
-    """[CRITICAL-T4-1] StreamingResponse returned by /jobs/{job_id}/stream must attach a
+    """StreamingResponse returned by /jobs/{job_id}/stream must attach a
     BackgroundTask / slot guard so slots are released even if the client disconnects
     before iterating body_iterator."""
     cfg = UBTConfig(db_dir=tmp_path / "ledgers")

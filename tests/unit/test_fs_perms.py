@@ -65,7 +65,7 @@ def test_restrict_env_file_absent_is_a_noop(tmp_path: Path) -> None:
 
 
 def test_restrict_env_file_never_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A filesystem that refuses the chmod must not abort the boot (M1: warn only)."""
+    """A filesystem that refuses the chmod must not abort the boot (warn only)."""
     env = tmp_path / ".env"
     env.write_text("X=1\n", encoding="utf-8")
 
@@ -94,7 +94,7 @@ def test_world_readable_files_scans_extra_dirs(tmp_path: Path) -> None:
 
     # Backwards compatible: one argument scans exactly that tree...
     assert world_readable_files(ledger_dir) == [exposed_ledger]
-    # ...and the extension reaches the artifact trees db_dir never covered (M2).
+    # ...and the extension reaches the artifact trees db_dir never covered.
     assert sorted(world_readable_files(ledger_dir, extra_dirs=[export_dir])) == sorted(
         [exposed_ledger, exposed_pdf]
     )

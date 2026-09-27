@@ -441,7 +441,7 @@ def test_sqlite_token_bucket_preserves_negative_debt_on_429(tmp_path: Path) -> N
 @pytest.mark.fast
 @pytest.mark.asyncio
 async def test_sqlite_token_bucket_has_async_thread_offloaded_reporters(tmp_path: Path) -> None:
-    """[CRITICAL-T3-1] SqliteTokenBucket must provide report_success_async and report_429_async
+    """SqliteTokenBucket must provide report_success_async and report_429_async
     that offload synchronous SQLite transactions via asyncio.to_thread."""
     bucket = SqliteTokenBucket(tmp_path / "rate.sqlite", initial_rpm=60, initial_tpm=60000)
     assert hasattr(bucket, "report_success_async"), (

@@ -415,7 +415,7 @@ def _stub_typesetter() -> RigidTypesetter:
 
 
 def test_region_floor_lets_a_small_print_block_fit(monkeypatch: pytest.MonkeyPatch) -> None:
-    """M2: a block that fits only below the body floor still renders in a
+    """A block that fits only below the body floor still renders in a
     small-print region, instead of failing closed to source-visible.
 
     ``_flow`` is the fit kernel; here it accepts only sizes <= 6.8pt, so the
@@ -440,7 +440,7 @@ def test_region_floor_lets_a_small_print_block_fit(monkeypatch: pytest.MonkeyPat
 
 
 def test_plan_blocks_applies_the_region_floor(monkeypatch: pytest.MonkeyPatch) -> None:
-    """M2 end-to-end: ``_plan_blocks`` resolves the floor from ``layout_role``.
+    """End-to-end: ``_plan_blocks`` resolves the floor from ``layout_role``.
 
     A caption whose text only fits below the body floor renders (the caption
     floor applies) while the identical body block spills — the evidence the

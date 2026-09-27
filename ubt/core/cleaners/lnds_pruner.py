@@ -356,7 +356,7 @@ def strip_textbook_ocr_artifacts(content: str, source_lang: str = "en") -> str:
         content = page_pat.sub("", content)
 
     # 4. Strip textbook OCR running headers glued to the beginning of text
-    # (C5: prefilter on the literal chapter keyword before running the regex
+    # (Prefilter on the literal chapter keyword before running the regex
     # so adversarial lines can never trigger catastrophic backtracking)
     hdr_pat = BoilerplateCatalog.get_running_header_pattern(source_lang)
     if hdr_pat:

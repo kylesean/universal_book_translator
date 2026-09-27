@@ -169,7 +169,7 @@ def test_core_has_no_hardcoded_adapter_paths() -> None:
 
 
 # ---------------------------------------------------------------------------
-# WS-A extensions (RETAINPDF §M-2: widen the guard surface, not just restore it)
+# Widen the guard surface, not just restore it.
 # ---------------------------------------------------------------------------
 
 # Base (always-installed) dependencies must stay CPU-light and zero-AGPL. Route B

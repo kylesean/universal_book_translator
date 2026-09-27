@@ -725,7 +725,7 @@ async def test_rerank_surfaces_short_score_reply() -> None:
     """The QE runner promises one score per pair; a degraded runner that
     returns fewer must fail the round explicitly, not crash the repair with
     a bare IndexError from the best-of-n indexing (quality_gate has the
-    same contract check, L21)."""
+    same contract check)."""
     from ubt.core.exceptions import MTQEEvaluationError
 
     router = ModelRouter(provider=MockModelProvider(default_response="我们使用神经网络模型。"))

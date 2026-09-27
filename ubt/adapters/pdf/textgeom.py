@@ -32,8 +32,8 @@ class LineBox:
 
     text: str
     rect: tuple[float, float, float, float]
-    table_band: bool = False  # P0: row from a >=3-run band (tabular zone)
-    members: tuple[LineBox, ...] = ()  # P0: glued source frags (span slicing)
+    table_band: bool = False  # row from a >=3-run band (tabular zone)
+    members: tuple[LineBox, ...] = ()  # glued source frags (span slicing)
     font_size: float = 0.0
     bold: bool = False
     italic: bool = False
@@ -359,7 +359,7 @@ def merge_row_fragments(
                 run.append(ln)
         if run:
             runs.append(run)
-        # P0 table exclusion: a band split into 3+ x-runs is a tabular zone
+        # Table exclusion: a band split into 3+ x-runs is a tabular zone
         # (body columns never exceed 2 runs per band). Its rows stay out of
         # zone matching entirely — tables remain source-visible instead of
         # wearing prose translations at cell positions.

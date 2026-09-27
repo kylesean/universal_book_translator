@@ -1,4 +1,4 @@
-"""Translation verdict: zero-LLM-cost pre-filter (roadmap P8).
+"""Translation verdict: zero-LLM-cost pre-filter.
 
 UBT already gates *after* drafting (0-Token FastPass); this gate runs
 *before* any model call. :func:`judge_block` applies ten ordered

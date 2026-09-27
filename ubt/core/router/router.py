@@ -917,7 +917,7 @@ class ModelRouter:
                 if not action.retryable:
                     if action.top_up_hint:
                         raise ModelProviderError(
-                            f"{exc} [P8 fail-fast: HTTP 402 — billing/quota exhausted, "
+                            f"{exc} [fail-fast: HTTP 402 — billing/quota exhausted, "
                             "top up the provider account before retrying]",
                             doc_id=exc.doc_id,
                             details=details,

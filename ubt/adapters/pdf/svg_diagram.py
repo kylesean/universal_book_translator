@@ -330,7 +330,7 @@ def _probe_rendering_cached(binary: str, mtime_ns: int) -> bool:
                 errors="replace",
                 check=False,
                 timeout=_PROBE_TIMEOUT_S,
-                # H-2: probe compile must mirror typst_compile (same env policy).
+                # Probe compile must mirror typst_compile (same env policy).
                 env=subprocess_env(),
             )
             if proc.returncode != 0:
@@ -432,7 +432,7 @@ def export_page_svg(pdf_path: Path | str, page_no: int, work_dir: Path | str) ->
             encoding="utf-8",
             errors="replace",
             timeout=120,
-            # H-2: same environment policy as every other external binary here.
+            # Same environment policy as every other external binary here.
             env=subprocess_env(),
         )
     except (OSError, subprocess.SubprocessError) as exc:
