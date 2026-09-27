@@ -7,6 +7,7 @@ from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.stage_context import StageContext
 from ubt.core.exceptions import MTQEEvaluationError
 from ubt.core.ir.models import BlockStatus, IRBlock
+from ubt.core.qe.base import BaseQERunner
 from ubt.core.qe.comet_runner import (
     HeuristicQERunner,
     glossary_violation_flag,
@@ -23,6 +24,7 @@ def _fast_pass_screen(
     *,
     fast_pass: FastPassFilter,
     glossary_validator: GlossaryConsistencyValidator | None,
+    glossary_terms: list[str] | None = None,
 ) -> tuple[list[IRBlock], list[dict[str, Any]]]:
     """Split drafted blocks into auto-passes and scoring candidates.
 
@@ -34,6 +36,10 @@ def _fast_pass_screen(
     passed_updates: list[dict[str, Any]] = []
 
     for b in blocks:
+        # Record the enforced glossary terms present in this block's
+        # target, so ``glossary_hits`` is populated rather than always [].
+        terms = glossary_terms or []
+        b.glossary_hits = [t for t in terms if t and t in (b.target_text or "")]
         decision = fast_pass.evaluate(
             b.source_text,
             b.target_text or "",
@@ -59,6 +65,7 @@ def _fast_pass_screen(
                     "block_id": b.id,
                     "target_text": b.target_text or "",
                     "status": BlockStatus.MTQE_PASSED,
+                    "glossary_hits": b.glossary_hits,
                 }
             )
         else:
@@ -73,6 +80,32 @@ def _fast_pass_screen(
             suspicious_blocks.append(b)
 
     return suspicious_blocks, passed_updates
+
+
+async def _audit_pass_sample(
+    qe_runner: BaseQERunner,
+    blocks: list[IRBlock],
+    threshold: float,
+) -> list[IRBlock]:
+    """FastPass-passing blocks whose sampled QE score falls below ``threshold``.
+
+    FastPass-passing blocks used to be written straight to ``MTQE_PASSED``, so
+    the ``pass_sample`` mechanism meant to audit a fraction of clean passes
+    (``TieredQERunner``) could never see them — the knob was inert. When the
+    runner samples passes, score them here and route any below-threshold block
+    back into repair. A plain heuristic/COMET runner has no ``pass_sample``, so
+    the default configuration is unchanged.
+    """
+    if getattr(qe_runner, "pass_sample", 0.0) <= 0.0 or not blocks:
+        return []
+    pairs = [{"src": b.source_text, "mt": b.target_text or ""} for b in blocks]
+    scores = await qe_runner.score_pairs(pairs)
+    if len(scores) != len(blocks):
+        raise MTQEEvaluationError(
+            f"QE runner returned {len(scores)} score(s) for {len(blocks)} pass-sample block(s)",
+            details={"expected": len(blocks), "got": len(scores)},
+        )
+    return [b for b, score in zip(blocks, scores, strict=True) if score < threshold]
 
 
 async def run_quality_gate_stage(
@@ -116,12 +149,28 @@ async def run_quality_gate_stage(
     glossary_validator = (
         GlossaryConsistencyValidator(glossary=glossary_dicts) if glossary_dicts else None
     )
+    glossary_terms = sorted(
+        {str(g.get("translation", "")).strip() for g in (glossary_dicts or [])} - {""}
+    )
     suspicious_blocks, passed_updates = await asyncio.to_thread(
         _fast_pass_screen,
         drafted_blocks,
         fast_pass=fast_pass,
         glossary_validator=glossary_validator,
+        glossary_terms=glossary_terms,
     )
+
+    # Audit a sample of FastPass passes when the runner supports it
+    # (``pass_sample`` > 0, i.e. TieredQERunner), so a clean-but-wrong block the
+    # judge lowers is routed to repair instead of shipping as MTQE_PASSED.
+    if passed_updates:
+        by_id = {b.id: b for b in drafted_blocks}
+        pass_blocks = [by_id[u["block_id"]] for u in passed_updates if u["block_id"] in by_id]
+        demoted = await _audit_pass_sample(qe_runner, pass_blocks, ctx.config.qe_threshold)
+        if demoted:
+            demoted_ids = {b.id for b in demoted}
+            passed_updates = [u for u in passed_updates if u["block_id"] not in demoted_ids]
+            suspicious_blocks.extend(demoted)
 
     if passed_updates:
         await asyncio.to_thread(ledger.save_checkpoints_batch, passed_updates)
@@ -201,6 +250,7 @@ async def run_quality_gate_stage(
                     "status": b.status,
                     "mtqe_score": score,
                     "error_flags": b.error_flags,
+                    "glossary_hits": b.glossary_hits,
                 }
             )
 

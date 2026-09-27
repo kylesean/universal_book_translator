@@ -369,12 +369,15 @@ def build_quality_report(
         elif b.repair_rounds >= 1:
             # A block that spent repair rounds but still ended FAILED (e.g. it
             # hit a rounds_cap of 1) is an exhaustion, not a round-1/2 success.
+            # A triage quarantine (NEEDS_HUMAN/BLOCKED_HUMAN) is not a success
+            # either — it used to be counted as one.
             if b.status == BlockStatus.FAILED:
                 exhausted += 1
-            elif b.repair_rounds == 1:
-                round_1 += 1
-            else:
-                round_2 += 1
+            elif b.status not in (BlockStatus.NEEDS_HUMAN, BlockStatus.BLOCKED_HUMAN):
+                if b.repair_rounds == 1:
+                    round_1 += 1
+                else:
+                    round_2 += 1
 
         for flag in b.error_flags:
             flag_counts[flag] = flag_counts.get(flag, 0) + 1
@@ -391,10 +394,18 @@ def build_quality_report(
             continue
         family = reason.split("(", 1)[0].strip()
         skip_families[family or flag] = skip_families.get(family or flag, 0) + count
-    # ``completed`` already excludes failed/needs-human/blocked blocks, so it is
-    # the delivered figure; subtracting skip flags here double-counted skips on
-    # blocks that were never completed.
-    rendered_blocks = completed
+    # ``completed`` counts every terminal MTQE_PASSED/REPAIRED block, but a
+    # fail-closed overlay skip KEEPS that status, so those blocks were counted as
+    # rendered AND as fail-closed — making rendered+fail_closed exceed the total.
+    # Count only completed blocks that were not fail-closed skipped; a
+    # preserved skip sits on a chrome/non-prose block that was never completed.
+    fail_closed_completed = sum(
+        1
+        for b in all_blocks
+        if b.status in (BlockStatus.MTQE_PASSED, BlockStatus.REPAIRED)
+        and any(_is_fail_closed_skip_flag(flag) for flag in b.error_flags)
+    )
+    rendered_blocks = max(0, completed - fail_closed_completed)
     coverage = round(rendered_blocks / total, 4) if total > 0 else 1.0
 
     route_info: ReportRouteInfo | None = None
@@ -537,6 +548,13 @@ def _skip_reason(flag: str) -> str | None:
     return None
 
 
+def _is_fail_closed_skip_flag(flag: str) -> bool:
+    """True when ``flag`` is a fail-closed render skip (not an intentional keep)."""
+    return _skip_reason(flag) is not None and not flag.startswith(
+        INTENTIONAL_PRESERVED_SKIP_PREFIXES
+    )
+
+
 def summarize_render_skips(defect_flags: dict[str, int]) -> tuple[int, int, str]:
     """Aggregate ``render_skip:{reason}`` flags by family.
 
@@ -574,7 +592,7 @@ def summarize_render_skips(defect_flags: dict[str, int]) -> tuple[int, int, str]
 # as one with a missing span, so both must count or the KDP audit prints "Full
 # retention" while the ledger flags corruption.
 _CORRUPT_FLAG_RE = re.compile(
-    r"math_token_corrupt missing=(\[.*?\]) mismatched=(\[.*?\]) mutated=(\[.*?\])"
+    r"(?:math|cite|code)_token_corrupt missing=(\[.*?\]) mismatched=(\[.*?\]) mutated=(\[.*?\])"
     r"(?: reordered=(\[.*?\]))?(?: duplicated=(\[.*?\]))?"
 )
 
@@ -615,10 +633,12 @@ def compute_placeholder_metrics(blocks: list[Any]) -> ReportPlaceholderMetrics:
         source = block.source_text or ""
         if not source:
             continue
-        masked_src, _ = code_masker.mask(source)
-        cite_masked, _ = cite_masker.mask(masked_src)
+        masked_src, code_map = code_masker.mask(source)
+        cite_masked, cite_map = cite_masker.mask(masked_src)
         _, math_map = math_masker.mask(cite_masked)
-        masked_count = len(math_map)
+        # Count every masked span type, not just math: code/citation
+        # corruption is MQM-Critical, so omitting it left retention at 1.0.
+        masked_count = len(code_map) + len(cite_map) + len(math_map)
         if masked_count:
             masked_blocks += 1
             masked_total += masked_count
@@ -893,7 +913,7 @@ In accordance with Amazon Kindle Direct Publishing (KDP) guidelines on AI-assist
 | **Terminology Precision (TP)** | {report.terminology.term_precision:.2%} | Exact term renderings over the occurrences exercised by this job ({report.terminology.terms_expected} distinct term(s)) |
 | **Fuzzy Terminology Precision (TF)** | {report.terminology.fuzzy_term_precision:.2%} | Allows a fuzzy (≥80%) rendering match |
 | **Terminology Recall** | {report.terminology.term_recall:.2%} | {report.terminology.terms_rendered}/{report.terminology.terms_expected} term(s) rendered exactly at least once |
-| **Terminology Consistency** | {report.entity_consistency.terms_with_drift}/{report.entity_consistency.terms_audited} term(s) drifted | Canonical rendering absent in at least one block (see §3.5) |
+| **Terminology Consistency** | {report.entity_consistency.terms_with_drift}/{report.entity_consistency.terms_audited} term(s) drifted | Canonical rendering absent in at least one block |
 | **Render-Skipped Segments** | {skip_total} | {skip_verdict} |
 | **Estimated Token Cost** | {cost_line} | From provider usage accounting |
 | **Cache Hit Rate** | {report.summary.cache_hit_rate:.2%} | static-prefix TCO lever (0% = unmeasured) |

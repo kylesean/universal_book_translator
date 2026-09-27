@@ -467,7 +467,13 @@ class PipelineOrchestrator:
                 run_usage,
                 newly_spent=newly_spent,
                 base_url=self.config.base_url,
-                endpoint_map=self.config.remote_billing_models(),
+                # Merge the OCR-channel map with the router's fallback attribution
+                # so a model served only by the local fallback is billed at the
+                # fallback endpoint, not the primary.
+                endpoint_map={
+                    **self.config.remote_billing_models(),
+                    **self.router.billing_endpoint_map(),
+                },
             )
             self._billed_run_usage = run_usage
             if raise_on_budget:

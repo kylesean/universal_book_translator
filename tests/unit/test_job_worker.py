@@ -229,7 +229,7 @@ async def test_writer_lock_conflict_yields_back_to_queued(queue: JobQueue) -> No
 async def test_writer_lock_conflict_backs_off_before_reclaiming(
     queue: JobQueue, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A yielded job must not be re-claimed in the same breath (review-2 X2).
+    """A yielded job must not be re-claimed in the same breath.
 
     ``release_claim`` puts the job back to QUEUED and ``_slot`` claims
     immediately, so without a backoff the slot grabbed the same job, hit the
@@ -441,3 +441,21 @@ async def test_lease_loss_signals_cancel_token(
     await worker.execute(claimed)
 
     assert token_was_set is True, "cancel_token must be set when lease is lost"
+
+
+def test_should_rehearse_uses_the_worker_process_key() -> None:
+    """A keyed worker runs an API-auto-set rehearsal for real."""
+    from pydantic import SecretStr
+
+    from ubt.core.config import UBTConfig
+    from ubt.core.engine.job_worker import _should_rehearse
+
+    keyed = UBTConfig(api_key=SecretStr("sk-real"))
+    keyless = UBTConfig(api_key=SecretStr(""))
+    auto = {"dry_run": True, "rehearsal_auto": True}
+    explicit = {"dry_run": True}
+
+    assert _should_rehearse(auto, keyed) is False  # keyed worker runs for real
+    assert _should_rehearse(auto, keyless) is True
+    assert _should_rehearse(explicit, keyed) is True  # user asked for rehearsal
+    assert _should_rehearse({}, keyed) is False

@@ -49,6 +49,17 @@ logger = logging.getLogger(__name__)
 EventSource = Callable[[QueuedJob, UBTConfig], AsyncGenerator[TranslationProgressEvent, None]]
 
 
+def _should_rehearse(payload: dict[str, Any], job_config: UBTConfig) -> bool:
+    """Whether this worker runs the job as a zero-token rehearsal.
+
+    Decided from THIS process's key, not the API process's auto-decision: an
+    explicit user ``dry_run`` is honored, but an auto-set one (marked
+    ``rehearsal_auto``) is overridden when this worker holds a key.
+    """
+    explicit_dry = bool(payload.get("dry_run")) and not payload.get("rehearsal_auto", False)
+    return explicit_dry or not bool(job_config.api_key.get_secret_value().strip())
+
+
 class JobWorker:
     """One process that drains queued jobs with ``concurrency`` slots."""
 
@@ -97,9 +108,9 @@ class JobWorker:
         payload = {**job.payload, "job_id": job.job_id}
         input_path = Path(str(payload["input_path"]))
         output_path = Path(str(payload["output_path"])) if payload.get("output_path") else None
-        if payload.get("dry_run"):
-            # Rehearsal row (auto-set at intake when no key, or explicitly
-            # requested): deterministic echo provider, mocked QE, no spend.
+        # Rehearsal is decided from THIS process's key (see the helper).
+        if _should_rehearse(payload, job_config):
+            # Deterministic echo provider, mocked QE, no spend.
             orchestrator = create_dry_run_orchestrator(job_config)
         else:
             orchestrator = PipelineOrchestrator(

@@ -462,7 +462,7 @@ async def test_repair_loop_targeted_span_flow() -> None:
 
 @pytest.mark.asyncio
 async def test_repair_loop_does_not_wash_glossary_violation_with_unaware_scorer() -> None:
-    """P1-4: a scorer that does not check terminology (COMET / Tiered / LLM judge
+    """A scorer that does not check terminology (COMET / Tiered / LLM judge
     — modelled here by a fixed-high ControlledScoreQERunner) must not launder a
     glossary-violation flag into a clean REPAIRED. The marker survives so triage
     still routes the block to the human queue."""
@@ -934,3 +934,48 @@ async def test_glossary_aware_low_rescore_does_not_erase_violation() -> None:
     )
     repaired = await repair_loop.repair_single_block(block)
     assert any(GLOSSARY_VIOLATION_MARKER in f for f in repaired.error_flags)
+
+
+def test_non_calibrated_runner_rejects_a_worse_candidate() -> None:
+    """A heuristic (non-calibrated) runner must not adopt a lower score.
+
+    Regression: ``new_score >= threshold`` adopted a candidate that scored
+    strictly worse than the draft whenever it still cleared the pass line
+    (old 0.92 -> new 0.80), silently degrading an already-passing block.
+    """
+    from ubt.core.qe.comet_runner import HeuristicQERunner
+
+    loop = RepairLoop(
+        router=ModelRouter(provider=MockModelProvider(), draft_model="d"),
+        qe_runner=HeuristicQERunner(),
+    )
+    assert not loop._adoptable(0.80, 0.92)  # worse, still above the pass line
+    assert not loop._adoptable(0.92, 0.92)  # a tie is not an improvement
+    assert loop._adoptable(0.95, 0.92)  # strictly better
+    assert loop._adoptable(0.92, 0.55)  # crosses the pass line from below
+
+
+def test_select_repair_candidates_uses_flags_and_low_score() -> None:
+    """Selection is flag/low-score based; the percentile cap was dead."""
+    from ubt.core.qe.comet_runner import HeuristicQERunner
+
+    loop = RepairLoop(
+        router=ModelRouter(provider=MockModelProvider(), draft_model="d"),
+        qe_runner=HeuristicQERunner(),
+    )
+    flagged = IRBlock(
+        id="b1",
+        spine_index=1,
+        source_text="s",
+        status=BlockStatus.REPAIR_PENDING,
+        mtqe_score=0.9,
+        error_flags=["Numeric fidelity"],
+    )
+    low = IRBlock(
+        id="b2", spine_index=2, source_text="s", status=BlockStatus.DRAFTED, mtqe_score=0.1
+    )
+    clean = IRBlock(
+        id="b3", spine_index=3, source_text="s", status=BlockStatus.DRAFTED, mtqe_score=0.95
+    )
+    selected = {b.id for b in loop.select_repair_candidates([flagged, low, clean])}
+    assert selected == {"b1", "b2"}

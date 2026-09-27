@@ -161,6 +161,61 @@ def test_build_and_save_quality_report(tmp_path: Path) -> None:
     assert "HITL Quarantined (Needs Human Review)" in md_content
 
 
+def test_quarantined_blocks_are_not_counted_as_repair_successes(tmp_path: Path) -> None:
+    """A triage quarantine is not a "round N repaired" success."""
+    db_path = tmp_path / "quarantine.sqlite"
+    ledger = SQLiteJobLedger(db_path)
+    job_id = "job_q"
+    manifest = BookManifest(
+        doc_id="doc_q",
+        title="Q",
+        source_path="q.md",
+        chapters=[ChapterMeta(chapter_id="ch01", title="Chapter 1", spine_index=1)],
+    )
+    ledger.init_job_from_manifest(job_id, manifest)
+    blocks = [
+        IRBlock(
+            id="q01",
+            flow_id=FlowID.MAIN_STORY,
+            spine_index=1,
+            block_type=BlockType.NARRATIVE,
+            source_text="a",
+            status=BlockStatus.NEEDS_HUMAN,
+            repair_rounds=1,
+            error_flags=["numeric"],
+        ),
+        IRBlock(
+            id="q02",
+            flow_id=FlowID.MAIN_STORY,
+            spine_index=2,
+            block_type=BlockType.NARRATIVE,
+            source_text="b",
+            status=BlockStatus.BLOCKED_HUMAN,
+            repair_rounds=2,
+            error_flags=["numeric"],
+        ),
+    ]
+    ledger.append_chapter(
+        job_id,
+        ChapterIR(
+            doc_id=manifest.doc_id,
+            chapter_id="ch01",
+            title="Chapter 1",
+            spine_index=1,
+            blocks=blocks,
+        ),
+    )
+    for b in blocks:
+        ledger.save_checkpoint(
+            block_id=b.id, status=b.status, repair_rounds=b.repair_rounds, error_flags=b.error_flags
+        )
+    report = build_quality_report(
+        ledger=ledger, job_id=job_id, manifest=manifest, output_path=tmp_path / "o.pdf"
+    )
+    assert report.repair_breakdown.round_1_repaired_count == 0
+    assert report.repair_breakdown.round_2_repaired_count == 0
+
+
 def test_quality_report_markdown_companion_is_opt_in(tmp_path: Path) -> None:
     """The KDP Markdown audit must not be written unless explicitly asked for.
 
@@ -251,13 +306,16 @@ def test_render_coverage_and_route_honesty(tmp_path: Path) -> None:
         output_path=tmp_path / "o.pdf",
     )
     # Pipeline completed everything; one block is fail-closed (source left
-    # visible), which is now reported on its own dimension rather than by
-    # shrinking render_coverage.
+    # visible). It keeps MTQE_PASSED, so it must be removed from the *rendered*
+    # count or rendered+fail_closed would exceed the total. Its own
+    # dimension still carries the fail-closed family.
     assert report.summary.pass_rate == 1.0
     assert report.render_coverage.skipped_blocks == 1
     assert report.render_coverage.fail_closed_blocks == 1
     assert report.render_coverage.preserved_blocks == 0
-    assert report.render_coverage.rendered_blocks == 2
+    assert report.render_coverage.rendered_blocks == 1
+    assert report.render_coverage.render_coverage == 0.5
+    assert report.render_coverage.rendered_blocks + report.render_coverage.fail_closed_blocks == 2
     assert report.render_coverage.skip_families == {"unmatched": 1}
     assert report.route is not None
     assert report.route.mode == "long"
@@ -391,7 +449,7 @@ def _minimal_report(
 
 
 def test_quality_report_carries_schema_version_and_top_level_avg_qe(tmp_path: Path) -> None:
-    """2026-09-22 review: the report had no schema_version and hid avg_qe
+    """The report had no schema_version and hid avg_qe
     under score_metrics, so consumers sniffed keys and had to know the nested
     path for the one number they always read."""
     import json
@@ -468,8 +526,8 @@ def test_kdp_metric_table_survives_the_mtqe_note(tmp_path: Path) -> None:
     CommonMark lazy continuation folded every row after the MTQE-semantics quote
     into the quote itself, so the GFM table extension never saw them: the
     delivered KDP audit rendered Bottom-15%, Failed Segments, the HITL queue,
-    placeholder retention, terminology and the cost line as prose (2026-09
-    review). The metrics table is the part a human reviewer reads.
+    placeholder retention, terminology and the cost line as prose. The metrics
+    table is the part a human reviewer reads.
     """
     from ubt.core.engine.reporter import render_kdp_audit_markdown
 

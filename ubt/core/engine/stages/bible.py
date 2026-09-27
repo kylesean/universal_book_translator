@@ -46,6 +46,23 @@ def _glossary_fingerprint(glossary_path: Path | str | None) -> str:
         return f"unreadable:{path}"
 
 
+def _split_bible_entries(
+    entries: list[BibleEntry],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Split bible entries into (glossary, abbreviation-channel) dicts.
+
+    Translated entries feed the enforced term glossary. Untranslated *terms* feed
+    the abbreviation channel, whose prompt says "keep the abbreviation
+    unchanged". Person and place entries are excluded: a name whose backfill
+    failed must not be rendered as an unchanged abbreviation.
+    """
+    glossary = [e.model_dump() for e in entries if e.translation]
+    abbreviations = [
+        e.model_dump() for e in entries if not e.translation and e.kind not in ("person", "place")
+    ]
+    return glossary, abbreviations
+
+
 async def run_bible_stage(
     ctx: StageContext,
 ) -> AsyncIterator[TranslationProgressEvent]:
@@ -259,8 +276,7 @@ async def run_bible_stage(
         language=target_lang,
         glossary=merged_entries,
     )
-    glossary_dicts = [e.model_dump() for e in bible.glossary if e.translation]
-    abbreviation_entries = [e.model_dump() for e in bible.glossary if not e.translation]
+    glossary_dicts, abbreviation_entries = _split_bible_entries(bible.glossary)
 
     await asyncio.to_thread(
         ledger.set_job_metadata_value,

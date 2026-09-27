@@ -418,3 +418,59 @@ async def test_flush_all_synchronizes_with_in_flight_background_save(tmp_path: P
     assert blocks["b_002"].target_text == "译文2"
     await flusher.close()
     ledger.close()
+
+
+@pytest.mark.fast
+@pytest.mark.asyncio
+async def test_older_retry_never_overwrites_a_newer_flush_all_value(tmp_path: Path) -> None:
+    """A failed older batch must land *before* flush_all's newer value.
+
+    The worker held an older batch while ``flush_all`` drained a newer one; on
+    failure the older batch was requeued and retried after the newer save had
+    landed, overwriting it. Draining under the save lock keeps the order.
+    """
+    ledger = SQLiteJobLedger(tmp_path / "ledger.sqlite")
+    seed_job(ledger, "job_order", _make_test_doc(), target_lang="zh")
+    original_save = ledger.save_checkpoints_batch
+
+    in_save = asyncio.Event()
+    release_save = asyncio.Event()
+    calls = 0
+
+    def fail_first_save(updates: list[dict[str, Any]], **kwargs: Any) -> int:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            in_save.set()
+            start_t = time.time()
+            while not release_save.is_set() and time.time() - start_t < 1.0:
+                time.sleep(0.01)
+            raise RuntimeError("simulated first-save failure")
+        return original_save(updates, **kwargs)
+
+    ledger.__dict__["save_checkpoints_batch"] = fail_first_save
+    flusher = CheckpointBatchFlusher(ledger, flush_interval=0.01, max_batch_size=1)
+
+    # Older value for b_001: the worker pops it and is inside the failing save.
+    await flusher.enqueue(
+        {"block_id": "b_001", "target_text": "旧值", "status": BlockStatus.DRAFTED}
+    )
+    await in_save.wait()
+
+    # Newer value for the SAME block, then a mid-run flush while the older save
+    # is still in flight.
+    await flusher.enqueue(
+        {"block_id": "b_001", "target_text": "新值", "status": BlockStatus.DRAFTED}
+    )
+    flush_task = asyncio.create_task(flusher.flush_all())
+    await asyncio.sleep(0.05)
+
+    release_save.set()
+    await flush_task
+    # Give the worker time to retry the failed older batch too.
+    await asyncio.sleep(0.05)
+
+    blocks = {b.id: b for b in ledger.get_all_blocks("job_order")}
+    assert blocks["b_001"].target_text == "新值"
+    await flusher.close()
+    ledger.close()

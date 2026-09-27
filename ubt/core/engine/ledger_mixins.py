@@ -882,9 +882,16 @@ class LedgerBlocksMixin(LedgerBase):
                 tm_hit = item.get("tm_hit")
                 mqm_severity = item.get("mqm_severity")
                 mqm_spans = item.get("mqm_spans")
+                glossary_hits = item.get("glossary_hits")
 
                 status_val = status.value if isinstance(status, BlockStatus) else str(status)
 
+                # A *non-terminal* write must not resurrect a row
+                # already in a terminal state. A terminal -> terminal re-save (PE
+                # import, export) is legitimate and must still apply. Unreachable
+                # under the current stage order; the guard is belt-and-suspenders
+                # against a late duplicate write.
+                terminal_values = sorted(s.value for s in TERMINAL_STATUSES)
                 query = """
                     UPDATE blocks
                     SET status = ?,
@@ -896,11 +903,10 @@ class LedgerBlocksMixin(LedgerBase):
                         tm_hit = COALESCE(?, tm_hit),
                         mqm_severity = COALESCE(?, mqm_severity),
                         mqm_spans_json = COALESCE(?, mqm_spans_json),
+                        glossary_hits_json = COALESCE(?, glossary_hits_json),
                         updated_at = CURRENT_TIMESTAMP
                     WHERE block_id = ?
                 """
-                if scope is not None:
-                    query += " AND job_id = ?"
                 params: list[Any] = [
                     status_val,
                     target_text,
@@ -913,9 +919,17 @@ class LedgerBlocksMixin(LedgerBase):
                     (1 if tm_hit else 0) if tm_hit is not None else None,
                     mqm_severity,
                     json.dumps(mqm_spans, ensure_ascii=False) if mqm_spans is not None else None,
+                    json.dumps(glossary_hits, ensure_ascii=False)
+                    if glossary_hits is not None
+                    else None,
                     block_id,
                 ]
+                if status_val not in terminal_values:
+                    terminal_placeholders = ",".join("?" * len(terminal_values))
+                    query += f" AND status NOT IN ({terminal_placeholders})"
+                    params.extend(terminal_values)
                 if scope is not None:
+                    query += " AND job_id = ?"
                     params.append(scope)
                 cursor.execute(query, params)
                 updated += cursor.rowcount
@@ -1379,6 +1393,27 @@ class LedgerBatchMixin(LedgerBase):
                 LIMIT 1
                 """,
                 (idempotency_key, *sorted(self.RESUMABLE_BATCH_STATUSES)),
+            ).fetchone()
+            return str(row["batch_id"]) if row else None
+
+    def find_live_batch_for_job(self, job_id: str, *, exclude_key: str) -> str | None:
+        """Return the batch_id of another unfinished batch for ``job_id``.
+
+        A restart whose payload changed (a glossary edit, a new block set) gets a
+        fresh idempotency key, so ``reserve_batch_job`` creates a *new* provider
+        batch while the old one keeps billing and is never cancelled.
+        The router uses this to abandon the superseded batch first.
+        """
+        placeholders = ",".join("?" * len(self.RESUMABLE_BATCH_STATUSES))
+        with self._get_conn() as conn:
+            row = conn.execute(
+                f"""
+                SELECT batch_id FROM batch_jobs
+                WHERE job_id = ? AND idempotency_key != ? AND status IN ({placeholders})
+                ORDER BY created_at ASC
+                LIMIT 1
+                """,
+                (job_id, exclude_key, *sorted(self.RESUMABLE_BATCH_STATUSES)),
             ).fetchone()
             return str(row["batch_id"]) if row else None
 

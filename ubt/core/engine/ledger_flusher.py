@@ -56,6 +56,11 @@ class CheckpointBatchFlusher:
         self._failures = 0
         self._retry_base_delay = 0.02
         self._save_lock = asyncio.Lock()
+        #: Set by ``enqueue``/``close`` to unpark an idle worker. The worker
+        #: waits on it WITHOUT holding ``_save_lock``, then drains + saves under
+        #: the lock; a blocking ``queue.get()`` would hold a popped batch
+        #: outside the lock and let ``flush_all`` commit newer items first.
+        self._wake = asyncio.Event()
 
     def start(self) -> None:
         """Start the background flusher task if not already running.
@@ -95,33 +100,38 @@ class CheckpointBatchFlusher:
             return
         self.start()
         await self._queue.put(update)
+        self._wake.set()
 
     async def _save(self, batch: list[dict[str, Any]]) -> bool:
+        """Persist *batch* under the save lock (see :meth:`_save_locked`)."""
+        async with self._save_lock:
+            return await self._save_locked(batch)
+
+    async def _save_locked(self, batch: list[dict[str, Any]]) -> bool:
         """Persist *batch*; on failure retain it for the next retry window.
 
-        Returns True when the batch landed. ``asyncio.CancelledError`` is *not*
-        caught here — it passes through so the worker's cancel handler can
-        re-queue the batch (a cancelled ``to_thread`` that had not started
-        would otherwise drop it).
+        Caller must hold ``_save_lock``. Returns True when the batch landed.
+        ``asyncio.CancelledError`` is *not* caught here — it passes through so
+        the worker's cancel handler can re-queue the batch (a cancelled
+        ``to_thread`` that had not started would otherwise drop it).
         """
         if not batch:
             return True
-        async with self._save_lock:
-            try:
-                await asyncio.to_thread(self.ledger.save_checkpoints_batch, batch)
-            except Exception as exc:
-                self._failures += 1
-                logger.error(
-                    "Failed to flush %d checkpoint(s) to ledger (consecutive failure %d/%d): %s",
-                    len(batch),
-                    self._failures,
-                    _MAX_CONSECUTIVE_FAILURES,
-                    exc,
-                )
-                self._retry_batches.insert(0, batch)
-                return False
-            self._failures = 0
-            return True
+        try:
+            await asyncio.to_thread(self.ledger.save_checkpoints_batch, batch)
+        except Exception as exc:
+            self._failures += 1
+            logger.error(
+                "Failed to flush %d checkpoint(s) to ledger (consecutive failure %d/%d): %s",
+                len(batch),
+                self._failures,
+                _MAX_CONSECUTIVE_FAILURES,
+                exc,
+            )
+            self._retry_batches.insert(0, batch)
+            return False
+        self._failures = 0
+        return True
 
     async def _run_flusher(self) -> None:
         """Continuously collect and flush queued updates to SQLite."""
@@ -129,43 +139,29 @@ class CheckpointBatchFlusher:
         try:
             while not self._closed or not self._queue.empty() or self._retry_batches:
                 batch = []
-                if self._retry_batches:
-                    # Preserve per-block checkpoint order: an older failed
-                    # batch must land before updates that arrived while it was
-                    # being retried.
-                    batch = self._retry_batches.pop(0)
-                else:
-                    try:
-                        item = await asyncio.wait_for(
-                            self._queue.get(), timeout=self.flush_interval
-                        )
-                        self._queue.task_done()
-                        if isinstance(item, _Wake):
-                            # close() is waiting on this task; the loop
-                            # condition below is what actually ends it.
-                            continue
-                        batch.append(item)
-                        while len(batch) < self.max_batch_size:
-                            try:
-                                extra = self._queue.get_nowait()
-                            except asyncio.QueueEmpty:
-                                break
-                            self._queue.task_done()
-                            if not isinstance(extra, _Wake):
-                                batch.append(extra)
-                    except TimeoutError:
-                        pass
-
-                if batch:
-                    await self._save(batch)
-                    batch = []
-                    if self._failures >= _MAX_CONSECUTIVE_FAILURES:
-                        raise RuntimeError(
-                            f"Ledger checkpoint flush failed {self._failures} times in a row; "
-                            "abandoning batched writes"
-                        ) from None
-                    if self._failures > 0:
-                        await asyncio.sleep(self._retry_base_delay * (2 ** (self._failures - 1)))
+                # Wait for work WITHOUT the lock, then drain + save atomically
+                # under it. Holding the lock across the whole drain+save is what
+                # stops ``flush_all`` from committing a newer queue item that an
+                # older retried batch would then overwrite; it also keeps
+                # the two save paths from ever running concurrently.
+                if self._queue.empty() and not self._retry_batches:
+                    with contextlib.suppress(TimeoutError):
+                        await asyncio.wait_for(self._wake.wait(), timeout=self.flush_interval)
+                    self._wake.clear()
+                async with self._save_lock:
+                    batch = self._drain_nowait(limit=self.max_batch_size)
+                    if batch:
+                        await self._save_locked(batch)
+                # The batch was saved, or requeued inside ``_save_locked``. Only
+                # a cancellation *during* the save leaves it unaccounted for.
+                batch = []
+                if self._failures >= _MAX_CONSECUTIVE_FAILURES:
+                    raise RuntimeError(
+                        f"Ledger checkpoint flush failed {self._failures} times in a row; "
+                        "abandoning batched writes"
+                    ) from None
+                if self._failures > 0:
+                    await asyncio.sleep(self._retry_base_delay * (2 ** (self._failures - 1)))
         except asyncio.CancelledError:
             # External cancellation (job cancel) between "dequeue" and "save
             # started": hand the batch back so close()'s final drain persists
@@ -174,11 +170,16 @@ class CheckpointBatchFlusher:
                 self._retry_batches.insert(0, batch)
             raise
 
-    def _drain_nowait(self) -> list[dict[str, Any]]:
-        """Pop retries and queued items, dropping wake sentinels."""
+    def _drain_nowait(self, limit: int | None = None) -> list[dict[str, Any]]:
+        """Pop retries and queued items, dropping wake sentinels.
+
+        ``limit`` caps how many *queued* items are pulled (retry batches are
+        always taken whole, so their order is preserved); ``None`` drains
+        everything.
+        """
         items: list[dict[str, Any]] = [item for batch in self._retry_batches for item in batch]
         self._retry_batches.clear()
-        while True:
+        while limit is None or len(items) < limit:
             try:
                 item = self._queue.get_nowait()
             except asyncio.QueueEmpty:
@@ -186,19 +187,20 @@ class CheckpointBatchFlusher:
             self._queue.task_done()
             if not isinstance(item, _Wake):
                 items.append(item)
+        return items
 
     async def flush_all(self) -> None:
         """Drain and commit all currently enqueued items immediately.
 
         A failure retains the batch for the background worker (which owns the
-        retry budget), so this mid-run checkpoint never aborts the stage.
+        retry budget), so this mid-run checkpoint never aborts the stage. The
+        drain runs under ``_save_lock`` so the worker cannot requeue an older
+        failed batch on top of this one.
         """
-        batch = self._drain_nowait()
-        if batch:
-            await self._save(batch)
-        else:
-            async with self._save_lock:
-                pass
+        async with self._save_lock:
+            batch = self._drain_nowait()
+            if batch:
+                await self._save_locked(batch)
 
     async def close(self) -> None:
         """Stop the background worker after all pending checkpoints landed.
@@ -214,6 +216,7 @@ class CheckpointBatchFlusher:
         task_exc: BaseException | None = None
         if task is not None:
             self._queue.put_nowait(_WAKE)
+            self._wake.set()
             try:
                 await asyncio.shield(task)
             except asyncio.CancelledError:

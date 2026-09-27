@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import math
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -92,6 +91,24 @@ class RepairLoop:
         """
         return self.rerank_k > 1 and self.qe_runner.is_calibrated()
 
+    def _adoptable(self, new_score: float, old_score: float) -> bool:
+        """Whether a repair candidate may replace the draft.
+
+        A calibrated runner ranks quality continuously, so ``>=`` is safe. A
+        non-calibrated one (heuristic) emits discrete bands, so the old
+        ``new_score >= threshold`` clause adopted a candidate that scored
+        *worse* than the draft whenever it still cleared the pass line — the
+        "repair made it worse" path. For it, require strict improvement,
+        or a genuine crossing of the pass line from below. Candidate soundness
+        is already enforced at collection (``_structural_check`` plus the
+        numeric/glossary validators), so this only tightens the comparison.
+        """
+        if self.qe_runner.is_calibrated():
+            return new_score >= old_score or new_score >= self.qe_threshold
+        return new_score > old_score or (
+            new_score >= self.qe_threshold and old_score < self.qe_threshold
+        )
+
     def select_repair_candidates(self, blocks: list[IRBlock]) -> list[IRBlock]:
         """Select blocks eligible for repair, capped strictly to bottom 15% and defect flags."""
         eligible: list[IRBlock] = []
@@ -116,19 +133,17 @@ class RepairLoop:
                 c.status = BlockStatus.REPAIR_PENDING
             return unscored_candidates
 
-        scored.sort(key=lambda x: x.mtqe_score if x.mtqe_score is not None else 0.0)
-        cutoff_count = max(1, math.ceil(len(scored) * self.bottom_percentile))
-        lowest_ids = {b.id for b in scored[:cutoff_count]}
-
         candidates: list[IRBlock] = []
         for b in eligible:
             score = b.mtqe_score or 0.0
-            # Condition: low score within bottom percentile or below threshold, or severe error flags
-            is_low_quality = (b.id in lowest_ids and score < self.qe_threshold) or (
-                score < self.qe_threshold * 0.8
-            )
-            has_defects = bool(b.error_flags)
-            if is_low_quality or has_defects:
+            # A block is repaired when it carries a defect flag (the quality gate
+            # only flags what FastPass could not auto-pass) or its score is
+            # clearly below the pass line. The old bottom-percentile cap was dead
+            # was dead: every REPAIR_PENDING block already carries a flag, so
+            # ``has_defects`` was always true and ``lowest_ids`` never changed the
+            # selected set. ``bottom_percentile`` stays a constructor knob (the
+            # assess fan-out reads the config) but no longer selects here.
+            if b.error_flags or score < self.qe_threshold * 0.8:
                 b.status = BlockStatus.REPAIR_PENDING
                 candidates.append(b)
 
@@ -357,9 +372,7 @@ class RepairLoop:
                 t1_chosen_text, _, t1_chosen_flags = valid_tier1[0]
                 t1_score = await self.qe_runner.score(block.source_text, t1_chosen_text)
 
-            t1_passed = (t1_score is not None) and (
-                t1_score >= self.qe_threshold or t1_score >= old_score
-            )
+            t1_passed = (t1_score is not None) and self._adoptable(t1_score, old_score)
 
             if t1_passed or not valid_tier2:
                 chosen_text, _chosen_flags, new_score = t1_chosen_text, t1_chosen_flags, t1_score
@@ -411,7 +424,7 @@ class RepairLoop:
                 t2_chosen_text, _, t2_chosen_flags = valid_tier2[0]
                 t2_score = await self.qe_runner.score(block.source_text, t2_chosen_text)
 
-            if t2_score is not None and (t2_score >= self.qe_threshold or t2_score > old_score):
+            if t2_score is not None and self._adoptable(t2_score, old_score):
                 chosen_text, _chosen_flags, new_score = t2_chosen_text, t2_chosen_flags, t2_score
             else:
                 chosen_text = draft_text
@@ -439,7 +452,7 @@ class RepairLoop:
             # leaving a block whose defect was never re-checked to read as clean
             # and be re-accepted by the next resume's FastPass.
             cleaned = new_score > old_score or new_score >= self.qe_threshold
-            if new_score >= old_score or new_score >= self.qe_threshold:
+            if self._adoptable(new_score, old_score):
                 block.target_text = chosen_text
                 block.mtqe_score = new_score
                 if cleaned:

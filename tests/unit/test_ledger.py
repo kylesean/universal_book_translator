@@ -156,7 +156,7 @@ def test_batch_checkpoint_and_reassemble(tmp_path: Path, sample_doc_ir: SeedDoc)
 def test_save_checkpoints_batch_clears_verdicts_in_the_same_call(
     tmp_path: Path, sample_doc_ir: SeedDoc
 ) -> None:
-    """Human PE import needs the new text and the verdict reset together (X17).
+    """Human PE import needs the new text and the verdict reset together.
 
     ``save_checkpoints_batch`` treats ``None`` as "leave alone", so it cannot
     clear a stale ``mtqe_score``/``mqm_severity``. Two separate calls left a
@@ -345,7 +345,7 @@ def test_resume_keeps_the_paid_draft_of_an_untranslated_sweep(
 
     Resume used to treat that marker like a drafting failure and route the row
     through the PENDING reset, which NULLs ``target_text`` and re-bills the same
-    draft on the next run (review 2026-09 P0-2). The row carries a paid draft
+    draft on the next run. The row carries a paid draft
     and no drafting marker, so it must go back to repair with its text intact.
     """
     ledger = SQLiteJobLedger(tmp_path / "ledger.db")
@@ -517,8 +517,7 @@ def test_high_throughput_batch_writes(tmp_path: Path) -> None:
     This used to assert ``update_tps > 5000``, a wall-clock measurement of the
     machine it ran on: it failed on a loaded CI runner and passed on a fast one
     even if the batch path had gone quadratic. The throughput is still printed
-    for a human reading the log; the assertion below is the part that tests code
-    (review-2 X47).
+    for a human reading the log; the assertion below is the part that tests code.
     """
     db_path = tmp_path / "perf_ledger.db"
     ledger = SQLiteJobLedger(db_path)
@@ -646,7 +645,7 @@ def test_schema_migration_versioning_and_contract_columns(tmp_path: Path) -> Non
 
 
 def test_v2_to_v3_migration_adds_tm_hit_and_defaults_existing_rows(tmp_path: Path) -> None:
-    """The v2→v3 ``ALTER TABLE`` must actually land (review-2 X46).
+    """The v2→v3 ``ALTER TABLE`` must actually land.
 
     The versioning test used to admit it could not simulate a legacy database
     and then assert ``SELECT tm_hit FROM blocks`` on an *empty* table — true no
@@ -1249,7 +1248,7 @@ def test_ledger_resolves_doc_id_alias(tmp_path: Path) -> None:
 
 
 def test_set_job_metadata_value_raises_on_unknown_job(tmp_path: Path) -> None:
-    """P1-12: a metadata write for a job with no job_meta row must surface,
+    """A metadata write for a job with no job_meta row must surface,
     not silently return. The write side of ``source_fingerprint`` depends on
     this: a swallowed failure leaves the fingerprint absent, which the next
     resume reads as "ingest never finished" and clears every block.
@@ -1527,7 +1526,7 @@ def test_metadata_write_for_unknown_job_leaves_no_transaction_open(tmp_path: Pat
     ledger = SQLiteJobLedger(tmp_path / "ghost.sqlite")
     # Pre-fix: the second call raised "cannot start a transaction within a
     # transaction" and a second connection saw "database is locked". The
-    # rollback-on-missing-row remains; the write now *also* surfaces (P1-12: a
+    # rollback-on-missing-row remains; the write now *also* surfaces (a
     # silently-swallowed source_fingerprint write let the next resume clear the
     # whole book), so we expect LedgerError while still asserting no dangling
     # transaction/lock is left behind.
@@ -1695,3 +1694,52 @@ def test_unscoped_write_on_a_multi_job_file_is_refused(
 
     with SQLiteJobLedger(db_path) as reopened, pytest.raises(LedgerError):
         reopened.save_checkpoint("ch01#b001", BlockStatus.DRAFTED, draft_text="x")
+
+
+def test_find_live_batch_for_job_excludes_the_current_key(tmp_path: Path) -> None:
+    """A changed payload (new key) must find the job's superseded live batch."""
+    ledger = SQLiteJobLedger(tmp_path / "batch.sqlite")
+    try:
+        ledger.register_batch_job("batch-old", "job1", "key-old", status="in_progress")
+        ledger.register_batch_job("batch-new", "job1", "key-new", status="in_progress")
+        ledger.register_batch_job("batch-other", "job2", "key-other", status="in_progress")
+
+        assert ledger.find_live_batch_for_job("job1", exclude_key="key-new") == "batch-old"
+        assert ledger.find_live_batch_for_job("job1", exclude_key="key-old") == "batch-new"
+        assert ledger.find_live_batch_for_job("job3", exclude_key="x") is None
+        # A consumed (terminal) batch is no longer live.
+        ledger.update_batch_job_status("batch-old", "consumed")
+        assert ledger.find_live_batch_for_job("job1", exclude_key="key-new") is None
+    finally:
+        ledger.close()
+
+
+def test_non_terminal_write_does_not_resurrect_a_terminal_block(
+    tmp_path: Path, sample_doc_ir: SeedDoc
+) -> None:
+    """A late non-terminal write must not resurrect a finalized block."""
+    ledger = SQLiteJobLedger(tmp_path / "resurrect.db")
+    job_id = "job_res"
+    try:
+        seed_job(ledger, job_id, sample_doc_ir, target_lang="zh")
+        ledger.save_checkpoint(
+            block_id="ch01#b001", status=BlockStatus.REPAIRED, target_text="done"
+        )
+        # A non-terminal write is refused...
+        updated = ledger.save_checkpoints_batch(
+            [{"block_id": "ch01#b001", "status": BlockStatus.DRAFTED, "target_text": "resurrected"}]
+        )
+        block = next(b for b in ledger.get_all_blocks(job_id) if b.id == "ch01#b001")
+        assert updated == 0
+        assert block.status is BlockStatus.REPAIRED
+        assert block.target_text == "done"
+        # ...but a terminal -> terminal re-save still applies.
+        updated = ledger.save_checkpoints_batch(
+            [{"block_id": "ch01#b001", "status": BlockStatus.REPAIRED, "target_text": "re-saved"}]
+        )
+        assert updated == 1
+        assert next(
+            b for b in ledger.get_all_blocks(job_id) if b.id == "ch01#b001"
+        ).target_text == ("re-saved")
+    finally:
+        ledger.close()

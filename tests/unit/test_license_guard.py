@@ -216,17 +216,17 @@ def test_route_b_heavy_imaging_stays_out_of_base() -> None:
 # grow; to raise a cap you must consciously edit it, which forces the debt
 # conversation. Shrinking the file is always welcome — lower the cap then.
 _SIZE_RATCHETS: dict[str, int] = {
-    # 2026-09-21: 759→763 for the P1-1 hard-cancel fix (CancelledError must
-    # write a terminal job status). Concurrent chapter-streaming work in this
-    # tree grew it further to 786; bundled per user request. The review's
-    # P1-B (split PipelineOrchestrator.run) should bring this back down.
-    # 2026-09-21 (P1-8/P1-21): net 786→770 — per-run usage attribution added a
+    # 2026-09-21: 759→763 for the hard-cancel fix (CancelledError must write a
+    # terminal job status). Concurrent chapter-streaming work in this tree grew
+    # it further to 786; bundled per user request. Splitting
+    # PipelineOrchestrator.run should bring this back down.
+    # 2026-09-21: net 786→770 — per-run usage attribution added a
     # sink-or-snapshot branch, and lifting the billing/budget arithmetic into
     # ubt/core/engine/usage.py took more out than it cost.
-    # 2026-09-21 (B3): 770→771 — AdapterRuntimeConfig gained the required
+    # 2026-09-21: 770→771 — AdapterRuntimeConfig gained the required
     # allow_page_upload field so the page-egress gate has one source of truth
     # (the resolved config) instead of a second os.environ read in the parser.
-    # 2026-09-21 (review-2 X1): 771→784 — billing now tracks the run usage it
+    # 2026-09-21: 771→784 — billing now tracks the run usage it
     # has already written, because ``_run_usage()`` is cumulative and folding
     # the whole of it into an absolute ledger write on every progress event
     # double-counted the job's spend (and tripped UBT_BUDGET_USD on spend the
@@ -235,36 +235,38 @@ _SIZE_RATCHETS: dict[str, int] = {
     # 2026-09-22 (budget fail-closed): 784→814 — the run() preflight refuses
     # capped runs whose models have no price entry (the cap was silently
     # inert otherwise), with the billing arithmetic itself living in
-    # usage.py. L2's run()/export decomposition is slated to pay this debt
+    # usage.py. The run()/export decomposition is slated to pay this debt
     # back several hundred lines.
     # 2026-09-22 (billing lock): 814→821 — a 5-line critical section around
-    # progress-event billing; repaid together with the same L2 debt.
+    # progress-event billing; repaid together with the same debt.
     # 2026-09-22 (budget preflight): 821→839 — the preflight now enumerates
     # every billable model (fallback chain + the wrapped TieredQERunner's judge)
     # instead of draft/repair only, with the comment that says why. Repaid with
-    # the same P1-B split.
+    # the same run() split.
     # 2026-09-22 (OCR billing): 839→853 — the pre-flight now enumerates the OCR
     # channel's own model (it bills through a separate httpx client, so an
     # unpriced pick made ``estimate_cost_usd`` return None and
     # ``budget_violation`` read that as "not exceeded" — the cap was inert for a
     # channel that spends real money), and ``AdapterRuntimeConfig`` grew the
     # matching ``ocr_model`` field so the driver bills the model the quote
-    # priced. Repaid with the same P1-B split. QE runner close lifecycle (Batch G)
-    # added clean runner teardown. 2026-09 review batch: shielded cancel-cleanup,
+    # priced. Repaid with the same run() split. QE runner close lifecycle
+    # added clean runner teardown. 2026-09: shielded cancel-cleanup,
     # UBTError logged without traceback, artifact-tree permission scan — repaid
     # in the same batch by merging the three BaseException abort handlers, so the
     # cap stays at 860 (a value that did not move needs no approval).
     # 2026-09-26: 860→869 — the initial commit shipped at 862 (already over the
     # pre-existing cap); `ruff format` and the owner-only-permission warning fix
-    # added the rest. CI was red on both ratchets before this review. Recorded
-    # consciously rather than trimming comments to satisfy a counter; the P1-B
+    # added the rest. CI was already red on both ratchets. Recorded
+    # consciously rather than trimming comments to satisfy a counter; the
     # run() split still owes the real repayment.
     # 2026-09-26 (usage persist): 869→885 — the run-usage persist change grew the
     # file again; recorded here so the cap tracks the shipped size.
     # 2026-09-27 (job-id identity): 885→927 — ``derive_job_id`` gained the genre
     # profile + non-default engine-knob signature (and its helper), so a resume
     # under a different --profile/--preset cannot reuse the wrong ledger.
-    "ubt/core/engine/pipeline.py": 927,
+    # 2026-09-27: 927→933 — the budget path merges the router's
+    # fallback-endpoint attribution into ``endpoint_map``.
+    "ubt/core/engine/pipeline.py": 933,
     "ubt/adapters/pdf/typst_reconstructor.py": 2336,
 }
 
@@ -279,7 +281,7 @@ _FUNCTION_RATCHETS: dict[str, tuple[str, int]] = {
     # tracks the shipped size.
     # _emit_block is the ONE shared emit core with pinned regression tests; a
     # 23-line extraction is deliberately deferred rather than done blind inside
-    # a broad review fix. Splitting run() (P1-B) remains the tracked repayment.
+    # a broad fix. Splitting run() remains the tracked repayment.
     "ubt/core/engine/pipeline.py": ("PipelineOrchestrator.run", 392),
     "ubt/adapters/pdf/typst_reconstructor.py": ("TypstReconstructor._emit_block", 318),
 }
