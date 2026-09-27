@@ -1,34 +1,13 @@
-# Universal Book Translator (UBT) - provider registry template.
-#
-# Copy to `ubt.toml` in the working directory (or ~/.config/ubt/config.toml, or
-# ~/.ubt/config.toml) and edit. Precedence, highest first:
-#
-#   CLI flag > process env (UBT_*) > [providers.<name>] > [defaults] > field default
-#
-# A provider bundles where and how to call an LLM — endpoint, wire protocol and
-# default models — and names the variable holding its credential (api_key_env).
-#
-# NEVER put a secret in this file: a key committed to a version-controlled TOML
-# is a leaked key, and a block carrying one is rejected. The secret goes in the
-# environment: UBT_LLM_API_KEY (generic, outranks a provider's api_key_env), or
-# the variable named by api_key_env.
+# UBT provider registry template. Copy to ubt.toml.
+# Precedence: CLI flag > env (UBT_*) > [providers.<name>] > [defaults] > field default.
+# Never put a secret here: a block carrying one is rejected. Put the variable name
+# in api_key_env and the key in the environment (UBT_LLM_API_KEY outranks it).
 
-# ---- Built-in providers ------------------------------------------------------
-# openai / anthropic / gemini / deepseek / opencode need no block at all:
-#
+# Built-ins need no block: openai / anthropic / gemini / deepseek / opencode.
 #   export UBT_PROVIDER=anthropic
 #   export UBT_LLM_API_KEY=sk-ant-...
-#
-# Add a block only to override a built-in default (e.g. a newer model tier):
-#
-# [providers.anthropic]
-# draft_model = "claude-3-7-sonnet"
-# repair_model = "claude-3-7-sonnet"
 
-# ---- A custom OpenAI-compatible endpoint ------------------------------------
-# base_url, api_mode and the models are the provider's own; api_key_env names
-# the variable the credential is read from (it is NOT a UBTConfig field).
-#
+# A custom OpenAI-compatible endpoint:
 # [providers.my-gateway]
 # base_url = "https://llm.internal.example/v1"
 # api_mode = "chat"            # chat | responses | anthropic
@@ -37,10 +16,7 @@
 # repair_model = "qwen3-32b"
 # api_timeout = 300.0
 
-# ---- Shared, non-secret settings under every provider -----------------------
-# [defaults] applies to EVERY run, including a bare UBTConfig.from_env(), so put
-# only settings you truly want everywhere. Anything a provider sets overrides it.
-#
+# [defaults] applies to every run, including a bare UBTConfig.from_env().
 # [defaults]
 # api_timeout = 180.0
 # draft_reasoning_effort = "low"
