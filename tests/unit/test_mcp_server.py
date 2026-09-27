@@ -647,3 +647,66 @@ async def test_mcp_tools_raise_tool_error_on_anticipated_failure(
 
     with pytest.raises(ToolError, match="outside the allowed directories"):
         await ubt_inspect_book("/tmp/outside_sandbox_never_allowed.pdf")
+
+
+@pytest.mark.fast
+async def test_ubt_cancel_job_in_memory(tmp_path: Path) -> None:
+    """Cancelling a running job in memory marks it CANCELLED and cancels its asyncio task."""
+    import asyncio
+
+    from ubt.api.models import JobSubmitRequest
+    from ubt.core.engine.job_queue import JobStatus
+    from ubt.mcp.server import _MANAGER, ubt_cancel_job
+
+    req = JobSubmitRequest(
+        input_path=str(tmp_path / "book.md"),
+        target_lang="zh",
+        dry_run=True,
+    )
+    rec = _MANAGER.create_job(req, job_id="job_mcp_cancel_test")
+
+    async def _long_runner() -> None:
+        await asyncio.sleep(100)
+
+    rec.status = JobStatus.RUNNING
+    rec.task = asyncio.create_task(_long_runner())
+
+    try:
+        res = await ubt_cancel_job("job_mcp_cancel_test")
+        assert res["status"] == JobStatus.CANCELLED
+        assert res["job_id"] == "job_mcp_cancel_test"
+        # Yield to let event loop deliver CancelledError
+        await asyncio.sleep(0)
+        assert rec.task.cancelled() or rec.task.done()
+    finally:
+        if not rec.task.done():
+            rec.task.cancel()
+
+
+@pytest.mark.fast
+async def test_ubt_cancel_job_terminal_idempotent() -> None:
+    """Cancelling an already-completed job is a no-op returning current status."""
+    from ubt.api.models import JobSubmitRequest
+    from ubt.core.engine.job_queue import JobStatus
+    from ubt.mcp.server import _MANAGER, ubt_cancel_job
+
+    req = JobSubmitRequest(input_path="b.md", target_lang="zh")
+    rec = _MANAGER.create_job(req, job_id="job_mcp_completed")
+    rec.status = JobStatus.COMPLETED
+
+    res = await ubt_cancel_job("job_mcp_completed")
+    assert res["status"] == JobStatus.COMPLETED
+
+
+@pytest.mark.fast
+async def test_ubt_cancel_job_unknown_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Cancelling a non-existent job surfaces a ToolError."""
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    from ubt.mcp.server import ubt_cancel_job
+
+    monkeypatch.setenv("UBT_ALLOWED_DIRS", str(tmp_path))
+    with pytest.raises(ToolError, match="no such job"):
+        await ubt_cancel_job("job_unknown_cancel", db_dir=str(tmp_path))

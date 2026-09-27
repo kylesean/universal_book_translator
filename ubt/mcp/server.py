@@ -7,6 +7,8 @@ calling agent is the orchestrator):
   (long books run minutes~hours; the background asyncio task owns the run).
 - ``ubt_job_status`` — poll ledger-backed progress (memory record + SQLite
   fallback, mirroring the REST ``GET /jobs/{id}/status`` disk fallback).
+- ``ubt_cancel_job`` — cancel an in-flight translation job (memory record + SQLite
+  fallback, idempotent: terminal jobs return as-is).
 - ``ubt_inspect_book`` — manifest JSON (title/doc_id/chapters), no Rich text.
 - ``ubt_doctor`` — preflight checks (API key, writable ledger dir, deps).
 
@@ -63,7 +65,7 @@ from ubt.core.config import parse_page_ranges as parse_page_ranges
 
 # Re-exported so the ceiling the server enforces is the number the registry
 # carries (``import as`` is the explicit-reexport spelling mypy wants).
-from ubt.core.engine.job_queue import JobStatus
+from ubt.core.engine.job_queue import TERMINAL_JOB_STATUSES, JobStatus
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.progress import ProgressSnapshot
 from ubt.core.exceptions import UBTError
@@ -495,6 +497,38 @@ async def ubt_job_status(job_id: str, db_dir: str | None = None) -> dict[str, An
         if status == JobStatus.FAILED:
             disk["error"] = "job terminated with status=failed before the restart"
         return disk
+    finally:
+        ledger.close()
+
+
+@mcp.tool()
+@_mcp_error_boundary
+async def ubt_cancel_job(job_id: str, db_dir: str | None = None) -> dict[str, Any]:
+    """Cancel an in-flight translation job. Idempotent: terminal jobs return their status as-is."""
+    jid = _check_job_id(job_id)
+    rec = _MANAGER.get_job(jid)
+    if rec is not None:
+        if rec.status not in (JobStatus.SUBMITTED, JobStatus.RUNNING):
+            return {"job_id": jid, "status": rec.status}
+        rec.status = JobStatus.CANCELLED
+        task = rec.task
+        if task is not None and not task.done():
+            task.cancel()
+        return {"job_id": jid, "status": JobStatus.CANCELLED}
+
+    base = _safe_output_path(str(db_dir)) if db_dir else UBTConfig.from_env().db_dir
+    db_path = base / f"{jid}.sqlite"
+    if not db_path.exists():
+        raise ToolError(f"no such job: {jid}")
+    ledger = SQLiteJobLedger(db_path)
+    try:
+        current_status = await asyncio.to_thread(ledger.get_job_status, jid)
+        if current_status is None:
+            raise ToolError(f"no such job: {jid}")
+        if current_status not in TERMINAL_JOB_STATUSES:
+            await asyncio.to_thread(ledger.finalize_job, jid, status=JobStatus.CANCELLED)
+            return {"job_id": jid, "status": JobStatus.CANCELLED}
+        return {"job_id": jid, "status": current_status}
     finally:
         ledger.close()
 
