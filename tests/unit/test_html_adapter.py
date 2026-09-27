@@ -207,6 +207,44 @@ async def test_html_adapter_monolingual_mode() -> None:
     assert "Source english paragraph." not in content
 
 
+async def test_html_monolingual_labels_unresolved_drafts() -> None:
+    """An unresolved draft must stay visible *and labelled* (ubt.adapters.unresolved).
+
+    Regression: HTML injected the bare machine draft exactly like an approved
+    translation, so a reader (and reviewer) could not tell it apart.
+    """
+    tmp = Path(tempfile.mkdtemp())
+    src_html = tmp / "index.html"
+    src_html.write_text(
+        "<html><body><p>Source english paragraph.</p></body></html>", encoding="utf-8"
+    )
+    manifest = BookManifest(
+        doc_id="test_html",
+        title="HTML Test",
+        source_path=str(src_html),
+        chapters=[
+            ChapterMeta(
+                chapter_id="ch001", title="Chapter 1", spine_index=1, source_file="index.html"
+            )
+        ],
+    )
+    blocks = [
+        IRBlock(
+            id="ch001#p00000",
+            spine_index=1,
+            flow_id=FlowID.MAIN_STORY,
+            source_text="Source english paragraph.",
+            target_text="未经审核的机器草稿。",
+            status=BlockStatus.NEEDS_HUMAN,
+        )
+    ]
+    out = tmp / "out.html"
+    await HTMLAdapter().render_blocks(manifest, blocks, "zh", out, bilingual_mode="monolingual")
+    content = out.read_text(encoding="utf-8")
+    assert "未经审核的机器草稿。" in content
+    assert "[UBT]" in content
+
+
 async def test_html_adapter_monolingual_keeps_multiple_paragraphs() -> None:
     """Monolingual output must split on blank lines like the bilingual branch.
 
@@ -346,3 +384,45 @@ async def test_html_ordered_list_bilingual_injection_inside_li(tmp_path: Path) -
         div = li.find("div", class_="ubt-bilingual-target")
         assert div is not None, f"Expected .ubt-bilingual-target div inside li, got: {li}"
         assert div.get_text().startswith("译：")
+
+
+async def test_html_monolingual_preserves_inline_media_and_anchors() -> None:
+    """Replacing text must not delete inline images / footnote anchors.
+
+    Regression: the monolingual branch ``clear()``-ed the leaf, so every inline
+    ``<img>``, ``<a href>`` and footnote reference vanished from the deliverable
+    (DOCX already preserved the equivalent graphics/hyperlinks).
+    """
+    tmp = Path(tempfile.mkdtemp())
+    src_html = tmp / "index.html"
+    src_html.write_text(
+        '<html><body><p>See <img src="fig.png" alt="fig"/> and '
+        '<a href="#fn1" id="ref1">[1]</a> for details.</p></body></html>',
+        encoding="utf-8",
+    )
+    manifest = BookManifest(
+        doc_id="test_html",
+        title="HTML Test",
+        source_path=str(src_html),
+        chapters=[
+            ChapterMeta(
+                chapter_id="ch001", title="Chapter 1", spine_index=1, source_file="index.html"
+            )
+        ],
+    )
+    blocks = [
+        IRBlock(
+            id="ch001#p00000",
+            spine_index=1,
+            flow_id=FlowID.MAIN_STORY,
+            source_text="See fig and note for details.",
+            target_text="详见插图与脚注。",
+        )
+    ]
+    out = tmp / "out.html"
+    await HTMLAdapter().render_blocks(manifest, blocks, "zh", out, bilingual_mode="monolingual")
+    content = out.read_text(encoding="utf-8")
+    assert "详见插图与脚注。" in content
+    assert "fig.png" in content
+    assert 'href="#fn1"' in content
+    assert 'id="ref1"' in content

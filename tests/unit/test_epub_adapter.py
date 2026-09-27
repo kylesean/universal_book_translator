@@ -1066,3 +1066,57 @@ def test_epub_bilingual_retains_source_classes() -> None:
     assert "chapter-sub" in classes
     assert "title-heavy" in classes
     assert BILINGUAL_TARGET_CLASS in classes
+
+
+def test_epub_labels_unresolved_drafts() -> None:
+    """An unresolved draft must stay visible *and labelled* (ubt.adapters.unresolved).
+
+    Regression: ``_inject_bilingual_dom`` injected the bare machine draft exactly
+    like an approved translation, so a reader/reviewer could not tell them apart.
+    """
+    from bs4 import BeautifulSoup as _BS
+
+    adapter = EPUBAdapter()
+    raw_html = (
+        b'<html xmlns="http://www.w3.org/1999/xhtml"><head></head>'
+        b"<body><p>Source english paragraph.</p></body></html>"
+    )
+    translation_map = {"ch01#p0000": "未经审核的机器草稿。"}
+    unresolved_notes = {"ch01#p0000": "[UBT] draft for review:"}
+
+    rewritten, count = adapter._inject_bilingual_dom(
+        raw_html=raw_html,
+        chapter_id="ch01",
+        translation_map=translation_map,
+        block_names={"p"},
+        unresolved_notes=unresolved_notes,
+    )
+    # The note is its own paragraph before the draft, so both are injected.
+    assert count == 2
+    soup = _BS(rewritten, "xml")
+    text = soup.get_text(" ", strip=True)
+    assert "未经审核的机器草稿。" in text
+    assert "[UBT]" in text
+
+
+def test_epub_monolingual_preserves_inline_media_and_anchors() -> None:
+    """The monolingual rewrite must keep inline images and footnote anchors."""
+    adapter = EPUBAdapter()
+    raw_html = (
+        b'<html xmlns="http://www.w3.org/1999/xhtml"><head></head><body>'
+        b'<p>See <img src="fig.png" alt="fig"/> and '
+        b'<a href="#fn1" id="ref1">[1]</a> for details.</p></body></html>'
+    )
+    rewritten, count = adapter._inject_bilingual_dom(
+        raw_html=raw_html,
+        chapter_id="ch01",
+        translation_map={"ch01#p0000": "详见插图与脚注。"},
+        block_names={"p"},
+        bilingual_mode="monolingual",
+    )
+    assert count == 1
+    out = rewritten.decode("utf-8")
+    assert "详见插图与脚注。" in out
+    assert "fig.png" in out
+    assert 'href="#fn1"' in out
+    assert 'id="ref1"' in out

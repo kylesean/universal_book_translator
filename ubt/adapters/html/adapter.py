@@ -23,8 +23,10 @@ from ubt.adapters.epub.adapter import (
     BLOCK_TAGS,
     determine_flow_id,
     is_leaf_block,
+    take_preserved_inline_children,
     wrap_nested_direct_blocks,
 )
+from ubt.adapters.unresolved import failure_note, is_unresolved
 from ubt.core.cleaners.html_sanitizer import sanitize_html_fragment, scrub_source_document
 from ubt.core.exceptions import DocumentParseError
 from ubt.core.ir.models import (
@@ -199,6 +201,17 @@ class HTMLAdapter(BaseDocumentAdapter):
                 target_text = sanitize_html_fragment(str(block.target_text))
                 if not target_text:
                     continue
+                # A block whose draft never passed the quality gates must stay
+                # *visible and labelled* in every deliverable (ubt.adapters.
+                # unresolved). EPUB/HTML used to inject the bare machine draft as
+                # if it were finished, so a reader could not tell it apart from an
+                # approved translation. The note becomes the first paragraph.
+                if is_unresolved(block.status):
+                    target_text = sanitize_html_fragment(
+                        f"{failure_note(block.status)}\n\n{block.target_text}"
+                    )
+                    if not target_text:
+                        continue
 
                 if is_monolingual:
                     # Split on blank lines like the bilingual branch: emitting the
@@ -207,6 +220,9 @@ class HTMLAdapter(BaseDocumentAdapter):
                         target_text
                     ]
                     is_internal_child = leaf.name in ("td", "th", "li")
+                    # Inline media/anchors must survive the text replacement (an
+                    # approved DOCX parallel keeps graphic runs + hyperlinks).
+                    preserved_inline = take_preserved_inline_children(leaf)
                     leaf.clear()
                     last_node: Tag = leaf
                     for i, p_text in enumerate(paras):
@@ -227,6 +243,8 @@ class HTMLAdapter(BaseDocumentAdapter):
                             else:
                                 last_node.insert_after(container)
                         last_node = container
+                    for node in preserved_inline:
+                        leaf.append(node)
                 else:
                     # Inside a table cell or list item, append a <div> *inside* the element
                     # instead of a sibling <td>/<th>/<li> — a sibling cell would double the column count

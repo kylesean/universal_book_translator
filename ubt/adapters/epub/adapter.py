@@ -17,6 +17,7 @@ from bs4 import BeautifulSoup, Tag
 from bs4.element import AttributeValueList, NavigableString
 
 from ubt.adapters.base import BILINGUAL_TARGET_CLASS, BaseDocumentAdapter
+from ubt.adapters.unresolved import failure_note, is_unresolved
 from ubt.core.cleaners.dynamic_boilerplate import (
     BoilerplateFingerprint,
     DynamicBoilerplateHarvester,
@@ -140,6 +141,31 @@ def is_leaf_block(tag: Tag, block_names: set[str]) -> bool:
     mined twice (e.g. a ``<div>`` around ``<pre>`` as both CODE and NARRATIVE).
     """
     return tag.find(list(block_names)) is None
+
+
+#: Inline children a monolingual rewrite must not lose. Replacing a leaf's text
+#: with the translation used to ``clear()`` the element, silently deleting inline
+#: images, footnote/cross-reference anchors, ``<br>`` breaks and embedded math;
+#: the delivered book then lost every figure and broke every footnote link.
+#: DOCX already preserves graphic runs and hyperlinks; these are the HTML/EPUB
+#: counterparts.
+_PRESERVED_INLINE_TAGS = frozenset(
+    {"img", "svg", "picture", "source", "video", "audio", "br", "hr", "math", "object", "a"}
+)
+
+
+def take_preserved_inline_children(leaf: Tag) -> list[Tag]:
+    """Detach and return inline children a monolingual rewrite must keep.
+
+    The nodes are detached (kept alive) so the caller can ``clear()`` the leaf
+    and re-append them after the translation.
+    """
+    preserved = [
+        c for c in leaf.children if isinstance(c, Tag) and c.name in _PRESERVED_INLINE_TAGS
+    ]
+    for node in preserved:
+        node.extract()
+    return preserved
 
 
 def wrap_nested_direct_blocks(soup: BeautifulSoup) -> None:
@@ -557,6 +583,14 @@ class EPUBAdapter(BaseDocumentAdapter):
         translation_map = {
             b.id: b.target_text for b in all_blocks if b.target_text and not b.skip_translate
         }
+        # Blocks whose draft never passed the quality gates stay labelled on the
+        # page (ubt.adapters.unresolved); EPUB used to inject the bare machine
+        # draft indistinguishably from an approved translation.
+        unresolved_notes = {
+            b.id: failure_note(b.status)
+            for b in all_blocks
+            if is_unresolved(b.status) and b.target_text and not b.skip_translate
+        }
         source_map = {b.id: b.source_text for b in all_blocks if b.source_text}
 
         if bilingual_mode is None and manifest and manifest.run:
@@ -650,6 +684,7 @@ class EPUBAdapter(BaseDocumentAdapter):
                             translation_map=translation_map,
                             block_names=block_names,
                             source_map=source_map,
+                            unresolved_notes=unresolved_notes,
                             stylesheet_href=stylesheet_href,
                             bilingual_mode=bilingual_mode,
                         )
@@ -714,6 +749,7 @@ class EPUBAdapter(BaseDocumentAdapter):
         translation_map: dict[str, str],
         block_names: set[str],
         source_map: dict[str, str] | None = None,
+        unresolved_notes: dict[str, str] | None = None,
         stylesheet_href: str | None = None,
         bilingual_mode: str | None = None,
     ) -> tuple[bytes, int]:
@@ -748,7 +784,14 @@ class EPUBAdapter(BaseDocumentAdapter):
             if not target_text:
                 continue
 
+            # Labelled unresolved draft, never mistaken for an approved
+            # translation (ubt.adapters.unresolved).
+            note = (unresolved_notes or {}).get(block_id)
+            if note:
+                target_text = f"{note}\n\n{target_text}"
+
             if is_monolingual:
+                preserved_inline = take_preserved_inline_children(leaf)
                 if "\n\n" in target_text:
                     paras = [p.strip() for p in target_text.split("\n\n") if p.strip()]
                     leaf.clear()
@@ -786,6 +829,9 @@ class EPUBAdapter(BaseDocumentAdapter):
                     for child in list(parsed_fragment.contents):
                         leaf.append(child)
                     injected_count += 1
+                # Restore the inline media/anchors the rewrite must not lose.
+                for node in preserved_inline:
+                    leaf.append(node)
                 continue
 
             # If translation contains multiple paragraphs separated by \n\n,
