@@ -673,6 +673,13 @@ _SRCSET_ATTR_NAMES = frozenset({"srcset", "imagesrcset"})
 #: in the member resolves, so a malicious source can reroute all links.
 _SOURCE_DROP_TAGS = frozenset({"base"})
 
+#: SMIL animation elements, dropped on sight. Their ``attributeName``/``values``
+#: pair retargets an arbitrary attribute of a *parent* element to a value the
+#: URL-scheme scrubber never inspects, so ``<animate attributeName="href"
+#: values="javascript:…">`` animated an already-approved ``href`` into an
+#: executable URL after the fact.
+_SMIL_ANIMATION_TAGS = frozenset({"animate", "animatemotion", "animatetransform", "set", "discard"})
+
 #: ``<link>`` rel values that load a remote resource (CSS, prefetch, icons).
 _LINK_RESOURCE_RELS = frozenset(
     {
@@ -810,7 +817,7 @@ class _SourceTagScrubber:
             if match.group(1) == "/":
                 out.append(raw_tag)
                 continue
-            if name in _SOURCE_DROP_TAGS:
+            if name in _SOURCE_DROP_TAGS or name in _SMIL_ANIMATION_TAGS:
                 # Void tag: skip the tag only, never ``_skip_element`` (which
                 # would hunt a nonexistent end tag and drop the document tail).
                 continue

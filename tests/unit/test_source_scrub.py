@@ -279,3 +279,28 @@ def test_source_unpaired_dangerous_tag_keeps_the_document_tail() -> None:
     assert "AFTER BODY" in out
     assert "<embed" not in out.lower()
     assert "payload" not in scrub_source_document("<div>a<embed>payload</embed>b</div>")
+
+
+def test_smil_animation_elements_are_dropped() -> None:
+    """SMIL retargets a parent's attribute to a scheme the URL gate never sees.
+
+    Regression: ``<animate attributeName="href" values="javascript:…">``
+    survived ``scrub_source_document`` verbatim, so a source could animate an
+    already-approved ``href`` into an executable URL after the scheme scrubber
+    had passed it.
+    """
+    src = (
+        '<svg xmlns="http://www.w3.org/2000/svg">'
+        '<a id="l" href="https://ok.example/"><text>click</text>'
+        '<animate attributeName="href" values="javascript:alert(1)" dur="0s" fill="freeze"/>'
+        "</a></svg>"
+    )
+    out = scrub_source_document(src)
+    assert "javascript:alert(1)" not in out
+    assert "<animate" not in out.lower()
+    # The approved link itself is untouched.
+    assert 'href="https://ok.example/"' in out
+    # A paired SMIL element is dropped too.
+    paired = scrub_source_document('<set to="javascript:alert(2)"></set><p>x</p>')
+    assert "javascript:alert(2)" not in paired
+    assert "<p>x</p>" in paired
