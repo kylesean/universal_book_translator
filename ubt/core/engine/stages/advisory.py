@@ -55,7 +55,7 @@ async def run_extraction_witness_stage(ctx: StageContext) -> None:
     Math-bearing fonts with no ``/ToUnicode`` make every library guess the same
     wrong thing, so cross-channel agreement *hides* the damage; this looks for it
     directly and flags the confirmed pages while the text is still cheap to
-    re-do (docs/design/PDF_SKILL_BORROWINGS.md D2').
+    re-do (docs/design/PDF_SKILL_BORROWINGS.md).
     """
     if ctx.source_pdf_path is None:
         return
@@ -88,7 +88,7 @@ async def run_extraction_witness_stage(ctx: StageContext) -> None:
                 "Extraction witness for job %s: %d/%d pages carry "
                 "font-encoding damage (%d residue chars); formulas in "
                 "source text are already wrong before translation — "
-                "see docs/design/PDF_SKILL_BORROWINGS.md D2'",
+                "see docs/design/PDF_SKILL_BORROWINGS.md",
                 ctx.job_id,
                 stats["confirmed_pages"],
                 stats["pages"],

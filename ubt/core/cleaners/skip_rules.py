@@ -13,7 +13,7 @@ machine translation is either meaningless or actively harmful:
 
 Blocks with real prose — including short citation lines like
 ``Research anchors: [1], [2]`` — are deliberately NOT skipped; those go
-through the LLM and are protected by the F3 QE calibration instead.
+through the LLM and are protected by the QE calibration instead.
 """
 
 from __future__ import annotations

@@ -461,7 +461,7 @@ async def test_triage_skips_skip_translate_blocks(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_triage_emits_throttled_progress_events_not_silence(tmp_path: Path) -> None:
-    """2026-09-22 E2E: 4m56s passed between REPAIR_BATCH_COMPLETED and
+    """E2E: 4m56s passed between REPAIR_BATCH_COMPLETED and
     TRIAGE_COMPLETED with zero events while 310 escalated repairs ran block by
     block. The per-block loops must spend throttled heartbeats (every 20 units
     or 5s) on the generator's yield — the only progress channel the pipeline

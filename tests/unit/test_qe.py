@@ -302,7 +302,7 @@ def test_qe_defect_class_legend_covers_all_emittable_values() -> None:
         "Insufficient zh script density (ratio=0.10)",
     ):
         emittable.add(HeuristicQERunner.score_from_decision_reason(reason))
-    # F3: the terminology band is emittable too.
+    # The terminology band is emittable too.
     emittable.add(QE_SCORE_GLOSSARY_VIOLATION)
 
     undocumented = emittable - legend_values
@@ -324,7 +324,7 @@ def test_format_only_matches_production_reason_strings() -> None:
 
 
 # ---------------------------------------------------------------------------
-# F3 (review): no terminology signal existed anywhere in the QE path. A fluent
+# No terminology signal existed anywhere in the QE path. A fluent
 # translation using the WRONG enforced term passed every gate and scored 0.92.
 # ---------------------------------------------------------------------------
 

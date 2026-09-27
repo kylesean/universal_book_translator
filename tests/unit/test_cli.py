@@ -295,7 +295,7 @@ def test_cli_translate_rolling_summary_defaults(
 def test_cli_config_backed_flags_arrive_unset_as_none(
     monkeypatch: pytest.MonkeyPatch, sample_book_md: Path
 ) -> None:
-    """Regression (2026-09 review): typer literals ("inline"/"auto"/False/
+    """Regression: typer literals ("inline"/"auto"/False/
     Path(".ubt/ledgers")) used to reach the engine as if the user had typed
     them, silently erasing UBT_* env and ubt.toml values."""
     captured: list[dict[str, Any]] = []
@@ -574,7 +574,7 @@ def test_cli_page_range_options(sample_book_md: Path, tmp_path: Path) -> None:
     """--pages / --page-range parse on the CLI, but are rejected at ingest for a
     non-PDF input (which has no page geometry) instead of silently translating —
     and billing — the whole document. Markdown is such an input, so a page-ranged
-    run must fail loudly with the PDF-only message (2026-09 review P1-b)."""
+    run must fail loudly with the PDF-only message."""
     out_file = tmp_path / "cli_out_pages.md"
     db_dir = tmp_path / "cli_ledgers_pages"
     # Test --pages
@@ -1052,7 +1052,7 @@ def test_translate_accepts_a_seeded_domain_profile(tmp_path: Path) -> None:
 
 
 def test_cli_tm_scan_and_evict_round_trip(tmp_path: Path) -> None:
-    """F5: ``TM.scan()``/``evict_ids()`` are reachable from the CLI.
+    """``TM.scan()``/``evict_ids()`` are reachable from the CLI.
 
     Reusable memory that can only grow and never be corrected is a liability; a
     poisoned entry is served verbatim on every later run.

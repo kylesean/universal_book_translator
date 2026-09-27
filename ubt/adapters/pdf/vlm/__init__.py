@@ -4,7 +4,7 @@ Scans enter here because the previous scan path is dead in practice
 (Docling is installed but neither of its OCR backends — easyocr nor
 tesserocr — is, so ``do_ocr=True`` goes nowhere).
 
-Architecture (roadmap P9):
+Architecture:
 - Drivers RECOGNIZE text (reading order). They never own geometry.
 - Anchoring owns geometry: the pdfium text layer votes first (proofread
   mode); only pages WITHOUT a usable text layer use measured driver boxes

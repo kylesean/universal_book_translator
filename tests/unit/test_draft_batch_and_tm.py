@@ -545,7 +545,7 @@ def test_draft_stage_tm_exact_hit_skips_llm(tmp_path: Path) -> None:
     ledger = SQLiteJobLedger(tmp_path / "job.sqlite")
     seed_job(ledger, "job_tm", _make_doc_ir(5), target_lang="zh")
     tm = TranslationMemory(tmp_path / "tm.sqlite")
-    # P8: the staged entry must carry the same context fingerprint the draft
+    # The staged entry must carry the same context fingerprint the draft
     # stage computes (PROMPT_VERSION + profile + glossary table + abbreviation
     # table + langs).
     tm.writeback(

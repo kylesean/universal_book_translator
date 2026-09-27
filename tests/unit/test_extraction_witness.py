@@ -1,7 +1,7 @@
-"""Tests for the extraction witness (D2').
+"""Tests for the extraction witness.
 
-Acceptance criteria (from the 2026-09-18 route comparison, since removed;
-git history preserves the measurements):
+Acceptance criteria (measured on a real route comparison; git history
+preserves the measurements):
 chapter-3 (the damaged file) must hit >= 20 confirmed pages, chapter-1 (the
 control) at most 2 — the witness must not be a detector that fires everywhere.
 """

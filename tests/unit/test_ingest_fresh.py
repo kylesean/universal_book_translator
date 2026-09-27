@@ -197,7 +197,7 @@ async def test_ingest_forwards_selected_pages_to_adapter(tmp_path: Path) -> None
 
 @pytest.mark.asyncio
 async def test_ingest_pages_on_non_paged_adapter_raises(tmp_path: Path) -> None:
-    """Regression (P1-b): ``--pages`` against an adapter with no page geometry
+    """Regression: ``--pages`` against an adapter with no page geometry
     must refuse before spending, not silently translate (and bill) the whole
     document — the afterwards bbox filter keeps every non-PDF block."""
     src = tmp_path / "book.epub"

@@ -4,7 +4,7 @@ Two distinct failure modes are being guarded here. The scanner can drift from th
 source (report a knob as sweepable when it has no override point, so a "band" gets
 measured against a value nothing reads), and the classifier can call an
 unmeasurable knob clean — the exact mistake recorded in
-``docs/design/knob-calibration-protocol.md`` 附录 B (the 2026-09-20 hardcode audit) as what
+``docs/design/knob-calibration-protocol.md`` as what
 the current defences make.
 """
 

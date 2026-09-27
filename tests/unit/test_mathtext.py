@@ -346,7 +346,7 @@ def test_inline_and_display_symbol_maps_do_not_drift() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Unicode-vs-LaTeX equivalence in the hallucination gate (2026-09-24).
+# Unicode-vs-LaTeX equivalence in the hallucination gate.
 # ---------------------------------------------------------------------------
 
 

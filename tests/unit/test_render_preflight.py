@@ -1,4 +1,4 @@
-"""Tests for the zero-token render pre-flight (D6').
+"""Tests for the zero-token render pre-flight.
 
 The gate exists so a broken PDF toolchain fails before Stage 3 bills the book.
 It must (a) skip non-PDF adapters and mock runs, (b) pick a markup-sensitive

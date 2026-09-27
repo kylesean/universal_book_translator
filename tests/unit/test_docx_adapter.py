@@ -278,7 +278,7 @@ async def test_docx_render_preserves_angle_bracket_prose_without_content_loss() 
 
 @pytest.mark.asyncio
 async def test_docx_nested_table_cells_are_extracted_and_translated(tmp_path: Path) -> None:
-    """Regression (P1-b2): a table whose cell contains a *nested* table must
+    """Regression: a table whose cell contains a *nested* table must
     have the nested cells' text enter the IR (previously only top-level tables
     and a cell's direct paragraphs were walked, so nested text silently shipped
     untranslated) and be translated on the way back out. The nested block id
@@ -319,7 +319,7 @@ async def test_docx_nested_table_cells_are_extracted_and_translated(tmp_path: Pa
 async def test_docx_section_headers_and_footers_are_extracted_and_translated(
     tmp_path: Path,
 ) -> None:
-    """Regression (P1-b3): section headers/footers carry translatable text that
+    """Regression: section headers/footers carry translatable text that
     previously never reached the IR (the body walk only covered ``doc.element.body``).
     They must be extracted into blocks and translated back in place; inherited
     (linked-to-previous) parts must be skipped so a shared header isn't
@@ -359,7 +359,7 @@ async def test_docx_section_headers_and_footers_are_extracted_and_translated(
 
 @pytest.mark.asyncio
 async def test_docx_footnotes_are_extracted_and_translated(tmp_path: Path) -> None:
-    """Regression (P1-b4): footnote text lives in a separate ``word/footnotes.xml``
+    """Regression: footnote text lives in a separate ``word/footnotes.xml``
     part that python-docx exposes only as a raw blob — it previously never
     reached the IR, so footnotes silently shipped untranslated. They must be
     extracted into blocks and translated back into the part."""

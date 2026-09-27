@@ -106,7 +106,7 @@ class UnmaskReport:
         "Reordered" tokens (checksums intact, but the spans appear in a
         different order than in the masked source) do fail closed: the text is
         not corrupt character-for-character, yet a protected span moved, which
-        only a re-draft can undo (defect D4).
+        only a re-draft can undo.
 
         "Duplicated" tokens (the draft also emitted the protected span's
         original text alongside its intact token, so restoration printed it

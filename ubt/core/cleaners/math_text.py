@@ -4,7 +4,7 @@ BabelDOC freezes everything inside formulas (``Z(\\text{Hit Rate})`` stays
 English forever). UBT holds the LaTeX source, so natural-language spans
 can go through the LLM while the math skeleton stays byte-identical.
 
-Conservative by design (§4 calibration: KV handbook has exactly 3 spans —
+Conservative by design (calibration: KV handbook has exactly 3 spans —
 ``softmax``/``GiB`` kept, ``by terms`` translated):
 
 - single tokens never translate (``softmax``, ``GiB``, ``ReLU`` are terms,

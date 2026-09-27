@@ -106,7 +106,7 @@ def test_few_shot_reference_formatting(tm: TranslationMemory) -> None:
     assert "A base sentence for reference." in rendered
     assert "参考译文。" in rendered
     assert f"{round(hit.similarity * 100)}%" in rendered
-    # F2: the reference is terminology-only evidence, never phrasing to copy.
+    # The reference is terminology-only evidence, never phrasing to copy.
     assert "reuse" not in rendered.lower()
     assert "phrasing" not in rendered.lower()
     assert "terminology reference ONLY" in rendered
@@ -115,7 +115,7 @@ def test_few_shot_reference_formatting(tm: TranslationMemory) -> None:
 
 
 # ---------------------------------------------------------------------------
-# F2 (review): whole-string similarity admits semantic inversions. Each pair
+# Whole-string similarity admits semantic inversions. Each pair
 # below is ADMITTED by fuzz.ratio at the 0.85 threshold (0.881-0.945) and used
 # to be injected as a reference the prompt told the model to imitate.
 # ---------------------------------------------------------------------------
@@ -192,7 +192,7 @@ def test_abbreviation_entries_change_tm_context() -> None:
     assert ctx_a == compute_tm_context(
         "v1", "general", terms, "en", "zh", format_abbreviations_markdown_table(abbr_a)
     )
-    # Pre-P8 empty-hash semantics are untouched: the 5-arg default stays "".
+    # The previous empty-hash semantics are untouched: the 5-arg default stays "".
     assert compute_tm_context("v1", "general", terms, "en", "zh") == compute_tm_context(
         "v1", "general", terms, "en", "zh", ""
     )

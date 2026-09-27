@@ -1,6 +1,6 @@
 """Zero-cost real-model baseline: a FIXED EN→ZH corpus through the real MT tier.
 
-Why this file exists (review D1/§8-19): every other test that exercises the draft
+Why this file exists: every other test that exercises the draft
 path drives ``MockModelProvider``, so the project's core claim — that a real model
 produces number-preserving, structurally clean Chinese — had no automated
 evidence at all. The nightly "real-provider smoke" was supposed to cover it but
@@ -10,7 +10,7 @@ This runs a real model over a fixed corpus and hard-asserts invariants that must
 hold for ANY competent translation. Neural quality scores are NOT computed here:
 the reference-free CometKiwi subprocess did not complete within its 300s budget in
 this environment (the same reason moved that case out of the unit
-suite), so paying it again would recreate the cost F8 removed. Neural profiles
+suite), so paying it again would recreate that cost. Neural profiles
 stay where they already are — ``tests/integration/test_qe_calibration.py``, run
 by the nightly ``live-local`` job — and remain uncalibrated
 (``docs/guides/evaluation-and-comparison-guide.md`` still lists L3 judge calibration as

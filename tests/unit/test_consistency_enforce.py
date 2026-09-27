@@ -215,7 +215,7 @@ def test_planner_caps_by_block_and_keeps_all_its_terms() -> None:
 
 @pytest.mark.asyncio
 async def test_repair_that_leaves_the_term_drifted_stays_pending(tmp_path: Path) -> None:
-    """F15: the terminology postcondition is checked independently of the engine.
+    """The terminology postcondition is checked independently of the engine.
 
     Regression: the constraint flag is not ``GLOSSARY_VIOLATION_MARKER``, so on a
     term-blind QE runner the repair loop laundered it and promoted a still-drifted

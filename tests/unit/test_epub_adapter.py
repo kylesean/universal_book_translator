@@ -260,7 +260,7 @@ def test_epub_table_cell_injection_preserves_structure() -> None:
 
 
 def test_epub_monolingual_multiparagraph_cell_keeps_column_count() -> None:
-    """Regression (P1-a): a monolingual multi-paragraph translation of a <td>
+    """Regression: a monolingual multi-paragraph translation of a <td>
     must nest its extra paragraphs *inside* the cell, never emit a sibling
     <td> that doubles the table's column count."""
     raw = (
@@ -541,8 +541,7 @@ async def test_render_blocks_does_not_duplicate_verbatim_code(tmp_path: Path) ->
 @pytest.mark.asyncio
 async def test_epub_spine_href_percent_and_relative_resolution(tmp_path: Path) -> None:
     """OPF hrefs are URL references: %xx escapes and ../ segments must be
-    resolved before the zip lookup, or whole chapters vanish silently
-    (2026-09 review)."""
+    resolved before the zip lookup, or whole chapters vanish silently."""
     body = page("<p>Real body text for the encoded chapter file.</p>")
     # NB: ``page`` supplies the <body> wrapper, so this takes the fragment only.
     epub_file = tmp_path / "encoded.epub"
@@ -574,7 +573,7 @@ async def test_epub_spine_href_percent_and_relative_resolution(tmp_path: Path) -
 async def test_inline_code_does_not_mark_whole_paragraph_code(tmp_path: Path) -> None:
     """A narrative paragraph containing an inline <code> must stay
     translatable: the CODE verdict used to swallow whole prose blocks and
-    stamp them MTQE_PASSED without translating (2026-09 review)."""
+    stamp them MTQE_PASSED without translating."""
     epub_file = tmp_path / "inline.epub"
     write_epub(
         epub_file,
@@ -667,7 +666,7 @@ def test_toc_labels_match_percent_encoded_hrefs() -> None:
 
 
 def test_toc_labels_never_leak_blocked_human_markup() -> None:
-    """2026-09-22 E2E: toc.xhtml carried the literal *source* of the
+    """E2E: toc.xhtml carried the literal *source* of the
     quarantine placeholder (``<mark class="ubt-blocked-human" title="...">…``)
     as its link text — double-escaped grammar-tag leakage that the behaviour
     contract forbids. The label must keep only the visible text."""

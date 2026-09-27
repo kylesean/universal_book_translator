@@ -9,12 +9,12 @@ Each knob carries a calibration status (see :data:`CALIBRATION`):
 
 - ``PROVEN`` — validated on 2+ documents, synthetic property tests, or PDF
   spec mechanics (not tunable judgment);
-- ``SINGLE_DOC`` — calibrated on chapter-1 only; needs the P11 golden corpus
+- ``SINGLE_DOC`` — calibrated on chapter-1 only; needs the golden corpus
   before anyone "tunes" it for another book;
 - ``HYPOTHESIS`` — principled default with no empirical backing yet.
 
 Discipline (docs/design/knob-calibration-protocol.md §3): new knobs land HERE with
-status + rationale, never inline in a module. P11 promotes statuses by evidence,
+status + rationale, never inline in a module. Statuses are promoted by evidence,
 never by feel.
 """
 
@@ -254,7 +254,7 @@ FIT_PRECISION_PT = 0.1
 # This module's registry discipline forbids. Deliberately distinct
 # from FIT_MIN_FONT_PT: rigid paint-back shrinks text inside the source
 # page's own zones, where the 6.5pt footnote floor reads as damage.
-# 7.0 (2026-09-27): lowered from 7.5 after the coverage sweep showed 7.5 sits
+# 7.0: lowered from 7.5 after the coverage sweep showed 7.5 sits
 # past the spill cliff on two corpora (single- and two-column). Blocks that need
 # <7.5pt now render instead of failing closed to source-visible; see the
 # CALIBRATION rationale and scripts/rigid_coverage_sweep.py.
@@ -282,7 +282,7 @@ def rigid_min_font_pt_for(layout_role: object, *, default: float = RIGID_MIN_FON
     return _RIGID_REGION_FLOORS.get(str(getattr(layout_role, "value", layout_role)), default)
 
 
-# P0 complex-page nets: row-fragment glue. Thresholds measured on chapter-1
+# Complex-page nets: row-fragment glue. Thresholds measured on chapter-1
 # (good: coverage 0.77-1.0) vs book2 p31 (bad: pairs down to 0.2); gap cap
 # sits between word gaps (<10pt) and column gutters.
 ROW_MERGE_GAP_PT = _env_float("UBT_ROW_MERGE_GAP_PT", 24.0)
@@ -473,7 +473,7 @@ MCP_MAX_RUNNING_JOBS = 8
 
 
 # ---------------------------------------------------------------------------
-# Calibration registry (P11 promotes by evidence)
+# Calibration registry (promoted by evidence)
 # ---------------------------------------------------------------------------
 P = Calibration.PROVEN
 S = Calibration.SINGLE_DOC
@@ -527,7 +527,7 @@ CALIBRATION: dict[str, KnobMeta] = {
     "FIT_PRECISION_PT": KnobMeta(P, "0.1 matches Typst :.1f emit rounding by construction"),
     "RIGID_MIN_FONT_PT": KnobMeta(
         S,
-        "7.0 rigid-engine floor, lowered from 7.5 on 2026-09-27. Two-corpus matrix "
+        "7.0 rigid-engine floor, lowered from 7.5. Two-corpus matrix "
         "sweep by scripts/rigid_coverage_sweep.py: synthetic-mono (251 blocks / "
         "13 pp) latin expansion held ~74% to ratio 1.4 at 7.0 but fell 74%->26% "
         "above 1.15 at 7.5; synthetic-duo pages 1-6 (201 blocks, two-column) held "
@@ -652,7 +652,7 @@ CALIBRATION: dict[str, KnobMeta] = {
 
 
 def calibration_summary() -> dict[str, int]:
-    """Count knobs by calibration status (P11 burn-down metric)."""
+    """Count knobs by calibration status."""
     counts = {status.value: 0 for status in Calibration}
     for meta in CALIBRATION.values():
         counts[meta.status.value] += 1

@@ -141,7 +141,7 @@ def _textless_rows(
     """Row evidence for a page without an extractable text layer.
 
     VLM-measured member lines win; otherwise the block bboxes are sliced
-    proportionally to the source line count (the historical P9-A path).
+    proportionally to the source line count.
     """
     rows = synthetic_vlm_lines(blocks)
     if rows:

@@ -12,7 +12,7 @@ class VlmLine:
 
     ``measured_box`` is PDF-point geometry ONLY when the driver measured it
     with a detector (rapidocr-style). LLM-VLM drivers MUST leave it None:
-    hallucinated coordinates are worse than none (roadmap P9 anchoring rule).
+    hallucinated coordinates are worse than none.
     The adapter — never the driver — decides whether the box is used.
     """
 

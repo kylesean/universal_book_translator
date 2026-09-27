@@ -198,7 +198,7 @@ def test_probe_effective_driver_modes(monkeypatch: pytest.MonkeyPatch) -> None:
         assert isinstance(drv, SidecarOcrDriver)
 
     # 6. auto mode with unhealthy sidecar but OPENAI_API_KEY: a working local
-    # engine wins over cloud egress (2026-09 privacy review reordering).
+    # engine wins over cloud egress (privacy reordering).
     import importlib.util
 
     with patch.object(SidecarOcrDriver, "is_healthy", return_value=False):

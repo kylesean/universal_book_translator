@@ -553,7 +553,7 @@ async def test_run_budget_exceeded_stops_job_and_keeps_ledger(
     sample_markdown: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """--budget-usd must fail the job at the next priced event but leave the
-    ledger resumable (2026-09 review: money spent had no ceiling)."""
+    ledger resumable (money spent had no ceiling)."""
     from ubt.core.exceptions import UBTError
 
     db_dir = tmp_path / "ledgers_budget"
@@ -610,7 +610,7 @@ async def test_progress_event_prices_the_job_across_resumes(tmp_path: Path) -> N
 
     Provider counters are per-process, so before the ledger carried usage a job
     resumed N times reported only the N-th sitting's cost — and --budget-usd was
-    a per-restart allowance rather than a cap on the job (2026-09 review).
+    a per-restart allowance rather than a cap on the job.
     """
     from ubt.core.engine.ledger import SQLiteJobLedger
     from ubt.core.ir.models import BookManifest, ChapterMeta
