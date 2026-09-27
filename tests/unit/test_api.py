@@ -44,6 +44,52 @@ def api_client(tmp_path: Path) -> TestClient:
     return TestClient(app)
 
 
+def test_shared_rate_limiter_honors_configured_backoff_cooldown(tmp_path: Path) -> None:
+    """The API's process-wide limiter must carry the configured AIMD cooldown.
+
+    Regression: ``create_app`` built ``AdaptiveTokenBucket(...)`` without
+    ``backoff_cooldown_sec``, so the default ``ubt-api`` deployment ran with a
+    0.0 cooldown (every interleaved 429 halved capacity to the floor) while
+    CLI/worker kept 3.0 — the same config behaving two ways.
+    """
+    config = UBTConfig(
+        db_dir=tmp_path / "api_ledgers",
+        allowed_dirs=str(tmp_path),
+        rate_limit_backoff_cooldown_sec=3.0,
+    )
+    app = create_app(config=config)
+    assert app.state.shared_rate_limiter.backoff_cooldown_sec == 3.0
+
+
+def test_public_report_reduces_host_paths() -> None:
+    """``/report`` must not echo absolute ``source_path``/``output_path``."""
+    from ubt.api.app import _public_report
+
+    report = {
+        "job_id": "j1",
+        "source_path": "/home/user/books/secret/alice.epub",
+        "output_path": "/home/user/books/out/alice.pdf",
+        "sections": {"nested": {"output_path": "/home/user/secret/deep.pdf", "score": 1}},
+    }
+    public = _public_report(report)
+    assert public["source_path"] == "alice.epub"
+    assert public["output_path"] == "alice.pdf"
+    assert public["sections"]["nested"]["output_path"] == "deep.pdf"
+    assert public["sections"]["nested"]["score"] == 1
+
+
+def test_submit_request_accepts_a_glossary_field() -> None:
+    """The REST submit model must expose ``glossary`` (CLI/MCP parity).
+
+    ``extra="forbid"`` meant a REST client passing ``glossary`` got a 422 while
+    the CLI and MCP surfaces accepted it.
+    """
+    from ubt.api.models import JobSubmitRequest
+
+    req = JobSubmitRequest(input_path="/tmp/book.md", glossary="/tmp/g.json")
+    assert req.glossary == "/tmp/g.json"
+
+
 def test_health_check(api_client: TestClient) -> None:
     resp = api_client.get("/health")
     assert resp.status_code == 200
@@ -86,7 +132,7 @@ def test_submit_job_success_and_query_status(
     assert status_data["job_id"] == job_id
     # A synchronous TestClient tears the job's asyncio task down between the
     # submit and the status query, so the task is legitimately cancelled.
-    # P1-1/P1-10 record that as a terminal "cancelled" instead of leaving a
+    # The pipeline records that as a terminal "cancelled" instead of leaving a
     # zombie "running". Anything but a failure is valid here; completion is
     # covered by the end-to-end pipeline tests, not this submit+query smoke.
     assert status_data["status"] in ("submitted", "running", "completed", "cancelled")
@@ -155,7 +201,7 @@ def test_visual_report_ledger_fallback(tmp_path: Path) -> None:
 def test_visual_report_rejected_path_falls_back_to_the_ledger(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A sandbox-rejected stored path must not mask the ledger's report (X21).
+    """A sandbox-rejected stored path must not mask the ledger's report.
 
     ``resolve_secure_path`` signals a rejected or missing path with
     ``HTTPException``, but the endpoint caught ``ValueError``/
@@ -207,7 +253,7 @@ def test_visual_report_rejected_path_falls_back_to_the_ledger(
 
 
 def test_only_the_exact_health_route_skips_auth(tmp_path: Path) -> None:
-    """A path merely *ending* in ``/health`` must not bypass the API key (X33).
+    """A path merely *ending* in ``/health`` must not bypass the API key.
 
     The check matched with ``endswith("/health")``, so any future route named
     e.g. ``/jobs/{id}/health`` would have been unauthenticated by default. The
@@ -231,7 +277,7 @@ async def test_sse_stream_terminates_for_cancelled_job(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """§10.3-#2: reconnecting /stream to a cancelled job must not hang forever.
+    """Reconnecting /stream to a cancelled job must not hang forever.
 
     The event generator's terminal-state checks used to list only
     ("completed", "failed"); a job cancelled while still "submitted" (its task
@@ -451,7 +497,7 @@ async def test_submit_without_output_path_yields_downloadable_artifact(
         output_file = status_data["output_file"]
         assert output_file is not None
         expected = tmp_path / "tmp" / "output" / f"{sample_api_doc.stem}_bilingual.md"
-        # L8: /status echoes the artifact's basename, never the host's absolute
+        # /status echoes the artifact's basename, never the host's absolute
         # path — /download below still resolves the stored path server-side.
         assert output_file == expected.name
         assert not Path(output_file).is_absolute()
@@ -738,6 +784,37 @@ def test_submit_job_id_is_idempotent(
     assert second.json()["job_id"] == "job_idem_fixed_1"
 
 
+def test_embedded_resubmit_of_a_failed_job_creates_a_fresh_job(tmp_path: Path) -> None:
+    """A FAILED embedded job_id must not hand back a dead task.
+
+    The queue branch skips FAILED/CANCELLED so ``enqueue`` re-runs; the embedded
+    branch returned any existing record, so a failed job_id yielded a task that
+    would never run.
+    """
+    from ubt.api.manager import JobRecord
+    from ubt.core.engine.job_queue import JobStatus
+
+    config = UBTConfig(db_dir=tmp_path / "ledgers", allowed_dirs=str(tmp_path))
+    app = create_app(config=config)
+    client = TestClient(app)
+    manager = app.state.job_manager
+    doc = tmp_path / "book.md"
+    doc.write_text("# C\n\nhello\n", encoding="utf-8")
+
+    dead = JobRecord(
+        job_id="job_dead", request=JobSubmitRequest(input_path=str(doc), target_lang="zh")
+    )
+    dead.status = JobStatus.FAILED
+    manager.jobs["job_dead"] = dead
+
+    resp = client.post(
+        "/jobs/submit",
+        json={"input_path": str(doc), "target_lang": "zh", "job_id": "job_dead"},
+    )
+    assert resp.status_code == 202
+    assert manager.jobs["job_dead"].status != JobStatus.FAILED
+
+
 def test_cancel_unknown_job_returns_404(api_client: TestClient) -> None:
     resp = api_client.post("/jobs/ghost_job/cancel")
     assert resp.status_code == 404
@@ -992,7 +1069,7 @@ def test_cancel_cannot_rewrite_a_completed_ledger(
 def test_submit_job_id_is_stored_as_validated(
     api_client: TestClient, sample_api_doc: Path, tmp_path: Path
 ) -> None:
-    """L3: ``validate_job_id`` strips, so ``create_job`` must get its return value.
+    """``validate_job_id`` strips, so ``create_job`` must get its return value.
 
     The handler validated a copy and then stored the raw ``req.job_id``: the
     manager was keyed on ``"  job_padded_1  "`` while the idempotency lookup
@@ -1019,7 +1096,7 @@ def test_submit_job_id_is_stored_as_validated(
 
 
 def test_global_stream_subscriber_ceiling(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """L2: per-job SSE caps do not bound the process — the global one must.
+    """Per-job SSE caps do not bound the process — the global one must.
 
     Each open stream polls from a worker thread once a second, so
     ``_MAX_SUBSCRIBERS_PER_JOB`` per job across N jobs still exhausts the
@@ -1041,8 +1118,8 @@ def test_global_stream_subscriber_ceiling(tmp_path: Path, monkeypatch: pytest.Mo
             self.jobs[record.job_id] = record
 
     monkeypatch.setattr(app_module, "JobManager", _PreloadedJobManager)
-    # The production default is what the review fixed; shrink it to one slot so
-    # the accounting assertions below are exact (any leak is visible).
+    # Shrink the production default to one slot so the accounting assertions
+    # below are exact (any leak is visible).
     assert app_module._MAX_GLOBAL_STREAM_SUBSCRIBERS == 64
     monkeypatch.setattr(app_module, "_MAX_GLOBAL_STREAM_SUBSCRIBERS", 1)
     config = UBTConfig(db_dir=tmp_path / "ledgers", allowed_dirs=str(tmp_path))
@@ -1069,7 +1146,7 @@ def test_global_stream_subscriber_ceiling(tmp_path: Path, monkeypatch: pytest.Mo
 def test_status_never_echoes_host_absolute_paths(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """L8: ``/status`` returned the pipeline's absolute artifact paths.
+    """``/status`` returned the pipeline's absolute artifact paths.
 
     The host directory layout (home directory, project path) went out over a
     port that is unauthenticated by default. The echo now carries basenames;
@@ -1145,7 +1222,7 @@ def test_bootstrap_converges_env_file_permissions(
     """M1: the ASGI entry point must chmod ``.env`` to 0600 before config reads it.
 
     dotenv files are created ``0644`` by editors and ``cp`` while holding the
-    API credentials (review 2026-09 M1). Unit behaviour lives in
+    API credentials. Unit behaviour lives in
     ``tests/unit/test_fs_perms.py``; this pins the *wiring*.
     """
     import importlib
@@ -1306,10 +1383,6 @@ def test_submit_request_still_refuses_credentials_and_server_owned_keys() -> Non
         # Server-owned state: the service picks its own storage and profile.
         "db_dir",
         "provider_profile",
-        # A filesystem path: it needs the same sandbox as ``input_path`` before
-        # it can be accepted, so it stays out until that is wired (see
-        # ``resolve_secure_path`` in the submit handler).
-        "glossary",
     ):
         with pytest.raises(ValidationError):
             JobSubmitRequest.model_validate({"input_path": "book.md", key: "probe"})

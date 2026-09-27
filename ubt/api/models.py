@@ -90,6 +90,10 @@ class JobSubmitRequest(BaseModel):
             raise ValueError(str(exc)) from exc
         return value
 
+    glossary: str | None = Field(
+        default=None,
+        description="Path to an external glossary file to enforce (CLI/MCP parity)",
+    )
     exec_mode: ExecMode | None = Field(
         default=None, description="Execution mode (auto, short, long)"
     )

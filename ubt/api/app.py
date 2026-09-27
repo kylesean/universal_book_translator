@@ -54,7 +54,7 @@ from ubt.core.job_options import (
 from ubt.core.log_config import setup_logging
 from ubt.core.qe import BaseQERunner
 from ubt.core.router import ModelProfile, get_default_registry
-from ubt.core.router.rate_limiter import AdaptiveTokenBucket
+from ubt.core.router.rate_limiter import build_rate_limiter
 from ubt.core.router.router import ModelRouter
 
 logger = logging.getLogger(__name__)
@@ -204,6 +204,28 @@ def _public_progress(progress: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
+#: QualityReport fields that carry an absolute host path. ``/report`` echoed
+#: them verbatim, leaking the host layout to any caller that could reach it.
+_REPORT_PATH_KEYS = frozenset({"source_path", "output_path"})
+
+
+def _public_report(value: Any) -> Any:
+    """Recursively reduce host paths in a report payload to their basenames.
+
+    ``/status`` and the SSE stream already ran ``_public_artifact``; ``/report``
+    returned the raw report JSON, so the same absolute ``source_path`` /
+    ``output_path`` leaked through a different door.
+    """
+    if isinstance(value, dict):
+        return {
+            key: (_public_artifact(item) if key in _REPORT_PATH_KEYS else _public_report(item))
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_public_report(item) for item in value]
+    return value
+
+
 def _progress_frame(snapshot: dict[str, Any], status: str) -> str:
     """The one non-terminal ``/stream`` frame, shared by both deployment modes.
 
@@ -258,16 +280,12 @@ def create_app(
     # builds its own provider per job so a request can override its models, but
     # `rate_limit_rpm` is a per-credential budget and must not be multiplied by
     # the number of concurrent jobs.
-    shared_rate_limiter = (
-        None
-        if router is not None
-        else AdaptiveTokenBucket(
-            initial_rpm=app_config.rate_limit_rpm,
-            initial_tpm=app_config.rate_limit_tpm,
-            max_rpm=app_config.rate_limit_max_rpm,
-            max_tpm=app_config.rate_limit_max_tpm,
-        )
-    )
+    # Reuse the one construction helper so the AIMD ``backoff_cooldown_sec``
+    # (config default 3.0) cannot be silently dropped here again: this inline
+    # ``AdaptiveTokenBucket(...)`` omitted it, so the documented oscillation
+    # guard was absent on the default ``ubt-api`` deployment while CLI/worker
+    # (which go through ``build_rate_limiter``/pipeline) kept it.
+    shared_rate_limiter = None if router is not None else build_rate_limiter(app_config)
     app_mod = sys.modules.get("ubt.api.app")
     job_manager_cls = getattr(app_mod, "JobManager", JobManager) if app_mod else JobManager
     manager: JobManager = job_manager_cls(
@@ -367,6 +385,11 @@ def create_app(
         redoc_url=None if auth_enabled else "/redoc",
         openapi_url=None if auth_enabled else "/openapi.json",
     )
+    # Booked on ``app.state`` so a test can assert the process-wide limiter's
+    # AIMD shape (e.g. the backoff cooldown) without reaching into the manager.
+    api_app.state.shared_rate_limiter = shared_rate_limiter
+    # Booked for tests that assert the embedded submit branch's idempotency.
+    api_app.state.job_manager = manager
 
     # A bind guard that only lives in ``run_server`` is bypassed by
     # ``uvicorn ubt.api.app:app --host 0.0.0.0``, which imports the app object
@@ -491,7 +514,13 @@ def create_app(
                     )
         if requested_id is not None:
             existing = manager.get_job(requested_id)
-            if existing is not None:
+            # Embedded parity with the queue branch above: a failed/cancelled id
+            # falls through so a fresh job replaces the dead record instead of
+            # handing back a task that will never run.
+            if existing is not None and existing.status not in (
+                JobStatus.FAILED,
+                JobStatus.CANCELLED,
+            ):
                 return JobSubmitResponse(
                     job_id=existing.job_id,
                     status=existing.status,
@@ -533,10 +562,19 @@ def create_app(
                     detail="output_path already exists; refusing to overwrite it",
                 )
 
+        resolved_glossary: str | None = None
+        if req.glossary:
+            # Same sandbox as input_path: a glossary is a filesystem path, so it
+            # must clear resolve_secure_path before the job may read it.
+            resolved_glossary = str(
+                resolve_secure_path(req.glossary, must_exist=True, config=app_config)
+            )
+
         safe_req = req.model_copy(
             update={
                 "input_path": str(resolved_in),
                 "output_path": str(resolved_out) if resolved_out is not None else None,
+                "glossary": resolved_glossary,
             }
         )
         # No provider key and no injected router → the run can only be a mock:
@@ -544,14 +582,22 @@ def create_app(
         # status, queue payload, worker) labels it instead of silently
         # reporting a mock delivery as a real one.
         app_key = app_config.api_key.get_secret_value()
+        auto_rehearsal = False
         if not safe_req.dry_run and router is None and (not app_key or app_key == MOCK_API_KEY):
             safe_req = safe_req.model_copy(update={"dry_run": True})
+            auto_rehearsal = True
             logger.warning(
                 "No API key configured: auto-setting dry_run rehearsal for input %s",
                 safe_req.input_path,
             )
         if job_queue is not None:
             queued_id = requested_id or f"job_{uuid.uuid4().hex[:12]}"
+            queued_payload = safe_req.model_dump()
+            if auto_rehearsal:
+                # The worker recomputes rehearsal from its OWN key; this
+                # marker says the dry_run was our auto-decision, not a user
+                # request, so a keyed worker runs for real.
+                queued_payload["rehearsal_auto"] = True
             try:
                 # ``enqueue`` runs ``BEGIN IMMEDIATE`` with a 30s busy_timeout;
                 # calling it inline on the event loop stalls every other request
@@ -559,7 +605,7 @@ def create_app(
                 job = await asyncio.to_thread(
                     job_queue.enqueue,
                     queued_id,
-                    safe_req.model_dump(),
+                    queued_payload,
                     tenant_id=_tenant_from_header(x_ubt_tenant),
                     priority=int(req.priority),
                 )
@@ -979,7 +1025,7 @@ def create_app(
             report_path = resolve_secure_path(report_file, must_exist=True, config=app_config)
             content = await asyncio.to_thread(report_path.read_text, encoding="utf-8")
             report_data: dict[str, Any] = json.loads(content)
-            return JSONResponse(content=report_data)
+            return JSONResponse(content=_public_report(report_data))
         except HTTPException:
             raise
         except (ValueError, FileNotFoundError) as err:
