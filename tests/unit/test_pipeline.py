@@ -1595,3 +1595,42 @@ def test_engine_signature_is_empty_for_defaults_and_tags_overrides() -> None:
     assert engine_signature(UBTConfig()) == ""
     assert "psrich" in engine_signature(UBTConfig(prompt_strategy="rich"))
     assert "mbimage" in engine_signature(UBTConfig(math_backend="image"))
+
+
+@pytest.mark.asyncio
+@pytest.mark.fast
+async def test_pipeline_finalize_runs_before_export_completed_break(
+    sample_markdown: Path,
+    tmp_path: Path,
+) -> None:
+    """finalize_job and TM writeback must run before EXPORT_COMPLETED is yielded to callers."""
+    output_file = tmp_path / "final_test.md"
+    config = UBTConfig(db_dir=str(tmp_path))
+    provider = MockModelProvider(default_response="这是中文测试翻译。")
+    router = ModelRouter(provider=provider, draft_model="mock-draft", repair_model="mock-repair")
+    qe = MockQERunner(default_score=0.88)
+
+    finalized = False
+
+    def on_finalize(event: TranslationProgressEvent) -> None:
+        nonlocal finalized
+        finalized = True
+
+    orchestrator = PipelineOrchestrator(
+        config=config,
+        router=router,
+        qe_runner=qe,
+        finalize_job=on_finalize,
+    )
+
+    async for event in orchestrator.run(
+        input_path=sample_markdown,
+        output_path=output_file,
+        target_lang="zh",
+        job_id="test_job_break_early",
+    ):
+        if event.event_type is EventType.EXPORT_COMPLETED:
+            assert finalized is True, (
+                "finalize_job must be executed before consumer sees EXPORT_COMPLETED"
+            )
+            break

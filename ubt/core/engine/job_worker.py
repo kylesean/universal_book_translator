@@ -108,17 +108,36 @@ class JobWorker:
         payload = {**job.payload, "job_id": job.job_id}
         input_path = Path(str(payload["input_path"]))
         output_path = Path(str(payload["output_path"])) if payload.get("output_path") else None
+
+        def _persist_metadata(event: TranslationProgressEvent) -> None:
+            from ubt.core.engine.ledger import SQLiteJobLedger
+            from ubt.core.engine.progress import ARTIFACT_KEYS, ProgressSnapshot
+
+            progress = ProgressSnapshot.from_event(event)
+            db_dir = Path(job_config.db_dir)
+            job_id = job.job_id
+            ledger_path = db_dir / f"{job_id}.sqlite"
+            if not ledger_path.exists():
+                return
+            with SQLiteJobLedger(ledger_path) as ldg:
+                for metadata_key in (*ARTIFACT_KEYS, "estimated_cost_usd"):
+                    value = getattr(progress, metadata_key)
+                    if value is not None:
+                        ldg.set_job_metadata_value(job_id, metadata_key, value)
+
         # Rehearsal is decided from THIS process's key (see the helper).
         if _should_rehearse(payload, job_config):
             # Deterministic echo provider, mocked QE, no spend.
-            orchestrator = create_dry_run_orchestrator(job_config)
+            orchestrator = create_dry_run_orchestrator(job_config, finalize_job=_persist_metadata)
         else:
             orchestrator = PipelineOrchestrator(
                 config=job_config,
                 router=self.router,
                 qe_runner=self.qe_runner,
                 rate_limiter=self.rate_limiter,
+                finalize_job=_persist_metadata,
             )
+
         async for event in orchestrator.run(
             input_path=input_path,
             output_path=output_path,
@@ -290,6 +309,7 @@ class JobWorker:
                         self.queue.is_cancel_requested, job.job_id, owner
                     ):
                         raise JobInterruptedError(f"job {job.job_id} cancelled by request")
+
             completed = await self._q(
                 self.queue.complete,
                 job.job_id,

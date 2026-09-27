@@ -836,19 +836,15 @@ class PipelineOrchestrator:
             async for event in run_export_stage(ctx):
                 if event.event_type is EventType.EXPORT_COMPLETED:
                     export_completed_event = event
+                    # Run TM writeback and final metadata persistence BEFORE yielding
+                    # EXPORT_COMPLETED so that callers who break immediately do not cause
+                    # GeneratorExit to abort these terminal persistence tasks.
+                    await run_tm_writeback_stage(ctx)
+                    if self.finalize_job is not None:
+                        with suppress(Exception):
+                            # Off-loop: the hook opens a SQLite ledger and writes metadata.
+                            await asyncio.to_thread(self.finalize_job, export_completed_event)
                 yield event
-            await run_tm_writeback_stage(ctx)
-
-            # Final metadata persistence under the still-held writer
-            # lock — invoked here (not by the API layer after run() returns)
-            # so it shares the single-writer guarantee with every stage write
-            # above. Gated on the actual EXPORT_COMPLETED event, which export
-            # only emits after ledger.finalize_job succeeded; best-effort, a
-            # metadata failure must not flip a completed job to failed.
-            if self.finalize_job is not None and export_completed_event is not None:
-                with suppress(Exception):
-                    # Off-loop: the hook opens a SQLite ledger and writes metadata.
-                    await asyncio.to_thread(self.finalize_job, export_completed_event)
 
         except GeneratorExit:
             # Consumer closed the generator early (job_worker's ``aclosing`` on a
