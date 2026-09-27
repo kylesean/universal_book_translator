@@ -950,9 +950,20 @@ def _latex_math_to_typst_regex(latex: str) -> str:
 
 # Pandoc's Typst writer emits real code expressions for a few LaTeX
 # constructs: ``\Big``-family delimiters -> ``#scale(x: ..%, y: ..%)[..]``,
-# ``\boxed`` -> ``#box(...)``, ``\phantom`` -> ``#hide[..]``. All three are
-# pure layout calls with no I/O, so they may keep their ``#``.
-_PANDOC_TYPST_CALL_RE = re.compile(r"#(?=(?:scale|box|hide)\s*[\(\[])")
+# ``\boxed`` -> ``#box(...)``, ``\phantom`` -> ``#hide[..]``. They are pure
+# layout calls, but their argument list is Typst *code*: ``#box(raw(read("x")))``
+# carries no second ``#`` and would still run. A call therefore keeps its ``#``
+# only when its bracket body is plain data; otherwise it is demoted to text.
+_PANDOC_CALL_NAME_RE = re.compile(r"#(?:scale|box|hide)\s*([\(\[])")
+
+#: Characters that mark a bracket body as code rather than a parameter list:
+#: a nested call, a string literal or a raw block.
+_PANDOC_CALL_BODY_FORBIDDEN = ("(", ")", '"', "'", "`")
+
+
+def _pandoc_call_body_is_data(body: str) -> bool:
+    """True when a ``#scale/#box/#hide`` argument body contains no code."""
+    return not any(ch in body for ch in _PANDOC_CALL_BODY_FORBIDDEN)
 
 
 def _sanitize_math_content(formula: str) -> str:
@@ -962,14 +973,33 @@ def _sanitize_math_content(formula: str) -> str:
     formula run arbitrary Typst code (file access, loops). Every ``#`` is
     dropped except pandoc's own side-effect-free calls — ``\\Big``-family
     delimiters, ``\\boxed`` and ``\\phantom`` become ``#scale(``, ``#box(``
-    and ``#hide[`` in the Typst writer. Blanket-stripping those turned
-    chapter-3 Eq. (3.9) into the literal text ``"scale"(x: 180%, ...)``:
-    removing the marker demoted real Typst code to ordinary glyphs.
+    and ``#hide[`` in the Typst writer — AND only when the call's argument body
+    is plain data. A call whose body contains a nested call or string literal
+    (``#box(raw(read("x")))``) is demoted to inert text, because its arguments
+    are code. Blanket-stripping the safe calls turned chapter-3 Eq. (3.9) into
+    the literal text ``"scale"(x: 180%, ...)``.
     """
     if "#" not in formula:
         return formula
-    protected = _PANDOC_TYPST_CALL_RE.sub("\x00", formula)
-    return protected.replace("#", "").replace("\x00", "#")
+    out: list[str] = []
+    i = 0
+    n = len(formula)
+    while i < n:
+        match = _PANDOC_CALL_NAME_RE.search(formula, i)
+        if match is None:
+            out.append(formula[i:].replace("#", ""))
+            break
+        out.append(formula[i : match.start()].replace("#", ""))
+        open_idx = match.end() - 1
+        close_idx = _matching_close(formula, open_idx)
+        if close_idx is not None and _pandoc_call_body_is_data(formula[open_idx + 1 : close_idx]):
+            out.append(formula[match.start() : close_idx + 1])
+            i = close_idx + 1
+        else:
+            # Drop only this call's ``#`` and keep scanning, so a later safe
+            # pandoc call is still protected.
+            i = match.start() + 1
+    return "".join(out)
 
 
 # The lookahead form above only locates the ``#``; masking to end-of-call needs
@@ -1154,9 +1184,15 @@ _OCR_PROSE_CONNECTOR_RE = re.compile(
 # once the final ``$`` fails — a measured 12 s for 16 repeats. Repeats are
 # peeled one at a time in the caller instead, which is linear.
 _EQ_NUM_TAIL_RE = re.compile(
-    r"(?:^|(?:\s|&|\\quad|\\qquad)+)"
-    r"\(\s*(?:[A-Za-z]\s*[.\-]\s*)?\d[\d.A-Za-z\s\-–]*\)\s*"
-    r"(?:\\\\(?:\\\\[&\s]*)?)?$"
+    # Trailing equation number after an EXPLICIT separator — ``\quad (3.2)``,
+    # ``\qquad (3.2) \\`` or ``\\ (A.8)``. The number is a letter prefix plus
+    # digits/dots only; a space or operator inside the parenthesis means it is
+    # content, not a number, so a legitimate tail such as ``f(x) = (1 - x)`` is
+    # no longer truncated to ``f(x) =`` (a bare `` (3.2)`` with only a space
+    # before it is left alone too — equation numbers follow a separator).
+    r"(?:\\qquad|\\quad|\\\\)[&\s]*"
+    r"\(\s*(?:[A-Za-z]\s*[.\-]\s*)?\d[\dA-Za-z.]*\)\s*"
+    r"(?:\\\\)?$"
 )
 
 

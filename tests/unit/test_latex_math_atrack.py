@@ -118,6 +118,23 @@ def test_glued_command_and_subscript_sanitization() -> None:
     assert '"SI"' in out or '"th"' in out
 
 
+def test_clean_ocr_formula_keeps_content_parenthesis_with_operators() -> None:
+    r"""Regression: a trailing ``(1 - x)`` is content, not an equation number.
+
+    ``_EQ_NUM_TAIL_RE`` matched any ``(digit …)`` after a space, so
+    ``f(x) = (1 - x)`` was silently truncated to ``f(x) =`` (a real, silent
+    formula-content loss).
+    """
+    from ubt.adapters.pdf.typst_math import _clean_ocr_formula
+
+    cleaned = _clean_ocr_formula(r"f(x) = (1 - x)")
+    assert "(1 - x)" in cleaned
+
+    # A real equation number after an explicit separator is still stripped.
+    numbered = _clean_ocr_formula(r"E = m c^2 \qquad (3.2) \\")
+    assert "3.2" not in numbered
+
+
 def test_clean_ocr_formula_upright_and_embedded_eq_num() -> None:
     from ubt.adapters.pdf.typst_math import _clean_ocr_formula
 
@@ -652,3 +669,28 @@ def test_clean_ocr_formula_preserves_function_arguments() -> None:
     assert _clean_ocr_formula("f(1)") == "f(1)"
     assert _clean_ocr_formula(r"y(t) = x(0)") == r"y(t) = x(0)"
     assert _clean_ocr_formula(r"P(A|B) = P(0)") == r"P(A|B) = P(0)"
+
+
+def test_math_content_sanitizer_blocks_code_in_pandoc_call_arguments() -> None:
+    r"""A pandoc layout call's arguments are Typst code, not data.
+
+    Regression: ``_sanitize_math_content`` kept the ``#`` of ``#box(...)``, but
+    its argument list can call any function (``#box(raw(read("x")))``) — no
+    second ``#`` needed — so a crafted source formula could execute Typst code.
+    """
+    from ubt.adapters.pdf.typst_math import _sanitize_math_content
+
+    # Injected call is demoted to inert text (its '#' stripped).
+    assert "#" not in _sanitize_math_content('#box(raw(read("secret.txt")))')
+    # A safe outer call keeps its '#', but the injected inner call is demoted.
+    scaled = _sanitize_math_content('#scale(x: 180%)[#read("x.txt")]')
+    assert "#read" not in scaled
+    assert 'read("x.txt")' in scaled
+    # The known-safe pandoc calls keep their '#' (Eq. 3.9 regression guard).
+    assert (
+        _sanitize_math_content("#scale(x: 180%, y: 180%)[$ x $]")
+        == "#scale(x: 180%, y: 180%)[$ x $]"
+    )
+    assert _sanitize_math_content("#hide[$ x $]") == "#hide[$ x $]"
+    # A plain '#' is still dropped.
+    assert _sanitize_math_content("a #evil b") == "a evil b"

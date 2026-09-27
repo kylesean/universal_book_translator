@@ -592,3 +592,38 @@ def test_clip_path_inside_strip_rect_is_never_dropped() -> None:
     ]
     assert "W" in ops and "n" in ops
     assert ops.count("f") == 0  # the painted decoration was dropped
+
+
+def test_private_form_is_not_mutated_when_a_shared_form_aborts_the_page() -> None:
+    """A shared-Form abort must leave the page's PRIVATE Forms intact too.
+
+    Regression: the private Form was rewritten in place while the page content
+    stream (and the translation overlay) were skipped, so that text vanished
+    from the deliverable instead of being preserved alongside the source.
+    """
+    pdf = pikepdf.new()
+    p1 = pdf.add_blank_page(page_size=(600, 800))
+    p2 = pdf.add_blank_page(page_size=(600, 800))
+    shared_form = _make_form(pdf, b"BT /F1 12 Tf 100 500 Td (Shared Form Text) Tj ET\n")
+    private_form = _make_form(pdf, b"BT /F1 12 Tf 100 400 Td (Private Form Text) Tj ET\n")
+    for page in (p1, p2):
+        page.Resources = pikepdf.Dictionary(
+            {"/XObject": pikepdf.Dictionary({"/FmShared": shared_form})}
+        )
+        page.Contents = pdf.make_stream(b"/FmShared Do\n")
+    p1.Resources = pikepdf.Dictionary(
+        {"/XObject": pikepdf.Dictionary({"/FmShared": shared_form, "/FmPrivate": private_form})}
+    )
+    p1.Contents = pdf.make_stream(b"/FmShared Do\n/FmPrivate Do\n")
+
+    shared = shared_form_objgens(pdf)
+    stats = strip_page_text_pikepdf(
+        p1,
+        [(80.0, 380.0, 300.0, 530.0)],
+        page_no=1,
+        shared_forms=shared,
+    )
+    assert stats.shared_forms_skipped >= 1
+    # Both Forms keep their source text, so the skipped overlay loses nothing.
+    assert b"Private Form Text" in private_form.read_bytes()
+    assert b"Shared Form Text" in shared_form.read_bytes()

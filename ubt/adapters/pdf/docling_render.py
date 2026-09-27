@@ -358,6 +358,7 @@ class DoclingRenderStrategy:
         # read page 1's size to classify a non-A4 cover correctly. Best-effort:
         # a missing/unreadable PDF leaves the A4-absolute fallback in place.
         source_page_height: float | None = None
+        source_page_count: int | None = None
         if src_pdf_path.exists() and src_pdf_path.suffix.lower() == ".pdf":
             try:
                 from ubt.adapters.pdf import pdf_struct
@@ -365,6 +366,10 @@ class DoclingRenderStrategy:
                 page_one = pdf_struct.page_sizes(src_pdf_path).get(1)
                 if page_one is not None:
                     source_page_height = page_one[1]
+                if active_mode in ("alternating", "facing", "facing_spread"):
+                    # Page-pad to the full source length so the translated PDF
+                    # has one page per source page (see _generate_page_strict).
+                    source_page_count = len(pdf_struct.page_sizes(src_pdf_path))
             except Exception as exc:  # noqa: BLE001 — cover heuristic only
                 logger.debug("Could not read source page height for cover: %s", exc)
 
@@ -385,6 +390,7 @@ class DoclingRenderStrategy:
             pagebreaks=(active_mode in ("alternating", "facing", "facing_spread")),
             target_lang=target_lang,
             source_page_height=source_page_height,
+            source_page_count=source_page_count,
         )
         # The reflow path's fail-closed drops are staged image assets; without
         # recording them a rigid-only skip ledger leaves ``render_coverage`` at
@@ -417,6 +423,20 @@ class DoclingRenderStrategy:
                 staging_trans_typ = staging_trans_pdf.with_suffix(".typ")
                 try:
                     await self.reconstructor.compile_pdf_async(typ_source, staging_trans_pdf)
+                    # Hard 1:1 guard: a page-count mismatch means the alternator
+                    # would pair the wrong pages from that point on. Refuse to
+                    # ship a silently misaligned bilingual book (the reconstructor
+                    # pads empty source pages, so a mismatch is a real defect).
+                    if source_page_count is not None:
+                        from ubt.adapters.pdf import pdf_struct as _pdf_struct
+
+                        trans_len = len(_pdf_struct.page_sizes(staging_trans_pdf))
+                        if trans_len != source_page_count:
+                            raise DocumentParseError(
+                                f"Page-strict {active_mode} render produced {trans_len} "
+                                f"page(s) for a {source_page_count}-page source; refusing "
+                                "to interleave a misaligned bilingual book."
+                            )
                     record_syntax_fallbacks(self.reconstructor, manifest)
                     record_witness_findings(self.reconstructor, manifest)
                     record_toolchain_versions(self.reconstructor, manifest)

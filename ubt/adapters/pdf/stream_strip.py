@@ -529,6 +529,7 @@ def strip_stream_instructions(
     recurse_forms: bool = True,
     visited_forms: set[str] | None = None,
     shared_forms: set[tuple[int, int]] | None = None,
+    form_writes: list[tuple[Any, bytes]] | None = None,
 ) -> tuple[list[tuple[Sequence[Any], Any]], int]:
     """Filter content stream instructions, returning (new_instructions, dropped_count).
 
@@ -537,6 +538,12 @@ def strip_stream_instructions(
     rewritten here: it is one indirect object drawn by several pages, so a
     strip rect belonging to one page would otherwise erase the source text from
     all of them.
+
+    ``form_writes``, when given, defers every private Form's in-place rewrite
+    into the list (``(xobj, new_stream)``) instead of applying it now. The
+    caller applies them only after confirming the page did not abort on a shared
+    Form; otherwise the private Forms would already be text-stripped while the
+    page overlay was skipped, leaving that text gone from the deliverable.
     """
     if visited_forms is None:
         visited_forms = set()
@@ -825,6 +832,7 @@ def strip_stream_instructions(
                                     recurse_forms=recurse_forms,
                                     visited_forms=visited_forms,
                                     shared_forms=shared_forms,
+                                    form_writes=form_writes,
                                 )
                             finally:
                                 # A failed recursion must not poison the set:
@@ -832,8 +840,15 @@ def strip_stream_instructions(
                                 # skipped and their text survives (fail-open).
                                 visited_forms.remove(name_str)
                             if sub_dropped > 0:
-                                target_xobj.write(pikepdf.unparse_content_stream(sub_out))
-                                stats.forms_changed += 1
+                                new_stream = pikepdf.unparse_content_stream(sub_out)
+                                if form_writes is not None:
+                                    # Defer: a later shared-Form abort must be
+                                    # able to discard this so the page keeps its
+                                    # source text instead of losing it silently.
+                                    form_writes.append((target_xobj, new_stream))
+                                else:
+                                    target_xobj.write(new_stream)
+                                    stats.forms_changed += 1
                                 dropped_count += sub_dropped
                 except Exception as exc:
                     logger.debug("Error processing Form XObject %s: %s", name_str, exc)
@@ -981,6 +996,9 @@ def strip_page_text_pikepdf(
         parsed = pikepdf.parse_content_stream(page)
         instructions = cast(list[tuple[Sequence[Any], Any]], list(parsed))
         resources = page.get(pikepdf.Name("/Resources"))
+        # Private-Form rewrites are queued here and applied only if the page does
+        # not abort on a shared Form (see ``strip_stream_instructions``).
+        form_writes: list[tuple[Any, bytes]] = []
 
         new_ops, dropped = strip_stream_instructions(
             instructions,
@@ -991,9 +1009,17 @@ def strip_page_text_pikepdf(
             resources=resources,
             recurse_forms=recurse_forms,
             shared_forms=shared_forms,
+            form_writes=form_writes,
         )
 
         if dropped > 0 and stats.shared_forms_skipped == 0:
+            # Commit the deferred private-Form rewrites only now that the page
+            # is known not to have aborted on a shared Form (see
+            # ``strip_stream_instructions``): an abort leaves every Form intact
+            # so the page still draws its source text.
+            for target_xobj, new_stream in form_writes:
+                target_xobj.write(new_stream)
+                stats.forms_changed += 1
             unparsed = pikepdf.unparse_content_stream(new_ops)
             page.Contents.write(unparsed)
 

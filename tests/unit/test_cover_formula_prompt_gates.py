@@ -135,6 +135,41 @@ def test_pagebreaks_flag_controls_hard_breaks() -> None:
     assert "第一页正文。" in flowing and "第二页正文。" in flowing
 
 
+def test_page_strict_pads_a_missing_source_page() -> None:
+    """A page with no block must still occupy its page, or every later page shifts.
+
+    Regression: ``_generate_page_strict`` only emitted the pages that carried a
+    block, so a blank/image-only page moved every following source page one
+    slot earlier and the bilingual alternator paired the wrong pages.
+    """
+    recon = TypstReconstructor()
+    blocks = [
+        _block(1, BlockType.NARRATIVE, "Page one body.", "第一页正文。", page=1),
+        _block(2, BlockType.NARRATIVE, "Page three body.", "第三页正文。", page=3),
+    ]
+    strict = recon.generate_typst_source(
+        blocks, title="T", page_strict=True, pagebreaks=True, source_page_count=4
+    )
+    # Page 2 (no block) and page 4 (trailing) are both placeholders.
+    assert strict.count("#box(height: 1pt)") == 2
+    assert "第一页正文。" in strict and "第三页正文。" in strict
+    # Three hard breaks separate the four page slots.
+    assert strict.count("#pagebreak()") == 3
+
+
+def test_page_strict_without_pagebreaks_does_not_pad() -> None:
+    """Monolingual reflow (no hard breaks) must not gain blank pages."""
+    recon = TypstReconstructor()
+    blocks = [
+        _block(1, BlockType.NARRATIVE, "Page one body.", "第一页正文。", page=1),
+        _block(2, BlockType.NARRATIVE, "Page three body.", "第三页正文。", page=3),
+    ]
+    flowing = recon.generate_typst_source(
+        blocks, title="T", page_strict=True, pagebreaks=False, source_page_count=4
+    )
+    assert "#box(height: 1pt)" not in flowing
+
+
 # ---------------------------------------------------------------------------
 # Formula fail-closed
 # ---------------------------------------------------------------------------

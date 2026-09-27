@@ -758,6 +758,7 @@ class TypstReconstructor:
         font_size: float | None = None,
         leading_em: float | None = None,
         source_page_height: float | None = None,
+        source_page_count: int | None = None,
     ) -> str:
         """Generate clean, publication-ready Typst source code from IR blocks.
 
@@ -917,6 +918,7 @@ class TypstReconstructor:
                 pagebreaks,
                 formula_map=formula_map,
                 source_page_height=source_page_height,
+                source_page_count=source_page_count,
             )
         else:
             if title:
@@ -1540,6 +1542,7 @@ class TypstReconstructor:
         pagebreaks: bool = True,
         formula_map: Mapping[str, str] | None = None,
         source_page_height: float | None = None,
+        source_page_count: int | None = None,
     ) -> None:
         """Emit blocks grouped by original page number with strict #pagebreak() boundaries.
 
@@ -1601,12 +1604,28 @@ class TypstReconstructor:
             page_block_list.sort(key=lambda b: b.spine_index)
 
         sorted_pages = sorted(page_groups.keys())
-        for page_idx, page_num in enumerate(sorted_pages):
+        if pagebreaks and source_page_count:
+            # Pad every page number from 1 to the source page count so the
+            # translated PDF has exactly one page per source page. A page with
+            # no blocks — blank page, image-only page, or a page the formatter
+            # dropped — would otherwise shift every later page and silently
+            # misalign the bilingual alternator from that point on.
+            page_numbers: Sequence[int] = range(1, source_page_count + 1)
+        else:
+            # No source page count (fragment / unit test) or no hard breaks
+            # (monolingual reflow): emit only the pages that carry blocks.
+            page_numbers = sorted_pages
+        for page_idx, page_num in enumerate(page_numbers):
             if page_idx > 0 and pagebreaks:
                 lines.append("#pagebreak()")
                 lines.append("")
 
-            page_blocks = page_groups[page_num]
+            page_blocks = page_groups.get(page_num)
+            if not page_blocks:
+                # Blank placeholder page keeps the 1:1 source/target alignment.
+                lines.append("#box(height: 1pt)")
+                lines.append("")
+                continue
             if page_num == 1 and self._is_cover_page(page_blocks, cover_mode):
                 self._emit_cover_page(page_blocks, lines, bilingual, source_page_height)
                 continue
