@@ -275,12 +275,16 @@ def _url_is_remote(value: str) -> bool:
     return probe.startswith("//") or bool(_SCHEME_RE.match(probe))
 
 
-def _scrub_style_body(css: str) -> str:
+def scrub_css_text(css: str) -> str:
     """Drop remote/unsafe ``@import`` and neutralise ``url()``/``expression()``.
 
     A kept stylesheet cannot execute in an EPUB reading system, but a *remote*
     ``@import`` fetches from the network (tracking, and CSS attribute-selector
     exfiltration), so remote targets go while relative in-package ones stay.
+
+    Public because a standalone ``.css`` package member is copied into the
+    deliverable and needs exactly the same gate as an inline ``<style>`` body;
+    only this file may hold the URL policy.
     """
     lowered = css.lower()
     if "@import" not in lowered and "url(" not in lowered and "expression" not in lowered:
@@ -843,7 +847,7 @@ class _SourceTagScrubber:
         """
         closing = re.compile(rf"</\s*{name}\b[^>]*>", re.IGNORECASE)
         match = closing.search(markup, start)
-        transform = _scrub_style_body if name == "style" else None
+        transform = scrub_css_text if name == "style" else None
         if match is None:
             body = markup[start:]
             out.append(transform(body) if transform is not None else body)

@@ -24,6 +24,7 @@ from ubt.core.cleaners.dynamic_boilerplate import (
 )
 from ubt.core.cleaners.html_sanitizer import (
     sanitize_html_fragment,
+    scrub_css_text,
     scrub_source_document,
     strip_html_mark_tags,
 )
@@ -57,6 +58,30 @@ def _is_safe_epub_member_name(name: str) -> bool:
         return False
     # A drive/URN-looking first segment ("C:") is absolute on Windows.
     return ":" not in normalized.split("/", 1)[0]
+
+
+#: Refuse to materialise a single member beyond this. A "zip bomb" member
+#: declares an enormous uncompressed size; ``zipfile`` stops at the declared
+#: size, so capping it before ``read`` is what keeps one crafted member from
+#: exhausting memory (a lying declaration is stopped and CRC-failed inside
+#: ``zipfile`` anyway).
+_MAX_EPUB_MEMBER_BYTES = 300 * 1024 * 1024
+
+
+def _read_epub_member(zf: zipfile.ZipFile, name: str) -> bytes | None:
+    """Read one member unless its declared size is bomb-scale.
+
+    Returns ``None`` (after logging) for a missing or oversized member instead
+    of raising, so the caller can skip it and still deliver the rest of the book.
+    """
+    try:
+        info = zf.getinfo(name)
+    except KeyError:
+        return None
+    if info.file_size > _MAX_EPUB_MEMBER_BYTES:
+        logger.warning("EPUB: skipping oversized member %r (%d bytes)", name, info.file_size)
+        return None
+    return zf.read(name)
 
 
 _NAMED_HTML_ENTITY_RE = re.compile(r"&([a-zA-Z][a-zA-Z0-9]*);")
@@ -284,7 +309,10 @@ def _parse_chapter_blocks(
     ``len(result)``, so this returns the blocks only.
     """
     assert chapter.source_file is not None  # caller guards the empty/None case
-    raw_bytes = zf.read(chapter.source_file)
+    raw_bytes = _read_epub_member(zf, chapter.source_file)
+    if raw_bytes is None:
+        # Missing or zip-bomb-sized member: yield no blocks rather than read it.
+        return []
     soup = _parse_xhtml(raw_bytes.decode("utf-8", errors="ignore"))
     wrap_nested_direct_blocks(soup)
     body = soup.body or soup
@@ -461,7 +489,10 @@ class EPUBAdapter(BaseDocumentAdapter):
                     sample_range = chapters[min(5, len(chapters) - 1) : min(35, len(chapters))]
                     for c in sample_range:
                         if c.source_file and c.source_file in zf.namelist():
-                            raw = zf.read(c.source_file).decode("utf-8", errors="ignore")
+                            sample_raw = _read_epub_member(zf, c.source_file)
+                            if sample_raw is None:
+                                continue
+                            raw = sample_raw.decode("utf-8", errors="ignore")
                             soup = BeautifulSoup(raw, "html.parser")
                             txt = soup.get_text(" ", strip=True)
                             if len(txt) >= 150:
@@ -637,7 +668,11 @@ class EPUBAdapter(BaseDocumentAdapter):
                         # Existing bilingual stylesheet will be re-written once at the end
                         continue
 
-                    data = zin.read(info.filename)
+                    data = _read_epub_member(zin, info.filename)
+                    if data is None:
+                        # Missing or zip-bomb-sized member: skip it rather than
+                        # materialise it.
+                        continue
 
                     if info.filename == "mimetype":
                         zout.writestr(
@@ -699,6 +734,13 @@ class EPUBAdapter(BaseDocumentAdapter):
                         data = scrub_source_document(data.decode("utf-8", errors="ignore")).encode(
                             "utf-8"
                         )
+                    elif info.filename.lower().endswith(".css"):
+                        # An external stylesheet ships inside the deliverable, so
+                        # a malicious source could smuggle a remote @import or a
+                        # remote url() past the chapter scrub (tracking, and CSS
+                        # attribute-selector exfiltration). Gate it exactly like
+                        # an inline <style> body.
+                        data = scrub_css_text(data.decode("utf-8", errors="ignore")).encode("utf-8")
 
                     # Pass the original ZipInfo object so date_time,
                     # external_attr (unix permissions), and compress metadata

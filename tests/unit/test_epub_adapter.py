@@ -1120,3 +1120,70 @@ def test_epub_monolingual_preserves_inline_media_and_anchors() -> None:
     assert "fig.png" in out
     assert 'href="#fn1"' in out
     assert 'id="ref1"' in out
+
+
+@pytest.mark.asyncio
+async def test_epub_external_stylesheet_is_scrubbed(tmp_path: Path) -> None:
+    """A copied ``.css`` member must be gated like an inline ``<style>`` body.
+
+    Regression: only ``.xhtml``/``.html``/``.xml``/``.svg`` members went through
+    the scrub, so a malicious source could ship a remote ``@import`` (network
+    fetch) or a ``url(javascript:…)`` the reader would honour.
+    """
+    epub_file = tmp_path / "styled.epub"
+    write_epub(
+        epub_file,
+        opf_xml=opf(
+            pub_id="urn:uuid:styled",
+            title="Styled",
+            items=[
+                item("ch1", "OEBPS/ch1.xhtml"),
+                item("css", "OEBPS/style.css", media_type="text/css"),
+            ],
+        ),
+        parts={
+            "OEBPS/ch1.xhtml": page("<p>Hello world.</p>", title="ch1"),
+            "OEBPS/style.css": (
+                '@import url("https://evil.example/x.css");\n'
+                "p { background: url(javascript:alert(1)); }\n"
+            ),
+        },
+    )
+    adapter = EPUBAdapter()
+    manifest = await adapter.extract_manifest(epub_file)
+
+    out = tmp_path / "out.epub"
+    with SQLiteJobLedger(tmp_path / "led.db") as ledger:
+        ledger.init_job_from_manifest(manifest.doc_id, manifest)
+        await adapter.render_output(
+            manifest=manifest, ledger=ledger, target_lang="zh", output_path=out
+        )
+
+    with zipfile.ZipFile(out) as zout:
+        css = zout.read("OEBPS/style.css").decode("utf-8")
+    assert "evil.example" not in css
+    assert "javascript" not in css
+
+
+def test_epub_refuses_to_read_an_oversized_member() -> None:
+    """A zip-bomb member (huge declared uncompressed size) must not be read.
+
+    ``zipfile.read`` stops at the declared size, so capping it before the read
+    is what keeps one crafted member from exhausting memory while still
+    delivering the rest of the book.
+    """
+    import io
+
+    from ubt.adapters.epub.adapter import _MAX_EPUB_MEMBER_BYTES, _read_epub_member
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("small.txt", b"ok")
+        zf.writestr("bomb.bin", b"x" * 1024)
+    buf.seek(0)
+    with zipfile.ZipFile(buf) as zf:
+        assert _read_epub_member(zf, "small.txt") == b"ok"
+        assert _read_epub_member(zf, "missing") is None
+        # Simulate the bomb declaration without allocating 300 MB.
+        zf.getinfo("bomb.bin").file_size = _MAX_EPUB_MEMBER_BYTES + 1
+        assert _read_epub_member(zf, "bomb.bin") is None
