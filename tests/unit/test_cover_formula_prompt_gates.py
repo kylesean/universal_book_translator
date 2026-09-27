@@ -622,3 +622,27 @@ def test_cover_thresholds_scale_with_source_page_height() -> None:
     fallback = recon.generate_typst_source(blocks, title="T", page_strict=True, cover_mode="always")
     sub_fallback = next(ln for ln in fallback.splitlines() if "副标题" in ln)
     assert 'style: "italic"' in sub_fallback
+
+
+def test_cover_is_clamped_to_one_page() -> None:
+    """A title/author-heavy cover must never spill onto a second page.
+
+    Regression: the cover was arbitrary-height content ending in ``#v(1fr)``,
+    so a short page or a tall image pushed it over and the alternator's 1:1
+    page pairing drifted from page 1 on.
+    """
+    recon = TypstReconstructor()
+    blocks = [
+        _cover_block(1, BlockType.HEADING, "Title", "标题", 380.0),
+        _cover_block(2, BlockType.NARRATIVE, "SUB", "副标题", 250.0),
+        _cover_block(3, BlockType.NARRATIVE, "Author", "作者", 150.0),
+    ]
+    short = recon.generate_typst_source(
+        blocks, title="T", page_strict=True, cover_mode="always", source_page_height=400.0
+    )
+    assert "#block(height: 100%, breakable: false, clip: true)[" in short
+    assert "#v(3.5cm)" not in short  # the gap scales with the page height
+    # Without a known page height the cover keeps the A4 fallback gap.
+    fallback = recon.generate_typst_source(blocks, title="T", page_strict=True, cover_mode="always")
+    assert "#block(height: 100%, breakable: false, clip: true)[" in fallback
+    assert "#v(3.50cm)" in fallback

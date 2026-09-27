@@ -1879,9 +1879,13 @@ class TypstReconstructor:
         if page_height and page_height > 0:
             subtitle_cut = page_height * _COVER_SUBTITLE_FRAC
             desc_cut = page_height * _COVER_DESC_FRAC
+            # Scale the top gap with the page too: a fixed 3.5cm is A4-sized and
+            # eats a short cover before any content is drawn.
+            top_gap_cm = max(0.6, 3.5 * page_height / 841.89)
         else:
             subtitle_cut = 300.0
             desc_cut = 200.0
+            top_gap_cm = 3.5
 
         title_block: IRBlock | None = None
         subtitle_block: IRBlock | None = None
@@ -1930,8 +1934,14 @@ class TypstReconstructor:
             else ""
         )
 
-        lines.append("#align(left)[")
-        lines.append("  #v(3.5cm)")
+        # A cover is arbitrary-height content ending in ``#v(1fr)``; a short page
+        # or a tall image pushed it onto a second page, which shifts every later
+        # source page in the alternator's 1:1 pairing (and now trips the
+        # page-strict page-count assertion). ``height: 100%`` + ``breakable:
+        # false`` + ``clip: true`` pins it to exactly one page and drops any
+        # overflow instead of spilling.
+        lines.append("#block(height: 100%, breakable: false, clip: true)[")
+        lines.append(f"  #v({top_gap_cm:.2f}cm)")
         if title:
             lines.append(
                 f'  #text(size: 26pt, weight: "bold", fill: rgb("#111827"))[{_escape_typst_markup(title)}]'
