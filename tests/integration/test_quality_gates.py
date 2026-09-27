@@ -8,9 +8,15 @@ Red Alert 3: ubt/core/ must contain 0 print() calls and 0 imports of click/fasta
 import ast
 from pathlib import Path
 
+import pytest
+
 from ubt.core.ir.models import BlockType, FlowID, IRBlock
 from ubt.core.memory.neighbor_window import NeighborContextBuilder
 from ubt.core.validators.html_delta import HTMLDeltaValidator
+
+# The core-purity AST scan (Red Alert 3) is automated evidence that must run in
+# the per-edit `pytest -m fast` gate rather than only in a manual full run.
+pytestmark = pytest.mark.fast
 
 
 def test_red_alert_1_unclosed_img_or_unescaped_quotes_detected() -> None:

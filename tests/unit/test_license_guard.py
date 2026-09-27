@@ -28,6 +28,11 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 UBT_DIR = REPO_ROOT / "ubt"
 CORE_DIR = UBT_DIR / "core"
 
+# This is automated clean-room / architecture evidence: it must run in the
+# per-edit `pytest -m fast` gate and the pre-push hook, or an AGPL/boundary
+# regression could land silently (remote CI is parked).
+pytestmark = pytest.mark.fast
+
 
 def _extract_imported_modules(file_path: Path) -> set[str]:
     """Parse a python file into an AST and collect all top-level module names imported.

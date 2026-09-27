@@ -20,6 +20,10 @@ UBT_PKG = Path(__file__).resolve().parents[2] / "ubt"
 
 GATE_MODULE = "ubt.adapters.pdf.pdfium_gate"
 
+# Runs in the per-edit `pytest -m fast` gate: the pypdfium2-import ordering
+# invariant is cheap to check and must not be able to regress silently.
+pytestmark = pytest.mark.fast
+
 
 def _module_imports(tree: ast.Module) -> set[str]:
     names: set[str] = set()

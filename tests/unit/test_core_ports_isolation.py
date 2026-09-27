@@ -12,7 +12,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).parents[2]
+
+# Runtime half of the architecture guard (the AST half is test_license_guard):
+# it must run in the per-edit `pytest -m fast` gate, or a core->adapters leak
+# could land silently.
+pytestmark = pytest.mark.fast
 
 PROBE = (
     "import sys\n"
