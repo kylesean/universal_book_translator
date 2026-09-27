@@ -175,3 +175,27 @@ def test_clean_head_keeps_a_leading_year() -> None:
     for page in ("42\nAnnual Report of the Society", "1234\nAnnual Report of the Society"):
         cleaned, _ = cleaner.clean_head(page)
         assert cleaned.startswith("Annual Report"), (page, cleaned)
+
+
+def test_footer_disclaimer_prefix_in_body_prose_is_not_stripped() -> None:
+    """A sentence that merely opens with the disclaimer's first words is prose.
+
+    Regression: the "anchor on leading 30 chars" branch stripped from a bare
+    prefix match, so a paragraph mentioning the copyright line had its tail
+    deleted and written back into the delivered file.
+    """
+    from ubt.core.cleaners.dynamic_boilerplate import BoilerplateFingerprint
+
+    disc = "Copyright 2024 Academic Publisher. All Rights Reserved. May not be copied."
+    fp = BoilerplateFingerprint(footer_disclaimers=(disc,))
+
+    body = "Please read the Copyright 2024 Academic Publisher guidelines before continuing."
+    cleaned, stripped = fp.clean_tail(body)
+    assert cleaned == body, cleaned
+    assert stripped == ""
+
+    # A genuine disclaimer whose tail varies is still stripped.
+    variant = disc.replace("copied.", "copied!")
+    cleaned2, stripped2 = fp.clean_tail(f"Some prose text. {variant}")
+    assert cleaned2 == "Some prose text", cleaned2
+    assert variant in stripped2

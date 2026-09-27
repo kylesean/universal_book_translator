@@ -87,13 +87,20 @@ class BoilerplateFingerprint:
                 cleaned = cleaned[:idx].rstrip(" .:,;-\t\r\n")
                 break
 
-            # Anchor on leading 30 chars
+            # Anchor on leading 30 chars. A *prefix* match alone is not
+            # evidence, though: the harvested disclaimer may vary at its tail
+            # (a trailing page number, a changed URL), but a body sentence that
+            # merely opens with the same words had everything after it deleted
+            # and written back into the delivered file. Require the candidate
+            # tail to actually resemble the disclaimer.
             lead = disc[: min(30, len(disc))]
             lead_idx = cleaned.rfind(lead)
             if lead_idx != -1 and lead_idx >= len(cleaned) - len(disc) - 200:
-                stripped_parts.append(cleaned[lead_idx:])
-                cleaned = cleaned[:lead_idx].rstrip(" .:,;-\t\r\n")
-                break
+                candidate = cleaned[lead_idx : lead_idx + len(disc)]
+                if difflib.SequenceMatcher(None, candidate, disc).ratio() >= 0.85:
+                    stripped_parts.append(cleaned[lead_idx:])
+                    cleaned = cleaned[:lead_idx].rstrip(" .:,;-\t\r\n")
+                    break
 
         # 3. Strip photo credit again if it was positioned immediately before disclaimer
         photo_m2 = _PHOTO_CREDIT_PATTERN.search(cleaned)
