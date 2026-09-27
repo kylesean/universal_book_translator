@@ -158,3 +158,20 @@ def test_leading_page_marker_does_not_eat_english_words() -> None:
     # Real page markers are still stripped.
     assert fp.clean_head("xiv\nChapter body")[0] == "Chapter body"
     assert fp.clean_head("Page 42\nBody")[0] == "Body"
+
+
+def test_clean_head_keeps_a_leading_year() -> None:
+    """A leading year is content, not a page marker.
+
+    Regression: the bare-number page-marker alternative matched a 4-digit year,
+    so a chapter headed "2024" or a dated front-matter line lost its first line.
+    """
+    from ubt.core.cleaners.dynamic_boilerplate import BoilerplateFingerprint
+
+    cleaner = BoilerplateFingerprint()
+    kept, _ = cleaner.clean_head("2024\nAnnual Report of the Society")
+    assert kept.startswith("2024")
+    # A real page number (and a non-year 4-digit number) is still stripped.
+    for page in ("42\nAnnual Report of the Society", "1234\nAnnual Report of the Society"):
+        cleaned, _ = cleaner.clean_head(page)
+        assert cleaned.startswith("Annual Report"), (page, cleaned)

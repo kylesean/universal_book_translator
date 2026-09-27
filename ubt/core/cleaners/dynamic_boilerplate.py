@@ -31,7 +31,12 @@ _PHOTO_CREDIT_PATTERN = re.compile(
 # block. Front-matter page markers are lowercase roman, so this keeps them.
 _ROMAN_NUMERAL = r"(?=[ivxlcdm])m{0,4}(?:cm|cd|d?c{0,3})(?:xc|xl|l?x{0,3})(?:ix|iv|v?i{0,3})"
 _LEADING_PAGE_MARKER = re.compile(
-    r"^\s*(?:[Pp][Aa][Gg][Ee]\s+\d+|\d+|" + _ROMAN_NUMERAL + r")[ \t]*(?:\n|$)",
+    # A bare leading number is a page marker, but a 4-digit year (1800-2099) is
+    # content: a chapter headed "2024" or a dated front-matter line had its year
+    # stripped and the block's first line deleted.
+    r"^\s*(?:[Pp][Aa][Gg][Ee]\s+\d+|(?!(?:1[89]|20)\d{2}\b)\d+|"
+    + _ROMAN_NUMERAL
+    + r")[ \t]*(?:\n|$)",
 )
 
 _RUNNING_HEADER_PATTERN = re.compile(
