@@ -4,8 +4,11 @@ Design (warn-only, ROI-first):
 - T0 deterministic, zero model tokens, always safe to run: banned unicode scan
   of the Typst source (U+2011), PDF page count, text-level blank-page
   candidates via pdf_oxide in-process extraction.
-- T1 structural, zero model tokens: block bbox overlap / out-of-bounds on the
-  same page (pure Python over IR blocks + pikepdf mediabox dimensions).
+- T1 structural, zero model tokens: text-line overlap / out-of-bounds on the
+  same page, read from the *artifact's* own pdfium line boxes (pure Python +
+  pikepdf mediabox dimensions). Falls back to the IR source bboxes only when
+  the artifact yields no text, and records ``artifact_unverified`` so an
+  unmeasured layout is never reported as a clean pass.
 - Pixel confirmation + T2 VLM are *optional*: page PNGs are rendered
   in-process by ``pdf_oxide`` (base dependency; no poppler ``pdftoppm``
   subprocess) and inspected with Pillow. PyMuPDF is deliberately NOT used
@@ -158,6 +161,67 @@ def page_dimensions(pdf_path: Path) -> dict[int, tuple[float, float]]:
     except Exception as exc:
         logger.debug("Visual gate: cannot read dimensions of %s: %s", pdf_path, exc)
         return {}
+
+
+#: Bound on pages whose *artifact* text boxes feed the deterministic geometry
+#: checks; a longer book is sampled evenly. pdfium extraction is cheap per page,
+#: but the gate runs on every export, so it is not unbounded.
+MAX_ARTIFACT_GEOMETRY_PAGES = 120
+
+
+def _geometry_pages(total: int) -> list[int]:
+    """1-based pages to read artifact text boxes from (all, or an even sample)."""
+    if total <= MAX_ARTIFACT_GEOMETRY_PAGES:
+        return list(range(1, total + 1))
+    step = total / MAX_ARTIFACT_GEOMETRY_PAGES
+    return sorted(
+        {min(total, max(1, round(1 + i * step))) for i in range(MAX_ARTIFACT_GEOMETRY_PAGES)}
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _ArtifactBBox:
+    page: int
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+
+
+@dataclass(frozen=True, slots=True)
+class _ArtifactBox:
+    """One artifact text line, shaped like an IRBlock for the T1 checks."""
+
+    id: str
+    bbox: _ArtifactBBox
+
+
+def artifact_text_boxes(pdf_path: Path, pages: Sequence[int]) -> list[_ArtifactBox]:
+    """Per-line text boxes read from the rendered artifact itself (pdfium).
+
+    The deterministic T1 checks used the IR's *source* bboxes, which cannot see
+    a render that moved or clipped text inside a page — and were skipped
+    entirely on the reflow route. These are the artifact's own pdfium text rects
+    (raw, not merged into reading-order lines: merging folds two overprinted runs
+    at the same position into one rect and hides the very overlap T1 looks for).
+    """
+    from ubt.adapters.pdf.textgeom import extract_text_rects
+
+    boxes: list[_ArtifactBox] = []
+    for page in pages:
+        try:
+            rects = extract_text_rects(pdf_path, page)
+        except Exception as exc:
+            logger.debug("Visual gate: artifact geometry failed for page %d: %s", page, exc)
+            continue
+        for idx, (x0, y0, x1, y1) in enumerate(rects):
+            boxes.append(
+                _ArtifactBox(
+                    id=f"p{page}:rect{idx}",
+                    bbox=_ArtifactBBox(page=page, x0=x0, y0=y0, x1=x1, y1=y1),
+                )
+            )
+    return boxes
 
 
 def blank_page_candidates(pdf_path: Path, min_chars: int = BLANK_TEXT_THRESHOLD_CHARS) -> list[int]:
@@ -584,10 +648,42 @@ async def run_visual_gate(
                 page=page,
             )
         )
-    if blocks:
-        findings.extend(block_overlap_findings(blocks))
-        dims = await asyncio.to_thread(page_dimensions, pdf_path)
-        findings.extend(blocks_out_of_bounds_findings(blocks, dims))
+    # T1 reads the artifact's OWN text boxes, not the IR's source bboxes: the IR
+    # cannot see a render that moved or clipped text inside a page, and it was
+    # skipped entirely on the reflow route. Fall back to the IR only when pdfium
+    # yields nothing, and say the artifact was not verified rather than report a
+    # clean pass.
+    geometry_pages = _geometry_pages(total)
+    artifact_boxes = await asyncio.to_thread(artifact_text_boxes, pdf_path, geometry_pages)
+    dims = await asyncio.to_thread(page_dimensions, pdf_path)
+    if artifact_boxes:
+        findings.extend(block_overlap_findings(artifact_boxes))
+        findings.extend(blocks_out_of_bounds_findings(artifact_boxes, dims))
+        if len(geometry_pages) < total:
+            findings.append(
+                VisualFinding(
+                    severity="info",
+                    code="geometry_sampled",
+                    message=(
+                        f"Artifact geometry checked on {len(geometry_pages)}/{total} "
+                        "pages (even sample)"
+                    ),
+                )
+            )
+    else:
+        if blocks:
+            findings.extend(block_overlap_findings(blocks))
+            findings.extend(blocks_out_of_bounds_findings(blocks, dims))
+        findings.append(
+            VisualFinding(
+                severity="info",
+                code="artifact_unverified",
+                message=(
+                    "No artifact text boxes could be read; geometry checks used the IR "
+                    "(source) bboxes, so the delivered layout was not verified"
+                ),
+            )
+        )
     flagged = [f.page for f in findings if f.page is not None]
     sampled = select_sample_pages(total, flagged, adaptive_sample_budget(total, sample_pages))
     vlm_pages: list[int] = []

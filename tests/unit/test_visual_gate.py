@@ -8,6 +8,7 @@ import pytest
 
 from ubt.adapters.pdf.visual_gate import (
     adaptive_sample_budget,
+    artifact_text_boxes,
     blank_page_candidates,
     block_overlap_findings,
     blocking_gate_tripped,
@@ -436,3 +437,39 @@ def test_source_bboxes_only_gate_the_engine_that_keeps_them() -> None:
     # is honored even when metadata is missing entirely.
     assert keeps(loop_with({"render_engine_effective": "publication"}, run_engine="rigid")) is True
     assert keeps(loop_with(None, run_engine="publication")) is False
+
+
+def test_visual_gate_measures_the_artifact_not_the_ir(tmp_path: Path) -> None:
+    """F3b: geometry is read from the delivered PDF, not the IR's source boxes.
+
+    Two text runs rendered on top of each other are invisible to the IR (whose
+    bboxes are fine) but obvious in the artifact. The gate must read the
+    artifact's own pdfium rects, so the overprint is flagged.
+    """
+    import shutil
+    import subprocess
+
+    if shutil.which("typst") is None:
+        pytest.skip("typst binary unavailable")
+
+    typ = (
+        "#set page(width: 300pt, height: 200pt, margin: 0pt)\n"
+        "#place(top + left, dx: 20pt, dy: 20pt)[#text(size: 12pt)[overlapping line one]]\n"
+        "#place(top + left, dx: 20pt, dy: 20pt)[#text(size: 12pt)[overlapping line two]]\n"
+    )
+    src = tmp_path / "over.typ"
+    out = tmp_path / "over.pdf"
+    src.write_text(typ, encoding="utf-8")
+    subprocess.run(["typst", "compile", str(src), str(out)], check=True)
+
+    boxes = artifact_text_boxes(out, [1])
+    assert len(boxes) >= 2
+    assert any(f.code == "block_overlap" for f in block_overlap_findings(boxes))
+
+
+@pytest.mark.asyncio
+async def test_visual_gate_reports_artifact_unverified_when_no_text(tmp_path: Path) -> None:
+    """No artifact text means the layout was not verified — say so, don't pass clean."""
+    pdf = _write_pdf(tmp_path / "blank.pdf", 1)
+    res = await run_visual_gate(pdf, blocks=[], sample_pages=0)
+    assert any(f.code == "artifact_unverified" for f in res.findings)

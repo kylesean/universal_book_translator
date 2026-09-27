@@ -143,6 +143,28 @@ _EXTRACT_LINES_CACHE: dict[tuple[str, int, int], tuple[list[LineBox], tuple[floa
 
 
 @pdfium_serialized
+def extract_text_rects(pdf_path: Path, page_no: int) -> list[tuple[float, float, float, float]]:
+    """Raw pdfium text rects for one page, *unmerged*.
+
+    ``extract_lines`` merges rects that share a baseline into one reading-order
+    line — which folds two overprinted runs at the same position into a single
+    rect and hides the very overlap a render check looks for. This returns the
+    raw per-run rects instead.
+    """
+    import pypdfium2 as pdfium
+
+    pdf = pdfium.PdfDocument(str(pdf_path))
+    if not 1 <= page_no <= len(pdf):
+        raise DocumentParseError(f"page {page_no} out of range in {pdf_path.name}")
+    textpage = pdf[page_no - 1].get_textpage()
+    rects: list[tuple[float, float, float, float]] = []
+    for idx in range(textpage.count_rects(0, -1)):
+        x0, y0, x1, y1 = textpage.get_rect(idx)
+        rects.append((float(x0), float(y0), float(x1), float(y1)))
+    return rects
+
+
+@pdfium_serialized
 def extract_lines(pdf_path: Path, page_no: int) -> tuple[list[LineBox], tuple[float, float]]:
     """pdfium line rects in column-aware reading order + page size."""
     import pypdfium2 as pdfium
