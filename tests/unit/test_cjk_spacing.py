@@ -204,3 +204,11 @@ def test_table_separator_gate_is_linear_on_adversarial_line() -> None:
     table = "| A | B |\n|---|---|\n| 1 | 2 |"
     assert _TABLE_SEP_RE.fullmatch("|---|---|") is not None
     assert normalize_publishing_cjk(table) == table
+
+
+def test_pangu_spacing_does_not_break_bare_function_calls() -> None:
+    """``sin(x)`` is a call, not a bracketed reference; leave it alone."""
+    assert apply_pangu_spacing("当 sin(x) 趋近时") == "当 sin(x) 趋近时"
+    assert apply_pangu_spacing("函数 f(x) 连续") == "函数 f(x) 连续"
+    # ...but a numeric bracketed reference still gets its space.
+    assert apply_pangu_spacing("参见图 3.1(a)所示。") == "参见图 3.1 (a) 所示。"

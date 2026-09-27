@@ -327,17 +327,18 @@ def strip_textbook_ocr_artifacts(content: str, source_lang: str = "en") -> str:
     # Layer 3 Invariant: strict immunity for mathematical formulas,
     # LaTeX markup, and code. Checked BEFORE the CMap normalizer: its
     # '/C2' -> '×' / '/C0' -> '-' rewrites would corrupt code fences
-    # ('/C2/data') and inline math ('$x /C2 y$').
-    if (
+    # ('/C2/data') and inline math ('$x /C2 y$'). Only the CMap step is skipped
+    # for such content — the boilerplate / page-marker / running-header stripping
+    # below must still run (a stray backtick used to disable all of it).
+    protect_math = (
         _has_dollar_math(content)
         or "\\begin" in content
         or "```" in content
         or "`" in content
         or "\\frac" in content
-    ):
-        return content
-
-    content = normalize_academic_pdf_math(content)
+    )
+    if not protect_math:
+        content = normalize_academic_pdf_math(content)
 
     # 1. Strip publisher legal disclaimers for the source language (via BoilerplateCatalog)
     legal_pat = BoilerplateCatalog.get_legal_pattern(source_lang)

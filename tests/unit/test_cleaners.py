@@ -720,3 +720,25 @@ def test_neutralize_pseudo_tags_stays_linear_on_unpaired_tags() -> None:
         elapsed = time.perf_counter() - start
         assert out.count("&lt;") == 50_000
         assert elapsed < 5.0, f"{chunk!r} * 50000 took {elapsed:.2f}s"
+
+
+def test_running_header_regex_keeps_a_title_ending_in_a_year() -> None:
+    """'CHAPTER 5 Overview of 2020' is a title, not a running header."""
+    from ubt.core.cleaners.lnds_pruner import strip_textbook_ocr_artifacts
+
+    assert "2020" in strip_textbook_ocr_artifacts("CHAPTER 5 Overview of 2020", "en")
+    # A real running header (page number, not a year) is still stripped.
+    assert "CHAPTER 5 Overview of 42" not in strip_textbook_ocr_artifacts(
+        "CHAPTER 5 Overview of 42", "en"
+    )
+
+
+def test_code_block_still_gets_boilerplate_stripped() -> None:
+    """A backtick must not disable boilerplate / page cleaning."""
+    from ubt.core.cleaners.lnds_pruner import strip_textbook_ocr_artifacts
+
+    out = strip_textbook_ocr_artifacts("Body `x` here.\nPage 42\nMore body.", "en")
+    assert "Page 42" not in out
+    assert "`x`" in out  # the code span itself is untouched
+    # The CMap normalizer must still be skipped for code (original intent).
+    assert "/C2/data" in strip_textbook_ocr_artifacts("```python\npath = '/C2/data'\n```", "en")

@@ -53,8 +53,11 @@ _CATALOG: dict[str, LanguageBoilerplate] = {
             r"^\s*Information\s+(?:about|about\s+the)\s+(?:the\s+)?(?:Project\s+)?Gutenberg[-\s][^\n]*",
         ),
         running_headers=(
-            r"^\s*(?:[A-Za-z]+(?:[^\S\n]+[A-Za-z]+)*[^\w\s]?[^\S\n]*CHAPTER[^\S\n]+\d+[^\S\n]+\d+|\d+[^\S\n]+CHAPTER[^\S\n]+\d+[^\w\s]?[^\S\n]*[A-Za-z]+(?:[^\S\n]+[A-Za-z]+)*)[^\S\n]*(?=[A-Z])",
-            r"^\s*CHAPTER[^\S\n]+\d+[^\w\s]?[^\S\n]*[A-Za-z]+(?:[^\S\n]+[A-Za-z]+)*[^\S\n]*\d+[^\S\n]*",
+            # The trailing page number must not be a 4-digit year: a chapter
+            # title like "CHAPTER 5 Overview of 2020" otherwise matched the
+            # running-header shape and the whole line was deleted.
+            r"^\s*(?:[A-Za-z]+(?:[^\S\n]+[A-Za-z]+)*[^\w\s]?[^\S\n]*CHAPTER[^\S\n]+\d+[^\S\n]+(?!(?:1[89]|20)\d{2}\b)\d+|\d+[^\S\n]+CHAPTER[^\S\n]+\d+[^\w\s]?[^\S\n]*[A-Za-z]+(?:[^\S\n]+[A-Za-z]+)*)[^\S\n]*(?=[A-Z])",
+            r"^\s*CHAPTER[^\S\n]+\d+[^\w\s]?[^\S\n]*[A-Za-z]+(?:[^\S\n]+[A-Za-z]+)*[^\S\n]*(?!(?:1[89]|20)\d{2}\b)\d+[^\S\n]*",
         ),
         page_markers=(r"^\s*Page\s+\d+\s*\n*",),
         photo_credits=(

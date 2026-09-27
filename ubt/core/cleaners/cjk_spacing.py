@@ -128,8 +128,11 @@ def apply_pangu_spacing(text: str, target_lang: str = "zh") -> str:
         seg = re.sub(rf"([{_CJK}])({_OPEN_BRACKET}{_LATIN_OR_NUM})", r"\1 \2", seg)
         # 2c. Half-width bracket with Latin/Num/Math + CJK: e.g. (3.1)出发 -> (3.1) 出发
         seg = re.sub(rf"({_LATIN_OR_NUM}{_CLOSE_BRACKET})([{_CJK}])", r"\1 \2", seg)
-        # 2d. Num/Latin + half-width bracket with Latin/Num: e.g. 图 3.1(a) -> 图 3.1 (a)
-        seg = re.sub(rf"({_LATIN_OR_NUM})({_OPEN_BRACKET}[a-zA-Z0-9])", r"\1 \2", seg)
+        # 2d. Num + half-width bracket with Latin/Num: e.g. 图 3.1(a) -> 图 3.1 (a)
+        # Only a *digit* may precede the bracket. A letter is an identifier, and
+        # ``sin(x)`` / ``f(x)`` are function calls, not bracketed references — the
+        # old ``_LATIN_OR_NUM`` rule inserted a space and broke them.
+        seg = re.sub(rf"(\d)({_OPEN_BRACKET}[a-zA-Z0-9])", r"\1 \2", seg)
         # 3. Number/Latin + % + CJK (e.g. 15% 的性能)
         seg = re.sub(rf"({_LATIN_OR_NUM}%)([{_CJK}])", r"\1 \2", seg)
         # 6. Clean spaces around CJK punctuation
