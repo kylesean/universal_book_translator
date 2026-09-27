@@ -25,7 +25,6 @@ from ubt.adapters.pdf.vlm.types import PageTranscript, VlmLine
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_VISION_MODEL = "gpt-4o-mini"
 DEFAULT_OPENAI_ENDPOINT = "https://api.openai.com/v1"
 
 
@@ -85,7 +84,6 @@ class CloudOcrDriver:
             api_key or os.environ.get("UBT_OCR_API_KEY") or os.environ.get("OPENAI_API_KEY")
         )
         self.provider = provider or os.environ.get("UBT_OCR_PROVIDER", "auto")
-        self.model = model or os.environ.get("UBT_OCR_MODEL", DEFAULT_VISION_MODEL)
         self.timeout = timeout
         self.extra_headers = dict(extra_headers or {})
         # Determine whether this driver yields measured boxes or vision text.
@@ -104,6 +102,18 @@ class CloudOcrDriver:
             )
         )
         self.measured_boxes = not self._vision_llm
+        # No vendor default: the vision route must be told which model to bill,
+        # and the cloud-REST route sends no model field at all. Fail closed here
+        # rather than ship ``"model": ""`` (or a model nobody chose).
+        self.model = (model or os.environ.get("UBT_OCR_MODEL") or "").strip()
+        if self._vision_llm and not self.model:
+            raise ValueError(
+                "Vision OCR needs an explicit model: this channel no longer falls "
+                "back to a vendor default. Set UBT_OCR_MODEL (or ocr_model in the "
+                "run config) to the vision model whose tokens the run will bill; "
+                "choose a local engine (UBT_VLM_DRIVER=rapidocr) or set "
+                "UBT_OCR_MODE=off to skip OCR instead."
+            )
 
     def recognize(
         self,

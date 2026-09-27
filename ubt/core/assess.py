@@ -616,10 +616,19 @@ def _build_cost(
     )
     ocr_page_calls = scan_pages if (scan_pages and config.ocr_mode in ("cloud", "vlm")) else 0
     # The two channels bill different models: the visual judge runs on
-    # ``visual_judge_model`` while the OCR driver bills ``UBT_OCR_MODEL``
-    # (default gpt-4o-mini). Pricing both at the judge rate made the quote
-    # disagree with the driver that actually pays.
+    # ``visual_judge_model`` while the OCR driver bills ``UBT_OCR_MODEL``. UBT
+    # ships no OCR model default, so an unset one leaves the vision figure
+    # unknown (warned below) rather than priced at a vendor's shipped model.
     vlm_model = getattr(config, "visual_judge_model", None) or config.repair_model
+    if ocr_page_calls and not config.ocr_model.strip():
+        warnings.append(
+            AssessmentWarning(
+                "OCR_MODEL_NOT_CONFIGURED",
+                "warn",
+                "OCR 已启用但未配置 ocr 模型：该通道记不到计费模型，费用呈现为「未知」。"
+                "请设置 UBT_OCR_MODEL；vision 模式在未设置时会直接报错。",
+            )
+        )
     # The OCR channel bills its own endpoint (empty map value = the OpenAI
     # default, i.e. remote); the visual judge bills the router's ``base_url``.
     ocr_endpoint = config.remote_billing_models().get(config.ocr_model, config.base_url)

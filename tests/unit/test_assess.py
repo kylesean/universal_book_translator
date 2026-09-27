@@ -219,6 +219,25 @@ def test_ocr_and_judge_channels_are_priced_on_their_own_models(
     assert unpriced.money_is_unknown
 
 
+def test_ocr_without_a_model_reports_unknown_cost(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No OCR model configured: the vision figure is unknown, and it is said so.
+
+    UBT ships no vendor default, so an OCR channel with no model cannot be
+    priced. The quote must say "unknown" rather than silently pricing whichever
+    vendor model UBT happened to default to.
+    """
+    doc = tmp_path / "paper.pdf"
+    doc.write_bytes(b"%PDF-1.4 fake")
+    _fake_pdf_env(monkeypatch, scanned_share=0.8)
+
+    report = assess_document(doc, _config(ocr_mode="cloud"))
+    assert report.cost.ocr_page_calls > 0
+    assert report.cost.vision_cost_usd is None
+    assert "OCR_MODEL_NOT_CONFIGURED" in {w.code for w in report.warnings}
+
+
 def test_pathological_pages_warn(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     doc = tmp_path / "giant.pdf"
     doc.write_bytes(b"%PDF-1.4 fake")

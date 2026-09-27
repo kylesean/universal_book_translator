@@ -10,7 +10,7 @@ import pytest
 from PIL import Image
 
 from ubt.adapters.pdf.docling_adapter import DoclingPDFAdapter
-from ubt.adapters.pdf.vlm.drivers.cloud_driver import DEFAULT_VISION_MODEL, CloudOcrDriver
+from ubt.adapters.pdf.vlm.drivers.cloud_driver import CloudOcrDriver
 from ubt.adapters.pdf.vlm.drivers.sidecar_driver import SidecarOcrDriver
 from ubt.adapters.pdf.vlm.registry import (
     list_drivers,
@@ -186,8 +186,8 @@ def test_probe_effective_driver_modes(monkeypatch: pytest.MonkeyPatch) -> None:
     assert mode == "cloud"
     assert isinstance(drv, CloudOcrDriver)
 
-    # 4. explicit vlm mode
-    mode, drv = probe_effective_driver(mode="vlm", allow_page_upload=True)
+    # 4. explicit vlm mode (a vision model is mandatory: no vendor default)
+    mode, drv = probe_effective_driver(mode="vlm", model="vision-x", allow_page_upload=True)
     assert mode == "vlm"
     assert isinstance(drv, CloudOcrDriver)
 
@@ -203,7 +203,7 @@ def test_probe_effective_driver_modes(monkeypatch: pytest.MonkeyPatch) -> None:
 
     with patch.object(SidecarOcrDriver, "is_healthy", return_value=False):
         monkeypatch.setenv("OPENAI_API_KEY", "sk-proj-test")
-        mode, drv = probe_effective_driver(mode="auto", allow_page_upload=True)
+        mode, drv = probe_effective_driver(mode="auto", model="vision-x", allow_page_upload=True)
         if importlib.util.find_spec("rapidocr") is not None:
             assert mode == "rapidocr"
         else:
@@ -468,8 +468,9 @@ def test_auto_mode_warns_before_selecting_paid_engine(
     monkeypatch.setitem(sys.modules, "rapidocr", None)
     with caplog.at_level(logging.WARNING, logger="ubt.adapters.pdf.vlm.registry"):
         # Uploads opted in: this case is about the surprise-bill warning, not
-        # about the egress gate (that pairing has its own case above).
-        mode, _drv = probe_effective_driver(mode="auto", allow_page_upload=True)
+        # about the egress gate (that pairing has its own case above). A model
+        # is supplied because the vision route will not invent one.
+        mode, _drv = probe_effective_driver(mode="auto", model="vision-x", allow_page_upload=True)
     assert mode == "vlm"
     assert any("PAID" in r.message for r in caplog.records)
 
@@ -508,17 +509,58 @@ def test_probe_effective_driver_honours_the_configured_ocr_model() -> None:
     assert isinstance(drv, CloudOcrDriver)
     assert drv.model == "org/vision-x"
 
-    # No pick given: the driver's own env/default fallback stays in charge.
-    _, default_drv = probe_effective_driver(mode="vlm", allow_page_upload=True)
-    assert isinstance(default_drv, CloudOcrDriver)
-    assert default_drv.model == DEFAULT_VISION_MODEL
+
+def test_no_shipped_vision_model_default() -> None:
+    """Neither the config field nor the driver may name a vendor's model.
+
+    A default here was a silent vendor choice: an operator who never set
+    ``UBT_OCR_MODEL`` billed whichever model UBT happened to ship.
+    """
+    from ubt.adapters.pdf.vlm.drivers import cloud_driver
+
+    assert UBTConfig.model_fields["ocr_model"].default == ""
+    assert not hasattr(cloud_driver, "DEFAULT_VISION_MODEL")
 
 
-def test_config_ocr_model_default_matches_the_driver() -> None:
-    """A default that drifts from the driver's would silently mis-quote OCR."""
-    from ubt.core.config import UBTConfig
+def test_ocr_mode_vlm_requires_a_model_at_config_time() -> None:
+    """``ocr_mode='vlm'`` is unbuildable without a model, so say so early."""
+    with pytest.raises(ValueError, match="UBT_OCR_MODEL"):
+        UBTConfig(ocr_mode="vlm", allow_page_upload=True)
 
-    assert UBTConfig.model_fields["ocr_model"].default == DEFAULT_VISION_MODEL
+
+def test_ocr_mode_cloud_needs_no_model() -> None:
+    """The cloud-REST path (Baidu/Tencent/Azure) never sends a model field."""
+    cfg = UBTConfig(ocr_mode="cloud", allow_page_upload=True)
+    assert cfg.ocr_model == ""
+
+
+def test_vision_driver_refuses_to_invent_a_model() -> None:
+    """The vision-LLM driver fails closed instead of shipping ``"model": ""``."""
+    with pytest.raises(ValueError, match="UBT_OCR_MODEL"):
+        CloudOcrDriver(provider="vlm")
+
+
+def test_cloud_rest_driver_needs_no_model() -> None:
+    driver = CloudOcrDriver(provider="cloud")
+    assert driver.model == ""
+    assert driver.measured_boxes is True
+
+
+def test_auto_vision_without_a_model_fails_loudly(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``auto`` reaching the paid vision route must not invent a model either.
+
+    ``OPENAI_API_KEY`` is the OCR interop key, so it is commonly set for the
+    translation provider; that must not silently start billing a vision model
+    the operator never chose.
+    """
+    import sys
+
+    monkeypatch.setitem(sys.modules, "rapidocr", None)
+    monkeypatch.setitem(sys.modules, "rapidocr_onnxruntime", None)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-not-an-ocr-choice")
+    monkeypatch.delenv("UBT_VLM_DRIVER", raising=False)
+    with pytest.raises(ValueError, match="UBT_OCR_MODEL"):
+        probe_effective_driver(mode="auto", allow_page_upload=True)
 
 
 def test_ocr_usage_books_the_run_sink_from_a_worker_thread() -> None:
@@ -540,7 +582,7 @@ def test_ocr_usage_books_the_run_sink_from_a_worker_thread() -> None:
         loop = asyncio.get_running_loop()
         await asyncio.to_thread(
             _record_ocr_usage,
-            DEFAULT_VISION_MODEL,
+            "vision-x",
             {"prompt_tokens": 1200, "completion_tokens": 90},
         )
         # A 200 with no usage block is unmeasured, not free.
@@ -552,8 +594,8 @@ def test_ocr_usage_books_the_run_sink_from_a_worker_thread() -> None:
 
     asyncio.run(_run())
 
-    assert sink[DEFAULT_VISION_MODEL]["prompt_tokens"] == 1200
-    assert "unmeasured_calls" not in sink[DEFAULT_VISION_MODEL]
+    assert sink["vision-x"]["prompt_tokens"] == 1200
+    assert "unmeasured_calls" not in sink["vision-x"]
     assert sink["unreported-vision-v9"]["unmeasured_calls"] == 1
 
 
@@ -662,7 +704,7 @@ def test_unmeasured_vlm_driver_is_not_scan_capable() -> None:
     from ubt.adapters.pdf.docling_parser import _driver_can_transcribe_scans
     from ubt.adapters.pdf.vlm.drivers.cloud_driver import CloudOcrDriver
 
-    assert _driver_can_transcribe_scans(CloudOcrDriver(provider="vlm")) is False
+    assert _driver_can_transcribe_scans(CloudOcrDriver(provider="vlm", model="vision-x")) is False
     assert _driver_can_transcribe_scans(CloudOcrDriver(provider="cloud")) is True
 
 
@@ -722,7 +764,7 @@ def test_sidecar_recognize_computes_measured_boxes_dynamically() -> None:
 @pytest.mark.fast
 def test_cloud_driver_measured_boxes_synchronized_in_init() -> None:
     # When endpoint is OpenAI or chat/completions, driver is vision LLM (measured_boxes=False)
-    driver = CloudOcrDriver(endpoint="https://api.openai.com/v1")
+    driver = CloudOcrDriver(endpoint="https://api.openai.com/v1", model="vision-x")
     assert driver.measured_boxes is False, (
         "OpenAI endpoint must set measured_boxes=False in __init__"
     )
@@ -784,7 +826,9 @@ def test_dry_run_closes_every_page_egress_path() -> None:
     """
     from ubt.core.engine.dry_run import create_dry_run_orchestrator
 
-    config = UBTConfig(ocr_mode="vlm", allow_page_upload=True, visual_judge_enabled=True)
+    config = UBTConfig(
+        ocr_mode="vlm", ocr_model="vision-x", allow_page_upload=True, visual_judge_enabled=True
+    )
     orchestrator = create_dry_run_orchestrator(config)
 
     assert orchestrator.config.ocr_mode == "off"

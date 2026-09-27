@@ -351,10 +351,10 @@ class UBTConfig(BaseSettings):
     ocr_endpoint: str = ""
     # Vision model for the OCR channel (env UBT_OCR_MODEL). Declared here so the
     # spend pre-flight and the assessor can price the channel the driver
-    # actually bills against; the driver reads the same env var
-    # (ubt/adapters/pdf/vlm/drivers/cloud_driver.py, whose DEFAULT_VISION_MODEL
-    # this default is pinned to by test_config_ocr_model_default_matches_the_driver).
-    ocr_model: str = "gpt-4o-mini"
+    # actually bills against. No vendor default: the vision channel must be told
+    # which model to call, and an empty value fails closed (see _check_invariants
+    # and CloudOcrDriver) rather than silently billing a shipped model.
+    ocr_model: str = ""
     # Plain declarative field: env_prefix maps this to UBT_OCR_API_KEY only, so
     # neither the bare ``OCR_API_KEY`` nor a shared LLM key can reach it.
     ocr_api_key: SecretStr = SecretStr("")
@@ -980,6 +980,18 @@ class UBTConfig(BaseSettings):
                         display_name=f"Config Custom ({m_name})",
                     )
                     reg.register(new_prof, override=True)
+
+        # The vision-LLM OCR route bills a model the operator must name: UBT
+        # ships no vendor default, so an explicitly requested 'vlm' with no
+        # model is unbuildable. 'cloud' (a REST endpoint such as Baidu/Azure,
+        # which sends no model field) and 'auto' (the driver re-checks) pass.
+        if self.ocr_mode == "vlm" and not self.ocr_model.strip():
+            raise ValueError(
+                "ocr_mode='vlm' requires a model (UBT_OCR_MODEL): the vision OCR "
+                "channel bills the model you name, and UBT ships no vendor default. "
+                "Set UBT_OCR_MODEL, choose a local engine (UBT_VLM_DRIVER=rapidocr), "
+                "or set UBT_OCR_MODE=off."
+            )
 
         return self
 
