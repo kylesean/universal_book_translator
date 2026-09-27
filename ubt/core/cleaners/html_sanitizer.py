@@ -26,6 +26,7 @@ Design notes:
 from __future__ import annotations
 
 import re
+from bisect import bisect_left
 from html.parser import HTMLParser
 
 # Inline formatting / structure that is meaningful in book translations.
@@ -489,14 +490,12 @@ def _scan_tag_end(text: str, start: int) -> int:
     return -1
 
 
-def _closer_exists(name: str, text: str, start: int) -> bool:
-    """Whether a ``</name>`` close tag appears at or after ``start``."""
-    return re.search(r"</\s*" + re.escape(name) + r"\b", text[start:], re.IGNORECASE) is not None
-
-
-def _opener_exists(name: str, text: str, before: int) -> bool:
-    """Whether an ``<name`` opener appears before ``before``."""
-    return re.search(r"<" + re.escape(name) + r"[\s/>]", text[:before], re.IGNORECASE) is not None
+# Existence queries inside ``_neutralize_pseudo_tags`` used to re-scan the whole
+# fragment (``text[:i]`` / ``text[start:]``) once per tag, which made the pass
+# O(n^2) on adversarial input. These scan the fragment once so every query is
+# O(1); the patterns mirror the old per-name forms exactly.
+_OPENER_SCAN_RE = re.compile(r"<([a-zA-Z][a-zA-Z0-9]*)[\s/>]", re.IGNORECASE)
+_CLOSER_SCAN_RE = re.compile(r"</\s*([a-zA-Z][a-zA-Z0-9]*)\b", re.IGNORECASE)
 
 
 def _neutralize_pseudo_tags(text: str) -> str:
@@ -520,8 +519,43 @@ def _neutralize_pseudo_tags(text: str) -> str:
     surface: neutralised runs render as inert text.
     """
     out: list[str] = []
-    i = 0
     n = len(text)
+
+    # One pass answers "is there an opener ``<name[\s/>]`` before i?" and "is
+    # there a closer ``</\s*name\b`` at/after p?" in O(1) each.
+    first_opener: dict[str, int] = {}
+    last_closer: dict[str, int] = {}
+    for opener_match in _OPENER_SCAN_RE.finditer(text):
+        first_opener.setdefault(opener_match.group(1).lower(), opener_match.start())
+    for closer_match in _CLOSER_SCAN_RE.finditer(text):
+        last_closer[closer_match.group(1).lower()] = closer_match.start()
+
+    # ``>`` positions and the next quote, so ``tag_end`` runs the quote-aware
+    # scan only when a quote actually precedes the first ``>``.
+    gt_positions = [idx for idx, ch in enumerate(text) if ch == ">"]
+    next_quote = [n] * (n + 1)
+    next_q = n
+    for idx in range(n - 1, -1, -1):
+        if text[idx] in ("'", '"'):
+            next_q = idx
+        next_quote[idx] = next_q
+
+    def opener_before(name: str, pos: int) -> bool:
+        return first_opener.get(name, n) < pos
+
+    def closer_after(name: str, pos: int) -> bool:
+        return last_closer.get(name, -1) >= pos
+
+    def tag_end(start: int) -> int:
+        pos = bisect_left(gt_positions, start + 1)
+        if pos == len(gt_positions):
+            return -1
+        first_gt = gt_positions[pos]
+        if next_quote[start + 1] >= first_gt:
+            return first_gt
+        return _scan_tag_end(text, start)
+
+    i = 0
     while i < n:
         if text[i] != "<":
             nxt = text.find("<", i)
@@ -552,21 +586,21 @@ def _neutralize_pseudo_tags(text: str) -> str:
             # (``<embed>``) has no content at all; both are escaped to inert
             # text so the rest of the fragment survives.
             if is_close:
-                opts = _opener_exists(name, text, i)
+                opts = opener_before(name, i)
                 if opts:
-                    end = _scan_tag_end(text, i)
+                    end = tag_end(i)
                     out.append(text[i:] if end == -1 else text[i : end + 1])
                     i = n if end == -1 else end + 1
                 else:
                     out.append(literal)
                     i = m.end()
                 continue
-            end = _scan_tag_end(text, i)
+            end = tag_end(i)
             if end == -1:
                 out.append(literal)
                 i = m.end()
                 continue
-            if _closer_exists(name, text, end + 1):
+            if closer_after(name, end + 1):
                 out.append(text[i : end + 1])
                 i = end + 1
             else:
@@ -578,9 +612,9 @@ def _neutralize_pseudo_tags(text: str) -> str:
             # A closer is real markup only when its opener was (or would be)
             # kept earlier in this fragment; otherwise escape it so a stray
             # ``</b>``/``</div>`` cannot orphan-open structure downstream.
-            opener = re.search(r"<" + re.escape(name) + r"[\s/>]", text[:i], re.IGNORECASE)
+            opener = opener_before(name, i)
             if opener:
-                end = _scan_tag_end(text, i)
+                end = tag_end(i)
                 out.append(text[i:] if end == -1 else text[i : end + 1])
                 i = n if end == -1 else end + 1
                 continue
@@ -593,20 +627,18 @@ def _neutralize_pseudo_tags(text: str) -> str:
             # so the parser drops the tag and keeps its inner text (module
             # docstring). An unpaired name (``List<T>``, ``<stdio.h>``) is
             # prose, not markup: escape it so its inner text is not swallowed.
-            gt = _scan_tag_end(text, i)
-            if gt != -1:
-                closer = re.compile(r"</\s*" + re.escape(name) + r"\b", re.IGNORECASE)
-                if closer.search(text, gt + 1):
-                    out.append(text[i : gt + 1])
-                    i = gt + 1
-                    continue
+            gt = tag_end(i)
+            if gt != -1 and closer_after(name, gt + 1):
+                out.append(text[i : gt + 1])
+                i = gt + 1
+                continue
             out.append(literal)
             i = m.end()
             continue
 
         # Allowlisted open tag: read to its ``>`` to tell void/self-closing
         # from a bare opener that needs a matching close.
-        gt = _scan_tag_end(text, i)
+        gt = tag_end(i)
         if gt == -1:
             # Unterminated ``<`` — cannot be markup; escape it as text.
             out.append(literal)
@@ -623,8 +655,7 @@ def _neutralize_pseudo_tags(text: str) -> str:
             out.append(tag_full)
             i = gt + 1
             continue
-        closer = re.compile(r"</\s*" + re.escape(name) + r"\b", re.IGNORECASE)
-        if closer.search(text, gt + 1):
+        if closer_after(name, gt + 1):
             out.append(tag_full)
             i = gt + 1
         else:

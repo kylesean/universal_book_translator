@@ -680,3 +680,43 @@ def test_sanitizer_keeps_ellipse_and_tfoot_and_bounds_long_pseudo_tag() -> None:
     assert perf_counter() - start < 2.0
     assert "<b>" not in out
     assert "keep" in out
+
+
+def test_neutralize_pseudo_tags_matches_the_characterization_corpus() -> None:
+    """The O(n) rewrite is byte-identical to the old per-tag scanner.
+
+    ``_neutralize_pseudo_tags`` only decides which ``<`` stay markup; the
+    allowlist parser is the XSS boundary, so a wrong decision can lose content
+    but cannot widen the attack surface. The corpus pins the old behaviour over
+    prose, unpaired/void tags, dangerous containers and quote/nesting edges.
+    """
+    import json
+    from pathlib import Path
+
+    from ubt.core.cleaners.html_sanitizer import _neutralize_pseudo_tags
+
+    fixture = Path(__file__).parent / "fixtures" / "neutralize_pseudo_tags_characterization.json"
+    corpus = json.loads(fixture.read_text(encoding="utf-8"))["corpus"]
+    assert len(corpus) >= 80
+    for case in corpus:
+        assert _neutralize_pseudo_tags(case["input"]) == case["expected"], repr(case["input"])
+
+
+def test_neutralize_pseudo_tags_stays_linear_on_unpaired_tags() -> None:
+    """A run of unpaired tags must not be quadratic — the input is untrusted.
+
+    The old pass re-scanned the fragment once per tag (``text[:i]`` /
+    ``text[start:]``), so ``"<b>" * N`` cost O(N^2); the position maps make it
+    O(N).
+    """
+    import time
+
+    from ubt.core.cleaners.html_sanitizer import _neutralize_pseudo_tags
+
+    for chunk in ("<b>", "<b"):
+        text = chunk * 50_000
+        start = time.perf_counter()
+        out = _neutralize_pseudo_tags(text)
+        elapsed = time.perf_counter() - start
+        assert out.count("&lt;") == 50_000
+        assert elapsed < 5.0, f"{chunk!r} * 50000 took {elapsed:.2f}s"
