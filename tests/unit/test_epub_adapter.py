@@ -9,9 +9,15 @@ import pytest
 from bs4 import BeautifulSoup
 
 from tests.epub_builders import XHTML_NS, item, opf, page, write_epub
-from ubt.adapters.epub.adapter import BLOCK_TAGS, EPUBAdapter, is_leaf_block
+from ubt.adapters.epub.adapter import (
+    BLOCK_TAGS,
+    EPUBAdapter,
+    _parse_chapter_blocks,
+    is_leaf_block,
+)
+from ubt.core.cleaners.dynamic_boilerplate import BoilerplateFingerprint
 from ubt.core.engine.ledger import SQLiteJobLedger
-from ubt.core.exceptions import UBTError
+from ubt.core.exceptions import DocumentParseError, UBTError
 from ubt.core.ir.models import BlockStatus, BlockType, BookManifest, ChapterMeta, FlowID, IRBlock
 from ubt.core.job_options import overrides_from_request
 
@@ -1220,3 +1226,22 @@ async def test_epub_non_utf8_chapter_is_decoded_not_dropped(tmp_path: Path) -> N
     async for chapter in adapter.parse_stream(path):
         blocks.extend(chapter.blocks)
     assert any("中文字符串测试" in b.source_text for b in blocks), [b.source_text for b in blocks]
+
+
+def test_parse_chapter_blocks_requires_a_source_file() -> None:
+    """A chapter with no spine member must fail loudly, not under ``-O``.
+
+    ``_parse_chapter_blocks`` guarded this with ``assert chapter.source_file is
+    not None``; ``python -O`` strips asserts, so the guard would vanish and a
+    ``None`` would surface later as an ``AttributeError`` on ``None``. The
+    caller skips falsy source files, so this is defensive: assert the explicit
+    ``DocumentParseError`` instead.
+    """
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("mimetype", "application/epub+zip")
+    buf.seek(0)
+
+    chapter = ChapterMeta(chapter_id="ch1", title="c", spine_index=1, source_file=None)
+    with zipfile.ZipFile(buf) as zf, pytest.raises(DocumentParseError, match="no source file"):
+        _parse_chapter_blocks(zf, chapter, set(), BoilerplateFingerprint(), False, 1)

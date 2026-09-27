@@ -156,6 +156,22 @@ def test_validate_safe_path_security_checks(tmp_path: Path) -> None:
     )
 
 
+def test_allowed_bases_are_resolved_before_containment(tmp_path: Path) -> None:
+    """An unresolved allowlist entry must still contain its own files.
+
+    Containment compares the *resolved* candidate against each base. A base
+    handed in unnormalized (``sub/..``, a symlinked directory) used to be
+    compared verbatim, so it never matched and every path inside it 403'd.
+    """
+    (tmp_path / "sub").mkdir()
+    target = tmp_path / "book.md"
+    target.touch()
+    base = tmp_path / "sub" / ".."  # resolves to tmp_path, but is not normalized as-is
+
+    resolved = resolve_secure_path(target, must_exist=True, allowed_bases=[base])
+    assert resolved == target.resolve()
+
+
 def test_operator_whitelist_unblocks_paths_inside_a_system_prefix(tmp_path: Path) -> None:
     """Risk: the hard-coded system deny list was checked before containment and
     overrode an explicit whitelist, so ``UBT_ALLOWED_DIRS=/var/lib/ubt/books``

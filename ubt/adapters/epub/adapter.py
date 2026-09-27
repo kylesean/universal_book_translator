@@ -349,8 +349,15 @@ def _parse_chapter_blocks(
     loop. ``global_spine`` is the starting spine index; the caller advances it by
     ``len(result)``, so this returns the blocks only.
     """
-    assert chapter.source_file is not None  # caller guards the empty/None case
-    raw_bytes = _read_epub_member(zf, chapter.source_file)
+    source_file = chapter.source_file
+    if source_file is None:
+        # Callers only enqueue a chapter whose spine member resolved (the
+        # parse_stream loop skips a falsy/absent source_file), so this is
+        # defensive. It is an explicit raise rather than an ``assert`` because
+        # ``python -O`` strips asserts, which would turn a None into a later
+        # ``AttributeError`` on ``None`` instead of this actionable message.
+        raise DocumentParseError(f"EPUB chapter {chapter.chapter_id!r} has no source file to parse")
+    raw_bytes = _read_epub_member(zf, source_file)
     if raw_bytes is None:
         # Missing or zip-bomb-sized member: yield no blocks rather than read it.
         return []

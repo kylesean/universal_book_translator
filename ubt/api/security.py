@@ -182,7 +182,6 @@ def effective_allowed_bases(config: UBTConfig | None = None) -> list[Path]:
 
 def resolve_secure_path(
     raw_path: str | Path,
-    base_dir: Path | None = None,
     must_exist: bool = True,
     allowed_bases: list[Path] | None = None,
     config: UBTConfig | None = None,
@@ -232,11 +231,11 @@ def resolve_secure_path(
         # sandbox of the no-whitelist posture. The sensitive-name deny list is
         # the one rule it does NOT override (docstring point 4).
         explicit_whitelist = False
-        if base_dir:
-            effective_bases.append(base_dir.resolve())
-            explicit_whitelist = True
-        elif allowed_bases is not None:
-            effective_bases.extend(allowed_bases)
+        if allowed_bases is not None:
+            # Resolve every base: containment is compared against the *resolved*
+            # candidate, so an unresolved base (``sub/..``, a symlinked dir)
+            # would never match and every path inside it would 403.
+            effective_bases.extend(b.resolve() for b in allowed_bases)
             explicit_whitelist = True
         else:
             cfg = config or UBTConfig()
