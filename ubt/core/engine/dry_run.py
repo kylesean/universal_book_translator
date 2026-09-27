@@ -14,12 +14,11 @@ from typing import Any
 from ubt.core.config import UBTConfig
 from ubt.core.engine.pipeline import PipelineOrchestrator
 from ubt.core.qe.comet_runner import MockQERunner
+from ubt.core.qe.fast_pass import REHEARSAL_MARKER as _DRY_RUN_PREFIX
 from ubt.core.router.prompts import draft_source_from_prompt
 from ubt.core.router.provider import MockModelProvider
 from ubt.core.router.rate_limiter import AdaptiveTokenBucket
 from ubt.core.router.router import ModelRouter
-
-_DRY_RUN_PREFIX = "[模拟翻译]"
 
 
 class DryRunModelProvider(MockModelProvider):

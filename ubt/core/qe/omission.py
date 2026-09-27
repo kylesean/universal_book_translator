@@ -39,7 +39,7 @@ from collections import Counter
 from dataclasses import dataclass
 
 from ubt.core.qe.term_shape import count_sentences as count_sentences
-from ubt.core.qe.term_shape import is_identifier_shaped
+from ubt.core.qe.term_shape import is_identifier_shaped, is_verbatim_carryover
 from ubt.core.validators.consistency import (
     canonicalize_numeric_token,
     normalize_for_numeric_matching,
@@ -129,6 +129,24 @@ def identifier_terms(source_text: str) -> set[str]:
     ]
     freq = Counter(runs)
     return {t for t in set(runs) if _is_identifier_shaped(t) and not _is_hyphen_ghost(t, freq)}
+
+
+def verbatim_carryover_terms(source_text: str) -> set[str]:
+    """Source-verbatim Latin runs a competent model keeps verbatim.
+
+    Superset of :func:`identifier_terms`: the omission gate no longer *demands*
+    a bare ``II``/``US`` survive translation, but a competent model still keeps
+    them, and the length/script-density gates treat them as legitimate
+    carry-overs (see ``term_shape.is_verbatim_carryover``). The offline baseline
+    double reuses this so its tokens track the gates that measure it.
+    """
+    runs = [
+        match.group(0)
+        for match in _LATIN_RUN_RE.finditer(source_text.strip())
+        if len(match.group(0)) >= 2
+    ]
+    freq = Counter(runs)
+    return {t for t in set(runs) if is_verbatim_carryover(t) and not _is_hyphen_ghost(t, freq)}
 
 
 def _math_term_variants(term: str) -> list[str]:

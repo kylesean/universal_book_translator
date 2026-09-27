@@ -179,3 +179,20 @@ def test_near_echo_still_fires_on_a_latin_target_with_no_cjk() -> None:
     src = "The harness reduces token cost across every benchmark in the evaluation suite."
     tgt = "The harness reduces token cost across every benchmark in the evaluation seri."
     assert is_near_verbatim_echo(src, tgt)
+
+
+def test_rehearsal_echo_is_not_quarantined_as_near_verbatim() -> None:
+    """A ``--dry-run`` echo must not be flagged untranslated.
+
+    Regression: the rehearsal's ``[模拟翻译]`` + source echo scores retention
+    ~1.0, so the rehearsal quarantined every normal-length paragraph and the
+    zero-token end-to-end validation produced an empty (0-completed) run.
+    """
+    src = (
+        "Alpha paragraph one is here with several words. "
+        "Beta paragraph two is also here with more words to translate."
+    )
+    assert not is_near_verbatim_echo(src, "[模拟翻译] " + src)
+    # The whole deterministic gate chain must let the rehearsal through, not
+    # just near-echo (script density / length ratio also reject a source echo).
+    assert _fp().evaluate(src, "[模拟翻译] " + src).passed

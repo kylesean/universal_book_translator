@@ -101,6 +101,25 @@ class TestProperNounRecall:
         assert decision.metrics.proper_noun_recall == 1.0
         assert decision.passed, decision.reason
 
+    def test_common_caps_words_are_not_identifier_terms(self) -> None:
+        """IT/OR/IF/US are ordinary words, not terms demanded verbatim.
+
+        Regression: every all-caps token counted as an identifier, so a correct
+        translation that rendered them in Chinese failed the omission gate and
+        the block was quarantined as BLOCKED_HUMAN.
+        """
+        src = "The IT department uses OR logic in IF statements and US dollars."
+        tgt = "信息技术部门在条件语句中使用或逻辑，并以美元计价。"
+        decision = OmissionGate().evaluate(src, tgt)
+        assert decision.metrics.proper_noun_recall == 1.0
+        assert decision.passed, decision.reason
+
+    def test_real_acronyms_remain_identifier_terms(self) -> None:
+        """The stoplist must not swallow genuine 3+ character acronyms."""
+        src = "The MHA and GQA kernels differ. LSTM layers stack deeply."
+        tgt = "MHA 与 GQA 内核不同。LSTM 层可深度堆叠。"
+        assert OmissionGate().evaluate(src, tgt).passed
+
 
 class TestNumberRecall:
     def test_cjk_structural_numeral_keeps_recall(self) -> None:

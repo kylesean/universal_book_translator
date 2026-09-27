@@ -16,7 +16,7 @@ from ubt.core.policy.layout_policy import PROSE_BLOCK_TYPES
 from ubt.core.qe.added_content import AddedContentGate
 from ubt.core.qe.defect_taxonomy import ECHO_MARKER, NEAR_ECHO_MARKER
 from ubt.core.qe.omission import OmissionGate, OmissionMetrics, singular_variant
-from ubt.core.qe.term_shape import is_identifier_shaped
+from ubt.core.qe.term_shape import is_identifier_shaped, is_verbatim_carryover
 from ubt.core.validators.consistency import NumericConsistencyValidator
 from ubt.core.validators.html_delta import HTMLDeltaValidator
 from ubt.core.validators.math_guard import (
@@ -248,6 +248,13 @@ def is_verbatim_echo(source_text: str, target_text: str) -> bool:
     return bool(_ECHO_WORD_RE.search(src))
 
 
+#: Rehearsal marker emitted by ``--dry-run``'s echo provider. A rehearsal is
+#: meant to prove the plumbing reaches a rendered artifact, so its synthetic
+#: "translation" (source echoed back behind this marker) must not be quarantined
+#: as an untranslated echo. Kept as one constant the dry-run provider imports.
+REHEARSAL_MARKER = "[模拟翻译]"
+
+
 def is_near_verbatim_echo(source_text: str, target_text: str) -> bool:
     """True when the target keeps almost all source words without translating.
 
@@ -266,6 +273,11 @@ def is_near_verbatim_echo(source_text: str, target_text: str) -> bool:
     the Latin-token retention test never runs on it.
     """
     if len(_CJK_SCRIPT_RE.findall(target_text)) >= _NEAR_ECHO_CJK_EXEMPT:
+        return False
+    if REHEARSAL_MARKER in target_text:
+        # A ``--dry-run`` echo is an intentional rehearsal artifact, not an
+        # untranslated book: its QE is mocked precisely so the plumbing can be
+        # exercised end to end.
         return False
     src_words = _ECHO_TOKEN_RE.findall(_ECHO_MASK_RE.sub(" ", source_text).lower())
     tgt_words = _ECHO_TOKEN_RE.findall(_ECHO_MASK_RE.sub(" ", target_text).lower())
@@ -634,6 +646,18 @@ class FastPassFilter:
         skip_translate: bool = False,
     ) -> FastPassDecision:
         """Evaluate whether a translated block qualifies for direct fast-pass release."""
+        if REHEARSAL_MARKER in target_text:
+            # ``--dry-run`` echo: the rehearsal exists to prove the plumbing
+            # reaches a rendered artifact, so its synthetic (untranslated) text
+            # must not be held to the deterministic QE gates — otherwise the
+            # zero-token end-to-end check quarantines every real-length paragraph
+            # and exercises none of the repair/render path it is meant to test.
+            return FastPassDecision(
+                passed=True,
+                reason="rehearsal echo (dry-run): deterministic QE bypassed",
+                target_ratio=1.0,
+                length_ratio=1.0,
+            )
         structural = self.validate_structural_invariants(
             source_text, target_text, block_type=block_type, skip_translate=skip_translate
         )
@@ -713,7 +737,7 @@ class FastPassFilter:
         # source-verbatim term instead (not just identifier-shaped ones) would
         # make an entire untranslated table read as empty residue (ratio 1.0).
         for term in preserved:
-            if _is_identifier_shaped(term) or (
+            if is_verbatim_carryover(term) or (
                 len(term) >= 3
                 and term[0].isupper()
                 and term[1:].islower()

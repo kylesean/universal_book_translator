@@ -101,12 +101,129 @@ _STRUCTURAL_DOCUMENT_LABELS = frozenset(
 )
 
 
+# Common English words that are all-caps-shaped when a heading/emphasis run is
+# uppercased. They are prose, not source-verbatim identifiers, so the omission
+# gate must not demand they survive translation. Kept deliberately to function
+# words and everyday nouns — real acronyms (API/CPU/GPT/LSTM…) are absent.
+_COMMON_CAPS_WORDS = frozenset(
+    {
+        "A",
+        "AM",
+        "AN",
+        "AND",
+        "ANY",
+        "ARE",
+        "AS",
+        "AT",
+        "BE",
+        "BUT",
+        "BY",
+        "CAN",
+        "DID",
+        "DO",
+        "EU",
+        "FEW",
+        "FOR",
+        "GET",
+        "GO",
+        "GOT",
+        "HAD",
+        "HAS",
+        "HE",
+        "HER",
+        "HIM",
+        "HIS",
+        "HOW",
+        "I",
+        "IF",
+        "IN",
+        "IS",
+        "IT",
+        "ITS",
+        "LET",
+        "MAY",
+        "ME",
+        "MEN",
+        "MY",
+        "NEW",
+        "NO",
+        "NON",
+        "NOT",
+        "NOW",
+        "OF",
+        "OFF",
+        "OK",
+        "OLD",
+        "ON",
+        "ONE",
+        "OR",
+        "OUR",
+        "OUT",
+        "OWN",
+        "PER",
+        "PM",
+        "PUT",
+        "RUN",
+        "SAY",
+        "SHE",
+        "SO",
+        "THE",
+        "TO",
+        "TOO",
+        "TOP",
+        "TWO",
+        "UN",
+        "UP",
+        "US",
+        "USE",
+        "VIA",
+        "WAS",
+        "WAY",
+        "WE",
+        "WHO",
+        "WHY",
+        "YES",
+        "YET",
+        "YOU",
+    }
+)
+
+
 def is_identifier_shaped(term: str) -> bool:
     """Whether a source-verbatim Latin term must survive translation verbatim.
 
-    camelCase humps (PagedAttention), all-caps acronyms (MHA, KV) and terms
-    carrying digits (GQA-8) are identifiers, not translatable prose.
-    Translatable structural document labels (FIG, TABLE, EQ, etc.) are excluded.
+    camelCase humps (PagedAttention), all-caps acronyms of 3+ characters (MHA,
+    LSTM) and terms carrying digits (GQA-8) are identifiers, not translatable
+    prose. Translatable structural document labels (FIG, TABLE, EQ, etc.) and
+    common all-caps *words* (IT, OR, IF, US, THE in a heading …) are excluded:
+    the omission gate used to demand those survive translation verbatim, so a
+    correct Chinese rendering of "the IT department uses OR logic" was flagged
+    "Omission suspected" and quarantined as BLOCKED_HUMAN.
+    """
+    if term.lower() in _STRUCTURAL_DOCUMENT_LABELS:
+        return False
+    if _HAS_DIGIT_RE.search(term) or _CAMEL_HUMP_RE.search(term):
+        return True
+    if "_" in term or "." in term:
+        return True
+    if _ALL_CAPS_RE.match(term):
+        core = term.strip("_")
+        # A 1-2 character all-caps run is ordinary prose far more often than a
+        # term (IT/OR/IF/US/EU/AI/OK/NO), and a common word that merely happens
+        # to be uppercased is not an identifier either.
+        return len(core) >= 3 and core not in _COMMON_CAPS_WORDS
+    return False
+
+
+def is_verbatim_carryover(term: str) -> bool:
+    """Whether a Latin term may legitimately survive translation verbatim.
+
+    Superset of :func:`is_identifier_shaped`, used by the *target-language
+    density* check: any camelCase, all-caps (even 2 letters) or digit-bearing
+    token a translation keeps verbatim must be stripped from the script-density
+    residue, or a correct translation carrying ``IT``/``US``/``MHA`` would read
+    as untranslated. The omission gate uses the narrower
+    :func:`is_identifier_shaped` so it does not *demand* those survive.
     """
     if term.lower() in _STRUCTURAL_DOCUMENT_LABELS:
         return False

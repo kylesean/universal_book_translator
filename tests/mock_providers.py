@@ -10,7 +10,7 @@ to behave like a competent model and the gate is supposed to be right.
 import re
 
 from ubt.core.qe.fast_pass import grid_columns
-from ubt.core.qe.omission import count_sentences, identifier_terms
+from ubt.core.qe.omission import count_sentences, verbatim_carryover_terms
 from ubt.core.router.provider import MockModelProvider
 from ubt.core.validators.math_guard import target_missing_math_delimiters
 
@@ -41,7 +41,7 @@ def _cell_tokens(cell: str) -> list[str]:
     """Opaque/verbatim payloads inside one table cell that must survive."""
     return [
         *_MATH_ECHO_RE.findall(cell),
-        *sorted(identifier_terms(cell)),
+        *sorted(verbatim_carryover_terms(cell)),
         *_TOKEN_ECHO_RE.findall(cell),
         *_NUM_ECHO_RE.findall(cell),
     ]
@@ -184,7 +184,7 @@ class TokenEchoMockProvider(MockModelProvider):
             for token in dict.fromkeys(
                 [
                     *_MATH_ECHO_RE.findall(scope),
-                    *sorted(identifier_terms(scope)),
+                    *sorted(verbatim_carryover_terms(scope)),
                     *_TOKEN_ECHO_RE.findall(scope),
                     *_NUM_ECHO_RE.findall(scope),
                 ]
