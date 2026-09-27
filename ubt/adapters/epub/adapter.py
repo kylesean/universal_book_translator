@@ -84,6 +84,47 @@ def _read_epub_member(zf: zipfile.ZipFile, name: str) -> bytes | None:
     return zf.read(name)
 
 
+_ENCODING_DECL_RE = re.compile(rb"""encoding\s*=\s*["']([A-Za-z0-9._-]+)["']""", re.IGNORECASE)
+_XML_DECL_ENCODING_RE = re.compile(
+    r"""(<\?xml[^>]*?\bencoding\s*=\s*["'])([A-Za-z0-9._-]+)(["'])""", re.IGNORECASE
+)
+
+
+def _decode_markup(raw: bytes) -> str:
+    """Decode an XML/HTML member, preferring UTF-8 then its declared encoding.
+
+    ``errors="ignore"`` silently dropped every byte a non-UTF-8 template could
+    not represent. UTF-8 is tried first so a *stale* declaration on already
+    UTF-8 bytes (every member this adapter re-serialises) can never mis-decode;
+    only genuinely non-UTF-8 bytes fall back to the BOM / XML declaration, then
+    to a replacement decode so nothing disappears without a visible marker.
+    """
+    if raw.startswith(b"\xef\xbb\xbf"):
+        return raw.decode("utf-8-sig")
+    if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return raw.decode("utf-16")
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+    match = _ENCODING_DECL_RE.search(raw[:1024])
+    if match:
+        try:
+            return raw.decode(match.group(1).decode("ascii", "ignore"))
+        except (LookupError, UnicodeDecodeError):
+            pass
+    return raw.decode("utf-8", errors="replace")
+
+
+def _force_utf8_declaration(text: str) -> str:
+    """Rewrite a non-UTF-8 XML declaration to ``utf-8`` after a re-encode.
+
+    A member decoded with its declared encoding is written back as UTF-8; if the
+    declaration still named the old encoding the reader would mis-decode it.
+    """
+    return _XML_DECL_ENCODING_RE.sub(r"\1utf-8\3", text, count=1)
+
+
 _NAMED_HTML_ENTITY_RE = re.compile(r"&([a-zA-Z][a-zA-Z0-9]*);")
 _EXEMPT_XML_ENTITIES = frozenset({"amp", "lt", "gt", "quot", "apos"})
 
@@ -313,7 +354,7 @@ def _parse_chapter_blocks(
     if raw_bytes is None:
         # Missing or zip-bomb-sized member: yield no blocks rather than read it.
         return []
-    soup = _parse_xhtml(raw_bytes.decode("utf-8", errors="ignore"))
+    soup = _parse_xhtml(_decode_markup(raw_bytes))
     wrap_nested_direct_blocks(soup)
     body = soup.body or soup
 
@@ -388,7 +429,7 @@ class EPUBAdapter(BaseDocumentAdapter):
         try:
             with zipfile.ZipFile(input_path) as zf:
                 opf_path = self._locate_opf(zf)
-                opf_soup = BeautifulSoup(zf.read(opf_path).decode("utf-8", errors="ignore"), "xml")
+                opf_soup = BeautifulSoup(_decode_markup(zf.read(opf_path)), "xml")
 
                 # Extract title and author
                 title_tag = opf_soup.find("dc:title") or opf_soup.find("title")
@@ -492,7 +533,7 @@ class EPUBAdapter(BaseDocumentAdapter):
                             sample_raw = _read_epub_member(zf, c.source_file)
                             if sample_raw is None:
                                 continue
-                            raw = sample_raw.decode("utf-8", errors="ignore")
+                            raw = _decode_markup(sample_raw)
                             soup = BeautifulSoup(raw, "html.parser")
                             txt = soup.get_text(" ", strip=True)
                             if len(txt) >= 150:
@@ -641,9 +682,7 @@ class EPUBAdapter(BaseDocumentAdapter):
                 opf_dir = posixpath.dirname(opf_path)
                 toc_paths: set[str] = set()
                 if opf_path and opf_path in zin.namelist():
-                    opf_soup = BeautifulSoup(
-                        zin.read(opf_path).decode("utf-8", errors="ignore"), "xml"
-                    )
+                    opf_soup = BeautifulSoup(_decode_markup(zin.read(opf_path)), "xml")
                     for item in opf_soup.find_all("item"):
                         href = str(item.get("href") or "")
                         if not href:
@@ -731,16 +770,16 @@ class EPUBAdapter(BaseDocumentAdapter):
                     # passed through untouched go through the same scrub; the
                     # PDF/OPF/NCX members below are not markup a reader executes.
                     if info.filename.lower().endswith((".xhtml", ".html", ".htm", ".xml", ".svg")):
-                        data = scrub_source_document(data.decode("utf-8", errors="ignore")).encode(
-                            "utf-8"
-                        )
+                        data = _force_utf8_declaration(
+                            scrub_source_document(_decode_markup(data))
+                        ).encode("utf-8")
                     elif info.filename.lower().endswith(".css"):
                         # An external stylesheet ships inside the deliverable, so
                         # a malicious source could smuggle a remote @import or a
                         # remote url() past the chapter scrub (tracking, and CSS
                         # attribute-selector exfiltration). Gate it exactly like
                         # an inline <style> body.
-                        data = scrub_css_text(data.decode("utf-8", errors="ignore")).encode("utf-8")
+                        data = scrub_css_text(_decode_markup(data)).encode("utf-8")
 
                     # Pass the original ZipInfo object so date_time,
                     # external_attr (unix permissions), and compress metadata
@@ -772,7 +811,7 @@ class EPUBAdapter(BaseDocumentAdapter):
     def _locate_opf(self, zf: zipfile.ZipFile) -> str:
         """Locate the root OPF file path via META-INF/container.xml."""
         if "META-INF/container.xml" in zf.namelist():
-            container_xml = zf.read("META-INF/container.xml").decode("utf-8", errors="ignore")
+            container_xml = _decode_markup(zf.read("META-INF/container.xml"))
             m = re.search(r'full-path=["\']([^"\']+)["\']', container_xml)
             if m:
                 return m.group(1)
@@ -802,7 +841,7 @@ class EPUBAdapter(BaseDocumentAdapter):
         (block-id mismatch) instead of shipping a source-language book and
         reporting success.
         """
-        soup = _parse_xhtml(raw_html.decode("utf-8", errors="ignore"))
+        soup = _parse_xhtml(_decode_markup(raw_html))
         wrap_nested_direct_blocks(soup)
         body = soup.body or soup
         leaves = [t for t in body.find_all(BLOCK_TAGS) if is_leaf_block(t, block_names)]
@@ -965,7 +1004,7 @@ class EPUBAdapter(BaseDocumentAdapter):
 
     def _update_opf(self, raw_opf: bytes, target_lang: str) -> bytes:
         """Point the package at the bilingual output: dc:language + CSS item."""
-        soup = BeautifulSoup(raw_opf.decode("utf-8", errors="ignore"), "xml")
+        soup = BeautifulSoup(_decode_markup(raw_opf), "xml")
         lang = soup.find("dc:language") or soup.find("language")
         if lang is not None:
             lang.string = target_lang
@@ -1026,7 +1065,7 @@ class EPUBAdapter(BaseDocumentAdapter):
         bilingual_mode: str | None = None,
     ) -> bytes:
         """Append bilingual labels (or monolingual translated labels) to NCX navPoints."""
-        soup = BeautifulSoup(raw_ncx.decode("utf-8", errors="ignore"), "xml")
+        soup = BeautifulSoup(_decode_markup(raw_ncx), "xml")
         is_monolingual = bilingual_mode in ("target", "monolingual")
         for nav_point in soup.find_all("navPoint"):
             content = nav_point.find("content")
@@ -1076,7 +1115,7 @@ class EPUBAdapter(BaseDocumentAdapter):
         bilingual_mode: str | None = None,
     ) -> bytes:
         """Append bilingual labels (or monolingual translated labels) to EPUB3 nav document links."""
-        soup = _parse_xhtml(raw_nav.decode("utf-8", errors="ignore"))
+        soup = _parse_xhtml(_decode_markup(raw_nav))
         is_monolingual = bilingual_mode in ("target", "monolingual")
         for anchor in soup.find_all("a"):
             href_raw = str(anchor.get("href") or "")

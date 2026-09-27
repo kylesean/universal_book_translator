@@ -1187,3 +1187,37 @@ def test_epub_refuses_to_read_an_oversized_member() -> None:
         # Simulate the bomb declaration without allocating 300 MB.
         zf.getinfo("bomb.bin").file_size = _MAX_EPUB_MEMBER_BYTES + 1
         assert _read_epub_member(zf, "bomb.bin") is None
+
+
+@pytest.mark.asyncio
+async def test_epub_non_utf8_chapter_is_decoded_not_dropped(tmp_path: Path) -> None:
+    """A chapter encoded in a non-UTF-8 charset must keep its text.
+
+    Regression: every member was decoded as UTF-8 with ``errors="ignore"``, so a
+    gb2312-encoded chapter silently lost all of its Chinese text.
+    """
+    from tests.epub_builders import CONTAINER_XML
+
+    body = (
+        '<?xml version="1.0" encoding="gb2312"?>\n'
+        f'<html xmlns="{XHTML_NS}"><head><title>t</title></head>'
+        "<body><p>中文字符串测试。</p></body></html>"
+    )
+    opf_xml = opf(pub_id="urn:uuid:gbk", title="GBK", items=[item("ch1", "ch1.xhtml")])
+    path = tmp_path / "gbk.epub"
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr(
+            zipfile.ZipInfo("mimetype"),
+            b"application/epub+zip",
+            compress_type=zipfile.ZIP_STORED,
+        )
+        zf.writestr("META-INF/container.xml", CONTAINER_XML)
+        zf.writestr("OEBPS/content.opf", opf_xml)
+        zf.writestr("OEBPS/ch1.xhtml", body.encode("gb2312"))
+
+    adapter = EPUBAdapter()
+    await adapter.extract_manifest(path)
+    blocks: list[IRBlock] = []
+    async for chapter in adapter.parse_stream(path):
+        blocks.extend(chapter.blocks)
+    assert any("中文字符串测试" in b.source_text for b in blocks), [b.source_text for b in blocks]

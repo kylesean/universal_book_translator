@@ -805,3 +805,48 @@ def test_docx_note_translation_handles_newlines_and_east_asia() -> None:
         r.find(f".//{qn('w:rFonts')}") for r in runs if r.find(f".//{qn('w:rFonts')}") is not None
     ]
     assert any(f.get(qn("w:eastAsia")) == "SimSun" for f in rpr_fonts)
+
+
+@pytest.mark.asyncio
+async def test_docx_tracked_insertion_text_is_extracted_and_replaced(tmp_path: Path) -> None:
+    """``w:ins`` (tracked insertion) runs are visible text, not invisible.
+
+    Regression: ``Paragraph.text`` omits runs wrapped in ``w:ins``, so the
+    inserted words never reached the model, while the monolingual rewrite left
+    them on the page next to the translation.
+    """
+    import zipfile
+
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    path = tmp_path / "ins.docx"
+    doc = Document()
+    para = doc.add_paragraph("plain ")
+    ins = OxmlElement("w:ins")
+    ins.set(qn("w:id"), "5")
+    run = OxmlElement("w:r")
+    text = OxmlElement("w:t")
+    text.text = "inserted"
+    run.append(text)
+    ins.append(run)
+    para._p.append(ins)
+    doc.save(str(path))
+
+    adapter = DOCXAdapter()
+    manifest = await adapter.extract_manifest(path)
+    blocks: list[IRBlock] = []
+    async for chapter in adapter.parse_stream(path):
+        blocks.extend(chapter.blocks)
+    assert any("inserted" in b.source_text for b in blocks), [b.source_text for b in blocks]
+
+    translated = [
+        b.model_copy(update={"target_text": "译文", "skip_translate": False}) for b in blocks
+    ]
+    out = tmp_path / "mono.docx"
+    await adapter.render_blocks(manifest, translated, "zh", out, bilingual_mode="monolingual")
+
+    with zipfile.ZipFile(out) as zf:
+        body = zf.read("word/document.xml").decode("utf-8")
+    assert "inserted" not in body, "the tracked insertion must not survive as source residue"
+    assert "译文" in body

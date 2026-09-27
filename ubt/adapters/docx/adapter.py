@@ -98,6 +98,35 @@ def _iter_body_items(doc: DocumentObject) -> list[Paragraph | Table]:
     return items
 
 
+#: OOXML subtrees whose ``w:t`` is a picture/text-box payload, not flow text.
+_GRAPHIC_SUBTREES = (qn("w:drawing"), qn("w:pict"), qn("w:object"))
+
+
+def _paragraph_text(el: Any) -> str:
+    """All visible ``w:t`` text of a paragraph, excluding drawing subtrees.
+
+    ``python-docx``'s ``Paragraph.text`` concatenates only *direct* ``w:r``
+    children, so it drops runs wrapped in ``w:ins`` (tracked insertions),
+    ``w:customXml``, ``w:smartTag`` or ``w:sdt`` — text that is on the page and
+    that the monolingual rewrite replaces. ``w:delText`` (tracked deletions) is
+    a different element and is correctly omitted. Kept in sync with the render
+    leg (``_replace_paragraph_in_place``) so extraction and rewrite agree on
+    what counts as the paragraph's text.
+    """
+    parts: list[str] = []
+    for t in el.iter(qn("w:t")):
+        ancestor = t.getparent()
+        in_graphic = False
+        while ancestor is not None and ancestor is not el:
+            if ancestor.tag in _GRAPHIC_SUBTREES:
+                in_graphic = True
+                break
+            ancestor = ancestor.getparent()
+        if not in_graphic:
+            parts.append(t.text or "")
+    return "".join(parts)
+
+
 def _walk_table_paragraphs(
     table: Table, id_prefix: str, tree: Any, seen_paths: set[str]
 ) -> Iterator[tuple[str, Paragraph]]:
@@ -167,7 +196,7 @@ def _walk_header_footer_blocks(doc: DocumentObject) -> Iterator[tuple[str, Parag
             pfx = f"docx_main#h{sec_idx:03d}{tag}"
             para_idx = 0
             for para in part.paragraphs:
-                if not para.text.strip():
+                if not _paragraph_text(para._p).strip():
                     continue
                 yield f"{pfx}p{para_idx:05d}", para
                 para_idx += 1
@@ -331,7 +360,7 @@ class DOCXAdapter(BaseDocumentAdapter):
 
         for item in _iter_body_items(doc):
             if isinstance(item, Paragraph):
-                text = item.text.strip()
+                text = _paragraph_text(item._p).strip()
                 if not text:
                     continue
                 blocks.append(
@@ -355,7 +384,7 @@ class DOCXAdapter(BaseDocumentAdapter):
         # ids aligned; inherited (linked-to-previous) parts are skipped so a
         # repeated physical header is not translated twice.
         for block_id, para in _walk_header_footer_blocks(doc):
-            text = para.text.strip()
+            text = _paragraph_text(para._p).strip()
             if not text:
                 continue
             blocks.append(
@@ -406,7 +435,7 @@ class DOCXAdapter(BaseDocumentAdapter):
         tree = table._element.getroottree()
         id_prefix = f"docx_main#t{table_idx:03d}"
         for block_id, cell_para in _walk_table_paragraphs(table, id_prefix, tree, set()):
-            text = cell_para.text.strip()
+            text = _paragraph_text(cell_para._p).strip()
             if not text:
                 continue
             blocks.append(
@@ -555,7 +584,14 @@ class DOCXAdapter(BaseDocumentAdapter):
                 for linked_run in list(host):
                     if linked_run.tag == qn("w:r"):
                         host.remove(linked_run)
-            elif child.tag in (qn("w:r"), qn("w:hyperlink")):
+            elif child.tag in (qn("w:r"), qn("w:hyperlink")) or (
+                next(child.iter(qn("w:t")), None) is not None
+            ):
+                # Remove direct runs/links AND inline wrappers that carry flow
+                # text (``w:ins`` tracked insertions, ``w:customXml``,
+                # ``w:smartTag``, ``w:sdt``): ``Paragraph.text`` omits their
+                # runs, so leaving them behind shipped the untranslated source
+                # in a monolingual export.
                 p.remove(child)
         cls._populate_paragraph_runs(para, translated_text, src_rpr, target_lang=target_lang)
         if host is not None:
@@ -677,7 +713,7 @@ class DOCXAdapter(BaseDocumentAdapter):
                 # consume one here either. Divergence silently shifts every
                 # subsequent block_id and injects translations into the wrong
                 # Paragraph.
-                if not item.text.strip():
+                if not _paragraph_text(item._p).strip():
                     continue
                 block_id = f"docx_main#p{para_idx:05d}"
                 para_idx += 1
@@ -695,7 +731,7 @@ class DOCXAdapter(BaseDocumentAdapter):
                 # tables included, merged cells de-duplicated identically.
                 for block_id, cell_para in _walk_table_paragraphs(item, id_prefix, tree, set()):
                     translated = targets.get(block_id)
-                    if not translated or not cell_para.text.strip():
+                    if not translated or not _paragraph_text(cell_para._p).strip():
                         continue
                     if is_monolingual:
                         self._replace_paragraph_in_place(
@@ -711,7 +747,7 @@ class DOCXAdapter(BaseDocumentAdapter):
         # exactly as they were when building the blocks.
         for block_id, para in _walk_header_footer_blocks(doc):
             translated = targets.get(block_id)
-            if not translated or not para.text.strip():
+            if not translated or not _paragraph_text(para._p).strip():
                 continue
             if is_monolingual:
                 self._replace_paragraph_in_place(para, translated, target_lang=target_lang)
