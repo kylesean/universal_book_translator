@@ -492,3 +492,15 @@ def test_superscript_seven_is_recognised_in_a_byline() -> None:
     from ubt.core.cleaners.skip_rules import _is_author_byline
 
     assert _is_author_byline("John Doe\u2077, Jane Roe\u2078") is True
+
+
+def test_bracket_citation_in_body_prose_is_not_a_bibliography_entry() -> None:
+    """A body paragraph that merely opens with a citation marker is prose.
+
+    Regression: ``[1] The trend is clear.`` matched the bracket-reference shape
+    and, lacking a narrative-prose keyword, was classified as a bibliography
+    entry and shipped untranslated.
+    """
+    assert classify_skip("[1] The trend is clear across every cohort studied.") is None
+    # A real reference entry (with a year) is still kept verbatim.
+    assert classify_skip("[1] Smith, J. (2020). A study of things. Journal of Stuff.") == BIB

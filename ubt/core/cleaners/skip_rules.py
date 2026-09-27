@@ -267,7 +267,9 @@ def classify_skip(
     if in_bibliography and not is_heading and not _NARRATIVE_PROSE_RE.search(text):
         return "bibliography entry (kept verbatim for retrievability)"
     if _ARXIV_RE.search(text) or (
-        _BRACKET_REF_RE.match(text) and not _NARRATIVE_PROSE_RE.search(text)
+        _BRACKET_REF_RE.match(text)
+        and _YEAR_RE.search(text)
+        and not _NARRATIVE_PROSE_RE.search(text)
     ):
         return "bibliography entry (kept verbatim for retrievability)"
     if _is_bib_entry(text):
