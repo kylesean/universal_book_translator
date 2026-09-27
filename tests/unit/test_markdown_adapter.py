@@ -528,3 +528,16 @@ def test_sanitizer_removes_unpaired_and_style_base_tags() -> None:
     assert _sanitize_markdown_content("Use List<T> and $x < y$, a & b.") == (
         "Use List<T> and $x < y$, a & b."
     )
+
+
+@pytest.mark.fast
+def test_sanitizer_strips_slash_delimited_event_handlers_and_js_urls() -> None:
+    """Event handlers and script URLs preceded by / must be stripped, not bypassed."""
+    from ubt.adapters.markdown.adapter import _sanitize_markdown_content
+
+    # Slash-delimited event handler
+    assert "onerror" not in _sanitize_markdown_content("<img/src=x/onerror=alert(1)>")
+    assert "onload" not in _sanitize_markdown_content("<svg/onload=alert(1)>")
+    # Slash-delimited javascript: URL
+    assert "javascript:" not in _sanitize_markdown_content("<a/href=javascript:alert(1)>click</a>")
+    assert "javascript:" not in _sanitize_markdown_content('<img/src="javascript:alert(1)">')

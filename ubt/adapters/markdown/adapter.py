@@ -78,7 +78,7 @@ _DANGEROUS_HTML_TAGS = re.compile(
 # alternation below is the HTML event-attribute set; ``\b`` stops ``online``
 # from matching ``on…``.
 _EVENT_ATTR_RE = re.compile(
-    r"""\son(?:abort|blur|change|click|dblclick|error|focus|keydown|keypress|keyup|"""
+    r"""[\s/]on(?:abort|blur|change|click|dblclick|error|focus|keydown|keypress|keyup|"""
     r"""load|mousedown|mousemove|mouseout|mouseover|mouseup|mouseenter|mouseleave|"""
     r"""reset|resize|scroll|submit|select|unload|input|contextmenu|touchstart|"""
     r"""touchend|touchmove|wheel|dragstart|dragover|dragleave|drop|paste|cut|copy|"""
@@ -87,7 +87,7 @@ _EVENT_ATTR_RE = re.compile(
     re.IGNORECASE,
 )
 _JS_URL_RE = re.compile(
-    r"""(\s(?:href|src|xlink:href)\s*=\s*)"""
+    r"""([\s/](?:href|src|xlink:href)\s*=\s*)"""
     r"""(?:"\s*(?:javascript|vbscript|data):[^"]*"|'\s*(?:javascript|vbscript|data):[^']*'|(?:javascript|vbscript|data):[^\s>]+)""",
     re.IGNORECASE,
 )
