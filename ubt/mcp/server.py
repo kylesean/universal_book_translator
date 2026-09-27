@@ -26,8 +26,6 @@ import asyncio
 import functools
 import logging
 import shutil
-import uuid
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -58,17 +56,16 @@ except ModuleNotFoundError as exc:  # pragma: no cover - install-shape guard
     ) from exc
 
 from ubt.adapters import get_adapter_for_path
+from ubt.api.manager import JobManager
+from ubt.api.models import JobSubmitRequest
 from ubt.core.config import MOCK_API_KEY, UBTConfig
 from ubt.core.config import parse_page_ranges as parse_page_ranges
-from ubt.core.engine.dry_run import create_dry_run_orchestrator
-from ubt.core.engine.events import TranslationProgressEvent
 
 # Re-exported so the ceiling the server enforces is the number the registry
 # carries (``import as`` is the explicit-reexport spelling mypy wants).
-from ubt.core.engine.job_queue import TERMINAL_JOB_STATUSES, JobStatus
+from ubt.core.engine.job_queue import JobStatus
 from ubt.core.engine.ledger import SQLiteJobLedger
-from ubt.core.engine.pipeline import PipelineOrchestrator
-from ubt.core.engine.progress import ARTIFACT_KEYS, ProgressSnapshot
+from ubt.core.engine.progress import ProgressSnapshot
 from ubt.core.exceptions import UBTError
 from ubt.core.fs_perms import (
     SYSTEM_DISALLOWED_PREFIXES,
@@ -81,9 +78,7 @@ from ubt.core.job_options import (
     apply_config_overrides,
     default_output_path,
     job_id_is_valid,
-    overrides_from_request,
     profile_name_is_valid,
-    run_kwargs_from_request,
     validate_request_enums,
 )
 from ubt.core.job_options import (
@@ -113,18 +108,17 @@ def _mcp_error_boundary(func: Any) -> Any:
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class _JobRecord:
-    job_id: str
-    status: str = JobStatus.SUBMITTED
-    progress: ProgressSnapshot = field(default_factory=ProgressSnapshot)
-    error: str | None = None
-    rehearsal: bool = False
-    task: asyncio.Task[None] | None = field(default=None, repr=False)
-
-
-_JOBS: dict[str, _JobRecord] = {}
 _MAX_RETAINED = 100
+
+#: The shared in-process job lifecycle: concurrency cap, retention pruning, the
+#: orchestrator build + one-owner progress fold, and the cancel/abort handling.
+#: MCP used to reimplement all of it; one implementation also means the
+#: REST and agent surfaces cannot drift. ``ubt.api`` is a lazy package and
+#: ``JobManager`` imports no FastAPI, so the MCP extra stays light.
+_MANAGER = JobManager(
+    max_running_jobs=MCP_MAX_RUNNING_JOBS,
+    max_retained_jobs=_MAX_RETAINED,
+)
 
 #: Slots for ``ubt_assess_book(deep=True)``.
 #:
@@ -279,67 +273,6 @@ def _safe_output_path(raw: str) -> Path:
     return _sandbox_path(raw, must_exist=False)
 
 
-def _prune_jobs() -> None:
-    if len(_JOBS) < _MAX_RETAINED:
-        return
-    done = [jid for jid, r in _JOBS.items() if r.status in TERMINAL_JOB_STATUSES]
-    for jid in done[: len(_JOBS) - _MAX_RETAINED + 1]:
-        del _JOBS[jid]
-
-
-async def _execute(job_id: str, payload: dict[str, Any]) -> None:
-    """Background translation task: owns its orchestrator end to end."""
-    rec = _JOBS[job_id]
-    rec.status = JobStatus.RUNNING
-    try:
-        # Config construction and validation live inside the try: with
-        # validate_assignment=True an invalid enum would otherwise raise out
-        # of the background task and leave the job "running" forever. The
-        # shared mapping is the same one the CLI/API use, so
-        # preset/glossary/pages are carried here too.
-        overrides = overrides_from_request(payload, allow_provider_keys=False)
-        if payload.get("db_dir"):
-            overrides["db_dir"] = _safe_output_path(str(payload["db_dir"]))
-        config = apply_config_overrides(UBTConfig.from_env(), overrides)
-        output_path = (
-            _safe_output_path(str(payload["output_path"])) if payload.get("output_path") else None
-        )
-
-        def _persist_final(event: TranslationProgressEvent) -> None:
-            progress = ProgressSnapshot.from_event(event)
-            ledger_path = Path(config.db_dir) / f"{job_id}.sqlite"
-            if not ledger_path.exists():
-                return
-            with SQLiteJobLedger(ledger_path) as ldg:
-                for metadata_key in (*ARTIFACT_KEYS, "estimated_cost_usd"):
-                    value = getattr(progress, metadata_key)
-                    if value is not None:
-                        ldg.set_job_metadata_value(job_id, metadata_key, value)
-
-        if payload.get("dry_run"):
-            orchestrator = create_dry_run_orchestrator(config, finalize_job=_persist_final)
-        else:
-            orchestrator = PipelineOrchestrator(config=config, finalize_job=_persist_final)
-        run_kwargs = run_kwargs_from_request({**payload, "job_id": job_id})
-        async for event in orchestrator.run(
-            input_path=Path(str(payload["input_path"])),
-            output_path=output_path,
-            **run_kwargs,
-        ):
-            rec.progress = ProgressSnapshot.from_event(event)
-        rec.status = JobStatus.COMPLETED
-    except asyncio.CancelledError:
-        # Mark cancelled task status explicitly so job slots are freed and resubmission succeeds.
-        rec.status = JobStatus.CANCELLED
-        logger.warning("MCP job %s task cancelled", job_id)
-        raise
-    except Exception as exc:
-        logger.warning("MCP job %s failed: %s", job_id, exc)
-        rec.status = JobStatus.FAILED
-        # Avoid echoing raw exception text (may contain paths or source text).
-        rec.error = f"{type(exc).__name__} (see server logs; job_id={job_id})"
-
-
 @mcp.tool()
 @_mcp_error_boundary
 async def ubt_translate_book(
@@ -401,15 +334,6 @@ async def ubt_translate_book(
     _check_lang(source_lang, "source_lang")
     profile = _check_profile(profile)
     pages = _check_pages(pages)
-    _prune_jobs()
-    running = sum(
-        1 for rec in _JOBS.values() if rec.status in (JobStatus.SUBMITTED, JobStatus.RUNNING)
-    )
-    if running >= MCP_MAX_RUNNING_JOBS:
-        raise UBTError(
-            f"Too many concurrent jobs ({running}/{MCP_MAX_RUNNING_JOBS}); "
-            "wait for one to finish before submitting another."
-        )
     resolved = _resolve_input(input_path)
     if output_path is not None:
         resolved_out = _safe_output_path(output_path)
@@ -428,31 +352,39 @@ async def ubt_translate_book(
         except UBTError:
             relocated = Path(UBTConfig.from_env().db_dir) / candidate.name
             output_path = str(_sandbox_path(str(relocated), must_exist=False))
-    jid = _check_job_id(job_id) if job_id else f"job_{uuid.uuid4().hex[:12]}"
-    if jid in _JOBS and _JOBS[jid].status in (JobStatus.SUBMITTED, JobStatus.RUNNING):
+    jid = _check_job_id(job_id) if job_id else ""
+    # A stable job_id that is still live is a resubmit, not a second run.
+    existing = _MANAGER.get_job(jid) if jid else None
+    if existing is not None and existing.status in (JobStatus.SUBMITTED, JobStatus.RUNNING):
         raise UBTError(f"Job {jid} is already running")
-    _JOBS[jid] = _JobRecord(job_id=jid)
-    # Rehearsal when asked, or when no key is configured: a keyless stdio
-    # server must label mock output instead of returning it as a delivery
-    # (same rule as the REST intake).
-    _key = UBTConfig.from_env().api_key.get_secret_value()
-    rehearsal = dry_run or not _key or _key == MOCK_API_KEY
-    _JOBS[jid].rehearsal = rehearsal
+
+    base_config = UBTConfig.from_env()
+    if db_dir:
+        # A server-side path: it rides on the base config rather than the request
+        # (whose model is ``extra="forbid"`` for REST parity). The shared
+        # ``execute_job`` applies the request overrides on top of this config.
+        base_config = apply_config_overrides(
+            base_config, {"db_dir": str(_safe_output_path(db_dir))}
+        )
+    # Rehearsal when asked, or when no key is configured: a keyless stdio server
+    # must label mock output instead of returning it as a delivery (same rule as
+    # the REST intake).
+    key = base_config.api_key.get_secret_value()
+    rehearsal = dry_run or not key or key == MOCK_API_KEY
     payload: dict[str, Any] = {
         "input_path": str(resolved),
         "output_path": output_path,
         "target_lang": target_lang,
-        "profile": profile,
         "source_lang": source_lang,
+        "profile": profile,
         "draft_model": draft_model,
         "repair_model": repair_model,
         "exec_mode": exec_mode,
         "formula_mode": formula_mode,
         "render_engine": render_engine,
         "dual_mode": dual_mode,
-        "db_dir": db_dir,
         "preset": preset,
-        "glossary_path": str(_resolve_input(glossary)) if glossary else None,
+        "glossary": str(_resolve_input(glossary)) if glossary else None,
         "pages": pages,
         "start_chapter": start_chapter,
         "max_chapters": max_chapters,
@@ -481,11 +413,13 @@ async def ubt_translate_book(
         "dry_run": rehearsal,
     }
     # Reject an out-of-vocabulary enum here, synchronously: otherwise the tool
-    # returned a job_id and the job only failed once _execute tried to apply the
-    # value (REST 422s upfront, so this restores parity).
+    # returned a job_id and the job only failed once the background task tried to
+    # apply the value (REST 422s upfront, so this restores parity).
     validate_request_enums(payload)
-    _JOBS[jid].task = asyncio.create_task(_execute(jid, payload))
-    return {"job_id": jid, "status": JobStatus.SUBMITTED, "rehearsal": rehearsal}
+    request = JobSubmitRequest.model_validate(payload)
+    record = _MANAGER.create_job(request, job_id=jid or None)
+    record.task = asyncio.create_task(_MANAGER.execute_job(record, base_config))
+    return {"job_id": record.job_id, "status": JobStatus.SUBMITTED, "rehearsal": rehearsal}
 
 
 @mcp.tool()
@@ -493,7 +427,7 @@ async def ubt_translate_book(
 async def ubt_job_status(job_id: str, db_dir: str | None = None) -> dict[str, Any]:
     """Poll translation progress. Falls back to the SQLite ledger when the job is unknown in memory."""
     jid = _check_job_id(job_id)
-    rec = _JOBS.get(jid)
+    rec = _MANAGER.get_job(jid)
     if rec is not None:
         live: dict[str, Any] = {
             "job_id": jid,
@@ -506,7 +440,7 @@ async def ubt_job_status(job_id: str, db_dir: str | None = None) -> dict[str, An
             "output_file": rec.progress.output_file,
             "report_file": rec.progress.report_file,
             "visual_report_file": rec.progress.visual_report_file,
-            "rehearsal": rec.rehearsal,
+            "rehearsal": rec.request.dry_run,
         }
         if rec.error:
             live["error"] = rec.error
@@ -659,7 +593,7 @@ async def ubt_doctor() -> dict[str, Any]:
 
 def main() -> None:
     """Stdio entry point (``ubt-mcp`` script + ``python -m ubt.mcp``)."""
-    # Same ``.env`` convergence as the API bootstrap (review M1): every tool
+    # Same ``.env`` convergence as the API bootstrap: every tool
     # builds ``UBTConfig.from_env()``, which reads ``.env`` from the cwd.
     restrict_env_file()
     mcp.run(transport="stdio")

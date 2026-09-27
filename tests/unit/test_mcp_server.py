@@ -12,7 +12,7 @@ from ubt.mcp.server import ubt_doctor, ubt_inspect_book, ubt_job_status
 
 
 async def test_inspect_book_manifest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The manifest tool reads inside the sandbox (M4: paths go through it now)."""
+    """The manifest tool reads inside the sandbox (paths go through it now)."""
     monkeypatch.setenv("UBT_ALLOWED_DIRS", str(tmp_path))
     pdf = text_pdf(tmp_path / "mcp.pdf", 2)
     out = await ubt_inspect_book(str(pdf))
@@ -41,7 +41,7 @@ async def test_job_status_bad_id() -> None:
 async def test_paths_outside_the_allowlist_are_refused(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """M4: the sandbox used to be a literal ``..`` check and nothing else.
+    """The sandbox used to be a literal ``..`` check and nothing else.
 
     ``ubt_job_status(db_dir=...)`` therefore created and opened
     ``<job_id>.sqlite`` (read-write, schema init) at any path an agent named,
@@ -69,7 +69,7 @@ async def test_sensitive_paths_are_refused_inside_the_allowlist(
 
     An MCP server started in ``$HOME`` has the whole home directory inside the
     default allowlist; a prompt-injected agent must still not read ``.ssh``
-    through these tools (review M4 + L1).
+    through these tools.
     """
     monkeypatch.setenv("UBT_ALLOWED_DIRS", str(tmp_path))
     secret_dir = tmp_path / ".ssh"
@@ -117,7 +117,7 @@ async def test_job_status_default_ledger_dir_is_still_served(
 async def test_deep_assess_is_capped_at_two_and_queues(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """M4: ``deep=True`` runs full adapter ingest, so it gets REST's ceiling too.
+    """``deep=True`` runs full adapter ingest, so it gets REST's ceiling too.
 
     REST gates the same work behind ``assess_semaphore``; MCP had none, and
     ``MCP_MAX_RUNNING_JOBS`` deliberately covers translations only. Two run at
@@ -183,7 +183,7 @@ async def test_doctor_shape() -> None:
 
 
 async def test_translate_book_rejects_bad_lang() -> None:
-    """§10.3-#4: entry-layer language-code validation, same pattern as REST."""
+    """Entry-layer language-code validation, same pattern as REST."""
     from ubt.mcp.server import ubt_translate_book
 
     with pytest.raises(Exception, match="Invalid target_lang"):
@@ -206,25 +206,34 @@ async def test_translate_book_rejects_path_shaped_profile() -> None:
         await ubt_translate_book(input_path="/any/book.pdf", profile="../evil")
 
 
-async def test_translate_book_caps_concurrency(monkeypatch: pytest.MonkeyPatch) -> None:
-    """§10.3-#4: MCP honours a max_running_jobs ceiling like the REST API."""
+async def test_translate_book_caps_concurrency(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """MCP honours a max_running_jobs ceiling like the REST API."""
     import ubt.mcp.server as srv
+    from ubt.api.manager import JobRecord
+    from ubt.api.models import JobSubmitRequest
     from ubt.mcp.server import ubt_translate_book
 
+    monkeypatch.setenv("UBT_ALLOWED_DIRS", str(tmp_path))
+    book = tmp_path / "book.md"
+    book.write_text("# C\n\ntext\n", encoding="utf-8")
     monkeypatch.setattr(
-        srv,
-        "_JOBS",
+        srv._MANAGER,
+        "jobs",
         {
-            f"job_{i}": srv._JobRecord(job_id=f"job_{i}", status="running")
+            f"job_{i}": JobRecord(job_id=f"job_{i}", request=JobSubmitRequest(input_path=str(book)))
             for i in range(srv.MCP_MAX_RUNNING_JOBS)
         },
     )
-    with pytest.raises(Exception, match="Too many concurrent jobs"):
-        await ubt_translate_book(input_path="/any/book.pdf", target_lang="zh", source_lang="en")
+    for rec in srv._MANAGER.jobs.values():
+        rec.status = "running"
+    with pytest.raises(Exception, match="at capacity"):
+        await ubt_translate_book(input_path=str(book), target_lang="zh", source_lang="en")
 
 
 async def test_cancelled_job_reaches_a_terminal_status(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A torn-down MCP task must not leave its job "running" (review P1-19).
+    """A torn-down MCP task must not leave its job "running".
 
     The record counts against MCP_MAX_RUNNING_JOBS and blocks a resubmit of the
     same id while it sits at "running", and CancelledError is a BaseException, so
@@ -232,7 +241,11 @@ async def test_cancelled_job_reaches_a_terminal_status(monkeypatch: pytest.Monke
     """
     import asyncio
 
+    import ubt.api.manager as api_manager
     import ubt.mcp.server as srv
+    from ubt.api.manager import JobRecord
+    from ubt.api.models import JobSubmitRequest
+    from ubt.core.config import UBTConfig
 
     class HangingOrchestrator:
         def __init__(self, **_kwargs: object) -> None:
@@ -242,12 +255,12 @@ async def test_cancelled_job_reaches_a_terminal_status(monkeypatch: pytest.Monke
             await asyncio.Event().wait()
             yield None  # pragma: no cover - makes this an async generator
 
-    monkeypatch.setattr(srv, "PipelineOrchestrator", HangingOrchestrator)
-    rec = srv._JobRecord(job_id="mcp_cancel")
+    monkeypatch.setattr(api_manager, "PipelineOrchestrator", HangingOrchestrator)
+    rec = JobRecord(job_id="mcp_cancel", request=JobSubmitRequest(input_path="/any/book.pdf"))
     jobs = {"mcp_cancel": rec}
-    monkeypatch.setattr(srv, "_JOBS", jobs)
+    monkeypatch.setattr(srv._MANAGER, "jobs", jobs)
 
-    task = asyncio.create_task(srv._execute("mcp_cancel", {"input_path": "/any/book.pdf"}))
+    task = asyncio.create_task(srv._MANAGER.execute_job(rec, UBTConfig.from_env()))
     await asyncio.sleep(0)
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
@@ -263,23 +276,31 @@ async def test_cancelled_job_reaches_a_terminal_status(monkeypatch: pytest.Monke
 def test_prune_jobs_uses_shared_terminal_statuses(monkeypatch: pytest.MonkeyPatch) -> None:
     """MCP trimming must agree with the queue's definition of "done".
 
-    It kept its own (\"completed\", \"failed\", \"cancelled\") literal set; when
-    the queue's terminal set grows, a forgotten copy would retain (or evict)
-    the wrong records.
+    It kept its own ("completed", "failed", "cancelled") literal set; the shared
+    ``JobManager._prune_old_jobs`` now trims against the queue's terminal set.
     """
     import ubt.mcp.server as server
+    from ubt.api.manager import JobRecord
+    from ubt.api.models import JobSubmitRequest
     from ubt.core.engine.job_queue import TERMINAL_JOB_STATUSES
 
-    monkeypatch.setattr(server, "_MAX_RETAINED", 3)
+    monkeypatch.setattr(server._MANAGER, "max_retained_jobs", 3)
     terminal = [str(status) for status in sorted(TERMINAL_JOB_STATUSES, key=str)]
-    jobs = {f"j_{name}": server._JobRecord(job_id=f"j_{name}", status=name) for name in terminal}
-    jobs["j_running"] = server._JobRecord(job_id="j_running", status="running")
-    jobs["j_queued"] = server._JobRecord(job_id="j_queued", status="queued")
-    monkeypatch.setattr(server, "_JOBS", jobs)
-    server._prune_jobs()
-    assert "j_running" in server._JOBS  # live records are never pruned
-    assert "j_queued" in server._JOBS
-    assert not any(rec.status in TERMINAL_JOB_STATUSES for rec in server._JOBS.values())
+    jobs: dict[str, JobRecord] = {
+        f"j_{name}": JobRecord(job_id=f"j_{name}", request=JobSubmitRequest(input_path="/x"))
+        for name in terminal
+    }
+    for name in terminal:
+        jobs[f"j_{name}"].status = name
+    jobs["j_running"] = JobRecord(job_id="j_running", request=JobSubmitRequest(input_path="/x"))
+    jobs["j_running"].status = "running"
+    jobs["j_queued"] = JobRecord(job_id="j_queued", request=JobSubmitRequest(input_path="/x"))
+    jobs["j_queued"].status = "queued"
+    monkeypatch.setattr(server._MANAGER, "jobs", jobs)
+    server._MANAGER._prune_old_jobs()
+    assert "j_running" in server._MANAGER.jobs  # live records are never pruned
+    assert "j_queued" in server._MANAGER.jobs
+    assert not any(rec.status in TERMINAL_JOB_STATUSES for rec in server._MANAGER.jobs.values())
 
 
 async def test_job_status_rejects_traversal_db_dir(
@@ -287,7 +308,7 @@ async def test_job_status_rejects_traversal_db_dir(
 ) -> None:
     """ubt_translate_book guards db_dir with the path sandbox; the status
     disk-fallback used to take it raw and hand SQLiteJobLedger (read-write,
-    schema-init) any path an injected agent names (L20/M4)."""
+    schema-init) any path an injected agent names."""
     monkeypatch.setenv("UBT_ALLOWED_DIRS", str(tmp_path))
 
     with pytest.raises(Exception, match=r"\.\."):
@@ -350,8 +371,10 @@ async def test_mcp_doctor_checks_pypdfium2() -> None:
 def test_mcp_in_memory_status_includes_report_fields() -> None:
     import asyncio
 
+    import ubt.mcp.server as srv
+    from ubt.api.manager import JobRecord
+    from ubt.api.models import JobSubmitRequest
     from ubt.core.engine.progress import ProgressSnapshot
-    from ubt.mcp.server import _JOBS, _JobRecord, ubt_job_status
 
     job_id = "test_mcp_job"
     progress = ProgressSnapshot(
@@ -362,18 +385,17 @@ def test_mcp_in_memory_status_includes_report_fields() -> None:
         report_file="/tmp/out_quality_report.json",
         visual_report_file="/tmp/out_visual_report.json",
     )
-    _JOBS[job_id] = _JobRecord(
-        job_id=job_id,
-        status="completed",
-        progress=progress,
-    )
+    rec = JobRecord(job_id=job_id, request=JobSubmitRequest(input_path="/x"))
+    rec.status = "completed"
+    rec.progress = progress
+    srv._MANAGER.jobs[job_id] = rec
     try:
-        status_res = asyncio.run(ubt_job_status(job_id))
+        status_res = asyncio.run(srv.ubt_job_status(job_id))
         assert status_res.get("report_file") == "/tmp/out_quality_report.json"
         assert status_res.get("visual_report_file") == "/tmp/out_visual_report.json"
         assert status_res.get("avg_qe_score") == 0.95
     finally:
-        _JOBS.pop(job_id, None)
+        srv._MANAGER.jobs.pop(job_id, None)
 
 
 # ---------------------------------------------------------------------------
@@ -450,7 +472,9 @@ async def test_translate_book_carries_the_engine_knobs_into_the_config(
 
     # dry_run keeps this off the real provider stack; the config build happens
     # before the dry-run branch, so the assertion still covers the real path.
-    monkeypatch.setattr(srv, "create_dry_run_orchestrator", CapturingOrchestrator)
+    import ubt.api.manager as api_manager
+
+    monkeypatch.setattr(api_manager, "create_dry_run_orchestrator", CapturingOrchestrator)
 
     result = await srv.ubt_translate_book(
         input_path=str(doc),
@@ -459,7 +483,8 @@ async def test_translate_book_carries_the_engine_knobs_into_the_config(
         max_chapters=3,
         **_MCP_ENGINE_KNOBS,
     )
-    job = srv._JOBS[result["job_id"]]
+    job = srv._MANAGER.get_job(result["job_id"])
+    assert job is not None
     assert job.task is not None, "the submit path must schedule the job task"
     await job.task
 
