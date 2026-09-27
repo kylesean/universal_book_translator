@@ -482,6 +482,9 @@ class UBTConfig(BaseSettings):
     # endpoints are free, which is what makes --budget-usd usable with
     # Ollama/llama.cpp, whose model names are absent from the price table.
     bill_local_endpoint: bool = False
+    # Path to external prices.toml (UBT_PRICES_FILE). When configured or present
+    # in standard search locations, its pricing definitions override shipped rates.
+    prices_file: Path | None = None
 
     def remote_billing_models(self) -> dict[str, str]:
         """Models that bill through an endpoint other than ``base_url``.

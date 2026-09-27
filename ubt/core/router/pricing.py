@@ -23,7 +23,12 @@ from __future__ import annotations
 import ipaddress
 import logging
 import os
+import tomllib
 from collections.abc import Mapping
+from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 
 logger = logging.getLogger(__name__)
@@ -39,6 +44,135 @@ _models_warned_unmeasured: set[str] = set()
 #: the full rate. ``ubt assess`` quotes the same constant, keeping the pre-run
 #: quote and the runtime cap on one formula.
 BATCH_API_DISCOUNT = 0.5
+
+
+@dataclass(frozen=True)
+class PriceEntry:
+    """Pricing entry for a model: input, output, cached_input, batch_discount, verified_at."""
+
+    input: float
+    output: float
+    cached_input: float
+    batch_discount: float = 0.5
+    verified_at: str = ""
+
+
+_SHIPPED_PRICES_REGISTRY = (
+    Path(__file__).resolve().parent.parent.parent / "resources" / "prices.toml"
+)
+
+DEFAULT_PRICES_LOCATIONS: tuple[Path, ...] = (
+    Path("prices.toml"),
+    Path.home() / ".config" / "ubt" / "prices.toml",
+    Path.home() / ".ubt" / "prices.toml",
+)
+
+
+def find_prices_file(custom_path: Path | str | None = None) -> Path | None:
+    """Locate the active prices file in search order."""
+    if custom_path:
+        p = Path(custom_path).expanduser().resolve()
+        if p.is_file():
+            return p
+        raise FileNotFoundError(f"Prices file not found: {custom_path}")
+
+    env_path = os.environ.get("UBT_PRICES_FILE")
+    if env_path:
+        p = Path(env_path).expanduser().resolve()
+        if p.is_file():
+            return p
+        logger.warning("UBT_PRICES_FILE points to non-existent file: %s", env_path)
+
+    for candidate in DEFAULT_PRICES_LOCATIONS:
+        try:
+            resolved = candidate.expanduser().resolve()
+            if resolved.is_file():
+                return resolved
+        except (OSError, RuntimeError):
+            continue
+    return None
+
+
+def _flatten_prices(raw: dict[str, Any], prefix: str = "") -> dict[str, dict[str, Any]]:
+    """Flatten potentially nested tables from dotted TOML keys like [prices.gemini-3.8-flash]."""
+    result: dict[str, dict[str, Any]] = {}
+    for key, val in raw.items():
+        full_key = f"{prefix}.{key}" if prefix else str(key)
+        if isinstance(val, dict):
+            if "input" in val or "output" in val:
+                result[full_key] = val
+            else:
+                result.update(_flatten_prices(val, prefix=full_key))
+    return result
+
+
+@lru_cache(maxsize=1)
+def _read_shipped_prices() -> dict[str, PriceEntry]:
+    """Read the bundled ubt/resources/prices.toml once."""
+    if not _SHIPPED_PRICES_REGISTRY.is_file():
+        return {}
+    try:
+        with _SHIPPED_PRICES_REGISTRY.open("rb") as f:
+            data = tomllib.load(f)
+    except Exception as exc:
+        logger.warning("Failed to parse shipped prices.toml: %s", exc)
+        return {}
+    raw_prices = data.get("prices", {})
+    if not isinstance(raw_prices, dict):
+        return {}
+    flat_prices = _flatten_prices(raw_prices)
+    result: dict[str, PriceEntry] = {}
+    for name, block in flat_prices.items():
+        if isinstance(block, dict):
+            inp = float(block.get("input", 0.0))
+            outp = float(block.get("output", 0.0))
+            cached = float(block.get("cached_input", inp))
+            discount = float(block.get("batch_discount", 0.5))
+            v_at = str(block.get("verified_at", ""))
+            result[str(name)] = PriceEntry(
+                input=inp,
+                output=outp,
+                cached_input=cached,
+                batch_discount=discount,
+                verified_at=v_at,
+            )
+    return result
+
+
+def load_prices_table(custom_path: Path | str | None = None) -> dict[str, PriceEntry]:
+    """Load pricing table, layering any user-defined prices.toml over the shipped table."""
+    base = dict(_read_shipped_prices())
+    custom_file = find_prices_file(custom_path)
+    if custom_file and custom_file.is_file():
+        try:
+            with custom_file.open("rb") as f:
+                data = tomllib.load(f)
+            raw = data.get("prices", {})
+            if isinstance(raw, dict):
+                flat = _flatten_prices(raw)
+                for name, block in flat.items():
+                    if isinstance(block, dict):
+                        inp = float(block.get("input", 0.0))
+                        outp = float(block.get("output", 0.0))
+                        cached = float(block.get("cached_input", inp))
+                        discount = float(block.get("batch_discount", 0.5))
+                        v_at = str(block.get("verified_at", ""))
+                        base[str(name)] = PriceEntry(
+                            input=inp,
+                            output=outp,
+                            cached_input=cached,
+                            batch_discount=discount,
+                            verified_at=v_at,
+                        )
+        except Exception as exc:
+            logger.warning("Failed to parse user prices file %s: %s", custom_file, exc)
+    return base
+
+
+def _current_prices_table() -> dict[str, PriceEntry]:
+    """Get the currently active pricing table (shipped + user file if present)."""
+    return load_prices_table()
+
 
 # USD per 1M tokens: (input, output)
 MODEL_PRICES_USD_PER_MTOK: dict[str, tuple[float, float]] = {
@@ -282,33 +416,10 @@ CACHED_INPUT_PRICES_USD_PER_MTOK: dict[str, float] = {
 
 
 def resolve_model_prices(model: str) -> tuple[float, float]:
-    """Resolve ``(input, output)`` USD price per 1M tokens via longest-prefix match."""
-    normalized = (model or "").strip().lower()
-    candidates = [normalized]
-    if "/" in normalized:
-        candidates.append(normalized.split("/", 1)[-1])
-        last_segment = normalized.rsplit("/", 1)[-1]
-        if last_segment not in candidates:
-            candidates.append(last_segment)
-    best_key = ""
-    best_prices = (0.0, 0.0)
-    merged_prices = {**MODEL_PRICES_USD_PER_MTOK, **_CUSTOM_PRICES}
-    for cand in candidates:
-        for key, prices in merged_prices.items():
-            if cand.startswith(key) and len(key) > len(best_key):
-                best_key = key
-                best_prices = prices
-    if not best_key:
-        logger.debug("No price table entry for model %r; cost will report as 0", model)
-    return best_prices
+    """Resolve ``(input, output)`` USD price per 1M tokens.
 
-
-def resolve_cached_input_price(model: str) -> float:
-    """Resolve the cached input rate (USD per 1M tokens) via longest-prefix match.
-
-    falls back to the model's full input price when the provider does
-    not publish a separate cached rate — never assume a discount that is not
-    on the price sheet.
+    Exact match takes precedence over family prefix; longest-prefix match is used
+    as fallback so model families resolve without exhaustive enumeration.
     """
     normalized = (model or "").strip().lower()
     candidates = [normalized]
@@ -317,14 +428,97 @@ def resolve_cached_input_price(model: str) -> float:
         last_segment = normalized.rsplit("/", 1)[-1]
         if last_segment not in candidates:
             candidates.append(last_segment)
+
+    # 1. Exact match in runtime custom prices:
+    for cand in candidates:
+        if cand in _CUSTOM_PRICES:
+            return _CUSTOM_PRICES[cand]
+
+    table = _current_prices_table()
+
+    # 2. Exact match in table:
+    for cand in candidates:
+        if cand in table:
+            entry = table[cand]
+            return (entry.input, entry.output)
+
+    # 3. Longest-prefix match in custom prices:
+    best_key = ""
+    best_prices = (0.0, 0.0)
+    for cand in candidates:
+        for key, prices in _CUSTOM_PRICES.items():
+            if cand.startswith(key) and len(key) > len(best_key):
+                best_key = key
+                best_prices = prices
+
+    # 4. Longest-prefix match in table:
+    for cand in candidates:
+        for key, entry in table.items():
+            if cand.startswith(key) and len(key) > len(best_key):
+                best_key = key
+                best_prices = (entry.input, entry.output)
+
+    # 5. Longest-prefix fallback in legacy MODEL_PRICES_USD_PER_MTOK:
+    for cand in candidates:
+        for key, prices in MODEL_PRICES_USD_PER_MTOK.items():
+            if cand.startswith(key) and len(key) > len(best_key):
+                best_key = key
+                best_prices = prices
+
+    if not best_key:
+        logger.debug("No price table entry for model %r; cost will report as 0", model)
+    return best_prices
+
+
+def resolve_cached_input_price(model: str) -> float:
+    """Resolve the cached input rate (USD per 1M tokens).
+
+    Exact match takes precedence over family prefix; falls back to the model's
+    full input price when the provider does not publish a separate cached rate.
+    """
+    normalized = (model or "").strip().lower()
+    candidates = [normalized]
+    if "/" in normalized:
+        candidates.append(normalized.split("/", 1)[-1])
+        last_segment = normalized.rsplit("/", 1)[-1]
+        if last_segment not in candidates:
+            candidates.append(last_segment)
+
+    # 1. Exact match in runtime custom cached prices:
+    for cand in candidates:
+        if cand in _CUSTOM_CACHED_PRICES:
+            return _CUSTOM_CACHED_PRICES[cand]
+
+    table = _current_prices_table()
+
+    # 2. Exact match in table:
+    for cand in candidates:
+        if cand in table:
+            return table[cand].cached_input
+
+    # 3. Longest-prefix match in custom cached prices:
     best_key = ""
     best_cached = -1.0
-    merged_cached = {**CACHED_INPUT_PRICES_USD_PER_MTOK, **_CUSTOM_CACHED_PRICES}
     for cand in candidates:
-        for key, cached_price in merged_cached.items():
+        for key, cached_price in _CUSTOM_CACHED_PRICES.items():
             if cand.startswith(key) and len(key) > len(best_key):
                 best_key = key
                 best_cached = cached_price
+
+    # 4. Longest-prefix match in table:
+    for cand in candidates:
+        for key, entry in table.items():
+            if cand.startswith(key) and len(key) > len(best_key):
+                best_key = key
+                best_cached = entry.cached_input
+
+    # 5. Longest-prefix fallback in legacy CACHED_INPUT_PRICES_USD_PER_MTOK:
+    for cand in candidates:
+        for key, cached_price in CACHED_INPUT_PRICES_USD_PER_MTOK.items():
+            if cand.startswith(key) and len(key) > len(best_key):
+                best_key = key
+                best_cached = cached_price
+
     if best_cached >= 0.0:
         return best_cached
     input_price, _ = resolve_model_prices(model)
@@ -344,14 +538,11 @@ def has_price_entry(model: str) -> bool:
     candidates = [normalized]
     if "/" in normalized:
         candidates.append(normalized.split("/", 1)[-1])
-        # Mirrors ``resolve_model_prices``: a nested namespace
-        # (``openrouter/google/gemini-2.0-flash``) only resolves through the
-        # last path segment, so the two predicates must consider the same
-        # candidates or a priced model reports as unknown.
         last_segment = normalized.rsplit("/", 1)[-1]
         if last_segment not in candidates:
             candidates.append(last_segment)
-    merged_keys = set(MODEL_PRICES_USD_PER_MTOK) | set(_CUSTOM_PRICES)
+    table = _current_prices_table()
+    merged_keys = set(table) | set(MODEL_PRICES_USD_PER_MTOK) | set(_CUSTOM_PRICES)
     return any(cand.startswith(key) for cand in candidates for key in merged_keys)
 
 

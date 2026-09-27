@@ -1,0 +1,183 @@
+# Default contemporary model pricing table (USD per 1M tokens) shipped with UBT.
+# Overridable via:
+# 1. Environment variable UBT_PRICES_FILE=/path/to/prices.toml
+# 2. Project-level ./prices.toml
+# 3. User-level ~/.config/ubt/prices.toml or ~/.ubt/prices.toml
+#
+# Fields:
+# - input: USD per 1M input tokens
+# - output: USD per 1M output tokens
+# - cached_input: USD per 1M prompt cache read tokens (optional, defaults to input)
+# - batch_discount: Discount multiplier for Batch API (optional, defaults to 0.5)
+# - verified_at: Date of verification (YYYY-MM-DD)
+
+[prices.gemini-3.8-flash]
+input = 0.10
+output = 0.40
+cached_input = 0.025
+verified_at = "2026-09-28"
+
+[prices.gemini-3.1-pro]
+input = 1.25
+output = 10.00
+cached_input = 0.3125
+verified_at = "2026-09-28"
+
+[prices.gemini-2.5-flash]
+input = 0.30
+output = 2.50
+cached_input = 0.075
+verified_at = "2026-09-28"
+
+[prices.gemini-2.5-pro]
+input = 1.25
+output = 10.00
+cached_input = 0.3125
+verified_at = "2026-09-28"
+
+[prices.gemini-1.5-flash]
+input = 0.075
+output = 0.30
+cached_input = 0.01875
+verified_at = "2026-09-28"
+
+[prices.gemini-1.5-pro]
+input = 1.25
+output = 5.00
+cached_input = 0.3125
+verified_at = "2026-09-28"
+
+[prices.gemini]
+input = 0.10
+output = 0.40
+cached_input = 0.025
+verified_at = "2026-09-28"
+
+[prices.claude-3-7-sonnet]
+input = 3.00
+output = 15.00
+cached_input = 0.30
+verified_at = "2026-09-28"
+
+[prices.claude-3-5-sonnet]
+input = 3.00
+output = 15.00
+cached_input = 0.30
+verified_at = "2026-09-28"
+
+[prices.claude-3-5-haiku]
+input = 0.80
+output = 4.00
+cached_input = 0.08
+verified_at = "2026-09-28"
+
+[prices.claude-3-opus]
+input = 15.00
+output = 75.00
+cached_input = 1.50
+verified_at = "2026-09-28"
+
+[prices.claude]
+input = 3.00
+output = 15.00
+cached_input = 0.30
+verified_at = "2026-09-28"
+
+[prices.deepseek-v4-flash]
+input = 0.14
+output = 0.55
+cached_input = 0.014
+verified_at = "2026-09-28"
+
+[prices.deepseek-v4]
+input = 0.27
+output = 1.10
+cached_input = 0.068
+verified_at = "2026-09-28"
+
+[prices.deepseek-chat]
+input = 0.27
+output = 1.10
+cached_input = 0.028
+verified_at = "2026-09-28"
+
+[prices.deepseek-reasoner]
+input = 0.55
+output = 2.19
+cached_input = 0.11
+verified_at = "2026-09-28"
+
+[prices.deepseek]
+input = 0.27
+output = 1.10
+cached_input = 0.028
+verified_at = "2026-09-28"
+
+[prices.o4-mini]
+input = 1.10
+output = 4.40
+cached_input = 0.55
+verified_at = "2026-09-28"
+
+[prices.o4]
+input = 2.50
+output = 10.00
+cached_input = 0.625
+verified_at = "2026-09-28"
+
+[prices.o3-mini]
+input = 1.10
+output = 4.40
+cached_input = 0.55
+verified_at = "2026-09-28"
+
+[prices.o1-mini]
+input = 1.10
+output = 4.40
+cached_input = 0.55
+verified_at = "2026-09-28"
+
+[prices.o1]
+input = 15.00
+output = 60.00
+cached_input = 7.50
+verified_at = "2026-09-28"
+
+[prices.gpt-4o-mini]
+input = 0.15
+output = 0.60
+verified_at = "2026-09-28"
+
+[prices.gpt-4o]
+input = 2.50
+output = 10.00
+verified_at = "2026-09-28"
+
+[prices.gpt-4]
+input = 30.00
+output = 60.00
+verified_at = "2026-09-28"
+
+[prices.qwen-max]
+input = 1.60
+output = 6.40
+cached_input = 0.80
+verified_at = "2026-09-28"
+
+[prices.qwen-plus]
+input = 0.40
+output = 1.20
+cached_input = 0.20
+verified_at = "2026-09-28"
+
+[prices.qwen-turbo]
+input = 0.05
+output = 0.20
+cached_input = 0.025
+verified_at = "2026-09-28"
+
+[prices.qwen]
+input = 0.40
+output = 1.20
+cached_input = 0.20
+verified_at = "2026-09-28"

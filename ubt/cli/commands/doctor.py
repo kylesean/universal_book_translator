@@ -268,10 +268,14 @@ def doctor_command(
 
                 if resp.status_code == 200:
                     try:
-                        data = resp.json().get("data", [])
-                        available = [
-                            str(m.get("id")) for m in data if isinstance(m, dict) and "id" in m
-                        ]
+                        resp_json = resp.json()
+                        raw_models = resp_json.get("data") or resp_json.get("models") or []
+                        available = []
+                        for m in raw_models:
+                            if isinstance(m, dict):
+                                mid = m.get("id") or m.get("name")
+                                if mid:
+                                    available.append(str(mid).removeprefix("models/"))
                     except Exception:
                         available = []
                     if available:

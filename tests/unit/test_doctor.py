@@ -156,3 +156,40 @@ def test_doctor_probe_connection_error() -> None:
         assert len(probe_checks) == 1
         assert probe_checks[0]["status"] == "FAIL"
         assert "Cannot connect" in probe_checks[0]["detail"]
+
+
+def test_doctor_probe_gemini_native_format() -> None:
+    """--probe parses Google Generative Language native /models format."""
+
+    def mock_handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/models")
+        return httpx.Response(
+            200,
+            json={
+                "models": [
+                    {"name": "models/gemini-3.8-flash", "displayName": "Gemini 3.8 Flash"},
+                    {"name": "models/gemini-3.1-pro", "displayName": "Gemini 3.1 Pro"},
+                ]
+            },
+        )
+
+    mock_client = httpx.Client(transport=httpx.MockTransport(mock_handler))
+    with patch("httpx.Client", return_value=mock_client):
+        result = runner.invoke(
+            app,
+            [
+                "doctor",
+                "--json",
+                "--probe",
+            ],
+            env={
+                "UBT_PROVIDER": "gemini",
+                "GEMINI_API_KEY": "sk-dummy-key",
+                "UBT_DRAFT_MODEL": "gemini-3.8-flash",
+            },
+        )
+        payload = json.loads(result.stdout)
+        probe_checks = [c for c in payload["checks"] if c["name"] == "Live Endpoint Probe"]
+        assert len(probe_checks) == 1
+        assert probe_checks[0]["status"] == "OK"
+        assert "draft model 'gemini-3.8-flash' confirmed online" in probe_checks[0]["detail"]

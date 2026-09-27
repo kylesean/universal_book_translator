@@ -62,7 +62,8 @@ class GeminiTransport(BaseTransport):
         return headers
 
     def _generate_url(self, model: str) -> str:
-        return f"{self._base_url}/models/{model}:generateContent"
+        clean_model = model.removeprefix("models/")
+        return f"{self._base_url}/models/{clean_model}:generateContent"
 
     def _build_payload(
         self,

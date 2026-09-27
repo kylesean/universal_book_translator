@@ -174,3 +174,22 @@ async def test_an_api_error_payload_raises() -> None:
 
     with pytest.raises(ModelProviderError, match="quota exceeded"):
         await _transport(handler).generate("hi")
+
+
+@pytest.mark.asyncio
+async def test_gemini_url_generation_strips_models_prefix() -> None:
+    seen_url: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_url.append(str(request.url))
+        return httpx.Response(
+            200,
+            json={
+                "candidates": [{"content": {"parts": [{"text": "ok"}]}, "finishReason": "STOP"}],
+                "usageMetadata": {"promptTokenCount": 1, "candidatesTokenCount": 1},
+            },
+        )
+
+    await _transport(handler).generate("hi", model="models/gemini-3.8-flash")
+    assert seen_url[0].endswith("/v1beta/models/gemini-3.8-flash:generateContent")
+    assert "models/models" not in seen_url[0]
