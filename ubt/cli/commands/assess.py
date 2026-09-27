@@ -182,6 +182,8 @@ def assess_cmd(
             pages=None,
             start_chapter=1,
             max_chapters=None,
+            profile_name=report.route.recommended_profile,
+            engine_signature=f"preset{effective_preset.value}",
         ),
     ]
     if report.route.recommended_render_engine != "auto":

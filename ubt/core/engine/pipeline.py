@@ -8,6 +8,7 @@ import re
 from collections.abc import AsyncIterator, Callable
 from contextlib import suppress
 from pathlib import Path
+from typing import Any
 
 from ubt.core.config import UBTConfig
 from ubt.core.engine.events import EventType, TranslationProgressEvent
@@ -81,6 +82,8 @@ def derive_job_id(
     start_chapter: int,
     max_chapters: int | None,
     mock_run: bool = False,
+    profile_name: str = "general",
+    engine_signature: str = "",
 ) -> str:
     """Ledger job id derived from the run's full identity.
 
@@ -91,9 +94,12 @@ def derive_job_id(
     new, exports the narrow subset and still reports "completed" (e.g.
     `--max-chapters 2` followed by a full-book run).
 
-    Language and page selection already namespace it; the chapter
-    window is included here for the same reason. The *default* window adds
-    no suffix, so ledgers written without one stay resumable.
+    Language and page selection already namespace it; the chapter window is
+    included here for the same reason. The *default* window adds no suffix, so
+    ledgers written without one stay resumable. ``profile_name`` (the genre
+    profile) and ``engine_signature`` (the non-default preset/engine knobs, see
+    :func:`engine_signature`) namespace it too: a run under a different profile
+    or ``--preset`` drafts differently and must not resume the other's drafts.
 
     ``mock_run`` (a ``--dry-run`` / 演练模式 pass) namespaces it too: the mock
     provider's drafts are not translations, and without this a simulated run
@@ -109,7 +115,44 @@ def derive_job_id(
         suffixes.append(f"c{start_chapter}-{window_end}")
     if mock_run:
         suffixes.append(_MOCK_JOB_SUFFIX.lstrip("_"))
+    if profile_name and profile_name.strip() != "general":
+        suffixes.append(f"pr{re.sub(r'[^A-Za-z0-9]', '', profile_name.strip())}")
+    if engine_signature:
+        suffixes.append(f"eng{re.sub(r'[^A-Za-z0-9]', '', engine_signature)}")
     return f"{base}_{'_'.join(suffixes)}" if suffixes else base
+
+
+#: Engine knobs, besides the profile/target/chapter window, that change what a
+#: run drafts. A preset (or an explicit flag) that moves any of them must get
+#: its own ledger, or the resume would skip drafting under the new settings.
+_ENGINE_SIGNATURE_FIELDS: tuple[tuple[str, str], ...] = (
+    ("prompt_strategy", "ps"),
+    ("exec_mode", "em"),
+    ("formula_enrichment", "fe"),
+    ("formula_render", "fr"),
+    ("math_backend", "mb"),
+)
+
+
+def engine_signature(config: Any) -> str:
+    """Compact suffix for the engine knobs a config overrides from the default.
+
+    The default config yields ``""`` (historical ledgers stay resumable); any
+    ``--preset`` or single overridden knob (flag OR env) contributes a readable
+    token, so a re-run under different draft settings cannot resume the wrong
+    ledger. Compared against the declared field default, not ``UBTConfig()``:
+    that constructor reads the environment itself and would hide an env-only
+    override.
+    """
+    fields = getattr(type(config), "model_fields", {})
+    parts: list[str] = []
+    for field, tag in _ENGINE_SIGNATURE_FIELDS:
+        value = getattr(config, field, None)
+        field_info = fields.get(field)
+        default = getattr(field_info, "default", None)
+        if value is not None and value != default:
+            parts.append(f"{tag}{re.sub(r'[^A-Za-z0-9]', '', str(value))}")
+    return "-".join(parts)
 
 
 async def _mark_failed_unless_completed(
@@ -605,6 +648,8 @@ class PipelineOrchestrator:
                 start_chapter=start_chapter,
                 max_chapters=max_chapters,
                 mock_run=self._is_mock_run,
+                profile_name=profile_name,
+                engine_signature=engine_signature(self.config),
             )
         # The ledger itself is created inside the try below, so a failure in
         # routing, TM construction, or anywhere else before staging cannot leak

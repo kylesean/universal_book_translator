@@ -1564,3 +1564,34 @@ def test_completion_floor_counts_blocked_human_placeholders_as_untranslated() ->
     ]
     with pytest.raises(IntegrityViolationError):
         _check_completion_ratio("job", blocks, 0.9)
+
+
+def test_derive_job_id_namespaces_profile_and_engine_knobs() -> None:
+    """A different genre profile or preset must not resume the other's drafts."""
+    kwargs = {
+        "doc_id": "abcdef0123456789",
+        "target_lang": "zh",
+        "pages": None,
+        "start_chapter": 1,
+        "max_chapters": None,
+    }
+    default = derive_job_id(**kwargs)  # type: ignore[arg-type]
+    assert default == "job_abcdef012345_zh"
+    profiled = derive_job_id(**kwargs, profile_name="academic")  # type: ignore[arg-type]
+    assert profiled != default and profiled.endswith("_pracademic")
+    engine = derive_job_id(**kwargs, engine_signature="psrich-mbimage")  # type: ignore[arg-type]
+    assert engine != default and engine.endswith("_engpsrichmbimage")
+    # Defaults add nothing, so historical ledgers stay resumable.
+    assert (
+        derive_job_id(**kwargs, profile_name="general", engine_signature="")  # type: ignore[arg-type]
+        == default
+    )
+
+
+def test_engine_signature_is_empty_for_defaults_and_tags_overrides() -> None:
+    from ubt.core.config import UBTConfig
+    from ubt.core.engine.pipeline import engine_signature
+
+    assert engine_signature(UBTConfig()) == ""
+    assert "psrich" in engine_signature(UBTConfig(prompt_strategy="rich"))
+    assert "mbimage" in engine_signature(UBTConfig(math_backend="image"))
