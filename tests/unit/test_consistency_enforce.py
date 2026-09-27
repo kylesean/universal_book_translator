@@ -47,7 +47,7 @@ def test_planner_skips_exact_and_dedups() -> None:
         TermHit("Working Memory", "工作记忆", "b1", exact=False, fuzzy=True),
         TermHit("Working Memory", "工作记忆", "b1", exact=False, fuzzy=False),
     )
-    tasks = plan_consistency_tasks(metrics, max_tasks=10)
+    tasks = plan_consistency_tasks(metrics, max_blocks=10)
     assert tasks == (ConsistencyTask(block_id="b1", source="Working Memory", expected="工作记忆"),)
 
 
@@ -55,9 +55,9 @@ def test_planner_is_stable_and_capped() -> None:
     metrics = _metrics(
         *[TermHit(f"Term{i}", "术语", f"b{i}", exact=False, fuzzy=False) for i in range(5)]
     )
-    tasks = plan_consistency_tasks(metrics, max_tasks=3)
+    tasks = plan_consistency_tasks(metrics, max_blocks=3)
     assert [t.block_id for t in tasks] == ["b0", "b1", "b2"]
-    assert plan_consistency_tasks(metrics, max_tasks=0) == ()
+    assert plan_consistency_tasks(metrics, max_blocks=0) == ()
 
 
 def test_task_flag_is_greppable_and_instructive() -> None:
@@ -105,7 +105,10 @@ async def _event(*args: Any, **kwargs: Any) -> object:
 
 
 async def _run_stage(
-    tmp_path: Path, fake: _FakeLedger, mode: Literal["report", "repair"]
+    tmp_path: Path,
+    fake: _FakeLedger,
+    mode: Literal["report", "repair"],
+    repair_loop: RepairLoop | None = None,
 ) -> list[object]:
     """One consistency pass under the given enforcement mode.
 
@@ -119,7 +122,7 @@ async def _run_stage(
             tmp_path,
             ledger=cast(SQLiteJobLedger, fake),
             job_id="job_c",
-            repair_loop=_repair_loop(),
+            repair_loop=repair_loop or _repair_loop(),
             glossary_dicts=_GLOSSARY,
             target_lang="zh",
             source_lang="en",
@@ -191,3 +194,38 @@ async def test_repair_mode_skips_human_and_failed_blocks(tmp_path: Path) -> None
     await _run_stage(tmp_path, fake, mode="repair")
     # None of the human/failed blocks were pulled back for repair.
     assert fake.saved == []
+
+
+def test_planner_caps_by_block_and_keeps_all_its_terms() -> None:
+    """The cap counts blocks, not tasks.
+
+    Regression: ``consistency_max_repairs`` (blocks) was applied per
+    ``(block, term)`` task, so one block with several drifted terms consumed the
+    whole budget — later blocks were never planned, and a block whose tasks were
+    cut off was repaired with an incomplete constraint set.
+    """
+    metrics = _metrics(
+        TermHit("A", "甲", "b0", exact=False, fuzzy=False),
+        TermHit("B", "乙", "b0", exact=False, fuzzy=False),
+        TermHit("A", "甲", "b1", exact=False, fuzzy=False),
+    )
+    tasks = plan_consistency_tasks(metrics, max_blocks=1)
+    assert [(t.block_id, t.source) for t in tasks] == [("b0", "A"), ("b0", "B")]
+
+
+@pytest.mark.asyncio
+async def test_repair_that_leaves_the_term_drifted_stays_pending(tmp_path: Path) -> None:
+    """F15: the terminology postcondition is checked independently of the engine.
+
+    Regression: the constraint flag is not ``GLOSSARY_VIOLATION_MARKER``, so on a
+    term-blind QE runner the repair loop laundered it and promoted a still-drifted
+    block to REPAIRED — which triage never re-reads, so it shipped.
+    """
+    router = ModelRouter(provider=MockModelProvider(default_response="工作内存"), max_retries=0)
+    drifted_loop = RepairLoop(router=router, qe_runner=MockQERunner(default_score=0.95))
+    fake = _FakeLedger([_block("b1", "Working Memory is central.", "工作内存是核心。")])
+    events = await _run_stage(tmp_path, fake, mode="repair", repair_loop=drifted_loop)
+    assert len(events) == 1
+    saved = {update["block_id"]: update for update in fake.saved}
+    assert saved["b1"]["status"] is BlockStatus.REPAIR_PENDING
+    assert any("Glossary term violation" in flag for flag in saved["b1"]["error_flags"])

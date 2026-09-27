@@ -18,8 +18,10 @@ from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.stage_context import StageContext
 from ubt.core.ir.models import BlockStatus
 from ubt.core.memory.glossary_table import build_chunk_glossary_table
+from ubt.core.qe.comet_runner import GLOSSARY_VIOLATION_MARKER
 from ubt.core.qe.consistency_enforce import ConsistencyTask, plan_consistency_tasks
 from ubt.core.qe.term_metrics import evaluate_terms
+from ubt.core.validators.consistency import GlossaryConsistencyValidator
 
 logger = logging.getLogger(__name__)
 
@@ -70,12 +72,13 @@ async def run_consistency_stage(
     if mode != "repair":
         logger.info(
             "Terminology consistency (report only): %d block(s) would be re-translated; e.g. %s",
-            len(tasks),
+            len({task.block_id for task in tasks}),
             " | ".join(task.flag for task in tasks[:3]),
         )
         return
 
     by_id = {b.id: b for b in deliverable}
+    glossary_validator = GlossaryConsistencyValidator(glossary=glossary_dicts)
     per_block: dict[str, list[ConsistencyTask]] = {}
     for task in tasks:
         per_block.setdefault(task.block_id, []).append(task)
@@ -103,13 +106,25 @@ async def run_consistency_stage(
                 glossary_entries=glossary_dicts,
                 source_pdf_path=source_pdf_path,
             )
+        status = repaired.status
+        error_flags = list(repaired.error_flags)
+        # A terminology repair is accepted only when the rendering is actually
+        # restored. The repair loop's acceptance check is term-blind unless its
+        # QE runner is glossary-aware, so on a comet/neural/subprocess engine the
+        # constraint flag is dropped and a still-drifted block would be promoted
+        # REPAIRED — which triage never re-reads. Verify the postcondition here.
+        if status is BlockStatus.REPAIRED:
+            check = glossary_validator.validate(repaired.source_text, repaired.target_text)
+            if not check.is_valid:
+                status = BlockStatus.REPAIR_PENDING
+                error_flags.append(f"{GLOSSARY_VIOLATION_MARKER}: {check.message}")
         return {
             "block_id": repaired.id,
             "target_text": repaired.target_text or "",
-            "status": repaired.status,
+            "status": status,
             "mtqe_score": repaired.mtqe_score,
             "repair_rounds": repaired.repair_rounds,
-            "error_flags": repaired.error_flags,
+            "error_flags": error_flags,
         }
 
     results = await asyncio.gather(

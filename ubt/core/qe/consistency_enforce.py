@@ -37,14 +37,17 @@ class ConsistencyTask:
         return f"{CONSTRAINT_PREFIX} render '{self.source}' as '{self.expected}'"
 
 
-def plan_consistency_tasks(terms: TermMetrics, max_tasks: int = 50) -> tuple[ConsistencyTask, ...]:
-    """One task per (block, drifted term), stable order, capped at ``max_tasks``.
+def plan_consistency_tasks(terms: TermMetrics, max_blocks: int = 50) -> tuple[ConsistencyTask, ...]:
+    """One task per (block, drifted term), stable order, capped by *blocks*.
 
-    ``max_tasks <= 0`` disables planning. Ordering is ``(block_id, source)`` so
-    the same drift always yields the same plan (grep-able, testable, and cheap
-    to diff between runs).
+    ``max_blocks <= 0`` disables planning. The cap counts distinct blocks, not
+    tasks: ``consistency_max_repairs`` budgets re-translations and the paid unit
+    is a block. A selected block keeps *every* drifted-term task, or its repair
+    is under-constrained and could "fix" one term while leaving another drifted.
+    Ordering is ``(block_id, source)`` so the same drift always yields the same
+    plan (grep-able, testable, and cheap to diff between runs).
     """
-    if max_tasks <= 0:
+    if max_blocks <= 0:
         return ()
     seen: set[tuple[str, str]] = set()
     tasks: list[ConsistencyTask] = []
@@ -59,4 +62,14 @@ def plan_consistency_tasks(terms: TermMetrics, max_tasks: int = 50) -> tuple[Con
             ConsistencyTask(block_id=hit.block_id, source=hit.source, expected=hit.expected)
         )
     tasks.sort(key=lambda task: (task.block_id, task.source))
-    return tuple(tasks[:max_tasks])
+    # Tasks are sorted by block, so a selected block's tasks are contiguous and
+    # all of them survive the cap.
+    selected: set[str] = set()
+    bounded: list[ConsistencyTask] = []
+    for task in tasks:
+        if task.block_id not in selected:
+            if len(selected) >= max_blocks:
+                continue
+            selected.add(task.block_id)
+        bounded.append(task)
+    return tuple(bounded)
