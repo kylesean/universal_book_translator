@@ -253,3 +253,66 @@ def test_cost_preflight_still_refuses_a_paid_run_over_budget(tmp_path: Path) -> 
     )
     with pytest.raises(UBTError, match="exceeds --budget-usd"):
         asyncio.run(run_cost_preflight_stage(cast(StageContext, _Ctx(config, router, blocks))))
+
+
+def test_cost_preflight_accounts_for_prior_ledger_spend(tmp_path: Path) -> None:
+    """Preflight on resume must add prior ledger spend to projected floor before checking budget."""
+    import asyncio
+    from typing import cast
+
+    from ubt.core.config import UBTConfig
+    from ubt.core.engine.stage_context import StageContext
+    from ubt.core.engine.stages.preflight import run_cost_preflight_stage
+    from ubt.core.exceptions import UBTError
+    from ubt.core.ir.models import BlockType, IRBlock
+    from ubt.core.router.provider import MockModelProvider
+    from ubt.core.router.router import ModelRouter
+
+    class _MockLedger:
+        def get_job_usage(self, job_id: str) -> dict[str, dict[str, int]]:
+            # $0.05 of prior spend
+            return {
+                "gpt-4o": {
+                    "prompt_tokens": 10_000,
+                    "completion_tokens": 2_000,
+                }
+            }
+
+    class _Ctx:
+        job_id = "job_resumed"
+        source_lang = "en"
+        target_lang = "zh"
+
+        def __init__(self, config: UBTConfig, router: ModelRouter, blocks: list[IRBlock]) -> None:
+            self.config = config
+            self.router = router
+            self._blocks = blocks
+            self.ledger = _MockLedger()
+
+        async def current_blocks(self) -> list[IRBlock]:
+            return self._blocks
+
+    # Small block: floor is very small (~$0.0001)
+    blocks = [
+        IRBlock(
+            id="ch01#b001",
+            spine_index=1,
+            block_type=BlockType.NARRATIVE,
+            source_text="A short sentence.",
+        )
+    ]
+    router = ModelRouter(
+        provider=MockModelProvider(default_response="x"),
+        draft_model="gpt-4o",
+        repair_model="gpt-4o",
+    )
+    # Budget is $0.01: floor alone (~$0.0001) does NOT exceed budget,
+    # but prior spend ($0.05) + floor DOES exceed $0.01!
+    config = UBTConfig(
+        db_dir=tmp_path,
+        base_url="https://api.openai.com/v1",
+        draft_model="gpt-4o",
+        budget_usd=0.01,
+    )
+    with pytest.raises(UBTError, match="already spent.*exceeds --budget-usd|exceeds --budget-usd"):
+        asyncio.run(run_cost_preflight_stage(cast(StageContext, _Ctx(config, router, blocks))))

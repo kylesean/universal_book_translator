@@ -12,6 +12,7 @@ book that cannot be delivered:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from ubt.core.engine.cost_estimate import estimate_draft_cost, measure_prefix_tokens
@@ -54,10 +55,31 @@ async def run_cost_preflight_stage(ctx: StageContext) -> None:
         return
     floor = run_estimate.cost_usd_cached
     logger.info("Job %s: %s", ctx.job_id, run_estimate.describe())
-    if floor is not None and ctx.config.budget_usd is not None and floor > ctx.config.budget_usd:
-        raise UBTError(
-            f"Refused before the first request: the cheapest plausible draft pass "
-            f"(${floor:.6g}) already exceeds --budget-usd "
-            f"(${ctx.config.budget_usd:.6g}). Raise the budget, or unset it "
-            "to run without a ceiling."
-        )
+    if floor is not None and ctx.config.budget_usd is not None:
+        prior_cost = 0.0
+        ledger = getattr(ctx, "ledger", None)
+        if ledger is not None and hasattr(ledger, "get_job_usage"):
+            from ubt.core.router.pricing import estimate_cost_usd
+
+            endpoint_map = (
+                ctx.router.billing_endpoint_map()
+                if hasattr(ctx.router, "billing_endpoint_map")
+                else None
+            )
+            prior_usage = await asyncio.to_thread(ledger.get_job_usage, ctx.job_id)
+            prior_cost = (
+                estimate_cost_usd(
+                    prior_usage, base_url=ctx.config.base_url, endpoint_map=endpoint_map
+                )
+                or 0.0
+            )
+
+        total_floor = prior_cost + floor
+        if total_floor > ctx.config.budget_usd:
+            spent_desc = f", plus ${prior_cost:.6g} already spent" if prior_cost > 0 else ""
+            raise UBTError(
+                f"Refused before the first request: the cheapest plausible draft pass "
+                f"(${floor:.6g}{spent_desc}) already exceeds --budget-usd "
+                f"(${ctx.config.budget_usd:.6g}). Raise the budget, or unset it "
+                "to run without a ceiling."
+            )
