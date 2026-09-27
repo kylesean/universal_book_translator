@@ -645,11 +645,12 @@ class UBTConfig(BaseSettings):
     vlm_trust_remote_code: bool = False
     visual_sample_pages: int = Field(default=6, ge=0, le=50)
     visual_max_vlm_pages: int = Field(default=3, ge=0, le=10)
-    # Diagnostic-only: the dual-raster render-fidelity probe (source-vs-artifact
-    # non-text residual + painted coverage). It costs two full rasterizations per
-    # job and only contributes `info` findings and stats that nothing consumes
-    # yet, so it stays off until a milestone actually optimizes against the
-    # number. The rigid geometry check it depends on still runs either way.
+    # Render-fidelity probe (source-vs-artifact non-text residual + painted
+    # coverage). The rigid route measures it on every run — that is where the
+    # pixel-preservation promise lives — and contributes advisory ``info``
+    # findings plus the ``fidelity_*`` KPIs (so it never blocks delivery). This
+    # flag is the explicit opt-in for any other engine, whose reflowed masks
+    # would be meaningless, so it is normally left off.
     render_fidelity_enabled: bool = False
     # -- visual blocking gate (opt-in for long docs; short docs fail closed) ---
     # Short docs (<= QA_FULL_GATE_MAX_PAGES) enforce visual blocking fail-closed

@@ -407,7 +407,11 @@ def _fidelity_probe_spy(monkeypatch: pytest.MonkeyPatch) -> list[int]:
 
 
 async def _run_clean_loop(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, render_fidelity_enabled: bool
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    render_fidelity_enabled: bool,
+    engine: str = "rigid",
 ) -> tuple[list[int], FakeLedger]:
     pdf_path = tmp_path / "fidelity.pdf"
     pdf_path.write_bytes(b"%PDF-1.4 mock")
@@ -422,7 +426,7 @@ async def _run_clean_loop(
         doc_id="doc1",
         title="Book",
         source_path=str(pdf_path),
-        metadata={"render_engine_effective": "rigid"},
+        metadata={"render_engine_effective": engine},
     )
     loop = ReflowControlLoop(
         adapter=FakeAdapter(),
@@ -437,12 +441,27 @@ async def _run_clean_loop(
 
 
 @pytest.mark.asyncio
-async def test_render_fidelity_probe_is_off_by_default(
+async def test_render_fidelity_probe_is_auto_on_for_the_rigid_route(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Two rasterizations for an `info`-only ruler nobody consumes: opt-in."""
+    """The rigid route promises pixel preservation, so it is measured by default."""
     calls, _ = await _run_clean_loop(tmp_path, monkeypatch, render_fidelity_enabled=False)
+    assert calls == [1]
+
+
+@pytest.mark.asyncio
+async def test_render_fidelity_probe_is_opt_in_for_a_reflow_route(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A reflow render's masks are meaningless, so the probe stays opt-in there."""
+    calls, _ = await _run_clean_loop(
+        tmp_path, monkeypatch, render_fidelity_enabled=False, engine="publication"
+    )
     assert calls == []
+    calls2, _ = await _run_clean_loop(
+        tmp_path, monkeypatch, render_fidelity_enabled=True, engine="publication"
+    )
+    assert calls2 == [1]
 
 
 @pytest.mark.asyncio

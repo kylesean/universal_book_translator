@@ -382,17 +382,13 @@ class ReflowControlLoop:
                 )
 
         # T0.6 render fidelity (advisory ruler, never a gate). The rigid route
-        # promises every non-text region stays pixel-intact; measure the residual
-        # and painted coverage and report them. ``gate.passed`` is untouched, so
-        # delivery is never blocked — this establishes the baseline number the
-        # later milestones optimize against. Rigid-only: a reflow render moves
-        # text off its source box, so the mask rectangles would be meaningless.
-        # Diagnostic-only (``render_fidelity_enabled``, default off): it costs two
-        # rasterizations and its findings/stats have no consumer yet.
-        if (
-            self.render_fidelity_enabled
-            and source_pdf.exists()
-            and self._output_keeps_source_geometry()
+        # promises every non-text region stays pixel-intact, so its residual and
+        # painted coverage are measured on every run; the flag is an explicit
+        # opt-in for any other engine (a reflow render moves text off its source
+        # box, so the mask rectangles would be meaningless). ``gate.passed`` is
+        # untouched, so delivery is never blocked by it.
+        if source_pdf.exists() and (
+            self._output_keeps_source_geometry() or self.render_fidelity_enabled
         ):
             try:
                 from ubt.core.ports import render_fidelity_findings, render_fidelity_stats
