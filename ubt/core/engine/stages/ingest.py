@@ -241,9 +241,11 @@ async def run_ingest_stage(
     # pipeline module imports this stage (a module-level import would cycle).
     from ubt.core.engine.pipeline import engine_signature
 
-    profile_name = ctx.profile_name
+    # Coerce to JSON-safe scalars: the identity is persisted, and a test (or a
+    # duck-typed caller) may hand in a non-serializable stand-in.
+    profile_name = str(ctx.profile_name)
     engine_sig = engine_signature(ctx.config)
-    mock_run = ctx.is_mock_run
+    mock_run = bool(ctx.is_mock_run)
     if selected_pages and not getattr(adapter, "supports_page_selection", True):
         # A page-ranged request against an adapter that declares no page
         # geometry would be silently ignored (its blocks have no ``bbox.page``),
