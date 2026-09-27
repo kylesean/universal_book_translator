@@ -1158,7 +1158,8 @@ class ModelRouter:
             # loop in the funnel.
             if cand_profile.supports_reasoning_effort:
                 return None
-            return max(1024, len(block.source_text) // 2)
+            src_tokens = _estimate_prompt_tokens(block.source_text)
+            return max(1024, int(src_tokens * 2.0))
 
         raw_res, actual_model = await self._execute_with_retry(
             system_prompt="",
@@ -1221,8 +1222,8 @@ class ModelRouter:
         def _calc_max_tokens(cand_model: str, cand_profile: ModelProfile) -> int | None:
             if cand_profile.supports_reasoning_effort:
                 return None
-            total_src_chars = sum(len(b.source_text) for b in blocks)
-            return max(2048, (total_src_chars // 2) + 512)
+            total_src_tokens = sum(_estimate_prompt_tokens(b.source_text) for b in blocks)
+            return max(2048, int(total_src_tokens * 2.0) + 512)
 
         raw_res, actual_model = await self._execute_with_retry(
             system_prompt="",
@@ -1314,7 +1315,9 @@ class ModelRouter:
                 # Mirror the interactive path's output budget. Without a cap the
                 # provider's default truncates a long block, and the Batch path
                 # has no continuation loop — a half sentence would ship.
-                body["max_tokens"] = max(1024, len(req.source_text) // 2)
+                src_tokens = _estimate_prompt_tokens(req.source_text)
+                body["max_tokens"] = max(1024, int(src_tokens * 2.0))
+
             # Match the interactive path: a server relying on
             # {"enable_thinking": false} must not start emitting thinking
             # traces in batch mode only.

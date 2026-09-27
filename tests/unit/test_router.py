@@ -1878,3 +1878,41 @@ def test_billing_endpoint_map_attributes_fallback_only_models() -> None:
     # A name served by both channels keeps the primary endpoint; only the
     # fallback-exclusive model is attributed to the fallback.
     assert router.billing_endpoint_map() == {"local-only": "http://localhost:9090"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.fast
+async def test_cjk_output_token_budget_not_underestimated() -> None:
+    """CJK source text token budget must be calculated using token counting, not len // 2."""
+    from ubt.core.engine.cost_estimate import count_text_tokens
+    from ubt.core.ir.models import IRBlock
+
+    class CapturingProvider(MockModelProvider):
+        def __init__(self) -> None:
+            super().__init__(default_response="<translation>翻译结果</translation>")
+            self.seen_max_tokens: int | None = None
+
+        async def generate_with_finish_reason(
+            self,
+            prompt: str,
+            system_prompt: str | None = None,
+            model: str | None = None,
+            temperature: float | None = 0.3,
+            max_tokens: int | None = None,
+            reasoning_effort: str | None = None,
+        ) -> tuple[str, str | None]:
+            self.seen_max_tokens = max_tokens
+            return "<translation>翻译结果</translation>", "stop"
+
+    provider = CapturingProvider()
+    router = ModelRouter(provider=provider, draft_model="d")
+    cjk_text = "这是一段很长的中文文本，包含大量的汉字。" * 100  # 2300 chars
+    src_tokens = count_text_tokens(cjk_text)
+    block = IRBlock(id="b1", spine_index=0, page_num=1, order_in_page=1, source_text=cjk_text)
+
+    await router.draft(block)
+
+    assert provider.seen_max_tokens is not None
+
+    assert provider.seen_max_tokens >= int(src_tokens * 1.8)
+    assert provider.seen_max_tokens > 2300
