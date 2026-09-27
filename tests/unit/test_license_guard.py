@@ -268,7 +268,10 @@ _SIZE_RATCHETS: dict[str, int] = {
     # fallback-endpoint attribution into ``endpoint_map``.
     # 2026-09-28: 933→959 — PipelineOrchestrator.__init__ gained heterogeneous
     # cross-provider repair_provider instantiation.
-    "ubt/core/engine/pipeline.py": 959,
+    # 2026-09-28: 959→963 — __init__ refuses a router-less run with no draft
+    # model, so a missing model fails at the call boundary instead of sending
+    # ``"model": ""``. Repaid with the same run() split.
+    "ubt/core/engine/pipeline.py": 963,
     "ubt/adapters/pdf/typst_reconstructor.py": 2336,
 }
 

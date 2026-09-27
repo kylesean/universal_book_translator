@@ -1180,7 +1180,7 @@ async def test_pipeline_finally_releases_writer_lock_on_ledger_close_failure(
     doc = tmp_path / "sample.md"
     doc.write_text("# Test\nBody", encoding="utf-8")
 
-    cfg = UBTConfig(db_dir=tmp_path)
+    cfg = UBTConfig(db_dir=tmp_path, draft_model="mock-draft", repair_model="mock-repair")
     orchestrator = PipelineOrchestrator(config=cfg)
 
     # Mock ledger.close to raise an exception
@@ -1207,7 +1207,9 @@ async def test_pipeline_finally_releases_writer_lock_on_ledger_close_failure(
 @pytest.mark.asyncio
 async def test_pipeline_orchestrator_marks_cancelled_on_keyboard_interrupt(tmp_path: Path) -> None:
     """KeyboardInterrupt during pipeline execution must mark job status as 'cancelled'."""
-    cfg = UBTConfig(db_dir=tmp_path / "ledgers")
+    cfg = UBTConfig(
+        db_dir=tmp_path / "ledgers", draft_model="mock-draft", repair_model="mock-repair"
+    )
     cfg.db_dir.mkdir(parents=True, exist_ok=True)
     input_file = tmp_path / "book.txt"
     input_file.write_text("Hello world\n", encoding="utf-8")
@@ -1342,7 +1344,8 @@ def test_orchestrator_honours_an_injected_shared_rate_limiter() -> None:
 
     shared = AdaptiveTokenBucket(initial_rpm=7, max_rpm=7)
     orchestrator = PipelineOrchestrator(
-        config=UBTConfig(api_key=SecretStr(MOCK_API_KEY)), rate_limiter=shared
+        config=UBTConfig(api_key=SecretStr(MOCK_API_KEY), draft_model="mock-draft"),
+        rate_limiter=shared,
     )
     assert orchestrator.router.rate_limiter is shared
 

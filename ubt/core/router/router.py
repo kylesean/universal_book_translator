@@ -332,8 +332,8 @@ class ModelRouter:
     def __init__(
         self,
         provider: BaseModelProvider,
-        draft_model: str = "deepseek-v4-flash",
-        repair_model: str = "deepseek-v4-flash",
+        draft_model: str = "",
+        repair_model: str = "",
         rate_limiter: AdaptiveTokenBucket | None = None,
         max_retries: int = 3,
         draft_reasoning_effort: str = "low",

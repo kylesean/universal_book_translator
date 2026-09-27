@@ -285,7 +285,9 @@ async def test_chat_template_kwargs_omitted_when_unset() -> None:
         captured["body"] = json.loads(request.content)
         return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
 
-    provider = OpenAICompatibleProvider(api_key="test-key", transport=httpx.MockTransport(handler))
+    provider = OpenAICompatibleProvider(
+        api_key="test-key", default_model="mock-model", transport=httpx.MockTransport(handler)
+    )
     await provider.generate("hello")
     assert "chat_template_kwargs" not in captured["body"]
 
@@ -355,6 +357,7 @@ async def test_responses_api_mode_error_payload_raises() -> None:
     provider = OpenAICompatibleProvider(
         api_key="k",
         base_url="https://x/v1",
+        default_model="mock-model",
         api_mode="openai-responses",
         transport=httpx.MockTransport(handler),
     )
@@ -537,6 +540,7 @@ async def test_openai_compatible_provider_passes_reasoning_effort_and_recovers_o
     provider = OpenAICompatibleProvider(
         api_key="k",
         base_url="https://api.openai.com/v1",
+        default_model="mock-model",
         transport=httpx.MockTransport(handler),
     )
 
@@ -560,6 +564,7 @@ async def test_openai_compatible_provider_reuses_client_and_closes() -> None:
     provider = OpenAICompatibleProvider(
         api_key="k",
         base_url="https://api.openai.com/v1",
+        default_model="mock-model",
         transport=httpx.MockTransport(handler),
     )
 
@@ -607,6 +612,7 @@ async def test_openai_compatible_provider_recovers_when_reasoning_effort_must_be
     provider = OpenAICompatibleProvider(
         api_key="k",
         base_url="https://api.openai.com/v1",
+        default_model="mock-model",
         transport=httpx.MockTransport(handler),
     )
     result = await provider.generate("test prompt", reasoning_effort="minimal")
@@ -646,6 +652,7 @@ async def test_openai_compatible_provider_recovers_on_temperature_rejection() ->
     provider = OpenAICompatibleProvider(
         api_key="k",
         base_url="https://api.openai.com/v1",
+        default_model="mock-model",
         transport=httpx.MockTransport(handler),
     )
     result = await provider.generate("test prompt", temperature=0.3)
@@ -681,6 +688,7 @@ async def test_openai_compatible_provider_handles_null_content_with_reasoning_co
     provider = OpenAICompatibleProvider(
         api_key="k",
         base_url="https://api.openai.com/v1",
+        default_model="mock-model",
         transport=httpx.MockTransport(handler),
     )
     result = await provider.generate("test prompt")
@@ -1289,7 +1297,9 @@ def test_pipeline_wires_config_fallback_models_into_router() -> None:
     from ubt.core.config import UBTConfig
     from ubt.core.engine.pipeline import PipelineOrchestrator
 
-    config = UBTConfig.from_env(api_key=SecretStr(""), fallback_models=["m-two", "m-three"])
+    config = UBTConfig.from_env(
+        api_key=SecretStr(""), draft_model="mock-draft", fallback_models=["m-two", "m-three"]
+    )
     orchestrator = PipelineOrchestrator(config=config)
     assert orchestrator.router.fallback_models == ["m-two", "m-three"]
 

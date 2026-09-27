@@ -21,7 +21,7 @@ class OpenAIResponsesTransport(BaseTransport):
         self,
         api_key: str,
         base_url: str = "https://api.openai.com/v1",
-        default_model: str = "muse-spark-1.3-contributor",
+        default_model: str = "",
         timeout: float = 60.0,
         provider_name: str = "openai_responses",
         reasoning_dialect: str = "nested",
@@ -67,7 +67,7 @@ class OpenAIResponsesTransport(BaseTransport):
         return await self._generate_responses_meta(
             prompt,
             system_prompt,
-            model or self._default_model,
+            self._resolve_model(model),
             temperature,
             max_tokens,
             reasoning_effort,
@@ -87,7 +87,7 @@ class OpenAIResponsesTransport(BaseTransport):
         text, _ = await self._generate_responses_meta(
             prompt,
             system_prompt,
-            model or self._default_model,
+            self._resolve_model(model),
             temperature,
             max_tokens,
             images_b64_png=images_b64_png,

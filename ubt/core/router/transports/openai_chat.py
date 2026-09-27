@@ -28,7 +28,7 @@ class OpenAIChatTransport(BaseTransport):
         self,
         api_key: str,
         base_url: str = "https://api.openai.com/v1",
-        default_model: str = "deepseek-v4-flash",
+        default_model: str = "",
         timeout: float = 60.0,
         provider_name: str = "openai_chat",
         **kwargs: Any,
@@ -81,7 +81,7 @@ class OpenAIChatTransport(BaseTransport):
         max_tokens: int | None = None,
         reasoning_effort: str | None = None,
     ) -> tuple[str, str | None]:
-        target_model = model or self._default_model
+        target_model = self._resolve_model(model)
         messages: list[dict[str, str]] = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
@@ -170,7 +170,7 @@ class OpenAIChatTransport(BaseTransport):
     ) -> str:
         if not images_b64_png:
             raise ModelProviderError("Vision input requires at least one image")
-        target_model = model or self._default_model
+        target_model = self._resolve_model(model)
         content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
         for b64 in images_b64_png:
             content.append(
@@ -387,9 +387,9 @@ class OpenAIChatTransport(BaseTransport):
                     usage = body.get("usage") or {}
                     cached = _extract_cached_tokens(usage)
                     self._record_usage(
-                        str(body.get("model") or self._default_model),
+                        str(body.get("model") or self._default_model or "unknown"),
                         {
-                            "model": str(body.get("model") or self._default_model),
+                            "model": str(body.get("model") or self._default_model or "unknown"),
                             "prompt_tokens": usage.get("prompt_tokens", 0) or 0,
                             "completion_tokens": usage.get("completion_tokens", 0) or 0,
                             "prompt_cache_hit_tokens": cached,
@@ -409,7 +409,7 @@ class OpenAIChatTransport(BaseTransport):
                         content = str(raw)
                         content = (
                             self._finalize_output(
-                                content, str(body.get("model") or self._default_model)
+                                content, str(body.get("model") or self._default_model or "unknown")
                             )
                             if self._sanitize_output
                             else content.strip()

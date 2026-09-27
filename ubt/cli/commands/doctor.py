@@ -321,20 +321,12 @@ def doctor_command(
                 f"Cannot connect to {base_clean}: {exc}",
                 fix="verify endpoint URL, network connection, or local model server status",
             )
-    shipped_defaults = {
-        UBTConfig.model_fields[name].default for name in ("draft_model", "repair_model")
-    }
-    shipped = sorted(
-        {model for model in (config.draft_model, config.repair_model) if model in shipped_defaults}
-    )
-    # A selected provider supplies these models on purpose (the opencode provider's
-    # default *is* the shipped one), so only an unselected run is a real oversight.
-    if shipped and config.provider is None:
+    if not config.draft_model.strip():
         record(
             "Models",
-            "WARN",
-            f"still the shipped benchmark default ({', '.join(shipped)})",
-            fix="set --draft-model/--repair-model or --provider before translating",
+            "FAIL",
+            "no draft model configured",
+            fix="set --draft-model/--repair-model, UBT_DRAFT_MODEL, or --provider",
         )
     else:
         record("Models", "OK", f"draft={config.draft_model} repair={config.repair_model}")

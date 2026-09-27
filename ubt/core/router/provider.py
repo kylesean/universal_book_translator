@@ -256,17 +256,18 @@ class _SharedTransportKwargs(TypedDict):
 
 
 class OpenAICompatibleProvider(BaseModelProvider):
-    """Production provider connecting to OpenAI, DeepSeek, Ollama, OpenRouter, Anthropic, etc.
+    """Production provider that speaks one of the four wire protocols.
 
-    Coordinates modular protocol transports (Chat, Responses, Anthropic) over a shared
-    HTTP connection pool and unified usage accounting ledger.
+    Coordinates modular protocol transports (chat, responses, anthropic
+    messages, gemini native) over a shared HTTP connection pool and unified
+    usage accounting ledger.
     """
 
     def __init__(
         self,
         api_key: str | SecretStr,
         base_url: str = "https://api.openai.com/v1",
-        default_model: str = "deepseek-v4-flash",
+        default_model: str = "",
         timeout: float = 60.0,
         provider_name: str = "openai_compatible",
         transport: httpx.AsyncBaseTransport | None = None,
@@ -547,7 +548,7 @@ class OpenAICompatibleProvider(BaseModelProvider):
 def create_model_provider(
     api_key: str | SecretStr,
     base_url: str = "https://api.openai.com/v1",
-    default_model: str = "deepseek-v4-flash",
+    default_model: str = "",
     api_mode: str = "openai-chat",
     timeout: float = 60.0,
     transport: httpx.AsyncBaseTransport | None = None,

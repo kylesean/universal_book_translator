@@ -144,6 +144,8 @@ async def test_repair_loop_dynamic_reasoning_effort_dispatch() -> None:
     mock_provider = MockModelProvider(default_response="修复完成")
     router = ModelRouter(
         provider=mock_provider,
+        draft_model="reasoning-test",
+        repair_model="reasoning-test",
         repair_reasoning_effort="high",
     )
     qe = ControlledScoreQERunner(next_scores=[0.85, 0.85])

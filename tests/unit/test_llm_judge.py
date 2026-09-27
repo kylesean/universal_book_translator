@@ -200,14 +200,14 @@ def test_pipeline_wiring_judge_enabled() -> None:
     from ubt.core.qe.comet_runner import HeuristicQERunner
     from ubt.core.qe.llm_judge import TieredQERunner
 
-    cfg_off = UBTConfig(qe_engine="heuristic")
+    cfg_off = UBTConfig(qe_engine="heuristic", draft_model="mock-draft")
     assert isinstance(PipelineOrchestrator(config=cfg_off).qe_runner, HeuristicQERunner)
 
-    cfg_on = UBTConfig(qe_engine="heuristic")
+    cfg_on = UBTConfig(qe_engine="heuristic", draft_model="mock-draft")
     cfg_on.qe_judge_enabled = True
     assert isinstance(PipelineOrchestrator(config=cfg_on).qe_runner, TieredQERunner)
 
-    cfg_tiered = UBTConfig(qe_engine="tiered")
+    cfg_tiered = UBTConfig(qe_engine="tiered", draft_model="mock-draft")
     assert isinstance(PipelineOrchestrator(config=cfg_tiered).qe_runner, HeuristicQERunner)
 
 

@@ -253,12 +253,14 @@ def test_pipeline_orchestrator_qe_engine_selection() -> None:
     from ubt.core.qe.comet_runner import HeuristicQERunner, SubprocessQERunner
 
     # Default heuristic
-    cfg_heuristic = UBTConfig(qe_engine="heuristic")
+    cfg_heuristic = UBTConfig(
+        qe_engine="heuristic", draft_model="mock-draft", repair_model="mock-repair"
+    )
     orch_heuristic = PipelineOrchestrator(config=cfg_heuristic)
     assert isinstance(orch_heuristic.qe_runner, HeuristicQERunner)
 
     # Comet engine config
-    cfg_comet = UBTConfig(qe_engine="comet")
+    cfg_comet = UBTConfig(qe_engine="comet", draft_model="mock-draft", repair_model="mock-repair")
     orch_comet = PipelineOrchestrator(config=cfg_comet)
     assert isinstance(orch_comet.qe_runner, SubprocessQERunner)
 

@@ -25,7 +25,7 @@ class AnthropicMessagesTransport(BaseTransport):
         self,
         api_key: str,
         base_url: str = "https://api.anthropic.com",
-        default_model: str = "claude-3-5-sonnet-20241022",
+        default_model: str = "",
         timeout: float = 60.0,
         provider_name: str = "anthropic_messages",
         **kwargs: Any,
@@ -81,7 +81,7 @@ class AnthropicMessagesTransport(BaseTransport):
         max_tokens: int | None = None,
         reasoning_effort: str | None = None,
     ) -> tuple[str, str | None]:
-        target_model = model or self._default_model
+        target_model = self._resolve_model(model)
         payload: dict[str, Any] = {
             "model": target_model,
             "messages": [{"role": "user", "content": prompt}],
@@ -186,7 +186,7 @@ class AnthropicMessagesTransport(BaseTransport):
     ) -> str:
         if not images_b64_png:
             raise ModelProviderError("Vision input requires at least one image")
-        target_model = model or self._default_model
+        target_model = self._resolve_model(model)
         content: list[dict[str, Any]] = []
         for b64 in images_b64_png:
             content.append(

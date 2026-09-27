@@ -323,8 +323,10 @@ class UBTConfig(BaseSettings):
     )
 
     # -- Model routing tiers (role-based canonical names) -------------------
-    draft_model: str = "muse-spark-1.3-contributor"
-    repair_model: str = "muse-spark-1.3-contributor"
+    # No vendor default: a model must come from the environment, a provider
+    # preset, or an explicit argument. Empty fails loudly at the call boundary.
+    draft_model: str = ""
+    repair_model: str = ""
     # Ordered model-level fallback chain. When the draft/repair
     # model fails (fail-fast client errors or exhausted retries), the router
     # retries the request on the next entry instead of failing every block.

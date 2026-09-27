@@ -192,6 +192,11 @@ class PipelineOrchestrator:
         self.config = config or UBTConfig.from_env()
 
         if router is None:
+            if not self.config.draft_model:
+                raise UBTError(
+                    "No draft model configured: set UBT_DRAFT_MODEL, select a provider "
+                    "(UBT_PROVIDER=...), or declare [providers.<name>]."
+                )
             # A long-lived caller (API server, worker) that runs several jobs
             # passes one bucket in, because `rate_limit_rpm` is a per-credential
             # budget: one bucket per job multiplied it by the job count.

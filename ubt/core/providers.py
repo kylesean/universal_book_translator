@@ -20,7 +20,7 @@ import os
 import re
 import tomllib
 from collections.abc import Mapping
-from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -43,93 +43,10 @@ class ProviderConfigError(UBTError):
     """A ``[providers.*]`` / ``[defaults]`` block is malformed or carries a secret."""
 
 
-@dataclass(frozen=True)
-class ProviderSpec:
-    """A built-in vendor: endpoint, protocol, credential variable, default models."""
-
-    base_url: str
-    api_mode: str
-    api_key_env: str
-    draft_model: str
-    repair_model: str
-    supports_batch_api: bool = False
-    is_free: bool = False
-    cost_per_mtok: tuple[float, float] | None = None
-    capability_profile: str | None = None
-    supports_temperature: bool | None = None
-    supports_reasoning_effort: bool | None = None
-    reasoning_dialect: str | None = None
-    repair_provider: str | None = None
-
-    def as_fields(self) -> dict[str, Any]:
-        res: dict[str, Any] = {
-            "base_url": self.base_url,
-            "api_mode": self.api_mode,
-            "draft_model": self.draft_model,
-            "repair_model": self.repair_model,
-            "supports_batch_api": self.supports_batch_api,
-            "is_free": self.is_free,
-        }
-        if self.cost_per_mtok is not None:
-            res["cost_per_mtok"] = self.cost_per_mtok
-        if self.capability_profile is not None:
-            res["capability_profile"] = self.capability_profile
-        if self.supports_temperature is not None:
-            res["supports_temperature"] = self.supports_temperature
-        if self.supports_reasoning_effort is not None:
-            res["supports_reasoning_effort"] = self.supports_reasoning_effort
-        if self.reasoning_dialect is not None:
-            res["reasoning_dialect"] = self.reasoning_dialect
-        if self.repair_provider is not None:
-            res["repair_provider"] = self.repair_provider
-        return res
-
-
-#: Vendor presets. Selecting one (``UBT_PROVIDER=anthropic``) is enough to point
-#: the run at the right endpoint with sane models; the credential is read from
-#: the named variable. Model IDs are defaults — override with ``UBT_DRAFT_MODEL``
-#: or a ``[providers.<name>]`` block when a vendor ships a newer tier.
-BUILTIN_PROVIDERS: dict[str, ProviderSpec] = {
-    "openai": ProviderSpec(
-        "https://api.openai.com/v1",
-        "openai-chat",
-        "OPENAI_API_KEY",
-        "gpt-4o-mini",
-        "o3-mini",
-        supports_batch_api=True,
-    ),
-    "anthropic": ProviderSpec(
-        "https://api.anthropic.com",
-        "anthropic-messages",
-        "ANTHROPIC_API_KEY",
-        "claude-3-5-haiku",
-        "claude-3-7-sonnet",
-        supports_batch_api=True,
-    ),
-    "gemini": ProviderSpec(
-        "https://generativelanguage.googleapis.com/v1beta",
-        "gemini-native",
-        "GEMINI_API_KEY",
-        "gemini-3.8-flash",
-        "gemini-3.1-pro",
-    ),
-    "deepseek": ProviderSpec(
-        "https://api.deepseek.com/v1",
-        "openai-chat",
-        "DEEPSEEK_API_KEY",
-        "deepseek-chat",
-        "deepseek-reasoner",
-    ),
-    "opencode": ProviderSpec(
-        "https://opencode.ai/zen/go/v1",
-        "openai-responses",
-        "OPENCODE_API_KEY",
-        "muse-spark-1.3-contributor",
-        "muse-spark-1.3-contributor",
-        cost_per_mtok=(0.0, 0.0),
-        reasoning_dialect="flat",
-    ),
-}
+#: Vendor presets that ship inside the package. Kept as data, not code, so this
+#: module names no vendor: the registry is read and validated through the very
+#: same path as a user's ``[providers.*]`` block.
+_SHIPPED_REGISTRY = Path(__file__).resolve().parent.parent / "resources" / "providers.toml"
 
 #: Fields a ``[providers.*]`` / ``[defaults]`` block may set. An explicit
 #: allow-list (not ``UBTConfig.model_fields``) keeps this module free of a
@@ -234,10 +151,40 @@ def _validate_block(label: str, fields: Mapping[str, Any]) -> dict[str, Any]:
     return {str(k): _expand_env_vars(v) for k, v in fields.items()}
 
 
+@lru_cache(maxsize=1)
+def _read_shipped_providers() -> dict[str, dict[str, Any]]:
+    """The packaged vendor presets, keyed by name, each run through ``_validate_block``.
+
+    Read once and cached: the file ships with the wheel and never changes at
+    runtime. A malformed or unreadable registry is a packaging fault, so it
+    fails loudly with the path rather than silently yielding no providers.
+    """
+    try:
+        with _SHIPPED_REGISTRY.open("rb") as f:
+            data = tomllib.load(f)
+    except OSError as exc:
+        raise ProviderConfigError(
+            f"shipped provider registry is unreadable at {_SHIPPED_REGISTRY}: {exc}"
+        ) from exc
+    except tomllib.TOMLDecodeError as exc:
+        raise ProviderConfigError(
+            f"shipped provider registry at {_SHIPPED_REGISTRY} is malformed: {exc}"
+        ) from exc
+    providers = data.get("providers", {})
+    if not isinstance(providers, dict):
+        raise ProviderConfigError(f"{_SHIPPED_REGISTRY}: [providers] must be a table")
+    shipped: dict[str, dict[str, Any]] = {}
+    for name, block in providers.items():
+        if not isinstance(block, dict):
+            raise ProviderConfigError(f"{_SHIPPED_REGISTRY}: [providers.{name}] must be a table")
+        shipped[str(name)] = _validate_block(f"{_SHIPPED_REGISTRY}: [providers.{name}]", block)
+    return shipped
+
+
 def list_providers(custom_path: Path | str | None = None) -> list[str]:
-    """Built-in providers plus any declared in the config file, sorted."""
+    """Shipped providers plus any declared in the config file, sorted."""
     declared = _read_toml(custom_path).get("providers", {})
-    names = set(BUILTIN_PROVIDERS)
+    names = set(_read_shipped_providers())
     if isinstance(declared, dict):
         names |= {str(k) for k in declared}
     return sorted(names)
@@ -248,15 +195,16 @@ def load_provider_block(
 ) -> tuple[dict[str, Any], str | None]:
     """Resolve ``name`` to ``(config fields, api_key_env)``.
 
-    A built-in provider is the base; a user ``[providers.<name>]`` block overrides
-    or extends it. ``api_key_env`` is returned separately — it names an
-    environment variable, it is not a ``UBTConfig`` field.
+    The shipped preset is the base; a user ``[providers.<name>]`` block overrides
+    or extends it. Both are validated identically. ``api_key_env`` is returned
+    separately — it names an environment variable, it is not a ``UBTConfig`` field.
     """
+    shipped = _read_shipped_providers()
     data = _read_toml(custom_path)
     declared = data.get("providers", {})
     if not isinstance(declared, dict):
         declared = {}
-    if name not in BUILTIN_PROVIDERS and name not in declared:
+    if name not in shipped and name not in declared:
         available = list_providers(custom_path)
         raise ProviderNotFoundError(
             f"Provider '{name}' not found. Available providers: {available if available else 'none'}"
@@ -264,10 +212,11 @@ def load_provider_block(
 
     fields: dict[str, Any] = {}
     api_key_env: str | None = None
-    if name in BUILTIN_PROVIDERS:
-        spec = BUILTIN_PROVIDERS[name]
-        fields.update(spec.as_fields())
-        api_key_env = spec.api_key_env
+    if name in shipped:
+        block = dict(shipped[name])
+        if "api_key_env" in block:
+            api_key_env = str(block.pop("api_key_env"))
+        fields.update(block)
 
     user_block = declared.get(name)
     if user_block is not None:

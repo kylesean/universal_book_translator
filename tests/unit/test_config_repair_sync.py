@@ -105,3 +105,15 @@ def test_from_env_and_overrides_agree_on_the_same_request(
         req_cfg.draft_model,
         req_cfg.repair_model,
     )
+
+
+def test_a_config_without_a_model_keeps_both_tiers_empty() -> None:
+    """Core ships no vendor model name: with nothing configured both stay "".
+
+    The draft->repair sync must not turn an absent model into anything else —
+    an empty draft leaves repair empty too, and the run later fails loudly at
+    the call boundary instead of silently calling a vendor's model.
+    """
+    cfg = UBTConfig()
+    assert cfg.draft_model == ""
+    assert cfg.repair_model == ""

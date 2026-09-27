@@ -21,9 +21,9 @@ from pydantic import SecretStr
 from ubt.core.config import UBTConfig
 from ubt.core.job_options import apply_config_overrides
 from ubt.core.providers import (
-    BUILTIN_PROVIDERS,
     ProviderConfigError,
     ProviderNotFoundError,
+    _read_shipped_providers,
     find_config_file,
     list_providers,
     load_defaults_block,
@@ -66,10 +66,33 @@ def config_toml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 # -- Registry -----------------------------------------------------------------
 
 
-def test_builtin_providers_are_available() -> None:
-    assert set(BUILTIN_PROVIDERS) >= {"openai", "anthropic", "gemini", "deepseek", "opencode"}
-    # Every built-in names the variable its credential is read from.
-    assert all(spec.api_key_env for spec in BUILTIN_PROVIDERS.values())
+def test_shipped_providers_are_available() -> None:
+    shipped = _read_shipped_providers()
+    assert set(shipped) >= {"openai", "anthropic", "gemini", "deepseek", "opencode"}
+    # Every shipped provider names the variable its credential is read from.
+    assert all(block.get("api_key_env") for block in shipped.values())
+
+
+def test_shipped_registry_is_validated_like_a_user_block() -> None:
+    """The packaged registry goes through ``_validate_block`` — no secrets, no typos.
+
+    Reading it raises ``ProviderConfigError`` on a leaked key or an unknown
+    field, so a successful read is itself the assertion; the checks below pin
+    the shape the loader relies on.
+    """
+    shipped = _read_shipped_providers()
+    assert shipped
+    for name, block in shipped.items():
+        assert "api_key" not in block, name
+        assert "api_key_env" in block, name
+
+
+def test_shipped_registry_ships_inside_the_package() -> None:
+    """``packages = ["ubt"]`` must carry the registry into a wheel install."""
+    import ubt
+
+    pkg_root = Path(ubt.__file__).resolve().parent
+    assert (pkg_root / "resources" / "providers.toml").is_file()
 
 
 def test_list_providers_merges_builtins_and_declared(config_toml: Path) -> None:
@@ -136,25 +159,26 @@ def test_provider_block_supports_custom_capabilities_and_pricing(tmp_path: Path)
     assert fields["reasoning_dialect"] == "flat"
 
 
-def test_builtin_providers_batch_api_flags() -> None:
-    assert BUILTIN_PROVIDERS["openai"].supports_batch_api is True
-    assert BUILTIN_PROVIDERS["gemini"].supports_batch_api is False
-    assert BUILTIN_PROVIDERS["deepseek"].supports_batch_api is False
+def test_shipped_providers_batch_api_flags() -> None:
+    shipped = _read_shipped_providers()
+    assert shipped["openai"]["supports_batch_api"] is True
+    assert shipped["gemini"].get("supports_batch_api", False) is False
+    assert shipped["deepseek"].get("supports_batch_api", False) is False
 
 
-def test_builtin_gemini_speaks_the_native_protocol() -> None:
+def test_shipped_gemini_speaks_the_native_protocol() -> None:
     """Gemini's preset points at its own API, not the OpenAI-compat facade."""
-    spec = BUILTIN_PROVIDERS["gemini"]
-    assert spec.api_mode == "gemini-native"
-    assert spec.base_url == "https://generativelanguage.googleapis.com/v1beta"
+    block = _read_shipped_providers()["gemini"]
+    assert block["api_mode"] == "gemini-native"
+    assert block["base_url"] == "https://generativelanguage.googleapis.com/v1beta"
 
 
-def test_builtin_opencode_declares_its_reasoning_dialect_and_zero_cost() -> None:
+def test_shipped_opencode_declares_its_reasoning_dialect_and_zero_cost() -> None:
     """Endpoint quirks travel as data, not as hostname branches in the transport."""
-    spec = BUILTIN_PROVIDERS["opencode"]
-    assert spec.api_mode == "openai-responses"
-    assert spec.reasoning_dialect == "flat"
-    assert spec.cost_per_mtok == (0.0, 0.0)
+    block = _read_shipped_providers()["opencode"]
+    assert block["api_mode"] == "openai-responses"
+    assert block["reasoning_dialect"] == "flat"
+    assert block["cost_per_mtok"] == [0.0, 0.0]
 
 
 def test_unknown_provider_raises_and_lists_available(config_toml: Path) -> None:

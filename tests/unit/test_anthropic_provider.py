@@ -130,6 +130,7 @@ async def test_anthropic_truncation_detection() -> None:
         api_key="sk-ant-test-key",
         base_url="https://api.anthropic.com",
         api_mode="anthropic-messages",
+        default_model="claude-3-5-sonnet-20241022",
         transport=httpx.MockTransport(handler),
     )
 
@@ -147,6 +148,7 @@ async def test_anthropic_rate_limit_429() -> None:
         api_key="sk-ant-test-key",
         base_url="https://api.anthropic.com",
         api_mode="anthropic-messages",
+        default_model="claude-3-5-sonnet-20241022",
         transport=httpx.MockTransport(handler),
     )
 
@@ -178,6 +180,7 @@ async def test_anthropic_vision_call() -> None:
         api_key="sk-ant-test-key",
         base_url="https://api.anthropic.com",
         api_mode="anthropic-messages",
+        default_model="claude-3-5-sonnet-20241022",
         transport=httpx.MockTransport(handler),
     )
 
@@ -227,6 +230,7 @@ async def test_responses_vision_call() -> None:
         api_key="sk-test",
         base_url="https://opencode.ai/zen/go/v1",
         api_mode="openai-responses",
+        default_model="muse-spark-1.3-contributor",
         transport=httpx.MockTransport(handler),
     )
     res = await provider.generate_with_images(

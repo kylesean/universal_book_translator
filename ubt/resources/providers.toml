@@ -1,0 +1,42 @@
+# Vendor presets shipped with UBT. Selecting one (UBT_PROVIDER=<name>) points a
+# run at the endpoint and models below; the credential is read from api_key_env.
+# Never put a secret here. See ubt.toml.example for the [providers.*] shape.
+
+[providers.openai]
+base_url = "https://api.openai.com/v1"
+api_mode = "openai-chat"
+api_key_env = "OPENAI_API_KEY"
+draft_model = "gpt-4o-mini"
+repair_model = "o3-mini"
+supports_batch_api = true
+
+[providers.anthropic]
+base_url = "https://api.anthropic.com"
+api_mode = "anthropic-messages"
+api_key_env = "ANTHROPIC_API_KEY"
+draft_model = "claude-3-5-haiku"
+repair_model = "claude-3-7-sonnet"
+supports_batch_api = true
+
+[providers.gemini]
+base_url = "https://generativelanguage.googleapis.com/v1beta"
+api_mode = "gemini-native"
+api_key_env = "GEMINI_API_KEY"
+draft_model = "gemini-3.8-flash"
+repair_model = "gemini-3.1-pro"
+
+[providers.deepseek]
+base_url = "https://api.deepseek.com/v1"
+api_mode = "openai-chat"
+api_key_env = "DEEPSEEK_API_KEY"
+draft_model = "deepseek-chat"
+repair_model = "deepseek-reasoner"
+
+[providers.opencode]
+base_url = "https://opencode.ai/zen/go/v1"
+api_mode = "openai-responses"
+api_key_env = "OPENCODE_API_KEY"
+draft_model = "muse-spark-1.3-contributor"
+repair_model = "muse-spark-1.3-contributor"
+cost_per_mtok = [0.0, 0.0]
+reasoning_dialect = "flat"

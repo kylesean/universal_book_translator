@@ -37,6 +37,7 @@ async def test_extra_headers_passed_to_requests() -> None:
     provider = create_model_provider(
         api_key="sk-test",
         base_url="https://api.custom-ai.org/v1",
+        default_model="mock-model",
         api_mode="openai-chat",
         extra_headers={
             "x-custom-tenant": "tenant-42",
@@ -74,12 +75,37 @@ async def test_extra_headers_carry_an_endpoint_specific_session_id() -> None:
     provider = create_model_provider(
         api_key="sk-test",
         base_url="https://api.openai.com/v1",
+        default_model="mock-model",
         extra_headers={"x-opencode-session": "ses_abc12345"},
         transport=httpx.MockTransport(handler),
     )
 
     await provider.generate("hello")
     assert captured_headers.get("x-opencode-session") == "ses_abc12345"
+
+
+@pytest.mark.asyncio
+async def test_a_call_without_a_model_fails_locally() -> None:
+    """A blank model is a local configuration error, not a request that ships
+    ``"model": ""`` and collects a 400 from the vendor."""
+    calls: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(json.loads(request.content))
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    provider = create_model_provider(
+        api_key="sk-test",
+        base_url="https://api.openai.com/v1",
+        transport=httpx.MockTransport(handler),
+    )
+    with pytest.raises(ModelProviderError, match="No model configured"):
+        await provider.generate("hello")
+    assert calls == []  # the blank model never reached the wire
+
+    # An explicit model satisfies the call even when the provider has no default.
+    assert await provider.generate("hello", model="some-model") == "ok"
+    assert calls[0]["model"] == "some-model"
 
 
 @pytest.mark.asyncio
@@ -180,6 +206,7 @@ def test_orchestrator_wires_config_extra_headers_to_provider(tmp_path: Any) -> N
         api_key=SecretStr("test-key"),
         base_url="https://api.openai.com/v1",
         db_dir=tmp_path,
+        draft_model="mock-draft",
         extra_headers={"x-gateway-tenant": "tenant-99", "cf-access-id": "client-abc"},
     )
     orchestrator = PipelineOrchestrator(config=cfg)

@@ -129,6 +129,7 @@ def test_orchestrator_wires_config_prompt_caching_to_provider(tmp_path: Path) ->
         api_key=SecretStr("test-key"),
         base_url="https://api.anthropic.com",
         db_dir=tmp_path,
+        draft_model="mock-draft",
         prompt_caching_enabled=False,
     )
     off_provider = PipelineOrchestrator(config=off).router.provider
@@ -139,6 +140,7 @@ def test_orchestrator_wires_config_prompt_caching_to_provider(tmp_path: Path) ->
         api_key=SecretStr("test-key"),
         base_url="https://api.anthropic.com",
         db_dir=tmp_path,
+        draft_model="mock-draft",
     )
     on_provider = PipelineOrchestrator(config=on).router.provider
     assert isinstance(on_provider, OpenAICompatibleProvider)

@@ -4,16 +4,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from pydantic import SecretStr
 
 from ubt.core.config import UBTConfig
 from ubt.core.engine.pipeline import PipelineOrchestrator
+from ubt.core.exceptions import UBTError
 from ubt.core.router.provider import MockModelProvider
 from ubt.core.router.router import ModelRouter
 
 
 def _config(tmp_path: Path) -> UBTConfig:
-    return UBTConfig.from_env(api_key=SecretStr("test-key"), db_dir=tmp_path)
+    return UBTConfig.from_env(
+        api_key=SecretStr("test-key"), db_dir=tmp_path, draft_model="mock-draft"
+    )
 
 
 def test_injected_router_is_not_owned(tmp_path: Path) -> None:
@@ -25,6 +29,22 @@ def test_injected_router_is_not_owned(tmp_path: Path) -> None:
 def test_default_router_is_owned(tmp_path: Path) -> None:
     orch = PipelineOrchestrator(config=_config(tmp_path))
     assert orch._owns_router is True
+
+
+def test_building_its_own_router_requires_a_draft_model(tmp_path: Path) -> None:
+    """No router injected and no model configured is a configuration error."""
+    config = UBTConfig.from_env(api_key=SecretStr("test-key"), db_dir=tmp_path)
+    assert config.draft_model == ""
+    with pytest.raises(UBTError, match="No draft model configured"):
+        PipelineOrchestrator(config=config)
+
+
+def test_an_injected_router_needs_no_configured_model(tmp_path: Path) -> None:
+    """An injected router owns the model choice, so a blank config is fine."""
+    config = UBTConfig.from_env(api_key=SecretStr("test-key"), db_dir=tmp_path)
+    router = ModelRouter(provider=MockModelProvider(default_response="x"), draft_model="m")
+    orch = PipelineOrchestrator(config=config, router=router)
+    assert orch.router is router
 
 
 def test_usage_delta_subtracts_baseline() -> None:

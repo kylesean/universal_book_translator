@@ -185,7 +185,7 @@ class BaseTransport(ABC):
         self,
         api_key: str | SecretStr,
         base_url: str,
-        default_model: str = "deepseek-v4-flash",
+        default_model: str = "",
         timeout: float = 60.0,
         provider_name: str = "base_transport",
         transport: httpx.AsyncBaseTransport | None = None,
@@ -244,6 +244,20 @@ class BaseTransport(ABC):
     @property
     def provider_name(self) -> str:
         return self._name
+
+    def _resolve_model(self, model: str | None) -> str:
+        """The model to call: the explicit argument, else this transport's default.
+
+        Fail-closed: a blank model is a configuration error, not a request to
+        send ``"model": ""`` and collect a 400 from the vendor.
+        """
+        target = (model or self._default_model or "").strip()
+        if not target:
+            raise ModelProviderError(
+                "No model configured: pass model= or set UBT_DRAFT_MODEL / the "
+                "provider block's draft_model."
+            )
+        return target
 
     @property
     def chat_template_kwargs(self) -> dict[str, Any]:

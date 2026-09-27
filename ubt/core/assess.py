@@ -672,7 +672,7 @@ def _build_cost(
             (config.ocr_model, ocr_page_calls > 0, ocr_endpoint),
             (config.draft_model, rollup_calls > 0, config.base_url),
         )
-        if billed and not price_is_known(model, base_url=endpoint)
+        if billed and model and not price_is_known(model, base_url=endpoint)
     ]
     if unpriced:
         warnings.append(
@@ -745,6 +745,16 @@ def _synthesize_warnings(
     quality_signals: list[str],
 ) -> list[AssessmentWarning]:
     warnings: list[AssessmentWarning] = []
+    if not config.draft_model.strip():
+        warnings.append(
+            AssessmentWarning(
+                "MODEL_NOT_CONFIGURED",
+                "warn",
+                "未配置 draft 模型：报价按模型名未知处理，费用呈现为「未知」。"
+                "请设置 UBT_DRAFT_MODEL、选择 provider（UBT_PROVIDER=...），"
+                "或声明 [providers.<name>]。",
+            )
+        )
     share = pdf.get("scan_page_share")
     if (share is not None and share > 0.5) or (share is None and arch.is_scanned):
         warnings.append(

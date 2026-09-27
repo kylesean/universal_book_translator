@@ -217,19 +217,18 @@ def test_doctor_ok_with_api_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     assert "All checks passed" in result.stdout
 
 
-def test_doctor_warns_when_models_are_the_shipped_default(
+def test_doctor_fails_when_no_model_is_configured(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The shipped default names the author's benchmark target, not a model a
-    normal credential can call; leaving it in place must be called out, not
-    printed as OK."""
+    """A run without a provider or an explicit model is not runnable."""
     monkeypatch.setenv("UBT_LLM_API_KEY", "test-key-12345678")
     monkeypatch.delenv("UBT_DRAFT_MODEL", raising=False)
     monkeypatch.delenv("UBT_REPAIR_MODEL", raising=False)
     monkeypatch.chdir(tmp_path)
     result = runner.invoke(app, ["doctor"])
-    assert result.exit_code == 0
-    assert "shipped benchmark default" in result.stdout
+    assert result.exit_code == 1
+    assert "no draft model configured" in result.stdout
+    assert "UBT_DRAFT_MODEL" in result.stdout
 
 
 def test_doctor_accepts_a_providers_own_default_models(
@@ -899,6 +898,8 @@ def test_doctor_warns_on_missing_toolchain_that_silently_degrades(
     needs Node plus ``scripts/mathjax/node_modules``. Both rows used to be OK.
     """
     monkeypatch.setenv("UBT_LLM_API_KEY", "test-key-12345678")
+    monkeypatch.setenv("UBT_DRAFT_MODEL", "mock-draft")
+    monkeypatch.setenv("UBT_REPAIR_MODEL", "mock-repair")
     monkeypatch.setenv("UBT_MATH_BACKEND", "mathjax")
     monkeypatch.chdir(tmp_path)
     import importlib.util

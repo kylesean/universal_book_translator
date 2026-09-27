@@ -36,7 +36,7 @@ class GeminiTransport(BaseTransport):
         self,
         api_key: str,
         base_url: str = "https://generativelanguage.googleapis.com/v1beta",
-        default_model: str = "gemini-3.8-flash",
+        default_model: str = "",
         timeout: float = 60.0,
         provider_name: str = "gemini_native",
         **kwargs: Any,
@@ -158,7 +158,7 @@ class GeminiTransport(BaseTransport):
         max_tokens: int | None = None,
         reasoning_effort: str | None = None,
     ) -> tuple[str, str | None]:
-        target_model = model or self._default_model
+        target_model = self._resolve_model(model)
         payload = self._build_payload(
             prompt, None, system_prompt, temperature, max_tokens, reasoning_effort
         )
@@ -203,7 +203,7 @@ class GeminiTransport(BaseTransport):
     ) -> str:
         if not images_b64_png:
             raise ModelProviderError("Vision input requires at least one image")
-        target_model = model or self._default_model
+        target_model = self._resolve_model(model)
         payload = self._build_payload(
             prompt, images_b64_png, system_prompt, temperature, max_tokens, None
         )

@@ -73,7 +73,9 @@ def test_config_command_defaults_are_never_pydantic_undefined(
     # A static default renders its value; only a factory field shows "<dynamic>".
     assert by_field["base_url"]["default"] == "https://api.openai.com/v1"
     assert by_field["api_key"]["default"] == "<dynamic>"
-    assert by_field["draft_model"]["default"] == "muse-spark-1.3-contributor"
+    # Core carries no vendor model default: the model comes from a provider
+    # preset, the environment, or an explicit argument.
+    assert by_field["draft_model"]["default"] == ""
 
 
 def test_config_command_redacts_secrets(
