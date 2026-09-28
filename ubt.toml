@@ -7,9 +7,20 @@
 # 本地 llama-swap 网关（127.0.0.1:9090），模型名须与 config.yaml 的 models: 键一致。
 # provider 不写后端端口：后端按需加载并分配临时端口。
 
-# OpenCode Zen /go/ 拒收无 x-opencode-session 的请求；用通用 extra_headers 表达。
+# OpenCode Go 订阅 (使用 OpenAI Responses 协议，关闭思考/零思考延迟)
 [providers.opencode]
-extra_headers = { "x-opencode-session" = "${OPENCODE_SESSION_ID}" }
+base_url = "https://opencode.ai/zen/go/v1"
+api_mode = "openai-responses"
+api_key_env = "OPENCODE_API_KEY"
+draft_model = "deepseek-v4-flash"
+repair_model = "deepseek-v4-pro"
+# draft_reasoning_effort: "none" 为彻底关闭思考 (0 思考 token)；也可设为 "minimal" 或 "low" 开启最低思考强度
+draft_reasoning_effort = "none"
+repair_reasoning_effort = "none"
+reasoning_dialect = "nested"
+is_free = true
+extra_headers = { "x-opencode-session" = "${OPENCODE_SESSION_ID:-ses_ubt_translation}" }
+
 
 [providers.local-gemma4]
 base_url = "http://127.0.0.1:9090/v1"
