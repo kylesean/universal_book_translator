@@ -54,6 +54,7 @@ _SHIPPED_REGISTRY = Path(__file__).resolve().parent.parent / "resources" / "prov
 #: or an unrelated knob.
 PROVIDER_ALLOWED_KEYS = frozenset(
     {
+        "api_key",
         "api_key_env",
         "base_url",
         "api_mode",
@@ -74,11 +75,12 @@ PROVIDER_ALLOWED_KEYS = frozenset(
         "supports_reasoning_effort",
         "reasoning_dialect",
         "repair_provider",
+        "ocr_api_key",
     }
 )
 
-#: Never allowed in a block that lands in a version-controlled TOML.
-PROVIDER_FORBIDDEN_KEYS = frozenset({"api_key", "service_api_key", "ocr_api_key"})
+#: Forbidden keys in outbound provider blocks. Inbound service auth uses UBT_API_KEY.
+PROVIDER_FORBIDDEN_KEYS = frozenset({"service_api_key"})
 
 
 def find_config_file(custom_path: Path | str | None = None) -> Path | None:
@@ -134,13 +136,12 @@ def _read_toml(custom_path: Path | str | None = None) -> dict[str, Any]:
 
 
 def _validate_block(label: str, fields: Mapping[str, Any]) -> dict[str, Any]:
-    """Reject secrets and unknown keys in a TOML block, then expand ``${VAR}``."""
+    """Reject invalid fields in a TOML block, then expand ``${VAR}``."""
     leaked = sorted(PROVIDER_FORBIDDEN_KEYS & set(fields))
     if leaked:
         raise ProviderConfigError(
-            f"{label} must not contain credential field(s) {', '.join(leaked)}: put the "
-            "secret in an environment variable (UBT_LLM_API_KEY, or the variable this "
-            "provider names in api_key_env). A key committed to a TOML file is a leaked key."
+            f"{label} must not contain inbound gate secret(s) {', '.join(leaked)}: "
+            "service_api_key is for the inbound REST API service gate (configure via UBT_API_KEY)."
         )
     unknown = sorted(set(fields) - PROVIDER_ALLOWED_KEYS)
     if unknown:
@@ -177,6 +178,10 @@ def _read_shipped_providers() -> dict[str, dict[str, Any]]:
     for name, block in providers.items():
         if not isinstance(block, dict):
             raise ProviderConfigError(f"{_SHIPPED_REGISTRY}: [providers.{name}] must be a table")
+        if "api_key" in block:
+            raise ProviderConfigError(
+                f"{_SHIPPED_REGISTRY}: shipped preset must not contain api_key"
+            )
         shipped[str(name)] = _validate_block(f"{_SHIPPED_REGISTRY}: [providers.{name}]", block)
     return shipped
 

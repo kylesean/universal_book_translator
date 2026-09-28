@@ -4,6 +4,8 @@ __pycache__/
 dist/
 .venv/
 .env*
+ubt.toml
+
 
 # Caches & tests
 .pytest_cache/

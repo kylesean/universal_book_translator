@@ -232,12 +232,25 @@ def test_find_config_file_returns_none_without_a_config(
 # -- Block validation (fail-closed on secrets) --------------------------------
 
 
-def test_block_may_not_carry_a_credential(tmp_path: Path) -> None:
-    """A key committed to a version-controlled TOML is a leaked key."""
+def test_provider_block_supports_direct_api_key(tmp_path: Path) -> None:
+    """A user configuration TOML can directly configure api_key without mandatory api_key_env indirection."""
     path = tmp_path / "config.toml"
-    path.write_text('[providers.leaky]\napi_key = "sk-leaked"\n', encoding="utf-8")
-    with pytest.raises(ProviderConfigError, match="leaked key"):
-        load_provider_block("leaky", path)
+    path.write_text(
+        "[providers.direct]\n"
+        'base_url = "https://direct.example/v1"\n'
+        'api_mode = "openai-chat"\n'
+        'api_key = "sk-direct-secret"\n',
+        encoding="utf-8",
+    )
+    fields, key_env = load_provider_block("direct", path)
+    assert fields["api_key"] == "sk-direct-secret"
+    assert key_env is None
+
+
+def test_shipped_registry_must_not_contain_api_key() -> None:
+    """The packaged preset registry must never carry an api_key."""
+    shipped = _read_shipped_providers()
+    assert all("api_key" not in block for block in shipped.values())
 
 
 def test_block_rejects_unknown_keys(tmp_path: Path) -> None:
@@ -277,11 +290,10 @@ def test_defaults_block_is_validated_and_never_names_a_credential(tmp_path: Path
     assert load_defaults_block(path) == {"api_timeout": 30.0}
 
 
-def test_defaults_block_rejects_a_credential(tmp_path: Path) -> None:
+def test_defaults_block_supports_direct_api_key(tmp_path: Path) -> None:
     path = tmp_path / "config.toml"
-    path.write_text('[defaults]\napi_key = "sk-leaked"\n', encoding="utf-8")
-    with pytest.raises(ProviderConfigError, match="leaked key"):
-        load_defaults_block(path)
+    path.write_text('[defaults]\napi_key = "sk-default-key"\n', encoding="utf-8")
+    assert load_defaults_block(path) == {"api_key": "sk-default-key"}
 
 
 # -- Precedence ladder --------------------------------------------------------
