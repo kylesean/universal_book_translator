@@ -131,10 +131,13 @@ class OpenAIResponsesTransport(BaseTransport):
             elif cached_mode == "nested_minimal" or eff == "minimal":
                 payload["reasoning"] = {"effort": "minimal"}
             elif eff == "none":
-                # ``nested`` omits the field entirely; ``flat`` needs the
-                # nested-minimal form to turn thinking off.
+                # In nested dialect, explicitly pass effort: 'none' to disable thinking;
+                # in flat dialect, send nested-minimal form.
                 if self._reasoning_dialect == "flat":
                     payload["reasoning"] = {"effort": "minimal"}
+                else:
+                    payload["reasoning"] = {"effort": "none"}
+
             elif self._reasoning_dialect == "flat":
                 payload["reasoning_effort"] = eff
             else:

@@ -572,6 +572,40 @@ async def test_the_reasoning_dialect_comes_from_data_not_the_host() -> None:
     assert "reasoning" not in flat
 
 
+@pytest.mark.fast
+@pytest.mark.asyncio
+async def test_responses_api_reasoning_effort_none() -> None:
+    """When reasoning_effort='none', nested dialect sends {'effort': 'none'} to disable thinking."""
+    from ubt.core.router.transports.openai_responses import OpenAIResponsesTransport
+
+    transport = OpenAIResponsesTransport(
+        api_key="test",
+        base_url="https://api.openai.com/v1",
+        reasoning_dialect="nested",
+    )
+    sent: list[dict[str, object]] = []
+
+    async def fake_request_json(_client: object, _url: str, payload: dict[str, object]) -> object:
+        sent.append(dict(payload))
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {
+            "output": [{"type": "message", "content": [{"type": "output_text", "text": "ok"}]}]
+        }
+        return resp
+
+    transport._request_json = fake_request_json  # type: ignore[assignment]
+    await transport._generate_responses_meta(
+        prompt="hi",
+        system_prompt=None,
+        target_model="some-model",
+        temperature=0.1,
+        max_tokens=10,
+        reasoning_effort="none",
+    )
+    assert sent[0].get("reasoning") == {"effort": "none"}
+
+
 def test_the_protocol_comes_from_api_mode_alone() -> None:
     """Each of the four protocols maps to its own transport."""
     from ubt.core.router.provider import OpenAICompatibleProvider
