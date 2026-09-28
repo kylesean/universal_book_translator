@@ -66,10 +66,20 @@ def config_toml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 # -- Registry -----------------------------------------------------------------
 
 
-def test_shipped_providers_are_available() -> None:
+def test_shipped_providers_are_pure_wire_protocols() -> None:
     shipped = _read_shipped_providers()
-    assert set(shipped) >= {"openai", "anthropic", "gemini", "deepseek", "opencode"}
-    # Every shipped provider names the variable its credential is read from.
+    assert set(shipped) == {
+        "openai-chat",
+        "openai-responses",
+        "anthropic-messages",
+        "gemini-native",
+    }
+    assert "deepseek" not in shipped
+    assert "opencode" not in shipped
+    # Shipped protocols are pure wire transports: they never hardcode model IDs.
+    assert all("draft_model" not in block for block in shipped.values())
+    assert all("repair_model" not in block for block in shipped.values())
+    # Every shipped protocol names the variable its credential is read from.
     assert all(block.get("api_key_env") for block in shipped.values())
 
 
@@ -102,12 +112,18 @@ def test_list_providers_merges_builtins_and_declared(config_toml: Path) -> None:
     assert names == sorted(names)
 
 
-def test_load_builtin_provider_returns_fields_and_key_env() -> None:
-    fields, api_key_env = load_provider_block("openai")
+def test_load_builtin_protocol_and_alias() -> None:
+    fields, api_key_env = load_provider_block("openai-chat")
     assert api_key_env == "OPENAI_API_KEY"
     assert fields["base_url"] == "https://api.openai.com/v1"
-    assert fields["draft_model"] == "gpt-4o-mini"
-    assert "api_key" not in fields  # the secret is never a field of the block
+    assert fields["api_mode"] == "openai-chat"
+    assert "draft_model" not in fields  # protocols do not hardcode model IDs
+    assert "api_key" not in fields  # secret is never in the block
+
+    # Alias 'openai' maps to the canonical 'openai-chat' protocol
+    alias_fields, alias_key_env = load_provider_block("openai")
+    assert alias_key_env == "OPENAI_API_KEY"
+    assert alias_fields == fields
 
 
 def test_user_block_overrides_a_builtin_field(config_toml: Path) -> None:
@@ -159,26 +175,25 @@ def test_provider_block_supports_custom_capabilities_and_pricing(tmp_path: Path)
     assert fields["reasoning_dialect"] == "flat"
 
 
-def test_shipped_providers_batch_api_flags() -> None:
+def test_shipped_protocols_batch_api_flags() -> None:
     shipped = _read_shipped_providers()
-    assert shipped["openai"]["supports_batch_api"] is True
-    assert shipped["gemini"].get("supports_batch_api", False) is False
-    assert shipped["deepseek"].get("supports_batch_api", False) is False
+    assert shipped["openai-chat"]["supports_batch_api"] is True
+    assert shipped["anthropic-messages"]["supports_batch_api"] is True
+    assert shipped["gemini-native"].get("supports_batch_api", False) is False
+    assert shipped["openai-responses"].get("supports_batch_api", False) is False
 
 
-def test_shipped_gemini_speaks_the_native_protocol() -> None:
-    """Gemini's preset points at its own API, not the OpenAI-compat facade."""
-    block = _read_shipped_providers()["gemini"]
+def test_shipped_gemini_native_speaks_the_native_protocol() -> None:
+    """Gemini native protocol points at Google v1beta API."""
+    block = _read_shipped_providers()["gemini-native"]
     assert block["api_mode"] == "gemini-native"
     assert block["base_url"] == "https://generativelanguage.googleapis.com/v1beta"
 
 
-def test_shipped_opencode_declares_its_reasoning_dialect_and_zero_cost() -> None:
-    """Endpoint quirks travel as data, not as hostname branches in the transport."""
-    block = _read_shipped_providers()["opencode"]
-    assert block["api_mode"] == "openai-responses"
-    assert block["reasoning_dialect"] == "flat"
-    assert block["cost_per_mtok"] == [0.0, 0.0]
+def test_undeclared_vendor_raises_not_found(config_toml: Path) -> None:
+    """Third-party providers like deepseek are not hardcoded: user declares them or uses pure protocol."""
+    with pytest.raises(ProviderNotFoundError, match="Available providers"):
+        load_provider_block("deepseek", config_toml)
 
 
 def test_unknown_provider_raises_and_lists_available(config_toml: Path) -> None:

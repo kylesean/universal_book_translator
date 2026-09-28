@@ -170,11 +170,23 @@ def test_openai_provider_reads_the_standard_variable(monkeypatch: pytest.MonkeyP
     assert cfg.ocr_api_key.get_secret_value() == ""
 
 
-def test_opencode_provider_reads_the_standard_variable(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("OPENCODE_API_KEY", "sk-opencode")
-    cfg = UBTConfig.from_env(provider="opencode")
-    assert cfg.api_key.get_secret_value() == "sk-opencode"
-    assert cfg.base_url == "https://opencode.ai/zen/go/v1"
+def test_declared_provider_reads_the_standard_variable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg_file = tmp_path / "ubt.toml"
+    cfg_file.write_text(
+        "[providers.openzen]\n"
+        'base_url = "https://zen.example/v1"\n'
+        'api_mode = "openai-responses"\n'
+        'api_key_env = "OPENZEN_API_KEY"\n'
+        'reasoning_dialect = "flat"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("ubt.core.providers.DEFAULT_CONFIG_LOCATIONS", (cfg_file,))
+    monkeypatch.setenv("OPENZEN_API_KEY", "sk-openzen")
+    cfg = UBTConfig.from_env(provider="openzen")
+    assert cfg.api_key.get_secret_value() == "sk-openzen"
+    assert cfg.base_url == "https://zen.example/v1"
     assert cfg.api_mode == "openai-responses"
     assert cfg.reasoning_dialect == "flat"
     assert cfg.service_api_key.get_secret_value() == ""
@@ -186,16 +198,16 @@ def test_credential_and_endpoint_come_from_the_same_provider(
 ) -> None:
     """The key and the URL must never come from different providers.
 
-    Both are supplied by the selected provider block, so with DEEPSEEK_API_KEY
-    and GEMINI_API_KEY both set, selecting deepseek sends the DeepSeek secret to
-    the DeepSeek endpoint — the old implicit sniffing paired the key from one
+    Both are supplied by the selected provider block, so with ANTHROPIC_API_KEY
+    and GEMINI_API_KEY both set, selecting gemini sends the Gemini secret to
+    the Gemini endpoint — the old implicit sniffing paired the key from one
     vendor with the host of another.
     """
-    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-deepseek")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
     monkeypatch.setenv("GEMINI_API_KEY", "gm-key")
-    cfg = UBTConfig.from_env(provider="deepseek")
-    assert cfg.api_key.get_secret_value() == "sk-deepseek"
-    assert "deepseek" in cfg.base_url
+    cfg = UBTConfig.from_env(provider="gemini")
+    assert cfg.api_key.get_secret_value() == "gm-key"
+    assert "googleapis.com" in cfg.base_url
 
 
 def test_third_party_names_are_inert_without_a_provider(monkeypatch: pytest.MonkeyPatch) -> None:

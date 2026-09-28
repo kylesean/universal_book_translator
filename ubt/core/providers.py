@@ -181,10 +181,18 @@ def _read_shipped_providers() -> dict[str, dict[str, Any]]:
     return shipped
 
 
+#: Ergonomic aliases mapping short names to canonical wire protocols.
+PROTOCOL_ALIASES: dict[str, str] = {
+    "openai": "openai-chat",
+    "anthropic": "anthropic-messages",
+    "gemini": "gemini-native",
+}
+
+
 def list_providers(custom_path: Path | str | None = None) -> list[str]:
-    """Shipped providers plus any declared in the config file, sorted."""
+    """Shipped wire protocols and aliases plus any declared in the config file, sorted."""
     declared = _read_toml(custom_path).get("providers", {})
-    names = set(_read_shipped_providers())
+    names = set(_read_shipped_providers()) | set(PROTOCOL_ALIASES)
     if isinstance(declared, dict):
         names |= {str(k) for k in declared}
     return sorted(names)
@@ -195,7 +203,7 @@ def load_provider_block(
 ) -> tuple[dict[str, Any], str | None]:
     """Resolve ``name`` to ``(config fields, api_key_env)``.
 
-    The shipped preset is the base; a user ``[providers.<name>]`` block overrides
+    The shipped wire protocol is the base; a user ``[providers.<name>]`` block overrides
     or extends it. Both are validated identically. ``api_key_env`` is returned
     separately — it names an environment variable, it is not a ``UBTConfig`` field.
     """
@@ -204,7 +212,9 @@ def load_provider_block(
     declared = data.get("providers", {})
     if not isinstance(declared, dict):
         declared = {}
-    if name not in shipped and name not in declared:
+
+    canonical_name = PROTOCOL_ALIASES.get(name, name)
+    if name not in shipped and canonical_name not in shipped and name not in declared:
         available = list_providers(custom_path)
         raise ProviderNotFoundError(
             f"Provider '{name}' not found. Available providers: {available if available else 'none'}"
@@ -212,8 +222,10 @@ def load_provider_block(
 
     fields: dict[str, Any] = {}
     api_key_env: str | None = None
-    if name in shipped:
-        block = dict(shipped[name])
+
+    base_preset = shipped.get(name) or shipped.get(canonical_name)
+    if base_preset is not None:
+        block = dict(base_preset)
         if "api_key_env" in block:
             api_key_env = str(block.pop("api_key_env"))
         fields.update(block)

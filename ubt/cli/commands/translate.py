@@ -143,14 +143,14 @@ def translate(
         ApiMode | None,
         typer.Option(
             "--api-mode",
-            help="API protocol mode: 'chat' (OpenAI/Gemini/DeepSeek), 'responses' (OpenAI Responses API), or 'anthropic' (Anthropic Messages API)",
+            help="API protocol mode: 'openai-chat', 'openai-responses', 'anthropic-messages', or 'gemini-native'",
         ),
     ] = None,
     provider: Annotated[
         str | None,
         typer.Option(
             "--provider",
-            help="Provider name — built-in (openai/anthropic/gemini/deepseek/opencode) or declared in ubt.toml / ~/.ubt/config.toml (e.g. 'local-gemma4')",
+            help="Provider name — built-in protocol ('openai-chat'/'openai', 'anthropic-messages'/'anthropic', 'gemini-native'/'gemini', 'openai-responses') or declared in ubt.toml / ~/.ubt/config.toml (e.g. 'deepseek', 'openrouter', 'ollama')",
         ),
     ] = None,
     repair_provider: Annotated[

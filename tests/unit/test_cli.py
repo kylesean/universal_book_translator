@@ -234,10 +234,17 @@ def test_doctor_fails_when_no_model_is_configured(
 def test_doctor_accepts_a_providers_own_default_models(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A selected provider supplies its models on purpose — even when they match
-    the shipped default (opencode's do), which is not an oversight to WARN about."""
+    """A declared provider in ubt.toml supplies its models on purpose."""
+    (tmp_path / "ubt.toml").write_text(
+        "[providers.local-custom]\n"
+        'base_url = "https://custom.example/v1"\n'
+        'api_mode = "openai-chat"\n'
+        'draft_model = "custom-draft-model"\n'
+        'repair_model = "custom-repair-model"\n',
+        encoding="utf-8",
+    )
     monkeypatch.setenv("UBT_LLM_API_KEY", "test-key-12345678")
-    monkeypatch.setenv("UBT_PROVIDER", "opencode")
+    monkeypatch.setenv("UBT_PROVIDER", "local-custom")
     monkeypatch.delenv("UBT_DRAFT_MODEL", raising=False)
     monkeypatch.delenv("UBT_REPAIR_MODEL", raising=False)
     monkeypatch.chdir(tmp_path)
@@ -247,9 +254,7 @@ def test_doctor_accepts_a_providers_own_default_models(
     payload = json.loads(result.stdout)
     models = next(check for check in payload["checks"] if check["name"] == "Models")
     assert models["status"] == "OK"
-    assert models["detail"] == (
-        "draft=muse-spark-1.3-contributor repair=muse-spark-1.3-contributor"
-    )
+    assert models["detail"] == ("draft=custom-draft-model repair=custom-repair-model")
 
 
 def test_doctor_fails_without_api_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

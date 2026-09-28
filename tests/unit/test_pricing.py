@@ -1,4 +1,4 @@
-"""Unit tests for per-model token pricing and cache discounts."""
+from pathlib import Path
 
 import pytest
 
@@ -183,27 +183,41 @@ def test_free_tier_models_are_priced_zero_not_unknown() -> None:
     assert not has_price_entry("localhost")
 
 
-def test_the_opencode_provider_declares_its_models_free() -> None:
-    """A zero price now comes from the provider's ``cost_per_mtok``, not a prefix.
+def test_a_declared_provider_declares_its_models_free(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A zero price comes from the provider's ``cost_per_mtok``, not a prefix.
 
     The ``muse-`` / ``opencode/`` price-table prefixes were vendor sniffing in
-    the pricing layer. The built-in provider declares the cost as data instead,
+    the pricing layer. A declared provider states the cost as data instead,
     and ``_check_invariants`` registers it for its draft/repair models, so the
     budget gate still sees a known (zero) price.
     """
     from ubt.core.config import UBTConfig
     from ubt.core.router.pricing import reset_custom_pricing
 
+    cfg_file = tmp_path / "ubt.toml"
+    cfg_file.write_text(
+        "[providers.free-tier]\n"
+        'base_url = "https://free.example/v1"\n'
+        'api_mode = "openai-chat"\n'
+        'draft_model = "custom-free-model"\n'
+        'repair_model = "custom-free-model"\n'
+        "cost_per_mtok = [0.0, 0.0]\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("ubt.core.providers.DEFAULT_CONFIG_LOCATIONS", (cfg_file,))
+
     try:
         reset_custom_pricing()
-        # Without the provider selected, the shipped model has no price entry.
-        assert not has_price_entry("muse-spark-1.3-contributor")
+        # Without the provider selected, the custom model has no price entry.
+        assert not has_price_entry("custom-free-model")
 
-        UBTConfig.from_env(provider="opencode")
-        assert has_price_entry("muse-spark-1.3-contributor")
+        UBTConfig.from_env(provider="free-tier")
+        assert has_price_entry("custom-free-model")
         assert (
             estimate_cost_usd(
-                {"muse-spark-1.3-contributor": {"prompt_tokens": 1000, "completion_tokens": 200}}
+                {"custom-free-model": {"prompt_tokens": 1000, "completion_tokens": 200}}
             )
             == 0.0
         )

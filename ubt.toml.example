@@ -1,31 +1,91 @@
-# UBT provider registry template. Copy to ubt.toml.
-# Precedence: CLI flag > env (UBT_*) > [providers.<name>] > [defaults] > field default.
-# Never put a secret here: a block carrying one is rejected. Put the variable name
-# in api_key_env and the key in the environment (UBT_LLM_API_KEY outranks it).
-
-# Built-ins need no block: openai / anthropic / gemini / deepseek / opencode.
+# =============================================================================
+# UBT Provider & Configuration Template (ubt.toml.example)
+# Copy this file to `ubt.toml` or `~/.config/ubt/config.toml` to customize.
+#
+# Precedence: CLI flag > env (UBT_*) > [providers.<name>] > [defaults] > code default
+# =============================================================================
+#
+# Security Invariant:
+# Never put API keys directly in this file! Any TOML block with an `api_key`
+# field is rejected outright to prevent accidental credential leakage into git.
+# Put the environment variable NAME in `api_key_env`, and export the real secret
+# in your shell (or use UBT_LLM_API_KEY which outranks any provider variable).
+#
+# -----------------------------------------------------------------------------
+# The Four Canonical Wire Protocols Built into UBT:
+# -----------------------------------------------------------------------------
+# UBT speaks exactly four wire protocols:
+#   1. openai-chat        (OpenAI Chat Completion API and compatible gateways)
+#   2. openai-responses   (OpenAI Responses API)
+#   3. anthropic-messages (Anthropic Messages API)
+#   4. gemini-native      (Google Gemini native v1beta API)
+#
+# Built-in shortcuts:
+#   - UBT_PROVIDER=openai-chat        (alias: openai)
+#   - UBT_PROVIDER=openai-responses
+#   - UBT_PROVIDER=anthropic-messages (alias: anthropic)
+#   - UBT_PROVIDER=gemini-native      (alias: gemini)
+#
+# When using official endpoints, no ubt.toml configuration is required at all:
 #   export UBT_PROVIDER=anthropic
-#   export UBT_LLM_API_KEY=sk-ant-...
+#   export ANTHROPIC_API_KEY="sk-ant-..."
+#   uv run ubt translate book.pdf --model claude-3-5-haiku
+#
+# -----------------------------------------------------------------------------
+# Third-party & Self-hosted Provider Configuration Examples
+# -----------------------------------------------------------------------------
+# Any commercial provider, relay, aggregator, or self-hosted model speaks one
+# of the four wire protocols above. Define your own providers here:
 
-# The four wire protocols: openai-chat | openai-responses | anthropic-messages |
-# gemini-native. Every provider -- gateway, relay, local server -- speaks one of
-# them, so api_mode is the only thing that selects the protocol. Never inferred
-# from the host or the model name.
+# Example 1: DeepSeek (OpenAI-compatible Chat protocol)
+# [providers.deepseek]
+# base_url = "https://api.deepseek.com/v1"
+# api_mode = "openai-chat"
+# api_key_env = "DEEPSEEK_API_KEY"
+# draft_model = "deepseek-chat"
+# repair_model = "deepseek-reasoner"
 
-# A custom OpenAI-compatible endpoint:
-# [providers.my-gateway]
+# Example 2: OpenRouter Gateway (OpenAI-compatible Chat protocol)
+# [providers.openrouter]
+# base_url = "https://openrouter.ai/api/v1"
+# api_mode = "openai-chat"
+# api_key_env = "OPENROUTER_API_KEY"
+# draft_model = "anthropic/claude-3.5-sonnet"
+# repair_model = "openai/o3-mini"
+
+# Example 3: Local Ollama (OpenAI-compatible Chat protocol)
+# [providers.ollama]
+# base_url = "http://127.0.0.1:11434/v1"
+# api_mode = "openai-chat"
+# draft_model = "qwen2.5:14b"
+# repair_model = "qwen2.5:14b"
+# is_free = true
+
+# Example 4: Local vLLM / SGLang (OpenAI-compatible Chat protocol)
+# [providers.vllm]
+# base_url = "http://127.0.0.1:8000/v1"
+# api_mode = "openai-chat"
+# draft_model = "deepseek-ai/DeepSeek-V3"
+# repair_model = "deepseek-ai/DeepSeek-R1"
+# chat_template_kwargs = { enable_thinking = false }
+# is_free = true
+
+# Example 5: Custom Corporate Gateway with Custom Headers
+# [providers.corp-gateway]
 # base_url = "https://llm.internal.example/v1"
 # api_mode = "openai-chat"
-# api_key_env = "MY_GATEWAY_API_KEY"
+# api_key_env = "CORP_GATEWAY_API_KEY"
 # draft_model = "qwen3-32b"
 # repair_model = "qwen3-32b"
 # api_timeout = 300.0
-# extra_headers = { "x-tenant" = "${MY_TENANT}" }
+# extra_headers = { "x-tenant-id" = "${CORP_TENANT_ID:-default}" }
 
-# [defaults] applies to every run, including a bare UBTConfig.from_env().
+# -----------------------------------------------------------------------------
+# Global Defaults
+# -----------------------------------------------------------------------------
+# [defaults] applies to every run, regardless of which provider is chosen.
 # [defaults]
 # api_timeout = 180.0
 # draft_reasoning_effort = "low"
 # repair_reasoning_effort = "high"
-# chat_template_kwargs = { enable_thinking = false }
 # prompt_caching_enabled = true
