@@ -205,8 +205,8 @@ async def _run_translation(
     if api_key_missing:
         raise RuntimeError(
             "No LLM credential is configured (empty or mock-key). Set "
-            "UBT_LLM_API_KEY, or select a provider whose api_key_env names the "
-            "variable holding the key; run with --dry-run for zero-token validation."
+            "UBT_LLM_API_KEY, configure api_key in ubt.toml, or pass --api-key; "
+            "run with --dry-run for zero-token validation."
         )
 
     if dry_run:

@@ -11,15 +11,14 @@ Design contract:
   silently couples the inbound gate to the outbound provider secret (a security
   defect — see ``_check_invariants``).
 - Third-party vendor names (``OPENAI_API_KEY``, ``ANTHROPIC_BASE_URL``, ...) are
-  NOT field aliases. A provider block names the variable holding its credential
-  via ``api_key_env``, and the precedence ladder in :mod:`ubt.core.providers`
-  resolves it; ``UBT_LLM_API_KEY`` is the generic override that outranks any
-  provider-specific variable. The settings source accepts only ``UBT_*`` names
-  and pins ``api_key`` / ``service_api_key`` to their one declared variable, so a
-  bare or third-party name in the process environment can never hijack the
-  outbound credential, the endpoint, or the inbound gate.
+  NOT field aliases. Credentials come directly from the provider block's ``api_key``
+  (with optional ``${VAR}`` expansion) or the generic ``UBT_LLM_API_KEY`` override.
+  The settings source accepts only ``UBT_*`` names and pins ``api_key`` /
+  ``service_api_key`` to their one declared variable, so a bare or third-party
+  name in the process environment can never hijack the outbound credential, the
+  endpoint, or the inbound gate.
 - No credential is ever scraped from another program: an outbound key resolves
-  only from ``UBT_LLM_API_KEY``, a selected provider's ``api_key_env``, or the
+  only from ``UBT_LLM_API_KEY``, a configured provider's ``api_key``, or the
   ``"mock-key"`` placeholder for dry-run / tests. Explicit env always wins — the
   settings layer resolves env before the factory ever runs, so factories never
   peek at other fields' env vars.
@@ -136,7 +135,7 @@ def _default_api_key() -> SecretStr:
     doing so would translate a whole book through a third-party account the
     user never selected and never saw named (``doctor`` prints only "API key
     OK", correctly refusing to echo a key fragment). A credential comes only
-    from ``UBT_LLM_API_KEY`` or a selected provider's ``api_key_env``; see the
+    from ``UBT_LLM_API_KEY`` or a configured provider's ``api_key``; see the
     ``api_key`` field.
     """
     return SecretStr(MOCK_API_KEY)
@@ -245,9 +244,9 @@ class UBTConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="UBT_",
         # The process environment is the only external source: there is no
-        # dotenv file. Provider selection and its non-secret settings live in
-        # the TOML provider registry, and credentials come from the environment
-        # (``UBT_LLM_API_KEY`` or the selected provider's ``api_key_env``).
+        # dotenv file. Provider selection and its settings live in the TOML
+        # provider registry, and credentials come from the environment
+        # (``UBT_LLM_API_KEY``), provider direct ``api_key``, or CLI flags.
         # Precedence is explicit init > real environment > field default.
         env_ignore_empty=True,
         extra="ignore",
@@ -272,10 +271,9 @@ class UBTConfig(BaseSettings):
 
     # -- API credentials and endpoints -------------------------------------
     # One canonical env name per field. The third-party names (OPENAI_API_KEY,
-    # ANTHROPIC_BASE_URL, ...) are NOT aliases: a provider block names the
-    # variable holding its credential via ``api_key_env``, and the ladder in
-    # ``providers.py`` resolves it. ``UBT_LLM_API_KEY`` is the generic override
-    # that outranks any provider-specific variable.
+    # ANTHROPIC_BASE_URL, ...) are NOT ambient aliases: credentials come from
+    # the provider block's ``api_key`` (with optional ${VAR} expansion) or the
+    # generic ``UBT_LLM_API_KEY`` override.
     api_key: SecretStr = Field(
         default_factory=_default_api_key,
         validation_alias="UBT_LLM_API_KEY",
@@ -314,7 +312,7 @@ class UBTConfig(BaseSettings):
 
     # -- Inbound service auth (X-API-Key gate, opt-in) -------------------------
     # Distinct from outbound ``api_key`` above (which resolves from
-    # UBT_LLM_API_KEY or the selected provider's api_key_env). The service gate
+    # UBT_LLM_API_KEY, provider direct api_key, or CLI). The service gate
     # must ONLY honor an explicitly configured UBT_API_KEY — it must never
     # read the outbound LLM credential or un-prefixed keys. Empty = open (development mode).
     service_api_key: SecretStr = Field(
@@ -921,7 +919,7 @@ class UBTConfig(BaseSettings):
         if raw_service_key and raw_service_key == self.api_key.get_secret_value():
             raise ValueError(
                 "UBT_API_KEY (inbound X-API-Key gate) must differ from the outbound "
-                "LLM key (UBT_LLM_API_KEY or the selected provider's api_key_env); "
+                "LLM key (UBT_LLM_API_KEY or provider api_key); "
                 "refusing to reuse one secret for both."
             )
 
@@ -1040,10 +1038,8 @@ class UBTConfig(BaseSettings):
 
         clean = {k: v for k, v in overrides.items() if v is not None}
         provider_name = clean.get("provider") or os.getenv("UBT_PROVIDER")
-        fields, api_key_env = load_layer(str(provider_name) if provider_name else None)
-        clean = merge_provider_under(
-            clean, fields, api_key_env, env_supplied=_env_supplied_field_names()
-        )
+        fields = load_layer(str(provider_name) if provider_name else None)
+        clean = merge_provider_under(clean, fields, env_supplied=_env_supplied_field_names())
         return cls(**clean)
 
 
@@ -1088,16 +1084,15 @@ def require_api_key(config: UBTConfig | None = None) -> str:
     """Return the configured API key, or fail fast with an actionable message.
 
     Single source of truth for scripts and one-off tools: resolves through the
-    canonical ladder (``UBT_LLM_API_KEY``, or the selected provider's
-    ``api_key_env``) and refuses to silently run live workloads against the
+    canonical ladder (``UBT_LLM_API_KEY``, provider configured ``api_key``,
+    or CLI flag) and refuses to silently run live workloads against the
     ``mock-key`` placeholder. Raises :class:`SystemExit` (exit code 2) when
     unconfigured.
     """
     key = (config or UBTConfig.from_env()).api_key.get_secret_value()
     if not key or key == MOCK_API_KEY:
         raise SystemExit(
-            "error: no API key configured — set UBT_LLM_API_KEY, or select a "
-            "provider (UBT_PROVIDER / --provider) whose api_key_env names the "
-            "variable holding the key"
+            "error: no API key configured — set UBT_LLM_API_KEY, configure "
+            "api_key in ubt.toml, or pass --api-key"
         )
     return key

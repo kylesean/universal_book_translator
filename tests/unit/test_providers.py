@@ -1,10 +1,7 @@
-"""The provider registry: built-ins, user ``[providers.*]`` blocks, one ladder.
+"""The provider registry: built-in wire protocols, user ``[providers.*]`` blocks, one ladder.
 
 A *provider* bundles everything about where and how to call an LLM — endpoint,
-wire protocol, default models — and names the environment variable holding its
-credential (``api_key_env``). The secret itself never lives in the TOML: a key
-committed to a version-controlled file is a leaked key, so a block carrying one
-is rejected outright.
+wire protocol, default models, and direct ``api_key`` credentials.
 
 ``explicit > environment > provider block > [defaults] > field default`` is one
 rule, owned by ``merge_provider_under`` and shared by ``UBTConfig.from_env`` and
@@ -54,7 +51,7 @@ def config_toml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         "[providers.custom]\n"
         'base_url = "https://custom.example/v1"\n'
         'api_mode = "openai-chat"\n'
-        'api_key_env = "CUSTOM_API_KEY"\n'
+        'api_key = "${CUSTOM_API_KEY}"\n'
         'draft_model = "custom-draft"\n'
         'repair_model = "custom-repair"\n',
         encoding="utf-8",
@@ -76,11 +73,11 @@ def test_shipped_providers_are_pure_wire_protocols() -> None:
     }
     assert "deepseek" not in shipped
     assert "opencode" not in shipped
-    # Shipped protocols are pure wire transports: they never hardcode model IDs.
+    # Shipped protocols are pure wire transports: they never hardcode model IDs or keys.
     assert all("draft_model" not in block for block in shipped.values())
     assert all("repair_model" not in block for block in shipped.values())
-    # Every shipped protocol names the variable its credential is read from.
-    assert all(block.get("api_key_env") for block in shipped.values())
+    assert all("api_key" not in block for block in shipped.values())
+    assert all("api_key_env" not in block for block in shipped.values())
 
 
 def test_shipped_registry_is_validated_like_a_user_block() -> None:
@@ -94,7 +91,7 @@ def test_shipped_registry_is_validated_like_a_user_block() -> None:
     assert shipped
     for name, block in shipped.items():
         assert "api_key" not in block, name
-        assert "api_key_env" in block, name
+        assert "api_key_env" not in block, name
 
 
 def test_shipped_registry_ships_inside_the_package() -> None:
@@ -113,16 +110,15 @@ def test_list_providers_merges_builtins_and_declared(config_toml: Path) -> None:
 
 
 def test_load_builtin_protocol_and_alias() -> None:
-    fields, api_key_env = load_provider_block("openai-chat")
-    assert api_key_env == "OPENAI_API_KEY"
+    fields = load_provider_block("openai-chat")
     assert fields["base_url"] == "https://api.openai.com/v1"
     assert fields["api_mode"] == "openai-chat"
     assert "draft_model" not in fields  # protocols do not hardcode model IDs
-    assert "api_key" not in fields  # secret is never in the block
+    assert "api_key" not in fields  # secret is never in the shipped block
+    assert "api_key_env" not in fields
 
     # Alias 'openai' maps to the canonical 'openai-chat' protocol
-    alias_fields, alias_key_env = load_provider_block("openai")
-    assert alias_key_env == "OPENAI_API_KEY"
+    alias_fields = load_provider_block("openai")
     assert alias_fields == fields
 
 
@@ -136,39 +132,40 @@ def test_protocol_shorthand_aliases() -> None:
         ("anthropic", "anthropic-messages"),
         ("gemini", "gemini-native"),
     ]:
-        fields, key_env = load_provider_block(alias)
-        canonical_fields, canonical_key_env = load_provider_block(canonical)
+        fields = load_provider_block(alias)
+        canonical_fields = load_provider_block(canonical)
         assert fields == canonical_fields
-        assert key_env == canonical_key_env
 
 
 def test_user_block_overrides_a_builtin_field(config_toml: Path) -> None:
-    fields, api_key_env = load_provider_block("gemini", config_toml)
+    fields = load_provider_block("gemini", config_toml)
     # The user changed only the models; the rest still comes from the built-in.
     assert fields["draft_model"] == "gemini-user-draft"
     assert fields["repair_model"] == "gemini-user-repair"
     assert fields["base_url"] == "https://generativelanguage.googleapis.com/v1beta"
-    assert api_key_env == "GEMINI_API_KEY"
 
 
 def test_declared_provider_without_a_builtin_base(config_toml: Path) -> None:
-    fields, api_key_env = load_provider_block("custom", config_toml)
-    assert api_key_env == "CUSTOM_API_KEY"
+    fields = load_provider_block("custom", config_toml)
     assert fields == {
         "base_url": "https://custom.example/v1",
         "api_mode": "openai-chat",
+        "api_key": "",
         "draft_model": "custom-draft",
         "repair_model": "custom-repair",
     }
 
 
-def test_provider_block_supports_custom_capabilities_and_pricing(tmp_path: Path) -> None:
+def test_provider_block_supports_custom_capabilities_and_pricing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CORP_KEY", "sk-corp-key")
     path = tmp_path / "config.toml"
     path.write_text(
         "[providers.enterprise]\n"
         'base_url = "https://llm.corp.example/v1"\n'
         'api_mode = "openai-chat"\n'
-        'api_key_env = "CORP_KEY"\n'
+        'api_key = "${CORP_KEY}"\n'
         'draft_model = "corp-draft"\n'
         'repair_model = "corp-repair"\n'
         'repair_provider = "anthropic"\n'
@@ -180,8 +177,8 @@ def test_provider_block_supports_custom_capabilities_and_pricing(tmp_path: Path)
         'reasoning_dialect = "flat"\n',
         encoding="utf-8",
     )
-    fields, api_key_env = load_provider_block("enterprise", path)
-    assert api_key_env == "CORP_KEY"
+    fields = load_provider_block("enterprise", path)
+    assert fields["api_key"] == "sk-corp-key"
     assert fields["is_free"] is True
     assert fields["cost_per_mtok"] == [0.10, 0.40]
     assert fields["supports_batch_api"] is True
@@ -242,9 +239,15 @@ def test_provider_block_supports_direct_api_key(tmp_path: Path) -> None:
         'api_key = "sk-direct-secret"\n',
         encoding="utf-8",
     )
-    fields, key_env = load_provider_block("direct", path)
+    fields = load_provider_block("direct", path)
     assert fields["api_key"] == "sk-direct-secret"
-    assert key_env is None
+
+
+def test_provider_block_strictly_rejects_api_key_env(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text('[providers.legacy]\napi_key_env = "CUSTOM_API_KEY"\n', encoding="utf-8")
+    with pytest.raises(ProviderConfigError, match="unknown field.*api_key_env"):
+        load_provider_block("legacy", path)
 
 
 def test_shipped_registry_must_not_contain_api_key() -> None:
@@ -273,21 +276,21 @@ def test_block_expands_environment_references(
         'extra_headers = { "x-session" = "${TEST_SESSION_ENV}" }\n',
         encoding="utf-8",
     )
-    fields, _ = load_provider_block("envtest", path)
+    fields = load_provider_block("envtest", path)
     assert fields["base_url"] == "https://expanded.example/v1"
     assert fields["draft_model"] == "fallback-model"
     # Table values expand too, so a header can name the variable it reads from.
     assert fields["extra_headers"] == {"x-session": "ses_42"}
 
 
-def test_defaults_block_is_validated_and_never_names_a_credential(tmp_path: Path) -> None:
+def test_defaults_block_strictly_rejects_api_key_env(tmp_path: Path) -> None:
     path = tmp_path / "config.toml"
     path.write_text(
-        '[defaults]\napi_timeout = 30.0\napi_key_env = "SHOULD_BE_IGNORED"\n',
+        '[defaults]\napi_timeout = 30.0\napi_key_env = "SHOULD_BE_REJECTED"\n',
         encoding="utf-8",
     )
-    # api_key_env is a provider-only key; in [defaults] it is dropped, not honoured.
-    assert load_defaults_block(path) == {"api_timeout": 30.0}
+    with pytest.raises(ProviderConfigError, match="unknown field.*api_key_env"):
+        load_defaults_block(path)
 
 
 def test_defaults_block_supports_direct_api_key(tmp_path: Path) -> None:
@@ -300,9 +303,7 @@ def test_defaults_block_supports_direct_api_key(tmp_path: Path) -> None:
 
 
 def test_merge_provider_under_explicit_wins_over_the_block() -> None:
-    merged = merge_provider_under(
-        {"draft_model": "explicit-draft"}, {"draft_model": "block-draft"}, None
-    )
+    merged = merge_provider_under({"draft_model": "explicit-draft"}, {"draft_model": "block-draft"})
     assert merged["draft_model"] == "explicit-draft"
 
 
@@ -310,7 +311,6 @@ def test_merge_provider_under_env_supplied_field_drops_the_block_value() -> None
     merged = merge_provider_under(
         {},
         {"draft_model": "block-draft", "base_url": "https://block.example/v1"},
-        None,
         env_supplied={"draft_model"},
     )
     assert "draft_model" not in merged
@@ -322,7 +322,6 @@ def test_merge_provider_under_drops_inherited_repair_when_draft_changes() -> Non
     merged = merge_provider_under(
         {"draft_model": "new-draft"},
         {"draft_model": "block-draft", "repair_model": "block-draft"},
-        None,
     )
     assert merged["draft_model"] == "new-draft"
     assert "repair_model" not in merged
@@ -332,34 +331,28 @@ def test_merge_provider_under_keeps_a_distinct_block_repair() -> None:
     merged = merge_provider_under(
         {"draft_model": "new-draft"},
         {"draft_model": "block-draft", "repair_model": "block-repair"},
-        None,
     )
     assert merged["repair_model"] == "block-repair"
 
 
-def test_merge_provider_under_resolves_credential_from_api_key_env(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv("UBT_LLM_API_KEY", raising=False)
-    monkeypatch.setenv("CUSTOM_API_KEY", "sk-custom")
-    assert merge_provider_under({}, {}, "CUSTOM_API_KEY")["api_key"] == "sk-custom"
+def test_merge_provider_under_inherits_block_api_key() -> None:
+    assert merge_provider_under({}, {"api_key": "sk-block"})["api_key"] == "sk-block"
 
 
-def test_merge_provider_under_defers_to_the_generic_llm_key(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """When ``UBT_LLM_API_KEY`` is set, the block's variable is not injected.
-
-    The generic key outranks the block, so the merge leaves ``api_key`` to the
-    environment source instead of copying the provider-specific value into the
-    init kwargs.
-    """
-    monkeypatch.setenv("UBT_LLM_API_KEY", "sk-generic")
-    monkeypatch.setenv("CUSTOM_API_KEY", "sk-custom")
-    assert "api_key" not in merge_provider_under({}, {}, "CUSTOM_API_KEY")
+def test_merge_provider_under_explicit_api_key_outranks_block() -> None:
+    assert (
+        merge_provider_under({"api_key": "sk-explicit"}, {"api_key": "sk-block"})["api_key"]
+        == "sk-explicit"
+    )
 
 
-def test_generic_llm_key_outranks_the_provider_variable(
+def test_merge_provider_under_env_supplied_drops_block_api_key() -> None:
+    assert "api_key" not in merge_provider_under(
+        {}, {"api_key": "sk-block"}, env_supplied={"api_key"}
+    )
+
+
+def test_generic_llm_key_outranks_the_provider_key(
     config_toml: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("UBT_LLM_API_KEY", "sk-generic")

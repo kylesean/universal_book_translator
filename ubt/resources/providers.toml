@@ -1,26 +1,22 @@
 # Pure wire protocol presets shipped with UBT.
 # Every LLM provider or gateway speaks one of these four wire protocols.
-# Users configure custom endpoints, third-party providers, and model IDs
-# in ubt.toml or via environment variables / CLI flags.
+# Users configure custom endpoints, third-party providers, and credentials
+# in ubt.toml (via api_key = "..." or "${VAR}") or via UBT_LLM_API_KEY / CLI flags.
 
 [providers.openai-chat]
 base_url = "https://api.openai.com/v1"
 api_mode = "openai-chat"
-api_key_env = "OPENAI_API_KEY"
 supports_batch_api = true
 
 [providers.openai-responses]
 base_url = "https://api.openai.com/v1"
 api_mode = "openai-responses"
-api_key_env = "OPENAI_API_KEY"
 
 [providers.anthropic-messages]
 base_url = "https://api.anthropic.com"
 api_mode = "anthropic-messages"
-api_key_env = "ANTHROPIC_API_KEY"
 supports_batch_api = true
 
 [providers.gemini-native]
 base_url = "https://generativelanguage.googleapis.com/v1beta"
 api_mode = "gemini-native"
-api_key_env = "GEMINI_API_KEY"

@@ -227,10 +227,8 @@ def apply_config_overrides(base: UBTConfig, overrides: Mapping[str, Any]) -> UBT
     # the request's explicit values, with environment-pinned fields above it.
     # ``repair_model`` follows the effective draft via ``_check_invariants``,
     # which assignment re-runs — one owner, so both paths agree.
-    fields, api_key_env = load_layer(str(provider_name) if provider_name else None)
-    effective = merge_provider_under(
-        overrides, fields, api_key_env, env_supplied=_env_supplied_field_names()
-    )
+    fields = load_layer(str(provider_name) if provider_name else None)
+    effective = merge_provider_under(overrides, fields, env_supplied=_env_supplied_field_names())
 
     for key, value in effective.items():
         if value is not None and key in valid_fields:

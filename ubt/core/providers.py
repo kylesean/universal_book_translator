@@ -1,10 +1,9 @@
-"""Provider registry: built-in vendors plus user-declared ``[providers.*]``.
+"""Provider registry: built-in wire protocols plus user-declared ``[providers.*]``.
 
 A *provider* bundles everything about **where** and **how** to call an LLM — the
-endpoint, the wire protocol, and the default models — and names the environment
-variable that holds its credential (``api_key_env``). The secret itself never
-lives in the TOML: a key committed to a version-controlled file is a leaked key,
-so a block carrying one is rejected outright.
+endpoint, the wire protocol, and the default models. Credential configuration
+is specified directly via ``api_key`` (supporting ``${VAR}`` expansion), or via
+the generic ``UBT_LLM_API_KEY`` environment variable or CLI flags.
 
 Search order for the config file (unchanged from the old profile loader):
 1. explicit path passed by the caller
@@ -55,7 +54,6 @@ _SHIPPED_REGISTRY = Path(__file__).resolve().parent.parent / "resources" / "prov
 PROVIDER_ALLOWED_KEYS = frozenset(
     {
         "api_key",
-        "api_key_env",
         "base_url",
         "api_mode",
         "draft_model",
@@ -208,14 +206,11 @@ def list_providers(custom_path: Path | str | None = None) -> list[str]:
     return sorted(names)
 
 
-def load_provider_block(
-    name: str, custom_path: Path | str | None = None
-) -> tuple[dict[str, Any], str | None]:
-    """Resolve ``name`` to ``(config fields, api_key_env)``.
+def load_provider_block(name: str, custom_path: Path | str | None = None) -> dict[str, Any]:
+    """Resolve ``name`` to a dictionary of config fields.
 
     The shipped wire protocol is the base; a user ``[providers.<name>]`` block overrides
-    or extends it. Both are validated identically. ``api_key_env`` is returned
-    separately — it names an environment variable, it is not a ``UBTConfig`` field.
+    or extends it. Both are validated identically.
     """
     shipped = _read_shipped_providers()
     data = _read_toml(custom_path)
@@ -231,24 +226,18 @@ def load_provider_block(
         )
 
     fields: dict[str, Any] = {}
-    api_key_env: str | None = None
 
     base_preset = shipped.get(name) or shipped.get(canonical_name)
     if base_preset is not None:
-        block = dict(base_preset)
-        if "api_key_env" in block:
-            api_key_env = str(block.pop("api_key_env"))
-        fields.update(block)
+        fields.update(dict(base_preset))
 
     user_block = declared.get(name)
     if user_block is not None:
         if not isinstance(user_block, dict):
             raise ProviderConfigError(f"[providers.{name}] must be a table")
         validated = _validate_block(f"[providers.{name}]", user_block)
-        if "api_key_env" in validated:
-            api_key_env = str(validated.pop("api_key_env"))
         fields.update(validated)
-    return fields, api_key_env
+    return fields
 
 
 def load_defaults_block(custom_path: Path | str | None = None) -> dict[str, Any]:
@@ -256,32 +245,26 @@ def load_defaults_block(custom_path: Path | str | None = None) -> dict[str, Any]
     defaults = _read_toml(custom_path).get("defaults", {})
     if not isinstance(defaults, dict) or not defaults:
         return {}
-    validated = _validate_block("[defaults]", defaults)
-    validated.pop("api_key_env", None)  # only a provider names a credential variable
-    return validated
+    return _validate_block("[defaults]", defaults)
 
 
-def load_layer(
-    provider_name: str | None, custom_path: Path | str | None = None
-) -> tuple[dict[str, Any], str | None]:
+def load_layer(provider_name: str | None, custom_path: Path | str | None = None) -> dict[str, Any]:
     """The ``[defaults]`` baseline with ``[providers.<name>]`` layered over it.
 
-    Returns ``(fields, api_key_env)``. With no provider the defaults stand alone;
+    Returns a dictionary of config fields. With no provider the defaults stand alone;
     a provider overrides or extends them. One loader, shared by ``from_env`` and
     ``apply_config_overrides`` so both paths see the same block.
     """
     fields: dict[str, Any] = dict(load_defaults_block(custom_path))
-    api_key_env: str | None = None
     if provider_name:
-        provider_fields, api_key_env = load_provider_block(provider_name, custom_path)
+        provider_fields = load_provider_block(provider_name, custom_path)
         fields.update(provider_fields)
-    return fields, api_key_env
+    return fields
 
 
 def merge_provider_under(
     explicit: Mapping[str, Any],
     fields: Mapping[str, Any],
-    api_key_env: str | None,
     *,
     env_supplied: frozenset[str] | set[str] | None = None,
 ) -> dict[str, Any]:
@@ -295,9 +278,7 @@ def merge_provider_under(
     ``env_supplied`` names fields the operator pinned in the process environment;
     those outrank the block. ``repair_model`` follows the effective draft unless
     the block (or the caller) chose a repair distinct from its own draft — the
-    same rule ``UBTConfig``'s validator enforces. The credential is taken from
-    ``api_key_env`` only when neither an explicit value nor ``UBT_LLM_API_KEY``
-    already supplied one.
+    same rule ``UBTConfig``'s validator enforces.
     """
     layer = dict(fields)
     if env_supplied:
@@ -313,8 +294,4 @@ def merge_provider_under(
         )
     ):
         merged.pop("repair_model", None)
-    if "api_key" not in explicit and not os.environ.get("UBT_LLM_API_KEY") and api_key_env:
-        value = os.environ.get(api_key_env)
-        if value:
-            merged["api_key"] = value
     return merged

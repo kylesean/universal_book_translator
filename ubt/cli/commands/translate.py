@@ -126,8 +126,8 @@ def translate(
         typer.Option(
             "--api-key",
             help=(
-                "Outbound LLM API key (overrides UBT_LLM_API_KEY and the selected "
-                "provider's api_key_env). Prefer the env var: argv is visible in "
+                "Outbound LLM API key (overrides UBT_LLM_API_KEY and provider's "
+                "configured api_key). Prefer the env var: argv is visible in "
                 "`ps` and shell history"
             ),
         ),

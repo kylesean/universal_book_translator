@@ -14,10 +14,9 @@ outbound credential, the endpoint, or the page filter. The settings source now
 accepts only ``UBT_*`` names (plus the ambient ``OPENCODE_SESSION_ID``).
 
 Third: the third-party vendor names (``OPENAI_API_KEY`` / ``DEEPSEEK_API_KEY`` /
-...) used to be ``api_key`` / ``base_url`` aliases, and the endpoint was guessed
-from whichever of them happened to be set. They are no longer aliases — a
-provider block names the variable holding its credential via ``api_key_env``,
-so the key and the endpoint always come from the *same* provider.
+...) used to be ``api_key`` / ``base_url`` aliases. They are no longer aliases —
+outbound credentials are never ambiently hijacked, and resolve strictly from
+``UBT_LLM_API_KEY``, configured ``api_key`` in TOML, or CLI flags.
 """
 
 from __future__ import annotations
@@ -29,6 +28,7 @@ from pydantic import SecretStr
 
 from ubt.core import config as config_mod
 from ubt.core.config import MOCK_API_KEY, UBTConfig
+from ubt.core.providers import ProviderConfigError
 
 _CRED_ENV = (
     "UBT_LLM_API_KEY",
@@ -159,15 +159,39 @@ def test_secondary_prefixed_aliases_still_resolve(monkeypatch: pytest.MonkeyPatc
     assert cfg.api_timeout == 11.0
 
 
-def test_openai_provider_reads_the_standard_variable(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A selected provider resolves its credential from its ``api_key_env``."""
+def test_declared_provider_reads_direct_or_expanded_api_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A selected provider resolves its credential from its direct or expanded ``api_key``."""
+    cfg_file = tmp_path / "ubt.toml"
+    cfg_file.write_text(
+        "[providers.openai-custom]\n"
+        'base_url = "https://api.openai.com/v1"\n'
+        'api_mode = "openai-chat"\n'
+        'api_key = "${OPENAI_API_KEY}"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("ubt.core.providers.DEFAULT_CONFIG_LOCATIONS", (cfg_file,))
     monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
-    cfg = UBTConfig.from_env(provider="openai")
+    cfg = UBTConfig.from_env(provider="openai-custom")
     assert cfg.api_key.get_secret_value() == "sk-openai"
     assert cfg.base_url == "https://api.openai.com/v1"
     # ...but the vendor name stays out of the inbound gate and the OCR key.
     assert cfg.service_api_key.get_secret_value() == ""
     assert cfg.ocr_api_key.get_secret_value() == ""
+
+
+def test_declared_provider_rejects_api_key_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg_file = tmp_path / "ubt.toml"
+    cfg_file.write_text(
+        '[providers.legacy]\nbase_url = "https://example.com/v1"\napi_key_env = "LEGACY_KEY"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("ubt.core.providers.DEFAULT_CONFIG_LOCATIONS", (cfg_file,))
+    with pytest.raises(ProviderConfigError, match="unknown field.*api_key_env"):
+        UBTConfig.from_env(provider="legacy")
 
 
 def test_declared_provider_reads_the_standard_variable(
@@ -178,7 +202,7 @@ def test_declared_provider_reads_the_standard_variable(
         "[providers.openzen]\n"
         'base_url = "https://zen.example/v1"\n'
         'api_mode = "openai-responses"\n'
-        'api_key_env = "OPENZEN_API_KEY"\n'
+        'api_key = "${OPENZEN_API_KEY}"\n'
         'reasoning_dialect = "flat"\n',
         encoding="utf-8",
     )
@@ -194,20 +218,41 @@ def test_declared_provider_reads_the_standard_variable(
 
 
 def test_credential_and_endpoint_come_from_the_same_provider(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The key and the URL must never come from different providers.
 
     Both are supplied by the selected provider block, so with ANTHROPIC_API_KEY
     and GEMINI_API_KEY both set, selecting gemini sends the Gemini secret to
-    the Gemini endpoint — the old implicit sniffing paired the key from one
-    vendor with the host of another.
+    the Gemini endpoint.
     """
+    cfg_file = tmp_path / "ubt.toml"
+    cfg_file.write_text(
+        "[providers.anthropic-custom]\n"
+        'base_url = "https://api.anthropic.com"\n'
+        'api_mode = "anthropic-messages"\n'
+        'api_key = "${ANTHROPIC_API_KEY}"\n'
+        "\n"
+        "[providers.gemini-custom]\n"
+        'base_url = "https://generativelanguage.googleapis.com/v1beta"\n'
+        'api_mode = "gemini-native"\n'
+        'api_key = "${GEMINI_API_KEY}"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("ubt.core.providers.DEFAULT_CONFIG_LOCATIONS", (cfg_file,))
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
     monkeypatch.setenv("GEMINI_API_KEY", "gm-key")
-    cfg = UBTConfig.from_env(provider="gemini")
+    cfg = UBTConfig.from_env(provider="gemini-custom")
     assert cfg.api_key.get_secret_value() == "gm-key"
     assert "googleapis.com" in cfg.base_url
+
+
+def test_third_party_names_are_inert_without_expansion(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Built-in wire protocols do not automatically sniff vendor env vars."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-ignored")
+    cfg = UBTConfig.from_env(provider="openai-chat")
+    assert cfg.api_key.get_secret_value() == MOCK_API_KEY
 
 
 def test_third_party_names_are_inert_without_a_provider(monkeypatch: pytest.MonkeyPatch) -> None:

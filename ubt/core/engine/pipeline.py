@@ -222,9 +222,9 @@ class PipelineOrchestrator:
             if self.config.repair_provider and self.config.repair_provider != self.config.provider:
                 from ubt.core.providers import load_layer
 
-                r_fields, r_key_env = load_layer(self.config.repair_provider)
+                r_fields = load_layer(self.config.repair_provider)
                 r_key = (
-                    os.environ.get(r_key_env or "")
+                    str(r_fields.get("api_key", ""))
                     or os.environ.get("UBT_LLM_API_KEY")
                     or self.config.api_key.get_secret_value()
                 )

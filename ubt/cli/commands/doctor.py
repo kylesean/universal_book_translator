@@ -236,8 +236,7 @@ def doctor_command(
             "API key",
             "FAIL",
             "not configured",
-            fix="export UBT_LLM_API_KEY=sk-... (or select a provider whose "
-            "api_key_env names the variable holding the key)",
+            fix="export UBT_LLM_API_KEY=sk-... (or set api_key in ubt.toml / pass --api-key)",
         )
     else:
         record("API key", "OK", "configured")

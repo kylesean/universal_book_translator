@@ -82,8 +82,8 @@ def live_llm_configured() -> bool:
 
     This marker gates the only test that spends real money, so it must be opted
     into: a bare third-party variable (``OPENAI_API_KEY`` and friends) is inert
-    on its own, and only ``UBT_LLM_API_KEY`` or a selected provider's
-    ``api_key_env`` supplies the credential. A malformed provider name must not
+    on its own, and only ``UBT_LLM_API_KEY`` or a configured provider's
+    ``api_key`` supplies the credential. A malformed provider name must not
     break collection, so the probe degrades to "not configured".
     """
     from ubt.core.config import MOCK_API_KEY, UBTConfig

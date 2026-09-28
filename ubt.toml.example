@@ -1,15 +1,15 @@
 # =============================================================================
 # UBT Provider & Configuration Template (ubt.toml.example)
-# Copy this file to `ubt.toml` or `~/.config/ubt/config.toml` to customize.
+# Copy this file to `ubt.toml` (git-ignored) or `~/.config/ubt/config.toml` to customize.
 #
 # Precedence: CLI flag > env (UBT_*) > [providers.<name>] > [defaults] > code default
 # =============================================================================
 #
-# Security Invariant:
-# Never put API keys directly in this file! Any TOML block with an `api_key`
-# field is rejected outright to prevent accidental credential leakage into git.
-# Put the environment variable NAME in `api_key_env`, and export the real secret
-# in your shell (or use UBT_LLM_API_KEY which outranks any provider variable).
+# Credential Configuration:
+# You can set `api_key` directly in this file (e.g. `api_key = "sk-..."`),
+# or reference an environment variable using `${VAR}` expansion (e.g. `api_key = "${DEEPSEEK_API_KEY}"`).
+# Local `ubt.toml` is excluded by .gitignore to protect your secrets.
+# Universal override: `export UBT_LLM_API_KEY="sk-..."` outranks any provider file setting.
 #
 # -----------------------------------------------------------------------------
 # The Four Canonical Wire Protocols Built into UBT:
@@ -20,16 +20,11 @@
 #   3. anthropic-messages (Anthropic Messages API)
 #   4. gemini-native      (Google Gemini native v1beta API)
 #
-# Built-in shortcuts:
-#   - UBT_PROVIDER=openai-chat        (alias: openai)
-#   - UBT_PROVIDER=openai-responses
-#   - UBT_PROVIDER=anthropic-messages (alias: anthropic)
+# Built-in shortcuts / aliases:
+#   - UBT_PROVIDER=openai-chat        (alias: openai, chat)
+#   - UBT_PROVIDER=openai-responses   (alias: responses)
+#   - UBT_PROVIDER=anthropic-messages (alias: anthropic, messages)
 #   - UBT_PROVIDER=gemini-native      (alias: gemini)
-#
-# When using official endpoints, no ubt.toml configuration is required at all:
-#   export UBT_PROVIDER=anthropic
-#   export ANTHROPIC_API_KEY="sk-ant-..."
-#   uv run ubt translate book.pdf --model claude-3-5-haiku
 #
 # -----------------------------------------------------------------------------
 # Third-party & Self-hosted Provider Configuration Examples
@@ -37,23 +32,31 @@
 # Any commercial provider, relay, aggregator, or self-hosted model speaks one
 # of the four wire protocols above. Define your own providers here:
 
-# Example 1: DeepSeek (OpenAI-compatible Chat protocol)
+# Example 1: OpenCode Go (OpenAI-compatible Responses protocol with minimal thinking)
+# [providers.opencode]
+# base_url = "https://api.opencode.com/v1"
+# api_mode = "openai-responses"
+# api_key = "sk-..."
+# draft_model = "deepseek-v4-flash"
+# draft_reasoning_effort = "none"
+
+# Example 2: DeepSeek (OpenAI-compatible Chat protocol)
 # [providers.deepseek]
 # base_url = "https://api.deepseek.com/v1"
 # api_mode = "openai-chat"
-# api_key_env = "DEEPSEEK_API_KEY"
+# api_key = "${DEEPSEEK_API_KEY}"
 # draft_model = "deepseek-chat"
 # repair_model = "deepseek-reasoner"
 
-# Example 2: OpenRouter Gateway (OpenAI-compatible Chat protocol)
+# Example 3: OpenRouter Gateway (OpenAI-compatible Chat protocol)
 # [providers.openrouter]
 # base_url = "https://openrouter.ai/api/v1"
 # api_mode = "openai-chat"
-# api_key_env = "OPENROUTER_API_KEY"
+# api_key = "${OPENROUTER_API_KEY}"
 # draft_model = "anthropic/claude-3.5-sonnet"
 # repair_model = "openai/o3-mini"
 
-# Example 3: Local Ollama (OpenAI-compatible Chat protocol)
+# Example 4: Local Ollama (OpenAI-compatible Chat protocol)
 # [providers.ollama]
 # base_url = "http://127.0.0.1:11434/v1"
 # api_mode = "openai-chat"
@@ -61,7 +64,7 @@
 # repair_model = "qwen2.5:14b"
 # is_free = true
 
-# Example 4: Local vLLM / SGLang (OpenAI-compatible Chat protocol)
+# Example 5: Local vLLM / SGLang (OpenAI-compatible Chat protocol)
 # [providers.vllm]
 # base_url = "http://127.0.0.1:8000/v1"
 # api_mode = "openai-chat"
@@ -70,11 +73,11 @@
 # chat_template_kwargs = { enable_thinking = false }
 # is_free = true
 
-# Example 5: Custom Corporate Gateway with Custom Headers
+# Example 6: Custom Corporate Gateway with Custom Headers
 # [providers.corp-gateway]
 # base_url = "https://llm.internal.example/v1"
 # api_mode = "openai-chat"
-# api_key_env = "CORP_GATEWAY_API_KEY"
+# api_key = "${CORP_GATEWAY_API_KEY}"
 # draft_model = "qwen3-32b"
 # repair_model = "qwen3-32b"
 # api_timeout = 300.0
