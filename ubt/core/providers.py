@@ -183,9 +183,14 @@ def _read_shipped_providers() -> dict[str, dict[str, Any]]:
 
 #: Ergonomic aliases mapping short names to canonical wire protocols.
 PROTOCOL_ALIASES: dict[str, str] = {
+    # Provider shorthand aliases
     "openai": "openai-chat",
     "anthropic": "anthropic-messages",
     "gemini": "gemini-native",
+    # Protocol shorthand aliases
+    "chat": "openai-chat",
+    "responses": "openai-responses",
+    "messages": "anthropic-messages",
 }
 
 

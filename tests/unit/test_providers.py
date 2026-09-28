@@ -126,6 +126,22 @@ def test_load_builtin_protocol_and_alias() -> None:
     assert alias_fields == fields
 
 
+def test_protocol_shorthand_aliases() -> None:
+    """Wire protocols can be selected by full name or shorthand alias."""
+    for alias, canonical in [
+        ("chat", "openai-chat"),
+        ("responses", "openai-responses"),
+        ("messages", "anthropic-messages"),
+        ("openai", "openai-chat"),
+        ("anthropic", "anthropic-messages"),
+        ("gemini", "gemini-native"),
+    ]:
+        fields, key_env = load_provider_block(alias)
+        canonical_fields, canonical_key_env = load_provider_block(canonical)
+        assert fields == canonical_fields
+        assert key_env == canonical_key_env
+
+
 def test_user_block_overrides_a_builtin_field(config_toml: Path) -> None:
     fields, api_key_env = load_provider_block("gemini", config_toml)
     # The user changed only the models; the rest still comes from the built-in.
