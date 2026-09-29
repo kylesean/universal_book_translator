@@ -29,7 +29,7 @@ fi
 
 # The local MT backend lives behind the llama-swap gateway (:9090), which loads
 # the translategemma backend on demand. The Ollama daemon on :11434 was retired
-# 2026-09-23 (unit disabled, weights deleted): probing it would skip this tier
+# (unit disabled, weights deleted): probing it would skip this tier
 # forever. Override the endpoint with UBT_LIVE_MT_BASE_URL.
 LOCAL_LLM_BASE_URL="${UBT_LIVE_MT_BASE_URL:-http://127.0.0.1:9090}"
 HAS_LOCAL_LLM=false
@@ -95,7 +95,7 @@ case "${MODE}" in
         fi
         ;;
     --gate)
-        # The real-model HARD gate (review D1): test_local_model_baseline.py
+        # The real-model HARD gate: test_local_model_baseline.py
         # asserts invariants any competent MT must hold, and a red here is a
         # regression, not missing weights. A missing prerequisite is therefore
         # itself a failure — a hard gate that silently skips is the exact no-op
@@ -135,8 +135,8 @@ esac
 
 echo ""
 echo "[3/4] Running zero-token deterministic regression guard..."
-# test_readme_case_count.py was removed in 9397326; the KPI-schema and shared
-# QE-score-policy tests are the deterministic guards that survived it.
+# The KPI-schema and shared QE-score-policy tests are the deterministic guards
+# that run on every zero-token pass.
 uv run pytest tests/unit/test_metrics.py tests/unit/test_qe_score_policy.py -q
 
 echo ""

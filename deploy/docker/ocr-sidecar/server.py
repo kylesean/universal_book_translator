@@ -63,7 +63,7 @@ def require_token(
     proceed. Both rules live in this one dependency so ``/health`` and
     ``/v1/ocr`` cannot drift apart again — they used to, and ``/v1/ocr``
     accepted unauthenticated LAN uploads on an "open" sidecar while ``/health``
-    already refused them (2026-09 review, M5).
+    already refused them.
 
     Boot logs a warning when no token is set, so the exposure is never silent.
     """

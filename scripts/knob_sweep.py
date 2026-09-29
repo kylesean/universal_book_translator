@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""K-1: measure each sweepable knob's tolerance band against the test corpus.
+"""Measure each sweepable knob's tolerance band against the test corpus.
 
 The registry says what a knob is *worth*; nothing said what it is *sensitive to*.
-The 2026-09-20 hardcode audit (folded into ``docs/design/knob-calibration-protocol.md``
+The hardcode audit (folded into ``docs/design/knob-calibration-protocol.md``
 附录 B) named the gap: the only defence against a knob change is an end-to-end
 golden baseline, so when a baseline goes
 red there is no mapping from the failure back to the number that moved — and a

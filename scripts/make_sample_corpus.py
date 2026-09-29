@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate the repo's synthetic PDF corpus (tests/fixtures/synthetic-*.pdf).
 
-Replaces the retired Elsevier chapter samples (2026-09 legal review) with
+Replaces the retired Elsevier chapter samples with
 typographically equivalent fixtures that are original text owned by this
 project. The structural properties the test suite depends on are encoded
 here and asserted at the end of this script:

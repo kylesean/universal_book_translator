@@ -2,8 +2,8 @@
 """Fidelity baseline harness — measure rigid-render fidelity over a corpus.
 
 The in-pipeline fidelity ruler (ubt/adapters/pdf/render_fidelity.py) reports a
-number per job; this script gives the aggregate baseline the masterplan's M2/M3
-decisions are calibrated against. It takes matched ``source`` and ``artifact``
+number per job; this script gives the aggregate baseline the layout decisions
+are calibrated against. It takes matched ``source`` and ``artifact``
 PDF pairs (either two parallel directories of the same filenames, or one
 directory where artifacts end in ``.translated.pdf``) and writes a JSON summary
 of non-text residual and painted coverage per document plus the corpus mean.

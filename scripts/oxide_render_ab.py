@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """A/B render equivalence: pdf_oxide ``render_page`` vs poppler ``pdftoppm``.
 
-Gate for stage 2 of the pdf_oxide adoption plan (assessment doc since removed;
-its §5.1 required this check):
-the two rasterizers must agree on output size (proves the ``-r N`` ==
+The two rasterizers must agree on output size (proves the ``-r N`` ==
 ``dpi=N`` scale assumption that svg_diagram's crop math depends on) and be
 perceptually close (different rasterization stacks hint/antialias differently,
 so a ratio threshold — not pixel equality — is the criterion).
@@ -27,7 +25,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 # The original real documents (chapter-1-zh.pdf, book2-nistir4653-artifact.pdf)
-# were removed in the 2026-09 legal review. The A/B gate now runs on the
+# were removed for legal reasons. The A/B gate now runs on the
 # generated, copyright-safe synthetic corpus (scripts/make_sample_corpus.py),
 # which tests/conftest.py seeds before collection — so this gate is runnable on
 # a fresh checkout without any Release attachment.
@@ -38,7 +36,7 @@ DEFAULT_PDFS = [
 PAGES = (1, 3, 5)
 DPIS = (72, 300)
 
-# Frozen from the 2026-09-20 calibration run on this corpus (see
+# Frozen from the first calibration run on this corpus (see
 # docs/design/knob-calibration-protocol.md): sizes matched exactly at every pair;
 # mismatch ratios measured 0.008-0.077 @72dpi and 0.003-0.054 @300dpi. The
 # heatmap showed the diff is glyph-edge hinting only (a ~1px subpixel shift

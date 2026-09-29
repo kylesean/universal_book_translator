@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""M1: rigid render coverage as a function of target length, per font floor.
+"""Rigid render coverage as a function of target length, per font floor.
 
 Why this exists
 ---------------
-``docs/design/LAYOUT_PRESERVATION_MASTERPLAN_2026-09.md`` §4 M2 named "reclaim more
+``docs/design/LAYOUT_PRESERVATION_MASTERPLAN_2026-09.md`` named "reclaim more
 blank margin" as the lever for rigid's coverage. Measuring it showed that lever
 is worth single digits, while the value that dominates every rendered page --
 ``RIGID_MIN_FONT_PT``, the floor ``RigidTypesetter`` shrinks text against -- is
