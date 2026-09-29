@@ -16,17 +16,25 @@ _REASONING_EFFORT_BUDGETS: dict[str, int] = {"low": 1024, "medium": 4096, "high"
 #: ``finishReason`` values that mean the model was cut off by the token limit.
 _LENGTH_REASONS = frozenset({"MAX_TOKENS"})
 
+#: Substrings of a lowercased 400 body that mean the request was rejected
+#: *because of* ``thinkingConfig`` — the only case where dropping it and
+#: retrying is a real fix. Without this gate any 400 (a bad model name, say)
+#: would be retried once without the field, billing a second doomed call.
+_THINKING_REJECTION_KEYS = ("thinkingconfig", "thinkingbudget", "thinking")
+
 
 def _heal_drop_thinking(err_text: str, payload: dict[str, Any]) -> dict[str, Any] | None:
     """Drop a rejected ``thinkingConfig`` and retry without it."""
     generation_config = payload.get("generationConfig")
-    if isinstance(generation_config, dict) and "thinkingConfig" in generation_config:
-        fixed = dict(payload)
-        fixed["generationConfig"] = {
-            key: value for key, value in generation_config.items() if key != "thinkingConfig"
-        }
-        return fixed
-    return None
+    if not isinstance(generation_config, dict) or "thinkingConfig" not in generation_config:
+        return None
+    if not any(key in err_text for key in _THINKING_REJECTION_KEYS):
+        return None
+    fixed = dict(payload)
+    fixed["generationConfig"] = {
+        key: value for key, value in generation_config.items() if key != "thinkingConfig"
+    }
+    return fixed
 
 
 class GeminiTransport(BaseTransport):
