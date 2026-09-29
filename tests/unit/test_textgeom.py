@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from ubt.adapters.pdf.textgeom import LineBox, column_order
@@ -71,3 +73,76 @@ def test_full_width_lines_do_not_form_columns() -> None:
         LineBox(text="b", rect=(0, 680, 600, 695)),
     ]
     assert _order(lines) == ["a", "b"]
+
+
+def _install_fake_pdfium(monkeypatch: pytest.MonkeyPatch, closes: list[str]) -> None:
+    import sys
+    import types
+
+    class _FakeTextPage:
+        def count_rects(self, start: int, count: int) -> int:
+            return 2
+
+        def get_rect(self, idx: int) -> tuple[float, float, float, float]:
+            return (0.0, 0.0, 10.0, 10.0)
+
+        def close(self) -> None:
+            closes.append("textpage")
+
+    class _FakePage:
+        def get_textpage(self) -> _FakeTextPage:
+            return _FakeTextPage()
+
+        def close(self) -> None:
+            closes.append("page")
+
+    class _FakeDoc:
+        def __init__(self, _path: str) -> None:
+            pass
+
+        def __len__(self) -> int:
+            return 1
+
+        def __getitem__(self, idx: int) -> _FakePage:
+            return _FakePage()
+
+        def close(self) -> None:
+            closes.append("doc")
+
+    monkeypatch.setitem(sys.modules, "pypdfium2", types.SimpleNamespace(PdfDocument=_FakeDoc))
+
+
+def test_extract_text_rects_closes_pdfium_handles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every native handle opened by ``extract_text_rects`` must be closed.
+
+    The function opened the document, page and textpage and returned without
+    closing any of them; measured with the sibling ``extract_lines`` pattern as
+    control, that leaks ~0.6 MB of native memory per call (+197 MB RSS over 300
+    calls vs +3 MB with explicit closes), and the export-time visual gate calls
+    it once per page.
+    """
+    from ubt.adapters.pdf import textgeom
+
+    closes: list[str] = []
+    _install_fake_pdfium(monkeypatch, closes)
+
+    rects = textgeom.extract_text_rects(tmp_path / "x.pdf", 1)
+    assert len(rects) == 2
+    assert closes == ["textpage", "page", "doc"]
+
+
+def test_extract_text_rects_closes_handles_on_out_of_range_page(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The out-of-range raise path must not leak the document handle."""
+    from ubt.adapters.pdf import textgeom
+    from ubt.core.exceptions import DocumentParseError
+
+    closes: list[str] = []
+    _install_fake_pdfium(monkeypatch, closes)
+
+    with pytest.raises(DocumentParseError):
+        textgeom.extract_text_rects(tmp_path / "x.pdf", 2)
+    assert closes == ["doc"]

@@ -154,14 +154,24 @@ def extract_text_rects(pdf_path: Path, page_no: int) -> list[tuple[float, float,
     import pypdfium2 as pdfium
 
     pdf = pdfium.PdfDocument(str(pdf_path))
-    if not 1 <= page_no <= len(pdf):
-        raise DocumentParseError(f"page {page_no} out of range in {pdf_path.name}")
-    textpage = pdf[page_no - 1].get_textpage()
-    rects: list[tuple[float, float, float, float]] = []
-    for idx in range(textpage.count_rects(0, -1)):
-        x0, y0, x1, y1 = textpage.get_rect(idx)
-        rects.append((float(x0), float(y0), float(x1), float(y1)))
-    return rects
+    try:
+        if not 1 <= page_no <= len(pdf):
+            raise DocumentParseError(f"page {page_no} out of range in {pdf_path.name}")
+        page = pdf[page_no - 1]
+        try:
+            textpage = page.get_textpage()
+            try:
+                rects: list[tuple[float, float, float, float]] = []
+                for idx in range(textpage.count_rects(0, -1)):
+                    x0, y0, x1, y1 = textpage.get_rect(idx)
+                    rects.append((float(x0), float(y0), float(x1), float(y1)))
+                return rects
+            finally:
+                textpage.close()
+        finally:
+            page.close()
+    finally:
+        pdf.close()
 
 
 @pdfium_serialized
