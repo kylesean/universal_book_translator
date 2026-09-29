@@ -200,69 +200,43 @@ def _current_prices_table() -> dict[str, PriceEntry]:
     return load_prices_table()
 
 
-# USD per 1M tokens: (input, output)
+# USD per 1M tokens: (input, output).
+#
+# Fallback table, NOT the primary source: ``resources/prices.toml`` is read
+# first (step 4 of ``resolve_model_prices``) and shadows any same-key entry
+# here (step 5 uses ``len(key) > len(best_key)``, which a same-length key can
+# never satisfy). A key that also exists in the TOML is therefore unreachable
+# and has been removed. What remains are the models the TOML does not carry,
+# kept so a missing/partial resource file degrades to a *priced* run instead
+# of an unpriced one. Add new rates to ``resources/prices.toml``, not here.
 MODEL_PRICES_USD_PER_MTOK: dict[str, tuple[float, float]] = {
-    # DeepSeek (published rates used by scripts/cost_benchmark.py)
-    "deepseek-v4-flash": (0.14, 0.55),
-    "deepseek-v4": (0.27, 1.10),
-    "deepseek-chat": (0.27, 1.10),
-    "deepseek-reasoner": (0.55, 2.19),
-    "deepseek": (0.27, 1.10),
-    # Gemini flash family (including 2026 3.x models)
-    "gemini-3.8-flash": (0.10, 0.40),
-    "gemini-3.1-pro": (1.25, 10.00),
-    "gemini-3-flash": (0.10, 0.40),
-    "gemini-3-pro": (1.25, 10.00),
+    # Gemini (the TOML carries the 1.5/2.5/3.1/3.8 families)
+    "gemini-1.5-flash-8b": (0.0375, 0.15),
     "gemini-2.0-flash": (0.10, 0.40),
     "gemini-2.0-flash-lite": (0.075, 0.30),
     "gemini-2.5-flash-lite": (0.10, 0.40),
-    "gemini-2.5-flash": (0.30, 2.50),
-    "gemini-2.5-pro": (1.25, 10.00),
-    # Gemini 1.5 entries: without these the broad "gemini" key (1.25/10.00)
-    # caught gemini-1.5-flash at ~16x/33x its published rate and mis-fed the
-    # budget gate. Longest-prefix match means every flash/lite variant needs
-    # its own key or it silently inherits the legacy pro rate.
-    "gemini-1.5-flash-8b": (0.0375, 0.15),
-    "gemini-1.5-flash": (0.075, 0.30),
-    "gemini-1.5-pro": (1.25, 5.00),
-    "gemini": (1.25, 10.00),
-    # OpenAI. Longest-prefix match means a more specific family MUST have its
-    # own key or it silently inherits the shorter legacy rate: without the
-    # gpt-4.1 entries below, `gpt-4.1`/`gpt-4.1-mini` resolved to `gpt-4`
-    # (30/60) — a ~75x overcharge that also fed the pre-flight budget refusal.
+    "gemini-3-flash": (0.10, 0.40),
+    "gemini-3-pro": (1.25, 10.00),
+    # OpenAI (the TOML carries gpt-4 / gpt-4o / o1 / o3-mini / o4)
+    "gpt-4-turbo": (10.00, 30.00),
     "gpt-4.1-nano": (0.10, 0.40),
     "gpt-4.1-mini": (0.40, 1.60),
     "gpt-4.1": (2.00, 8.00),
-    "gpt-4o-mini": (0.15, 0.60),
-    "gpt-4o": (2.50, 10.00),
-    "gpt-4-turbo": (10.00, 30.00),
-    "gpt-4": (30.00, 60.00),
     "gpt-5-nano": (0.05, 0.40),
     "gpt-5-mini": (0.25, 2.00),
     "gpt-5": (1.25, 10.00),
-    "o1-mini": (1.10, 4.40),
-    "o1": (15.00, 60.00),
-    "o3-mini": (1.10, 4.40),
     "o3": (2.00, 8.00),
-    "o4-mini": (1.10, 4.40),
-    "o4": (2.50, 10.00),
-    # Anthropic (including 2026 Claude 3.7 and Claude 4)
-    "claude-3-7-sonnet": (3.00, 15.00),
-    "claude-sonnet-4": (3.00, 15.00),
-    "claude-opus-4": (15.00, 75.00),
-    "claude-3-5-sonnet": (3.00, 15.00),
-    "claude-3-5-haiku": (0.80, 4.00),
-    "claude-3-opus": (15.00, 75.00),
-    "claude-3-sonnet": (3.00, 15.00),
+    # Anthropic (the TOML carries the 3.5 / 3.7 / sonnet-4 / opus-4 families)
     "claude-3-haiku": (0.80, 4.00),
+    "claude-3-sonnet": (3.00, 15.00),
     "claude-haiku": (0.80, 4.00),
-    "claude-sonnet": (3.00, 15.00),
     "claude-opus": (15.00, 75.00),
-    "claude": (3.00, 15.00),
+    "claude-opus-4": (15.00, 75.00),
+    "claude-sonnet": (3.00, 15.00),
+    "claude-sonnet-4": (3.00, 15.00),
     # Qwen
     "qwen3-mt": (0.50, 1.50),
     "qwen3": (0.50, 1.50),
-    "qwen": (0.50, 1.50),
 }
 
 #: Hosts that mean "this machine", or "this machine as seen from a container".
@@ -402,40 +376,25 @@ def price_is_known(
 
 
 # Cached input price (USD per 1M tokens) where the provider publishes
-# one. DeepSeek's published cache-hit rate is roughly a tenth of its input
-# price; absent an entry, the full input price applies (no discount assumed).
+# one. Absent an entry, the full input price applies (no discount assumed).
+#
+# Same fallback rule as MODEL_PRICES_USD_PER_MTOK: a key that also exists in
+# ``resources/prices.toml`` is shadowed by the TOML (step 4 precedes step 5)
+# and was removed; what remains are the models the TOML does not carry.
 CACHED_INPUT_PRICES_USD_PER_MTOK: dict[str, float] = {
-    "deepseek-v4-flash": 0.014,
-    "deepseek-chat": 0.028,
-    "deepseek-reasoner": 0.11,
-    "deepseek": 0.028,
     # Gemini prompt caching
-    "gemini-3.8-flash": 0.025,
-    "gemini-3.1-pro": 0.3125,
     "gemini-3-flash": 0.025,
     "gemini-3-pro": 0.3125,
-    "gemini-2.5-pro": 0.3125,
-    "gemini-2.5-flash": 0.075,
     "gemini-2.0-flash": 0.025,
-    "gemini-1.5-pro": 0.3125,
-    "gemini-1.5-flash": 0.01875,
     # Anthropic publishes a cache-*read* rate of 10% of the input price
-    "claude-3-7-sonnet": 0.30,
     "claude-sonnet-4": 0.30,
     "claude-opus-4": 1.50,
-    "claude-3-5-sonnet": 0.30,
-    "claude-3-5-haiku": 0.08,
-    "claude-3-opus": 1.50,
     "claude-3-sonnet": 0.30,
     "claude-3-haiku": 0.08,
     "claude-haiku": 0.08,
     "claude-sonnet": 0.30,
     "claude-opus": 1.50,
-    "claude": 0.30,
-    # OpenAI o4 / o3 / gpt-5
-    "o4-mini": 0.275,
-    "o4": 0.625,
-    "o3-mini": 0.275,
+    # OpenAI gpt-5
     "gpt-5-mini": 0.0625,
     "gpt-5": 0.3125,
 }
@@ -645,7 +604,8 @@ def estimate_cost_usd(
         if novel:
             logger.warning(
                 "No price-table entry for model(s) %s — token cost reports as "
-                "unknown; add the rate to MODEL_PRICES_USD_PER_MTOK",
+                "unknown; add the rate to resources/prices.toml (legacy "
+                "fallback: MODEL_PRICES_USD_PER_MTOK)",
                 ", ".join(sorted(novel)),
             )
             _models_warned_unpriced.update(novel)

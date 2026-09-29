@@ -360,7 +360,10 @@ def doctor_command(
             "WARN",
             f"no price-table entry for {', '.join(unpriced)} \u2014 cost reports as "
             "unknown and --budget-usd cannot trip",
-            fix="add the per-MTok rate to MODEL_PRICES_USD_PER_MTOK in ubt/core/router/pricing.py",
+            fix=(
+                "add the per-MTok rate to resources/prices.toml "
+                "(legacy fallback: MODEL_PRICES_USD_PER_MTOK in ubt/core/router/pricing.py)"
+            ),
         )
     else:
         record("Cost pricing", "OK", "draft and repair models are priced")
