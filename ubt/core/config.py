@@ -468,9 +468,12 @@ class UBTConfig(BaseSettings):
     # Mirrors of the pricing helper's endpoint knobs (ubt/core/router/pricing.py
     # reads the environment directly — this decision is made deep in the pricing
     # path, where no config object is in scope). Surfaced here so `ubt config`
-    # and the docs-completeness gate can see them. Because the helper reads the
-    # environment, constructing UBTConfig(bill_local_endpoint=True) in code does
-    # NOT change pricing: set the variable.
+    # and the docs-completeness gate can see them. There is no dotenv source
+    # (see ``model_config``), so the process environment is the one external
+    # source: reading ``os.environ`` there and reading this field resolve the
+    # same value. The only difference is programmatic construction —
+    # ``UBTConfig(bill_local_endpoint=True)`` in code does NOT change pricing:
+    # set the variable.
     #
     # Extra hosts declared self-hosted (a LAN inference box), comma/`os.pathsep`
     # separated. Loopback and the container-host aliases need no declaration.
