@@ -7,6 +7,7 @@ en→zh behaviour.
 """
 
 import re
+from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
@@ -353,8 +354,34 @@ def is_verbatim_echo(source_text: str, target_text: str) -> bool:
 REHEARSAL_MARKER = "[模拟翻译]"
 
 
+def _cjk_bigram_retention(source_text: str, target_text: str) -> float | None:
+    """Fraction of the target's CJK character bigrams the source also carries.
+
+    Order-sensitive, so shared technical vocabulary ("半導体素子…") does not read
+    as an echo while a re-punctuated copy of the source does. ``None`` when the
+    target has too few bigrams to judge.
+    """
+
+    def _bigrams(text: str) -> list[str]:
+        chars = _CJK_SCRIPT_RE.findall(text)
+        return [chars[i] + chars[i + 1] for i in range(len(chars) - 1)]
+
+    target_grams = _bigrams(target_text)
+    if len(target_grams) < _NEAR_ECHO_MIN_TOKENS:
+        return None
+    source_counts = Counter(_bigrams(source_text))
+    kept = sum(
+        min(count, source_counts.get(gram, 0)) for gram, count in Counter(target_grams).items()
+    )
+    return kept / len(target_grams)
+
+
 def is_near_verbatim_echo(
-    source_text: str, target_text: str, *, target_is_cjk: bool = True
+    source_text: str,
+    target_text: str,
+    *,
+    target_is_cjk: bool = True,
+    source_is_cjk: bool = False,
 ) -> bool:
     """True when the target keeps almost all source words without translating.
 
@@ -371,7 +398,18 @@ def is_near_verbatim_echo(
     translated paragraph would be quarantined as untranslated. Guard it
     directly: a target written in a CJK script is translated by definition, so
     the Latin-token retention test never runs on it.
+
+    That exemption is only valid when the source is a different script. For a
+    same-script CJK pair (zh->ja) a CJK target is *not* translated by definition,
+    so the retention test falls back to CJK character bigrams (order-sensitive:
+    shared terminology survives, a copied sentence does not).
     """
+    if target_is_cjk and source_is_cjk:
+        # Same-script pair (zh<->ja/ko): "a CJK target is translated by
+        # definition" does not hold, and the Latin-only retention test below is
+        # blind to CJK tokens entirely. Judge over character bigrams instead.
+        retention = _cjk_bigram_retention(source_text, target_text)
+        return retention is not None and retention >= _NEAR_ECHO_RETENTION
     if target_is_cjk and len(_CJK_SCRIPT_RE.findall(target_text)) >= _NEAR_ECHO_CJK_EXEMPT:
         return False
     if REHEARSAL_MARKER in target_text:
@@ -558,7 +596,10 @@ class FastPassFilter:
             and _is_prose
             and src_clean != tgt_clean
             and is_near_verbatim_echo(
-                src_clean, tgt_clean, target_is_cjk=self.profile.code in ("zh", "ja", "ko")
+                src_clean,
+                tgt_clean,
+                target_is_cjk=self.profile.code in ("zh", "ja", "ko"),
+                source_is_cjk=getattr(self.profile, "source_code", "") in ("zh", "ja", "ko"),
             )
         ):
             return FastPassDecision(

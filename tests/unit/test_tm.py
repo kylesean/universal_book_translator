@@ -400,6 +400,35 @@ def test_human_pe_falls_back_across_contexts(tm: TranslationMemory) -> None:
     assert hit.provenance == PROVENANCE_HUMAN_PE
 
 
+def test_lookup_survives_a_contended_use_count_bump(tmp_path: Path) -> None:
+    """A held write lock must not fail a read: use_count is best-effort audit data.
+
+    Regression: the reuse counter UPDATE sat in the read path unguarded, so a
+    concurrent writer (another worker process on the shared tm.sqlite) could
+    block it past ``busy_timeout`` and the lookup raised "database is locked",
+    failing the translation. ``writeback`` already retried; reads did not.
+    """
+    import sqlite3
+
+    db = tmp_path / "tm.sqlite"
+    tm = TranslationMemory(db, busy_timeout_sec=0.2)
+    try:
+        tm.writeback([TMPendingEntry("en", "zh", "A test sentence here.", "这是一句测试。")])
+        other = sqlite3.connect(str(db), timeout=0.2)
+        try:
+            other.execute("PRAGMA journal_mode=WAL;")
+            other.execute("BEGIN IMMEDIATE;")  # hold the writer lock
+            other.execute("UPDATE tm_entries SET use_count = use_count WHERE id = 1;")
+            hit = tm.lookup_exact("en", "zh", "A test sentence here.")
+            assert hit is not None
+            assert hit.provenance == PROVENANCE_MACHINE
+        finally:
+            other.rollback()
+            other.close()
+    finally:
+        tm.close()
+
+
 def test_human_pe_outranks_a_context_matching_machine_row(tm: TranslationMemory) -> None:
     """Human review is the highest-trust signal, over an exact-context MT row too.
 

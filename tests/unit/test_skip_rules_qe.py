@@ -173,6 +173,39 @@ def test_near_echo_never_fires_on_a_cjk_target_full_of_latin_proper_nouns() -> N
     assert _fp().evaluate(src, tgt).passed
 
 
+def test_near_echo_fires_on_a_same_script_cjk_echo() -> None:
+    """A CJK->CJK near echo is untranslated and must be caught.
+
+    Regression: the CJK exemption ("a CJK-script target is translated by
+    definition") holds for Latin->CJK but not when the source is CJK too. A
+    zh->ja target that copies the Chinese source with one punctuation mark
+    changed passed every gate, because the Latin-only retention test cannot see
+    CJK tokens. Retention now runs over CJK character bigrams for same-script
+    pairs.
+    """
+    src = "这是一个非常重要的段落，描述了实验的核心结果与关键发现。"
+    near = src.replace("，", "、")
+    assert is_near_verbatim_echo(src, near, target_is_cjk=True, source_is_cjk=True)
+    d = FastPassFilter(source_lang="zh", target_lang="ja").evaluate(src, near)
+    assert not d.passed
+    assert "keeps nearly all source words" in d.reason
+
+    # The reverse direction is the same defect: a ja source echoed into zh.
+    ja_src = "これは非常に重要な段落であり、実験の中核的な結果を述べている。"
+    assert is_near_verbatim_echo(
+        ja_src, ja_src.replace("。", "！"), target_is_cjk=True, source_is_cjk=True
+    )
+
+
+def test_same_script_cjk_translation_still_passes() -> None:
+    """A real zh->ja translation shares kanji but not character-bigram order."""
+    src = "这是一个非常重要的段落，描述了实验的核心结果与关键发现。"
+    tgt = "これは非常に重要な段落であり、実験の中核的な結果と重要な発見を述べている。"
+    assert not is_near_verbatim_echo(src, tgt, target_is_cjk=True, source_is_cjk=True)
+    d = FastPassFilter(source_lang="zh", target_lang="ja").evaluate(src, tgt)
+    assert d.passed, d.reason
+
+
 def test_near_echo_still_fires_on_a_latin_target_with_no_cjk() -> None:
     """The guard is CJK-presence only: a Latin echo that never reached the
     target language still has no CJK and must stay quarantined."""

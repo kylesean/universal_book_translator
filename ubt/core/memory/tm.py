@@ -559,10 +559,7 @@ class TranslationMemory:
 
             best_row = max(valid_rows, key=_candidate_rank)
             hit_id = int(best_row[0])
-            conn.execute(
-                "UPDATE tm_entries SET use_count = use_count + 1 WHERE id = ?",
-                (hit_id,),
-            )
+            self._bump_use_count(conn, hit_id)
 
         return TMHit(
             source_text=str(best_row[1]),
@@ -694,6 +691,22 @@ class TranslationMemory:
         return None
 
     @staticmethod
+    def _bump_use_count(conn: sqlite3.Connection, entry_id: int) -> None:
+        """Best-effort reuse counter: audit metadata must never fail a read.
+
+        A concurrent writer (another worker process on the shared tm.sqlite) can
+        hold the WAL write lock past ``busy_timeout``; the hit is already read
+        and chosen, so losing one count beats failing the translation.
+        """
+        try:
+            conn.execute(
+                "UPDATE tm_entries SET use_count = use_count + 1 WHERE id = ?",
+                (entry_id,),
+            )
+        except sqlite3.OperationalError as exc:
+            logger.debug("tm: use_count bump skipped for entry %s: %s", entry_id, exc)
+
+    @staticmethod
     def _is_passthrough(src_text: str, tgt_text: str) -> bool:
         """True for a stored row whose target is the source carried over verbatim.
 
@@ -741,10 +754,7 @@ class TranslationMemory:
                 return None
             if not self._hit_allowed(provenance, str(row[3] or ""), row[4], context_hash, domain):
                 return None
-            conn.execute(
-                "UPDATE tm_entries SET use_count = use_count + 1 WHERE id = ?",
-                (entry_id,),
-            )
+            self._bump_use_count(conn, entry_id)
         return TMHit(
             source_text=str(row[0]),
             target_text=str(row[1]),
