@@ -28,9 +28,6 @@ from __future__ import annotations
 
 import importlib.util
 import logging
-import shutil
-import tempfile
-from collections.abc import Sequence
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -76,36 +73,6 @@ def write_page_png(pdf_path: Path, page: int, dpi: int, out_dir: Path) -> Path |
         logger.debug("oxide render: cannot write %s: %s", target, exc)
         return None
     return target
-
-
-def render_pages_to_png(
-    pdf_path: Path,
-    pages: Sequence[int],
-    dpi: int,
-    work_dir: Path | None = None,
-) -> dict[int, Path]:
-    """Oxide-only batch render, mirroring ``visual_gate.render_pages_to_png``'s
-    contract: ``{page_no: png_path}``, empty dict on failure, never raises,
-    and a self-created tmpdir is removed when nothing was produced."""
-    out: dict[int, Path] = {}
-    if not pages:
-        return out
-    owns_tmp = work_dir is None
-    tmp = Path(work_dir) if work_dir is not None else Path(tempfile.mkdtemp(prefix="ubt_oxide_"))
-    try:
-        tmp.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        logger.debug("oxide render: cannot create tmpdir: %s", exc)
-        if owns_tmp:
-            shutil.rmtree(tmp, ignore_errors=True)
-        return out
-    for page in pages:
-        path = write_page_png(pdf_path, page, dpi, tmp)
-        if path is not None:
-            out[page] = path
-    if owns_tmp and not out:
-        shutil.rmtree(tmp, ignore_errors=True)
-    return out
 
 
 def extract_page_texts(pdf_path: Path) -> list[str]:

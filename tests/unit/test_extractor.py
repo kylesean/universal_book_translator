@@ -92,14 +92,6 @@ def test_extractor_fallback_strips_pure_conversational_prefixes() -> None:
     assert TranslationOutputExtractor.extract(raw_header) == "量子计算是一门跨学科前沿领域。"
 
 
-def test_extractor_specialized_mt_fast_path() -> None:
-    raw_specialized = "Direct MT model translation without any schema."
-    assert (
-        TranslationOutputExtractor.extract(raw_specialized, is_specialized_mt=True)
-        == raw_specialized
-    )
-
-
 @pytest.mark.fast
 def test_extractor_prioritizes_final_translation() -> None:
     text = (

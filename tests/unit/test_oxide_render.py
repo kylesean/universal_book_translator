@@ -92,32 +92,6 @@ def test_write_page_png_persists_bytes(fake_oxide: type[_FakeDoc], tmp_path: Pat
     assert out.read_bytes() == _FAKE_PNG
 
 
-def test_render_pages_to_png_contract(fake_oxide: type[_FakeDoc], tmp_path: Path) -> None:
-    assert oxide_render.render_pages_to_png(tmp_path / "x.pdf", [], 72) == {}
-    out = oxide_render.render_pages_to_png(tmp_path / "x.pdf", [1, 2], 72, work_dir=tmp_path)
-    assert sorted(out) == [1, 2]
-    assert out[1].name == "p1.png"
-
-
-def test_render_pages_to_png_cleans_own_tmpdir_when_empty(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_oxide: type[_FakeDoc]
-) -> None:
-    fake_oxide.fail = True
-    import tempfile
-
-    created: list[Path] = []
-    real_mkdtemp = tempfile.mkdtemp
-
-    def fake_mkdtemp(*args: str, **kwargs: str) -> str:
-        name = str(real_mkdtemp(*args, **kwargs))
-        created.append(Path(name))
-        return name
-
-    monkeypatch.setattr(tempfile, "mkdtemp", fake_mkdtemp)
-    assert oxide_render.render_pages_to_png(tmp_path / "x.pdf", [1], 72) == {}
-    assert created and not created[0].exists()
-
-
 def test_is_available_follows_find_spec(monkeypatch: pytest.MonkeyPatch) -> None:
     import importlib.util
 

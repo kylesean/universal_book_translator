@@ -959,36 +959,6 @@ class LedgerBlocksMixin(LedgerBase):
             self._mark_blocks_changed()
             return updated
 
-    def clear_machine_verdict(self, block_ids: list[str], job_id: str | None = None) -> int:
-        """Clear machine QE/MQM verdict columns after a human revision lands.
-
-        ``save_checkpoints_batch`` deliberately treats ``None`` as "leave
-        alone", so it cannot clear a stale ``mtqe_score`` / ``mqm_severity`` /
-        ``mqm_spans_json`` measured against a superseded machine draft. Human
-        PE import is the one caller that needs the reset: without it a
-        human-fixed block keeps its old "critical" severity and score, which
-        misleads auditors and defect-flag rollups downstream.
-        """
-        if not block_ids:
-            return 0
-        with self._get_conn() as conn:
-            conn.execute("BEGIN IMMEDIATE;")
-            scope = self._block_scope(conn, job_id)
-            placeholders = ",".join("?" * len(block_ids))
-            scope_clause = " AND job_id = ?" if scope is not None else ""
-            cursor = conn.execute(
-                f"""
-                UPDATE blocks
-                   SET mtqe_score = NULL, mqm_severity = NULL,
-                       mqm_spans_json = NULL, updated_at = CURRENT_TIMESTAMP
-                 WHERE block_id IN ({placeholders}){scope_clause}
-                """,
-                [*block_ids, *([scope] if scope is not None else [])],
-            )
-            conn.execute("COMMIT;")
-            self._mark_blocks_changed()
-            return int(cursor.rowcount)
-
     def reset_blocks_to_pending(self, block_ids: list[str], job_id: str | None = None) -> int:
         """Re-queue blocks by clearing their translation state. Returns rows changed.
 

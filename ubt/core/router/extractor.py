@@ -156,18 +156,23 @@ class TranslationOutputExtractor:
     def extract(
         cls,
         raw_text: str,
-        is_specialized_mt: bool = False,
         strategy: ExtractionStrategy | str | None = None,
     ) -> str:
-        """Extract pristine target translation from raw LLM output using chosen strategy."""
+        """Extract pristine target translation from raw LLM output using chosen strategy.
+
+        Sanitization is deliberately NOT applied here. Repair-loop protocol tags
+        (``<correction id="...">``) and HTML-preserving flows pass through
+        extraction and would be destroyed by an allowlist at this layer.
+        Untrusted LLM output is instead sanitized at the artifact boundaries
+        where stored XSS could actually materialize: EPUB DOM injection,
+        Markdown rendering, and Typst escaping.
+        """
         if not raw_text or not isinstance(raw_text, str):
             return ""
 
-        # Resolve extraction strategy from string or default based on engine type
+        # Resolve extraction strategy from string or default to AUTO.
         if strategy is None:
-            resolved_strategy = (
-                ExtractionStrategy.RAW if is_specialized_mt else ExtractionStrategy.AUTO
-            )
+            resolved_strategy = ExtractionStrategy.AUTO
         elif isinstance(strategy, str):
             try:
                 resolved_strategy = ExtractionStrategy(strategy.lower())
@@ -217,10 +222,3 @@ class TranslationOutputExtractor:
             if bid and content:
                 results[bid] = content
         return results
-
-        # NOTE: sanitization is deliberately NOT applied here.
-        # Repair-loop protocol tags (<correction id="...">) and HTML-preserving
-        # flows pass through extraction and would be destroyed by an allowlist
-        # at this layer. Untrusted LLM output is instead sanitized at the
-        # artifact boundaries where stored XSS could actually materialize:
-        # EPUB DOM injection, Markdown rendering, and Typst escaping.
