@@ -1,4 +1,4 @@
-"""Unit tests for Phase 1: Prompt Caching Prefix Alignment and Anthropic cache_control."""
+"""Unit tests for prompt-caching prefix alignment and Anthropic cache_control."""
 
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock

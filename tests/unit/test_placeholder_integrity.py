@@ -11,7 +11,7 @@ spelled out in the test docstring:
   protected span could move position unnoticed;
 * a model echo of the citation's original text alongside its intact token left
   the restore character-perfect and every bucket empty, so the reference
-  shipped twice (review defect 10.4-3, fail-open restoration).
+  shipped twice (a fail-open restoration).
 """
 
 import asyncio
@@ -220,7 +220,7 @@ def test_find_reordered_tolerates_unknown_indices() -> None:
 def test_citation_echoed_alongside_token_is_flagged_duplicated() -> None:
     """A literal '[12]' emitted next to its intact token must not pass as clean.
 
-    User-visible failure prevented (review 10.4-3): masking replaces every
+    User-visible failure prevented: masking replaces every
     bracketed citation, so a draft that contains ``[12]`` as free text *plus*
     its intact token restored the citation twice — the reference shipped
     duplicated in the published chapter. The restore is character-perfect, so

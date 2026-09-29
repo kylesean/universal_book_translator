@@ -1,4 +1,4 @@
-"""Unit tests for Track 2 modern PDF adapters (Docling, Typst, BilingualAlternator)."""
+"""Unit tests for the modern PDF adapters (Docling, Typst, BilingualAlternator)."""
 
 import tempfile
 from pathlib import Path

@@ -505,7 +505,7 @@ def create_mock_epub_with_code_block(target_path: Path) -> Path:
 
 @pytest.mark.asyncio
 async def test_render_blocks_does_not_duplicate_verbatim_code(tmp_path: Path) -> None:
-    """A3: verbatim (skip_translate) blocks must not be injected as translations.
+    """Verbatim (skip_translate) blocks must not be injected as translations.
 
     ingest.py stamps every CODE/IMAGE/FORMULA/kept block with
     ``target_text = source_text``; because the EPUB renderer built its lookup

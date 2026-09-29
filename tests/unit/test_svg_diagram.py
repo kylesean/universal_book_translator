@@ -62,7 +62,7 @@ _SVG_SKIP_REASON = next(
 
 NEEDS_POPPLER = pytest.mark.skipif(bool(_SVG_SKIP_REASON), reason=_SVG_SKIP_REASON)
 # Named like this so a skip says which input is gone: "test PDF missing" sent
-# nobody to the right place after docs/chapter-3.pdf was withdrawn.
+# nobody to the right place after the real sample PDF was withdrawn.
 NEEDS_SAMPLE_PDF = pytest.mark.skipif(
     not SAMPLE_PDF.exists(),
     reason=f"{SAMPLE_PDF} fixture missing (set UBT_TEST_REAL_PDF to a scanned chapter PDF)",

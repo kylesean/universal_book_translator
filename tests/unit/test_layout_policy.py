@@ -49,7 +49,7 @@ def test_anchored_floor_is_registered_and_in_force() -> None:
 
 
 def test_rigid_region_floors_tier_small_print_regions() -> None:
-    """M2 region tiering: captions/footnotes may shrink below the body floor.
+    """Region tiering: captions/footnotes may shrink below the body floor.
 
     Those are the source's own small-print regions; a block that cannot fit the
     body floor fails closed and leaves the source visible, so a lower region

@@ -40,7 +40,7 @@ DOCLAYNET_PDF = FIXTURES / "doclaynet.pdf"  # two-column ACM layout stress test
 
 requires_docling = pytest.mark.skipif(
     not DoclingPDFAdapter().is_docling_installed(),
-    reason="docling not installed (uv sync --extra docling)",
+    reason="docling not installed (uv sync --extra pdf)",
 )
 requires_fixture = pytest.mark.skipif(
     not ATTENTION_PDF.exists(),

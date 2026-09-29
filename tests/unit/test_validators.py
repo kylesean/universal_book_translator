@@ -184,7 +184,7 @@ def test_non_numeral_cjk_characters_do_not_mask_lost_numbers() -> None:
     assert not res.is_valid
     assert res.error_code == "NUMERIC_INCONSISTENCY"
 
-    # A genuine standalone Chinese numeral still matches (H11 behavior kept).
+    # A genuine standalone Chinese numeral still matches.
     assert validator.validate("Section 5 details.", "五项细节。").is_valid
 
 

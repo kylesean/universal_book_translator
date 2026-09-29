@@ -75,7 +75,7 @@ def test_masker_corrupt_token_flagged() -> None:
 
 
 def test_param_unit_never_splits_english_word() -> None:
-    """C1: "5 square meters" must not match "Area = 5 s"."""
+    """A "5 square meters" phrase must not match "Area = 5 s"."""
     from ubt.core.cleaners.soup_math import SoupMathMasker
 
     assert _covered("The area = 5 square meters") == ["area = 5"]
@@ -88,7 +88,7 @@ def test_param_unit_never_splits_english_word() -> None:
 
 
 def test_existing_mask_tokens_are_never_rewrapped() -> None:
-    """C2: soup must not nest tokens inside already-masked text."""
+    """Soup must not nest tokens inside already-masked text."""
     from ubt.core.cleaners.math_masker import MathMasker
 
     math_masker = SoupMathMasker()

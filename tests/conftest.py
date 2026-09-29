@@ -36,7 +36,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 def _ensure_synthetic_corpus() -> str | None:
     """Regenerate tests/fixtures/synthetic-*.pdf when the suite deleted-or-missed them.
 
-    The corpus is generated, not committed (ROI-1): ``scripts/
+    The corpus is generated, not committed: ``scripts/
     make_sample_corpus.py`` is the source of truth and the acceptance runbook
     says so. Commit 62fcd75 removed the last committed copies, which silently
     turned eleven real-PDF tests red on every fresh checkout. Rebuilding them

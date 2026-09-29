@@ -24,9 +24,8 @@ the gateway is missing (CI is parked during private iteration —
 ``docs/guides/CI_AND_QUALITY_GATES.md``).
 
 The probe targets the llama-swap gateway, not the Ollama daemon that used to
-serve this model: Ollama was retired 2026-09-23 (unit disabled, weights
-deleted), so a ``:11434`` probe would have skipped this gate forever while
-reporting green.
+serve this model: Ollama was retired (unit disabled, weights deleted), so a
+``:11434`` probe would have skipped this gate forever while reporting green.
 """
 
 from __future__ import annotations

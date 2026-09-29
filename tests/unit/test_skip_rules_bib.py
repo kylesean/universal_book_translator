@@ -202,7 +202,7 @@ def test_custom_bib_patterns_registration() -> None:
 
 
 def test_custom_bib_patterns_registration_is_thread_safe() -> None:
-    """Concurrent registration must not lose patterns (review finding)."""
+    """Concurrent registration must not lose patterns."""
     import threading
 
     from ubt.core.cleaners.skip_rules import register_bib_patterns, reset_custom_bib_patterns

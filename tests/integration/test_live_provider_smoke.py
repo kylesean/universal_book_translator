@@ -1,21 +1,12 @@
-"""The one test that spends real provider budget (nightly smoke job).
+"""The one test that spends real provider budget.
 
-Why this file exists: every other test that exercises the
-draft path drives ``MockModelProvider``, and the nightly "Real-provider smoke"
-job (since retired; recover it with
-``git log -- .github/workflows/nightly-smoke.yml``) selected tests with
-``-k "smoke or real"`` — which matched only ``test_docling_real_paper.py``
-(matched on the module name containing "real"), a file with zero provider
-references that parses a PDF. So the job could not verify a provider even in
-principle, and its ``grep -c PASSED`` gate could never be satisfied by
-``pytest -q`` output either.
-
-Deliberately tiny (one or two calls, cents at most) and deliberately lenient: it
-asserts invariants that must hold for ANY competent provider. The structural
-*quality floor* (once deferred) is covered by
-``test_live_draft_meets_structural_quality_gate`` below: the draft must clear the
-pipeline's own zero-token FastPassFilter gate. It self-skips without a real
-credential, so a local run stays free.
+Why this file exists: every other test that exercises the draft path drives
+``MockModelProvider``, so nothing verified a real provider end to end. This
+file deliberately makes one or two live calls (cents at most) and asserts
+invariants that must hold for ANY competent provider. The structural *quality
+floor* is covered by ``test_live_draft_meets_structural_quality_gate`` below:
+the draft must clear the pipeline's own zero-token FastPassFilter gate. It
+self-skips without a real credential, so a local run stays free.
 """
 
 from __future__ import annotations
@@ -134,8 +125,9 @@ async def test_live_draft_meets_structural_quality_gate(live_llm_env: None) -> N
     zero-token ``FastPassFilter`` structural gate the pipeline auto-passes
     blocks on. So it fails only on a genuine regression — dropped figures, a
     corrupted masked formula, a source echo, or exploded length — and not on an
-    acceptable rewording. Runs in the nightly smoke job (``UBT_SMOKE_API_KEY``);
-    self-skips otherwise, so it never spends budget in the merge matrix.
+    acceptable rewording. Runs only when a live credential is configured
+    (``UBT_LLM_API_KEY``); self-skips otherwise, so it never spends budget in
+    the merge matrix.
     """
     config = UBTConfig.from_env()
     provider = OpenAICompatibleProvider(

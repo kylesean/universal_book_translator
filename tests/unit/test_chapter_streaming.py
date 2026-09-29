@@ -1,4 +1,4 @@
-"""Unit tests for Phase 3: Chapter-Streaming Pipeline (Decoupled stage barriers)."""
+"""Unit tests for the chapter-streaming pipeline (decoupled stage barriers)."""
 
 from __future__ import annotations
 

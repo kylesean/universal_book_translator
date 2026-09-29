@@ -60,7 +60,7 @@ def test_select_sample_pages_flagged_first() -> None:
 
 
 def test_adaptive_sample_budget_tiers() -> None:
-    # ROI-4: <=20 full inspection, 20-100 ~20% (floor 6, cap 10), >100 fixed 10.
+    # <=20 full inspection, 20-100 ~20% (floor 6, cap 10), >100 fixed 10.
     assert adaptive_sample_budget(3, 2) == 3
     assert adaptive_sample_budget(13, 6) == 13
     assert adaptive_sample_budget(50, 6) == 10
@@ -89,7 +89,7 @@ def test_blocking_gate_tripped() -> None:
     assert blocking_gate_tripped([crit], 21, True) == []
     assert blocking_gate_tripped([crit], 0, True) == []
     assert blocking_gate_tripped([], 10, True) == []
-    # Defect A7: an unreadable PDF (pdf_page_count sentinel -1) fails closed,
+    # An unreadable PDF (pdf_page_count sentinel -1) fails closed,
     # even when the opt-in visual gate is off.
     assert blocking_gate_tripped([crit, major], -1, True) == [crit]
     assert blocking_gate_tripped([crit], -1, False) == [crit]
@@ -98,7 +98,7 @@ def test_blocking_gate_tripped() -> None:
 
 def test_absent_target_language_fails_closed_regardless_of_gate() -> None:
     """T0.5 parity: an artifact with none of the target language is unshippable
-    on the A7 reasoning — even long docs and a disabled gate cannot waive it."""
+    — even long docs and a disabled gate cannot waive it."""
     from ubt.adapters.pdf.visual_gate import VisualFinding
 
     absent = VisualFinding(severity="critical", code="target_language_absent", message="zh=0%")
@@ -130,7 +130,7 @@ def test_delivery_breaking_parity_majors_fail_closed() -> None:
 
 @pytest.mark.asyncio
 async def test_unreadable_pdf_trips_blocking_gate(tmp_path: Path) -> None:
-    """A7: a rendered PDF nobody can read must refuse export, not fail open.
+    """A rendered PDF nobody can read must refuse export, not fail open.
 
     run_visual_gate reports ``passed=False`` with a CRITICAL ``unreadable_pdf``
     finding, but used to leave ``stats["total_pages"] = 0`` — which
@@ -238,7 +238,7 @@ def test_blank_page_candidates_text_level(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_run_visual_gate_flags_truly_blank_pdf(tmp_path: Path) -> None:
     # add_blank_page PDFs render as genuinely blank: pixel check must fire.
-    # ROI-4: 3-page books are fully inspected, so sample_pages=2 adapts to 3.
+    # 3-page books are fully inspected, so sample_pages=2 adapts to 3.
     pdf = _write_pdf(tmp_path / "out.pdf", 3)
     res = await run_visual_gate(pdf, blocks=[], typ_text="a-b", sample_pages=2)
     assert res.stats["total_pages"] == 3

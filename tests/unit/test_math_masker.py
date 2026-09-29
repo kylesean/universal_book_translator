@@ -188,7 +188,7 @@ def test_unmask_checked_mismatched_when_index_rewritten() -> None:
 
 
 def test_unmask_checked_checksum_case_insensitive() -> None:
-    """C3: an uppercased checksum hex restores clean (code/cite parity)."""
+    """An uppercased checksum hex restores clean (code/cite parity)."""
     import re
 
     masker = _masker()

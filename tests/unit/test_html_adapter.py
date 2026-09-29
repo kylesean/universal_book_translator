@@ -323,7 +323,7 @@ async def test_html_adapter_preserves_angle_bracket_prose() -> None:
 async def test_html_deliverable_does_not_ship_source_scripts_and_handlers(
     tmp_path: Path,
 ) -> None:
-    """L-4 for HTML inputs: the source markup is copied into the deliverable.
+    """HTML inputs: the source markup is copied into the deliverable.
 
     ``scrub_source_document`` documents itself as the guard for markup the run
     did not write — EPUB members *and* HTML inputs — but only the EPUB path

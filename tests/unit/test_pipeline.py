@@ -1464,7 +1464,7 @@ async def test_interrupted_export_leaves_no_report_for_a_deliverable_it_never_sa
 ) -> None:
     """A run that dies after the render must not leave the last run's reports.
 
-    Reproduction of the round-5 finding: the deliverable is written first and the
+    Reproduction of the underlying defect: the deliverable is written first and the
     reports later, so an interrupt (or the blocking visual gate raising) in that
     window left a ``*_quality_report.json`` claiming a finished book whose text it
     had never seen -- and ``artifact_and_report_paths`` re-attaches those names to

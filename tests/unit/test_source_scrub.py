@@ -1,4 +1,4 @@
-"""``scrub_source_document`` — the L-4 guard for markup the run did not write.
+"""``scrub_source_document`` — the guard for markup the run did not write.
 
 EPUB/HTML sources are copied into the deliverable largely verbatim, so they are
 scrubbed for executable constructs (``<script>``, ``on*`` handlers,

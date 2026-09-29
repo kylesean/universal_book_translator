@@ -1,4 +1,4 @@
-"""The K-1 sweep harness must read the registry correctly and classify honestly.
+"""The sweep harness must read the registry correctly and classify honestly.
 
 Two distinct failure modes are being guarded here. The scanner can drift from the
 source (report a knob as sweepable when it has no override point, so a "band" gets

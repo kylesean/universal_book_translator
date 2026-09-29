@@ -1,4 +1,4 @@
-"""Unit tests for Phase 2: Structured Macro-Chunking (Pack-by-Macro-Block)."""
+"""Unit tests for structured macro-chunking (pack-by-macro-block)."""
 
 import asyncio
 from pathlib import Path

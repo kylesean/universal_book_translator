@@ -2,7 +2,7 @@
 
 Every corpus directory here has a provenance note (origin, why it is in the
 set, and what it exercises). This file consolidates the former per-directory
-`SOURCE.md` notes (merged here in the 2026-09-26 doc cleanup). The baseline
+`SOURCE.md` notes. The baseline
 **contract** — what each tier asserts and how goldens are regenerated — lives in
 [`docs/design/golden-set.md`](../../docs/design/golden-set.md).
 
@@ -14,7 +14,7 @@ set, and what it exercises). This file consolidates the former per-directory
   consistency, and every final-format emitter.
 - The pre-UBT "skill" pipeline record (38-chunk run, glossary/entity tables,
   per-format byte sizes) and its `scripts/convert.py` / `scripts/merge_and_build.py`
-  instructions were removed in the 2026-09-17 doc cleanup; those scripts no
+  instructions have been removed; those scripts no
   longer exist. The historical record remains in git history.
 
 ## call-of-the-wild

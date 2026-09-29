@@ -83,7 +83,7 @@ def test_fast_preset_definition_and_resolution() -> None:
 
 
 def test_preset_bundle_applies_through_validated_config() -> None:
-    """Risk: the C2 validated-override path must still apply the complete preset
+    """Risk: the validated-override path must still apply the complete preset
     bundle — including falsy values such as ``emit_both=False``, which a
     truthiness filter would silently drop (re-rendering a second artifact)."""
     from ubt.cli.main import _build_config

@@ -480,7 +480,7 @@ def test_probe_default_forbids_page_egress(monkeypatch: pytest.MonkeyPatch, tmp_
 
     ``allow_page_upload`` used to default to True, so every new call site
     opted the book into cloud egress by omission — the opposite of the
-    UBTConfig default and of the privacy review the ordering already follows.
+    UBTConfig default and of the privacy ordering this module documents.
     """
     import sys
 

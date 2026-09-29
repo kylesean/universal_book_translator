@@ -1,4 +1,4 @@
-"""Q-3: curated seed glossary + control-char debris strip."""
+"""Curated seed glossary + control-char debris strip."""
 
 import asyncio
 from pathlib import Path

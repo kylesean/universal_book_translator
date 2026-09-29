@@ -137,7 +137,7 @@ def test_annotator_missing_source_number_produces_span() -> None:
 
 
 def test_annotator_alias_requires_word_boundary() -> None:
-    """C4: 'cat' must not match inside 'category' (exporter bar parity)."""
+    """'cat' must not match inside 'category' (exporter bar parity)."""
     from ubt.core.validators.span_repair import MQMSpanAnnotator
 
     annotator = MQMSpanAnnotator()
@@ -160,7 +160,7 @@ def test_annotator_alias_requires_word_boundary() -> None:
 
 
 def test_annotator_cjk_expansion_skips_compound() -> None:
-    """C4: H12 compound guard parity — '网络' inside '计算机网络' is not a span."""
+    """CJK compound guard parity — '网络' inside '计算机网络' is not a span."""
     from ubt.core.validators.span_repair import MQMSpanAnnotator
 
     annotator = MQMSpanAnnotator()

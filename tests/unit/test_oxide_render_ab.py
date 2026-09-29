@@ -1,9 +1,8 @@
 """Gated A/B of the pdf_oxide rasterizer against poppler pdftoppm.
 
-Skipped unless BOTH the ``oxide`` extra and the poppler binary are present,
-and deselected by default (``-m 'not slow'``); the CI job that installs
-``--extra oxide`` runs it with ``-m slow``. Thresholds and their provenance
-live in scripts/oxide_render_ab.py.
+Skipped unless both ``pdf_oxide`` and the poppler binary are present, and
+deselected by default (``-m 'not slow'``); run it with ``-m slow`` where both
+are installed. Thresholds and their provenance live in scripts/oxide_render_ab.py.
 """
 
 from __future__ import annotations

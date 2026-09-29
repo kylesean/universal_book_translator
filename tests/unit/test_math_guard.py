@@ -173,7 +173,7 @@ def test_apply_guards_falls_back_failed_debris_with_count() -> None:
 
 
 def test_apply_guards_idempotent_across_export_reruns() -> None:
-    """E3: resume/re-export re-runs export; flags and counts must not inflate."""
+    """Resume/re-export re-runs export; flags and counts must not inflate."""
     latex = "K _ { 1 \\colon t } = [ k _ { t } ]"
     bad = _block("f1", BlockType.FORMULA, latex, "K 的翻译", BlockStatus.MTQE_PASSED)
     debris = _block("d1", BlockType.NARRATIVE, DEBRIS_QKV, "k, q, v, t, t, t", BlockStatus.FAILED)
