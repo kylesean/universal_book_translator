@@ -175,6 +175,52 @@ def test_router_draft_batch_extracts_and_reports_missing_lines() -> None:
     assert results[1].error == "Missing from batch output"
 
 
+def test_router_draft_batch_rides_out_a_transient_result_fetch_failure() -> None:
+    """A blip on the result-file fetch must not discard a completed batch.
+
+    The status poll already rides out retryable transport errors; the result
+    fetch is the same kind of read. Treating a single 5xx there as a dead batch
+    reaches the caller, which cancels the submitted job and re-drafts every
+    block interactively — paying for the same work twice.
+    """
+
+    class FlakyFetchProvider(MockModelProvider):
+        @property
+        def supports_batch_api(self) -> bool:
+            return True
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.fetches = 0
+
+        async def create_batch_job(self, requests: list[dict[str, Any]]) -> str:
+            return "batch-fetch"
+
+        async def get_batch_job(self, batch_id: str) -> dict[str, Any]:
+            return {"status": "completed", "output_file_id": "out"}
+
+        async def fetch_batch_results(self, batch_id: str) -> dict[str, dict[str, Any]]:
+            self.fetches += 1
+            if self.fetches == 1:
+                raise ModelProviderError(
+                    "Batch result download failed (503)", details={"status_code": 503}
+                )
+            return {"req-1": {"content": "<translation>译文一</translation>", "error": None}}
+
+    provider = FlakyFetchProvider()
+    router = ModelRouter(provider=provider, draft_model="batch-test-model")
+    results = asyncio.run(
+        router.draft_batch(
+            [BatchDraftRequest(custom_id="req-1", source_text="Hello.")],
+            poll_interval=0.01,
+        )
+    )
+
+    assert provider.fetches == 2, "the result fetch must be retried once"
+    assert results[0].text == "译文一"
+    assert results[0].error is None
+
+
 def test_router_batch_body_forwards_chat_template_kwargs() -> None:
     """The batch body must carry chat_template_kwargs, matching the interactive path.
 

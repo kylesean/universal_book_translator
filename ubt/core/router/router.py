@@ -11,7 +11,7 @@ import logging
 import os
 import random
 import re
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol, overload
 
@@ -80,6 +80,12 @@ class ProviderErrorAction:
 _FAIL_FAST_STATUS = frozenset({400, 401, 402, 403, 404, 422})
 # Transient errors worth a backoff retry.
 _RETRYABLE_STATUS = frozenset({408, 425, 429, 500, 502, 503, 504})
+# A completed batch's result file is one GET away. Ride out a short transport
+# blip rather than surfacing "batch is dead": the caller answers a batch failure
+# by cancelling the already-paid job and re-drafting every block interactively,
+# which bills the same work twice. Bounded, so a persistent outage still fails.
+_BATCH_RESULT_FETCH_GRACE_SECONDS = 5.0
+_BATCH_RESULT_FETCH_BACKOFF_SECONDS = 1.0
 # Default local endpoint for the one retry a self-hosted model gets when the
 # primary gateway drops it. Ollama is the default because it is the most common
 # one-line install; llama-swap (:9090), llama-server (:8081) and vLLM (:8000)
@@ -1280,6 +1286,41 @@ class ModelRouter:
         )
         return TranslationOutputExtractor.extract_macro_blocks(raw_res)
 
+    async def _await_batch_read[T](
+        self,
+        batch_id: str,
+        call: Callable[[], Awaitable[T]],
+        *,
+        deadline: float,
+        interval: float,
+        what: str,
+    ) -> T:
+        """Await a read-only Batch API call, riding out retryable failures.
+
+        A transient 5xx on the status endpoint *or* on the result-file fetch
+        must not surface as a dead batch: the caller cancels the submitted job
+        and re-drafts every block interactively, paying for the same work twice.
+        Retry what the router's own taxonomy calls retryable until ``deadline``;
+        a terminal failure or a passed deadline raises ``BatchTranslationError``
+        carrying the batch id so the caller can abandon the job first.
+        """
+        loop = asyncio.get_running_loop()
+        while True:
+            try:
+                return await call()
+            except ModelProviderError as exc:
+                if not classify_provider_error(exc).retryable or loop.time() >= deadline:
+                    raise BatchTranslationError(
+                        f"Batch {what} failed: {exc}", batch_id=batch_id
+                    ) from exc
+                logger.warning(
+                    "Batch %s %s failed (%s); retrying inside the deadline",
+                    batch_id,
+                    what,
+                    exc,
+                )
+                await asyncio.sleep(interval)
+
     async def draft_batch(
         self,
         requests: list[BatchDraftRequest],
@@ -1294,10 +1335,11 @@ class ModelRouter:
         """Translate a batch of blocks through the provider's Batch API.
 
         Prompts are built with the exact same topology as :meth:`draft` so
-        batch and interactive outputs stay consistent. A *status-endpoint*
-        failure that the router's own taxonomy calls retryable is ridden out
-        inside ``poll_timeout``; a non-retryable transport failure, that
-        timeout, or a non-completed terminal status raises
+        batch and interactive outputs stay consistent. A *read* failure (the
+        status endpoint or the result-file fetch) that the router's own taxonomy
+        calls retryable is ridden out inside ``poll_timeout``; a non-retryable
+        transport failure, that timeout, or a non-completed terminal status
+        raises
         :class:`BatchTranslationError` with the provider job attached, and
         callers fall back to interactive drafting for the same blocks. A
         :class:`BudgetExceededError` from ``status_callback`` cancels the batch
@@ -1431,28 +1473,13 @@ class ModelRouter:
             interval = max(poll_interval, 0.5)
             job: dict[str, Any] = {}
             while True:
-                try:
-                    job = await self.provider.get_batch_job(batch_id)
-                except ModelProviderError as exc:
-                    # A blip on the status endpoint is not a failed batch. The
-                    # caller reads any BatchTranslationError as "batch is dead":
-                    # it cancels this job and re-drafts every block
-                    # interactively, so one 503 on a poll interval would destroy a
-                    # whole book's committed batch spend and re-bill it at the
-                    # higher interactive price. Ride out what the router's own
-                    # taxonomy calls retryable, until the poll deadline says
-                    # otherwise.
-                    if not classify_provider_error(exc).retryable or loop.time() >= deadline:
-                        raise BatchTranslationError(
-                            f"Batch transport failure: {exc}", batch_id=batch_id
-                        ) from exc
-                    logger.warning(
-                        "Batch %s status poll failed (%s); retrying inside the deadline",
-                        batch_id,
-                        exc,
-                    )
-                    await asyncio.sleep(interval)
-                    continue
+                job = await self._await_batch_read(
+                    batch_id,
+                    lambda: self.provider.get_batch_job(batch_id),
+                    deadline=deadline,
+                    interval=interval,
+                    what="status poll",
+                )
                 status = str(job.get("status") or "")
                 if ledger is not None and job_id is not None:
                     await asyncio.to_thread(
@@ -1490,7 +1517,13 @@ class ModelRouter:
                     f"Batch job {batch_id} ended with status {str(job.get('status'))!r}",
                     batch_id=batch_id,
                 )
-            raw_results = await self.provider.fetch_batch_results(batch_id)
+            raw_results = await self._await_batch_read(
+                batch_id,
+                lambda: self.provider.fetch_batch_results(batch_id),
+                deadline=loop.time() + _BATCH_RESULT_FETCH_GRACE_SECONDS,
+                interval=_BATCH_RESULT_FETCH_BACKOFF_SECONDS,
+                what="result fetch",
+            )
         except ModelProviderError as exc:
             # Carry batch_id through the rewrap so the caller can still
             # abandon_batch a job that was already created (otherwise it keeps
