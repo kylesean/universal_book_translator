@@ -367,13 +367,10 @@ def _escape_typst_markup(text: str) -> str:
     result = text
     for ch in _MARKUP_SPECIALS:
         result = result.replace(ch, "\\" + ch)
-    # Block markers (``=``/``+``/``-``/``N.``) are only special at line start;
-    # escape them there so an embedded newline cannot re-open Typst structure.
+    # Block markers (``=``/``+``/``-``/``/``/``N.``) are only special at line
+    # start (string start counts); the shared escaper handles every line,
+    # including a ``/`` term marker after an embedded newline.
     result = escape_line_start_markup(result)
-    # In Typst content blocks, a leading "/" is parsed as a line-break marker.
-    # Escape it only at the start so URLs mid-text stay intact.
-    if result.startswith("/"):
-        result = "\\/" + result[1:]
     # A mid-text "//" opens a Typst line comment and silently drops the rest of
     # the paragraph -- compile still exits 0 with no diagnostic, so this is
     # content loss, not a formatting glitch. The zero-width space breaks the

@@ -47,18 +47,19 @@ from ubt.core.cleaners.math_masker import MathMasker
 _CJK = r"一-鿿㐀-䶿豈-﫿぀-ヿ가-힯"
 
 
-_LINE_START_MARKUP_RE = re.compile(r"(?m)^([ \t]*)(=|\+|-|\d+\.)(?=\s|$)")
+_LINE_START_MARKUP_RE = re.compile(r"(?m)^([ \t]*)(=|\+|-|/|\d+\.)(?=\s|$)")
 
 
 def escape_line_start_markup(text: str) -> str:
     """Escape Typst block markers that are special only at the start of a line.
 
-    ``=``/``+``/``-``/``N.`` open a heading/list/enum in Typst *only* at line
-    start, so they are deliberately absent from the mid-line escape sets
-    (escaping them everywhere would litter ordinary prose and maths). A
-    translated paragraph can still carry a newline immediately before such a
-    marker, which silently re-lays-out the page as a heading or list; escape
-    the marker (and, for ``N.``, its dot) so it renders as literal text.
+    ``=``/``+``/``-``/``/``/``N.`` open a heading/list/enum/term-list in Typst
+    *only* at line start, so they are deliberately absent from the mid-line
+    escape sets (escaping them everywhere would litter ordinary prose and
+    maths). A translated paragraph can still carry a newline immediately before
+    such a marker, which silently re-lays-out the page as a heading or list (or
+    fails the whole compile, as a ``/`` term marker does); escape the marker
+    (and, for ``N.``, its dot) so it renders as literal text.
     """
 
     # The marker must be followed by whitespace or end-of-line: ``12.5`` is a
