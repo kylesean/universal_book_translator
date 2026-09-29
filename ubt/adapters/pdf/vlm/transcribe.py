@@ -28,7 +28,7 @@ FALLBACK_ENV_VAR = "UBT_VLM_SCAN_FALLBACK"
 
 
 class VlmFallbackMode(StrEnum):
-    """Fallback tiers for VLM ingestion (Phase 1)."""
+    """Fallback tiers for VLM ingestion."""
 
     OFF = "off"
     MISSING = "missing"

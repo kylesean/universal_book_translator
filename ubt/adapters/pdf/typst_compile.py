@@ -47,7 +47,7 @@ def typst_compile(
             encoding="utf-8",
             errors="replace",
             timeout=timeout,
-            # H-2: typst keeps PATH/HOME/XDG_*/fontconfig; keys are not its business.
+            # typst keeps PATH/HOME/XDG_*/fontconfig; keys are not its business.
             env=subprocess_env(),
         )
     except subprocess.TimeoutExpired:

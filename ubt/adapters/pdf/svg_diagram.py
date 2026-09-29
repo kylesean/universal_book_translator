@@ -1,4 +1,4 @@
-"""F-img: vector diagram extraction with in-diagram label backfill (SVG route).
+"""Vector diagram extraction with in-diagram label backfill (SVG route).
 
 Replaces the legacy low-resolution PNG harvesting for PDF diagrams
 (``pic_p*.png`` at ~1-2x scale, typically a few hundred pixels wide and

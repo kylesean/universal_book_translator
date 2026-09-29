@@ -1,9 +1,9 @@
-"""Optional ``pdf_oxide`` backend — render and text legs (adoption stage 2).
+"""Optional ``pdf_oxide`` backend — render and text legs.
 
 pdf_oxide (Rust/PyO3, zero Python deps, MIT/Apache) renders a page to PNG
 bytes and extracts page text in-process, replacing the poppler ``pdftoppm``
-subprocess (a system binary plus a Popen attack surface, security review
-H-2) and the retired runtime ``pypdf`` text leg. Every entry point here is
+subprocess (a system binary plus a Popen attack surface) and the retired
+runtime ``pypdf`` text leg. Every entry point here is
 non-raising: render ``None`` means "no image", text ``""`` means "no text",
 so a faulty engine degrades the visual gates instead of crashing the run.
 Structural reads (geometry, content-stream ops, resources) deliberately do

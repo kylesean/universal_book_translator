@@ -9,7 +9,9 @@ They serve different output contexts, so this module keeps them deliberately
 separate while single-sourcing the vocabulary:
 
 - :data:`_SHARED`       — commands both recognise, with the display spelling.
-- :data:`_DISPLAY_ONLY` — commands only the display converter recognises.
+- :data:`_DISPLAY_ONLY` — commands the display converter owns; the inline
+  table admits them too (see the note on ``INLINE_SYMBOLS``) because
+  paragraph-level context math shares the display vocabulary.
 - :data:`_INLINE_ONLY`  — commands only the inline converter recognises
   (Greek letters and the frac/sqrt/det branch it handles itself).
 - :data:`DISPLAY_VALUE_OVERRIDES` / :data:`INLINE_VALUE_OVERRIDES` — the seven

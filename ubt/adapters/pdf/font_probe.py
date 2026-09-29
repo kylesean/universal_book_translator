@@ -136,7 +136,7 @@ def _typst_families_cached(resolved: str, mtime_ns: int) -> frozenset[str] | Non
             encoding="utf-8",
             errors="replace",
             timeout=_PROBE_TIMEOUT_S,
-            # H-2: mirror typst_compile's environment policy exactly — the probe
+            # mirror typst_compile's environment policy exactly — the probe
             # is only trustworthy if it sees the same environment as a compile.
             env=subprocess_env(),
         )

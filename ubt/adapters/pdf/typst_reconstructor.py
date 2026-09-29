@@ -786,6 +786,10 @@ class TypstReconstructor:
             source_page_height: Optional source page height in pt, used only to
                 place cover-page subtitle/description cuts relative to the page
                 (does not change the output page size).
+            source_page_count: Optional source page count. With ``pagebreaks``,
+                pads the emitted page-number sequence to 1..N so the output
+                keeps one page per source page (a blank placeholder page is
+                emitted for a source page that carries no blocks).
         """
         effective_target_lang = target_lang or self.target_lang
         self.target_lang = effective_target_lang
@@ -1688,8 +1692,7 @@ class TypstReconstructor:
         plus every behavioral fix that used to live only in ``_emit_block``
         (page chrome, draft-over-source, caption polish, verbatim formula
         tags, heading-echo trim) — there is no interior-only shadow logic
-        left (incident tests: ``test_cover_formula_prompt_gates.py:272`` and
-        ``:460``).
+        left (incident tests in ``test_cover_formula_prompt_gates.py``).
         """
         # Reading order is the caller's (``spine_index`` is column-aware;
         # geometry here would interleave the two columns of a page).

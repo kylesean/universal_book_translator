@@ -1,4 +1,4 @@
-"""3 born-digital PDF fast path: pypdfium2 text extraction.
+"""Born-digital PDF fast path: pypdfium2 text extraction.
 
 pypdfium2 is Apache-2.0 (the bundled PDFium binary is BSD-3-Clause), which
 keeps the repository's Zero-AGPL delivery guarantee intact. The adapter

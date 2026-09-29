@@ -293,7 +293,7 @@ class HTMLAdapter(BaseDocumentAdapter):
         output_path.parent.mkdir(parents=True, exist_ok=True)
         tmp_path = output_path.with_suffix(output_path.suffix + ".tmp")
         # The source document is copied into the deliverable largely verbatim,
-        # so it goes through the same L-4 scrub the EPUB members get: target
+        # so it goes through the same source scrub the EPUB members get: target
         # text is already sanitized, but a dirty *source* would otherwise ship
         # <script>, onload= handlers and javascript: links to the reader.
         try:

@@ -204,7 +204,7 @@ class MathjaxRenderer:
                 encoding="utf-8",
                 errors="replace",
                 bufsize=1,
-                # H-2: node needs PATH/HOME; it has no use for the LLM keys.
+                # node needs PATH/HOME; it has no use for the LLM keys.
                 env=subprocess_env(),
             )
         except OSError as exc:

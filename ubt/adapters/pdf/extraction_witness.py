@@ -1,12 +1,12 @@
 """Extraction witness: catch font-level text damage before it is billed.
 
-The PDF that motivated this (docs/chapter-3.pdf) has twelve math-bearing fonts
+The PDF that motivated this had twelve math-bearing fonts
 with no ``/ToUnicode`` map. Every extraction library must then guess the
 encoding, and they all guess the same MacRoman prior — so ``Nch = 2 × 10¹⁸
 cm⁻³`` arrives as ``Nch ¼ 2 % 1018 cm-3`` identically through pdftotext,
 pdfium, pypdf and pdfplumber. Cross-channel agreement (the original idea)
-cannot see this class at all; on chapter-3 it scores 0/26 while the damage sits
-on 20/26 pages.
+cannot see this class at all; on that corpus it scores 0/26 while the damage
+sits on 20/26 pages.
 
 Two signals replace it:
 

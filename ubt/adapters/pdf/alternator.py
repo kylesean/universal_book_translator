@@ -3,7 +3,7 @@
 CRITICAL ARCHITECTURE INVARIANT:
 This module must NEVER import or reference 'fitz' or 'pymupdf' to maintain 100%
 license safety and commercial independence. Page merging is backed by pikepdf
-(MPL-2.0); the retired pypdf leg moved here in the pdf_oxide adoption sweep.
+(MPL-2.0); the retired pypdf leg moved here when pdf_oxide replaced it.
 
 SECOND INVARIANT (exit-134 post-mortem): this is where pikepdf
 enters the ``ubt.adapters`` import graph, and pikepdf's nanobind extension can

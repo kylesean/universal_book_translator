@@ -1,4 +1,4 @@
-"""LaTeX/math-to-Typst conversion chain (Track 2 fragment).
+"""LaTeX/math-to-Typst conversion chain.
 
 Extracted from :mod:`ubt.adapters.pdf.typst_reconstructor` (god-file split):
 group reader, Docling-math normalization, pandoc + regex converters, OCR
@@ -717,7 +717,7 @@ def _pandoc_math_to_typst(normalized: str) -> str | None:
             errors="replace",
             check=False,
             timeout=_PANDOC_TIMEOUT_S,
-            # H-2: pandoc needs PATH/HOME, not this host's credentials.
+            # pandoc needs PATH/HOME, not this host's credentials.
             env=subprocess_env(),
         )
     except (OSError, subprocess.SubprocessError):

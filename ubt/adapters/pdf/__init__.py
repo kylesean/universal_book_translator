@@ -1,4 +1,4 @@
-"""PDF Document Engine Adapters (Track 2: IBM Docling + Typst + PyPDF).
+"""PDF document engine adapters (Docling + Typst + pdf_oxide).
 
 100% permissively licensed (MIT / Apache-2.0 / BSD-3) production-grade PDF processing.
 """

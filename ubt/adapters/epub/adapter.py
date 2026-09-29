@@ -744,7 +744,7 @@ class EPUBAdapter(BaseDocumentAdapter):
                         )
                         total_injected += chapter_injected
 
-                    # L-4: source markup is copied into the deliverable, so a
+                    # Source markup is copied into the deliverable, so a
                     # malicious source could ship <script>/onload=/javascript:
                     # to the reader. Both the rewritten chapter and the members
                     # passed through untouched go through the same scrub; the

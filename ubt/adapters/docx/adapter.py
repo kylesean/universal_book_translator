@@ -11,9 +11,10 @@ Design notes:
   positions and inserts a bilingual paragraph right after each source
   paragraph — the source paragraph keeps its runs (with hyperlinks, images,
   formatting), the inserted copy inherits paragraph properties (pPr) and the
-  first run's character properties (rPr). Everything python-docx does not
-  model (headers/footers, footnotes, images, sections) is carried through
-  untouched because the document is edited in memory, never rebuilt.
+  first run's character properties (rPr). Headers, footers and footnotes are
+  mined as their own blocks and written back in place (python-docx models none
+  of them natively); images and section properties pass through untouched
+  because the document is edited in memory, never rebuilt.
 """
 
 import asyncio

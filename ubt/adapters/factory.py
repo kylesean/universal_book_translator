@@ -153,7 +153,7 @@ def get_adapter_for_path(
 ) -> BaseDocumentAdapter:
     """Factory helper to resolve the appropriate document adapter by file extension.
 
-    Uses Track 2 (IBM Docling + Typst + PyPDF) for 100% permissive Zero-AGPL modern delivery.
+    Uses Docling + Typst + pdf_oxide for 100% permissive Zero-AGPL modern delivery.
     ``pdf_engine='auto'`` routes PDFs through the first-page heuristic
     (born-digital single-column → pypdfium2 fast path, else Docling).
     """
