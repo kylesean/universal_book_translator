@@ -319,6 +319,50 @@ def test_router_batch_transport_failure_keeps_batch_id_for_abandon() -> None:
     assert excinfo.value.batch_id == "batch-keep"
 
 
+class _CancelRecordingProvider(MockModelProvider):
+    @property
+    def supports_batch_api(self) -> bool:
+        return True
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.cancelled: list[str] = []
+
+    async def cancel_batch_job(self, batch_id: str) -> None:
+        self.cancelled.append(batch_id)
+
+
+def test_abandon_batch_leaves_a_finished_batch_resumable(tmp_path: Path) -> None:
+    """Abandoning must not cancel or relabel a batch that already finished.
+
+    The poll loop records the provider's terminal status. Overwriting it with
+    ``cancelled`` dropped the resumable state of a run whose results were
+    already paid for, so a later run could no longer harvest them.
+    """
+    ledger = SQLiteJobLedger(tmp_path / "ledger.sqlite")
+    ledger.register_batch_job("batch-done", "job-1", "idem-1", status="completed")
+    provider = _CancelRecordingProvider()
+    router = ModelRouter(provider=provider, draft_model="batch-test-model")
+
+    asyncio.run(router.abandon_batch("batch-done", ledger=ledger, job_id="job-1"))
+
+    assert provider.cancelled == [], "a finished batch has nothing to cancel"
+    # Still resumable: the paid results can be fetched on the next run.
+    assert ledger.find_live_batch_by_idempotency_key("idem-1") == "batch-done"
+
+
+def test_abandon_batch_cancels_a_live_batch(tmp_path: Path) -> None:
+    ledger = SQLiteJobLedger(tmp_path / "ledger.sqlite")
+    ledger.register_batch_job("batch-live", "job-1", "idem-1", status="in_progress")
+    provider = _CancelRecordingProvider()
+    router = ModelRouter(provider=provider, draft_model="batch-test-model")
+
+    asyncio.run(router.abandon_batch("batch-live", ledger=ledger, job_id="job-1"))
+
+    assert provider.cancelled == ["batch-live"]
+    assert ledger.find_live_batch_by_idempotency_key("idem-1") is None
+
+
 # ---------------------------------------------------------------------------
 # Draft-stage integration: batch success, batch fallback, TM funnel
 # ---------------------------------------------------------------------------

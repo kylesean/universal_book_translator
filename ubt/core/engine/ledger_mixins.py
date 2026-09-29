@@ -1410,6 +1410,20 @@ class LedgerBatchMixin(LedgerBase):
             )
             conn.execute("COMMIT;")
 
+    def is_batch_live(self, batch_id: str) -> bool:
+        """Whether the provider batch may still consume its queue.
+
+        A missing row answers ``True``: with no recorded status the safe action
+        is to cancel (it may be billing) rather than assume it finished.
+        """
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT status FROM batch_jobs WHERE batch_id = ?", (batch_id,)
+            ).fetchone()
+        if row is None:
+            return True
+        return str(row["status"]) in self.LIVE_BATCH_STATUSES
+
     # A batch_id is only known *after* the provider call returns, so a crash
     # between ``create_batch_job`` and persisting that id would re-submit (and
     # re-bill) the whole batch on restart. To close the gap, a worker first

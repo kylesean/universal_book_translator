@@ -331,6 +331,8 @@ class BatchJobStore(Protocol):
 
     def update_batch_job_status(self, batch_id: str, status: str) -> None: ...
 
+    def is_batch_live(self, batch_id: str) -> bool: ...
+
 
 class ModelRouter:
     """Routes translation and repair tasks across LLM tiers with capability strategy dispatch."""
@@ -1568,16 +1570,22 @@ class ModelRouter:
         return results
 
     async def abandon_batch(
-        self, batch_id: str, ledger: Any | None = None, job_id: str | None = None
+        self, batch_id: str, ledger: BatchJobStore | None = None, job_id: str | None = None
     ) -> None:
-        """Cancel a submitted batch we are about to abandon to interactive.
+        """Cancel a still-running batch we are about to abandon to interactive.
 
-        When :meth:`draft_batch` times out the job is still in_progress at the
-        provider and will keep billing, yet the caller re-drafts the same blocks
-        interactively — a duplicate charge whose output is never harvested. The
-        caller invokes this at that decision point. Best-effort: cleanup must
-        never raise over the fallback it is annotating.
+        Only a live batch is cancelled and marked ``cancelled``: a batch that
+        already finished — results harvested or not — is terminal, so cancelling
+        is a no-op at the provider and overwriting its status would drop the
+        resumable state of an already-paid run. The caller invokes this at the
+        decision point; cleanup must never raise over the fallback it annotates.
         """
+        if (
+            ledger is not None
+            and job_id is not None
+            and not await asyncio.to_thread(ledger.is_batch_live, batch_id)
+        ):
+            return
         try:
             await self.provider.cancel_batch_job(batch_id)
         except Exception as exc:  # never mask the fallback
