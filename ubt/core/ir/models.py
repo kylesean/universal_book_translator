@@ -44,7 +44,7 @@ class BlockStatus(StrEnum):
     BLOCKED_HUMAN = "blocked_human"  # MQM Critical unresolved: MUST NOT ship machine output
 
 
-# (Code review): single source of truth for the lifecycle's terminal
+# Single source of truth for the lifecycle's terminal
 # states. is_finalized, the ledger's NON_TERMINAL_STATUSES and the repair
 # eligibility SQL all derive from this frozenset, so adding a status can never
 # drift between the three former parallel definitions.

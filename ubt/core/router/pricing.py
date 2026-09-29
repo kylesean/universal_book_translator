@@ -202,13 +202,13 @@ def _current_prices_table() -> dict[str, PriceEntry]:
 
 # USD per 1M tokens: (input, output).
 #
-# Fallback table, NOT the primary source: ``resources/prices.toml`` is read
+# Fallback table, NOT the primary source: ``ubt/resources/prices.toml`` is read
 # first (step 4 of ``resolve_model_prices``) and shadows any same-key entry
 # here (step 5 uses ``len(key) > len(best_key)``, which a same-length key can
 # never satisfy). A key that also exists in the TOML is therefore unreachable
 # and has been removed. What remains are the models the TOML does not carry,
 # kept so a missing/partial resource file degrades to a *priced* run instead
-# of an unpriced one. Add new rates to ``resources/prices.toml``, not here.
+# of an unpriced one. Add new rates to ``ubt/resources/prices.toml``, not here.
 MODEL_PRICES_USD_PER_MTOK: dict[str, tuple[float, float]] = {
     # Gemini (the TOML carries the 1.5/2.5/3.1/3.8 families)
     "gemini-1.5-flash-8b": (0.0375, 0.15),
@@ -379,7 +379,7 @@ def price_is_known(
 # one. Absent an entry, the full input price applies (no discount assumed).
 #
 # Same fallback rule as MODEL_PRICES_USD_PER_MTOK: a key that also exists in
-# ``resources/prices.toml`` is shadowed by the TOML (step 4 precedes step 5)
+# ``ubt/resources/prices.toml`` is shadowed by the TOML (step 4 precedes step 5)
 # and was removed; what remains are the models the TOML does not carry.
 CACHED_INPUT_PRICES_USD_PER_MTOK: dict[str, float] = {
     # Gemini prompt caching
@@ -604,7 +604,7 @@ def estimate_cost_usd(
         if novel:
             logger.warning(
                 "No price-table entry for model(s) %s — token cost reports as "
-                "unknown; add the rate to resources/prices.toml (legacy "
+                "unknown; add the rate to ubt/resources/prices.toml (legacy "
                 "fallback: MODEL_PRICES_USD_PER_MTOK)",
                 ", ".join(sorted(novel)),
             )

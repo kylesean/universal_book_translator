@@ -418,7 +418,7 @@ class PipelineOrchestrator:
                 f"--budget-usd/UBT_BUDGET_USD is set but these models have no "
                 f"known price: {', '.join(unpriced)}. Their spend would "
                 "report as unknown and the cap could never fire. Add the rate to "
-                "resources/prices.toml (legacy: MODEL_PRICES_USD_PER_MTOK; see "
+                "ubt/resources/prices.toml (legacy: MODEL_PRICES_USD_PER_MTOK; see "
                 "`ubt doctor`), switch to a priced model, or set "
                 "UBT_ALLOW_UNPRICED_BUDGET=1 to run uncapped-by-warning anyway. "
                 "Models reached through a self-hosted endpoint are exempt (they cost $0)."

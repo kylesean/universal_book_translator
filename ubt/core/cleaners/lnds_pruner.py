@@ -199,7 +199,7 @@ def collect_dropped_line_indices(
             nxt = next_nonblank(i)
             value = int(line.strip())
 
-            # Task 2.3: Protection for TOC entries and ordered list numbering
+            # Protection for TOC entries and ordered list numbering
             # e.g., "1\nIntroduction" or list with introductory colon "Steps:\n1\nFirst"
             if nxt is not None and is_likely_heading_or_list_item(nxt):
                 continue

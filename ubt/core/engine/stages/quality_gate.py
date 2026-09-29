@@ -209,7 +209,7 @@ async def run_quality_gate_stage(
 
         qe_updates: list[dict[str, Any]] = []
         for b, score in zip(suspicious_blocks, scores, strict=True):
-            # Phase 2: Anchor provenance weighting (pure domain data, no adapter imports)
+            # Anchor provenance weighting (pure domain data, no adapter imports)
             # Dual-witness agreement boost (+0.05) when matched and no review needed.
             # Disagreement (needs_review or high vlm_only discrepancy) routes to REPAIR_PENDING.
             prov = b.provenance or {}

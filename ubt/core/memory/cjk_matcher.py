@@ -42,7 +42,7 @@ def _cjk_has_free_boundary(source: str, text: str) -> bool:
     selection guard: a 2-3 char CJK term that only ever occurs
     embedded inside longer CJK runs is likely a compound fragment, not an
     independent hit. Callers deprioritize (never drop) such matches so the
-    H12 compound guard in ``glossary_enforcer`` stays the enforcement point.
+    compound guard in ``glossary_enforcer`` stays the enforcement point.
     """
     if not source or not text:
         return False

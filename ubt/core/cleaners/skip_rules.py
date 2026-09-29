@@ -166,7 +166,7 @@ _DOC_CITATION_RE = re.compile(
 
 
 def _is_bib_entry(text: str) -> bool:
-    """Label-free bibliography signature (R2 tiers A/B, see above)."""
+    """Label-free bibliography signature (tiers A/B, see above)."""
     if _NARRATIVE_PROSE_RE.search(text):
         return False
     if (

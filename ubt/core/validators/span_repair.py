@@ -20,7 +20,7 @@ from ubt.core.validators.glossary_enforcer import is_cjk_char
 def _is_cjk_expansion_blocked(
     text: str, start: int, end: int, surface: str, rendering: str
 ) -> bool:
-    """H12 compound guard — the enforcer's own rule, mirrored for repair.
+    """CJK compound guard — the enforcer's own rule, mirrored for repair.
 
     An EXPANSION rule (canonical rendering longer than, and containing, the
     surface it replaces — e.g. alias ``网络`` -> ``神经网络``) must not be

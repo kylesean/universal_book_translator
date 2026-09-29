@@ -42,9 +42,9 @@ class ProviderConfigError(UBTError):
     """A ``[providers.*]`` / ``[defaults]`` block is malformed or carries a secret."""
 
 
-#: Vendor presets that ship inside the package. Kept as data, not code, so this
-#: module names no vendor: the registry is read and validated through the very
-#: same path as a user's ``[providers.*]`` block.
+#: Wire-protocol presets that ship inside the package. Kept as data, not code,
+#: so the registry is read and validated through the very same path as a user's
+#: ``[providers.*]`` block.
 _SHIPPED_REGISTRY = Path(__file__).resolve().parent.parent / "resources" / "providers.toml"
 
 #: Fields a ``[providers.*]`` / ``[defaults]`` block may set. An explicit
@@ -164,7 +164,7 @@ def _validate_block(label: str, fields: Mapping[str, Any]) -> dict[str, Any]:
 
 @lru_cache(maxsize=1)
 def _read_shipped_providers() -> dict[str, dict[str, Any]]:
-    """The packaged vendor presets, keyed by name, each run through ``_validate_block``.
+    """The packaged wire-protocol presets, keyed by name, each run through ``_validate_block``.
 
     Read once and cached: the file ships with the wheel and never changes at
     runtime. A malformed or unreadable registry is a packaging fault, so it

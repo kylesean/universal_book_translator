@@ -135,7 +135,7 @@ class CitationMasker:
         tokens restore, a faithful draft contains each citation exactly as many
         times as the mapping has tokens for it. A draft that kept the citation
         as free text *in addition* to its token inflates that count, and the
-        published text would repeat the reference (defect 10.4-3: every
+        published text would repeat the reference (the defect this guards: every
         existing bucket stayed empty and the echo passed as clean). A citation-
         shaped string the mapping never issued is a *foreign* citation — added
         content, which the QE added-content gate owns, not this masker.
@@ -196,7 +196,7 @@ class CitationMasker:
         )
         # A token echoed *plus* its citation emitted as free text leaves the
         # restore character-perfect and every bucket above empty — only the
-        # occurrence count sees the duplicated reference (defect 10.4-3).
+        # occurrence count sees the duplicated reference.
         duplicated = self._duplicated_indices(table, restored)
         residue = [f"{idx}-{ck}" if ck else str(idx) for idx, ck in self._scan_refs(restored)]
         return UnmaskReport(

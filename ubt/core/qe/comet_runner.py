@@ -487,7 +487,7 @@ class SubprocessQERunner(BaseQERunner):
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                # H-2: the scorer needs HF_HOME/TORCH_*/PATH, not this host's keys.
+                # The scorer needs HF_HOME/TORCH_*/PATH, not this host's keys.
                 env=subprocess_env(),
             )
 

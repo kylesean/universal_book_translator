@@ -2,9 +2,11 @@
 
 Design contract:
 - ONE canonical env var per field: ``UBT_<FIELD_NAME>`` (upper-snake of the
-  field name), resolved declaratively by ``pydantic-settings`` — there are no
-  dual keys. The role-based names (``draft_*`` / ``repair_*``, matching
-  :class:`ModelRouter` parameters and CLI flags) are the only names.
+  field name), resolved declaratively by ``pydantic-settings``. A few fields
+  also accept a documented legacy alias via ``AliasChoices`` (``UBT_TIMEOUT``,
+  ``UBT_PAGE_RANGE``); there is no second *role* name. The role-based names
+  (``draft_*`` / ``repair_*``, matching :class:`ModelRouter` parameters and CLI
+  flags) are the only names.
 - Distinct credentials never share an env name: ``UBT_LLM_API_KEY`` is the
   outbound LLM key, ``UBT_API_KEY`` the inbound HTTP gate, and
   ``UBT_OCR_API_KEY`` the OCR/vision key. Sharing a name across these three
@@ -1098,8 +1100,7 @@ def require_api_key(config: UBTConfig | None = None) -> str:
     Single source of truth for scripts and one-off tools: resolves through the
     canonical ladder (``UBT_LLM_API_KEY``, provider configured ``api_key``,
     or CLI flag) and refuses to silently run live workloads against the
-    ``mock-key`` placeholder. Raises :class:`SystemExit` (exit code 2) when
-    unconfigured.
+    ``mock-key`` placeholder. Raises :class:`SystemExit` when unconfigured.
     """
     key = (config or UBTConfig.from_env()).api_key.get_secret_value()
     if not key or key == MOCK_API_KEY:

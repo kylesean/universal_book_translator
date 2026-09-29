@@ -75,9 +75,9 @@ UNICODE_WORD_RE = re.compile(r"\w+", re.UNICODE)
 PROSE_BLOCK_TYPES = frozenset({BlockType.HEADING, BlockType.NARRATIVE, BlockType.LIST_ITEM})
 # Blocks whose text must ship byte-identical. TABLE is deliberately NOT here:
 # a table's cells are the book's content, and both the parser
-# (``docling_parser`` marks tables ``skip=False``) and the QE layer
-# (``test_review_2026_09_18_regressions`` requires an untranslated table to FAIL
-# FastPass) already assumed they get translated -- keeping them here meant no
+# (``docling_parser`` marks tables ``skip=False``) and the QE layer (which
+# fails an untranslated table in FastPass) already assumed they get
+# translated -- keeping them here meant no
 # run ever sent one to the model, and the verdict's keep stamped them
 # MTQE_PASSED/1.0 so a whole book of source-language tables reported a perfect
 # pass rate. The rigid engine still leaves them alone (it paints
@@ -252,7 +252,7 @@ FIT_PRECISION_PT = 0.1
 # <7.5pt now render instead of failing closed to source-visible; see the
 # CALIBRATION rationale and scripts/rigid_coverage_sweep.py.
 RIGID_MIN_FONT_PT = _env_float("UBT_RIGID_MIN_FONT_PT", 7.0)
-# M2 region-tiered floors: a region the source itself sets in small type may go
+# Region-tiered floors: a region the source itself sets in small type may go
 # below the body floor, because the block would otherwise fail closed and leave
 # the source visible — a still-legible target beats an untranslated line. Both
 # mirror FIT_MIN_FONT_PT (6.5, validated on chapter-1 tiny print).
@@ -527,12 +527,12 @@ CALIBRATION: dict[str, KnobMeta] = {
         "56% vs 40% at latin ratio 1.2 and 41% vs 32% at cjk ratio 0.6. So 7.5 sat "
         "past the knee; this floor, not margin_reclaim_pt, is the rigid capacity "
         "knob. Blocks needing <7.5pt now render instead of failing closed to "
-        "source-visible. Real-corpus (ForMaT) confirmation and the section 4.4 "
-        "human visual pass remain open; override per-run with UBT_RIGID_MIN_FONT_PT",
+        "source-visible. Real-corpus (ForMaT) confirmation and the human visual "
+        "pass remain open; override per-run with UBT_RIGID_MIN_FONT_PT",
     ),
     "RIGID_CAPTION_MIN_FONT_PT": KnobMeta(
         S,
-        "6.5 caption-region floor (M2 region tiering): captions are set in small "
+        "6.5 caption-region floor (region tiering): captions are set in small "
         "type in the source, and one that cannot fit the 7.0 body floor fails "
         "closed and leaves the source visible. Aligned with FIT_MIN_FONT_PT; the "
         "wiring is proven end-to-end by tests/unit/test_rigid_zones.py::"
@@ -542,7 +542,7 @@ CALIBRATION: dict[str, KnobMeta] = {
     ),
     "RIGID_FOOTNOTE_MIN_FONT_PT": KnobMeta(
         S,
-        "6.5 footnote-region floor (M2 region tiering), reusing the FIT_MIN_FONT_PT "
+        "6.5 footnote-region floor (region tiering), reusing the FIT_MIN_FONT_PT "
         "value validated on chapter-1 tiny print; the body floor would fail "
         "footnotes closed and leave the source visible. Wiring proven end-to-end "
         "by tests/unit/test_rigid_zones.py::test_plan_blocks_applies_the_region_floor",

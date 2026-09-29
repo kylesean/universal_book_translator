@@ -134,7 +134,7 @@ class LanguagePairPolicy:
 
 # Pair-specific expansion/contraction ratios (source, target) -> (min_ratio, max_ratio)
 _PAIR_RATIO_BOUNDS: dict[tuple[str, str], tuple[float, float]] = {
-    # English -> Mainstream targets (Phase 1 focus)
+    # English -> mainstream targets
     ("en", "zh"): (0.2, 1.5),
     ("en", "ja"): (0.2, 1.8),
     ("en", "ko"): (0.25, 1.8),
