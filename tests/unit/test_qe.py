@@ -18,9 +18,8 @@ from ubt.core.qe.defect_taxonomy import (
 )
 from ubt.core.qe.fast_pass import FastPassFilter
 
-pytestmark = pytest.mark.fast
 
-
+@pytest.mark.fast
 def test_fast_pass_filter_approves_clean_paragraph() -> None:
     """Validate that high quality, structurally sound translation is directly approved."""
     fp = FastPassFilter(source_lang="en", target_lang="zh")
@@ -33,6 +32,7 @@ def test_fast_pass_filter_approves_clean_paragraph() -> None:
     assert "Flawless" in decision.reason
 
 
+@pytest.mark.fast
 def test_fast_pass_filter_rejects_hallucinations_and_leaks() -> None:
     """Validate that repetitions and template XML residues are rejected."""
     fp = FastPassFilter(source_lang="en", target_lang="zh")
@@ -51,6 +51,7 @@ def test_fast_pass_filter_rejects_hallucinations_and_leaks() -> None:
     assert "artifacts leaked" in dec_leak.reason
 
 
+@pytest.mark.fast
 def test_fast_pass_filter_rejects_newline_separated_repetition_loop() -> None:
     """UBT the flat regex misses loops separated by newlines.
 
@@ -79,6 +80,7 @@ def test_fast_pass_filter_rejects_newline_separated_repetition_loop() -> None:
     assert "Repetitive loop" in dec_long.reason
 
 
+@pytest.mark.fast
 def test_fast_pass_line_loop_allows_legitimate_repeats() -> None:
     """Non-contiguous repeats and numeric tables stay exempt (structural gate)."""
     fp = FastPassFilter(source_lang="en", target_lang="zh")
@@ -97,6 +99,7 @@ def test_fast_pass_line_loop_allows_legitimate_repeats() -> None:
     assert fp.validate_structural_invariants(src, verse).passed is True
 
 
+@pytest.mark.fast
 def test_fast_pass_filter_rejects_broken_html_and_missing_numbers() -> None:
     """Validate that structural HTML and numeric errors fail fast-pass."""
     fp = FastPassFilter(source_lang="en", target_lang="zh")
@@ -118,6 +121,7 @@ def test_fast_pass_filter_rejects_broken_html_and_missing_numbers() -> None:
     assert "Numeric fidelity failure" in dec_num.reason
 
 
+@pytest.mark.fast
 def test_fast_pass_filter_ignores_urls_in_script_density() -> None:
     """URLs survive translation verbatim and must not dilute zh density."""
     fp = FastPassFilter(source_lang="en", target_lang="zh")
@@ -185,6 +189,7 @@ async def test_subprocess_qe_runner_with_ipc_script(monkeypatch: pytest.MonkeyPa
     assert runner.is_calibrated() is False
 
 
+@pytest.mark.fast
 def test_subprocess_qe_parses_labelled_ipc_protocol(tmp_path: Path) -> None:
     """The {scores, engine} object protocol, with stdout chatter tolerated."""
     runner = SubprocessQERunner(
@@ -203,6 +208,7 @@ def test_subprocess_qe_parses_labelled_ipc_protocol(tmp_path: Path) -> None:
     assert engine == "neural"
 
 
+@pytest.mark.fast
 def test_subprocess_qe_unlabelled_output_is_not_calibrated() -> None:
     """A legacy bare-array reply cannot prove neural origin: fail closed.
 
@@ -246,6 +252,7 @@ async def test_subprocess_qe_reports_a_missing_script_instead_of_unbound_proc() 
         await runner.score_pairs([{"src": "hello", "mt": "你好"}])
 
 
+@pytest.mark.fast
 def test_pipeline_orchestrator_qe_engine_selection() -> None:
     """Validate PipelineOrchestrator chooses appropriate QE runner based on config."""
     from ubt.core.config import UBTConfig
@@ -271,6 +278,7 @@ def test_pipeline_orchestrator_qe_engine_selection() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.fast
 def test_qe_defect_class_legend_covers_all_emittable_values() -> None:
     import asyncio
 
@@ -313,6 +321,7 @@ def test_qe_defect_class_legend_covers_all_emittable_values() -> None:
     )
 
 
+@pytest.mark.fast
 def test_format_only_matches_production_reason_strings() -> None:
     """The cheap-repair path must key off the reasons FastPass actually emits."""
     from ubt.core.qe.defect_taxonomy import is_format_only
@@ -335,6 +344,7 @@ _GLOSSARY_GOOD = "当沟道长度缩短至 20 nm 时，亚阈值摆幅会退化�
 _GLOSSARY_BAD = "当沟道长度缩短至 20 nm 时，短沟道效应会加剧。"
 
 
+@pytest.mark.fast
 def test_heuristic_scores_enforced_term_violation_below_pass() -> None:
     import asyncio
 
@@ -367,6 +377,7 @@ def test_heuristic_scores_enforced_term_violation_below_pass() -> None:
     assert runner.glossary_violation(_GLOSSARY_SRC, _GLOSSARY_GOOD) is None
 
 
+@pytest.mark.fast
 def test_with_glossary_binds_the_terminology_signal() -> None:
     """The orchestrator binds the run glossary after the bible stage."""
     import asyncio
@@ -390,6 +401,7 @@ def test_with_glossary_binds_the_terminology_signal() -> None:
     assert rebound.glossary_violation(_GLOSSARY_SRC, _GLOSSARY_BAD) is not None
 
 
+@pytest.mark.fast
 def test_glossary_violation_band_is_structural_and_caps_the_score() -> None:
     from ubt.core.qe.comet_runner import (
         GLOSSARY_VIOLATION_MARKER,
@@ -433,6 +445,7 @@ def test_glossary_violation_band_is_structural_and_caps_the_score() -> None:
     )
 
 
+@pytest.mark.fast
 def test_fast_pass_markdown_table_immunity() -> None:
     """Verify that FastPassFilter does not falsely detect repetition loops on Markdown tables."""
     fp = FastPassFilter()
@@ -570,6 +583,7 @@ async def test_resident_path_disabled_by_rollback_switch(
     assert runner._resident is None
 
 
+@pytest.mark.fast
 def test_subprocess_runner_is_not_calibrated_before_it_scores() -> None:
     """'Not scored yet' must not read as calibrated.
 
@@ -582,6 +596,7 @@ def test_subprocess_runner_is_not_calibrated_before_it_scores() -> None:
     assert runner.is_calibrated() is False
 
 
+@pytest.mark.fast
 def test_reset_residency_re_enables_the_resident_path() -> None:
     """The broken latch is per-run, but the API shares one runner across jobs.
 
@@ -753,6 +768,7 @@ else:
     await _cleanup(runner)
 
 
+@pytest.mark.fast
 def test_term_shape_halfwidth_terminators_without_space() -> None:
     """Half-width ! / ? next to CJK are terminal even with no whitespace.
 
@@ -790,6 +806,7 @@ def test_resolve_checkpoint_does_not_recurse_on_a_checkpointless_dir(
     assert comet_score_ipc.resolve_checkpoint(str(tmp_path)) == str(tmp_path / "fake.ckpt")
 
 
+@pytest.mark.fast
 def test_comet_runner_teardown_has_newline() -> None:
     from unittest.mock import AsyncMock, MagicMock
 
@@ -805,6 +822,7 @@ def test_comet_runner_teardown_has_newline() -> None:
     assert written_bytes.endswith(b"\n"), f"Expected trailing newline, got {written_bytes!r}"
 
 
+@pytest.mark.fast
 def test_term_shape_dialogue_sentence_count() -> None:
     from ubt.core.qe.term_shape import count_sentences
 
@@ -877,6 +895,7 @@ _a0920_SOURCE_PARAGRAPH = (
 )
 
 
+@pytest.mark.fast
 def test_both_echo_phrasings_are_registered_in_every_defect_table() -> None:
     """The reason strings and the tables must not be able to drift apart."""
     from ubt.core.qe.fast_pass import FastPassFilter as _FP
@@ -891,6 +910,7 @@ def test_both_echo_phrasings_are_registered_in_every_defect_table() -> None:
     assert exact.reason.startswith(ECHO_MARKER)
 
 
+@pytest.mark.fast
 def test_fallback_score_flags_an_opening_translation_tag_leak() -> None:
     """The leak check must test the opening tag the scaffold actually leaks."""
     from ubt.core.qe.comet_score_ipc import calculate_fallback_score

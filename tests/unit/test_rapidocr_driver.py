@@ -44,7 +44,6 @@ def test_recognize_converts_rgb_to_bgr() -> None:
     assert list(arr[0, 1]) == [60, 50, 40]
 
 
-@pytest.mark.fast
 def test_rapidocr_driver_empty_box_does_not_crash() -> None:
     # numpy ships in the optional `ocr` extra (see test_rapidocr_driver.py for
     # why the skip stays in-test rather than at module level).
