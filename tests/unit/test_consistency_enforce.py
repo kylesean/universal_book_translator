@@ -8,6 +8,7 @@ from typing import Any, Literal, cast
 
 import pytest
 
+from tests.block_builder import make_test_block
 from tests.stage_ctx_factory import build_stage_ctx
 from ubt.core.config import UBTConfig
 from ubt.core.engine.ledger import SQLiteJobLedger
@@ -82,11 +83,8 @@ class _FakeLedger:
 
 
 def _block(bid: str, source: str, target: str) -> IRBlock:
-    return IRBlock(
+    return make_test_block(
         id=bid,
-        flow_id=FlowID.MAIN_STORY,
-        spine_index=1,
-        block_type=BlockType.NARRATIVE,
         source_text=source,
         draft_text=target,
         target_text=target,
@@ -169,7 +167,6 @@ async def test_repair_mode_skips_human_and_failed_blocks(tmp_path: Path) -> None
     draft). Re-translating them and stamping REPAIRED would drop them out of
     the human queue (triage later re-reads only REPAIR_PENDING/FAILED), letting
     a Critical ship as clean. They must be excluded from consistency."""
-    from ubt.core.ir.models import BlockType, FlowID
 
     def _blocked(bid: str, status: BlockStatus) -> IRBlock:
         return IRBlock(

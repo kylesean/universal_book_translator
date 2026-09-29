@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.block_builder import make_test_block
 from ubt.adapters.pdf.font_probe import available_font_families, is_cjk_capable
 from ubt.adapters.pdf.overlay_text import typst_escape as overlay_escape
 from ubt.adapters.pdf.typst_fragments import _escape_typst_markup, _reference_numbers
@@ -28,7 +29,7 @@ def _block(
     skip: bool = False,
     flow: FlowID = FlowID.MAIN_STORY,
 ) -> IRBlock:
-    return IRBlock(
+    return make_test_block(
         id=f"t#b{idx:04d}",
         spine_index=idx,
         block_type=block_type,

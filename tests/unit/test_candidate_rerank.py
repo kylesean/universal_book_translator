@@ -6,8 +6,9 @@ from typing import Any
 
 import pytest
 
+from tests.block_builder import make_test_block
 from ubt.core.engine.repair_loop import RepairLoop
-from ubt.core.ir.models import BlockStatus, BlockType, FlowID, IRBlock
+from ubt.core.ir.models import BlockStatus, IRBlock
 from ubt.core.qe.base import BaseQERunner
 from ubt.core.qe.comet_runner import HeuristicQERunner
 from ubt.core.router.provider import MockModelProvider
@@ -79,11 +80,8 @@ class _AlwaysFailFilter:
 
 
 def _block(score: float = 0.2) -> IRBlock:
-    return IRBlock(
+    return make_test_block(
         id="b1",
-        flow_id=FlowID.MAIN_STORY,
-        spine_index=1,
-        block_type=BlockType.NARRATIVE,
         source_text="A source sentence.",
         draft_text="草稿",
         target_text="草稿",

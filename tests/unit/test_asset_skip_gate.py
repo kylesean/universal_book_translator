@@ -16,19 +16,18 @@ from typing import Any, cast
 
 import pytest
 
+from tests.block_builder import make_test_block
 from ubt.adapters.pdf.artifact_parity import asset_skip_findings
 from ubt.adapters.pdf.visual_gate import blocking_gate_tripped
 from ubt.core.engine.reflow_loop import ReflowControlLoop
-from ubt.core.ir.models import BlockType, BookManifest, FlowID, IRBlock
+from ubt.core.ir.models import BlockType, BookManifest, IRBlock
 from ubt.core.ports import reset_ports, set_visual_gate_runner
 
 pytestmark = pytest.mark.fast
 
 
 def _block(bid: str, block_type: BlockType) -> IRBlock:
-    return IRBlock(
-        id=bid, flow_id=FlowID.MAIN_STORY, spine_index=1, block_type=block_type, source_text=""
-    )
+    return make_test_block(id=bid, block_type=block_type, source_text="")
 
 
 # ---------------------------------------------------------------------------
