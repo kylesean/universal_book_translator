@@ -76,7 +76,7 @@ async def test_anthropic_generate_wraps_system_prompt_with_ephemeral_cache() -> 
     mock_client = MagicMock(spec=httpx.AsyncClient)
     mock_client.is_closed = False
     mock_client.post = AsyncMock(return_value=fake_response)
-    provider._client = mock_client
+    provider._anthropic_transport._client = mock_client
 
     # Exercise the live transport path (the provider's redundant meta shim was
     # removed): _select_transport routes api_mode="anthropic-messages" here.

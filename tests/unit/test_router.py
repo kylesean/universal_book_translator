@@ -553,36 +553,6 @@ async def test_openai_compatible_provider_passes_reasoning_effort_and_recovers_o
 
 
 @pytest.mark.asyncio
-async def test_openai_compatible_provider_reuses_client_and_closes() -> None:
-    import httpx
-
-    from ubt.core.router.provider import OpenAICompatibleProvider
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
-
-    provider = OpenAICompatibleProvider(
-        api_key="k",
-        base_url="https://api.openai.com/v1",
-        default_model="mock-model",
-        transport=httpx.MockTransport(handler),
-    )
-
-    client1 = provider._get_client()
-    await provider.generate("first")
-    client2 = provider._get_client()
-    assert client1 is client2
-    assert not client1.is_closed
-
-    await provider.generate("second")
-    assert provider.usage_totals["calls"] == 2
-
-    await provider.aclose()
-    assert client1.is_closed
-    assert provider._client is None
-
-
-@pytest.mark.asyncio
 async def test_openai_compatible_provider_recovers_when_reasoning_effort_must_be_low() -> None:
     """When an o-series model rejects an invalid effort with 'must be one of [low, medium, high]',
     provider retries with reasoning_effort='low'."""

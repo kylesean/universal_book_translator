@@ -298,8 +298,6 @@ class OpenAICompatibleProvider(BaseModelProvider):
         self._api_mode = api_mode
         self._sanitize_output = sanitize_output
         self._prompt_caching = prompt_caching
-        self._owned_client_ref: httpx.AsyncClient | None = client
-        self._owned_client = client is None
         self._limits = limits or httpx.Limits(
             max_connections=100,
             max_keepalive_connections=20,
@@ -318,7 +316,7 @@ class OpenAICompatibleProvider(BaseModelProvider):
         shared_kw: _SharedTransportKwargs = {
             "timeout": self._timeout,
             "transport": self._transport,
-            "client": self._owned_client_ref,
+            "client": client,
             "limits": self._limits,
             "extra_headers": self._extra_headers,
             "sanitize_output": self._sanitize_output,
@@ -354,18 +352,6 @@ class OpenAICompatibleProvider(BaseModelProvider):
             **shared_kw,
         )
 
-    @property
-    def _client(self) -> httpx.AsyncClient | None:
-        return self._owned_client_ref
-
-    @_client.setter
-    def _client(self, value: httpx.AsyncClient | None) -> None:
-        self._owned_client_ref = value
-        self._chat_transport._client = value
-        self._anthropic_transport._client = value
-        self._responses_transport._client = value
-        self._gemini_transport._client = value
-
     def _select_transport(self) -> BaseTransport:
         # The protocol is fixed for the provider's lifetime. It takes no model:
         # a fallback chain that lands on another model family must not silently
@@ -387,27 +373,12 @@ class OpenAICompatibleProvider(BaseModelProvider):
         transport = self._select_transport()
         return transport._auth_headers()
 
-    def _get_client(self) -> httpx.AsyncClient:
-        """Provide a pooled, persistent AsyncClient instance."""
-        if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(
-                timeout=self._timeout,
-                transport=self._transport,
-                limits=self._limits,
-            )
-            self._owned_client = True
-        return self._client
-
     async def aclose(self) -> None:
         """Close connection pool and release underlying socket resources."""
         await self._chat_transport.aclose()
         await self._anthropic_transport.aclose()
         await self._responses_transport.aclose()
         await self._gemini_transport.aclose()
-        if self._owned_client and self._client is not None:
-            if not self._client.is_closed:
-                await self._client.aclose()
-            self._client = None
 
     async def close(self) -> None:
         """Alias for aclose()."""
