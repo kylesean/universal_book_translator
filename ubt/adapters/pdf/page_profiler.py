@@ -285,7 +285,10 @@ def profile_pdf(pdf_path: Path, cache_dir: Path | None = None) -> list[PageProfi
             except (ValueError, KeyError, TypeError) as exc:
                 logger.debug("profiler: ignoring corrupt cache %s: %s", cache_file, exc)
     profiles = [PageProfile(facts=f, kind=classify_page(f)) for f in collect_page_facts(pdf_path)]
-    if cache_file is not None:
+    # An empty profile means the probe failed (pdfium could not open the
+    # document); caching it would serve one transient failure as the PDF's
+    # permanent profile — the key covers only path/size/mtime.
+    if cache_file is not None and profiles:
         try:
             cache_file.parent.mkdir(parents=True, exist_ok=True)
             restrict_dir_to_owner(cache_file.parent)

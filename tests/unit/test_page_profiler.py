@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from tests.corpus_markers import requires_synthetic_mono
 from ubt.adapters.pdf.page_profiler import PageFacts, PageKind, classify_page, profile_pdf
 
@@ -118,3 +120,19 @@ def test_profile_real_pdf_and_cache(tmp_path: Path) -> None:
     again = profile_pdf(pdf, cache_dir=tmp_path)
     assert [p.kind for p in again] == [p.kind for p in profiles]
     assert list(tmp_path.glob("*.json")) != []
+
+
+def test_empty_profile_is_not_cached(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A failed probe must not be remembered: empty profiles are never written.
+
+    ``collect_page_facts`` returns ``[]`` when pdfium cannot open the document;
+    caching that unconditionally served one transient failure as the PDF's
+    permanent profile (the cache key covers only path/size/mtime), silently
+    downgrading engine routing until the file changed.
+    """
+    import ubt.adapters.pdf.page_profiler as profiler
+
+    monkeypatch.setattr(profiler, "collect_page_facts", lambda _path: [])
+    cache_dir = tmp_path / "cache"
+    assert profiler.profile_pdf(tmp_path / "any.pdf", cache_dir) == []
+    assert not list(cache_dir.glob("*.json"))
