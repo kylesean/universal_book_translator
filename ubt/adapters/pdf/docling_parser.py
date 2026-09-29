@@ -1088,10 +1088,9 @@ def annotate_page_kinds(path: Path, blocks: list[IRBlock]) -> dict[int, str]:
         logger.debug("page profiling / ingest plans skipped for '%s': %s", path.name, exc)
         return {}
     kinds = {p.page_number: p.kind.value for p in plans}
-    kind_by_page = {p.page_number: p.kind.value for p in plans}
     for b in blocks:
-        if b.bbox is not None and b.bbox.page in kind_by_page:
-            b.provenance["page_kind"] = kind_by_page[b.bbox.page]
+        if b.bbox is not None and b.bbox.page in kinds:
+            b.provenance["page_kind"] = kinds[b.bbox.page]
     logger.debug("page kinds for '%s': %s", path.name, kinds)
     return kinds
 
