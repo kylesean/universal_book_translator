@@ -985,6 +985,12 @@ class ModelRouter:
                 raise ModelProviderError(
                     f"Provider response could not be parsed: {type(exc).__name__}: {exc}"
                 ) from exc
+            except (BudgetExceededError, JobInterruptedError):
+                # A hard stop (spend cap / cooperative cancel) is not a transient
+                # provider error: retrying it burns the budget the cap exists to
+                # protect, and rewrapping it as "Unexpected provider error" hides
+                # the real cause from the caller.
+                raise
             except Exception as exc:
                 retries += 1
                 if retries > self.max_retries:
@@ -1042,6 +1048,12 @@ class ModelRouter:
                         self.rate_limiter.report_success()
                 except Exception:
                     logger.warning("continuation limiter bookkeeping failed", exc_info=True)
+            except (BudgetExceededError, JobInterruptedError):
+                # Keeping the partial output is right for a transient provider
+                # failure, but wrong for a hard stop: swallowing a spend cap or a
+                # cooperative cancel here would let a still-billing generation
+                # continue as if nothing happened.
+                raise
             except Exception as exc:
                 # Any failure of the *continuation* keeps the already-produced
                 # partial: the primary call succeeded and was billed, and half a
