@@ -139,34 +139,60 @@ def _read_shipped_prices() -> dict[str, PriceEntry]:
     return result
 
 
-def load_prices_table(custom_path: Path | str | None = None) -> dict[str, PriceEntry]:
-    """Load pricing table, layering any user-defined prices.toml over the shipped table."""
-    base = dict(_read_shipped_prices())
+def _prices_file_signature(custom_path: Path | str | None) -> tuple[str | None, int, int]:
+    """Identity of the user prices file that would layer over the shipped table.
+
+    ``(path, mtime_ns, size)`` (or ``(None, 0, 0)`` when there is none) is the
+    cache key for :func:`_load_prices_cached`: a rewritten file changes mtime
+    and/or size, so the stale overlay is never served.
+    """
     custom_file = find_prices_file(custom_path)
-    if custom_file and custom_file.is_file():
-        try:
-            with custom_file.open("rb") as f:
-                data = tomllib.load(f)
-            raw = data.get("prices", {})
-            if isinstance(raw, dict):
-                flat = _flatten_prices(raw)
-                for name, block in flat.items():
-                    if isinstance(block, dict):
-                        inp = float(block.get("input", 0.0))
-                        outp = float(block.get("output", 0.0))
-                        cached = float(block.get("cached_input", inp))
-                        discount = float(block.get("batch_discount", 0.5))
-                        v_at = str(block.get("verified_at", ""))
-                        base[str(name)] = PriceEntry(
-                            input=inp,
-                            output=outp,
-                            cached_input=cached,
-                            batch_discount=discount,
-                            verified_at=v_at,
-                        )
-        except Exception as exc:
-            logger.warning("Failed to parse user prices file %s: %s", custom_file, exc)
-    return base
+    if custom_file is None:
+        return (None, 0, 0)
+    try:
+        st = custom_file.stat()
+    except OSError:
+        return (None, 0, 0)
+    return (str(custom_file), st.st_mtime_ns, st.st_size)
+
+
+@lru_cache(maxsize=8)
+def _load_prices_cached(signature: tuple[str | None, int, int]) -> dict[str, PriceEntry]:
+    """Shipped table plus the user overlay for one file signature, parsed once."""
+    table = dict(_read_shipped_prices())
+    path_str = signature[0]
+    if not path_str:
+        return table
+    try:
+        with Path(path_str).open("rb") as f:
+            data = tomllib.load(f)
+    except Exception as exc:
+        logger.warning("Failed to parse user prices file %s: %s", path_str, exc)
+        return table
+    raw = data.get("prices", {})
+    if isinstance(raw, dict):
+        for name, block in _flatten_prices(raw).items():
+            if isinstance(block, dict):
+                inp = float(block.get("input", 0.0))
+                table[str(name)] = PriceEntry(
+                    input=inp,
+                    output=float(block.get("output", 0.0)),
+                    cached_input=float(block.get("cached_input", inp)),
+                    batch_discount=float(block.get("batch_discount", 0.5)),
+                    verified_at=str(block.get("verified_at", "")),
+                )
+    return table
+
+
+def load_prices_table(custom_path: Path | str | None = None) -> dict[str, PriceEntry]:
+    """Load pricing table, layering any user-defined prices.toml over the shipped table.
+
+    Memoised on the resolved file's ``(path, mtime_ns, size)``. ``estimate_cost_usd``
+    reaches this several times per model on every priced progress event, and
+    re-parsing an unchanged file on each call was pure disk IO; a rewritten file
+    gets a new signature and is re-read.
+    """
+    return dict(_load_prices_cached(_prices_file_signature(custom_path)))
 
 
 def _current_prices_table() -> dict[str, PriceEntry]:
