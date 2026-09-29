@@ -102,7 +102,16 @@ def translatable_spans(latex: str) -> list[TextSpan]:
 
 
 def skeleton(latex: str) -> str:
-    """Formula with every span body blanked — the C-era invariant key."""
+    """Formula with every span body blanked — the C-era invariant key.
+
+    Only the braced *contents* are masked; the command name (``\\text`` vs
+    ``\\mathrm``) stays in the skeleton. Masking the whole ``\\cmd{…}`` (as this
+    once did) made ``\\text{x}`` and ``\\mathrm{x}`` compare equal, so a
+    translation that rewrote the command passed the invariant and reached the
+    renderer. The command/brace whitespace is normalised the same way
+    :func:`reassemble` does, so an incidental ``\\text {x}`` is not a false
+    failure.
+    """
     spans = extract_text_spans(latex)
     if not spans:
         return latex
@@ -110,7 +119,7 @@ def skeleton(latex: str) -> str:
     cursor = 0
     for i, sp in enumerate(spans):
         parts.append(latex[cursor : sp.start])
-        parts.append(f"\x00SPAN{i}\x00")
+        parts.append(f"\\{sp.cmd}{{\x00SPAN{i}\x00}}")
         cursor = sp.end
     parts.append(latex[cursor:])
     return "".join(parts)

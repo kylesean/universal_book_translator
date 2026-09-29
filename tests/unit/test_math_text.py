@@ -217,4 +217,8 @@ def test_math_text_nested_spans() -> None:
     assert spans[0].inner == "outer \\text{inner} text"
     skel = skeleton(latex)
     assert "\x00SPAN0\x00" in skel
-    assert skel == "\x00SPAN0\x00"
+    # The command name stays in the skeleton: masking the whole ``\cmd{...}``
+    # made ``\text{x}`` and ``\mathrm{x}`` compare equal, so a translation that
+    # rewrote the command passed the skeleton invariant (see ``skeleton``).
+    assert skel == "\\text{\x00SPAN0\x00}"
+    assert not skeleton_holds(r"\text{x}", r"\mathrm{x}")
