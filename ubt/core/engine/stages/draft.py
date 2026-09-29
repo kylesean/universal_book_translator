@@ -523,6 +523,8 @@ class _DraftProcessor:
                     )
 
                 await self.finalize_draft(block, draft_raw, inputs)
+            except (asyncio.CancelledError, JobInterruptedError, BudgetExceededError):
+                raise
             except Exception as exc:
                 retryable = classify_provider_error(exc).retryable
                 if retryable:
@@ -880,6 +882,8 @@ class _DraftProcessor:
                         delay = min(8.0, self.policy.draft_retry_base_delay * (2**attempt))
                         delay += random.uniform(0, delay * 0.25)
                         await asyncio.sleep(delay)
+            except (asyncio.CancelledError, JobInterruptedError, BudgetExceededError):
+                raise
             except Exception as exc:
                 logger.warning(
                     "Macro-chunk draft failed for %d blocks (%s); redrafting blocks individually",
@@ -963,15 +967,14 @@ class _DraftProcessor:
                 return_exceptions=True,
             )
 
+        critical_exc: BaseException | None = None
         stranded: list[dict[str, Any]] = []
         for res, group in zip(results, groups, strict=True):
+            if isinstance(res, (BudgetExceededError, JobInterruptedError, asyncio.CancelledError)):
+                if critical_exc is None:
+                    critical_exc = res
+                continue
             if isinstance(res, Exception):
-                # Per-block provider errors are already handled inside
-                # draft_single_block / the macro group; a leaked exception here
-                # is a programming defect or a cancel racing the batch. Persist
-                # the affected blocks as FAILED (resume re-drafts FAILED) so
-                # they surface in stats/export instead of staying silently
-                # PENDING with only a log line — paid work otherwise stranded.
                 logger.warning("Draft task failed with exception: %s", res)
                 prefix = (
                     DRAFTING_ERROR_PREFIX
@@ -992,6 +995,8 @@ class _DraftProcessor:
                     await self.runtime.flusher.enqueue(update)
             else:
                 await asyncio.to_thread(self.runtime.ledger.save_checkpoints_batch, stranded)
+        if critical_exc is not None:
+            raise critical_exc
 
     async def maybe_roll_chapter(self, segment: list[IRBlock]) -> str:
         """Summarize the previous chapter on segment transition (rolling L3).

@@ -9,6 +9,7 @@ from typing import Any
 
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.stage_context import StageContext
+from ubt.core.exceptions import BudgetExceededError, JobInterruptedError
 from ubt.core.ir.models import BlockStatus, IRBlock
 from ubt.core.memory.glossary_table import build_chunk_glossary_table
 from ubt.core.qe.defect_taxonomy import REPAIR_ERROR_PREFIX
@@ -116,9 +117,9 @@ async def run_repair_stage(
             """
             try:
                 update = await _repair_single_candidate(cand)
-            except asyncio.CancelledError:
-                # A cancel is not a failed repair; laundering it into a FAILED
-                # checkpoint would strand the block behind a defect marker.
+            except (asyncio.CancelledError, BudgetExceededError, JobInterruptedError):
+                # A cancel/budget-cap is not a failed repair; laundering it into a FAILED
+                # checkpoint would strand the block behind a defect marker and swallow hard stops.
                 raise
             except BaseException as res:  # mirrors return_exceptions=True
                 logger.warning("Repair failed for block %s: %s", cand.id, res)
@@ -130,9 +131,11 @@ async def run_repair_stage(
             return_exceptions=True,
         )
         for outcome in results:
-            if isinstance(outcome, BaseException) and not isinstance(
-                outcome, asyncio.CancelledError
+            if isinstance(
+                outcome, (BudgetExceededError, JobInterruptedError, asyncio.CancelledError)
             ):
+                raise outcome
+            if isinstance(outcome, BaseException):
                 # Without return_exceptions=True the first ledger-write failure
                 # propagated while sibling repairs kept calling the paid model
                 # and writing after the stage unwound.

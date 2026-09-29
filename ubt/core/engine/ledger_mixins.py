@@ -463,13 +463,12 @@ class LedgerJobsMixin(LedgerBase):
                 conn.execute("ROLLBACK;")
                 raise LedgerError(f"finalize_job: unknown job '{job_id}'")
             existing = str(row["status"])
-            if status == "completed" and existing in ("cancelled",):
-                # A cancel is authoritative: an export that finishes afterwards
-                # must not rewrite it to a false success. Idempotent no-op (not
-                # an error) so the export stage does not crash after losing the
-                # race.
+            if status in ("completed", "failed") and existing in ("cancelled",):
+                # A cancel is authoritative: an export or worker abort that arrives
+                # afterwards must not rewrite it to a false success or failure. Idempotent
+                # no-op (not an error) so stages do not crash after losing the race.
                 logger.warning(
-                    "finalize_job('completed') ignored for '%s': already cancelled", actual_id
+                    "finalize_job(%r) ignored for '%s': already cancelled", status, actual_id
                 )
                 conn.execute("ROLLBACK;")
                 return

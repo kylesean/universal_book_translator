@@ -14,7 +14,7 @@ from ubt.core.cleaners.code_masker import CodeMasker
 from ubt.core.config import UBTConfig
 from ubt.core.engine.ledger import TARGET_SCHEMA_VERSION, SQLiteJobLedger
 from ubt.core.engine.stages.draft import run_draft_stage
-from ubt.core.exceptions import ModelProviderError
+from ubt.core.exceptions import BudgetExceededError, JobInterruptedError, ModelProviderError
 from ubt.core.ir.models import (
     BlockStatus,
     BookManifest,
@@ -465,3 +465,59 @@ async def test_draft_stage_restores_memory_on_fresh_job(tmp_path: Path) -> None:
             pass
 
     restore_mock.assert_called_once()
+
+
+@pytest.mark.fast
+async def test_draft_stage_reraises_budget_exceeded_error(tmp_path: Path) -> None:
+    """BudgetExceededError must re-raise from draft stage rather than swallow into FAILED."""
+    doc = _make_doc(3)
+    manifest = _make_manifest()
+    ledger = SQLiteJobLedger(tmp_path / "test.sqlite")
+    seed_job(ledger, "job_budget", doc, target_lang="zh")
+    config = _base_config()
+
+    class BudgetExceededRouter(ModelRouter):
+        async def draft(self, *args: Any, **kwargs: Any) -> str:
+            raise BudgetExceededError("Budget exceeded: spent $10.00 > limit $5.00")
+
+    router = BudgetExceededRouter(provider=MockModelProvider())
+    ctx = build_stage_ctx(
+        tmp_path,
+        job_id="job_budget",
+        input_path=tmp_path / "input.epub",
+        config=config,
+        manifest=manifest,
+        ledger=ledger,
+        router=router,
+    )
+    with pytest.raises(BudgetExceededError):
+        async for _ in run_draft_stage(ctx):
+            pass
+
+
+@pytest.mark.fast
+async def test_draft_stage_reraises_job_interrupted_error(tmp_path: Path) -> None:
+    """JobInterruptedError must re-raise from draft stage rather than swallow into FAILED."""
+    doc = _make_doc(3)
+    manifest = _make_manifest()
+    ledger = SQLiteJobLedger(tmp_path / "test.sqlite")
+    seed_job(ledger, "job_interrupt", doc, target_lang="zh")
+    config = _base_config()
+
+    class InterruptRouter(ModelRouter):
+        async def draft(self, *args: Any, **kwargs: Any) -> str:
+            raise JobInterruptedError("Job cancelled")
+
+    router = InterruptRouter(provider=MockModelProvider())
+    ctx = build_stage_ctx(
+        tmp_path,
+        job_id="job_interrupt",
+        input_path=tmp_path / "input.epub",
+        config=config,
+        manifest=manifest,
+        ledger=ledger,
+        router=router,
+    )
+    with pytest.raises(JobInterruptedError):
+        async for _ in run_draft_stage(ctx):
+            pass

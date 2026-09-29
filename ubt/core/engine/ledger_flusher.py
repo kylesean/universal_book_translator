@@ -42,11 +42,15 @@ class CheckpointBatchFlusher:
         ledger: SQLiteJobLedger,
         flush_interval: float = 0.25,
         max_batch_size: int = 50,
+        max_queue_size: int = 1000,
     ) -> None:
         self.ledger = ledger
         self.flush_interval = max(0.01, flush_interval)
         self.max_batch_size = max(1, max_batch_size)
-        self._queue: asyncio.Queue[dict[str, Any] | _Wake] = asyncio.Queue()
+        self.max_queue_size = max(self.max_batch_size, max_queue_size)
+        self._queue: asyncio.Queue[dict[str, Any] | _Wake] = asyncio.Queue(
+            maxsize=self.max_queue_size
+        )
         # Failed batches have priority over updates queued while the database
         # was unavailable. Retrying an older batch before newer checkpoints for
         # the same block preserves the ledger's event order.
@@ -215,7 +219,8 @@ class CheckpointBatchFlusher:
         task, self._flusher_task = self._flusher_task, None
         task_exc: BaseException | None = None
         if task is not None:
-            self._queue.put_nowait(_WAKE)
+            with contextlib.suppress(asyncio.QueueFull):
+                self._queue.put_nowait(_WAKE)
             self._wake.set()
             try:
                 await asyncio.shield(task)

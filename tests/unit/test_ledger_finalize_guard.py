@@ -109,3 +109,12 @@ def test_stale_failure_cannot_overwrite_completed(tmp_path: Path) -> None:
 
     ledger.finalize_job("j1", status="failed")
     assert ledger.get_job_status("j1") == "completed"
+
+
+def test_finalize_failed_cannot_overwrite_cancelled(tmp_path: Path) -> None:
+    """A worker abort/failure must not overwrite a user-initiated cancellation."""
+    ledger = SQLiteJobLedger(tmp_path / "l.sqlite")
+    seed_job(ledger, "j1", _doc(2), target_lang="zh")
+    ledger.finalize_job("j1", status="cancelled")
+    ledger.finalize_job("j1", status="failed")
+    assert ledger.get_job_status("j1") == "cancelled"

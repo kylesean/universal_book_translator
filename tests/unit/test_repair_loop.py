@@ -981,3 +981,42 @@ def test_select_repair_candidates_uses_flags_and_low_score() -> None:
     )
     selected = {b.id for b in loop.select_repair_candidates([flagged, low, clean])}
     assert selected == {"b1", "b2"}
+
+
+@pytest.mark.fast
+async def test_repair_stage_reraises_budget_exceeded_error(tmp_path: Path) -> None:
+    from tests.stage_ctx_factory import build_stage_ctx
+    from ubt.core.engine.stages.repair import run_repair_stage
+    from ubt.core.exceptions import BudgetExceededError
+
+    doc, chapter = _r0922_doc_ir(1)
+    ledger = SQLiteJobLedger(tmp_path / "repair.sqlite")
+    seed_job(ledger, "job_repair_budget", doc, target_lang="zh")
+    ledger.append_chapter("job_repair_budget", chapter)
+    ledger.save_checkpoints_batch(
+        [
+            {
+                "block_id": "ch01#b001",
+                "status": BlockStatus.REPAIR_PENDING,
+                "target_text": "OLD DRAFT",
+                "mtqe_score": 0.31,
+            }
+        ]
+    )
+
+    class BudgetRepairLoop(RepairLoop):
+        async def repair_single_block(self, *args: Any, **kwargs: Any) -> IRBlock:
+            raise BudgetExceededError("Budget exceeded in repair")
+
+    router = ModelRouter(provider=MockModelProvider())
+    qe = MockQERunner()
+    loop = BudgetRepairLoop(router=router, qe_runner=qe)
+    ctx = build_stage_ctx(
+        tmp_path,
+        ledger=ledger,
+        job_id="job_repair_budget",
+        repair_loop=loop,
+    )
+    with pytest.raises(BudgetExceededError):
+        async for _ in run_repair_stage(ctx):
+            pass

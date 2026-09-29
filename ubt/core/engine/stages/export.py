@@ -378,6 +378,12 @@ def _check_completion_ratio(
         for fb in translatable
         if not (fb.target_text or "")
         or fb.status in (BlockStatus.BLOCKED_HUMAN, BlockStatus.FAILED)
+        or any(
+            isinstance(f, str)
+            and f.startswith(("render_skip:", "inplace_skip:"))
+            and not f.startswith(_INTENTIONAL_PRESERVED_SKIP_PREFIXES)
+            for f in fb.error_flags
+        )
     ]
     completed_ratio = 1.0 - len(untranslated) / len(translatable)
     if completed_ratio < min_completion_ratio:
@@ -974,6 +980,7 @@ async def run_export_stage(
     # Render skip pass-through + length conservation, before the report is
     # built (see _apply_render_skip_ledger_pass).
     await _apply_render_skip_ledger_pass(ctx, adapter, manifest, final_blocks)
+    _check_completion_ratio(actual_job_id, final_blocks, min_completion_ratio)
 
     # Clean up any stale quality/metrics reports from prior runs so that
     # the persisted report files always reflect the current render.

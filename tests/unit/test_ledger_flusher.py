@@ -474,3 +474,47 @@ async def test_older_retry_never_overwrites_a_newer_flush_all_value(tmp_path: Pa
     assert blocks["b_001"].target_text == "新值"
     await flusher.close()
     ledger.close()
+
+
+@pytest.mark.asyncio
+async def test_flusher_bounded_queue_backpressure(tmp_path: Path) -> None:
+    ledger = SQLiteJobLedger(tmp_path / "ledger_bounded.sqlite")
+    seed_job(ledger, "job_bounded", _make_test_doc(), target_lang="zh")
+
+    flusher = CheckpointBatchFlusher(
+        ledger, flush_interval=10.0, max_batch_size=2, max_queue_size=2
+    )
+    assert flusher._queue.maxsize == 2
+
+    # Hold _save_lock to simulate slow disk write
+    async with flusher._save_lock:
+        await flusher.enqueue(
+            {"block_id": "b_001", "target_text": "1", "status": BlockStatus.DRAFTED}
+        )
+        await flusher.enqueue(
+            {"block_id": "b_002", "target_text": "2", "status": BlockStatus.DRAFTED}
+        )
+        assert flusher._queue.full()
+
+        # Enqueueing a third item should wait until space is available
+        put_done = False
+
+        async def put_third() -> None:
+            nonlocal put_done
+            await flusher.enqueue(
+                {"block_id": "b_003", "target_text": "3", "status": BlockStatus.DRAFTED}
+            )
+            put_done = True
+
+        task = asyncio.create_task(put_third())
+        await asyncio.sleep(0.02)
+        assert (
+            not put_done
+        )  # Still blocked because queue is full and worker cannot drain without lock
+
+    # Releasing _save_lock allows the flusher worker to drain items
+    await asyncio.sleep(0.05)
+    assert put_done
+    await task
+    await flusher.close()
+    ledger.close()
