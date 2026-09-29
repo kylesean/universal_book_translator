@@ -246,3 +246,17 @@ def test_every_language_profile_names_both_labels() -> None:
         config = resolve_font_config(code)
         assert config.table_prefix not in ("Table", ""), code
         assert config.figure_prefix not in ("Fig.", ""), code
+
+
+def test_untranslated_cjk_fails_fast_pass_for_cjk_to_latin() -> None:
+    """CJK source translated to Latin target must not pass FastPass if target is untranslated CJK."""
+    fp = FastPassFilter(source_lang="zh", target_lang="en")
+    cjk_src = "这是一个非常重要的段落，描述了实验的核心结果与关键发现。"
+    cjk_near = "这是一个非常重要的段落，描述了实验的核心结果与关键发现！"
+    decision = fp.evaluate(cjk_src, cjk_near)
+    assert decision.passed is False
+    assert (
+        "script density" in decision.reason.lower()
+        or "echo" in decision.reason.lower()
+        or "not translated" in decision.reason.lower()
+    )

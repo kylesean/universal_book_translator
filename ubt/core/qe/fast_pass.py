@@ -42,7 +42,7 @@ _REPETITION_PATTERN = re.compile(r"(.{4,20}?)\1{3,}")  # Detect 4+ repetitions o
 # sparse numeric tables like repeated "| 0 | 0 |" rows don't trip it).
 _REPETITION_LINE_RUN = 4
 _REPETITION_LINE_MIN_LETTERS = 3
-_LINE_LETTER_RE = re.compile(r"[A-Za-z\u4e00-\u9fff]")
+_LINE_LETTER_RE = re.compile(r"[A-Za-z\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]")
 # URLs survive translation verbatim, so they are stripped before script-density
 # measurement (same rationale as HTML tags). Bare domains without a scheme or
 # www. prefix are left in place: indistinguishable from ordinary latin tokens.
@@ -255,7 +255,9 @@ def is_verbatim_echo(source_text: str, target_text: str) -> bool:
 REHEARSAL_MARKER = "[模拟翻译]"
 
 
-def is_near_verbatim_echo(source_text: str, target_text: str) -> bool:
+def is_near_verbatim_echo(
+    source_text: str, target_text: str, *, target_is_cjk: bool = True
+) -> bool:
     """True when the target keeps almost all source words without translating.
 
     The exact-equality echo gate is blind to a one-character difference, and
@@ -272,7 +274,7 @@ def is_near_verbatim_echo(source_text: str, target_text: str) -> bool:
     directly: a target written in a CJK script is translated by definition, so
     the Latin-token retention test never runs on it.
     """
-    if len(_CJK_SCRIPT_RE.findall(target_text)) >= _NEAR_ECHO_CJK_EXEMPT:
+    if target_is_cjk and len(_CJK_SCRIPT_RE.findall(target_text)) >= _NEAR_ECHO_CJK_EXEMPT:
         return False
     if REHEARSAL_MARKER in target_text:
         # A ``--dry-run`` echo is an intentional rehearsal artifact, not an
@@ -457,7 +459,9 @@ class FastPassFilter:
             not skip_translate
             and _is_prose
             and src_clean != tgt_clean
-            and is_near_verbatim_echo(src_clean, tgt_clean)
+            and is_near_verbatim_echo(
+                src_clean, tgt_clean, target_is_cjk=self.profile.code in ("zh", "ja", "ko")
+            )
         ):
             return FastPassDecision(
                 passed=False,

@@ -63,6 +63,16 @@ RENDER_MODE_VALUE: dict[DualMode, str] = {
     "facing": "facing_spread",
 }
 
+# Baseline mode preference penalties: as a bilingual translator, bilingual layouts
+# (inline / alternating) are intrinsically preferred over degrading to monolingual.
+# Monolingual carries a baseline penalty of 0.20 so alternating is chosen unless
+# structural chaos degrades it below 0.80.
+_BASE_MODE_PENALTY: dict[DualMode, float] = {
+    "inline": 0.0,
+    "alternating": 0.0,
+    "monolingual": 0.20,
+}
+
 # Secondary artifact suffixes for dual output (BabelDOC no-dual/no-mono style).
 SECONDARY_SUFFIX: dict[DualMode, str] = {
     "inline": "_mono",
@@ -290,7 +300,7 @@ def advise_layout(
     sensitivity = _PROFILE_SENSITIVITY.get(profile, 0.8)
     scored: list[ModeScore] = []
     for mode in MODES:
-        score = 1.0
+        score = 1.0 - _BASE_MODE_PENALTY.get(mode, 0.0)
         hits: list[str] = []
         for rule in RULES:
             detail = rule.fires(signals)

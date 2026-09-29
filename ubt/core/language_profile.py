@@ -94,10 +94,10 @@ class LanguageProfile:
 ZH = LanguageProfile("zh", "Chinese", 0.2, 3.0, 0.25, cjk_script_ratio)
 JA = LanguageProfile("ja", "Japanese", 0.2, 2.5, 0.10, kana_script_ratio)
 KO = LanguageProfile("ko", "Korean", 0.2, 2.5, 0.30, hangul_script_ratio)
-FR = LanguageProfile("fr", "French", 0.6, 1.8, 0.0, latin_script_ratio)
-DE = LanguageProfile("de", "German", 0.7, 2.0, 0.0, latin_script_ratio)
-ES = LanguageProfile("es", "Spanish", 0.6, 1.8, 0.0, latin_script_ratio)
-EN = LanguageProfile("en", "English", 0.6, 1.8, 0.0, latin_script_ratio)
+FR = LanguageProfile("fr", "French", 0.6, 1.8, 0.25, latin_script_ratio)
+DE = LanguageProfile("de", "German", 0.7, 2.0, 0.25, latin_script_ratio)
+ES = LanguageProfile("es", "Spanish", 0.6, 1.8, 0.25, latin_script_ratio)
+EN = LanguageProfile("en", "English", 0.6, 1.8, 0.25, latin_script_ratio)
 RU = LanguageProfile("ru", "Russian", 0.6, 2.0, 0.25, cyrillic_script_ratio)
 
 PROFILES: dict[str, LanguageProfile] = {p.code: p for p in (ZH, JA, KO, FR, DE, ES, EN, RU)}

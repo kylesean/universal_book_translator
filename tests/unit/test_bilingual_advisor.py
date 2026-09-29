@@ -339,3 +339,17 @@ async def test_mode_advisory_forces_a_fresh_block_read(
     assert refresh_flags == [True], "the advise read must force a refresh"
     assert events, "the stage still emits its MODE_ADVISED event"
     assert seen and {b.id for b in seen[0]} == {"b1"}, "the ledger's current rows must be used"
+
+
+def test_moderate_layout_prefers_alternating_over_monolingual() -> None:
+    """When inline is discouraged due to modest layout interruptions, alternating must beat monolingual."""
+    blocks = []
+    for i in range(1, 100):
+        blocks.append(
+            _block(i, BlockType.NARRATIVE, "Sample text block for testing.", page=(i // 10) + 1)
+        )
+    blocks.append(_block(101, BlockType.TABLE, "| A | B |", page=5))
+    advisory = advise_layout(blocks, "inline", profile="general")
+    alternating_score = next(m.score for m in advisory.ranking if m.mode == "alternating")
+    monolingual_score = next(m.score for m in advisory.ranking if m.mode == "monolingual")
+    assert alternating_score > monolingual_score

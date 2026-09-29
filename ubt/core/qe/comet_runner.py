@@ -666,7 +666,7 @@ class HeuristicQERunner(BaseQERunner):
             # test_d2_echo_regression. Only non-"leak" scaffold phrasings
             # reach this branch.
             return QE_SCORE_FABRICATED
-        if "html" in r:
+        if "html" in r or "table" in r or "math" in r or "latex" in r:
             return QE_SCORE_HTML_DELTA
         if "omission" in r:
             return QE_SCORE_OMISSION

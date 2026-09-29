@@ -81,6 +81,40 @@ def test_fast_pass_filter_rejects_newline_separated_repetition_loop() -> None:
 
 
 @pytest.mark.fast
+def test_fast_pass_line_loop_detects_korean_and_japanese_kana_loops() -> None:
+    """Line-level repetition loop detection must catch Hangul and Kana loops."""
+    src = "The experiment proceeded without incident."
+
+    # Korean loop
+    fp_ko = FastPassFilter(source_lang="en", target_lang="ko")
+    tgt_ko = "실험은 순조롭게 진행되었습니다.\n실험은 순조롭게 진행되었습니다.\n실험은 순조롭게 진행되었습니다.\n실험은 순조롭게 진행되었습니다."
+    dec_ko = fp_ko.evaluate(src, tgt_ko)
+    assert dec_ko.passed is False
+    assert "Repetitive loop" in dec_ko.reason
+
+    # Japanese Kana loop
+    fp_ja = FastPassFilter(source_lang="en", target_lang="ja")
+    tgt_ja = "ありがとうございます。\nありがとうございます。\nありがとうございます。\nありがとうございます。"
+    dec_ja = fp_ja.evaluate(src, tgt_ja)
+    assert dec_ja.passed is False
+    assert "Repetitive loop" in dec_ja.reason
+
+
+@pytest.mark.fast
+def test_heuristic_qe_scores_math_and_table_defects_below_gray_band() -> None:
+    """Structural math and table defects must score below the 0.70 gray band to avoid paid LLM judge."""
+    from ubt.core.qe.comet_runner import HeuristicQERunner
+
+    assert HeuristicQERunner.score_from_decision_reason("Table dropped") <= 0.35
+    assert HeuristicQERunner.score_from_decision_reason("Table grid mismatch") <= 0.35
+    assert (
+        HeuristicQERunner.score_from_decision_reason("Math span mismatch: missing formula") <= 0.35
+    )
+    assert HeuristicQERunner.score_from_decision_reason("Undelimited math formula") <= 0.35
+    assert HeuristicQERunner.score_from_decision_reason("Hallucinated LaTeX in target") <= 0.35
+
+
+@pytest.mark.fast
 def test_fast_pass_line_loop_allows_legitimate_repeats() -> None:
     """Non-contiguous repeats and numeric tables stay exempt (structural gate)."""
     fp = FastPassFilter(source_lang="en", target_lang="zh")
