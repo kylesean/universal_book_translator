@@ -32,7 +32,7 @@ _ENCODING_DECL_RE = re.compile(
 #: neither a BOM nor a declared encoding. Restricting the set keeps it from
 #: guessing UTF-16 or Korean for a short GBK sample; on whole-file input the
 #: guess is reliable, but a narrow plausible set makes short files reliable too.
-_FALLBACK_ENCODINGS = ("utf_8", "utf_16", "gb18030", "big5", "cp932", "euc_kr", "cp1252")
+_FALLBACK_ENCODINGS = ("utf_8", "gb18030", "big5", "cp932", "cp1252")
 
 
 def decode_markup(raw: bytes) -> str:
