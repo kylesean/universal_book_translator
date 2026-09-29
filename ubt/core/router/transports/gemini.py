@@ -138,7 +138,10 @@ class GeminiTransport(BaseTransport):
             {
                 "model": target_model,
                 "prompt_tokens": int(usage.get("promptTokenCount", 0) or 0),
-                "completion_tokens": int(usage.get("candidatesTokenCount", 0) or 0),
+                # candidatesTokenCount excludes thinking; thoughtsTokenCount is
+                # billed as output, so both count toward completion tokens.
+                "completion_tokens": int(usage.get("candidatesTokenCount", 0) or 0)
+                + int(usage.get("thoughtsTokenCount", 0) or 0),
                 "prompt_cache_hit_tokens": int(usage.get("cachedContentTokenCount", 0) or 0),
             },
             unmeasured=not usage,

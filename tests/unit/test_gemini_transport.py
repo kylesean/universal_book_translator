@@ -78,6 +78,35 @@ async def test_usage_maps_cached_content_tokens() -> None:
 
 
 @pytest.mark.asyncio
+async def test_usage_counts_thoughts_as_output_tokens() -> None:
+    """Thinking tokens are billed as output and must count toward completion.
+
+    ``candidatesTokenCount`` excludes ``thoughtsTokenCount`` on the
+    generateContent endpoint; reading only the former silently under-bills
+    every thinking-enabled call (the default draft/repair profiles enable
+    thinking), so cost reports and the budget gate drift low.
+    """
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "candidates": [{"content": {"parts": [{"text": "ok"}]}, "finishReason": "STOP"}],
+                "usageMetadata": {
+                    "promptTokenCount": 100,
+                    "candidatesTokenCount": 50,
+                    "thoughtsTokenCount": 200,
+                },
+            },
+        )
+
+    transport = _transport(handler)
+    await transport.generate("hi")
+
+    assert transport.usage_totals["completion_tokens"] == 250
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("finish_reason", "expected"),
     [("MAX_TOKENS", "length"), ("STOP", "stop"), ("SAFETY", None)],
