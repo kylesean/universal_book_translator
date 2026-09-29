@@ -361,7 +361,7 @@ def doctor_command(
             f"no price-table entry for {', '.join(unpriced)} \u2014 cost reports as "
             "unknown and --budget-usd cannot trip",
             fix=(
-                "add the per-MTok rate to resources/prices.toml "
+                "add the per-MTok rate to ubt/resources/prices.toml "
                 "(legacy fallback: MODEL_PRICES_USD_PER_MTOK in ubt/core/router/pricing.py)"
             ),
         )
@@ -498,7 +498,7 @@ def doctor_command(
                 "PDF engine",
                 "WARN",
                 "auto routing needs docling for layout analysis but it is not "
-                "installed \u2014 complex PDFs silently degrade to the pypdf fast path "
+                "installed \u2014 complex PDFs silently degrade to the pypdfium2 fast path "
                 "and whole pages arrive as one untranslatable block",
                 fix="uv sync --extra pdf, or set UBT_PDF_ENGINE=pdfium to force the fast path",
             )

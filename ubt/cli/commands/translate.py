@@ -79,7 +79,7 @@ def translate(
         typer.Option(
             "--output",
             "-o",
-            help="Target output bilingual document path (default: tmp/output/<stem>_bilingual<suffix>)",
+            help="Target output bilingual document path (default: <documents>/UBT/<stem>_bilingual<suffix>)",
         ),
     ] = None,
     source_lang: Annotated[

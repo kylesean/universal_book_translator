@@ -1256,7 +1256,8 @@ def run_server(host: str | None = None, port: int | None = None) -> None:
     """CLI helper to boot uvicorn server.
 
     Defaults to binding localhost only. The service now refuses to start without
-    an API key gate: set ``UBT_API_KEY`` (or ``UBT_STRICT_AUTH=1``). For a local,
+    an API key gate: set ``UBT_API_KEY`` (``UBT_STRICT_AUTH=1`` makes the
+    refusal fatal instead of a warning-and-continue). For a local,
     throwaway server, ``UBT_ALLOW_NO_AUTH=1`` restores the old open behaviour.
     """
     host, port = _resolve_bind(host, port)
