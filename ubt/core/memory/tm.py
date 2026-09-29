@@ -542,15 +542,20 @@ class TranslationMemory:
                 return None
 
             def _candidate_rank(r: tuple[Any, ...]) -> tuple[int, int, int, int]:
+                # human_pe outranks context. A PE import carries no context
+                # hash, so ranking context first let an exact-context machine
+                # row shadow the reviewed rendering — contradicting the
+                # writeback contract that human review is the highest-trust
+                # signal in the pipeline.
                 r_id, _, _, prov, r_ctx, r_domain = r
+                is_human = 1 if prov == PROVENANCE_HUMAN_PE else 0
                 exact_ctx = (
                     1
                     if (context_hash and r_ctx == context_hash) or (not context_hash and not r_ctx)
                     else 0
                 )
-                is_human = 1 if prov == PROVENANCE_HUMAN_PE else 0
                 same_domain = 1 if domain and r_domain == domain else 0
-                return (exact_ctx, is_human, same_domain, int(r_id))
+                return (is_human, exact_ctx, same_domain, int(r_id))
 
             best_row = max(valid_rows, key=_candidate_rank)
             hit_id = int(best_row[0])

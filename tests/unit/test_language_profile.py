@@ -52,13 +52,52 @@ def test_french_profile_approves_french_translation() -> None:
 
 
 def test_japanese_profile_approves_japanese_translation() -> None:
-    """ja profile gates on kana density instead of CJK ideographs."""
+    """ja profile gates on Japanese script (kana + ideographs)."""
     fp = FastPassFilter(get_profile("ja"))
     decision = fp.evaluate(
         "Psychological research shows that sleep deprivation significantly impairs cognition.",
         "心理学の研究により、睡眠不足が認知能力を著しく損なうことが示されている。",
     )
     assert decision.passed is True
+
+
+def test_ja_script_ratio_counts_kanji_and_kana() -> None:
+    """Kanji is Japanese script; a kana-only ratio reads 0.0 on a kanji-only title."""
+    from ubt.core.language_profile import ja_script_ratio
+
+    assert ja_script_ratio("深層学習") == 1.0
+    assert ja_script_ratio("ひらがな") == 1.0
+    assert ja_script_ratio("画像処理と機械翻訳") == 1.0
+    # A Latin target carries no Japanese identity: the gate must still catch it.
+    assert ja_script_ratio("Deep Learning") == 0.0
+
+
+def test_japanese_profile_accepts_kanji_only_targets() -> None:
+    """A correct kanji-only heading must not be quarantined as untranslated.
+
+    Regression: the target-identity ratio counted only Hiragana+Katakana, so
+    "深層学習"/"第1章 概要"/"画像処理技術" measured 0.00 and FastPass rejected them
+    with "Insufficient ja script density" — routine in Japanese technical books.
+    """
+    from ubt.core.ir.models import BlockType
+
+    fp = FastPassFilter(source_lang="en", target_lang="ja")
+    for src, tgt in (
+        ("Chapter 1 Overview", "第1章 概要"),
+        ("Deep Learning", "深層学習"),
+        ("Image processing technology", "画像処理技術"),
+    ):
+        decision = fp.evaluate(src, tgt, block_type=BlockType.HEADING)
+        assert decision.passed is True, f"{tgt!r} rejected: {decision.reason}"
+
+    # The gate still has teeth: a Latin target carries no Japanese identity.
+    latin = fp.evaluate(
+        "Deep learning models are powerful.",
+        "Powerful models are deep learning.",
+        block_type=BlockType.NARRATIVE,
+    )
+    assert latin.passed is False
+    assert "script density" in latin.reason
 
 
 def test_unknown_profile_raises_instead_of_silent_fallback() -> None:

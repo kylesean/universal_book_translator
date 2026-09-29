@@ -32,13 +32,19 @@ def cjk_script_ratio(text: str) -> float:
     return count / total
 
 
-def kana_script_ratio(text: str) -> float:
-    """Fraction of Hiragana + Katakana among non-space chars (Japanese identity)."""
+def ja_script_ratio(text: str) -> float:
+    """Fraction of Japanese script — Kana *or* CJK ideographs — among non-space chars.
+
+    Japanese uses three scripts, so a kana-only ratio measures 0.0 on a
+    kanji-only heading ("深層学習") and quarantines a correct translation as
+    untranslated. Ideographs count as Japanese identity alongside Kana; what the
+    gate must still reject is a target with no Japanese script at all (an
+    untranslated English echo). Kana and ideograph ranges are disjoint, so the
+    two counts never overlap.
+    """
     total = _prose_total(text)
-    count = sum(
-        1 for c in text for lo, hi in ((0x3040, 0x309F), (0x30A0, 0x30FF)) if lo <= ord(c) <= hi
-    )
-    return count / total
+    kana = sum(1 for c in text if 0x3040 <= ord(c) <= 0x30FF)
+    return kana / total + cjk_script_ratio(text)
 
 
 def hangul_script_ratio(text: str) -> float:
@@ -93,7 +99,7 @@ class LanguageProfile:
 # Production construction paths passing source_lang/target_lang resolve through
 # :func:`get_pair_policy`, whose ("en", "zh") band is calibrated to (0.2, 1.5).
 ZH = LanguageProfile("zh", "Chinese", 0.2, 3.0, 0.25, cjk_script_ratio)
-JA = LanguageProfile("ja", "Japanese", 0.2, 2.5, 0.10, kana_script_ratio)
+JA = LanguageProfile("ja", "Japanese", 0.2, 2.5, 0.10, ja_script_ratio)
 KO = LanguageProfile("ko", "Korean", 0.2, 2.5, 0.30, hangul_script_ratio)
 FR = LanguageProfile("fr", "French", 0.6, 1.8, 0.25, latin_script_ratio)
 DE = LanguageProfile("de", "German", 0.7, 2.0, 0.25, latin_script_ratio)

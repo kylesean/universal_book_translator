@@ -400,6 +400,34 @@ def test_human_pe_falls_back_across_contexts(tm: TranslationMemory) -> None:
     assert hit.provenance == PROVENANCE_HUMAN_PE
 
 
+def test_human_pe_outranks_a_context_matching_machine_row(tm: TranslationMemory) -> None:
+    """Human review is the highest-trust signal, over an exact-context MT row too.
+
+    Regression: the candidate rank compared context before provenance, so a
+    machine row carrying the run's context hash beat the human-reviewed row for
+    the same source (a PE import carries no context hash) and the reviewed
+    rendering was never served again.
+    """
+    from ubt.core.memory.tm import compute_tm_context
+
+    ctx = compute_tm_context("v1", "general", "", "en", "zh")
+    tm.writeback(
+        [
+            TMPendingEntry(
+                "en", "zh", "Reviewed sentence.", "机器版。", PROVENANCE_MACHINE, context_hash=ctx
+            )
+        ]
+    )
+    tm.writeback(
+        [TMPendingEntry("en", "zh", "Reviewed sentence.", "人工审校版。", PROVENANCE_HUMAN_PE)]
+    )
+
+    hit = tm.lookup_exact("en", "zh", "Reviewed sentence.", ctx)
+    assert hit is not None
+    assert hit.provenance == PROVENANCE_HUMAN_PE
+    assert hit.target_text == "人工审校版。"
+
+
 def test_machine_legacy_does_not_fall_back(tm: TranslationMemory) -> None:
     """Stale machine rows from pre-context days must not skip the LLM."""
     from ubt.core.memory.tm import compute_tm_context
