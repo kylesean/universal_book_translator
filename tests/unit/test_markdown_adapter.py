@@ -541,3 +541,31 @@ def test_sanitizer_strips_slash_delimited_event_handlers_and_js_urls() -> None:
     # Slash-delimited javascript: URL
     assert "javascript:" not in _sanitize_markdown_content("<a/href=javascript:alert(1)>click</a>")
     assert "javascript:" not in _sanitize_markdown_content('<img/src="javascript:alert(1)">')
+
+
+@pytest.mark.asyncio
+async def test_math_fence_inside_code_fence_does_not_swallow_book(tmp_path: Path) -> None:
+    """A ``$$`` line inside a fenced code block must stay code content.
+
+    ``parse_stream`` tested ``$$`` before the code-fence boundary, so a ``$$``
+    line inside a fence flipped into math mode, swallowed every later line
+    (including the closing fence) into one skip-translate formula block, and
+    silently dropped all following chapters while ``extract_manifest`` still
+    reported them. The two passes must agree.
+    """
+    md = tmp_path / "book.md"
+    md.write_text(
+        "# Chapter 1\nalpha text\n\n"
+        "```python\n$$\nprint('hi')\n```\n\n"
+        "# Chapter 2\nbeta text\n\n"
+        "# Chapter 3\ngamma text\n",
+        encoding="utf-8",
+    )
+    adapter = MarkdownAdapter()
+    manifest_ids = [c.chapter_id for c in (await adapter.extract_manifest(md)).chapters]
+    stream = [ch async for ch in adapter.parse_stream(md)]
+    stream_ids = [ch.chapter_id for ch in stream]
+    assert stream_ids == manifest_ids
+    texts = [b.source_text for ch in stream for b in ch.blocks]
+    assert any("beta text" in t for t in texts)
+    assert any("gamma text" in t for t in texts)

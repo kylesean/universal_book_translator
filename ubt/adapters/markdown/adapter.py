@@ -358,6 +358,24 @@ class MarkdownAdapter(BaseDocumentAdapter):
                     para_lines.append(line)
                 continue
 
+            # Handle fenced code block boundary — before the math fence, so a
+            # ``$$`` line inside a fence stays code content (mirrors the order
+            # extract_manifest scans the same document).
+            if line_s.startswith("```"):
+                if in_code_block:
+                    code_lines.append(line)
+                    in_code_block = False
+                    flush_code()
+                else:
+                    flush_paragraph()
+                    in_code_block = True
+                    code_lines.append(line)
+                continue
+
+            if in_code_block:
+                code_lines.append(line)
+                continue
+
             # Handle fenced math block boundary ($$)
             if line_s.startswith("$$"):
                 if in_math_block:
@@ -376,22 +394,6 @@ class MarkdownAdapter(BaseDocumentAdapter):
 
             if in_math_block:
                 math_lines.append(line)
-                continue
-
-            # Handle fenced code block boundary
-            if line_s.startswith("```"):
-                if in_code_block:
-                    code_lines.append(line)
-                    in_code_block = False
-                    flush_code()
-                else:
-                    flush_paragraph()
-                    in_code_block = True
-                    code_lines.append(line)
-                continue
-
-            if in_code_block:
-                code_lines.append(line)
                 continue
 
             # Check if this line is an ATX heading
