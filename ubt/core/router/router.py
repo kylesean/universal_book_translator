@@ -526,6 +526,10 @@ class ModelRouter:
             if callable(fallback_closer):
                 await fallback_closer()
             self._fallback_provider = None
+        if self.rate_limiter is not None:
+            rl_closer = getattr(self.rate_limiter, "close", None)
+            if callable(rl_closer):
+                rl_closer()
 
     def _get_profile(self, model_name: str | None = None) -> ModelProfile:
         """Resolve model capability profile from registry, or default to standard LLM."""
@@ -1614,6 +1618,8 @@ class ModelRouter:
                     raw_res,
                     strategy=actual_profile.extraction_strategy,
                 )
+            except (asyncio.CancelledError, JobInterruptedError, BudgetExceededError):
+                raise
             except Exception as exc:
                 logger.warning(
                     "Visual repair failed for block %s; falling back to text repair: %s",

@@ -640,3 +640,62 @@ def test_a_model_name_does_not_switch_the_transport() -> None:
         api_mode="openai-chat",
     )
     assert provider._select_transport() is provider._chat_transport
+
+
+@pytest.mark.fast
+@pytest.mark.asyncio
+async def test_anthropic_transport_400_self_heals_thinking() -> None:
+    """When Anthropic rejects thinking with 400, transport drops thinking and self-heals."""
+    from ubt.core.router.transports.anthropic import AnthropicMessagesTransport
+
+    calls: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content.decode("utf-8"))
+        calls.append(body)
+        if len(calls) == 1:
+            return httpx.Response(
+                400,
+                text='{"type":"error","error":{"type":"invalid_request_error","message":"thinking is not supported for this model"}}',
+            )
+        return httpx.Response(
+            200,
+            json={
+                "id": "msg_healed",
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "text", "text": "Healed response"}],
+                "stop_reason": "end_turn",
+                "usage": {"input_tokens": 10, "output_tokens": 5},
+            },
+        )
+
+    transport = AnthropicMessagesTransport(
+        api_key="sk-ant-test",
+        default_model="claude-3-5-haiku",
+        transport=httpx.MockTransport(handler),
+    )
+
+    text = await transport.generate("test prompt", reasoning_effort="high")
+    assert text == "Healed response"
+    assert len(calls) == 2
+    assert "thinking" in calls[0]
+    assert "thinking" not in calls[1]
+
+
+@pytest.mark.fast
+def test_gemini_transport_reasoning_effort_none_sends_budget_zero() -> None:
+    """When reasoning_effort is 'none' or 'off', Gemini transport sets thinkingBudget to 0."""
+    from ubt.core.router.transports.gemini import GeminiTransport
+
+    transport = GeminiTransport(api_key="gem-test")
+    payload = transport._build_payload(
+        prompt="hello",
+        images_b64_png=None,
+        system_prompt=None,
+        temperature=0.7,
+        max_tokens=100,
+        reasoning_effort="none",
+    )
+    assert "generationConfig" in payload
+    assert payload["generationConfig"].get("thinkingConfig") == {"thinkingBudget": 0}

@@ -176,6 +176,22 @@ def _heal_drop_temperature(*keys: str) -> _HealFix:
     return fix
 
 
+_ANTHROPIC_THINKING_KEYS = ("thinking", "budget_tokens")
+
+
+def _heal_drop_thinking(*keys: str) -> _HealFix:
+    """Build the 'endpoint has no thinking/reasoning' cleaner for Anthropic/Claude."""
+
+    def fix(err_text: str, payload: dict[str, Any]) -> dict[str, Any] | None:
+        if "thinking" in payload and any(k in err_text for k in keys):
+            fixed = dict(payload)
+            fixed.pop("thinking", None)
+            return fixed
+        return None
+
+    return fix
+
+
 class BaseTransport(ABC):
     """Base transport providing connection pooling, metrics, and auth headers."""
 

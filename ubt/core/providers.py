@@ -201,6 +201,7 @@ PROTOCOL_ALIASES: dict[str, str] = {
     # Provider shorthand aliases
     "openai": "openai-chat",
     "anthropic": "anthropic-messages",
+    "claude": "anthropic-messages",
     "gemini": "gemini-native",
     # Protocol shorthand aliases
     "chat": "openai-chat",
@@ -231,7 +232,14 @@ def load_provider_block(name: str, custom_path: Path | str | None = None) -> dic
         declared = {}
 
     canonical_name = PROTOCOL_ALIASES.get(name, name)
-    if name not in shipped and canonical_name not in shipped and name not in declared:
+    user_block = declared.get(name) or declared.get(canonical_name)
+    if user_block is None:
+        for alias, canon in PROTOCOL_ALIASES.items():
+            if canon == canonical_name and alias in declared:
+                user_block = declared.get(alias)
+                break
+
+    if name not in shipped and canonical_name not in shipped and user_block is None:
         available = list_providers(custom_path)
         raise ProviderNotFoundError(
             f"Provider '{name}' not found. Available providers: {available if available else 'none'}"
@@ -243,7 +251,6 @@ def load_provider_block(name: str, custom_path: Path | str | None = None) -> dic
     if base_preset is not None:
         fields.update(dict(base_preset))
 
-    user_block = declared.get(name)
     if user_block is not None:
         if not isinstance(user_block, dict):
             raise ProviderConfigError(f"[providers.{name}] must be a table")

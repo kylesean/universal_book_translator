@@ -517,3 +517,33 @@ def test_custom_pricing_and_free_endpoints() -> None:
         assert estimate_cost_usd(totals, base_url="https://free.internal.corp/v1") == 0.0
     finally:
         reset_custom_pricing()
+
+
+def test_estimate_cost_usd_honors_per_model_batch_discount() -> None:
+    """Pricing must respect PriceEntry.batch_discount instead of hardcoding 0.5."""
+    from ubt.core.router.pricing import (
+        register_custom_model_pricing,
+        reset_custom_pricing,
+    )
+
+    try:
+        # Register a model with a 75% batch discount (batch_discount = 0.25)
+        # Input price: $1.00 / MTok, output price: $2.00 / MTok
+        register_custom_model_pricing(
+            "deep-discount-model",
+            (1.0, 2.0),
+            batch_discount=0.25,
+        )
+        totals = {
+            "deep-discount-model": {
+                "prompt_tokens": 1_000_000,
+                "completion_tokens": 0,
+                "batch_prompt_tokens": 1_000_000,
+                "batch_completion_tokens": 0,
+            }
+        }
+        # 1M tokens * $1.00 / MTok * 0.25 = $0.25 (with hardcoded 0.5 it would be $0.50)
+        cost = estimate_cost_usd(totals)
+        assert cost == 0.25
+    finally:
+        reset_custom_pricing()

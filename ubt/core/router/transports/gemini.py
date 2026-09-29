@@ -11,7 +11,13 @@ from ubt.core.router.transports.base import BaseTransport
 logger = logging.getLogger(__name__)
 
 #: ``reasoning_effort`` -> Gemini ``thinkingConfig.thinkingBudget`` token budget.
-_REASONING_EFFORT_BUDGETS: dict[str, int] = {"low": 1024, "medium": 4096, "high": 8192}
+_REASONING_EFFORT_BUDGETS: dict[str, int] = {
+    "none": 0,
+    "off": 0,
+    "low": 1024,
+    "medium": 4096,
+    "high": 8192,
+}
 
 #: ``finishReason`` values that mean the model was cut off by the token limit.
 _LENGTH_REASONS = frozenset({"MAX_TOKENS"})

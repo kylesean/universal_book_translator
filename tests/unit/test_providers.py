@@ -441,3 +441,26 @@ def test_explicit_api_key_override_survives_a_provider(
         UBTConfig.from_env(), {"provider": "custom", "api_key": SecretStr("sk-explicit")}
     )
     assert cfg.api_key.get_secret_value() == "sk-explicit"
+
+
+def test_load_provider_block_resolves_canonical_and_alias_symmetrically(
+    tmp_path: Path,
+) -> None:
+    """load_provider_block must find user blocks declared by alias or by canonical name."""
+    cfg_file = tmp_path / "custom_providers.toml"
+    cfg_file.write_text(
+        "[providers.openai]\n"
+        'draft_model = "user-gpt-draft"\n'
+        "\n"
+        "[providers.anthropic-messages]\n"
+        'draft_model = "user-claude-draft"\n',
+        encoding="utf-8",
+    )
+
+    # 1. User defined under alias "openai", queried by canonical "openai-chat"
+    block_canonical = load_provider_block("openai-chat", custom_path=cfg_file)
+    assert block_canonical["draft_model"] == "user-gpt-draft"
+
+    # 2. User defined under canonical "anthropic-messages", queried by alias "claude" / "anthropic"
+    block_alias = load_provider_block("claude", custom_path=cfg_file)
+    assert block_alias["draft_model"] == "user-claude-draft"

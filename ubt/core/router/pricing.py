@@ -268,6 +268,7 @@ def _declared_local_hostnames() -> set[str]:
 
 _CUSTOM_PRICES: dict[str, tuple[float, float]] = {}
 _CUSTOM_CACHED_PRICES: dict[str, float] = {}
+_CUSTOM_BATCH_DISCOUNTS: dict[str, float] = {}
 _CUSTOM_FREE_ENDPOINTS: set[str] = set()
 
 
@@ -275,12 +276,15 @@ def register_custom_model_pricing(
     model_prefix: str,
     prices: tuple[float, float],
     cached_input: float | None = None,
+    batch_discount: float | None = None,
 ) -> None:
     """Register or override a custom model pricing entry."""
     norm = model_prefix.strip().lower()
     _CUSTOM_PRICES[norm] = prices
     if cached_input is not None:
         _CUSTOM_CACHED_PRICES[norm] = cached_input
+    if batch_discount is not None:
+        _CUSTOM_BATCH_DISCOUNTS[norm] = batch_discount
 
 
 def declare_custom_free_endpoint(base_url: str) -> None:
@@ -293,6 +297,7 @@ def reset_custom_pricing() -> None:
     """Clear all registered custom prices and free endpoints."""
     _CUSTOM_PRICES.clear()
     _CUSTOM_CACHED_PRICES.clear()
+    _CUSTOM_BATCH_DISCOUNTS.clear()
     _CUSTOM_FREE_ENDPOINTS.clear()
 
 
@@ -518,6 +523,36 @@ def resolve_cached_input_price(model: str) -> float:
     return input_price
 
 
+def resolve_batch_discount(model: str) -> float:
+    """Resolve the batch discount factor (e.g. 0.5 for 50% discount)."""
+    normalized = (model or "").strip().lower()
+    candidates = [normalized]
+    if "/" in normalized:
+        candidates.append(normalized.split("/", 1)[-1])
+        last_segment = normalized.rsplit("/", 1)[-1]
+        if last_segment not in candidates:
+            candidates.append(last_segment)
+
+    for cand in candidates:
+        if cand in _CUSTOM_BATCH_DISCOUNTS:
+            return _CUSTOM_BATCH_DISCOUNTS[cand]
+
+    table = _current_prices_table()
+    for cand in candidates:
+        if cand in table:
+            return table[cand].batch_discount
+
+    best_key = ""
+    best_discount = BATCH_API_DISCOUNT
+    for cand in candidates:
+        for key, entry in table.items():
+            if cand.startswith(key) and len(key) > len(best_key):
+                best_key = key
+                best_discount = entry.batch_discount
+
+    return best_discount
+
+
 def has_price_entry(model: str) -> bool:
     """True when the model resolves to an explicit price-table entry.
 
@@ -621,11 +656,12 @@ def estimate_cost_usd(
             continue
         input_price, output_price = resolve_model_prices(model)
         cached_input_price = resolve_cached_input_price(model)
+        batch_discount = resolve_batch_discount(model)
         prompt_tokens = int(totals.get("prompt_tokens", 0) or 0)
         completion_tokens = int(totals.get("completion_tokens", 0) or 0)
         cached_tokens = min(int(totals.get("cached_tokens", 0) or 0), prompt_tokens)
         # Batch-served tokens are a *subset* of the totals above, not an
-        # addition: they were recorded with ``batch=True`` and bill at half
+        # addition: they were recorded with ``batch=True`` and bill at discount
         # rate. Splitting them out here (rather than discounting the whole
         # model) is what keeps a repair/QE call on the same model at full
         # price — without it the runtime overstated batch runs ~2x and tripped
@@ -650,7 +686,7 @@ def estimate_cost_usd(
             + batch_cached * cached_input_price
             + batch_completion * output_price
         )
-        total_cost += (interactive_cost + batch_cost * BATCH_API_DISCOUNT) / 1_000_000
+        total_cost += (interactive_cost + batch_cost * batch_discount) / 1_000_000
     return round(total_cost, 6)
 
 

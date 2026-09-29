@@ -8,8 +8,10 @@ from typing import Any
 from ubt.core.exceptions import ModelProviderError
 from ubt.core.router.transports.base import (
     _ANTHROPIC_TEMPERATURE_KEYS,
+    _ANTHROPIC_THINKING_KEYS,
     BaseTransport,
     _heal_drop_temperature,
+    _heal_drop_thinking,
 )
 
 logger = logging.getLogger(__name__)
@@ -123,7 +125,10 @@ class AnthropicMessagesTransport(BaseTransport):
                 url,
                 payload,
                 response,
-                (_heal_drop_temperature(*_ANTHROPIC_TEMPERATURE_KEYS),),
+                (
+                    _heal_drop_temperature(*_ANTHROPIC_TEMPERATURE_KEYS),
+                    _heal_drop_thinking(*_ANTHROPIC_THINKING_KEYS),
+                ),
             )
 
         if response.status_code == 429:

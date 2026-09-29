@@ -1764,6 +1764,21 @@ def test_provider_aclose_closes_all_transports() -> None:
     m3.assert_awaited_once()
 
 
+@pytest.mark.fast
+@pytest.mark.asyncio
+async def test_router_aclose_closes_rate_limiter() -> None:
+    from unittest.mock import MagicMock
+
+    from ubt.core.router.router import ModelRouter
+
+    provider = MagicMock()
+    provider.aclose = AsyncMock()
+    rate_limiter = MagicMock()
+    router = ModelRouter(provider=provider, rate_limiter=rate_limiter)
+    await router.aclose()
+    rate_limiter.close.assert_called_once()
+
+
 def test_draft_source_is_recovered_from_every_builder() -> None:
     import inspect
 
@@ -1963,3 +1978,25 @@ async def test_cjk_output_token_budget_not_underestimated() -> None:
 
     assert provider.seen_max_tokens >= int(src_tokens * 1.8)
     assert provider.seen_max_tokens > 2300
+
+
+@pytest.mark.asyncio
+async def test_visual_repair_reraises_budget_exceeded_error() -> None:
+    """Visual repair failure due to BudgetExceededError must re-raise rather than fall back to text repair."""
+    from ubt.core.exceptions import BudgetExceededError
+
+    class BudgetExceededImageProvider(MockModelProvider):
+        async def generate_with_images(self, *args: Any, **kwargs: Any) -> str:
+            raise BudgetExceededError("Budget exceeded in image repair")
+
+        async def generate(self, *args: Any, **kwargs: Any) -> str:
+            return "Should not be called"
+
+    provider = BudgetExceededImageProvider()
+    router = ModelRouter(provider=provider, repair_model="vision-pro", allow_page_upload=True)
+    block = IRBlock(id="b1", spine_index=0, source_text="Formula text")
+
+    with pytest.raises(BudgetExceededError):
+        await router.repair(
+            block=block, draft_text="Draft", error_flags=[], image_b64="fake_base64_image"
+        )
