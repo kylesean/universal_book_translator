@@ -55,7 +55,8 @@ async def run_chapter_streaming_pipeline(
             yield event
         return
 
-    qe_queue: asyncio.Queue[ChapterMeta | None] = asyncio.Queue()
+    queue_size = getattr(ctx.config, "chapter_streaming_queue_size", 2)
+    qe_queue: asyncio.Queue[ChapterMeta | None] = asyncio.Queue(maxsize=max(1, int(queue_size)))
     event_queue: asyncio.Queue[Any] = asyncio.Queue()
     c_text_enabled = bool(ctx.config.c_text_enabled)
 

@@ -581,6 +581,11 @@ class UBTConfig(BaseSettings):
         default=False,
         description="Enable chapter-level streaming pipeline channel for multi-chapter books",
     )
+    chapter_streaming_queue_size: int = Field(
+        default=2,
+        gt=0,
+        description="Maximum chapters buffered between draft and repair in chapter streaming",
+    )
 
     # -- Draft retry (transient provider failures) ---------------------------
     draft_max_retries: int = Field(default=2, ge=0)

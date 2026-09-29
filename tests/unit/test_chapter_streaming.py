@@ -414,3 +414,88 @@ async def test_chapter_streaming_filters_chapters_by_window(tmp_path: Path) -> N
 
     # Should only draft ch2 and ch3 (start_chapter=2, max_chapters=2)
     assert drafted_chapters == ["ch2", "ch3"]
+
+
+@pytest.mark.fast
+async def test_chapter_streaming_backpressure_bounds_queue(tmp_path: Path) -> None:
+    """When QE/repair is slower than drafting, qe_queue maxsize prevents draft_worker from unbounded buffering."""
+    config = UBTConfig(chapter_streaming_queue_size=2)
+    manifest = BookManifest(
+        doc_id="doc_backpressure",
+        title="Pipelined Book",
+        source_path=str(tmp_path / "book.epub"),
+        chapters=[
+            ChapterMeta(chapter_id="ch1", title="Ch1", spine_index=0),
+            ChapterMeta(chapter_id="ch2", title="Ch2", spine_index=1),
+            ChapterMeta(chapter_id="ch3", title="Ch3", spine_index=2),
+            ChapterMeta(chapter_id="ch4", title="Ch4", spine_index=3),
+            ChapterMeta(chapter_id="ch5", title="Ch5", spine_index=4),
+        ],
+    )
+    ledger = SQLiteJobLedger(tmp_path / "test_bp.sqlite")
+    ledger.init_job_from_manifest("job_bp", manifest)
+
+    ctx = build_stage_ctx(
+        tmp_path,
+        job_id="job_bp",
+        input_path=tmp_path / "book.epub",
+        config=config,
+        manifest=manifest,
+        ledger=ledger,
+    )
+
+    drafted_chapters: list[str] = []
+    qe_hold_event = asyncio.Event()
+
+    async def fake_draft_stage(c: StageContext, chapter_id: str | None = None) -> Any:
+        if chapter_id:
+            drafted_chapters.append(chapter_id)
+        if False:
+            yield None
+
+    async def fake_slow_stage(c: StageContext, chapter_id: str | None = None) -> Any:
+        # Pause on the first consumed chapter until we inspect draft progress
+        if chapter_id == "ch1" and not qe_hold_event.is_set():
+            await qe_hold_event.wait()
+        if False:
+            yield None
+
+    with (
+        patch(
+            "ubt.core.engine.stages.chapter_streaming.run_draft_stage", side_effect=fake_draft_stage
+        ),
+        patch(
+            "ubt.core.engine.stages.chapter_streaming.run_quality_gate_stage",
+            side_effect=fake_slow_stage,
+        ),
+        patch(
+            "ubt.core.engine.stages.chapter_streaming.run_repair_stage",
+            side_effect=fake_slow_stage,
+        ),
+    ):
+        generator = run_chapter_streaming_pipeline(ctx)
+
+        async def _advance() -> TranslationProgressEvent:
+            return await anext(generator)
+
+        # Advance generator until draft worker hits queue full
+        gen_task = asyncio.create_task(_advance())
+        # Give event loop cycles for draft_worker to draft ch1..ch4 and block on put(ch4)
+        for _ in range(10):
+            await asyncio.sleep(0.01)
+
+        # With maxsize=2 and consumer holding ch1:
+        # qe_queue has [ch2, ch3]. draft_worker drafts ch4 and blocks on put(ch4).
+        # It must NOT have started drafting ch5!
+        assert "ch5" not in drafted_chapters
+        assert drafted_chapters == ["ch1", "ch2", "ch3", "ch4"]
+
+        # Release the consumer so the pipeline finishes
+        qe_hold_event.set()
+        try:
+            while True:
+                await gen_task
+                gen_task = asyncio.create_task(_advance())
+        except StopAsyncIteration:
+            pass
+        assert drafted_chapters == ["ch1", "ch2", "ch3", "ch4", "ch5"]
