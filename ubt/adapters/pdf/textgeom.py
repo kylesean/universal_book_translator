@@ -117,28 +117,6 @@ def synthetic_vlm_lines(blocks: Sequence[IRBlock]) -> list[LineBox]:
     return [LineBox(e.text, e.box) for e in _vlm_lines(blocks)]
 
 
-def union_area(rects: Sequence[tuple[float, float, float, float]]) -> float:
-    """Exact union area of rects (x-sweep; footprint metric primitive)."""
-    edges = sorted({e for r in rects for e in (r[0], r[2])})
-    total = 0.0
-    for x0, x1 in zip(edges, edges[1:], strict=False):
-        if x1 <= x0:
-            continue
-        spans = sorted((r[1], r[3]) for r in rects if r[0] <= x0 and r[2] >= x1)
-        y = None
-        for lo, hi in spans:
-            if y is None:
-                y, cur = lo, hi
-            elif lo <= cur:
-                cur = max(cur, hi)
-            else:
-                total += (x1 - x0) * (cur - y)
-                y, cur = lo, hi
-        if y is not None:
-            total += (x1 - x0) * (cur - y)
-    return total
-
-
 _EXTRACT_LINES_CACHE: dict[tuple[str, int, int], tuple[list[LineBox], tuple[float, float]]] = {}
 
 
@@ -587,5 +565,4 @@ __all__ = [
     "extract_lines",
     "merge_row_fragments",
     "synthetic_vlm_lines",
-    "union_area",
 ]
