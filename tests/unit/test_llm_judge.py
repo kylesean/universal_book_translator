@@ -2,12 +2,37 @@
 
 import pytest
 
-from ubt.core.qe.comet_runner import HeuristicQERunner
+from ubt.core.qe.comet_runner import (
+    QE_SCORE_EMPTY,
+    QE_SCORE_NUMERIC,
+    QE_SCORE_PASS,
+    QE_SCORE_STRUCTURAL_OTHER,
+    HeuristicQERunner,
+)
 from ubt.core.qe.llm_judge import (
     LLMJudgeQERunner,
     TieredQERunner,
     parse_judge_score,
 )
+
+
+class _ClassedHeuristic(HeuristicQERunner):
+    """Emit a chosen defect class per pair instead of deriving it from content.
+
+    Production only reaches the 0.70 "structural other" band when a suspicious
+    block carries no specific error flag (``HeuristicQERunner.score_from_flags([])``
+    at ``quality_gate.py``): every concrete FastPass reason maps to its own band,
+    and math/table defects deliberately score below the gray band so they do not
+    spend a paid judge. Pinning the scores keeps the tiered-routing tests below
+    independent of which content defect happens to map where.
+    """
+
+    def __init__(self, scores: list[float]) -> None:
+        super().__init__()
+        self._scores = scores
+
+    async def score_pairs(self, pairs: list[dict[str, str]]) -> list[float]:
+        return self._scores[: len(pairs)]
 
 
 def test_parse_judge_score_formats() -> None:
@@ -62,7 +87,6 @@ async def test_llm_judge_scores_and_signals_no_opinion_on_failure() -> None:
 
 @pytest.mark.asyncio
 async def test_tiered_only_gray_zone_hits_judge() -> None:
-    heuristic = HeuristicQERunner()
     calls: list[str] = []
 
     async def fake_judge(**kwargs: object) -> str:
@@ -70,30 +94,15 @@ async def test_tiered_only_gray_zone_hits_judge() -> None:
         return "score: 77"
 
     judge = LLMJudgeQERunner(judge_fn=fake_judge)
+    # One band per block: pass (0.92), the 0.70 gray band, a numeric failure
+    # (0.55) and an empty target (0.0). Only the gray band may spend a judge call;
+    # the others are deterministic failures the judge must not review.
+    heuristic = _ClassedHeuristic(
+        [QE_SCORE_PASS, QE_SCORE_STRUCTURAL_OTHER, QE_SCORE_NUMERIC, QE_SCORE_EMPTY]
+    )
     tiered = TieredQERunner(heuristic=heuristic, judge=judge, allow_upgrade=True)
 
-    good_src = "Psychological research shows that sleep deprivation impairs cognition."
-    good_mt = "心理学研究表明，睡眠不足会损害认知能力。"
-    # Gray zone input: math span mismatch maps to the heuristic "other" band
-    # (0.70), which lands inside [0.7, 0.8) — the only band the judge reviews.
-    gray_src = "The total energy is $E = mc^2$ according to physics."
-    gray_mt = "总能量符合物理学规律。"
-    # Below the gray zone after (gray_low=0.7): the numeric band 0.55
-    # is a deterministic failure and must NOT spend a judge call.
-    numeric_src = "Founded in 1998 with 500 members."
-    numeric_mt = "该组织成立较早，拥有许多成员。"
-    # Heuristic fail with non-gray score (empty -> 0.0)
-    bad_src = "Hello world, this is a test."
-    bad_mt = ""
-
-    scores = await tiered.score_pairs(
-        [
-            {"src": good_src, "mt": good_mt},
-            {"src": gray_src, "mt": gray_mt},
-            {"src": numeric_src, "mt": numeric_mt},
-            {"src": bad_src, "mt": bad_mt},
-        ]
-    )
+    scores = await tiered.score_pairs([{"src": f"seg-{i}", "mt": "译文"} for i in range(4)])
     assert scores[0] == 0.92
     # With allow_upgrade=True (default), the LLM Judge score applies to the gray zone.
     assert scores[1] == 0.77
@@ -106,18 +115,18 @@ async def test_tiered_only_gray_zone_hits_judge() -> None:
 @pytest.mark.asyncio
 async def test_judge_cannot_raise_score_above_heuristic() -> None:
     """When allow_upgrade=False (conservative mode), judge cannot raise score above heuristic."""
-    heuristic = HeuristicQERunner()
 
     async def over_confident_judge(**kwargs: object) -> str:
         return "score: 95"
 
     judge = LLMJudgeQERunner(judge_fn=over_confident_judge)
-    tiered = TieredQERunner(heuristic=heuristic, judge=judge, allow_upgrade=False)
+    tiered = TieredQERunner(
+        heuristic=_ClassedHeuristic([QE_SCORE_STRUCTURAL_OTHER]),
+        judge=judge,
+        allow_upgrade=False,
+    )
 
-    # Gray zone: math span mismatch -> heuristic 0.70, inside [0.7, 0.8)
-    gray_src = "The total energy is $E = mc^2$ according to physics."
-    gray_mt = "总能量符合物理学规律。"
-    scores = await tiered.score_pairs([{"src": gray_src, "mt": gray_mt}])
+    scores = await tiered.score_pairs([{"src": "src", "mt": "译文"}])
     # In conservative mode, min(0.70, 0.95) = 0.70.
     assert scores[0] == 0.70
 
@@ -125,34 +134,36 @@ async def test_judge_cannot_raise_score_above_heuristic() -> None:
 @pytest.mark.asyncio
 async def test_judge_can_rescue_gray_zone_block() -> None:
     """By default, a justified high judge score rescues a borderline 0.70 block."""
-    heuristic = HeuristicQERunner()
 
     async def favorable_judge(**kwargs: object) -> str:
         return "score: 88"
 
     judge = LLMJudgeQERunner(judge_fn=favorable_judge)
-    tiered = TieredQERunner(heuristic=heuristic, judge=judge, allow_upgrade=True)
+    tiered = TieredQERunner(
+        heuristic=_ClassedHeuristic([QE_SCORE_STRUCTURAL_OTHER]),
+        judge=judge,
+        allow_upgrade=True,
+    )
 
-    gray_src = "The total energy is $E = mc^2$ according to physics."
-    gray_mt = "总能量符合物理学规律。"
-    scores = await tiered.score_pairs([{"src": gray_src, "mt": gray_mt}])
+    scores = await tiered.score_pairs([{"src": "src", "mt": "译文"}])
     assert scores[0] == 0.88
 
 
 @pytest.mark.asyncio
 async def test_judge_one_does_not_rescue_gray_zone_block() -> None:
     """A judge reply of 1 (1%) must not upgrade a near-failing gray block to pass."""
-    heuristic = HeuristicQERunner()
 
     async def near_failing_judge(**kwargs: object) -> str:
         return "score: 1"
 
     judge = LLMJudgeQERunner(judge_fn=near_failing_judge)
-    tiered = TieredQERunner(heuristic=heuristic, judge=judge, allow_upgrade=True)
+    tiered = TieredQERunner(
+        heuristic=_ClassedHeuristic([QE_SCORE_STRUCTURAL_OTHER]),
+        judge=judge,
+        allow_upgrade=True,
+    )
 
-    gray_src = "The total energy is $E = mc^2$ according to physics."
-    gray_mt = "总能量符合物理学规律。"
-    scores = await tiered.score_pairs([{"src": gray_src, "mt": gray_mt}])
+    scores = await tiered.score_pairs([{"src": "src", "mt": "译文"}])
     assert scores[0] == 0.01
     assert scores[0] != 1.0
 
@@ -161,18 +172,14 @@ async def test_judge_one_does_not_rescue_gray_zone_block() -> None:
 async def test_judge_failure_preserves_heuristic_and_records_error() -> None:
     """Judge failure keeps the original heuristic score (no silent
     0.5 fallback) and is observable via judge_errors rather than swallowed."""
-    heuristic = HeuristicQERunner()
 
     async def exploding_judge(**kwargs: object) -> str:
         raise RuntimeError("judge down")
 
     judge = LLMJudgeQERunner(judge_fn=exploding_judge)
-    tiered = TieredQERunner(heuristic=heuristic, judge=judge)
+    tiered = TieredQERunner(heuristic=_ClassedHeuristic([QE_SCORE_STRUCTURAL_OTHER]), judge=judge)
 
-    # Gray zone: math span mismatch -> heuristic 0.70, inside [0.7, 0.8)
-    gray_src = "The total energy is $E = mc^2$ according to physics."
-    gray_mt = "总能量符合物理学规律。"
-    scores = await tiered.score_pairs([{"src": gray_src, "mt": gray_mt}])
+    scores = await tiered.score_pairs([{"src": "src", "mt": "译文"}])
     # heuristic 0.70 preserved; judge call still counted but error recorded
     assert scores[0] == 0.70
     assert tiered.judge_calls == 1
@@ -301,19 +308,8 @@ async def test_paid_judge_follows_defect_class_and_sampled_passes() -> None:
         QE_SCORE_LEAK,
         QE_SCORE_PASS,
         QE_SCORE_STRUCTURAL_OTHER,
-        HeuristicQERunner,
     )
     from ubt.core.qe.llm_judge import LLMJudgeQERunner, TieredQERunner
-
-    class _ClassedHeuristic(HeuristicQERunner):
-        """Emit a chosen defect class per pair instead of deriving it from content."""
-
-        def __init__(self, scores: list[float]) -> None:
-            super().__init__()
-            self._scores = scores
-
-        async def score_pairs(self, pairs: list[dict[str, str]]) -> list[float]:
-            return self._scores[: len(pairs)]
 
     scores = [QE_SCORE_PASS, QE_SCORE_STRUCTURAL_OTHER, QE_SCORE_LEAK, QE_SCORE_EMPTY]
     pairs = [{"src": f"seg-{i}", "mt": "译文"} for i in range(len(scores))]
