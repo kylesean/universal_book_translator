@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import re
 from bisect import bisect_left
+from html import unescape
 from html.parser import HTMLParser
 
 # Inline formatting / structure that is meaningful in book translations.
@@ -662,6 +663,103 @@ def _neutralize_pseudo_tags(text: str) -> str:
             out.append(literal)
             i = m.end()
 
+    return "".join(out)
+
+
+# A well-formed inline tag for the tag-preserving pass below. ``/`` is accepted
+# as an attribute separator because HTML treats ``<img/src=x>`` as a tag; the
+# shared ``_TAG_STRUCT_RE`` only accepts whitespace, so a slash-delimited tag
+# used to be escaped whole. Possessive quantifiers keep the scan linear on
+# adversarial input.
+_INLINE_TAG_RE = re.compile(
+    r"<(/?)([a-zA-Z][a-zA-Z0-9]*)"
+    r"((?:[\s/]++[a-zA-Z_:][-a-zA-Z0-9_:.]*+"
+    r"(?:[\s]*+=[\s]*+(?:\"[^\"]*\"|'[^']*'|[^\s\"'>]++))?+)*+)"
+    r"[\s/]*+>",
+    re.IGNORECASE,
+)
+
+# One attribute token: ``name`` or ``name=value`` (quoted or unquoted).
+_INLINE_ATTR_RE = re.compile(
+    r"([a-zA-Z_:][-a-zA-Z0-9_:.]*)(?:[\s]*+=[\s]*+(\"[^\"]*\"|'[^']*'|[^\s\"'>]++))?",
+    re.IGNORECASE,
+)
+
+# An attribute name is treated as a fresh one after a ``/`` when it is an event
+# handler (``<img/src=x/onerror=…>``), matching how HTML resolves the slash
+# before an attribute name. Restricting it to the ``on…=`` shape leaves a
+# legitimate unquoted URL value such as ``src=/img/a.png`` intact.
+_INLINE_SLASH_SEPARATOR_RE = re.compile(r"/(?=on[a-z0-9]+\s*=)", re.IGNORECASE)
+
+
+def _rewrite_inline_tag(match: re.Match[str]) -> str:
+    """Rewrite one matched tag to the shared allowlist (see :data:`ALLOWED_TAGS`)."""
+    closing = bool(match.group(1))
+    raw_name = match.group(2)
+    name = raw_name.lower()
+    if closing:
+        # Keep a real close so the surrounding Markdown keeps its structure;
+        # drop a stray close of a tag we never keep.
+        return f"</{raw_name}>" if name in ALLOWED_TAGS and name not in VOID_TAGS else ""
+    if name in DROP_WITH_CONTENT or name in _SOURCE_DROP_TAGS or name in _SMIL_ANIMATION_TAGS:
+        return ""
+    if name not in ALLOWED_TAGS:
+        # Unknown tags keep their shape (and case) so prose such as ``List<T>``
+        # survives, but lose every attribute — where a payload would live.
+        return f"<{raw_name}>"
+    attrs_raw = _INLINE_SLASH_SEPARATOR_RE.sub(" ", match.group(3))
+    rendered: list[str] = []
+    for attr in _INLINE_ATTR_RE.finditer(attrs_raw):
+        key = attr.group(1).lower()
+        raw = attr.group(2)
+        if raw is None:
+            if _attr_allowed(name, key, None):
+                rendered.append(f" {key}")
+            continue
+        # Decode first: an HTML parser decodes character references in attribute
+        # values before the scheme check, so ``javascript&colon;`` is executable.
+        value = unescape(raw[1:-1] if raw[:1] in ("'", '"') else raw)
+        if _attr_allowed(name, key, value):
+            rendered.append(f' {key}="{_escape_attr(value)}"')
+    return f"<{raw_name}{''.join(rendered)}>"
+
+
+def sanitize_inline_html(text: str) -> str:
+    """Sanitize the HTML *tags* in ``text``, leaving every text span untouched.
+
+    Unlike :func:`sanitize_html_fragment` this never escapes ``&``/``<`` in the
+    surrounding text, so Markdown and ``$…$`` LaTeX survive verbatim — the
+    requirement of the Markdown deliverable. Every real tag is rewritten to the
+    same allowlist as the fragment sanitizer: an allowlisted tag keeps only its
+    allowlisted attributes (with URL-scheme gating), a dangerous element is
+    dropped, and any other tag keeps its shape with all attributes stripped.
+    Sealing the whole tag — not a hand-maintained denylist of names — is what
+    closes an unlisted event handler, ``srcset``, ``style`` or an SVG animation.
+    """
+    if "<" not in text:
+        return text
+    out: list[str] = []
+    i = 0
+    n = len(text)
+    while i < n:
+        lt = text.find("<", i)
+        if lt < 0:
+            out.append(text[i:])
+            break
+        out.append(text[i:lt])
+        if text.startswith("<!--", lt):
+            # Comments are dropped (payload smuggling vector), as in the
+            # fragment sanitizer.
+            end = text.find("-->", lt + 4)
+            i = n if end < 0 else end + 3
+            continue
+        match = _INLINE_TAG_RE.match(text, lt)
+        if match is None:
+            out.append("<")
+            i = lt + 1
+            continue
+        out.append(_rewrite_inline_tag(match))
+        i = match.end()
     return "".join(out)
 
 

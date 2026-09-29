@@ -590,3 +590,28 @@ def test_sanitizer_strips_entity_encoded_javascript_url() -> None:
     # Safe URLs (with a legitimate entity in the query) are untouched.
     keep = _sanitize_markdown_content('<a href="https://example.com?a=1&amp;b=2">x</a>')
     assert "https://example.com?a=1&amp;b=2" in keep, keep
+
+
+@pytest.mark.fast
+def test_sanitizer_seals_attributes_the_denylist_missed() -> None:
+    """Unlisted handlers, ``srcset``, ``style`` and SVG animation must not survive.
+
+    The previous local denylist enumerated event-attribute names and scanned only
+    ``href``/``src``/``xlink:href``, so ``onpointerenter``/``ontoggle``, a
+    ``srcset``, a ``style`` ``url(javascript:)`` and an SVG ``<animate>`` reached
+    the delivered Markdown while the allowlist fragment sanitizer stripped the
+    same input. The tags are now sealed against the shared allowlist.
+    """
+    from ubt.adapters.markdown.adapter import _sanitize_markdown_content
+
+    for payload in (
+        "<img src=x onpointerenter=alert(1)>",
+        "<details open ontoggle=alert(1)>x</details>",
+        '<img srcset="javascript:alert(1) 1x">',
+        '<div style="background:url(javascript:alert(1))">x</div>',
+        '<svg><animate attributeName="href" values="javascript:alert(1)"/></svg>',
+    ):
+        out = _sanitize_markdown_content(payload)
+        assert "alert(1)" not in out and "javascript:" not in out, (payload, out)
+    # Prose angle brackets, math and ampersands stay byte-for-byte.
+    assert _sanitize_markdown_content("List<T> $a<b$ & c") == "List<T> $a<b$ & c"

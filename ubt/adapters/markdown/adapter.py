@@ -1,7 +1,6 @@
 """Markdown and flat text document adapter."""
 
 import asyncio
-import html
 import os
 import re
 import tempfile
@@ -11,7 +10,7 @@ from typing import Any
 
 from ubt.adapters.base import BaseDocumentAdapter, decode_markup
 from ubt.adapters.unresolved import UNRESOLVED_STATUSES, failure_note_markdown
-from ubt.core.cleaners.html_sanitizer import strip_html_mark_tags
+from ubt.core.cleaners.html_sanitizer import sanitize_inline_html, strip_html_mark_tags
 from ubt.core.exceptions import DocumentParseError
 from ubt.core.ir.models import (
     BlockStatus,
@@ -70,74 +69,16 @@ def _format_blockquoted(text: str) -> str:
     return "\n".join(f"> {line}" if line.strip() else ">" for line in text.splitlines())
 
 
-_DANGEROUS_HTML_TAGS = re.compile(
-    r"<\s*(?:script|iframe|object|embed|applet|meta|link|style|base|form)\b[^>]*>"
-    r"[\s\S]*?<\s*/\s*(?:script|iframe|object|embed|applet|meta|link|style|base|form)\s*>|"
-    r"<\s*/?\s*(?:script|iframe|object|embed|applet|meta|link|style|base|form)\b[^>]*/?>",
-    re.IGNORECASE,
-)
-
-# Event-handler attributes (``onerror``, ``onload``, …) and script-bearing URL
-# schemes are stripped from any surviving inline tag. Unlike
-# ``sanitize_html_fragment`` this leaves the tag and every ``<``/``&`` in the
-# text alone, so Markdown and ``$…$`` LaTeX are not escaped — the point of this
-# adapter's sanitiser. Without it a target like ``<img src=x onerror=alert(1)>``
-# shipped verbatim into the ``.md`` deliverable.
-#
-# The name is matched against the real event-handler vocabulary, NOT ``\son\w+``:
-# the loose form ate ordinary prose such as ``set online=true`` / ``once=1``
-# (``on`` + ``line``/``ce`` + ``=``), silently corrupting the translation. The
-# alternation below is the HTML event-attribute set; ``\b`` stops ``online``
-# from matching ``on…``.
-_EVENT_ATTR_RE = re.compile(
-    r"""[\s/]on(?:abort|blur|change|click|dblclick|error|focus|keydown|keypress|keyup|"""
-    r"""load|mousedown|mousemove|mouseout|mouseover|mouseup|mouseenter|mouseleave|"""
-    r"""reset|resize|scroll|submit|select|unload|input|contextmenu|touchstart|"""
-    r"""touchend|touchmove|wheel|dragstart|dragover|dragleave|drop|paste|cut|copy|"""
-    r"""hashchange|pageshow|pagehide|beforeunload|message|pointerdown|pointerup)\b"""
-    r"""\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)""",
-    re.IGNORECASE,
-)
-_JS_URL_RE = re.compile(
-    r"""([\s/](?:href|src|xlink:href)\s*=\s*)("[^"]*"|'[^']*'|[^\s>]+)""",
-    re.IGNORECASE,
-)
-_DANGEROUS_SCHEME_RE = re.compile(r"\s*(?:javascript|vbscript|data):", re.IGNORECASE)
-
-
-def _neutralize_script_urls(text: str) -> str:
-    """Replace dangerous-scheme URL attribute values with ``"#"``.
-
-    The value is entity-decoded before the scheme check: HTML parsers decode
-    character references in attribute values, so a literal-only match let
-    ``javascript&colon;alert(1)`` (or ``&#106;avascript:…``) through as an
-    executable ``javascript:`` URL.
-    """
-
-    def _sub(match: re.Match[str]) -> str:
-        value = match.group(2)
-        inner = value[1:-1] if value[:1] in ('"', "'") else value
-        if _DANGEROUS_SCHEME_RE.match(html.unescape(inner)):
-            return match.group(1) + '"#"'
-        return match.group(0)
-
-    return _JS_URL_RE.sub(_sub, text)
-
-
 def _sanitize_markdown_content(text: str) -> str:
-    """Strip quarantine marks and dangerous HTML without escaping Markdown/LaTeX.
+    """Sanitize inline HTML tags without escaping Markdown or ``$…$`` LaTeX.
 
-    Removes ``script/iframe/object/embed/applet/meta/link/style/base/form`` tags
-    whether paired OR unpaired — the old pattern required a close, so an
-    *unclosed* ``<iframe src=…>`` survived — plus event-handler attributes and
-    script-bearing URL schemes. Deliberately NOT ``sanitize_html_fragment``: that
-    allowlist escapes every ``<``/``&``, mangling Markdown and ``$…$`` LaTeX
-    (``List<T>`` -> ``List&lt;T&gt;``).
+    Deliberately NOT :func:`sanitize_html_fragment`: that allowlist escapes every
+    ``<``/``&`` in the text, mangling Markdown and LaTeX (``List<T>`` becomes
+    ``List&lt;T&gt;``). :func:`sanitize_inline_html` applies the same allowlist to
+    the *tags* only: a surviving tag keeps only its allowlisted attributes (with
+    URL-scheme gating) while the surrounding text is byte-for-byte unchanged.
     """
-    cleaned = strip_html_mark_tags(text)
-    cleaned = _DANGEROUS_HTML_TAGS.sub("", cleaned)
-    cleaned = _EVENT_ATTR_RE.sub("", cleaned)
-    return _neutralize_script_urls(cleaned)
+    return sanitize_inline_html(strip_html_mark_tags(text))
 
 
 _TABLE_DELIMITER_RE = re.compile(r"^\|?(\s*:?-+:?\s*\|)+\s*:?-+:?\s*\|?$")
