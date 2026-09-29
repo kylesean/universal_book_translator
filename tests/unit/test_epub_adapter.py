@@ -1291,3 +1291,52 @@ def test_parse_chapter_blocks_requires_a_source_file() -> None:
     chapter = ChapterMeta(chapter_id="ch1", title="c", spine_index=1, source_file=None)
     with zipfile.ZipFile(buf) as zf, pytest.raises(DocumentParseError, match="no source file"):
         _parse_chapter_blocks(zf, chapter, set(), BoilerplateFingerprint(), False, 1)
+
+
+def test_preserved_inline_children_include_nested_footnote_anchor() -> None:
+    """A footnote anchor wrapped in ``<sup>`` must survive the monolingual rewrite.
+
+    Only direct children were preserved, so the standard footnote-reference
+    shape ``<sup><a href="#fn1" id="ref1">1</a></sup>`` was destroyed with its
+    href/id when the leaf was cleared — silently breaking every footnote link,
+    the very failure the preservation mechanism exists to prevent.
+    """
+    from ubt.adapters.epub.adapter import take_preserved_inline_children
+
+    soup = BeautifulSoup(
+        '<p>Para one with a note<sup><a href="#fn1" id="ref1">1</a></sup> end.</p>',
+        "html.parser",
+    )
+    leaf = soup.p
+    assert leaf is not None
+    preserved = take_preserved_inline_children(leaf)
+    leaf.clear()
+    for node in preserved:
+        leaf.append(node)
+    anchor = leaf.find("a")
+    assert anchor is not None
+    assert anchor.get("href") == "#fn1"
+    assert anchor.get("id") == "ref1"
+    # The outermost preserved tag is kept once; its subtree is not duplicated.
+    assert len(leaf.find_all("a")) == 1
+
+
+def test_preserved_inline_children_do_not_duplicate_nested_preserved_tags() -> None:
+    """An ``<img>`` inside a preserved ``<a>`` must be kept once, not twice.
+
+    Collecting the subtree naively would detach both the anchor and the image,
+    then re-append the image a second time outside the anchor.
+    """
+    from ubt.adapters.epub.adapter import take_preserved_inline_children
+
+    soup = BeautifulSoup(
+        '<p>See <a href="#f1"><img src="fig1.png" alt="f"/></a> here.</p>', "html.parser"
+    )
+    leaf = soup.p
+    assert leaf is not None
+    preserved = take_preserved_inline_children(leaf)
+    leaf.clear()
+    for node in preserved:
+        leaf.append(node)
+    assert len(leaf.find_all("img")) == 1
+    assert len(leaf.find_all("a")) == 1

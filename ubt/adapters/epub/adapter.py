@@ -194,13 +194,19 @@ _PRESERVED_INLINE_TAGS = frozenset(
 
 
 def take_preserved_inline_children(leaf: Tag) -> list[Tag]:
-    """Detach and return inline children a monolingual rewrite must keep.
+    """Detach and return inline descendants a monolingual rewrite must keep.
 
+    Collected from the whole subtree (a footnote reference is the standard
+    ``<sup><a href="#fn1">1</a></sup>`` shape — a direct-children scan drops it
+    with its href/id when the leaf is cleared). Only the outermost preserved
+    tags are taken: their subtrees ride along, so nothing is duplicated.
     The nodes are detached (kept alive) so the caller can ``clear()`` the leaf
     and re-append them after the translation.
     """
     preserved = [
-        c for c in leaf.children if isinstance(c, Tag) and c.name in _PRESERVED_INLINE_TAGS
+        c
+        for c in leaf.find_all(list(_PRESERVED_INLINE_TAGS))
+        if not any(p.name in _PRESERVED_INLINE_TAGS for p in c.parents)
     ]
     for node in preserved:
         node.extract()
