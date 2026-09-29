@@ -31,6 +31,7 @@ from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.stage_context import StageContext
 from ubt.core.ir.models import BlockStatus, IRBlock
 from ubt.core.memory.glossary_table import build_chunk_glossary_table
+from ubt.core.policy.layout_policy import is_rigid_non_prose_degradable
 from ubt.core.qe.defect_taxonomy import (
     FLAG_MQM_CRITICAL_BLOCKED as _FLAG_MQM_CRITICAL_BLOCKED,
 )
@@ -315,6 +316,31 @@ async def run_triage_stage(
                     }
                 )
                 continue
+
+            # Non-prose tables under rigid mode are preserved verbatim in the PDF
+            # via render_skip:non_prose. If the defect is non-fatal, route to
+            # NEEDS_HUMAN instead of hard BLOCKED_HUMAN to prevent catastrophic false-blocking.
+            render_engine = getattr(ctx.config, "render_engine", None)
+            if is_rigid_non_prose_degradable(
+                cand.block_type, cand.error_flags, render_engine=render_engine
+            ):
+                counters["needs_human"] += 1
+                flags = _needs_human_flags(cand)
+                if not any("render_skip:non_prose" in f for f in flags):
+                    flags.append("render_skip:non_prose")
+                updates.append(
+                    {
+                        "block_id": cand.id,
+                        "status": BlockStatus.NEEDS_HUMAN,
+                        "target_text": cand.target_text or cand.draft_text or cand.source_text,
+                        "mtqe_score": cand.mtqe_score,
+                        "repair_rounds": cand.repair_rounds,
+                        "error_flags": flags,
+                        **mqm_update,
+                    }
+                )
+                continue
+
             counters["critical_blocked"] += 1
             flags = list(cand.error_flags)
             if cand.id in escalation_errors:

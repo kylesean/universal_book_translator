@@ -520,22 +520,70 @@ def is_inside_picture(
     return False
 
 
-def table_to_markdown(table_item: Any, doc: Any) -> str:
-    """Render a Docling TableItem as markdown, falling back to its TableFormer grid."""
-    try:
-        md = table_item.export_to_markdown(doc)
-        if md and md.strip():
-            return str(md).strip()
-    except Exception as exc:
-        logger.debug("Table export_to_markdown failed: %s; using grid fallback", exc)
+def table_to_markdown(table_item: Any, doc: Any = None) -> str:
+    """Render a Docling TableItem as markdown with proper merged/colspan cell handling.
 
+    For merged cells (spanning multiple columns or rows), only the top-left primary cell
+    emits text; continuation cells emit empty strings to preserve grid dimensions without
+    duplicating text across cells or corrupting downstream text/QE.
+    """
     grid = getattr(getattr(table_item, "data", None), "grid", None) or []
-    rows = [[(getattr(cell, "text", "") or "").strip() for cell in row] for row in grid]
-    if not rows:
-        return ""
-    lines = ["| " + " | ".join(row) + " |" for row in rows]
-    lines.insert(1, "|" + "---|" * len(rows[0]))
-    return "\n".join(lines)
+    if grid:
+        seen_cells: set[int] = set()
+        covered_coords: set[tuple[int, int]] = set()
+        rows: list[list[str]] = []
+        for r, row in enumerate(grid):
+            row_cells: list[str] = []
+            for c, cell in enumerate(row):
+                cell_id = id(cell)
+                start_r = getattr(cell, "start_row_offset_idx", r)
+                start_c = getattr(cell, "start_col_offset_idx", c)
+                row_span = getattr(cell, "row_span", 1) or 1
+                col_span = getattr(cell, "col_span", 1) or 1
+
+                is_continuation = (
+                    (r, c) in covered_coords
+                    or (start_r != r or start_c != c)
+                    or (cell_id in seen_cells)
+                )
+
+                if is_continuation:
+                    row_cells.append("")
+                else:
+                    seen_cells.add(cell_id)
+                    if row_span > 1 or col_span > 1:
+                        for dr in range(row_span):
+                            for dc in range(col_span):
+                                if dr != 0 or dc != 0:
+                                    covered_coords.add((r + dr, c + dc))
+
+                    raw_text = getattr(cell, "text", "") or ""
+                    clean_text = " ".join(raw_text.split()).replace("|", r"\|")
+                    row_cells.append(clean_text)
+            rows.append(row_cells)
+
+        if rows and any(any(c for c in r) for r in rows):
+            num_cols = max(len(r) for r in rows) if rows else 0
+            if num_cols > 0:
+                padded_rows = [r + [""] * (num_cols - len(r)) for r in rows]
+                lines = ["| " + " | ".join(r) + " |" for r in padded_rows]
+                lines.insert(1, "|" + "---|" * num_cols)
+                return "\n".join(lines)
+
+    # Fallback to export_to_markdown if grid is not available
+    try:
+        if hasattr(table_item, "export_to_markdown"):
+            md = (
+                table_item.export_to_markdown(doc)
+                if doc is not None
+                else table_item.export_to_markdown()
+            )
+            if md and str(md).strip():
+                return str(md).strip()
+    except Exception as exc:
+        logger.debug("Table export_to_markdown failed: %s", exc)
+
+    return ""
 
 
 def resolve_overlapping_formula_blocks(blocks: list[IRBlock]) -> list[IRBlock]:

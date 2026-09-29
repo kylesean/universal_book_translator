@@ -22,8 +22,10 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Any
 
 from ubt.core.ir.models import BlockType, FlowID, LayoutRole
 
@@ -652,6 +654,44 @@ def calibration_summary() -> dict[str, int]:
     return counts
 
 
+_FATAL_LEAK_MARKERS: tuple[str, ...] = (
+    "Prompt template XML artifacts",
+    "Prompt scaffold",
+)
+
+
+def is_rigid_non_prose_degradable(
+    block_type: Any,
+    error_flags: Iterable[str],
+    *,
+    render_engine: str | None = None,
+) -> bool:
+    """True when a non-prose block (e.g. table) under rigid mode should degrade
+    to NEEDS_HUMAN rather than BLOCKED_HUMAN on non-fatal defects.
+
+    In rigid mode, non-prose blocks (tables, code, formulas) are preserved
+    verbatim in the rendered PDF via render_skip:non_prose. Unless a defect is
+    truly fatal (e.g. prompt template leak), quarantining the block as
+    BLOCKED_HUMAN would abort export catastrophically.
+    """
+    bt = getattr(block_type, "value", block_type or "")
+    is_non_prose = str(bt).lower() in ("table", "code", "formula", "image") or (
+        str(bt).lower() not in {str(t.value).lower() for t in PROSE_BLOCK_TYPES}
+    )
+    if not is_non_prose:
+        return False
+
+    flags_list = list(error_flags)
+    has_render_skip = any("render_skip:non_prose" in f for f in flags_list)
+    engine = (render_engine or "").strip().lower()
+    is_rigid = engine in ("rigid", "inplace", "hybrid") or has_render_skip
+    if not is_rigid:
+        return False
+
+    # Truly fatal prompt template leak or security injection must still be quarantined
+    return not any(m in flag for flag in flags_list for m in _FATAL_LEAK_MARKERS)
+
+
 __all__ = [
     "RIGID_MIN_FONT_PT",
     "RIGID_CAPTION_MIN_FONT_PT",
@@ -697,6 +737,7 @@ __all__ = [
     "INDEX_MIN_LINES",
     "INDEX_MIN_SINGLE_SHARE",
     "ISBN_DIGITS_RE",
+    "is_rigid_non_prose_degradable",
     "JOIN_CROSS_NO_TERMINAL",
     "JOIN_HYPHEN_TAIL",
     "JOIN_LOWER_START",

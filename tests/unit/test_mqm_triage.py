@@ -723,3 +723,66 @@ def test_triage_structural_defect_markers_include_repair_and_draft_errors() -> N
 
     assert any("Repair error" in m for m in STRUCTURAL_DEFECT_MARKERS)
     assert any("Drafting error" in m for m in STRUCTURAL_DEFECT_MARKERS)
+
+
+@pytest.mark.asyncio
+async def test_triage_non_prose_table_under_rigid_mode_degrades_gracefully(tmp_path: Path) -> None:
+    """Non-prose tables under rigid mode (preserved verbatim via render_skip:non_prose
+    in rigid PDF rendering) must degrade to NEEDS_HUMAN rather than BLOCKED_HUMAN
+    on non-fatal defects, avoiding catastrophic false-blocking of export.
+    """
+    from ubt.core.config import UBTConfig
+    from ubt.core.ir.models import BlockType
+    from ubt.core.policy.layout_policy import is_rigid_non_prose_degradable
+
+    # Policy helper check
+    assert (
+        is_rigid_non_prose_degradable(
+            BlockType.TABLE,
+            ["Repetitive loop hallucination detected"],
+            render_engine="rigid",
+        )
+        is True
+    )
+    # Truly fatal defect (prompt template leak) must still be quarantined
+    assert (
+        is_rigid_non_prose_degradable(
+            BlockType.TABLE,
+            ["Prompt template XML artifacts leaked into target text"],
+            render_engine="rigid",
+        )
+        is False
+    )
+
+    # Stage integration check: table block with non-fatal defect under rigid mode
+    source_table = "| Method | Accuracy |\n|---|---|\n| Model | 0.95 |"
+    table_block = IRBlock(
+        id="ch01#t001",
+        flow_id=FlowID.TABLE_GRID,
+        block_type=BlockType.TABLE,
+        spine_index=1,
+        source_text=source_table,
+        draft_text=source_table,
+        target_text=source_table,
+        status=BlockStatus.REPAIR_PENDING,
+        mtqe_score=0.35,
+        repair_rounds=2,
+        error_flags=["Repetitive loop hallucination detected", "render_skip:non_prose"],
+    )
+    ledger = _init_ledger(tmp_path, [table_block])
+
+    router = ModelRouter(provider=MockModelProvider(default_response=source_table))
+    repair_loop = RepairLoop(router=router, qe_runner=ControlledScoreQERunner([0.40]))
+
+    config = UBTConfig(render_engine="rigid")
+    ctx = _triage_ctx(tmp_path, ledger, repair_loop, config=config)
+
+    async for _ in run_triage_stage(ctx):
+        pass
+
+    rows = {b.id: b for b in ledger.get_all_blocks("job_triage")}
+    table_row = rows["ch01#t001"]
+    assert table_row.status == BlockStatus.NEEDS_HUMAN, (
+        f"Expected NEEDS_HUMAN degradation, got: {table_row.status}"
+    )
+    ledger.close()
