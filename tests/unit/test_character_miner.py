@@ -434,3 +434,86 @@ def test_honorific_core_still_mines_a_normal_name() -> None:
 
     mined = mine_characters("王先生来了。王先生走了。", source_lang="zh", min_freq=2)
     assert any(str(entry.get("source", "")) == "王" for entry in mined), mined
+
+
+# Natural paragraph breaks over a mix of honorific and frequent bare names.
+_MINER_BLOCKS = (
+    "Elizabeth Bennet was reading quietly.",
+    "Mr. Darcy arrived soon after and bowed.",
+    "Elizabeth said hello to the garden.",
+    "Colonel Fitzwilliam laughed out loud.",
+    "Elizabeth and Mr. Darcy spoke near the old stone wall.",
+    "The Elizabeth river flowed past the village.",
+    "Elizabeth nodded at last.",
+    "Elizabeth smiled warmly.",
+    "Dr. Grant observed from the window.",
+)
+
+
+@pytest.mark.fast
+def test_mining_is_deterministic_for_repeated_identical_input() -> None:
+    """Mining is a pure function of (text, options): no dedupe-order nondeterminism."""
+    from ubt.core.memory.character_miner import mine_characters_stream
+
+    joined = "\n".join(_MINER_BLOCKS)
+    assert mine_characters(joined, min_freq=3) == mine_characters(joined, min_freq=3)
+    assert mine_characters_stream(list(_MINER_BLOCKS), min_freq=3) == mine_characters_stream(
+        list(_MINER_BLOCKS), min_freq=3
+    )
+
+
+@pytest.mark.fast
+@pytest.mark.parametrize("chunk_chars", [50, 100, 300, 1000, 262_144])
+def test_stream_mining_equals_whole_text_for_every_chunk_size(chunk_chars: int) -> None:
+    """The stream is a bounded-memory view of one whole-text scan.
+
+    The chunk size — including sizes far below the default ``tail_chars`` — must
+    not change the mined set or any attestation count. The reference is the same
+    text joined exactly the way the stream joins its blocks (``"\\n".join``).
+    """
+    from ubt.core.memory.character_miner import mine_characters_stream
+
+    blocks = list(_MINER_BLOCKS)
+    joined = "\n".join(blocks)
+    assert mine_characters_stream(blocks, min_freq=2, chunk_chars=chunk_chars) == mine_characters(
+        joined, min_freq=2
+    )
+
+
+@pytest.mark.fast
+@pytest.mark.parametrize("blocks", [[], [""], ["", ""], ["\n"], ["   \n  "]])
+def test_empty_input_mines_no_entries(blocks: list[str]) -> None:
+    from ubt.core.memory.character_miner import mine_characters_stream
+
+    assert mine_characters_stream(blocks, min_freq=1) == []
+
+
+@pytest.mark.fast
+def test_empty_string_mines_no_entries() -> None:
+    assert mine_characters("", min_freq=1) == []
+
+
+@pytest.mark.fast
+def test_overlong_block_equals_its_partitioned_equivalent() -> None:
+    """A document far larger than one chunk mines the same names however it is cut."""
+    from ubt.core.memory.character_miner import mine_characters_stream
+
+    big = (" ".join(_MINER_BLOCKS) + "\n") * 400
+    partitioned = [big[i : i + 4096] for i in range(0, len(big), 4096)]
+    assert mine_characters_stream([big], min_freq=3) == mine_characters(big, min_freq=3)
+    assert mine_characters_stream(partitioned, min_freq=3, chunk_chars=2048) == mine_characters(
+        "\n".join(partitioned), min_freq=3
+    )
+
+
+@pytest.mark.fast
+def test_cjk_stream_source_safely_degrades() -> None:
+    """Honorific-free CJK mines nothing in stream mode either (no Latin-regex spill)."""
+    from ubt.core.memory.character_miner import mine_characters_stream
+
+    assert (
+        mine_characters_stream(
+            ["诸葛亮对刘备说：天下大势。", "周瑜和鲁肃在江东。"], source_lang="zh", min_freq=1
+        )
+        == []
+    )

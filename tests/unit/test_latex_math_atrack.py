@@ -6,6 +6,7 @@ and detached subscripts (``K _(...)``); pandoc renders it complete with
 attached subscripts (``K_(...)``).
 """
 
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -694,3 +695,47 @@ def test_math_content_sanitizer_blocks_code_in_pandoc_call_arguments() -> None:
     assert _sanitize_math_content("#hide[$ x $]") == "#hide[$ x $]"
     # A plain '#' is still dropped.
     assert _sanitize_math_content("a #evil b") == "a evil b"
+
+
+_MATH_INJECTION_CORPUS = (
+    '#read("/etc/passwd")',
+    '#import "evil": *',
+    '#include "other.typ"',
+    '#eval("1 + 1")',
+    "#sys.exit()",
+    "#let x = 1",
+    '#plugin("x.wasm")',
+    '#box(raw(read("secret")))',
+    "#box(",  # unbalanced call cannot be matched and demoted
+    '#box(x: raw(read("a")))[#read("b")]',
+    '#scale(x: 180%)[#read("x")]',
+)
+
+
+@pytest.mark.fast
+@pytest.mark.parametrize("payload", _MATH_INJECTION_CORPUS)
+def test_math_sanitizer_corpus_keeps_only_data_shaped_pandoc_calls(payload: str) -> None:
+    """Inside math mode a ``#`` is a code-execution switch.
+
+    ``_sanitize_math_content`` must drop every ``#`` except the three
+    side-effect-free pandoc calls whose bracket body is plain data, so a crafted
+    source or target formula can never call ``read``/``import``/``eval``.
+    """
+    from ubt.adapters.pdf.typst_math import _sanitize_math_content
+
+    out = _sanitize_math_content(payload)
+    for token in ("#read", "#import", "#include", "#eval", "#sys", "#let", "#plugin"):
+        assert token not in out, f"{token} survived in {out!r}"
+
+    for match in re.finditer("#", out):
+        assert out[match.start() :].startswith(("#scale", "#box", "#hide")), (
+            f"unexpected code call left in {out!r}"
+        )
+
+
+@pytest.mark.fast
+def test_math_sanitizer_keeps_data_shaped_pandoc_box_call() -> None:
+    """The ``#box`` companion of the scale/hide regression guard."""
+    from ubt.adapters.pdf.typst_math import _sanitize_math_content
+
+    assert _sanitize_math_content("#box(width: 1pt)[]") == "#box(width: 1pt)[]"

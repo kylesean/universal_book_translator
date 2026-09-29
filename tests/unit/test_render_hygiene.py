@@ -1,6 +1,7 @@
 """Unit tests for render-hygiene fixes: native SVG sizing, chrome-video
 dedup, footnote-anchor guard (p3/p33 screenshot defects)."""
 
+import re
 import subprocess
 from pathlib import Path
 
@@ -475,6 +476,77 @@ def test_double_slash_survives_the_reflow_emitter(tmp_path: Path) -> None:
         ["pdftotext", str(pdf), "-"], check=True, capture_output=True, text=True
     ).stdout
     assert "后半句不能消失" in rendered.replace("​", "")
+
+
+def _alnum_only(text: str) -> str:
+    return re.sub(r"[^0-9A-Za-z]", "", text)
+
+
+def _unescaped_positions(text: str, char: str) -> list[int]:
+    """Positions of ``char`` that are not preceded by an odd run of backslashes."""
+    hits: list[int] = []
+    for i, ch in enumerate(text):
+        if ch != char:
+            continue
+        backslashes = 0
+        j = i - 1
+        while j >= 0 and text[j] == "\\":
+            backslashes += 1
+            j -= 1
+        if backslashes % 2 == 0:
+            hits.append(i)
+    return hits
+
+
+_INJECTION_CORPUS = (
+    '#read("/etc/passwd")',
+    '#import "evil": *',
+    '#include "other.typ"',
+    '#eval("1 + 1")',
+    "#sys.exit()",
+    "#let x = 1",
+    '#plugin("x.wasm")',
+    '\\#read("x")',  # already-escaped input must not become a live call
+    '[#read("y")]',
+    'line one\n#read("z")',
+    '#(read)("x")',
+    '#box(width: 1pt)[#read("x")]',
+    "a // b",
+    'x $ #read("q") $ y',
+)
+
+
+@pytest.mark.fast
+@pytest.mark.parametrize("payload", _INJECTION_CORPUS)
+def test_escaping_leaves_no_unescaped_typst_trigger(payload: str) -> None:
+    """A malicious source or target span must reach Typst as inert text.
+
+    In Typst markup a bare ``#`` opens code mode, an unescaped ``[``/``]``
+    unbalances a content block, ``$`` toggles math and ``//`` opens a line
+    comment — each can execute code or silently drop the rest of the page. Both
+    escapers must neutralize all of them for the same corpus.
+    """
+    for escaper in (_escape_typst_markup, overlay_escape):
+        out = escaper(payload)
+        for char in "#[]$":
+            assert not _unescaped_positions(out, char), (
+                f"{escaper.__name__} leaked an unescaped {char!r} from {payload!r}: {out!r}"
+            )
+        assert "//" not in out, f"{escaper.__name__} left a line comment in {out!r}"
+
+
+@pytest.mark.fast
+@pytest.mark.parametrize("payload", _INJECTION_CORPUS)
+def test_escaping_neutralizes_without_deleting_content(payload: str) -> None:
+    """Escaping is additive: it must not silently drop the payload's text.
+
+    Stripping every non-alphanumeric character from input and output must agree,
+    so ``#read`` becoming ``\\#read`` is a visible escape and never a deletion.
+    """
+    for escaper in (_escape_typst_markup, overlay_escape):
+        assert _alnum_only(escaper(payload)) == _alnum_only(payload), (
+            f"{escaper.__name__} dropped content from {payload!r}"
+        )
 
 
 def test_double_slash_guard_has_one_owner_in_both_engines() -> None:

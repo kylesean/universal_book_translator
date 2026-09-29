@@ -18,6 +18,19 @@ def test_sanitize_image_ref_rejects_traversal() -> None:
     assert tf._sanitize_image_ref('a"b\\c') == "abc"
 
 
+@pytest.mark.fast
+def test_sanitize_image_ref_rejects_only_dotdot_components() -> None:
+    """A ``..`` *path component* is traversal; the same two characters inside a
+    filename are not. Quotes, backslashes and newlines are stripped because they
+    would escape the Typst string literal or break the source line."""
+    assert tf._sanitize_image_ref("a/../b.png") == ""
+    assert tf._sanitize_image_ref("..") == ""
+    assert tf._sanitize_image_ref("file..name.png") == "file..name.png"
+    assert tf._sanitize_image_ref("x/..y/z.png") == "x/..y/z.png"
+    assert tf._sanitize_image_ref('q"uo\\te') == "quote"
+    assert tf._sanitize_image_ref("a\r\nb") == "ab"
+
+
 def _isolate_temp(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     import tempfile
 
