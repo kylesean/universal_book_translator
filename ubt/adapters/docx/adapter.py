@@ -79,6 +79,26 @@ def _resolve_east_asia_font(target_lang: str | None) -> str | None:
     return _EAST_ASIA_FONT_MAP.get(primary)
 
 
+def _collect_block_items(container: Any, parent: Any) -> list[Paragraph | Table]:
+    """Direct + ``w:sdt``-wrapped paragraphs/tables of one container element.
+
+    Shared by the body walk (``_iter_body_items``) and the table-cell walk
+    (``_walk_table_paragraphs``): a content control nests its content under
+    ``w:sdt/w:sdtContent`` at either level, and both must recurse into it.
+    """
+    items: list[Paragraph | Table] = []
+    for child in container.iterchildren():
+        if child.tag == qn("w:p"):
+            items.append(Paragraph(child, parent))
+        elif child.tag == qn("w:tbl"):
+            items.append(Table(child, parent))
+        elif child.tag == qn("w:sdt"):
+            content = child.find(qn("w:sdtContent"))
+            if content is not None:
+                items.extend(_collect_block_items(content, parent))
+    return items
+
+
 def _iter_body_items(doc: DocumentObject) -> list[Paragraph | Table]:
     """Body items in true document order (paragraphs and top-level tables).
 
@@ -86,21 +106,7 @@ def _iter_body_items(doc: DocumentObject) -> list[Paragraph | Table]:
     under ``w:sdt/w:sdtContent`` rather than direct body children, so a document
     built from content controls used to be extracted (and shipped) untranslated.
     """
-    items: list[Paragraph | Table] = []
-
-    def _walk(container: Any) -> None:
-        for child in container.iterchildren():
-            if child.tag == qn("w:p"):
-                items.append(Paragraph(child, doc))
-            elif child.tag == qn("w:tbl"):
-                items.append(Table(child, doc))
-            elif child.tag == qn("w:sdt"):
-                content = child.find(qn("w:sdtContent"))
-                if content is not None:
-                    _walk(content)
-
-    _walk(doc.element.body)
-    return items
+    return _collect_block_items(doc.element.body, doc)
 
 
 #: OOXML subtrees whose ``w:t`` is a picture/text-box payload, not flow text.
@@ -138,11 +144,14 @@ def _walk_table_paragraphs(
     """Yield ``(block_id, paragraph)`` for every cell paragraph of ``table``,
     recursing into tables nested inside cells.
 
-    Both extraction (:meth:`DOCXAdapter._extract_table_blocks`) and rendering
-    (:meth:`DOCXAdapter._render_sync`) consume this *single* generator, so the
-    ``block_id`` each paragraph gets is computed by identical code on both
-    legs (the two can never drift apart) and nested tables are covered too.
-    ``id_prefix`` encodes the path from the top-level table
+    Cell content is walked with the same sdt-recursing helper as the body
+    (``_collect_block_items``): a ``w:sdt`` content control inside a cell nests
+    its paragraphs/tables under ``w:sdtContent``, and they must be extracted
+    too. Both extraction (:meth:`DOCXAdapter._extract_table_blocks`) and
+    rendering (:meth:`DOCXAdapter._render_sync`) consume this *single*
+    generator, so the ``block_id`` each paragraph gets is computed by identical
+    code on both legs (the two can never drift apart) and nested tables are
+    covered too. ``id_prefix`` encodes the path from the top-level table
     (``docx_main#t{idx:03d}``), extended by ``r{row}c{col}`` per cell and
     ``n{idx}`` per nested table. ``seen_paths`` de-duplicates merged/spanned
     cells by XML path (``row.cells`` repeats them), so each real cell is walked
@@ -155,12 +164,17 @@ def _walk_table_paragraphs(
                 continue
             seen_paths.add(path)
             cell_prefix = f"{id_prefix}r{row_idx:03d}c{col_idx:03d}"
-            for para_idx, para in enumerate(cell.paragraphs):
-                yield f"{cell_prefix}p{para_idx:03d}", para
-            for nested_idx, nested in enumerate(cell.tables):
-                yield from _walk_table_paragraphs(
-                    nested, f"{cell_prefix}n{nested_idx:03d}", tree, seen_paths
-                )
+            para_idx = 0
+            nested_idx = 0
+            for blk in _collect_block_items(cell._tc, cell):
+                if isinstance(blk, Paragraph):
+                    yield f"{cell_prefix}p{para_idx:03d}", blk
+                    para_idx += 1
+                else:
+                    yield from _walk_table_paragraphs(
+                        blk, f"{cell_prefix}n{nested_idx:03d}", tree, seen_paths
+                    )
+                    nested_idx += 1
 
 
 def _iter_section_parts(section: Any) -> Iterator[tuple[str, Any]]:

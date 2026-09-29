@@ -865,3 +865,34 @@ def test_docx_populate_runs_filters_xml_illegal_control_characters(tmp_path: Pat
     assert "\x07" not in p.text
     assert "\x1b" not in p.text
     assert "\x0c" not in p.text
+
+
+@pytest.mark.asyncio
+async def test_docx_table_cell_walks_sdt_wrapped_paragraph(tmp_path: Path) -> None:
+    """A ``w:sdt``-wrapped paragraph inside a table cell must be extracted.
+
+    ``_Cell.paragraphs`` exposes only direct ``w:tc`` children, so a paragraph
+    nested under ``w:sdt/w:sdtContent`` in a cell was dropped by extraction and
+    shipped untranslated; the body walk already recurses into sdt
+    (``_iter_body_items``), the cell walk must mirror it.
+    """
+    from docx.oxml.ns import qn
+
+    doc = Document()
+    table = doc.add_table(rows=1, cols=1)
+    cell = table.rows[0].cells[0]
+    para = cell.paragraphs[0]
+    para.add_run("SDT-wrapped cell text")
+    tc = cell._tc
+    sdt = tc.makeelement(qn("w:sdt"), {})
+    content = tc.makeelement(qn("w:sdtContent"), {})
+    tc.remove(para._p)
+    content.append(para._p)
+    sdt.append(content)
+    tc.append(sdt)
+    path = tmp_path / "sdt_cell.docx"
+    doc.save(str(path))
+
+    blocks = (await _collect(DOCXAdapter().parse_stream(path)))[0].blocks
+    texts = [b.source_text for b in blocks]
+    assert any("SDT-wrapped cell text" in t for t in texts), texts
