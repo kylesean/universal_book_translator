@@ -274,12 +274,12 @@ def probe_effective_driver(
             "to avoid this.",
             provider,
         )
-        try:
-            return provider, CloudOcrDriver(
-                endpoint=endpoint, api_key=api_key, model=model, provider=provider
-            )
-        except ValueError as exc:
-            logger.debug("Cloud driver probe failed: %s", exc)
-            return None, None
+        # A missing vision model must fail loudly, not degrade to a silent
+        # skip: ``auto`` warns first, then ``CloudOcrDriver`` refuses to invent
+        # a model, so the ValueError propagates (see
+        # test_auto_vision_without_a_model_fails_loudly).
+        return provider, CloudOcrDriver(
+            endpoint=endpoint, api_key=api_key, model=model, provider=provider
+        )
 
     return None, None

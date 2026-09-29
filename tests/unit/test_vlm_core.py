@@ -717,31 +717,3 @@ def test_vlm_env_var_obeys_allow_page_upload_gate(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setenv("UBT_VLM_DRIVER", "cloud")
     with pytest.raises(ValueError, match="allow_page_upload=false"):
         probe_effective_driver(allow_page_upload=False)
-
-
-def test_probe_effective_driver_gracefully_handles_missing_model_with_ambient_openai_key(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Ambient OPENAI_API_KEY without explicit UBT_OCR_MODEL must not cause unhandled ValueError."""
-    import builtins
-
-    from ubt.adapters.pdf.vlm.registry import probe_effective_driver
-
-    monkeypatch.delenv("UBT_VLM_DRIVER", raising=False)
-    monkeypatch.delenv("UBT_OCR_MODEL", raising=False)
-    monkeypatch.delenv("UBT_OCR_ENDPOINT", raising=False)
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-ambient-test-key")
-
-    orig_import = builtins.__import__
-
-    def mock_import(name: str, *args: Any, **kwargs: Any) -> Any:
-        if "rapidocr" in name:
-            raise ImportError("RapidOCR not installed")
-        return orig_import(name, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "__import__", mock_import)
-
-    # Must return (None, None) gracefully rather than crashing with unhandled ValueError
-    driver_name, driver = probe_effective_driver(allow_page_upload=True)
-    assert driver_name is None
-    assert driver is None
