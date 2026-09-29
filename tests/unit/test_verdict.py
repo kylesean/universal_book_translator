@@ -139,7 +139,6 @@ def test_apply_verdict_stamps_and_skips() -> None:
     assert b.policy_translate is False
     assert b.policy_reason == "verdict:short_label"
     assert b.skip_translate is True
-    assert b.effective_should_translate() is False
     assert b.validate_contract() == []
 
 

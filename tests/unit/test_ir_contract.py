@@ -30,15 +30,7 @@ def test_legacy_blocks_default_to_old_behavior() -> None:
     assert b.layout_role is None
     assert b.policy_translate is None
     assert b.provenance == {}
-    assert b.effective_should_translate() is False
     assert b.validate_contract() == []
-
-
-def test_explicit_policy_wins_over_skip_translate() -> None:
-    b = _block(skip_translate=True, policy_translate=True)
-    assert b.effective_should_translate() is True
-    b2 = _block(skip_translate=False, policy_translate=False, policy_reason="header")
-    assert b2.effective_should_translate() is False
 
 
 def test_derive_roles_respects_explicit() -> None:

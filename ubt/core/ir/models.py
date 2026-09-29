@@ -171,16 +171,6 @@ class IRBlock(BaseModel):
         """Returns True if the block has reached a terminal status."""
         return self.status in TERMINAL_STATUSES
 
-    def effective_should_translate(self) -> bool:
-        """Single translation-gate entry point.
-
-        Explicit policy verdict wins; undecided blocks fall back to checking
-        the ``skip_translate`` flag.
-        """
-        if self.policy_translate is not None:
-            return self.policy_translate
-        return not self.skip_translate
-
     def derive_roles(self) -> None:
         """Fill unset role layers from explicit FlowID/BlockType (no guessing).
 
@@ -272,10 +262,6 @@ class ChapterIR(BaseModel):
     spine_index: int
     blocks: list[IRBlock] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)  # e.g. page_kinds
-
-    def get_blocks_by_flow(self, flow_id: FlowID) -> list[IRBlock]:
-        """Filter blocks belonging strictly to a given semantic flow."""
-        return [b for b in self.blocks if b.flow_id == flow_id]
 
     @property
     def total_blocks(self) -> int:

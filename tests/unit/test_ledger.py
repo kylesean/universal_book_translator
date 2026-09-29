@@ -1027,7 +1027,6 @@ def test_v5_contract_columns_round_trip(tmp_path: Path) -> None:
     assert got.policy_translate is False
     assert got.policy_reason == "verdict:short_label"
     assert got.provenance["page_kind"] == "mixed_complex"
-    assert got.effective_should_translate() is False
     assert got.validate_contract() == []
 
 
