@@ -409,7 +409,13 @@ class EPUBAdapter(BaseDocumentAdapter):
         try:
             with zipfile.ZipFile(input_path) as zf:
                 opf_path = self._locate_opf(zf)
-                opf_soup = BeautifulSoup(decode_markup(zf.read(opf_path)), "xml")
+                opf_bytes = _read_epub_member(zf, opf_path)
+                if opf_bytes is None:
+                    raise DocumentParseError(
+                        f"Invalid EPUB: OPF package manifest {opf_path!r} could not be read "
+                        "(missing or oversized member)."
+                    )
+                opf_soup = BeautifulSoup(decode_markup(opf_bytes), "xml")
 
                 # Extract title and author
                 title_tag = opf_soup.find("dc:title") or opf_soup.find("title")
@@ -661,8 +667,13 @@ class EPUBAdapter(BaseDocumentAdapter):
                 opf_path = str(manifest.metadata.get("opf_path") or "")
                 opf_dir = posixpath.dirname(opf_path)
                 toc_paths: set[str] = set()
-                if opf_path and opf_path in zin.namelist():
-                    opf_soup = BeautifulSoup(decode_markup(zin.read(opf_path)), "xml")
+                opf_bytes = (
+                    _read_epub_member(zin, opf_path)
+                    if opf_path and opf_path in zin.namelist()
+                    else None
+                )
+                if opf_bytes is not None:
+                    opf_soup = BeautifulSoup(decode_markup(opf_bytes), "xml")
                     for item in opf_soup.find_all("item"):
                         href = str(item.get("href") or "")
                         if not href:
@@ -790,8 +801,9 @@ class EPUBAdapter(BaseDocumentAdapter):
 
     def _locate_opf(self, zf: zipfile.ZipFile) -> str:
         """Locate the root OPF file path via META-INF/container.xml."""
-        if "META-INF/container.xml" in zf.namelist():
-            container_xml = decode_markup(zf.read("META-INF/container.xml"))
+        container_bytes = _read_epub_member(zf, "META-INF/container.xml")
+        if container_bytes is not None:
+            container_xml = decode_markup(container_bytes)
             m = re.search(r'full-path=["\']([^"\']+)["\']', container_xml)
             if m:
                 return m.group(1)

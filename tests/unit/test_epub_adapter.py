@@ -1194,6 +1194,52 @@ def test_epub_refuses_to_read_an_oversized_member() -> None:
         assert _read_epub_member(zf, "bomb.bin") is None
 
 
+def test_locate_opf_falls_back_when_container_xml_is_bomb_sized(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An oversized META-INF/container.xml must be skipped, not read raw.
+
+    With the member read unguarded, ``_locate_opf`` trusted the bomb-declared
+    container's (wrong) full-path; guarded, the member is skipped and the
+    ``.opf`` name scan runs instead.
+    """
+    import ubt.adapters.epub.adapter as epub_adapter
+
+    monkeypatch.setattr(epub_adapter, "_MAX_EPUB_MEMBER_BYTES", 10)
+    buf = io.BytesIO()
+    container = (
+        '<container><rootfiles><rootfile full-path="wrong/path.opf"/></rootfiles></container>'
+    )
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("META-INF/container.xml", container)
+        zf.writestr("OEBPS/content.opf", "<package/>")
+    buf.seek(0)
+    with zipfile.ZipFile(buf) as zf:
+        assert EPUBAdapter()._locate_opf(zf) == "OEBPS/content.opf"
+
+
+@pytest.mark.asyncio
+async def test_extract_manifest_rejects_bomb_sized_opf(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bomb-sized OPF must fail closed, not be read raw.
+
+    The unguarded ``zf.read`` ignored the member-size policy so parsing went
+    ahead; the guarded read returns ``None`` and the parse must raise
+    ``DocumentParseError``.
+    """
+    import ubt.adapters.epub.adapter as epub_adapter
+
+    monkeypatch.setattr(epub_adapter, "_MAX_EPUB_MEMBER_BYTES", 10)
+    path = write_epub(
+        tmp_path / "bomb.epub",
+        opf_xml=opf(pub_id="p", title="t", items=[item("c1", "c1.xhtml")]),
+        parts={"OEBPS/c1.xhtml": page("<p>hello</p>")},
+    )
+    with pytest.raises(DocumentParseError, match="OPF"):
+        await EPUBAdapter().extract_manifest(path)
+
+
 @pytest.mark.asyncio
 async def test_epub_non_utf8_chapter_is_decoded_not_dropped(tmp_path: Path) -> None:
     """A chapter encoded in a non-UTF-8 charset must keep its text.
