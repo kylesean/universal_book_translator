@@ -438,6 +438,20 @@ def build_macro_chunk_draft_prompt(
     return system_prompt, "\n".join(user_parts)
 
 
+def _detect_table_grid(text: str) -> tuple[int, int] | None:
+    """Return (num_rows, num_cols) if text contains a markdown table, else None."""
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    table_lines = [ln for ln in lines if ln.count("|") >= 2]
+    if len(table_lines) >= 2:
+        col_counts = [len(ln.strip("|").split("|")) for ln in table_lines]
+        if col_counts:
+            from collections import Counter
+
+            common_cols = Counter(col_counts).most_common(1)[0][0]
+            return len(table_lines), common_cols
+    return None
+
+
 def build_minimal_repair_prompt(
     source_text: str,
     glossary_table: str = "",
@@ -457,6 +471,15 @@ def build_minimal_repair_prompt(
     parts = []
     if glossary_table.strip():
         parts.append(f"Glossary:\n{glossary_table.strip()}")
+    grid_info = _detect_table_grid(source_text)
+    if grid_info:
+        rows, cols = grid_info
+        parts.append(
+            f"CRITICAL TABLE PRESERVATION GUARDRAIL:\n"
+            f"The text is a markdown table with {rows} rows and {cols} columns. "
+            f"You MUST strictly preserve the exact {rows}x{cols} table grid structure. "
+            f"Do NOT delete, drop, or merge any rows or columns during repair."
+        )
     parts.append(
         f"Translate the following {src_name} text into clean, fluent {tgt_name}. Output ONLY the translation without any title, prefix, or commentary:\n\n{_neutralize_reserved_tags(source_text).strip()}"
     )
@@ -483,9 +506,22 @@ def build_hybrid_repair_prompt(
         tgt_profile.name if tgt_profile else (target_lang.upper() if target_lang else "TARGET")
     )
 
+    grid_info = _detect_table_grid(source_text)
+    table_guardrail = ""
+    if grid_info:
+        rows, cols = grid_info
+        table_guardrail = (
+            f"\n\n[CRITICAL TABLE STRUCTURE GUARDRAIL]:\n"
+            f"The text contains a markdown table with {rows} rows and {cols} columns.\n"
+            f"You MUST STRICTLY PRESERVE the exact {rows} rows and {cols} columns ({rows}x{cols} grid).\n"
+            f"NEVER delete, drop, or merge any rows or columns during repair, even if a critique reports repetition or loops.\n"
+            f"Output the complete table with identical row and column count, translating only translatable cell text."
+        )
+
     system_prompt = (
         f"You are an expert bilingual editor refining a translation from {src_name} into {tgt_name}.\n"
         "Fix all identified issues and output the corrected translation."
+        f"{table_guardrail}"
     )
 
     issues_formatted = (
@@ -497,6 +533,14 @@ def build_hybrid_repair_prompt(
     user_parts: list[str] = []
     if glossary_table.strip():
         user_parts.append(f"### Terminology Glossary\n{glossary_table.strip()}\n")
+
+    if grid_info:
+        rows, cols = grid_info
+        user_parts.append(
+            f"### Table Preservation Requirement\n"
+            f"Strictly maintain the exact {rows} rows and {cols} columns of the table grid. "
+            f"Do not delete or merge any rows or columns.\n"
+        )
 
     if has_error_spans and annotated_draft.strip():
         user_parts.append(
@@ -542,11 +586,28 @@ def build_rich_repair_prompt(
         else "- General fluency / quality score below threshold"
     )
 
+    grid_info = _detect_table_grid(source_text)
+
     user_parts: list[str] = []
     if glossary_table.strip():
         user_parts.append(f"### Translation Bible\n{glossary_table.strip()}\n")
 
+    if grid_info:
+        rows, cols = grid_info
+        user_parts.append(
+            f"### Table Structure Guardrail\n"
+            f"Strictly preserve the exact {rows} rows and {cols} columns of the source table grid. "
+            f"Do NOT delete, drop, or merge any rows or columns.\n"
+        )
+
     if has_error_spans and annotated_draft.strip():
+        table_infilling_note = ""
+        if grid_info:
+            rows, cols = grid_info
+            table_infilling_note = (
+                f"\n4. Table Structure: Preserve all {rows} rows and {cols} columns of the table grid. "
+                "Never delete or drop table rows."
+            )
         system_prompt = (
             f"You are an automated precision translation repair agent refining a translation from {src_name} into {tgt_name}.\n"
             "Your task is MINIMAL IN-PLACE CORRECTION to eliminate over-editing.\n\n"
@@ -557,6 +618,7 @@ def build_rich_repair_prompt(
             '<correction id="1">replacement_text</correction>\n'
             'If multiple spans exist, output <correction id="X"> for each. '
             "Or output the complete text with only the marked errors repaired in <final_translation>...</final_translation>."
+            f"{table_infilling_note}"
         )
 
         user_parts.append(
@@ -567,6 +629,15 @@ def build_rich_repair_prompt(
             'Correct the marked error spans with minimal in-place edits using <correction id="...">replacement</correction>:'
         )
     else:
+        table_rule = ""
+        if grid_info:
+            rows, cols = grid_info
+            table_rule = (
+                f"6. [Table Structure Preservation ({rows}x{cols} Grid)]: The source is a table with {rows} rows and {cols} columns. "
+                f"Strictly preserve the exact row count and column count. Never delete, drop, or merge rows or columns during repair, "
+                f"even if a critique notes repetition or loops. Maintain the complete grid shape perfectly.\n\n"
+            )
+
         system_prompt = (
             f"You are a master bilingual editor and precision repair agent refining a translation from {src_name} into {tgt_name}.\n"
             "A draft translation failed quality checks. Conduct a focused, structured review before outputting the final translation.\n\n"
@@ -575,7 +646,8 @@ def build_rich_repair_prompt(
             "2. [Critique Resolution]: Address and fix every flagged quality defect.\n"
             "3. [Fluency & Denoising]: Polish target prose to eliminate stiff translationese and mechanical passive constructions (naturalize passive voice to active/topic-prominent phrasing in CJK, 意合重组). Suppress any raw OCR glyph noise, stray symbols, or broken boilerplate fragments that leaked into the draft.\n"
             "4. [Scientific Math & Definition Integrity]: Reconstruct all inline physical variables, symbols, and subscripts/superscripts (e.g. Vtm, kBT/q, Vch) into LaTeX inline math ($...$). Only wrap notation already mathematical in the source — never invent LaTeX commands (\\mathrm, \\text, ...) or $...$ for plain labels verbatim in the source (2D, 3D, Fig. 1.1); reproduce those exactly. Never drop explanatory definition clauses that follow equations (e.g. 'where...', '其中...').\n"
-            "5. [Publishing Typography & CJK Spacing]: In Chinese target text, leave a single half-width space between Chinese characters and English words, digits, or inline math ($...$), and eliminate stray spaces around full-width CJK punctuation.\n\n"
+            "5. [Publishing Typography & CJK Spacing]: In Chinese target text, leave a single half-width space between Chinese characters and English words, digits, or inline math ($...$), and eliminate stray spaces around full-width CJK punctuation.\n"
+            f"{table_rule}"
             "Output Requirement:\n"
             "Wrap the final polished translation strictly inside <final_translation>...</final_translation> without commentary or markdown code blocks."
         )
