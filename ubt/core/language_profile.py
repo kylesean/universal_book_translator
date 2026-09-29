@@ -15,6 +15,8 @@ Design notes:
   which is out of scope for 0-token checks).
 """
 
+import re
+import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -127,6 +129,10 @@ class LanguagePairPolicy:
     min_target_ratio: float
     target_script_ratio: Callable[[str], float]
     supports_backfill: bool = True
+    #: Lexical target-identity gate for same-script pairs, or None. The
+    #: script-density gate is disabled for those pairs, so this is the only
+    #: 0-token identity signal available.
+    same_script_gate: Callable[[str], bool] | None = None
 
     @property
     def code(self) -> str:
@@ -245,6 +251,417 @@ def get_profile(code: str) -> LanguageProfile:
     return profile
 
 
+# Function-word fingerprints for the Latin-script target languages. Same-script
+# pairs zero the script-density gate (script classes cannot tell English from
+# German), so the pair policy carries this lexical gate instead: a target whose
+# frequent function words are still the source language's was not translated.
+# Entries are accent-folded and lowercased to match :func:`_fold_word`.
+_LATIN_FUNCTION_WORDS: dict[str, frozenset[str]] = {
+    "en": frozenset(
+        [
+            "the",
+            "a",
+            "an",
+            "and",
+            "or",
+            "but",
+            "of",
+            "to",
+            "in",
+            "on",
+            "at",
+            "by",
+            "for",
+            "with",
+            "from",
+            "as",
+            "is",
+            "are",
+            "was",
+            "were",
+            "be",
+            "been",
+            "being",
+            "this",
+            "that",
+            "these",
+            "those",
+            "it",
+            "its",
+            "he",
+            "she",
+            "they",
+            "we",
+            "you",
+            "not",
+            "no",
+            "than",
+            "then",
+            "so",
+            "if",
+            "when",
+            "where",
+            "which",
+            "who",
+            "whom",
+            "whose",
+            "across",
+            "while",
+            "during",
+            "between",
+            "through",
+            "before",
+            "after",
+            "because",
+            "although",
+            "since",
+            "until",
+            "about",
+            "into",
+            "over",
+            "under",
+            "again",
+            "also",
+            "only",
+            "just",
+            "very",
+            "more",
+            "most",
+            "some",
+            "any",
+            "all",
+            "each",
+            "both",
+            "many",
+            "much",
+            "other",
+            "others",
+            "such",
+            "same",
+            "too",
+            "now",
+            "here",
+            "there",
+            "our",
+            "your",
+            "their",
+            "them",
+            "him",
+            "her",
+            "us",
+        ]
+    ),
+    "de": frozenset(
+        [
+            "der",
+            "die",
+            "das",
+            "den",
+            "dem",
+            "des",
+            "ein",
+            "eine",
+            "einen",
+            "einem",
+            "eines",
+            "und",
+            "oder",
+            "aber",
+            "von",
+            "zu",
+            "in",
+            "ist",
+            "sind",
+            "war",
+            "waren",
+            "sein",
+            "seine",
+            "ihrem",
+            "ihren",
+            "fur",
+            "uber",
+            "mit",
+            "auf",
+            "bei",
+            "aus",
+            "als",
+            "es",
+            "sie",
+            "er",
+            "wir",
+            "ich",
+            "nicht",
+            "kein",
+            "keine",
+            "keinen",
+            "im",
+            "am",
+            "zum",
+            "zur",
+            "dass",
+            "wenn",
+            "wie",
+            "auch",
+            "noch",
+            "nur",
+            "schon",
+            "durch",
+            "gegen",
+            "ohne",
+            "um",
+            "weil",
+            "denn",
+            "obwohl",
+            "wahrend",
+            "nachdem",
+            "damit",
+            "dabei",
+            "deshalb",
+            "trotzdem",
+            "zwar",
+            "sowie",
+            "beide",
+            "mehr",
+            "viele",
+            "viel",
+            "wenige",
+            "alle",
+            "jede",
+            "jeder",
+            "jeder",
+            "dieser",
+            "diese",
+            "dieses",
+            "mein",
+            "meine",
+            "dein",
+            "deine",
+            "unser",
+            "unsere",
+            "ihre",
+            "werden",
+            "wird",
+            "wurde",
+            "wurden",
+            "hat",
+            "haben",
+            "hatte",
+            "hatten",
+            "nach",
+            "seit",
+            "bis",
+            "beim",
+            "vom",
+        ]
+    ),
+    "fr": frozenset(
+        [
+            "le",
+            "la",
+            "les",
+            "un",
+            "une",
+            "des",
+            "du",
+            "de",
+            "et",
+            "ou",
+            "mais",
+            "a",
+            "dans",
+            "est",
+            "sont",
+            "etait",
+            "etaient",
+            "etre",
+            "pour",
+            "avec",
+            "sur",
+            "au",
+            "aux",
+            "par",
+            "comme",
+            "il",
+            "elle",
+            "ils",
+            "elles",
+            "nous",
+            "je",
+            "ne",
+            "pas",
+            "ce",
+            "cette",
+            "ces",
+            "son",
+            "sa",
+            "leur",
+            "leurs",
+            "que",
+            "qui",
+            "dont",
+            "ont",
+            "plus",
+            "tres",
+            "moins",
+            "aussi",
+            "donc",
+            "car",
+            "puis",
+            "alors",
+            "ainsi",
+            "bien",
+            "mieux",
+            "selon",
+            "pendant",
+            "depuis",
+            "avant",
+            "apres",
+            "entre",
+            "sans",
+            "sous",
+            "vers",
+            "chez",
+            "lorsque",
+            "quand",
+            "parce",
+            "beaucoup",
+            "peu",
+            "tous",
+            "toutes",
+            "tout",
+            "toute",
+            "chaque",
+            "quelques",
+            "certains",
+            "autre",
+            "autres",
+            "meme",
+            "deja",
+            "encore",
+            "toujours",
+            "jamais",
+            "souvent",
+        ]
+    ),
+    "es": frozenset(
+        [
+            "el",
+            "la",
+            "los",
+            "las",
+            "un",
+            "una",
+            "unos",
+            "unas",
+            "de",
+            "del",
+            "y",
+            "o",
+            "pero",
+            "en",
+            "es",
+            "son",
+            "era",
+            "eran",
+            "para",
+            "con",
+            "por",
+            "como",
+            "se",
+            "su",
+            "sus",
+            "no",
+            "lo",
+            "al",
+            "a",
+            "que",
+            "este",
+            "esta",
+            "estos",
+            "estas",
+            "mas",
+            "muy",
+            "sin",
+            "sobre",
+            "entre",
+            "hasta",
+            "desde",
+            "hay",
+            "tiene",
+            "tienen",
+            "tambien",
+            "siempre",
+            "nunca",
+            "mucho",
+            "poco",
+            "todo",
+            "todos",
+            "toda",
+            "todas",
+            "cada",
+            "algunos",
+            "otro",
+            "otros",
+            "mismo",
+            "asi",
+            "entonces",
+            "porque",
+            "pues",
+            "aunque",
+            "mientras",
+            "durante",
+            "antes",
+            "despues",
+            "bajo",
+            "hacia",
+            "cuando",
+            "donde",
+            "quien",
+            "cual",
+        ]
+    ),
+}
+_WORD_RE = re.compile(r"[^\W\d_]+", re.UNICODE)
+#: Below this many function-word hits the sample is too small to judge.
+_SAME_SCRIPT_MIN_FUNCTION_WORDS = 5
+#: Share of function-word hits that must belong to the target language.
+_SAME_SCRIPT_TARGET_SHARE = 0.5
+
+
+def _fold_word(word: str) -> str:
+    """Lowercase and strip accents so ``über``/``uber`` and ``à``/``a`` match."""
+    return "".join(
+        c for c in unicodedata.normalize("NFD", word.lower()) if unicodedata.category(c) != "Mn"
+    )
+
+
+def same_script_identity_gate(source_code: str, target_code: str) -> Callable[[str], bool] | None:
+    """Return a lexical target-identity predicate for a same-script pair, or None.
+
+    ``True`` means the text looks like the target language. Only words exclusive
+    to the source count as residue evidence: cognate function words shared by
+    both languages (en/de ``in``, fr/es ``de``) carry no signal. Below
+    ``_SAME_SCRIPT_MIN_FUNCTION_WORDS`` hits the sample is too small to judge, so
+    the gate passes rather than fire on noise.
+    """
+    target_fw = _LATIN_FUNCTION_WORDS.get(target_code)
+    source_fw = _LATIN_FUNCTION_WORDS.get(source_code)
+    if target_fw is None or source_fw is None:
+        return None
+    source_only = source_fw - target_fw
+
+    def looks_translated(text: str) -> bool:
+        tokens = [_fold_word(m.group(0)) for m in _WORD_RE.finditer(text)]
+        target_hits = sum(1 for w in tokens if w in target_fw)
+        source_hits = sum(1 for w in tokens if w in source_only)
+        population = target_hits + source_hits
+        if population < _SAME_SCRIPT_MIN_FUNCTION_WORDS:
+            return True
+        return target_hits / population >= _SAME_SCRIPT_TARGET_SHARE
+
+    return looks_translated
+
+
 def get_pair_policy(source_lang: str = "en", target_lang: str = "zh") -> LanguagePairPolicy:
     """Resolve a bidirectional pair policy with calibrated length bounds and script guards.
 
@@ -266,10 +683,13 @@ def get_pair_policy(source_lang: str = "en", target_lang: str = "zh") -> Languag
     )
 
     # Script gating: if source and target share Latin script, character-ratio gate cannot
-    # distinguish source residue from target text, so min_target_ratio is 0.0.
+    # distinguish source residue from target text, so min_target_ratio is 0.0 and a
+    # lexical (function-word) identity gate takes its place.
     min_target = tgt_profile.min_target_ratio
+    same_script_gate: Callable[[str], bool] | None = None
     if src in _LATIN_SCRIPTS and tgt in _LATIN_SCRIPTS:
         min_target = 0.0
+        same_script_gate = same_script_identity_gate(src, tgt)
 
     return LanguagePairPolicy(
         source_code=src,
@@ -281,6 +701,7 @@ def get_pair_policy(source_lang: str = "en", target_lang: str = "zh") -> Languag
         min_target_ratio=min_target,
         target_script_ratio=tgt_profile.target_script_ratio,
         supports_backfill=tgt_profile.supports_backfill,
+        same_script_gate=same_script_gate,
     )
 
 

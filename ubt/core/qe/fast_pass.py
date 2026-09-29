@@ -15,7 +15,11 @@ from ubt.core.cleaners.math_masker import extract_math_spans
 from ubt.core.language_profile import ZH, LanguagePairPolicy, LanguageProfile, get_pair_policy
 from ubt.core.policy.layout_policy import PROSE_BLOCK_TYPES
 from ubt.core.qe.added_content import AddedContentGate
-from ubt.core.qe.defect_taxonomy import ECHO_MARKER, NEAR_ECHO_MARKER
+from ubt.core.qe.defect_taxonomy import (
+    ECHO_MARKER,
+    NEAR_ECHO_MARKER,
+    UNTRANSLATED_RESIDUE_MARKER,
+)
 from ubt.core.qe.omission import OmissionGate, OmissionMetrics, singular_variant
 from ubt.core.qe.term_shape import is_identifier_shaped, is_verbatim_carryover
 from ubt.core.validators.consistency import NumericConsistencyValidator
@@ -534,6 +538,9 @@ class FastPassFilter:
         self.max_length_ratio = (
             self.profile.max_length_ratio if max_length_ratio is None else max_length_ratio
         )
+        # Same-script pairs disable the script-density gate; the pair policy
+        # carries a lexical (function-word) identity gate in its place.
+        self.same_script_gate = getattr(self.profile, "same_script_gate", None)
         self.html_validator = HTMLDeltaValidator()
         self.numeric_validator = NumericConsistencyValidator(profile=self.profile)
         self.omission_gate = OmissionGate(target_lang=self.profile.code)
@@ -917,6 +924,24 @@ class FastPassFilter:
                 )
         else:
             target_ratio = 1.0
+
+        # 6b. Same-script lexical identity. The script classes above cannot
+        # separate a Latin->Latin pair, so the pair policy's function-word gate
+        # is the only identity signal. ``None`` means the pair is cross-script
+        # (or a language without a fingerprint), so this check is inert.
+        if self.same_script_gate is not None and not self.same_script_gate(prose_only):
+            source_name = getattr(self.profile, "source_name", "the source language")
+            target_name = getattr(self.profile, "target_name", "the target language")
+            return FastPassDecision(
+                passed=False,
+                reason=(
+                    f"{UNTRANSLATED_RESIDUE_MARKER}: the target's common words are still "
+                    f"{source_name}, not {target_name} — render the passage in "
+                    f"{target_name}, keeping identifiers, numerals and quoted strings verbatim"
+                ),
+                target_ratio=0.0,
+                length_ratio=length_ratio,
+            )
 
         return FastPassDecision(
             passed=True,

@@ -10,17 +10,21 @@ clear the QE gate and never reach triage).
 from collections.abc import Iterable
 
 # --- The "not translated" (echo) class --------------------------------------
-# FastPass rejects an untranslated passage with one of two phrasings: the exact
-# echo, and the near-verbatim variant (``is_near_verbatim_echo``) for a target
-# that kept nearly all source words while changing a few. They are the same
-# defect, so every table below — and the QE score classifier — has to match
-# both; matching only one would let a never-translated paragraph fall through to
-# "other structural rejection" (0.70), read as a generic structural problem, and
-# get auto-passed by any threshold at or above it. The markers live here so the
-# reason strings and the tables cannot drift.
+# FastPass rejects an untranslated passage with one of three phrasings: the
+# exact echo, the near-verbatim variant (``is_near_verbatim_echo``) for a target
+# that kept nearly all source words while changing a few, and the same-script
+# lexical variant (``same_script_identity_gate``) for a target whose script
+# classes cannot separate the pair and whose frequent function words are still
+# the source language's. They are the same defect, so every table below — and
+# the QE score classifier — has to match all of them; matching only some would
+# let a never-translated paragraph fall through to "other structural rejection"
+# (0.70), read as a generic structural problem, and get auto-passed by any
+# threshold at or above it. The markers live here so the reason strings and the
+# tables cannot drift.
 ECHO_MARKER = "Target identical to source"
 NEAR_ECHO_MARKER = "Target keeps nearly all source words"
-ECHO_MARKERS: tuple[str, ...] = (ECHO_MARKER, NEAR_ECHO_MARKER)
+UNTRANSLATED_RESIDUE_MARKER = "Target reads as source-language residue"
+ECHO_MARKERS: tuple[str, ...] = (ECHO_MARKER, NEAR_ECHO_MARKER, UNTRANSLATED_RESIDUE_MARKER)
 
 # Fragments that mark structural / factual corruption: the draft cannot be
 # trusted even when the score looks acceptable, and must never be auto-passed.

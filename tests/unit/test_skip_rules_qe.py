@@ -206,6 +206,35 @@ def test_same_script_cjk_translation_still_passes() -> None:
     assert d.passed, d.reason
 
 
+def test_same_script_latin_residue_is_rejected() -> None:
+    """Same-script pairs zero the script gate, so a target that translated the
+    content words but kept the source's function words is still source residue."""
+    src = (
+        "The model learns representations and it generalizes across many tasks "
+        "while the data is small and the weights are shared."
+    )
+    tgt = (
+        "Das Modell lernt Repraesentationen and it generalisiert across viele "
+        "Aufgaben while the Daten is klein and the Gewichte are geteilt."
+    )
+    d = FastPassFilter(source_lang="en", target_lang="de").evaluate(src, tgt)
+    assert not d.passed
+    assert "source-language residue" in d.reason
+
+
+def test_same_script_latin_real_translation_passes() -> None:
+    src = (
+        "The model learns representations and it generalizes across many tasks "
+        "while the data is small and the weights are shared."
+    )
+    tgt = (
+        "Das Modell erlernt Repräsentationen und verallgemeinert über viele "
+        "Aufgaben, während die Daten klein sind und die Gewichte geteilt werden."
+    )
+    d = FastPassFilter(source_lang="en", target_lang="de").evaluate(src, tgt)
+    assert d.passed, d.reason
+
+
 def test_near_echo_still_fires_on_a_latin_target_with_no_cjk() -> None:
     """The guard is CJK-presence only: a Latin echo that never reached the
     target language still has no CJK and must stay quarantined."""
