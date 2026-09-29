@@ -28,10 +28,11 @@ def _endpoint_is_local(endpoint: str | None) -> bool:
     if "://" not in endpoint:
         endpoint = "http://" + endpoint
     host = (urlparse(endpoint).hostname or "").lower()
-    if host == "localhost" or host.endswith(".localhost"):
+    if host in ("localhost", "host.docker.internal") or host.endswith(".localhost"):
         return True
     try:
-        return ipaddress.ip_address(host).is_loopback
+        ip = ipaddress.ip_address(host)
+        return ip.is_loopback or ip.is_private
     except ValueError:
         return False
 
@@ -161,6 +162,10 @@ def probe_effective_driver(
     own privacy policy says the opposite.
     """
     clean_mode = (mode or "auto").strip().lower()
+    if clean_mode == "auto":
+        vlm_env = os.environ.get("UBT_VLM_DRIVER", "").strip().lower()
+        if vlm_env:
+            clean_mode = vlm_env
     if clean_mode == "off":
         return None, None
 
@@ -217,11 +222,6 @@ def probe_effective_driver(
         return clean_mode, get_driver(clean_mode)
 
     # auto mode:
-    # 0. If UBT_VLM_DRIVER environment variable is set to a registered driver, honor it
-    vlm_env = os.environ.get("UBT_VLM_DRIVER", "").strip()
-    if vlm_env and vlm_env in _FACTORIES:
-        return vlm_env, get_driver(vlm_env)
-
     # 1. Probe sidecar health
     from ubt.adapters.pdf.vlm.drivers.sidecar_driver import SidecarOcrDriver
 
@@ -274,8 +274,12 @@ def probe_effective_driver(
             "to avoid this.",
             provider,
         )
-        return provider, CloudOcrDriver(
-            endpoint=endpoint, api_key=api_key, model=model, provider=provider
-        )
+        try:
+            return provider, CloudOcrDriver(
+                endpoint=endpoint, api_key=api_key, model=model, provider=provider
+            )
+        except ValueError as exc:
+            logger.debug("Cloud driver probe failed: %s", exc)
+            return None, None
 
     return None, None

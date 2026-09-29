@@ -893,7 +893,8 @@ class RigidTypesetter:
 
         pages = await asyncio.to_thread(_extract_all_pages)
         zone_map = build_zones(pages, blocks, allow_chrome_bands=self.translate_chrome)
-        paints, report = self._plan_blocks(
+        paints, report = await asyncio.to_thread(
+            self._plan_blocks,
             blocks,
             zone_map,
             {p: f.height for p, f in pages.items()},
@@ -1039,26 +1040,35 @@ class RigidTypesetter:
                             )
                             aborted_pages.append(page_no)
                             continue
-                        with pikepdf.open(overlay_path) as overlay:
-                            if overlay.pages:
-                                form = pdf.copy_foreign(overlay.pages[0].as_form_xobject())
-                                # ``add_overlay(form, None)`` places the form in
-                                # the page's TrimBox (pikepdf's default), which
-                                # scales and re-anchors the whole translation
-                                # layer whenever CropBox/TrimBox < MediaBox. The
-                                # overlay is authored in the MediaBox frame (see
-                                # rigid/extract.py), so place it there explicitly
-                                # for a 1:1, unscaled result.
-                                media = page.mediabox
-                                page.add_overlay(
-                                    form,
-                                    pikepdf.Rectangle(
-                                        float(media[0]),
-                                        float(media[1]),
-                                        float(media[2]),
-                                        float(media[3]),
-                                    ),
-                                )
+                        try:
+                            with pikepdf.open(overlay_path) as overlay:
+                                if overlay.pages:
+                                    form = pdf.copy_foreign(overlay.pages[0].as_form_xobject())
+                                    # ``add_overlay(form, None)`` places the form in
+                                    # the page's TrimBox (pikepdf's default), which
+                                    # scales and re-anchors the whole translation
+                                    # layer whenever CropBox/TrimBox < MediaBox. The
+                                    # overlay is authored in the MediaBox frame (see
+                                    # rigid/extract.py), so place it there explicitly
+                                    # for a 1:1, unscaled result.
+                                    media = page.mediabox
+                                    page.add_overlay(
+                                        form,
+                                        pikepdf.Rectangle(
+                                            float(media[0]),
+                                            float(media[1]),
+                                            float(media[2]),
+                                            float(media[3]),
+                                        ),
+                                    )
+                        except Exception as exc:
+                            logger.warning(
+                                "rigid overlay copy failed on page %d: %s; keeping source page",
+                                page_no,
+                                exc,
+                            )
+                            aborted_pages.append(page_no)
+                            continue
                     pdf.save(str(out_path))
 
             await asyncio.to_thread(_merge_sync)

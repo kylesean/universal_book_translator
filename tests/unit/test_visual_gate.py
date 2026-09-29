@@ -545,3 +545,33 @@ def test_geometry_sampling_always_includes_the_final_page() -> None:
         assert pages[-1] == total, f"last page missing from geometry sample (total={total})"
         assert len(pages) <= MAX_ARTIFACT_GEOMETRY_PAGES + 1
         assert pages == sorted(set(pages))
+
+
+@pytest.mark.fast
+def test_render_pages_to_png_registers_atexit_cleanup(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from ubt.adapters.pdf import visual_gate
+
+    registered: list[tuple[object, tuple[object, ...], dict[str, object]]] = []
+    monkeypatch.setattr(
+        "atexit.register",
+        lambda fn, *args, **kwargs: registered.append((fn, args, kwargs)),
+    )
+    monkeypatch.setattr(
+        "ubt.adapters.pdf.oxide_render.write_page_png",
+        lambda pdf_path, page, dpi, tmp: tmp / f"page_{page}.png",
+    )
+
+    pdf_dummy = tmp_path / "dummy.pdf"
+    pdf_dummy.write_bytes(b"%PDF-dummy")
+
+    result = visual_gate.render_pages_to_png(pdf_dummy, [1], work_dir=None)
+    assert 1 in result
+    # Check that atexit registered rmtree for the temporary directory
+    import shutil
+
+    assert any(
+        fn is shutil.rmtree and len(args) > 0 and args[0] == result[1].parent
+        for fn, args, _ in registered
+    )

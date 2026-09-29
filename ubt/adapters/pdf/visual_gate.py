@@ -33,6 +33,7 @@ exported artifact itself cannot be read.
 from __future__ import annotations
 
 import asyncio
+import atexit
 import base64
 import logging
 import shutil
@@ -417,6 +418,8 @@ def render_pages_to_png(
         if owns_tmp:
             shutil.rmtree(tmp, ignore_errors=True)
         return {}
+    if owns_tmp:
+        atexit.register(shutil.rmtree, tmp, ignore_errors=True)
     for page in pages:
         png = oxide_render.write_page_png(pdf_path, page, dpi, tmp)
         if png is not None:

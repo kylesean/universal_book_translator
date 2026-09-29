@@ -699,3 +699,49 @@ def test_ocr_endpoint_local_check_is_not_a_hostname_prefix_match() -> None:
     assert not _endpoint_is_local("http://127.0.0.1.attacker.example:80")
     assert not _endpoint_is_local("http://127.ocr.internal")
     assert not _endpoint_is_local("https://ocr.example.com")
+
+
+def test_ocr_endpoint_local_check_recognizes_docker_and_private_networks() -> None:
+    """host.docker.internal and private container bridges must be recognized as local."""
+    from ubt.adapters.pdf.vlm.registry import _endpoint_is_local
+
+    assert _endpoint_is_local("http://host.docker.internal:8000")
+    assert _endpoint_is_local("http://172.17.0.1:8765")
+    assert _endpoint_is_local("http://192.168.1.100:8765")
+
+
+def test_vlm_env_var_obeys_allow_page_upload_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    """UBT_VLM_DRIVER must not bypass allow_page_upload=False to ship pages to cloud."""
+    from ubt.adapters.pdf.vlm.registry import probe_effective_driver
+
+    monkeypatch.setenv("UBT_VLM_DRIVER", "cloud")
+    with pytest.raises(ValueError, match="allow_page_upload=false"):
+        probe_effective_driver(allow_page_upload=False)
+
+
+def test_probe_effective_driver_gracefully_handles_missing_model_with_ambient_openai_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ambient OPENAI_API_KEY without explicit UBT_OCR_MODEL must not cause unhandled ValueError."""
+    import builtins
+
+    from ubt.adapters.pdf.vlm.registry import probe_effective_driver
+
+    monkeypatch.delenv("UBT_VLM_DRIVER", raising=False)
+    monkeypatch.delenv("UBT_OCR_MODEL", raising=False)
+    monkeypatch.delenv("UBT_OCR_ENDPOINT", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-ambient-test-key")
+
+    orig_import = builtins.__import__
+
+    def mock_import(name: str, *args: Any, **kwargs: Any) -> Any:
+        if "rapidocr" in name:
+            raise ImportError("RapidOCR not installed")
+        return orig_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", mock_import)
+
+    # Must return (None, None) gracefully rather than crashing with unhandled ValueError
+    driver_name, driver = probe_effective_driver(allow_page_upload=True)
+    assert driver_name is None
+    assert driver is None
