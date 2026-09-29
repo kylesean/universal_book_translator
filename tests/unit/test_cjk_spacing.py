@@ -7,19 +7,21 @@ from ubt.core.cleaners.cjk_spacing import (
 )
 
 
-def test_apply_pangu_spacing_cjk_and_latin() -> None:
-    """Test space insertion between CJK and Latin characters."""
-    assert apply_pangu_spacing("在GCA条件下") == "在 GCA 条件下"
-    assert apply_pangu_spacing("FinFET器件") == "FinFET 器件"
-    assert apply_pangu_spacing("在FinFET和GAA架构中") == "在 FinFET 和 GAA 架构中"
-
-
-def test_apply_pangu_spacing_cjk_and_numbers() -> None:
-    """Test space insertion between CJK and digits."""
-    assert apply_pangu_spacing("第3章") == "第 3 章"
-    assert apply_pangu_spacing("3.1节") == "3.1 节"
-    assert apply_pangu_spacing("在2026年出版") == "在 2026 年出版"
-    assert apply_pangu_spacing("性能提升了15%的水平") == "性能提升了 15% 的水平"
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("在GCA条件下", "在 GCA 条件下"),
+        ("FinFET器件", "FinFET 器件"),
+        ("在FinFET和GAA架构中", "在 FinFET 和 GAA 架构中"),
+        ("第3章", "第 3 章"),
+        ("3.1节", "3.1 节"),
+        ("在2026年出版", "在 2026 年出版"),
+        ("性能提升了15%的水平", "性能提升了 15% 的水平"),
+    ],
+)
+def test_apply_pangu_spacing_cjk_latin_and_digits(raw: str, expected: str) -> None:
+    """Space insertion between CJK and Latin characters or digits."""
+    assert apply_pangu_spacing(raw) == expected
 
 
 def test_apply_pangu_spacing_math_and_masks() -> None:
@@ -80,20 +82,25 @@ def test_apply_pangu_spacing_idempotent_and_non_cjk() -> None:
     assert apply_pangu_spacing("") == ""
 
 
-def test_apply_pangu_spacing_bracketed_references() -> None:
-    """Test space insertion around half-width bracketed equation/figure references (W3C CLReq)."""
-    assert (
-        apply_pangu_spacing("因此，将从式(3.1)出发建立紧凑模型。")
-        == "因此，将从式 (3.1) 出发建立紧凑模型。"
-    )
-    assert (
-        apply_pangu_spacing("式(3.7)和(3.8)可以合并为一个方程：")
-        == "式 (3.7) 和 (3.8) 可以合并为一个方程："
-    )
-    assert apply_pangu_spacing("由方程(3.1)的数值解获得。") == "由方程 (3.1) 的数值解获得。"
-    assert apply_pangu_spacing("参见图 3.1(a)所示。") == "参见图 3.1 (a) 所示。"
-    # Guard against breaking full-width CJK brackets
-    assert apply_pangu_spacing("由式（3.1）推导得出") == "由式（3.1）推导得出"
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (
+            "因此，将从式(3.1)出发建立紧凑模型。",
+            "因此，将从式 (3.1) 出发建立紧凑模型。",
+        ),
+        (
+            "式(3.7)和(3.8)可以合并为一个方程：",
+            "式 (3.7) 和 (3.8) 可以合并为一个方程：",
+        ),
+        ("由方程(3.1)的数值解获得。", "由方程 (3.1) 的数值解获得。"),
+        ("参见图 3.1(a)所示。", "参见图 3.1 (a) 所示。"),
+        ("由式（3.1）推导得出", "由式（3.1）推导得出"),
+    ],
+)
+def test_apply_pangu_spacing_bracketed_references(raw: str, expected: str) -> None:
+    """Space insertion around half-width bracketed equation/figure references (W3C CLReq)."""
+    assert apply_pangu_spacing(raw) == expected
 
 
 def test_normalize_publishing_cjk_full_pipeline() -> None:
