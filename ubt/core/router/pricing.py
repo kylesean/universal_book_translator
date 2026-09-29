@@ -475,6 +475,10 @@ def resolve_cached_input_price(model: str) -> float:
 
     Exact match takes precedence over family prefix; falls back to the model's
     full input price when the provider does not publish a separate cached rate.
+    The result is capped at the model's own input price: a cache read is never
+    dearer than a fresh read, and without the cap a longest-prefix match can
+    inherit a *parent* entry's cached rate (``gpt-4.1`` matching ``gpt-4``, whose
+    ``cached_input`` defaults to its input 30.0) so a hit cost up to 300x a miss.
     """
     normalized = (model or "").strip().lower()
     candidates = [normalized]
@@ -519,9 +523,13 @@ def resolve_cached_input_price(model: str) -> float:
                 best_key = key
                 best_cached = cached_price
 
-    if best_cached >= 0.0:
-        return best_cached
     input_price, _ = resolve_model_prices(model)
+    if best_cached >= 0.0:
+        # Cap at the model's own input price: the longest-prefix match may have
+        # picked a parent entry whose cached rate is the parent's (higher) input,
+        # which made a cache hit dearer than a miss and tripped UBT_BUDGET_USD
+        # early. ``min`` also guards an exact entry with a bad cached > input.
+        return min(best_cached, input_price)
     return input_price
 
 
