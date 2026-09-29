@@ -229,35 +229,40 @@ async def test_close_does_not_wait_out_the_flush_interval(tmp_path: Path) -> Non
 @pytest.mark.fast
 @pytest.mark.asyncio
 async def test_ledger_flusher_persists_drained_checkpoints_when_task_cancelled() -> None:
+    """Cancelling close() must not drop the batch it is draining.
+
+    close() persists the pending checkpoints under ``asyncio.shield``: the
+    cancellation must neither skip that save nor lose its verdict. The save is
+    made slow enough that the cancellation lands while it is in flight, and no
+    background worker is started so close()'s final drain is the only writer —
+    the path this test pins, instead of a scheduling race with the worker.
+    """
     from unittest.mock import MagicMock
 
+    saved: list[list[dict[str, object]]] = []
+
+    def slow_save(batch: list[dict[str, object]]) -> None:
+        time.sleep(0.05)
+        saved.append(list(batch))
+
     mock_ledger = MagicMock()
-    mock_ledger.save_checkpoints_batch = MagicMock()
+    mock_ledger.save_checkpoints_batch = MagicMock(side_effect=slow_save)
 
-    flusher = CheckpointBatchFlusher(
-        ledger=mock_ledger,
-        flush_interval=0.1,
-        max_batch_size=5,
-    )
-    flusher.start()
-
-    # Submit an item to the flusher
+    flusher = CheckpointBatchFlusher(ledger=mock_ledger, flush_interval=10.0, max_batch_size=5)
     mock_checkpoint = {"block_id": "b1", "status": "drafted"}
-    await flusher.enqueue(mock_checkpoint)
+    flusher._queue.put_nowait(mock_checkpoint)
 
-    # Cancel the flusher close task
     async def cancel_close() -> None:
         task = asyncio.create_task(flusher.close())
+        await asyncio.sleep(0)  # let close() begin the shielded save
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
 
     await cancel_close()
 
-    # The checkpoint batch MUST have been saved because it was shielded
-    assert mock_ledger.save_checkpoints_batch.called
-    saved_batch = mock_ledger.save_checkpoints_batch.call_args[0][0]
-    assert mock_checkpoint in saved_batch
+    # The checkpoint batch MUST have been saved because it was shielded.
+    assert saved == [[mock_checkpoint]]
 
 
 @pytest.mark.fast
