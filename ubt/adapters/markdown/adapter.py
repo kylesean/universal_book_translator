@@ -1,6 +1,7 @@
 """Markdown and flat text document adapter."""
 
 import asyncio
+import html
 import os
 import re
 import tempfile
@@ -98,10 +99,29 @@ _EVENT_ATTR_RE = re.compile(
     re.IGNORECASE,
 )
 _JS_URL_RE = re.compile(
-    r"""([\s/](?:href|src|xlink:href)\s*=\s*)"""
-    r"""(?:"\s*(?:javascript|vbscript|data):[^"]*"|'\s*(?:javascript|vbscript|data):[^']*'|(?:javascript|vbscript|data):[^\s>]+)""",
+    r"""([\s/](?:href|src|xlink:href)\s*=\s*)("[^"]*"|'[^']*'|[^\s>]+)""",
     re.IGNORECASE,
 )
+_DANGEROUS_SCHEME_RE = re.compile(r"\s*(?:javascript|vbscript|data):", re.IGNORECASE)
+
+
+def _neutralize_script_urls(text: str) -> str:
+    """Replace dangerous-scheme URL attribute values with ``"#"``.
+
+    The value is entity-decoded before the scheme check: HTML parsers decode
+    character references in attribute values, so a literal-only match let
+    ``javascript&colon;alert(1)`` (or ``&#106;avascript:…``) through as an
+    executable ``javascript:`` URL.
+    """
+
+    def _sub(match: re.Match[str]) -> str:
+        value = match.group(2)
+        inner = value[1:-1] if value[:1] in ('"', "'") else value
+        if _DANGEROUS_SCHEME_RE.match(html.unescape(inner)):
+            return match.group(1) + '"#"'
+        return match.group(0)
+
+    return _JS_URL_RE.sub(_sub, text)
 
 
 def _sanitize_markdown_content(text: str) -> str:
@@ -117,7 +137,7 @@ def _sanitize_markdown_content(text: str) -> str:
     cleaned = strip_html_mark_tags(text)
     cleaned = _DANGEROUS_HTML_TAGS.sub("", cleaned)
     cleaned = _EVENT_ATTR_RE.sub("", cleaned)
-    return _JS_URL_RE.sub(r'\1"#"', cleaned)
+    return _neutralize_script_urls(cleaned)
 
 
 _TABLE_DELIMITER_RE = re.compile(r"^\|?(\s*:?-+:?\s*\|)+\s*:?-+:?\s*\|?$")

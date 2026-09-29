@@ -569,3 +569,24 @@ async def test_math_fence_inside_code_fence_does_not_swallow_book(tmp_path: Path
     texts = [b.source_text for ch in stream for b in ch.blocks]
     assert any("beta text" in t for t in texts)
     assert any("gamma text" in t for t in texts)
+
+
+@pytest.mark.fast
+def test_sanitizer_strips_entity_encoded_javascript_url() -> None:
+    """Entity-encoded script schemes must not reach the deliverable.
+
+    The scheme check matched the literal ``javascript:`` string, but HTML
+    parsers decode character references in attribute values, so
+    ``javascript&colon;alert(1)`` passed the sanitizer untouched and arrived at
+    the consumer as an executable ``javascript:alert(1)`` URL — while the
+    allowlist ``sanitize_html_fragment`` strips the same input.
+    """
+    from ubt.adapters.markdown.adapter import _sanitize_markdown_content
+
+    out = _sanitize_markdown_content('<a href="javascript&colon;alert(1)">click</a>')
+    assert "alert(1)" not in out, out
+    out2 = _sanitize_markdown_content('<a href="&#106;avascript:alert(1)">click</a>')
+    assert "avascript:" not in out2, out2
+    # Safe URLs (with a legitimate entity in the query) are untouched.
+    keep = _sanitize_markdown_content('<a href="https://example.com?a=1&amp;b=2">x</a>')
+    assert "https://example.com?a=1&amp;b=2" in keep, keep
