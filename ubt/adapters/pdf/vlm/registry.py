@@ -36,6 +36,42 @@ def _endpoint_is_local(endpoint: str | None) -> bool:
         return False
 
 
+def _sidecar_endpoint(endpoint: str | None) -> str:
+    """The endpoint ``SidecarOcrDriver`` will actually reach.
+
+    Mirrors the driver's own fallback chain (``endpoint`` -> ``UBT_OCR_ENDPOINT``
+    -> localhost default). The egress gate must judge *this* value, not the raw
+    argument: ``endpoint=None`` looks local but the driver would then read a
+    remote ``UBT_OCR_ENDPOINT`` and ship the pages there.
+    """
+    return endpoint or os.environ.get("UBT_OCR_ENDPOINT", "http://localhost:8765")
+
+
+#: Endpoint shapes that mean the OpenAI-compatible vision chat route rather than
+#: a generic cloud-REST OCR API. Mirrors ``CloudOcrDriver``'s own heuristic.
+_VISION_ENDPOINT_HINTS = ("/chat/completions", "api.openai.com", "api.deepseek.com")
+
+
+def _cloud_endpoint(endpoint: str | None) -> str:
+    """The endpoint ``CloudOcrDriver`` will reach, mirroring its fallback chain.
+
+    ``OPENAI_BASE_URL`` is part of that chain — an endpoint *fallback*, never a
+    route selector — and the last resort is OpenAI's own default.
+    """
+    from ubt.adapters.pdf.vlm.drivers.cloud_driver import DEFAULT_OPENAI_ENDPOINT
+
+    return (
+        endpoint
+        or os.environ.get("UBT_OCR_ENDPOINT")
+        or os.environ.get("OPENAI_BASE_URL")
+        or DEFAULT_OPENAI_ENDPOINT
+    ).rstrip("/")
+
+
+def _looks_like_vision_endpoint(endpoint: str) -> bool:
+    return any(hint in endpoint for hint in _VISION_ENDPOINT_HINTS)
+
+
 _FACTORIES: dict[str, Callable[[], VlmDriver]] = {}
 
 
@@ -131,9 +167,12 @@ def probe_effective_driver(
     if clean_mode in ("sidecar", "http"):
         # The sidecar is normally a local process, but UBT_OCR_ENDPOINT may point
         # it at a remote host — which would ship page images off-machine while
-        # allow_page_upload=false. Gate only the non-local case so the local
-        # sidecar keeps working under the default closed gate.
-        if not allow_page_upload and not _endpoint_is_local(endpoint):
+        # allow_page_upload=false. Gate on the endpoint the driver will actually
+        # reach (``endpoint`` or the env fallback), not the raw argument, so a
+        # ``endpoint=None`` call cannot slip a remote UBT_OCR_ENDPOINT past the
+        # gate. Only the non-local case is blocked; the local sidecar keeps
+        # working under the default closed gate.
+        if not allow_page_upload and not _endpoint_is_local(_sidecar_endpoint(endpoint)):
             raise ValueError(
                 "ocr_mode='sidecar' targets a non-local endpoint and ships rendered "
                 "book pages there, but allow_page_upload=false (UBT_ALLOW_PAGE_UPLOAD) "
@@ -186,7 +225,7 @@ def probe_effective_driver(
     # 1. Probe sidecar health
     from ubt.adapters.pdf.vlm.drivers.sidecar_driver import SidecarOcrDriver
 
-    target_ep = endpoint or os.environ.get("UBT_OCR_ENDPOINT", "http://localhost:8765")
+    target_ep = _sidecar_endpoint(endpoint)
     # The explicit-mode egress gate already blocks a non-local sidecar when
     # ``allow_page_upload=False``; auto must obey the same rule or a remote
     # endpoint silently ships pages off-machine. A local sidecar (or uploads
@@ -215,10 +254,15 @@ def probe_effective_driver(
         api_key or os.environ.get("UBT_OCR_API_KEY") or os.environ.get("OPENAI_API_KEY")
     )
     has_cloud_endpoint = bool(endpoint or os.environ.get("UBT_OCR_ENDPOINT"))
-    if has_cloud_key or (has_cloud_endpoint and not target_ep.startswith("http://localhost")):
+    if has_cloud_key or (has_cloud_endpoint and not _endpoint_is_local(target_ep)):
         from ubt.adapters.pdf.vlm.drivers.cloud_driver import CloudOcrDriver
 
-        provider = "vlm" if bool(os.environ.get("OPENAI_API_KEY")) else "cloud"
+        # Vision vs generic cloud-REST is decided by the *endpoint*, not by the
+        # mere presence of an ambient OPENAI_API_KEY: that variable is only an
+        # OCR credential fallback, and letting it pick the wire protocol meant a
+        # key exported for some other tool hijacked the OCR classification (and
+        # sent an OpenAI vision payload to, say, a Baidu REST endpoint).
+        provider = "vlm" if _looks_like_vision_endpoint(_cloud_endpoint(endpoint)) else "cloud"
         # A paid pick under auto must never be silent: every other paid route
         # in this project (batch, neural QE) requires an explicit flag, and a
         # surprise bill must not arrive through the back door. The warning
