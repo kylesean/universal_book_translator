@@ -16,3 +16,8 @@
 - **Local Gate (active)**: run `uv run pre-commit install` once; lint/format then run on every commit, and `mypy --strict ubt tests` + `pytest -m fast -q` run on every push. Remote CI is intentionally parked in `.github/workflows.disabled/` while the repo is private and iterating fast — the phased rollout is documented in `docs/guides/CI_AND_QUALITY_GATES.md`. Do not re-enable CI that is not already green locally.
 - **Final E2E Verification**: `uv run pytest tests/baselines tests/e2e -q`
 - **Expected Artifact**: a finalized `job_meta` row plus terminal `blocks` rows in `<job_id>.sqlite`, plus the bilingual artifact on disk and `*_quality_report.json`
+
+## 3. Evidence-First Verification Protocol
+
+- **Red-Phase Proof**: When executing Failure-First steps, you must execute the test against current code and output the terminal trace confirming failure (Exit Code != 0) BEFORE touching production code.
+- **Green-Phase Proof**: Before declaring completion, you must execute <FAST_TEST_CMD> and <E2E_TEST_CMD>. Your final response MUST display the raw test runner console stdout showing 100% pass rate (Exit Code == 0). Textual claims without raw CLI execution traces are strictly invalid.
