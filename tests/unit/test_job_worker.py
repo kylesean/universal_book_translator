@@ -411,10 +411,17 @@ async def test_lease_loss_writes_failed_ledger_with_reason(
 
 
 @pytest.mark.asyncio
-async def test_lease_loss_signals_cancel_token(
+async def test_lease_loss_does_not_signal_cancel_token(
     queue: JobQueue, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """When a worker loses its lease, cancel_token must be set immediately so pipeline stops drafting."""
+    """A lost lease must NOT be signalled through ``cancel_token``.
+
+    Setting it made the pipeline raise ``JobInterruptedError``, which marked the
+    ledger ``cancelled``; ``finalize_job('completed')`` then refuses to
+    overwrite ``cancelled``, so the reclaiming worker's delivered book read
+    cancelled. Lease loss travels through the worker's own lease check between
+    events, so ``cancel_token`` must stay clear.
+    """
     job_id = "job_lease_cancel"
     queue.enqueue(job_id, {"input_path": "x.pdf"}, tenant_id="default")
     claimed = queue.claim("w1")
@@ -440,7 +447,7 @@ async def test_lease_loss_signals_cancel_token(
     worker._heartbeat_interval = 0.005
     await worker.execute(claimed)
 
-    assert token_was_set is True, "cancel_token must be set when lease is lost"
+    assert token_was_set is False, "cancel_token must stay clear when only the lease is lost"
 
 
 def test_should_rehearse_uses_the_worker_process_key() -> None:

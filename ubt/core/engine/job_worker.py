@@ -228,11 +228,13 @@ class JobWorker:
                     # Logging alone would leave the job running: ``reclaim_stale``
                     # hands it to a second worker while the first keeps drafting,
                     # so the book is paid for twice and both workers checkpoint
-                    # the same rows.
+                    # the same rows. Signal lease loss through ``lost`` only —
+                    # NOT ``cancel_token``, whose JobInterruptedError path would
+                    # mark the job ``cancelled`` and refuse the new owner's
+                    # ``completed`` (the pipeline checks ``lease_lost_token``
+                    # and raises LeaseLostError instead).
                     logger.warning("Job %s: lease lost, stopping heartbeats", job_id)
                     lost.set()
-                    if cancel_token is not None:
-                        cancel_token.set()
                     return
                 if cancel_token is not None and await self._q(
                     self.queue.is_cancel_requested, job_id, worker_id
@@ -252,10 +254,9 @@ class JobWorker:
             # A transient SQLite/OS error must not leave the heartbeat task dead
             # while execute() continues billing a lease another worker may
             # reclaim. Treat every unexpected heartbeat failure as lease loss;
-            # the main loop will stop the generator at its next event.
+            # the main loop will stop the generator at its next event. Again only
+            # ``lost`` is set — see the note in the ``not ok`` branch above.
             lost.set()
-            if cancel_token is not None:
-                cancel_token.set()
             logger.warning(
                 "Job %s: heartbeat failed; treating lease as lost: %s",
                 job_id,
@@ -365,6 +366,20 @@ class JobWorker:
                 "Job %s: lease lost, stopping without a queue terminal write", job.job_id
             )
         except JobInterruptedError:
+            if lease_lost.is_set():
+                # Lease loss and a user cancel raced; the lease loss wins —
+                # the new owner's ``completed`` must not be refused against a
+                # ``cancelled`` this worker wrote. Mirror the LeaseLostError
+                # branch: no queue terminal write, ledger ``failed``.
+                with suppress(Exception):
+                    await self._write_abort_ledger(
+                        job, job_config, status="failed", reason="lease_lost"
+                    )
+                logger.warning(
+                    "Job %s: cancel signalled but lease already lost; treating as lease loss",
+                    job.job_id,
+                )
+                return
             await self._q(
                 self.queue.complete,
                 job.job_id,

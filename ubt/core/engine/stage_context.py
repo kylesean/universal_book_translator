@@ -148,7 +148,13 @@ class StageContext:
     cancel_token: asyncio.Event | None = None
 
     def check_cancelled(self) -> None:
-        """Raise JobInterruptedError if cooperative cancellation was signaled."""
+        """Raise JobInterruptedError if cooperative cancellation was signaled.
+
+        A *lost lease* is signalled separately (through ``JobWorker``'s lease
+        check between events), never through this token: conflating them made a
+        reclaimed job read ``cancelled`` and refuse the new owner's
+        ``finalize_job('completed')``.
+        """
         if self.cancel_token is not None and self.cancel_token.is_set():
             raise JobInterruptedError(f"Job {self.job_id} cancelled cooperatively")
 

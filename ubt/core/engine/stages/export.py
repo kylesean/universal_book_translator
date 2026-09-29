@@ -545,10 +545,10 @@ async def _run_visual_gate(
         elif gate.skipped_reason:
             logger.info("Visual gate for job %s skipped: %s", ctx.job_id, gate.skipped_reason)
     except JobInterruptedError:
-        # Cooperative cancellation is raised from inside reflow_loop.run and
-        # by the check below it; it must reach the pipeline's cancelled
-        # handler, not be reported as a non-fatal gate hiccup that then
-        # renders, writes the report and stamps the job "completed".
+        # Cooperative cancellation (user cancel or lost lease) is raised from
+        # inside reflow_loop.run and by the check below it; it must reach the
+        # pipeline's handler, not be reported as a non-fatal gate hiccup that
+        # then renders, writes the report and stamps the job "completed".
         raise
     except Exception as exc:
         logger.warning(
