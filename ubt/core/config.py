@@ -287,7 +287,6 @@ class UBTConfig(BaseSettings):
     api_mode: ApiMode = "openai-chat"
     provider: str | None = Field(default=None, validation_alias="UBT_PROVIDER")
     repair_provider: str | None = Field(default=None, validation_alias="UBT_REPAIR_PROVIDER")
-    supports_batch_api: bool = False
     is_free: bool = False
     cost_per_mtok: tuple[float, float] | None = None
     capability_profile: str | None = None

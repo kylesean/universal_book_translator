@@ -6,7 +6,6 @@
 [providers.openai-chat]
 base_url = "https://api.openai.com/v1"
 api_mode = "openai-chat"
-supports_batch_api = true
 
 [providers.openai-responses]
 base_url = "https://api.openai.com/v1"
@@ -15,7 +14,6 @@ api_mode = "openai-responses"
 [providers.anthropic-messages]
 base_url = "https://api.anthropic.com"
 api_mode = "anthropic-messages"
-supports_batch_api = true
 
 [providers.gemini-native]
 base_url = "https://generativelanguage.googleapis.com/v1beta"

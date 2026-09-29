@@ -65,7 +65,6 @@ PROVIDER_ALLOWED_KEYS = frozenset(
         "extra_headers",
         "api_timeout",
         "prompt_caching_enabled",
-        "supports_batch_api",
         "is_free",
         "cost_per_mtok",
         "capability_profile",

@@ -171,7 +171,6 @@ def test_provider_block_supports_custom_capabilities_and_pricing(
         'repair_provider = "anthropic"\n'
         "is_free = true\n"
         "cost_per_mtok = [0.10, 0.40]\n"
-        "supports_batch_api = true\n"
         "supports_temperature = false\n"
         "supports_reasoning_effort = true\n"
         'reasoning_dialect = "flat"\n',
@@ -181,19 +180,42 @@ def test_provider_block_supports_custom_capabilities_and_pricing(
     assert fields["api_key"] == "sk-corp-key"
     assert fields["is_free"] is True
     assert fields["cost_per_mtok"] == [0.10, 0.40]
-    assert fields["supports_batch_api"] is True
     assert fields["repair_provider"] == "anthropic"
     assert fields["supports_temperature"] is False
     assert fields["supports_reasoning_effort"] is True
     assert fields["reasoning_dialect"] == "flat"
 
 
-def test_shipped_protocols_batch_api_flags() -> None:
+def test_batch_api_knob_is_rejected_as_unknown(tmp_path: Path) -> None:
+    """``supports_batch_api`` is removed: a block carrying it fails closed.
+
+    The knob was dead — ``UBTConfig`` accepted it but no production code read
+    it, so a block could claim batch support the runtime always overrode with
+    its own wire-protocol decision. Deleting it beats keeping a switch that
+    lies; an old config carrying the key now errors like any unknown field.
+    """
+    path = tmp_path / "config.toml"
+    path.write_text(
+        "[providers.x]\n"
+        'base_url = "http://localhost:8080/v1"\n'
+        'api_mode = "openai-chat"\n'
+        "supports_batch_api = true\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ProviderConfigError, match="unknown field"):
+        load_provider_block("x", path)
+
+
+def test_shipped_protocols_carry_no_batch_knob() -> None:
+    """Shipped presets must not declare the removed ``supports_batch_api`` knob.
+
+    The anthropic-messages preset claimed ``true`` while the runtime always
+    returned ``False`` for non-chat protocols — a preset that lies about a
+    capability. Capability now comes only from the wire protocol, not data.
+    """
     shipped = _read_shipped_providers()
-    assert shipped["openai-chat"]["supports_batch_api"] is True
-    assert shipped["anthropic-messages"]["supports_batch_api"] is True
-    assert shipped["gemini-native"].get("supports_batch_api", False) is False
-    assert shipped["openai-responses"].get("supports_batch_api", False) is False
+    for name, fields in shipped.items():
+        assert "supports_batch_api" not in fields, name
 
 
 def test_shipped_gemini_native_speaks_the_native_protocol() -> None:
