@@ -116,6 +116,16 @@ def test_allowed_bases_are_resolved_before_containment(tmp_path: Path) -> None:
     assert resolved == target.resolve()
 
 
+def test_empty_allowed_bases_denies_all_paths(tmp_path: Path) -> None:
+    """An explicitly empty allowed_bases list must deny all paths rather than bypassing containment."""
+    target = tmp_path / "book.md"
+    target.touch()
+    with pytest.raises(HTTPException) as exc:
+        resolve_secure_path(target, must_exist=True, allowed_bases=[])
+    assert exc.value.status_code == 403
+    assert "outside the configured allowed directories" in exc.value.detail
+
+
 def test_operator_whitelist_unblocks_paths_inside_a_system_prefix(tmp_path: Path) -> None:
     """Risk: the hard-coded system deny list was checked before containment and
     overrode an explicit whitelist, so ``UBT_ALLOWED_DIRS=/var/lib/ubt/books``

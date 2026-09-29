@@ -622,6 +622,51 @@ async def test_translate_book_refuses_to_overwrite_existing_output_path(
         )
 
 
+async def test_translate_book_existing_directory_as_output_path_allowed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """An existing directory passed as output_path must be accepted unless the target file inside exists."""
+    from ubt.mcp.server import ubt_translate_book
+
+    src = tmp_path / "book.md"
+    src.write_text("# T\n\nHello.\n", encoding="utf-8")
+    out_dir = tmp_path / "out_folder"
+    out_dir.mkdir()
+
+    monkeypatch.setenv("UBT_ALLOWED_DIRS", str(tmp_path))
+    res = await ubt_translate_book(
+        input_path=str(src),
+        output_path=str(out_dir),
+        target_lang="zh",
+        dry_run=True,
+    )
+    assert res["job_id"]
+
+
+async def test_translate_book_default_output_checks_collision(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Default output path must check for existing file collision before proceeding."""
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    from ubt.core.job_options import default_output_path
+    from ubt.mcp.server import ubt_translate_book
+
+    src = tmp_path / "book.md"
+    src.write_text("# T\n\nHello.\n", encoding="utf-8")
+    # Pre-create the relocated output in src.parent (REST parity)
+    collision = src.parent / default_output_path(src).name
+    collision.write_text("existing output", encoding="utf-8")
+
+    monkeypatch.setenv("UBT_ALLOWED_DIRS", str(tmp_path))
+    with pytest.raises(ToolError, match="output_path already exists"):
+        await ubt_translate_book(
+            input_path=str(src),
+            target_lang="zh",
+            dry_run=True,
+        )
+
+
 async def test_mcp_tools_raise_tool_error_on_anticipated_failure(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

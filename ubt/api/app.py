@@ -48,6 +48,7 @@ from ubt.core.job_options import (
     apply_config_overrides,
     default_output_path,
     overrides_from_request,
+    resolve_target_output,
     run_kwargs_from_request,
 )
 from ubt.core.log_config import setup_logging
@@ -331,6 +332,7 @@ def create_app(
 
     @asynccontextmanager
     async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+        _require_api_key_gate(app_config)
         _log_startup_auth_warning(app_config)
         yield
 
@@ -530,7 +532,12 @@ def create_app(
 
         if req.output_path:
             resolved_out = resolve_secure_path(req.output_path, must_exist=False, config=app_config)
-            if resolved_out is not None and resolved_out.exists() and not req.fresh:
+            target_candidate = (
+                resolve_target_output(resolved_out, resolved_in)
+                if resolved_out is not None
+                else None
+            )
+            if target_candidate is not None and target_candidate.exists() and not req.fresh:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="output_path already exists; refusing to overwrite it",
@@ -550,12 +557,17 @@ def create_app(
                         resolved_in.parent == b or b in resolved_in.parent.parents for b in bases
                     ):
                         default_out = resolved_in.parent / default_out.name
-                    else:
+                    elif bases:
                         default_out = bases[0] / default_out.name
             except Exception:
                 pass
             resolved_out = resolve_secure_path(default_out, must_exist=False, config=app_config)
-            if resolved_out is not None and resolved_out.exists() and not req.fresh:
+            target_candidate = (
+                resolve_target_output(resolved_out, resolved_in)
+                if resolved_out is not None
+                else None
+            )
+            if target_candidate is not None and target_candidate.exists() and not req.fresh:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="output_path already exists; refusing to overwrite it",

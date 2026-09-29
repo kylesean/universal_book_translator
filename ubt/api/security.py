@@ -290,7 +290,7 @@ def resolve_secure_path(
                 detail=f"Access denied: Accessing sensitive configuration directory or file '{part}' is prohibited",
             )
 
-    if effective_bases and not contained:
+    if (explicit_whitelist or effective_bases) and not contained:
         # Generic detail: the allowed bases are server-side paths and this route
         # is reachable without credentials by default (same sanitization as the
         # job-failure path), so they must not be echoed to the caller.

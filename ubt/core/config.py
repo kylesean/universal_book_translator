@@ -901,10 +901,13 @@ class UBTConfig(BaseSettings):
                 self.rerank_k,
                 self.qe_engine,
             )
-        # ``allowed_dirs`` (plural) wins over the legacy singular ``allowed_dir``;
-        # with both set the singular one is dropped. Surface it rather than let a
-        # configured base directory vanish from the path sandbox without a word.
-        if self.allowed_dirs.strip() and self.allowed_dir.strip():
+        # Synchronize programmatic allowed_dir vs ambient allowed_dirs: an explicit
+        # programmatic setting takes precedence over ambient environment.
+        if "allowed_dir" in self.model_fields_set and "allowed_dirs" not in self.model_fields_set:
+            self.allowed_dirs = self.allowed_dir
+        elif "allowed_dirs" in self.model_fields_set and "allowed_dir" not in self.model_fields_set:
+            self.allowed_dir = self.allowed_dirs
+        elif self.allowed_dirs.strip() and self.allowed_dir.strip():
             logger.warning(
                 "both allowed_dirs and allowed_dir are set; allowed_dir=%r is "
                 "ignored — allowed_dirs takes precedence.",
@@ -1029,9 +1032,13 @@ class UBTConfig(BaseSettings):
             parts = re.split(r"[,;]", raw) if os.pathsep != ":" else re.split(r"[:,;]", raw)
             for part in parts:
                 if part.strip():
-                    bases.append(Path(part.strip()).resolve())
-        elif self.allowed_dir.strip():
-            bases.append(Path(self.allowed_dir.strip()).resolve())
+                    p = Path(part.strip()).resolve()
+                    if p not in bases:
+                        bases.append(p)
+        if self.allowed_dir.strip():
+            p = Path(self.allowed_dir.strip()).resolve()
+            if p not in bases:
+                bases.append(p)
         return bases
 
     def get_selected_pages(self) -> set[int] | None:

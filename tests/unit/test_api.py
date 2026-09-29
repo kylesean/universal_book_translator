@@ -915,6 +915,16 @@ def test_strict_auth_without_key_refuses_to_boot(
 
 
 @pytest.mark.asyncio
+async def test_app_lifespan_enforces_api_key_gate() -> None:
+    """App startup lifespan must execute _require_api_key_gate and fail fast when strict_auth=True without key."""
+    cfg = UBTConfig(strict_auth=True)
+    app = create_app(config=cfg)
+    with pytest.raises(SystemExit):
+        async with app.router.lifespan_context(app):
+            pass
+
+
+@pytest.mark.asyncio
 async def test_deep_assess_is_capped_at_the_job_ceiling(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1736,6 +1746,22 @@ def test_submit_job_existing_output_path_rejected_unless_fresh(
     }
     resp_fresh = api_client.post("/jobs/submit", json=payload_fresh)
     assert resp_fresh.status_code == 202
+
+
+def test_submit_job_existing_directory_as_output_path_allowed(
+    api_client: TestClient, sample_api_doc: Path, tmp_path: Path
+) -> None:
+    """An existing directory passed as output_path must be accepted unless the target file inside it exists."""
+    out_dir = tmp_path / "valid_out_dir"
+    out_dir.mkdir()
+
+    payload = {
+        "input_path": str(sample_api_doc),
+        "output_path": str(out_dir),
+        "target_lang": "zh",
+    }
+    resp = api_client.post("/jobs/submit", json=payload)
+    assert resp.status_code == 202
 
 
 def test_model_profiles_post_forbids_overriding_builtins() -> None:

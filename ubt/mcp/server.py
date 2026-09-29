@@ -80,6 +80,7 @@ from ubt.core.job_options import (
     default_output_path,
     job_id_is_valid,
     profile_name_is_valid,
+    resolve_target_output,
     validate_request_enums,
 )
 from ubt.core.job_options import (
@@ -338,21 +339,31 @@ async def ubt_translate_book(
     resolved = _resolve_input(input_path)
     if output_path is not None:
         resolved_out = _safe_output_path(output_path)
-        if resolved_out.exists() and not fresh:
+        target_candidate = resolve_target_output(resolved_out, resolved)
+        if target_candidate.exists() and not fresh:
             raise ToolError(f"output_path already exists; refusing to overwrite it: {output_path}")
-        output_path = str(resolved_out)
+        output_path = str(target_candidate)
     else:
         # The implicit deliverable defaults to ~/Documents/UBT, which is outside
         # the MCP sandbox; REST relocates it inside the allowlist, so MCP must
         # too instead of writing outside its own contract. Relocate into the
-        # ledger dir (always a sandbox base) with the same file name.
+        # input book's directory (REST parity) or allowed bases with the same file name.
         candidate = default_output_path(resolved)
         try:
             _sandbox_path(str(candidate), must_exist=False)
             output_path = str(candidate)
         except UBTError:
-            relocated = Path(UBTConfig.from_env().db_dir) / candidate.name
+            config_env = UBTConfig.from_env()
+            bases = config_env.allowed_base_dirs()
+            if any(resolved.parent == b or b in resolved.parent.parents for b in bases):
+                relocated = resolved.parent / candidate.name
+            elif bases:
+                relocated = bases[0] / candidate.name
+            else:
+                relocated = Path(config_env.db_dir) / candidate.name
             output_path = str(_sandbox_path(str(relocated), must_exist=False))
+        if Path(output_path).exists() and not fresh:
+            raise ToolError(f"output_path already exists; refusing to overwrite it: {output_path}")
     jid = _check_job_id(job_id) if job_id else ""
     # A stable job_id that is still live is a resubmit, not a second run.
     existing = _MANAGER.get_job(jid) if jid else None
