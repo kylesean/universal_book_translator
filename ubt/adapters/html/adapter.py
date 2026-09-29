@@ -189,106 +189,102 @@ class HTMLAdapter(BaseDocumentAdapter):
             bilingual_mode = manifest.run.bilingual_mode
 
         is_monolingual = bilingual_mode in ("target", "monolingual")
-        is_source_only = bilingual_mode == "source"
 
         injected = 0
-        if not is_source_only:
-            for leaf_idx, leaf in enumerate(leaves):
-                block = by_id.get(f"{manifest.chapters[0].chapter_id}#p{leaf_idx:05d}")
-                if block is None or block.skip_translate or not block.target_text:
-                    continue
+        for leaf_idx, leaf in enumerate(leaves):
+            block = by_id.get(f"{manifest.chapters[0].chapter_id}#p{leaf_idx:05d}")
+            if block is None or block.skip_translate or not block.target_text:
+                continue
 
-                target_text = sanitize_html_fragment(str(block.target_text))
+            target_text = sanitize_html_fragment(str(block.target_text))
+            if not target_text:
+                continue
+            # A block whose draft never passed the quality gates must stay
+            # *visible and labelled* in every deliverable (ubt.adapters.
+            # unresolved). EPUB/HTML used to inject the bare machine draft as
+            # if it were finished, so a reader could not tell it apart from an
+            # approved translation. The note becomes the first paragraph.
+            if is_unresolved(block.status):
+                target_text = sanitize_html_fragment(
+                    f"{failure_note(block.status)}\n\n{block.target_text}"
+                )
                 if not target_text:
                     continue
-                # A block whose draft never passed the quality gates must stay
-                # *visible and labelled* in every deliverable (ubt.adapters.
-                # unresolved). EPUB/HTML used to inject the bare machine draft as
-                # if it were finished, so a reader could not tell it apart from an
-                # approved translation. The note becomes the first paragraph.
-                if is_unresolved(block.status):
-                    target_text = sanitize_html_fragment(
-                        f"{failure_note(block.status)}\n\n{block.target_text}"
-                    )
-                    if not target_text:
-                        continue
 
-                if is_monolingual:
-                    # Split on blank lines like the bilingual branch: emitting the
-                    # whole fragment let HTML collapse the paragraph breaks.
-                    paras = [p.strip() for p in target_text.split("\n\n") if p.strip()] or [
-                        target_text
-                    ]
-                    is_internal_child = leaf.name in ("td", "th", "li")
-                    # Inline media/anchors must survive the text replacement (an
-                    # approved DOCX parallel keeps graphic runs + hyperlinks).
-                    preserved_inline = take_preserved_inline_children(leaf)
-                    leaf.clear()
-                    last_node: Tag = leaf
-                    for i, p_text in enumerate(paras):
-                        parsed_fragment = BeautifulSoup(p_text, "html.parser")
-                        if i == 0:
-                            container: Tag = leaf
-                        elif is_internal_child:
-                            # Inside a cell / list item extra paragraphs nest as a
-                            # <div>; a sibling <li> would add list items.
-                            container = soup.new_tag("div")
-                        else:
-                            container = soup.new_tag(leaf.name if leaf.name else "p")
-                        for child in list(parsed_fragment.contents):
-                            container.append(child)
-                        if i > 0:
-                            if is_internal_child:
-                                leaf.append(container)
-                            else:
-                                last_node.insert_after(container)
-                        last_node = container
-                    for node in preserved_inline:
-                        leaf.append(node)
-                else:
-                    # Inside a table cell or list item, append a <div> *inside* the element
-                    # instead of a sibling <td>/<th>/<li> — a sibling cell would double the column count
-                    # and a sibling <li> would add list items.
-                    is_internal_child = leaf.name in ("td", "th", "li")
-                    source_classes = list(leaf.get("class") or [])
-                    target_classes = source_classes + [_TARGET_CSS_CLASS]
-
-                    if "\n\n" in target_text:
-                        paras = [p.strip() for p in target_text.split("\n\n") if p.strip()]
-                        if is_internal_child:
-                            for p_text in paras:
-                                target_tag = soup.new_tag("div")
-                                target_tag["class"] = AttributeValueList(target_classes)
-                                parsed_fragment = BeautifulSoup(p_text, "html.parser")
-                                for child in list(parsed_fragment.contents):
-                                    target_tag.append(child)
-                                leaf.append(target_tag)
-                        else:
-                            last_node = leaf
-                            for p_text in paras:
-                                tag_name = leaf.name if leaf.name else "p"
-                                target_tag = soup.new_tag(tag_name)
-                                target_tag["class"] = AttributeValueList(target_classes)
-                                parsed_fragment = BeautifulSoup(p_text, "html.parser")
-                                for child in list(parsed_fragment.contents):
-                                    target_tag.append(child)
-                                last_node.insert_after(target_tag)
-                                last_node = target_tag
+            if is_monolingual:
+                # Split on blank lines like the bilingual branch: emitting the
+                # whole fragment let HTML collapse the paragraph breaks.
+                paras = [p.strip() for p in target_text.split("\n\n") if p.strip()] or [target_text]
+                is_internal_child = leaf.name in ("td", "th", "li")
+                # Inline media/anchors must survive the text replacement (an
+                # approved DOCX parallel keeps graphic runs + hyperlinks).
+                preserved_inline = take_preserved_inline_children(leaf)
+                leaf.clear()
+                last_node: Tag = leaf
+                for i, p_text in enumerate(paras):
+                    parsed_fragment = BeautifulSoup(p_text, "html.parser")
+                    if i == 0:
+                        container: Tag = leaf
+                    elif is_internal_child:
+                        # Inside a cell / list item extra paragraphs nest as a
+                        # <div>; a sibling <li> would add list items.
+                        container = soup.new_tag("div")
                     else:
+                        container = soup.new_tag(leaf.name if leaf.name else "p")
+                    for child in list(parsed_fragment.contents):
+                        container.append(child)
+                    if i > 0:
                         if is_internal_child:
-                            target_tag = soup.new_tag("div")
+                            leaf.append(container)
                         else:
+                            last_node.insert_after(container)
+                    last_node = container
+                for node in preserved_inline:
+                    leaf.append(node)
+            else:
+                # Inside a table cell or list item, append a <div> *inside* the element
+                # instead of a sibling <td>/<th>/<li> — a sibling cell would double the column count
+                # and a sibling <li> would add list items.
+                is_internal_child = leaf.name in ("td", "th", "li")
+                source_classes = list(leaf.get("class") or [])
+                target_classes = source_classes + [_TARGET_CSS_CLASS]
+
+                if "\n\n" in target_text:
+                    paras = [p.strip() for p in target_text.split("\n\n") if p.strip()]
+                    if is_internal_child:
+                        for p_text in paras:
+                            target_tag = soup.new_tag("div")
+                            target_tag["class"] = AttributeValueList(target_classes)
+                            parsed_fragment = BeautifulSoup(p_text, "html.parser")
+                            for child in list(parsed_fragment.contents):
+                                target_tag.append(child)
+                            leaf.append(target_tag)
+                    else:
+                        last_node = leaf
+                        for p_text in paras:
                             tag_name = leaf.name if leaf.name else "p"
                             target_tag = soup.new_tag(tag_name)
-                        target_tag["class"] = AttributeValueList(target_classes)
-                        parsed_fragment = BeautifulSoup(target_text, "html.parser")
-                        for child in list(parsed_fragment.contents):
-                            target_tag.append(child)
-                        if is_internal_child:
-                            leaf.append(target_tag)
-                        else:
-                            leaf.insert_after(target_tag)
-                injected += 1
+                            target_tag["class"] = AttributeValueList(target_classes)
+                            parsed_fragment = BeautifulSoup(p_text, "html.parser")
+                            for child in list(parsed_fragment.contents):
+                                target_tag.append(child)
+                            last_node.insert_after(target_tag)
+                            last_node = target_tag
+                else:
+                    if is_internal_child:
+                        target_tag = soup.new_tag("div")
+                    else:
+                        tag_name = leaf.name if leaf.name else "p"
+                        target_tag = soup.new_tag(tag_name)
+                    target_tag["class"] = AttributeValueList(target_classes)
+                    parsed_fragment = BeautifulSoup(target_text, "html.parser")
+                    for child in list(parsed_fragment.contents):
+                        target_tag.append(child)
+                    if is_internal_child:
+                        leaf.append(target_tag)
+                    else:
+                        leaf.insert_after(target_tag)
+            injected += 1
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
         tmp_path = output_path.with_suffix(output_path.suffix + ".tmp")

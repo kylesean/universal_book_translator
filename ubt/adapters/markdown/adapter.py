@@ -501,11 +501,10 @@ class MarkdownAdapter(BaseDocumentAdapter):
 
         rendered_sections: list[str] = []
         is_monolingual = bilingual_mode in ("target", "monolingual")
-        is_source_only = bilingual_mode == "source"
 
         for b in blocks:
             # If block skipped translation (e.g. code/formula), preserve directly
-            if b.skip_translate or is_source_only:
+            if b.skip_translate:
                 rendered_sections.append(b.source_text)
                 continue
             unresolved = b.status in _UNRESOLVED_STATUSES
