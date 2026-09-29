@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
-from ubt.adapters.base import BaseDocumentAdapter
+from ubt.adapters.base import BaseDocumentAdapter, decode_markup
 from ubt.adapters.unresolved import UNRESOLVED_STATUSES, failure_note_markdown
 from ubt.core.cleaners.html_sanitizer import strip_html_mark_tags
 from ubt.core.exceptions import DocumentParseError
@@ -33,6 +33,17 @@ _GUTENBERG_MARKER = re.compile(r"^\[(Illustration|Footnote)\b", re.IGNORECASE)
 # The status set and notes are shared with every other adapter via
 # ``ubt.adapters.unresolved`` so the formats cannot drift apart.
 _UNRESOLVED_STATUSES = UNRESOLVED_STATUSES
+
+
+def _read_text(path: Path) -> str:
+    """Read a Markdown/text file, sniffing BOM / declared encoding before UTF-8.
+
+    A hard ``utf-8`` decode with ``errors="replace"`` turned every GBK/Shift-JIS
+    byte into ``\\ufffd`` before anything could look at the source. Going through
+    the shared :func:`decode_markup` keeps a BOM (UTF-8/UTF-16) and any declared
+    encoding authoritative, falling back to a replacement decode only last.
+    """
+    return decode_markup(path.read_bytes())
 
 
 def _with_heading_marker(block: IRBlock, target: str) -> str:
@@ -142,7 +153,7 @@ class MarkdownAdapter(BaseDocumentAdapter):
 
         # Off-loop: sha computation and file read run in thread pool to prevent blocking the event loop on large sources.
         doc_id = await asyncio.to_thread(compute_file_sha256_cached, input_path)
-        content = await asyncio.to_thread(input_path.read_text, encoding="utf-8", errors="replace")
+        content = await asyncio.to_thread(_read_text, input_path)
         lines = content.split("\n")
 
         # Scan for markdown headers (# Heading) as chapter boundaries
@@ -232,7 +243,7 @@ class MarkdownAdapter(BaseDocumentAdapter):
     ) -> AsyncIterator[ChapterIR]:
         """Stream Markdown document partitioned by chapters."""
         manifest = await self.extract_manifest(input_path)
-        content = await asyncio.to_thread(input_path.read_text, encoding="utf-8", errors="replace")
+        content = await asyncio.to_thread(_read_text, input_path)
         # The only blocking IO (the file read) is offloaded above. The remaining
         # line loop is pure-Python with a small per-line cost, and it stays on
         # the loop deliberately: moving it into a worker thread would have to

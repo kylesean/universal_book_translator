@@ -25,6 +25,7 @@ exclude = [
     "scratch/",
     "tmp/",
     "deploy/",
+    "REVIEW_REPORT.md",
 ]
 
 
@@ -60,6 +61,11 @@ dependencies = [
     "lxml>=6.1.3",
     "pikepdf>=10.13.0.post1",
     "socksio>=1.0.0",
+    # Last-resort charset detection for source files with neither a BOM nor a
+    # declared encoding (GBK/Shift-JIS Markdown, .txt). See adapters/base.py
+    # decode_markup; without it those bytes decode to U+FFFD before any sniffer
+    # can look at them.
+    "charset-normalizer>=3.3.0",
 ]
 
 [project.scripts]

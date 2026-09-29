@@ -18,7 +18,7 @@ from typing import Any
 from bs4 import BeautifulSoup, Tag
 from bs4.element import AttributeValueList
 
-from ubt.adapters.base import BILINGUAL_TARGET_CLASS, BaseDocumentAdapter
+from ubt.adapters.base import BILINGUAL_TARGET_CLASS, BaseDocumentAdapter, decode_markup
 from ubt.adapters.epub.adapter import (
     BLOCK_TAGS,
     determine_flow_id,
@@ -55,7 +55,7 @@ class HTMLAdapter(BaseDocumentAdapter):
         if not input_path.exists():
             raise DocumentParseError(f"HTML file not found: {input_path}")
         try:
-            raw = input_path.read_text(encoding="utf-8", errors="replace")
+            raw = decode_markup(input_path.read_bytes())
             return BeautifulSoup(raw, "html.parser")
         except Exception as err:
             raise DocumentParseError(f"Failed to parse HTML document {input_path}: {err}") from err
