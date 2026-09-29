@@ -840,6 +840,7 @@ class LedgerBlocksMixin(LedgerBase):
         *,
         clear_verdict_for: list[str] | None = None,
         job_id: str | None = None,
+        allow_terminal_override: bool = False,
     ) -> int:
         """Atomically update multiple blocks in a single transactional write.
 
@@ -847,10 +848,18 @@ class LedgerBlocksMixin(LedgerBase):
         promotions must not trust a buffered write's success).
 
         ``clear_verdict_for`` nulls the machine verdict columns of those block
-        ids in the *same* transaction (see :meth:`clear_machine_verdict`).
-        Human PE import needs both, and doing them as two calls left a window
-        where a crash kept the new human text next to a stale "critical"
-        severity — the exact state the clear exists to prevent.
+        ids in the *same* transaction. Human PE import needs both, and doing them
+        as two calls left a window where a crash kept the new human text next to
+        a stale "critical" severity — the exact state the clear exists to
+        prevent.
+
+        ``allow_terminal_override`` lets a *deliberate* non-terminal write land
+        on a row already in a terminal state. The triage stage's paid escalated
+        repair returns ``REPAIR_PENDING`` for a block that entered as ``FAILED``
+        (terminal); without this flag the terminal guard silently dropped the
+        result (``rowcount == 0``) and resume re-escalated — and re-billed — the
+        same block. Every other caller leaves it off so a late duplicate write
+        still cannot resurrect a terminal row.
 
         Note on omitted keys: ``repair_rounds``
         and ``error_flags`` are read with ``item.get(...)`` — a *missing* key
@@ -888,9 +897,10 @@ class LedgerBlocksMixin(LedgerBase):
 
                 # A *non-terminal* write must not resurrect a row
                 # already in a terminal state. A terminal -> terminal re-save (PE
-                # import, export) is legitimate and must still apply. Unreachable
-                # under the current stage order; the guard is belt-and-suspenders
-                # against a late duplicate write.
+                # import, export) is legitimate and must still apply. The triage
+                # stage's paid escalated repair is the one caller that must write
+                # a non-terminal ``REPAIR_PENDING`` over a terminal ``FAILED``
+                # row, so it opts in via ``allow_terminal_override``.
                 terminal_values = sorted(s.value for s in TERMINAL_STATUSES)
                 query = """
                     UPDATE blocks
@@ -924,7 +934,7 @@ class LedgerBlocksMixin(LedgerBase):
                     else None,
                     block_id,
                 ]
-                if status_val not in terminal_values:
+                if status_val not in terminal_values and not allow_terminal_override:
                     terminal_placeholders = ",".join("?" * len(terminal_values))
                     query += f" AND status NOT IN ({terminal_placeholders})"
                     params.extend(terminal_values)

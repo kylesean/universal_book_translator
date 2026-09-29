@@ -257,8 +257,22 @@ async def run_triage_stage(
                         # final batch runs only after every critical block, so a
                         # cancel/crash in between would drop it and re-escalate
                         # (re-bill) the same block on resume. MQM fields are
-                        # added by that final batch.
-                        await asyncio.to_thread(ledger.save_checkpoints_batch, [result])
+                        # added by that final batch. ``allow_terminal_override``
+                        # is required because the candidate may have entered as
+                        # FAILED (terminal) while a still-unresolved repair
+                        # returns the non-terminal REPAIR_PENDING — the ledger's
+                        # terminal guard would otherwise drop the write.
+                        persisted = await asyncio.to_thread(
+                            ledger.save_checkpoints_batch,
+                            [result],
+                            allow_terminal_override=True,
+                        )
+                        if persisted == 0:
+                            logger.warning(
+                                "Escalated repair for block %s was not persisted "
+                                "(row missing or job scope mismatch)",
+                                cand.id,
+                            )
                     else:
                         # The block still lands in BLOCKED_HUMAN below, but without a
                         # marker nobody can tell "escalation never ran" apart from
