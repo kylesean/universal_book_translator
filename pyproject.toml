@@ -25,7 +25,6 @@ exclude = [
     "scratch/",
     "tmp/",
     "deploy/",
-    "REVIEW_REPORT.md",
 ]
 
 
