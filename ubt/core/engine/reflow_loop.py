@@ -331,7 +331,7 @@ class ReflowControlLoop:
                 sel_pages = (
                     getattr(getattr(self.manifest, "run", None), "selected_pages", None) or None
                 )
-                if not sel_pages and hasattr(self, "ledger") and self.ledger is not None:
+                if not sel_pages and self.ledger is not None:
                     sel_pages = (
                         self.ledger.get_job_metadata_value(self.job_id, "selected_pages") or None
                     )
