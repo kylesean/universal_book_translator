@@ -200,6 +200,48 @@ async def test_lease_loss_stops_the_worker_without_a_terminal_write(
 
 
 @pytest.mark.asyncio
+async def test_progress_write_that_lost_ownership_stops_the_worker(
+    queue: JobQueue, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A scoped progress write that matched no row means the lease is gone.
+
+    ``update_progress`` filters on the current owner and reports whether the row
+    still belongs to this worker. Discarding that result left the worker
+    drafting (and billing) until the next heartbeat noticed, long enough for a
+    reclaimed job to be paid for twice.
+    """
+    emitted: list[str] = []
+    closed = False
+    queue.enqueue("job_own", {"input_path": "x.pdf"}, tenant_id="default")
+    claimed = queue.claim("w1")
+    assert claimed is not None
+
+    # Keep the heartbeat healthy: the loss must be detected from the scoped
+    # write alone, not from a heartbeat timeout.
+    monkeypatch.setattr(queue, "heartbeat", lambda *a, **k: True)
+    monkeypatch.setattr(queue, "update_progress", lambda *a, **k: False)
+
+    async def _slow(
+        job: QueuedJob, _config: UBTConfig
+    ) -> AsyncGenerator[TranslationProgressEvent, None]:
+        nonlocal closed
+        try:
+            for index in range(5):
+                await asyncio.sleep(0.02)
+                emitted.append(f"e{index}")
+                yield _event(job.job_id)
+        finally:
+            closed = True
+
+    worker = JobWorker(queue, UBTConfig(), worker_id="w1", event_source=_slow)
+    worker._heartbeat_interval = 100.0  # never fires within the test
+    await worker.execute(claimed)
+
+    assert len(emitted) < 5, "the event loop should have stopped early"
+    assert closed, "the event source must be aclose()d on early exit"
+
+
+@pytest.mark.asyncio
 async def test_writer_lock_conflict_yields_back_to_queued(queue: JobQueue) -> None:
     from ubt.core.exceptions import LedgerWriterLockConflictError
 

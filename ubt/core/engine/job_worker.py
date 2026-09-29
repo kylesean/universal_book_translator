@@ -303,8 +303,12 @@ class JobWorker:
             async with aclosing(self._event_source(job, job_config, **kwargs)) as events:
                 async for event in events:
                     progress = ProgressSnapshot.from_event(event).to_payload()
-                    await self._q(self.queue.update_progress, job.job_id, owner, progress)
-                    if lease_lost.is_set():
+                    # The scoped write already knows whether the row still
+                    # belongs to this worker. Treat a miss as a lost lease
+                    # instead of waiting for the next heartbeat to notice: the
+                    # reclaimed job would keep drafting (and billing) until then.
+                    owned = await self._q(self.queue.update_progress, job.job_id, owner, progress)
+                    if not owned or lease_lost.is_set():
                         raise LeaseLostError(f"job {job.job_id} lost its lease to another worker")
                     if cancel_token.is_set() or await self._q(
                         self.queue.is_cancel_requested, job.job_id, owner
