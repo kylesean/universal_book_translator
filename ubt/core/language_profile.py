@@ -54,8 +54,9 @@ def latin_script_ratio(text: str) -> float:
     """Fraction of Latin letters (incl. extended/A+B) among non-space chars.
 
     Note: for same-script source pairs (en→fr, en→de, ...) this cannot detect
-    English echo; ``min_target_ratio=0.0`` disables the identity gate there.
-    It still catches gross failures such as CJK echo in a Latin target.
+    English echo, so :func:`get_pair_policy` zeroes ``min_target_ratio`` for a
+    Latin→Latin pair. The per-target profile still carries the identity gate
+    (0.25), so a CJK emission into a Latin target language is still caught.
     """
     total = _prose_total(text)
     count = sum(

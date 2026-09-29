@@ -194,7 +194,10 @@ def test_language_pair_policy_reverse_pairs() -> None:
     assert policy_zh_en.target_name == "English"
     assert policy_zh_en.min_length_ratio == 1.0
     assert policy_zh_en.max_length_ratio == 5.0
-    assert policy_zh_en.min_target_ratio == 0.0  # English target
+    # Latin target keeps the identity gate on (EN profile 0.25): a CJK emission
+    # into an English target must be caught. Only Latin->Latin pairs zero this
+    # gate (see the en->de case above); a zh->en pair does not.
+    assert policy_zh_en.min_target_ratio == 0.25
 
     # ja -> en
     policy_ja_en = get_pair_policy("ja", "en")
