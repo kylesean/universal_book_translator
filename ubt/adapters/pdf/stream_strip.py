@@ -1017,11 +1017,24 @@ def strip_page_text_pikepdf(
             # is known not to have aborted on a shared Form (see
             # ``strip_stream_instructions``): an abort leaves every Form intact
             # so the page still draws its source text.
-            for target_xobj, new_stream in form_writes:
-                target_xobj.write(new_stream)
-                stats.forms_changed += 1
+            #
+            # Serialize *before* touching anything: unparsing can raise, and a
+            # failure after the shared Forms were rewritten would leave them
+            # stripped with no overlay — the typesetter sees ``aborted``, keeps
+            # the page and never paints a translation, so the source text is
+            # lost silently. Snapshot the Forms and restore them if the commit
+            # fails partway (the Contents write is the last, most likely step).
             unparsed = pikepdf.unparse_content_stream(new_ops)
-            page.Contents.write(unparsed)
+            form_backups = [(obj, bytes(obj.read_bytes())) for obj, _ in form_writes]
+            try:
+                for target_xobj, new_stream in form_writes:
+                    target_xobj.write(new_stream)
+                    stats.forms_changed += 1
+                page.Contents.write(unparsed)
+            except Exception:
+                for obj, original in form_backups:
+                    obj.write(original)
+                raise
 
     except Exception as exc:
         # Keep the abort reason actionable: callers inspect ``aborted`` to
