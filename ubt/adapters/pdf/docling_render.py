@@ -307,7 +307,13 @@ class DoclingRenderStrategy:
         from ubt.adapters.pdf.docling_blocks import resolve_overlapping_formula_blocks
 
         blocks = resolve_overlapping_formula_blocks(list(blocks))
-        is_in_place = active_mode in ("bilingual", "inline", "interlinear")
+        # ``active_mode`` is the adapter vocabulary (``RENDER_MODE_VALUE`` in
+        # bilingual_advisor: "bilingual"/"alternating"/"monolingual"/
+        # "facing_spread"), not the ``DualMode`` Literal. Only "bilingual"
+        # interleaves the target into the source flow; the old "inline" /
+        # "interlinear" alternatives were never produced by any caller, so this
+        # is the same predicate with the dead names dropped.
+        is_in_place = active_mode == "bilingual"
         # Vectorize qualifying diagram images before emission.
         src_pdf_path = Path(manifest.source_path)
         # Hand the source PDF to the reconstructor so a formula that fails
