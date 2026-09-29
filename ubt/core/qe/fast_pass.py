@@ -209,6 +209,104 @@ def _has_repeated_line_run(text: str) -> bool:
     return False
 
 
+def _is_exempt_repetition(src_clean: str, tgt_clean: str, m: re.Match[str]) -> bool:
+    """True when the repeated sequence or pattern is legitimately present in the source.
+
+    Prevents false positives on repeated cell values (e.g. | GPT-5.6 Sol | GPT-5.6 Sol | ...),
+    source-attested repeated phrases, refrains, or isomorphic table cell repetitions across columns,
+    while correctly rejecting in-cell loops or runaway target hallucinations.
+    """
+    matched_text = m.group(0)
+    repeated_unit = m.group(1)
+
+    # 1. Exact match of the entire repeated sequence in source
+    if matched_text in src_clean:
+        return True
+
+    # 2. Repeated unit present in source with equal or comparable count (not runaway loop)
+    clean_unit = repeated_unit.strip(" |:\t-，。、")
+    if len(clean_unit) >= 2:
+        src_cnt = src_clean.count(clean_unit)
+        tgt_cnt = tgt_clean.count(clean_unit)
+        if src_cnt >= 3 and tgt_cnt <= src_cnt + 2:
+            return True
+        if src_cnt > 0 and src_cnt >= tgt_cnt:
+            return True
+
+    # 3. Table cell repetition / isomorphic repetition across table columns
+    # Find the line in tgt_clean containing the matched repetition
+    tgt_lines = tgt_clean.splitlines()
+    tgt_line = ""
+    char_cursor = 0
+    tgt_line_idx = -1
+    for idx, ln in enumerate(tgt_lines):
+        line_len = len(ln)
+        if char_cursor <= m.start() <= char_cursor + line_len:
+            tgt_line = ln
+            tgt_line_idx = idx
+            break
+        char_cursor += line_len + 1  # +1 for newline
+
+    if tgt_line and tgt_line.count("|") >= 2:
+        tgt_cells = [c.strip() for c in tgt_line.strip().strip("|").split("|")]
+        # Only consider repetition across cells (not in-cell runaway text loop)
+        from collections import Counter
+
+        tgt_counts = Counter(c for c in tgt_cells if c and not re.match(r"^[-:| ]+$", c))
+        if tgt_counts:
+            top_tgt_cell, top_tgt_cnt = tgt_counts.most_common(1)[0]
+            # Ensure the matched repetition corresponds to this cell repetition across columns
+            cell_matches_unit = (
+                clean_unit == top_tgt_cell
+                or (clean_unit != "" and clean_unit in top_tgt_cell)
+                or (top_tgt_cell != "" and top_tgt_cell in repeated_unit)
+                or "|" in repeated_unit
+            )
+            if top_tgt_cnt >= 3 and cell_matches_unit:
+                src_lines = src_clean.splitlines()
+                # Check corresponding or compatible source table row
+                candidate_src_lines: list[str] = []
+                if 0 <= tgt_line_idx < len(src_lines) and src_lines[tgt_line_idx].count("|") >= 2:
+                    candidate_src_lines.append(src_lines[tgt_line_idx])
+                candidate_src_lines.extend(
+                    ln
+                    for idx, ln in enumerate(src_lines)
+                    if idx != tgt_line_idx and ln.count("|") >= 2
+                )
+                for s_ln in candidate_src_lines:
+                    s_cells = [c.strip() for c in s_ln.strip().strip("|").split("|")]
+                    if abs(len(s_cells) - len(tgt_cells)) <= 2:
+                        s_counts = Counter(
+                            c for c in s_cells if c and not re.match(r"^[-:| ]+$", c)
+                        )
+                        if any(cnt >= 3 or cnt >= top_tgt_cnt - 1 for cnt in s_counts.values()):
+                            return True
+
+    # 4. Source in-line pattern repetition (e.g. poetry, song refrain, in-line repeated phrases)
+    # Only exempt when the target's repetition is structurally aligned to the source refrain
+    # (matching repeat count, anchored at identical boundaries, and covering comparable span).
+    for sm in _REPETITION_PATTERN.finditer(src_clean):
+        s_unit = sm.group(1)
+        if re.search(r"[\w\u4e00-\u9fff]", s_unit) and not re.match(
+            r"^\|?[\s\-:|]+\|?$", sm.group(0).strip()
+        ):
+            src_reps = len(sm.group(0)) // max(1, len(s_unit))
+            tgt_reps = len(matched_text) // max(1, len(repeated_unit))
+            if abs(src_reps - tgt_reps) <= 1:
+                aligned_start = sm.start() == 0 and m.start() == 0
+                aligned_end = (
+                    abs(len(src_clean) - sm.end()) <= 5 and abs(len(tgt_clean) - m.end()) <= 5
+                )
+                covers_substantial = (
+                    len(sm.group(0)) >= len(src_clean) * 0.3
+                    and len(matched_text) >= len(tgt_clean) * 0.3
+                )
+                if (aligned_start or aligned_end) and covers_substantial:
+                    return True
+
+    return False
+
+
 # A target that repeats the source is not a translation. The script-density
 # gate below cannot see this when the pair shares a writing system
 # (``language_profile.py`` zeroes ``min_target_ratio`` for Latin->Latin, and
@@ -483,6 +581,8 @@ class FastPassFilter:
                 matched_text = m.group(0)
                 if re.match(r"^\|?[\s\-:|]+\|?$", matched_text.strip()):
                     continue
+                if _is_exempt_repetition(src_clean, tgt_clean, m):
+                    continue
                 return FastPassDecision(
                     passed=False,
                     reason="Repetitive loop hallucination detected",
@@ -670,6 +770,8 @@ class FastPassFilter:
 
         src_clean = source_text.strip()
         tgt_clean = target_text.strip()
+        _bt = getattr(block_type, "value", block_type or "")
+        _is_prose = not _bt or str(_bt).lower() in {str(t.value).lower() for t in PROSE_BLOCK_TYPES}
 
         # 4. Standalone number preservation check
         num_res = self.numeric_validator.validate(src_clean, tgt_clean)
@@ -707,10 +809,12 @@ class FastPassFilter:
                 length_ratio=length_ratio,
             )
 
-        # 5b. Omission gate: dropped sentences, missing identifier
-        # terms, truncated verbatim residue. Catches the "delete a whole
-        # sentence and stay inside the length band" blind spot of gate 5.
-        omission = self.omission_gate.evaluate(src_clean, tgt_clean)
+        omission = self.omission_gate.evaluate(
+            src_clean,
+            tgt_clean,
+            is_table=True if ((not _is_prose) or bool(markdown_grid_shape(src_clean))) else None,
+            block_type=block_type,
+        )
         if not omission.passed:
             return FastPassDecision(
                 passed=False,

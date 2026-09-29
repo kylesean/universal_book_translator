@@ -502,6 +502,74 @@ def test_fast_pass_markdown_table_immunity() -> None:
     assert "Repetitive loop hallucination" in decision_loop.reason
 
 
+@pytest.mark.fast
+def test_fast_pass_table_cell_repetition_allows_isomorphic_repeats() -> None:
+    """Legitimate repeated cell values across columns (e.g. | GPT-5.6 Sol | GPT-5.6 Sol | ...)
+    must not be falsely flagged as repetition-loop hallucinations when present in source.
+    """
+    fp = FastPassFilter(source_lang="en", target_lang="zh")
+    src = (
+        "| Model | Task A | Task B | Task C | Task D |\n"
+        "|---|---|---|---|---|\n"
+        "| Baseline | GPT-5.6 Sol | GPT-5.6 Sol | GPT-5.6 Sol | GPT-5.6 Sol |"
+    )
+    tgt = (
+        "| 模型 | 任务 A | 任务 B | 任务 C | 任务 D |\n"
+        "|---|---|---|---|---|\n"
+        "| 基线 | GPT-5.6 Sol | GPT-5.6 Sol | GPT-5.6 Sol | GPT-5.6 Sol |"
+    )
+    decision = fp.validate_structural_invariants(src, tgt)
+    assert decision.passed is True, f"Erroneously flagged repetition: {decision.reason}"
+
+
+@pytest.mark.fast
+def test_fast_pass_inline_source_repetition_is_exempt() -> None:
+    """In-line repeated phrases (e.g. poetic refrain, song lyrics) that exist in the source
+    must be exempted rather than falsely flagging hallucination.
+    """
+    fp = FastPassFilter(source_lang="en", target_lang="zh")
+    src = "never give up, never give up, never give up, never give up, stay strong."
+    tgt = "永不放弃，永不放弃，永不放弃，永不放弃，保持坚强。"
+    decision = fp.validate_structural_invariants(src, tgt)
+    assert decision.passed is True, f"Erroneously flagged repetition: {decision.reason}"
+
+
+@pytest.mark.fast
+def test_fast_pass_in_cell_repetition_hallucination_is_not_exempt() -> None:
+    """An in-cell repetition hallucination loop inside a single cell must NOT be exempted
+    just because another row in the source table has repeated identical cell values across columns.
+    """
+    fp = FastPassFilter(source_lang="en", target_lang="zh")
+    src = (
+        "| Model | Task alpha | Task beta | Task gamma |\n"
+        "|---|---|---|---|\n"
+        "| ModelA | None | None | None |\n"
+        "| ModelB | Good | Good | Good |"
+    )
+    tgt = (
+        "| Model | Task alpha | Task beta | Task gamma |\n"
+        "|---|---|---|---|\n"
+        "| ModelA | None | None | None |\n"
+        "| ModelB | 循环幻觉循环幻觉循环幻觉循环幻觉循环幻觉循环幻觉循环幻觉 | Good | Good |"
+    )
+    decision = fp.validate_structural_invariants(src, tgt)
+    assert decision.passed is False
+    assert "Repetitive loop hallucination" in decision.reason
+
+
+@pytest.mark.fast
+def test_fast_pass_unrelated_target_repetition_is_not_exempt() -> None:
+    """An unrelated hallucination loop in target must NOT be exempted merely because
+    the source text contains some repeated words or refrains elsewhere.
+    """
+    fp = FastPassFilter(source_lang="en", target_lang="zh")
+    src = "never never never never went the little train."
+    tgt = "小火车鸣笛。错误翻译模型循环错误翻译模型循环错误翻译模型循环错误翻译模型循环"
+    decision = fp.validate_structural_invariants(src, tgt)
+    assert decision.passed is False
+    assert "Repetitive loop hallucination" in decision.reason
+
+
 @pytest.mark.asyncio
 async def test_cancelled_score_pairs_reaps_the_subprocess(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

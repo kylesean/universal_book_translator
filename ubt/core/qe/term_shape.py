@@ -43,7 +43,19 @@ _SENT_END_RE = re.compile(
 # private-use placeholder before splitting (trade-off: a real sentence break
 # after a trailing 'etc.' is merged; abbreviations mid-sentence dominate).
 _ABBREV_RE = re.compile(
-    r"\b(?:Eqs?|Figs?|Secs?|Refs?|Chap|App|No|Vol|pp?|e\.g|i\.e|etc|vs|cf|al|Dr|Prof|St)\.(?=\s|$)",
+    r"\b(?:"
+    r"Eqs?|Eqns?|Figs?|Secs?|Refs?|Chap|App|Appx|No|Vol|pp?|"
+    r"Avg|Avgs|Eff|Effs|Std|Stds|Min|Mins|Max|Maxs|dev|devs|"
+    r"Stat|Stats|Conf|Confs|Proc|Procs|Tab|Tabs|"
+    r"Dept|Depts|Univ|Univs|Approx|Est|Def|Defs|"
+    r"Thm|Thms|Lem|Lems|Prop|Props|Cor|Cors|"
+    r"Intl|Trans|Soc|Inst|Ed|Eds|"
+    r"Temp|Temps|Coeff|Coeffs|Var|Vars|Med|Meds|"
+    r"Freq|Freqs|Diff|Diffs|Corr|Corrs|Acc|Prec|"
+    r"Dist|Dists|Prob|Probs|Param|Params|"
+    r"Corp|Assn|Lab|Labs|Rep|Reps|Ser|"
+    r"e\.g|i\.e|etc|vs|cf|al|Dr|Prof|St"
+    r")\.(?=[\s|,\)\]]|$)",
     re.IGNORECASE,
 )
 _ABBREV_DOT = "\ue000"

@@ -249,6 +249,15 @@ class OmissionMetrics:
     verbatim_chrf_recall: float
 
 
+def _is_table_content(text: str) -> bool:
+    """True when text consists of markdown table lines or headers."""
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if not lines:
+        return False
+    table_lines = sum(1 for ln in lines if ln.count("|") >= 2)
+    return table_lines >= max(1, len(lines) // 2)
+
+
 @dataclass(frozen=True, slots=True)
 class OmissionDecision:
     """Outcome of the omission gate; ``metrics`` always carries all signals."""
@@ -284,9 +293,23 @@ class OmissionGate:
         self.min_chrf_ngrams = min_chrf_ngrams
         self.ngram_sizes = ngram_sizes
 
-    def evaluate(self, source_text: str, target_text: str) -> OmissionDecision:
+    def evaluate(
+        self,
+        source_text: str,
+        target_text: str,
+        *,
+        is_table: bool | None = None,
+        block_type: object = None,
+    ) -> OmissionDecision:
         src = source_text.strip()
         tgt = target_text.strip()
+
+        if is_table is None:
+            bt = getattr(block_type, "value", block_type or "")
+            if str(bt).lower() in ("table", "blocktype.table"):
+                is_table = True
+            else:
+                is_table = _is_table_content(src) or _is_table_content(tgt)
 
         src_sentences = count_sentences(src)
         tgt_sentences = count_sentences(tgt)
@@ -315,8 +338,10 @@ class OmissionGate:
             verbatim_chrf_recall=chrf_recall,
         )
 
-        if src_sentences >= self.min_source_sentences and (
-            sentence_ratio <= self.min_sentence_ratio
+        if (
+            not is_table
+            and src_sentences >= self.min_source_sentences
+            and (sentence_ratio <= self.min_sentence_ratio)
         ):
             return OmissionDecision(
                 passed=False,

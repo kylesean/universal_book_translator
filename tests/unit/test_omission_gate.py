@@ -265,6 +265,25 @@ class TestAbbreviationAwareSentences:
         decision = OmissionGate().evaluate(src, tgt)
         assert not decision.passed
 
+    def test_academic_statistical_abbreviations_do_not_split_sentences(self) -> None:
+        from ubt.core.qe.omission import count_sentences
+
+        # Abbreviations like Avg., Eff., Std., Min., Max., Ref., Stat., Conf., Proc., Dept., Univ.
+        src = "Avg. score was 0.95 with Std. dev. 0.05. Max. was 1.0 while Min. was 0.8. Univ. and Dept. reports confirmed."
+        assert count_sentences(src) == 3
+
+    def test_table_headers_and_blocks_exempt_from_sentence_ratio_omission(self) -> None:
+        src = "| Model | Avg. | Eff. | Std. | Min. | Max. |"
+        tgt = "| 模型 | 平均 | 效率 | 标准差 | 最小 | 最大 |"
+        decision = OmissionGate().evaluate(src, tgt)
+        assert decision.passed is True, f"Erroneously rejected table header: {decision.reason}"
+
+    def test_fast_pass_evaluates_single_line_table_header_without_omission_rejection(self) -> None:
+        src = "| Model | Method | Temp. | Coeff. | Var. |"
+        tgt = "| 模型 | 方法 | 温度 | 系数 | 方差 |"
+        decision = FastPassFilter(source_lang="en", target_lang="zh").evaluate(src, tgt)
+        assert decision.passed is True, f"FastPass falsely rejected table header: {decision.reason}"
+
 
 class TestIdentifierNoiseTolerance:
     def test_english_plural_renders_singular(self) -> None:
