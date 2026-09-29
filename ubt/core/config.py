@@ -899,6 +899,15 @@ class UBTConfig(BaseSettings):
                 self.rerank_k,
                 self.qe_engine,
             )
+        # ``allowed_dirs`` (plural) wins over the legacy singular ``allowed_dir``;
+        # with both set the singular one is dropped. Surface it rather than let a
+        # configured base directory vanish from the path sandbox without a word.
+        if self.allowed_dirs.strip() and self.allowed_dir.strip():
+            logger.warning(
+                "both allowed_dirs and allowed_dir are set; allowed_dir=%r is "
+                "ignored — allowed_dirs takes precedence.",
+                self.allowed_dir,
+            )
         # If draft_model was explicitly configured (via env or constructor or copy)
         # and repair_model was NOT explicitly configured, sync repair_model to draft_model.
         # Assign only on an actual change: ``validate_assignment`` re-enters this
