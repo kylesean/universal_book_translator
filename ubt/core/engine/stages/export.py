@@ -360,21 +360,30 @@ def _check_completion_ratio(
     ``BLOCKED_HUMAN`` blocks carry a non-empty ``<mark>`` placeholder wrapping
     the *source*, not a translation, so they must not count as delivered — an
     all-quarantined book would otherwise pass a completion floor of 1.0.
+
+    The floor is measured over *translatable* blocks only. A ``skip_translate``
+    block (formula, image, preserved marker) is rendered verbatim by design, so
+    leaving it in the denominator let a mostly-skipped book clear the floor
+    without a single translated sentence.
     """
     if min_completion_ratio <= 0 or not final_blocks:
         return
 
+    translatable = [fb for fb in final_blocks if not fb.skip_translate]
+    if not translatable:
+        return
+
     untranslated = [
         fb.id
-        for fb in final_blocks
-        if not fb.skip_translate
-        and (not (fb.target_text or "") or fb.status == BlockStatus.BLOCKED_HUMAN)
+        for fb in translatable
+        if not (fb.target_text or "")
+        or fb.status in (BlockStatus.BLOCKED_HUMAN, BlockStatus.FAILED)
     ]
-    completed_ratio = 1.0 - len(untranslated) / len(final_blocks)
+    completed_ratio = 1.0 - len(untranslated) / len(translatable)
     if completed_ratio < min_completion_ratio:
         raise IntegrityViolationError(
             f"Export blocked for job {actual_job_id}: only {completed_ratio:.0%} of "
-            f"{len(final_blocks)} block(s) carry a translation, below the "
+            f"{len(translatable)} translatable block(s) carry a translation, below the "
             f"{min_completion_ratio:.0%} floor (UBT_EXPORT_MIN_COMPLETION_RATIO). "
             f"{len(untranslated)} block(s) have no target, e.g. "
             f"{', '.join(untranslated[:10])}. Resume the job to retry them, "

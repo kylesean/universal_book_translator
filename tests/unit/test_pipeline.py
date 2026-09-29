@@ -1569,6 +1569,32 @@ def test_completion_floor_counts_blocked_human_placeholders_as_untranslated() ->
         _check_completion_ratio("job", blocks, 0.9)
 
 
+def test_completion_floor_counts_failed_blocks_with_target_text_as_untranslated() -> None:
+    """A FAILED block carrying remnant draft text from an aborted repair must not count as completed."""
+    from ubt.core.engine.stages.export import _check_completion_ratio
+
+    blocks = [
+        IRBlock(
+            id="a",
+            spine_index=1,
+            block_type=BlockType.NARRATIVE,
+            source_text="One.",
+            target_text="一。",
+            status=BlockStatus.MTQE_PASSED,
+        ),
+        IRBlock(
+            id="b",
+            spine_index=2,
+            block_type=BlockType.NARRATIVE,
+            source_text="Failed block.",
+            target_text="Bad draft text.",
+            status=BlockStatus.FAILED,
+        ),
+    ]
+    with pytest.raises(IntegrityViolationError):
+        _check_completion_ratio("job", blocks, 0.9)
+
+
 def test_derive_job_id_namespaces_profile_and_engine_knobs() -> None:
     """A different genre profile or preset must not resume the other's drafts."""
     kwargs = {
