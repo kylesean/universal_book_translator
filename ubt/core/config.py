@@ -749,7 +749,6 @@ class UBTConfig(BaseSettings):
     strict_auth: bool = False
     env: str = "development"
     allowed_dirs: str = ""
-    allowed_dir: str = ""
     model_profiles_json: str = ""
     model_profiles_file: str = ""
 
@@ -900,18 +899,6 @@ class UBTConfig(BaseSettings):
                 self.rerank_k,
                 self.qe_engine,
             )
-        # Synchronize programmatic allowed_dir vs ambient allowed_dirs: an explicit
-        # programmatic setting takes precedence over ambient environment.
-        if "allowed_dir" in self.model_fields_set and "allowed_dirs" not in self.model_fields_set:
-            self.allowed_dirs = self.allowed_dir
-        elif "allowed_dirs" in self.model_fields_set and "allowed_dir" not in self.model_fields_set:
-            self.allowed_dir = self.allowed_dirs
-        elif self.allowed_dirs.strip() and self.allowed_dir.strip():
-            logger.warning(
-                "both allowed_dirs and allowed_dir are set; allowed_dir=%r is "
-                "ignored — allowed_dirs takes precedence.",
-                self.allowed_dir,
-            )
         # If draft_model was explicitly configured (via env or constructor or copy)
         # and repair_model was NOT explicitly configured, sync repair_model to draft_model.
         # Assign only on an actual change: ``validate_assignment`` re-enters this
@@ -1017,7 +1004,7 @@ class UBTConfig(BaseSettings):
         return bool(self.strict_auth) or self.env == "production"
 
     def allowed_base_dirs(self) -> list[Path]:
-        """Parse allowed_dirs/allowed_dir into resolved base directories.
+        """Parse allowed_dirs into resolved base directories.
 
         Supports ``os.pathsep`` (';' on Windows, ':' on POSIX) as well as comma/semicolon,
         avoiding accidental splitting of Windows drive letters (e.g. C:\\path).
@@ -1034,10 +1021,6 @@ class UBTConfig(BaseSettings):
                     p = Path(part.strip()).resolve()
                     if p not in bases:
                         bases.append(p)
-        if self.allowed_dir.strip():
-            p = Path(self.allowed_dir.strip()).resolve()
-            if p not in bases:
-                bases.append(p)
         return bases
 
     def get_selected_pages(self) -> set[int] | None:

@@ -12,6 +12,7 @@ reflected. Deleted.
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 import pytest
@@ -121,18 +122,23 @@ def test_explicit_api_mode_is_honoured() -> None:
     assert cfg.api_mode == "openai-responses"
 
 
-def test_programmatic_allowed_dir_not_overridden_by_ambient_allowed_dirs(
+def test_allowed_dirs_is_the_single_source_for_the_path_sandbox(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """An explicit programmatic allowed_dir must not be silently dropped by ambient UBT_ALLOWED_DIRS."""
+    """A programmatic allowlist beats the ambient env and splits into bases.
+
+    The plural field is the one source: a programmatic value must not be
+    overridden by an ambient ``UBT_ALLOWED_DIRS``, and a multi-entry value must
+    resolve to exactly those entries — never a spurious literal ``a:b`` path.
+    """
     env_dir = tmp_path / "env_allowed"
     env_dir.mkdir()
-    prog_dir = tmp_path / "prog_allowed"
-    prog_dir.mkdir()
+    first_dir = tmp_path / "prog_allowed"
+    first_dir.mkdir()
+    second_dir = tmp_path / "prog_allowed_2"
+    second_dir.mkdir()
 
     monkeypatch.setenv("UBT_ALLOWED_DIRS", str(env_dir))
-    cfg = UBTConfig(allowed_dir=str(prog_dir))
+    cfg = UBTConfig(allowed_dirs=f"{first_dir}{os.pathsep}{second_dir}")
 
-    # The programmatic allowed_dir must be included in allowed bases
-    bases = cfg.allowed_base_dirs()
-    assert prog_dir.resolve() in bases
+    assert cfg.allowed_base_dirs() == [first_dir.resolve(), second_dir.resolve()]
