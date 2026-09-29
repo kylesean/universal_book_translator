@@ -554,11 +554,9 @@ def tm_evict(
 @app.command(name="api")
 def api_command(
     host: Annotated[
-        str | None, typer.Option("--host", help="Bind host (defaults to config/env)")
+        str | None, typer.Option("--host", help="Bind host (default 127.0.0.1)")
     ] = None,
-    port: Annotated[
-        int | None, typer.Option("--port", help="Bind port (defaults to config/env)")
-    ] = None,
+    port: Annotated[int | None, typer.Option("--port", help="Bind port (default 8000)")] = None,
 ) -> None:
     """Start the REST API server (same as the ``ubt-api`` entry point)."""
     from ubt.api.app import run_server
