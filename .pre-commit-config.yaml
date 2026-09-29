@@ -36,7 +36,7 @@ repos:
 
       # Whole-tree checks: pass_filenames off so a push cannot pass just because
       # the changed files happen to be clean. mypy resolves the whole program
-      # anyway, and the fast tier is ~6s (measured 2026-09-26), so pre-push
+      # anyway, and the fast tier is ~6s, so pre-push
       # stays well inside the inner-loop budget.
       - id: mypy
         name: mypy --strict (ubt + tests)
