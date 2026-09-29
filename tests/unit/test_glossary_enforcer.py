@@ -463,3 +463,14 @@ def test_replacement_containing_the_match_is_still_idempotent() -> None:
     corrected, records = enforcer.enforce("神经网络")
     assert corrected == "神经网络"
     assert records == []
+
+
+def test_cjk_currency_without_space_does_not_shield_glossary_terms() -> None:
+    """Currency amounts in Chinese without spaces ($5...$10) must not shield terms between them."""
+    enforcer = DeterministicGlossaryEnforcer(
+        glossary=[_entry("Alpha", "阿尔法")], target_lang="zh", source_lang="en"
+    )
+    text = "价格是$5包含Alpha术语到$10之间"
+    corrected, records = enforcer.enforce(text)
+    assert len(records) == 1
+    assert "阿尔法" in corrected

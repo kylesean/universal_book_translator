@@ -23,6 +23,10 @@ import functools
 import re
 from collections import Counter
 
+from ubt.core.cleaners.inline_math import (
+    INLINE_DOLLAR_PATTERN,
+    is_math_content,
+)
 from ubt.core.cleaners.mask_tokens import UnmaskReport
 from ubt.core.cleaners.mask_tokens import find_reordered as _find_reordered
 from ubt.core.cleaners.mask_tokens import order_by_position as _order_by_position
@@ -88,34 +92,6 @@ _MATH_ENV_PATTERN = re.compile(
 # LaTeX \(...\) and \[...\] groups (single-line; display blocks are FORMULA).
 _PAREN_MATH_PATTERN = re.compile(r"\\\((.+?)\\\)")
 _BRACKET_MATH_PATTERN = re.compile(r"\\\[(.+?)\\\]", re.DOTALL)
-# Inline $...$: neither delimiter may touch whitespace (excludes "$5 and $10"
-# chains where the inner edge hits a space).
-_INLINE_DOLLAR_PATTERN = re.compile(r"\$(?!\s)([^$\n]+?)(?<!\s)\$")
-
-# Bare numbers with optional thousands/decimal separators: money, not math.
-_CURRENCY_PATTERN = re.compile(r"^\d[\d,.]*$")
-# Currency chains/ranges ($10-$20, $5–$10, $10-20$)
-_CURRENCY_RANGE_PATTERN = re.compile(r"^\d[\d,.]*\s*[-–—]\s*(?:\$?\d[\d,.]*)?$")
-
-# Signs the interior is real math: a \command, sub/superscript, or brace.
-_LATEX_SIGNAL_PATTERN = re.compile(r"\\[A-Za-z]+|[_^{}]")
-
-
-def _is_math_content(content: str) -> bool:
-    """True when a $...$ interior is math rather than currency/prose."""
-    stripped = content.strip()
-    if not stripped:
-        return False
-    if _CURRENCY_PATTERN.match(stripped) or _CURRENCY_RANGE_PATTERN.match(stripped):
-        return False
-    # A lone ``$`` is a currency-unit marker, not a delimiter. Two of them on
-    # one line -- a table header's ``Eff. ($) ... Token ($)`` -- pair up into a
-    # span whose content is a row of prose, so Gate 4 failed the block for a
-    # "math span mismatch" the draft can never fix. The tell is a span glued to
-    # brackets with no math inside it; a stray-dollar-shattered formula
-    # (``$\psi = V \ln($``) ends with ``(`` too, but carries \commands.
-    bracket_glued = stripped.startswith(")") or stripped.endswith("(")
-    return not bracket_glued or bool(_LATEX_SIGNAL_PATTERN.search(stripped))
 
 
 class MathMasker:
@@ -142,7 +118,7 @@ class MathMasker:
             return token
 
         def _replace_guarded(match: re.Match[str]) -> str:
-            if not _is_math_content(match.group(1)):
+            if not is_math_content(match.group(1)):
                 return match.group(0)
             return _replace(match)
 
@@ -150,7 +126,7 @@ class MathMasker:
         masked = _DISPLAY_DOLLAR_PATTERN.sub(_replace, masked)
         masked = _PAREN_MATH_PATTERN.sub(_replace, masked)
         masked = _BRACKET_MATH_PATTERN.sub(_replace, masked)
-        masked = _INLINE_DOLLAR_PATTERN.sub(_replace_guarded, masked)
+        masked = INLINE_DOLLAR_PATTERN.sub(_replace_guarded, masked)
         return masked, _order_by_position(masked, mapping)
 
     def unmask(self, text: str, mapping: dict[str, str]) -> str:

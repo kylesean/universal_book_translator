@@ -18,6 +18,8 @@ try:
 except ImportError:
     _HAS_AHOCORASICK = False
 
+from ubt.core.cleaners.inline_math import inline_math_spans
+
 
 @dataclass(frozen=True, slots=True)
 class EnforcementRecord:
@@ -71,7 +73,6 @@ _PROTECTED_SPAN_PATTERNS = (
     re.compile(r"`[^`\n]+`"),  # Inline code `...`
     re.compile(r"https?://[^\s<>'\"\)\]]+"),  # Standalone URLs
     re.compile(r"\$\$[\s\S]*?\$\$"),  # Display math $$...$$
-    re.compile(r"\$[^\$\n]+\$"),  # Inline math $...$
     re.compile(r"\\\[[\s\S]*?\\\]"),  # LaTeX display \[...\]
     re.compile(r"\\\([\s\S]*?\\\)"),  # LaTeX inline \(...\)
     re.compile(r"\\begin\{[a-zA-Z*]+\}[\s\S]*?\\end\{[a-zA-Z*]+\}"),  # LaTeX environments
@@ -81,11 +82,18 @@ _PROTECTED_SPAN_PATTERNS = (
 
 
 def extract_protected_spans(text: str) -> list[tuple[int, int]]:
-    """Find intervals in text (HTML tags, LaTeX math, Markdown URLs) to shield from glossary substitutions."""
+    """Find intervals in text (HTML tags, LaTeX math, Markdown URLs) to shield from glossary substitutions.
+
+    Inline ``$...$`` is matched through the shared, currency-aware
+    :func:`~ubt.core.cleaners.inline_math.inline_math_spans`: a naive
+    ``\\$[^\\$\\n]+\\$`` paired ``"$5 and $10"`` into one "math" span and
+    shielded every term between the two dollars from enforcement.
+    """
     spans: list[tuple[int, int]] = []
     for patt in _PROTECTED_SPAN_PATTERNS:
         for m in patt.finditer(text):
             spans.append((m.start(), m.end()))
+    spans.extend(inline_math_spans(text))
     return spans
 
 

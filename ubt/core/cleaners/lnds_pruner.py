@@ -5,11 +5,8 @@ import re
 import sys
 
 from ubt.core.cleaners.boilerplate_catalog import BoilerplateCatalog
-from ubt.core.cleaners.math_masker import (
-    _DISPLAY_DOLLAR_PATTERN,
-    _INLINE_DOLLAR_PATTERN,
-    _is_math_content,
-)
+from ubt.core.cleaners.inline_math import INLINE_DOLLAR_PATTERN, is_math_content
+from ubt.core.cleaners.math_masker import _DISPLAY_DOLLAR_PATTERN
 from ubt.core.ir.models import BlockStatus, BlockType, IRBlock
 
 
@@ -19,7 +16,7 @@ def _has_dollar_math(content: str) -> bool:
         return False
     if _DISPLAY_DOLLAR_PATTERN.search(content):
         return True
-    return any(_is_math_content(m.group(1)) for m in _INLINE_DOLLAR_PATTERN.finditer(content))
+    return any(is_math_content(m.group(1)) for m in INLINE_DOLLAR_PATTERN.finditer(content))
 
 
 # Extraction-debris control chars: never legitimate prose, not even inside

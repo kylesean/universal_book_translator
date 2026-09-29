@@ -61,8 +61,14 @@ _SPACED_ELLIPSIS = re.compile(rf"(?<=[{_CJK}])\s*……\s*(?=[{_CJK}])")
 
 # Inline math, code spans, and masker placeholders whose bytes must never be touched.
 # The capturing group is required by :func:`re.split` to keep the spans.
+#
+# The inline ``$...$`` alternative requires both delimiters to be flush against
+# non-whitespace (``\$(?!\s) ... (?<!\s)\$``), matching
+# :data:`~ubt.core.cleaners.inline_math.INLINE_DOLLAR_PATTERN`. The naive
+# ``\$[^\$\n]+\$`` paired the two dollars of ``"$5 and $10"`` into one "math"
+# span and skipped Pangu spacing across the whole run of prose between them.
 _PROTECTED_SPAN_RE = re.compile(
-    r"(⟦[^⟧]*⟧|```[\w]*\n[\s\S]*?\n```|```[\s\S]*?```|`[^`\n]+`|\$\$[\s\S]*?\$\$|\$[^\$\n]+\$)"
+    r"(⟦[^⟧]*⟧|```[\w]*\n[\s\S]*?\n```|```[\s\S]*?```|`[^`\n]+`|\$\$[\s\S]*?\$\$|\$(?!\s)[^$\n]+?(?<!\s)\$)"
 )
 # Markdown table separator row: pipes, colons, dashes and spaces only.
 #
