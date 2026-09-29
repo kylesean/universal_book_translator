@@ -901,8 +901,10 @@ async def assess_document_async(
         fallback_chars = arch.sample_chars
     source_chars = int(pdf.get("probed_chars") or fallback_chars)
 
-    # Scanned PDF with missing text layer: calibrate estimated chars if OCR is active
-    scan_share = pdf.get("scan_page_share") if ext == "pdf" else (1.0 if arch.is_scanned else 0.0)
+    # Scanned PDF with missing text layer: calibrate estimated chars if OCR is active.
+    # (is_scanned is only ever true for PDFs — sample_document returns False for
+    # every other format — so the share is simply absent outside the PDF route.)
+    scan_share = pdf.get("scan_page_share") if ext == "pdf" else 0.0
     is_scanned_dominant = (scan_share is not None and scan_share > 0.5) or (
         scan_share is None and arch.is_scanned
     )
@@ -956,10 +958,6 @@ async def assess_document_async(
     )
     rec = _recommend_route(arch, route, pdf, config)
     scan_pages = math.ceil((pdf.get("scan_page_share") or 0.0) * pages)
-    if scan_pages == 0 and ext != "pdf" and arch.is_scanned:
-        scan_pages = (
-            pages  # non-PDF cannot census; treat sampled-empty as scanned only if heuristic says so
-        )
     cost = _build_cost(
         config,
         billable_blocks=billable_blocks,
