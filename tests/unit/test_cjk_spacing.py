@@ -212,3 +212,11 @@ def test_pangu_spacing_does_not_break_bare_function_calls() -> None:
     assert apply_pangu_spacing("函数 f(x) 连续") == "函数 f(x) 连续"
     # ...but a numeric bracketed reference still gets its space.
     assert apply_pangu_spacing("参见图 3.1(a)所示。") == "参见图 3.1 (a) 所示。"
+
+
+def test_cjk_spacing_does_not_treat_currency_as_protected_math() -> None:
+    """Currency runs like $5到$10 must not be treated as protected math spans."""
+    res = apply_pangu_spacing("价格为$5到$10。")
+    assert "$5到$" not in res
+    assert "价格为 $5" not in res
+    assert "5 到" in res

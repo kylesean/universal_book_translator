@@ -67,9 +67,16 @@ def is_math_content(content: str) -> bool:
 
 def iter_inline_math(text: str) -> Iterator[re.Match[str]]:
     """Yield regex matches for genuine inline ``$...$`` math spans in ``text``."""
-    for match in INLINE_DOLLAR_PATTERN.finditer(text):
+    pos = 0
+    while pos < len(text):
+        match = INLINE_DOLLAR_PATTERN.search(text, pos)
+        if match is None:
+            break
         if is_math_content(match.group(1)):
             yield match
+            pos = match.end()
+        else:
+            pos = match.start() + 1
 
 
 def inline_math_spans(text: str) -> list[tuple[int, int]]:

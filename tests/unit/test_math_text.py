@@ -222,3 +222,10 @@ def test_math_text_nested_spans() -> None:
     # rewrote the command passed the skeleton invariant (see ``skeleton``).
     assert skel == "\\text{\x00SPAN0\x00}"
     assert not skeleton_holds(r"\text{x}", r"\mathrm{x}")
+
+
+def test_skeleton_rejects_altering_untranslatable_math_operators() -> None:
+    """Non-translatable math operators like \\mathrm{softmax} must not be blanked into generic spans."""
+    src = r"\mathrm{softmax}(x)"
+    tgt = r"\mathrm{软极大}(x)"
+    assert not skeleton_holds(src, tgt)

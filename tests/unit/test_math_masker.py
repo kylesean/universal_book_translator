@@ -91,6 +91,18 @@ def test_real_inline_math_still_masked_next_to_dollar_markers() -> None:
     assert list(mapping.values()) == ["$K_{t}$"], mapping
 
 
+def test_inline_math_after_unspaced_cjk_currency_is_not_dropped() -> None:
+    """Inline math directly adjoining unspaced currency spans must not be dropped by cursor advance."""
+    from ubt.core.cleaners.inline_math import inline_math_spans
+
+    spans = inline_math_spans("从$5到$x$")
+    assert spans == [(4, 7)]
+
+    src = "价格在$5到$x$之间浮动"
+    masked, mapping = _masker().mask(src)
+    assert list(mapping.values()) == ["$x$"]
+
+
 def test_plain_prose_untouched() -> None:
     src = "The cache does not store thoughts or symbolic facts."
     masked, mapping = _masker().mask(src)

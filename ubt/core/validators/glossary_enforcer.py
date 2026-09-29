@@ -122,18 +122,18 @@ def find_term_occurrences(
     """
     if not text or not term:
         return []
-    is_latin = not any(is_cjk_char(c) for c in term)
+    check_left = bool(term) and _is_latin_word_char(term[0])
+    check_right = bool(term) and _is_latin_word_char(term[-1])
     if protected is None:
         protected = extract_protected_spans(text)
     flags = re.IGNORECASE if case_insensitive else 0
     found: list[tuple[int, int]] = []
     for match in re.finditer(re.escape(term), text, flags):
         start, end = match.start(), match.end()
-        if is_latin:
-            if start > 0 and _is_latin_word_char(text[start - 1]):
-                continue
-            if end < len(text) and _is_latin_word_char(text[end]):
-                continue
+        if check_left and start > 0 and _is_latin_word_char(text[start - 1]):
+            continue
+        if check_right and end < len(text) and _is_latin_word_char(text[end]):
+            continue
         if any(start < p_end and end > p_start for p_start, p_end in protected):
             continue
         found.append((start, end))
@@ -162,9 +162,9 @@ class DeterministicGlossaryEnforcer:
         self.source_lang = source_lang.lower()
         self.enforce_source_leak_replacement = enforce_source_leak_replacement
 
-        # Build replacement mapping: pattern -> (canonical_translation, rule_source, is_latin_word)
+        # Build replacement mapping: pattern -> (canonical_translation, rule_source, check_left, check_right)
         # Also collect approved target variants to prevent overwriting correct inflections.
-        self._rules: dict[str, tuple[str, str, bool]] = {}
+        self._rules: dict[str, tuple[str, str, bool, bool]] = {}
         self._approved_target_forms: set[str] = set()
 
         self._compile_glossary(glossary)
@@ -197,19 +197,31 @@ class DeterministicGlossaryEnforcer:
             for alias in entry.get("aliases") or []:
                 a_clean = str(alias).strip()
                 if a_clean and a_clean != target and a_clean not in self._approved_target_forms:
-                    is_latin = not any(is_cjk_char(c) for c in a_clean)
-                    self._rules[a_clean] = (target, f"alias:{source}->{target}", is_latin)
+                    check_left = _is_latin_word_char(a_clean[0])
+                    check_right = _is_latin_word_char(a_clean[-1])
+                    self._rules[a_clean] = (
+                        target,
+                        f"alias:{source}->{target}",
+                        check_left,
+                        check_right,
+                    )
 
             # 2. Map untranslated source term -> canonical target (if scripts differ or leak enforcement enabled)
-            if self.enforce_source_leak_replacement and source and source != target:
-                # Replacing untranslated source in target text is critical
-                is_latin_src = not any(is_cjk_char(c) for c in source)
-                # Avoid adding very short English words (1-2 chars) as source leaks unless uppercase acronyms
-
-                if (
-                    len(source) > 2 or source.isupper()
-                ) and source not in self._approved_target_forms:
-                    self._rules[source] = (target, f"source_leak:{source}->{target}", is_latin_src)
+            if (
+                self.enforce_source_leak_replacement
+                and source
+                and source != target
+                and (len(source) > 2 or source.isupper())
+                and source not in self._approved_target_forms
+            ):
+                check_left_src = _is_latin_word_char(source[0])
+                check_right_src = _is_latin_word_char(source[-1])
+                self._rules[source] = (
+                    target,
+                    f"source_leak:{source}->{target}",
+                    check_left_src,
+                    check_right_src,
+                )
 
     def _build_automaton(self) -> None:
         if _HAS_AHOCORASICK and self._rules:
@@ -220,19 +232,18 @@ class DeterministicGlossaryEnforcer:
         else:
             self._automaton = None
 
-    def _verify_boundary(self, text: str, start: int, end: int, is_latin: bool) -> bool:
+    def _verify_boundary(
+        self, text: str, start: int, end: int, check_left: bool, check_right: bool
+    ) -> bool:
         """Check whether the match satisfies word/token boundary assertions."""
-        if not is_latin:
-            return True
-
         # Left boundary check
-        if start > 0:
+        if check_left and start > 0:
             prev_char = text[start - 1]
             if _is_latin_word_char(prev_char):
                 return False
 
         # Right boundary check
-        if end < len(text):
+        if check_right and end < len(text):
             next_char = text[end]
             if _is_latin_word_char(next_char):
                 return False
@@ -254,17 +265,21 @@ class DeterministicGlossaryEnforcer:
 
         if self._automaton is not None:
             # Aho-Corasick scanning
-            for end_idx, (pattern, repl, rule, is_latin) in self._automaton.iter(target_text):
+            for end_idx, (pattern, repl, rule, check_left, check_right) in self._automaton.iter(
+                target_text
+            ):
                 start_idx = end_idx - len(pattern) + 1
                 end_pos = end_idx + 1
-                if self._verify_boundary(target_text, start_idx, end_pos, is_latin):
+                if self._verify_boundary(target_text, start_idx, end_pos, check_left, check_right):
                     raw_matches.append((start_idx, end_pos, pattern, repl, rule))
         else:
             # Pure Python Trie / regex fallback
-            for pattern, (repl, rule, is_latin) in self._rules.items():
+            for pattern, (repl, rule, check_left, check_right) in self._rules.items():
                 patt = re.compile(re.escape(pattern))
                 for m in patt.finditer(target_text):
-                    if self._verify_boundary(target_text, m.start(), m.end(), is_latin):
+                    if self._verify_boundary(
+                        target_text, m.start(), m.end(), check_left, check_right
+                    ):
                         raw_matches.append((m.start(), m.end(), pattern, repl, rule))
 
         if not raw_matches:

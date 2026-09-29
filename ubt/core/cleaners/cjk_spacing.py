@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import re
 
+from ubt.core.cleaners.inline_math import iter_inline_math
+
 _CJK = r"一-鿿㐀-䶿豈-﫿぀-ヿ가-힯"
 _CJK_PUNCT = r"，；：、？！（）》”’】…—「『～·《“‘【〈〔［｛"
 
@@ -58,18 +60,37 @@ _SINGLE_ELLIPSIS = re.compile(
 _EXCESS_ELLIPSIS = re.compile(rf"(?<=[{_CJK}])(?:\u2026){{3,}}|(?:\u2026){{3,}}(?=[{_CJK}])")
 _SPACED_EM_DASH = re.compile(rf"(?<=[{_CJK}])\s*——\s*(?=[{_CJK}])")
 _SPACED_ELLIPSIS = re.compile(rf"(?<=[{_CJK}])\s*……\s*(?=[{_CJK}])")
-
-# Inline math, code spans, and masker placeholders whose bytes must never be touched.
-# The capturing group is required by :func:`re.split` to keep the spans.
-#
-# The inline ``$...$`` alternative requires both delimiters to be flush against
-# non-whitespace (``\$(?!\s) ... (?<!\s)\$``), matching
-# :data:`~ubt.core.cleaners.inline_math.INLINE_DOLLAR_PATTERN`. The naive
-# ``\$[^\$\n]+\$`` paired the two dollars of ``"$5 and $10"`` into one "math"
-# span and skipped Pangu spacing across the whole run of prose between them.
-_PROTECTED_SPAN_RE = re.compile(
-    r"(⟦[^⟧]*⟧|```[\w]*\n[\s\S]*?\n```|```[\s\S]*?```|`[^`\n]+`|\$\$[\s\S]*?\$\$|\$(?!\s)[^$\n]+?(?<!\s)\$)"
+_OTHER_PROTECTED_RE = re.compile(
+    r"(⟦[^⟧]*⟧|```[\w]*\n[\s\S]*?\n```|```[\s\S]*?```|`[^`\n]+`|\$\$[\s\S]*?\$\$)"
 )
+
+
+def _split_protected(text: str) -> list[str]:
+    """Split text into alternating [unprotected, protected, ...] segments.
+
+    Guards code blocks, code spans, maskers, display math, and genuine inline math,
+    without treating unspaced CJK currency (e.g. $5到$10) as math.
+    """
+    intervals: list[tuple[int, int]] = []
+    for m in _OTHER_PROTECTED_RE.finditer(text):
+        intervals.append((m.start(), m.end()))
+    for m in iter_inline_math(text):
+        start, end = m.start(), m.end()
+        if not any(start < prev_end and end > prev_start for prev_start, prev_end in intervals):
+            intervals.append((start, end))
+    if not intervals:
+        return [text]
+    intervals.sort()
+    parts: list[str] = []
+    last = 0
+    for start, end in intervals:
+        parts.append(text[last:start])
+        parts.append(text[start:end])
+        last = end
+    parts.append(text[last:])
+    return parts
+
+
 # Markdown table separator row: pipes, colons, dashes and spaces only.
 #
 # Possessive quantifiers are load-bearing, not style: the non-possessive form
@@ -123,7 +144,7 @@ def apply_pangu_spacing(text: str, target_lang: str = "zh") -> str:
     if not _HAS_CJK.search(text):
         return text
 
-    parts = _PROTECTED_SPAN_RE.split(text)
+    parts = _split_protected(text)
     for i in range(0, len(parts), 2):
         seg = parts[i]
         # 1. CJK + Latin/Num
@@ -202,7 +223,7 @@ def normalize_cjk_punctuation(text: str, target_lang: str = "zh") -> str:
     if not _HAS_CJK.search(text):
         return text
 
-    parts = _PROTECTED_SPAN_RE.split(text)
+    parts = _split_protected(text)
     for i in range(0, len(parts), 2):
         parts[i] = _normalize_punct_block(parts[i])
     return "".join(parts)

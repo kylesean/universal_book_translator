@@ -474,3 +474,37 @@ def test_cjk_currency_without_space_does_not_shield_glossary_terms() -> None:
     corrected, records = enforcer.enforce(text)
     assert len(records) == 1
     assert "阿尔法" in corrected
+
+
+def test_hybrid_latin_cjk_term_word_boundaries() -> None:
+    """Hybrid Latin-CJK terms (e.g. C语言, 10米, 中文API) must respect word boundaries."""
+    from ubt.core.validators.glossary_enforcer import find_term_occurrences
+
+    # Left Latin boundary on C语言
+    text_c = "这是ABC语言教程，推荐学习C语言。"
+    occurrences = find_term_occurrences(text_c, "C语言")
+    assert len(occurrences) == 1
+    start, end = occurrences[0]
+    assert text_c[start:end] == "C语言"
+    assert text_c[start - 1] != "B"
+
+    # Numeric boundary on 10米
+    text_m = "总长110米，距离10米。"
+    occurrences_m = find_term_occurrences(text_m, "10米")
+    assert len(occurrences_m) == 1
+
+    # Right Latin boundary on 中文API
+    text_api = "这是中文APIs规范，这是中文API。"
+    occurrences_api = find_term_occurrences(text_api, "中文API")
+    assert len(occurrences_api) == 1
+
+    # Enforcer substitution honors hybrid boundaries
+    enforcer = DeterministicGlossaryEnforcer(
+        glossary=[{"source": "C language", "translation": "C语言（精选）", "aliases": ["C语言"]}],
+        target_lang="zh",
+        source_lang="en",
+    )
+    corrected, records = enforcer.enforce("这是ABC语言，那是C语言。")
+    assert "ABC语言" in corrected
+    assert "那是C语言（精选）。" in corrected
+    assert len(records) == 1

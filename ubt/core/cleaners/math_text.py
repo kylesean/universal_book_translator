@@ -126,7 +126,17 @@ def skeleton(latex: str) -> str:
 
 
 def skeleton_holds(source: str, target: str) -> bool:
-    """True when translation changed span contents and nothing else."""
+    """True when translation changed translatable span contents and nothing else."""
+    src_spans = extract_text_spans(source)
+    tgt_spans = extract_text_spans(target)
+    if len(src_spans) != len(tgt_spans):
+        return False
+    for s_sp, t_sp in zip(src_spans, tgt_spans, strict=True):
+        if s_sp.cmd != t_sp.cmd:
+            return False
+        # Untranslatable math operators / symbols in source (e.g. \mathrm{softmax}) must survive verbatim
+        if s_sp.cmd in ("mathrm", "operatorname") and s_sp.inner.strip() != t_sp.inner.strip():
+            return False
     return skeleton(source) == skeleton(target)
 
 

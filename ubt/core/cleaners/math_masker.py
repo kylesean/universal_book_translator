@@ -24,7 +24,6 @@ import re
 from collections import Counter
 
 from ubt.core.cleaners.inline_math import (
-    INLINE_DOLLAR_PATTERN,
     is_math_content,
 )
 from ubt.core.cleaners.mask_tokens import UnmaskReport
@@ -126,7 +125,18 @@ class MathMasker:
         masked = _DISPLAY_DOLLAR_PATTERN.sub(_replace, masked)
         masked = _PAREN_MATH_PATTERN.sub(_replace, masked)
         masked = _BRACKET_MATH_PATTERN.sub(_replace, masked)
-        masked = INLINE_DOLLAR_PATTERN.sub(_replace_guarded, masked)
+        from ubt.core.cleaners.inline_math import iter_inline_math
+
+        inline_matches = list(iter_inline_math(masked))
+        if inline_matches:
+            pieces: list[str] = []
+            last_end = 0
+            for m in inline_matches:
+                pieces.append(masked[last_end : m.start()])
+                pieces.append(_replace(m))
+                last_end = m.end()
+            pieces.append(masked[last_end:])
+            masked = "".join(pieces)
         return masked, _order_by_position(masked, mapping)
 
     def unmask(self, text: str, mapping: dict[str, str]) -> str:
