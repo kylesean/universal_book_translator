@@ -121,15 +121,27 @@ def _expand_env_vars(val: Any) -> Any:
 
 
 def _read_toml(custom_path: Path | str | None = None) -> dict[str, Any]:
+    """Read the user config TOML, or ``{}`` when no file exists.
+
+    A *malformed* user config fails loudly, matching
+    :func:`_read_shipped_providers`. Returning ``{}`` here (the old fail-open)
+    dropped every declared provider and fell back to the shipped defaults on a
+    single typo, so a run silently used the wrong endpoint/model.
+
+    The parser message quotes the offending source line, and a user
+    ``[providers.*]`` block may hold a literal ``api_key``; only the path is
+    echoed, with the original error kept as the chained cause.
+    """
     config_file = find_config_file(custom_path)
     if not config_file:
         return {}
     try:
         with config_file.open("rb") as f:
             data = tomllib.load(f)
-    except Exception as exc:
-        logger.warning("Failed to parse configuration file %s: %s", config_file, exc)
-        return {}
+    except OSError as exc:
+        raise ProviderConfigError(f"configuration file is unreadable at {config_file}") from exc
+    except tomllib.TOMLDecodeError as exc:
+        raise ProviderConfigError(f"configuration file at {config_file} is not valid TOML") from exc
     return data if isinstance(data, dict) else {}
 
 
