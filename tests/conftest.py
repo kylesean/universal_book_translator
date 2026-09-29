@@ -177,6 +177,17 @@ def hermetic_config() -> Iterator[None]:
         os.environ.update(saved_proxy)
 
 
+@pytest.fixture(autouse=True)
+def hermetic_ports() -> Iterator[None]:
+    """Ensure core dependency ports state is reset to production defaults after every test."""
+    try:
+        yield
+    finally:
+        from ubt.core.ports import reset_ports
+
+        reset_ports()
+
+
 @pytest.fixture
 def live_llm_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Restore the operator's live-provider env for one test body.

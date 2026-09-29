@@ -62,3 +62,21 @@ def test_ports_lazy_default_still_resolves(tmp_path: Path) -> None:
         assert is_pdf_engine_adapter(adapter) is False
     finally:
         reset_ports()
+
+
+def test_ports_reset_restores_default_visual_gate_runner() -> None:
+    """set_visual_gate_runner override is cleared when reset_ports is invoked."""
+    from ubt.core.ports import get_visual_gate_runner, reset_ports, set_visual_gate_runner
+
+    dummy_called = False
+
+    def dummy_runner(*args: object, **kwargs: object) -> object:
+        nonlocal dummy_called
+        dummy_called = True
+        return None
+
+    set_visual_gate_runner(dummy_runner)
+    assert get_visual_gate_runner() is dummy_runner
+
+    reset_ports()
+    assert get_visual_gate_runner() is not dummy_runner
