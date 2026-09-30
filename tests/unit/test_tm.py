@@ -11,6 +11,7 @@ from ubt.core.memory.tm import (
     PROVENANCE_MACHINE,
     TMPendingEntry,
     TranslationMemory,
+    _polarity_diverges,
     format_few_shot_reference,
     normalize_for_tm,
 )
@@ -806,3 +807,36 @@ def test_domain_rewrite_updates_the_stored_label(tm: TranslationMemory) -> None:
     rows = {e.source_text: e for e in tm.scan()}
     assert rows["Hello there."].target_text == "乙。"
     assert rows["Hello there."].domain == "b"
+
+
+def test_polarity_guard_covers_cjk_negation() -> None:
+    """CJK negation must gate fuzzy references like English negation does.
+
+    The tokenizer only produced [a-z]+ tokens, so for zh/ja sources the
+    polarity signature was always empty and a "没有增加" query could take a
+    "增加" neighbor as its few-shot example.
+    """
+    assert _polarity_diverges("他没有增加用量。", "他增加用量。") is True
+    assert _polarity_diverges("推奨されない手法", "推奨される手法") is True
+    # Same polarity on both sides, or no cue on either side, stays compatible.
+    assert _polarity_diverges("他没有增加用量。", "她没有减少用量。") is False
+    assert _polarity_diverges("他增加用量。", "产量上升。") is False
+
+
+def test_case_echo_is_rejected_but_a_pe_restyle_is_served(
+    tm: TranslationMemory,
+) -> None:
+    """A case-only echo is not a translation; a human PE restyle may be.
+
+    normalize_for_tm never folded case, so a stored row of
+    ("Introduction", "introduction") passed the passthrough rejection and was
+    served as a 1.0 exact hit. human PE provenance keeps serving: a restylist
+    may deliberately re-case a heading.
+    """
+    tm.writeback([TMPendingEntry("en", "zh", "Introduction", "introduction", PROVENANCE_MACHINE)])
+    assert tm.lookup_exact("en", "zh", "Introduction") is None
+
+    tm.writeback([TMPendingEntry("en", "zh", "Preface", "preface", PROVENANCE_HUMAN_PE)])
+    hit = tm.lookup_exact("en", "zh", "Preface")
+    assert hit is not None
+    assert hit.provenance == PROVENANCE_HUMAN_PE

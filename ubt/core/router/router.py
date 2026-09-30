@@ -636,6 +636,8 @@ class ModelRouter:
         if profile.prompt_strategy == PromptStrategy.MINIMAL:
             return build_minimal_repair_prompt(
                 source_text=source_text,
+                draft_text=draft_text,
+                error_flags=error_flags,
                 glossary_table=glossary_table,
                 target_lang=target_lang,
                 source_lang=source_lang,

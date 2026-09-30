@@ -454,11 +454,18 @@ def _detect_table_grid(text: str) -> tuple[int, int] | None:
 
 def build_minimal_repair_prompt(
     source_text: str,
+    draft_text: str = "",
+    error_flags: list[str] | None = None,
     glossary_table: str = "",
     target_lang: str = "zh",
     source_lang: str = "en",
 ) -> tuple[str, str]:
-    """Direct, minimalist repair prompt without metaprompts."""
+    """Direct, minimalist repair prompt without metaprompts.
+
+    Minimal means small, not blind: the draft and its defect flags travel with
+    the request, or a "repair" degenerates into an unconditioned re-translation
+    that bills a repair round for a fresh draft with no error context.
+    """
     src_profile = PROFILES.get(source_lang.strip().lower()) if source_lang else None
     tgt_profile = PROFILES.get(target_lang.strip().lower()) if target_lang else None
     src_name = (
@@ -480,8 +487,14 @@ def build_minimal_repair_prompt(
             f"You MUST strictly preserve the exact {rows}x{cols} table grid structure. "
             f"Do NOT delete, drop, or merge any rows or columns during repair."
         )
+    flags = ", ".join(error_flags or []) or "none"
+    draft_body = _neutralize_reserved_tags(draft_text).strip() if draft_text.strip() else "(empty)"
     parts.append(
-        f"Translate the following {src_name} text into clean, fluent {tgt_name}. Output ONLY the translation without any title, prefix, or commentary:\n\n{_neutralize_reserved_tags(source_text).strip()}"
+        f"Fix the draft translation below. Source {src_name} text:\n\n"
+        f"{_neutralize_reserved_tags(source_text).strip()}\n\n"
+        f"Detected problems in the draft: {flags}.\n"
+        f"Current draft ({tgt_name}):\n{draft_body}\n\n"
+        f"Output ONLY the corrected {tgt_name} translation without any title, prefix, or commentary."
     )
     return "", "\n\n".join(parts)
 

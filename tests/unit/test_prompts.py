@@ -75,3 +75,24 @@ def test_table_repair_prompt_with_intro_preamble_preserves_guardrail() -> None:
         "critical table structure guardrail" in prompt_text_h
         or "table preservation requirement" in prompt_text_h
     )
+
+
+def test_minimal_repair_prompt_carries_the_draft_and_flags() -> None:
+    """MINIMAL is small, not blind: the draft and its defects must be included.
+
+    The minimal repair prompt only carried the source, so a "repair" under a
+    minimal-model profile re-translated from scratch with no error context —
+    the MQM repair chain silently degraded to a fresh draft while still
+    billing repair rounds.
+    """
+    from ubt.core.router.prompts import build_minimal_repair_prompt
+
+    _system, user = build_minimal_repair_prompt(
+        source_text="The valve opens at dawn.",
+        draft_text="The valve opens at dawn.",
+        error_flags=["target_missing", "echo_detected"],
+        target_lang="zh",
+    )
+    assert "The valve opens at dawn." in user
+    assert "target_missing" in user
+    assert "echo_detected" in user

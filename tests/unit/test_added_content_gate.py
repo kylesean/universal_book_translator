@@ -196,9 +196,15 @@ class TestTmTrustBoundary:
     def test_clean_block_is_eligible(self) -> None:
         assert tm_writeback_eligible(self._block(_CLEAN_SRC, _CLEAN_TGT))
 
-    def test_skip_translate_block_is_eligible(self) -> None:
-        """Formula blocks echo their source by contract, so they cannot add."""
-        assert tm_writeback_eligible(self._block(_B0045_SRC, _B0045_SRC, skip=True))
+    def test_skip_translate_block_is_not_eligible(self) -> None:
+        """A skip row can never be served back, so writing it is dead weight.
+
+        Formula blocks echo their source by contract, and the read side
+        permanently refuses identity rows — writing them anyway manufactured
+        dead rows per book that still entered the fuzzy candidate pool and
+        inflated entry_count.
+        """
+        assert not tm_writeback_eligible(self._block(_B0045_SRC, _B0045_SRC, skip=True))
 
     def test_evict_ids_removes_entries_and_keeps_fts_consistent(self, tmp_path: Path) -> None:
         """Reusable memory needs a correction path, not just an append path."""

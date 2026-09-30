@@ -517,3 +517,28 @@ def test_cjk_stream_source_safely_degrades() -> None:
         )
         == []
     )
+
+
+@pytest.mark.parametrize(
+    ("text", "junk"),
+    [
+        ("他看见李老师走进教室。", "看见李"),
+        ("告诉我们李老师已经到了。", "我们李"),
+        ("大家看着王老师笑了。", "着王"),
+        ("彼の様子を見た。", "彼の"),
+        ("彼女の様相は変わった。", "彼女の"),
+    ],
+)
+def test_junk_adjoined_honorific_matches_are_rejected(text: str, junk: str) -> None:
+    """A verb/pronoun glued to the honorific core must not become a person.
+
+    The strip only shaved *leading* prefixes from the configured word list, so
+    a junk char sitting before the name survived the {1,4} window and every
+    distinct 'verb+name' combination produced a frequency-1 fake person that
+    went into the bible and the paid backfill.
+    """
+    from ubt.core.memory.character_miner import mine_characters
+
+    lang = "zh" if "老师" in text else "ja"
+    entries = mine_characters(text, source_lang=lang, min_freq=1)
+    assert all(junk not in e["source"] for e in entries)

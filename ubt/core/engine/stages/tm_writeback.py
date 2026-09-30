@@ -39,8 +39,10 @@ _added_content_gate = AddedContentGate()
 def tm_writeback_eligible(block: Any) -> bool:
     """Whether a finalized block may be promoted into the shared TM."""
     if block.skip_translate:
-        # Contract: the target is a verbatim source echo, so it cannot add.
-        return True
+        # A skip row echoes its source, and the read side permanently refuses
+        # identity rows — storing one is dead weight in the fuzzy candidate
+        # pool and inflates the entry count for every later lookup.
+        return False
     draft = tm_writeback_text(block)
     decision = _added_content_gate.evaluate(block.source_text or "", draft)
     if decision.passed:

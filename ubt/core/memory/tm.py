@@ -69,6 +69,12 @@ _APOSTROPHE_RE = re.compile(r"[\u2018\u2019\u02bc\u0060\u00b4]")
 _NEGATION_CUES = frozenset(
     {"not", "no", "never", "without", "none", "neither", "nor", "nothing", "nobody", "cannot"}
 )
+# CJK negation travels as characters, not [a-z]+ tokens, so the cue set above
+# never fired for zh/ja sources and every fuzzy reference passed the guard.
+# Unambiguous negators only: 未/非 are omitted on purpose — they are substrings
+# of 未来/非常 — and a false cue costs one dropped reference (a re-draft), never
+# a wrong sentence.
+_CJK_NEGATION_CUES = frozenset({"不", "没", "没有", "别", "无", "勿", "ない", "ず", "ぬ"})
 # Mutually exclusive antonym cue groups: both sides carrying the SAME group
 # member agrees in polarity; a missing or different member is a divergence.
 _ANTONYM_CUE_GROUPS: tuple[tuple[str, ...], ...] = (
@@ -94,7 +100,11 @@ def _polarity_signature(text: str) -> tuple[str, ...]:
     """
     lowered = _APOSTROPHE_RE.sub("'", text.lower())
     tokens = set(_TOKEN_RE.findall(lowered))
-    negated = bool(tokens & _NEGATION_CUES) or "n't" in lowered
+    negated = (
+        bool(tokens & _NEGATION_CUES)
+        or "n't" in lowered
+        or any(cue in lowered for cue in _CJK_NEGATION_CUES)
+    )
     slots = ["neg" if negated else ""]
     for group, regex in zip(_ANTONYM_CUE_GROUPS, _ANTONYM_CUE_RES, strict=True):
         match = regex.search(text)
@@ -529,7 +539,7 @@ class TranslationMemory:
             valid_rows = [
                 row
                 for row in rows
-                if not self._is_passthrough(str(row[1]), str(row[2]))
+                if not self._row_rejected(str(row[3]), str(row[1]), str(row[2]))
                 and self._hit_allowed(
                     str(row[3]),
                     str(row[4] or ""),
@@ -707,15 +717,23 @@ class TranslationMemory:
             logger.debug("tm: use_count bump skipped for entry %s: %s", entry_id, exc)
 
     @staticmethod
-    def _is_passthrough(src_text: str, tgt_text: str) -> bool:
-        """True for a stored row whose target is the source carried over verbatim.
+    def _row_rejected(provenance: str, src_text: str, tgt_text: str) -> bool:
+        """True for a stored row whose target is just the source carried over.
 
         A row can enter the store with an untranslated value (an MT pass-through
         that cleared the write-side filter). Serving it back as a finished
-        translation converts stored noise into a shortcut that bypasses drafting,
-        so reads refuse identity rows; they stay in the table untouched.
+        translation converts stored noise into a shortcut that bypasses
+        drafting, so reads refuse identity rows; they stay in the table
+        untouched. normalize_for_tm never folds case, so a machine row differing
+        only by case ("Introduction" -> "introduction") is the same echo; a
+        human PE restyle may re-case deliberately and only a verbatim echo is
+        noise.
         """
-        return normalize_for_tm(src_text) == normalize_for_tm(tgt_text)
+        src = normalize_for_tm(src_text)
+        tgt = normalize_for_tm(tgt_text)
+        if provenance == PROVENANCE_HUMAN_PE:
+            return src == tgt
+        return src.casefold() == tgt.casefold()
 
     @staticmethod
     def _hit_allowed(
@@ -750,7 +768,7 @@ class TranslationMemory:
             if row is None:
                 return None
             provenance = str(row[2])
-            if self._is_passthrough(str(row[0]), str(row[1])):
+            if self._row_rejected(str(row[2]), str(row[0]), str(row[1])):
                 return None
             if not self._hit_allowed(provenance, str(row[3] or ""), row[4], context_hash, domain):
                 return None
