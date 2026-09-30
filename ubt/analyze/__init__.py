@@ -18,10 +18,12 @@ from ubt.analyze.bridge import (
     document_from_blocks,
     element_from_block,
 )
+from ubt.analyze.reader_pdf import read_pdf
 
 __all__ = [
     "block_from_element",
     "blocks_from_document",
     "document_from_blocks",
     "element_from_block",
+    "read_pdf",
 ]
