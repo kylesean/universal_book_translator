@@ -116,6 +116,11 @@ def evaluate_expectations(report: ReconciliationReport, expect: dict[str, Any]) 
     - ``min_accounted_ratio``: minimum share of text nodes that are accounted for
       as *delivered* (translated) or *verbatim* (intentionally kept). Nodes that
       shipped source (``source_kept``) or were dropped do not count.
+    - ``min_delivered_ratio``: minimum share of text nodes actually *translated*.
+      ``min_accounted_ratio`` also counts ``verbatim``, so a run that keeps more
+      of the book than it translates can clear it; this is the floor that catches
+      that trade (a finer block split that turns prose into preserved fragments,
+      for instance).
     """
     failures: list[str] = []
     max_errors = int(expect.get("max_errors", 0))
@@ -139,6 +144,12 @@ def evaluate_expectations(report: ReconciliationReport, expect: dict[str, Any]) 
         floor = float(expect["min_accounted_ratio"])
         if ratio < floor:
             failures.append(f"accounted ratio {ratio:.3f} < required {floor:.3f}")
+
+    if "min_delivered_ratio" in expect:
+        ratio = report.delivered_text / report.total_text if report.total_text else 1.0
+        floor = float(expect["min_delivered_ratio"])
+        if ratio < floor:
+            failures.append(f"delivered ratio {ratio:.3f} < required {floor:.3f}")
 
     return failures
 
