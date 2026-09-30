@@ -45,6 +45,7 @@ from ubt.core.ports import (
 
 if TYPE_CHECKING:
     from ubt.adapters.pdf.visual_gate import VisualGateResult
+    from ubt.core.content.contract import ReconciliationReport
 from ubt.core.qe.defect_taxonomy import (
     INTENTIONAL_PRESERVED_SKIP_PREFIXES as _INTENTIONAL_PRESERVED_SKIP_PREFIXES,
 )
@@ -844,13 +845,13 @@ async def _render_complementary_artifact(
 
 def _reconcile_delivery_contract(
     ctx: StageContext, blocks: list[IRBlock], rendered_path: Path
-) -> dict[str, Any]:
+) -> ReconciliationReport:
     """Build the content graph, reconcile the two ledgers, persist the contract.
 
-    Phase 0 is advisory: violations are recorded in the report and the standalone
-    ``*_contract.json``; ``ubt verify`` fails the build on error-severity
-    violations, but export does not block on them until renderers are
-    ledger-bound (Phase 2).
+    Always writes the standalone ``*_contract.json`` and returns the report. The
+    report is advisory unless ``config.strict_contract`` is set, in which case
+    the caller aborts on an ERROR-severity violation; ``ubt verify`` applies the
+    same contract to a delivered artifact or a finished job's ledger.
     """
     from ubt.core.content import graph_from_blocks, reconcile
 
@@ -882,7 +883,7 @@ def _reconcile_delivery_contract(
         )
     except OSError as exc:  # a missing audit file must not sink the artifact
         logger.warning("Could not write delivery contract for %s: %s", ctx.job_id, exc)
-        return payload
+        return contract
     if contract.passed:
         logger.info("Delivery contract %s: %s", contract_path.name, contract.summary_line())
     else:
@@ -893,7 +894,7 @@ def _reconcile_delivery_contract(
             len(contract.errors),
             contract_path,
         )
-    return payload
+    return contract
 
 
 async def _build_reports(
@@ -1138,8 +1139,17 @@ async def run_export_stage(
     _drop_stale_run_reports(rendered_path)
 
     # Delivery contract: reconcile the content and asset ledgers for the primary
-    # artifact. Written beside it and embedded in the quality report.
-    delivery_contract = _reconcile_delivery_contract(ctx, final_blocks, rendered_path)
+    # artifact. Written beside it and embedded in the quality report; an opt-in
+    # hard gate (UBT_STRICT_CONTRACT) aborts a knowingly-broken delivery.
+    contract = _reconcile_delivery_contract(ctx, final_blocks, rendered_path)
+    if ctx.config.strict_contract and not contract.passed:
+        raise IntegrityViolationError(
+            f"Export blocked for job {ctx.job_id}: delivery contract failed with "
+            f"{len(contract.errors)} error(s) - {contract.summary_line()}. The "
+            "content/asset ledgers do not balance (dropped text or lost assets). "
+            "Fix the loss, or unset UBT_STRICT_CONTRACT to ship knowingly."
+        )
+    delivery_contract = contract.model_dump(mode="json")
 
     # Post-render visual gate (self-healing loop): T0/T1 deterministic +
     # optional pixel confirmation + sampled T2 VLM + ReflowControlLoop.

@@ -654,6 +654,13 @@ class UBTConfig(BaseSettings):
     # skip the extra (CPU-only, no-LLM) render on large figure-bearing books.
     emit_companion_auto: bool = True
 
+    # Opt-in hard gate: abort export when the delivery contract has an
+    # ERROR-severity violation (dropped text, lost/corrupt asset, or a
+    # translation that could not be placed). Off by default so a partial book
+    # can still ship knowingly; ``ubt verify`` always reports the same contract
+    # regardless of this flag.
+    strict_contract: bool = False
+
     # -- PDF render engine --------------------------------------------------------
     # 'auto' (default): density dispatch — formula/table/figure-dense documents
     #   take the rigid engine (source page as canvas: geometry, figures and
