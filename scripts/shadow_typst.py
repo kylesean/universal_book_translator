@@ -1,17 +1,17 @@
 #!/usr/bin/env python
-"""Phase-3 acceptance: the Typst backend reflows paragraphs and verifies them.
+"""Phase-3 acceptance: the Typst backend reflows text elements and verifies them.
 
-The first reflowing backend declares ``RECONSTRUCTED_ADAPTED`` for Paragraph
-alone. This harness runs the real ``realize()`` over the corpus with it and
-checks:
+The reflowing backend declares ``RECONSTRUCTED_ADAPTED`` for the text classes it
+can re-typeset. This harness runs the real ``realize()`` over the corpus with it
+and checks:
 
-- a paragraph with a translation comes back RECONSTRUCTED_ADAPTED, its fragment
-  produced and verified;
-- a paragraph with *no* translation descends to PRESERVED_OPAQUE -- nothing to
-  reflow, so the lattice keeps the source rather than losing it;
+- a reflowable text element with a translation comes back RECONSTRUCTED_ADAPTED,
+  its fragment produced and verified;
+- one with *no* translation descends to PRESERVED_OPAQUE -- nothing to reflow, so
+  the lattice keeps the source rather than losing it;
 - every other element class is placed opaque;
 - the capability set is exactly the opaque rung for all classes plus
-  RECONSTRUCTED_ADAPTED for Paragraph.
+  RECONSTRUCTED_ADAPTED for the reflowable text classes.
 
 Translations are the dry-run rehearsal's (``[模拟翻译] <source>``), so the run
 needs no API key. Exit 0 iff every check holds.
@@ -24,10 +24,10 @@ from pathlib import Path
 
 from ubt.analyze.reader_pdf import read_pdf
 from ubt.core.qe.fast_pass import REHEARSAL_MARKER, FastPassFilter
-from ubt.model.ast import ELEMENT_CLASSES, Paragraph
+from ubt.model.ast import ELEMENT_CLASSES
 from ubt.model.fidelity import Fidelity
 from ubt.pipeline.steps import realize
-from ubt.render.typst_backend import TypstBackend
+from ubt.render.typst_backend import REFLOW_CLASSES, TypstBackend
 from ubt.verify.verifier import Verifiers, build_verifiers
 
 
@@ -52,10 +52,10 @@ def _load_cases(corpus_dir: Path) -> list[tuple[str, Path]]:
 def _check_capabilities() -> list[str]:
     capabilities = TypstBackend().capabilities()
     expected = {(cls, Fidelity.PRESERVED_OPAQUE) for cls in ELEMENT_CLASSES}
-    expected.add((Paragraph, Fidelity.RECONSTRUCTED_ADAPTED))
+    expected |= {(cls, Fidelity.RECONSTRUCTED_ADAPTED) for cls in REFLOW_CLASSES}
     problems: list[str] = []
     if capabilities.supported != frozenset(expected):
-        problems.append("capabilities are not exactly opaque-for-all + adapted-for-paragraph")
+        problems.append("capabilities are not exactly opaque-for-all + adapted-for-reflow")
     if not capabilities.reflows:
         problems.append("typst backend must declare reflow")
     return problems
@@ -67,7 +67,7 @@ def _check_document(document: Path) -> tuple[int, int, list[str]]:
     translations = {
         element.id: f"{REHEARSAL_MARKER} {element.text}"
         for element in doc.elements
-        if isinstance(element, Paragraph)
+        if isinstance(element, REFLOW_CLASSES)
     }
     backend = TypstBackend(translations)
     untranslated = TypstBackend()
@@ -76,10 +76,10 @@ def _check_document(document: Path) -> tuple[int, int, list[str]]:
 
     for element in doc.elements:
         attestation = realize(element, backend, verifiers, doc.source)
-        if isinstance(element, Paragraph):
+        if isinstance(element, REFLOW_CLASSES):
             if attestation.fidelity is not Fidelity.RECONSTRUCTED_ADAPTED:
                 problems.append(
-                    f"{element.id}: paragraph {attestation.fidelity.name}, "
+                    f"{element.id}: {element.kind} {attestation.fidelity.name}, "
                     f"expected RECONSTRUCTED_ADAPTED"
                 )
             else:
@@ -94,7 +94,7 @@ def _check_document(document: Path) -> tuple[int, int, list[str]]:
             bare = realize(element, untranslated, verifiers, doc.source)
             if bare.fidelity is not Fidelity.PRESERVED_OPAQUE:
                 problems.append(
-                    f"{element.id}: untranslated paragraph {bare.fidelity.name}, "
+                    f"{element.id}: untranslated {element.kind} {bare.fidelity.name}, "
                     f"expected PRESERVED_OPAQUE"
                 )
         elif attestation.fidelity is not Fidelity.PRESERVED_OPAQUE:
@@ -120,7 +120,7 @@ def main() -> int:
     print(f"\nPhase-3 typst-backend acceptance — {corpus_dir} ({len(cases)} document(s))")
     print(
         f"  {'capabilities':<20} {'pass' if not problems else 'FAIL':<6} "
-        f"classes={len(ELEMENT_CLASSES)} reflow=Paragraph"
+        f"classes={len(ELEMENT_CLASSES)} reflow=text"
     )
     total = 0
     for case_id, document in cases:
