@@ -16,6 +16,7 @@ from typing import Any
 
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.stage_context import StageContext
+from ubt.core.exceptions import BudgetExceededError, JobInterruptedError
 from ubt.core.ir.models import BlockStatus
 from ubt.core.memory.glossary_table import build_chunk_glossary_table
 from ubt.core.qe.comet_runner import GLOSSARY_VIOLATION_MARKER
@@ -24,6 +25,24 @@ from ubt.core.qe.term_metrics import evaluate_terms
 from ubt.core.validators.consistency import GlossaryConsistencyValidator
 
 logger = logging.getLogger(__name__)
+
+
+def _split_repair_results(results: list[Any]) -> list[dict[str, Any]]:
+    """Re-raise cooperative interrupts; log ordinary failures; return updates.
+
+    Mirrors the repair stage's gather handling: a budget stop or cancellation
+    that arrives mid-repair must reach the pipeline's handler instead of being
+    downgraded to a warning while the stage finalizes drifted blocks anyway.
+    """
+    updates: list[dict[str, Any]] = []
+    for outcome in results:
+        if isinstance(outcome, (BudgetExceededError, JobInterruptedError, asyncio.CancelledError)):
+            raise outcome
+        if isinstance(outcome, BaseException):
+            logger.warning("Consistency repair task failed: %s", outcome)
+            continue
+        updates.append(outcome)
+    return updates
 
 
 async def run_consistency_stage(
@@ -131,10 +150,7 @@ async def run_consistency_stage(
         *[_repair_block(block_id, block_tasks) for block_id, block_tasks in per_block.items()],
         return_exceptions=True,
     )
-    updates = [res for res in results if isinstance(res, dict)]
-    for block_id, res in zip(per_block, results, strict=True):
-        if not isinstance(res, dict):
-            logger.warning("Consistency repair failed for block %s: %s", block_id, res)
+    updates = _split_repair_results(results)
     if updates:
         await asyncio.to_thread(ledger.save_checkpoints_batch, updates)
 

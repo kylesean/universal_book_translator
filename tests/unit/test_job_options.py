@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import inspect
 
+import pytest
+
 from ubt.api.models import JobSubmitRequest
 from ubt.core.config import UBTConfig
 from ubt.core.job_options import RUN_ONLY_KEYS
@@ -161,3 +163,20 @@ def test_validate_request_enums_rejects_unknown_values() -> None:
         overrides_from_request({"preset": "turbo"})
     with pytest.raises(UBTError, match="Invalid ocr_mode"):
         overrides_from_request({"ocr_mode": "telepathy"})
+
+
+def test_env_dual_mode_survives_the_adaptive_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """UBT_DUAL_MODE must keep its documented precedence over the profile default.
+
+    The adaptive default was written into the request-override layer, which
+    outranks the environment, so an operator's UBT_DUAL_MODE=inline was
+    silently overridden for paper/fiction/rigid jobs.
+    """
+    from ubt.core.job_options import overrides_from_request
+
+    monkeypatch.setenv("UBT_DUAL_MODE", "inline")
+    # The env value reaches the config through from_env(); the override layer
+    # must stay out of the way so the env setting wins over the profile default.
+    assert "dual_mode" not in overrides_from_request({"profile": "paper"})
+    monkeypatch.delenv("UBT_DUAL_MODE")
+    assert overrides_from_request({"profile": "paper"})["dual_mode"] == "monolingual"

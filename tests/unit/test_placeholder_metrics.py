@@ -126,3 +126,15 @@ def test_code_and_citation_corruption_counts_toward_retention() -> None:
     assert metrics.masked_spans >= 2
     assert metrics.corrupt_spans >= 1
     assert metrics.retention_rate < 1.0
+
+
+def test_placeholder_metrics_count_soup_spans() -> None:
+    """Soup spans are part of the draft mask order; the recount must match.
+
+    The reporter's recount skipped the soup masker entirely, so delimiter-free
+    unicode math (F_th,SI / β2) did not count toward retention and a corrupt
+    soup restore read as a perfect 1.0.
+    """
+    block = _math_block("b1", "由F_th,SI得到β2项 [2]")
+    metrics = compute_placeholder_metrics([block])
+    assert metrics.masked_spans >= 2

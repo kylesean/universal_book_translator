@@ -7,7 +7,6 @@ import logging
 import os
 import re
 from collections.abc import AsyncIterator, Callable
-from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -127,6 +126,8 @@ def derive_job_id(
 #: run drafts. A preset (or an explicit flag) that moves any of them must get
 #: its own ledger, or the resume would skip drafting under the new settings.
 _ENGINE_SIGNATURE_FIELDS: tuple[tuple[str, str], ...] = (
+    ("draft_model", "dm"),
+    ("repair_model", "rm"),
     ("prompt_strategy", "ps"),
     ("exec_mode", "em"),
     ("formula_enrichment", "fe"),
@@ -154,6 +155,22 @@ def engine_signature(config: Any) -> str:
         if value is not None and value != default:
             parts.append(f"{tag}{re.sub(r'[^A-Za-z0-9]', '', str(value))}")
     return "-".join(parts)
+
+
+async def _close_adapter_off_loop(adapter: Any, job_id: str) -> None:
+    """Close the adapter off the event loop.
+
+    Adapter close may wait on subprocess termination (the MathJax node
+    renderer's ``proc.wait(timeout=5)``); running it inline in run()'s finally
+    stalls the loop shared with SSE fan-out for every connected client.
+    """
+    close_adapter = getattr(adapter, "close", None)
+    if not callable(close_adapter):
+        return
+    try:
+        await asyncio.to_thread(close_adapter)
+    except Exception as adapter_exc:
+        logger.debug("Error closing adapter for job %s: %s", job_id, adapter_exc)
 
 
 async def _mark_failed_unless_completed(
@@ -574,6 +591,22 @@ class PipelineOrchestrator:
             artifact_path=artifact_path,
         )
 
+    async def _run_finalize_hook(self, event: TranslationProgressEvent) -> None:
+        """Best-effort post-finalize hook; a failure is logged, never fatal.
+
+        The hook persists the artifact/report pointers callers download through,
+        so a silent failure would strand delivered artifacts with no signal —
+        unlike the abort-finalize path this is the only terminal hook that had
+        no log at all.
+        """
+        if self.finalize_job is None:
+            return
+        try:
+            # Off-loop: the hook opens a SQLite ledger and writes metadata.
+            await asyncio.to_thread(self.finalize_job, event)
+        except Exception as exc:
+            logger.warning("finalize_job hook failed for job %s: %s", event.job_id, exc)
+
     async def run(
         self,
         input_path: Path,
@@ -874,10 +907,7 @@ class PipelineOrchestrator:
                     # EXPORT_COMPLETED so that callers who break immediately do not cause
                     # GeneratorExit to abort these terminal persistence tasks.
                     await run_tm_writeback_stage(ctx)
-                    if self.finalize_job is not None:
-                        with suppress(Exception):
-                            # Off-loop: the hook opens a SQLite ledger and writes metadata.
-                            await asyncio.to_thread(self.finalize_job, export_completed_event)
+                    await self._run_finalize_hook(export_completed_event)
                 yield event
 
         except GeneratorExit:
@@ -941,12 +971,8 @@ class PipelineOrchestrator:
                     logger.debug("Error closing TM for job %s: %s", actual_job_id, tm_exc)
             # Adapters may own subprocesses (the MathJax node renderer); close
             # them per run so a long-lived server does not accumulate children.
-            close_adapter = getattr(adapter, "close", None)
-            if callable(close_adapter):
-                try:
-                    close_adapter()
-                except Exception as adapter_exc:
-                    logger.debug("Error closing adapter for job %s: %s", actual_job_id, adapter_exc)
+            if adapter is not None:
+                await _close_adapter_off_loop(adapter, actual_job_id)
             if self._owns_router:
                 try:
                     await self.router.aclose()

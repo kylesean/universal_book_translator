@@ -33,6 +33,7 @@ from ubt.core.config import (
     RenderEngine,
     UBTConfig,
     canonical_render_engine,
+    env_var_names,
 )
 from ubt.core.exceptions import UBTError
 from ubt.core.presets import PRESET_ENGINE_FIELDS, Preset, resolve_engine_params
@@ -171,7 +172,12 @@ def overrides_from_request(
     # default on every surface. Previously only the CLI applied it, so the same
     # job (e.g. an academic paper) rendered bilingual inline through the API/MCP
     # and monolingual through the CLI.
-    if "dual_mode" not in overrides:
+    if "dual_mode" not in overrides and not any(
+        var in os.environ for var in env_var_names("dual_mode")
+    ):
+        # The adaptive default is a *default*: writing it into the overrides
+        # layer would outrank UBT_DUAL_MODE, which the CLI help documents as
+        # "unset follows config / UBT_DUAL_MODE".
         adaptive = adaptive_dual_mode(None, request.get("profile"), overrides.get("render_engine"))
         if adaptive is not None:
             overrides["dual_mode"] = adaptive
@@ -321,7 +327,9 @@ def resolve_target_output(output_path: Path | str | None, input_path: Path | str
 
 
 #: The derived reports that hang off a deliverable.
-SidecarKind = Literal["quality_report.json", "metrics.json", "visual_report.json"]
+SidecarKind = Literal[
+    "quality_report.json", "quality_report.md", "metrics.json", "visual_report.json"
+]
 
 
 def sidecar_path(artifact: str | Path, kind: SidecarKind) -> Path:

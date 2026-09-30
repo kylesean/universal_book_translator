@@ -1,6 +1,8 @@
 """Unit and integration tests for 6-stage PipelineOrchestrator."""
 
 import asyncio
+import logging
+import threading
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -14,7 +16,7 @@ from ubt.adapters.markdown.adapter import MarkdownAdapter
 from ubt.core.config import UBTConfig
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.ledger import SQLiteJobLedger
-from ubt.core.engine.pipeline import PipelineOrchestrator, derive_job_id
+from ubt.core.engine.pipeline import PipelineOrchestrator, derive_job_id, engine_signature
 from ubt.core.engine.repair_loop import RepairLoop
 from ubt.core.engine.stages.export import run_export_stage
 from ubt.core.exceptions import IntegrityViolationError
@@ -1663,3 +1665,92 @@ async def test_pipeline_finalize_runs_before_export_completed_break(
                 "finalize_job must be executed before consumer sees EXPORT_COMPLETED"
             )
             break
+
+
+def test_engine_signature_namespaces_the_models() -> None:
+    """A switched draft/repair model drafts differently; it must not resume.
+
+    The models were left out of the signature, so a resume under a different
+    model kept the old ledger and shipped one book stitched from two models'
+    outputs while the ledger snapshot and the quality report each named a
+    different model.
+    """
+    assert engine_signature(UBTConfig(draft_model="", repair_model="")) == ""
+    draft_switched = engine_signature(UBTConfig(draft_model="qwen-max", repair_model=""))
+    assert "dmqwen" in draft_switched and "rm" not in draft_switched
+    repair_switched = engine_signature(UBTConfig(draft_model="", repair_model="gemini-pro"))
+    assert "rmgemini" in repair_switched and "dm" not in repair_switched
+    both = engine_signature(UBTConfig(draft_model="qwen-max", repair_model="gemini-pro"))
+    assert "dmqwen" in both and "rmgemini" in both
+    # The default-config signature stays empty so historical ledgers resume.
+    assert engine_signature(UBTConfig()) == ""
+
+
+def test_derive_job_id_namespaces_the_model_signature() -> None:
+    doc = "abcdef0123456789"
+    plain = derive_job_id(
+        doc_id=doc, target_lang="zh", pages=None, start_chapter=1, max_chapters=None
+    )
+    switched = derive_job_id(
+        doc_id=doc,
+        target_lang="zh",
+        pages=None,
+        start_chapter=1,
+        max_chapters=None,
+        engine_signature="dmqwenmax",
+    )
+    assert switched != plain
+    assert "dmqwenmax" in switched
+
+
+@pytest.mark.asyncio
+async def test_finalize_hook_failure_is_logged_not_swallowed(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A failing finalize hook must leave a trace, not vanish.
+
+    The hook wrote the download/artifact pointers from ``with suppress(Exception)``
+    with no log at all, so a silent failure stranded the job's artifacts with
+    zero signal that the pointer write never happened.
+    """
+    orchestrator = PipelineOrchestrator(
+        config=UBTConfig(draft_model="mock-draft", repair_model="mock-repair"),
+        router=ModelRouter(provider=MockModelProvider(default_response="[模拟翻译]")),
+    )
+
+    def _boom(event: object) -> None:
+        raise RuntimeError("hook exploded")
+
+    orchestrator.finalize_job = _boom
+    event = TranslationProgressEvent(
+        event_type=EventType.EXPORT_COMPLETED,
+        job_id="job_hook_log",
+        total_blocks=1,
+        completed_blocks=1,
+    )
+
+    with caplog.at_level(logging.WARNING):
+        await orchestrator._run_finalize_hook(event)
+
+    assert any("finalize_job hook failed" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_adapter_close_runs_off_the_event_loop() -> None:
+    """Adapter teardown may terminate subprocesses; it must not block the loop.
+
+    The MathJax node renderer's close waits up to 5 seconds on proc.terminate();
+    calling it synchronously in run()'s finally stalled the SSE-shared loop for
+    every connected client.
+    """
+    from ubt.core.engine.pipeline import _close_adapter_off_loop
+
+    close_threads: list[int] = []
+
+    class _Adapter:
+        def close(self) -> None:
+            close_threads.append(threading.get_ident())
+
+    await _close_adapter_off_loop(_Adapter(), "job_close_thread")
+    assert close_threads
+    assert close_threads[0] != threading.get_ident()

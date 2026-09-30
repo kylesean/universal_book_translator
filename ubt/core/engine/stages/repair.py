@@ -161,9 +161,14 @@ async def run_repair_stage(
     # still finalize unresolved blocks.
     if repair_pending_blocks and not defer_unresolved_to_triage:
         terminal_updates: list[dict[str, Any]] = []
+        # Same "shippable" floor as the repair loop's terminal pass decision:
+        # a configured qe_threshold above 0.5 must not be short-circuited here.
+        pass_floor = max(0.5, ctx.config.qe_threshold)
         for b in repair_pending_blocks:
             final_status = (
-                BlockStatus.MTQE_PASSED if (b.mtqe_score or 0.0) >= 0.5 else BlockStatus.FAILED
+                BlockStatus.MTQE_PASSED
+                if (b.mtqe_score or 0.0) >= pass_floor
+                else BlockStatus.FAILED
             )
             raw_text = b.target_text or b.draft_text or ""
             if final_status == BlockStatus.FAILED and raw_text:

@@ -270,7 +270,12 @@ _SIZE_RATCHETS: dict[str, int] = {
     # 959→963 — __init__ refuses a router-less run with no draft model, so a
     # missing model fails at the call boundary instead of sending
     # ``"model": ""``. Repaid with the same run() split.
-    "ubt/core/engine/pipeline.py": 963,
+    # 963→965 — draft/repair model join the engine signature whitelist, so a
+    # resume under a switched model gets its own ledger instead of stitching
+    # two models' drafts into one deliverable.
+    # 965→989 — the finalize hook and adapter close became logged, off-loop
+    # helpers instead of an inline suppress and a synchronous subprocess wait.
+    "ubt/core/engine/pipeline.py": 989,
     "ubt/adapters/pdf/typst_reconstructor.py": 2336,
 }
 

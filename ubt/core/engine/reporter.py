@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, computed_field
 from ubt.core.cleaners.citation_masker import CitationMasker
 from ubt.core.cleaners.code_masker import CodeMasker
 from ubt.core.cleaners.math_masker import MathMasker
+from ubt.core.cleaners.soup_math import SoupMathMasker
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.ir.models import BlockStatus, BlockType, BookManifest
 from ubt.core.qe.defect_taxonomy import INTENTIONAL_PRESERVED_SKIP_PREFIXES
@@ -617,14 +618,15 @@ def compute_placeholder_metrics(blocks: list[Any]) -> ReportPlaceholderMetrics:
     """Recompute placeholder retention without any pipeline or schema change.
 
     The maskers are deterministic pure functions, so re-masking each block's
-    source in pipeline order (code -> citation -> math) reproduces the exact
-    pre-draft masked-span count. Corrupt restores are read back from the
-    persisted ``math_token_corrupt`` flags, capped per block at its masked
-    count so re-finalized stages can never double-count the same event.
+    source in the draft stage's exact order (code -> math -> soup -> citation)
+    reproduces the pre-draft masked-span count. Corrupt restores are read back
+    from the persisted ``math_token_corrupt`` flags, capped per block at its
+    masked count so re-finalized stages can never double-count the same event.
     """
     code_masker = CodeMasker()
     cite_masker = CitationMasker()
     math_masker = MathMasker()
+    soup_masker = SoupMathMasker()
     masked_total = 0
     corrupt_total = 0
     masked_blocks = 0
@@ -634,11 +636,12 @@ def compute_placeholder_metrics(blocks: list[Any]) -> ReportPlaceholderMetrics:
         if not source:
             continue
         masked_src, code_map = code_masker.mask(source)
-        cite_masked, cite_map = cite_masker.mask(masked_src)
-        _, math_map = math_masker.mask(cite_masked)
+        math_masked, math_map = math_masker.mask(masked_src)
+        soup_masked, soup_map = soup_masker.mask(math_masked)
+        _, cite_map = cite_masker.mask(soup_masked)
         # Count every masked span type, not just math: code/citation
         # corruption is MQM-Critical, so omitting it left retention at 1.0.
-        masked_count = len(code_map) + len(cite_map) + len(math_map)
+        masked_count = len(code_map) + len(math_map) + len(soup_map) + len(cite_map)
         if masked_count:
             masked_blocks += 1
             masked_total += masked_count
