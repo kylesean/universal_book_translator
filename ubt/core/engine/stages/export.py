@@ -897,43 +897,43 @@ def _reconcile_delivery_contract(
     return contract
 
 
-def _write_xliff_companion(ctx: StageContext, rendered_path: Path) -> Path | None:
-    """Write a translation-ready *source* XLIFF beside the artifact (best-effort).
+def _write_xliff_companion(
+    ctx: StageContext, rendered_path: Path, blocks: list[IRBlock]
+) -> Path | None:
+    """Write a bilingual XLIFF beside the artifact for review (best-effort).
 
-    Read-only by construction: the native reader builds a Document from the
-    source PDF, protected spans are masked, and one segment per element is
-    serialized. It never touches the rendered artifact, so any failure is logged
-    and skipped rather than allowed to sink the delivery.
+    Read-only by construction: it serializes the *delivered* blocks -- each
+    source with its protected spans masked into inline codes, and the target that
+    actually shipped -- so an editor opens source and target side by side in any
+    CAT tool or XLIFF viewer. It never touches the rendered artifact, so any
+    failure is logged and skipped rather than allowed to sink the delivery.
     """
-    source_pdf = ctx.source_pdf_path
-    if source_pdf is None or not ctx.config.emit_xliff_companion:
+    if not ctx.config.emit_xliff_companion:
         return None
     try:
-        from ubt.analyze.reader_pdf import read_pdf
         from ubt.core.cleaners.citation_masker import CitationMasker
         from ubt.core.cleaners.code_masker import CodeMasker
         from ubt.core.cleaners.math_masker import MathMasker
         from ubt.core.cleaners.soup_math import SoupMathMasker
         from ubt.core.job_options import companion_path
-        from ubt.segment.document import segments_from_document
+        from ubt.segment.document import segments_from_blocks
         from ubt.segment.placeholders import PlaceholderEngine
         from ubt.segment.xliff import to_xliff
 
-        document = read_pdf(source_pdf)
         engine = PlaceholderEngine(
             code=CodeMasker(),
             math=MathMasker(),
             soup=SoupMathMasker(),
             citation=CitationMasker(),
         )
-        segments = segments_from_document(document, engine=engine)
+        segments = segments_from_blocks(blocks, engine=engine)
         if not segments:
             return None
         xml = to_xliff(
             segments,
             src_lang=ctx.source_lang or "en",
             trg_lang=ctx.target_lang,
-            original=Path(source_pdf).name,
+            original=Path(ctx.input_path).name,
         )
         path = companion_path(rendered_path, ".xliff")
         path.write_text(xml, encoding="utf-8")
@@ -1203,9 +1203,9 @@ async def run_export_stage(
         )
     delivery_contract = contract.model_dump(mode="json")
 
-    # Translation-ready XLIFF companion (source view). Read-only, best-effort:
-    # it cannot affect the artifact, only add a file beside it.
-    await asyncio.to_thread(_write_xliff_companion, ctx, rendered_path)
+    # Bilingual XLIFF companion (source + delivered target). Read-only,
+    # best-effort: it cannot affect the artifact, only add a file beside it.
+    await asyncio.to_thread(_write_xliff_companion, ctx, rendered_path, final_blocks)
 
     # Post-render visual gate (self-healing loop): T0/T1 deterministic +
     # optional pixel confirmation + sampled T2 VLM + ReflowControlLoop.
