@@ -1,0 +1,152 @@
+"""Artifact-level attestation check (ADR-0001 Phase 3 acceptance).
+
+The attestation layer says, per element, what was realized -- a verified
+translation, a reconstructed asset, or the source kept whole. This closes the
+loop on the *delivered artifact*: does the file a reader gets actually carry the
+realization the attestation claims?
+
+It is deliberately narrow. Only *text* elements are checked, and only by their
+delivered text: an asset's realization is markup (a formula's LaTeX, a table's
+grid), which is drawn rather than spelled out, so its fidelity is a pixel claim
+the witnesses make -- not something a text probe can confirm. A text element
+attested above the floor must show its translation in the artifact; one kept at
+the floor must show its source.
+
+During the migration this measures the ADR's "产物保真度 ≥ 现路径" on every real
+delivery instead of only in a corpus run. It is a *report*: a missing element is
+surfaced, never silently tolerated, and never allowed to sink the artifact.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+
+from ubt.model.ast import Document, Element
+from ubt.model.fidelity import Attestation, Fidelity
+from ubt.model.span import CanonicalSource
+from ubt.render.overlay_backend import source_slice
+
+#: Shortest delivered text worth probing for. Below this a match is noise -- a
+#: bullet, a lone glyph -- and the check says nothing either way.
+_MIN_PROBE = 4
+#: Share of an element's tokens that must appear in the artifact. A reflowing
+#: backend re-breaks lines (and may hyphenate a long word), so an exact substring
+#: match would report the very elements it placed; token overlap measures the
+#: realization without mistaking layout for loss.
+_MIN_OVERLAP = 0.6
+
+
+@dataclass(frozen=True, slots=True)
+class ElementCheck:
+    """One text element's claim, and whether the artifact carries it."""
+
+    element_id: str
+    fidelity: Fidelity
+    page: int
+    present: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ArtifactReport:
+    """The artifact's agreement with the attestations, element by element."""
+
+    total: int
+    checks: tuple[ElementCheck, ...]
+
+    @property
+    def missing(self) -> tuple[ElementCheck, ...]:
+        """Text elements whose realization the artifact does not carry."""
+        return tuple(check for check in self.checks if not check.present)
+
+    @property
+    def passed(self) -> bool:
+        return not self.missing
+
+    def summary_line(self) -> str:
+        verdict = "PASS" if self.passed else "FAIL"
+        return (
+            f"[{verdict}] artifact carries {self.total - len(self.missing)}/{self.total} "
+            f"text realization(s)"
+        )
+
+
+def _normalize(text: str) -> str:
+    """Whitespace-collapsed text, so a reflowed line break is not a mismatch."""
+    return " ".join(text.split())
+
+
+def _artifact_tokens(artifact: Path) -> frozenset[str]:
+    """Every whitespace-delimited token in the artifact (pages joined).
+
+    Joined across pages on purpose: a bilingual artifact interleaves source and
+    target pages, so a realization need not sit on its source page number.
+    """
+    from ubt.adapters.pdf import pdf_struct, textgeom
+
+    with pdf_struct.open_pdf(artifact) as pdf:
+        pages = len(pdf.pages)
+    chunks: list[str] = []
+    for page_no in range(1, pages + 1):
+        lines, _ = textgeom.extract_lines(artifact, page_no)
+        chunks.append(" ".join(line.text for line in lines))
+    return frozenset(_normalize(" ".join(chunks)).split())
+
+
+def _present(expected: str, tokens: frozenset[str]) -> bool:
+    """Whether the artifact carries enough of ``expected`` to call it placed."""
+    wanted = expected.split()
+    if len(expected) < _MIN_PROBE or not wanted:
+        return True
+    hits = sum(1 for token in wanted if token in tokens)
+    return hits / len(wanted) >= _MIN_OVERLAP
+
+
+def _expected(
+    element: Element,
+    fidelity: Fidelity,
+    source: CanonicalSource,
+    delivered: Mapping[str, str],
+) -> str:
+    """The text the attestation says the artifact carries for this element."""
+    if fidelity > Fidelity.PRESERVED_OPAQUE:
+        return delivered.get(element.id, "")
+    return source_slice(element, source)
+
+
+def check_artifact(
+    document: Document,
+    attestations: Sequence[Attestation],
+    delivered: Mapping[str, str],
+    artifact_pdf: str | Path,
+) -> ArtifactReport:
+    """Check every attested *text* element against the delivered artifact.
+
+    ``delivered`` is the run's ``element id -> target`` map (the same one the
+    backend is built with); a text element attested above the floor is expected to
+    show its target, one at the floor its source. Assets are not text claims and
+    are skipped.
+    """
+    text = _artifact_tokens(Path(artifact_pdf))
+    by_id = {attestation.element_id: attestation for attestation in attestations}
+    checks: list[ElementCheck] = []
+    for element in document.elements:
+        if not element.is_text:
+            continue
+        attestation = by_id.get(element.id)
+        if attestation is None:
+            continue
+        expected = _normalize(_expected(element, attestation.fidelity, document.source, delivered))
+        checks.append(
+            ElementCheck(
+                element.id,
+                attestation.fidelity,
+                element.span.page,
+                _present(expected, text),
+            )
+        )
+    return ArtifactReport(total=len(checks), checks=tuple(checks))
+
+
+__all__ = ["ArtifactReport", "ElementCheck", "check_artifact"]

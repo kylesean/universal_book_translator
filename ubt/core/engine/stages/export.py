@@ -7,7 +7,7 @@ import contextlib
 import html
 import json
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -30,7 +30,7 @@ from ubt.core.exceptions import (
     RenderBlocksNotImplementedError,
     UBTError,
 )
-from ubt.core.ir.models import BlockStatus, BlockType, BookManifest, IRBlock
+from ubt.core.ir.models import BlockStatus, BookManifest, IRBlock
 from ubt.core.job_options import resolve_target_output, sidecar_path
 from ubt.core.metrics.collect import collect_kpis, save_metrics_report
 from ubt.core.policy.bilingual_advisor import SECONDARY_SUFFIX
@@ -46,6 +46,9 @@ from ubt.core.ports import (
 if TYPE_CHECKING:
     from ubt.adapters.pdf.visual_gate import VisualGateResult
     from ubt.core.content.contract import ReconciliationReport
+    from ubt.model.ast import Document
+    from ubt.pipeline.artifact import ArtifactReport
+    from ubt.pipeline.attest import AttestationReport
 from ubt.core.qe.defect_taxonomy import (
     INTENTIONAL_PRESERVED_SKIP_PREFIXES as _INTENTIONAL_PRESERVED_SKIP_PREFIXES,
 )
@@ -843,27 +846,65 @@ async def _render_complementary_artifact(
     return secondary_path
 
 
-def _reconcile_delivery_contract(
-    ctx: StageContext, blocks: list[IRBlock], rendered_path: Path
-) -> ReconciliationReport:
-    """Build the content graph, reconcile the two ledgers, persist the contract.
+def _effective_engine(ctx: StageContext) -> str:
+    """The engine the run actually used (the render decision, stated once).
 
-    Always writes the standalone ``*_contract.json`` and returns the report. The
-    report is advisory unless ``config.strict_contract`` is set, in which case
-    the caller aborts on an ERROR-severity violation; ``ubt verify`` applies the
-    same contract to a delivered artifact or a finished job's ledger.
+    ``render_engine_effective`` is what the router chose; an explicit config
+    engine is the fallback, and ``publication`` the default. The contract and the
+    attestation layer both read it from here so they cannot drift.
     """
-    from ubt.core.content import graph_from_blocks, reconcile
-
-    manifest = ctx.manifest
-    engine = str(
-        getattr(manifest.run, "render_engine_effective", "")
+    return str(
+        getattr(ctx.manifest.run, "render_engine_effective", "")
         or ctx.config.render_engine
         or "publication"
     )
+
+
+def _attest_delivery(
+    ctx: StageContext, blocks: list[IRBlock]
+) -> tuple[Document, dict[str, str], AttestationReport]:
+    """Realize the delivery per element: its Document, its target map, its account.
+
+    The backend is fed the run's own decisions (ADR-0001 Phase 3 migration):
+    which engine ran and which elements the delivery kept in the source.
+    ``realize()`` then reproduces and *verifies* each element -- the
+    construction-time core the delivery contract is projected from.
+    """
+    from ubt.pipeline.attest import attest_document
+    from ubt.pipeline.delivery import delivery_document, delivery_translations
+    from ubt.render.typst_backend import TypstBackend
+    from ubt.verify.verifier import build_verifiers
+
+    doc_id = str(getattr(ctx.manifest, "doc_id", "") or "")
+    document = delivery_document(blocks, doc_id=doc_id)
+    translations = delivery_translations(blocks, engine=_effective_engine(ctx))
+    report = attest_document(document, TypstBackend(translations), build_verifiers(ctx.fast_pass))
+    return document, translations, report
+
+
+def _deliver_contract(
+    ctx: StageContext,
+    blocks: list[IRBlock],
+    rendered_path: Path,
+    report: AttestationReport,
+) -> ReconciliationReport:
+    """Build the content graph, project the attestations onto it, persist the contract.
+
+    The contract is a *projection* of the per-element attestations (ADR-0001
+    Phase 3): ``realize()`` is the construction-time core, and the graph supplies
+    only the detail the AST deliberately does not model. Always writes the
+    standalone ``*_contract.json`` and returns the report. The report is advisory
+    unless ``config.strict_contract`` is set, in which case the caller aborts on
+    an ERROR-severity violation; ``ubt verify`` applies the same contract to a
+    delivered artifact or a finished job's ledger.
+    """
+    from ubt.core.content import graph_from_blocks
+    from ubt.pipeline.attest import project_contract
+
+    manifest = ctx.manifest
     graph = graph_from_blocks(
         blocks,
-        engine=engine,
+        engine=_effective_engine(ctx),
         doc_id=str(getattr(manifest, "doc_id", "") or ""),
         title=str(getattr(manifest, "title", "") or ""),
         source_path=str(getattr(manifest, "source_path", "") or ""),
@@ -874,7 +915,7 @@ def _reconcile_delivery_contract(
             str(item) for item in (manifest.metadata.get("table_fallback_findings") or []) if item
         ],
     )
-    contract = reconcile(graph)
+    contract = project_contract(report, graph)
     payload = contract.model_dump(mode="json")
     contract_path = sidecar_path(rendered_path, "contract.json")
     try:
@@ -949,8 +990,8 @@ def _write_xliff_companion(
         return None
 
 
-def _attestation_payload(report: Any) -> dict[str, Any]:
-    """Serialize an :class:`~ubt.pipeline.attest.AttestationReport` for the shadow."""
+def _attestation_payload(report: AttestationReport) -> dict[str, Any]:
+    """Serialize an :class:`~ubt.pipeline.attest.AttestationReport` for the sidecar."""
     return {
         "total": report.total,
         "text": dict(report.text),
@@ -960,65 +1001,55 @@ def _attestation_payload(report: Any) -> dict[str, Any]:
     }
 
 
-def _write_attestation_shadow(
-    ctx: StageContext, rendered_path: Path, blocks: list[IRBlock]
-) -> Path | None:
-    """Write the realize()-based attestation shadow beside the artifact (best-effort).
+def _artifact_payload(report: ArtifactReport) -> dict[str, Any]:
+    """Serialize an :class:`~ubt.pipeline.artifact.ArtifactReport` for the sidecar."""
+    return {
+        "total": report.total,
+        "missing": [check.element_id for check in report.missing],
+        "summary": report.summary_line(),
+    }
 
-    Migration shadow (ADR-0001 Phase 3): the content-graph contract still decides
-    delivery; this records the per-element attestations the ADR will replace it
-    with, built from the *same* delivered blocks, so the two can be compared on
-    real deliveries. Read-only and off-loop; a failure is logged and skipped and
-    can never sink the delivery.
+
+def _write_attestation_shadow(
+    ctx: StageContext,
+    rendered_path: Path,
+    document: Document,
+    translations: Mapping[str, str],
+    report: AttestationReport,
+) -> Path | None:
+    """Write the attestation account -- and the artifact check -- beside the artifact.
+
+    ADR-0001 Phase 3: the attestations *are* the delivery's account, and this
+    records them, plus whether the delivered artifact actually carries each text
+    realization ("产物保真度 ≥ 现路径"). Read-only and off-loop; a failure is logged
+    and skipped and can never sink the delivery.
     """
     if not ctx.config.emit_attestation_shadow:
         return None
     try:
-        from ubt.analyze.bridge import document_from_blocks
-        from ubt.core.content.adapt import _all_intentional, _skip_flags
         from ubt.core.job_options import companion_path
-        from ubt.pipeline.attest import attest_document
-        from ubt.render.typst_backend import TypstBackend
-        from ubt.verify.verifier import build_verifiers
+        from ubt.pipeline.artifact import check_artifact
 
-        def _kept(block: IRBlock) -> bool:
-            """Deliberately kept in the source: no delivered realization to attest.
-
-            ``skip_translate`` and an intentional render-skip (page chrome) both
-            record VERBATIM in the contract. A rigid run places assets opaque
-            instead of reconstructing them, so their markup is not a realization
-            either -- the engine is the whole-document choice the per-element
-            backends replace, and it drives the backend here.
-            """
-            if block.block_type in (BlockType.FORMULA, BlockType.TABLE, BlockType.IMAGE):
-                return engine == "rigid"
-            return block.skip_translate or _all_intentional(_skip_flags(block))
-
-        engine = str(
-            getattr(ctx.manifest.run, "render_engine_effective", "")
-            or ctx.config.render_engine
-            or "publication"
-        )
-        document = document_from_blocks(
-            blocks, doc_id=str(getattr(ctx.manifest, "doc_id", "") or "")
-        )
-        backend = TypstBackend(
-            translations={
-                block.id: block.target_text
-                for block in blocks
-                if block.target_text and not _kept(block)
-            }
-        )
-        report = attest_document(document, backend, build_verifiers(ctx.fast_pass))
+        payload = _attestation_payload(report)
+        try:
+            artifact = check_artifact(document, report.attestations, translations, rendered_path)
+        except Exception as exc:  # the probe is best-effort; the account still stands
+            logger.warning("Artifact check skipped for job %s: %s", ctx.job_id, exc)
+        else:
+            payload["artifact"] = _artifact_payload(artifact)
+            if not artifact.passed:
+                logger.warning(
+                    "Attestation artifact check for job %s: %s (missing: %s)",
+                    ctx.job_id,
+                    artifact.summary_line(),
+                    ", ".join(check.element_id for check in artifact.missing[:5]),
+                )
         path = companion_path(rendered_path, "_attestations.json")
-        path.write_text(
-            json.dumps(_attestation_payload(report), ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        logger.info("Attestation shadow for job %s: %s", ctx.job_id, report.summary_line())
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        logger.info("Attestation account for job %s: %s", ctx.job_id, report.summary_line())
         return path
-    except Exception as exc:  # a migration shadow must never sink the delivery
-        logger.warning("Attestation shadow skipped for job %s: %s", ctx.job_id, exc)
+    except Exception as exc:  # an audit companion must never sink the delivery
+        logger.warning("Attestation account skipped for job %s: %s", ctx.job_id, exc)
         return None
 
 
@@ -1263,10 +1294,18 @@ async def run_export_stage(
     # the persisted report files always reflect the current render.
     _drop_stale_run_reports(rendered_path)
 
-    # Delivery contract: reconcile the content and asset ledgers for the primary
-    # artifact. Written beside it and embedded in the quality report; an opt-in
-    # hard gate (UBT_STRICT_CONTRACT) aborts a knowingly-broken delivery.
-    contract = _reconcile_delivery_contract(ctx, final_blocks, rendered_path)
+    # Attest the delivery per element (ADR-0001 Phase 3): realize() is the
+    # construction-time core, and the contract below is *projected* from it. The
+    # same Document and account feed the artifact check in the audit companion.
+    # Off-loop: realize() runs the verifiers over every block.
+    document, translations, attestations = await asyncio.to_thread(
+        _attest_delivery, ctx, final_blocks
+    )
+
+    # Delivery contract: the attestation projection, written beside the artifact
+    # and embedded in the quality report; an opt-in hard gate
+    # (UBT_STRICT_CONTRACT) aborts a knowingly-broken delivery.
+    contract = _deliver_contract(ctx, final_blocks, rendered_path, attestations)
     if ctx.config.strict_contract and not contract.passed:
         raise IntegrityViolationError(
             f"Export blocked for job {ctx.job_id}: delivery contract failed with "
@@ -1280,9 +1319,11 @@ async def run_export_stage(
     # best-effort: it cannot affect the artifact, only add a file beside it.
     await asyncio.to_thread(_write_xliff_companion, ctx, rendered_path, final_blocks)
 
-    # realize()-based attestation shadow (migration, ADR-0001 Phase 3): the same
-    # delivered blocks, accounted for per element. Read-only, best-effort.
-    await asyncio.to_thread(_write_attestation_shadow, ctx, rendered_path, final_blocks)
+    # Attestation account + artifact-level agreement, beside the artifact
+    # (ADR-0001 Phase 3). Read-only, best-effort.
+    await asyncio.to_thread(
+        _write_attestation_shadow, ctx, rendered_path, document, translations, attestations
+    )
 
     # Post-render visual gate (self-healing loop): T0/T1 deterministic +
     # optional pixel confirmation + sampled T2 VLM + ReflowControlLoop.

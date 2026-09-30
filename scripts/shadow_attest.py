@@ -1,20 +1,16 @@
 #!/usr/bin/env python
-"""Phase-3 acceptance: the realize() attestations account for the delivery.
+"""Phase-3 acceptance: the attestations account for the delivery, artifact included.
 
 Runs a corpus document through the real pipeline (dry-run, mock translations, no
-API key) and compares the attestation shadow the export stage writes against the
-delivery contract written beside it:
+API key) and checks the attestation companion the export stage writes:
 
-- the shadow covers every element and records no violation;
-- text the contract delivered (TRANSLATED) equals the text realized
-  RECONSTRUCTED_ADAPTED;
-- text the contract kept verbatim or source-kept equals the text realized
-  PRESERVED_OPAQUE.
-
-Asset reconstruction is not compared yet: the backends do not reconstruct
-formulas/tables, so those attest PRESERVED_OPAQUE while the existing renderer may
-reconstruct them. That gap is reported, not failed. Exit 0 iff the text account
-agrees.
+- ``realize()`` covers every element and records no violation;
+- the delivered artifact actually carries each text element's realization -- a
+  translation where the element was reconstructed, the source where it was kept
+  (the ADR's "产物保真度 ≥ 现路径" acceptance);
+- the delivery contract beside it is the attestation *projection*: its delivered
+  and reconstructed counts are exactly the verified realizations, and it reports
+  no error.
 
 One document by default (~1-2 min); ``--all`` runs the corpus.
 """
@@ -79,7 +75,7 @@ def _run_one(
         problems.append(f"no contract at {contract_path}")
         return None, None, problems
     if not shadow_path.exists():
-        problems.append(f"no attestation shadow at {shadow_path}")
+        problems.append(f"no attestation account at {shadow_path}")
         return None, None, problems
     contract = json.loads(contract_path.read_text(encoding="utf-8"))
     shadow = json.loads(shadow_path.read_text(encoding="utf-8"))
@@ -87,28 +83,30 @@ def _run_one(
     if shadow["violations"]:
         problems.append(f"{len(shadow['violations'])} violation(s): {shadow['violations'][:3]}")
     if not shadow["total"]:
-        problems.append("shadow covers no elements")
+        problems.append("attestations cover no elements")
 
-    text = shadow["text"]
-    realized = text.get("RECONSTRUCTED_ADAPTED", 0)
-    opaque = text.get("PRESERVED_OPAQUE", 0)
-    kept = contract["verbatim_text"] + contract["source_kept_text"]
+    artifact = shadow.get("artifact")
+    if artifact is None:
+        problems.append("no artifact-level check in the attestation account")
+    elif artifact["missing"]:
+        problems.append(
+            f"artifact missing {len(artifact['missing'])} text realization(s): "
+            f"{artifact['missing'][:3]}"
+        )
+
+    # The contract is projected from these attestations, so the account must be
+    # exactly the verified realizations.
+    realized = shadow["text"].get("RECONSTRUCTED_ADAPTED", 0)
     if realized != contract["delivered_text"]:
-        problems.append(f"delivered text {contract['delivered_text']} != realized {realized}")
-    if opaque != kept:
-        problems.append(f"kept text {kept} != opaque {opaque}")
+        problems.append(f"contract delivered {contract['delivered_text']} != realized {realized}")
     rebuilt = shadow["assets"].get("RECONSTRUCTED_VERIFIED", 0)
     if rebuilt != contract["reconstructed_assets"]:
         problems.append(
-            f"reconstructed assets {contract['reconstructed_assets']} != attested {rebuilt}"
+            f"contract reconstructed {contract['reconstructed_assets']} != attested {rebuilt}"
         )
-    if contract["missing_assets"]:
-        problems.append(f"contract reports {contract['missing_assets']} missing asset(s)")
-    if contract["pending_text"] or contract["skipped_text"]:
-        problems.append(
-            f"contract left text unaccounted (pending={contract['pending_text']}, "
-            f"skipped={contract['skipped_text']})"
-        )
+    errors = [v for v in contract["violations"] if v.get("severity") == "error"]
+    if errors:
+        problems.append(f"contract has {len(errors)} error(s): {errors[0]}")
     return contract, shadow, problems
 
 
@@ -126,20 +124,19 @@ def main() -> int:
     elif not args.all:
         cases = cases[:1]
 
-    print(f"\nPhase-3 attestation-shadow acceptance — {corpus_dir} ({len(cases)} document(s))")
+    print(f"\nPhase-3 attestation acceptance — {corpus_dir} ({len(cases)} document(s))")
     problems: list[str] = []
     for case_id, document in cases:
         contract, shadow, issues = _run_one(case_id, document)
         problems.extend(f"[{case_id}] {p}" for p in issues)
         status = "pass" if not issues else "FAIL"
         if contract is not None and shadow is not None:
-            asset_gap = contract["reconstructed_assets"] - shadow["assets"].get(
-                "RECONSTRUCTED_VERIFIED", 0
-            )
+            artifact = shadow.get("artifact") or {}
             print(
                 f"  {case_id:<20} {status:<6} text={contract['total_text']} "
-                f"delivered={contract['delivered_text']} kept={contract['verbatim_text'] + contract['source_kept_text']} "
-                f"asset-reconstruction-gap={asset_gap}"
+                f"delivered={contract['delivered_text']} "
+                f"kept={contract['verbatim_text'] + contract['source_kept_text']} "
+                f"artifact-missing={len(artifact.get('missing', []))}"
             )
         else:
             print(f"  {case_id:<20} {status:<6}")

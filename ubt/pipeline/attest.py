@@ -10,6 +10,11 @@ with no lossless realization is recorded as a violation instead of hidden.
 kept; assets reconstructed vs preserved) so the two can be compared element for
 element during the migration shadow. Text and asset histograms stay apart because
 the contract counts them apart.
+
+:func:`project_contract` is the switch itself: the delivery contract is a
+*projection* of the attestations (the account of realizations and the verdict on
+loss), with the content graph supplying only the detail the AST deliberately does
+not model (why a kept node was kept) -- not a second, independent audit.
 """
 
 from __future__ import annotations
@@ -17,8 +22,18 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass
 
+from ubt.core.content.contract import (
+    ReconciliationReport,
+    Severity,
+    Violation,
+    ViolationKind,
+    reconcile,
+)
+from ubt.core.content.graph import ContentGraph
+from ubt.core.content.ledger import build_ledgers
+from ubt.core.content.nodes import TextDisposition
 from ubt.model.ast import Document
-from ubt.model.fidelity import Fidelity
+from ubt.model.fidelity import Attestation, Fidelity
 from ubt.pipeline.steps import IntegrityViolation, realize
 from ubt.render.capability import Backend
 from ubt.verify.verifier import Verifiers
@@ -32,6 +47,7 @@ class AttestationReport:
     text: tuple[tuple[str, int], ...]  # fidelity name -> count, over text elements
     assets: tuple[tuple[str, int], ...]  # fidelity name -> count, over asset elements
     violations: tuple[str, ...] = ()  # elements with no lossless realization
+    attestations: tuple[Attestation, ...] = ()  # the per-element realizations
 
     @property
     def passed(self) -> bool:
@@ -65,6 +81,7 @@ def attest_document(
     text: Counter[str] = Counter()
     assets: Counter[str] = Counter()
     violations: list[str] = []
+    attestations: list[Attestation] = []
     for element in document.elements:
         try:
             attestation = realize(element, backend, verifiers, document.source)
@@ -72,12 +89,66 @@ def attest_document(
             violations.append(element.id)
             continue
         (text if element.is_text else assets)[attestation.fidelity.name] += 1
+        attestations.append(attestation)
     return AttestationReport(
         total=len(document.elements),
         text=tuple(sorted(text.items())),
         assets=tuple(sorted(assets.items())),
         violations=tuple(violations),
+        attestations=tuple(attestations),
     )
 
 
-__all__ = ["AttestationReport", "attest_document"]
+def project_contract(report: AttestationReport, graph: ContentGraph) -> ReconciliationReport:
+    """Project the per-element attestations onto the delivery contract.
+
+    ``reconcile()`` balanced two ledgers after a delivery was already built; the
+    attestations *are* the account now, so the export builds its contract from
+    them. The graph still *classifies* -- it is the bridge from ``IRBlock`` to the
+    contract's vocabulary -- and supplies the detail the AST deliberately does not
+    model: the reason a kept text node was kept (verbatim vs source-kept) and the
+    named violations with their detail. It is no longer a second, independent
+    verdict on whether a realization exists.
+
+    The realizations the attestations *verify* replace the graph's count of them:
+    a text node is delivered when ``realize()`` reconstructed and verified it, and
+    an asset is reconstructed when it did -- a block that merely carries a target
+    no longer counts. A translation that did not verify is demoted to source-kept
+    (the reader gets the source) so the account still balances. An element with no
+    lossless realization is an ERROR here, the construction-time loss ``realize()``
+    refuses to hide and the graph cannot see (the block still carries a target).
+    """
+    base = reconcile(graph)
+    content, _ = build_ledgers(graph)
+    attested = {attestation.element_id: attestation.fidelity for attestation in report.attestations}
+    demoted = tuple(
+        Violation(
+            kind=ViolationKind.TEXT_SOURCE_KEPT,
+            severity=Severity.WARNING,
+            node_id=entry.node_id,
+            detail="translation did not verify; source kept",
+        )
+        for entry in content.entries.values()
+        if entry.disposition is TextDisposition.TRANSLATED
+        and attested.get(entry.node_id) is not Fidelity.RECONSTRUCTED_ADAPTED
+    )
+    lost = tuple(
+        Violation(
+            kind=ViolationKind.TEXT_UNDELIVERED,
+            severity=Severity.ERROR,
+            node_id=element_id,
+            detail="no lossless realization (ADR-0001 Axiom B)",
+        )
+        for element_id in report.violations
+    )
+    return base.model_copy(
+        update={
+            "delivered_text": report.text_count(Fidelity.RECONSTRUCTED_ADAPTED),
+            "source_kept_text": base.source_kept_text + len(demoted),
+            "reconstructed_assets": report.asset_count(Fidelity.RECONSTRUCTED_VERIFIED),
+            "violations": base.violations + demoted + lost,
+        }
+    )
+
+
+__all__ = ["AttestationReport", "attest_document", "project_contract"]

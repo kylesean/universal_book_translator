@@ -67,6 +67,19 @@ def _all_intentional(flags: Sequence[str]) -> bool:
     return bool(flags) and all(f.startswith(INTENTIONAL_PRESERVED_SKIP_PREFIXES) for f in flags)
 
 
+def kept_in_source(block: IRBlock) -> bool:
+    """Whether the delivery keeps this *text* block in the source.
+
+    True for a deliberate keep (``skip_translate``, an intentional render-skip
+    such as page chrome) *and* for a fail-closed render-skip (a translation that
+    could not be placed). In both cases the reader gets the source, so there is
+    no placed translation -- and none for a backend to reflow. This is exactly
+    the contract's ``TRANSLATED`` condition, stated once beside the skip-flag
+    vocabulary it reads, so the two cannot drift.
+    """
+    return block.skip_translate or bool(_skip_flags(block))
+
+
 def _text_node(block: IRBlock, order: int, region: SourceRegion | None) -> TextNode:
     flags = _skip_flags(block)
     if flags and not _all_intentional(flags):
@@ -224,4 +237,4 @@ def graph_from_blocks(
     return ContentGraph(doc_id=doc_id, title=title, source_path=source_path, nodes=tuple(nodes))
 
 
-__all__ = ["graph_from_blocks"]
+__all__ = ["graph_from_blocks", "kept_in_source"]

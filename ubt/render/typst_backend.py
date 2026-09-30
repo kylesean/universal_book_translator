@@ -92,13 +92,21 @@ class TypstBackend:
             if fragment is None:
                 return None
             return Produced(payload=target, note=f"typst:{element.kind}", fragment=fragment)
-        if fidelity is Fidelity.RECONSTRUCTED_VERIFIED and isinstance(element, (Formula, Table)):
+        if fidelity is Fidelity.RECONSTRUCTED_VERIFIED:
             # The delivered markup is the reconstruction the existing renderer
             # produced; the structural verifier judges it, and a failure descends
-            # to the opaque slice.
-            if not target.strip():
+            # to the opaque slice. With no delivered markup the element's own
+            # source markup is the reconstruction -- the same fallback the
+            # contract's asset policy uses, so the two agree.
+            if isinstance(element, Formula):
+                markup = target or element.source
+            elif isinstance(element, Table):
+                markup = target or element.markup
+            else:
                 return None
-            return Produced(payload=target, note=f"typst:{element.kind}")
+            if not markup.strip():
+                return None
+            return Produced(payload=markup, note=f"typst:{element.kind}")
         return None
 
 
