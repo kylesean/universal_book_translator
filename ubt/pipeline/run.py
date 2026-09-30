@@ -89,7 +89,7 @@ async def run_stages(
     async for event in run_bible_stage(ctx, facts.terminology):
         yield event
     if gates.chapter_streaming:
-        async for event in run_chapter_streaming_pipeline(ctx, facts.terminology):
+        async for event in run_chapter_streaming_pipeline(ctx, facts.terminology, facts.scoring):
             yield event
     else:
         async for event in run_draft_stage(ctx, facts.terminology):
@@ -97,14 +97,14 @@ async def run_stages(
         if gates.c_text:
             async for event in run_c_text_stage(ctx):
                 yield event
-        async for event in run_quality_gate_stage(ctx, facts.terminology):
+        async for event in run_quality_gate_stage(ctx, facts.terminology, facts.scoring):
             yield event
-        async for event in run_repair_stage(ctx, facts.terminology):
+        async for event in run_repair_stage(ctx, facts.terminology, facts.scoring):
             yield event
     if gates.consistency:
-        async for event in run_consistency_stage(ctx, facts.terminology):
+        async for event in run_consistency_stage(ctx, facts.terminology, facts.scoring):
             yield event
-    async for event in run_triage_stage(ctx, facts.terminology):
+    async for event in run_triage_stage(ctx, facts.terminology, facts.scoring):
         yield event
     await run_difficulty_advisory_stage(ctx, facts.layout)
     async for event in run_export_stage(ctx, facts.terminology):

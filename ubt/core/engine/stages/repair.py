@@ -13,7 +13,7 @@ from ubt.core.exceptions import BudgetExceededError, JobInterruptedError
 from ubt.core.ir.models import BlockStatus, IRBlock
 from ubt.core.memory.glossary_table import build_chunk_glossary_table
 from ubt.core.qe.defect_taxonomy import REPAIR_ERROR_PREFIX
-from ubt.pipeline.facts import Terminology
+from ubt.pipeline.facts import Scoring, Terminology
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 async def run_repair_stage(
     ctx: StageContext,
     terminology: Terminology,
+    scoring: Scoring,
     defer_unresolved_to_triage: bool = True,
     chapter_id: str | None = None,
 ) -> AsyncIterator[TranslationProgressEvent]:
@@ -36,7 +37,7 @@ async def run_repair_stage(
     # triage rather than force-finalized here. The flag survives as an argument
     # only because the fallback path (finalize as FAILED) is still reachable and
     # still tested.
-    repair_loop = ctx.repair_loop
+    repair_loop = scoring.repair_loop or ctx.repair_loop
     glossary_dicts = terminology.glossary_dicts
     abbreviation_entries = terminology.abbreviation_entries
     target_lang = ctx.target_lang

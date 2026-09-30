@@ -15,7 +15,7 @@ from ubt.core.qe.comet_runner import (
 from ubt.core.qe.defect_taxonomy import has_structural_defect
 from ubt.core.qe.fast_pass import FastPassFilter
 from ubt.core.validators.consistency import GlossaryConsistencyValidator
-from ubt.pipeline.facts import Terminology
+from ubt.pipeline.facts import Scoring, Terminology
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +112,7 @@ async def _audit_pass_sample(
 async def run_quality_gate_stage(
     ctx: StageContext,
     terminology: Terminology,
+    scoring: Scoring,
     chapter_id: str | None = None,
 ) -> AsyncIterator[TranslationProgressEvent]:
     """Evaluate drafted blocks with FastPassFilter and score suspicious blocks via QE runner.
@@ -133,7 +134,11 @@ async def run_quality_gate_stage(
     fast_pass = ctx.fast_pass
     create_event_fn = ctx.create_event
     glossary_dicts = terminology.glossary_dicts or None
-    qe_runner = ctx.qe_runner
+    # The gate produces the run's scoring collaborators (ADR-0001 explicit
+    # params): it binds the glossary onto the QE runner and builds the repair
+    # loop around it, so repair, triage and consistency re-score terminology with
+    # the same runner. A runner/loop the caller injected is kept.
+    qe_runner = scoring.qe_runner or ctx.qe_runner
     bind_glossary = getattr(qe_runner, "with_glossary", None)
     if not ctx.qe_runner_explicit and glossary_dicts and callable(bind_glossary):
         # Both the gate's scoring branch and the repair loop's re-score must
@@ -143,8 +148,8 @@ async def run_quality_gate_stage(
         # terminology); a subprocess/neural runner has none and keeps its own
         # scoring.
         qe_runner = bind_glossary(glossary_dicts)
-        ctx.qe_runner = qe_runner
-        ctx.repair_loop = ctx.rebuild_repair_loop()
+        scoring.qe_runner = qe_runner
+        scoring.repair_loop = ctx.repair_loop_for(qe_runner)
     drafted_blocks = await asyncio.to_thread(
         ledger.fetch_blocks_by_status, actual_job_id, BlockStatus.DRAFTED, chapter_id=chapter_id
     )

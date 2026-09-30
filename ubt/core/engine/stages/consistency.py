@@ -23,7 +23,7 @@ from ubt.core.qe.comet_runner import GLOSSARY_VIOLATION_MARKER
 from ubt.core.qe.consistency_enforce import ConsistencyTask, plan_consistency_tasks
 from ubt.core.qe.term_metrics import evaluate_terms
 from ubt.core.validators.consistency import GlossaryConsistencyValidator
-from ubt.pipeline.facts import Terminology
+from ubt.pipeline.facts import Scoring, Terminology
 
 logger = logging.getLogger(__name__)
 
@@ -49,11 +49,12 @@ def _split_repair_results(results: list[Any]) -> list[dict[str, Any]]:
 async def run_consistency_stage(
     ctx: StageContext,
     terminology: Terminology,
+    scoring: Scoring,
 ) -> AsyncIterator[TranslationProgressEvent]:
     """Detect terminology drift and (mode='repair') re-translate drifted blocks."""
     ledger = ctx.ledger
     actual_job_id = ctx.job_id
-    repair_loop = ctx.repair_loop
+    repair_loop = scoring.repair_loop or ctx.repair_loop
     glossary_dicts = terminology.glossary_dicts
     target_lang = ctx.target_lang
     source_lang = ctx.source_lang

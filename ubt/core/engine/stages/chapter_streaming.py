@@ -14,7 +14,7 @@ from ubt.core.engine.stages.draft import run_draft_stage
 from ubt.core.engine.stages.quality_gate import run_quality_gate_stage
 from ubt.core.engine.stages.repair import run_repair_stage
 from ubt.core.ir.models import ChapterMeta
-from ubt.pipeline.facts import Terminology
+from ubt.pipeline.facts import Scoring, Terminology
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +24,7 @@ _DONE = object()
 async def run_chapter_streaming_pipeline(
     ctx: StageContext,
     terminology: Terminology,
+    scoring: Scoring,
 ) -> AsyncIterator[TranslationProgressEvent]:
     """Execute streaming pipelined chapter processing across stages.
 
@@ -51,9 +52,9 @@ async def run_chapter_streaming_pipeline(
         if ctx.config.c_text_enabled:
             async for event in run_c_text_stage(ctx):
                 yield event
-        async for event in run_quality_gate_stage(ctx, terminology):
+        async for event in run_quality_gate_stage(ctx, terminology, scoring):
             yield event
-        async for event in run_repair_stage(ctx, terminology):
+        async for event in run_repair_stage(ctx, terminology, scoring):
             yield event
         return
 
@@ -93,10 +94,12 @@ async def run_chapter_streaming_pipeline(
                     async for event in run_c_text_stage(ctx, chapter_id=ch.chapter_id):
                         await event_queue.put(event)
                 async for event in run_quality_gate_stage(
-                    ctx, terminology, chapter_id=ch.chapter_id
+                    ctx, terminology, scoring, chapter_id=ch.chapter_id
                 ):
                     await event_queue.put(event)
-                async for event in run_repair_stage(ctx, terminology, chapter_id=ch.chapter_id):
+                async for event in run_repair_stage(
+                    ctx, terminology, scoring, chapter_id=ch.chapter_id
+                ):
                     await event_queue.put(event)
 
                 # Emit CHAPTER_COMPLETED milestone event

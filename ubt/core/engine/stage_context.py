@@ -188,25 +188,26 @@ class StageContext:
             )
         return self.adapter
 
-    def rebuild_repair_loop(self) -> RepairLoop:
-        """Rebuild the repair loop around a re-bound QE runner.
+    def repair_loop_for(self, qe_runner: BaseQERunner) -> RepairLoop:
+        """A repair loop around ``qe_runner``; an injected loop is handed back as-is.
 
         The loop shares the runner so the closed-loop re-score after a repair
-        uses the identical policy; an explicitly injected loop is the caller's
-        object and is handed back untouched.
+        uses the identical policy. The result is *returned*, not written back:
+        the run's own ``repair_loop`` stays what the caller supplied, and the
+        terminology-bound one is a value the plan threads (see
+        :mod:`ubt.pipeline.facts`).
         """
         if self.repair_loop_explicit:
             return self.repair_loop
         config = self.config
-        self.repair_loop = RepairLoop(
+        return RepairLoop(
             router=self.router,
-            qe_runner=self.qe_runner,
+            qe_runner=qe_runner,
             max_rounds=config.max_repair_rounds,
             qe_threshold=config.qe_threshold,
             bottom_percentile=config.bottom_percentile,
             rerank_k=config.rerank_k,
         )
-        return self.repair_loop
 
     @property
     def raw_completion(self) -> Callable[..., Awaitable[str]]:

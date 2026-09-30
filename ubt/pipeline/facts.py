@@ -17,7 +17,9 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from ubt.core.config import DualMode
+from ubt.core.engine.repair_loop import RepairLoop
 from ubt.core.policy.bilingual_advisor import Advisory
+from ubt.core.qe.base import BaseQERunner
 
 
 @dataclass
@@ -48,6 +50,21 @@ class LayoutAdvisory:
 
 
 @dataclass
+class Scoring:
+    """The terminology-bound scoring collaborators the quality gate produces.
+
+    The gate binds the run's glossary onto the QE runner so a terminology
+    violation scores at its own band, and builds the repair loop around that
+    runner; repair, triage and consistency then re-score with the same one.
+    ``None`` means "use the run's own" (``ctx.qe_runner`` / ``ctx.repair_loop``),
+    so a caller that injects a runner/loop keeps it.
+    """
+
+    qe_runner: BaseQERunner | None = None
+    repair_loop: RepairLoop | None = None
+
+
+@dataclass
 class RunFacts:
     """The values a run threads between its stages.
 
@@ -58,6 +75,7 @@ class RunFacts:
 
     terminology: Terminology = field(default_factory=Terminology)
     layout: LayoutAdvisory = field(default_factory=LayoutAdvisory)
+    scoring: Scoring = field(default_factory=Scoring)
 
 
-__all__ = ["LayoutAdvisory", "RunFacts", "Terminology"]
+__all__ = ["LayoutAdvisory", "RunFacts", "Scoring", "Terminology"]
