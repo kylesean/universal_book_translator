@@ -17,7 +17,6 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Sequence
 
-from ubt.core.content.asset_verify import StructuralVerdict, verify_asset_structure
 from ubt.core.content.graph import ContentGraph
 from ubt.core.content.nodes import (
     AssetDescriptor,
@@ -156,18 +155,26 @@ def _asset_node(
             verified = True
             detail = "placed"
         else:
-            verdict = verify_asset_structure(
-                asset_kind, block.target_text or block.source_text or ""
+            # Structural verification now goes through the unified verifier
+            # seam (ADR-0001). The import is function-local because
+            # ``ubt.verify`` imports this package's ``asset_verify`` submodule:
+            # a module-level edge here would close a cycle when ``ubt.verify``
+            # is the first package imported. The behaviour is unchanged -- the
+            # seam wraps the very same check, proven by scripts/shadow_verify.py.
+            from ubt.verify.verifier import StructuralAsset, StructuralAssetVerifier
+
+            proof = StructuralAssetVerifier().verify(
+                StructuralAsset(asset_kind, block.target_text or block.source_text or "")
             )
             integrity = AssetIntegrity.RECONSTRUCTED
-            if verdict.verdict is StructuralVerdict.PASS:
+            if proof.verified:
                 verified = True
-                detail = verdict.detail
-            elif verdict.verdict is StructuralVerdict.FAIL:
+                detail = proof.detail
+            elif proof.failed:
                 corrupt = True
-                detail = f"structural:{verdict.detail}"
+                detail = f"structural:{proof.detail}"
             else:
-                detail = verdict.detail
+                detail = proof.detail
     return AssetNode(
         id=block.id,
         order=order,

@@ -24,6 +24,9 @@ from pathlib import Path
 
 from ubt.analyze.bridge import blocks_from_document, document_from_blocks
 from ubt.core.ir.models import FlowID, IRBlock, LayoutRole, SemanticRole, StructureRole
+from ubt.core.qe.fast_pass import FastPassFilter
+from ubt.model.ast import Document
+from ubt.verify import build_verifiers, verify_element
 
 
 def _parse_blocks(document: Path, engine: str) -> list[IRBlock]:
@@ -66,7 +69,9 @@ def _projection(block: IRBlock) -> dict[str, object]:
     }
 
 
-def _compare(blocks: list[IRBlock], *, doc_id: str, path: str) -> tuple[Counter[str], list[str]]:
+def _compare(
+    blocks: list[IRBlock], *, doc_id: str, path: str
+) -> tuple[Counter[str], list[str], Document]:
     # Match the pipeline's own normalization first. Ingest calls derive_roles()
     # before anything reads the role layers; parse_stream (used here) does not.
     # Comparing post-derivation is the fair baseline: the AST re-derives the
@@ -106,7 +111,24 @@ def _compare(blocks: list[IRBlock], *, doc_id: str, path: str) -> tuple[Counter[
                 details.append(f"{block_id}: {diffs}")
         else:
             counts["ok"] += 1
-    return counts, details
+    return counts, details, document
+
+
+def _judge(document: Document) -> tuple[Counter[str], Counter[str], int]:
+    """Run the verifier over every element; count kinds, outcomes, and fall-through."""
+    verifiers = build_verifiers(FastPassFilter(source_lang="en", target_lang="zh"))
+    by_kind: Counter[str] = Counter()
+    by_outcome: Counter[str] = Counter()
+    unjudged = 0
+    for element in document.elements:
+        by_kind[element.kind.value] += 1
+        try:
+            proof = verify_element(element, verifiers)
+        except Exception:  # a fall-through is the failure this gate exists to catch
+            unjudged += 1
+            continue
+        by_outcome[proof.outcome.value] += 1
+    return by_kind, by_outcome, unjudged
 
 
 def _load_cases(corpus_dir: Path) -> list[tuple[str, Path]]:
@@ -134,6 +156,8 @@ def main() -> int:
     per_case: list[dict[str, object]] = []
     total = 0
     total_ok = 0
+    total_elements = 0
+    total_unjudged = 0
     all_details: list[str] = []
     for case_id, document in _load_cases(corpus_dir):
         if not document.exists():
@@ -144,44 +168,58 @@ def main() -> int:
         except Exception as exc:  # one bad document must not sink the acceptance run
             per_case.append({"id": case_id, "status": "error", "reason": str(exc)})
             continue
-        counts, details = _compare(blocks, doc_id=case_id, path=str(document))
+        counts, details, doc = _compare(blocks, doc_id=case_id, path=str(document))
+        by_kind, by_outcome, unjudged = _judge(doc)
         total += len(blocks)
         total_ok += counts["ok"]
+        total_elements += sum(by_kind.values())
+        total_unjudged += unjudged
         all_details.extend(f"[{case_id}] {line}" for line in details)
         per_case.append(
             {
                 "id": case_id,
-                "status": "pass" if counts["mismatch"] == 0 and counts["missing"] == 0 else "fail",
+                "status": "pass"
+                if counts["mismatch"] == 0 and counts["missing"] == 0 and unjudged == 0
+                else "fail",
                 "blocks": len(blocks),
                 "ok": counts["ok"],
                 "mismatch": counts["mismatch"],
                 "missing": counts["missing"],
                 "extra": counts["extra"],
+                "elements": sum(by_kind.values()),
+                "unjudged": unjudged,
+                "outcomes": dict(by_outcome),
                 "fields": {k: v for k, v in counts.items() if k.startswith("field:")},
             }
         )
 
-    passed = total > 0 and total_ok == total
+    passed = total > 0 and total_ok == total and total_unjudged == 0
     payload = {
         "status": "pass" if passed else "fail",
         "total_blocks": total,
         "round_tripped": total_ok,
+        "total_elements": total_elements,
+        "unjudged": total_unjudged,
         "cases": per_case,
     }
     if args.json:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
-        print(f"\nPhase-1 AST round-trip acceptance — {corpus_dir}")
+        print(f"\nPhase-1 AST acceptance — {corpus_dir}")
         for entry in per_case:
             fields = entry.get("fields") or ""
             print(
                 f"  {entry['id']:<20} {entry['status']:<8} "
                 f"blocks={entry.get('blocks', 0)} ok={entry.get('ok', 0)} "
-                f"mismatch={entry.get('mismatch', 0)} missing={entry.get('missing', 0)}"
+                f"mismatch={entry.get('mismatch', 0)} missing={entry.get('missing', 0)} "
+                f"elements={entry.get('elements', 0)} unjudged={entry.get('unjudged', 0)}"
                 + (f"  {fields}" if fields else "")
                 + (f"  reason={entry['reason']}" if entry.get("reason") else "")
             )
-        print(f"\n  TOTAL: {total_ok}/{total} blocks round-tripped losslessly")
+        print(f"\n  round-trip : {total_ok}/{total} blocks lossless")
+        print(
+            f"  judged     : {total_elements - total_unjudged}/{total_elements} elements, {total_unjudged} unjudged"
+        )
         for line in all_details[:30]:
             print(f"    {line}")
     return 0 if passed else 1
