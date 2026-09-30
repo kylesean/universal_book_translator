@@ -96,12 +96,30 @@ def _fields(report: Any) -> dict[str, Any]:
     }
 
 
+def _has_substring_original(mapping: dict[str, str]) -> bool:
+    """True when one protected original contains another (a legacy-bug input)."""
+    originals = sorted(
+        {original for original in mapping.values() if original}, key=len, reverse=True
+    )
+    return any(
+        shorter in longer for index, shorter in enumerate(originals) for longer in originals[:index]
+    )
+
+
 def _compare_pair(label: str, legacy: Any, modern: Any, text: str, counts: Counts) -> None:
     if not text.strip():
         counts.skipped += 1
         return
     masked, mapping = modern.mask(text)
     if not mapping:
+        counts.skipped += 1
+        return
+    if _has_substring_original(mapping):
+        # The legacy duplicate/missing check counts substring occurrences, so an
+        # original inside a longer sibling (Γc inside Γcoeffect) false-positives
+        # as a leak. That is a known legacy bug the unified restore fixes, so
+        # such inputs are excluded from the equivalence check rather than
+        # asserted to reproduce the bug.
         counts.skipped += 1
         return
     for variant_name, echo in _variants(masked, mapping).items():

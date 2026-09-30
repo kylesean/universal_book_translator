@@ -196,8 +196,25 @@ def _restore_text(
     return result
 
 
+def _free_text_counts(table: dict[int, tuple[str, str, str]], restored: str) -> Counter[str]:
+    """How many *standalone* times each original survived in the restored text.
+
+    A plain ``str.count`` counts substring occurrences, so an original that is a
+    substring of a longer sibling (``Γc`` inside ``Γcoeffect``) is counted twice
+    and reads as a leak that never happened. One longest-first scan counts each
+    span where it actually stands.
+    """
+    originals = sorted(
+        {original for _, original, _ in table.values() if original}, key=len, reverse=True
+    )
+    if not originals:
+        return Counter()
+    pattern = re.compile("|".join(re.escape(original) for original in originals))
+    return Counter(match.group(0) for match in pattern.finditer(restored))
+
+
 def _missing_indices(
-    table: dict[int, tuple[str, str, str]], seen: dict[int, str | None], restored: str
+    table: dict[int, tuple[str, str, str]], seen: dict[int, str | None], free_counts: Counter[str]
 ) -> list[int]:
     """Indices whose span did not survive into the restored text.
 
@@ -213,24 +230,26 @@ def _missing_indices(
             idx for idx in idxs if seen.get(idx) and str(seen[idx]).lower() == table[idx][2].lower()
         ]
         omitted = [idx for idx in idxs if idx not in seen]
-        surplus = restored.count(original) - len(valid_emitted)
+        surplus = free_counts.get(original, 0) - len(valid_emitted)
         covered = min(len(omitted), max(0, surplus))
         missing.extend(omitted[covered:])
     return sorted(set(missing))
 
 
-def _duplicated_indices(table: dict[int, tuple[str, str, str]], restored: str) -> list[int]:
+def _duplicated_indices(
+    table: dict[int, tuple[str, str, str]], free_counts: Counter[str]
+) -> list[int]:
     """Indices whose protected span leaked as free text in the draft.
 
     A faithful draft holds each original exactly as many times as there are
-    tokens for it; a higher restored count is the model emitting the span
+    tokens for it; a higher *standalone* count is the model emitting the span
     twice (echo twin of :func:`_missing_indices`).
     """
     expected: Counter[str] = Counter(original for _, original, _ in table.values())
     leaked = {
         idx
         for idx, (_, original, _) in table.items()
-        if restored.count(original) > expected[original]
+        if free_counts.get(original, 0) > expected[original]
     }
     return sorted(leaked)
 
@@ -250,7 +269,8 @@ def restore_masked(text: str, mapping: dict[str, str], style: RestoreStyle) -> U
 
     restored = _restore_text(text, mapping, table, style)
 
-    missing = _missing_indices(table, seen, restored)
+    free_counts = _free_text_counts(table, restored)
+    missing = _missing_indices(table, seen, free_counts)
     # A token echoed without its checksum is "unverified", not "mismatched":
     # the suffix is optional, so a faithful model may drop it. Only a checksum
     # that is present but wrong (a rewritten index) is a wrong-span risk.
@@ -268,7 +288,7 @@ def restore_masked(text: str, mapping: dict[str, str], style: RestoreStyle) -> U
         f"{int(idx)}-{ck}" if ck else str(int(idx))
         for idx, ck in style.scan_pattern.findall(restored)
     ]
-    duplicated = _duplicated_indices(table, restored)
+    duplicated = _duplicated_indices(table, free_counts)
     return UnmaskReport(
         text=restored,
         missing=sorted(missing),
