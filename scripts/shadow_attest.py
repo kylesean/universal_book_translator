@@ -97,6 +97,13 @@ def _run_one(
         problems.append(f"delivered text {contract['delivered_text']} != realized {realized}")
     if opaque != kept:
         problems.append(f"kept text {kept} != opaque {opaque}")
+    rebuilt = shadow["assets"].get("RECONSTRUCTED_VERIFIED", 0)
+    if rebuilt != contract["reconstructed_assets"]:
+        problems.append(
+            f"reconstructed assets {contract['reconstructed_assets']} != attested {rebuilt}"
+        )
+    if contract["missing_assets"]:
+        problems.append(f"contract reports {contract['missing_assets']} missing asset(s)")
     if contract["pending_text"] or contract["skipped_text"]:
         problems.append(
             f"contract left text unaccounted (pending={contract['pending_text']}, "
@@ -108,12 +115,15 @@ def _run_one(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--corpus", default="corpus")
-    parser.add_argument("--all", action="store_true", help="Every case (default: the first)")
+    parser.add_argument("--case", default=None, help="One case id (default: the first)")
+    parser.add_argument("--all", action="store_true", help="Every case")
     args = parser.parse_args()
 
     corpus_dir = Path(args.corpus)
     cases = [(c, d) for c, d in _load_cases(corpus_dir) if d.exists()]
-    if not args.all:
+    if args.case:
+        cases = [c for c in cases if c[0] == args.case]
+    elif not args.all:
         cases = cases[:1]
 
     print(f"\nPhase-3 attestation-shadow acceptance — {corpus_dir} ({len(cases)} document(s))")

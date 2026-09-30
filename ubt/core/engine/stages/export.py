@@ -30,7 +30,7 @@ from ubt.core.exceptions import (
     RenderBlocksNotImplementedError,
     UBTError,
 )
-from ubt.core.ir.models import BlockStatus, BookManifest, IRBlock
+from ubt.core.ir.models import BlockStatus, BlockType, BookManifest, IRBlock
 from ubt.core.job_options import resolve_target_output, sidecar_path
 from ubt.core.metrics.collect import collect_kpis, save_metrics_report
 from ubt.core.policy.bilingual_advisor import SECONDARY_SUFFIX
@@ -981,20 +981,32 @@ def _write_attestation_shadow(
         from ubt.render.typst_backend import TypstBackend
         from ubt.verify.verifier import build_verifiers
 
+        def _kept(block: IRBlock) -> bool:
+            """Deliberately kept in the source: no delivered realization to attest.
+
+            ``skip_translate`` and an intentional render-skip (page chrome) both
+            record VERBATIM in the contract. A rigid run places assets opaque
+            instead of reconstructing them, so their markup is not a realization
+            either -- the engine is the whole-document choice the per-element
+            backends replace, and it drives the backend here.
+            """
+            if block.block_type in (BlockType.FORMULA, BlockType.TABLE, BlockType.IMAGE):
+                return engine == "rigid"
+            return block.skip_translate or _all_intentional(_skip_flags(block))
+
+        engine = str(
+            getattr(ctx.manifest.run, "render_engine_effective", "")
+            or ctx.config.render_engine
+            or "publication"
+        )
         document = document_from_blocks(
             blocks, doc_id=str(getattr(ctx.manifest, "doc_id", "") or "")
         )
-        # A block the delivery deliberately keeps (skip_translate, or an
-        # intentional render-skip like page chrome) has no translation to reflow,
-        # so it is left out of the map and realizes PRESERVED_OPAQUE -- the
-        # contract's VERBATIM. The signal is a runtime render decision the AST
-        # deliberately does not model, so it is fed to the backend here.
         backend = TypstBackend(
             translations={
                 block.id: block.target_text
                 for block in blocks
-                if block.target_text
-                and not (block.skip_translate or _all_intentional(_skip_flags(block)))
+                if block.target_text and not _kept(block)
             }
         )
         report = attest_document(document, backend, build_verifiers(ctx.fast_pass))

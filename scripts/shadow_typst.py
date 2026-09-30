@@ -24,7 +24,7 @@ from pathlib import Path
 
 from ubt.analyze.reader_pdf import read_pdf
 from ubt.core.qe.fast_pass import REHEARSAL_MARKER, FastPassFilter
-from ubt.model.ast import ELEMENT_CLASSES
+from ubt.model.ast import ELEMENT_CLASSES, Formula, Table
 from ubt.model.fidelity import Fidelity
 from ubt.pipeline.steps import realize
 from ubt.render.typst_backend import REFLOW_CLASSES, TypstBackend
@@ -53,6 +53,10 @@ def _check_capabilities() -> list[str]:
     capabilities = TypstBackend().capabilities()
     expected = {(cls, Fidelity.PRESERVED_OPAQUE) for cls in ELEMENT_CLASSES}
     expected |= {(cls, Fidelity.RECONSTRUCTED_ADAPTED) for cls in REFLOW_CLASSES}
+    expected |= {
+        (Formula, Fidelity.RECONSTRUCTED_VERIFIED),
+        (Table, Fidelity.RECONSTRUCTED_VERIFIED),
+    }
     problems: list[str] = []
     if capabilities.supported != frozenset(expected):
         problems.append("capabilities are not exactly opaque-for-all + adapted-for-reflow")

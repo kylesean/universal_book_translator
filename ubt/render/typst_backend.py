@@ -31,9 +31,11 @@ from ubt.model.ast import (
     Caption,
     Dialogue,
     Element,
+    Formula,
     Heading,
     ListItem,
     Paragraph,
+    Table,
     TextElement,
 )
 from ubt.model.fidelity import Fidelity
@@ -71,6 +73,8 @@ class TypstBackend:
     def capabilities(self) -> Capabilities:
         supported = {(cls, Fidelity.PRESERVED_OPAQUE) for cls in ELEMENT_CLASSES}
         supported |= {(cls, Fidelity.RECONSTRUCTED_ADAPTED) for cls in REFLOW_CLASSES}
+        supported |= {(Formula, Fidelity.RECONSTRUCTED_VERIFIED)}
+        supported |= {(Table, Fidelity.RECONSTRUCTED_VERIFIED)}
         return Capabilities(supported=frozenset(supported), reflows=True)
 
     def produce(
@@ -78,16 +82,23 @@ class TypstBackend:
     ) -> Produced | None:
         if fidelity is Fidelity.PRESERVED_OPAQUE:
             return Produced(payload=source_slice(element, source), note=f"opaque:{element.kind}")
+        target = self._translations.get(element.id, "")
         if fidelity is Fidelity.RECONSTRUCTED_ADAPTED and isinstance(element, REFLOW_CLASSES):
             if element.skip_translate:
                 # Deliberately kept in the source (a listing, a proper noun): the
                 # contract calls this VERBATIM, so it is placed opaque, not reflowed.
                 return None
-            target = self._translations.get(element.id, "")
             fragment = text_fragment(target)
             if fragment is None:
                 return None
             return Produced(payload=target, note=f"typst:{element.kind}", fragment=fragment)
+        if fidelity is Fidelity.RECONSTRUCTED_VERIFIED and isinstance(element, (Formula, Table)):
+            # The delivered markup is the reconstruction the existing renderer
+            # produced; the structural verifier judges it, and a failure descends
+            # to the opaque slice.
+            if not target.strip():
+                return None
+            return Produced(payload=target, note=f"typst:{element.kind}")
         return None
 
 
