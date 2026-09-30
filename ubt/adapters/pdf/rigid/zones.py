@@ -792,6 +792,24 @@ def build_zones(
                     continue
                 _consume(page_no, run)
 
+    # Axiom B safety net: a prose block whose region is a sub-line fragment gets
+    # no accepted zone above, and the rigid engine would otherwise ship its
+    # source (render:no_zone). Give it its own region anyway -- its matched rows,
+    # or its bbox -- so the translation is painted (the engine then shrinks or
+    # overflows as needed). Overlap with a neighbour is accepted: the agreed
+    # priority puts translation completeness above pixel layout.
+    for block in prose:
+        if block.bbox is None or block.id in by_id:
+            continue
+        facts = pages.get(block.bbox.page)
+        if facts is None:
+            continue
+        zone = own_zone(block, facts, tuple(blocks), allow_chrome_bands=allow_chrome_bands)
+        if zone is None:
+            zone = _bbox_zone(block, facts, allow_chrome_bands=allow_chrome_bands)
+        if zone is not None and zone.height >= 1.0:
+            by_id.setdefault(block.id, []).append(zone)
+
     return {bid: tuple(_order_block_zones(zones, pages)) for bid, zones in by_id.items() if zones}
 
 
