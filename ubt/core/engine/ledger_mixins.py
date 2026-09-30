@@ -463,16 +463,25 @@ class LedgerJobsMixin(LedgerBase):
                 conn.execute("ROLLBACK;")
                 raise LedgerError(f"finalize_job: unknown job '{job_id}'")
             existing = str(row["status"])
-            if status in ("completed", "failed") and existing in ("cancelled",):
-                # A cancel is authoritative: an export or worker abort that arrives
-                # afterwards must not rewrite it to a false success or failure. Idempotent
-                # no-op (not an error) so stages do not crash after losing the race.
+            if status == "failed" and existing in ("cancelled",):
+                # A cancel is authoritative against a late abort: an export or
+                # worker failure that arrives afterwards must not rewrite it.
+                # Idempotent no-op (not an error) so stages do not crash after
+                # losing the race.
                 logger.warning(
-                    "finalize_job(%r) ignored for '%s': already cancelled", status, actual_id
+                    "finalize_job('failed') ignored for '%s': already cancelled", actual_id
                 )
                 conn.execute("ROLLBACK;")
                 return
-            if status == "completed" and existing == "failed":
+            if status == "completed" and existing == "cancelled":
+                # A rerun the user explicitly started after a cancel may finish:
+                # keeping the job cancelled forever stranded delivered artifacts
+                # under a dead status. Cancel stays authoritative only while
+                # nothing new completed.
+                logger.info(
+                    "finalize_job('completed') supersedes a cancellation for '%s'", actual_id
+                )
+            elif status == "completed" and existing == "failed":
                 # ``failed`` is not authoritative against a real completion: a
                 # job marked failed by a stale owner (its lease was reclaimed)
                 # or by a previous attempt that the user resumed can still reach
