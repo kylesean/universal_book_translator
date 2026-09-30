@@ -39,7 +39,13 @@ class MaskedSource:
 
     @property
     def placeholders(self) -> tuple[Placeholder, ...]:
-        """Every protected span, tagged by family, in mask order."""
+        """Every *visible* protected span, tagged by family, in mask order.
+
+        A token hidden inside another token's original (a math environment
+        nested inside inline math) is not in the masked text; it is an
+        implementation detail of the restore pass, not part of the segment a
+        translator or an XLIFF reader sees.
+        """
         maps = {
             "code": self.code_map,
             "math": self.math_map,
@@ -50,6 +56,7 @@ class MaskedSource:
             Placeholder(token=token, kind=kind, original=original)
             for kind in _KINDS
             for token, original in maps[kind].items()
+            if token in self.text
         )
 
 
