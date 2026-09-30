@@ -32,7 +32,7 @@ from ubt.core.content.asset_verify import (
     verify_asset_structure,
 )
 from ubt.core.content.nodes import AssetKind
-from ubt.verify.proof import Proof, ProofKind
+from ubt.model.fidelity import Proof, ProofKind
 
 if TYPE_CHECKING:
     from pathlib import Path

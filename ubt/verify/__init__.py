@@ -18,7 +18,7 @@ Phase 3 lowers elements through :func:`ubt.verify.verifier.Verifier`.
 
 from __future__ import annotations
 
-from ubt.verify.proof import Proof, ProofKind, ProofOutcome
+from ubt.model.fidelity import Proof, ProofKind, ProofOutcome
 from ubt.verify.shadow import AgreementReport, Mismatch, ShadowRun, expected_outcome
 from ubt.verify.verifier import (
     FormulaWitnessVerifier,

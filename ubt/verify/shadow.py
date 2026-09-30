@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from ubt.verify.proof import Proof, ProofOutcome
+from ubt.model.fidelity import Proof, ProofOutcome
 
 #: Legacy verdict words -> the outcome they mean. The single translation table;
 #: adding a check means adding its words here, nowhere else.
