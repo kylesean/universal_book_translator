@@ -28,11 +28,14 @@ class Produced:
 
     ``payload`` is the delivered text/markup the element's verifier checks -- a
     reconstructed formula or table, a translated target, or the opaque source
-    slice. ``note`` is free-form provenance carried into the attestation.
+    slice. ``fragment`` is the backend's layout artifact (Typst source for a
+    reflowed element), empty when the realization is placed rather than drawn.
+    ``note`` is free-form provenance carried into the attestation.
     """
 
     payload: str
     note: str = ""
+    fragment: str = ""
 
 
 @dataclass(frozen=True, slots=True)

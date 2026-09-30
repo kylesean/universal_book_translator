@@ -11,6 +11,7 @@ from __future__ import annotations
 from ubt.render.capability import Backend, Capabilities, Produced
 from ubt.render.outputs import Composition, LoweringUnsupported, Placement, compose
 from ubt.render.overlay_backend import OverlayBackend
+from ubt.render.typst_backend import TypstBackend
 
 __all__ = [
     "Backend",
@@ -20,5 +21,6 @@ __all__ = [
     "OverlayBackend",
     "Placement",
     "Produced",
+    "TypstBackend",
     "compose",
 ]
