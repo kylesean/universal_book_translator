@@ -19,7 +19,6 @@ from ubt.core.content.contract import (
     ReconciliationReport,
     Violation,
     ViolationKind,
-    reconcile,
 )
 from ubt.core.content.graph import ContentGraph
 from ubt.core.content.ledger import AssetLedger, ContentLedger, build_ledgers
@@ -53,5 +52,4 @@ __all__ = [
     "ViolationKind",
     "build_ledgers",
     "graph_from_blocks",
-    "reconcile",
 ]

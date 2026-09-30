@@ -112,7 +112,15 @@ class ReconciliationReport(BaseModel):
 
 
 def reconcile(graph: ContentGraph) -> ReconciliationReport:
-    """Balance the two ledgers against the content graph.
+    """The contract as the content graph *alone* can see it.
+
+    Not the delivery verdict any more: the export projects its contract from the
+    per-element attestations (``ubt.pipeline.attest.project_contract``), which
+    calls this for the detail the graph owns -- the reason a kept text node was
+    kept, the named violations -- and then replaces the realization counts with
+    the ones ``realize()`` verified. This balance is still the honest account of
+    the graph; it is just no longer a second, independent decision about whether
+    a realization exists.
 
     A text node is accounted for only when it is TRANSLATED or VERBATIM; a
     PENDING node was never decided and a SKIPPED node was dropped. An asset is

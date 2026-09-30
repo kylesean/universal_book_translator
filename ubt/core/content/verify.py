@@ -4,8 +4,9 @@ Two ways to obtain the contract:
 
 - :func:`load_contract` reads the ``*_contract.json`` written beside a delivered
   artifact -- the artifact of record.
-- :func:`contract_from_ledger` re-derives it from a finished job's ledger blocks,
-  an independent cross-check that does not trust the sidecar.
+- :func:`contract_from_ledger` re-derives it from a finished job's ledger blocks
+  -- it does not trust the sidecar -- through the same attestation projection the
+  export used, so both paths read one account.
 
 :func:`evaluate_expectations` turns a corpus case's thresholds into failures, so
 a regression on any render path shows up as an unbalanced book.
@@ -20,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from ubt.core.content.adapt import graph_from_blocks
-from ubt.core.content.contract import ReconciliationReport, reconcile
+from ubt.core.content.contract import ReconciliationReport
 from ubt.core.job_options import sidecar_path
 
 if TYPE_CHECKING:
@@ -48,13 +49,33 @@ def contract_from_ledger(
 ) -> ReconciliationReport:
     """Re-derive the contract from a finished job's ledger blocks.
 
+    It does not trust the ``*_contract.json`` sidecar: the blocks come from the
+    ledger, and the run's language policy is read back from it (the target_lang
+    column and the source_lang the ingest recorded), so the translation
+    predicate scores with the same profile the run used.
+
+    The account is the *attestation projection* the export uses (ADR-0001
+    Phase 3), not a second, independent balance: one account, one mechanism.
     ``engine`` selects the asset-preservation policy (see
     :func:`ubt.core.content.adapt.graph_from_blocks`); it cannot be read back
     reliably from the ledger, so the caller states it (default: reflow).
     """
+    from ubt.core.qe.fast_pass import FastPassFilter
+    from ubt.pipeline.attest import attest_document, project_contract
+    from ubt.pipeline.delivery import delivery_document, delivery_translations
+    from ubt.render.typst_backend import TypstBackend
+    from ubt.verify.verifier import build_verifiers
+
     blocks = ledger.get_all_blocks(job_id)
     graph = graph_from_blocks(blocks, engine=engine, doc_id=job_id)
-    return reconcile(graph)
+    source_lang = str(ledger.get_job_metadata_value(job_id, "source_lang") or "en")
+    target_lang = str(ledger.get_job_target_lang(job_id) or "zh")
+    report = attest_document(
+        delivery_document(blocks, doc_id=job_id),
+        TypstBackend(delivery_translations(blocks, engine=engine)),
+        build_verifiers(FastPassFilter(source_lang=source_lang, target_lang=target_lang)),
+    )
+    return project_contract(report, graph)
 
 
 class CorpusCase(BaseModel):
