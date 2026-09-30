@@ -113,10 +113,13 @@ def project_contract(report: AttestationReport, graph: ContentGraph) -> Reconcil
     The realizations the attestations *verify* replace the graph's count of them:
     a text node is delivered when ``realize()`` reconstructed and verified it, and
     an asset is reconstructed when it did -- a block that merely carries a target
-    no longer counts. A translation that did not verify is demoted to source-kept
-    (the reader gets the source) so the account still balances. An element with no
-    lossless realization is an ERROR here, the construction-time loss ``realize()``
-    refuses to hide and the graph cannot see (the block still carries a target).
+    no longer counts. The asset account is then balanced by remainder, so the
+    projection stays internally consistent even where the graph and the
+    attestations disagree about which blocks are assets. A translation that did
+    not verify is demoted to source-kept (the reader gets the source) so the text
+    account balances too. An element with no lossless realization is an ERROR
+    here, the construction-time loss ``realize()`` refuses to hide and the graph
+    cannot see (the block still carries a target).
     """
     base = reconcile(graph)
     content, _ = build_ledgers(graph)
@@ -141,11 +144,21 @@ def project_contract(report: AttestationReport, graph: ContentGraph) -> Reconcil
         )
         for element_id in report.violations
     )
+    # The attestations decide how many assets were *reconstructed*; what the graph
+    # counts as an asset and was neither reconstructed, dropped nor missing is
+    # preserved. Deriving the remainder (rather than copying the graph's
+    # ``preserved_assets``) keeps the account balanced even when the two disagree
+    # about which blocks are assets -- a divergence the sum would otherwise hide.
+    reconstructed = min(report.asset_count(Fidelity.RECONSTRUCTED_VERIFIED), base.total_assets)
+    preserved = max(
+        0, base.total_assets - reconstructed - base.dropped_assets - base.missing_assets
+    )
     return base.model_copy(
         update={
             "delivered_text": report.text_count(Fidelity.RECONSTRUCTED_ADAPTED),
             "source_kept_text": base.source_kept_text + len(demoted),
-            "reconstructed_assets": report.asset_count(Fidelity.RECONSTRUCTED_VERIFIED),
+            "reconstructed_assets": reconstructed,
+            "preserved_assets": preserved,
             "violations": base.violations + demoted + lost,
         }
     )
