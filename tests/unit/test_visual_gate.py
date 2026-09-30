@@ -575,3 +575,55 @@ def test_render_pages_to_png_registers_atexit_cleanup(
         fn is shutil.rmtree and len(args) > 0 and args[0] == result[1].parent
         for fn, args, _ in registered
     )
+
+
+def test_blocking_gate_trips_on_a_crashed_gate_even_when_disabled() -> None:
+    # A gate that crashed means "visual state unknown". That refuses export on
+    # the same fail-closed reasoning as an unreadable PDF, regardless of the
+    # opt-in flag or the page window — a crash used to read as "no gate" and
+    # skipped every rejection layer.
+    from ubt.adapters.pdf.visual_gate import VisualFinding
+
+    finding = VisualFinding(
+        severity="critical",
+        code="visual_gate_crashed",
+        message="visual gate did not complete: RuntimeError: boom",
+    )
+    tripped = blocking_gate_tripped((finding,), total_pages=0, enabled=False)
+    assert [f.code for f in tripped] == ["visual_gate_crashed"]
+
+
+@pytest.mark.asyncio
+async def test_run_visual_gate_flags_text_painted_over(tmp_path: Path) -> None:
+    """Text the text layer reports but the raster does not show is occluded.
+
+    A near-white paint over a paragraph is invisible to the geometry checks
+    (the boxes are still there) and to the blank-page heuristic (the page is
+    not blank overall) — the classic scalpel white-out shipped undetected.
+    """
+    import pikepdf
+
+    pdf = tmp_path / "whitebox.pdf"
+    content = (
+        b"BT /F1 12 Tf 72 700 Td (Hidden paragraph text here) Tj ET\n"
+        b"1 1 1 rg\n72 690 300 20 re f\n"
+        b"0 0 0 rg\n72 100 200 50 re f\n"
+        b"BT /F1 12 Tf 72 670 Td (Visible line stays readable) Tj ET\n"
+    )
+    with pikepdf.new() as doc:
+        page = doc.add_blank_page(page_size=(595, 842))
+        page.Contents = doc.make_stream(content)
+        page.Resources = pikepdf.Dictionary(
+            Font=pikepdf.Dictionary(
+                F1=pikepdf.Dictionary(
+                    Type=pikepdf.Name("/Font"),
+                    Subtype=pikepdf.Name("/Type1"),
+                    BaseFont=pikepdf.Name("/Helvetica"),
+                )
+            )
+        )
+        doc.save(pdf)
+
+    res = await run_visual_gate(pdf, blocks=[], typ_text="a-b", sample_pages=1)
+    assert any(f.code == "text_occluded" for f in res.findings)
+    assert res.passed is False

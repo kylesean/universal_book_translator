@@ -9,7 +9,7 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from ubt.core.cleaners.cjk_spacing import normalize_publishing_cjk
 from ubt.core.config import DualMode
@@ -38,9 +38,13 @@ from ubt.core.policy.layout_policy import LENGTH_OVERFLOW_TO_HUMAN, LENGTH_POLIC
 from ubt.core.ports import (
     DocumentAdapter,
     blocking_gate_tripped,
+    crashed_visual_gate_result,
     get_last_render_skips,
     is_pdf_engine_adapter,
 )
+
+if TYPE_CHECKING:
+    from ubt.adapters.pdf.visual_gate import VisualGateResult
 from ubt.core.qe.defect_taxonomy import (
     INTENTIONAL_PRESERVED_SKIP_PREFIXES as _INTENTIONAL_PRESERVED_SKIP_PREFIXES,
 )
@@ -560,7 +564,50 @@ async def _run_visual_gate(
         logger.warning(
             "Visual gate self-healing failed (non-fatal) for job %s: %s", ctx.job_id, exc
         )
+        # A crashed gate must read as failed, not absent: blocking enforcement
+        # and the KPI collector both key off this object, and None silently
+        # skipped every rejection layer while metrics recorded a perfect pass.
+        gate = crashed_visual_gate_result(
+            f"visual gate did not complete: {type(exc).__name__}: {exc}"[:300]
+        )
+        visual_report_path = await _persist_crashed_gate_report(ctx, rendered_path, gate, exc)
     return rendered_path, visual_report_path, gate
+
+
+async def _persist_crashed_gate_report(
+    ctx: StageContext,
+    rendered_path: Path,
+    gate: VisualGateResult,
+    exc: Exception,
+) -> Path | None:
+    """Write the crash gate where a live run would have written its report.
+
+    The sidecar, the ledger record and the KPI collector all read this state;
+    best-effort only, the caller is already inside the failure path.
+    """
+    try:
+        from ubt.core.log_aggregate import noise_report
+
+        payload: dict[str, Any] = {
+            **gate.report_payload(),
+            "self_healed": False,
+            "healing_strategy": "none",
+            "healing_skipped_reason": f"visual gate crashed: {type(exc).__name__}: {exc}"[:300],
+            "parse_noise": noise_report(),
+        }
+        visual_report_path = sidecar_path(rendered_path, "visual_report.json")
+        await asyncio.to_thread(
+            visual_report_path.write_text,
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        await asyncio.to_thread(ctx.ledger.record_visual_report, ctx.job_id, payload)
+        return visual_report_path
+    except Exception as persist_exc:
+        logger.debug(
+            "crashed-gate report persistence failed for job %s: %s", ctx.job_id, persist_exc
+        )
+        return None
 
 
 def _drop_stale_run_reports(rendered_path: Path) -> None:
@@ -572,7 +619,7 @@ def _drop_stale_run_reports(rendered_path: Path) -> None:
     back. The deliverable itself is never touched, and a missing file is not an
     error.
     """
-    for kind in ("quality_report.json", "metrics.json", "visual_report.json"):
+    for kind in ("quality_report.json", "quality_report.md", "metrics.json", "visual_report.json"):
         with contextlib.suppress(OSError):
             sidecar_path(rendered_path, kind).unlink(missing_ok=True)
 

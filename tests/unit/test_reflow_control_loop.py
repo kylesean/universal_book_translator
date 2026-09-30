@@ -3,36 +3,18 @@
 import json
 import logging
 from collections.abc import Generator
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
 
+from ubt.adapters.pdf.visual_gate import VisualFinding, VisualGateResult
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.reflow_loop import ReflowControlLoop
 from ubt.core.ir.models import BlockStatus, BookManifest, BoundingBox, FlowID, IRBlock
 from ubt.core.log_aggregate import install_noise_aggregators, noise_aggregators
 from ubt.core.ports import reset_ports, set_visual_gate_runner
-
-
-@dataclass
-class FakeFinding:
-    severity: str
-    code: str
-    message: str
-    page: int | None = None
-
-
-@dataclass
-class FakeGateResult:
-    passed: bool
-    findings: tuple[FakeFinding, ...] = ()
-    sampled_pages: tuple[int, ...] = (1,)
-    vlm_pages: tuple[int, ...] = ()
-    skipped_reason: str | None = None
-    stats: dict[str, Any] = field(default_factory=dict)
 
 
 class FakeReconstructor:
@@ -71,8 +53,8 @@ async def test_reflow_control_loop_clean_pass(tmp_path: Path) -> None:
     pdf_path = tmp_path / "out.pdf"
     pdf_path.write_bytes(b"%PDF-1.4 mock")
 
-    async def mock_gate_runner(*args: Any, **kwargs: Any) -> FakeGateResult:
-        return FakeGateResult(passed=True, findings=())
+    async def mock_gate_runner(*args: Any, **kwargs: Any) -> VisualGateResult:
+        return VisualGateResult(passed=True, findings=())
 
     set_visual_gate_runner(mock_gate_runner)
 
@@ -111,9 +93,9 @@ async def test_reflow_forwards_declared_padding_pages_to_the_gate(tmp_path: Path
 
     captured: dict[str, Any] = {}
 
-    async def mock_gate_runner(*args: Any, **kwargs: Any) -> FakeGateResult:
+    async def mock_gate_runner(*args: Any, **kwargs: Any) -> VisualGateResult:
         captured.update(kwargs)
-        return FakeGateResult(passed=True, findings=())
+        return VisualGateResult(passed=True, findings=())
 
     set_visual_gate_runner(mock_gate_runner)
 
@@ -139,17 +121,19 @@ async def test_reflow_control_loop_typography_self_healing(tmp_path: Path) -> No
 
     calls = 0
 
-    async def mock_gate_runner(*args: Any, **kwargs: Any) -> FakeGateResult:
+    async def mock_gate_runner(*args: Any, **kwargs: Any) -> VisualGateResult:
         nonlocal calls
         calls += 1
         if calls == 1:
-            return FakeGateResult(
+            return VisualGateResult(
                 passed=False,
                 findings=(
-                    FakeFinding(severity="major", code="block_overlap", message="overlap", page=1),
+                    VisualFinding(
+                        severity="major", code="block_overlap", message="overlap", page=1
+                    ),
                 ),
             )
-        return FakeGateResult(passed=True, findings=())
+        return VisualGateResult(passed=True, findings=())
 
     set_visual_gate_runner(mock_gate_runner)
 
@@ -195,11 +179,11 @@ async def test_reflow_quarantine_only_escalates_and_skips_verbatim(tmp_path: Pat
     pdf_path = tmp_path / "out.pdf"
     pdf_path.write_bytes(b"%PDF-1.4 mock")
 
-    async def mock_gate_runner(*args: Any, **kwargs: Any) -> FakeGateResult:
-        return FakeGateResult(
+    async def mock_gate_runner(*args: Any, **kwargs: Any) -> VisualGateResult:
+        return VisualGateResult(
             passed=False,
             findings=(
-                FakeFinding(severity="critical", code="blank_page", message="blank", page=2),
+                VisualFinding(severity="critical", code="blank_page", message="blank", page=2),
             ),
         )
 
@@ -267,11 +251,11 @@ async def test_reflow_control_loop_quarantine_persistent_failures(tmp_path: Path
     pdf_path = tmp_path / "out.pdf"
     pdf_path.write_bytes(b"%PDF-1.4 mock")
 
-    async def mock_gate_runner(*args: Any, **kwargs: Any) -> FakeGateResult:
-        return FakeGateResult(
+    async def mock_gate_runner(*args: Any, **kwargs: Any) -> VisualGateResult:
+        return VisualGateResult(
             passed=False,
             findings=(
-                FakeFinding(severity="major", code="block_overlap", message="overlap", page=2),
+                VisualFinding(severity="major", code="block_overlap", message="overlap", page=2),
             ),
         )
 
@@ -332,11 +316,11 @@ async def test_reflow_control_loop_no_futile_heal_for_rigid_engine(tmp_path: Pat
     pdf_path = tmp_path / "out.pdf"
     pdf_path.write_bytes(b"%PDF-1.4 mock")
 
-    async def mock_gate_runner(*args: Any, **kwargs: Any) -> FakeGateResult:
-        return FakeGateResult(
+    async def mock_gate_runner(*args: Any, **kwargs: Any) -> VisualGateResult:
+        return VisualGateResult(
             passed=False,
             findings=(
-                FakeFinding(severity="critical", code="blank_page", message="blank", page=2),
+                VisualFinding(severity="critical", code="blank_page", message="blank", page=2),
             ),
         )
 
@@ -416,8 +400,8 @@ async def _run_clean_loop(
     pdf_path = tmp_path / "fidelity.pdf"
     pdf_path.write_bytes(b"%PDF-1.4 mock")
 
-    async def mock_gate_runner(*args: Any, **kwargs: Any) -> FakeGateResult:
-        return FakeGateResult(passed=True, findings=())
+    async def mock_gate_runner(*args: Any, **kwargs: Any) -> VisualGateResult:
+        return VisualGateResult(passed=True, findings=())
 
     set_visual_gate_runner(mock_gate_runner)
     calls = _fidelity_probe_spy(monkeypatch)
@@ -502,8 +486,8 @@ async def test_visual_report_persists_aggregated_table_structure_noise(tmp_path:
             f"fallback (row={cid % 30}, x=200.0, dist=64.{cid % 10})"
         )
 
-    async def mock_gate_runner(*args: Any, **kwargs: Any) -> FakeGateResult:
-        return FakeGateResult(passed=True, findings=())
+    async def mock_gate_runner(*args: Any, **kwargs: Any) -> VisualGateResult:
+        return VisualGateResult(passed=True, findings=())
 
     set_visual_gate_runner(mock_gate_runner)
     ledger = FakeLedger()

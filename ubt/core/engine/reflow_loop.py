@@ -418,30 +418,15 @@ class ReflowControlLoop:
                 logger.debug("render fidelity skipped for job %s: %s", self.job_id, exc)
 
         report_dict: dict[str, Any] = {
-            "passed": gate.passed,
+            **gate.report_payload(),
             "self_healed": self_healed,
             "healing_strategy": healing_strategy,
             "healing_skipped_reason": healing_skipped_reason,
-            "skipped_reason": gate.skipped_reason,
-            "stats": dict(gate.stats) if getattr(gate, "stats", None) else {},
-            "sampled_pages": list(gate.sampled_pages)
-            if getattr(gate, "sampled_pages", None)
-            else [],
-            "vlm_pages": list(gate.vlm_pages) if getattr(gate, "vlm_pages", None) else [],
             # Parse-stage third-party warnings the log aggregated instead of
             # printing per cell (see ubt.core.log_aggregate). Empty when the
             # parse emitted none. This is the durable record of *why* a table
             # may be structurally wrong even when the render looks fine.
             "parse_noise": noise_report(),
-            "findings": [
-                {
-                    "severity": getattr(f, "severity", ""),
-                    "code": getattr(f, "code", ""),
-                    "message": getattr(f, "message", ""),
-                    "page": getattr(f, "page", None),
-                }
-                for f in gate.findings
-            ],
         }
         visual_report_path = sidecar_path(rendered_path, "visual_report.json")
         payload = json.dumps(report_dict, ensure_ascii=False, indent=2)

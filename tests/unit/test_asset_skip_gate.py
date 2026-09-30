@@ -10,7 +10,6 @@ NOT affected (its skip reasons are text-placement, not asset loss).
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
@@ -18,7 +17,10 @@ import pytest
 
 from tests.block_builder import make_test_block
 from ubt.adapters.pdf.artifact_parity import asset_skip_findings
-from ubt.adapters.pdf.visual_gate import blocking_gate_tripped
+from ubt.adapters.pdf.visual_gate import (
+    VisualGateResult,
+    blocking_gate_tripped,
+)
 from ubt.core.engine.reflow_loop import ReflowControlLoop
 from ubt.core.ir.models import BlockType, BookManifest, IRBlock
 from ubt.core.ports import reset_ports, set_visual_gate_runner
@@ -62,24 +64,6 @@ def test_content_asset_missing_fails_closed_even_when_gate_disabled() -> None:
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class _Finding:
-    severity: str
-    code: str
-    message: str
-    page: int | None = None
-
-
-@dataclass
-class _GateResult:
-    passed: bool
-    findings: tuple[_Finding, ...] = ()
-    sampled_pages: tuple[int, ...] = (1,)
-    vlm_pages: tuple[int, ...] = ()
-    skipped_reason: str | None = None
-    stats: dict[str, Any] = field(default_factory=dict)
-
-
 class _Adapter:
     engine_name = "docling"
 
@@ -106,8 +90,8 @@ async def _run_loop(
     pdf_path = tmp_path / "out.pdf"
     pdf_path.write_bytes(b"%PDF-1.4 mock")
 
-    async def mock_gate_runner(*args: Any, **kwargs: Any) -> _GateResult:
-        return _GateResult(passed=True, findings=())
+    async def mock_gate_runner(*args: Any, **kwargs: Any) -> VisualGateResult:
+        return VisualGateResult(passed=True, findings=())
 
     set_visual_gate_runner(mock_gate_runner)
     # A nonexistent source skips the (subprocess-backed) artifact-parity probe so

@@ -41,7 +41,7 @@ import tempfile
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from ubt.adapters.pdf import oxide_render, pdf_struct
 from ubt.core.policy.layout_policy import (
@@ -61,7 +61,9 @@ BANNED_NON_BREAKING_HYPHEN = "\u2011"
 # that refuse export on the same reasoning as the unreadable-PDF case, even
 # when the blocking gate is off:
 # an artifact carrying none of the commissioned target language is unshippable.
-_ALWAYS_FAIL_CLOSED_CODES = frozenset({"target_language_absent"})
+# ``visual_gate_crashed`` joins them: a gate that died mid-run leaves the
+# artifact's visual state unknown, and "unknown" must not read as a pass.
+_ALWAYS_FAIL_CLOSED_CODES = frozenset({"target_language_absent", "visual_gate_crashed"})
 # Delivery-breaking parity MAJORS. The geometry ones only fire on
 # geometry-preserving renders (artifact_parity gates them on
 # keeps_source_geometry), so a change here is not "different layout by
@@ -126,6 +128,31 @@ class VisualGateResult:
     vlm_pages: tuple[int, ...] = ()
     skipped_reason: str | None = None
     stats: dict[str, str | int | float] = field(default_factory=dict)
+
+    def report_payload(self) -> dict[str, Any]:
+        """Gate-owned half of the visual_report.json schema.
+
+        The reflow loop adds its healing/parse-noise keys on top; a gate that
+        crashed before the loop could write anything still produces this half,
+        so the sidecar file, the ledger record and the KPI collector agree on
+        the outage instead of the crash vanishing from all three.
+        """
+        return {
+            "passed": self.passed,
+            "skipped_reason": self.skipped_reason,
+            "stats": dict(self.stats),
+            "sampled_pages": list(self.sampled_pages),
+            "vlm_pages": list(self.vlm_pages),
+            "findings": [
+                {
+                    "severity": getattr(finding, "severity", ""),
+                    "code": getattr(finding, "code", ""),
+                    "message": getattr(finding, "message", ""),
+                    "page": getattr(finding, "page", None),
+                }
+                for finding in self.findings
+            ],
+        }
 
 
 def scan_typ_source(typ_text: str) -> list[VisualFinding]:
@@ -606,6 +633,83 @@ def blocking_gate_tripped(
     return [f for f in findings if getattr(f, "severity", "") == "critical"]
 
 
+#: A text line box whose raster crop carries less than this fraction of
+#: non-white pixels is treated as unprinted (painted over / white-on-white).
+OCCLUSION_INK_FLOOR = 0.02
+OCCLUSION_MIN_BOX_PX = 8
+
+
+def text_occlusion_findings(
+    page_pngs: Mapping[int, Path],
+    text_boxes: Sequence[_ArtifactBox],
+    bounds: Mapping[int, tuple[float, float, float, float]],
+    dpi: int = DEFAULT_DPI,
+) -> list[VisualFinding]:
+    """Text the text layer reports but the raster does not show.
+
+    A near-white paint over a paragraph (or white-on-white text) is invisible
+    to the geometry checks — the boxes are still there — and to the blank-page
+    heuristic, because the page is not blank overall. The signature is a text
+    line box whose rendered crop carries almost no ink. One finding per page.
+    """
+    try:
+        from PIL import Image
+    except ImportError:
+        return []
+    boxes_by_page: dict[int, list[_ArtifactBox]] = {}
+    for box in text_boxes:
+        boxes_by_page.setdefault(box.bbox.page, []).append(box)
+    findings: list[VisualFinding] = []
+    scale = dpi / 72.0
+    for page, png_path in sorted(page_pngs.items()):
+        boxes = boxes_by_page.get(page)
+        media = bounds.get(page)
+        if not boxes or media is None:
+            continue
+        try:
+            with Image.open(png_path) as img:
+                grey = img.convert("L")
+                width_px, height_px = grey.size
+                media_x0, _media_y0, _media_x1, media_y1 = media
+                occluded = 0
+                sample = ""
+                for box in boxes:
+                    bbox = box.bbox
+                    left = max(0, int((bbox.x0 - media_x0) * scale))
+                    right = min(width_px, int((bbox.x1 - media_x0) * scale))
+                    top = max(0, int((media_y1 - bbox.y1) * scale))
+                    bottom = min(height_px, int((media_y1 - bbox.y0) * scale))
+                    if right - left < OCCLUSION_MIN_BOX_PX or bottom - top < 4:
+                        continue
+                    crop = grey.crop((left, top, right, bottom))
+                    pixels = list(crop.getdata())
+                    if not pixels:
+                        continue
+                    ink = sum(1 for px in pixels if px < 245) / len(pixels)
+                    if ink < OCCLUSION_INK_FLOOR:
+                        occluded += 1
+                        if not sample:
+                            sample = (
+                                f"e.g. ({bbox.x0:.0f},{bbox.y0:.0f})-({bbox.x1:.0f},{bbox.y1:.0f})"
+                            )
+        except Exception as exc:
+            logger.debug("Visual gate: occlusion probe failed for page %d: %s", page, exc)
+            continue
+        if occluded:
+            findings.append(
+                VisualFinding(
+                    severity="major",
+                    code="text_occluded",
+                    message=(
+                        f"{occluded} text line(s) extracted from the text layer render "
+                        f"with no ink ({sample}); likely painted over or white-on-white"
+                    ),
+                    page=page,
+                )
+            )
+    return findings
+
+
 async def run_visual_gate(
     pdf_path: Path,
     blocks: Sequence[object] = (),
@@ -716,6 +820,9 @@ async def run_visual_gate(
         if sampled and not pngs:
             skip_notes.append("page render failed (pdf_oxide); pixel checks skipped")
         else:
+            findings.extend(
+                await asyncio.to_thread(text_occlusion_findings, pngs, artifact_boxes, bounds, dpi)
+            )
             for page, png in sorted(pngs.items()):
                 # pixel_findings decodes the PNG with PIL (CPU-bound) — keep it off the loop too.
                 p_findings = await asyncio.to_thread(pixel_findings, png, page)

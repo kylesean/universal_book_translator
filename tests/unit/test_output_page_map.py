@@ -14,7 +14,6 @@ keep using ``bbox.page``.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
@@ -22,6 +21,7 @@ import pytest
 
 import ubt.core.ports as ports
 from ubt.adapters.pdf.output_page_map import map_blocks_to_output_pages
+from ubt.adapters.pdf.visual_gate import VisualFinding, VisualGateResult
 from ubt.core.engine.reflow_loop import ReflowControlLoop
 from ubt.core.ir.models import BlockStatus, BookManifest, BoundingBox, FlowID, IRBlock
 from ubt.core.ports import reset_ports, set_visual_gate_runner
@@ -70,24 +70,6 @@ def test_missing_target_is_skipped() -> None:
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class _Finding:
-    severity: str
-    code: str
-    message: str
-    page: int | None = None
-
-
-@dataclass
-class _GateResult:
-    passed: bool
-    findings: tuple[_Finding, ...] = ()
-    sampled_pages: tuple[int, ...] = (1,)
-    vlm_pages: tuple[int, ...] = ()
-    skipped_reason: str | None = None
-    stats: dict[str, Any] = field(default_factory=dict)
-
-
 class _Adapter:
     engine_name = "docling"
 
@@ -123,10 +105,10 @@ async def _run_loop(
     pdf_path = tmp_path / "out.pdf"
     pdf_path.write_bytes(b"%PDF-1.4 mock")
 
-    async def mock_gate_runner(*args: Any, **kwargs: Any) -> _GateResult:
-        return _GateResult(
+    async def mock_gate_runner(*args: Any, **kwargs: Any) -> VisualGateResult:
+        return VisualGateResult(
             passed=False,
-            findings=(_Finding("major", "blank_candidate", "page 2 blank", page=2),),
+            findings=(VisualFinding("major", "blank_candidate", "page 2 blank", page=2),),
         )
 
     set_visual_gate_runner(mock_gate_runner)
