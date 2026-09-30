@@ -13,28 +13,37 @@ document loses text or assets.
 ```
 corpus/
   cases.json          # the case manifest (checked in)
-  documents/          # real artifacts + their *_contract.json (NOT checked in)
+  documents/          # real source documents + delivered artifacts (NOT checked in)
 ```
 
-Large/real documents are deliberately **not** committed. Populate
-`corpus/documents/` locally (copy the delivered `*.pdf` and its `*_contract.json`
-sidecar), or point a case at an existing artifact path. A case whose artifact is
-absent is reported `skip` (or `fail` under `--require-all`).
+Large/real documents are deliberately **not** committed (size + licensing).
+Populate `corpus/documents/` locally. `cases.json` references them by relative
+path; a case whose file is absent is reported `skip` (or `fail` under
+`--require-all`).
 
 ## Running
 
 ```bash
-# Verify every populated case. Exit 0 = all pass; 1 = a contract/expectation failed.
+# Translate every case's source document (dry-run, no API key) and verify the
+# contract each run writes. This is the full gate: the pipeline itself is the
+# ground truth, not a hand-written fixture.
+uv run ubt verify --corpus corpus --run --require-all
+
+# Verify only what is already on disk (no translation).
 uv run ubt verify --corpus corpus
 
-# CI: a missing artifact is a failure, not a skip.
-uv run ubt verify --corpus corpus --require-all
-
-# Verify one delivered artifact (reads its <stem>_contract.json).
+# Verify one delivered artifact (reads its <stem>_<tag>_contract.json).
 uv run ubt verify /path/to/book_mono.pdf
 
 # Re-derive the contract from a finished job's ledger (independent cross-check).
 uv run ubt verify --job job_<docid>_zh --engine rigid
+```
+
+Local run for the two checked-in cases (source PDFs are not committed):
+
+```bash
+cp ~/Downloads/2609.20519v1.pdf ~/Downloads/2608.25512v1.pdf corpus/documents/
+uv run ubt verify --corpus corpus --run --require-all
 ```
 
 ## Case schema (`cases.json`)
@@ -44,14 +53,17 @@ uv run ubt verify --job job_<docid>_zh --engine rigid
   "schema_version": 1,
   "cases": [
     {
-      "id": "twocol-paper",
-      "description": "Two-column academic paper: figures/tables must survive.",
-      "artifact": "documents/2609.20519v1_mono.pdf", // or "job": "job_..._zh"
+      "id": "twocol-paper-2609",
+      "description": "Two-column paper: figures/tables must survive.",
+      // One of:
+      "document": "documents/2609.20519v1.pdf", // source to translate (needs --run)
+      // "artifact": "documents/book_mono.pdf", // an already-delivered artifact
+      // "job": "job_<docid>_zh",               // a finished job's ledger
       "expect": {
         "max_errors": 0,            // ERROR-severity violations allowed (default 0)
         "max_missing_assets": 0,    // lost non-text nodes allowed
         "max_source_kept": 5,       // text nodes allowed to ship source
-        "min_accounted_ratio": 0.95 // (translated + verbatim) / total_text floor
+        "min_accounted_ratio": 0.9  // (translated + verbatim) / total_text floor
       }
     }
   ]
@@ -65,9 +77,9 @@ with an unaccounted text node or a missing asset fails even with no `expect`.
 
 | Case | Axis it pins |
 |---|---|
-| `prose-book` | reflow prose must deliver all text; no assets to lose |
-| `twocol-paper` | multi-column + figures/tables → rigid; no lost assets |
-| `scanned` | scan → overlay; text layer may be sparse but must be accounted |
-| `fgm-dense` | formula/figure/math-dense → rigid; formula assets preserved, not shattered |
+| `twocol-paper-2609` | multi-column + figures/tables → rigid; no lost assets |
+| `paper-2608` | figures/tables survive across a second document |
 
-Add a case whenever a bug is found; the case is the regression test.
+Add a case whenever a bug is found; the case is the regression test. Prefer a
+`document` case (the gate runs the pipeline) over a frozen `artifact` one, so the
+case keeps probing the current engine rather than yesterday's output.

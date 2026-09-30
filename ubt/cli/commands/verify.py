@@ -98,13 +98,22 @@ def verify_command(
             help="Corpus: a missing artifact/job is a failure, not a skip",
         ),
     ] = False,
+    run: Annotated[
+        bool,
+        typer.Option(
+            "--run",
+            help="Corpus: translate each case's `document` (dry-run) before verifying",
+        ),
+    ] = False,
     json_output: Annotated[
         bool, typer.Option("--json", help="Machine-readable mode: stdout carries JSON")
     ] = False,
 ) -> None:
     """Reconcile delivery content/asset ledgers; non-zero exit on violations."""
     if corpus is not None:
-        _verify_corpus(corpus, db_dir=db_dir, require_all=require_all, json_output=json_output)
+        _verify_corpus(
+            corpus, db_dir=db_dir, require_all=require_all, run=run, json_output=json_output
+        )
         return
     if job is not None:
         report = _verify_job(job, engine=engine, db_dir=db_dir, json_output=json_output)
@@ -176,7 +185,9 @@ def _verify_job(job: str, *, engine: str, db_dir: Any, json_output: bool) -> Rec
     return report
 
 
-def _verify_corpus(corpus_dir: Path, *, db_dir: Any, require_all: bool, json_output: bool) -> None:
+def _verify_corpus(
+    corpus_dir: Path, *, db_dir: Any, require_all: bool, run: bool, json_output: bool
+) -> None:
     if not corpus_dir.exists():
         if json_output:
             print(json.dumps({"status": "error", "error": f"no corpus at {corpus_dir}"}))
@@ -197,12 +208,18 @@ def _verify_corpus(corpus_dir: Path, *, db_dir: Any, require_all: bool, json_out
     for case in cases:
         entry: dict[str, Any] = {"id": case.id, "description": case.description}
         try:
-            report = _resolve_case(case, corpus_dir=corpus_dir, db_dir=db_dir)
+            report = _resolve_case(case, corpus_dir=corpus_dir, db_dir=db_dir, run=run)
         except _CaseSkipped as skip:
             entry["status"] = "fail" if require_all else "skip"
             entry["reason"] = skip.reason
             if require_all:
                 failed += 1
+            results.append(entry)
+            continue
+        except _CaseFailed as failure:
+            entry["status"] = "fail"
+            entry["reason"] = failure.reason
+            failed += 1
             results.append(entry)
             continue
         failures = evaluate_expectations(report, case.expect)
@@ -245,7 +262,64 @@ class _CaseSkipped(Exception):
         self.reason = reason
 
 
-def _resolve_case(case: Any, *, corpus_dir: Path, db_dir: Any) -> ReconciliationReport:
+class _CaseFailed(Exception):
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+def _run_document(document: Path, case_id: str) -> ReconciliationReport:
+    """Translate one source document (dry-run) and return its delivery contract.
+
+    The corpus gate's ground truth is the real pipeline, not a hand-written
+    fixture: this runs the entrypoint with mock translations (no API key) and
+    reads the contract it wrote. Any nonzero exit is a hard failure.
+    """
+    import os
+    import subprocess
+    import sys
+    import tempfile
+
+    from ubt.core.content.verify import contract_path_for_artifact, load_contract_file
+
+    out_dir = Path(tempfile.mkdtemp(prefix=f"ubt-corpus-{case_id}-"))
+    out_path = out_dir / f"{case_id}_mono.pdf"
+    env = dict(os.environ)
+    env["UBT_OUTPUT_DIR"] = str(out_dir)
+    cmd = [
+        sys.executable,
+        "-m",
+        "ubt",
+        "translate",
+        str(document),
+        "--dry-run",
+        "--yes",
+        "-o",
+        str(out_path),
+    ]
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, env=env, timeout=3600, check=False
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise _CaseFailed(f"could not run translation: {exc}") from exc
+    if proc.returncode != 0:
+        tail = (proc.stderr or proc.stdout or "").strip().splitlines()[-6:]
+        raise _CaseFailed(f"translation failed (exit {proc.returncode}): {' / '.join(tail)}")
+    contract = contract_path_for_artifact(out_path)
+    if not contract.exists():
+        raise _CaseFailed(f"translation wrote no contract at {contract}")
+    return load_contract_file(contract)
+
+
+def _resolve_case(case: Any, *, corpus_dir: Path, db_dir: Any, run: bool) -> ReconciliationReport:
+    if run and case.document:
+        document = Path(case.document)
+        if not document.is_absolute():
+            document = corpus_dir / document
+        if not document.exists():
+            raise _CaseSkipped(f"document missing: {document}")
+        return _run_document(document, case.id)
     if case.artifact:
         artifact = Path(case.artifact)
         if not artifact.is_absolute():
@@ -264,7 +338,9 @@ def _resolve_case(case: Any, *, corpus_dir: Path, db_dir: Any) -> Reconciliation
             return contract_from_ledger(ledger, case.job)
         finally:
             ledger.close()
-    raise _CaseSkipped("case declares neither artifact nor job")
+    if case.document:
+        raise _CaseSkipped("case has a document; re-run with --run to translate it")
+    raise _CaseSkipped("case declares no document, artifact, or job")
 
 
 def _dump(report: ReconciliationReport) -> dict[str, Any]:

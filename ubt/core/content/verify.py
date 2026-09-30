@@ -32,11 +32,15 @@ def contract_path_for_artifact(artifact: Path | str) -> Path:
     return sidecar_path(Path(artifact), "contract.json")
 
 
+def load_contract_file(path: Path | str) -> ReconciliationReport:
+    """Read a ``*_contract.json`` written by the export stage (raises if absent)."""
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    return ReconciliationReport.model_validate(data)
+
+
 def load_contract(artifact: Path | str) -> ReconciliationReport:
     """Read the contract written beside ``artifact`` (raises if absent/corrupt)."""
-    path = contract_path_for_artifact(artifact)
-    data = json.loads(path.read_text(encoding="utf-8"))
-    return ReconciliationReport.model_validate(data)
+    return load_contract_file(contract_path_for_artifact(artifact))
 
 
 def contract_from_ledger(
@@ -60,6 +64,9 @@ class CorpusCase(BaseModel):
 
     id: str
     description: str = ""
+    #: Source document to translate (with ``--run``) before verifying. Relative
+    #: paths resolve against the corpus directory.
+    document: str | None = None
     #: Path to a delivered artifact (its ``*_contract.json`` is the contract).
     artifact: str | None = None
     #: Or a finished job id whose ledger is re-reconciled.
@@ -121,5 +128,6 @@ __all__ = [
     "contract_path_for_artifact",
     "evaluate_expectations",
     "load_contract",
+    "load_contract_file",
     "load_corpus",
 ]
