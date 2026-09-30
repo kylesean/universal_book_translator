@@ -2221,9 +2221,10 @@ class TypstReconstructor:
             return
 
         if block.block_type == BlockType.TABLE:
-            # Axiom A: only emit a reconstruction that passes structural
-            # verification; an uncertain or corrupt grid is preserved whole as
-            # its source region instead of shipping shattered cells.
+            # Axiom A, two levels: level 1 judges the table text (shatter),
+            # level 2 the rendered grid (shape). A table that fails either is
+            # preserved whole as its source region instead of shipping a
+            # corrupt grid.
             from ubt.core.content.asset_verify import (
                 StructuralVerdict,
                 verify_table_structure,
@@ -2236,7 +2237,20 @@ class TypstReconstructor:
                     lines.append(fallback)
                     lines.append("")
                     return
-            lines.append(_markdown_table_to_typst(content))
+            markup = _markdown_table_to_typst(content)
+            if markup and self.source_pdf is not None:
+                from ubt.adapters.pdf.table_witness import witness_table
+
+                witness = witness_table(markup, block, self.source_pdf, self.typst_binary)
+                if witness.status == "fail":
+                    fallback = self._crop_table_fallback(
+                        block, "witness: " + "; ".join(witness.findings)
+                    )
+                    if fallback is not None:
+                        lines.append(fallback)
+                        lines.append("")
+                        return
+            lines.append(markup)
             lines.append("")
             return
 

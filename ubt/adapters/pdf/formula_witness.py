@@ -275,44 +275,72 @@ def _metrics(img: PILImage.Image) -> _Metrics | None:
     )
 
 
-def compare_structure(rendered: PILImage.Image, source: PILImage.Image) -> list[str]:
+def compare_structure(
+    rendered: PILImage.Image,
+    source: PILImage.Image,
+    *,
+    min_aspect: float = MIN_ASPECT_RATIO,
+    max_aspect: float = MAX_ASPECT_RATIO,
+    min_component: float = MIN_COMPONENT_RATIO,
+    max_component: float = MAX_COMPONENT_RATIO,
+) -> list[str]:
     """Return human-readable findings; an empty list means the pair matches.
 
     Only gross structural deviations are reported — this is a corruption
     witness, not a typesetting critic. Returns ``["unwitnessable"]`` when the
     source crop cannot be measured, so the caller can distinguish "nothing to
     compare" from "compared and matched".
+
+    The tolerances are keyword-configurable because the same metrics judge
+    formulas and tables: a formula's band is calibrated tight, a table's is
+    wider (a Typst booktabs grid legitimately differs in rules and fonts).
     """
     rendered_metrics = _metrics(rendered)
     source_metrics = _metrics(source)
     if source_metrics is None:
         return ["unwitnessable"]
     if rendered_metrics is None:
-        return ["rendered formula has no measurable ink"]
+        return ["rendered asset has no measurable ink"]
     findings: list[str] = []
     aspect_ratio = rendered_metrics.aspect / source_metrics.aspect
-    if not MIN_ASPECT_RATIO <= aspect_ratio <= MAX_ASPECT_RATIO:
+    if not min_aspect <= aspect_ratio <= max_aspect:
         findings.append(f"aspect {aspect_ratio:.2f}x of source")
     component_ratio = rendered_metrics.components / float(max(source_metrics.components, 1))
-    if not MIN_COMPONENT_RATIO <= component_ratio <= MAX_COMPONENT_RATIO:
+    if not min_component <= component_ratio <= max_component:
         findings.append(f"components {rendered_metrics.components} vs {source_metrics.components}")
     return findings
 
 
-def rasterize_math(
-    math_line: str,
+def rasterize_typst(
+    body: str,
     typst_binary: str,
     dpi: int = WITNESS_DPI,
+    page_width_pt: float | None = None,
 ) -> PILImage.Image | None:
-    """Compile one emitted math line and rasterize it; None when unavailable."""
+    """Compile one Typst body into a standalone auto-sized page and rasterize it.
+
+    Shared by the formula and table witnesses: every witness rasterizes the
+    *emitted* markup in isolation, so the comparison is against the artifact the
+    reader will actually see. None when the rasterizer is unavailable (the
+    fail-open contract callers depend on).
+
+    ``page_width_pt`` fixes the probe page width. A table's columns are
+    percentage-based, so on a ``width: auto`` page they collapse and the grid
+    rasterizes tall and narrow; passing the source table's width makes the
+    percentages resolve exactly as they do on the delivered page. Left None for
+    formulas, whose probe geometry is already calibrated.
+    """
+    if page_width_pt is not None and page_width_pt > 0:
+        page_setup = (
+            f"#set page(width: {page_width_pt:.1f}pt, height: auto, margin: 0pt)\n"
+            "#set math.equation(numbering: none)\n\n"
+        )
+    else:
+        page_setup = "#set page(width: auto, height: auto)\n#set math.equation(numbering: none)\n\n"
     try:
         with tempfile.TemporaryDirectory(prefix="ubt-witness-") as tmp:
             probe = Path(tmp) / "witness.typ"
-            probe.write_text(
-                "#set page(width: auto, height: auto)\n"
-                "#set math.equation(numbering: none)\n\n" + _extract_math_source(math_line) + "\n",
-                encoding="utf-8",
-            )
+            probe.write_text(page_setup + body + "\n", encoding="utf-8")
             pdf_path = Path(tmp) / "witness.pdf"
             proc = subprocess.run(
                 [typst_binary, "compile", str(probe), str(pdf_path)],
@@ -345,6 +373,15 @@ def rasterize_math(
     except (OSError, subprocess.SubprocessError, ImportError) as exc:
         logger.debug("Witness rasterization unavailable: %s", exc)
         return None
+
+
+def rasterize_math(
+    math_line: str,
+    typst_binary: str,
+    dpi: int = WITNESS_DPI,
+) -> PILImage.Image | None:
+    """Compile one emitted math line and rasterize it; None when unavailable."""
+    return rasterize_typst(_extract_math_source(math_line), typst_binary, dpi=dpi)
 
 
 def witness_formula(
