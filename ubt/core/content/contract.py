@@ -1,0 +1,204 @@
+"""Reconciliation: does a delivery account for every content node?
+
+This is the gate the whole architecture exists to provide. It is engine-,
+language- and layout-agnostic: it reads the content graph and the ledgers, not
+the render path. A regression on any path therefore surfaces the same way -- as
+an unbalanced book -- instead of as a document-type-specific bug.
+
+Severity is phased on purpose. Phase 0 can already catch *unaccounted* and
+*dropped* content (hard errors). Round-trip verification of reconstructed
+formulae/tables arrives in Phase 1, so an unverified reconstruction is a
+*warning* here and is promoted to an error once verification exists.
+"""
+
+from __future__ import annotations
+
+from enum import StrEnum
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from ubt.core.content.graph import ContentGraph
+from ubt.core.content.ledger import build_ledgers
+from ubt.core.content.nodes import AssetIntegrity, TextDisposition
+
+
+class ViolationKind(StrEnum):
+    TEXT_UNACCOUNTED = "text_unaccounted"  # decided neither translated nor kept
+    TEXT_UNDELIVERED = "text_undelivered"  # dropped without a kept-verbatim reason
+    TEXT_SOURCE_KEPT = "text_source_kept"  # shipped source (translation not placed)
+    ASSET_MISSING = "asset_missing"  # non-text content lost
+    ASSET_UNVERIFIED_RECONSTRUCTION = "asset_unverified_reconstruction"
+
+
+class Severity(StrEnum):
+    ERROR = "error"  # fails the contract
+    WARNING = "warning"  # reported, does not fail (yet)
+
+
+class Violation(BaseModel):
+    """One way the delivery failed to account for the graph."""
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: ViolationKind
+    severity: Severity
+    node_id: str
+    detail: str = ""
+
+
+class ReconciliationReport(BaseModel):
+    """The delivery contract, serialized as ``*.contract.json``.
+
+    ``passed`` is the single machine-checkable verdict: no ERROR-severity
+    violation. Warnings are surfaced for audit but do not block (Phase 0).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    doc_id: str = ""
+    title: str = ""
+    schema_version: int = 1
+
+    total_text: int = 0
+    delivered_text: int = 0
+    verbatim_text: int = 0
+    source_kept_text: int = 0
+    skipped_text: int = 0
+    pending_text: int = 0
+
+    total_assets: int = 0
+    reconstructed_assets: int = 0
+    preserved_assets: int = 0
+    dropped_assets: int = 0
+    missing_assets: int = 0
+
+    violations: tuple[Violation, ...] = Field(default_factory=tuple)
+
+    @property
+    def errors(self) -> tuple[Violation, ...]:
+        return tuple(v for v in self.violations if v.severity is Severity.ERROR)
+
+    @property
+    def warnings(self) -> tuple[Violation, ...]:
+        return tuple(v for v in self.violations if v.severity is Severity.WARNING)
+
+    @property
+    def passed(self) -> bool:
+        return not self.errors
+
+    def summary_line(self) -> str:
+        verdict = "PASS" if self.passed else "FAIL"
+        return (
+            f"[{verdict}] text {self.delivered_text}/{self.total_text} delivered "
+            f"({self.verbatim_text} verbatim, {self.source_kept_text} source-kept, "
+            f"{self.skipped_text} skipped, {self.pending_text} pending) | assets "
+            f"{self.total_assets} ({self.reconstructed_assets} reconstructed, "
+            f"{self.preserved_assets} preserved, {self.missing_assets} missing) | "
+            f"{len(self.errors)} error(s), {len(self.warnings)} warning(s)"
+        )
+
+
+def reconcile(graph: ContentGraph) -> ReconciliationReport:
+    """Balance the two ledgers against the content graph.
+
+    A text node is accounted for only when it is TRANSLATED or VERBATIM; a
+    PENDING node was never decided and a SKIPPED node was dropped. An asset is
+    accounted for when it is PRESERVED_OPAQUE or a *verified* RECONSTRUCTED; an
+    unverified reconstruction is a warning in Phase 0, and MISSING is an error.
+    """
+    content, assets = build_ledgers(graph)
+    violations: list[Violation] = []
+
+    delivered = verbatim = source_kept = skipped = pending = 0
+    for entry in content.entries.values():
+        if entry.disposition is TextDisposition.TRANSLATED:
+            delivered += 1
+        elif entry.disposition is TextDisposition.VERBATIM:
+            verbatim += 1
+        elif entry.disposition is TextDisposition.SOURCE_KEPT:
+            source_kept += 1
+            violations.append(
+                Violation(
+                    kind=ViolationKind.TEXT_SOURCE_KEPT,
+                    severity=Severity.WARNING,
+                    node_id=entry.node_id,
+                    detail=entry.reason or "shipped source; translation not placed",
+                )
+            )
+        elif entry.disposition is TextDisposition.SKIPPED:
+            skipped += 1
+            violations.append(
+                Violation(
+                    kind=ViolationKind.TEXT_UNDELIVERED,
+                    severity=Severity.ERROR,
+                    node_id=entry.node_id,
+                    detail=entry.reason or "dropped without a kept-verbatim reason",
+                )
+            )
+        else:  # PENDING
+            pending += 1
+            violations.append(
+                Violation(
+                    kind=ViolationKind.TEXT_UNACCOUNTED,
+                    severity=Severity.ERROR,
+                    node_id=entry.node_id,
+                    detail="no disposition recorded at delivery",
+                )
+            )
+
+    reconstructed = preserved = dropped = missing = 0
+    for asset_entry in assets.entries.values():
+        if asset_entry.integrity is AssetIntegrity.MISSING:
+            missing += 1
+            violations.append(
+                Violation(
+                    kind=ViolationKind.ASSET_MISSING,
+                    severity=Severity.ERROR,
+                    node_id=asset_entry.node_id,
+                    detail=asset_entry.reason or "asset not carried into the delivery",
+                )
+            )
+        elif asset_entry.integrity is AssetIntegrity.DROPPED:
+            dropped += 1
+        elif asset_entry.integrity is AssetIntegrity.PRESERVED_OPAQUE:
+            preserved += 1
+        else:  # RECONSTRUCTED
+            reconstructed += 1
+            if not asset_entry.verified:
+                violations.append(
+                    Violation(
+                        kind=ViolationKind.ASSET_UNVERIFIED_RECONSTRUCTION,
+                        severity=Severity.WARNING,
+                        node_id=asset_entry.node_id,
+                        detail=(
+                            f"reconstructed as {asset_entry.representation.value} without a "
+                            "round-trip verification (Phase 1 gate)"
+                        ),
+                    )
+                )
+
+    return ReconciliationReport(
+        doc_id=graph.doc_id,
+        title=graph.title,
+        total_text=content.total,
+        delivered_text=delivered,
+        verbatim_text=verbatim,
+        source_kept_text=source_kept,
+        skipped_text=skipped,
+        pending_text=pending,
+        total_assets=assets.total,
+        reconstructed_assets=reconstructed,
+        preserved_assets=preserved,
+        dropped_assets=dropped,
+        missing_assets=missing,
+        violations=tuple(violations),
+    )
+
+
+__all__ = [
+    "ReconciliationReport",
+    "Severity",
+    "Violation",
+    "ViolationKind",
+    "reconcile",
+]

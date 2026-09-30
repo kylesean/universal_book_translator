@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "prose-book",
+      "description": "Continuous prose: every translatable text node must be delivered; no assets to lose.",
+      "artifact": "documents/prose-book_mono.pdf",
+      "expect": {
+        "max_errors": 0,
+        "max_missing_assets": 0,
+        "max_source_kept": 0,
+        "min_accounted_ratio": 0.98
+      }
+    },
+    {
+      "id": "twocol-paper",
+      "description": "Two-column academic paper (arXiv 2609.20519): figures/tables must survive; rigid engine.",
+      "artifact": "documents/twocol-paper_mono.pdf",
+      "expect": {
+        "max_errors": 0,
+        "max_missing_assets": 0,
+        "min_accounted_ratio": 0.9
+      }
+    },
+    {
+      "id": "scanned",
+      "description": "Scanned book: overlay engine; sparse text layer must still be accounted for.",
+      "artifact": "documents/scanned_mono.pdf",
+      "expect": {
+        "max_errors": 0,
+        "max_missing_assets": 0
+      }
+    },
+    {
+      "id": "fgm-dense",
+      "description": "Formula/figure/math-dense: formula assets preserved whole, never shattered into text.",
+      "artifact": "documents/fgm-dense_mono.pdf",
+      "expect": {
+        "max_errors": 0,
+        "max_missing_assets": 0
+      }
+    }
+  ]
+}

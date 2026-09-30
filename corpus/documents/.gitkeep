@@ -1,0 +1,3 @@
+# Real artifacts are not committed (size + licensing). Copy delivered
+# ``*.pdf`` files together with their ``*_contract.json`` sidecars here, then run
+# ``uv run ubt verify --corpus corpus``. See ../README.md.

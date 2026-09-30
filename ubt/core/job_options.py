@@ -341,7 +341,11 @@ def resolve_target_output(
 
 #: The derived reports that hang off a deliverable.
 SidecarKind = Literal[
-    "quality_report.json", "quality_report.md", "metrics.json", "visual_report.json"
+    "quality_report.json",
+    "quality_report.md",
+    "metrics.json",
+    "visual_report.json",
+    "contract.json",
 ]
 
 

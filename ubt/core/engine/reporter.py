@@ -274,6 +274,10 @@ class QualityReport(BaseModel):
     # document was forced through overlay engine). None = normal delivery.
     delivery_status: str | None = None
     delivery_warning: str | None = None
+    #: Content/asset ledger reconciliation (ubt.core.content.contract). None for
+    #: jobs that predate the contract layer. The standalone ``*.contract.json``
+    #: holds the same structure; this is the embedded copy for one-stop audit.
+    delivery_contract: dict[str, Any] | None = None
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -312,6 +316,7 @@ def build_quality_report(
     terminology_metrics: ReportTerminologyMetrics | None = None,
     entity_consistency: ReportEntityConsistency | None = None,
     enforced_spans: int = 0,
+    delivery_contract: dict[str, Any] | None = None,
 ) -> QualityReport:
     """Analyze all ledger blocks for a job and construct a comprehensive QualityReport.
 
@@ -532,6 +537,7 @@ def build_quality_report(
         qe_judge_errors=_metadata_counter("qe_judge_errors"),
         delivery_status=manifest.run.delivery_status,
         delivery_warning=manifest.run.delivery_warning,
+        delivery_contract=delivery_contract,
     )
 
 

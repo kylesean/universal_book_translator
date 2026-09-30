@@ -858,6 +858,54 @@ async def _render_complementary_artifact(
     return secondary_path
 
 
+def _reconcile_delivery_contract(
+    ctx: StageContext, blocks: list[IRBlock], rendered_path: Path
+) -> dict[str, Any]:
+    """Build the content graph, reconcile the two ledgers, persist the contract.
+
+    Phase 0 is advisory: violations are recorded in the report and the standalone
+    ``*_contract.json``; ``ubt verify`` fails the build on error-severity
+    violations, but export does not block on them until renderers are
+    ledger-bound (Phase 2).
+    """
+    from ubt.core.content import graph_from_blocks, reconcile
+
+    manifest = ctx.manifest
+    engine = str(
+        getattr(manifest.run, "render_engine_effective", "")
+        or ctx.config.render_engine
+        or "publication"
+    )
+    graph = graph_from_blocks(
+        blocks,
+        engine=engine,
+        doc_id=str(getattr(manifest, "doc_id", "") or ""),
+        title=str(getattr(manifest, "title", "") or ""),
+        source_path=str(getattr(manifest, "source_path", "") or ""),
+    )
+    contract = reconcile(graph)
+    payload = contract.model_dump(mode="json")
+    contract_path = sidecar_path(rendered_path, "contract.json")
+    try:
+        contract_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    except OSError as exc:  # a missing audit file must not sink the artifact
+        logger.warning("Could not write delivery contract for %s: %s", ctx.job_id, exc)
+        return payload
+    if contract.passed:
+        logger.info("Delivery contract %s: %s", contract_path.name, contract.summary_line())
+    else:
+        logger.warning(
+            "Delivery contract FAILED for job %s: %s (%d error(s)); see %s",
+            ctx.job_id,
+            contract.summary_line(),
+            len(contract.errors),
+            contract_path,
+        )
+    return payload
+
+
 async def _build_reports(
     ctx: StageContext,
     final_blocks: list[IRBlock],
@@ -867,6 +915,7 @@ async def _build_reports(
     glossary_dicts: list[dict[str, Any]],
     enforced_spans: int,
     run_usage: Any,
+    delivery_contract: dict[str, Any] | None = None,
 ) -> tuple[QualityReport, Path]:
     """Write the quality report + versioned KPI artifact; return both handles.
 
@@ -950,6 +999,7 @@ async def _build_reports(
         terminology_metrics=terminology_metrics,
         entity_consistency=entity_consistency,
         enforced_spans=enforced_spans,
+        delivery_contract=delivery_contract,
     )
     if report.summary.failed_blocks > 0:
         logger.warning(
@@ -1097,6 +1147,10 @@ async def run_export_stage(
     # the persisted report files always reflect the current render.
     _drop_stale_run_reports(rendered_path)
 
+    # Delivery contract: reconcile the content and asset ledgers for the primary
+    # artifact. Written beside it and embedded in the quality report.
+    delivery_contract = _reconcile_delivery_contract(ctx, final_blocks, rendered_path)
+
     # Post-render visual gate (self-healing loop): T0/T1 deterministic +
     # optional pixel confirmation + sampled T2 VLM + ReflowControlLoop.
     # Enforcement is deferred until after _build_reports (below): a refusal
@@ -1152,6 +1206,7 @@ async def run_export_stage(
         glossary_dicts=glossary_dicts,
         enforced_spans=enforced_spans,
         run_usage=run_usage,
+        delivery_contract=delivery_contract,
     )
 
     # Enforce AFTER the reports are on disk so a refused job keeps its audit

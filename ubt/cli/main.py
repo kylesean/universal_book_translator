@@ -18,6 +18,7 @@ from ubt.cli.commands.doctor import doctor_command
 from ubt.cli.commands.status import inspect_book, job_status, pe_import, recheck_gates_cmd
 from ubt.cli.commands.translate import console as console
 from ubt.cli.commands.translate import translate
+from ubt.cli.commands.verify import verify_command
 from ubt.cli.commands.worker import worker_command
 from ubt.core.config import (
     MOCK_API_KEY,
@@ -573,6 +574,7 @@ app.command(name="pe-import")(pe_import)
 app.command(name="doctor")(doctor_command)
 app.command(name="worker")(worker_command)
 app.command(name="config")(config_command)
+app.command(name="verify")(verify_command)
 
 __all__ = [
     "app",
@@ -585,6 +587,7 @@ __all__ = [
     "doctor_command",
     "worker_command",
     "config_command",
+    "verify_command",
     "version",
     "_build_config",
     "_resolve_db_dir",
