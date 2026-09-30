@@ -15,6 +15,7 @@ from ubt.core.qe.comet_runner import (
 from ubt.core.qe.defect_taxonomy import has_structural_defect
 from ubt.core.qe.fast_pass import FastPassFilter
 from ubt.core.validators.consistency import GlossaryConsistencyValidator
+from ubt.pipeline.facts import Terminology
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +111,7 @@ async def _audit_pass_sample(
 
 async def run_quality_gate_stage(
     ctx: StageContext,
+    terminology: Terminology,
     chapter_id: str | None = None,
 ) -> AsyncIterator[TranslationProgressEvent]:
     """Evaluate drafted blocks with FastPassFilter and score suspicious blocks via QE runner.
@@ -119,7 +121,7 @@ async def run_quality_gate_stage(
     that scores, and only the bible stage could have produced a glossary. An
     explicitly injected runner keeps its own scoring policy.
 
-    The run's enforced terminology comes from ``ctx.glossary_dicts``. A target
+    The run's enforced terminology comes from the ``terminology`` parameter. A target
     that drops/alters a term gets a flag carrying
     ``GLOSSARY_VIOLATION_MARKER``, which is a registered structural marker —
     the block is routed into the scoring branch below instead of auto-passing
@@ -130,7 +132,7 @@ async def run_quality_gate_stage(
     actual_job_id = ctx.job_id
     fast_pass = ctx.fast_pass
     create_event_fn = ctx.create_event
-    glossary_dicts = ctx.glossary_dicts or None
+    glossary_dicts = terminology.glossary_dicts or None
     qe_runner = ctx.qe_runner
     bind_glossary = getattr(qe_runner, "with_glossary", None)
     if not ctx.qe_runner_explicit and glossary_dicts and callable(bind_glossary):

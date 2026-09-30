@@ -15,15 +15,14 @@ The split this enforces:
 - :attr:`StageContext.config` / :attr:`~StageContext.router` /
   :attr:`~StageContext.manifest` — the run's inputs; a stage reads the config
   field it needs instead of receiving it as a parameter.
-- The ``glossary_dicts`` / ``abbreviation_entries`` / ``block_count`` fields —
-  written by the stage that produces them and read by the stages after it. That
-  is the actual stage-to-stage data flow, now visible in one place.
+- What one stage *produces* and a later one consumes lives in
+  :mod:`ubt.pipeline.facts` now, not here: the plan owns the value and hands it
+  to the stage that reads it (``terminology`` to the draft/repair/triage/… stages,
+  ``layout`` to the two advisories), so the inter-stage flow is an explicit,
+  typed parameter.
 - What a *single* stage needs for itself (``mode`` and ``max_repairs`` for
   consistency, the ``visual_*`` knobs for export) stays in that stage's own
   signature, so it remains greppable as a stage-specific tunable.
-
-Tests drive one stage by building a context with the fields that stage reads; see
-``tests/stage_ctx_factory.py``.
 """
 
 from __future__ import annotations
@@ -32,13 +31,13 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal, Protocol
+from typing import Protocol
 
 from ubt.core.cleaners.citation_masker import CitationMasker
 from ubt.core.cleaners.code_masker import CodeMasker
 from ubt.core.cleaners.math_masker import MathMasker
 from ubt.core.cleaners.soup_math import SoupMathMasker
-from ubt.core.config import DualMode, UBTConfig
+from ubt.core.config import UBTConfig
 from ubt.core.engine.events import (
     EventType,
     TranslationProgressEvent,
@@ -47,10 +46,8 @@ from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.repair_loop import RepairLoop
 from ubt.core.exceptions import JobInterruptedError
 from ubt.core.ir.models import BookManifest, IRBlock
-from ubt.core.memory.bible import BookBible
 from ubt.core.memory.tm import TranslationMemory
 from ubt.core.policy.adaptive_policy import AdaptivePolicy
-from ubt.core.policy.bilingual_advisor import Advisory
 from ubt.core.ports import DocumentAdapter
 from ubt.core.qe.base import BaseQERunner
 from ubt.core.qe.fast_pass import FastPassFilter
@@ -158,17 +155,11 @@ class StageContext:
         if self.cancel_token is not None and self.cancel_token.is_set():
             raise JobInterruptedError(f"Job {self.job_id} cancelled cooperatively")
 
-    # --- Produced by an earlier stage, consumed by a later one ------------
-    #: The whole-book translation bible the bible stage assembled.
-    bible: BookBible | None = None
-    glossary_dicts: list[dict[str, Any]] = field(default_factory=list)
-    abbreviation_entries: list[dict[str, Any]] = field(default_factory=list)
-    block_count: int = 0
-    #: Bilingual advisory state: phase 1 (layout) writes it, phase 2
-    #: (post-repair difficulty) reads it to decide whether to downgrade a step.
-    advisory: Advisory | None = None
-    tier_basis: DualMode = "inline"
-    enforcement: Literal["advise", "auto"] = "advise"
+    # --- Produced by an earlier stage -------------------------------------
+    # Values one stage produces and a later one consumes live in
+    # :mod:`ubt.pipeline.facts` now: the plan owns them and passes the value to
+    # the stage that reads it, so the inter-stage flow is an explicit, typed
+    # parameter instead of a field on this shared object.
 
     # Backing store for :meth:`current_blocks`: the snapshot plus the ledger
     # block revision it was read at.

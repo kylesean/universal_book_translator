@@ -38,6 +38,7 @@ from ubt.core.engine.stages import (
     run_repair_stage,
     run_triage_stage,
 )
+from ubt.pipeline.facts import RunFacts
 
 #: Called with the terminal export event, *before* it is yielded.
 ExportHook = Callable[[TranslationProgressEvent], Awaitable[None]]
@@ -60,10 +61,16 @@ class RunGates:
 async def run_stages(
     ctx: StageContext,
     gates: RunGates,
+    facts: RunFacts,
     *,
     on_export_completed: ExportHook | None = None,
 ) -> AsyncIterator[TranslationProgressEvent]:
     """Run the stage plan, yielding every progress event in order.
+
+    ``facts`` carries the values a stage produces and a later one consumes (see
+    :mod:`ubt.pipeline.facts`); the plan threads the value each stage reads, so
+    the inter-stage flow is an explicit parameter rather than a field on the
+    shared context.
 
     ``on_export_completed`` runs on the terminal export event *before* it is
     yielded, so a caller that stops iterating immediately does not lose the
@@ -72,35 +79,35 @@ async def run_stages(
     async for event in run_ingest_stage(ctx):
         yield event
     await run_extraction_witness_stage(ctx)
-    async for event in run_mode_advisory_stage(ctx):
+    async for event in run_mode_advisory_stage(ctx, facts.layout):
         yield event
     # Zero-token preflights BEFORE the bible: the bible stage's skeleton
     # extraction and abbreviation backfill are billable calls, and the
     # render/cost preflight exists to fail before any spend.
     await run_render_preflight_stage(ctx)
     await run_cost_preflight_stage(ctx)
-    async for event in run_bible_stage(ctx):
+    async for event in run_bible_stage(ctx, facts.terminology):
         yield event
     if gates.chapter_streaming:
-        async for event in run_chapter_streaming_pipeline(ctx):
+        async for event in run_chapter_streaming_pipeline(ctx, facts.terminology):
             yield event
     else:
-        async for event in run_draft_stage(ctx):
+        async for event in run_draft_stage(ctx, facts.terminology):
             yield event
         if gates.c_text:
             async for event in run_c_text_stage(ctx):
                 yield event
-        async for event in run_quality_gate_stage(ctx):
+        async for event in run_quality_gate_stage(ctx, facts.terminology):
             yield event
-        async for event in run_repair_stage(ctx):
+        async for event in run_repair_stage(ctx, facts.terminology):
             yield event
     if gates.consistency:
-        async for event in run_consistency_stage(ctx):
+        async for event in run_consistency_stage(ctx, facts.terminology):
             yield event
-    async for event in run_triage_stage(ctx):
+    async for event in run_triage_stage(ctx, facts.terminology):
         yield event
-    await run_difficulty_advisory_stage(ctx)
-    async for event in run_export_stage(ctx):
+    await run_difficulty_advisory_stage(ctx, facts.layout)
+    async for event in run_export_stage(ctx, facts.terminology):
         if event.event_type is EventType.EXPORT_COMPLETED and on_export_completed is not None:
             await on_export_completed(event)
         yield event

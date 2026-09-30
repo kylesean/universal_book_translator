@@ -38,6 +38,7 @@ from ubt.core.router.router import (
     classify_provider_error,
 )
 from ubt.core.validators.consistency import GlossaryConsistencyValidator
+from ubt.pipeline.facts import Terminology
 from ubt.segment.placeholders import MaskedSource, PlaceholderEngine
 from ubt.translate.engine import TranslationEngine
 
@@ -1062,6 +1063,7 @@ def _restore_memory_state(
 
 async def run_draft_stage(
     ctx: StageContext,
+    terminology: Terminology,
     chapter_id: str | None = None,
 ) -> AsyncIterator[TranslationProgressEvent]:
     """Execute streaming drafted translation across keyset pagination batches."""
@@ -1084,9 +1086,16 @@ async def run_draft_stage(
         )
     )
     config = ctx.config
-    all_blocks_count = ctx.block_count
-    glossary_dicts = ctx.glossary_dicts
-    abbreviation_entries = ctx.abbreviation_entries
+    # How many blocks the book holds: derived here from the ledger (it is
+    # observable state, not something a stage has to hand forward) and read by
+    # resolve_draft_policy to decide fast-path vs rolling summaries.
+    stats = await asyncio.to_thread(ledger.get_job_stats, actual_job_id)
+    try:
+        all_blocks_count = int(stats.get("total", 0)) if stats else 0
+    except (TypeError, ValueError):
+        all_blocks_count = 0
+    glossary_dicts = terminology.glossary_dicts
+    abbreviation_entries = terminology.abbreviation_entries
     concurrency_sem = ctx.concurrency_sem
     create_event_fn = ctx.create_event
     tm = ctx.tm

@@ -13,12 +13,14 @@ from ubt.core.exceptions import BudgetExceededError, JobInterruptedError
 from ubt.core.ir.models import BlockStatus, IRBlock
 from ubt.core.memory.glossary_table import build_chunk_glossary_table
 from ubt.core.qe.defect_taxonomy import REPAIR_ERROR_PREFIX
+from ubt.pipeline.facts import Terminology
 
 logger = logging.getLogger(__name__)
 
 
 async def run_repair_stage(
     ctx: StageContext,
+    terminology: Terminology,
     defer_unresolved_to_triage: bool = True,
     chapter_id: str | None = None,
 ) -> AsyncIterator[TranslationProgressEvent]:
@@ -35,8 +37,8 @@ async def run_repair_stage(
     # only because the fallback path (finalize as FAILED) is still reachable and
     # still tested.
     repair_loop = ctx.repair_loop
-    glossary_dicts = ctx.glossary_dicts
-    abbreviation_entries = ctx.abbreviation_entries
+    glossary_dicts = terminology.glossary_dicts
+    abbreviation_entries = terminology.abbreviation_entries
     target_lang = ctx.target_lang
     source_lang = ctx.source_lang
     fast_pass = ctx.fast_pass

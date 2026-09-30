@@ -16,6 +16,7 @@ from ubt.core.memory.character_miner import mine_characters_stream
 from ubt.core.memory.seed_glossary import load_external_glossary, seed_entries_for_profile
 from ubt.core.memory.tm import PROMPT_VERSION
 from ubt.core.ports import is_fast_lane_eligible
+from ubt.pipeline.facts import Terminology
 
 logger = logging.getLogger(__name__)
 
@@ -65,12 +66,13 @@ def _split_bible_entries(
 
 async def run_bible_stage(
     ctx: StageContext,
+    terminology: Terminology,
 ) -> AsyncIterator[TranslationProgressEvent]:
     """Extract, mine, and backfill translation bible for the whole book.
 
-    The extracted terminology lands on the context (``ctx.glossary_dicts``,
-    ``ctx.abbreviation_entries``, ``ctx.block_count``) for the stages that follow,
-    and the stage yields its own ``BIBLE_EXTRACTED`` event when it has one.
+    The extracted terminology is written into the plan-owned ``terminology``
+    value (ADR-0001 explicit params) for the stages that follow, and the stage
+    yields its own ``BIBLE_EXTRACTED`` event when it has one.
 
     ``ctx.fast_lane`` (short docs): seeds + chapter titles only —
     skips 0-token mining and the LLM backfill channel. Same stage graph,
@@ -146,14 +148,6 @@ async def run_bible_stage(
                 if e:
                     bible_entries.append(e)
 
-    stats = await asyncio.to_thread(ledger.get_job_stats, actual_job_id)
-    block_count = 0
-    if stats:
-        try:
-            block_count = int(stats.get("total", 0))
-        except (TypeError, ValueError):
-            block_count = 0
-
     if cached_payload is not None:
         # Reuse mined+backfilled entries from the previous run of this job;
         # the deterministic entries above were recomputed fresh.
@@ -195,10 +189,8 @@ async def run_bible_stage(
                     f"({len(glossary_dicts)} translated, {len(abbreviation_entries)} pending)"
                 ),
             )
-        ctx.bible = bible
-        ctx.glossary_dicts = glossary_dicts
-        ctx.abbreviation_entries = abbreviation_entries
-        ctx.block_count = block_count
+        terminology.glossary_dicts = glossary_dicts
+        terminology.abbreviation_entries = abbreviation_entries
         if event is not None:
             yield event
         return
@@ -302,9 +294,7 @@ async def run_bible_stage(
             ),
         )
 
-    ctx.bible = bible
-    ctx.glossary_dicts = glossary_dicts
-    ctx.abbreviation_entries = abbreviation_entries
-    ctx.block_count = block_count
+    terminology.glossary_dicts = glossary_dicts
+    terminology.abbreviation_entries = abbreviation_entries
     if event is not None:
         yield event

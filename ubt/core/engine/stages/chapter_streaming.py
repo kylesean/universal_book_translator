@@ -14,6 +14,7 @@ from ubt.core.engine.stages.draft import run_draft_stage
 from ubt.core.engine.stages.quality_gate import run_quality_gate_stage
 from ubt.core.engine.stages.repair import run_repair_stage
 from ubt.core.ir.models import ChapterMeta
+from ubt.pipeline.facts import Terminology
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,7 @@ _DONE = object()
 
 async def run_chapter_streaming_pipeline(
     ctx: StageContext,
+    terminology: Terminology,
 ) -> AsyncIterator[TranslationProgressEvent]:
     """Execute streaming pipelined chapter processing across stages.
 
@@ -44,14 +46,14 @@ async def run_chapter_streaming_pipeline(
             chapters = chapters[start_idx:]
     if not chapters:
         # Fallback to monolithic stage execution when no chapter metadata is present
-        async for event in run_draft_stage(ctx):
+        async for event in run_draft_stage(ctx, terminology):
             yield event
         if ctx.config.c_text_enabled:
             async for event in run_c_text_stage(ctx):
                 yield event
-        async for event in run_quality_gate_stage(ctx):
+        async for event in run_quality_gate_stage(ctx, terminology):
             yield event
-        async for event in run_repair_stage(ctx):
+        async for event in run_repair_stage(ctx, terminology):
             yield event
         return
 
@@ -69,7 +71,7 @@ async def run_chapter_streaming_pipeline(
                     ch.spine_index,
                     ch.chapter_id,
                 )
-                async for event in run_draft_stage(ctx, chapter_id=ch.chapter_id):
+                async for event in run_draft_stage(ctx, terminology, chapter_id=ch.chapter_id):
                     await event_queue.put(event)
                 await qe_queue.put(ch)
         finally:
@@ -90,9 +92,11 @@ async def run_chapter_streaming_pipeline(
                 if c_text_enabled:
                     async for event in run_c_text_stage(ctx, chapter_id=ch.chapter_id):
                         await event_queue.put(event)
-                async for event in run_quality_gate_stage(ctx, chapter_id=ch.chapter_id):
+                async for event in run_quality_gate_stage(
+                    ctx, terminology, chapter_id=ch.chapter_id
+                ):
                     await event_queue.put(event)
-                async for event in run_repair_stage(ctx, chapter_id=ch.chapter_id):
+                async for event in run_repair_stage(ctx, terminology, chapter_id=ch.chapter_id):
                     await event_queue.put(event)
 
                 # Emit CHAPTER_COMPLETED milestone event

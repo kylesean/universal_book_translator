@@ -26,6 +26,7 @@ from ubt.core.memory.tm import (
     TranslationMemory,
 )
 from ubt.core.qe.added_content import AddedContentGate
+from ubt.pipeline.facts import Terminology
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +110,7 @@ def writeback_tm_from_ledger(
     return tm.writeback(entries)
 
 
-async def run_tm_writeback_stage(ctx: StageContext) -> None:
+async def run_tm_writeback_stage(ctx: StageContext, terminology: Terminology) -> None:
     """Flush this run's accepted blocks into the shared TM. Yields no events."""
     from ubt.core.memory.abbreviation_miner import format_abbreviations_markdown_table
     from ubt.core.memory.tm import PROMPT_VERSION, compute_tm_context
@@ -128,11 +129,13 @@ async def run_tm_writeback_stage(ctx: StageContext) -> None:
             # The capped sheet the draft prompts actually carried — hashing the
             # uncapped table here would let a glossary change go undetected by
             # the TM fingerprint.
-            build_global_glossary_table(ctx.glossary_dicts, ctx.config.glossary_max_global_entries),
+            build_global_glossary_table(
+                terminology.glossary_dicts, ctx.config.glossary_max_global_entries
+            ),
             ctx.source_lang,
             ctx.target_lang,
             # Same abbreviation channel the draft stage hashed.
-            format_abbreviations_markdown_table(ctx.abbreviation_entries),
+            format_abbreviations_markdown_table(terminology.abbreviation_entries),
         )
         written = await asyncio.to_thread(
             writeback_tm_from_ledger,

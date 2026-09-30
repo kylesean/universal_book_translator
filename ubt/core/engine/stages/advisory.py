@@ -45,6 +45,7 @@ from ubt.core.ports import (
     inspect_font_encoding_damage,
     summarize_font_encoding_damage,
 )
+from ubt.pipeline.facts import LayoutAdvisory
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +117,9 @@ async def run_extraction_witness_stage(ctx: StageContext) -> None:
         logger.debug("Extraction witness skipped for %s: %s", ctx.job_id, exc)
 
 
-async def run_mode_advisory_stage(ctx: StageContext) -> AsyncIterator[TranslationProgressEvent]:
+async def run_mode_advisory_stage(
+    ctx: StageContext, layout: LayoutAdvisory
+) -> AsyncIterator[TranslationProgressEvent]:
     """Publish the run policy and advise on the requested bilingual mode."""
     config = ctx.config
     manifest = ctx.manifest
@@ -126,8 +129,8 @@ async def run_mode_advisory_stage(ctx: StageContext) -> AsyncIterator[Translatio
     auto_mode = config.dual_mode == "auto"
     tier_basis: DualMode = "inline" if auto_mode else requested_mode
     enforcement: Literal["advise", "auto"] = "auto" if auto_mode else "advise"
-    ctx.tier_basis = tier_basis
-    ctx.enforcement = enforcement
+    layout.tier_basis = tier_basis
+    layout.enforcement = enforcement
 
     # Run-policy keys: the renderer and the report read these off the manifest,
     # so they are published before the first stage that could fail.
@@ -156,7 +159,7 @@ async def run_mode_advisory_stage(ctx: StageContext) -> AsyncIterator[Translatio
         profile=ctx.profile_name,
         figure_pages=figure_pages,
     )
-    ctx.advisory = advisory
+    layout.advisory = advisory
     effective_mode: DualMode = (
         advisory.recommended if auto_mode and advisory.tier == "discourage" else tier_basis
     )
@@ -258,7 +261,7 @@ async def run_mode_advisory_stage(ctx: StageContext) -> AsyncIterator[Translatio
     yield event
 
 
-async def run_difficulty_advisory_stage(ctx: StageContext) -> None:
+async def run_difficulty_advisory_stage(ctx: StageContext, layout: LayoutAdvisory) -> None:
     """Step the render mode down on live repair burden. Yields no events.
 
     Only ``auto`` enforcement may move the user's choice, and only one notch
@@ -267,7 +270,7 @@ async def run_difficulty_advisory_stage(ctx: StageContext) -> None:
     """
     config = ctx.config
     manifest = ctx.manifest
-    advisory = ctx.advisory
+    advisory = layout.advisory
     if advisory is None:  # pragma: no cover - phase 1 always runs first
         return
     post_stats = await asyncio.to_thread(ctx.ledger.get_job_stats, ctx.job_id)
@@ -276,11 +279,11 @@ async def run_difficulty_advisory_stage(ctx: StageContext) -> None:
         repaired=int(post_stats.get("repaired", 0)),
         failed=int(post_stats.get("failed", 0)),
     )
-    pre_downgrade = str(manifest.run.effective_dual_mode or ctx.tier_basis)
-    effective_mode: DualMode = ctx.tier_basis
+    pre_downgrade = str(manifest.run.effective_dual_mode or layout.tier_basis)
+    effective_mode: DualMode = layout.tier_basis
     if not ctx.short_chain:
         effective_mode = resolve_effective_mode(
-            ctx.tier_basis, advisory, difficulty, enforcement=ctx.enforcement
+            layout.tier_basis, advisory, difficulty, enforcement=layout.enforcement
         )
     else:
         effective_mode = pre_downgrade  # type: ignore[assignment]
@@ -319,7 +322,7 @@ async def run_difficulty_advisory_stage(ctx: StageContext) -> None:
     )
     advisory_dict = dict(advisory.to_dict())
     advisory_dict["effective"] = effective_mode
-    advisory_dict["enforcement"] = ctx.enforcement
+    advisory_dict["enforcement"] = layout.enforcement
     advisory_dict["difficulty"] = {
         "hard": difficulty.hard,
         "repair_share": difficulty.repair_share,

@@ -51,6 +51,7 @@ from ubt.core.router.rate_limiter import AdaptiveTokenBucket
 from ubt.core.router.registry import get_default_registry
 from ubt.core.router.router import ModelRouter
 from ubt.core.router_mode import decide
+from ubt.pipeline.facts import RunFacts
 from ubt.pipeline.run import RunGates, run_stages
 
 logger = logging.getLogger(__name__)
@@ -860,12 +861,19 @@ class PipelineOrchestrator:
                 c_text=self.config.c_text_enabled,
                 consistency=self.config.consistency_enforce != "off",
             )
+            # The values a stage produces and a later one consumes live here for
+            # the whole run (ADR-0001 explicit params): the plan threads each to
+            # the stage that reads it, and the terminal hook reads the same facts
+            # the stages filled.
+            facts = RunFacts()
 
             async def _on_export_completed(event: TranslationProgressEvent) -> None:
-                await run_tm_writeback_stage(ctx)
+                await run_tm_writeback_stage(ctx, facts.terminology)
                 await self._run_finalize_hook(event)
 
-            async for event in run_stages(ctx, gates, on_export_completed=_on_export_completed):
+            async for event in run_stages(
+                ctx, gates, facts, on_export_completed=_on_export_completed
+            ):
                 yield event
 
         except GeneratorExit:

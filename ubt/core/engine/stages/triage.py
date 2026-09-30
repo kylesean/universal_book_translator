@@ -44,6 +44,7 @@ from ubt.core.qe.defect_taxonomy import (
     is_transient_lifecycle_only,
 )
 from ubt.core.validators.span_repair import max_severity, span_to_dict
+from ubt.pipeline.facts import Terminology
 
 logger = logging.getLogger(__name__)
 
@@ -116,13 +117,14 @@ def _blocked_human_target(source_text: str) -> str:
 
 async def run_triage_stage(
     ctx: StageContext,
+    terminology: Terminology,
 ) -> AsyncIterator[TranslationProgressEvent]:
     """Classify unresolved blocks by MQM severity and route them accordingly."""
     ledger = ctx.ledger
     actual_job_id = ctx.job_id
     repair_loop = ctx.repair_loop
-    glossary_dicts = ctx.glossary_dicts
-    abbreviation_entries = ctx.abbreviation_entries
+    glossary_dicts = terminology.glossary_dicts
+    abbreviation_entries = terminology.abbreviation_entries
     target_lang = ctx.target_lang
     source_lang = ctx.source_lang
     fast_pass = ctx.fast_pass

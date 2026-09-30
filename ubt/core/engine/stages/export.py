@@ -59,6 +59,7 @@ from ubt.core.validators.consistency import GlossaryConsistencyValidator
 from ubt.core.validators.glossary_enforcer import DeterministicGlossaryEnforcer
 from ubt.core.validators.html_delta import HTMLDeltaValidator
 from ubt.core.validators.math_guard import apply_math_guards
+from ubt.pipeline.facts import Terminology
 
 logger = logging.getLogger(__name__)
 
@@ -1182,6 +1183,7 @@ async def _build_reports(
 
 async def run_export_stage(
     ctx: StageContext,
+    terminology: Terminology,
 ) -> AsyncIterator[TranslationProgressEvent]:
     """Perform integrity checks, apply glossary enforcement (opt-in), and render output document."""
     ledger = ctx.ledger
@@ -1199,7 +1201,7 @@ async def run_export_stage(
     input_path = ctx.input_path
     target_lang = ctx.target_lang
     source_lang = ctx.source_lang
-    glossary_dicts = ctx.glossary_dicts
+    glossary_dicts = terminology.glossary_dicts
     html_validator = ctx.html_validator
     create_event_fn = ctx.create_event
     pe_queue_enabled = ctx.config.pe_queue_enabled
