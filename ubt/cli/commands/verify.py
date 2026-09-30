@@ -292,6 +292,7 @@ def _run_document(document: Path, case_id: str) -> ReconciliationReport:
         "ubt",
         "translate",
         str(document),
+        "--fresh",
         "--dry-run",
         "--yes",
         "-o",

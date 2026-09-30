@@ -179,6 +179,13 @@ class PDFiumAdapter(DoclingPDFAdapter):
         if page_range is not None:
             first, last = page_range
             blocks = [b for b in blocks if _block_page_in_range(b, first, last)]
+        # Evidence-based flow repair: the geometric classifier labels any short,
+        # unterminated paragraph a heading and splits paragraphs at column
+        # boundaries, which strands fragments with no paintable region. Repair
+        # roles and reunite fragments against the page's real typography.
+        from ubt.adapters.pdf.flow_reassembly import reassemble_flow
+
+        blocks, _stats = reassemble_flow(blocks, pdf_path=path)
         return blocks
 
     @pdfium_serialized

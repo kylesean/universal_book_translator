@@ -67,6 +67,12 @@ def _aggregate_line_styles(items: Sequence[LineBox]) -> tuple[float, bool, bool]
     return best_size, (bold_w >= 0.5 * total_w), (italic_w >= 0.5 * total_w)
 
 
+#: Public alias: the char-weighted ground-truth style of a group of source lines.
+#: Extraction-side validation reads this to check a block's role against the
+#: typography actually present on the page.
+aggregate_line_styles = _aggregate_line_styles
+
+
 def _probe_rect_font_style(
     textpage: Any, left: float, bottom: float, right: float, top: float
 ) -> tuple[float, bool, bool]:

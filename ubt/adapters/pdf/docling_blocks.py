@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import re
+from pathlib import Path
 from typing import Any
 
 from ubt.core.ir.models import BlockType, BoundingBox, FlowID, IRBlock, LayoutRole
@@ -637,20 +638,26 @@ def resolve_overlapping_formula_blocks(blocks: list[IRBlock]) -> list[IRBlock]:
     return out
 
 
-def postprocess_blocks(blocks: list[IRBlock], *, allow_cross_page: bool = True) -> list[IRBlock]:
+def postprocess_blocks(
+    blocks: list[IRBlock],
+    *,
+    allow_cross_page: bool = True,
+    pdf_path: Path | None = None,
+) -> list[IRBlock]:
     """Apply the caption/narrative post-pipeline in its fixed order.
 
     Order is load-bearing: chapter fuse → embedded-caption decouple →
     caption-body latch → span-tail attach → caption unify → overlapping
-    formula merge → narrative defragment.
+    formula merge → flow reassembly → narrative defragment.
     """
-    return defragment_narrative_blocks(
-        resolve_overlapping_formula_blocks(
-            unify_figure_captions(
-                attach_split_caption_tails(
-                    latch_caption_bodies(decouple_embedded_captions(fuse_chapter_number(blocks)))
-                )
+    staged = resolve_overlapping_formula_blocks(
+        unify_figure_captions(
+            attach_split_caption_tails(
+                latch_caption_bodies(decouple_embedded_captions(fuse_chapter_number(blocks)))
             )
-        ),
-        allow_cross_page=allow_cross_page,
+        )
     )
+    from ubt.adapters.pdf.flow_reassembly import reassemble_flow
+
+    staged, _stats = reassemble_flow(staged, pdf_path=pdf_path, allow_cross_page=allow_cross_page)
+    return defragment_narrative_blocks(staged, allow_cross_page=allow_cross_page)

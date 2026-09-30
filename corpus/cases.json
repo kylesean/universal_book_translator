@@ -14,12 +14,12 @@
     },
     {
       "id": "paper-2608",
-      "description": "Academic paper (arXiv 2608.25512): figures/tables survive. Budget of 35 untranslated fragments: docling splits algorithm listings and a few prose lines into micro-blocks the rigid zone builder cannot place (no_zone). Enforced so a regression that raises the count fails.",
+      "description": "Academic paper (arXiv 2608.25512): figures/tables survive. Budget of 30 untranslated fragments: a few math/algorithm lines the plain-text extractor splits into micro-blocks the rigid zone builder cannot place (no_zone). Enforced so a regression that raises the count fails.",
       "document": "documents/2608.25512v1.pdf",
       "expect": {
         "max_errors": 0,
         "max_missing_assets": 0,
-        "max_source_kept": 35,
+        "max_source_kept": 30,
         "min_accounted_ratio": 0.9
       }
     },
