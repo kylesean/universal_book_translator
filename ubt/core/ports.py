@@ -60,6 +60,9 @@ class AdapterRuntimeConfig:
     #: VLM judge). Carried here so the adapter reads the resolved config value
     #: instead of re-deriving it from the environment — one gate, one source.
     allow_page_upload: bool
+    #: Content-addressed step cache root (ADR-0001 Phase 4). Empty disables it;
+    #: the adapter builds a store from it for the render path's pixel witnesses.
+    cache_dir: str = ""
 
 
 def apply_runtime_config(adapter: Any, runtime_config: AdapterRuntimeConfig) -> None:

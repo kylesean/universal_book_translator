@@ -20,7 +20,7 @@ from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ubt.adapters.pdf.font_probe import resolve_font_stack
 from ubt.adapters.pdf.formula_tags import recover_formula_tag
@@ -69,6 +69,9 @@ from ubt.adapters.pdf.typst_math import (
 )
 from ubt.core.ir.models import BlockStatus, BlockType, FlowID, IRBlock, LayoutRole
 from ubt.core.language_profile import resolve_font_config
+
+if TYPE_CHECKING:
+    from ubt.cache.store import CacheStore
 
 logger = logging.getLogger(__name__)
 
@@ -725,6 +728,12 @@ class TypstReconstructor:
         # em units from MathJax's viewBox so every formula matches the text.
         self._active_font_pt: float = self.font_size_pt
         self._healer = TypstDiagnosticHealer(typst_binary=self.typst_binary)
+        # Optional content-addressed cache for the pixel witnesses (ADR-0001
+        # Phase 4). The witness compiles + rasters the emitted markup -- the
+        # render path's most expensive pure step -- so a resumed or re-run job
+        # reuses the verdict. Set by the adapter from the run config; None
+        # (the default) computes every time.
+        self.witness_cache: CacheStore | None = None
 
     def is_compiler_available(self) -> bool:
         """Check if typst CLI compiler is available on PATH."""
@@ -1287,7 +1296,7 @@ class TypstReconstructor:
         components and baseline. A failing formula is swapped for its source
         graphic (lossless) and recorded in ``last_witness_findings``.
         """
-        from ubt.adapters.pdf.formula_witness import witness_formula
+        from ubt.adapters.pdf.witness_cache import cached_witness_formula
 
         if self.source_pdf is None:
             return 0
@@ -1300,7 +1309,9 @@ class TypstReconstructor:
             block = by_id.get(m.group(1)) if m else None
             if block is None:
                 continue
-            result = witness_formula(ln, block, self.source_pdf, self.typst_binary)
+            result = cached_witness_formula(
+                self.witness_cache, ln, block, self.source_pdf, self.typst_binary
+            )
             if result.status != "fail":
                 continue
             image_line = self._crop_formula_fallback(block)
@@ -2239,9 +2250,11 @@ class TypstReconstructor:
                     return
             markup = _markdown_table_to_typst(content)
             if markup and self.source_pdf is not None:
-                from ubt.adapters.pdf.table_witness import witness_table
+                from ubt.adapters.pdf.witness_cache import cached_witness_table
 
-                witness = witness_table(markup, block, self.source_pdf, self.typst_binary)
+                witness = cached_witness_table(
+                    self.witness_cache, markup, block, self.source_pdf, self.typst_binary
+                )
                 if witness.status == "fail":
                     fallback = self._crop_table_fallback(
                         block, "witness: " + "; ".join(witness.findings)

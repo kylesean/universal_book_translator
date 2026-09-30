@@ -360,6 +360,13 @@ class UBTConfig(BaseSettings):
 
     # -- SQLite ledger storage directory ------------------------------------
     db_dir: Path = Path(".ubt/ledgers")
+    # Content-addressed step cache (ADR-0001 Phase 4). The render path's pixel
+    # witnesses compile + raster every formula/table, the most expensive pure
+    # step of a render; a resumed or re-run job reuses the verdict when the
+    # inputs are unchanged. Delete the directory to clear it; UBT_CACHE_ENABLED=0
+    # disables it (nothing is read or written).
+    cache_enabled: bool = True
+    cache_dir: Path = Path(".ubt/cache")
     # Opt-in KDP / human-review Markdown companion beside *_quality_report.json.
     # Off by default: it is a review artifact, not part of the machine contract,
     # and no stale-report sweep knows about the extra file. Set

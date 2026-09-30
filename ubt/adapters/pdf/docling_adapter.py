@@ -177,6 +177,14 @@ class DoclingPDFAdapter(BasePDFEngineAdapter):
             reconstructor.formula_render = runtime_config.formula_render
         if hasattr(reconstructor, "math_backend"):
             reconstructor.math_backend = runtime_config.math_backend
+        if hasattr(reconstructor, "witness_cache"):
+            # Content-addressed cache for the pixel witnesses (ADR-0001 Phase 4):
+            # a re-render reuses the compile+raster verdict per formula/table.
+            from ubt.cache.store import DiskCacheStore
+
+            reconstructor.witness_cache = (
+                DiskCacheStore(runtime_config.cache_dir) if runtime_config.cache_dir else None
+            )
 
     def close(self) -> None:
         """Release adapter-owned subprocesses (the MathJax node renderer)."""

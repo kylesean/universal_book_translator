@@ -680,6 +680,7 @@ class PipelineOrchestrator:
                 font_family=self.config.font_family,
                 math_backend=self.config.math_backend,
                 allow_page_upload=self.config.allow_page_upload,
+                cache_dir=str(self.config.cache_dir) if self.config.cache_enabled else "",
             ),
         )
 
