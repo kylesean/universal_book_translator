@@ -36,6 +36,18 @@ class Severity(StrEnum):
     WARNING = "warning"  # reported, does not fail (yet)
 
 
+#: Source-kept reasons that are a *space* failure (Axiom B): the translation
+#: existed but could not be placed, so the reader loses it. These are errors.
+#: Other source-kept reasons (unrenderable math, a quarantined block) are honest,
+#: explicit keeps -- permitted by Axiom B -- and stay warnings.
+_SPACE_FAILURE_MARKERS = ("spill", "overflow", "no_fit", "does not fit")
+
+
+def _is_space_failure(reason: str) -> bool:
+    lowered = reason.lower()
+    return any(marker in lowered for marker in _SPACE_FAILURE_MARKERS)
+
+
 class Violation(BaseModel):
     """One way the delivery failed to account for the graph."""
 
@@ -121,7 +133,9 @@ def reconcile(graph: ContentGraph) -> ReconciliationReport:
             violations.append(
                 Violation(
                     kind=ViolationKind.TEXT_SOURCE_KEPT,
-                    severity=Severity.WARNING,
+                    severity=(
+                        Severity.ERROR if _is_space_failure(entry.reason) else Severity.WARNING
+                    ),
                     node_id=entry.node_id,
                     detail=entry.reason or "shipped source; translation not placed",
                 )

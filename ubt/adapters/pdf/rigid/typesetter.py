@@ -70,6 +70,12 @@ ZONE_INSET_TOP_PT = 1.5
 # over a neighbour. Recovers single-line captions/notes whose Chinese needs one
 # more line than the thin source band holds (arXiv 2609.20519 p6 "Note.").
 RIGID_MARGIN_RECLAIM_DEFAULT_PT = 24.0
+# Axiom B last resort: when margin reclaim is still not enough, try one more
+# fit below the region floor, down to this absolute minimum, before failing
+# closed (leaving source visible). A slightly small target beats an untranslated
+# paragraph for the reader; the degraded blocks are counted so the quality
+# report can show the tradeoff.
+RIGID_DEGRADED_FIT_FLOOR_PT = 5.0
 # Minimum blank band (points) kept between a reclaimed zone's new bottom and the
 # nearest occupied rect below it, so reclaimed paint never grazes a neighbour.
 RECLAIM_GAP_PT = 5.0
@@ -111,6 +117,9 @@ class RigidReport:
     # Blocks that only fit after margin reclaim — counted so the quality
     # report can show how much coverage reclaim bought.
     reclaimed_blocks: list[str] = field(default_factory=list)
+    # Blocks that only fit after shrinking below the region floor (Axiom B
+    # last resort). Counted so the quality report can show the tradeoff.
+    degraded_blocks: list[str] = field(default_factory=list)
     # page number -> block ids planned for that page. A page-level overlay
     # compile failure must demote these blocks to render skips so the loss is
     # block-scoped and visible in the quality report instead of silently
@@ -660,6 +669,14 @@ class RigidTypesetter:
                         pending = trial
                         eff_zones = (*block_zones[:-1], reclaimed_last)
                         report.reclaimed_blocks.append(block.id)
+            if pending is None and floor > RIGID_DEGRADED_FIT_FLOOR_PT:
+                # Axiom B last resort: shrink below the region floor rather than
+                # leave the source visible. A small but translated paragraph is
+                # what the reader needs; the degradation is recorded.
+                degraded = self._paginate(text, eff_zones, RIGID_DEGRADED_FIT_FLOOR_PT)
+                if degraded is not None:
+                    pending = degraded
+                    report.degraded_blocks.append(block.id)
             if pending is None:
                 # Fail closed: a half-painted paragraph is exactly the
                 # mixed-layout artifact this engine removes.
@@ -1145,5 +1162,10 @@ class RigidTypesetter:
                 len(report.rendered_blocks),
                 preserved_count,
                 len(paints),
+            )
+        if report.degraded_blocks:
+            logger.info(
+                "Rigid typesetting: %d block(s) shrunk below the region floor to avoid leaving source visible",
+                len(report.degraded_blocks),
             )
         return out_path, report
