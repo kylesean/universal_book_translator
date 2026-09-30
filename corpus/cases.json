@@ -20,6 +20,26 @@
         "max_missing_assets": 0,
         "min_accounted_ratio": 0.85
       }
+    },
+    {
+      "id": "paper-2609-22978",
+      "description": "Math-heavy paper (arXiv 2609.22978): formulas must survive, not shatter.",
+      "document": "documents/2609.22978v1.pdf",
+      "expect": {
+        "max_errors": 0,
+        "max_missing_assets": 0,
+        "min_accounted_ratio": 0.85
+      }
+    },
+    {
+      "id": "book-chapter-3",
+      "description": "Book chapter (prose): reflow must deliver the text.",
+      "document": "documents/chapter-3.pdf",
+      "expect": {
+        "max_errors": 0,
+        "max_missing_assets": 0,
+        "min_accounted_ratio": 0.9
+      }
     }
   ]
 }

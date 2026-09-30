@@ -39,10 +39,12 @@ uv run ubt verify /path/to/book_mono.pdf
 uv run ubt verify --job job_<docid>_zh --engine rigid
 ```
 
-Local run for the two checked-in cases (source PDFs are not committed):
+Local run for the checked-in cases (source PDFs are not committed; drop the
+matching files into `corpus/documents/`):
 
 ```bash
-cp ~/Downloads/2609.20519v1.pdf ~/Downloads/2608.25512v1.pdf corpus/documents/
+cp ~/Downloads/2609.20519v1.pdf ~/Downloads/2608.25512v1.pdf \
+   ~/Downloads/2609.22978v1.pdf ~/Downloads/chapter-3.pdf corpus/documents/
 uv run ubt verify --corpus corpus --run --require-all
 ```
 
@@ -79,6 +81,8 @@ with an unaccounted text node or a missing asset fails even with no `expect`.
 |---|---|
 | `twocol-paper-2609` | multi-column + figures/tables → rigid; no lost assets |
 | `paper-2608` | figures/tables survive across a second document |
+| `paper-2609-22978` | math-dense paper; tables reconstructed+verified or preserved whole |
+| `book-chapter-3` | figure-heavy prose chapter; reflow delivers text, figures preserved |
 
 Add a case whenever a bug is found; the case is the regression test. Prefer a
 `document` case (the gate runs the pipeline) over a frozen `artifact` one, so the
