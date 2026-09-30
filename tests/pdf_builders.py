@@ -35,8 +35,19 @@ def blank_pdf(path: Path, pages: int = 1) -> Path:
     return path
 
 
-def text_pdf(path: Path, pages: int, chars_per_page: int = 300) -> Path:
+def text_pdf(
+    path: Path,
+    pages: int,
+    chars_per_page: int = 300,
+    blank_pages: frozenset[int] = frozenset(),
+    image_pages: frozenset[int] = frozenset(),
+) -> Path:
     """Minimal born-digital PDF: ``pages`` pages of extractable ASCII text.
+
+    ``blank_pages`` (0-based page indexes) get an empty content stream instead —
+    extractable-char-free pages the profiler classifies as scans.
+    ``image_pages`` declare a 1x1 image XObject in the page resources and draw
+    it, for tests that count images per page.
 
     Built as raw bytes with a hand-written xref so nothing but the format itself
     is under test: pypdf's writer emits an object stream the naive parsers in
@@ -48,11 +59,30 @@ def text_pdf(path: Path, pages: int, chars_per_page: int = 300) -> Path:
         2: f"<< /Type /Pages /Kids [{kids}] /Count {pages} >>".encode(),
     }
     for i in range(pages):
-        text = ("lorem ipsum dolor sit amet " * ((chars_per_page // 27) + 1))[:chars_per_page]
-        content = f"BT /F1 12 Tf 72 720 Td ({text}) Tj ET".encode("latin-1")
+        if i in blank_pages:
+            content = b""
+        else:
+            text = ("lorem ipsum dolor sit amet " * ((chars_per_page // 27) + 1))[:chars_per_page]
+            content = f"BT /F1 12 Tf 72 720 Td ({text}) Tj ET".encode("latin-1")
+        if i in image_pages:
+            content += b"\nq 100 0 0 100 72 72 cm /Im0 Do Q"
+            image_obj = 200 + i
+            objs[image_obj] = (
+                b"<< /Type /XObject /Subtype /Image /Width 1 /Height 1 "
+                b"/ColorSpace /DeviceGray /BitsPerComponent 8 /Length 1 >>\nstream\n\x00\nendstream"
+            )
+            resources = (
+                b"<< /Font << /F1 99 0 R >> /XObject << /Im0 "
+                + f"{image_obj} 0 R".encode()
+                + b" >> >>"
+            )
+        else:
+            resources = b"<< /Font << /F1 99 0 R >> >>"
         objs[3 + i * 2] = (
             b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] "
-            + f"/Contents {4 + i * 2} 0 R /Resources << /Font << /F1 99 0 R >> >> >>".encode()
+            + f"/Contents {4 + i * 2} 0 R /Resources ".encode()
+            + resources
+            + b" >>"
         )
         objs[4 + i * 2] = (
             f"<< /Length {len(content)} >>\nstream\n".encode() + content + b"\nendstream"

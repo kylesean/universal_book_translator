@@ -314,6 +314,11 @@ CJK_FONT_CANDIDATES = (
 PROBE_MIN_CHARS = 32
 PROBE_COLUMN_EDGE_RATIO = 0.45
 PROBE_COLUMN_SHARE = 0.25
+# Justified single-column lines fragment every few glyphs; the gap between
+# fragments inside one row stays under ~1% of the page width, while a real
+# column gutter exceeds 2%. Between them the split is unambiguous on both
+# synthetic corpus papers (mono share 0.000, duo ~0.49).
+PROBE_COLUMN_GAP_RATIO = 0.03
 PROBE_MIN_ROWS = 6
 PROBE_SAMPLE_FRACTIONS = (0.0, 0.25, 0.5, 0.75, 1.0)
 PROBE_FORMULA_SHARE = 0.10
@@ -576,6 +581,7 @@ CALIBRATION: dict[str, KnobMeta] = {
     "PROBE_MIN_CHARS": KnobMeta(S, "32 chars separates scans from text pages"),
     "PROBE_COLUMN_EDGE_RATIO": KnobMeta(S, "0.45 edge ratio observed on two-column pages"),
     "PROBE_COLUMN_SHARE": KnobMeta(S, "0.25 share observed on two-column pages"),
+    "PROBE_COLUMN_GAP_RATIO": KnobMeta(S, "0.03 of page width splits gutter from word gap"),
     "PROBE_MIN_ROWS": KnobMeta(S, "6 rows minimum avoids title-page misfire"),
     "PROBE_SAMPLE_FRACTIONS": KnobMeta(S, "front/quarters/back defeats cover spoofing"),
     "PROBE_FORMULA_SHARE": KnobMeta(S, "0.10 separates formula pages (0.16+) from prose (<0.08)"),

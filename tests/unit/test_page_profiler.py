@@ -4,8 +4,22 @@ from pathlib import Path
 
 import pytest
 
-from tests.corpus_markers import requires_synthetic_mono
-from ubt.adapters.pdf.page_profiler import PageFacts, PageKind, classify_page, profile_pdf
+from tests.corpus_markers import requires_synthetic_duo, requires_synthetic_mono
+from ubt.adapters.pdf.page_profiler import (
+    PageFacts,
+    PageKind,
+    classify_page,
+    collect_page_facts,
+    column_right_share,
+    profile_pdf,
+)
+
+Rect = tuple[float, float, float, float]
+
+
+def _rect(left: float, top: float, right: float, height: float = 12.0) -> Rect:
+    """A pdfium-shaped rect (left, bottom, right, top) on a 612pt page."""
+    return (left, top - height, right, top)
 
 
 def _facts(**kwargs: object) -> PageFacts:
@@ -136,3 +150,58 @@ def test_empty_profile_is_not_cached(tmp_path: Path, monkeypatch: pytest.MonkeyP
     cache_dir = tmp_path / "cache"
     assert profiler.profile_pdf(tmp_path / "any.pdf", cache_dir) == []
     assert not list(cache_dir.glob("*.json"))
+
+
+def test_column_share_merges_fragments_within_a_row() -> None:
+    # A justified single-column line fragments every few glyphs; the fragments
+    # must merge back into one row (small intra-row gaps) so none of them reads
+    # as a right-hand column start.
+    row = 700.0
+    rects = [_rect(x, row, x + 90.0) for x in (72.0, 170.0, 268.0, 366.0, 464.0)]
+    assert column_right_share(rects, width=612.0) == 0.0
+
+
+def test_column_share_detects_a_real_second_column() -> None:
+    # Every row has a genuine second-column segment (gutter-sized gap); half
+    # the segments start right of the 0.45 edge ratio.
+    rects: list[Rect] = []
+    for row in (760.0 - i * 16.0 for i in range(10)):
+        rects.append(_rect(50.0, row, 250.0))
+        rects.append(_rect(300.0, row, 500.0))
+    share = column_right_share(rects, width=540.0)
+    assert share > 0.25
+
+
+def test_column_share_counts_right_started_indented_lines() -> None:
+    # A line whose only segment begins past the edge ratio still counts —
+    # this is what keeps genuine two-column detection working.
+    rects = [_rect(320.0, 700.0, 540.0), _rect(320.0, 684.0, 540.0)]
+    assert column_right_share(rects, width=612.0) == 1.0
+
+
+def test_column_share_empty_page_is_zero() -> None:
+    assert column_right_share([], width=612.0) == 0.0
+
+
+@requires_synthetic_mono
+def test_mono_fixture_prose_pages_are_not_column_flagged() -> None:
+    # The mono corpus is single-column prose: per-fragment share read ~0.55 on
+    # every body page, routing the whole book down the docling mainline. After
+    # the row merge, sampled prose pages must sit far below the 0.25 column bar.
+    pdf = Path("tests/fixtures/synthetic-mono.pdf")
+    facts = collect_page_facts(pdf)
+    sampled = [1, 4, 7, 10, 13]
+    for page_no in sampled:
+        share = facts[page_no - 1].right_row_share
+        assert share < 0.25, f"page {page_no} share={share:.3f}"
+
+
+@requires_synthetic_duo
+def test_duo_fixture_keeps_the_column_signal() -> None:
+    # The merge must not swallow the genuine two-column tell: every duo page
+    # stays above the share bar.
+    pdf = Path("tests/fixtures/synthetic-duo.pdf")
+    facts = collect_page_facts(pdf)
+    assert facts, "duo fixture profiled empty"
+    for fact in facts:
+        assert fact.right_row_share > 0.25, f"page {fact.page} share={fact.right_row_share:.3f}"

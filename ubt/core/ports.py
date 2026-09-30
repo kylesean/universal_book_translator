@@ -148,6 +148,22 @@ def get_visual_gate_runner() -> VisualGateRunnerFn:
     return run_visual_gate
 
 
+def crashed_visual_gate_result(message: str) -> Any:
+    """Gate result reporting the gate itself as failed (visual state unknown).
+
+    The gate dataclasses live in the adapters layer, so core stages build the
+    crash record through this bridge; a crash must not degrade to "no gate",
+    which skips blocking enforcement and reads as a perfect KPI pass.
+    """
+    from ubt.adapters.pdf.visual_gate import VisualFinding, VisualGateResult
+
+    return VisualGateResult(
+        passed=False,
+        findings=(VisualFinding(severity="critical", code="visual_gate_crashed", message=message),),
+        stats={"total_pages": 0},
+    )
+
+
 def artifact_parity_findings(
     *,
     source_pdf: Path,
@@ -305,14 +321,21 @@ def probe_pdf_pages(input_path: Path) -> tuple[int, int]:
 
 
 def classify_pdf_content(input_path: Path) -> tuple[bool, bool]:
-    """Return (has_scan, formula_heavy) via page_profiler."""
+    """Return (has_scan, formula_heavy) via page_profiler.
+
+    Both flags aggregate with a >=50% page share, matching the sampled-page
+    majority the engine selector applies to the same signals: a lone blank
+    page in a born-digital book must not route the whole title down the
+    long-chain/VLM path.
+    """
     try:
         from ubt.adapters.pdf.page_profiler import PageKind, classify_page, collect_page_facts
 
         facts = collect_page_facts(input_path)
         kinds = [classify_page(f) for f in facts] if facts else []
-        has_scan = any(k == PageKind.SCAN_IMAGE for k in kinds)
-        formula_heavy = any(k == PageKind.MIXED_COMPLEX for k in kinds)
+        n = len(kinds)
+        has_scan = n > 0 and sum(1 for k in kinds if k == PageKind.SCAN_IMAGE) * 2 >= n
+        formula_heavy = n > 0 and sum(1 for k in kinds if k == PageKind.MIXED_COMPLEX) * 2 >= n
         return has_scan, formula_heavy
     except Exception as exc:
         # Fail-open stays (conservative probe), but a silent

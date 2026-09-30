@@ -32,6 +32,7 @@ from ubt.core.policy.layout_policy import (
     POSTER_MAX_CHARS,
     POSTER_MAX_FONTS,
     PROBE_COLUMN_EDGE_RATIO,
+    PROBE_COLUMN_GAP_RATIO,
     PROBE_COLUMN_SHARE,
     PROBE_FORMULA_SHARE,
     PROBE_MIN_CHARS,
@@ -42,6 +43,55 @@ from ubt.core.policy.layout_policy import (
 )
 
 logger = logging.getLogger(__name__)
+
+Rect = tuple[float, float, float, float]
+
+
+def _group_rows(rects: list[Rect]) -> list[list[Rect]]:
+    """Group pdfium rect fragments into text rows by vertical overlap."""
+    rows: list[list[Rect]] = []
+    for rect in rects:
+        left, bottom, _right, top = rect
+        height = top - bottom
+        for row in rows:
+            row_top = max(r[3] for r in row)
+            row_bottom = min(r[1] for r in row)
+            overlap = min(top, row_top) - max(bottom, row_bottom)
+            if overlap > 0.5 * min(height, row_top - row_bottom):
+                row.append(rect)
+                break
+        else:
+            rows.append([rect])
+    return rows
+
+
+def column_right_share(rects: list[Rect], width: float) -> float:
+    """Share of text segments starting right of the column edge ratio.
+
+    ``count_rects`` fragments a justified line every few glyphs, so judging
+    each fragment's left edge flags every dense single-column page as
+    multi-column. Fragments merge back into rows by vertical overlap, rows
+    split at column-gutter-sized gaps, and only whole segments — the units a
+    layout actually positions — are judged.
+    """
+    if not rects or width <= 0:
+        return 0.0
+    gap = PROBE_COLUMN_GAP_RATIO * width
+    segments = 0
+    right_started = 0
+    for row in _group_rows(sorted(rects, key=lambda r: (-r[3], r[0]))):
+        ordered = sorted(row, key=lambda r: r[0])
+        left, edge = ordered[0][0], ordered[0][2]
+        for frag_left, _bottom, frag_right, _top in ordered[1:]:
+            if frag_left - edge > gap:
+                segments += 1
+                right_started += left > PROBE_COLUMN_EDGE_RATIO * width
+                left, edge = frag_left, frag_right
+            else:
+                edge = max(edge, frag_right)
+        segments += 1
+        right_started += left > PROBE_COLUMN_EDGE_RATIO * width
+    return right_started / segments if segments else 0.0
 
 
 class PageKind(StrEnum):
@@ -159,18 +209,14 @@ def _pdfium_facts(pdf_path: Path) -> list[dict[str, Any]]:
                     except Exception:
                         text = ""
                     n_rects = int(textpage.count_rects(0, -1))
-                    right = sum(
-                        1
-                        for i in range(n_rects)
-                        if textpage.get_rect(i)[0] > PROBE_COLUMN_EDGE_RATIO * width
-                    )
+                    rects = [textpage.get_rect(i) for i in range(n_rects)]
                     out.append(
                         {
                             "width_pt": width,
                             "height_pt": height,
                             "n_chars": n_chars,
                             "n_rect_rows": n_rects,
-                            "right_row_share": (right / n_rects) if n_rects else 0.0,
+                            "right_row_share": column_right_share(rects, width),
                             "formula_density": formula_debris_share(text),
                         }
                     )
@@ -247,7 +293,7 @@ def collect_page_facts(pdf_path: Path) -> list[PageFacts]:
 # cache key must cover the profiler *logic*, not just the PDF bytes: an
 # mtime-only key silently reused profiles from older rules for any PDF that had
 # not been edited (see ``_cache_key``).
-_PROFILE_CACHE_VERSION = 1
+_PROFILE_CACHE_VERSION = 2
 
 
 def _cache_key(pdf_path: Path) -> str:

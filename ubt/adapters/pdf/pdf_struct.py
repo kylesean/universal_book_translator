@@ -140,7 +140,12 @@ def resource_image_count(page: Page) -> int:
             obj: Any = ref
             if hasattr(obj, "get_object"):
                 obj = obj.get_object()
-            if isinstance(obj, Dictionary) and obj.get(Name("/Subtype")) == Name("/Image"):
+            # An image XObject is a Stream, which is not a Dictionary subclass
+            # in pikepdf — requiring Dictionary here counted zero images for
+            # every PDF ever probed.
+            if isinstance(obj, (Dictionary, pikepdf.Stream)) and obj.get(Name("/Subtype")) == Name(
+                "/Image"
+            ):
                 n += 1
         except Exception:  # unresolvable entry is not an image
             continue

@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from tests.corpus_markers import requires_synthetic_mono
+from tests.corpus_markers import requires_synthetic_duo, requires_synthetic_mono
 from ubt.adapters.factory import _PDF_ENGINE_REGISTRY, get_adapter_for_path
 from ubt.adapters.pdf.engine_selector import (
     PageIngestPlan,
@@ -145,3 +145,57 @@ def test_unknown_pdf_engine_reports_the_live_registry(tmp_path: Path) -> None:
     assert "Available:" in message
     for name in _PDF_ENGINE_REGISTRY:
         assert name in message
+
+
+@requires_synthetic_mono
+def test_route_plan_single_column_fixture_is_not_multicolumn() -> None:
+    # The mono corpus is single-column prose: the per-fragment column tell read
+    # ~0.55 on body pages and forced the whole book onto the docling mainline.
+    # With row-merged segments the sampled prose pages stay below the bar.
+    plan = inspect_pdf_route_plan(Path("tests/fixtures/synthetic-mono.pdf"))
+    assert plan.has_multicolumn is False
+
+
+@requires_synthetic_duo
+def test_route_plan_two_column_fixture_stays_multicolumn() -> None:
+    plan = inspect_pdf_route_plan(Path("tests/fixtures/synthetic-duo.pdf"))
+    assert plan.has_multicolumn is True
+
+
+def test_route_plan_image_tell_uses_the_sampled_majority(tmp_path: Path) -> None:
+    """One image page (a cover) must not push a whole book onto docling."""
+    from tests.pdf_builders import text_pdf
+
+    pdf = text_pdf(tmp_path / "one_image.pdf", pages=6, image_pages=frozenset({0}))
+    plan = inspect_pdf_route_plan(pdf)
+    assert plan.has_vector_diagrams is False
+
+
+def test_route_plan_two_image_pages_stay_vector_flagged(tmp_path: Path) -> None:
+    from tests.pdf_builders import text_pdf
+
+    pdf = text_pdf(tmp_path / "three_images.pdf", pages=6, image_pages=frozenset({0, 1, 3}))
+    plan = inspect_pdf_route_plan(pdf)
+    assert plan.has_vector_diagrams is True
+
+
+def test_route_plan_vector_probe_failure_stays_conservative(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A broken pikepdf probe must default to docling, as its docstring promises.
+
+    The probe swallowed the exception and returned 0 ops, which steered the
+    route toward the *faster* engine — the opposite of the documented
+    conservative fallback.
+    """
+    from tests.pdf_builders import text_pdf
+    from ubt.adapters.pdf import pdf_struct
+
+    pdf = text_pdf(tmp_path / "probe_fail.pdf", pages=6)
+
+    def _boom(*args: object, **kwargs: object) -> int:
+        raise RuntimeError("pikepdf broken")
+
+    monkeypatch.setattr(pdf_struct, "count_ops", _boom)
+    plan = inspect_pdf_route_plan(pdf)
+    assert plan.has_vector_diagrams is True

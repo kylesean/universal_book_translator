@@ -28,11 +28,10 @@ from pathlib import Path
 from typing import Any
 
 from ubt.adapters.pdf import pdf_struct
-from ubt.adapters.pdf.page_profiler import PageKind
+from ubt.adapters.pdf.page_profiler import PageKind, column_right_share
 from ubt.adapters.pdf.pdfium_gate import pdfium_serialized
 from ubt.core.policy.layout_policy import (
     PDF_PATH_OPS,
-    PROBE_COLUMN_EDGE_RATIO,
     PROBE_COLUMN_SHARE,
     PROBE_FORMULA_SHARE,
     PROBE_MIN_CHARS,
@@ -115,12 +114,14 @@ def _probe_page_vector_ops(page: Any) -> int:
 
     ``pdf_struct.count_ops`` reproduces pypdf's raw per-page operator count
     exactly (no XObject recursion), so ``PROFILE_VECTOR_PATH_OPS`` stays
-    calibrated across the engine swap.
+    calibrated across the engine swap. A probe failure returns -1 so the
+    caller can take the conservative route (docling) instead of steering
+    toward the faster engine on missing data.
     """
     try:
         return pdf_struct.count_ops(page, PDF_PATH_OPS)
     except Exception:
-        return 0
+        return -1
 
 
 @pdfium_serialized
@@ -168,6 +169,7 @@ def inspect_pdf_route_plan(
             has_formulas = False
             has_multicolumn = False
             has_vector_diagrams = False
+            vector_flagged_pages = 0
             sampled_char_counts: list[int] = []
 
             for idx in page_indices:
@@ -193,12 +195,8 @@ def inspect_pdf_route_plan(
                         n_rects = textpage.count_rects(0, -1)
                         if n_rects >= PROBE_MIN_ROWS:
                             page_width = page.get_width()
-                            right_rows = sum(
-                                1
-                                for i in range(n_rects)
-                                if textpage.get_rect(i)[0] > PROBE_COLUMN_EDGE_RATIO * page_width
-                            )
-                            if right_rows / n_rects > PROBE_COLUMN_SHARE:
+                            rects = [textpage.get_rect(i) for i in range(n_rects)]
+                            if column_right_share(rects, page_width) > PROBE_COLUMN_SHARE:
                                 has_multicolumn = True
                     finally:
                         textpage.close()
@@ -207,19 +205,30 @@ def inspect_pdf_route_plan(
 
             scanned_detected = _scan_detected_from_probe(sampled_char_counts)
 
-            # Inspect vector diagrams via pikepdf (raw content-stream ops)
+            # Inspect vector diagrams via pikepdf (raw content-stream ops).
+            # The signal aggregates over the sampled pages with the same
+            # >=half majority as the scan tell: a single cover image in a
+            # born-digital book must not force the docling mainline on the
+            # whole document.
             try:
                 with pdf_struct.open_pdf(pdf_path) as pike_doc:
                     for idx in page_indices:
-                        if idx < len(pike_doc.pages):
-                            pg = pike_doc.pages[idx]
-                            n_path_ops = _probe_page_vector_ops(pg)
-                            n_images = pdf_struct.resource_image_count(pg)
-                            if n_path_ops >= PROFILE_VECTOR_PATH_OPS or n_images >= 1:
-                                has_vector_diagrams = True
-                                break
+                        if idx >= len(pike_doc.pages):
+                            continue
+                        pg = pike_doc.pages[idx]
+                        n_path_ops = _probe_page_vector_ops(pg)
+                        if n_path_ops < 0:
+                            # Probe failure is conservative: assume heavy.
+                            vector_flagged_pages = len(page_indices)
+                            break
+                        if (
+                            n_path_ops >= PROFILE_VECTOR_PATH_OPS
+                            or pdf_struct.resource_image_count(pg) >= 1
+                        ):
+                            vector_flagged_pages += 1
             except Exception as exc:
                 logger.debug("PDF vector probe skipped on '%s': %s", pdf_path.name, exc)
+            has_vector_diagrams = vector_flagged_pages * 2 >= len(page_indices)
 
             needs_docling = (
                 scanned_detected or has_formulas or has_multicolumn or has_vector_diagrams
