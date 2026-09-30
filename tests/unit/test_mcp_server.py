@@ -744,3 +744,50 @@ async def test_ubt_cancel_job_unknown_raises(
     monkeypatch.setenv("UBT_ALLOWED_DIRS", str(tmp_path))
     with pytest.raises(ToolError, match="no such job"):
         await ubt_cancel_job("job_unknown_cancel", db_dir=str(tmp_path))
+
+
+@pytest.mark.asyncio
+async def test_mcp_disk_cancel_waits_for_the_writer_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Disk-path cancel must not clobber a pipeline that holds the writer lock.
+
+    The REST surface takes the job-level LedgerWriterLock before finalizing so
+    a cancellation cannot race a still-writing pipeline's checkpoints; the MCP
+    disk fallback wrote straight through it.
+    """
+    from ubt.core.engine.job_queue import JobStatus
+    from ubt.core.engine.ledger import SQLiteJobLedger
+    from ubt.core.engine.writer_lock import LedgerWriterLock
+    from ubt.core.ir.models import BookManifest, ChapterMeta
+    from ubt.mcp import server as server_module
+    from ubt.mcp.server import ubt_cancel_job
+
+    monkeypatch.setenv("UBT_ALLOWED_DIRS", str(tmp_path))
+    jid = "job_mcp_lock"
+    db_path = tmp_path / f"{jid}.sqlite"
+    ledger = SQLiteJobLedger(db_path)
+    ledger.init_job_from_manifest(
+        jid,
+        BookManifest(
+            doc_id="lockdoc",
+            title="T",
+            source_path=str(tmp_path / "b.md"),
+            chapters=[ChapterMeta(chapter_id="ch01", title="One", spine_index=1)],
+        ),
+    )
+    ledger.close()
+
+    lock = LedgerWriterLock(db_path, jid)
+    lock.acquire()
+    monkeypatch.setattr(server_module, "_CANCEL_LOCK_WAIT_SEC", 0.2)
+    try:
+        res = await ubt_cancel_job(jid, db_dir=str(tmp_path))
+        assert res["status"] != JobStatus.CANCELLED
+        check = SQLiteJobLedger(db_path)
+        try:
+            assert check.get_job_status(jid) != JobStatus.CANCELLED
+        finally:
+            check.close()
+    finally:
+        lock.release()

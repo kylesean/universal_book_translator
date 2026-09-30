@@ -72,6 +72,44 @@ def _is_interactive() -> bool:
 _PROFILE_EXAMPLES = "general, textbook, paper, fiction, humanities, semiconductor"
 
 
+def _refuse_existing_output(output: Path | None, *, fresh: bool | None) -> Path | None:
+    """Mirror the API 409 / MCP ToolError overwrite guard on the CLI surface.
+
+    The other two entry points refuse to overwrite an existing deliverable
+    unless the caller asks for a fresh run; the CLI used to overwrite silently,
+    and even its default output name collides on a second run.
+    """
+    if output is None or fresh:
+        return output
+    if output.exists():
+        raise typer.BadParameter(
+            f"output path already exists; refusing to overwrite it: {output} "
+            "(pass --fresh to overwrite)"
+        )
+    return output
+
+
+def _report_degrades_bilingual_delivery(report_data: dict[str, Any]) -> bool:
+    """Whether the quality report says the delivery is not a bilingual document.
+
+    The reporter serializes the advisory under ``mode_advisory``; the CLI used
+    to look up a key that never exists in the report, so degraded deliveries
+    were announced as bilingual documents.
+    """
+    advisory = report_data.get("mode_advisory", {})
+    if not isinstance(advisory, dict):
+        return False
+    rendered_modes = advisory.get("rendered_modes", [])
+    effective = advisory.get("effective")
+    return (
+        rendered_modes == ["monolingual"]
+        or effective == "monolingual"
+        or "dual_mode_downgraded" in report_data
+        or "overlay engine" in report_data.get("delivery_status", "")
+        or "overlay engine" in report_data.get("delivery_warning", "")
+    )
+
+
 def translate(
     input_path: Annotated[Path, typer.Argument(help="Path to input document (.epub, .md, .pdf)")],
     output: Annotated[
@@ -717,6 +755,7 @@ def translate(
                 else:
                     request["emit_companion_rigid"] = True
 
+    output = _refuse_existing_output(output, fresh=fresh)
     try:
         run_fn = _get_run_translation()
         result_path = asyncio.run(
@@ -804,16 +843,7 @@ def translate(
         if report_path.exists():
             with contextlib.suppress(Exception):
                 report_data = json.loads(report_path.read_text(encoding="utf-8"))
-                bilingual_adv = report_data.get("bilingual_advisory", {})
-                rendered_modes = bilingual_adv.get("rendered_modes", [])
-                effective = bilingual_adv.get("effective")
-                if (
-                    rendered_modes == ["monolingual"]
-                    or effective == "monolingual"
-                    or "dual_mode_downgraded" in report_data
-                    or "overlay engine" in report_data.get("delivery_status", "")
-                    or "overlay engine" in report_data.get("delivery_warning", "")
-                ):
+                if _report_degrades_bilingual_delivery(report_data):
                     is_bilingual = False
         elif dual_mode == "monolingual" or canonical_render_engine(render_engine) == "rigid":
             is_bilingual = False

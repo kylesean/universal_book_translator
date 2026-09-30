@@ -28,6 +28,7 @@ import asyncio
 import functools
 import logging
 import shutil
+import time
 from pathlib import Path
 from typing import Any
 
@@ -68,7 +69,8 @@ from ubt.core.config import parse_page_ranges as parse_page_ranges
 from ubt.core.engine.job_queue import TERMINAL_JOB_STATUSES, JobStatus
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.progress import ProgressSnapshot
-from ubt.core.exceptions import UBTError
+from ubt.core.engine.writer_lock import LedgerWriterLock
+from ubt.core.exceptions import LedgerWriterLockConflictError, UBTError
 from ubt.core.fs_perms import (
     SYSTEM_DISALLOWED_PREFIXES,
     is_sensitive_path_part,
@@ -108,6 +110,10 @@ def _mcp_error_boundary(func: Any) -> Any:
 
 
 logger = logging.getLogger(__name__)
+
+#: How long a disk-path cancel waits for the pipeline's writer lock before
+#: leaving the terminal write to the running pipeline (mirrors the REST wait).
+_CANCEL_LOCK_WAIT_SEC = 10.0
 
 
 _MAX_RETAINED = 100
@@ -536,8 +542,34 @@ async def ubt_cancel_job(job_id: str, db_dir: str | None = None) -> dict[str, An
         if current_status is None:
             raise ToolError(f"no such job: {jid}")
         if current_status not in TERMINAL_JOB_STATUSES:
-            await asyncio.to_thread(ledger.finalize_job, jid, status=JobStatus.CANCELLED)
-            return {"job_id": jid, "status": JobStatus.CANCELLED}
+            # The running pipeline holds the job-level writer lock for the whole
+            # run; taking it here too is what keeps a cancellation from
+            # clobbering the pipeline's checkpoints (mirrors the REST surface).
+            lock = LedgerWriterLock(db_path, jid)
+            deadline = time.monotonic() + _CANCEL_LOCK_WAIT_SEC
+            while True:
+                try:
+                    lock.acquire()
+                    break
+                except LedgerWriterLockConflictError:
+                    if time.monotonic() >= deadline:
+                        logger.info(
+                            "MCP cancel for %s: writer lock still held; the running "
+                            "pipeline will finalize it.",
+                            jid,
+                        )
+                        return {"job_id": jid, "status": current_status}
+                    await asyncio.sleep(0.1)
+            try:
+                # Re-check under the lock: the pipeline may have finalized while
+                # we waited, and a finished job must not be rewritten.
+                status_now = await asyncio.to_thread(ledger.get_job_status, jid)
+                if status_now is not None and status_now not in TERMINAL_JOB_STATUSES:
+                    await asyncio.to_thread(ledger.finalize_job, jid, status=JobStatus.CANCELLED)
+                    return {"job_id": jid, "status": JobStatus.CANCELLED}
+                return {"job_id": jid, "status": status_now or current_status}
+            finally:
+                lock.release()
         return {"job_id": jid, "status": current_status}
     finally:
         ledger.close()

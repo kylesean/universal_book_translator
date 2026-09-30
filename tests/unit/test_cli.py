@@ -539,6 +539,7 @@ def test_cli_dual_mode_facing_derives_spread(
             str(sample_book_md),
             "-o",
             str(out),
+            "--fresh",
             "--dry-run",
             "--dual-mode",
             "facing",
@@ -1219,3 +1220,56 @@ def test_cli_tm_scan_and_evict_round_trip(tmp_path: Path) -> None:
         assert tm2.scan() == []
     finally:
         tm2.close()
+
+
+def test_report_degrades_bilingual_delivery_reads_the_report_key() -> None:
+    """The degradation label must read the key the reporter actually writes.
+
+    The CLI looked up "bilingual_advisory" while quality_report.json carries
+    the advisory under "mode_advisory", so the fallback label logic never ran
+    and every degraded delivery was announced as a bilingual document.
+    """
+    from ubt.cli.commands.translate import _report_degrades_bilingual_delivery
+
+    assert (
+        _report_degrades_bilingual_delivery({"mode_advisory": {"rendered_modes": ["monolingual"]}})
+        is True
+    )
+    assert (
+        _report_degrades_bilingual_delivery({"mode_advisory": {"effective": "monolingual"}}) is True
+    )
+    assert _report_degrades_bilingual_delivery({"dual_mode_downgraded": True}) is True
+    assert _report_degrades_bilingual_delivery({"delivery_status": "overlay engine used"}) is True
+    assert (
+        _report_degrades_bilingual_delivery(
+            {"mode_advisory": {"rendered_modes": ["inline"], "effective": "inline"}}
+        )
+        is False
+    )
+    assert _report_degrades_bilingual_delivery({}) is False
+
+
+def test_cli_translate_refuses_existing_output_without_fresh(
+    monkeypatch: pytest.MonkeyPatch, sample_book_md: Path, tmp_path: Path
+) -> None:
+    """The CLI must mirror the API 409 / MCP ToolError overwrite guard."""
+    called: list[dict[str, Any]] = []
+
+    async def _mock_run_translation(**kwargs: object) -> Path:
+        called.append(kwargs)
+        return tmp_path / "never_written.md"
+
+    monkeypatch.setattr("ubt.cli.main._run_translation", _mock_run_translation)
+    out = tmp_path / "book_bilingual.md"
+    out.write_text("stale delivery", encoding="utf-8")
+
+    result = runner.invoke(app, ["translate", str(sample_book_md), "--output", str(out)])
+    assert result.exit_code != 0
+    assert called == []
+    assert out.read_text(encoding="utf-8") == "stale delivery"
+
+    result_fresh = runner.invoke(
+        app, ["translate", str(sample_book_md), "--output", str(out), "--fresh"]
+    )
+    assert result_fresh.exit_code == 0
+    assert len(called) == 1
