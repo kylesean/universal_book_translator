@@ -11,6 +11,7 @@ The translation-unit types themselves (:class:`~ubt.model.segment.Segment`,
 
 from __future__ import annotations
 
+from ubt.segment.document import segments_from_document
 from ubt.segment.placeholders import MaskedSource, PlaceholderEngine, RestoreOutcome
 from ubt.segment.xliff import XliffDocument, from_xliff, to_xliff
 
@@ -20,5 +21,6 @@ __all__ = [
     "RestoreOutcome",
     "XliffDocument",
     "from_xliff",
+    "segments_from_document",
     "to_xliff",
 ]

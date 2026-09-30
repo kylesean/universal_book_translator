@@ -653,6 +653,13 @@ class UBTConfig(BaseSettings):
     # threshold miss can never silently lose figures or tables. Toggle off to
     # skip the extra (CPU-only, no-LLM) render on large figure-bearing books.
     emit_companion_auto: bool = True
+    # Emit a translation-ready XLIFF 2.1 companion ('*_<tag>.xliff') beside the
+    # deliverable: the native reader turns the source PDF into a typed Document,
+    # protected spans are masked, and one segment per element is written. It is
+    # a *source* view (no target) for CAT-tool handoff; read-only, CPU-only, and
+    # it can never affect the rendered artifact. Toggle off to skip re-reading
+    # the source on large books.
+    emit_xliff_companion: bool = True
 
     # Opt-in hard gate: abort export when the delivery contract has an
     # ERROR-severity violation (dropped text, lost/corrupt asset, or a

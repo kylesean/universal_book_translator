@@ -897,6 +897,58 @@ def _reconcile_delivery_contract(
     return contract
 
 
+def _write_xliff_companion(ctx: StageContext, rendered_path: Path) -> Path | None:
+    """Write a translation-ready *source* XLIFF beside the artifact (best-effort).
+
+    Read-only by construction: the native reader builds a Document from the
+    source PDF, protected spans are masked, and one segment per element is
+    serialized. It never touches the rendered artifact, so any failure is logged
+    and skipped rather than allowed to sink the delivery.
+    """
+    source_pdf = ctx.source_pdf_path
+    if source_pdf is None or not ctx.config.emit_xliff_companion:
+        return None
+    try:
+        from ubt.analyze.reader_pdf import read_pdf
+        from ubt.core.cleaners.citation_masker import CitationMasker
+        from ubt.core.cleaners.code_masker import CodeMasker
+        from ubt.core.cleaners.math_masker import MathMasker
+        from ubt.core.cleaners.soup_math import SoupMathMasker
+        from ubt.core.job_options import companion_path
+        from ubt.segment.document import segments_from_document
+        from ubt.segment.placeholders import PlaceholderEngine
+        from ubt.segment.xliff import to_xliff
+
+        document = read_pdf(source_pdf)
+        engine = PlaceholderEngine(
+            code=CodeMasker(),
+            math=MathMasker(),
+            soup=SoupMathMasker(),
+            citation=CitationMasker(),
+        )
+        segments = segments_from_document(document, engine=engine)
+        if not segments:
+            return None
+        xml = to_xliff(
+            segments,
+            src_lang=ctx.source_lang or "en",
+            trg_lang=ctx.target_lang,
+            original=Path(source_pdf).name,
+        )
+        path = companion_path(rendered_path, ".xliff")
+        path.write_text(xml, encoding="utf-8")
+        logger.info(
+            "XLIFF companion for job %s: %s (%d segment(s))",
+            ctx.job_id,
+            path.name,
+            len(segments),
+        )
+        return path
+    except Exception as exc:  # a companion must never sink the delivery
+        logger.warning("XLIFF companion skipped for job %s: %s", ctx.job_id, exc)
+        return None
+
+
 async def _build_reports(
     ctx: StageContext,
     final_blocks: list[IRBlock],
@@ -1150,6 +1202,10 @@ async def run_export_stage(
             "Fix the loss, or unset UBT_STRICT_CONTRACT to ship knowingly."
         )
     delivery_contract = contract.model_dump(mode="json")
+
+    # Translation-ready XLIFF companion (source view). Read-only, best-effort:
+    # it cannot affect the artifact, only add a file beside it.
+    await asyncio.to_thread(_write_xliff_companion, ctx, rendered_path)
 
     # Post-render visual gate (self-healing loop): T0/T1 deterministic +
     # optional pixel confirmation + sampled T2 VLM + ReflowControlLoop.

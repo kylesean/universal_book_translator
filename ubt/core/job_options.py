@@ -369,6 +369,20 @@ def sidecar_path(artifact: str | Path, kind: SidecarKind) -> Path:
     return output.with_name(f"{output.stem}_{tag}_{kind}")
 
 
+def companion_path(artifact: str | Path, suffix: str) -> Path:
+    """A *companion* file beside a deliverable (e.g. an XLIFF view).
+
+    Keyed on the whole file name for the same reason as :func:`sidecar_path`:
+    ``book.epub`` and ``book.md`` both default to ``book_mono.<ext>``, so the
+    format tag keeps their companions from overwriting each other. Unlike a
+    sidecar, the caller supplies the suffix, because a companion is a real
+    document the reader opens, not a report.
+    """
+    output = Path(artifact)
+    tag = output.suffix.removeprefix(".") or "artifact"
+    return output.with_name(f"{output.stem}_{tag}{suffix}")
+
+
 def artifact_and_report_paths(
     artifact: str | Path,
 ) -> tuple[Path, Path | None, Path | None]:
