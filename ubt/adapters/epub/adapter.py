@@ -469,6 +469,7 @@ class EPUBAdapter(BaseDocumentAdapter):
                 chapters: list[ChapterMeta] = []
                 spine_tags = opf_soup.find_all("itemref")
                 spine_idx = 1
+                seen_source_files: set[str] = set()
 
                 for itemref in spine_tags:
                     idref = itemref.get("idref")
@@ -481,6 +482,18 @@ class EPUBAdapter(BaseDocumentAdapter):
                     if file_href and file_href.lower().endswith(
                         (".xhtml", ".html", ".htm", ".xml")
                     ):
+                        # Anthologies legitimately repeat a spine item, but a
+                        # second ChapterMeta for the same file clones identical
+                        # blocks (paid twice to translate) that the renderer can
+                        # never both inject: the zip member is visited once and
+                        # the chapter lookup matches only the first clone.
+                        if file_href in seen_source_files:
+                            logger.info(
+                                "EPUB manifest: spine repeats %s; keeping the first occurrence only",
+                                file_href,
+                            )
+                            continue
+                        seen_source_files.add(file_href)
                         chapters.append(
                             ChapterMeta(
                                 chapter_id=f"ch_{spine_idx:03d}_{idref}",

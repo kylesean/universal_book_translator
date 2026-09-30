@@ -1340,3 +1340,38 @@ def test_preserved_inline_children_do_not_duplicate_nested_preserved_tags() -> N
         leaf.append(node)
     assert len(leaf.find_all("img")) == 1
     assert len(leaf.find_all("a")) == 1
+
+
+@pytest.mark.asyncio
+async def test_epub_manifest_dedupes_a_repeated_spine_item(tmp_path: Path) -> None:
+    """A spine that lists one file twice must not clone its chapters.
+
+    Both clones were extracted and paid to translate, but the renderer visits
+    the zip member once and its chapter lookup matched only the first clone —
+    the second clone's translations never landed, and the deliverable shipped
+    that chapter duplicated and untranslated.
+    """
+    epub_file = tmp_path / "dup_spine.epub"
+    write_epub(
+        epub_file,
+        opf_xml=opf(
+            pub_id="urn:uuid:dup-spine",
+            title="Dup Spine",
+            items=[item("ch01", "ch01.xhtml"), item("ch02", "ch02.xhtml")],
+            spine=["ch01", "ch02", "ch01"],
+        ),
+        parts={
+            "OEBPS/ch01.xhtml": page("<h1>One</h1><p>First chapter body.</p>"),
+            "OEBPS/ch02.xhtml": page("<h1>Two</h1><p>Second chapter body.</p>"),
+        },
+    )
+
+    adapter = EPUBAdapter()
+    manifest = await adapter.extract_manifest(epub_file)
+    assert [c.source_file for c in manifest.chapters] == [
+        "OEBPS/ch01.xhtml",
+        "OEBPS/ch02.xhtml",
+    ]
+
+    chapters = [ch async for ch in adapter.parse_stream(epub_file)]
+    assert [ch.chapter_id for ch in chapters] == [c.chapter_id for c in manifest.chapters]
