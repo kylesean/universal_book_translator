@@ -9,14 +9,16 @@ seam they plug into.
 from __future__ import annotations
 
 from ubt.render.capability import Backend, Capabilities, Produced
-from ubt.render.outputs import LoweringUnsupported, compose
+from ubt.render.outputs import Composition, LoweringUnsupported, Placement, compose
 from ubt.render.overlay_backend import OverlayBackend
 
 __all__ = [
     "Backend",
     "Capabilities",
+    "Composition",
     "LoweringUnsupported",
     "OverlayBackend",
+    "Placement",
     "Produced",
     "compose",
 ]
