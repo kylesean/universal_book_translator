@@ -30,6 +30,7 @@ from typing import ClassVar, cast
 
 from ubt.analyze.reader_pdf import read_pdf
 from ubt.model.ast import (
+    ELEMENT_CLASSES,
     Caption,
     CodeBlock,
     Dialogue,
@@ -52,18 +53,7 @@ _RA = Fidelity.RECONSTRUCTED_ADAPTED
 _RV = Fidelity.RECONSTRUCTED_VERIFIED
 _PO = Fidelity.PRESERVED_OPAQUE
 
-#: The closed element set, and the text classes a reflowing backend can re-typeset.
-_ALL_CLASSES: tuple[type[Element], ...] = (
-    Heading,
-    Paragraph,
-    Dialogue,
-    ListItem,
-    Caption,
-    CodeBlock,
-    Formula,
-    Table,
-    Figure,
-)
+#: The text classes a reflowing backend can re-typeset.
 _REFLOW_TEXT: tuple[type[Element], ...] = (Heading, Paragraph, Dialogue, ListItem, Caption)
 
 
@@ -110,7 +100,7 @@ class _ReflowingBackend:
     name: ClassVar[str] = "reflowing"
 
     def capabilities(self) -> Capabilities:
-        supported = {(cls, _PO) for cls in _ALL_CLASSES}
+        supported = {(cls, _PO) for cls in ELEMENT_CLASSES}
         supported |= {(cls, _RA) for cls in _REFLOW_TEXT}
         supported |= {(Formula, _RV), (Table, _RV)}
         return Capabilities(supported=frozenset(supported), reflows=True)
@@ -127,7 +117,7 @@ class _PlacingBackend:
     name: ClassVar[str] = "placing"
 
     def capabilities(self) -> Capabilities:
-        return Capabilities(supported=frozenset((cls, _PO) for cls in _ALL_CLASSES))
+        return Capabilities(supported=frozenset((cls, _PO) for cls in ELEMENT_CLASSES))
 
     def produce(
         self, element: Element, fidelity: Fidelity, source: CanonicalSource
@@ -179,7 +169,7 @@ def _check_assignment_table() -> list[str]:
     reflowing = _ReflowingBackend()
     placing = _PlacingBackend()
     problems: list[str] = []
-    for cls in _ALL_CLASSES:
+    for cls in ELEMENT_CLASSES:
         element = _synthetic(cls)
         reflowed = realize(element, reflowing, _VERIFIERS, source)
         placed = realize(element, placing, _VERIFIERS, source)
@@ -271,7 +261,7 @@ def main() -> int:
     problems.extend(f"[table] {p}" for p in table_problems)
     print(
         f"  {'assignment-table':<20} {'pass' if not table_problems else 'FAIL':<6} "
-        f"classes={len(_ALL_CLASSES)}"
+        f"classes={len(ELEMENT_CLASSES)}"
     )
     for case_id, document in cases:
         count, kinds, issues = _check_document(document)

@@ -9,5 +9,6 @@ seam they plug into.
 from __future__ import annotations
 
 from ubt.render.capability import Backend, Capabilities, Produced
+from ubt.render.overlay_backend import OverlayBackend
 
-__all__ = ["Backend", "Capabilities", "Produced"]
+__all__ = ["Backend", "Capabilities", "OverlayBackend", "Produced"]

@@ -189,6 +189,21 @@ TEXT_ELEMENTS: tuple[type[Element], ...] = (
 #: Element classes that are immutable assets.
 ASSET_ELEMENTS: tuple[type[Element], ...] = (Formula, Table, Figure)
 
+#: The closed set of concrete element classes -- the runtime form of
+#: :data:`ElementT`. Capability declarations and exhaustive dispatches are built
+#: from it, so adding a class is one edit here.
+ELEMENT_CLASSES: tuple[type[Element], ...] = (
+    Heading,
+    Paragraph,
+    Dialogue,
+    ListItem,
+    Caption,
+    CodeBlock,
+    Formula,
+    Table,
+    Figure,
+)
+
 _ELEMENT_KIND: dict[type[Element], ElementKind] = {
     Heading: ElementKind.HEADING,
     Paragraph: ElementKind.PARAGRAPH,
@@ -235,6 +250,7 @@ class Document:
 
 __all__ = [
     "ASSET_ELEMENTS",
+    "ELEMENT_CLASSES",
     "TEXT_ELEMENTS",
     "Caption",
     "CodeBlock",
