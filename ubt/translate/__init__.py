@@ -8,6 +8,6 @@ clean. It is the seam the draft stage will migrate onto.
 
 from __future__ import annotations
 
-from ubt.translate.engine import TranslateFn, TranslationEngine
+from ubt.translate.engine import RestoreResult, TranslateFn, TranslationEngine
 
-__all__ = ["TranslateFn", "TranslationEngine"]
+__all__ = ["RestoreResult", "TranslateFn", "TranslationEngine"]

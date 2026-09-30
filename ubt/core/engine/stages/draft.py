@@ -8,10 +8,6 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
 
-from ubt.core.cleaners.citation_masker import CitationMasker
-from ubt.core.cleaners.code_masker import CodeMasker
-from ubt.core.cleaners.math_masker import MathMasker
-from ubt.core.cleaners.soup_math import SoupMathMasker
 from ubt.core.config import UBTConfig
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.ledger import SQLiteJobLedger
@@ -43,6 +39,7 @@ from ubt.core.router.router import (
 )
 from ubt.core.validators.consistency import GlossaryConsistencyValidator
 from ubt.segment.placeholders import MaskedSource, PlaceholderEngine
+from ubt.translate.engine import TranslationEngine
 
 logger = logging.getLogger(__name__)
 
@@ -129,10 +126,7 @@ class DraftRuntime:
     ledger: SQLiteJobLedger
     actual_job_id: str
     router: ModelRouter
-    code_masker: CodeMasker
-    citation_masker: CitationMasker
-    math_masker: MathMasker
-    soup_masker: SoupMathMasker
+    engine: TranslationEngine
     memory_mgr: HierarchicalMemoryManager
     concurrency_sem: asyncio.Semaphore
     tm: TranslationMemory | None
@@ -152,20 +146,6 @@ class DraftRuntime:
     last_fail_fast_reason: str = ""
     ctx: StageContext | None = None
     create_event_fn: Any = None
-
-    @property
-    def placeholder_engine(self) -> PlaceholderEngine:
-        """The placeholder mask order and its reverse, owned in one place.
-
-        Constructed on access (it only holds the four masker references) so the
-        order is never restated by a call site (ADR-0001 Phase 2).
-        """
-        return PlaceholderEngine(
-            code=self.code_masker,
-            math=self.math_masker,
-            soup=self.soup_masker,
-            citation=self.citation_masker,
-        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -348,9 +328,9 @@ class _DraftProcessor:
 
         # Off-loop: regex/parse-heavy masking would otherwise serialize the
         # single event loop across concurrent draft tasks and SSE fan-out. The
-        # mask order (code -> math -> soup -> citation) lives in
-        # PlaceholderEngine, not here (ADR-0001 Phase 2).
-        masked = await asyncio.to_thread(self.runtime.placeholder_engine.mask, block.source_text)
+        # mask order (code -> math -> soup -> citation) lives in the engine, not
+        # here (ADR-0001 Phase 2).
+        masked = await asyncio.to_thread(self.runtime.engine.mask, block.source_text)
 
         macro_ctx = ""
         if self.policy.rolling_enabled:
@@ -382,9 +362,9 @@ class _DraftProcessor:
         # fail-fast breaker only counts *consecutive* non-retryable failures.
         self.runtime.fail_fast_consecutive = 0
 
-        # Restore in reverse mask order (citation -> soup -> math -> code); the
-        # engine owns that order and verifies every namespace with the same
-        # checksummed contract (ADR-0001 Phase 2).
+        # Restore in reverse mask order (citation -> soup -> math -> code) and
+        # judge: the engine owns that order and verifies every namespace with
+        # the same checksummed contract (ADR-0001 Phase 2).
         masked = MaskedSource(
             text=inputs.masked_source,
             code_map=inputs.code_map,
@@ -392,17 +372,15 @@ class _DraftProcessor:
             soup_map=inputs.soup_map,
             cite_map=inputs.cite_map,
         )
-        outcome = await asyncio.to_thread(self.runtime.placeholder_engine.restore, raw_text, masked)
-        final_draft = outcome.text
+        result = await asyncio.to_thread(self.runtime.engine.resolve, raw_text, masked)
+        final_draft = result.text
 
         error_flags: list[str] = list(block.error_flags)
         # One rule for all four maskers: a restore that is not clean (missing /
         # mismatched / mutated / reordered / duplicated span) means the target
         # is not trustworthy. Record the evidence on the block instead of
         # shipping it.
-        for label, report in outcome.reports:
-            if report.clean:
-                continue
+        for label, report in result.dirty:
             detail = (
                 f"{label} missing={report.missing} "
                 f"mismatched={report.mismatched} "
@@ -414,7 +392,7 @@ class _DraftProcessor:
             error_flags.append(detail)
             self.runtime.counters[label] = self.runtime.counters.get(label, 0) + 1
 
-        restore_clean = outcome.clean
+        restore_clean = result.clean
 
         drafted_block = block.model_copy(
             update={"target_text": final_draft, "draft_text": final_draft}
@@ -1094,10 +1072,17 @@ async def run_draft_stage(
     target_lang = ctx.target_lang
     source_lang = ctx.source_lang
     router = ctx.router
-    code_masker = ctx.code_masker
-    citation_masker = ctx.citation_masker
-    math_masker = ctx.math_masker
-    soup_masker = ctx.soup_masker
+    # The per-unit transform (mask -> restore -> judge) has one owner now
+    # (ADR-0001 Phase 2): the engine holds the fixed mask order, while the
+    # router/batch/retry orchestration below stays in this stage.
+    translation_engine = TranslationEngine(
+        placeholders=PlaceholderEngine(
+            code=ctx.code_masker,
+            math=ctx.math_masker,
+            soup=ctx.soup_masker,
+            citation=ctx.citation_masker,
+        )
+    )
     config = ctx.config
     all_blocks_count = ctx.block_count
     glossary_dicts = ctx.glossary_dicts
@@ -1162,10 +1147,7 @@ async def run_draft_stage(
             ledger=ledger,
             actual_job_id=actual_job_id,
             router=router,
-            code_masker=code_masker,
-            citation_masker=citation_masker,
-            math_masker=math_masker,
-            soup_masker=soup_masker,
+            engine=translation_engine,
             memory_mgr=memory_mgr,
             concurrency_sem=concurrency_sem,
             tm=tm,
