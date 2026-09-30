@@ -120,6 +120,10 @@ class RigidReport:
     # Blocks that only fit after shrinking below the region floor (Axiom B
     # last resort). Counted so the quality report can show the tradeoff.
     degraded_blocks: list[str] = field(default_factory=list)
+    # Blocks that only fit after the last zone was extended to the page bottom
+    # (bounded overflow). Translation completeness outranks pixel layout, so
+    # these paint past their source box; counted so the tradeoff is visible.
+    overflow_blocks: list[str] = field(default_factory=list)
     # page number -> block ids planned for that page. A page-level overlay
     # compile failure must demote these blocks to render skips so the loss is
     # block-scoped and visible in the quality report instead of silently
@@ -370,6 +374,21 @@ def _reclaim_zone_down(
     if new_y0 >= zone.y0 - 0.5:
         return zone
     return zone.with_y0(new_y0)
+
+
+def _overflow_zone_down(zone: Zone, min_y: float) -> Zone:
+    """Extend a zone down to the page content bottom, ignoring neighbours.
+
+    Bounded overflow (Axiom B): when a translation cannot fit its region even at
+    the degraded floor, prefer painting it below the source box — down to the
+    page's content bottom — over leaving the source visible. It is bounded by
+    the *page*, not by neighbours, so the text may run into blank space or, at
+    worst, over a neighbour: the agreed priority order puts translation
+    completeness above pixel layout. A no-op zone is returned unchanged.
+    """
+    if min_y >= zone.y0 - 0.5:
+        return zone
+    return zone.with_y0(min_y)
 
 
 def _boxes_for(zone: Zone, size_pt: float) -> list[Rect]:
@@ -677,9 +696,23 @@ class RigidTypesetter:
                 if degraded is not None:
                     pending = degraded
                     report.degraded_blocks.append(block.id)
+            if pending is None and eff_zones:
+                # Bounded overflow: even the floor does not fit, so extend the
+                # last zone to the page's content bottom and retry. Translation
+                # completeness outranks pixel layout, so the text may paint past
+                # its source box rather than leave the source visible.
+                overflow_last = _overflow_zone_down(eff_zones[-1], CONTENT_BOTTOM_PT)
+                if overflow_last is not eff_zones[-1]:
+                    trial = self._paginate(
+                        text, (*eff_zones[:-1], overflow_last), RIGID_DEGRADED_FIT_FLOOR_PT
+                    )
+                    if trial is not None:
+                        pending = trial
+                        eff_zones = (*eff_zones[:-1], overflow_last)
+                        report.overflow_blocks.append(block.id)
             if pending is None:
-                # Fail closed: a half-painted paragraph is exactly the
-                # mixed-layout artifact this engine removes.
+                # Still nothing fits a whole page: keep the source visible and
+                # record it (an explicit keep, not a silent drop).
                 report.skipped.append((block.id, "spill"))
                 continue
             planned.append((block, text, eff_zones, pending))
@@ -1167,5 +1200,10 @@ class RigidTypesetter:
             logger.info(
                 "Rigid typesetting: %d block(s) shrunk below the region floor to avoid leaving source visible",
                 len(report.degraded_blocks),
+            )
+        if report.overflow_blocks:
+            logger.info(
+                "Rigid typesetting: %d block(s) painted past their box (bounded overflow) to avoid leaving source visible",
+                len(report.overflow_blocks),
             )
         return out_path, report
