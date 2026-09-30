@@ -128,8 +128,11 @@ class AssetDescriptor(BaseModel):
     representation: AssetRepresentation
     integrity: AssetIntegrity
     source_region: SourceRegion | None = None
-    #: Round-trip verification passed: only then may integrity be RECONSTRUCTED.
+    #: Round-trip / structural verification passed: only then may integrity be
+    #: RECONSTRUCTED without a warning.
     verified: bool = False
+    #: Structural check found a corrupt reconstruction (e.g. a shattered table).
+    corrupt: bool = False
     #: Content hash of the preserved region, for ledger reconciliation.
     digest: str = ""
     detail: str = ""

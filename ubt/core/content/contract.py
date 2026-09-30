@@ -27,6 +27,7 @@ class ViolationKind(StrEnum):
     TEXT_UNDELIVERED = "text_undelivered"  # dropped without a kept-verbatim reason
     TEXT_SOURCE_KEPT = "text_source_kept"  # shipped source (translation not placed)
     ASSET_MISSING = "asset_missing"  # non-text content lost
+    ASSET_CORRUPT_RECONSTRUCTION = "asset_corrupt_reconstruction"  # shattered/erroring rebuild
     ASSET_UNVERIFIED_RECONSTRUCTION = "asset_unverified_reconstruction"
 
 
@@ -164,15 +165,25 @@ def reconcile(graph: ContentGraph) -> ReconciliationReport:
             preserved += 1
         else:  # RECONSTRUCTED
             reconstructed += 1
-            if not asset_entry.verified:
+            if asset_entry.corrupt:
+                violations.append(
+                    Violation(
+                        kind=ViolationKind.ASSET_CORRUPT_RECONSTRUCTION,
+                        severity=Severity.WARNING,
+                        node_id=asset_entry.node_id,
+                        detail=asset_entry.reason
+                        or f"corrupt reconstruction as {asset_entry.representation.value}",
+                    )
+                )
+            elif not asset_entry.verified:
                 violations.append(
                     Violation(
                         kind=ViolationKind.ASSET_UNVERIFIED_RECONSTRUCTION,
                         severity=Severity.WARNING,
                         node_id=asset_entry.node_id,
                         detail=(
-                            f"reconstructed as {asset_entry.representation.value} without a "
-                            "round-trip verification (Phase 1 gate)"
+                            f"reconstructed as {asset_entry.representation.value} without "
+                            "verification (Phase 1 gate)"
                         ),
                     )
                 )

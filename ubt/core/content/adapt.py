@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Sequence
 
+from ubt.core.content.asset_verify import StructuralVerdict, verify_asset_structure
 from ubt.core.content.graph import ContentGraph
 from ubt.core.content.nodes import (
     AssetDescriptor,
@@ -117,24 +118,56 @@ def _digest(block: IRBlock, region: SourceRegion | None) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
-def _asset_node(block: IRBlock, order: int, region: SourceRegion | None, engine: str) -> AssetNode:
+def _asset_node(
+    block: IRBlock,
+    order: int,
+    region: SourceRegion | None,
+    engine: str,
+    substituted_ids: frozenset[str],
+) -> AssetNode:
     asset_kind = _ASSET_KIND[block.block_type]
     flags = _skip_flags(block)
     reasons = {_skip_reason(f) for f in flags}
+    verified = False
+    corrupt = False
     if reasons & _DECORATIVE_SKIP_REASONS:
         integrity = AssetIntegrity.DROPPED
         detail = "intentional:" + ",".join(sorted(reasons & _DECORATIVE_SKIP_REASONS))
     elif flags and not _all_intentional(flags):
         integrity = AssetIntegrity.MISSING
         detail = f"render:{_skip_reason(flags[0])}"
-    else:
-        # No round-trip verifier yet (Phase 1). Rigid keeps the source canvas, so
-        # the asset is preserved whole; reflow's placement is an unverified
-        # reconstruction.
-        integrity = (
-            AssetIntegrity.PRESERVED_OPAQUE if engine == "rigid" else AssetIntegrity.RECONSTRUCTED
-        )
+    elif engine != "rigid" and block.id in substituted_ids:
+        # The formula witness failed and the renderer swapped in the source
+        # graphic: lossless by construction, so the asset is preserved opaque.
+        integrity = AssetIntegrity.PRESERVED_OPAQUE
+        detail = "witness_substituted"
+        verified = True
+    elif engine == "rigid":
+        # The source canvas is kept, so every non-text node survives whole.
+        integrity = AssetIntegrity.PRESERVED_OPAQUE
         detail = ""
+    else:
+        # Reflow reconstruction: level-1 structural verification (Phase 1a).
+        # A PASS is verified; a FAIL is corruption (Axiom A) and awaits the
+        # opaque source-crop fallback (Phase 1b); a SKIP stays unverified.
+        if asset_kind is AssetKind.FIGURE:
+            # A figure is placed as its original graphic, not rebuilt.
+            integrity = AssetIntegrity.PRESERVED_OPAQUE
+            verified = True
+            detail = "placed"
+        else:
+            verdict = verify_asset_structure(
+                asset_kind, block.target_text or block.source_text or ""
+            )
+            integrity = AssetIntegrity.RECONSTRUCTED
+            if verdict.verdict is StructuralVerdict.PASS:
+                verified = True
+                detail = verdict.detail
+            elif verdict.verdict is StructuralVerdict.FAIL:
+                corrupt = True
+                detail = f"structural:{verdict.detail}"
+            else:
+                detail = verdict.detail
     return AssetNode(
         id=block.id,
         order=order,
@@ -143,7 +176,8 @@ def _asset_node(block: IRBlock, order: int, region: SourceRegion | None, engine:
             representation=_representation(block, asset_kind, integrity),
             integrity=integrity,
             source_region=region,
-            verified=False,
+            verified=verified,
+            corrupt=corrupt,
             digest=_digest(block, region),
             detail=detail,
         ),
@@ -159,18 +193,24 @@ def graph_from_blocks(
     doc_id: str = "",
     title: str = "",
     source_path: str = "",
+    witness_findings: Sequence[str] = (),
 ) -> ContentGraph:
     """Build the delivery contract's content graph from the delivered blocks.
 
     ``engine`` selects the asset-preservation policy: ``rigid`` preserves every
-    non-text node whole, ``publication``/``reflow`` reconstructs it (unverified
-    until Phase 1).
+    non-text node whole, ``publication``/``reflow`` reconstructs it and runs the
+    structural verification. ``witness_findings`` are the formula-witness lines
+    (``"<block_id>: <detail>"``) for formulas the renderer swapped for their
+    source graphic; those are honoured as preserved-opaque, not reconstructions.
     """
+    substituted_ids = frozenset(
+        f.split(":", 1)[0].strip() for f in witness_findings if f and ":" in f
+    )
     nodes: list[ContentNode] = []
     for order, block in enumerate(blocks):
         region = _region(block)
         if block.block_type in _ASSET_KIND:
-            nodes.append(_asset_node(block, order, region, engine))
+            nodes.append(_asset_node(block, order, region, engine, substituted_ids))
         else:
             nodes.append(_text_node(block, order, region))
     return ContentGraph(doc_id=doc_id, title=title, source_path=source_path, nodes=tuple(nodes))

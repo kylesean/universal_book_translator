@@ -49,6 +49,7 @@ class AssetLedgerEntry(BaseModel):
     integrity: AssetIntegrity
     representation: AssetRepresentation
     verified: bool = False
+    corrupt: bool = False
     digest: str = ""
     reason: str = ""
 
@@ -116,6 +117,7 @@ def build_ledgers(graph: ContentGraph) -> tuple[ContentLedger, AssetLedger]:
                 integrity=node.descriptor.integrity,
                 representation=node.descriptor.representation,
                 verified=node.descriptor.verified,
+                corrupt=node.descriptor.corrupt,
                 digest=node.descriptor.digest,
                 reason=node.descriptor.detail,
             )
