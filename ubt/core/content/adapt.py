@@ -194,17 +194,18 @@ def graph_from_blocks(
     title: str = "",
     source_path: str = "",
     witness_findings: Sequence[str] = (),
+    table_fallbacks: Sequence[str] = (),
 ) -> ContentGraph:
     """Build the delivery contract's content graph from the delivered blocks.
 
     ``engine`` selects the asset-preservation policy: ``rigid`` preserves every
     non-text node whole, ``publication``/``reflow`` reconstructs it and runs the
-    structural verification. ``witness_findings`` are the formula-witness lines
-    (``"<block_id>: <detail>"``) for formulas the renderer swapped for their
+    structural verification. ``witness_findings`` / ``table_fallbacks`` are the
+    ``"<block_id>: <detail>"`` lines for assets the renderer swapped for their
     source graphic; those are honoured as preserved-opaque, not reconstructions.
     """
     substituted_ids = frozenset(
-        f.split(":", 1)[0].strip() for f in witness_findings if f and ":" in f
+        f.split(":", 1)[0].strip() for f in (*witness_findings, *table_fallbacks) if f and ":" in f
     )
     nodes: list[ContentNode] = []
     for order, block in enumerate(blocks):

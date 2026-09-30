@@ -114,6 +114,11 @@ _FORMULA_FALLBACK_DPI = 300
 # ~493pt wide, so 460pt keeps even a pathological bbox inside the margins.
 _FORMULA_FALLBACK_MAX_WIDTH_PT = 460.0
 
+# Table image fallback: 200 dpi keeps cell text legible at ~half the bytes of
+# the formula fallback, and the crop is scaled to the source box width.
+_TABLE_FALLBACK_DPI = 200
+_TABLE_FALLBACK_MAX_WIDTH_PT = 480.0
+
 # Engine backend: the witness compares the MathJax raster and
 # the source crop at the same 150 dpi the deterministic witness calibrated on.
 _ENGINE_WITNESS_DPI = 150
@@ -708,6 +713,10 @@ class TypstReconstructor:
         # Witness failures of the last generation (formula id + findings),
         # surfaced by the adapter into manifest.metadata -> quality report.
         self.last_witness_findings: list[str] = []
+        # Table reconstructions that failed structural verification and were
+        # replaced by their source graphic (Axiom A: preserve whole, never ship
+        # a shattered grid). Reset per generation; surfaced like the witness.
+        self.last_table_fallbacks: list[str] = []
         # Display-formula backend. "typst" keeps native Typst conversion;
         # the orchestrator sets "mathjax" (engine SVG, default) or "image" (source crops).
         self.math_backend: str = "typst"
@@ -797,6 +806,7 @@ class TypstReconstructor:
         self._last_equation_chapter = None
         # Fresh witness audit trail per generation.
         self.last_witness_findings = []
+        self.last_table_fallbacks = []
         resolved_font_size = font_size if font_size is not None else self.font_size_pt
         if page_strict:
             # Use slightly smaller font for page-strict academic mode to fit content
@@ -1431,6 +1441,47 @@ class TypstReconstructor:
             f'#v(0.4em)#align(center)[#image("{png}", width: {width_pt:.1f}pt)]'
             f"{_formula_label(block)}#counter(math.equation).step()#v(0.4em)"
         )
+
+    def _crop_table_fallback(self, block: IRBlock, reason: str) -> str | None:
+        """Show a failed table reconstruction as its ORIGINAL page region.
+
+        Axiom A: when a table cannot be reconstructed faithfully, preserve the
+        source whole rather than ship a shattered grid. Returns a Typst
+        ``#image`` line, or None when no source crop is possible (callers then
+        keep the reconstruction and the contract records the corruption).
+        """
+        if self.source_pdf is None or block.bbox is None:
+            return None
+        try:
+            import base64
+
+            from ubt.adapters.pdf.math_renderer import MATH_CACHE_DIR
+            from ubt.adapters.pdf.visual_scalpel import crop_ir_block_image
+            from ubt.core.fs_perms import restrict_dir_to_owner
+
+            b64 = crop_ir_block_image(self.source_pdf, block, dpi=_TABLE_FALLBACK_DPI, bleed_pt=0.0)
+            if not b64:
+                return None
+            asset_dir = MATH_CACHE_DIR
+            asset_dir.mkdir(parents=True, exist_ok=True)
+            restrict_dir_to_owner(asset_dir)
+            safe_id = re.sub(r"[^A-Za-z0-9_.-]", "-", block.id)
+            raw = base64.b64decode(b64)
+            digest = hashlib.sha256(raw).hexdigest()[:12]
+            png = asset_dir / f"table-fallback-{safe_id}-{digest}.png"
+            png.write_bytes(raw)
+        except Exception as exc:
+            logger.warning("Table image fallback unavailable for %s: %s", block.id, exc)
+            return None
+        width_pt = float(block.bbox.x1) - float(block.bbox.x0)
+        width_pt = min(max(width_pt, 1.0), _TABLE_FALLBACK_MAX_WIDTH_PT)
+        self.last_table_fallbacks.append(f"{block.id}: {reason}")
+        logger.warning(
+            "Table %s reconstruction not verified (%s); using its source graphic",
+            block.id,
+            reason,
+        )
+        return f'#v(0.4em)#align(center)[#image("{png}", width: {width_pt:.1f}pt)]#v(0.4em)'
 
     def _degrade_math_line(self, lines: list[str], li: int, by_id: Mapping[str, IRBlock]) -> None:
         """Replace one math line with its verbatim source span (fail-closed)."""
@@ -2170,6 +2221,21 @@ class TypstReconstructor:
             return
 
         if block.block_type == BlockType.TABLE:
+            # Axiom A: only emit a reconstruction that passes structural
+            # verification; an uncertain or corrupt grid is preserved whole as
+            # its source region instead of shipping shattered cells.
+            from ubt.core.content.asset_verify import (
+                StructuralVerdict,
+                verify_table_structure,
+            )
+
+            verdict = verify_table_structure(content)
+            if verdict.verdict is not StructuralVerdict.PASS:
+                fallback = self._crop_table_fallback(block, verdict.detail or verdict.verdict.value)
+                if fallback is not None:
+                    lines.append(fallback)
+                    lines.append("")
+                    return
             lines.append(_markdown_table_to_typst(content))
             lines.append("")
             return

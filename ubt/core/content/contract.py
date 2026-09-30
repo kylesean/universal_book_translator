@@ -169,7 +169,7 @@ def reconcile(graph: ContentGraph) -> ReconciliationReport:
                 violations.append(
                     Violation(
                         kind=ViolationKind.ASSET_CORRUPT_RECONSTRUCTION,
-                        severity=Severity.WARNING,
+                        severity=Severity.ERROR,
                         node_id=asset_entry.node_id,
                         detail=asset_entry.reason
                         or f"corrupt reconstruction as {asset_entry.representation.value}",

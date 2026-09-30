@@ -885,6 +885,9 @@ def _reconcile_delivery_contract(
         witness_findings=[
             str(item) for item in (manifest.metadata.get("formula_witness_findings") or []) if item
         ],
+        table_fallbacks=[
+            str(item) for item in (manifest.metadata.get("table_fallback_findings") or []) if item
+        ],
     )
     contract = reconcile(graph)
     payload = contract.model_dump(mode="json")

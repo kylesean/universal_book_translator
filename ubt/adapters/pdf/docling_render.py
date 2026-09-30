@@ -47,6 +47,23 @@ def record_witness_findings(reconstructor: TypstReconstructor, manifest: BookMan
         manifest.metadata["formula_witness_findings"] = findings
 
 
+def record_table_fallbacks(reconstructor: TypstReconstructor, manifest: BookManifest) -> None:
+    """Persist table image fallbacks into manifest metadata.
+
+    A table whose reconstruction fails structural verification is replaced by
+    its source graphic (Axiom A: preserve whole, never ship a shattered grid).
+    The substitution is lossless but must stay visible in the audit.
+    """
+    findings = list(getattr(reconstructor, "last_table_fallbacks", []) or [])
+    if not findings:
+        return
+    recorded = manifest.metadata.setdefault("table_fallback_findings", [])
+    if isinstance(recorded, list):
+        recorded.extend(findings)
+    else:
+        manifest.metadata["table_fallback_findings"] = findings
+
+
 def record_toolchain_versions(reconstructor: TypstReconstructor, manifest: BookManifest) -> None:
     """Persist the Typst compiler pin into manifest metadata.
 
@@ -450,6 +467,7 @@ class DoclingRenderStrategy:
                             )
                     record_syntax_fallbacks(self.reconstructor, manifest)
                     record_witness_findings(self.reconstructor, manifest)
+                    record_table_fallbacks(self.reconstructor, manifest)
                     record_toolchain_versions(self.reconstructor, manifest)
                     interleaved = await self.alternator.interleave_pages_async(
                         src_path, staging_trans_pdf, out_path, facing_spread=use_facing
@@ -465,6 +483,7 @@ class DoclingRenderStrategy:
                 await self.reconstructor.compile_pdf_async(typ_source, out_path)
                 record_syntax_fallbacks(self.reconstructor, manifest)
                 record_witness_findings(self.reconstructor, manifest)
+                record_table_fallbacks(self.reconstructor, manifest)
                 record_toolchain_versions(self.reconstructor, manifest)
         else:
             # Compiler not found: the .typ and a bilingual Markdown companion are
