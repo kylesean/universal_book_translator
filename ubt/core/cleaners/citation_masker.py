@@ -15,10 +15,8 @@ hard invariant.
 
 import functools
 import re
-from collections import Counter
 
-from ubt.core.cleaners.mask_tokens import UnmaskReport
-from ubt.core.cleaners.mask_tokens import find_reordered as _find_reordered
+from ubt.core.cleaners.mask_tokens import RestoreStyle, UnmaskReport, restore_masked
 from ubt.core.cleaners.mask_tokens import order_by_position as _order_by_position
 from ubt.core.cleaners.mask_tokens import token_checksum as _token_checksum
 
@@ -78,135 +76,20 @@ class CitationMasker:
         masked = _CITATION_PATTERN.sub(_replace, text)
         return masked, _order_by_position(masked, mapping)
 
-    def _index_table(self, mapping: dict[str, str]) -> dict[int, tuple[str, str, str]]:
-        """index -> (token, original, expected checksum)."""
-        table: dict[int, tuple[str, str, str]] = {}
-        for token, original in mapping.items():
-            m = re.search(r"(\d+)", token)
-            if m:
-                idx = int(m.group(1))
-                table[idx] = (token, original, _token_checksum(idx, original))
-        return table
-
-    def _scan_refs(self, text: str) -> list[tuple[int, str | None]]:
-        """All token-shaped references in text: (index, checksum-or-None)."""
-        pattern = _get_citation_scan_pattern(self.mask_prefix)
-        return [(int(idx), ck) for idx, ck in pattern.findall(text)]
-
     def unmask(self, text: str, mapping: dict[str, str]) -> str:
-        """Restore citation tokens; fuzzy-matches LLM mutations like CodeMasker.
-
-        Only a token carrying a *matching* checksum is restored. A present-but-
-        wrong checksum (renumbered token) and a checksum-less bare token are both
-        left in place: a leftover mask is reported unverified and quarantined,
-        whereas silently restoring a citation the model merely echoed back would
-        corrupt the book.
-        """
-        result = text
-        for token, original in mapping.items():
-            result = result.replace(token, original)
-
-        table = self._index_table(mapping)
-        if not table:
-            return result
-
-        fuzzy = _get_citation_fuzzy_pattern(self.mask_prefix)
-
-        def _fuzzy_repl(match: re.Match[str]) -> str:
-            idx = int(match.group(1))
-            checksum = match.group(2)
-            entry = table.get(idx)
-            if entry is None:
-                return match.group(0)
-            if not checksum or checksum.lower() != entry[2]:
-                return match.group(0)
-            return entry[1]
-
-        return fuzzy.sub(_fuzzy_repl, result)
-
-    def _duplicated_indices(
-        self, table: dict[int, tuple[str, str, str]], restored: str
-    ) -> list[int]:
-        """Indices whose protected citation leaked as literal text in the draft.
-
-        Masking replaces *every* bracketed numeric citation in the block, so the
-        model can only emit the original form ``[12]`` by echoing it from its
-        own memory (or from unmasked neighbor context in the prompt). After the
-        tokens restore, a faithful draft contains each citation exactly as many
-        times as the mapping has tokens for it. A draft that kept the citation
-        as free text *in addition* to its token inflates that count, and the
-        published text would repeat the reference (the defect this guards: every
-        existing bucket stayed empty and the echo passed as clean). A citation-
-        shaped string the mapping never issued is a *foreign* citation — added
-        content, which the QE added-content gate owns, not this masker.
-        """
-        expected = Counter(original for _, original, _ in table.values())
-        leaked = {
-            idx
-            for idx, (_, original, _) in table.items()
-            if restored.count(original) > expected[original]
-        }
-        return sorted(leaked)
-
-    def _missing_indices(
-        self, table: dict[int, tuple[str, str, str]], seen: dict[int, str | None], restored: str
-    ) -> list[int]:
-        """Indices whose citation did not survive into the restored text.
-
-        Multiple tokens can mask the same original — two ``[12]`` in one block.
-        A test satisfied whenever *any* copy of the original is present lets a
-        draft that dropped 1 of 2 identical citations read as clean, and the
-        fail-closed checker opens on symmetric input. Attribute the shortfall
-        to the tokens the model never emitted, letting a genuine free-text copy
-        cover one that it did drop. Bare/mismatched tokens keep
-        going to ``unverified``/``mismatched`` and are not double-flagged here.
-        """
-        by_original: dict[str, list[int]] = {}
-        for idx, (_, original, _) in table.items():
-            by_original.setdefault(original, []).append(idx)
-        missing: list[int] = []
-        for original, idxs in by_original.items():
-            valid_emitted = [
-                idx for idx in idxs if seen.get(idx) and str(seen[idx]).lower() == table[idx][2]
-            ]
-            omitted = [idx for idx in idxs if idx not in seen]
-            surplus = restored.count(original) - len(valid_emitted)
-            covered = min(len(omitted), max(0, surplus))
-            missing.extend(omitted[covered:])
-        return sorted(set(missing))
+        """Restore citations; only checksum-verified tokens (see restore_masked)."""
+        return restore_masked(text, mapping, self._restore_style()).text
 
     def unmask_checked(self, text: str, mapping: dict[str, str]) -> UnmaskReport:
-        """Restore plus integrity verification (see :class:`UnmaskReport`)."""
-        table = self._index_table(mapping)
-        seen: dict[int, str | None] = {}
-        for idx, checksum in self._scan_refs(text):
-            seen.setdefault(idx, checksum)
+        """Restore plus integrity verification; see :class:`UnmaskReport`."""
+        return restore_masked(text, mapping, self._restore_style())
 
-        restored = self.unmask(text, mapping)
-
-        missing = self._missing_indices(table, seen, restored)
-        unverified = sorted(idx for idx, ck in seen.items() if idx in table and not ck)
-        mismatched = sorted(
-            idx for idx, ck in seen.items() if idx in table and ck and ck.lower() != table[idx][2]
-        )
-        # A swap of two intact spans leaves every other bucket empty; only the
-        # order check can see a protected citation move within the block.
-        reordered = _find_reordered(
-            list(table), [idx for idx, _ in self._scan_refs(text) if idx in table]
-        )
-        # A token echoed *plus* its citation emitted as free text leaves the
-        # restore character-perfect and every bucket above empty — only the
-        # occurrence count sees the duplicated reference.
-        duplicated = self._duplicated_indices(table, restored)
-        residue = [f"{idx}-{ck}" if ck else str(idx) for idx, ck in self._scan_refs(restored)]
-        return UnmaskReport(
-            text=restored,
-            missing=sorted(missing),
-            mismatched=mismatched,
-            mutated=residue,
-            unverified=unverified,
-            reordered=reordered,
-            duplicated=duplicated,
+    def _restore_style(self) -> RestoreStyle:
+        return RestoreStyle(
+            scan_pattern=_get_citation_scan_pattern(self.mask_prefix),
+            fuzzy_pattern=_get_citation_fuzzy_pattern(self.mask_prefix),
+            checksumless_restores=False,
+            nested=False,
         )
 
 

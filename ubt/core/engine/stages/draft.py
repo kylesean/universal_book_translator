@@ -42,6 +42,7 @@ from ubt.core.router.router import (
     classify_provider_error,
 )
 from ubt.core.validators.consistency import GlossaryConsistencyValidator
+from ubt.segment.placeholders import MaskedSource, PlaceholderEngine
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +152,20 @@ class DraftRuntime:
     last_fail_fast_reason: str = ""
     ctx: StageContext | None = None
     create_event_fn: Any = None
+
+    @property
+    def placeholder_engine(self) -> PlaceholderEngine:
+        """The placeholder mask order and its reverse, owned in one place.
+
+        Constructed on access (it only holds the four masker references) so the
+        order is never restated by a call site (ADR-0001 Phase 2).
+        """
+        return PlaceholderEngine(
+            code=self.code_masker,
+            math=self.math_masker,
+            soup=self.soup_masker,
+            citation=self.citation_masker,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -331,26 +346,11 @@ class _DraftProcessor:
             fallback_next_text=fallback_next,
         )
 
-        def _mask_all(
-            src: str,
-        ) -> tuple[str, dict[str, str], dict[str, str], dict[str, str], dict[str, str]]:
-            m1, code_map = self.runtime.code_masker.mask(src)
-            # Gate 2 (math isolation): inline math is masked before citations so
-            # mathematical intervals (e.g. $x \in [0, 1]$) or matrix brackets
-            # are protected as math atoms and never intercepted by citation_masker.
-            m2, math_map = self.runtime.math_masker.mask(m1)
-            # Gate 2b (soup isolation): delimiter-free unicode math merged into
-            # narrative by docling (psi_pert, cos(beta), beta2) is masked behind
-            # its own token namespace; restored verbatim below.
-            m3, soup_map = self.runtime.soup_masker.mask(m2)
-            m4, cite_map = self.runtime.citation_masker.mask(m3)
-            return m4, code_map, cite_map, math_map, soup_map
-
         # Off-loop: regex/parse-heavy masking would otherwise serialize the
-        # single event loop across concurrent draft tasks and SSE fan-out.
-        soup_masked_src, code_map, cite_map, math_map, soup_map = await asyncio.to_thread(
-            _mask_all, block.source_text
-        )
+        # single event loop across concurrent draft tasks and SSE fan-out. The
+        # mask order (code -> math -> soup -> citation) lives in
+        # PlaceholderEngine, not here (ADR-0001 Phase 2).
+        masked = await asyncio.to_thread(self.runtime.placeholder_engine.mask, block.source_text)
 
         macro_ctx = ""
         if self.policy.rolling_enabled:
@@ -362,11 +362,11 @@ class _DraftProcessor:
         epoch_ctx = self.runtime.memory_mgr.get_l3_summary()
 
         inputs = _DraftInputs(
-            masked_source=soup_masked_src,
-            code_map=code_map,
-            cite_map=cite_map,
-            math_map=math_map,
-            soup_map=soup_map,
+            masked_source=masked.text,
+            code_map=masked.code_map,
+            cite_map=masked.cite_map,
+            math_map=masked.math_map,
+            soup_map=masked.soup_map,
             glossary_table=glossary_table,
             neighbor_ctx=neighbor_ctx,
             macro_ctx=macro_ctx,
@@ -382,35 +382,25 @@ class _DraftProcessor:
         # fail-fast breaker only counts *consecutive* non-retryable failures.
         self.runtime.fail_fast_consecutive = 0
 
-        def _unmask_all(raw: str) -> tuple[Any, Any, Any, Any, str]:
-            # Restore in reverse masking order (citation -> soup -> math -> code),
-            # so every namespace is verified with the same checksummed
-            # ``unmask_checked`` contract. The weak ``unmask`` variants return a
-            # bare string, so a dropped inline-code or citation token would be
-            # invisible to the quality gate.
-            cite_report = self.runtime.citation_masker.unmask_checked(raw, inputs.cite_map)
-            soup_report = self.runtime.soup_masker.unmask_checked(
-                cite_report.text, inputs.soup_map or {}
-            )
-            math_report = self.runtime.math_masker.unmask_checked(soup_report.text, inputs.math_map)
-            code_report = self.runtime.code_masker.unmask_checked(math_report.text, inputs.code_map)
-            return soup_report, math_report, cite_report, code_report, code_report.text
-
-        soup_report, math_report, cite_report, code_report, final_draft = await asyncio.to_thread(
-            _unmask_all, raw_text
+        # Restore in reverse mask order (citation -> soup -> math -> code); the
+        # engine owns that order and verifies every namespace with the same
+        # checksummed contract (ADR-0001 Phase 2).
+        masked = MaskedSource(
+            text=inputs.masked_source,
+            code_map=inputs.code_map,
+            math_map=inputs.math_map,
+            soup_map=inputs.soup_map,
+            cite_map=inputs.cite_map,
         )
+        outcome = await asyncio.to_thread(self.runtime.placeholder_engine.restore, raw_text, masked)
+        final_draft = outcome.text
 
         error_flags: list[str] = list(block.error_flags)
         # One rule for all four maskers: a restore that is not clean (missing /
         # mismatched / mutated / reordered / duplicated span) means the target
         # is not trustworthy. Record the evidence on the block instead of
         # shipping it.
-        for label, report in (
-            ("soup_token_corrupt", soup_report),
-            ("math_token_corrupt", math_report),
-            ("cite_token_corrupt", cite_report),
-            ("code_token_corrupt", code_report),
-        ):
+        for label, report in outcome.reports:
             if report.clean:
                 continue
             detail = (
@@ -424,9 +414,7 @@ class _DraftProcessor:
             error_flags.append(detail)
             self.runtime.counters[label] = self.runtime.counters.get(label, 0) + 1
 
-        restore_clean = (
-            soup_report.clean and math_report.clean and cite_report.clean and code_report.clean
-        )
+        restore_clean = outcome.clean
 
         drafted_block = block.model_copy(
             update={"target_text": final_draft, "draft_text": final_draft}

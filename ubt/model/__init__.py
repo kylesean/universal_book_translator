@@ -48,6 +48,7 @@ from ubt.model.fidelity import (
     ProofKind,
     ProofOutcome,
 )
+from ubt.model.segment import QA, Placeholder, Provenance, Segment, SegmentState
 from ubt.model.span import BBox, CanonicalSource, PageGeometry, Span
 
 __all__ = [
@@ -73,11 +74,16 @@ __all__ = [
     "ListItem",
     "PageGeometry",
     "Paragraph",
+    "Placeholder",
     "Proof",
     "ProofKind",
     "ProofOutcome",
+    "Provenance",
+    "QA",
     "Region",
     "RegionKind",
+    "Segment",
+    "SegmentState",
     "SemanticKind",
     "Span",
     "Table",

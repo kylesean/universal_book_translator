@@ -9,6 +9,8 @@ namespace by its siblings.
 """
 
 import hashlib
+import re
+from collections import Counter
 from dataclasses import dataclass, field
 
 
@@ -121,3 +123,169 @@ class UnmaskReport:
             and not self.reordered
             and not self.duplicated
         )
+
+
+@dataclass(frozen=True, slots=True)
+class RestoreStyle:
+    """How one placeholder family's tokens are shaped and restored.
+
+    The math / code / citation / soup maskers differ only in these four knobs;
+    everything else about restoring a masked block is identical. Collapsing the
+    four near-identical ``unmask_checked`` implementations into
+    :func:`restore_masked` is what lets "protect a span" have one owner.
+    """
+
+    scan_pattern: re.Pattern[str]
+    fuzzy_pattern: re.Pattern[str]
+    #: Restore a checksum-less echo by index (math/code/soup) or refuse it
+    #: (citation: an echoed marker we cannot verify must not be re-published).
+    checksumless_restores: bool = True
+    #: Re-run restore to a fixed point so a token revealed by restoring an
+    #: enclosing token (a math environment nested inside inline math) expands.
+    nested: bool = False
+
+
+def _index_table(mapping: dict[str, str]) -> dict[int, tuple[str, str, str]]:
+    """index -> (token, original, expected checksum)."""
+    table: dict[int, tuple[str, str, str]] = {}
+    for token, original in mapping.items():
+        match = re.search(r"(\d+)", token)
+        if match:
+            idx = int(match.group(1))
+            table[idx] = (token, original, token_checksum(idx, original))
+    return table
+
+
+def _restore_text(
+    text: str, mapping: dict[str, str], table: dict[int, tuple[str, str, str]], style: RestoreStyle
+) -> str:
+    """Replace tokens verbatim, then fuzzy-match the mutations the model made."""
+
+    def _fuzzy_repl(match: re.Match[str]) -> str:
+        idx = int(match.group(1))
+        checksum = match.group(2)
+        entry = table.get(idx)
+        if entry is None:
+            return match.group(0)
+        if checksum:
+            if checksum.lower() != entry[2]:
+                return match.group(0)  # present-but-wrong: never restore the wrong span
+        elif not style.checksumless_restores:
+            return match.group(0)
+        return entry[1]
+
+    result = text
+    # A no-nesting family needs one pass; a nested one (a token whose original
+    # contains another token) needs a fixed point, bounded so a pathological
+    # mapping cannot spin.
+    passes = min(len(mapping) + 2, 6) if style.nested else 1
+    for _ in range(passes):
+        changed = False
+        for token, original in mapping.items():
+            if token in result:
+                replaced = result.replace(token, original)
+                if replaced != result:
+                    changed = True
+                    result = replaced
+        subbed = style.fuzzy_pattern.sub(_fuzzy_repl, result)
+        if subbed != result:
+            changed = True
+            result = subbed
+        if not changed:
+            break
+    return result
+
+
+def _missing_indices(
+    table: dict[int, tuple[str, str, str]], seen: dict[int, str | None], restored: str
+) -> list[int]:
+    """Indices whose span did not survive into the restored text.
+
+    Count-aware per-original: two identical spans masked by different tokens
+    must not let one surviving copy vouch for the other.
+    """
+    by_original: dict[str, list[int]] = {}
+    for idx, (_, original, _) in table.items():
+        by_original.setdefault(original, []).append(idx)
+    missing: list[int] = []
+    for original, idxs in by_original.items():
+        valid_emitted = [
+            idx for idx in idxs if seen.get(idx) and str(seen[idx]).lower() == table[idx][2].lower()
+        ]
+        omitted = [idx for idx in idxs if idx not in seen]
+        surplus = restored.count(original) - len(valid_emitted)
+        covered = min(len(omitted), max(0, surplus))
+        missing.extend(omitted[covered:])
+    return sorted(set(missing))
+
+
+def _duplicated_indices(table: dict[int, tuple[str, str, str]], restored: str) -> list[int]:
+    """Indices whose protected span leaked as free text in the draft.
+
+    A faithful draft holds each original exactly as many times as there are
+    tokens for it; a higher restored count is the model emitting the span
+    twice (echo twin of :func:`_missing_indices`).
+    """
+    expected: Counter[str] = Counter(original for _, original, _ in table.values())
+    leaked = {
+        idx
+        for idx, (_, original, _) in table.items()
+        if restored.count(original) > expected[original]
+    }
+    return sorted(leaked)
+
+
+def restore_masked(text: str, mapping: dict[str, str], style: RestoreStyle) -> UnmaskReport:
+    """Restore a masked block and verify it — the one restore implementation.
+
+    Replaces the four near-identical ``unmask_checked`` methods the math / code /
+    citation / soup maskers each carried. Every integrity bucket is computed here
+    once; a family only supplies its :class:`RestoreStyle`.
+    """
+    table = _index_table(mapping)
+    draft_refs = [(int(idx), checksum) for idx, checksum in style.scan_pattern.findall(text)]
+    seen: dict[int, str | None] = {}
+    for idx, checksum in draft_refs:
+        seen.setdefault(idx, checksum)
+
+    restored = _restore_text(text, mapping, table, style)
+
+    missing = _missing_indices(table, seen, restored)
+    # A token echoed without its checksum is "unverified", not "mismatched":
+    # the suffix is optional, so a faithful model may drop it. Only a checksum
+    # that is present but wrong (a rewritten index) is a wrong-span risk.
+    unverified = sorted(idx for idx, ck in seen.items() if idx in table and not ck)
+    mismatched = sorted(
+        idx
+        for idx, ck in seen.items()
+        if idx in table and ck and ck.lower() != table[idx][2].lower()
+    )
+    # A swap of two intact tokens leaves every other bucket empty; only the
+    # order check can see a protected span move within the block.
+    reordered = find_reordered(list(table), [idx for idx, _ in draft_refs if idx in table])
+    # Post-restore residue: anything still token-shaped is unaccounted for.
+    residue = [
+        f"{int(idx)}-{ck}" if ck else str(int(idx))
+        for idx, ck in style.scan_pattern.findall(restored)
+    ]
+    duplicated = _duplicated_indices(table, restored)
+    return UnmaskReport(
+        text=restored,
+        missing=sorted(missing),
+        mismatched=mismatched,
+        mutated=residue,
+        unverified=unverified,
+        reordered=reordered,
+        duplicated=duplicated,
+    )
+
+
+__all__ = [
+    "RestoreStyle",
+    "UnmaskReport",
+    "find_reordered",
+    "order_by_position",
+    "position_of",
+    "restore_masked",
+    "token_checksum",
+]
