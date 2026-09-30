@@ -723,6 +723,7 @@ async def _render_complementary_artifact(
     adapter: DocumentAdapter,
     final_blocks: list[IRBlock],
     target_output: Path,
+    rendered_path: Path | None = None,
 ) -> Path | None:
     """Render the requested complementary dual-mode or secondary-engine PDF, or None.
 
@@ -804,56 +805,39 @@ async def _render_complementary_artifact(
             if hasattr(adapter, "last_render_skips"):
                 adapter.last_render_skips = saved_skips
     elif (
-        secondary_engine == "publication"
+        secondary_engine == "rigid_bilingual"
         and str(manifest.run.render_engine_effective or "") == "rigid"
-        and is_pdf_engine_adapter(adapter)
         and target_output.suffix.lower() == ".pdf"
+        and ctx.source_pdf_path is not None
+        and rendered_path is not None
     ):
-        # Auto-routed rigid: the primary is a monolingual overlay, so schedule
-        # the requested bilingual delivery as a zero-token reflow companion.
-        # The pre-downgrade mode is recorded on ``dual_mode_downgraded``.
-        # An auto-named primary is ``<stem>_mono``; restore the canonical
-        # ``<stem>_bilingual`` name for the bilingual companion. An explicit -o
-        # name is unknown to us, so fall back to a distinct ``_reflow`` suffix.
+        # Auto-routed rigid: the primary is a monolingual overlay. The bilingual
+        # companion interleaves the SOURCE pages with the rigid TARGET pages, so
+        # the reader gets 1:1 fidelity and the translation side by side without a
+        # second re-typeset (fidelity and bilingual are no longer a tradeoff). An
+        # auto-named primary is ``<stem>_mono``; restore the canonical
+        # ``<stem>_bilingual`` name for the companion.
         stem = target_output.stem
-        companion_name = (
-            f"{stem[: -len('_mono')]}_bilingual{target_output.suffix}"
-            if stem.endswith("_mono")
-            else f"{stem}_reflow{target_output.suffix}"
-        )
-        candidate = target_output.with_name(companion_name)
-        saved_effective = manifest.run.render_engine_effective
-        saved_meta_effective = manifest.metadata.get("render_engine_effective")
-        saved_skips = list(getattr(adapter, "last_render_skips", ()))
-        companion_mode = str(manifest.run.dual_mode_downgraded or "inline")
+        base = stem[: -len("_mono")] if stem.endswith("_mono") else stem
+        candidate = target_output.with_name(f"{base}_bilingual{target_output.suffix}")
         try:
-            secondary_path = await _render_adapter_output(
-                adapter=adapter,
-                manifest=manifest,
-                ledger=ctx.ledger,
-                blocks=final_blocks,
-                target_lang=ctx.target_lang,
-                output_path=candidate,
-                job_id=ctx.job_id,
-                bilingual_mode=companion_mode,
-                render_engine="publication",
+            from ubt.adapters.pdf.alternator import BilingualAlternator
+
+            result = await BilingualAlternator().interleave_pages_async(
+                source_pdf=ctx.source_pdf_path,
+                translated_pdf=rendered_path,
+                output_pdf=candidate,
+                facing_spread=bool(manifest.run.facing_spread),
             )
+            secondary_path = Path(result.output_path)
             manifest.run.companion_output_path = str(secondary_path)
             logger.info(
-                "Zero-cost bilingual reflow companion rendered alongside rigid artifact: %s",
+                "Zero-cost rigid bilingual companion (source + target pages) rendered: %s",
                 secondary_path,
             )
         except Exception as exc:
-            logger.warning("Companion reflow render failed (non-fatal): %s", exc)
+            logger.warning("Rigid bilingual interleave failed (non-fatal): %s", exc)
             secondary_path = None
-        finally:
-            manifest.run.render_engine_effective = saved_effective
-            if saved_meta_effective is not None:
-                manifest.metadata["render_engine_effective"] = saved_meta_effective
-            elif "render_engine_effective" in manifest.metadata:
-                del manifest.metadata["render_engine_effective"]
-            if hasattr(adapter, "last_render_skips"):
-                adapter.last_render_skips = saved_skips
     manifest.metadata.pop("suppress_render_engine_warning", None)
     return secondary_path
 
@@ -1196,7 +1180,9 @@ async def run_export_stage(
     # for a complementary artifact, render it from the same translated
     # blocks (no extra LLM cost). PDF only — other adapters have no
     # render-mode override plumbing.
-    secondary_path = await _render_complementary_artifact(ctx, adapter, final_blocks, target_output)
+    secondary_path = await _render_complementary_artifact(
+        ctx, adapter, final_blocks, target_output, rendered_path
+    )
 
     # Persist this run's spend to the ledger before the report reads it: the
     # visual gate and complementary render above made paid calls after the last

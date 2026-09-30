@@ -192,19 +192,17 @@ async def run_mode_advisory_stage(ctx: StageContext) -> AsyncIterator[Translatio
             "for bilingual output."
         )
         # Auto-routed rigid is a borderline judgement and rigid is monolingual:
-        # keep a zero-token bilingual companion so the auto decision cannot cost
-        # the reader their bilingual delivery. Explicit --render-engine rigid is
-        # the user's own choice; a scanned document has no text layer to reflow,
-        # so a companion there would be a wasted render.
+        # emit a zero-token bilingual companion by interleaving the source pages
+        # with the rigid target pages (fidelity + bilingual, no re-render).
+        # Explicit --render-engine rigid is the user's own choice.
         if (
             config.emit_companion_bilingual
             and canonical_render_engine(config.render_engine) == "auto"
-            and not bool(_run_route(manifest).get("has_scan"))
         ):
-            manifest.run.emit_secondary_engine = "publication"
+            manifest.run.emit_secondary_engine = "rigid_bilingual"
             engine_advisory_msg += (
-                " A zero-token bilingual '*_reflow.pdf' companion was scheduled so "
-                "the bilingual delivery is preserved."
+                " A zero-token bilingual companion (source + translated pages) was "
+                "scheduled so the bilingual delivery is preserved."
             )
         logger.warning("Job %s: %s", ctx.job_id, engine_advisory_msg)
     elif (
