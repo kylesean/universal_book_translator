@@ -28,6 +28,15 @@ logger = logging.getLogger(__name__)
 # region-rigid typesetting cannot produce (figures stay untouched).
 STRUCT_SHARE_AUTO = 0.20
 
+# Page-level multi-column share above which the rigid engine wins the auto
+# dispatch. Multi-column extraction order is exactly what a reflow re-typeset
+# mangles (arXiv 2609.20519: a two-column paper whose 7/15 columnar pages lost
+# 4 of 6 figures and shattered Table 1). Unlike ``STRUCT_SHARE_AUTO`` this is a
+# page ratio, so it does not drift with parser chunk granularity, and the
+# signal is bimodal (single-column prose ~0.02 vs a two-column body ~0.4+), so
+# the cutoff has wide margin.
+MULTICOLUMN_SHARE_AUTO = 0.25
+
 
 class Granularity(StrEnum):
     """Execution chunking granularity for the unified translation pipeline.
@@ -112,6 +121,7 @@ def resolve_render_engine_from_signals(
     has_math: bool,
     struct_share: float,
     has_geometry: bool = True,
+    multicolumn_share: float = 0.0,
 ) -> str:
     """Canonical render-route decision from document facts, without IR blocks.
 
@@ -122,10 +132,10 @@ def resolve_render_engine_from_signals(
     actually runs.
 
     ``publication``/``reflow`` and ``rigid`` pass through; ``auto`` routes to
-    rigid only when the document carries math or is structure-dense **and** has
-    usable geometry. Rigid typesets from source boxes, so a plain-text fallback
-    that stamps zero-area bboxes must reflow instead. Unknown names fall back to
-    publication.
+    rigid when the document carries math, is structure-dense, or is laid out in
+    columns **and** has usable geometry. Rigid typesets from source boxes, so a
+    plain-text fallback that stamps zero-area bboxes must reflow instead.
+    Unknown names fall back to publication.
     """
     norm = canonical_render_engine(requested) if requested else "auto"
     if norm in ("publication", "rigid"):
@@ -145,8 +155,18 @@ def resolve_render_engine_from_signals(
     # cells and TikZ/matplotlib figures go missing wholesale (arXiv
     # 2609.20519: 4 of 6 figures lost, Table 1 unusable). Rigid keeps the
     # source page as the canvas, so untouched geometry cannot be corrupted.
+    # ``multicolumn_share`` is the page-level form of the same tell: a
+    # multi-column body is what a reflow re-typeset mangles most, and the
+    # 2609.20519 case is caught by it (7/15 columnar pages) even though its
+    # IR block-count share (8.6%) and FORMULA-block count (0) both miss.
     # Plain prose has no such risk and gets the reflow route's better typography.
-    return "rigid" if has_math or struct_share >= STRUCT_SHARE_AUTO else "publication"
+    return (
+        "rigid"
+        if has_math
+        or struct_share >= STRUCT_SHARE_AUTO
+        or multicolumn_share >= MULTICOLUMN_SHARE_AUTO
+        else "publication"
+    )
 
 
 def resolve_pdf_engine(
@@ -156,9 +176,10 @@ def resolve_pdf_engine(
 ) -> str:
     """Resolve the PDF render engine for one render call from its IR blocks and manifest.
 
-    Derives the three routing signals the canonical dispatcher needs
-    (``has_math`` / ``struct_share`` / ``has_geometry``) from the block mix and
-    manifest facts, then delegates to :func:`resolve_render_engine_from_signals`.
+    Derives the routing signals the canonical dispatcher needs
+    (``has_math`` / ``struct_share`` / ``multicolumn_share`` / ``has_geometry``)
+    from the block mix and manifest facts, then delegates to
+    :func:`resolve_render_engine_from_signals`.
     """
     materialized = list(blocks)
     has_geometry = any(
@@ -166,6 +187,7 @@ def resolve_pdf_engine(
     )
     has_math = False
     struct_share = 0.0
+    multicolumn_share = 0.0
     if materialized:
         # ``has_math`` is driven by explicit FORMULA blocks only. An inline
         # ``$x$`` anywhere in prose used to flip this True via
@@ -182,9 +204,20 @@ def resolve_pdf_engine(
 
     if manifest is not None:
         rd = getattr(manifest.run, "route_decision", None)
-        if isinstance(rd, dict) and rd.get("formula_heavy"):
-            has_math = True
+        if isinstance(rd, dict):
+            if rd.get("formula_heavy"):
+                has_math = True
+            # Page-level census carried by the router. Preferred over the
+            # block-count share because it does not drift with parser chunking.
+            try:
+                multicolumn_share = float(rd.get("multicolumn_page_share") or 0.0)
+            except (TypeError, ValueError):
+                multicolumn_share = 0.0
 
     return resolve_render_engine_from_signals(
-        requested, has_math=has_math, struct_share=struct_share, has_geometry=has_geometry
+        requested,
+        has_math=has_math,
+        struct_share=struct_share,
+        has_geometry=has_geometry,
+        multicolumn_share=multicolumn_share,
     )

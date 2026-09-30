@@ -320,6 +320,56 @@ def probe_pdf_pages(input_path: Path) -> tuple[int, int]:
     return _probe(input_path)
 
 
+@dataclass(frozen=True)
+class PdfStructureFacts:
+    """Page-level structure census feeding render-engine routing.
+
+    All ratios are over *all* pages (not a sample) and are page-level, so the
+    signal does not drift when the parser re-chunks text into more IR blocks.
+    ``has_scan`` / ``formula_heavy`` keep their historical majority semantics.
+    """
+
+    has_scan: bool
+    formula_heavy: bool
+    multicolumn_page_share: float
+    structural_page_share: float
+
+
+def classify_pdf_structure(input_path: Path) -> PdfStructureFacts:
+    """Census the document's pages once and return the routing signals.
+
+    Fail-open stays (a probe failure is conservative), but it is logged: a
+    silent default quietly distorts the ``pdf_engine='auto'`` routing decision.
+    """
+    try:
+        from ubt.adapters.pdf.page_profiler import (
+            PageKind,
+            classify_page,
+            collect_page_facts,
+            structural_page_shares,
+        )
+
+        facts = collect_page_facts(input_path)
+        kinds = [classify_page(f) for f in facts]
+        n = len(kinds)
+        has_scan = n > 0 and sum(1 for k in kinds if k == PageKind.SCAN_IMAGE) * 2 >= n
+        formula_heavy = n > 0 and sum(1 for k in kinds if k == PageKind.MIXED_COMPLEX) * 2 >= n
+        multicolumn_share, structural_share = structural_page_shares(facts)
+        return PdfStructureFacts(
+            has_scan=has_scan,
+            formula_heavy=formula_heavy,
+            multicolumn_page_share=multicolumn_share,
+            structural_page_share=structural_share,
+        )
+    except Exception as exc:
+        logging.getLogger(__name__).warning(
+            "PDF content classification failed for %s (routing probe degraded): %s",
+            input_path,
+            exc,
+        )
+        return PdfStructureFacts(False, False, 0.0, 0.0)
+
+
 def classify_pdf_content(input_path: Path) -> tuple[bool, bool]:
     """Return (has_scan, formula_heavy) via page_profiler.
 
@@ -328,25 +378,8 @@ def classify_pdf_content(input_path: Path) -> tuple[bool, bool]:
     page in a born-digital book must not route the whole title down the
     long-chain/VLM path.
     """
-    try:
-        from ubt.adapters.pdf.page_profiler import PageKind, classify_page, collect_page_facts
-
-        facts = collect_page_facts(input_path)
-        kinds = [classify_page(f) for f in facts] if facts else []
-        n = len(kinds)
-        has_scan = n > 0 and sum(1 for k in kinds if k == PageKind.SCAN_IMAGE) * 2 >= n
-        formula_heavy = n > 0 and sum(1 for k in kinds if k == PageKind.MIXED_COMPLEX) * 2 >= n
-        return has_scan, formula_heavy
-    except Exception as exc:
-        # Fail-open stays (conservative probe), but a silent
-        # (False, False) quietly distorts the pdf_engine="auto" routing
-        # decision — make the probe failure visible.
-        logging.getLogger(__name__).warning(
-            "PDF content classification failed for %s (routing probe degraded): %s",
-            input_path,
-            exc,
-        )
-        return False, False
+    facts = classify_pdf_structure(input_path)
+    return facts.has_scan, facts.formula_heavy
 
 
 def extract_pdf_figures(

@@ -643,6 +643,16 @@ class UBTConfig(BaseSettings):
     emit_both: bool = False
     # Explicitly deliver a zero-cost '*_rigid.pdf' companion alongside reflow.
     emit_companion_rigid: bool = False
+    # Deliver a zero-cost bilingual '*_reflow.pdf' companion when an auto-routed
+    # document takes the monolingual rigid engine, so a borderline auto decision
+    # never silently costs the reader their bilingual delivery. Explicit
+    # --render-engine rigid is the user's own choice and is exempt.
+    emit_companion_bilingual: bool = True
+    # Auto-emit a zero-cost '*_rigid.pdf' companion whenever a reflow-primary PDF
+    # still carries page-level structure (figures/columns/mixed pages), so a
+    # threshold miss can never silently lose figures or tables. Toggle off to
+    # skip the extra (CPU-only, no-LLM) render on large figure-bearing books.
+    emit_companion_auto: bool = True
 
     # -- PDF render engine --------------------------------------------------------
     # 'auto' (default): density dispatch — formula/table/figure-dense documents

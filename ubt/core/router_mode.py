@@ -23,7 +23,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Literal
 
-from ubt.core.ports import classify_pdf_content, probe_pdf_pages
+from ubt.core.ports import classify_pdf_structure, probe_pdf_pages
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +56,12 @@ class RouteDecision:
     reason: str
     chapters: int = 1
     estimated_tokens: int = 0
+    #: Page-level structure shares from the profiler census. Carried on the
+    #: decision so the renderer's ``auto`` dispatch reads the *same* signal the
+    #: router did, instead of re-deriving a chunk-granular IR block-count
+    #: share that drifts when the parser splits paragraphs differently.
+    multicolumn_page_share: float = 0.0
+    structural_page_share: float = 0.0
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -66,6 +72,8 @@ class RouteDecision:
             "formula_heavy": self.formula_heavy,
             "chapters": self.chapters,
             "estimated_tokens": self.estimated_tokens,
+            "multicolumn_page_share": self.multicolumn_page_share,
+            "structural_page_share": self.structural_page_share,
             "reason": self.reason,
         }
 
@@ -373,8 +381,8 @@ def decide(
             chapters=pdf_chapters,
             estimated_tokens=est_tokens,
         )
-    has_scan, formula_heavy = classify_pdf_content(path)
-    if has_scan:
+    structure = classify_pdf_structure(path)
+    if structure.has_scan:
         return RouteDecision(
             mode="long",
             pages=pages,
@@ -384,6 +392,8 @@ def decide(
             reason=f"scan page present ({pages}pp), long chain VLM",
             chapters=pdf_chapters,
             estimated_tokens=est_tokens,
+            multicolumn_page_share=structure.multicolumn_page_share,
+            structural_page_share=structure.structural_page_share,
         )
     # A PDF can have few pages but a huge text layer; the token budget must be
     # checked too or a 30-page 300k-char dump takes the short single-shot chain.
@@ -393,21 +403,25 @@ def decide(
             pages=pages,
             chars=chars,
             has_scan=False,
-            formula_heavy=formula_heavy,
+            formula_heavy=structure.formula_heavy,
             reason=(
                 f"short born-digital chapter ({pages}pp<={short_max_pages}, "
                 f"~{est_tokens}<= {token_budget} tokens)"
             ),
             chapters=pdf_chapters,
             estimated_tokens=est_tokens,
+            multicolumn_page_share=structure.multicolumn_page_share,
+            structural_page_share=structure.structural_page_share,
         )
     return RouteDecision(
         mode="long",
         pages=pages,
         chars=chars,
         has_scan=False,
-        formula_heavy=formula_heavy,
+        formula_heavy=structure.formula_heavy,
         reason=(f"long book ({pages}pp>{short_max_pages} or ~{est_tokens} tokens>{token_budget})"),
         chapters=pdf_chapters,
         estimated_tokens=est_tokens,
+        multicolumn_page_share=structure.multicolumn_page_share,
+        structural_page_share=structure.structural_page_share,
     )

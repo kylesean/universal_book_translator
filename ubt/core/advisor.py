@@ -154,6 +154,27 @@ class DocumentAdvisor:
         reasons: list[str] = []
         conflict_warnings: list[str] = []
 
+        # Route probe (also feeds the engine signal). Runs before the engine
+        # recommendation so the page-level multi-column share can steer it.
+        route_mode = "auto"
+        route_reason = "结构化文档，无需 PDF 路由探测"
+        route_multicolumn_share = 0.0
+        if format_ext == "pdf":
+            try:
+                route = decide_route(
+                    path,
+                    short_max_pages=route_short_max,
+                    exec_mode=route_exec_mode,
+                )
+                route_mode = route.mode
+                route_reason = route.reason
+                route_multicolumn_share = float(
+                    getattr(route, "multicolumn_page_share", 0.0) or 0.0
+                )
+            except Exception:  # probing must never block the wizard
+                route_mode = "auto"
+                route_reason = "路由探测不可用，按默认策略执行"
+
         # 1. Render engine recommendation — predicted through the same canonical
         # resolver the runtime ``auto`` dispatch uses
         # (``adaptive_policy.resolve_render_engine_from_signals``), so the advice
@@ -167,6 +188,7 @@ class DocumentAdvisor:
                 has_math=math_density == MathDensity.HIGH,
                 struct_share=1.0 if is_scanned else 0.0,
                 has_geometry=True,
+                multicolumn_share=route_multicolumn_share,
             )
             if canonical == "rigid":
                 recommended_render_engine: RenderEngine = "rigid"
@@ -217,21 +239,7 @@ class DocumentAdvisor:
 
         recommended_formula_mode: FormulaMode = "readable"
 
-        # 4. Route + tier + profile suggestions
-        route_mode = "auto"
-        route_reason = "结构化文档，无需 PDF 路由探测"
-        if format_ext == "pdf":
-            try:
-                route = decide_route(
-                    path,
-                    short_max_pages=route_short_max,
-                    exec_mode=route_exec_mode,
-                )
-                route_mode = route.mode
-                route_reason = route.reason
-            except Exception:  # probing must never block the wizard
-                route_mode = "auto"
-                route_reason = "路由探测不可用，按默认策略执行"
+        # 4. Route + tier + profile suggestions (route probed above)
 
         if math_density == MathDensity.HIGH or category in (
             DocCategory.ACADEMIC_PAPER,

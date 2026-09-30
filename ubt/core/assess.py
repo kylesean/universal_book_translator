@@ -383,6 +383,11 @@ def _recommend_route(
     pdf_format = arch.format_ext == "pdf"
     has_formula_signal = bool(pdf.get("has_formulas")) or math_heavy
     has_vector_signal = bool(pdf.get("has_vector_diagrams"))
+    # A multi-column body is the layout a reflow re-typeset mangles most; the
+    # probe already computes it (``inspect_pdf_route_plan``), but the
+    # recommendation used to ignore it, so a two-column paper was quoted
+    # reflow while the runtime ``auto`` dispatch would pick rigid.
+    has_multicolumn_signal = bool(pdf.get("has_multicolumn"))
 
     # Scanned-page truth: prefer the per-page census over the 5-page heuristic.
     if pdf.get("scan_page_share") is not None:
@@ -416,6 +421,7 @@ def _recommend_route(
             has_math=has_formula_signal,
             struct_share=1.0 if (has_vector_signal or scanned) else 0.0,
             has_geometry=True,
+            multicolumn_share=1.0 if has_multicolumn_signal else 0.0,
         )
         render_engine = "rigid" if canonical == "rigid" else "reflow"
     else:

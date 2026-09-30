@@ -734,6 +734,11 @@ async def _render_complementary_artifact(
     secondary_render = str(manifest.run.emit_secondary_mode or "")
     secondary_engine = str(manifest.run.emit_secondary_engine or "")
     secondary_path: Path | None = None
+    # Companion renders are intentional second passes; the forced-engine
+    # warning ("...auto dispatch would route...") is for a user-forced *primary*
+    # render, so suppress it while a companion is produced.
+    if isinstance(getattr(manifest, "metadata", None), dict):
+        manifest.metadata["suppress_render_engine_warning"] = True
     if secondary_render and str(manifest.run.render_engine_effective or "") == "rigid":
         # The rigid engine is monolingual: a complementary mode would
         # produce a byte-identical mono artifact. Record the skip instead.
@@ -798,6 +803,58 @@ async def _render_complementary_artifact(
                 del manifest.metadata["render_engine_effective"]
             if hasattr(adapter, "last_render_skips"):
                 adapter.last_render_skips = saved_skips
+    elif (
+        secondary_engine == "publication"
+        and str(manifest.run.render_engine_effective or "") == "rigid"
+        and is_pdf_engine_adapter(adapter)
+        and target_output.suffix.lower() == ".pdf"
+    ):
+        # Auto-routed rigid: the primary is a monolingual overlay, so schedule
+        # the requested bilingual delivery as a zero-token reflow companion.
+        # The pre-downgrade mode is recorded on ``dual_mode_downgraded``.
+        # An auto-named primary is ``<stem>_mono``; restore the canonical
+        # ``<stem>_bilingual`` name for the bilingual companion. An explicit -o
+        # name is unknown to us, so fall back to a distinct ``_reflow`` suffix.
+        stem = target_output.stem
+        companion_name = (
+            f"{stem[: -len('_mono')]}_bilingual{target_output.suffix}"
+            if stem.endswith("_mono")
+            else f"{stem}_reflow{target_output.suffix}"
+        )
+        candidate = target_output.with_name(companion_name)
+        saved_effective = manifest.run.render_engine_effective
+        saved_meta_effective = manifest.metadata.get("render_engine_effective")
+        saved_skips = list(getattr(adapter, "last_render_skips", ()))
+        companion_mode = str(manifest.run.dual_mode_downgraded or "inline")
+        try:
+            secondary_path = await _render_adapter_output(
+                adapter=adapter,
+                manifest=manifest,
+                ledger=ctx.ledger,
+                blocks=final_blocks,
+                target_lang=ctx.target_lang,
+                output_path=candidate,
+                job_id=ctx.job_id,
+                bilingual_mode=companion_mode,
+                render_engine="publication",
+            )
+            manifest.run.companion_output_path = str(secondary_path)
+            logger.info(
+                "Zero-cost bilingual reflow companion rendered alongside rigid artifact: %s",
+                secondary_path,
+            )
+        except Exception as exc:
+            logger.warning("Companion reflow render failed (non-fatal): %s", exc)
+            secondary_path = None
+        finally:
+            manifest.run.render_engine_effective = saved_effective
+            if saved_meta_effective is not None:
+                manifest.metadata["render_engine_effective"] = saved_meta_effective
+            elif "render_engine_effective" in manifest.metadata:
+                del manifest.metadata["render_engine_effective"]
+            if hasattr(adapter, "last_render_skips"):
+                adapter.last_render_skips = saved_skips
+    manifest.metadata.pop("suppress_render_engine_warning", None)
     return secondary_path
 
 
@@ -1007,8 +1064,15 @@ async def run_export_stage(
     # Default output is isolated under tmp/output/ so a forgotten -o
     # never pollutes the input directory (or docs/). All derived artifacts
     # (secondary render, quality/visual reports, .typ sidecar, PE queue)
-    # hang off target_output and follow it automatically.
-    target_output = resolve_target_output(output_path, input_path)
+    # hang off target_output and follow it automatically. A monolingual
+    # (rigid) primary gets the honest ``_mono`` default name; an explicit -o is
+    # respected as given.
+    is_monolingual_output = (
+        str(manifest.run.effective_dual_mode or manifest.run.bilingual_mode or "") == "monolingual"
+    )
+    target_output = resolve_target_output(
+        output_path, input_path, monolingual=is_monolingual_output
+    )
     target_output.parent.mkdir(parents=True, exist_ok=True)
 
     ctx.check_cancelled()

@@ -147,6 +147,11 @@ def _warn_forced_engine(
     """
     if canonical_render_engine(requested_engine) == "auto":
         return
+    metadata = getattr(manifest, "metadata", None)
+    if isinstance(metadata, dict) and metadata.get("suppress_render_engine_warning"):
+        # Companion second pass: the primary already took the auto route, so a
+        # forced-engine warning here would contradict the delivered artifact.
+        return
     auto_choice = resolve_pdf_engine("auto", blocks, manifest=manifest)
     if auto_choice != active_engine:
         logger.warning(

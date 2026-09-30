@@ -301,26 +301,39 @@ def default_output_dir_for_scan() -> Path:
     return default_output_dir()
 
 
-def default_output_path(input_path: Path | str) -> Path:
-    """Where a run with no ``-o`` writes its deliverable."""
+def default_output_path(input_path: Path | str, *, monolingual: bool = False) -> Path:
+    """Where a run with no ``-o`` writes its deliverable.
+
+    A monolingual (rigid) primary is named ``<stem>_mono`` rather than
+    ``<stem>_bilingual`` so the file name does not promise a bilingual document
+    whose content is target-only.
+    """
     source = Path(input_path)
-    return default_output_dir() / f"{source.stem}_bilingual{source.suffix}"
+    label = "mono" if monolingual else "bilingual"
+    return default_output_dir() / f"{source.stem}_{label}{source.suffix}"
 
 
-def resolve_target_output(output_path: Path | str | None, input_path: Path | str) -> Path:
+def resolve_target_output(
+    output_path: Path | str | None,
+    input_path: Path | str,
+    *,
+    monolingual: bool = False,
+) -> Path:
     """Normalize user-supplied output path or derive default deliverable path.
 
-    - None -> <documents>/UBT/<stem>_bilingual<suffix>
+    - None -> <documents>/UBT/<stem>_bilingual<suffix> (``_mono`` when monolingual)
     - Directory (existing or ending with / or \\) -> <dir>/<stem>_bilingual<suffix>
+      (``_mono`` when monolingual)
     - Path without extension -> <path><input_suffix>
-    - Path with extension -> <path> as-is
+    - Path with extension -> <path> as-is (an explicit name is always respected)
     """
     inp = Path(input_path)
     if output_path is None:
-        return default_output_path(inp)
+        return default_output_path(inp, monolingual=monolingual)
     out = Path(output_path)
     if out.is_dir() or str(output_path).endswith(("/", "\\")):
-        return out / f"{inp.stem}_bilingual{inp.suffix}"
+        label = "mono" if monolingual else "bilingual"
+        return out / f"{inp.stem}_{label}{inp.suffix}"
     if not out.suffix and inp.suffix:
         return out.with_suffix(inp.suffix)
     return out

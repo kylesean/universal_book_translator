@@ -23,8 +23,10 @@ import tempfile
 from pathlib import Path
 from typing import Any, cast
 
+from ubt.core.config import RIGID_ENGINES, canonical_render_engine
 from ubt.core.exceptions import DocumentParseError
 from ubt.core.ir.models import BlockType, IRBlock
+from ubt.core.policy.adaptive_policy import resolve_pdf_engine
 from ubt.core.ports import DocumentAdapter, is_pdf_engine_adapter
 
 logger = logging.getLogger(__name__)
@@ -97,16 +99,31 @@ async def run_render_preflight(
     sample = select_preflight_sample(blocks)
     metadata = getattr(manifest, "metadata", None) or {}
     run_meta = getattr(manifest, "run", None)
-    render_engine = (
-        getattr(run_meta, "render_engine_effective", None)
-        or metadata.get("render_engine")
-        or getattr(run_meta, "render_engine", None)
-    )
+    # Resolve the engine against ALL blocks, then force that engine onto the
+    # sample. ``select_preflight_sample`` is deliberately structure-biased
+    # (TABLE/FORMULA first), so resolving on the sample alone could route rigid
+    # while the full document reflows: the scratch render would exercise a path
+    # that never runs, and log a monolingual-downgrade warning for it.
+    effective_engine = getattr(run_meta, "render_engine_effective", None)
+    if effective_engine:
+        render_engine = str(effective_engine)
+    else:
+        requested_engine = (
+            metadata.get("render_engine")
+            or getattr(run_meta, "render_engine", None)
+            or "publication"
+        )
+        render_engine = resolve_pdf_engine(str(requested_engine), blocks, manifest=manifest)
     bilingual_mode = (
         getattr(run_meta, "effective_dual_mode", None)
         or getattr(run_meta, "bilingual_mode", None)
         or metadata.get("bilingual_mode")
     )
+    # Rigid is monolingual: match the scratch mode to the resolved engine so the
+    # rehearsal is faithful and the scratch copy does not emit a downgrade
+    # warning for a route the live manifest never took.
+    if canonical_render_engine(render_engine) in RIGID_ENGINES:
+        bilingual_mode = "monolingual"
     pdf_adapter = cast(Any, adapter)
     # Render into an isolated copy: the scratch compile must not write its
     # route/downgrade facts back onto the live run manifest.

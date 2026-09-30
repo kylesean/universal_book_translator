@@ -110,6 +110,20 @@ def _report_degrades_bilingual_delivery(report_data: dict[str, Any]) -> bool:
     )
 
 
+def _find_companion_paths(result_path: Path) -> list[Path]:
+    """Existing complementary artifacts the pipeline wrote beside the primary.
+
+    The pipeline may emit a fidelity rigid companion (``_rigid``) and/or a
+    bilingual reflow companion (``_reflow``, or ``_bilingual`` when the primary
+    took the auto-named ``_mono`` delivery).
+    """
+    stem = result_path.stem
+    names = [f"{stem}_rigid.pdf", f"{stem}_reflow.pdf"]
+    if stem.endswith("_mono"):
+        names.append(f"{stem[: -len('_mono')]}_bilingual{result_path.suffix}")
+    return [p for p in (result_path.with_name(n) for n in names) if p.exists()]
+
+
 def translate(
     input_path: Annotated[Path, typer.Argument(help="Path to input document (.epub, .md, .pdf)")],
     output: Annotated[
@@ -784,7 +798,7 @@ def translate(
             raise typer.Exit(code=1)
         report_path = sidecar_path(result_path, "quality_report.json")
         visual_path = sidecar_path(result_path, "visual_report.json")
-        companion_rigid = result_path.with_name(f"{result_path.stem}_rigid.pdf")
+        companions = _find_companion_paths(result_path)
         if strict:
             strict_fn = _get_strict_failures()
             failures = strict_fn(report_path)
@@ -810,9 +824,8 @@ def translate(
                     {
                         "status": "completed",
                         "output_file": str(result_path),
-                        "companion_file": str(companion_rigid)
-                        if companion_rigid.exists()
-                        else None,
+                        "companion_file": str(companions[0]) if companions else None,
+                        "companion_files": [str(p) for p in companions],
                         "quality_report": str(report_path) if report_path.exists() else None,
                         "visual_report": str(visual_path) if visual_path.exists() else None,
                     }
@@ -855,9 +868,9 @@ def translate(
         )
         console.print("\n[bold green]✓ Translation Completed Successfully![/]")
         console.print(f"  [cyan]{doc_label}[/] [link=file://{result_path}]{result_path}[/]")
-        if companion_rigid.exists():
+        for companion in companions:
             console.print(
-                f"  [green]Companion Faithful:[/] [link=file://{companion_rigid}]{companion_rigid}[/]"
+                f"  [green]Companion Artifact:[/] [link=file://{companion}]{companion}[/]"
             )
         if report_path.exists():
             console.print(

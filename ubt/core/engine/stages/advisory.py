@@ -21,7 +21,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import AsyncIterator
-from typing import Literal
+from typing import Any, Literal
 
 from ubt.core.config import RIGID_ENGINES, DualMode, canonical_render_engine
 from ubt.core.engine.events import EventType, TranslationProgressEvent
@@ -47,6 +47,24 @@ from ubt.core.ports import (
 )
 
 logger = logging.getLogger(__name__)
+
+#: Page-level structural share above which a publication-primary render still
+#: earns a zero-token rigid fidelity companion. Deliberately low: the companion
+#: carries no LLM cost, and a missed one silently loses figures/tables.
+COMPANION_STRUCTURAL_SHARE = 0.15
+
+
+def _run_route(manifest: BookManifest) -> dict[str, Any]:
+    """The route decision dict the renderer also reads (empty when absent)."""
+    rd = getattr(manifest.run, "route_decision", None)
+    return rd if isinstance(rd, dict) else {}
+
+
+def _structural_page_share(manifest: BookManifest) -> float:
+    try:
+        return float(_run_route(manifest).get("structural_page_share") or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 async def run_extraction_witness_stage(ctx: StageContext) -> None:
@@ -173,24 +191,38 @@ async def run_mode_advisory_stage(ctx: StageContext) -> AsyncIterator[Translatio
             f"'monolingual'. Use --render-engine reflow (or --preset publication) "
             "for bilingual output."
         )
+        # Auto-routed rigid is a borderline judgement and rigid is monolingual:
+        # keep a zero-token bilingual companion so the auto decision cannot cost
+        # the reader their bilingual delivery. Explicit --render-engine rigid is
+        # the user's own choice; a scanned document has no text layer to reflow,
+        # so a companion there would be a wasted render.
+        if (
+            config.emit_companion_bilingual
+            and canonical_render_engine(config.render_engine) == "auto"
+            and not bool(_run_route(manifest).get("has_scan"))
+        ):
+            manifest.run.emit_secondary_engine = "publication"
+            engine_advisory_msg += (
+                " A zero-token bilingual '*_reflow.pdf' companion was scheduled so "
+                "the bilingual delivery is preserved."
+            )
         logger.warning("Job %s: %s", ctx.job_id, engine_advisory_msg)
     elif (
         ctx.source_pdf_path is not None
-        and canonical_render_engine(config.render_engine) == "publication"
+        and effective_engine not in RIGID_ENGINES
         and (
             config.emit_companion_rigid
             or (
-                resolve_pdf_engine("auto", current_blocks, manifest=manifest) == "rigid"
-                and advisory.tier == "discourage"
+                config.emit_companion_auto
+                and _structural_page_share(manifest) >= COMPANION_STRUCTURAL_SHARE
             )
         )
     ):
         manifest.run.emit_secondary_engine = "rigid"
         engine_advisory_msg = (
-            f"Layout tradeoff advisory: '--render-engine {config.render_engine}' was explicitly forced "
-            f"on a formula/structure-dense PDF where auto routing selects 'rigid'. "
-            "Proceeding with reflow bilingual rendering as requested, and scheduling a zero-cost "
-            "companion '*_rigid.pdf' artifact for layout-faithful verification."
+            "Layout tradeoff advisory: this structure-bearing PDF is rendered with "
+            "the reflow engine as requested; a zero-cost companion '*_rigid.pdf' "
+            "artifact was scheduled for layout-faithful verification."
         )
         logger.warning("Job %s: %s", ctx.job_id, engine_advisory_msg)
     adv_dict = dict(advisory.to_dict())

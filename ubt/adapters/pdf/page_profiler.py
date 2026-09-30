@@ -18,6 +18,7 @@ import contextlib
 import hashlib
 import json
 import logging
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -180,6 +181,43 @@ def classify_page(facts: PageFacts) -> PageKind:
     if facts.n_chars > RESUME_MIN_CHARS:
         return PageKind.RESUME_DENSE
     return PageKind.EDITABLE_TEXT
+
+
+#: Page kinds whose content a reflow re-typeset cannot rebuild faithfully:
+#: multi-column bodies, vector drawings, raster/scan pages and image-led
+#: posters. ``RESUME_DENSE`` and ``EDITABLE_TEXT`` are plain prose and reflow
+#: fine, so they are deliberately excluded.
+_STRUCTURAL_KINDS: frozenset[PageKind] = frozenset(
+    {
+        PageKind.MIXED_COMPLEX,
+        PageKind.VECTOR_HEAVY,
+        PageKind.SCAN_IMAGE,
+        PageKind.POSTER_FIXED,
+    }
+)
+
+
+def structural_page_shares(facts: Sequence[PageFacts]) -> tuple[float, float]:
+    """Return ``(multicolumn_page_share, structural_page_share)`` over all pages.
+
+    Page-level, unlike an IR block-count share: a page does not multiply when
+    the parser splits its paragraphs into more blocks, so the routing signal no
+    longer drifts with chunk granularity.
+
+    - ``multicolumn_page_share`` is the share of pages laid out in more than
+      one column (``right_row_share`` past the calibrated gutter). Multi-column
+      extraction ordering is exactly what a reflow re-typeset mangles, so this
+      is the primary "use the overlay engine" tell.
+    - ``structural_page_share`` is the broader share of pages carrying content
+      reflow cannot rebuild faithfully (see :data:`_STRUCTURAL_KINDS`) — the
+      knob for the zero-cost fidelity-companion decision.
+    """
+    n = len(facts)
+    if n == 0:
+        return 0.0, 0.0
+    multicolumn = sum(1 for f in facts if f.right_row_share > PROBE_COLUMN_SHARE)
+    structural = sum(1 for f in facts if classify_page(f) in _STRUCTURAL_KINDS)
+    return multicolumn / n, structural / n
 
 
 @pdfium_serialized
