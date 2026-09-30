@@ -17,22 +17,7 @@ from ubt.core.engine.repair_loop import RepairLoop
 from ubt.core.engine.stage_context import StageContext
 from ubt.core.engine.stages import (
     apply_layout_tradeoff_advisory,
-    run_bible_stage,
-    run_c_text_stage,
-    run_chapter_streaming_pipeline,
-    run_consistency_stage,
-    run_cost_preflight_stage,
-    run_difficulty_advisory_stage,
-    run_draft_stage,
-    run_export_stage,
-    run_extraction_witness_stage,
-    run_ingest_stage,
-    run_mode_advisory_stage,
-    run_quality_gate_stage,
-    run_render_preflight_stage,
-    run_repair_stage,
     run_tm_writeback_stage,
-    run_triage_stage,
 )
 from ubt.core.engine.usage import JobBill, bill_job_run, budget_violation
 from ubt.core.engine.writer_lock import LedgerWriterLock
@@ -66,6 +51,7 @@ from ubt.core.router.rate_limiter import AdaptiveTokenBucket
 from ubt.core.router.registry import get_default_registry
 from ubt.core.router.router import ModelRouter
 from ubt.core.router_mode import decide
+from ubt.pipeline.run import RunGates, run_stages
 
 logger = logging.getLogger(__name__)
 
@@ -860,54 +846,25 @@ class PipelineOrchestrator:
             )
 
             # -----------------------------------------------------------------
-            # The stage sequence. Every stage is ``f(ctx) -> AsyncIterator of
-            # event`` and lives under ubt/core/engine/stages/, so what is left
-            # here is order and gating. Three points are load-bearing: the
-            # zero-token witness, advisory and pre-flight stages run before the
-            # first billable draft call; the difficulty advisory runs after
-            # triage, which is where the repair burden becomes known; and export
-            # renders the mode that advisory settles on.
+            # The stage plan lives in ubt.pipeline.run (ADR-0001): this class
+            # owns the run's resources -- the writer lock, ledger, adapter,
+            # router -- and the plan owns order and gating. The terminal export
+            # event triggers TM writeback and the finalize hook BEFORE it is
+            # yielded, so a caller that breaks immediately does not lose those
+            # writes to GeneratorExit.
             # -----------------------------------------------------------------
-            async for event in run_ingest_stage(ctx):
-                yield event
-            await run_extraction_witness_stage(ctx)
-            async for event in run_mode_advisory_stage(ctx):
-                yield event
-            # Zero-token preflights BEFORE the bible: the bible stage's skeleton
-            # extraction and abbreviation backfill are billable calls, and the
-            # render/cost preflight exists to fail before any spend.
-            await run_render_preflight_stage(ctx)
-            await run_cost_preflight_stage(ctx)
-            async for event in run_bible_stage(ctx):
-                yield event
-            if self.config.chapter_streaming_enabled and len(manifest.chapters) > 1:
-                async for event in run_chapter_streaming_pipeline(ctx):
-                    yield event
-            else:
-                async for event in run_draft_stage(ctx):
-                    yield event
-                if self.config.c_text_enabled:
-                    async for event in run_c_text_stage(ctx):
-                        yield event
-                async for event in run_quality_gate_stage(ctx):
-                    yield event
-                async for event in run_repair_stage(ctx):
-                    yield event
-            if self.config.consistency_enforce != "off":
-                async for event in run_consistency_stage(ctx):
-                    yield event
-            async for event in run_triage_stage(ctx):
-                yield event
-            await run_difficulty_advisory_stage(ctx)
-            export_completed_event: TranslationProgressEvent | None = None
-            async for event in run_export_stage(ctx):
-                if event.event_type is EventType.EXPORT_COMPLETED:
-                    export_completed_event = event
-                    # Run TM writeback and final metadata persistence BEFORE yielding
-                    # EXPORT_COMPLETED so that callers who break immediately do not cause
-                    # GeneratorExit to abort these terminal persistence tasks.
-                    await run_tm_writeback_stage(ctx)
-                    await self._run_finalize_hook(export_completed_event)
+            gates = RunGates(
+                chapter_streaming=self.config.chapter_streaming_enabled
+                and len(manifest.chapters) > 1,
+                c_text=self.config.c_text_enabled,
+                consistency=self.config.consistency_enforce != "off",
+            )
+
+            async def _on_export_completed(event: TranslationProgressEvent) -> None:
+                await run_tm_writeback_stage(ctx)
+                await self._run_finalize_hook(event)
+
+            async for event in run_stages(ctx, gates, on_export_completed=_on_export_completed):
                 yield event
 
         except GeneratorExit:
