@@ -949,6 +949,67 @@ def _write_xliff_companion(
         return None
 
 
+def _attestation_payload(report: Any) -> dict[str, Any]:
+    """Serialize an :class:`~ubt.pipeline.attest.AttestationReport` for the shadow."""
+    return {
+        "total": report.total,
+        "text": dict(report.text),
+        "assets": dict(report.assets),
+        "violations": list(report.violations),
+        "summary": report.summary_line(),
+    }
+
+
+def _write_attestation_shadow(
+    ctx: StageContext, rendered_path: Path, blocks: list[IRBlock]
+) -> Path | None:
+    """Write the realize()-based attestation shadow beside the artifact (best-effort).
+
+    Migration shadow (ADR-0001 Phase 3): the content-graph contract still decides
+    delivery; this records the per-element attestations the ADR will replace it
+    with, built from the *same* delivered blocks, so the two can be compared on
+    real deliveries. Read-only and off-loop; a failure is logged and skipped and
+    can never sink the delivery.
+    """
+    if not ctx.config.emit_attestation_shadow:
+        return None
+    try:
+        from ubt.analyze.bridge import document_from_blocks
+        from ubt.core.content.adapt import _all_intentional, _skip_flags
+        from ubt.core.job_options import companion_path
+        from ubt.pipeline.attest import attest_document
+        from ubt.render.typst_backend import TypstBackend
+        from ubt.verify.verifier import build_verifiers
+
+        document = document_from_blocks(
+            blocks, doc_id=str(getattr(ctx.manifest, "doc_id", "") or "")
+        )
+        # A block the delivery deliberately keeps (skip_translate, or an
+        # intentional render-skip like page chrome) has no translation to reflow,
+        # so it is left out of the map and realizes PRESERVED_OPAQUE -- the
+        # contract's VERBATIM. The signal is a runtime render decision the AST
+        # deliberately does not model, so it is fed to the backend here.
+        backend = TypstBackend(
+            translations={
+                block.id: block.target_text
+                for block in blocks
+                if block.target_text
+                and not (block.skip_translate or _all_intentional(_skip_flags(block)))
+            }
+        )
+        report = attest_document(document, backend, build_verifiers(ctx.fast_pass))
+        path = companion_path(rendered_path, "_attestations.json")
+        path.write_text(
+            json.dumps(_attestation_payload(report), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        logger.info("Attestation shadow for job %s: %s", ctx.job_id, report.summary_line())
+        return path
+    except Exception as exc:  # a migration shadow must never sink the delivery
+        logger.warning("Attestation shadow skipped for job %s: %s", ctx.job_id, exc)
+        return None
+
+
 async def _build_reports(
     ctx: StageContext,
     final_blocks: list[IRBlock],
@@ -1206,6 +1267,10 @@ async def run_export_stage(
     # Bilingual XLIFF companion (source + delivered target). Read-only,
     # best-effort: it cannot affect the artifact, only add a file beside it.
     await asyncio.to_thread(_write_xliff_companion, ctx, rendered_path, final_blocks)
+
+    # realize()-based attestation shadow (migration, ADR-0001 Phase 3): the same
+    # delivered blocks, accounted for per element. Read-only, best-effort.
+    await asyncio.to_thread(_write_attestation_shadow, ctx, rendered_path, final_blocks)
 
     # Post-render visual gate (self-healing loop): T0/T1 deterministic +
     # optional pixel confirmation + sampled T2 VLM + ReflowControlLoop.

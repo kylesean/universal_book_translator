@@ -661,6 +661,14 @@ class UBTConfig(BaseSettings):
     # the source on large books.
     emit_xliff_companion: bool = True
 
+    # Emit the realize()-based attestation shadow ('*_<tag>_attestations.json')
+    # beside the deliverable. A *migration* shadow (ADR-0001 Phase 3): the
+    # content-graph contract still decides delivery, and this records the
+    # per-element attestations the ADR will replace it with, so the two can be
+    # compared on real deliveries. Read-only, CPU-only, best-effort; removed
+    # when realize() goes live.
+    emit_attestation_shadow: bool = True
+
     # Opt-in hard gate: abort export when the delivery contract has an
     # ERROR-severity violation (dropped text, lost/corrupt asset, or a
     # translation that could not be placed). Off by default so a partial book

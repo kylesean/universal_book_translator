@@ -8,6 +8,7 @@ this package starts with the step itself.
 
 from __future__ import annotations
 
+from ubt.pipeline.attest import AttestationReport, attest_document
 from ubt.pipeline.steps import IntegrityViolation, realize
 
-__all__ = ["IntegrityViolation", "realize"]
+__all__ = ["AttestationReport", "IntegrityViolation", "attest_document", "realize"]

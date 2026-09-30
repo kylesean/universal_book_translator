@@ -79,6 +79,10 @@ class TypstBackend:
         if fidelity is Fidelity.PRESERVED_OPAQUE:
             return Produced(payload=source_slice(element, source), note=f"opaque:{element.kind}")
         if fidelity is Fidelity.RECONSTRUCTED_ADAPTED and isinstance(element, REFLOW_CLASSES):
+            if element.skip_translate:
+                # Deliberately kept in the source (a listing, a proper noun): the
+                # contract calls this VERBATIM, so it is placed opaque, not reflowed.
+                return None
             target = self._translations.get(element.id, "")
             fragment = text_fragment(target)
             if fragment is None:
