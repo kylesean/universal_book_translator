@@ -627,3 +627,36 @@ def test_private_form_is_not_mutated_when_a_shared_form_aborts_the_page() -> Non
     # Both Forms keep their source text, so the skipped overlay loses nothing.
     assert b"Private Form Text" in private_form.read_bytes()
     assert b"Shared Form Text" in shared_form.read_bytes()
+
+
+def test_successful_strip_exposes_rollback() -> None:
+    """A committed strip must be undoable: the caller paints afterwards."""
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(600, 800))
+    page.Contents = pdf.make_stream(b"BT /F1 12 Tf 50 500 Td (Prose to remove) Tj ET\n")
+
+    stats = strip_page_text_pikepdf(page, [(40.0, 490.0, 300.0, 520.0)], page_no=1)
+    assert stats.aborted is None
+    assert stats.dropped_ops == 1
+    assert b"Prose to remove" not in page.Contents.read_bytes()
+
+    assert stats.rollback is not None
+    stats.rollback()
+    assert b"Prose to remove" in page.Contents.read_bytes()
+
+
+def test_rollback_restores_stripped_private_form_text() -> None:
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(600, 800))
+    form = _make_form(pdf, b"BT /F1 12 Tf 100 500 Td (Private Form) Tj ET\n")
+    page.Resources = pikepdf.Dictionary({"/XObject": pikepdf.Dictionary({"/Fm1": form})})
+    page.Contents = pdf.make_stream(b"/Fm1 Do\n")
+
+    stats = strip_page_text_pikepdf(
+        page, [(80.0, 480.0, 300.0, 530.0)], page_no=1, shared_forms=shared_form_objgens(pdf)
+    )
+    assert stats.forms_changed == 1
+    assert stats.rollback is not None
+
+    stats.rollback()
+    assert b"Private Form" in form.read_bytes()

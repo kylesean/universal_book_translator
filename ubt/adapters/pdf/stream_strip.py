@@ -14,7 +14,7 @@ from __future__ import annotations
 import contextlib
 import logging
 from bisect import bisect_right
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, replace
 from typing import Any, cast
 
@@ -278,6 +278,11 @@ class StreamStripStats:
     #: one in place would erase text on every page that draws it.
     shared_forms_skipped: int = 0
     aborted: str | None = None
+    #: Restores the pre-strip Contents and Form streams. Set only after a
+    #: successful commit; a caller that paints a translation afterwards uses it
+    #: to undo the strip when that paint fails, so a page never ships with its
+    #: source text deleted and no translation in its place.
+    rollback: Callable[[], None] | None = None
 
 
 def _extract_text_metrics(operands: Sequence[Any]) -> tuple[int, int, float]:
@@ -1026,15 +1031,22 @@ def strip_page_text_pikepdf(
             # fails partway (the Contents write is the last, most likely step).
             unparsed = pikepdf.unparse_content_stream(new_ops)
             form_backups = [(obj, bytes(obj.read_bytes())) for obj, _ in form_writes]
+            original_contents = bytes(page.Contents.read_bytes())
+
+            def _restore() -> None:
+                for obj, original in form_backups:
+                    obj.write(original)
+                page.Contents.write(original_contents)
+
             try:
                 for target_xobj, new_stream in form_writes:
                     target_xobj.write(new_stream)
                     stats.forms_changed += 1
                 page.Contents.write(unparsed)
             except Exception:
-                for obj, original in form_backups:
-                    obj.write(original)
+                _restore()
                 raise
+            stats.rollback = _restore
 
     except Exception as exc:
         # Keep the abort reason actionable: callers inspect ``aborted`` to

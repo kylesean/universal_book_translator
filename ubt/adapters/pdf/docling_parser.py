@@ -1195,7 +1195,16 @@ def vlm_fallback_missing_pages(
 
     import pypdfium2 as pdfium
 
+    # A block whose provenance entry carries no geometry has bbox=None but
+    # still knows its page (see ``map_iterated_items``); excluding such pages
+    # from the covered set made mode="missing" re-transcribe them through the
+    # paid VLM path while the originals were retained — the page shipped twice.
     covered = {b.bbox.page for b in blocks if b.bbox is not None}
+    for block in blocks:
+        if block.bbox is None:
+            source_page = block.provenance.get("source_page")
+            if source_page is not None:
+                covered.add(int(source_page))
     with PDFIUM_LOCK:
         try:
             probe_doc = pdfium.PdfDocument(str(path))

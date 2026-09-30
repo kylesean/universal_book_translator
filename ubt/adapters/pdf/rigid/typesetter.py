@@ -207,6 +207,94 @@ def _erase_rects_by_page(
     return erase_rects
 
 
+def _strip_and_merge_page(
+    pdf: pikepdf.Pdf,
+    page: pikepdf.Page,
+    page_no: int,
+    overlay_path: str,
+    strip_rects: list[Rect],
+    protected_rects: list[Rect],
+    shared_forms: set[tuple[int, int]],
+) -> tuple[int, bool]:
+    """Strip one page's source text and paint its translation overlay.
+
+    The overlay is prepared before any stripping and a failed paint rolls the
+    strip back, so a ``False`` return always means the page still carries its
+    source text — never a stripped page with no translation painted. Returns
+    ``(strip ops dropped, overlay painted)``.
+    """
+    from ubt.adapters.pdf.stream_strip import strip_page_text_pikepdf
+
+    try:
+        with pikepdf.open(overlay_path) as overlay:
+            if not overlay.pages:
+                logger.warning(
+                    "rigid overlay for page %d has no pages; keeping source page", page_no
+                )
+                return 0, False
+            form = pdf.copy_foreign(overlay.pages[0].as_form_xobject())
+    except Exception as exc:
+        logger.warning(
+            "rigid overlay load failed on page %d: %s; keeping source page", page_no, exc
+        )
+        return 0, False
+
+    stats = strip_page_text_pikepdf(
+        page,
+        strip_rects,
+        protected_rects=protected_rects,
+        page_no=page_no,
+        shared_forms=shared_forms,
+    )
+    if stats.shared_forms_skipped:
+        # Forms shared with other pages are left intact (their text would
+        # vanish everywhere otherwise), so the source text under the erase
+        # rects survives. Painting the overlay on top would double it,
+        # exactly like an abort — treat it as one and keep the source page.
+        logger.warning(
+            "rigid strip on page %d left %d page-shared Form "
+            "XObject(s) intact; skipping the overlay to avoid "
+            "doubling the surviving source text",
+            page_no,
+            stats.shared_forms_skipped,
+        )
+        return stats.dropped_ops, False
+    if stats.aborted:
+        # The source text could not be removed (the strip never committed);
+        # drawing the overlay on top would double/overlap the text. Keep the
+        # source page and record the loss as a skip.
+        logger.warning(
+            "rigid strip aborted on page %d (%s); keeping source text",
+            page_no,
+            stats.aborted,
+        )
+        return stats.dropped_ops, False
+    try:
+        # ``add_overlay(form, None)`` places the form in the page's TrimBox
+        # (pikepdf's default), which scales and re-anchors the whole
+        # translation layer whenever CropBox/TrimBox < MediaBox. The overlay is
+        # authored in the MediaBox frame (see rigid/extract.py), so place it
+        # there explicitly for a 1:1, unscaled result.
+        media = page.mediabox
+        page.add_overlay(
+            form,
+            pikepdf.Rectangle(
+                float(media[0]),
+                float(media[1]),
+                float(media[2]),
+                float(media[3]),
+            ),
+        )
+    except Exception as exc:
+        if stats.rollback is not None:
+            stats.rollback()
+        logger.warning(
+            "rigid overlay paint failed on page %d: %s; source text restored", page_no, exc
+        )
+        return stats.dropped_ops, False
+    return stats.dropped_ops, True
+
+
 _SUPERSCRIPT_DIGITS = str.maketrans("0123456789", "⁰¹²³⁴⁵⁶⁷⁸⁹")
 _SUPERSCRIPT_TO_ASCII = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹", "0123456789")
 _FOOTNOTE_NUM_RE = re.compile(r"^(\d{1,2})\s+\S")
@@ -984,10 +1072,7 @@ class RigidTypesetter:
             aborted_pages: list[int] = []
 
             def _merge_sync() -> None:
-                from ubt.adapters.pdf.stream_strip import (
-                    shared_form_objgens,
-                    strip_page_text_pikepdf,
-                )
+                from ubt.adapters.pdf.stream_strip import shared_form_objgens
 
                 erase_rects = _erase_rects_by_page(zone_map, planned_rendered_ids, set(overlays))
 
@@ -997,7 +1082,6 @@ class RigidTypesetter:
                     shared_forms = shared_form_objgens(pdf)
                     for page_no, overlay_path in sorted(overlays.items()):
                         page = pdf.pages[page_no - 1]
-                        rects = erase_rects.get(page_no, [])
                         guards: list[Rect] = []
                         for block in blocks:
                             if block.bbox is None or block.bbox.page != page_no:
@@ -1006,69 +1090,18 @@ class RigidTypesetter:
                                 guards.append(
                                     (block.bbox.x0, block.bbox.y0, block.bbox.x1, block.bbox.y1)
                                 )
-                        stats = strip_page_text_pikepdf(
+                        dropped, painted = _strip_and_merge_page(
+                            pdf,
                             page,
-                            rects,
-                            protected_rects=guards,
-                            page_no=page_no,
-                            shared_forms=shared_forms,
+                            page_no,
+                            overlay_path,
+                            erase_rects.get(page_no, []),
+                            guards,
+                            shared_forms,
                         )
-                        page_reports[page_no].stripped_ops += stats.dropped_ops
-                        if stats.shared_forms_skipped:
-                            # Forms shared with other pages are left intact (their
-                            # text would vanish everywhere otherwise), so the
-                            # source text under the erase rects survives. Painting
-                            # the overlay on top would double it, exactly like an
-                            # abort — treat it as one and keep the source page.
-                            logger.warning(
-                                "rigid strip on page %d left %d page-shared Form "
-                                "XObject(s) intact; skipping the overlay to avoid "
-                                "doubling the surviving source text",
-                                page_no,
-                                stats.shared_forms_skipped,
-                            )
+                        page_reports[page_no].stripped_ops += dropped
+                        if not painted:
                             aborted_pages.append(page_no)
-                            continue
-                        if stats.aborted:
-                            # The source text could not be removed; drawing the
-                            # overlay on top would double/overlap the text. Keep
-                            # the source page and record the loss as a skip.
-                            logger.warning(
-                                "rigid strip aborted on page %d (%s); keeping source text",
-                                page_no,
-                                stats.aborted,
-                            )
-                            aborted_pages.append(page_no)
-                            continue
-                        try:
-                            with pikepdf.open(overlay_path) as overlay:
-                                if overlay.pages:
-                                    form = pdf.copy_foreign(overlay.pages[0].as_form_xobject())
-                                    # ``add_overlay(form, None)`` places the form in
-                                    # the page's TrimBox (pikepdf's default), which
-                                    # scales and re-anchors the whole translation
-                                    # layer whenever CropBox/TrimBox < MediaBox. The
-                                    # overlay is authored in the MediaBox frame (see
-                                    # rigid/extract.py), so place it there explicitly
-                                    # for a 1:1, unscaled result.
-                                    media = page.mediabox
-                                    page.add_overlay(
-                                        form,
-                                        pikepdf.Rectangle(
-                                            float(media[0]),
-                                            float(media[1]),
-                                            float(media[2]),
-                                            float(media[3]),
-                                        ),
-                                    )
-                        except Exception as exc:
-                            logger.warning(
-                                "rigid overlay copy failed on page %d: %s; keeping source page",
-                                page_no,
-                                exc,
-                            )
-                            aborted_pages.append(page_no)
-                            continue
                     pdf.save(str(out_path))
 
             await asyncio.to_thread(_merge_sync)

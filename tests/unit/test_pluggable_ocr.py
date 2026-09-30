@@ -872,3 +872,77 @@ def test_page_upload_gate_falls_back_to_env_without_a_config(
     docling_parser.vlm_fallback_missing_pages(pdf, [_r0921_page_two_block()], ocr_mode="vlm")
 
     assert seen["allow_page_upload"] is True
+
+
+def test_bboxless_blocks_cover_their_page_in_missing_scan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A page that already produced blocks must not be transcribed again.
+
+    A provenance entry without geometry leaves the block's bbox None; those
+    blocks still know their page via provenance["source_page"]. Excluding them
+    from the covered set made mode="missing" re-transcribe the page through the
+    paid VLM path while the originals were retained — the page shipped twice
+    and the call was billed twice.
+    """
+    import pypdfium2 as pdfium
+
+    pdf_path = tmp_path / "bboxless_covered.pdf"
+    doc = pdfium.PdfDocument.new()
+    doc.new_page(200, 300)
+    doc.new_page(200, 300)
+    doc.save(str(pdf_path))
+    doc.close()
+
+    blk_p1 = IRBlock(
+        id="b1",
+        flow_id=FlowID.MAIN_STORY,
+        spine_index=1,
+        block_type=BlockType.NARRATIVE,
+        source_text="Page 1 text",
+        bbox=BoundingBox(page=1, x0=10.0, y0=10.0, x1=100.0, y1=50.0),
+        provenance={"parser": "docling"},
+    )
+    blk_p2_no_bbox = IRBlock(
+        id="b2",
+        flow_id=FlowID.MAIN_STORY,
+        spine_index=2,
+        block_type=BlockType.NARRATIVE,
+        source_text="Page 2 text (no geometry)",
+        bbox=None,
+        provenance={"parser": "docling", "source_page": 2},
+    )
+
+    class _CountingDriver:
+        name = "sidecar:counting"
+        measured_boxes = True
+        calls: list[int] = []
+
+        def recognize(
+            self, image: object, page_size_pt: tuple[float, float], scale: float
+        ) -> PageTranscript:
+            _CountingDriver.calls.append(1)
+            return PageTranscript(
+                lines=(
+                    VlmLine(
+                        text="VLM transcribed this page",
+                        reading_index=0,
+                        measured_box=(10.0, 10.0, 150.0, 40.0),
+                    ),
+                ),
+                engine="sidecar",
+                measured_boxes=True,
+            )
+
+    monkeypatch.setenv("UBT_VLM_SCAN_FALLBACK", "missing")
+    with patch(
+        "ubt.adapters.pdf.vlm.registry.probe_effective_driver",
+        return_value=("sidecar", _CountingDriver()),
+    ):
+        res = DoclingPDFAdapter._vlm_fallback_missing_pages(
+            pdf_path, [blk_p1, blk_p2_no_bbox], ocr_mode="sidecar"
+        )
+
+    assert _CountingDriver.calls == []
+    assert [b.id for b in res] == ["b1", "b2"]
+    assert not any("VLM transcribed" in b.source_text for b in res)
