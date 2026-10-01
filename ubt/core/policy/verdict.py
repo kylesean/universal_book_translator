@@ -31,7 +31,7 @@ from ubt.core.policy.layout_policy import (
     UNICODE_WORD_RE,
     URL_DOI_RE,
 )
-from ubt.model.ast import RegionKind, SemanticKind
+from ubt.model.ast import RegionKind
 
 # Two or more purely-lowercase words read as prose ("effective mobility"), not
 # as a figure/table label ("B1", "Fig. 3", "kg"). Rule 10 kept such prose in the
@@ -98,26 +98,19 @@ def judge_block(block: IRBlock, *, translate_chrome: bool = False) -> Verdict:
         not translate_chrome or block.layout_role is RegionKind.PAGE_NUMBER
     ):
         return Verdict(False, "verdict:chrome")
-    # Rule 6: non-prose semantic roles never enter translation.
-    if block.semantic_role in {
-        SemanticKind.REFERENCE,
-        SemanticKind.METADATA,
-        SemanticKind.AFFILIATION,
-    }:
-        return Verdict(False, "verdict:non_prose_role")
-    # Rule 7: identifier-only blocks (bare URL / DOI / ISBN).
+    # Rule 6: identifier-only blocks (bare URL / DOI / ISBN).
     if URL_DOI_RE.match(stripped):
         return Verdict(False, "verdict:identifier_only")
     digits_only = re.sub(r"[- ]", "", stripped)
     if ISBN_DIGITS_RE.match(digits_only):
         return Verdict(False, "verdict:identifier_only")
-    # Rule 8: hexdumps / byte tables.
+    # Rule 7: hexdumps / byte tables.
     if _is_hexdump(stripped):
         return Verdict(False, "verdict:hexdump")
-    # Rule 9: index-like single-token line lists.
+    # Rule 8: index-like single-token line lists.
     if _is_index_list(stripped):
         return Verdict(False, "verdict:index_list")
-    # Rule 10: short alnum labels outside the main story flow.
+    # Rule 9: short alnum labels outside the main story flow.
     if (
         block.flow_id in NON_PROSE_FLOWS
         and len(stripped) <= SHORT_LABEL_MAX_LEN

@@ -8,7 +8,7 @@ into the other so the kernel can migrate to the typed model piecemeal.
 The round-trip preserves everything that defines the document:
 
     id, spine_index, block_type, flow_id, layout_role,
-    semantic_role, structure_role, source_text, skip_translate, bbox
+    structure_role, source_text, skip_translate, bbox
 
 It deliberately does **not** carry pipeline state (status, ``target_text``,
 scores, flags, provenance): those belong to execution, not understanding, and
@@ -46,7 +46,6 @@ from ubt.model.ast import (
     Paragraph,
     Region,
     RegionKind,
-    SemanticKind,
     Table,
     TextElement,
 )
@@ -91,7 +90,6 @@ def element_from_block(block: IRBlock) -> ElementT:
         "spine_index": block.spine_index,
         "span": _span(block),
         "flow": _FLOW_TO_KIND.get(block.flow_id, FlowKind.MAIN),
-        "semantic": block.semantic_role or SemanticKind.MAIN_TEXT,
         "skip_translate": block.skip_translate,
     }
     text = block.source_text or ""
@@ -198,7 +196,6 @@ def block_from_element(element: ElementT, *, region_kind: RegionKind) -> IRBlock
         source_text=_element_source(element),
         skip_translate=element.skip_translate,
         layout_role=region_kind,
-        semantic_role=element.semantic,
     )
     return block
 

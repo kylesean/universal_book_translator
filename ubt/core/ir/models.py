@@ -6,7 +6,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from ubt.core.ir.run_metadata import RunMetadata
-from ubt.model.ast import RegionKind, SemanticKind
+from ubt.model.ast import RegionKind
 
 
 class FlowID(StrEnum):
@@ -63,12 +63,12 @@ TERMINAL_STATUSES: frozenset[BlockStatus] = frozenset(
 MQM_SEVERITY_LEVELS: tuple[str, ...] = ("critical", "major", "minor")
 
 
-# The page-layout and semantic axes use the *typed model's* vocabulary
-# (:class:`ubt.model.ast.RegionKind` / :class:`ubt.model.ast.SemanticKind`)
-# directly. They used to be two enums per axis -- ``LayoutRole``/``SemanticRole``
-# here and their mirrors in the model -- with a hand-written bridge mapping one
-# to the other (ADR R3: one attribute, one origin). The values were identical, so
-# removing the duplicates is a pure vocabulary unification.
+# The page-layout axis uses the *typed model's* vocabulary
+# (:class:`ubt.model.ast.RegionKind`) directly. It used to be an enum here plus
+# its mirror in the model with a hand-written bridge mapping one to the other
+# (ADR R3: one attribute, one origin). The values were identical, so removing
+# the duplicate is a pure vocabulary unification. The semantic axis is gone
+# entirely: nothing ever set it to anything but its default.
 
 
 class StructureRole(StrEnum):
@@ -140,14 +140,13 @@ class IRBlock(BaseModel):
     mqm_severity: str | None = None  # "critical" | "major" | "minor" (None = not triaged)
     mqm_spans: list[dict[str, Any]] = Field(default_factory=list)  # Serialized MQMErrorSpan dicts
 
-    # Document-v1 seven-layer contract extension (all optional). Layer mapping:
+    # Document-v1 contract extension (all optional). Layer mapping:
     #   geometry → bbox, content → source_text/block_type,
-    #   layout_role/semantic_role → below (the extractor's finding),
+    #   layout_role → below (the extractor's finding),
     #   structure_role → derived from block_type (property, not a field),
     #   policy → policy_translate/policy_reason (+ skip_translate fallback),
     #   provenance → provenance dict (parser/provider/adapter that produced it).
     layout_role: RegionKind | None = None
-    semantic_role: SemanticKind | None = None
     policy_translate: bool | None = None  # None = undecided, fall back to skip_translate
     policy_reason: str | None = None  # Required when policy_translate is False
     provenance: dict[str, Any] = Field(default_factory=dict)
@@ -166,16 +165,14 @@ class IRBlock(BaseModel):
         return _structure_role_from_block_type(self.block_type)
 
     def derive_roles(self) -> None:
-        """Fill unset role layers from explicit FlowID/BlockType (no guessing).
+        """Fill the layout layer from the explicit FlowID (no guessing).
 
-        Only writes layers that are still None — an explicitly set role
+        Only writes the layer when it is still None — an explicitly set role
         always wins over derivation. ``structure_role`` is not here: it is a
         property of ``block_type`` (see above).
         """
         if self.layout_role is None:
             self.layout_role = _layout_role_from_flow(self.flow_id)
-        if self.semantic_role is None:
-            self.semantic_role = SemanticKind.MAIN_TEXT
 
     def validate_contract(self) -> list[str]:
         """Check document-v1 invariants; returns violation messages (empty = ok)."""

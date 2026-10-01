@@ -26,9 +26,9 @@ from ubt.core.ir.models import (
     IRBlock,
     StyleMeta,
 )
-from ubt.model.ast import RegionKind, SemanticKind
+from ubt.model.ast import RegionKind
 
-TARGET_SCHEMA_VERSION = 11
+TARGET_SCHEMA_VERSION = 12
 
 # Every column ``_row_to_block`` reads by name. Kept as a literal (not derived
 # from the CREATE statement) to guarantee all required schema fields are verified
@@ -54,8 +54,6 @@ _REQUIRED_BLOCK_COLUMNS = frozenset(
         "mqm_severity",
         "mqm_spans_json",
         "layout_role",
-        "semantic_role",
-        "structure_role",
         "policy_translate",
         "policy_reason",
         "provenance_json",
@@ -97,8 +95,6 @@ def _upsert_blocks_batch(cursor: sqlite3.Cursor, job_id: str, blocks: Sequence[I
             b.repair_rounds,
             json.dumps(b.error_flags, ensure_ascii=False),
             b.layout_role.value if b.layout_role else None,
-            b.semantic_role.value if b.semantic_role else None,
-            b.structure_role.value if b.structure_role else None,
             (1 if b.policy_translate else 0) if b.policy_translate is not None else None,
             b.policy_reason,
             json.dumps(b.provenance, ensure_ascii=False),
@@ -115,11 +111,11 @@ def _upsert_blocks_batch(cursor: sqlite3.Cursor, job_id: str, blocks: Sequence[I
             bbox_json, style_json, source_text, draft_text, target_text,
             status, skip_translate, glossary_hits_json, mtqe_score,
             repair_rounds, error_flags_json,
-            layout_role, semantic_role, structure_role,
+            layout_role,
             policy_translate, policy_reason, provenance_json,
             mqm_severity, mqm_spans_json,
             updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         ON CONFLICT(job_id, block_id) DO UPDATE SET
             flow_id = excluded.flow_id,
             spine_index = excluded.spine_index,
@@ -166,8 +162,6 @@ def _upsert_blocks_batch(cursor: sqlite3.Cursor, job_id: str, blocks: Sequence[I
                 ELSE blocks.error_flags_json
             END,
             layout_role = excluded.layout_role,
-            semantic_role = excluded.semantic_role,
-            structure_role = excluded.structure_role,
             policy_translate = excluded.policy_translate,
             policy_reason = excluded.policy_reason,
             provenance_json = excluded.provenance_json,
@@ -349,8 +343,6 @@ class LedgerBase:
                         mqm_severity TEXT DEFAULT NULL,
                         mqm_spans_json TEXT DEFAULT NULL,
                         layout_role TEXT DEFAULT NULL,
-                        semantic_role TEXT DEFAULT NULL,
-                        structure_role TEXT DEFAULT NULL,
                         policy_translate INTEGER DEFAULT NULL,
                         policy_reason TEXT DEFAULT NULL,
                         provenance_json TEXT DEFAULT NULL,
@@ -373,7 +365,7 @@ class LedgerBase:
                     CREATE INDEX IF NOT EXISTS idx_blocks_job_mtqe ON blocks(job_id, mtqe_score);
                     CREATE INDEX IF NOT EXISTS idx_blocks_pending ON blocks(job_id, status, spine_index, block_id);
                     CREATE INDEX IF NOT EXISTS idx_blocks_rollup ON blocks(job_id, skip_translate, mtqe_score, status);
-                    PRAGMA user_version = 11;
+                    PRAGMA user_version = 12;
                 """)
                 current_version = TARGET_SCHEMA_VERSION
 
@@ -566,6 +558,22 @@ class LedgerBase:
                     PRAGMA user_version = 11;
                 """)
 
+            # Migration to Version 12: drop the semantic/structure role columns.
+            # ``structure_role`` is a property of ``block_type`` (never read back
+            # since ADR R3), and the semantic axis was never set to anything but
+            # its default, so both columns are dead weight. ``layout_role``
+            # stays: it is the extractor's finding and cannot be derived.
+            if current_version < 12:
+                columns = {
+                    str(row["name"])
+                    for row in conn.execute("PRAGMA table_info(blocks);").fetchall()
+                }
+                if "semantic_role" in columns:
+                    conn.execute("ALTER TABLE blocks DROP COLUMN semantic_role;")
+                if "structure_role" in columns:
+                    conn.execute("ALTER TABLE blocks DROP COLUMN structure_role;")
+                conn.execute("PRAGMA user_version = 12;")
+
             # Guard against TARGET_SCHEMA_VERSION drift: migrations above must
             # land exactly on the declared target, otherwise future restarts
             # silently skip new migrations.
@@ -670,9 +678,6 @@ class LedgerBase:
             mqm_severity=row["mqm_severity"],
             mqm_spans=mqm_spans,
             layout_role=RegionKind(row["layout_role"]) if row["layout_role"] else None,
-            semantic_role=SemanticKind(row["semantic_role"]) if row["semantic_role"] else None,
-            # ``structure_role`` is derived from ``block_type`` (property), so
-            # the stored column is not read back (ADR R3).
             policy_translate=bool(policy_raw) if policy_raw is not None else None,
             policy_reason=row["policy_reason"],
             provenance=provenance,

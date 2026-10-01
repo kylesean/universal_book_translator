@@ -1,10 +1,8 @@
 """The typed Document AST (ADR-0001 model layer).
 
 This is the one place that answers "what is this piece of the document?". An
-element's *type* is its structure; the region it sits in is its layout; an
-optional :class:`SemanticKind` carries the semantic axes that are neither
-(element type cannot say "this paragraph is an abstract"). ``IRBlock`` spread
-that answer across ``block_type`` plus three role enums that could disagree;
+element's *type* is its structure; the region it sits in is its layout. ``IRBlock``
+spread that answer across ``block_type`` plus role enums that could disagree;
 here a single class is the source of truth and the bridge re-derives the rest.
 
 The element set is closed and deliberately small -- one class per kind the
@@ -57,17 +55,6 @@ class RegionKind(StrEnum):
     FOOTNOTE = "footnote"
 
 
-class SemanticKind(StrEnum):
-    """Semantic axis the element type cannot express; the one semantic vocabulary."""
-
-    MAIN_TEXT = "main_text"
-    ABSTRACT = "abstract"
-    REFERENCE = "reference"
-    METADATA = "metadata"
-    AFFILIATION = "affiliation"
-    UNKNOWN = "unknown"
-
-
 class ElementKind(StrEnum):
     """Flat tag for an element class, for serialization and switching."""
 
@@ -97,7 +84,6 @@ class Element:
     #: must resolve to a translated or preserved realization.
     decorative: bool = False
     flow: FlowKind = FlowKind.MAIN
-    semantic: SemanticKind = SemanticKind.MAIN_TEXT
     skip_translate: bool = False
 
     @property
@@ -268,7 +254,6 @@ __all__ = [
     "Paragraph",
     "Region",
     "RegionKind",
-    "SemanticKind",
     "Table",
     "TextElement",
     "CanonicalSource",

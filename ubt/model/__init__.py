@@ -36,7 +36,6 @@ from ubt.model.ast import (
     Paragraph,
     Region,
     RegionKind,
-    SemanticKind,
     Table,
     TextElement,
 )
@@ -84,7 +83,6 @@ __all__ = [
     "RegionKind",
     "Segment",
     "SegmentState",
-    "SemanticKind",
     "Span",
     "Table",
     "TextElement",
