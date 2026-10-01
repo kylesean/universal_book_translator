@@ -8,8 +8,10 @@ cache is fail-open: a miss, an unavailable store, or a corrupt entry computes
 through the provider.
 
 Checks: identical inputs hit the cache (provider called once), a changed source /
-model / prompt version misses, a corrupt entry is a miss (fail-open), and the
-cache never changes the delivered target (equals the uncached translation).
+model / prompt version / prompt *context* misses, the non-draft (macro-chunk)
+value cache round-trips under its own kind, a corrupt entry is a miss
+(fail-open), and the cache never changes the delivered target (equals the
+uncached translation).
 """
 
 from __future__ import annotations
@@ -76,6 +78,34 @@ def _run() -> list[str]:
         asyncio.run(engine_m2.translate_text("e1", "hello world", counter.translate()))
         if counter.calls != 4:
             problems.append(f"a new model reused the cache (calls={counter.calls})")
+
+        # A changed prompt *context* (the production path keys on the exact
+        # prompt) must not reuse the old draft: same source, different context.
+        before = counter.calls
+        asyncio.run(
+            engine.translate_text("e1", "hello world", counter.translate(), context="ctx-A")
+        )
+        asyncio.run(
+            engine.translate_text("e1", "hello world", counter.translate(), context="ctx-A")
+        )
+        if counter.calls != before + 1:
+            problems.append(f"a context-keyed pair did not hit then miss (calls={counter.calls})")
+        asyncio.run(
+            engine.translate_text("e1", "hello world", counter.translate(), context="ctx-B")
+        )
+        if counter.calls != before + 2:
+            problems.append(f"a new context reused the cache (calls={counter.calls})")
+
+        # The non-draft (macro-chunk) cache: a distinct kind, same envelope.
+        engine_v3 = _engine(store, model="m3")
+        if engine_v3.cached_value("chunk-A", kind="translate_chunk") is not None:
+            problems.append("an unwritten chunk value was a hit")
+        engine_v3.remember_value("chunk-A", '{"b1": "x"}', kind="translate_chunk")
+        got = engine_v3.cached_value("chunk-A", kind="translate_chunk")
+        if got != '{"b1": "x"}':
+            problems.append(f"chunk value round-trip failed: {got!r}")
+        if engine_v3.cached_value("chunk-A", kind="other_kind") is not None:
+            problems.append("a different kind reused a chunk value")
 
         # Corrupt entry -> miss -> recompute (fail-open), and target still correct.
         key_files = list(Path(tmp).rglob("*.json"))
