@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from collections.abc import Mapping
 from contextlib import suppress
 from pathlib import Path
 
@@ -25,6 +26,7 @@ from ubt.core.exceptions import DocumentParseError
 from ubt.core.ir.models import BlockType, BookManifest, BoundingBox, FlowID, IRBlock
 from ubt.core.ir.render_plan import RenderOutcome, RenderPlan
 from ubt.core.policy.adaptive_policy import resolve_pdf_engine
+from ubt.model.fidelity import Fidelity
 
 logger = logging.getLogger(__name__)
 
@@ -213,6 +215,7 @@ class DoclingRenderStrategy:
         bilingual_mode: str | None = None,
         render_engine: str | None = None,
         render_plan: RenderPlan | None = None,
+        realization_plan: Mapping[str, Fidelity] | None = None,
     ) -> Path:
         """Render publication-grade translated output from pre-fetched blocks.
 
@@ -299,6 +302,7 @@ class DoclingRenderStrategy:
                 translate_chrome=bool(translate_chrome),
                 font_family=font_family,
                 target_lang=target_lang or getattr(manifest, "target_lang", "zh") or "zh",
+                realization_plan=realization_plan,
             )
             staged_path, rigid_report = await rigid.render(
                 manifest=manifest,
@@ -432,6 +436,7 @@ class DoclingRenderStrategy:
             bilingual=is_in_place,
             page_strict=not is_in_place,
             cover_mode=str(cover_mode or "auto"),
+            realization_plan=realization_plan,
             # Hard 1:1 pagebreaks exist only for the alternating page-zipper
             # (source/translation interleave). Monolingual reflow flows
             # continuously — forced breaks strand figure-only pages on

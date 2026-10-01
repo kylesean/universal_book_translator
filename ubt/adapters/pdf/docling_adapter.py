@@ -20,7 +20,7 @@ import asyncio
 import importlib
 import importlib.util
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -43,6 +43,7 @@ from ubt.adapters.pdf.typst_reconstructor import TypstReconstructor
 from ubt.core.env import has_accelerator as _has_accelerator
 from ubt.core.ir.models import BookManifest, ChapterIR, IRBlock
 from ubt.core.ir.render_plan import RenderOutcome, RenderPlan
+from ubt.model.fidelity import Fidelity
 
 if TYPE_CHECKING:
     from ubt.core.ports import AdapterRuntimeConfig
@@ -371,6 +372,7 @@ class DoclingPDFAdapter(BasePDFEngineAdapter):
         bilingual_mode: str | None = None,
         render_engine: str | None = None,
         render_plan: RenderPlan | None = None,
+        realization_plan: Mapping[str, Fidelity] | None = None,
         **kwargs: Any,
     ) -> Path:
         """Render publication-grade output (delegates to DoclingRenderStrategy)."""
@@ -382,6 +384,7 @@ class DoclingPDFAdapter(BasePDFEngineAdapter):
             bilingual_mode,
             render_engine,
             render_plan=render_plan,
+            realization_plan=realization_plan,
         )
         self.last_render_skips = list(self._renderer.last_render_skips)
         self.last_render_outcome = self._renderer.last_outcome

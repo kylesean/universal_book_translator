@@ -76,6 +76,7 @@ async def _render_adapter_output(
     bilingual_mode: str | None = None,
     render_engine: str | None = None,
     render_plan: RenderPlan | None = None,
+    realization_plan: Mapping[str, Any] | None = None,
 ) -> Path:
     """Render via ``render_blocks`` with fallback to ``render_output``.
 
@@ -103,6 +104,7 @@ async def _render_adapter_output(
                 bilingual_mode=bilingual_mode,
                 render_engine=render_engine,
                 render_plan=render_plan,
+                realization_plan=realization_plan,
             )
             return cast(Path, res)
         return await adapter.render_blocks(
@@ -866,29 +868,20 @@ async def _render_complementary_artifact(
     return secondary_path
 
 
-def _effective_engine(ctx: StageContext) -> str:
-    """The engine the run actually used (the render decision, stated once).
-
-    ``render_engine_effective`` is what the router chose; an explicit config
-    engine is the fallback, and ``publication`` the default. The contract and the
-    attestation layer both read it from here so they cannot drift.
-    """
-    return str(
-        ctx.manifest.metadata.get("render_engine_effective")
-        or ctx.config.render_engine
-        or "publication"
-    )
-
-
 def _attest_delivery(
-    ctx: StageContext, services: RunServices, blocks: list[IRBlock]
+    ctx: StageContext,
+    services: RunServices,
+    blocks: list[IRBlock],
+    engine: str,
 ) -> tuple[Document, dict[str, str], AttestationReport]:
     """Realize the delivery per element: its Document, its target map, its account.
 
     The backend is fed the run's own decisions (ADR-0001 Phase 3 migration):
     which engine ran and which elements the delivery kept in the source.
     ``realize()`` then reproduces and *verifies* each element -- the
-    construction-time core the delivery contract is projected from.
+    construction-time core the delivery contract is projected from. ``engine`` is
+    resolved by the caller *before* the render, so the plan exists before the
+    renderer reads it.
     """
     from ubt.layout.theme import resolve_theme
     from ubt.pipeline.attest import attest_document
@@ -898,7 +891,7 @@ def _attest_delivery(
 
     doc_id = str(getattr(ctx.manifest, "doc_id", "") or "")
     document = delivery_document(blocks, doc_id=doc_id)
-    translations = delivery_translations(blocks, engine=_effective_engine(ctx))
+    translations = delivery_translations(blocks, engine=engine)
     theme = resolve_theme(ctx.source_lang or "en", ctx.target_lang or "zh")
     report = attest_document(
         document, TypstBackend(translations, theme=theme), build_verifiers(services.fast_pass)
@@ -906,11 +899,30 @@ def _attest_delivery(
     return document, translations, report
 
 
+def _resolve_render_engine(
+    ctx: StageContext, adapter: DocumentAdapter, blocks: list[IRBlock], render: RenderPlan
+) -> str:
+    """The engine this render will use, resolved *before* the render.
+
+    The decision plan is built before the renderer runs (ADR-0001 Phase 3), so
+    the engine its asset policy depends on cannot be read back from the
+    renderer's telemetry afterwards. Resolving here with the same
+    ``resolve_pdf_engine`` the renderer uses keeps the two in agreement.
+    """
+    from ubt.core.policy.adaptive_policy import resolve_pdf_engine
+
+    if not is_pdf_engine_adapter(adapter) or not blocks:
+        return "publication"
+    requested = str(render.render_engine or ctx.config.render_engine or "publication")
+    return resolve_pdf_engine(requested, blocks, manifest=ctx.manifest)
+
+
 def _deliver_contract(
     ctx: StageContext,
     blocks: list[IRBlock],
     rendered_path: Path,
     report: AttestationReport,
+    engine: str,
 ) -> ReconciliationReport:
     """Build the content graph, project the attestations onto it, persist the contract.
 
@@ -928,7 +940,7 @@ def _deliver_contract(
     manifest = ctx.manifest
     graph = graph_from_blocks(
         blocks,
-        engine=_effective_engine(ctx),
+        engine=engine,
         doc_id=str(getattr(manifest, "doc_id", "") or ""),
         title=str(getattr(manifest, "title", "") or ""),
         source_path=str(getattr(manifest, "source_path", "") or ""),
@@ -1294,6 +1306,18 @@ async def run_export_stage(
 
     ctx.check_cancelled()
     effective_bilingual_mode = render.bilingual_mode
+    # ADR-0001 Phase 3 inversion: build the decision plan *before* the render and
+    # hand it to the renderer as its per-element decision source. The engine the
+    # plan's asset policy depends on is resolved here (the renderer resolves the
+    # same one). The contract below is then projected from this same plan -- one
+    # realize() pass, not a second account.
+    render_engine = _resolve_render_engine(ctx, adapter, final_blocks, render)
+    document, translations, attestations = await asyncio.to_thread(
+        _attest_delivery, ctx, services, final_blocks, render_engine
+    )
+    from ubt.pipeline.decisions import plan_fidelities
+
+    realization_plan = plan_fidelities(attestations)
     rendered_path = await _render_adapter_output(
         adapter=adapter,
         manifest=manifest,
@@ -1304,6 +1328,7 @@ async def run_export_stage(
         job_id=actual_job_id,
         bilingual_mode=effective_bilingual_mode,
         render_plan=render,
+        realization_plan=realization_plan,
     )
 
     # Render skip pass-through + length conservation, before the report is
@@ -1315,18 +1340,10 @@ async def run_export_stage(
     # the persisted report files always reflect the current render.
     _drop_stale_run_reports(rendered_path)
 
-    # Attest the delivery per element (ADR-0001 Phase 3): realize() is the
-    # construction-time core, and the contract below is *projected* from it. The
-    # same Document and account feed the artifact check in the audit companion.
-    # Off-loop: realize() runs the verifiers over every block.
-    document, translations, attestations = await asyncio.to_thread(
-        _attest_delivery, ctx, services, final_blocks
-    )
-
     # Delivery contract: the attestation projection, written beside the artifact
     # and embedded in the quality report; an opt-in hard gate
     # (UBT_STRICT_CONTRACT) aborts a knowingly-broken delivery.
-    contract = _deliver_contract(ctx, final_blocks, rendered_path, attestations)
+    contract = _deliver_contract(ctx, final_blocks, rendered_path, attestations, render_engine)
     if ctx.config.strict_contract and not contract.passed:
         raise IntegrityViolationError(
             f"Export blocked for job {ctx.job_id}: delivery contract failed with "

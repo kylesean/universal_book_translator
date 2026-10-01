@@ -32,6 +32,17 @@ def plan_realization(
     return attest_document(document, backend, verifiers)
 
 
+def plan_fidelities(plan: AttestationReport) -> dict[str, Fidelity]:
+    """The plan as ``element id -> committed fidelity``, the renderer's input.
+
+    This is the value the production renderer reads (ADR-0001 Phase 3): it no
+    longer decides per element whether to reflow or preserve -- it looks the
+    decision up here. A missing id means the plan does not cover it and the
+    renderer falls back to its own judgment.
+    """
+    return {attestation.element_id: attestation.fidelity for attestation in plan.attestations}
+
+
 def divergences(
     plan: AttestationReport, realized: Mapping[str, Fidelity]
 ) -> tuple[tuple[str, Fidelity, Fidelity], ...]:
@@ -49,4 +60,4 @@ def divergences(
     return tuple(found)
 
 
-__all__ = ["divergences", "plan_realization"]
+__all__ = ["divergences", "plan_fidelities", "plan_realization"]

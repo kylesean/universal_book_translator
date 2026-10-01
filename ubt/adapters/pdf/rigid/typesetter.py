@@ -20,7 +20,7 @@ import asyncio
 import logging
 import os
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -50,6 +50,7 @@ from ubt.core.policy.layout_policy import (
     RIGID_MIN_FONT_PT,
     rigid_min_font_pt_for,
 )
+from ubt.model.fidelity import Fidelity
 
 logger = logging.getLogger(__name__)
 
@@ -433,11 +434,16 @@ class RigidTypesetter:
         translate_chrome: bool = False,
         typst_binary: str | None = None,
         margin_reclaim_pt: float | None = None,
+        realization_plan: Mapping[str, Fidelity] | None = None,
     ) -> None:
         from ubt.core.language_profile import resolve_font_config
 
         self.typst_binary = typst_binary or os.environ.get("UBT_TYPST_BINARY", "typst")
         self.target_lang = target_lang
+        # The decision plan (ADR-0001 Phase 3): element id -> committed fidelity.
+        # A block the plan kept (PRESERVED_OPAQUE) is left in the source rather
+        # than painted over with its translation.
+        self.realization_plan = realization_plan
         if font_family is not None and font_family.strip():
             self.font_family = font_family.strip()
         else:
@@ -621,6 +627,15 @@ class RigidTypesetter:
                 # Chrome / policy / non-prose / verbatim: source-visible by
                 # design, recorded so the audit stays complete.
                 report.skipped.append((block.id, reason))
+                continue
+            if (
+                self.realization_plan is not None
+                and self.realization_plan.get(block.id) is Fidelity.PRESERVED_OPAQUE
+            ):
+                # The decision plan kept this element in the source (ADR-0001
+                # Phase 3): leave the source box intact rather than painting the
+                # translation over it.
+                report.skipped.append((block.id, "plan:preserved"))
                 continue
             floor = rigid_min_font_pt_for(block.layout_role, default=self.min_font_pt)
             text = prepare_overlay_text(

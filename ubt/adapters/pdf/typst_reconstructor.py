@@ -69,6 +69,7 @@ from ubt.adapters.pdf.typst_math import (
 )
 from ubt.core.ir.models import BlockStatus, BlockType, FlowID, IRBlock, LayoutRole
 from ubt.core.language_profile import is_rtl_lang, resolve_font_config
+from ubt.model.fidelity import Fidelity
 
 if TYPE_CHECKING:
     from ubt.cache.store import CacheStore
@@ -234,14 +235,19 @@ def _polish_target_text(s: str, target_lang: str = "zh") -> str:
     return s.strip()
 
 
-def _resolve_content(block: IRBlock) -> tuple[str, str, str]:
+def _resolve_content(block: IRBlock, *, ignore_target: bool = False) -> tuple[str, str, str]:
     """Fail-closed (content, target, source) triple for one block.
 
     Terminally-failed blocks still carry a usable draft (QE-killed, not
     empty): prefer it over raw source so Chinese books never sprout
     full-English paragraphs while discarding real translations.
+
+    ``ignore_target`` is the decision plan's verdict (ADR-0001 Phase 3): the run
+    did not commit to deliver this block's translation (it failed verification),
+    so the renderer must not reflow it -- it falls through to draft/source exactly
+    as a block that never had a target.
     """
-    text = (block.target_text or "").strip()
+    text = "" if ignore_target else (block.target_text or "").strip()
     draft = (block.draft_text or "").strip()
     source = (block.source_text or "").strip()
 
@@ -720,6 +726,9 @@ class TypstReconstructor:
         # replaced by their source graphic (Axiom A: preserve whole, never ship
         # a shattered grid). Reset per generation; surfaced like the witness.
         self.last_table_fallbacks: list[str] = []
+        # Decision plan for the current generation (element id -> Fidelity); set
+        # by generate_typst_source, read by _emit_block. None = no plan.
+        self._plan: Mapping[str, Fidelity] | None = None
         # Display-formula backend. "typst" keeps native Typst conversion;
         # the orchestrator sets "mathjax" (engine SVG, default) or "image" (source crops).
         self.math_backend: str = "typst"
@@ -777,6 +786,7 @@ class TypstReconstructor:
         leading_em: float | None = None,
         source_page_height: float | None = None,
         source_page_count: int | None = None,
+        realization_plan: Mapping[str, Fidelity] | None = None,
     ) -> str:
         """Generate clean, publication-ready Typst source code from IR blocks.
 
@@ -816,6 +826,11 @@ class TypstReconstructor:
         # Fresh witness audit trail per generation.
         self.last_witness_findings = []
         self.last_table_fallbacks = []
+        # The decision plan (ADR-0001 Phase 3 inversion): element id -> the
+        # fidelity this run committed to deliver. ``_emit_block`` reads it so the
+        # renderer *follows* the plan instead of deciding reflow-vs-preserve
+        # itself. ``None`` (no plan) keeps the renderer's own judgment.
+        self._plan = realization_plan
         resolved_font_size = font_size if font_size is not None else self.font_size_pt
         if page_strict:
             # Use slightly smaller font for page-strict academic mode to fit content
@@ -2076,7 +2091,17 @@ class TypstReconstructor:
         """
         ctx = context if context is not None else _EmitContext()
         profile = ctx.profile
-        content, text, source = _resolve_content(block)
+        # The decision plan is the renderer's per-element instruction (ADR-0001
+        # Phase 3): DROPPED is removed, PRESERVED_OPAQUE keeps the source (a
+        # translation the plan did not commit to is not reflowed), and a
+        # reconstructed rung reflows the target. A missing id falls back to the
+        # renderer's own judgment, so a plan-less render is unchanged.
+        planned = self._plan.get(block.id) if self._plan is not None else None
+        if planned is Fidelity.DROPPED:
+            logger.debug("Decision plan dropped decorative block %s", block.id)
+            return
+        deliverable = planned is None or planned >= Fidelity.RECONSTRUCTED_ADAPTED
+        content, text, source = _resolve_content(block, ignore_target=not deliverable)
         if not content:
             return
 
@@ -2218,6 +2243,14 @@ class TypstReconstructor:
             # silently drop (Gate 4 verified rendering). The trailing id
             # comment lets the compile-probe pass map failures back to the
             # source block for verbatim degradation (fail-closed math).
+            if planned is Fidelity.PRESERVED_OPAQUE:
+                # The plan did not commit to reconstructing this formula (its
+                # reconstruction failed verification): keep the source graphic.
+                fallback = self._crop_formula_fallback(block)
+                if fallback is not None:
+                    lines.append(fallback)
+                    lines.append("")
+                    return
             lines.append(
                 _emit_formula_line(block, content, tag_hint=self._recover_formula_tag(block))
             )
@@ -2246,6 +2279,14 @@ class TypstReconstructor:
                 verify_table_structure,
             )
 
+            if planned is Fidelity.PRESERVED_OPAQUE:
+                # The plan kept this table as its source region (rigid, or a
+                # reconstruction that failed verification): do not rebuild it.
+                fallback = self._crop_table_fallback(block, "plan:preserved")
+                if fallback is not None:
+                    lines.append(fallback)
+                    lines.append("")
+                    return
             verdict = verify_table_structure(content)
             if verdict.verdict is not StructuralVerdict.PASS:
                 fallback = self._crop_table_fallback(block, verdict.detail or verdict.verdict.value)
