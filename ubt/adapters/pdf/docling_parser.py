@@ -424,12 +424,22 @@ def type_docling_blocks(blocks: list[IRBlock], *, pdf_path: Path | None) -> list
 
     This is the Docling analyzer producing its own types (ADR §6.1 item 9). It
     used to be a separate ``docling_blocks.postprocess_blocks`` pass called from
-    outside; the analyzer now owns the sequence end to end. The order is
+    outside; the analyzer now owns the sequence end to end, and it names each
+    typing stage itself instead of delegating to a generic ``reassemble_flow``
+    (which stays only for the geometry-less oxide fallback). The order is
     load-bearing: chapter fuse -> embedded-caption decouple -> caption-body latch
-    -> span-tail attach -> caption unify -> overlapping-formula merge -> flow
-    reassembly -> narrative defragment.
+    -> span-tail attach -> caption unify -> overlapping-formula merge -> chrome /
+    debris / listing typing -> heading demotion -> fragment coalescing -> narrative
+    defragment.
     """
-    from ubt.adapters.pdf.flow_reassembly import reassemble_flow
+    from ubt.adapters.pdf.flow_reassembly import (
+        classify_chrome_blocks,
+        classify_debris_blocks,
+        classify_listing_blocks,
+        coalesce_flow_fragments,
+        demote_fragment_headings,
+        stamp_ground_truth_typography,
+    )
 
     staged = resolve_overlapping_formula_blocks(
         unify_figure_captions(
@@ -438,7 +448,15 @@ def type_docling_blocks(blocks: list[IRBlock], *, pdf_path: Path | None) -> list
             )
         )
     )
-    staged, _stats = reassemble_flow(staged, pdf_path=pdf_path, allow_cross_page=True)
+    try:
+        truth = stamp_ground_truth_typography(staged, pdf_path)
+        classify_chrome_blocks(staged, truth.height)
+        classify_debris_blocks(staged)
+        classify_listing_blocks(staged)
+        demote_fragment_headings(staged, truth.body_size)
+        coalesce_flow_fragments(staged, allow_cross_page=True, body_by_page=truth.body_size)
+    except Exception as exc:  # never let extraction repair sink extraction
+        logger.warning("docling typing skipped after error: %s", exc)
     return defragment_narrative_blocks(staged, allow_cross_page=True)
 
 
