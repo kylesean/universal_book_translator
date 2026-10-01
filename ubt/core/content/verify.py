@@ -61,6 +61,7 @@ def contract_from_ledger(
     reliably from the ledger, so the caller states it (default: reflow).
     """
     from ubt.core.qe.fast_pass import FastPassFilter
+    from ubt.layout.theme import resolve_theme
     from ubt.pipeline.attest import attest_document, project_contract
     from ubt.pipeline.delivery import delivery_document, delivery_translations
     from ubt.render.typst_backend import TypstBackend
@@ -72,7 +73,10 @@ def contract_from_ledger(
     target_lang = str(ledger.get_job_target_lang(job_id) or "zh")
     report = attest_document(
         delivery_document(blocks, doc_id=job_id),
-        TypstBackend(delivery_translations(blocks, engine=engine)),
+        TypstBackend(
+            delivery_translations(blocks, engine=engine),
+            theme=resolve_theme(source_lang, target_lang),
+        ),
         build_verifiers(FastPassFilter(source_lang=source_lang, target_lang=target_lang)),
     )
     return project_contract(report, graph)

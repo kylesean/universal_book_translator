@@ -23,9 +23,10 @@ slice.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from ubt.adapters.pdf.overlay_text import typst_escape
+from ubt.layout.theme import Direction
 from ubt.model.ast import (
     ELEMENT_CLASSES,
     Caption,
@@ -43,6 +44,9 @@ from ubt.model.span import CanonicalSource
 from ubt.render.capability import Capabilities, Produced
 from ubt.render.overlay_backend import source_slice
 
+if TYPE_CHECKING:
+    from ubt.layout.theme import Theme
+
 #: Text classes this backend can re-typeset. Code is deliberately absent: its
 #: descent has no reconstructed rung, so it is only ever placed.
 REFLOW_CLASSES: tuple[type[TextElement], ...] = (
@@ -54,12 +58,20 @@ REFLOW_CLASSES: tuple[type[TextElement], ...] = (
 )
 
 
-def text_fragment(text: str) -> str | None:
-    """One text element's Typst content, or ``None`` when there is nothing to reflow."""
+def text_fragment(text: str, *, direction: Direction = Direction.LTR) -> str | None:
+    """One text element's Typst content, or ``None`` when there is nothing to reflow.
+
+    A right-to-left target is wrapped so Typst lays the run out right-to-left;
+    the text stays in logical order (Typst runs UAX #9 itself), so nothing is
+    reordered here.
+    """
     body = text.strip()
     if not body:
         return None
-    return typst_escape(body)
+    escaped = typst_escape(body)
+    if direction is Direction.RTL:
+        return f"#text(dir: rtl)[{escaped}]"
+    return escaped
 
 
 class TypstBackend:
@@ -67,8 +79,15 @@ class TypstBackend:
 
     name: ClassVar[str] = "typst"
 
-    def __init__(self, translations: Mapping[str, str] | None = None) -> None:
+    def __init__(
+        self, translations: Mapping[str, str] | None = None, *, theme: Theme | None = None
+    ) -> None:
         self._translations = dict(translations or {})
+        self._theme = theme
+
+    @property
+    def _direction(self) -> Direction:
+        return self._theme.target_direction if self._theme is not None else Direction.LTR
 
     def capabilities(self) -> Capabilities:
         supported = {(cls, Fidelity.PRESERVED_OPAQUE) for cls in ELEMENT_CLASSES}
@@ -88,7 +107,7 @@ class TypstBackend:
                 # Deliberately kept in the source (a listing, a proper noun): the
                 # contract calls this VERBATIM, so it is placed opaque, not reflowed.
                 return None
-            fragment = text_fragment(target)
+            fragment = text_fragment(target, direction=self._direction)
             if fragment is None:
                 return None
             return Produced(payload=target, note=f"typst:{element.kind}", fragment=fragment)

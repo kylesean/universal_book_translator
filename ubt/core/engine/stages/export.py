@@ -871,6 +871,7 @@ def _attest_delivery(
     ``realize()`` then reproduces and *verifies* each element -- the
     construction-time core the delivery contract is projected from.
     """
+    from ubt.layout.theme import resolve_theme
     from ubt.pipeline.attest import attest_document
     from ubt.pipeline.delivery import delivery_document, delivery_translations
     from ubt.render.typst_backend import TypstBackend
@@ -879,7 +880,10 @@ def _attest_delivery(
     doc_id = str(getattr(ctx.manifest, "doc_id", "") or "")
     document = delivery_document(blocks, doc_id=doc_id)
     translations = delivery_translations(blocks, engine=_effective_engine(ctx))
-    report = attest_document(document, TypstBackend(translations), build_verifiers(ctx.fast_pass))
+    theme = resolve_theme(ctx.source_lang or "en", ctx.target_lang or "zh")
+    report = attest_document(
+        document, TypstBackend(translations, theme=theme), build_verifiers(ctx.fast_pass)
+    )
     return document, translations, report
 
 
