@@ -19,12 +19,11 @@ IO is one file read, and the line loop is pure.
 
 from __future__ import annotations
 
-import dataclasses
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ubt.analyze._identity import file_digest
-from ubt.analyze.normalize import normalize_text
+from ubt.analyze.assemble import assemble
 from ubt.analyze.structure import (
     is_display_math,
     is_markdown_table,
@@ -39,12 +38,9 @@ from ubt.model.ast import (
     Heading,
     ListItem,
     Paragraph,
-    Region,
-    RegionKind,
     Table,
-    TextElement,
 )
-from ubt.model.span import CanonicalSource, Span
+from ubt.model.span import Span
 
 if TYPE_CHECKING:
     from ubt.model.ast import ElementT
@@ -55,28 +51,6 @@ def _decode(path: Path) -> str:
     from ubt.adapters.base import decode_markup
 
     return decode_markup(path.read_bytes())
-
-
-def _element_text(element: ElementT) -> str:
-    """The text a ``Span.chars`` range indexes for this element class."""
-    if isinstance(element, TextElement):
-        return element.text
-    if isinstance(element, Formula):
-        return element.source
-    if isinstance(element, Table):
-        return element.markup
-    return ""
-
-
-def _normalized(element: ElementT) -> ElementT:
-    """The element with its canonical text normalized (ADR §12 Q3)."""
-    if isinstance(element, TextElement):
-        return dataclasses.replace(element, text=normalize_text(element.text))
-    if isinstance(element, Formula):
-        return dataclasses.replace(element, source=normalize_text(element.source))
-    if isinstance(element, Table):
-        return dataclasses.replace(element, markup=normalize_text(element.markup))
-    return element
 
 
 def read_md(path: str | Path, *, doc_id: str | None = None) -> Document:
@@ -253,31 +227,7 @@ def read_md(path: str | Path, *, doc_id: str | None = None) -> Document:
     if in_math:
         flush_math()
 
-    # Stamp reading-order char ranges and build the canonical stream they index.
-    texts: list[str] = []
-    stamped: list[ElementT] = []
-    cursor = 0
-    for element in elements:
-        element = _normalized(element)
-        text = _element_text(element)
-        stamped.append(
-            dataclasses.replace(element, span=Span(page=0, chars=(cursor, cursor + len(text))))
-        )
-        texts.append(text)
-        cursor += len(text) + 1
-
-    source = CanonicalSource(
-        doc_id=doc_id or file_digest(md_path),
-        path=str(md_path),
-        text="\n".join(texts),
-        pages=(),
-    )
-    if stamped:
-        region = Region(id="r0", kind=RegionKind.BODY, elements=tuple(stamped))
-        regions: tuple[Region, ...] = (region,)
-    else:
-        regions = ()
-    return Document(source=source, regions=regions)
+    return assemble(elements, doc_id=doc_id or file_digest(md_path), path=str(md_path))
 
 
 __all__ = ["read_md"]
