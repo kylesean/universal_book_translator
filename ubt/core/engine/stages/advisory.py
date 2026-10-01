@@ -46,7 +46,8 @@ from ubt.core.ports import (
     summarize_font_encoding_damage,
 )
 from ubt.pipeline.blocks import BlockReader
-from ubt.pipeline.facts import LayoutAdvisory
+from ubt.pipeline.facts import LayoutAdvisory, RenderPlan
+from ubt.pipeline.services import RunServices
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +84,6 @@ async def run_extraction_witness_stage(ctx: StageContext, blocks: BlockReader) -
     try:
         witness_verdicts = await asyncio.to_thread(inspect_font_encoding_damage, ctx.input_path)
         stats = summarize_font_encoding_damage(witness_verdicts)
-        ctx.manifest.run.extraction_witness = stats
         # force_refresh: this is the stage that *fills* the shared blocks cache,
         # and it mutates error_flags on disk right after the read. Handing the
         # freshly-populated snapshot to the next stage ensures mode advisory
@@ -119,7 +119,11 @@ async def run_extraction_witness_stage(ctx: StageContext, blocks: BlockReader) -
 
 
 async def run_mode_advisory_stage(
-    ctx: StageContext, layout: LayoutAdvisory, blocks: BlockReader
+    ctx: StageContext,
+    layout: LayoutAdvisory,
+    render: RenderPlan,
+    blocks: BlockReader,
+    services: RunServices,
 ) -> AsyncIterator[TranslationProgressEvent]:
     """Publish the run policy and advise on the requested bilingual mode."""
     config = ctx.config
@@ -138,9 +142,6 @@ async def run_mode_advisory_stage(
     manifest.run.render_engine = config.render_engine
     manifest.run.translate_chrome = config.translate_chrome
     manifest.run.cover_mode = config.cover_mode
-    manifest.run.ocr_mode = config.ocr_mode
-    if config.ocr_endpoint:
-        manifest.run.ocr_endpoint = config.ocr_endpoint
 
     figure_pages: set[int] = set()
     if ctx.source_pdf_path is not None:
@@ -172,7 +173,7 @@ async def run_mode_advisory_stage(
         effective_engine = config.render_engine
     else:
         effective_engine = (
-            getattr(getattr(ctx, "adaptive_policy", None), "render_engine", None)
+            getattr(services.adaptive_policy, "render_engine", None)
             or getattr(getattr(ctx, "adapter", None), "render_engine", None)
             or config.render_engine
         )
@@ -203,7 +204,7 @@ async def run_mode_advisory_stage(
             config.emit_companion_bilingual
             and canonical_render_engine(config.render_engine) == "auto"
         ):
-            manifest.run.emit_secondary_engine = "rigid_bilingual"
+            render.emit_secondary_engine = "rigid_bilingual"
             engine_advisory_msg += (
                 " A zero-token bilingual companion (source + translated pages) was "
                 "scheduled so the bilingual delivery is preserved."
@@ -220,7 +221,7 @@ async def run_mode_advisory_stage(
             )
         )
     ):
-        manifest.run.emit_secondary_engine = "rigid"
+        render.emit_secondary_engine = "rigid"
         engine_advisory_msg = (
             "Layout tradeoff advisory: this structure-bearing PDF is rendered with "
             "the reflow engine as requested; a zero-cost companion '*_rigid.pdf' "
@@ -230,15 +231,13 @@ async def run_mode_advisory_stage(
     adv_dict = dict(advisory.to_dict())
     adv_dict["effective"] = effective_mode
     adv_dict["rendered_modes"] = [effective_mode]
-    manifest.run.bilingual_advisory = adv_dict
-    manifest.run.dual_enforcement = enforcement
+    render.bilingual_advisory = adv_dict
     manifest.run.bilingual_mode = RENDER_MODE_VALUE[effective_mode]
     manifest.run.effective_dual_mode = effective_mode
     manifest.run.facing_spread = config.facing_spread or effective_mode in (
         "facing",
         "facing_spread",
     )
-    manifest.run.render_engine_advisory = engine_advisory_msg
     if advisory.tier != "ok":
         logger.warning(
             "Bilingual advisory for job %s: requested '%s' is '%s' "
@@ -263,7 +262,11 @@ async def run_mode_advisory_stage(
 
 
 async def run_difficulty_advisory_stage(
-    ctx: StageContext, layout: LayoutAdvisory, blocks: BlockReader
+    ctx: StageContext,
+    layout: LayoutAdvisory,
+    render: RenderPlan,
+    blocks: BlockReader,
+    services: RunServices,
 ) -> None:
     """Step the render mode down on live repair burden. Yields no events.
 
@@ -295,7 +298,7 @@ async def run_difficulty_advisory_stage(
         effective_engine = config.render_engine
     else:
         effective_engine = (
-            getattr(getattr(ctx, "adaptive_policy", None), "render_engine", None)
+            getattr(services.adaptive_policy, "render_engine", None)
             or getattr(getattr(ctx, "adapter", None), "render_engine", None)
             or config.render_engine
         )
@@ -337,8 +340,8 @@ async def run_difficulty_advisory_stage(
     advisory_dict["rendered_modes"] = (
         [effective_mode] if secondary is None else [effective_mode, secondary]
     )
-    manifest.run.bilingual_advisory = advisory_dict
-    manifest.run.emit_secondary_mode = RENDER_MODE_VALUE[secondary] if secondary is not None else ""
+    render.bilingual_advisory = advisory_dict
+    render.emit_secondary_mode = RENDER_MODE_VALUE[secondary] if secondary is not None else ""
 
 
 def apply_layout_tradeoff_advisory(

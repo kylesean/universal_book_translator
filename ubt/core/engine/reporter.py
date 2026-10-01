@@ -319,6 +319,7 @@ def build_quality_report(
     entity_consistency: ReportEntityConsistency | None = None,
     enforced_spans: int = 0,
     delivery_contract: dict[str, Any] | None = None,
+    mode_advisory: dict[str, Any] | None = None,
 ) -> QualityReport:
     """Analyze all ledger blocks for a job and construct a comprehensive QualityReport.
 
@@ -520,11 +521,7 @@ def build_quality_report(
             pages_measured=int((manifest.metadata.get("fidelity") or {}).get("pages_measured", 0)),
         ),
         route=route_info,
-        mode_advisory=(
-            dict(manifest.run.bilingual_advisory)
-            if isinstance(manifest.run.bilingual_advisory, dict)
-            else None
-        ),
+        mode_advisory=mode_advisory,
         config_snapshot=cfg_snapshot,
         syntax_fallbacks=[
             str(item) for item in (manifest.metadata.get("typst_syntax_fallbacks") or []) if item

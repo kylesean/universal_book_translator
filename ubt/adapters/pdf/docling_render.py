@@ -255,14 +255,9 @@ class DoclingRenderStrategy:
                     "render_engine='rigid' is monolingual; requested mode %r downgraded",
                     manifest.run.dual_mode_downgraded,
                 )
-        manifest.run.render_engine_effective = active_engine
-        # The metadata copy is a fallback for manifests that predate the typed
-        # field: ``reflow_loop.effective_render_engine`` reads
-        # ``manifest.run.render_engine_effective`` first and falls back to
-        # ``manifest.metadata["render_engine_effective"]``. Without either, the
-        # geometry predicates treat every render -- including a reflowed
-        # publication -- as geometry-preserving, which injects bogus
-        # page_count/image_count parity majors into the visual gate.
+        # The engine the renderer actually used is render *telemetry*, so its home
+        # is ``manifest.metadata`` (ARTIFACT_METADATA_KEYS), read by the visual
+        # gate and the quality report -- not a run decision on the manifest.
         if isinstance(getattr(manifest, "metadata", None), dict):
             manifest.metadata["render_engine_effective"] = active_engine
 
@@ -475,7 +470,10 @@ class DoclingRenderStrategy:
                     # The alternator pads the shorter side with intentional
                     # blanks; record exactly which pages so the visual gate
                     # does not report them as CRITICAL blank_page defects.
-                    manifest.run.render_padding_pages = list(interleaved.padding_pages) or None
+                    if isinstance(getattr(manifest, "metadata", None), dict):
+                        manifest.metadata["render_padding_pages"] = (
+                            list(interleaved.padding_pages) or None
+                        )
                 finally:
                     staging_trans_pdf.unlink(missing_ok=True)
                     staging_trans_typ.unlink(missing_ok=True)

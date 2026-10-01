@@ -37,21 +37,23 @@ RenderFn = Callable[..., Awaitable[Path]]
 
 
 def effective_render_engine(manifest: Any) -> str:
-    """Engine the renderer actually used, from the typed run metadata.
+    """Engine the renderer actually used, from the render telemetry.
 
-    ``manifest.run.render_engine_effective`` is written by the PDF renderer for
-    both of its tracks. The ``manifest.metadata`` copy is kept in sync for older
-    readers; it is consulted only as a fallback, so a manifest whose metadata is
-    not a dict still resolves the engine instead of silently defaulting to
-    "geometry-preserving".
+    ``manifest.metadata["render_engine_effective"]`` is written by the PDF
+    renderer for both of its tracks (it is render telemetry, so it lives in
+    ``manifest.metadata``, not on ``manifest.run``). Without it the geometry
+    predicates treat every render -- including a reflowed publication -- as
+    geometry-preserving, which injects bogus page_count/image_count parity
+    majors into the visual gate.
     """
+    metadata = getattr(manifest, "metadata", None)
+    if isinstance(metadata, dict):
+        engine = metadata.get("render_engine_effective")
+        if engine:
+            return str(engine)
+    # Transitional: an older manifest may still carry it as a run field.
     run = getattr(manifest, "run", None)
-    engine = getattr(run, "render_engine_effective", None)
-    if not engine:
-        metadata = getattr(manifest, "metadata", None)
-        if isinstance(metadata, dict):
-            engine = metadata.get("render_engine_effective")
-    return str(engine or "")
+    return str(getattr(run, "render_engine_effective", None) or "")
 
 
 class ReflowControlLoop:
@@ -149,8 +151,8 @@ class ReflowControlLoop:
         # gate flags the page-count padding as CRITICAL blank_page and flips a
         # correct facing artifact to passed=False.
         padding_pages: tuple[int, ...] = ()
-        if self.manifest is not None:
-            padding_pages = tuple(self.manifest.run.render_padding_pages or ())
+        if isinstance(getattr(self.manifest, "metadata", None), dict):
+            padding_pages = tuple(self.manifest.metadata.get("render_padding_pages") or ())
         # T1 (out of bounds) and the overlap check both read the SOURCE page's
         # bboxes. That is the artifact for the rigid overlay, whose canvas is
         # the original page, and for the alternating zipper, whose pages are the

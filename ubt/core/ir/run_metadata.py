@@ -24,7 +24,7 @@ never set stays absent instead of appearing as an explicit ``null``.
 
 from __future__ import annotations
 
-from typing import Any, Final, Literal
+from typing import Any, Final
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -41,8 +41,10 @@ ARTIFACT_METADATA_KEYS: Final[frozenset[str]] = frozenset(
         "boilerplate_footers",
         "is_page_slice_epub",
         "page_kinds",
-        # Render telemetry, consumed by the quality report.
+        # Render telemetry, consumed by the quality report and the visual gate.
         "formula_witness_findings",
+        "render_engine_effective",
+        "render_padding_pages",
         "typst_syntax_fallbacks",
         "typst_version",
     }
@@ -57,64 +59,29 @@ class RunMetadata(BaseModel):
     # --- Routing and cost policy ------------------------------------------
     route_decision: dict[str, Any] | None = None
     route_mode: str | None = None
-    fast_lane: bool | None = None
     adaptive_policy: dict[str, Any] | None = Field(
         default=None, description="resolve_adaptive_policy().to_dict()"
     )
     config_snapshot: dict[str, Any] | None = None
 
     # --- Bilingual / render mode ------------------------------------------
+    # The advisory's purely-advisory outputs (``bilingual_advisory``,
+    # ``emit_secondary_*``) live in ``RunFacts.RenderPlan`` now. The mode cluster
+    # below stays here because the PDF renderer reads and rewrites it across the
+    # adapter boundary (the renderer->gate handshake; ADR-0001 final cut).
     bilingual_mode: str | None = Field(default=None, description="RENDER_MODE_VALUE key")
     effective_dual_mode: str | None = None
     dual_mode_downgraded: str | None = Field(
         default=None, description="the mode before the rigid engine replaced it"
     )
-    dual_enforcement: Literal["advise", "auto"] | None = None
-    bilingual_advisory: dict[str, Any] | None = None
     facing_spread: bool | None = None
-    render_padding_pages: list[int] | None = Field(
-        default=None,
-        description=(
-            "1-based pages the bilingual alternator filled with intentional blanks "
-            "(facing flyleaf + page-count padding); the visual gate exempts them "
-            "from blank-page findings"
-        ),
-    )
-    emit_secondary_mode: str | None = Field(
-        default=None, description="--emit-both second mode, '' when not requested"
-    )
-    emit_secondary_engine: str | None = Field(
-        default=None,
-        description="secondary PDF render engine (e.g. 'rigid') when reflow is forced on a dense layout",
-    )
-    companion_output_path: str | None = Field(
-        default=None,
-        description="path to the rendered secondary/companion PDF artifact when dual delivery triggers",
-    )
     render_engine: str | None = None
-    render_engine_effective: str | None = Field(
-        default=None, description="engine the PDF renderer actually used"
-    )
-    render_engine_advisory: str | None = None
     translate_chrome: bool | None = None
     cover_mode: str | None = None
 
     # --- Extraction / formula policy --------------------------------------
     formula_mode: str | None = None
     selected_pages: list[int] | None = None
-    extraction_witness: dict[str, Any] | None = Field(
-        default=None, description="font-encoding damage summary, zero tokens"
-    )
-
-    # --- OCR egress disclosure --------------------------------------------
-    ocr_mode: str | None = None
-    ocr_endpoint: str | None = None
-
-    # --- Terminology and export-time policy -------------------------------
-    terminology_table: dict[str, str] | None = Field(
-        default=None, description="the capped sheet the draft prompts carried"
-    )
-    length_policy: dict[str, Any] | None = None
 
     # --- Delivery verdict -------------------------------------------------
     delivery_status: str | None = None

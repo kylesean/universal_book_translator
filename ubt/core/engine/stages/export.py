@@ -47,7 +47,7 @@ if TYPE_CHECKING:
     from ubt.adapters.pdf.visual_gate import VisualGateResult
     from ubt.core.content.contract import ReconciliationReport
     from ubt.model.ast import Document
-    from ubt.pipeline.artifact import ArtifactReport
+    from ubt.pipeline.artifact import ArtifactReport, DeliveredArtifact
     from ubt.pipeline.attest import AttestationReport
 from ubt.core.qe.defect_taxonomy import (
     INTENTIONAL_PRESERVED_SKIP_PREFIXES as _INTENTIONAL_PRESERVED_SKIP_PREFIXES,
@@ -59,7 +59,7 @@ from ubt.core.validators.consistency import GlossaryConsistencyValidator
 from ubt.core.validators.glossary_enforcer import DeterministicGlossaryEnforcer
 from ubt.core.validators.html_delta import HTMLDeltaValidator
 from ubt.core.validators.math_guard import apply_math_guards
-from ubt.pipeline.facts import Terminology
+from ubt.pipeline.facts import RenderPlan, Terminology
 from ubt.pipeline.services import RunServices
 
 logger = logging.getLogger(__name__)
@@ -482,10 +482,6 @@ async def _apply_render_skip_ledger_pass(
             actual_job_id,
             length_human,
         )
-    manifest.run.length_policy = {
-        "overflow_to_human": length_human,
-        "enforce": bool(LENGTH_OVERFLOW_TO_HUMAN),
-    }
     if render_skip_checkpoints or cleared_skips:
         if render_skip_checkpoints:
             fail_closed_count, preserved_count = _partition_render_skip_counts(
@@ -728,8 +724,8 @@ async def _render_complementary_artifact(
     ctx: StageContext,
     adapter: DocumentAdapter,
     final_blocks: list[IRBlock],
-    target_output: Path,
-    rendered_path: Path | None = None,
+    artifact: DeliveredArtifact,
+    render: RenderPlan,
 ) -> Path | None:
     """Render the requested complementary dual-mode or secondary-engine PDF, or None.
 
@@ -738,15 +734,18 @@ async def _render_complementary_artifact(
     secondary render must not sink the delivered primary artifact.
     """
     manifest = ctx.manifest
-    secondary_render = str(manifest.run.emit_secondary_mode or "")
-    secondary_engine = str(manifest.run.emit_secondary_engine or "")
+    secondary_render = str(render.emit_secondary_mode or "")
+    secondary_engine = str(render.emit_secondary_engine or "")
+    # The engine the primary render actually used: render telemetry, written by
+    # the renderer into manifest.metadata (its home), not a run decision.
+    effective_engine = str(manifest.metadata.get("render_engine_effective") or "")
     secondary_path: Path | None = None
     # Companion renders are intentional second passes; the forced-engine
     # warning ("...auto dispatch would route...") is for a user-forced *primary*
     # render, so suppress it while a companion is produced.
     if isinstance(getattr(manifest, "metadata", None), dict):
         manifest.metadata["suppress_render_engine_warning"] = True
-    if secondary_render and str(manifest.run.render_engine_effective or "") == "rigid":
+    if secondary_render and effective_engine == "rigid":
         # The rigid engine is monolingual: a complementary mode would
         # produce a byte-identical mono artifact. Record the skip instead.
         logger.info("Complementary dual render skipped: 'rigid' is monolingual")
@@ -754,8 +753,7 @@ async def _render_complementary_artifact(
     if secondary_render:
         primary_mode = str(manifest.run.effective_dual_mode or "inline")
         suffix = SECONDARY_SUFFIX.get(cast(DualMode, primary_mode), "_secondary")
-        ext = target_output.suffix
-        candidate = target_output.with_name(f"{target_output.stem}{suffix}{ext}")
+        candidate = artifact.sibling(suffix)
         try:
             secondary_path = await _render_adapter_output(
                 adapter=adapter,
@@ -767,19 +765,17 @@ async def _render_complementary_artifact(
                 job_id=ctx.job_id,
                 bilingual_mode=secondary_render,
             )
-            manifest.run.companion_output_path = str(secondary_path)
             logger.info("Dual output rendered complementary artifact: %s", secondary_path)
         except Exception as exc:
             logger.warning("Complementary dual render failed (non-fatal): %s", exc)
             secondary_path = None
     elif (
         secondary_engine == "rigid"
-        and str(manifest.run.render_engine_effective or "") != "rigid"
+        and effective_engine != "rigid"
         and is_pdf_engine_adapter(adapter)
-        and target_output.suffix.lower() == ".pdf"
+        and artifact.target_output.suffix.lower() == ".pdf"
     ):
-        candidate = target_output.with_name(f"{target_output.stem}_rigid.pdf")
-        saved_effective = manifest.run.render_engine_effective
+        candidate = artifact.sibling("_rigid")
         saved_meta_effective = manifest.metadata.get("render_engine_effective")
         saved_skips = list(getattr(adapter, "last_render_skips", ()))
         try:
@@ -794,7 +790,6 @@ async def _render_complementary_artifact(
                 bilingual_mode="monolingual",
                 render_engine="rigid",
             )
-            manifest.run.companion_output_path = str(secondary_path)
             logger.info(
                 "Zero-cost companion rigid PDF rendered alongside forced reflow artifact: %s",
                 secondary_path,
@@ -803,7 +798,8 @@ async def _render_complementary_artifact(
             logger.warning("Companion rigid render failed (non-fatal): %s", exc)
             secondary_path = None
         finally:
-            manifest.run.render_engine_effective = saved_effective
+            # The companion render overwrote the primary's engine telemetry;
+            # restore it so the visual gate scores the delivered artifact.
             if saved_meta_effective is not None:
                 manifest.metadata["render_engine_effective"] = saved_meta_effective
             elif "render_engine_effective" in manifest.metadata:
@@ -812,10 +808,9 @@ async def _render_complementary_artifact(
                 adapter.last_render_skips = saved_skips
     elif (
         secondary_engine == "rigid_bilingual"
-        and str(manifest.run.render_engine_effective or "") == "rigid"
-        and target_output.suffix.lower() == ".pdf"
+        and effective_engine == "rigid"
+        and artifact.target_output.suffix.lower() == ".pdf"
         and ctx.source_pdf_path is not None
-        and rendered_path is not None
     ):
         # Auto-routed rigid: the primary is a monolingual overlay. The bilingual
         # companion interleaves the SOURCE pages with the rigid TARGET pages, so
@@ -823,20 +818,21 @@ async def _render_complementary_artifact(
         # second re-typeset (fidelity and bilingual are no longer a tradeoff). An
         # auto-named primary is ``<stem>_mono``; restore the canonical
         # ``<stem>_bilingual`` name for the companion.
-        stem = target_output.stem
+        stem = artifact.target_output.stem
         base = stem[: -len("_mono")] if stem.endswith("_mono") else stem
-        candidate = target_output.with_name(f"{base}_bilingual{target_output.suffix}")
+        candidate = artifact.target_output.with_name(
+            f"{base}_bilingual{artifact.target_output.suffix}"
+        )
         try:
             from ubt.adapters.pdf.alternator import BilingualAlternator
 
             result = await BilingualAlternator().interleave_pages_async(
                 source_pdf=ctx.source_pdf_path,
-                translated_pdf=rendered_path,
+                translated_pdf=artifact.rendered_path,
                 output_pdf=candidate,
                 facing_spread=bool(manifest.run.facing_spread),
             )
             secondary_path = Path(result.output_path)
-            manifest.run.companion_output_path = str(secondary_path)
             logger.info(
                 "Zero-cost rigid bilingual companion (source + target pages) rendered: %s",
                 secondary_path,
@@ -856,7 +852,7 @@ def _effective_engine(ctx: StageContext) -> str:
     attestation layer both read it from here so they cannot drift.
     """
     return str(
-        getattr(ctx.manifest.run, "render_engine_effective", "")
+        ctx.manifest.metadata.get("render_engine_effective")
         or ctx.config.render_engine
         or "publication"
     )
@@ -1060,6 +1056,7 @@ async def _build_reports(
     enforced_spans: int,
     run_usage: Any,
     delivery_contract: dict[str, Any] | None = None,
+    mode_advisory: dict[str, Any] | None = None,
 ) -> tuple[QualityReport, Path]:
     """Write the quality report + versioned KPI artifact; return both handles.
 
@@ -1144,6 +1141,7 @@ async def _build_reports(
         entity_consistency=entity_consistency,
         enforced_spans=enforced_spans,
         delivery_contract=delivery_contract,
+        mode_advisory=mode_advisory,
     )
     if report.summary.failed_blocks > 0:
         logger.warning(
@@ -1180,6 +1178,7 @@ async def _build_reports(
 async def run_export_stage(
     ctx: StageContext,
     services: RunServices,
+    render: RenderPlan,
     terminology: Terminology,
 ) -> AsyncIterator[TranslationProgressEvent]:
     """Perform integrity checks, apply glossary enforcement (opt-in), and render output document."""
@@ -1363,8 +1362,13 @@ async def run_export_stage(
     # for a complementary artifact, render it from the same translated
     # blocks (no extra LLM cost). PDF only — other adapters have no
     # render-mode override plumbing.
+    # The two artifact identities (requested target vs returned file, which the
+    # visual gate may have rewritten) named once, where the render returns.
+    from ubt.pipeline.artifact import delivered_artifact
+
+    artifact = delivered_artifact(rendered_path, target_output)
     secondary_path = await _render_complementary_artifact(
-        ctx, adapter, final_blocks, target_output, rendered_path
+        ctx, adapter, final_blocks, artifact, render
     )
 
     # Persist this run's spend to the ledger before the report reads it: the
@@ -1382,6 +1386,7 @@ async def run_export_stage(
         enforced_spans=enforced_spans,
         run_usage=run_usage,
         delivery_contract=delivery_contract,
+        mode_advisory=render.bilingual_advisory,
     )
 
     # Enforce AFTER the reports are on disk so a refused job keeps its audit

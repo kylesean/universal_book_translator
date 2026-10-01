@@ -103,7 +103,6 @@ async def run_bible_stage(
             fast_lane = await asyncio.to_thread(is_fast_lane_eligible, ctx.input_path)
         except Exception as exc:
             logger.debug("Fast-lane eligibility check skipped for %s: %s", actual_job_id, exc)
-    manifest.run.fast_lane = fast_lane
     if fast_lane:
         logger.info(
             "Fast lane enabled for job %s (seed-only bible, full gates kept)",

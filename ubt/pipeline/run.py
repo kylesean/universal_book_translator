@@ -83,7 +83,7 @@ async def run_stages(
     async for event in run_ingest_stage(ctx):
         yield event
     await run_extraction_witness_stage(ctx, blocks)
-    async for event in run_mode_advisory_stage(ctx, facts.layout, blocks):
+    async for event in run_mode_advisory_stage(ctx, facts.layout, facts.render, blocks, services):
         yield event
     # Zero-token preflights BEFORE the bible: the bible stage's skeleton
     # extraction and abbreviation backfill are billable calls, and the
@@ -112,8 +112,8 @@ async def run_stages(
             yield event
     async for event in run_triage_stage(ctx, services, facts.terminology, facts.scoring):
         yield event
-    await run_difficulty_advisory_stage(ctx, facts.layout, blocks)
-    async for event in run_export_stage(ctx, services, facts.terminology):
+    await run_difficulty_advisory_stage(ctx, facts.layout, facts.render, blocks, services)
+    async for event in run_export_stage(ctx, services, facts.render, facts.terminology):
         if event.event_type is EventType.EXPORT_COMPLETED and on_export_completed is not None:
             await on_export_completed(event)
         yield event

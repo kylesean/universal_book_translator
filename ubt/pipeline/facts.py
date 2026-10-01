@@ -65,6 +65,26 @@ class Scoring:
 
 
 @dataclass
+class RenderPlan:
+    """The render decision the advisories publish and export acts on.
+
+    These were written back onto ``manifest.run`` -- the run manifest doubling as
+    an inter-stage bus. A decision one stage makes *about this run* is a fact, not
+    a property of the source document, so it lives here and is threaded to the
+    stage that reads it (``export``) instead of being posted on a shared object.
+
+    The bilingual/engine *mode* cluster stays on ``manifest.run`` for now: the PDF
+    renderer reads and rewrites it across the adapter boundary (the renderer
+    handshake, ADR-0001 final cut). Only the purely advisory-owned values are
+    moved here.
+    """
+
+    bilingual_advisory: dict[str, Any] | None = None
+    emit_secondary_mode: str | None = None
+    emit_secondary_engine: str | None = None
+
+
+@dataclass
 class RunFacts:
     """The values a run threads between its stages.
 
@@ -76,6 +96,7 @@ class RunFacts:
     terminology: Terminology = field(default_factory=Terminology)
     layout: LayoutAdvisory = field(default_factory=LayoutAdvisory)
     scoring: Scoring = field(default_factory=Scoring)
+    render: RenderPlan = field(default_factory=RenderPlan)
 
 
-__all__ = ["LayoutAdvisory", "RunFacts", "Scoring", "Terminology"]
+__all__ = ["LayoutAdvisory", "RenderPlan", "RunFacts", "Scoring", "Terminology"]
