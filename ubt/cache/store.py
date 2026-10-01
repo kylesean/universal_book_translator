@@ -43,6 +43,14 @@ def step_key(kind: str, inputs: Sequence[str], params: Mapping[str, object]) -> 
 class CacheStore(Protocol):
     """A content-addressed store of text values."""
 
+    def get(self, key: str) -> str | None:
+        """The stored value for ``key``, or ``None`` on a miss."""
+        ...
+
+    def put(self, key: str, value: str) -> None:
+        """Store ``value`` under ``key`` (fail-open)."""
+        ...
+
     def get_or_compute(self, key: str, compute: Callable[[], str]) -> str:
         """The stored value for ``key``, or ``compute()`` once and store it."""
         ...
@@ -62,13 +70,14 @@ class DiskCacheStore:
     def _path(self, key: str) -> Path:
         return self.root / key[:2] / f"{key}.json"
 
-    def get_or_compute(self, key: str, compute: Callable[[], str]) -> str:
-        path = self._path(key)
+    def get(self, key: str) -> str | None:
         try:
-            return path.read_text(encoding="utf-8")
+            return self._path(key).read_text(encoding="utf-8")
         except OSError:
-            pass  # absent or unreadable is a miss, never an error
-        value = compute()
+            return None  # absent or unreadable is a miss, never an error
+
+    def put(self, key: str, value: str) -> None:
+        path = self._path(key)
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             tmp = path.parent / f"{path.name}.tmp"
@@ -76,6 +85,13 @@ class DiskCacheStore:
             tmp.replace(path)
         except OSError as exc:
             logger.debug("cache write failed for %s: %s", key, exc)
+
+    def get_or_compute(self, key: str, compute: Callable[[], str]) -> str:
+        cached = self.get(key)
+        if cached is not None:
+            return cached
+        value = compute()
+        self.put(key, value)
         return value
 
 

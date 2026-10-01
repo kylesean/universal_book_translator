@@ -21,14 +21,20 @@ attached. Fail closed, or a silently corrupted formula ships.
 
 from __future__ import annotations
 
+import contextlib
+import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from ubt.core.cleaners.mask_tokens import UnmaskReport
 from ubt.model.ast import Document, TextElement
 from ubt.model.segment import QA, Provenance, Segment, SegmentState
 from ubt.segment.placeholders import MaskedSource, PlaceholderEngine
 from ubt.segment.xliff import xml_safe
+
+if TYPE_CHECKING:
+    from ubt.cache.store import CacheStore
 
 #: A masked source in, a raw draft out. The engine never sees the provider.
 TranslateFn = Callable[[str], Awaitable[str]]
@@ -59,6 +65,10 @@ class TranslationEngine:
     placeholders: PlaceholderEngine
     model: str = ""
     prompt_version: str = ""
+    #: Content-addressed cache for the translate step (ADR-0001 Phase 4). The
+    #: key is the masked source plus the model and prompt version, so a changed
+    #: prompt or model cannot reuse an old draft; ``None`` calls straight through.
+    cache: CacheStore | None = None
 
     def mask(self, text: str) -> MaskedSource:
         """Protect a source's spans, in the engine's fixed mask order."""
@@ -75,10 +85,50 @@ class TranslationEngine:
     def _provenance(self) -> Provenance:
         return Provenance(source="mt", model=self.model, prompt_version=self.prompt_version)
 
+    async def _draft(self, masked_source: str, translate: TranslateFn) -> str:
+        """Generate the raw draft, through the content cache when one is set.
+
+        Fail-open: any cache problem (an unavailable store, a corrupt entry)
+        falls back to the provider, because a cache must never break a
+        translation.
+        """
+        if self.cache is None:
+            return await translate(masked_source)
+        from ubt.cache.store import step_key
+
+        key = step_key("translate", [self.model, self.prompt_version, masked_source], {})
+        cached = self._cached_draft(key)
+        if cached is not None:
+            return cached
+        raw = await translate(masked_source)
+        # A JSON envelope carrying the key makes a truncated, hand-edited or
+        # split-brain entry a miss rather than a silently wrong draft.
+        envelope = json.dumps({"key": key, "text": raw}, ensure_ascii=False)
+        with contextlib.suppress(OSError, ValueError, KeyError, TypeError):
+            self.cache.put(key, envelope)
+        return raw
+
+    def _cached_draft(self, key: str) -> str | None:
+        """The cached draft for ``key``, or ``None`` on any miss/corruption."""
+        try:
+            entry = self.cache.get(key) if self.cache is not None else None
+        except (OSError, ValueError, KeyError, TypeError):
+            return None
+        if entry is None:
+            return None
+        try:
+            data = json.loads(entry)
+        except (ValueError, TypeError):
+            return None
+        if not isinstance(data, dict) or data.get("key") != key:
+            return None
+        text = data.get("text")
+        return text if isinstance(text, str) else None
+
     async def translate_text(self, element_id: str, text: str, translate: TranslateFn) -> Segment:
         """Translate one unit end to end, verifying its protected spans."""
         masked = self.mask(xml_safe(text))
-        raw = await translate(masked.text)
+        raw = await self._draft(masked.text, translate)
         result = self.resolve(raw, masked)
         return Segment(
             id=element_id,
