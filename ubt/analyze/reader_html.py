@@ -117,28 +117,32 @@ def _list_marker(item: Tag, index: int) -> str:
     return "•"
 
 
-def _walk(
+def walk_markup_elements(
     node: Tag,
-    out: list[ElementT],
     *,
-    page: int,
-    resolve_asset: Callable[[str], str],
-) -> None:
-    """Emit elements for one DOM node's block-level children, in reading order."""
-    pending: list[str] = []
+    page: int = 0,
+    resolve_asset: Callable[[str], str] | None = None,
+) -> list[tuple[ElementT, Tag | list[NavigableString]]]:
+    """Emit (Element, DOM node) pairs for one DOM node's block-level children, in reading order."""
+    resolve = resolve_asset or (lambda src: src)
+    out: list[tuple[ElementT, Tag | list[NavigableString]]] = []
+    pending: list[NavigableString] = []
 
     def flush() -> None:
         if not pending:
             return
-        text = _clean(" ".join(pending))
+        text = _clean(" ".join(str(s) for s in pending))
+        saved_pending = list(pending)
         pending.clear()
         if text:
-            out.append(Paragraph(id="", spine_index=0, span=Span(page=page), text=text))
+            out.append(
+                (Paragraph(id="", spine_index=0, span=Span(page=page), text=text), saved_pending)
+            )
 
     for child in node.children:
         if isinstance(child, NavigableString):
             if str(child).strip():
-                pending.append(str(child))
+                pending.append(child)
             continue
         if not isinstance(child, Tag):
             continue
@@ -150,13 +154,16 @@ def _walk(
             text = _clean(child.get_text(" ", strip=True))
             if text:
                 out.append(
-                    Heading(
-                        id="",
-                        spine_index=0,
-                        span=Span(page=page),
-                        text=text,
-                        level=_HEADINGS[name],
-                        confidence=Confidence.VERIFIED,
+                    (
+                        Heading(
+                            id="",
+                            spine_index=0,
+                            span=Span(page=page),
+                            text=text,
+                            level=_HEADINGS[name],
+                            confidence=Confidence.VERIFIED,
+                        ),
+                        child,
                     )
                 )
             continue
@@ -164,7 +171,9 @@ def _walk(
             flush()
             text = _clean(child.get_text(" ", strip=True))
             if text:
-                out.append(Paragraph(id="", spine_index=0, span=Span(page=page), text=text))
+                out.append(
+                    (Paragraph(id="", spine_index=0, span=Span(page=page), text=text), child)
+                )
             continue
         if name in ("ul", "ol"):
             flush()
@@ -172,12 +181,15 @@ def _walk(
                 text = _clean(item.get_text(" ", strip=True))
                 if text:
                     out.append(
-                        ListItem(
-                            id="",
-                            spine_index=0,
-                            span=Span(page=page),
-                            text=text,
-                            marker=_list_marker(item, index),
+                        (
+                            ListItem(
+                                id="",
+                                spine_index=0,
+                                span=Span(page=page),
+                                text=text,
+                                marker=_list_marker(item, index),
+                            ),
+                            item,
                         )
                     )
             continue
@@ -186,7 +198,10 @@ def _walk(
             text = _clean(child.get_text(" ", strip=True))
             if text:
                 out.append(
-                    ListItem(id="", spine_index=0, span=Span(page=page), text=text, marker="•")
+                    (
+                        ListItem(id="", spine_index=0, span=Span(page=page), text=text, marker="•"),
+                        child,
+                    )
                 )
             continue
         if name == "pre":
@@ -194,13 +209,16 @@ def _walk(
             code = child.get_text("", strip=False).rstrip("\n")
             if code.strip():
                 out.append(
-                    CodeBlock(
-                        id="",
-                        spine_index=0,
-                        span=Span(page=page),
-                        text=code,
-                        skip_translate=True,
-                        confidence=Confidence.VERIFIED,
+                    (
+                        CodeBlock(
+                            id="",
+                            spine_index=0,
+                            span=Span(page=page),
+                            text=code,
+                            skip_translate=True,
+                            confidence=Confidence.VERIFIED,
+                        ),
+                        child,
                     )
                 )
             continue
@@ -209,12 +227,15 @@ def _walk(
             markup = _pipe_table(child)
             if markup:
                 out.append(
-                    Table(
-                        id="",
-                        spine_index=0,
-                        span=Span(page=page),
-                        markup=markup,
-                        confidence=Confidence.VERIFIED,
+                    (
+                        Table(
+                            id="",
+                            spine_index=0,
+                            span=Span(page=page),
+                            markup=markup,
+                            confidence=Confidence.VERIFIED,
+                        ),
+                        child,
                     )
                 )
             continue
@@ -223,12 +244,15 @@ def _walk(
             src = str(child.get("src") or child.get("data-src") or "").strip()
             if src:
                 out.append(
-                    Figure(
-                        id="",
-                        spine_index=0,
-                        span=Span(page=page),
-                        asset_id=resolve_asset(src),
-                        confidence=Confidence.VERIFIED,
+                    (
+                        Figure(
+                            id="",
+                            spine_index=0,
+                            span=Span(page=page),
+                            asset_id=resolve(src),
+                            confidence=Confidence.VERIFIED,
+                        ),
+                        child,
                     )
                 )
             continue
@@ -236,17 +260,30 @@ def _walk(
             flush()
             text = _clean(child.get_text(" ", strip=True))
             if text:
-                out.append(Caption(id="", spine_index=0, span=Span(page=page), text=text))
+                out.append((Caption(id="", spine_index=0, span=Span(page=page), text=text), child))
             continue
         if name in _CONTAINERS:
             flush()
-            _walk(child, out, page=page, resolve_asset=resolve_asset)
+            out.extend(walk_markup_elements(child, page=page, resolve_asset=resolve))
             continue
         # Unknown/inline tag: fold its text into the pending paragraph.
         inline = _clean(child.get_text(" ", strip=True))
         if inline:
-            pending.append(inline)
+            pending.append(NavigableString(inline))
     flush()
+    return out
+
+
+def _walk(
+    node: Tag,
+    out: list[ElementT],
+    *,
+    page: int,
+    resolve_asset: Callable[[str], str],
+) -> None:
+    """Emit elements for one DOM node's block-level children, in reading order."""
+    pairs = walk_markup_elements(node, page=page, resolve_asset=resolve_asset)
+    out.extend(element for element, _ in pairs)
 
 
 def elements_from_markup(
@@ -257,10 +294,8 @@ def elements_from_markup(
 ) -> list[ElementT]:
     """The block elements of a parsed HTML/XHTML document, in reading order."""
     resolve = resolve_asset or (lambda src: src)
-    out: list[ElementT] = []
     body = soup.body or soup
-    _walk(body, out, page=page, resolve_asset=resolve)
-    return out
+    return [elem for elem, _ in walk_markup_elements(body, page=page, resolve_asset=resolve)]
 
 
 def read_html(path: str | Path, *, doc_id: str | None = None) -> Document:
@@ -271,4 +306,4 @@ def read_html(path: str | Path, *, doc_id: str | None = None) -> Document:
     return assemble(elements, doc_id=doc_id or file_digest(html_path), path=str(html_path))
 
 
-__all__ = ["elements_from_markup", "pipe_table", "read_html"]
+__all__ = ["elements_from_markup", "pipe_table", "read_html", "walk_markup_elements"]

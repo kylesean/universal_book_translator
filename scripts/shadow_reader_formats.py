@@ -13,6 +13,7 @@ Exit 0 iff all three readers pass span exactness, round-trip and structure.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import tempfile
 import zipfile
 from collections import Counter
@@ -176,6 +177,47 @@ def main() -> int:
             print(f"  {status:<5} elements={len(document.elements):<4} {name}")
             for problem in problems[:5]:
                 print(f"        {problem}")
+
+        # HTMLAdapter parse and render verification
+        from ubt.adapters.html.adapter import HTMLAdapter
+
+        adapter = HTMLAdapter()
+
+        async def _test_html_adapter() -> list[str]:
+            errs: list[str] = []
+            manifest = await adapter.extract_manifest(html_path)
+            blocks = []
+            async for ch in adapter.parse_stream(html_path):
+                blocks.extend(ch.blocks)
+            if len(blocks) != 8:
+                errs.append(f"HTMLAdapter expected 8 blocks, got {len(blocks)}")
+            for b in blocks:
+                if not b.skip_translate:
+                    b.target_text = f"tr:{b.source_text}"
+            out_mono = tmp / "rendered_mono.html"
+            await adapter.render_blocks(
+                manifest, blocks, "zh", out_mono, bilingual_mode="monolingual"
+            )
+            if not out_mono.exists() or "tr:Chapter One" not in out_mono.read_text(
+                encoding="utf-8"
+            ):
+                errs.append("HTMLAdapter monolingual render missing target text")
+            out_bi = tmp / "rendered_bi.html"
+            await adapter.render_blocks(manifest, blocks, "zh", out_bi, bilingual_mode="bilingual")
+            if not out_bi.exists() or "ubt-bilingual-target" not in out_bi.read_text(
+                encoding="utf-8"
+            ):
+                errs.append("HTMLAdapter bilingual render missing target class")
+            return errs
+
+        adapter_errs = asyncio.run(_test_html_adapter())
+        if adapter_errs:
+            failed += 1
+            print("  FAIL  HTMLAdapter")
+            for err in adapter_errs:
+                print(f"        {err}")
+        else:
+            print("  pass  HTMLAdapter render (mono + bi)")
 
     print(f"\n  readers={len(cases)} failed={failed} -> {'PASS' if not failed else 'FAIL'}")
     return 0 if not failed else 1
