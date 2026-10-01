@@ -38,7 +38,6 @@ from ubt.core.qe.score_policy import QE_SCORED_SQL
 
 #: Terminal ``job_meta.status`` values. A ``completed`` finalize must not
 #: overwrite any of these (the string mirror of the queue's terminal set).
-_TERMINAL_JOB_STATUSES = frozenset({"completed", "failed", "cancelled"})
 
 
 def _chapter_match(chapter_id: str) -> tuple[str, tuple[str, ...]]:

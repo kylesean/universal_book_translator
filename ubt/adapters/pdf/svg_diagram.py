@@ -177,34 +177,6 @@ def is_svg_backend_available() -> bool:
     return shutil.which("pdftocairo") is not None and shutil.which("pdftotext") is not None
 
 
-def get_diagram_backend_status() -> dict[str, Any]:
-    """Inspect local system capabilities for diagram extraction & rendering.
-
-    Returns diagnostic status for Poppler utilities and Typst vector capabilities,
-    indicating whether the preferred pipeline is 'vector_svg', 'raster_png', or 'none'.
-    """
-    has_pdftocairo = shutil.which("pdftocairo") is not None
-    has_pdftotext = shutil.which("pdftotext") is not None
-    has_oxide = oxide_render.is_available()
-    typst_svg_ok = is_svg_rendering_supported() if shutil.which("typst") else False
-
-    if has_pdftocairo and has_pdftotext and typst_svg_ok:
-        preferred = "vector_svg"
-    elif has_oxide:
-        preferred = "raster_png"
-    else:
-        preferred = "none"
-
-    return {
-        "pdftocairo": has_pdftocairo,
-        "pdftotext": has_pdftotext,
-        "oxide": has_oxide,
-        "raster_backend": "oxide" if has_oxide else None,
-        "typst_svg_ok": typst_svg_ok,
-        "preferred_mode": preferred,
-    }
-
-
 _PROBE_SVG = (
     '<svg xmlns="http://www.w3.org/2000/svg" width="100pt" height="60pt"'
     ' viewBox="0 0 100 60">'

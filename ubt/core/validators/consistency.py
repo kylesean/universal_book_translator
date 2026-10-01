@@ -24,8 +24,6 @@ _CN_DIGIT_VALUES = {
     "九": 9,
 }
 _CN_UNIT_VALUES = {"十": 10, "百": 100, "千": 1000}
-# Chinese numerals immediately following a structural marker (第...章/节/卷/页/回/部/条/款)
-_CN_STRUCTURAL_NUM_RE = re.compile(r"(?<=第)[零一二两三四五六七八九十百千]+")
 # Magnitude-suffixed numbers: '250万' = 2500000, '1.5亿' = 150000000
 _WAN_YI_RE = re.compile(r"(\d+(?:\.\d+)?)([万亿])")
 # A run of adjacent magnitudes is ONE quantity ("1亿2000万" = 120000000); the
@@ -204,17 +202,6 @@ def canonicalize_numeric_token(s: str) -> str:
     t = _THOUSANDS_DOT_RE.sub("", t)
     t = _DECIMAL_COMMA_RE.sub(".", t)
     return _strip_trailing_decimal_zeros(t)
-
-
-def normalize_structural_numerals(text: str) -> str:
-    """Rewrite structural Chinese numerals to digits so '第七章' matches source 'Chapter 7'.
-
-    Structural markers (第...章 etc.) are number-preserving positions: unlike
-    prose style ('第七章' vs '第7章' is pure register choice), the value itself
-    must not change. Converting them to digits before matching removes the
-    systematic false-positive that sent correct translations to repair.
-    """
-    return _CN_STRUCTURAL_NUM_RE.sub(lambda m: str(_cn_numeral_value(m.group(0))), text)
 
 
 def normalize_for_numeric_matching(text: str, lang: str = "zh") -> str:

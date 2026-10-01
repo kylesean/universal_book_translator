@@ -150,61 +150,6 @@ def find_soup_spans(text: str) -> list[tuple[int, int]]:
     return merged
 
 
-_LONG_WORD_RE = re.compile(
-    r"[a-z]{4,}"
-)  # lowercase only: TFIN/EsiNchVtm are identifiers, not prose
-
-
-def _long_word_density(line: str) -> float:
-    total = sum(1 for c in line if not c.isspace())
-    if not total:
-        return 0.0
-    return sum(len(m.group(0)) for m in _LONG_WORD_RE.finditer(line)) / total
-
-
-def is_soup_line(line: str) -> bool:
-    """True when a source line is a display-math line (overlay hole).
-
-    Three conditions, all required: at least one qualified soup span (the
-    anchor), no CJK (prose lines are translated whole; their inline math
-    rides the placeholder path instead), and low long-word density (tells
-    English prose like ``where ψ(x, y) is the ...`` apart from display
-    equations, whose alpha runs are short identifiers).
-    """
-    if not line or sum(1 for c in line if not c.isspace()) < 6:
-        return False
-    if _CJK_RE.search(line):
-        return False
-    if not find_soup_spans(line):
-        return False
-    return _long_word_density(line) < 0.35
-
-
-def strip_fuzzy(haystack: str, needle: str) -> str | None:
-    """Remove the first whitespace-insensitive occurrence of needle.
-
-    pdfium line boxes (``where Q 0``) and docling block text (``whereQ0``)
-    space the same glyphs differently; both collapse to the same key.
-    Returns None when needle is absent (caller keeps status-quo cover).
-    """
-    if not haystack or not needle:
-        return None
-    key = _WS_RE.sub("", needle)
-    if not key:
-        return None
-    pos: list[int] = []
-    ns: list[str] = []
-    for i, ch in enumerate(haystack):
-        if not ch.isspace():
-            pos.append(i)
-            ns.append(ch)
-    flat = "".join(ns)
-    at = flat.find(key)
-    if at < 0:
-        return None
-    return haystack[: pos[at]] + haystack[pos[at + len(key) - 1] + 1 :]
-
-
 class SoupMathMasker(MathMasker):
     """Masks delimiter-free unicode math; restores via MathMasker machinery."""
 

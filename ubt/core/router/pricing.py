@@ -293,14 +293,6 @@ def declare_custom_free_endpoint(base_url: str) -> None:
         _CUSTOM_FREE_ENDPOINTS.add(base_url.strip().rstrip("/").lower())
 
 
-def reset_custom_pricing() -> None:
-    """Clear all registered custom prices and free endpoints."""
-    _CUSTOM_PRICES.clear()
-    _CUSTOM_CACHED_PRICES.clear()
-    _CUSTOM_BATCH_DISCOUNTS.clear()
-    _CUSTOM_FREE_ENDPOINTS.clear()
-
-
 def endpoint_is_free(base_url: str | None) -> bool:
     """True when base_url has been declared free via declare_custom_free_endpoint."""
     if not base_url:

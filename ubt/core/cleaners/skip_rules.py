@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import re
 import threading
-from collections.abc import Sequence
 
 from ubt.core.memory.cjk_matcher import contains_cjk
 
@@ -126,26 +125,6 @@ _SUPERSCRIPT_DIGITS = "⁰¹²³⁴⁵⁶⁷⁸⁹"
 _EXTRA_BIB_VENUE_PATTERNS: list[re.Pattern[str]] = []
 _EXTRA_BIB_BOOK_PATTERNS: list[re.Pattern[str]] = []
 _PATTERNS_LOCK = threading.Lock()
-
-
-def register_bib_patterns(
-    *,
-    extra_venues: Sequence[str | re.Pattern[str]] = (),
-    extra_books: Sequence[str | re.Pattern[str]] = (),
-) -> None:
-    """Register additional domain-specific venue and book patterns for bib entry detection."""
-    venues = [re.compile(p, re.IGNORECASE) if isinstance(p, str) else p for p in extra_venues]
-    books = [re.compile(p, re.IGNORECASE) if isinstance(p, str) else p for p in extra_books]
-    with _PATTERNS_LOCK:
-        _EXTRA_BIB_VENUE_PATTERNS.extend(venues)
-        _EXTRA_BIB_BOOK_PATTERNS.extend(books)
-
-
-def reset_custom_bib_patterns() -> None:
-    """Clear all registered custom bib patterns."""
-    with _PATTERNS_LOCK:
-        _EXTRA_BIB_VENUE_PATTERNS.clear()
-        _EXTRA_BIB_BOOK_PATTERNS.clear()
 
 
 _NARRATIVE_PROSE_RE = re.compile(

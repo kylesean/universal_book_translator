@@ -32,7 +32,6 @@ _SHATTER_CELL_MAX = 1
 _SHATTER_CELL_SHARE = 0.5
 _SHATTER_MIN_CELLS = 4
 _ENGINE_ERROR_MARKERS = ("data-mjx-error", "mathjax error", "unsupported")
-_MATH_ERROR_RE = re.compile(r"\b(?:error|failed)\b", re.IGNORECASE)
 
 
 class StructuralVerdict(StrEnum):

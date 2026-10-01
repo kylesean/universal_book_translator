@@ -101,9 +101,6 @@ _BARE_NUMBER_RE = re.compile(r"^\d[\d,.]*$")
 # line carries LaTeX markers; a lone currency ``$5`` must survive verbatim.
 _MATHY_RE = re.compile(r"[\\_{}^\u221a\u222b\u2211\u220f\u2202\u221e\u2208]")
 
-_EDGE_WS_L = re.compile(r"[ \t\u3000]+$")
-_EDGE_WS_R = re.compile(r"^[ \t\u3000]+")
-
 
 def strip_cjk_latin_spaces(text: str, target_lang: str = "zh") -> str:
     """Normalize CJK spacing conforming to Chinese typography guidelines (Pangu spacing).

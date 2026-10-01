@@ -84,10 +84,6 @@ class NoiseAggregator(logging.Filter):
 _REGISTRY: dict[str, NoiseAggregator] = {}
 
 
-def noise_aggregators() -> dict[str, NoiseAggregator]:
-    return _REGISTRY
-
-
 def noise_report() -> dict[str, dict[str, Any]]:
     """The aggregated counts, shaped for ``visual_report.json``."""
     return {name: agg.stats() for name, agg in _REGISTRY.items() if agg.seen}

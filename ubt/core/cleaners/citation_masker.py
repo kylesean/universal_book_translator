@@ -91,8 +91,3 @@ class CitationMasker:
             checksumless_restores=False,
             nested=False,
         )
-
-
-def count_citations(text: str) -> int:
-    """Number of bracketed numeric citations in text (0-token diagnostics)."""
-    return len(_CITATION_PATTERN.findall(text))
