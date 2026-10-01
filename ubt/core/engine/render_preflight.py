@@ -100,7 +100,6 @@ async def run_render_preflight(
 
     sample = select_preflight_sample(blocks)
     metadata = getattr(manifest, "metadata", None) or {}
-    run_meta = getattr(manifest, "run", None)
     # The render decision is the plan's (ADR-0001 renderer handshake); the
     # manifest metadata copy is a fallback for callers that pass no plan.
     # Resolve the engine against ALL blocks, then force that engine onto the
@@ -111,15 +110,12 @@ async def run_render_preflight(
     requested_engine = (
         (render_plan.render_engine if render_plan is not None else None)
         or metadata.get("render_engine")
-        or getattr(run_meta, "render_engine", None)
         or "publication"
     )
     render_engine = resolve_pdf_engine(str(requested_engine), blocks, manifest=manifest)
     bilingual_mode = (
         (render_plan.effective_dual_mode if render_plan is not None else None)
         or (render_plan.bilingual_mode if render_plan is not None else None)
-        or getattr(run_meta, "effective_dual_mode", None)
-        or getattr(run_meta, "bilingual_mode", None)
         or metadata.get("bilingual_mode")
     )
     # Rigid is monolingual: match the scratch mode to the resolved engine so the

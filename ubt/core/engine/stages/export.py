@@ -59,8 +59,7 @@ from ubt.core.validators.consistency import GlossaryConsistencyValidator
 from ubt.core.validators.glossary_enforcer import DeterministicGlossaryEnforcer
 from ubt.core.validators.html_delta import HTMLDeltaValidator
 from ubt.core.validators.math_guard import apply_math_guards
-from ubt.pipeline.facts import RenderOutcome, RenderPlan, Terminology
-from ubt.pipeline.render_shadow import render_handshake_drift
+from ubt.pipeline.facts import RenderPlan, Terminology
 from ubt.pipeline.services import RunServices
 
 logger = logging.getLogger(__name__)
@@ -85,18 +84,13 @@ async def _render_adapter_output(
     are invoked through the fallback branch.
 
     ``render_plan`` is the render decision the advisories made (ADR-0001
-    renderer handshake). ``bilingual_mode``/``render_engine`` are read from it
-    when not passed explicitly; the ``manifest.run`` fallback is transitional
-    and removed with those fields.
+    renderer handshake); ``bilingual_mode``/``render_engine`` are read from it
+    when not passed explicitly.
     """
     if bilingual_mode is None and render_plan is not None:
         bilingual_mode = render_plan.bilingual_mode
     if render_engine is None and render_plan is not None:
         render_engine = render_plan.render_engine
-    if bilingual_mode is None and manifest and manifest.run:
-        bilingual_mode = manifest.run.bilingual_mode
-    if render_engine is None and manifest and manifest.run:
-        render_engine = manifest.run.render_engine
 
     try:
         if is_pdf_engine_adapter(adapter):
@@ -872,22 +866,6 @@ async def _render_complementary_artifact(
     return secondary_path
 
 
-def _assert_render_handshake(
-    render: RenderPlan, outcome: RenderOutcome | None, manifest: BookManifest
-) -> None:
-    """Shadow-assert the plan/outcome agree with the legacy ``manifest.run`` channel.
-
-    Transitional (ADR-0001 final cut): while the mode cluster still lives on
-    ``manifest.run``, this is the acceptance evidence that the new channel is
-    equivalent before those fields are deleted. It is removed with them.
-    """
-    drift = render_handshake_drift(render, outcome, manifest)
-    if drift:
-        raise RuntimeError(
-            "Render handshake drift (plan/outcome vs manifest.run): " + "; ".join(drift)
-        )
-
-
 def _effective_engine(ctx: StageContext) -> str:
     """The engine the run actually used (the render decision, stated once).
 
@@ -1327,10 +1305,6 @@ async def run_export_stage(
         bilingual_mode=effective_bilingual_mode,
         render_plan=render,
     )
-    # What the renderer actually used (post rigid monolingual downgrade). The
-    # plan is the decision; the outcome is the handshake back (ADR-0001).
-    outcome = getattr(adapter, "last_render_outcome", None)
-    _assert_render_handshake(render, outcome, manifest)
 
     # Render skip pass-through + length conservation, before the report is
     # built (see _apply_render_skip_ledger_pass).
@@ -1464,11 +1438,16 @@ async def run_export_stage(
         else ""
     )
     dual_suffix = f" | Complementary artifact: {secondary_path}" if secondary_path else ""
-    is_bilingual = (
-        getattr(getattr(ctx, "manifest", None), "run", None) is not None
-        and getattr(ctx.manifest.run, "effective_dual_mode", None) not in ("monolingual", None)
-        and getattr(ctx.manifest.run, "bilingual_mode", None) != "monolingual"
-    )
+    # What the artifact actually is: the renderer's outcome when it rendered,
+    # else the plan (a non-PDF target never downgrades).
+    render_outcome = getattr(adapter, "last_render_outcome", None)
+    effective_mode = (
+        render_outcome.effective_dual_mode if render_outcome else None
+    ) or render.effective_dual_mode
+    mode_value = (
+        render_outcome.bilingual_mode if render_outcome else None
+    ) or render.bilingual_mode
+    is_bilingual = effective_mode not in ("monolingual", None) and mode_value != "monolingual"
     doc_label = "Bilingual document" if is_bilingual else "Translated document"
     event = await create_event_fn(
         EventType.EXPORT_COMPLETED,

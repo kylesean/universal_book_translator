@@ -230,15 +230,11 @@ class DoclingRenderStrategy:
         out_path = Path(output_path)
         out_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # The render decision is the plan's (ADR-0001 renderer handshake); the
-        # manifest.run copy is a transitional fallback for callers that pass no
-        # plan, and is deleted with the field once the shadow proves equivalence.
+        # The render decision is the plan's (ADR-0001 renderer handshake). A
+        # caller that passes no plan (an external render) gets the adapter
+        # defaults; the mode cluster is no longer read from manifest.run.
         plan_mode = render_plan.bilingual_mode if render_plan is not None else None
         plan_engine = render_plan.render_engine if render_plan is not None else None
-        if plan_mode is None:
-            plan_mode = manifest.run.bilingual_mode
-        if plan_engine is None:
-            plan_engine = manifest.run.render_engine
         active_mode = bilingual_mode or str(plan_mode or "bilingual")
         requested_engine = render_engine or str(plan_engine or "publication")
         is_pdf_target = out_path.suffix.lower() == ".pdf"
@@ -260,17 +256,11 @@ class DoclingRenderStrategy:
         # mode silently produce a mono artifact. The downgrade is recorded as
         # the renderer's *outcome* (not written back onto the run manifest) so
         # export and the visual gate can see what actually shipped.
-        prior_downgrade = (
-            render_plan.dual_mode_downgraded
-            if render_plan is not None
-            else manifest.run.dual_mode_downgraded
-        )
+        prior_downgrade = render_plan.dual_mode_downgraded if render_plan is not None else None
         outcome = RenderOutcome(
             bilingual_mode=active_mode,
             effective_dual_mode=(
-                render_plan.effective_dual_mode
-                if render_plan is not None
-                else manifest.run.effective_dual_mode
+                render_plan.effective_dual_mode if render_plan is not None else None
             ),
             dual_mode_downgraded=prior_downgrade,
         )
@@ -280,11 +270,6 @@ class DoclingRenderStrategy:
             active_mode = "monolingual"
             outcome.bilingual_mode = "monolingual"
             outcome.effective_dual_mode = "monolingual"
-            # Shadow: mirror onto the legacy manifest channel while the renderer
-            # handshake is proven equivalent; deleted with the fields.
-            manifest.run.dual_mode_downgraded = outcome.dual_mode_downgraded
-            manifest.run.bilingual_mode = outcome.bilingual_mode
-            manifest.run.effective_dual_mode = outcome.effective_dual_mode
             if not was_downgraded:
                 logger.warning(
                     "render_engine='rigid' is monolingual; requested mode %r downgraded",
@@ -297,19 +282,10 @@ class DoclingRenderStrategy:
         if isinstance(getattr(manifest, "metadata", None), dict):
             manifest.metadata["render_engine_effective"] = active_engine
 
-        # Chrome/cover/facing are the plan's; the manifest.run copies are the
-        # transitional fallback for callers that pass no plan.
-        translate_chrome = (
-            render_plan.translate_chrome
-            if render_plan is not None
-            else manifest.run.translate_chrome
-        )
-        cover_mode = render_plan.cover_mode if render_plan is not None else manifest.run.cover_mode
-        facing_spread_plan = (
-            render_plan.facing_spread
-            if render_plan is not None
-            else bool(manifest.run.facing_spread)
-        )
+        # Chrome/cover/facing are the plan's.
+        translate_chrome = render_plan.translate_chrome if render_plan is not None else None
+        cover_mode = render_plan.cover_mode if render_plan is not None else None
+        facing_spread_plan = render_plan.facing_spread if render_plan is not None else False
 
         # --- Rigid typesetting (region-rigid adaptive typesetting) ---
         # Source page stays the canvas; prose regions are re-typeset, figures

@@ -425,9 +425,6 @@ class MarkdownAdapter(BaseDocumentAdapter):
         """Render bilingual Markdown document interleaving source and translated paragraphs."""
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        if bilingual_mode is None and manifest and manifest.run:
-            bilingual_mode = manifest.run.bilingual_mode
-
         rendered_sections: list[str] = []
         is_monolingual = bilingual_mode in ("target", "monolingual")
 

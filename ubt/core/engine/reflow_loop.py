@@ -52,9 +52,7 @@ def effective_render_engine(manifest: Any) -> str:
         engine = metadata.get("render_engine_effective")
         if engine:
             return str(engine)
-    # Transitional: an older manifest may still carry it as a run field.
-    run = getattr(manifest, "run", None)
-    return str(getattr(run, "render_engine_effective", None) or "")
+    return ""
 
 
 class ReflowControlLoop:
@@ -151,11 +149,6 @@ class ReflowControlLoop:
             facing_spread = bool(
                 self.render_plan.facing_spread
                 or self.render_plan.bilingual_mode in ("facing", "facing_spread")
-            )
-        elif self.manifest and self.manifest.metadata:
-            facing_spread = bool(
-                self.manifest.run.facing_spread
-                or self.manifest.run.bilingual_mode in ("facing", "facing_spread")
             )
         # Pages the alternator filled with intentional blanks. Without this the
         # gate flags the page-count padding as CRITICAL blank_page and flips a

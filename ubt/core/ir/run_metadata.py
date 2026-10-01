@@ -65,19 +65,10 @@ class RunMetadata(BaseModel):
     config_snapshot: dict[str, Any] | None = None
 
     # --- Bilingual / render mode ------------------------------------------
-    # The advisory's purely-advisory outputs (``bilingual_advisory``,
-    # ``emit_secondary_*``) live in ``RunFacts.RenderPlan`` now. The mode cluster
-    # below stays here because the PDF renderer reads and rewrites it across the
-    # adapter boundary (the renderer->gate handshake; ADR-0001 final cut).
-    bilingual_mode: str | None = Field(default=None, description="RENDER_MODE_VALUE key")
-    effective_dual_mode: str | None = None
-    dual_mode_downgraded: str | None = Field(
-        default=None, description="the mode before the rigid engine replaced it"
-    )
-    facing_spread: bool | None = None
-    render_engine: str | None = None
-    translate_chrome: bool | None = None
-    cover_mode: str | None = None
+    # The whole render decision (mode, engine, chrome/cover, secondary request)
+    # lives in ``RunFacts.RenderPlan`` and the renderer's result in
+    # ``RenderOutcome`` (ADR-0001 renderer handshake). Nothing is posted here:
+    # this was the last inter-stage bus on the manifest.
 
     # --- Extraction / formula policy --------------------------------------
     formula_mode: str | None = None

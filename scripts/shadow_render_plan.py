@@ -1,122 +1,68 @@
 #!/usr/bin/env python
-"""Renderer-handshake acceptance: the new channel matches the legacy manifest.run.
+"""Renderer-handshake acceptance: where the render decision lives (ADR-0001).
 
-While the render decision moves off ``manifest.run`` and onto ``RenderPlan`` (the
-advisory's decision) and ``RenderOutcome`` (what the renderer actually used), the
-export stage keeps the legacy channel populated and asserts the two agree
-(ADR-0001 final cut). This harness exercises that comparator directly:
+The bilingual/engine mode cluster was the last inter-stage bus on
+``manifest.run``: the PDF renderer read and rewrote it across the adapter
+boundary. It now lives in typed values --
 
-- an agreeing plan/outcome/manifest triple yields no drift;
-- each drifting field is reported;
-- after a render the mode fields are judged against the *outcome* (the renderer
-  mirrors its rigid downgrade onto the manifest), so a rigid render whose run
-  channel shows monolingual agrees even though the plan asked for bilingual.
+- ``ubt.core.ir.render_plan.RenderPlan`` -- the advisories' decision, threaded to
+  the renderer as an explicit ``render_blocks`` argument;
+- ``RenderOutcome`` -- what the renderer actually used, recorded on the adapter
+  (``last_render_outcome``), never written back onto the manifest.
+
+During the migration an "old manifest.run.X vs RenderPlan.X" shadow assertion
+proved the two channels equivalent on real runs; the fields were deleted only
+after the corpus gate passed 4/4 with that assertion active. This harness is the
+permanent guard that they do not come back: the mode cluster must be on the
+plan/outcome, and ``RunMetadata`` must not carry it again.
 """
 
 from __future__ import annotations
 
-from typing import Any
+import dataclasses
 
 from ubt.core.ir.render_plan import RenderOutcome, RenderPlan
 from ubt.core.ir.run_metadata import RunMetadata
-from ubt.pipeline.render_shadow import render_handshake_drift
 
-
-class _Manifest:
-    """Just the ``run`` attribute the comparator reads."""
-
-    def __init__(self, run: RunMetadata) -> None:
-        self.run = run
-
-
-def _plan(**kw: Any) -> RenderPlan:
-    base: dict[str, Any] = {
-        "bilingual_mode": "bilingual",
-        "effective_dual_mode": "inline",
-        "dual_mode_downgraded": None,
-        "facing_spread": False,
-        "render_engine": "auto",
-        "translate_chrome": False,
-        "cover_mode": "auto",
-    }
-    base.update(kw)
-    return RenderPlan(**base)
-
-
-def _run(**kw: Any) -> RunMetadata:
-    base: dict[str, Any] = {
-        "bilingual_mode": "bilingual",
-        "effective_dual_mode": "inline",
-        "dual_mode_downgraded": None,
-        "facing_spread": False,
-        "render_engine": "auto",
-        "translate_chrome": False,
-        "cover_mode": "auto",
-    }
-    base.update(kw)
-    return RunMetadata(**base)
+#: The cluster that used to be a ``manifest.run`` bus.
+_MODE_CLUSTER = (
+    "bilingual_mode",
+    "effective_dual_mode",
+    "dual_mode_downgraded",
+    "facing_spread",
+    "render_engine",
+    "translate_chrome",
+    "cover_mode",
+)
+#: The purely-advisory outputs that moved to the plan in the earlier cut.
+_ADVISORY_OUTPUTS = (
+    "bilingual_advisory",
+    "emit_secondary_mode",
+    "emit_secondary_engine",
+)
 
 
 def main() -> int:
     problems: list[str] = []
 
-    def expect(
-        name: str, plan: RenderPlan, outcome: RenderOutcome | None, run: RunMetadata, drift: bool
-    ) -> None:
-        found = render_handshake_drift(plan, outcome, _Manifest(run))
-        if bool(found) != drift:
-            problems.append(f"{name}: expected {'drift' if drift else 'agreement'}, got {found!r}")
+    plan_fields = {f.name for f in dataclasses.fields(RenderPlan)}
+    outcome_fields = {f.name for f in dataclasses.fields(RenderOutcome)}
+    run_fields = set(RunMetadata.model_fields)
 
-    outcome = RenderOutcome(
-        bilingual_mode="bilingual", effective_dual_mode="inline", dual_mode_downgraded=None
-    )
+    for name in _MODE_CLUSTER + _ADVISORY_OUTPUTS:
+        if name not in plan_fields:
+            problems.append(f"RenderPlan is missing {name!r}")
+        if name in run_fields:
+            problems.append(f"RunMetadata still carries the bus field {name!r}")
 
-    # Agreement: plan == outcome == manifest.run.
-    expect("agree", _plan(), outcome, _run(), drift=False)
+    # The renderer's result channel: the mode it actually used.
+    for name in ("bilingual_mode", "effective_dual_mode", "dual_mode_downgraded"):
+        if name not in outcome_fields:
+            problems.append(f"RenderOutcome is missing {name!r}")
 
-    # Every policy field drifting is caught.
-    expect("drift render_engine", _plan(), outcome, _run(render_engine="rigid"), drift=True)
-    expect("drift translate_chrome", _plan(), outcome, _run(translate_chrome=True), drift=True)
-    expect("drift cover_mode", _plan(), outcome, _run(cover_mode="first_page"), drift=True)
-    expect("drift facing_spread", _plan(), outcome, _run(facing_spread=True), drift=True)
-
-    # The mode fields are judged against the outcome after a render.
-    rigid_outcome = RenderOutcome(
-        bilingual_mode="monolingual",
-        effective_dual_mode="monolingual",
-        dual_mode_downgraded="inline",
-    )
-    rigid_plan = _plan(bilingual_mode="bilingual", effective_dual_mode="inline")
-    expect(
-        "rigid downgrade mirrored",
-        rigid_plan,
-        rigid_outcome,
-        _run(
-            bilingual_mode="monolingual",
-            effective_dual_mode="monolingual",
-            dual_mode_downgraded="inline",
-        ),
-        drift=False,
-    )
-    # The manifest not mirroring the outcome is the drift the shadow exists to catch.
-    expect(
-        "rigid downgrade not mirrored",
-        rigid_plan,
-        rigid_outcome,
-        _run(bilingual_mode="bilingual", effective_dual_mode="inline"),
-        drift=True,
-    )
-    # A manifest whose mode matches the plan but not the outcome still drifts.
-    expect(
-        "outcome differs from manifest",
-        _plan(),
-        rigid_outcome,
-        _run(),
-        drift=True,
-    )
-
-    print("\nRenderer-handshake shadow (RenderPlan/RenderOutcome vs manifest.run)")
-    print(f"  checks=9 problems={len(problems)} -> {'PASS' if not problems else 'FAIL'}")
+    print("\nRenderer-handshake field homes (RenderPlan/RenderOutcome vs manifest.run)")
+    print(f"  plan={len(plan_fields)} outcome={len(outcome_fields)} run={len(run_fields)}")
+    print(f"  problems={len(problems)} -> {'PASS' if not problems else 'FAIL'}")
     for problem in problems:
         print(f"    {problem}")
     return 0 if not problems else 1

@@ -137,15 +137,11 @@ async def run_mode_advisory_stage(
     layout.tier_basis = tier_basis
     layout.enforcement = enforcement
 
-    # Run-policy keys: the renderer reads these off the plan. The manifest copy
-    # is kept in sync only while the shadow assertion (below) proves the two
-    # agree; it is deleted once the renderer handshake lands (ADR-0001 final cut).
+    # Run-policy keys: the renderer reads these off the plan (ADR-0001 renderer
+    # handshake). They are no longer posted on manifest.run.
     render.render_engine = config.render_engine
     render.translate_chrome = config.translate_chrome
     render.cover_mode = config.cover_mode
-    manifest.run.render_engine = config.render_engine
-    manifest.run.translate_chrome = config.translate_chrome
-    manifest.run.cover_mode = config.cover_mode
 
     figure_pages: set[int] = set()
     if ctx.source_pdf_path is not None:
@@ -189,7 +185,6 @@ async def run_mode_advisory_stage(
         and effective_mode != "monolingual"
     ):
         render.dual_mode_downgraded = effective_mode
-        manifest.run.dual_mode_downgraded = effective_mode
         effective_mode = "monolingual"
         engine_name = effective_engine
         # Both rigid names reflow onto the source page, so the way back to a
@@ -243,10 +238,6 @@ async def run_mode_advisory_stage(
         "facing",
         "facing_spread",
     )
-    # Shadow: mirror onto the legacy manifest channel while equivalence is proven.
-    manifest.run.bilingual_mode = render.bilingual_mode
-    manifest.run.effective_dual_mode = render.effective_dual_mode
-    manifest.run.facing_spread = render.facing_spread
     if advisory.tier != "ok":
         logger.warning(
             "Bilingual advisory for job %s: requested '%s' is '%s' "
@@ -320,7 +311,6 @@ async def run_difficulty_advisory_stage(
         and effective_mode != "monolingual"
     ):
         render.dual_mode_downgraded = effective_mode
-        manifest.run.dual_mode_downgraded = effective_mode
         effective_mode = "monolingual"
     if effective_mode != pre_downgrade:
         logger.warning(
@@ -336,10 +326,6 @@ async def run_difficulty_advisory_stage(
         "facing",
         "facing_spread",
     )
-    # Shadow: mirror onto the legacy manifest channel while equivalence is proven.
-    manifest.run.bilingual_mode = render.bilingual_mode
-    manifest.run.effective_dual_mode = render.effective_dual_mode
-    manifest.run.facing_spread = render.facing_spread
     advisory_dict = dict(advisory.to_dict())
     advisory_dict["effective"] = effective_mode
     advisory_dict["enforcement"] = layout.enforcement

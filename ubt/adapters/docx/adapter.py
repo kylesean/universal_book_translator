@@ -678,8 +678,6 @@ class DOCXAdapter(BaseDocumentAdapter):
     ) -> Path:
         """Re-open the source document and inject translated paragraphs."""
         source_path = Path(manifest.source_path)
-        if bilingual_mode is None and manifest and manifest.run:
-            bilingual_mode = manifest.run.bilingual_mode
 
         targets: dict[str, str] = {}
         for b in blocks:

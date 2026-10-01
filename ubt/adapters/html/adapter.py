@@ -185,9 +185,6 @@ class HTMLAdapter(BaseDocumentAdapter):
 
         by_id = {b.id: b for b in blocks}
 
-        if bilingual_mode is None and manifest and manifest.run:
-            bilingual_mode = manifest.run.bilingual_mode
-
         is_monolingual = bilingual_mode in ("target", "monolingual")
 
         injected = 0

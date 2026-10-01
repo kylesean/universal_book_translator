@@ -670,9 +670,6 @@ class EPUBAdapter(BaseDocumentAdapter):
         }
         source_map = {b.id: b.source_text for b in all_blocks if b.source_text}
 
-        if bilingual_mode is None and manifest and manifest.run:
-            bilingual_mode = manifest.run.bilingual_mode
-
         total_injected = 0
         with tempfile.TemporaryDirectory(prefix="ubt_epub_render_") as tmpdir:
             temp_epub = Path(tmpdir) / "output.epub"
