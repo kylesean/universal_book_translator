@@ -19,6 +19,7 @@ surfaced, never silently tolerated, and never allowed to sink the artifact.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -37,6 +38,14 @@ _MIN_PROBE = 4
 #: match would report the very elements it placed; token overlap measures the
 #: realization without mistaking layout for loss.
 _MIN_OVERLAP = 0.6
+
+_CJK_RANGE = r"\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff\u3040-\u30ff\uac00-\ud7af"
+_TOKEN_RE = re.compile(rf"[{_CJK_RANGE}]|[^\s\W_]+(?:-[^\s\W_]+)*")
+
+
+def _tokenize(text: str) -> list[str]:
+    """Tokenize text into probe units: words in spaced scripts, individual CJK glyphs."""
+    return _TOKEN_RE.findall(text)
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,25 +88,51 @@ def _normalize(text: str) -> str:
 
 
 def _artifact_tokens(artifact: Path) -> frozenset[str]:
-    """Every whitespace-delimited token in the artifact (pages joined).
+    """Every token in the artifact (pages joined).
 
     Joined across pages on purpose: a bilingual artifact interleaves source and
     target pages, so a realization need not sit on its source page number.
+    Extracts native textpage ranges via pdfium (covering rotated margin/header
+    stamps as well as standard horizontal lines), falling back to line extraction
+    if needed.
     """
     from ubt.adapters.pdf import pdf_struct, textgeom
+    from ubt.adapters.pdf.pdfium_gate import pdfium_serialized
 
-    with pdf_struct.open_pdf(artifact) as pdf:
-        pages = len(pdf.pages)
-    chunks: list[str] = []
-    for page_no in range(1, pages + 1):
-        lines, _ = textgeom.extract_lines(artifact, page_no)
-        chunks.append(" ".join(line.text for line in lines))
-    return frozenset(_normalize(" ".join(chunks)).split())
+    @pdfium_serialized
+    def _read_all_text(p: Path) -> str:
+        import pypdfium2 as pdfium
+
+        pdf = pdfium.PdfDocument(str(p))
+        chunks: list[str] = []
+        try:
+            for page in pdf:
+                tp = page.get_textpage()
+                try:
+                    chunks.append(tp.get_text_range())
+                finally:
+                    tp.close()
+        finally:
+            pdf.close()
+        return " ".join(chunks)
+
+    try:
+        raw = _read_all_text(artifact)
+    except Exception:
+        with pdf_struct.open_pdf(artifact) as pdf:
+            pages = len(pdf.pages)
+        chunks: list[str] = []
+        for page_no in range(1, pages + 1):
+            lines, _ = textgeom.extract_lines(artifact, page_no)
+            chunks.append(" ".join(line.text for line in lines))
+        raw = " ".join(chunks)
+
+    return frozenset(_tokenize(raw))
 
 
 def _present(expected: str, tokens: frozenset[str]) -> bool:
     """Whether the artifact carries enough of ``expected`` to call it placed."""
-    wanted = expected.split()
+    wanted = _tokenize(expected)
     if len(expected) < _MIN_PROBE or not wanted:
         return True
     hits = sum(1 for token in wanted if token in tokens)
