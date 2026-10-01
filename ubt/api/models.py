@@ -20,7 +20,7 @@ from ubt.core.config import (
 )
 from ubt.core.engine.progress import ProgressSnapshot
 from ubt.core.job_options import LANG_CODE_PATTERN, PROFILE_NAME_PATTERN
-from ubt.core.language_profile import is_supported_lang
+from ubt.core.language_profile import is_supported_lang, supported_lang_codes
 from ubt.core.presets import Preset
 
 
@@ -34,7 +34,7 @@ def _require_supported_target_lang(value: str) -> str:
     if not is_supported_lang(value):
         raise ValueError(
             f"Unsupported target language {value!r}. Supported base languages: "
-            "zh, en, ja, ko, fr, de, es, ru (region tags such as 'zh-CN' are accepted)."
+            f"{', '.join(supported_lang_codes())} (region tags such as 'zh-CN' are accepted)."
         )
     return value
 

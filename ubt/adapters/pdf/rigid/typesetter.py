@@ -906,9 +906,9 @@ class RigidTypesetter:
                 # protect it from pruning exactly as the reflow path does.
                 protected=(self.font_family,),
             )
-            if not resolved.cjk_available:
+            if not resolved.script_available:
                 logger.warning(
-                    "No CJK-capable font installed for target %r; the rigid "
+                    "No target-script font installed for %r; the rigid "
                     "overlay will render its text as tofu.",
                     self.target_lang,
                 )

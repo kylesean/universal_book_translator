@@ -112,6 +112,25 @@ _CJK_SCRIPT_LANGS: frozenset[str] = frozenset(
     }
 )
 
+# Right-to-left targets (ADR-0001 §12 Q4): a Latin-only stack cannot shape
+# Arabic/Hebrew either, so they get the same "substitute rather than ship tofu"
+# treatment as CJK. Markers are script-specific strings a Latin family does not
+# carry; the DejaVu tail cannot be trusted for Arabic shaping, so it is not a
+# marker.
+_RTL_NAME_MARKERS: tuple[str, ...] = (
+    "arabic",
+    "naskh",
+    "kufi",
+    "amiri",
+    "scheherazade",
+    "kacst",
+    "hebrew",
+    "rashi",
+)
+_RTL_SCRIPT_LANGS: frozenset[str] = frozenset(
+    {"ar", "he", "fa", "ur", "ps", "sd", "ug", "yi", "dv"}
+)
+
 _PROBE_TIMEOUT_S = 20.0
 
 
@@ -231,6 +250,37 @@ def needs_cjk(target_lang: str | None) -> bool:
     return lang in _CJK_SCRIPT_LANGS or lang.split("-")[0] in {"zh", "ja", "ko"}
 
 
+def is_rtl_capable(family: str) -> bool:
+    """Whether a family name suggests glyphs for Arabic/Hebrew scripts."""
+    normalized = _norm(family)
+    return any(marker in normalized for marker in _RTL_NAME_MARKERS)
+
+
+def needs_rtl(target_lang: str | None) -> bool:
+    """Whether a target language is right-to-left (cannot use a Latin-only stack)."""
+    if not target_lang:
+        return False
+    lang = target_lang.strip().lower().replace("_", "-")
+    return lang in _RTL_SCRIPT_LANGS or lang.split("-")[0] in _RTL_SCRIPT_LANGS
+
+
+def script_need(target_lang: str | None) -> str:
+    """The non-Latin script a target needs: ``"cjk"``, ``"rtl"``, or ``""``."""
+    if needs_cjk(target_lang):
+        return "cjk"
+    if needs_rtl(target_lang):
+        return "rtl"
+    return ""
+
+
+def _is_script_capable(family: str, need: str) -> bool:
+    if need == "cjk":
+        return is_cjk_capable(family)
+    if need == "rtl":
+        return is_rtl_capable(family)
+    return False
+
+
 @dataclass(frozen=True, slots=True)
 class FontStack:
     """A requested font stack, resolved against what the machine has."""
@@ -240,9 +290,9 @@ class FontStack:
     unavailable: tuple[str, ...] = ()
     # False when no probe answered, so the stack was passed through untouched.
     probed: bool = True
-    # Whether the emitted stack can render the target script at all.
-    cjk_available: bool = True
-    # Families added because nothing requested could render a CJK target.
+    # Whether the emitted stack can render the target script at all (CJK or RTL).
+    script_available: bool = True
+    # Families added because nothing requested could render a non-Latin target.
     substituted: tuple[str, ...] = ()
 
     def as_typst_tuple(self) -> str:
@@ -255,8 +305,8 @@ class FontStack:
 
 
 def _script_of(target_lang: str | None) -> str:
-    """'zh' / 'ja' / 'ko' for a CJK target, else ''."""
-    if not needs_cjk(target_lang):
+    """Base code ('zh'/'ja'/'ko'/'ar'/'he') for a non-Latin target, else ''."""
+    if not script_need(target_lang):
         return ""
     return (target_lang or "").strip().lower().replace("_", "-").split("-")[0]
 
@@ -298,6 +348,8 @@ _SCRIPT_EXCLUSIVE: dict[str, tuple[str, ...]] = {
         "uigothic",
     ),
     "ko": ("malgun", "gulim", "batang", "nanum"),
+    "ar": ("arabic", "naskh", "kufi", "amiri", "scheherazade", "kacst"),
+    "he": ("hebrew", "rashi"),
 }
 _SCRIPT_SUFFIXES: dict[str, tuple[str, ...]] = {
     "zh": ("sc", "hans", "cn"),
@@ -341,9 +393,12 @@ def _substitution_rank(family: str, target_lang: str | None) -> tuple[int, str]:
 def _substitute_for(
     available: frozenset[str], kept: list[str], target_lang: str | None
 ) -> str | None:
-    """Best CJK-capable family on this machine that is not already in ``kept``."""
+    """Best same-script family on this machine that is not already in ``kept``."""
+    need = script_need(target_lang)
+    if not need:
+        return None
     already = {_norm(k) for k in kept}
-    candidates = [f for f in available if is_cjk_capable(f) and _norm(f) not in already]
+    candidates = [f for f in available if _is_script_capable(f, need) and _norm(f) not in already]
     if not candidates:
         return None
     return min(candidates, key=lambda f: _substitution_rank(f, target_lang))
@@ -364,16 +419,17 @@ def resolve_font_stack(
     than letting Typst fall back. They still appear in ``unavailable`` so the
     caller can say the name is not installed.
 
-    Never returns an empty stack. When a CJK target's stack would leave no
-    CJK-capable family, one is substituted from what the renderer reports and
-    named in ``substituted``: readable text in a substitute typeface beats
-    blank squares. If nothing requested resolves and there is no substitute, the
-    requested stack is emitted unchanged so Typst's own fallback applies, with
-    every name reported in ``unavailable`` and ``cjk_available`` False.
+    Never returns an empty stack. When a non-Latin target's stack would leave no
+    family for its script (CJK or RTL), one is substituted from what the renderer
+    reports and named in ``substituted``: readable text in a substitute typeface
+    beats blank squares. If nothing requested resolves and there is no substitute,
+    the requested stack is emitted unchanged so Typst's own fallback applies, with
+    every name reported in ``unavailable`` and ``script_available`` False.
     """
+    need = script_need(target_lang)
     requested = [f for f in configured if f and f.strip()]
     if not requested:
-        return FontStack(families=(), cjk_available=not needs_cjk(target_lang))
+        return FontStack(families=(), script_available=not need)
 
     if available is None:
         available = available_font_families(typst_binary)
@@ -382,7 +438,7 @@ def resolve_font_stack(
         return FontStack(
             families=tuple(requested),
             probed=False,
-            cjk_available=any(is_cjk_capable(f) for f in requested) or not needs_cjk(target_lang),
+            script_available=any(_is_script_capable(f, need) for f in requested) or not need,
         )
 
     present = {_norm(f) for f in available}
@@ -392,15 +448,15 @@ def resolve_font_stack(
     kept = [f for f in requested if _norm(f) in present or _norm(f) in protected_norm]
     dropped = tuple(f for f in requested if _norm(f) not in present)
 
-    def _has_cjk(names: list[str]) -> bool:
-        return any(_norm(f) in present and is_cjk_capable(f) for f in names)
+    def _has_script(names: list[str]) -> bool:
+        return any(_norm(f) in present and _is_script_capable(f, need) for f in names)
 
     substituted: tuple[str, ...] = ()
-    if needs_cjk(target_lang) and not _has_cjk(kept):
+    if need and not _has_script(kept):
         # The profile's stack cannot render this script, but the machine may
-        # still have a CJK family under a name the profile never heard of.
-        # Appending it turns blank squares into readable text in a substitute
-        # typeface; shipping tofu is the worse failure.
+        # still have a same-script family under a name the profile never heard
+        # of. Appending it turns blank squares into readable text in a
+        # substitute typeface; shipping tofu is the worse failure.
         spare = _substitute_for(available, kept, target_lang)
         if spare:
             kept.append(spare)
@@ -410,14 +466,14 @@ def resolve_font_stack(
         # Nothing requested exists and there is no substitute. Emit the
         # requested stack anyway so Typst's own fallback applies, rather than us
         # guessing a replacement -- but report every name as unavailable and
-        # claim no CJK coverage, because we verified none of them resolve.
+        # claim no script coverage, because we verified none of them resolve.
         kept = list(requested)
 
     return FontStack(
         families=tuple(kept),
         unavailable=dropped,
         probed=True,
-        cjk_available=_has_cjk(kept) or not needs_cjk(target_lang),
+        script_available=_has_script(kept) or not need,
         substituted=substituted,
     )
 
@@ -426,6 +482,9 @@ __all__ = [
     "FontStack",
     "available_font_families",
     "is_cjk_capable",
+    "is_rtl_capable",
     "needs_cjk",
+    "needs_rtl",
     "resolve_font_stack",
+    "script_need",
 ]

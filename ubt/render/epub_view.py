@@ -34,14 +34,20 @@ _XHTML_HEAD = (
     '<?xml version="1.0" encoding="utf-8"?>\n'
     "<!DOCTYPE html>\n"
     '<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" '
-    'xml:lang="{lang}" lang="{lang}">\n'
+    'xml:lang="{lang}" lang="{lang}"{dir_attr}>\n'
     '<head><meta charset="utf-8"/><title>{title}</title></head>\n'
     "<body>\n"
 )
 _XHTML_TAIL = "\n</body>\n</html>\n"
 
 
-def _opf(identifier: str, title: str, lang: str) -> str:
+def _dir_attr(direction: str) -> str:
+    """`` dir="rtl"`` for an RTL target, empty for LTR (unchanged bytes)."""
+    return f' dir="{html.escape(direction)}"' if direction and direction != "ltr" else ""
+
+
+def _opf(identifier: str, title: str, lang: str, direction: str = "ltr") -> str:
+    progression = "rtl" if direction == "rtl" else "ltr"
     return (
         '<?xml version="1.0" encoding="utf-8"?>\n'
         '<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid">\n'
@@ -54,15 +60,15 @@ def _opf(identifier: str, title: str, lang: str) -> str:
         '    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>\n'
         '    <item id="text" href="text.xhtml" media-type="application/xhtml+xml"/>\n'
         "  </manifest>\n"
-        "  <spine>\n"
+        f'  <spine page-progression-direction="{progression}">\n'
         '    <itemref idref="text"/>\n'
         "  </spine>\n"
         "</package>\n"
     )
 
 
-def _nav(title: str, lang: str) -> str:
-    head = _XHTML_HEAD.format(lang=lang, title=html.escape(title))
+def _nav(title: str, lang: str, direction: str = "ltr") -> str:
+    head = _XHTML_HEAD.format(lang=lang, title=html.escape(title), dir_attr=_dir_attr(direction))
     entry = f'<nav epub:type="toc"><ol><li><a href="text.xhtml">{html.escape(title)}</a></li></ol></nav>'
     return f"{head}{entry}{_XHTML_TAIL}"
 
@@ -75,8 +81,14 @@ def compose_epub(
     *,
     title: str = "UBT translation",
     lang: str = "en",
+    direction: str = "ltr",
 ) -> Composition:
-    """Lower a realized document to an EPUB 3 package, recording every placement."""
+    """Lower a realized document to an EPUB 3 package, recording every placement.
+
+    ``lang``/``direction`` describe the target language; an RTL target sets
+    ``dir="rtl"`` on the content documents and ``page-progression-direction`` on
+    the spine, so a reading system turns pages right-to-left.
+    """
     fragment, placements = render_fragment(document, attestations, delivered)
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -88,9 +100,13 @@ def compose_epub(
         info.compress_type = zipfile.ZIP_STORED
         archive.writestr(info, "application/epub+zip")
         archive.writestr("META-INF/container.xml", _CONTAINER)
-        archive.writestr("OEBPS/content.opf", _opf(identifier, title, lang))
-        archive.writestr("OEBPS/nav.xhtml", _nav(title, lang))
-        xhtml = _XHTML_HEAD.format(lang=lang, title=html.escape(title)) + fragment + _XHTML_TAIL
+        archive.writestr("OEBPS/content.opf", _opf(identifier, title, lang, direction))
+        archive.writestr("OEBPS/nav.xhtml", _nav(title, lang, direction))
+        xhtml = (
+            _XHTML_HEAD.format(lang=lang, title=html.escape(title), dir_attr=_dir_attr(direction))
+            + fragment
+            + _XHTML_TAIL
+        )
         archive.writestr("OEBPS/text.xhtml", xhtml)
     return Composition(output_path=output, placements=placements)
 

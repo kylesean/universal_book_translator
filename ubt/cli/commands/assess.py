@@ -80,7 +80,7 @@ def assess_cmd(
     不预测质量分数（MTQE 只存在于译文之上）；费用为「预期非保证」。
     """
     from ubt.core.job_options import LANG_CODE_RE
-    from ubt.core.language_profile import is_supported_lang
+    from ubt.core.language_profile import is_supported_lang, supported_lang_codes
 
     for key, val in (("source-lang", source_lang), ("target-lang", target_lang)):
         if val is not None and LANG_CODE_RE.fullmatch(str(val)) is None:
@@ -111,7 +111,7 @@ def assess_cmd(
                         "code": "UNSUPPORTED_LANG",
                         "error": (
                             f"Unsupported target-lang: {target_lang!r}. Supported base "
-                            "languages: zh, en, ja, ko, fr, de, es, ru"
+                            f"languages: {', '.join(supported_lang_codes())}"
                         ),
                     }
                 )
@@ -119,7 +119,7 @@ def assess_cmd(
             raise typer.Exit(code=2)
         console.print(
             f"[bold red]不支持的目标语言:[/] {escape(str(target_lang))} "
-            "(支持 zh, en, ja, ko, fr, de, es, ru；接受 zh-CN 等区域码)"
+            f"(支持 {', '.join(supported_lang_codes())}；接受 zh-CN 等区域码)"
         )
         raise typer.Exit(code=2)
 

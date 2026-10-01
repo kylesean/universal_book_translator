@@ -12,7 +12,13 @@ from dataclasses import dataclass
 from typing import Any
 
 from ubt.core.cleaners.math_masker import extract_math_spans
-from ubt.core.language_profile import ZH, LanguagePairPolicy, LanguageProfile, get_pair_policy
+from ubt.core.language_profile import (
+    ZH,
+    LanguagePairPolicy,
+    LanguageProfile,
+    get_pair_policy,
+    is_rtl_lang,
+)
 from ubt.core.policy.layout_policy import PROSE_BLOCK_TYPES
 from ubt.core.qe.added_content import AddedContentGate
 from ubt.core.qe.defect_taxonomy import (
@@ -335,6 +341,13 @@ _NEAR_ECHO_RETENTION = 0.9
 # token floor.
 _CJK_SCRIPT_RE = re.compile(r"[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]")
 _NEAR_ECHO_CJK_EXEMPT = _NEAR_ECHO_MIN_TOKENS
+# Same exemption for RTL targets: an Arabic/Hebrew passage that carries a few
+# Latin proper nouns across verbatim is translated by definition, exactly as a
+# CJK passage is.
+_RTL_SCRIPT_RE = re.compile(
+    r"[\u0590-\u05ff\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff"
+    r"\ufb1d-\ufb4f\ufb50-\ufdff\ufe70-\ufeff]"
+)
 
 
 def is_verbatim_echo(source_text: str, target_text: str) -> bool:
@@ -386,6 +399,7 @@ def is_near_verbatim_echo(
     *,
     target_is_cjk: bool = True,
     source_is_cjk: bool = False,
+    target_is_rtl: bool = False,
 ) -> bool:
     """True when the target keeps almost all source words without translating.
 
@@ -415,6 +429,8 @@ def is_near_verbatim_echo(
         retention = _cjk_bigram_retention(source_text, target_text)
         return retention is not None and retention >= _NEAR_ECHO_RETENTION
     if target_is_cjk and len(_CJK_SCRIPT_RE.findall(target_text)) >= _NEAR_ECHO_CJK_EXEMPT:
+        return False
+    if target_is_rtl and len(_RTL_SCRIPT_RE.findall(target_text)) >= _NEAR_ECHO_CJK_EXEMPT:
         return False
     if REHEARSAL_MARKER in target_text:
         # A ``--dry-run`` echo is an intentional rehearsal artifact, not an
@@ -607,6 +623,7 @@ class FastPassFilter:
                 tgt_clean,
                 target_is_cjk=self.profile.code in ("zh", "ja", "ko"),
                 source_is_cjk=getattr(self.profile, "source_code", "") in ("zh", "ja", "ko"),
+                target_is_rtl=is_rtl_lang(self.profile.code),
             )
         ):
             return FastPassDecision(

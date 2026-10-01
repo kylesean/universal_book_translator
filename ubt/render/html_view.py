@@ -37,12 +37,21 @@ from ubt.model.span import CanonicalSource
 from ubt.render.outputs import Composition, LoweringUnsupported, Placement
 from ubt.render.overlay_backend import source_slice
 
-_HEAD = (
-    "<!DOCTYPE html>\n"
-    '<html lang="en">\n<head>\n<meta charset="utf-8">\n'
-    "<title>UBT translation</title>\n</head>\n<body>\n"
-)
 _TAIL = "</body>\n</html>\n"
+
+
+def document_head(lang: str = "en", direction: str = "ltr") -> str:
+    """The ``<html>`` head for a view, carrying the target language and direction.
+
+    ``dir`` is only emitted for a right-to-left target, so an LTR document's
+    bytes are unchanged from before direction support existed.
+    """
+    dir_attr = f' dir="{html.escape(direction)}"' if direction and direction != "ltr" else ""
+    return (
+        "<!DOCTYPE html>\n"
+        f'<html lang="{html.escape(lang)}"{dir_attr}>\n<head>\n<meta charset="utf-8">\n'
+        "<title>UBT translation</title>\n</head>\n<body>\n"
+    )
 
 
 def _element_text(
@@ -133,12 +142,20 @@ def compose_html(
     attestations: Sequence[Attestation],
     delivered: Mapping[str, str],
     output_path: str | Path,
+    *,
+    lang: str = "en",
+    direction: str = "ltr",
 ) -> Composition:
-    """Lower a realized document to semantic HTML, recording every placement."""
+    """Lower a realized document to semantic HTML, recording every placement.
+
+    ``lang``/``direction`` describe the *target* language; a right-to-left target
+    gets ``dir="rtl"`` on the root element so a browser lays the document out
+    right-to-left (the text stays in logical order).
+    """
     fragment, placements = render_fragment(document, attestations, delivered)
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(f"{_HEAD}{fragment}\n{_TAIL}", encoding="utf-8")
+    output.write_text(f"{document_head(lang, direction)}{fragment}\n{_TAIL}", encoding="utf-8")
     return Composition(output_path=output, placements=placements)
 
 

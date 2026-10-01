@@ -68,7 +68,7 @@ from ubt.adapters.pdf.typst_math import (
     _pandoc_math_to_typst,
 )
 from ubt.core.ir.models import BlockStatus, BlockType, FlowID, IRBlock, LayoutRole
-from ubt.core.language_profile import resolve_font_config
+from ubt.core.language_profile import is_rtl_lang, resolve_font_config
 
 if TYPE_CHECKING:
     from ubt.cache.store import CacheStore
@@ -880,11 +880,11 @@ class TypstReconstructor:
                 effective_target_lang,
                 ", ".join(resolved_fonts.substituted),
             )
-        if not resolved_fonts.cjk_available:
+        if not resolved_fonts.script_available:
             logger.warning(
-                "No CJK-capable font installed for target %r; Chinese/Japanese/Korean "
-                "glyphs will render as tofu. Install a CJK font (e.g. noto-fonts-cjk) "
-                "or pass an available family via font_family.",
+                "No target-script font installed for %r; its glyphs will render as "
+                "tofu. Install a matching font (e.g. noto-fonts-cjk for CJK, "
+                "noto-fonts for RTL) or pass an available family via font_family.",
                 effective_target_lang,
             )
         font_tuple_str = resolved_fonts.as_typst_tuple()
@@ -909,11 +909,16 @@ class TypstReconstructor:
         indent_setting = f", first-line-indent: {indent_val}" if indent_val else ""
         safe_lang = sanitize_lang_tag(lang_code)
         text_lang_setting = f', lang: "{safe_lang}"' if safe_lang else ""
+        # Typst lays a right-to-left run out itself (UAX #9); the text stays in
+        # logical order. Emitting the direction in the live preamble is what
+        # makes an RTL PDF an RTL PDF -- the L6 TypstBackend's dir: rtl is the
+        # attestation seam, not the shipped artifact (ADR-0001 §12 Q4).
+        text_dir_setting = ", dir: rtl" if is_rtl_lang(lang_code) else ""
 
         lines: list[str] = [
             f"#set page({page_dim}, {margins}{col_setting}{footer_block})",
             *counter_line,
-            f"#set text(font: {font_tuple_str}, size: {resolved_font_size}pt{text_lang_setting})",
+            f"#set text(font: {font_tuple_str}, size: {resolved_font_size}pt{text_lang_setting}{text_dir_setting})",
             f"#set par(justify: true, leading: {resolved_leading_em}em{indent_setting})",
             "#set list(spacing: 0.7em, marker: [•])",
             "#show heading.where(level: 1): it => { counter(math.equation).update(0); it }",

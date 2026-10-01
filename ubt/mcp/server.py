@@ -88,7 +88,7 @@ from ubt.core.job_options import (
 from ubt.core.job_options import (
     JOB_ID_RE as JOB_ID_RE,
 )
-from ubt.core.language_profile import is_supported_lang
+from ubt.core.language_profile import is_supported_lang, supported_lang_codes
 from ubt.core.policy.layout_policy import MCP_MAX_RUNNING_JOBS as MCP_MAX_RUNNING_JOBS
 
 mcp = MCPServer(name="ubt")
@@ -168,7 +168,7 @@ def _check_lang(code: str, field: str) -> str:
     if field == "target_lang" and not is_supported_lang(code):
         raise UBTError(
             f"Unsupported {field} {code!r}. Supported base languages: "
-            "zh, en, ja, ko, fr, de, es, ru (region tags such as 'zh-CN' are accepted)."
+            f"{', '.join(supported_lang_codes())} (region tags such as 'zh-CN' are accepted)."
         )
     return code
 

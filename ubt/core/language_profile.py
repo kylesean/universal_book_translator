@@ -83,6 +83,35 @@ def cyrillic_script_ratio(text: str) -> float:
     return count / total
 
 
+def arabic_script_ratio(text: str) -> float:
+    """Fraction of Arabic-script characters among non-space chars (Arabic identity).
+
+    Covers the Arabic block, its supplement and extended-A, and the presentation
+    forms A/B that PDF extraction emits for shaped glyphs.
+    """
+    total = _prose_total(text)
+    count = sum(
+        1
+        for c in text
+        for lo, hi in (
+            (0x0600, 0x06FF),
+            (0x0750, 0x077F),
+            (0x08A0, 0x08FF),
+            (0xFB50, 0xFDFF),
+            (0xFE70, 0xFEFF),
+        )
+        if lo <= ord(c) <= hi
+    )
+    return count / total
+
+
+def hebrew_script_ratio(text: str) -> float:
+    """Fraction of Hebrew-script characters among non-space chars (Hebrew identity)."""
+    total = _prose_total(text)
+    count = sum(1 for c in text if 0x0590 <= ord(c) <= 0x05FF or 0xFB1D <= ord(c) <= 0xFB4F)
+    return count / total
+
+
 @dataclass(frozen=True, slots=True)
 class LanguageProfile:
     """Per-target-language policy consumed by FastPassFilter and friends."""
@@ -108,8 +137,13 @@ DE = LanguageProfile("de", "German", 0.7, 2.0, 0.25, latin_script_ratio)
 ES = LanguageProfile("es", "Spanish", 0.6, 1.8, 0.25, latin_script_ratio)
 EN = LanguageProfile("en", "English", 0.6, 1.8, 0.25, latin_script_ratio)
 RU = LanguageProfile("ru", "Russian", 0.6, 2.0, 0.25, cyrillic_script_ratio)
+# Right-to-left targets (ADR-0001 §12 Q4): admission for a real RTL job. The
+# direction itself is owned by ubt.layout.theme.direction_for; the profile only
+# carries the 0-token identity/ratio policy.
+AR = LanguageProfile("ar", "Arabic", 0.6, 2.0, 0.25, arabic_script_ratio)
+HE = LanguageProfile("he", "Hebrew", 0.6, 2.0, 0.25, hebrew_script_ratio)
 
-PROFILES: dict[str, LanguageProfile] = {p.code: p for p in (ZH, JA, KO, FR, DE, ES, EN, RU)}
+PROFILES: dict[str, LanguageProfile] = {p.code: p for p in (ZH, JA, KO, FR, DE, ES, EN, RU, AR, HE)}
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,10 +189,15 @@ _PAIR_RATIO_BOUNDS: dict[tuple[str, str], tuple[float, float]] = {
     ("en", "fr"): (0.7, 1.9),
     ("en", "es"): (0.7, 1.9),
     ("en", "ru"): (0.6, 2.0),
+    ("en", "ar"): (0.6, 2.0),
+    ("en", "he"): (0.6, 2.0),
     # Reverse pairs: CJK -> English (significant expansion)
     ("zh", "en"): (1.0, 5.0),
     ("ja", "en"): (0.8, 4.5),
     ("ko", "en"): (0.8, 4.5),
+    # RTL -> English
+    ("ar", "en"): (0.5, 1.8),
+    ("he", "en"): (0.5, 1.8),
     # Latin -> English
     ("de", "en"): (0.6, 1.6),
     ("fr", "en"): (0.6, 1.6),
@@ -181,6 +220,23 @@ _PAIR_RATIO_BOUNDS: dict[tuple[str, str], tuple[float, float]] = {
 _CJK_SCRIPTS = frozenset({"zh", "ja", "ko"})
 _LATIN_SCRIPTS = frozenset({"en", "fr", "de", "es", "it", "pt", "nl"})
 _CYRILLIC_SCRIPTS = frozenset({"ru", "uk", "bg"})
+#: Right-to-left base languages. Direction is owned by ``ubt.layout.theme``;
+#: this set is only the script family the ratio bounds below are keyed on.
+_RTL_SCRIPTS = frozenset({"ar", "he", "fa", "ur", "ps", "sd", "ug", "yi", "dv"})
+
+
+def is_rtl_lang(code: str) -> bool:
+    """Whether ``code`` (optionally region/script-tagged) is a right-to-left language."""
+    return normalize_lang_code(code) in _RTL_SCRIPTS
+
+
+def supported_lang_codes() -> tuple[str, ...]:
+    """The base codes with a profile, sorted -- the entry points' allowed set.
+
+    A single source for the "supported languages are …" message, so adding a
+    profile cannot leave one of the four entry points advertising a stale list.
+    """
+    return tuple(sorted(PROFILES))
 
 
 def resolve_script_family_bounds(
@@ -213,6 +269,18 @@ def resolve_script_family_bounds(
         return (0.5, 1.8)
     if src in _LATIN_SCRIPTS and tgt in _CYRILLIC_SCRIPTS:
         return (0.6, 2.0)
+
+    # Right-to-left transitions. Arabic/Hebrew tokenize and space like Latin
+    # (words are whitespace-delimited), so the Latin<->RTL band is near 1.0 —
+    # looser than the Latin<->CJK band, tighter than CJK's.
+    if (src in _LATIN_SCRIPTS and tgt in _RTL_SCRIPTS) or (
+        src in _RTL_SCRIPTS and tgt in _LATIN_SCRIPTS
+    ):
+        return (0.5, 2.0)
+    if src in _CJK_SCRIPTS and tgt in _RTL_SCRIPTS:
+        return (0.5, 2.5)
+    if src in _RTL_SCRIPTS and tgt in _CJK_SCRIPTS:
+        return (0.3, 2.0)
 
     return fallback_bounds
 
@@ -822,6 +890,31 @@ _FONT_CONFIGS: dict[str, FontConfig] = {
         typst_fonts=("Liberation Serif", "DejaVu Serif", "Noto Serif"),
         figure_prefix="Рис.",
         table_prefix="Таблица",
+    ),
+    # RTL targets (ADR-0001 §12 Q4). Noto first (the family the CJK stacks rely
+    # on and the most likely to be installed); the DejaVu tail is a last-resort
+    # glyph source, and the probe substitutes another same-script face when the
+    # configured one is absent.
+    "ar": FontConfig(
+        typst_fonts=(
+            "Noto Naskh Arabic",
+            "Noto Sans Arabic",
+            "Amiri",
+            "Scheherazade New",
+            "DejaVu Sans",
+        ),
+        figure_prefix="شكل",
+        table_prefix="جدول",
+    ),
+    "he": FontConfig(
+        typst_fonts=(
+            "Noto Sans Hebrew",
+            "Noto Serif Hebrew",
+            "Frank Ruehl CLM",
+            "DejaVu Sans",
+        ),
+        figure_prefix="איור",
+        table_prefix="טבלה",
     ),
 }
 

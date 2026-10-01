@@ -39,7 +39,7 @@ from ubt.core.job_options import (
 from ubt.core.job_options import (
     LANG_CODE_RE as LANG_CODE_RE,
 )
-from ubt.core.language_profile import is_supported_lang
+from ubt.core.language_profile import is_supported_lang, supported_lang_codes
 from ubt.core.log_config import setup_logging
 from ubt.core.metrics import (
     KPI_DEFINITIONS,
@@ -164,7 +164,7 @@ async def _run_translation(
     if target_lang_value is not None and not is_supported_lang(str(target_lang_value)):
         raise UBTError(
             f"Unsupported target-lang {target_lang_value!r}: supported base languages "
-            "are zh, en, ja, ko, fr, de, es, ru (region tags such as 'zh-CN' are accepted)"
+            f"are {', '.join(supported_lang_codes())} (region tags such as 'zh-CN' are accepted)"
         )
     overrides: dict[str, Any] = overrides_from_request(request)
 

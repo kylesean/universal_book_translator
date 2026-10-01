@@ -562,7 +562,7 @@ def translate(
     }
 
     from ubt.core.job_options import LANG_CODE_RE
-    from ubt.core.language_profile import is_supported_lang
+    from ubt.core.language_profile import is_supported_lang, supported_lang_codes
 
     for key in ("source_lang", "target_lang"):
         value = request.get(key)
@@ -593,7 +593,7 @@ def translate(
     if target_lang_value is not None and not is_supported_lang(str(target_lang_value)):
         err_msg = (
             f"Unsupported target-lang: {str(target_lang_value)!r}. Supported base "
-            "languages: zh, en, ja, ko, fr, de, es, ru (region tags such as "
+            f"languages: {', '.join(supported_lang_codes())} (region tags such as "
             "'zh-CN' are accepted)."
         )
         if json_output:
@@ -602,7 +602,7 @@ def translate(
             console.print(
                 f"[bold red]Unsupported target-lang:[/] "
                 f"{escape(str(target_lang_value))!r}. Supported base languages: "
-                "zh, en, ja, ko, fr, de, es, ru (region tags such as 'zh-CN' are accepted)."
+                f"{', '.join(supported_lang_codes())} (region tags such as 'zh-CN' are accepted)."
             )
         raise typer.Exit(code=1)
 

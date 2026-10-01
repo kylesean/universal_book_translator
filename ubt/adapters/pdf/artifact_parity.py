@@ -67,6 +67,16 @@ def _script_ranges(target_lang: str) -> tuple[range, ...]:
         return (han, range(0x3040, 0x30FF))
     if base == "ko":
         return (range(0xAC00, 0xD7A3), range(0x1100, 0x11FF))
+    if base == "ar":
+        return (
+            range(0x0600, 0x06FF),
+            range(0x0750, 0x077F),
+            range(0x08A0, 0x08FF),
+            range(0xFB50, 0xFDFF),
+            range(0xFE70, 0xFEFF),
+        )
+    if base == "he":
+        return (range(0x0590, 0x05FF), range(0xFB1D, 0xFB4F))
     return ()
 
 

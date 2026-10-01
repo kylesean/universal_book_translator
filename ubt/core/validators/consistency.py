@@ -32,6 +32,14 @@ _WAN_YI_RE = re.compile(r"(\d+(?:\.\d+)?)([万亿])")
 # per-magnitude regex above must not scale and concatenate them separately.
 _WAN_YI_SEQ_RE = re.compile(r"(?:\d+(?:\.\d+)?[万亿])+")
 _FULLWIDTH_DIGITS = str.maketrans("０１２３４５６７８９", "0123456789")
+# Arabic-Indic (U+0660-0669) and Extended Arabic-Indic (U+06F0-06F9) digits.
+# An Arabic target may render a source number in either; without this fold the
+# ASCII source digit has no match and a correct translation reports a lost
+# number. Match-only view, stored text untouched.
+_ARABIC_INDIC_DIGITS = str.maketrans(
+    "٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹",
+    "01234567890123456789",
+)
 # Unicode sub/superscript digits -> ASCII (match-only view, stored text is
 # untouched): PDF extraction spaces subscripts ('β 2') while translation
 # normalizes them ('β²' / 'β₀'). Without this, a correct 'β²项' fails the
@@ -219,6 +227,7 @@ def normalize_for_numeric_matching(text: str, lang: str = "zh") -> str:
     canonicalization.
     """
     text = text.translate(_FULLWIDTH_DIGITS)
+    text = text.translate(_ARABIC_INDIC_DIGITS)
     text = _expand_scientific_not(text)
     text = _SUB_SUP_DIGITS_RE.sub(lambda m: _SUB_SUP_DIGITS_MAP[m.group(0)], text)
     if lang == "zh" or any(c in text for c in _CN_DIGIT_VALUES):

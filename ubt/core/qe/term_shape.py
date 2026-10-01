@@ -31,7 +31,7 @@ _CJK_ADJ = (
     r"\uf900-\ufaff\uac00-\ud7af\uff00-\uffef]"
 )
 _SENT_END_RE = re.compile(
-    r"[。！？]"
+    r"[。！？؟؛۔]"
     r"|[.!?]['\"”’\)\]]*(?=\s|$)"
     rf"|(?<={_CJK_ADJ})[!?]"
     rf"|[!?](?={_CJK_ADJ})"
