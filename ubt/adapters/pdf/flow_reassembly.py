@@ -1,28 +1,34 @@
-"""Evidence-based flow reassembly for Docling extraction.
+"""Evidence-based flow repair: chrome, debris, listings, headings, coalescing.
 
-Docling's item labels are a *prior*, not ground truth. On a math-heavy paper
-its layout model routinely reports algorithm listings and sentence fragments as
-``SECTION_HEADER`` items, and splits one paragraph into several one-line blocks.
-A fragment has no region the rigid engine can typeset its translation into, so
-the engine keeps the source visible (``render:no_zone``): the reader loses a
-translation, which is exactly the account the delivery contract is meant to keep
-balanced.
+Extraction is a *prior*, not ground truth -- whether it comes from Docling's
+layout model or the native reader's geometric grouping. Both can report
+algorithm listings and sentence fragments as prose, split one paragraph into
+several one-line blocks, or surface page furniture as body text. A fragment has
+no region the rigid engine can typeset its translation into, so the engine keeps
+the source visible (``render:no_zone``): the reader loses a translation, which is
+exactly the account the delivery contract is meant to keep balanced.
 
 This module repairs the *flow* before zoning. Every rule fires only on
 checkable evidence; a block that is not provably a fragment is left exactly as
-Docling labelled it:
+extraction typed it:
 
 1. **Ground-truth typography** -- pdfium ``font_size`` / ``bold`` for the lines
-   under each prose block is stamped onto ``block.style`` / ``provenance``. This
-   is the page's real typography, independent of Docling's guess.
-2. **Listings** -- text carrying unambiguous program syntax is moved to
+   under each prose block is stamped onto ``block.style`` / ``provenance``, and
+   the page's body size and height are measured. This is the page's real
+   typography and geometry, independent of the extractor's guess.
+2. **Chrome** -- a bare page number is preserved (never translated or merged)
+   only when it sits in the page's top or bottom margin band. A bare number
+   *inside* the body is content (a table cell, a TOC leader, an index entry).
+3. **Math debris** -- a short token that is a name, operator or equation
+   fragment is held byte-identical rather than translated into nonsense.
+4. **Listings** -- text carrying unambiguous program syntax is moved to
    ``BlockType.CODE`` (preserved verbatim). A listing is not prose; leaving it
    to the rigid engine as a "heading" is what produced the loss.
-3. **Heading legitimacy** -- a ``HEADING`` that is *smaller than the body text*
+5. **Heading legitimacy** -- a ``HEADING`` that is *smaller than the body text*
    it heads, or that is a lowercase/math/sentence fragment, is demoted to
    ``NARRATIVE``. A heading cannot be smaller than its body, and prose fragments
    are not titles; these are invariant facts, not tuned thresholds.
-4. **Fragment coalescing** -- adjacent prose fragments in the same column within
+6. **Fragment coalescing** -- adjacent prose fragments in the same column within
    normal leading, where the second continues the first (lowercase opener, open
    sentence, hyphenation), are reunited into one translation unit.
 
@@ -46,7 +52,7 @@ from ubt.core.ir.models import (
     LayoutRole,
     StyleMeta,
 )
-from ubt.core.policy.layout_policy import PROSE_BLOCK_TYPES
+from ubt.core.policy.layout_policy import FOOTER_BAND_PT, HEADER_BAND_PT, PROSE_BLOCK_TYPES
 
 if TYPE_CHECKING:
     from ubt.adapters.pdf.textgeom import LineBox
@@ -148,18 +154,22 @@ class ReassemblyStats:
 # --------------------------------------------------------------------------- #
 # Step 1 -- ground-truth typography
 # --------------------------------------------------------------------------- #
-def _page_lines(pdf_path: Path, page: int, cache: dict[int, list[LineBox]]) -> list[LineBox]:
-    lines = cache.get(page)
-    if lines is None:
+def _page_lines_and_height(
+    pdf_path: Path, page: int, cache: dict[int, tuple[list[LineBox], float]]
+) -> tuple[list[LineBox], float]:
+    """Extract a page's lines and height once; extraction never breaks the pipeline."""
+    entry = cache.get(page)
+    if entry is None:
         from ubt.adapters.pdf.textgeom import extract_lines
 
         try:
-            lines = extract_lines(pdf_path, page)[0]
+            lines, (_width, height) = extract_lines(pdf_path, page)
         except Exception as exc:  # extraction must never break the pipeline
             logger.debug("flow reassembly: line extraction failed on page %d: %s", page, exc)
-            lines = []
-        cache[page] = lines
-    return lines
+            lines, height = [], 0.0
+        entry = (lines, float(height))
+        cache[page] = entry
+    return entry
 
 
 def _body_size_by_page(lines_by_page: dict[int, list[LineBox]]) -> dict[int, float]:
@@ -177,19 +187,36 @@ def _body_size_by_page(lines_by_page: dict[int, list[LineBox]]) -> dict[int, flo
     return body
 
 
-def stamp_ground_truth_typography(blocks: list[IRBlock], pdf_path: Path | None) -> dict[int, float]:
-    """Stamp pdfium font size / weight on every prose block; return page body sizes."""
+@dataclass
+class PageTruth:
+    """The page's own geometry: char-weighted body size and height, by page.
+
+    Both are measured from the page, never guessed. ``body_size`` decides
+    headings; ``height`` places page furniture (a bare number is a page number
+    only inside the margin band, never mid-page).
+    """
+
+    body_size: dict[int, float] = field(default_factory=dict)
+    height: dict[int, float] = field(default_factory=dict)
+
+
+def stamp_ground_truth_typography(blocks: list[IRBlock], pdf_path: Path | None) -> PageTruth:
+    """Stamp pdfium font size / weight on every prose block; return the page truth."""
+    truth = PageTruth()
     if pdf_path is None:
-        return {}
+        return truth
     pages = sorted({b.bbox.page for b in blocks if b.bbox and b.bbox.page > 0})
     if not pages:
-        return {}
+        return truth
     from ubt.adapters.pdf.textgeom import aggregate_line_styles
 
-    cache: dict[int, list[LineBox]] = {}
+    cache: dict[int, tuple[list[LineBox], float]] = {}
+    lines_by_page: dict[int, list[LineBox]] = {}
     for page in pages:
-        _page_lines(pdf_path, page, cache)
-    body = _body_size_by_page(cache)
+        lines, height = _page_lines_and_height(pdf_path, page, cache)
+        lines_by_page[page] = lines
+        truth.height[page] = height
+    truth.body_size = _body_size_by_page(lines_by_page)
 
     for block in blocks:
         if block.bbox is None or block.block_type not in PROSE_BLOCK_TYPES:
@@ -197,7 +224,7 @@ def stamp_ground_truth_typography(blocks: list[IRBlock], pdf_path: Path | None) 
         bbox = block.bbox
         lines = [
             ln
-            for ln in cache.get(bbox.page, [])
+            for ln in lines_by_page.get(bbox.page, [])
             if ln.rect[3] > bbox.y0 - 1
             and ln.rect[1] < bbox.y1 + 1
             and ln.rect[0] < bbox.x1 + 1
@@ -210,7 +237,7 @@ def stamp_ground_truth_typography(blocks: list[IRBlock], pdf_path: Path | None) 
             block.style = StyleMeta(font_size=size)
         block.provenance["gt_bold"] = bold
         block.provenance["gt_italic"] = italic
-    return body
+    return truth
 
 
 # --------------------------------------------------------------------------- #
@@ -223,23 +250,42 @@ def _looks_like_listing(text: str) -> bool:
     return bool(_LISTING_FORMS.search(body))
 
 
-def classify_chrome_blocks(blocks: list[IRBlock]) -> int:
-    """Mark bare page numbers as preserved chrome (never translated or merged).
+def _in_margin_band(bbox: BoundingBox | None, page_heights: dict[int, float]) -> bool:
+    """True when a box sits in the page's top or bottom margin band."""
+    if bbox is None:
+        return False
+    height = page_heights.get(bbox.page, 0.0)
+    if height <= 0:
+        return False
+    return bbox.y0 < FOOTER_BAND_PT or bbox.y1 > height - HEADER_BAND_PT
 
-    The plain-text extractors have no page-furniture model, so a bare page
-    number arrives as prose -- and, lacking terminal punctuation, as a heading.
-    Left in the flow it is translated, and the fragment coalescer would then
-    anchor a whole page onto it. It is removed before any of that happens.
+
+def classify_chrome_blocks(blocks: list[IRBlock], page_heights: dict[int, float]) -> int:
+    """Mark bare page numbers *in the page margins* as preserved chrome.
+
+    The plain-text extractors have no page-furniture model, so a page number
+    arrives as prose -- and, lacking terminal punctuation, as a heading. Left in
+    the flow it is translated, and the fragment coalescer would then anchor a
+    whole page onto it.
+
+    A bare number is page furniture only where page furniture lives: the top or
+    bottom margin band. A bare number *inside* the text body is content -- a
+    table cell, a TOC leader, an index entry -- and is left alone. When the page
+    height is unknown the number cannot be placed, so it is left alone too: the
+    safe direction is to translate it, never to keep it silently.
     """
     marked = 0
     for block in blocks:
         if block.block_type not in PROSE_BLOCK_TYPES or block.skip_translate:
             continue
-        if _BARE_PAGE_NUMBER.match(block.source_text or ""):
-            block.skip_translate = True
-            block.layout_role = LayoutRole.PAGE_NUMBER
-            block.provenance["flow_reassembly"] = "page_number"
-            marked += 1
+        if not _BARE_PAGE_NUMBER.match(block.source_text or ""):
+            continue
+        if not _in_margin_band(block.bbox, page_heights):
+            continue
+        block.skip_translate = True
+        block.layout_role = LayoutRole.PAGE_NUMBER
+        block.provenance["flow_reassembly"] = "page_number"
+        marked += 1
     return marked
 
 
@@ -475,13 +521,13 @@ def reassemble_flow(
     """Run the reassembly passes in order; fail-open on any error."""
     stats = ReassemblyStats()
     try:
-        body_by_page = stamp_ground_truth_typography(blocks, pdf_path)
-        stats.chrome = classify_chrome_blocks(blocks)
+        truth = stamp_ground_truth_typography(blocks, pdf_path)
+        stats.chrome = classify_chrome_blocks(blocks, truth.height)
         stats.debris = classify_debris_blocks(blocks)
         stats.listings = classify_listing_blocks(blocks)
-        stats.demoted_headings = demote_fragment_headings(blocks, body_by_page)
+        stats.demoted_headings = demote_fragment_headings(blocks, truth.body_size)
         stats.coalesced = coalesce_flow_fragments(
-            blocks, allow_cross_page=allow_cross_page, body_by_page=body_by_page
+            blocks, allow_cross_page=allow_cross_page, body_by_page=truth.body_size
         )
     except Exception as exc:  # never let extraction repair sink extraction
         logger.warning("flow reassembly skipped after error: %s", exc)
@@ -492,6 +538,7 @@ def reassemble_flow(
 
 
 __all__ = [
+    "PageTruth",
     "ReassemblyStats",
     "classify_chrome_blocks",
     "classify_debris_blocks",
