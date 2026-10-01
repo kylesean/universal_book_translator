@@ -26,7 +26,6 @@ from ubt.adapters.pdf.docling_blocks import (
     attach_split_caption_tails,
     chrome_key,
     decouple_embedded_captions,
-    defragment_narrative_blocks,
     fuse_chapter_number,
     is_inside_picture,
     is_repeat_handle,
@@ -421,42 +420,25 @@ def _ensure_docling_pdfium_lock() -> None:
     )
 
 
-def type_docling_blocks(blocks: list[IRBlock], *, pdf_path: Path | None) -> list[IRBlock]:
+def type_docling_blocks(blocks: list[IRBlock]) -> list[IRBlock]:
     """The analyzer's own typing stage: raw Docling blocks -> final typed blocks.
 
-    This is the Docling analyzer producing its own types (ADR §6.1 item 9). It
-    used to be a separate ``docling_blocks.postprocess_blocks`` pass called from
-    outside; the analyzer now owns the sequence end to end, and it names each
-    typing stage itself instead of delegating to a generic ``reassemble_flow``
-    (which stays only for the geometry-less oxide fallback). Debris/listing
-    typing is NOT here: the emission loop types those directly from the shared
-    rules. The order is load-bearing: chapter fuse -> embedded-caption decouple ->
-    caption-body latch -> span-tail attach -> caption unify -> overlapping-formula
-    merge -> chrome typing -> heading demotion -> fragment coalescing -> narrative
-    defragment.
+    This is the Docling analyzer producing its own types (ADR §6.1 item 2/9): it
+    trusts Docling's reading order, chrome labels (PAGE_HEADER/PAGE_FOOTER),
+    heading labels (TITLE/SECTION_HEADER) and segmentation, instead of a later
+    flow-repair pass re-typing them from pdfium geometry. Debris/listing typing is
+    also the analyzer's, done directly in the emission loop from the shared rules.
+    The one sequence left is the caption typing Docling's labels cannot express:
+    chapter fuse -> embedded-caption decouple -> caption-body latch -> span-tail
+    attach -> caption unify -> overlapping-formula merge.
     """
-    from ubt.adapters.pdf.flow_reassembly import (
-        classify_chrome_blocks,
-        coalesce_flow_fragments,
-        demote_fragment_headings,
-        stamp_ground_truth_typography,
-    )
-
-    staged = resolve_overlapping_formula_blocks(
+    return resolve_overlapping_formula_blocks(
         unify_figure_captions(
             attach_split_caption_tails(
                 latch_caption_bodies(decouple_embedded_captions(fuse_chapter_number(blocks)))
             )
         )
     )
-    try:
-        truth = stamp_ground_truth_typography(staged, pdf_path)
-        classify_chrome_blocks(staged, truth.height)
-        demote_fragment_headings(staged, truth.body_size)
-        coalesce_flow_fragments(staged, allow_cross_page=True, body_by_page=truth.body_size)
-    except Exception as exc:  # never let extraction repair sink extraction
-        logger.warning("docling typing skipped after error: %s", exc)
-    return defragment_narrative_blocks(staged, allow_cross_page=True)
 
 
 def extract_with_docling(
@@ -1027,7 +1009,7 @@ def map_iterated_items(
                 )
             )
 
-    return type_docling_blocks(blocks, pdf_path=pdf_path)
+    return type_docling_blocks(blocks)
 
 
 def map_export_dict(data: dict[str, Any]) -> list[IRBlock]:
