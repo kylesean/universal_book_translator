@@ -156,12 +156,12 @@ class IRBlock(BaseModel):
 
     # Document-v1 seven-layer contract extension (all optional). Layer mapping:
     #   geometry → bbox, content → source_text/block_type,
-    #   layout_role/semantic_role/structure_role → below,
+    #   layout_role/semantic_role → below (the extractor's finding),
+    #   structure_role → derived from block_type (property, not a field),
     #   policy → policy_translate/policy_reason (+ skip_translate fallback),
     #   provenance → provenance dict (parser/provider/adapter that produced it).
     layout_role: LayoutRole | None = None
     semantic_role: SemanticRole | None = None
-    structure_role: StructureRole | None = None
     policy_translate: bool | None = None  # None = undecided, fall back to skip_translate
     policy_reason: str | None = None  # Required when policy_translate is False
     provenance: dict[str, Any] = Field(default_factory=dict)
@@ -171,16 +171,23 @@ class IRBlock(BaseModel):
         """Returns True if the block has reached a terminal status."""
         return self.status in TERMINAL_STATUSES
 
+    #: ``structure_role`` is a pure function of ``block_type``, so it is derived
+    #: rather than stored (ADR R3: one attribute, one origin). It used to be a
+    #: field a caller could set to a value disagreeing with the block's type.
+    @property
+    def structure_role(self) -> StructureRole:
+        """Structural role, derived from the element type."""
+        return _structure_role_from_block_type(self.block_type)
+
     def derive_roles(self) -> None:
         """Fill unset role layers from explicit FlowID/BlockType (no guessing).
 
         Only writes layers that are still None — an explicitly set role
-        always wins over derivation.
+        always wins over derivation. ``structure_role`` is not here: it is a
+        property of ``block_type`` (see above).
         """
         if self.layout_role is None:
             self.layout_role = _layout_role_from_flow(self.flow_id)
-        if self.structure_role is None:
-            self.structure_role = _structure_role_from_block_type(self.block_type)
         if self.semantic_role is None:
             self.semantic_role = SemanticRole.MAIN_TEXT
 

@@ -26,7 +26,6 @@ from ubt.core.ir.models import (
     IRBlock,
     LayoutRole,
     SemanticRole,
-    StructureRole,
     StyleMeta,
 )
 
@@ -673,7 +672,8 @@ class LedgerBase:
             mqm_spans=mqm_spans,
             layout_role=LayoutRole(row["layout_role"]) if row["layout_role"] else None,
             semantic_role=SemanticRole(row["semantic_role"]) if row["semantic_role"] else None,
-            structure_role=StructureRole(row["structure_role"]) if row["structure_role"] else None,
+            # ``structure_role`` is derived from ``block_type`` (property), so
+            # the stored column is not read back (ADR R3).
             policy_translate=bool(policy_raw) if policy_raw is not None else None,
             policy_reason=row["policy_reason"],
             provenance=provenance,
