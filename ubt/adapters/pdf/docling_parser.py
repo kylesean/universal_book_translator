@@ -23,17 +23,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from ubt.adapters.pdf.docling_blocks import (
-    attach_split_caption_tails,
     chrome_key,
-    decouple_embedded_captions,
-    fuse_chapter_number,
     is_inside_picture,
     is_repeat_handle,
-    latch_caption_bodies,
     resolve_overlapping_formula_blocks,
     split_prov_spans,
     table_to_markdown,
-    unify_figure_captions,
 )
 from ubt.adapters.pdf.pdfium_gate import PDFIUM_LOCK, unify_docling_pdfium_lock
 from ubt.adapters.pdf.plain_text_extractor import pages_to_blocks
@@ -423,22 +418,19 @@ def _ensure_docling_pdfium_lock() -> None:
 def type_docling_blocks(blocks: list[IRBlock]) -> list[IRBlock]:
     """The analyzer's own typing stage: raw Docling blocks -> final typed blocks.
 
-    This is the Docling analyzer producing its own types (ADR §6.1 item 2/9): it
-    trusts Docling's reading order, chrome labels (PAGE_HEADER/PAGE_FOOTER),
-    heading labels (TITLE/SECTION_HEADER) and segmentation, instead of a later
-    flow-repair pass re-typing them from pdfium geometry. Debris/listing typing is
-    also the analyzer's, done directly in the emission loop from the shared rules.
-    The one sequence left is the caption typing Docling's labels cannot express:
-    chapter fuse -> embedded-caption decouple -> caption-body latch -> span-tail
-    attach -> caption unify -> overlapping-formula merge.
+    This is the Docling analyzer producing its own types (ADR §6.1 item 2/9). It
+    trusts Docling's labels end to end -- reading order, chrome (PAGE_HEADER /
+    PAGE_FOOTER), headings (TITLE / SECTION_HEADER), captions (CAPTION and the
+    ``FIG. N`` title shape) and segmentation -- and the emission loop types
+    debris/listing directly from the shared rules. There is no caption fuse /
+    decouple / latch pass re-guessing boundaries afterwards.
+
+    The one remaining stage is a rendering-correctness merge, not typing:
+    vertically overlapping FORMULA boxes (Docling's detector emits two for an
+    equation paired with a commutative diagram) are unioned so the shared region
+    is cropped once instead of twice.
     """
-    return resolve_overlapping_formula_blocks(
-        unify_figure_captions(
-            attach_split_caption_tails(
-                latch_caption_bodies(decouple_embedded_captions(fuse_chapter_number(blocks)))
-            )
-        )
-    )
+    return resolve_overlapping_formula_blocks(blocks)
 
 
 def extract_with_docling(

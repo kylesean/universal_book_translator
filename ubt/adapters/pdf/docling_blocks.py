@@ -1,11 +1,12 @@
-"""Pure IRBlock shaping for the Docling adapter.
+"""Pure IRBlock shaping helpers for the Docling adapter.
 
-These helpers were the Tail of ``docling_adapter.DoclingPDFAdapter``. They
-never touch adapter state: each one takes the mapped blocks (or a raw Docling
-item) and returns blocks, so they live here as plain functions and the
-adapter keeps thin static aliases for its historical call sites. The composed
-sequence is the analyzer's own stage
-(:func:`ubt.adapters.pdf.docling_parser.type_docling_blocks`).
+These are the Docling adapter's raw item helpers: read a Docling item's own
+provenance (page spans, geometry) and render its grid to markup. They never
+classify or repair -- the analyzer types directly from Docling's labels in
+:func:`ubt.adapters.pdf.docling_parser.extract_with_docling` (ADR §6.1 item 2/9).
+The caption fuse/decouple/latch heuristics that used to live here are deleted:
+Docling labels captions (``CAPTION``, ``PICTURE``, a ``FIG. N`` title), and the
+analyzer trusts those labels rather than re-guessing the boundaries afterwards.
 """
 
 from __future__ import annotations
@@ -14,9 +15,7 @@ import logging
 import re
 from typing import Any
 
-from ubt.core.ir.models import BlockType, BoundingBox, FlowID, IRBlock
-from ubt.core.policy.layout_policy import CAPTION_RE, PAIR_TERMINAL_PUNCT
-from ubt.model.ast import RegionKind
+from ubt.core.ir.models import BlockType, BoundingBox, IRBlock
 
 logger = logging.getLogger(__name__)
 
@@ -69,11 +68,12 @@ def split_prov_spans(item: Any) -> tuple[str, str, BoundingBox | None] | None:
     """Split one Docling item whose text spans two pages.
 
     Docling sometimes joins a cross-page paragraph fragment with the next
-    page's figure-caption body into a single text item (chapter-3 FIG. 3.1
-    and FIG. 3.5 captions were both swallowed this way). The item's prov
+    page's figure-caption body into a single text item. The item's prov
     charspans expose both regions; return ``(head_text, tail_text,
     tail_bbox)`` when the trailing span is a sentence-like caption body on
-    a different page, otherwise ``None`` so the item stays untouched.
+    a different page, otherwise ``None`` so the item stays untouched. This
+    reads Docling's own provenance, so it is typing from evidence, not a
+    post-hoc guess.
     """
     provs = list(getattr(item, "prov", []) or [])
     if len(provs) < 2:
@@ -107,289 +107,6 @@ def split_prov_spans(item: Any) -> tuple[str, str, BoundingBox | None] | None:
             y1=float(getattr(prov_bbox, "t", 0.0)),
         )
     return head, tail, tail_bbox
-
-
-def attach_split_caption_tails(blocks: list[IRBlock]) -> list[IRBlock]:
-    """Fuse a span-split caption body back onto its bare "FIG. N" label.
-
-    The split tail sits before the label in reading order (docling emits
-    the swallowed caption text at the end of the paragraph item, and the
-    label item follows the figure), so search backwards from each bare
-    caption label for the nearest split tail on the same page. Formula
-    blocks may sit between the two; another caption label ends the search.
-    """
-    removed: set[int] = set()
-    for i, head in enumerate(blocks):
-        head_text = (head.source_text or "").strip()
-        if not (
-            CAPTION_RE.fullmatch(head_text)
-            or (CAPTION_RE.match(head_text) and len(head_text) <= 20)
-        ):
-            continue
-        for j in range(i - 1, max(i - 8, -1), -1):
-            if j in removed:
-                continue
-            cand = blocks[j]
-            cand_text = (cand.source_text or "").strip()
-            if not cand.provenance.get("docling_span_split_tail"):
-                if CAPTION_RE.match(cand_text) and len(cand_text) <= 20:
-                    break  # a different caption label owns nothing here
-                continue
-            if cand.bbox is not None and head.bbox is not None and cand.bbox.page != head.bbox.page:
-                continue
-            head.source_text = f"{head_text}: {cand_text}"
-            head.flow_id = FlowID.CAPTION
-            removed.add(j)
-            break
-    if not removed:
-        return blocks
-    return [b for k, b in enumerate(blocks) if k not in removed]
-
-
-def decouple_embedded_captions(blocks: list[IRBlock]) -> list[IRBlock]:
-    """Decouple figure captions that Docling merged into preceding body paragraphs."""
-    # Generic caption decoupling only: rigid on explicit "Figure N:" /
-    # "Fig. N:" markers. Book-specific caption opener strings are NOT
-    # hardcoded here — they leaked single-book calibration into generic
-    # Extraction and never matched any other document.
-    caption_pattern = re.compile(
-        r"(?P<prose>.*?)(?<!\bas shown in)(?<!\bin)(?<!\bfrom)(?<!\bsee)(?<!\busing)\s+"
-        r"(?P<caption>(?:FIGURE|Figure|FIG\.|Fig\.)\s+\d+(?:\.\d+)*[.:]?\s+[A-Z].*?\.)\s*$",
-        re.DOTALL,
-    )
-    out: list[IRBlock] = []
-    for b in blocks:
-        if b.block_type == BlockType.NARRATIVE and b.source_text:
-            m = caption_pattern.search(b.source_text)
-            if m and len(m.group("prose").strip()) > 20:
-                prose_text = m.group("prose").strip()
-                cap_text = m.group("caption").strip()
-                b.source_text = prose_text
-                # Split the merged paragraph's vertical band between the prose
-                # and the caption. Handing the caption the parent's *entire*
-                # bbox made the two rigid zones overlap: the caption's zone was
-                # clipped to zero height and rejected, while the prose
-                # translation (which no longer contains the caption) was drawn
-                # over the source caption line — the caption vanished from the
-                # delivered PDF. Disjoint bands keep both zones placeable.
-                #
-                # Bounding boxes are bottom-up (y0 = the lower edge; the rigid
-                # typesetter converts with ``page_h - y1``), and the caption is
-                # the *last* text of the paragraph, so it owns the bottom band.
-                # Taking the top band instead painted the translated caption
-                # over the source prose and vice versa — the collision this
-                # split exists to prevent.
-                cap_bbox: BoundingBox | None = None
-                if b.bbox is not None:
-                    height = max(b.bbox.y1 - b.bbox.y0, 0.0)
-                    share = len(cap_text) / max(len(prose_text) + len(cap_text), 1)
-                    split_y = b.bbox.y0 + height * share
-                    cap_bbox = BoundingBox(
-                        page=b.bbox.page,
-                        x0=b.bbox.x0,
-                        y0=b.bbox.y0,
-                        x1=b.bbox.x1,
-                        y1=split_y,
-                    )
-                    b.bbox = BoundingBox(
-                        page=b.bbox.page,
-                        x0=b.bbox.x0,
-                        y0=split_y,
-                        x1=b.bbox.x1,
-                        y1=b.bbox.y1,
-                    )
-                out.append(b)
-                cap_block = IRBlock(
-                    id=f"{b.id}_cap",
-                    # Share the parent's spine index: a fresh ``len(out) + 1``
-                    # would equal the next block's own index (the caption adds
-                    # one extra block, shifting every following position). The
-                    # ledger's keyset order is ``(spine_index, block_id)`` and
-                    # the ``_cap`` suffix sorts after the parent, so a tie keeps
-                    # the caption immediately after its paragraph.
-                    spine_index=b.spine_index,
-                    block_type=BlockType.NARRATIVE,
-                    flow_id=FlowID.CAPTION,
-                    source_text=cap_text,
-                    bbox=cap_bbox,
-                    layout_role=RegionKind.CAPTION,
-                )
-                out.append(cap_block)
-                continue
-        out.append(b)
-    return out
-
-
-def unify_figure_captions(blocks: list[IRBlock]) -> list[IRBlock]:
-    """Fuse orphan caption tags (e.g. 'FIG. 3.1') with their descriptive text.
-
-    Docling frequently separates 'FIG. 3.2' and its body 'Fin potential ...'
-    into two independent blocks. Unifying them produces coherent LLM translation
-    and proper academic caption layout.
-    """
-    i = 0
-    while i < len(blocks):
-        head = blocks[i]
-        head_text = (head.source_text or "").strip()
-        if CAPTION_RE.fullmatch(head_text) or (
-            CAPTION_RE.match(head_text) and len(head_text) <= 20
-        ):
-            head.block_type = BlockType.NARRATIVE
-            head.flow_id = FlowID.CAPTION
-            merged = False
-            # Try next block first (standard order: label then description)
-            if i + 1 < len(blocks):
-                cand = blocks[i + 1]
-                cand_text = (cand.source_text or "").strip()
-                if (
-                    cand.block_type == BlockType.NARRATIVE
-                    and cand.flow_id in (FlowID.CAPTION, FlowID.MAIN_STORY)
-                    and (head.bbox is None or cand.bbox is None or head.bbox.page == cand.bbox.page)
-                    and not CAPTION_RE.match(cand_text)
-                    and len(cand_text) > 5
-                ):
-                    head.source_text = f"{head_text}: {cand_text}"
-                    if (
-                        head.bbox is not None
-                        and cand.bbox is not None
-                        and head.bbox.page == cand.bbox.page
-                    ):
-                        head.bbox = BoundingBox(
-                            page=head.bbox.page,
-                            x0=min(head.bbox.x0, cand.bbox.x0),
-                            y0=min(head.bbox.y0, cand.bbox.y0),
-                            x1=max(head.bbox.x1, cand.bbox.x1),
-                            y1=max(head.bbox.y1, cand.bbox.y1),
-                        )
-                    del blocks[i + 1]
-                    merged = True
-            # Try previous block (if description preceded the label block on same page)
-            if not merged and i > 0:
-                prev = blocks[i - 1]
-                prev_text = (prev.source_text or "").strip()
-                if (
-                    prev.block_type == BlockType.NARRATIVE
-                    and prev.flow_id in (FlowID.CAPTION, FlowID.MAIN_STORY)
-                    and (head.bbox is None or prev.bbox is None or head.bbox.page == prev.bbox.page)
-                    and not CAPTION_RE.match(prev_text)
-                    and len(prev_text) > 5
-                    and not prev_text.endswith((".", "!", "?", "。"))
-                ):
-                    head.source_text = f"{head_text}: {prev_text}"
-                    if (
-                        head.bbox is not None
-                        and prev.bbox is not None
-                        and head.bbox.page == prev.bbox.page
-                    ):
-                        head.bbox = BoundingBox(
-                            page=head.bbox.page,
-                            x0=min(head.bbox.x0, prev.bbox.x0),
-                            y0=min(head.bbox.y0, prev.bbox.y0),
-                            x1=max(head.bbox.x1, prev.bbox.x1),
-                            y1=max(head.bbox.y1, prev.bbox.y1),
-                        )
-                    del blocks[i - 1]
-                    i -= 1
-                    merged = True
-        i += 1
-    return blocks
-
-
-def latch_caption_bodies(blocks: list[IRBlock]) -> list[IRBlock]:
-    """Latch caption-body paragraphs onto the caption flow (post-pass).
-
-    Docling labels the caption tag line (``FIG. 3.6``) but frequently
-    leaves the caption body itself as plain text, so the body flows as
-    body prose: it merges with neighbours and its paint truncates
-    (chapter-3 FIG. 3.6 kept only its first clause). After a
-    caption-label block, the immediately following narrative run on the
-    same page belongs to the figure: latch it onto ``CAPTION`` until a
-    terminal-punctuated block (inclusive). The label block itself is
-    untouched (it already translates fine as a heading).
-    """
-    for i, head in enumerate(blocks):
-        if not CAPTION_RE.match((head.source_text or "").strip()):
-            continue
-        for j in range(i + 1, len(blocks)):
-            cand = blocks[j]
-            if cand.block_type != BlockType.NARRATIVE or cand.flow_id != FlowID.MAIN_STORY:
-                break
-            if cand.bbox is None or head.bbox is None or cand.bbox.page != head.bbox.page:
-                break
-            # Do not latch lowercase sentence continuations as captions
-            cand_src = (cand.source_text or "").lstrip()
-            if (
-                not cand_src
-                or cand_src[:1].islower()
-                or cand_src.startswith(("dependence", "where ", "which ", "and "))
-            ):
-                break
-            cand.flow_id = FlowID.CAPTION
-            tail = (cand.source_text or "").rstrip()
-            if tail and tail[-1] in PAIR_TERMINAL_PUNCT:
-                break
-    return blocks
-
-
-def fuse_chapter_number(blocks: list[IRBlock]) -> list[IRBlock]:
-    """Fuse an orphan chapter digit into its CHAPTER heading pre-translation.
-
-    Docling often splits ``CHAPTER`` / title / ``3`` into three blocks;
-    translating ``CHAPTER`` alone yields ``第章`` (numberless) while the
-    lone ``3`` is later dropped as page chrome. When a bare-digit
-    narrative sits within 3 blocks after a CHAPTER heading inside the
-    opening window, merge it (``CHAPTER 3`` → ``第 3 章``) and drop the
-    digit block. Ids of surviving blocks are untouched.
-    """
-    if len(blocks) < 3:
-        return blocks
-    head_idx = next(
-        (
-            i
-            for i, b in enumerate(blocks[:6])
-            if b.block_type == BlockType.HEADING
-            and re.fullmatch(r"(?i)\s*chapter\s*", b.source_text or "")
-        ),
-        None,
-    )
-    if head_idx is None:
-        return blocks
-    num_idx = next(
-        (
-            i
-            for i in range(head_idx + 1, min(head_idx + 4, len(blocks)))
-            if blocks[i].block_type == BlockType.NARRATIVE
-            and re.fullmatch(r"\s*\d{1,3}\s*", blocks[i].source_text or "")
-        ),
-        None,
-    )
-    if num_idx is None:
-        return blocks
-    num_block = blocks[num_idx]
-    num = (num_block.source_text or "").strip()
-    head = blocks[head_idx]
-    old_source = (head.source_text or "").strip()
-    head.source_text = f"{old_source} {num}"
-    head.skip_translate = False
-    head.layout_role = RegionKind.TITLE
-    if head.bbox is not None and num_block.bbox is not None:
-        head_h = head.bbox.y1 - head.bbox.y0
-        num_h = num_block.bbox.y1 - num_block.bbox.y0
-        if 0.5 <= num_h / max(head_h, 1e-3) <= 2.0:
-            head.bbox = BoundingBox(
-                page=head.bbox.page,
-                x0=min(head.bbox.x0, num_block.bbox.x0),
-                y0=min(head.bbox.y0, num_block.bbox.y0),
-                x1=max(head.bbox.x1, num_block.bbox.x1),
-                y1=max(head.bbox.y1, num_block.bbox.y1),
-            )
-    # The former zh preset (``target_text = f"第 {num} 章"``)
-    # hardcoded Chinese into a target-language-agnostic extraction stage —
-    # non-zh runs could ship a Chinese fragment through MT-tier/verbatim
-    # paths. The fused "CHAPTER 3" source is translated normally by
-    # whichever tier handles the block, in the actual target language.
-    del blocks[num_idx]
-    return blocks
 
 
 def is_inside_picture(
@@ -527,10 +244,3 @@ def resolve_overlapping_formula_blocks(blocks: list[IRBlock]) -> list[IRBlock]:
                 continue
         out.append(b)
     return out
-
-
-# The caption/narrative typing sequence that used to live here as
-# ``postprocess_blocks`` is now the analyzer's own stage
-# (:func:`ubt.adapters.pdf.docling_parser.type_docling_blocks`): the Docling
-# analyzer produces its types directly instead of a separate post-pass applying
-# them from outside (ADR §6.1 item 9).
