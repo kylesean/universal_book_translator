@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Literal
 
 from ubt.model.span import CanonicalSource, Span
 
@@ -73,7 +74,9 @@ class ElementKind(StrEnum):
 class Element:
     """Base of the AST union: identity, provenance span, and coarse flags.
 
-    Never instantiated directly -- use one of the concrete classes below.
+    Never instantiated directly -- use one of the concrete classes below. Each
+    concrete class narrows :attr:`kind` to a ``Literal`` so the closed union can
+    be serialized and deserialized without guessing the class back from shape.
     """
 
     id: str
@@ -85,10 +88,11 @@ class Element:
     decorative: bool = False
     flow: FlowKind = FlowKind.MAIN
     skip_translate: bool = False
-
-    @property
-    def kind(self) -> ElementKind:
-        return _ELEMENT_KIND[type(self)]
+    #: The page-furniture role this element sits in (the extractor's finding,
+    #: ADR R3 one-layout-vocabulary). ``Region`` groups elements by it.
+    region: RegionKind = RegionKind.BODY
+    #: Discriminator for the closed union; each concrete class narrows it.
+    kind: ElementKind = ElementKind.PARAGRAPH
 
     @property
     def is_text(self) -> bool:
@@ -109,31 +113,33 @@ class TextElement(Element):
 @dataclass(frozen=True, slots=True)
 class Heading(TextElement):
     level: int = 1
+    kind: Literal[ElementKind.HEADING] = ElementKind.HEADING
 
 
 @dataclass(frozen=True, slots=True)
 class Paragraph(TextElement):
-    pass
+    kind: Literal[ElementKind.PARAGRAPH] = ElementKind.PARAGRAPH
 
 
 @dataclass(frozen=True, slots=True)
 class Dialogue(TextElement):
-    pass
+    kind: Literal[ElementKind.DIALOGUE] = ElementKind.DIALOGUE
 
 
 @dataclass(frozen=True, slots=True)
 class ListItem(TextElement):
     marker: str = ""
+    kind: Literal[ElementKind.LIST_ITEM] = ElementKind.LIST_ITEM
 
 
 @dataclass(frozen=True, slots=True)
 class Caption(TextElement):
-    pass
+    kind: Literal[ElementKind.CAPTION] = ElementKind.CAPTION
 
 
 @dataclass(frozen=True, slots=True)
 class CodeBlock(TextElement):
-    pass
+    kind: Literal[ElementKind.CODE_BLOCK] = ElementKind.CODE_BLOCK
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,6 +147,7 @@ class Formula(Element):
     """A display equation, carried as its source markup (never retyped by an LLM)."""
 
     source: str = ""
+    kind: Literal[ElementKind.FORMULA] = ElementKind.FORMULA
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,6 +155,7 @@ class Table(Element):
     """A table, carried as its structured markup."""
 
     markup: str = ""
+    kind: Literal[ElementKind.TABLE] = ElementKind.TABLE
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,6 +163,7 @@ class Figure(Element):
     """An image/vector asset, referenced by id (never re-drawn from text)."""
 
     asset_id: str = ""
+    kind: Literal[ElementKind.FIGURE] = ElementKind.FIGURE
 
 
 #: The closed union of concrete element classes.
@@ -189,18 +198,6 @@ ELEMENT_CLASSES: tuple[type[Element], ...] = (
     Table,
     Figure,
 )
-
-_ELEMENT_KIND: dict[type[Element], ElementKind] = {
-    Heading: ElementKind.HEADING,
-    Paragraph: ElementKind.PARAGRAPH,
-    Dialogue: ElementKind.DIALOGUE,
-    ListItem: ElementKind.LIST_ITEM,
-    Caption: ElementKind.CAPTION,
-    CodeBlock: ElementKind.CODE_BLOCK,
-    Formula: ElementKind.FORMULA,
-    Table: ElementKind.TABLE,
-    Figure: ElementKind.FIGURE,
-}
 
 
 @dataclass(frozen=True, slots=True)

@@ -47,6 +47,7 @@ from ubt.core.ir.models import (
     ChapterMeta,
     FlowID,
     IRBlock,
+    make_element,
 )
 from ubt.core.ir.serializer import compute_file_sha256_cached
 
@@ -384,11 +385,13 @@ class DOCXAdapter(BaseDocumentAdapter):
                     continue
                 blocks.append(
                     IRBlock(
-                        id=f"docx_main#p{para_idx:05d}",
-                        flow_id=FlowID.MAIN_STORY,
-                        spine_index=global_spine,
-                        block_type=_classify_paragraph(item),
-                        source_text=text,
+                        element=make_element(
+                            id=f"docx_main#p{para_idx:05d}",
+                            flow_id=FlowID.MAIN_STORY,
+                            spine_index=global_spine,
+                            block_type=_classify_paragraph(item),
+                            source_text=text,
+                        )
                     )
                 )
                 para_idx += 1
@@ -408,11 +411,13 @@ class DOCXAdapter(BaseDocumentAdapter):
                 continue
             blocks.append(
                 IRBlock(
-                    id=block_id,
-                    flow_id=FlowID.MAIN_STORY,
-                    spine_index=global_spine,
-                    block_type=BlockType.NARRATIVE,
-                    source_text=text,
+                    element=make_element(
+                        id=block_id,
+                        flow_id=FlowID.MAIN_STORY,
+                        spine_index=global_spine,
+                        block_type=BlockType.NARRATIVE,
+                        source_text=text,
+                    )
                 )
             )
             global_spine += 1
@@ -428,11 +433,13 @@ class DOCXAdapter(BaseDocumentAdapter):
                     continue
                 blocks.append(
                     IRBlock(
-                        id=block_id,
-                        flow_id=FlowID.MAIN_STORY,
-                        spine_index=global_spine,
-                        block_type=BlockType.NARRATIVE,
-                        source_text=text,
+                        element=make_element(
+                            id=block_id,
+                            flow_id=FlowID.MAIN_STORY,
+                            spine_index=global_spine,
+                            block_type=BlockType.NARRATIVE,
+                            source_text=text,
+                        )
                     )
                 )
                 global_spine += 1
@@ -459,11 +466,13 @@ class DOCXAdapter(BaseDocumentAdapter):
                 continue
             blocks.append(
                 IRBlock(
-                    id=block_id,
-                    flow_id=FlowID.TABLE_GRID,
-                    spine_index=next_spine,
-                    block_type=BlockType.NARRATIVE,
-                    source_text=text,
+                    element=make_element(
+                        id=block_id,
+                        flow_id=FlowID.TABLE_GRID,
+                        spine_index=next_spine,
+                        block_type=BlockType.NARRATIVE,
+                        source_text=text,
+                    )
                 )
             )
             next_spine += 1

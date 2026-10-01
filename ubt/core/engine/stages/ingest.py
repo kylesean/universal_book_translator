@@ -365,8 +365,6 @@ async def run_ingest_stage(
                 in_bibliography = update_bibliography_section_state(
                     cleaned_blocks, idx_b, in_bibliography
                 )
-                # Role layers (explicit FlowID/BlockType derivation only).
-                b.derive_roles()
                 # Chrome opt-in: the adapter marks running heads and footers
                 # skip-at-parse; with the flag on they get a real translation
                 # (page numbers never do) and the rigid gate paints them.

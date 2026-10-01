@@ -21,6 +21,7 @@ from ubt.core.ir.models import (
     ChapterMeta,
     FlowID,
     IRBlock,
+    make_element,
 )
 from ubt.core.ir.serializer import compute_file_sha256_cached
 
@@ -241,12 +242,14 @@ class MarkdownAdapter(BaseDocumentAdapter):
 
             current_blocks.append(
                 IRBlock(
-                    id=f"{current_chapter.chapter_id}#b{block_idx:04d}",
-                    flow_id=flow_id,
-                    spine_index=global_spine,
-                    block_type=block_type,
-                    source_text=text,
-                    skip_translate=skip_translate,
+                    element=make_element(
+                        id=f"{current_chapter.chapter_id}#b{block_idx:04d}",
+                        flow_id=flow_id,
+                        spine_index=global_spine,
+                        block_type=block_type,
+                        source_text=text,
+                        skip_translate=skip_translate,
+                    )
                 )
             )
             block_idx += 1
@@ -263,12 +266,14 @@ class MarkdownAdapter(BaseDocumentAdapter):
 
             current_blocks.append(
                 IRBlock(
-                    id=f"{current_chapter.chapter_id}#b{block_idx:04d}",
-                    flow_id=FlowID.MAIN_STORY,
-                    spine_index=global_spine,
-                    block_type=BlockType.CODE,
-                    source_text=text,
-                    skip_translate=True,
+                    element=make_element(
+                        id=f"{current_chapter.chapter_id}#b{block_idx:04d}",
+                        flow_id=FlowID.MAIN_STORY,
+                        spine_index=global_spine,
+                        block_type=BlockType.CODE,
+                        source_text=text,
+                        skip_translate=True,
+                    )
                 )
             )
             block_idx += 1
@@ -285,12 +290,14 @@ class MarkdownAdapter(BaseDocumentAdapter):
 
             current_blocks.append(
                 IRBlock(
-                    id=f"{current_chapter.chapter_id}#b{block_idx:04d}",
-                    flow_id=FlowID.MAIN_STORY,
-                    spine_index=global_spine,
-                    block_type=BlockType.FORMULA,
-                    source_text=text,
-                    skip_translate=True,
+                    element=make_element(
+                        id=f"{current_chapter.chapter_id}#b{block_idx:04d}",
+                        flow_id=FlowID.MAIN_STORY,
+                        spine_index=global_spine,
+                        block_type=BlockType.FORMULA,
+                        source_text=text,
+                        skip_translate=True,
+                    )
                 )
             )
             block_idx += 1

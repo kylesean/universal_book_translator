@@ -35,6 +35,7 @@ from ubt.core.ir.models import (
     ChapterIR,
     ChapterMeta,
     IRBlock,
+    make_element,
 )
 from ubt.core.ir.serializer import compute_file_sha256_cached
 
@@ -131,12 +132,14 @@ class HTMLAdapter(BaseDocumentAdapter):
 
             blocks.append(
                 IRBlock(
-                    id=f"{chapter.chapter_id}#p{leaf_idx:05d}",
-                    flow_id=determine_flow_id(leaf),
-                    spine_index=global_spine,
-                    block_type=b_type,
-                    source_text=text,
-                    skip_translate=bool(b_type == BlockType.CODE),
+                    element=make_element(
+                        id=f"{chapter.chapter_id}#p{leaf_idx:05d}",
+                        flow_id=determine_flow_id(leaf),
+                        spine_index=global_spine,
+                        block_type=b_type,
+                        source_text=text,
+                        skip_translate=bool(b_type == BlockType.CODE),
+                    )
                 )
             )
             global_spine += 1

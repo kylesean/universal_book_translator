@@ -44,6 +44,7 @@ from ubt.core.ir.models import (
     ChapterMeta,
     FlowID,
     IRBlock,
+    make_element,
 )
 from ubt.core.ir.serializer import compute_file_sha256_cached
 from ubt.core.policy.layout_policy import (
@@ -682,18 +683,19 @@ def _extract_document_index_blocks(
             idx = start_index + len(out)
             out.append(
                 IRBlock(
-                    id=f"pdf_main#b{idx:04d}",
-                    spine_index=idx,
-                    block_type=BlockType.HEADING if ln.bold else BlockType.NARRATIVE,
-                    flow_id=FlowID.MAIN_STORY,
-                    source_text=normalize_academic_pdf_math(title),
-                    skip_translate=False,
-                    bbox=BoundingBox(
-                        page=page_no,
-                        x0=float(ln.rect[0]),
-                        y0=float(ln.rect[1]),
-                        x1=float(ln.rect[2]),
-                        y1=float(ln.rect[3]),
+                    element=make_element(
+                        id=f"pdf_main#b{idx:04d}",
+                        spine_index=idx,
+                        block_type=BlockType.HEADING if ln.bold else BlockType.NARRATIVE,
+                        flow_id=FlowID.MAIN_STORY,
+                        source_text=normalize_academic_pdf_math(title),
+                        bbox=BoundingBox(
+                            page=page_no,
+                            x0=float(ln.rect[0]),
+                            y0=float(ln.rect[1]),
+                            x1=float(ln.rect[2]),
+                            y1=float(ln.rect[3]),
+                        ),
                     ),
                     provenance={
                         "source_page": page_no,
@@ -832,14 +834,16 @@ def map_iterated_items(
             if asset_path.exists():
                 blocks.append(
                     IRBlock(
-                        id=f"pdf_main#img_{len(blocks) + 1:04d}",
-                        spine_index=len(blocks) + 1,
-                        block_type=BlockType.IMAGE,
-                        flow_id=FlowID.CAPTION,
-                        source_text=str(asset_path),
+                        element=make_element(
+                            id=f"pdf_main#img_{len(blocks) + 1:04d}",
+                            spine_index=len(blocks) + 1,
+                            block_type=BlockType.IMAGE,
+                            flow_id=FlowID.CAPTION,
+                            source_text=str(asset_path),
+                            bbox=item_bbox,
+                            skip_translate=True,
+                        ),
                         target_text=str(asset_path),
-                        skip_translate=True,
-                        bbox=item_bbox,
                     )
                 )
             continue
@@ -975,14 +979,16 @@ def map_iterated_items(
 
         blocks.append(
             IRBlock(
-                id=f"pdf_main#b{len(blocks) + 1:04d}",
-                spine_index=len(blocks) + 1,
-                block_type=block_type,
-                flow_id=flow_id,
-                source_text=text,
-                skip_translate=skip,
-                bbox=item_bbox,
-                layout_role=layout_role,
+                element=make_element(
+                    id=f"pdf_main#b{len(blocks) + 1:04d}",
+                    spine_index=len(blocks) + 1,
+                    block_type=block_type,
+                    flow_id=flow_id,
+                    source_text=text,
+                    bbox=item_bbox,
+                    skip_translate=skip,
+                    region=layout_role,
+                ),
                 provenance=block_provenance,
             )
         )
@@ -990,13 +996,15 @@ def map_iterated_items(
             tail_text, tail_bbox = span_split[1], span_split[2]
             blocks.append(
                 IRBlock(
-                    id=f"pdf_main#b{len(blocks) + 1:04d}",
-                    spine_index=len(blocks) + 1,
-                    block_type=BlockType.NARRATIVE,
-                    flow_id=FlowID.CAPTION,
-                    source_text=normalize_academic_pdf_math(tail_text),
-                    bbox=tail_bbox,
-                    layout_role=RegionKind.CAPTION,
+                    element=make_element(
+                        id=f"pdf_main#b{len(blocks) + 1:04d}",
+                        spine_index=len(blocks) + 1,
+                        block_type=BlockType.NARRATIVE,
+                        flow_id=FlowID.CAPTION,
+                        source_text=normalize_academic_pdf_math(tail_text),
+                        bbox=tail_bbox,
+                        region=RegionKind.CAPTION,
+                    ),
                     provenance={"docling_span_split_tail": True},
                 )
             )
@@ -1071,12 +1079,14 @@ def map_export_dict(data: dict[str, Any]) -> list[IRBlock]:
 
         blocks.append(
             IRBlock(
-                id=f"pdf_main#b{len(blocks) + 1:04d}",
-                spine_index=len(blocks) + 1,
-                block_type=block_type,
-                flow_id=flow_id,
-                source_text=text,
-                skip_translate=skip_translate,
+                element=make_element(
+                    id=f"pdf_main#b{len(blocks) + 1:04d}",
+                    spine_index=len(blocks) + 1,
+                    block_type=block_type,
+                    flow_id=flow_id,
+                    source_text=text,
+                    skip_translate=skip_translate,
+                )
             )
         )
 
@@ -1086,12 +1096,13 @@ def map_export_dict(data: dict[str, Any]) -> list[IRBlock]:
             continue
         blocks.append(
             IRBlock(
-                id=f"pdf_main#b{len(blocks) + 1:04d}",
-                spine_index=len(blocks) + 1,
-                block_type=BlockType.TABLE,
-                flow_id=FlowID.TABLE_GRID,
-                source_text=tbl_text,
-                skip_translate=False,
+                element=make_element(
+                    id=f"pdf_main#b{len(blocks) + 1:04d}",
+                    spine_index=len(blocks) + 1,
+                    block_type=BlockType.TABLE,
+                    flow_id=FlowID.TABLE_GRID,
+                    source_text=tbl_text,
+                )
             )
         )
 
@@ -1491,5 +1502,5 @@ def vlm_fallback_missing_pages(
         page_keys[id(_b)] = _carry
     out.sort(key=lambda b: page_keys.get(id(b), b.bbox.page if b.bbox else _carry))
     for i, block in enumerate(out):
-        block.spine_index = i + 1
+        block.set_spine_index(i + 1)
     return _reject_empty_book(path, out)

@@ -555,7 +555,7 @@ class _DraftProcessor:
                 :meth:`~ubt.translate.engine.TranslationEngine.draft` owns the
                 cache decision around it.
                 """
-                block_to_draft = block.model_copy(update={"source_text": masked_source})
+                block_to_draft = block.with_source_text(masked_source)
                 draft_raw: str | None = None
                 last_exc: Exception | None = None
                 for attempt in range(self.policy.draft_max_retries + 1):
@@ -1012,9 +1012,7 @@ class _DraftProcessor:
 
         if not extracted_by_id:
             async with self.runtime.concurrency_sem:
-                blocks_to_draft = [
-                    b.model_copy(update={"source_text": inp.masked_source}) for b, inp in chunk
-                ]
+                blocks_to_draft = [b.with_source_text(inp.masked_source) for b, inp in chunk]
                 try:
                     for attempt in range(self.policy.draft_max_retries + 1):
                         try:

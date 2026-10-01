@@ -17,7 +17,7 @@ from ubt.analyze.structure import (
     looks_like_heading,
     looks_like_listing,
 )
-from ubt.core.ir.models import BlockType, BoundingBox, FlowID, IRBlock
+from ubt.core.ir.models import BlockType, BoundingBox, FlowID, IRBlock, make_element
 
 
 def sample_pdf_pages(path: Path) -> tuple[int, bool, str]:
@@ -106,38 +106,36 @@ def classify_plain_text_block(
     # from the reader -- the analyzer produces the types directly instead of a
     # later flow-repair pass re-typing them.
     if looks_like_debris(normalized):
-        return IRBlock(
-            id=f"pdf_main#b{block_idx:04d}",
-            spine_index=block_idx,
-            block_type=BlockType.FORMULA,
-            flow_id=FlowID.MAIN_STORY,
-            source_text=normalized,
-            skip_translate=True,
-            bbox=resolved_bbox,
-        )
+        return _plain_block(normalized, block_idx, resolved_bbox, BlockType.FORMULA, skip=True)
     if looks_like_listing(normalized):
-        return IRBlock(
-            id=f"pdf_main#b{block_idx:04d}",
-            spine_index=block_idx,
-            block_type=BlockType.CODE,
-            flow_id=FlowID.MAIN_STORY,
-            source_text=normalized,
-            skip_translate=True,
-            bbox=resolved_bbox,
-        )
+        return _plain_block(normalized, block_idx, resolved_bbox, BlockType.CODE, skip=True)
     is_list = is_list_prefix(normalized)
     block_type = (
         BlockType.HEADING
         if looks_like_heading(normalized)
         else (BlockType.LIST_ITEM if is_list else BlockType.NARRATIVE)
     )
+    return _plain_block(normalized, block_idx, resolved_bbox, block_type, skip=False)
+
+
+def _plain_block(
+    normalized: str,
+    block_idx: int,
+    bbox: BoundingBox,
+    block_type: BlockType,
+    *,
+    skip: bool,
+) -> IRBlock:
     return IRBlock(
-        id=f"pdf_main#b{block_idx:04d}",
-        spine_index=block_idx,
-        block_type=block_type,
-        flow_id=FlowID.MAIN_STORY,
-        source_text=normalized,
-        bbox=resolved_bbox,
+        element=make_element(
+            id=f"pdf_main#b{block_idx:04d}",
+            spine_index=block_idx,
+            block_type=block_type,
+            flow_id=FlowID.MAIN_STORY,
+            source_text=normalized,
+            bbox=bbox,
+            skip_translate=skip,
+        )
     )
 
 

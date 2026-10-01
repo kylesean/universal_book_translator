@@ -237,8 +237,8 @@ def resolve_overlapping_formula_blocks(blocks: list[IRBlock]) -> list[IRBlock]:
                     if cur_txt and cur_txt not in prev_txt
                     else prev_txt
                 )
-                out[-1].bbox = union_box
-                out[-1].source_text = merged_txt
+                out[-1].set_bbox(union_box)
+                out[-1].set_source_text(merged_txt)
                 if out[-1].target_text is not None:
                     out[-1].target_text = merged_txt
                 continue

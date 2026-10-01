@@ -80,8 +80,8 @@ def extract_blocks_with_pdfium(
             pages = range(max(1, page_range[0]), page_range[1] + 1)
         blocks = blocks_from_document(read_pdf(path, pages=pages))
         for index, block in enumerate(blocks, start=1):
-            block.id = f"pdf_main#b{index:04d}"
-            block.spine_index = index
+            block.set_id(f"pdf_main#b{index:04d}")
+            block.set_spine_index(index)
         return blocks
 
     return cached_blocks(store, path=path, page_range=page_range, compute=_read)

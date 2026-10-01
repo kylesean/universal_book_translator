@@ -18,7 +18,7 @@ from ubt.adapters.pdf.pdfium_gate import PDFIUM_LOCK
 from ubt.adapters.pdf.vlm.anchor import AnchorStats, anchor_transcript
 from ubt.adapters.pdf.vlm.registry import get_driver
 from ubt.adapters.pdf.vlm.types import VlmDriver
-from ubt.core.ir.models import BlockType, BoundingBox, FlowID, IRBlock
+from ubt.core.ir.models import BlockType, BoundingBox, FlowID, IRBlock, make_element
 
 logger = logging.getLogger(__name__)
 
@@ -186,12 +186,14 @@ def transcribe_page_to_blocks(
         provenances = sorted({m.provenance for m in members})
         blocks.append(
             IRBlock(
-                id=f"{id_prefix}#v{page_no:03d}{g:04d}",
-                flow_id=FlowID.MAIN_STORY,
-                spine_index=start_index + g,
-                block_type=BlockType.NARRATIVE,
-                bbox=BoundingBox(page=page_no, x0=x0, y0=y0, x1=x1, y1=y1),
-                source_text=text,
+                element=make_element(
+                    id=f"{id_prefix}#v{page_no:03d}{g:04d}",
+                    flow_id=FlowID.MAIN_STORY,
+                    spine_index=start_index + g,
+                    block_type=BlockType.NARRATIVE,
+                    bbox=BoundingBox(page=page_no, x0=x0, y0=y0, x1=x1, y1=y1),
+                    source_text=text,
+                ),
                 provenance={
                     "parser": f"vlm:{transcript.engine}",
                     "anchor_provenance": "+".join(provenances),

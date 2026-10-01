@@ -36,6 +36,7 @@ from ubt.core.ir.models import (
     ChapterMeta,
     FlowID,
     IRBlock,
+    make_element,
 )
 from ubt.core.ir.serializer import compute_file_sha256_cached
 
@@ -385,12 +386,14 @@ def _parse_chapter_blocks(
 
         chapter_blocks.append(
             IRBlock(
-                id=block_id,
-                flow_id=flow_id,
-                spine_index=global_spine,
-                block_type=b_type,
-                source_text=text,
-                skip_translate=bool(b_type == BlockType.CODE),
+                element=make_element(
+                    id=block_id,
+                    flow_id=flow_id,
+                    spine_index=global_spine,
+                    block_type=b_type,
+                    source_text=text,
+                    skip_translate=bool(b_type == BlockType.CODE),
+                ),
                 provenance=prov,
             )
         )

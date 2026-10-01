@@ -25,6 +25,7 @@ from ubt.core.ir.models import (
     FlowID,
     IRBlock,
     StyleMeta,
+    make_element,
 )
 from ubt.model.ast import RegionKind
 
@@ -658,18 +659,22 @@ class LedgerBase:
             provenance = {}
         policy_raw = row["policy_translate"]
 
+        region = RegionKind(row["layout_role"]) if row["layout_role"] else None
         return IRBlock(
-            id=row["block_id"],
-            flow_id=FlowID(row["flow_id"]),
-            spine_index=row["spine_index"],
-            block_type=BlockType(row["block_type"]),
-            bbox=bbox,
+            element=make_element(
+                id=row["block_id"],
+                spine_index=row["spine_index"],
+                block_type=BlockType(row["block_type"]),
+                flow_id=FlowID(row["flow_id"]),
+                region=region,
+                source_text=row["source_text"],
+                bbox=bbox,
+                skip_translate=bool(row["skip_translate"]),
+            ),
             style=style,
-            source_text=row["source_text"],
             draft_text=row["draft_text"],
             target_text=row["target_text"],
             status=BlockStatus(row["status"]),
-            skip_translate=bool(row["skip_translate"]),
             tm_hit=bool(row["tm_hit"]),
             glossary_hits=glossary_hits,
             mtqe_score=row["mtqe_score"],
@@ -677,7 +682,6 @@ class LedgerBase:
             error_flags=error_flags,
             mqm_severity=row["mqm_severity"],
             mqm_spans=mqm_spans,
-            layout_role=RegionKind(row["layout_role"]) if row["layout_role"] else None,
             policy_translate=bool(policy_raw) if policy_raw is not None else None,
             policy_reason=row["policy_reason"],
             provenance=provenance,

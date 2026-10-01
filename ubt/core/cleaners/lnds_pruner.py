@@ -406,7 +406,7 @@ class LNDSPageCleaner:
             For document translation pipelines, always use :meth:`clean_chapter_blocks`.
         """
         cleaned_text = self.clean(block.source_text)
-        return block.model_copy(update={"source_text": cleaned_text})
+        return block.with_source_text(cleaned_text)
 
     def clean_chapter_blocks(self, blocks: list[IRBlock]) -> list[IRBlock]:
         """Clean Calibre noise and cross-block monotonic page numbers across a chapter."""
@@ -471,15 +471,15 @@ class LNDSPageCleaner:
                 else:
                     new_block = orig_block.model_copy(
                         update={
-                            "source_text": "",
                             "target_text": "",
-                            "skip_translate": True,
                             "status": BlockStatus.MTQE_PASSED,
                             "mtqe_score": 1.0,
                         }
                     )
+                    new_block.set_source_text("")
+                    new_block.skip_translate = True
             else:
-                new_block = orig_block.model_copy(update={"source_text": cleaned_text})
+                new_block = orig_block.with_source_text(cleaned_text)
             result_blocks.append(new_block)
 
         return result_blocks

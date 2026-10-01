@@ -23,7 +23,7 @@ from ubt.adapters.pdf.rigid import RigidTypesetter
 from ubt.adapters.pdf.typst_reconstructor import TypstReconstructor
 from ubt.core.config import canonical_render_engine
 from ubt.core.exceptions import DocumentParseError
-from ubt.core.ir.models import BlockType, BookManifest, BoundingBox, FlowID, IRBlock
+from ubt.core.ir.models import BlockType, BookManifest, BoundingBox, FlowID, IRBlock, make_element
 from ubt.core.ir.render_plan import RenderOutcome, RenderPlan
 from ubt.core.policy.adaptive_policy import resolve_pdf_engine
 from ubt.model.fidelity import Fidelity
@@ -630,7 +630,7 @@ class DoclingRenderStrategy:
                     logger.debug("SVG vectorization skipped for %s: %s", block.id, exc)
                     continue
                 if svg_path is not None:
-                    block.source_text = str(svg_path.resolve())
+                    block.set_source_text(str(svg_path.resolve()))
                     block.target_text = str(svg_path.resolve())
                     covered.add(bbox.page)
                     converted_boxes.append((bbox.page, (bbox.x0, bbox.y0, bbox.x1, bbox.y1)))
@@ -729,14 +729,16 @@ class DoclingRenderStrategy:
             bx0, by0, bx1, by1 = fig.bbox
             woven.append(
                 IRBlock(
-                    id=f"pdf_main#fig_{safe_id}",
-                    spine_index=9999,
-                    block_type=BlockType.IMAGE,
-                    flow_id=FlowID.CAPTION,
-                    source_text=str(fig.image_path.resolve()),
+                    element=make_element(
+                        id=f"pdf_main#fig_{safe_id}",
+                        spine_index=9999,
+                        block_type=BlockType.IMAGE,
+                        flow_id=FlowID.CAPTION,
+                        source_text=str(fig.image_path.resolve()),
+                        bbox=BoundingBox(page=fig.page, x0=bx0, y0=by0, x1=bx1, y1=by1),
+                        skip_translate=True,
+                    ),
                     target_text=str(fig.image_path.resolve()),
-                    skip_translate=True,
-                    bbox=BoundingBox(page=fig.page, x0=bx0, y0=by0, x1=bx1, y1=by1),
                 )
             )
             placed_rects.setdefault(fig.page, []).append((bx0, by0, bx1, by1))
@@ -793,14 +795,16 @@ class DoclingRenderStrategy:
                     block_id = f"pdf_main#ras_{page_no}_{idx}"
                 woven.append(
                     IRBlock(
-                        id=block_id,
-                        spine_index=9999,
-                        block_type=BlockType.IMAGE,
-                        flow_id=FlowID.CAPTION,
-                        source_text=str(asset_path.resolve()),
+                        element=make_element(
+                            id=block_id,
+                            spine_index=9999,
+                            block_type=BlockType.IMAGE,
+                            flow_id=FlowID.CAPTION,
+                            source_text=str(asset_path.resolve()),
+                            bbox=BoundingBox(page=page_no, x0=x0, y0=y0, x1=x1, y1=y1),
+                            skip_translate=True,
+                        ),
                         target_text=str(asset_path.resolve()),
-                        skip_translate=True,
-                        bbox=BoundingBox(page=page_no, x0=x0, y0=y0, x1=x1, y1=y1),
                     )
                 )
                 covered.add(page_no)
