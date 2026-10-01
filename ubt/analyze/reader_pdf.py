@@ -3,8 +3,8 @@
 This is the "difficulty concentrated in one place" the ADR calls for. ``adapters``
 supply *raw geometry* (text lines, their boxes and font metrics via
 :mod:`ubt.adapters.pdf.textgeom`); this module owns *structure* -- reading order,
-paragraph grouping, heading detection -- and emits a
-:class:`~ubt.model.ast.Document` directly, with no ``IRBlock`` detour.
+paragraph grouping, heading detection, and page furniture (chrome, listings) --
+and emits a :class:`~ubt.model.ast.Document` directly, with no ``IRBlock`` detour.
 
 One rule set, stated once and documented, replaces the competing heuristics the
 old flow lived with:
@@ -14,7 +14,11 @@ old flow lived with:
 2. a font-size change over :data:`FONT_CHANGE_RATIO` starts a new paragraph;
 3. a first-line indent (``x0`` moves right by more than :data:`INDENT_FACTOR`
    font sizes) starts a new paragraph;
-4. a line beginning with a bullet/number starts a list item.
+4. a line beginning with a bullet/number starts a list item;
+5. a bare number in the top or bottom margin band is a page number -- page
+   furniture, kept verbatim in a ``RegionKind.PAGE_NUMBER`` region;
+6. a line carrying unambiguous program syntax is a :class:`CodeBlock` (kept
+   verbatim), never prose.
 
 A heading is decided by *typography* (font size relative to the page's body
 size, or bold + short + no terminal punctuation), never by length alone -- the
@@ -33,7 +37,9 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ubt.core.policy.layout_policy import FOOTER_BAND_PT, HEADER_BAND_PT
 from ubt.model.ast import (
+    CodeBlock,
     Confidence,
     Document,
     ElementT,
@@ -63,6 +69,21 @@ _HEADING_MAX_CHARS = 100
 _LIST_PREFIXES = ("\u2022", "\u25e6", "\u2023", "-", "*", "\u00b7", "\u2013")
 _SENTENCE_END = (".", "!", "?", "\u3002", ":", ";")
 _WS_RE = re.compile(r"\s+")
+
+#: A bare page number (arabic or roman) is page furniture -- but only in a
+#: margin band (see :func:`_is_page_number`).
+_BARE_PAGE_NUMBER = re.compile(r"^\s*(?:\d{1,4}|[ivxlcdm]{1,7})\s*$", re.IGNORECASE)
+#: Unambiguous program/algorithm syntax. Deliberately narrow: a false positive
+#: silently stops a real paragraph from being translated, so only forms that do
+#: not occur in running prose qualify.
+_LISTING_FORMS = re.compile(
+    r"←|⟵|↤|▷"  # assignment / dataflow / comment markers
+    r"|\bawait\s+\w[\w.]*\s*\("  # await call(...)
+    r"|\bdef\s+\w+\s*\(|\bclass\s+\w+\s*[:\(]|\bfunction\s+\w+\s*\("
+    r"|\bfrom\s+[\w.]+\s+import\b"
+    r"|\b(?:else|elif|repeat|until)\s+\d{1,3}\b"  # bare statement + line number
+)
+_LISTING_MAX_CHARS = 400
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -171,46 +192,111 @@ def _heading_level(group: _Group, body: float) -> int | None:
     return None
 
 
-def _classify(group: _Group, body: float, element_id: str, spine_index: int) -> ElementT:
-    """Turn a provisional group into its typed element (never drops it)."""
+def _is_page_number(group: _Group, page_height: float) -> bool:
+    """Whether a group is a bare page number sitting in a margin band.
+
+    A page number is page furniture only where furniture lives: the top or
+    bottom margin. A bare number *inside* the body is content -- a table cell, a
+    TOC leader, an index entry -- and is left to translate. This is the reader's
+    own geometry talking, not a guess.
+    """
+    if page_height <= 0 or not _BARE_PAGE_NUMBER.match(group.text):
+        return False
+    _x0, y0, _x1, y1 = group.bbox
+    return y0 < FOOTER_BAND_PT or y1 > page_height - HEADER_BAND_PT
+
+
+def _looks_like_listing(text: str) -> bool:
+    """Whether a group carries unambiguous program/algorithm syntax."""
+    body = (text or "").strip()
+    return bool(body) and len(body) <= _LISTING_MAX_CHARS and bool(_LISTING_FORMS.search(body))
+
+
+def _classify(
+    group: _Group, body: float, element_id: str, spine_index: int, *, page_height: float
+) -> tuple[ElementT, RegionKind]:
+    """Turn a provisional group into its typed element and page region.
+
+    Never drops a group: an element it cannot classify is prose at
+    :attr:`Confidence.INFERRED`. The region kind is the reader's own layout
+    judgement (body vs page furniture), which is exactly what the AST's
+    :class:`RegionKind` models -- the pipeline no longer re-derives it.
+    """
     confidence = Confidence.INFERRED
+    span = Span(page=group.page, bbox=group.bbox)
+    if _is_page_number(group, page_height):
+        return (
+            Paragraph(
+                id=element_id,
+                spine_index=spine_index,
+                text=group.text,
+                skip_translate=True,
+                span=span,
+                confidence=confidence,
+            ),
+            RegionKind.PAGE_NUMBER,
+        )
     if group.text.startswith(_LIST_PREFIXES):
         marker = group.text[0]
-        return ListItem(
-            id=element_id,
-            spine_index=spine_index,
-            text=group.text[len(marker) :].strip(),
-            marker=marker,
-            span=Span(page=group.page, bbox=group.bbox),
-            confidence=confidence,
+        return (
+            ListItem(
+                id=element_id,
+                spine_index=spine_index,
+                text=group.text[len(marker) :].strip(),
+                marker=marker,
+                span=span,
+                confidence=confidence,
+            ),
+            RegionKind.BODY,
         )
     level = _heading_level(group, body)
     if level is not None:
-        return Heading(
-            id=element_id,
-            spine_index=spine_index,
-            text=group.text,
-            level=level,
-            span=Span(page=group.page, bbox=group.bbox),
-            confidence=confidence,
+        return (
+            Heading(
+                id=element_id,
+                spine_index=spine_index,
+                text=group.text,
+                level=level,
+                span=span,
+                confidence=confidence,
+            ),
+            RegionKind.BODY,
+        )
+    if _looks_like_listing(group.text):
+        return (
+            CodeBlock(
+                id=element_id,
+                spine_index=spine_index,
+                text=group.text,
+                skip_translate=True,
+                span=span,
+                confidence=confidence,
+            ),
+            RegionKind.BODY,
         )
     from ubt.core.validators.math_guard import looks_like_math_debris
 
     if looks_like_math_debris(group.text):
-        return Formula(
+        return (
+            Formula(
+                id=element_id,
+                spine_index=spine_index,
+                source=group.text,
+                skip_translate=True,
+                span=span,
+                confidence=confidence,
+            ),
+            RegionKind.BODY,
+        )
+    return (
+        Paragraph(
             id=element_id,
             spine_index=spine_index,
-            source=group.text,
-            skip_translate=True,
-            span=Span(page=group.page, bbox=group.bbox),
+            text=group.text,
+            span=span,
             confidence=confidence,
-        )
-    return Paragraph(
-        id=element_id,
-        spine_index=spine_index,
-        text=group.text,
-        span=Span(page=group.page, bbox=group.bbox),
-        confidence=confidence,
+        ),
+        RegionKind.BODY,
     )
 
 
@@ -253,7 +339,7 @@ def read_pdf(
     wanted = list(range(1, _page_count(pdf_path) + 1)) if pages is None else sorted(set(pages))
 
     geometry: list[PageGeometry] = []
-    provisional: list[ElementT] = []
+    provisional: list[tuple[ElementT, RegionKind]] = []
     texts: list[str] = []
     sequence = 0
 
@@ -271,15 +357,31 @@ def read_pdf(
             group = _group_from_lines(line_group, page_no)
             if group is None:
                 continue
+            element, region_kind = _classify(
+                group, body, f"pdf#{sequence:05d}", sequence, page_height=height
+            )
             texts.append(group.text)
-            provisional.append(_classify(group, body, f"pdf#{sequence:05d}", sequence))
+            provisional.append((element, region_kind))
             sequence += 1
 
-    elements: list[ElementT] = []
+    # Regions are the reader's own layout judgement: consecutive elements of the
+    # same page-furniture kind (body vs page number) form one region.
+    regions: list[Region] = []
+    current_kind = RegionKind.BODY
+    current: list[ElementT] = []
     cursor = 0
-    for element, text in zip(provisional, texts, strict=True):
-        elements.append(_with_chars(element, (cursor, cursor + len(text))))
+    for (element, region_kind), text in zip(provisional, texts, strict=True):
+        element = _with_chars(element, (cursor, cursor + len(text)))
         cursor += len(text) + 1
+        if current and region_kind is not current_kind:
+            regions.append(
+                Region(id=f"r{len(regions)}", kind=current_kind, elements=tuple(current))
+            )
+            current = []
+        current_kind = region_kind
+        current.append(element)
+    if current:
+        regions.append(Region(id=f"r{len(regions)}", kind=current_kind, elements=tuple(current)))
 
     source = CanonicalSource(
         doc_id=doc_id or _file_digest(pdf_path),
@@ -287,8 +389,7 @@ def read_pdf(
         text="\n".join(texts),
         pages=tuple(geometry),
     )
-    region = Region(id="r0", kind=RegionKind.BODY, elements=tuple(elements))
-    return Document(source=source, regions=(region,) if elements else ())
+    return Document(source=source, regions=tuple(regions))
 
 
 __all__ = ["read_pdf"]
