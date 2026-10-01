@@ -65,6 +65,20 @@ def decode_markup(raw: bytes) -> str:
     return raw.decode("utf-8", errors="replace")
 
 
+def parse_pipe_table_cells(markup: str) -> list[list[str]]:
+    """Parse GitHub-flavoured markdown pipe table markup into grid rows."""
+    rows: list[list[str]] = []
+    for line in markup.strip().splitlines():
+        line = line.strip()
+        if not line or not line.startswith("|"):
+            continue
+        cells = [c.strip() for c in line.strip("|").split("|")]
+        if cells and all(set(c).issubset({"-", ":", " "}) for c in cells):
+            continue
+        rows.append(cells)
+    return rows
+
+
 def _detect_and_decode(raw: bytes) -> str | None:
     """Decode bytes with no BOM and no declared encoding via charset detection.
 

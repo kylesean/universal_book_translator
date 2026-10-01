@@ -219,6 +219,45 @@ def main() -> int:
         else:
             print("  pass  HTMLAdapter render (mono + bi)")
 
+        # EPUBAdapter parse and render verification
+        from ubt.adapters.epub.adapter import EPUBAdapter
+
+        epub_adapter = EPUBAdapter()
+
+        async def _test_epub_adapter() -> list[str]:
+            errs: list[str] = []
+            manifest = await epub_adapter.extract_manifest(epub_path)
+            blocks = []
+            async for ch in epub_adapter.parse_stream(epub_path):
+                blocks.extend(ch.blocks)
+            if len(blocks) != 6:
+                errs.append(f"EPUBAdapter expected 6 blocks, got {len(blocks)}")
+            for b in blocks:
+                if not b.skip_translate:
+                    b.target_text = f"tr:{b.source_text}"
+            out_mono = tmp / "rendered_mono.epub"
+            await epub_adapter.render_blocks(
+                manifest, blocks, "zh", out_mono, bilingual_mode="monolingual"
+            )
+            if not out_mono.exists():
+                errs.append("EPUBAdapter monolingual render output missing")
+            out_bi = tmp / "rendered_bi.epub"
+            await epub_adapter.render_blocks(
+                manifest, blocks, "zh", out_bi, bilingual_mode="bilingual"
+            )
+            if not out_bi.exists():
+                errs.append("EPUBAdapter bilingual render output missing")
+            return errs
+
+        epub_adapter_errs = asyncio.run(_test_epub_adapter())
+        if epub_adapter_errs:
+            failed += 1
+            print("  FAIL  EPUBAdapter")
+            for err in epub_adapter_errs:
+                print(f"        {err}")
+        else:
+            print("  pass  EPUBAdapter render (mono + bi)")
+
     print(f"\n  readers={len(cases)} failed={failed} -> {'PASS' if not failed else 'FAIL'}")
     return 0 if not failed else 1
 

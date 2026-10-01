@@ -1,6 +1,7 @@
 """EPUB Native DOM Tree bilingual injection adapter using zipfile and BeautifulSoup."""
 
 import asyncio
+import dataclasses
 import html
 import logging
 import posixpath
@@ -16,8 +17,15 @@ from urllib.parse import unquote
 from bs4 import BeautifulSoup, Tag
 from bs4.element import AttributeValueList, NavigableString
 
-from ubt.adapters.base import BILINGUAL_TARGET_CLASS, BaseDocumentAdapter, decode_markup
+from ubt.adapters.base import (
+    BILINGUAL_TARGET_CLASS,
+    BaseDocumentAdapter,
+    decode_markup,
+    parse_pipe_table_cells,
+)
 from ubt.adapters.unresolved import failure_note, is_unresolved
+from ubt.analyze.assemble import number
+from ubt.analyze.reader_html import walk_markup_elements
 from ubt.core.cleaners.dynamic_boilerplate import (
     BoilerplateFingerprint,
     DynamicBoilerplateHarvester,
@@ -36,9 +44,9 @@ from ubt.core.ir.models import (
     ChapterMeta,
     FlowID,
     IRBlock,
-    make_element,
 )
 from ubt.core.ir.serializer import compute_file_sha256_cached
+from ubt.model.ast import ListItem, Table
 
 logger = logging.getLogger(__name__)
 
@@ -345,55 +353,37 @@ def _parse_chapter_blocks(
     wrap_nested_direct_blocks(soup)
     body = soup.body or soup
 
-    leaves = [t for t in body.find_all(BLOCK_TAGS) if is_leaf_block(t, block_names)]
+    pairs = walk_markup_elements(body)
+    elements = [p[0] for p in pairs]
+    numbered = number(elements, chapter.chapter_id)
     chapter_blocks: list[IRBlock] = []
 
-    for leaf_idx, leaf in enumerate(leaves):
-        text = leaf.get_text(" ", strip=True)
-        if not text:
+    for elem, (_orig_elem, dom_node) in zip(numbered, pairs, strict=True):
+        text = elem.text if elem.is_text else ""
+        if not text and not elem.is_asset:
             continue
-
-        # Dynamic boilerplate cleaning on page-slice or detected books
-        if is_page_slice or fp.footer_disclaimers:
-            text = fp.clean(text)
-            if not text:
+        if (is_page_slice or fp.footer_disclaimers) and text:
+            cleaned = fp.clean(text)
+            if not cleaned:
                 continue
 
-        # Classify block type
-        if leaf.name in ("h1", "h2", "h3", "h4", "h5", "h6"):
-            b_type = BlockType.HEADING
-        elif leaf.name in ("pre", "code", "tt"):
-            # See html adapter: inline <code> inside a narrative
-            # paragraph must not make the whole block CODE.
-            b_type = BlockType.CODE
-        else:
-            b_type = BlockType.NARRATIVE
-
-        flow_id = determine_flow_id(leaf)
-        block_id = f"{chapter.chapter_id}#p{leaf_idx:04d}"
         prov: dict[str, Any] = {}
-        leaf_id: Any = leaf.get("id")
-        if not leaf_id:
-            anchor = leaf.find(["a", "span"], attrs={"id": True})
-            if anchor is not None:
-                leaf_id = anchor.get("id")
-        if not leaf_id:
-            named = leaf.find("a", attrs={"name": True})
-            if named is not None:
-                leaf_id = named.get("name")
-        if leaf_id:
-            prov["html_id"] = str(leaf_id)
+        if isinstance(dom_node, Tag):
+            leaf_id: Any = dom_node.get("id")
+            if not leaf_id:
+                anchor = dom_node.find(["a", "span"], attrs={"id": True})
+                if anchor is not None:
+                    leaf_id = anchor.get("id")
+            if not leaf_id:
+                named = dom_node.find("a", attrs={"name": True})
+                if named is not None:
+                    leaf_id = named.get("name")
+            if leaf_id:
+                prov["html_id"] = str(leaf_id)
 
         chapter_blocks.append(
             IRBlock(
-                element=make_element(
-                    id=block_id,
-                    flow_id=flow_id,
-                    spine_index=global_spine,
-                    block_type=b_type,
-                    source_text=text,
-                    skip_translate=bool(b_type == BlockType.CODE),
-                ),
+                element=dataclasses.replace(elem, spine_index=global_spine),
                 provenance=prov,
             )
         )
@@ -855,136 +845,132 @@ class EPUBAdapter(BaseDocumentAdapter):
         soup = _parse_xhtml(decode_markup(raw_html))
         wrap_nested_direct_blocks(soup)
         body = soup.body or soup
-        leaves = [t for t in body.find_all(BLOCK_TAGS) if is_leaf_block(t, block_names)]
+        pairs = walk_markup_elements(body)
         is_monolingual = bilingual_mode in ("target", "monolingual")
 
         injected_count = 0
-        for leaf_idx, leaf in enumerate(leaves):
-            block_id = f"{chapter_id}#p{leaf_idx:04d}"
+        for idx, (elem, dom_node) in enumerate(pairs):
+            block_id = f"{chapter_id}#{idx:05d}"
             target_text = translation_map.get(block_id)
             if (
                 source_map
-                and target_text  # Only touch source when we also have a
-                # translation — otherwise the cleaner-stripped boilerplate would
-                # silently vanish from the *source* text too, losing the original.
+                and target_text
                 and block_id in source_map
                 and source_map[block_id]
-                and source_map[block_id] != leaf.get_text(" ", strip=True)
-                and not leaf.find_all(True)
+                and isinstance(dom_node, Tag)
+                and source_map[block_id] != dom_node.get_text(" ", strip=True)
+                and not dom_node.find_all(True)
             ):
-                leaf.string = source_map[block_id]
+                dom_node.string = source_map[block_id]
             if not target_text:
                 continue
 
-            # Labelled unresolved draft, never mistaken for an approved
-            # translation (ubt.adapters.unresolved).
+            # Labelled unresolved draft, never mistaken for an approved translation
             note = (unresolved_notes or {}).get(block_id)
             if note:
                 target_text = f"{note}\n\n{target_text}"
 
-            if is_monolingual:
-                preserved_inline = take_preserved_inline_children(leaf)
-                if "\n\n" in target_text:
-                    paras = [p.strip() for p in target_text.split("\n\n") if p.strip()]
-                    leaf.clear()
-                    # Sanitize every paragraph exactly like the
-                    # single-paragraph path below, so LLM inline markup is
-                    # parsed consistently instead of rendering literally.
-                    in_cell = leaf.name in ("td", "th", "li")
-                    last_node: Tag = leaf
-                    for i, p_text in enumerate(paras):
-                        sanitized = sanitize_html_fragment(p_text)
-                        if i == 0:
-                            container: Tag = leaf
-                        elif in_cell:
-                            # A monolingual cell keeps its own <td>; extra
-                            # paragraphs nest as <div> *inside* it. A sibling
-                            # <td> would double the column count and wreck
-                            # the table.
-                            container = soup.new_tag("div")
+            if isinstance(elem, Table) and isinstance(dom_node, Tag):
+                rows = parse_pipe_table_cells(target_text)
+                if rows:
+                    if is_monolingual:
+                        dom_trs = dom_node.find_all("tr")
+                        if len(dom_trs) == len(rows):
+                            for r_idx, tr in enumerate(dom_trs):
+                                cells = tr.find_all(["th", "td"])
+                                for c_idx, cell in enumerate(cells):
+                                    if c_idx < len(rows[r_idx]):
+                                        cell.string = rows[r_idx][c_idx]
                         else:
-                            container = soup.new_tag(leaf.name)
-                        parsed_fragment = BeautifulSoup(sanitized, "html.parser")
-                        for child in list(parsed_fragment.contents):
-                            container.append(child)
-                        if i > 0:
-                            if in_cell:
-                                leaf.append(container)
-                            else:
-                                last_node.insert_after(container)
-                        last_node = container
-                    injected_count += len(paras)
-                else:
-                    sanitized_target = sanitize_html_fragment(target_text)
-                    leaf.clear()
-                    parsed_fragment = BeautifulSoup(sanitized_target, "html.parser")
-                    for child in list(parsed_fragment.contents):
-                        leaf.append(child)
-                    injected_count += 1
-                # Restore the inline media/anchors the rewrite must not lose.
-                for node in preserved_inline:
-                    leaf.append(node)
+                            new_table = soup.new_tag("table")
+                            if dom_node.get("class"):
+                                new_table["class"] = dom_node["class"]
+                            for row in rows:
+                                tr = soup.new_tag("tr")
+                                for cell_text in row:
+                                    td = soup.new_tag("td")
+                                    td.string = cell_text
+                                    tr.append(td)
+                                new_table.append(tr)
+                            dom_node.replace_with(new_table)
+                    else:
+                        new_table = soup.new_tag("table")
+                        source_classes = list(dom_node.get("class") or [])
+                        new_table["class"] = AttributeValueList(
+                            source_classes + [BILINGUAL_TARGET_CLASS]
+                        )
+                        for row in rows:
+                            tr = soup.new_tag("tr")
+                            for cell_text in row:
+                                td = soup.new_tag("td")
+                                td.string = cell_text
+                                tr.append(td)
+                            new_table.append(tr)
+                        dom_node.insert_after(new_table)
+                injected_count += 1
                 continue
 
-            # If translation contains multiple paragraphs separated by \n\n,
-            # inject each cleanly. The allowlist sanitizer runs first — the
-            # same contract as the single-paragraph branches above and below:
-            # raw LLM markup must never reach the stored EPUB, and escaping
-            # happens in the sanitizer, so inline <em>/<strong> still renders
-            # as formatting instead of literal text.
-            raw_classes = leaf.get("class")
-            if isinstance(raw_classes, list):
-                target_classes = list(raw_classes) + [BILINGUAL_TARGET_CLASS]
-            elif raw_classes:
-                target_classes = str(raw_classes).split() + [BILINGUAL_TARGET_CLASS]
-            else:
-                target_classes = [BILINGUAL_TARGET_CLASS]
-
-            if "\n\n" in target_text:
-                paras = [p.strip() for p in target_text.split("\n\n") if p.strip()]
-                is_internal_child = leaf.name in ("td", "th", "li")
-                if is_internal_child:
-                    # Inside a table cell or ordered list item: append inside the element,
-                    # never as a sibling (a sibling cell doubles column count, sibling li
-                    # doubles ordered list item counters).
-                    for p_text in paras:
-                        parsed_para = BeautifulSoup(sanitize_html_fragment(p_text), "html.parser")
-                        new_tag = soup.new_tag("div")
-                        new_tag["class"] = AttributeValueList(target_classes)
-                        for child in list(parsed_para.contents):
-                            new_tag.append(child)
-                        leaf.append(new_tag)
-                        injected_count += 1
+            if isinstance(dom_node, Tag):
+                if isinstance(elem, ListItem):
+                    if is_monolingual:
+                        preserved_inline = take_preserved_inline_children(dom_node)
+                        dom_node.clear()
+                        dom_node.append(
+                            BeautifulSoup(sanitize_html_fragment(target_text), "html.parser")
+                        )
+                        for node in preserved_inline:
+                            dom_node.append(node)
+                    else:
+                        target_tag = soup.new_tag("div")
+                        target_tag["class"] = AttributeValueList([BILINGUAL_TARGET_CLASS])
+                        target_tag.append(
+                            BeautifulSoup(sanitize_html_fragment(target_text), "html.parser")
+                        )
+                        dom_node.append(target_tag)
+                    injected_count += 1
                 else:
-                    last_node = leaf
-                    for p_text in paras:
-                        parsed_para = BeautifulSoup(sanitize_html_fragment(p_text), "html.parser")
-                        new_tag = soup.new_tag("p")
-                        new_tag["class"] = AttributeValueList(target_classes)
-                        for child in list(parsed_para.contents):
-                            new_tag.append(child)
-                        last_node.insert_after(new_tag)
-                        last_node = new_tag
-                        injected_count += 1
-            else:
-                # LLM output is untrusted — run the allowlist sanitizer
-                # before any HTML parsing so <script>/handlers/javascript:
-                # URLs can never reach the stored EPUB.
-                sanitized_target = sanitize_html_fragment(target_text)
-                is_internal_child = leaf.name in ("td", "th", "li")
-                # Inside a table cell or ordered list: append a <div> *inside* the element so the
-                # row/column structure and list numbering are preserved; otherwise match leaf tag.
-                new_tag = soup.new_tag("div") if is_internal_child else soup.new_tag(leaf.name)
-                new_tag["class"] = AttributeValueList(target_classes)
-                parsed_fragment = BeautifulSoup(sanitized_target, "html.parser")
-                for child in list(parsed_fragment.contents):
-                    new_tag.append(child)
+                    if is_monolingual:
+                        paras = [p.strip() for p in target_text.split("\n\n") if p.strip()] or [
+                            target_text
+                        ]
+                        preserved_inline = take_preserved_inline_children(dom_node)
+                        dom_node.clear()
+                        last_node: Tag = dom_node
+                        for i, p_text in enumerate(paras):
+                            sanitized = sanitize_html_fragment(p_text)
+                            container = dom_node if i == 0 else soup.new_tag(dom_node.name)
+                            parsed_fragment = BeautifulSoup(sanitized, "html.parser")
+                            for child in list(parsed_fragment.contents):
+                                container.append(child)
+                            if i > 0:
+                                last_node.insert_after(container)
+                            last_node = container
+                        for node in preserved_inline:
+                            dom_node.append(node)
+                        injected_count += len(paras)
+                    else:
+                        raw_classes = dom_node.get("class")
+                        if isinstance(raw_classes, list):
+                            target_classes = list(raw_classes) + [BILINGUAL_TARGET_CLASS]
+                        elif raw_classes:
+                            target_classes = str(raw_classes).split() + [BILINGUAL_TARGET_CLASS]
+                        else:
+                            target_classes = [BILINGUAL_TARGET_CLASS]
 
-                if is_internal_child:
-                    leaf.append(new_tag)
-                else:
-                    leaf.insert_after(new_tag)
-                injected_count += 1
+                        paras = [p.strip() for p in target_text.split("\n\n") if p.strip()] or [
+                            target_text
+                        ]
+                        last_node = dom_node
+                        for p_text in paras:
+                            sanitized = sanitize_html_fragment(p_text)
+                            new_tag = soup.new_tag(dom_node.name)
+                            new_tag["class"] = AttributeValueList(target_classes)
+                            parsed_fragment = BeautifulSoup(sanitized, "html.parser")
+                            for child in list(parsed_fragment.contents):
+                                new_tag.append(child)
+                            last_node.insert_after(new_tag)
+                            last_node = new_tag
+                            injected_count += 1
 
         if injected_count > 0:
             # Inject styling into <head>. The stylesheet ships once
