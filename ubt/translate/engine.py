@@ -85,27 +85,64 @@ class TranslationEngine:
     def _provenance(self) -> Provenance:
         return Provenance(source="mt", model=self.model, prompt_version=self.prompt_version)
 
-    async def _draft(self, masked_source: str, translate: TranslateFn) -> str:
+    def _cache_key(self, masked_source: str, context: str) -> str:
+        """The content key for one masked source under one prompt context.
+
+        ``context`` is the exact prompt the generate step will send. The
+        standalone path's generate is a pure function of the masked source, so
+        its context is empty and omitted (keeping the standalone key stable); the
+        production draft path's generate also depends on glossary / neighbour /
+        memory context, so that context must enter the key or a changed prompt
+        would reuse a stale draft (ADR-0001 Phase 4).
+        """
+        from ubt.cache.store import step_key
+
+        parts = [self.model, self.prompt_version, masked_source]
+        if context:
+            parts.append(context)
+        return step_key("translate", parts, {})
+
+    def cached_draft(self, masked_source: str, *, context: str = "") -> str | None:
+        """The cached raw draft for this masked source + context, or ``None``.
+
+        For callers whose generate step is not a single coroutine of the masked
+        source -- the draft stage's Batch API path, which submits many units at
+        once -- so they can consult the cache before spending and record after.
+        Fail-open: no store, or a corrupt entry, is a miss.
+        """
+        if self.cache is None:
+            return None
+        return self._cached_draft(self._cache_key(masked_source, context))
+
+    def remember_draft(self, masked_source: str, raw: str, *, context: str = "") -> None:
+        """Store a raw draft under its masked source + prompt context (fail-open)."""
+        if self.cache is None:
+            return
+        key = self._cache_key(masked_source, context)
+        # A JSON envelope carrying the key makes a truncated, hand-edited or
+        # split-brain entry a miss rather than a silently wrong draft.
+        envelope = json.dumps({"key": key, "text": raw}, ensure_ascii=False)
+        with contextlib.suppress(OSError, ValueError, KeyError, TypeError):
+            self.cache.put(key, envelope)
+
+    async def draft(self, masked_source: str, translate: TranslateFn, *, context: str = "") -> str:
         """Generate the raw draft, through the content cache when one is set.
 
+        The cache-aware generate half of a translation unit. ``context`` is the
+        exact prompt the generate step will send, so a changed prompt (a new
+        glossary, a new neighbour window) is a miss, not a stale draft.
         Fail-open: any cache problem (an unavailable store, a corrupt entry)
         falls back to the provider, because a cache must never break a
         translation.
         """
         if self.cache is None:
             return await translate(masked_source)
-        from ubt.cache.store import step_key
-
-        key = step_key("translate", [self.model, self.prompt_version, masked_source], {})
+        key = self._cache_key(masked_source, context)
         cached = self._cached_draft(key)
         if cached is not None:
             return cached
         raw = await translate(masked_source)
-        # A JSON envelope carrying the key makes a truncated, hand-edited or
-        # split-brain entry a miss rather than a silently wrong draft.
-        envelope = json.dumps({"key": key, "text": raw}, ensure_ascii=False)
-        with contextlib.suppress(OSError, ValueError, KeyError, TypeError):
-            self.cache.put(key, envelope)
+        self.remember_draft(masked_source, raw, context=context)
         return raw
 
     def _cached_draft(self, key: str) -> str | None:
@@ -125,10 +162,16 @@ class TranslationEngine:
         text = data.get("text")
         return text if isinstance(text, str) else None
 
-    async def translate_text(self, element_id: str, text: str, translate: TranslateFn) -> Segment:
-        """Translate one unit end to end, verifying its protected spans."""
+    async def translate_text(
+        self, element_id: str, text: str, translate: TranslateFn, *, context: str = ""
+    ) -> Segment:
+        """Translate one unit end to end, verifying its protected spans.
+
+        ``context`` is the prompt the generate step will send; the engine folds it
+        into the cache key so a changed prompt is a miss (see :meth:`_cache_key`).
+        """
         masked = self.mask(xml_safe(text))
-        raw = await self._draft(masked.text, translate)
+        raw = await self.draft(masked.text, translate, context=context)
         result = self.resolve(raw, masked)
         return Segment(
             id=element_id,

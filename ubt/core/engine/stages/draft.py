@@ -188,6 +188,50 @@ class _DraftProcessor:
             return None
         return GlossaryConsistencyValidator(glossary=self.policy.glossary_dicts)
 
+    def prompt_context(self, inputs: _DraftInputs) -> str:
+        """The content key of one draft prompt (ADR-0001 Phase 4).
+
+        The production generate step is *not* a pure function of the masked
+        source: the same source drafted under a different glossary, neighbour
+        window, rolling/epoch summary or few-shot reference is a different
+        prompt, so the translate cache must key on the prompt itself. Building
+        the exact prompt the router will send (the router's own builder, so the
+        two cannot drift) and hashing it makes a changed prompt a miss rather
+        than a stale draft.
+        """
+        from ubt.cache.store import step_key
+
+        system, user = self.runtime.router.build_draft_prompt(
+            source_text=inputs.masked_source,
+            glossary_table=inputs.glossary_table,
+            neighbor_context=inputs.neighbor_ctx,
+            target_lang=self.policy.target_lang,
+            source_lang=self.policy.source_lang,
+            genre_profile=self.policy.profile_name,
+            rolling_summary=inputs.macro_ctx,
+            global_glossary=self.policy.global_glossary_table,
+            few_shot_reference=inputs.few_shot_reference,
+            epoch_summary=inputs.epoch_ctx,
+            model=self.runtime.router.draft_model,
+            domain=self.policy.domain,
+        )
+        # The prompt already carries the languages/profile/domain, but fold them
+        # in explicitly too: the key must separate two runs that differ on any
+        # output-bearing axis even if a future prompt builder stopped embedding
+        # one of them.
+        return step_key(
+            "draft_prompt",
+            [
+                system,
+                user,
+                self.policy.source_lang,
+                self.policy.target_lang,
+                self.policy.profile_name,
+                self.policy.domain or "",
+            ],
+            {},
+        )
+
     async def prepare_draft_inputs(
         self,
         block: IRBlock,
@@ -442,9 +486,14 @@ class _DraftProcessor:
                 if inputs is None:
                     return
 
-            block_to_draft = block.model_copy(update={"source_text": inputs.masked_source})
+            async def generate(masked_source: str) -> str:
+                """The generate half: one provider draft, with this stage's retries.
 
-            try:
+                Captured here (not inlined) so the engine's cache-aware
+                :meth:`~ubt.translate.engine.TranslationEngine.draft` owns the
+                cache decision around it.
+                """
+                block_to_draft = block.model_copy(update={"source_text": masked_source})
                 draft_raw: str | None = None
                 last_exc: Exception | None = None
                 for attempt in range(self.policy.draft_max_retries + 1):
@@ -489,7 +538,20 @@ class _DraftProcessor:
                         if last_exc is not None
                         else RuntimeError("Draft returned no content")
                     )
+                return draft_raw
 
+            try:
+                # The engine owns the cache-aware generate step (ADR-0001
+                # Phase 4): a hit skips the provider entirely, and a changed
+                # prompt (context) is a miss, not a stale draft. The prompt key
+                # is built only when a cache is set, so a cache-less run pays
+                # nothing for it.
+                context = (
+                    self.prompt_context(inputs) if self.runtime.engine.cache is not None else ""
+                )
+                draft_raw = await self.runtime.engine.draft(
+                    inputs.masked_source, generate, context=context
+                )
                 await self.finalize_draft(block, draft_raw, inputs)
             except (asyncio.CancelledError, JobInterruptedError, BudgetExceededError):
                 raise
@@ -523,6 +585,34 @@ class _DraftProcessor:
                         self.runtime.ledger.save_checkpoints_batch, [fail_update]
                     )
 
+    async def finalize_cache_hits(
+        self, prepared: list[tuple[IRBlock, _DraftInputs]]
+    ) -> list[tuple[IRBlock, _DraftInputs]]:
+        """Finalize the translate-cache hits now; return the misses to submit.
+
+        The cache is content-addressed on the exact prompt, so a hit is a draft
+        this run would have generated identically. Finalizing it directly saves
+        the provider request entirely (ADR-0001 Phase 4) -- for the Batch API
+        paths that is a request not submitted, not just a response reused.
+        """
+        if self.runtime.engine.cache is None:
+            return prepared
+        misses: list[tuple[IRBlock, _DraftInputs]] = []
+        for b, inp in prepared:
+            cached = await asyncio.to_thread(
+                self.runtime.engine.cached_draft,
+                inp.masked_source,
+                context=self.prompt_context(inp),
+            )
+            if cached is None:
+                misses.append((b, inp))
+                continue
+            await self.finalize_draft(b, cached, inp)
+            self.runtime.counters["translate_cache_hits"] = (
+                self.runtime.counters.get("translate_cache_hits", 0) + 1
+            )
+        return misses
+
     async def try_batch_draft(
         self,
         blocks: list[IRBlock],
@@ -540,6 +630,10 @@ class _DraftProcessor:
             inputs = await self.prepare_draft_inputs(b, current_batch, rolling_prev_summary)
             if inputs is not None:
                 prepared.append((b, inputs))
+        if not prepared:
+            return True
+        # A cache hit needs no batch request: finalize it and submit the rest.
+        prepared = await self.finalize_cache_hits(prepared)
         if not prepared:
             return True
 
@@ -615,6 +709,15 @@ class _DraftProcessor:
             if r is None or r.error or not r.text or not r.text.strip():
                 retriable.append((b, inp))
                 continue
+            # Record the batch's own output under the same key the interactive
+            # path reads, so a re-run reuses it (ADR-0001 Phase 4).
+            if self.runtime.engine.cache is not None:
+                await asyncio.to_thread(
+                    self.runtime.engine.remember_draft,
+                    inp.masked_source,
+                    r.text,
+                    context=self.prompt_context(inp),
+                )
             await self.finalize_draft(b, r.text, inp)
             self.runtime.counters["batch_drafted"] += 1
         if retriable:
@@ -665,6 +768,12 @@ class _DraftProcessor:
                 if inputs is not None:
                     prepared.append((b, inputs))
 
+        if not prepared:
+            if self.runtime.flusher is not None:
+                await self.runtime.flusher.flush_all()
+            return True
+        # A cache hit needs no batch request: finalize it and submit the rest.
+        prepared = await self.finalize_cache_hits(prepared)
         if not prepared:
             if self.runtime.flusher is not None:
                 await self.runtime.flusher.flush_all()
@@ -754,6 +863,15 @@ class _DraftProcessor:
             if r is None or r.error or not r.text or not r.text.strip():
                 retriable.append((b, inp))
                 continue
+            # Record the batch's own output under the same key the interactive
+            # path reads, so a re-run reuses it (ADR-0001 Phase 4).
+            if self.runtime.engine.cache is not None:
+                await asyncio.to_thread(
+                    self.runtime.engine.remember_draft,
+                    inp.masked_source,
+                    r.text,
+                    context=self.prompt_context(inp),
+                )
             await self.finalize_draft(b, r.text, inp)
             self.runtime.counters["batch_drafted"] += 1
 
@@ -1076,11 +1194,24 @@ async def run_draft_stage(
     target_lang = ctx.target_lang
     source_lang = ctx.source_lang
     router = ctx.router
+    config = ctx.config
+    from ubt.cache.store import DiskCacheStore
+
+    # The translate step's content cache (ADR-0001 Phase 4): a resumed or re-run
+    # job reuses drafts whose exact prompt is unchanged. Fail-open, and off when
+    # UBT_CACHE_ENABLED=0.
+    draft_cache = DiskCacheStore(config.cache_dir) if config.cache_enabled else None
     # The per-unit transform (mask -> restore -> judge) has one owner now
     # (ADR-0001 Phase 2): the engine holds the fixed mask order, while the
-    # router/batch/retry orchestration below stays in this stage.
-    translation_engine = TranslationEngine(placeholders=default_placeholder_engine())
-    config = ctx.config
+    # router/batch/retry orchestration below stays in this stage. The cache is
+    # keyed on the exact prompt, so the production path and the standalone path
+    # share one content-addressed translate step (ADR-0001 Phase 4 / Plan A).
+    translation_engine = TranslationEngine(
+        placeholders=default_placeholder_engine(),
+        model=router.draft_model,
+        prompt_version=PROMPT_VERSION,
+        cache=draft_cache,
+    )
     # How many blocks the book holds: derived here from the ledger (it is
     # observable state, not something a stage has to hand forward) and read by
     # resolve_draft_policy to decide fast-path vs rolling summaries.
@@ -1126,6 +1257,7 @@ async def run_draft_stage(
         "tm_exact_hits": 0,
         "batch_drafted": 0,
         "batch_fallbacks": 0,
+        "translate_cache_hits": 0,
     }
 
     # Exact TM hits are only valid under this run's prompt/glossary context;
@@ -1340,11 +1472,18 @@ async def run_draft_stage(
                 _persist_memory_state, ledger, actual_job_id, memory_mgr, processor
             )
         memory_mgr._unsummarized_blocks.clear()
-        if counters["tm_exact_hits"] or counters["batch_drafted"] or counters["batch_fallbacks"]:
+        if (
+            counters["tm_exact_hits"]
+            or counters["batch_drafted"]
+            or counters["batch_fallbacks"]
+            or counters["translate_cache_hits"]
+        ):
             logger.info(
-                "Draft stage summary for %s: tm_exact_hits=%d batch_drafted=%d batch_fallbacks=%d",
+                "Draft stage summary for %s: tm_exact_hits=%d batch_drafted=%d "
+                "batch_fallbacks=%d translate_cache_hits=%d",
                 actual_job_id,
                 counters["tm_exact_hits"],
                 counters["batch_drafted"],
                 counters["batch_fallbacks"],
+                counters["translate_cache_hits"],
             )
