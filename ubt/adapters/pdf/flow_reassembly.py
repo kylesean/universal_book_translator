@@ -44,6 +44,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ubt.analyze.structure import is_bare_page_number, looks_like_debris, looks_like_listing
 from ubt.core.ir.models import (
     BlockType,
     BoundingBox,
@@ -58,24 +59,6 @@ if TYPE_CHECKING:
     from ubt.adapters.pdf.textgeom import LineBox
 
 logger = logging.getLogger(__name__)
-
-# --------------------------------------------------------------------------- #
-# Listing detection
-# --------------------------------------------------------------------------- #
-# Unambiguous program/algorithm syntax. Deliberately narrow: a false positive
-# silently stops a real paragraph from being translated, so only forms that do
-# not occur in running prose qualify. A listed line almost always carries an
-# assignment arrow or a definition/call keyword; weaker hints ("for ... (",
-# "obj.method(") were removed because prose ("for the number ... (No deadlock.)")
-# matched them and was silently kept untranslated.
-_LISTING_FORMS = re.compile(
-    r"←|⟵|↤|▷"  # assignment / dataflow / comment markers
-    r"|\bawait\s+\w[\w.]*\s*\("  # await call(...)
-    r"|\bdef\s+\w+\s*\(|\bclass\s+\w+\s*[:\(]|\bfunction\s+\w+\s*\("
-    r"|\bfrom\s+[\w.]+\s+import\b"
-    r"|\b(?:else|elif|repeat|until)\s+\d{1,3}\b"  # bare statement + line number
-)
-_LISTING_MAX_CHARS = 400
 
 # --------------------------------------------------------------------------- #
 # Heading legitimacy
@@ -114,22 +97,6 @@ _CONTINUATION_START = re.compile(
     r"where|which|when|if|of|the|we|it|this|they|then|so|thus|hence)\b)"
 )
 _MERGE_GAP_FACTOR = 2.0  # vertical gap allowance, in body-line heights
-
-#: A bare page number (arabic or roman) is chrome, never content.
-_BARE_PAGE_NUMBER = re.compile(r"^\s*(?:\d{1,4}|[ivxlcdm]{1,7})\s*$", re.IGNORECASE)
-
-# --------------------------------------------------------------------------- #
-# Non-translatable math / algorithm debris
-# --------------------------------------------------------------------------- #
-_MATH_SYMBOL_CHARS = frozenset("←⟵↤↦∘≔≃≅≤≥≠⊤⊥⊢⊣∈∉⊆⊂∪∩∀∃∧∨¬≡∑∏√∫∞∂∇⋯⋃⋂′″⟨⟩")
-#: Algorithm/typing tokens: ``L-Iter``, ``pr 1``, ``id Γ``. These are names, not
-#: prose; translating them is meaningless and painting over them corrupts the
-#: listing, so they are preserved.
-_ALG_TOKEN = re.compile(
-    r"^(?:[A-Z][A-Za-z]*[-_][A-Z][a-z]+"
-    r"|[a-z]{1,3}\s+\d{1,3}"
-    r"|[a-z]{1,3}\s*[\U0001D400-\U0001D7FFΓΔΘΛΞΠΣΦΨΩ])$"
-)
 
 
 @dataclass
@@ -241,15 +208,8 @@ def stamp_ground_truth_typography(blocks: list[IRBlock], pdf_path: Path | None) 
 
 
 # --------------------------------------------------------------------------- #
-# Step 2 -- listings
+# Step 2 -- chrome
 # --------------------------------------------------------------------------- #
-def _looks_like_listing(text: str) -> bool:
-    body = (text or "").strip()
-    if not body or len(body) > _LISTING_MAX_CHARS:
-        return False
-    return bool(_LISTING_FORMS.search(body))
-
-
 def _in_margin_band(bbox: BoundingBox | None, page_heights: dict[int, float]) -> bool:
     """True when a box sits in the page's top or bottom margin band."""
     if bbox is None:
@@ -278,7 +238,7 @@ def classify_chrome_blocks(blocks: list[IRBlock], page_heights: dict[int, float]
     for block in blocks:
         if block.block_type not in PROSE_BLOCK_TYPES or block.skip_translate:
             continue
-        if not _BARE_PAGE_NUMBER.match(block.source_text or ""):
+        if not is_bare_page_number(block.source_text or ""):
             continue
         if not _in_margin_band(block.bbox, page_heights):
             continue
@@ -289,40 +249,13 @@ def classify_chrome_blocks(blocks: list[IRBlock], page_heights: dict[int, float]
     return marked
 
 
-def _has_math(text: str) -> bool:
-    return any(ch in _MATH_SYMBOL_CHARS or 0x1D400 <= ord(ch) <= 0x1D7FF for ch in text)
-
-
-def _looks_like_debris(text: str) -> bool:
-    """True for a short math/algorithm token that is not prose.
-
-    Axiom B preserves non-translatable content explicitly: these are names,
-    operators and equation fragments the extractor typed as prose. Translating
-    them yields nonsense and repainting them corrupts the listing, so they are
-    held byte-identical instead. A sentence fragment (terminal punctuation) is
-    never debris -- it belongs to a paragraph and must be translated.
-    """
-    body = (text or "").strip()
-    if not body or len(body) > 80 or body.endswith((".", "!", "?", "。")):
-        return False
-    if _ALG_TOKEN.fullmatch(body):
-        return True
-    tokens = body.split()
-    if len(tokens) > 10:
-        return False
-    wordy = sum(1 for w in tokens if w.isalpha() and len(w) >= 3)
-    if wordy <= 1 and (body.endswith(("=", "→", "↦", "≔", "<", ">")) or _has_math(body)):
-        return True
-    return bool(wordy <= 2 and len(tokens) <= 6 and _has_math(body))
-
-
 def classify_debris_blocks(blocks: list[IRBlock]) -> int:
     """Hold short math/algorithm tokens byte-identical (preserved, not prose)."""
     marked = 0
     for block in blocks:
         if block.block_type not in PROSE_BLOCK_TYPES or block.skip_translate:
             continue
-        if _looks_like_debris(block.source_text or ""):
+        if looks_like_debris(block.source_text or ""):
             block.block_type = BlockType.FORMULA
             block.skip_translate = True
             block.provenance["flow_reassembly"] = "math_debris"
@@ -336,7 +269,7 @@ def classify_listing_blocks(blocks: list[IRBlock]) -> int:
     for block in blocks:
         if block.block_type not in PROSE_BLOCK_TYPES or block.skip_translate:
             continue
-        if _looks_like_listing(block.source_text or ""):
+        if looks_like_listing(block.source_text or ""):
             block.block_type = BlockType.CODE
             block.skip_translate = True
             block.provenance["flow_reassembly"] = "listing"

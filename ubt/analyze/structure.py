@@ -1,0 +1,101 @@
+"""The single classification rule set (ADR-0001 Phase 1, R3).
+
+Extraction is a *prior*: whether a line is a listing, a page number, or math
+debris is a property of the line, decided once here -- not re-guessed by a
+second pass. Both the native reader (:mod:`ubt.analyze.reader_pdf`) and the
+Docling flow-repair pass (:mod:`ubt.adapters.pdf.flow_reassembly`) call these,
+so a line cannot be prose to one and debris to the other.
+
+Only the *text-content* rules live here. Where a line sits (the margin band that
+makes a bare number a page number) is geometry, and stays with the reader that
+measured it.
+"""
+
+from __future__ import annotations
+
+import re
+
+# --------------------------------------------------------------------------- #
+# Page furniture
+# --------------------------------------------------------------------------- #
+#: A bare page number (arabic or roman) and nothing else.
+_BARE_PAGE_NUMBER = re.compile(r"^\s*(?:\d{1,4}|[ivxlcdm]{1,7})\s*$", re.IGNORECASE)
+
+
+def is_bare_page_number(text: str) -> bool:
+    """True for a bare page number -- arabic or roman, nothing else."""
+    return bool(_BARE_PAGE_NUMBER.match(text or ""))
+
+
+# --------------------------------------------------------------------------- #
+# Listings
+# --------------------------------------------------------------------------- #
+#: Unambiguous program/algorithm syntax. Deliberately narrow: a false positive
+#: silently stops a real paragraph from being translated, so only forms that do
+#: not occur in running prose qualify. A listed line almost always carries an
+#: assignment arrow or a definition/call keyword; weaker hints ("for ... (",
+#: "obj.method(") were removed because prose ("for the number ... (No deadlock.)")
+#: matched them and was silently kept untranslated.
+_LISTING_FORMS = re.compile(
+    r"←|⟵|↤|▷"  # assignment / dataflow / comment markers
+    r"|\bawait\s+\w[\w.]*\s*\("  # await call(...)
+    r"|\bdef\s+\w+\s*\(|\bclass\s+\w+\s*[:\(]|\bfunction\s+\w+\s*\("
+    r"|\bfrom\s+[\w.]+\s+import\b"
+    r"|\b(?:else|elif|repeat|until)\s+\d{1,3}\b"  # bare statement + line number
+)
+_LISTING_MAX_CHARS = 400
+
+
+def looks_like_listing(text: str) -> bool:
+    """True when text carries unambiguous program/algorithm syntax."""
+    body = (text or "").strip()
+    return bool(body) and len(body) <= _LISTING_MAX_CHARS and bool(_LISTING_FORMS.search(body))
+
+
+# --------------------------------------------------------------------------- #
+# Math / algorithm debris
+# --------------------------------------------------------------------------- #
+_MATH_SYMBOL_CHARS = frozenset("←⟵↤↦∘≔≃≅≤≥≠⊤⊥⊢⊣∈∉⊆⊂∪∩∀∃∧∨¬≡∑∏√∫∞∂∇⋯⋃⋂′″⟨⟩")
+#: Algorithm/typing tokens: ``L-Iter``, ``pr 1``, ``id Γ``. These are names, not
+#: prose; translating them is meaningless and painting over them corrupts the
+#: listing, so they are preserved.
+_ALG_TOKEN = re.compile(
+    r"^(?:[A-Z][A-Za-z]*[-_][A-Z][a-z]+"
+    r"|[a-z]{1,3}\s+\d{1,3}"
+    r"|[a-z]{1,3}\s*[\U0001D400-\U0001D7FFΓΔΘΛΞΠΣΦΨΩ])$"
+)
+_DEBRIS_MAX_CHARS = 80
+
+
+def _has_math(text: str) -> bool:
+    return any(ch in _MATH_SYMBOL_CHARS or 0x1D400 <= ord(ch) <= 0x1D7FF for ch in text)
+
+
+def looks_like_debris(text: str) -> bool:
+    """True for a short math/algorithm token that is not prose.
+
+    Axiom B preserves non-translatable content explicitly: these are names,
+    operators and equation fragments extraction typed as prose. Translating them
+    yields nonsense and repainting them corrupts the listing, so they are held
+    byte-identical instead. A sentence fragment (terminal punctuation) is never
+    debris -- it belongs to a paragraph and must be translated.
+    """
+    body = (text or "").strip()
+    if not body or len(body) > _DEBRIS_MAX_CHARS or body.endswith((".", "!", "?", "。")):
+        return False
+    if _ALG_TOKEN.fullmatch(body):
+        return True
+    tokens = body.split()
+    if len(tokens) > 10:
+        return False
+    wordy = sum(1 for w in tokens if w.isalpha() and len(w) >= 3)
+    if wordy <= 1 and (body.endswith(("=", "→", "↦", "≔", "<", ">")) or _has_math(body)):
+        return True
+    return bool(wordy <= 2 and len(tokens) <= 6 and _has_math(body))
+
+
+__all__ = [
+    "is_bare_page_number",
+    "looks_like_debris",
+    "looks_like_listing",
+]
