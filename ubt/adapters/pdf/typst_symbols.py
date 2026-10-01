@@ -18,8 +18,7 @@ separate while single-sourcing the vocabulary:
   shared commands each side intentionally spells differently (both valid Typst).
 
 A value fix (e.g. ``\\cap`` → ``inter``) therefore lands once and reaches both
-tables; ``tests/unit/test_mathtext.py`` pins the relationship so the two maps
-cannot silently drift apart again.
+tables, so the two maps cannot silently drift apart again.
 """
 
 from __future__ import annotations

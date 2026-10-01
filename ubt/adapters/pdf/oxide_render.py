@@ -45,7 +45,7 @@ def render_page_png(pdf_path: Path, page: int, dpi: int) -> bytes | None:
     """Render a 1-based page to PNG bytes; ``None`` on any failure.
 
     ``page`` is 1-based (UBT convention); pdf_oxide is 0-based — the ``-1``
-    mapping is pinned by ``tests/unit/test_oxide_render.py``.
+    mapping is deliberate.
     """
     try:
         from pdf_oxide import PdfDocument

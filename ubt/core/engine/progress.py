@@ -5,7 +5,7 @@ enumerations of the same field names drift the moment one side adds a
 metric, so all surfaces derive their snapshot here.
 
 The persisted key names are an on-disk contract (``job_queue.progress_json``
-rows survive upgrades), so ``tests/unit/test_progress_snapshot.py`` pins them.
+rows survive upgrades).
 """
 
 from __future__ import annotations

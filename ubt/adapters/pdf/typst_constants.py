@@ -59,8 +59,7 @@ class StyleProfile:
     ONE emission core; the two layouts pass their profile, so every emitter
     style value is declared exactly once, here.
 
-    Style unification record (two historical divergences are pinned by
-    ``tests/unit/test_cover_formula_prompt_gates.py``): the two emitters had
+    Style unification record (two historical divergences): the two emitters had
     silently diverged. Where the same markup existed in both paths, the
     flowing ``_emit_block`` values are canonical and the interior values they
     replaced are recorded here:

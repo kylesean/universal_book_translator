@@ -20,10 +20,9 @@ Only two structural anchors are relied on: the ``error:`` message line and the
 lines are ignored. A single error message may be followed by more than one
 caret block; the first location wins (:func:`parse_typst_stderr`).
 
-When the pinned Typst series changes, re-capture the samples in
-``tests/unit/test_typst_diagnostics.py`` and bump :data:`DIALECT_TYPST_SERIES`
-if the anchors moved; the dialect test fails loudly instead of the self-healing
-loop silently degrading content.
+When the pinned Typst series changes, re-capture the samples and bump
+:data:`DIALECT_TYPST_SERIES` if the anchors moved; the dialect check fails
+loudly instead of the self-healing loop silently degrading content.
 """
 
 from __future__ import annotations

@@ -11,9 +11,7 @@ be initialized only ONCE per process. Erasing ``sys.modules["pikepdf..."]`` and
 importing again makes nanobind call ``abort()`` — no traceback, no exception, no
 test result. So never stub these names through ``sys.modules`` (use a lazy import
 seam), and never hand coverage a dotted source under ``ubt.adapters``: it imports
-the module to locate it and then un-imports everything it touched. The full
-post-mortem and the authorable-half guard live in
-``tests/unit/test_sys_modules_guard.py``.
+the module to locate it and then un-imports everything it touched.
 """
 
 from __future__ import annotations

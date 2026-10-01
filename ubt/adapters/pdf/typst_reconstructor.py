@@ -1775,7 +1775,7 @@ class TypstReconstructor:
         plus every behavioral fix that used to live only in ``_emit_block``
         (page chrome, draft-over-source, caption polish, verbatim formula
         tags, heading-echo trim) — there is no interior-only shadow logic
-        left (incident tests in ``test_cover_formula_prompt_gates.py``).
+        left.
         """
         # Reading order is the caller's (``spine_index`` is column-aware;
         # geometry here would interleave the two columns of a page).
@@ -2085,8 +2085,7 @@ class TypstReconstructor:
         context). Behavioral fixes — page-chrome drop, draft preferred over
         source, caption polish, verbatim formula tags, chrome-block drop,
         heading-echo trim — therefore land exactly once and can never exist
-        in only one path again (the two incidents pinned by
-        ``tests/unit/test_cover_formula_prompt_gates.py``). Style and the
+        in only one path again. Style and the
         remaining deliberate page-strict design differences travel in
         ``context.profile`` (see :class:`StyleProfile` for the drift record).
         """
