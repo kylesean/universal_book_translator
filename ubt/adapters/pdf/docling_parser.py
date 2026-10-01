@@ -38,6 +38,7 @@ from ubt.adapters.pdf.docling_blocks import (
 )
 from ubt.adapters.pdf.pdfium_gate import PDFIUM_LOCK, unify_docling_pdfium_lock
 from ubt.adapters.pdf.plain_text_extractor import pages_to_blocks
+from ubt.analyze.structure import looks_like_debris, looks_like_listing
 from ubt.core.cleaners.lnds_pruner import normalize_academic_pdf_math
 from ubt.core.config import RIGID_ENGINES
 from ubt.core.exceptions import DocumentParseError
@@ -53,6 +54,7 @@ from ubt.core.ir.models import (
 from ubt.core.ir.serializer import compute_file_sha256_cached
 from ubt.core.policy.layout_policy import (
     CAPTION_RE,
+    PROSE_BLOCK_TYPES,
     VLM_CIRCUIT_FAIL_PCT,
     VLM_CIRCUIT_MIN_TRIES,
 )
@@ -426,16 +428,15 @@ def type_docling_blocks(blocks: list[IRBlock], *, pdf_path: Path | None) -> list
     used to be a separate ``docling_blocks.postprocess_blocks`` pass called from
     outside; the analyzer now owns the sequence end to end, and it names each
     typing stage itself instead of delegating to a generic ``reassemble_flow``
-    (which stays only for the geometry-less oxide fallback). The order is
-    load-bearing: chapter fuse -> embedded-caption decouple -> caption-body latch
-    -> span-tail attach -> caption unify -> overlapping-formula merge -> chrome /
-    debris / listing typing -> heading demotion -> fragment coalescing -> narrative
+    (which stays only for the geometry-less oxide fallback). Debris/listing
+    typing is NOT here: the emission loop types those directly from the shared
+    rules. The order is load-bearing: chapter fuse -> embedded-caption decouple ->
+    caption-body latch -> span-tail attach -> caption unify -> overlapping-formula
+    merge -> chrome typing -> heading demotion -> fragment coalescing -> narrative
     defragment.
     """
     from ubt.adapters.pdf.flow_reassembly import (
         classify_chrome_blocks,
-        classify_debris_blocks,
-        classify_listing_blocks,
         coalesce_flow_fragments,
         demote_fragment_headings,
         stamp_ground_truth_typography,
@@ -451,8 +452,6 @@ def type_docling_blocks(blocks: list[IRBlock], *, pdf_path: Path | None) -> list
     try:
         truth = stamp_ground_truth_typography(staged, pdf_path)
         classify_chrome_blocks(staged, truth.height)
-        classify_debris_blocks(staged)
-        classify_listing_blocks(staged)
         demote_fragment_headings(staged, truth.body_size)
         coalesce_flow_fragments(staged, allow_cross_page=True, body_by_page=truth.body_size)
     except Exception as exc:  # never let extraction repair sink extraction
@@ -955,6 +954,16 @@ def map_iterated_items(
                     break
         if not text:
             continue
+
+        # The analyzer types math debris and algorithm listings itself, from the
+        # shared text-content rules (ADR §6.1 item 2: the analyzer produces the
+        # types, not a later repair pass). A short math/algorithm token is a
+        # FORMULA/CODE held byte-identical; Docling's own label is only a prior.
+        if not skip and block_type in PROSE_BLOCK_TYPES:
+            if looks_like_debris(text):
+                block_type, skip = BlockType.FORMULA, True
+            elif looks_like_listing(text):
+                block_type, skip = BlockType.CODE, True
 
         last_kept_label = label
         last_kept_page = item_page
