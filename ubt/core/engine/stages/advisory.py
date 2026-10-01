@@ -45,6 +45,7 @@ from ubt.core.ports import (
     inspect_font_encoding_damage,
     summarize_font_encoding_damage,
 )
+from ubt.pipeline.blocks import BlockReader
 from ubt.pipeline.facts import LayoutAdvisory
 
 logger = logging.getLogger(__name__)
@@ -68,7 +69,7 @@ def _structural_page_share(manifest: BookManifest) -> float:
         return 0.0
 
 
-async def run_extraction_witness_stage(ctx: StageContext) -> None:
+async def run_extraction_witness_stage(ctx: StageContext, blocks: BlockReader) -> None:
     """Mark font-encoding damage on the ingested blocks. Yields no events.
 
     Math-bearing fonts with no ``/ToUnicode`` make every library guess the same
@@ -88,7 +89,7 @@ async def run_extraction_witness_stage(ctx: StageContext) -> None:
         # freshly-populated snapshot to the next stage ensures mode advisory
         # reflects the post-witness state.
         witness_flagged = flag_font_encoding_damage(
-            await ctx.current_blocks(force_refresh=True), witness_verdicts
+            await blocks.current_blocks(force_refresh=True), witness_verdicts
         )
         if witness_flagged:
             await asyncio.to_thread(
@@ -118,7 +119,7 @@ async def run_extraction_witness_stage(ctx: StageContext) -> None:
 
 
 async def run_mode_advisory_stage(
-    ctx: StageContext, layout: LayoutAdvisory
+    ctx: StageContext, layout: LayoutAdvisory, blocks: BlockReader
 ) -> AsyncIterator[TranslationProgressEvent]:
     """Publish the run policy and advise on the requested bilingual mode."""
     config = ctx.config
@@ -145,13 +146,13 @@ async def run_mode_advisory_stage(
     if ctx.source_pdf_path is not None:
         try:
             figure_pages = await asyncio.to_thread(
-                detect_figure_pages, ctx.input_path, await ctx.current_blocks()
+                detect_figure_pages, ctx.input_path, await blocks.current_blocks()
             )
         except Exception as exc:
             logger.debug("Figure page detection skipped for %s: %s", ctx.job_id, exc)
     # force_refresh on both reads: this stage runs after repair/consistency/
     # triage have mutated block statuses on disk — the ingest-era snapshot would score stale repair states.
-    current_blocks = await ctx.current_blocks(force_refresh=True)
+    current_blocks = await blocks.current_blocks(force_refresh=True)
     advisory: Advisory = await asyncio.to_thread(
         advise_layout,
         current_blocks,
@@ -261,7 +262,9 @@ async def run_mode_advisory_stage(
     yield event
 
 
-async def run_difficulty_advisory_stage(ctx: StageContext, layout: LayoutAdvisory) -> None:
+async def run_difficulty_advisory_stage(
+    ctx: StageContext, layout: LayoutAdvisory, blocks: BlockReader
+) -> None:
     """Step the render mode down on live repair burden. Yields no events.
 
     Only ``auto`` enforcement may move the user's choice, and only one notch
@@ -297,7 +300,7 @@ async def run_difficulty_advisory_stage(ctx: StageContext, layout: LayoutAdvisor
             or config.render_engine
         )
         if effective_engine == "auto":
-            current_blocks = await ctx.current_blocks()
+            current_blocks = await blocks.current_blocks()
             effective_engine = resolve_pdf_engine("auto", current_blocks, manifest=manifest)
     if (
         ctx.source_pdf_path is not None

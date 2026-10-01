@@ -51,6 +51,7 @@ from ubt.core.router.rate_limiter import AdaptiveTokenBucket
 from ubt.core.router.registry import get_default_registry
 from ubt.core.router.router import ModelRouter
 from ubt.core.router_mode import decide
+from ubt.pipeline.blocks import BlockReader
 from ubt.pipeline.facts import RunFacts
 from ubt.pipeline.run import RunGates, run_stages
 
@@ -866,13 +867,17 @@ class PipelineOrchestrator:
             # the stage that reads it, and the terminal hook reads the same facts
             # the stages filled.
             facts = RunFacts()
+            # The run's one mutable state: the block snapshot, owned by the plan
+            # and read explicitly by the analyze-adjacent stages (ADR-0001
+            # orchestration convergence, third cut).
+            blocks = BlockReader(ledger, actual_job_id)
 
             async def _on_export_completed(event: TranslationProgressEvent) -> None:
                 await run_tm_writeback_stage(ctx, facts.terminology)
                 await self._run_finalize_hook(event)
 
             async for event in run_stages(
-                ctx, gates, facts, on_export_completed=_on_export_completed
+                ctx, gates, facts, blocks=blocks, on_export_completed=_on_export_completed
             ):
                 yield event
 

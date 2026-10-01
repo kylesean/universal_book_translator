@@ -41,7 +41,7 @@ from ubt.core.engine.events import (
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.repair_loop import RepairLoop
 from ubt.core.exceptions import JobInterruptedError
-from ubt.core.ir.models import BookManifest, IRBlock
+from ubt.core.ir.models import BookManifest
 from ubt.core.memory.tm import TranslationMemory
 from ubt.core.policy.adaptive_policy import AdaptivePolicy
 from ubt.core.ports import DocumentAdapter
@@ -74,9 +74,16 @@ class EventFactory(Protocol):
     ) -> TranslationProgressEvent: ...
 
 
-@dataclass
+@dataclass(frozen=True)
 class StageContext:
-    """State a pipeline stage reads, and the few values stages hand forward."""
+    """The immutable inputs and per-run collaborators a pipeline stage reads.
+
+    Frozen on purpose (ADR-0001 orchestration convergence, third cut): no stage
+    writes a field, and the run's one piece of mutable state -- the block
+    snapshot -- now lives in :class:`~ubt.pipeline.blocks.BlockReader`, owned by
+    the plan. ``frozen=True`` makes "a stage cannot mutate the run" a
+    compile/runtime invariant rather than a convention.
+    """
 
     # --- The run's inputs -------------------------------------------------
     config: UBTConfig
@@ -151,11 +158,8 @@ class StageContext:
     # Values one stage produces and a later one consumes live in
     # :mod:`ubt.pipeline.facts` now: the plan owns them and passes the value to
     # the stage that reads it, so the inter-stage flow is an explicit, typed
-    # parameter instead of a field on this shared object.
-
-    # Backing store for :meth:`current_blocks`: the snapshot plus the ledger
-    # block revision it was read at.
-    _blocks: tuple[list[IRBlock], int] | None = field(default=None, repr=False)
+    # parameter instead of a field on this shared object. The block snapshot
+    # lives in :class:`~ubt.pipeline.blocks.BlockReader`, owned by the plan.
 
     @property
     def is_mock_run(self) -> bool:
@@ -205,30 +209,6 @@ class StageContext:
     def raw_completion(self) -> Callable[..., Awaitable[str]]:
         """The injected backfill channel, or the router's own."""
         return self.complete_raw_fn or self.router.complete_raw
-
-    def invalidate_blocks_cache(self) -> None:
-        """Drop the cached block snapshot so the next read comes from the ledger."""
-        self._blocks = None
-
-    async def current_blocks(self, force_refresh: bool = False) -> list[IRBlock]:
-        """This job's blocks, read from SQLite.
-
-        The snapshot is reused only while the ledger reports no block write, so a
-        stage cannot be handed an outdated pre-write view of the book by forgetting to
-        refresh.
-        ``force_refresh`` and :meth:`invalidate_blocks_cache` remain for callers
-        that changed the blocks in memory without a ledger write to report.
-        """
-        # Read the revision before the query: a write that lands mid-read leaves
-        # the cached pair below looking older than it is, which costs one more
-        # reload. Reading it afterwards would certify a snapshot that missed it.
-        revision = self.ledger.blocks_seq
-        if force_refresh or self._blocks is None or self._blocks[1] != revision:
-            # Same thread discipline as the event factory: a full-table read
-            # belongs off the loop an SSE server shares across jobs.
-            blocks = await asyncio.to_thread(self.ledger.get_all_blocks, self.job_id)
-            self._blocks = (blocks, revision)
-        return self._blocks[0]
 
     @property
     def source_pdf_path(self) -> Path | None:

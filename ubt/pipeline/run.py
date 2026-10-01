@@ -38,6 +38,7 @@ from ubt.core.engine.stages import (
     run_repair_stage,
     run_triage_stage,
 )
+from ubt.pipeline.blocks import BlockReader
 from ubt.pipeline.facts import RunFacts
 
 #: Called with the terminal export event, *before* it is yielded.
@@ -63,6 +64,7 @@ async def run_stages(
     gates: RunGates,
     facts: RunFacts,
     *,
+    blocks: BlockReader,
     on_export_completed: ExportHook | None = None,
 ) -> AsyncIterator[TranslationProgressEvent]:
     """Run the stage plan, yielding every progress event in order.
@@ -78,14 +80,14 @@ async def run_stages(
     """
     async for event in run_ingest_stage(ctx):
         yield event
-    await run_extraction_witness_stage(ctx)
-    async for event in run_mode_advisory_stage(ctx, facts.layout):
+    await run_extraction_witness_stage(ctx, blocks)
+    async for event in run_mode_advisory_stage(ctx, facts.layout, blocks):
         yield event
     # Zero-token preflights BEFORE the bible: the bible stage's skeleton
     # extraction and abbreviation backfill are billable calls, and the
     # render/cost preflight exists to fail before any spend.
-    await run_render_preflight_stage(ctx)
-    await run_cost_preflight_stage(ctx)
+    await run_render_preflight_stage(ctx, blocks)
+    await run_cost_preflight_stage(ctx, blocks)
     async for event in run_bible_stage(ctx, facts.terminology):
         yield event
     if gates.chapter_streaming:
@@ -106,7 +108,7 @@ async def run_stages(
             yield event
     async for event in run_triage_stage(ctx, facts.terminology, facts.scoring):
         yield event
-    await run_difficulty_advisory_stage(ctx, facts.layout)
+    await run_difficulty_advisory_stage(ctx, facts.layout, blocks)
     async for event in run_export_stage(ctx, facts.terminology):
         if event.event_type is EventType.EXPORT_COMPLETED and on_export_completed is not None:
             await on_export_completed(event)

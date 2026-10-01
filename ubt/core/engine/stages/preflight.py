@@ -19,11 +19,12 @@ from ubt.core.engine.cost_estimate import estimate_draft_cost, measure_prefix_to
 from ubt.core.engine.render_preflight import run_render_preflight
 from ubt.core.engine.stage_context import StageContext
 from ubt.core.exceptions import UBTError
+from ubt.pipeline.blocks import BlockReader
 
 logger = logging.getLogger(__name__)
 
 
-async def run_render_preflight_stage(ctx: StageContext) -> None:
+async def run_render_preflight_stage(ctx: StageContext, blocks: BlockReader) -> None:
     """Compile a source sample with the configured renderer. Yields no events."""
     if not ctx.config.render_preflight_enabled or ctx.is_mock_run:
         # A mock run rehearses the renderer through its own pipeline already.
@@ -31,12 +32,12 @@ async def run_render_preflight_stage(ctx: StageContext) -> None:
     await run_render_preflight(
         adapter=ctx.require_adapter(),
         manifest=ctx.manifest,
-        blocks=await ctx.current_blocks(),
+        blocks=await blocks.current_blocks(),
         target_lang=ctx.target_lang,
     )
 
 
-async def run_cost_preflight_stage(ctx: StageContext) -> None:
+async def run_cost_preflight_stage(ctx: StageContext, blocks: BlockReader) -> None:
     """Refuse a job whose cheapest pass breaks the budget. Yields no events."""
     prefix_tokens = measure_prefix_tokens(
         ctx.router, target_lang=ctx.target_lang, source_lang=ctx.source_lang
@@ -45,7 +46,7 @@ async def run_cost_preflight_stage(ctx: StageContext) -> None:
         None
         if prefix_tokens is None
         else estimate_draft_cost(
-            await ctx.current_blocks(),
+            await blocks.current_blocks(),
             draft_model=ctx.config.draft_model,
             prefix_tokens=prefix_tokens,
             base_url=ctx.config.base_url,
