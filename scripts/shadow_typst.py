@@ -7,11 +7,16 @@ and checks:
 
 - a reflowable text element with a translation comes back RECONSTRUCTED_ADAPTED,
   its fragment produced and verified;
-- one with *no* translation descends to PRESERVED_OPAQUE -- nothing to reflow, so
-  the lattice keeps the source rather than losing it;
-- every other element class is placed opaque;
+- one with *no* translation -- no translation, or a ``skip_translate`` element
+  the reader typed as page furniture / a listing -- descends to
+  PRESERVED_OPAQUE, because there is nothing to reflow and the lattice keeps
+  the source rather than losing it;
+- Formula and Table are reconstructed (RECONSTRUCTED_VERIFIED) from the
+  delivered markup when their structural witness passes, and descend to opaque
+  otherwise; every other element class is placed opaque;
 - the capability set is exactly the opaque rung for all classes plus
-  RECONSTRUCTED_ADAPTED for the reflowable text classes.
+  RECONSTRUCTED_ADAPTED for the reflowable text classes and
+  RECONSTRUCTED_VERIFIED for Formula and Table.
 
 Translations are the dry-run rehearsal's (``[模拟翻译] <source>``), so the run
 needs no API key. Exit 0 iff every check holds.
@@ -68,10 +73,14 @@ def _check_capabilities() -> list[str]:
 def _check_document(document: Path) -> tuple[int, int, list[str]]:
     doc = read_pdf(document)
     verifiers = _verifiers()
+    # A ``skip_translate`` element is one the reader typed as page furniture or
+    # a kept listing: the backend deliberately places it opaque, so it must not
+    # appear in the translation map (giving it one would reflow what the reader
+    # chose to keep verbatim -- the gap the attestation shadow first caught).
     translations = {
         element.id: f"{REHEARSAL_MARKER} {element.text}"
         for element in doc.elements
-        if isinstance(element, REFLOW_CLASSES)
+        if isinstance(element, REFLOW_CLASSES) and not element.skip_translate
     }
     backend = TypstBackend(translations)
     untranslated = TypstBackend()
@@ -80,7 +89,7 @@ def _check_document(document: Path) -> tuple[int, int, list[str]]:
 
     for element in doc.elements:
         attestation = realize(element, backend, verifiers, doc.source)
-        if isinstance(element, REFLOW_CLASSES):
+        if isinstance(element, REFLOW_CLASSES) and not element.skip_translate:
             if attestation.fidelity is not Fidelity.RECONSTRUCTED_ADAPTED:
                 problems.append(
                     f"{element.id}: {element.kind} {attestation.fidelity.name}, "
@@ -101,7 +110,21 @@ def _check_document(document: Path) -> tuple[int, int, list[str]]:
                     f"{element.id}: untranslated {element.kind} {bare.fidelity.name}, "
                     f"expected PRESERVED_OPAQUE"
                 )
+        elif isinstance(element, (Formula, Table)):
+            # The backend reconstructs formulas and tables; a verified
+            # reconstruction is the design, and a failed structural check falls
+            # through to the opaque slice -- both are acceptable outcomes.
+            if attestation.fidelity not in (
+                Fidelity.RECONSTRUCTED_VERIFIED,
+                Fidelity.PRESERVED_OPAQUE,
+            ):
+                problems.append(
+                    f"{element.id} ({element.kind}): {attestation.fidelity.name}, "
+                    f"expected RECONSTRUCTED_VERIFIED or PRESERVED_OPAQUE"
+                )
         elif attestation.fidelity is not Fidelity.PRESERVED_OPAQUE:
+            # skip_translate reflow classes (page furniture, kept listings) and
+            # every class the backend does not reflow are placed opaque.
             problems.append(
                 f"{element.id} ({element.kind}): {attestation.fidelity.name}, "
                 f"expected PRESERVED_OPAQUE"
