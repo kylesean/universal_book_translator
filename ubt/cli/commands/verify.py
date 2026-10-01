@@ -77,12 +77,12 @@ def verify_command(
         typer.Option("--corpus", help="Directory containing cases.json to verify"),
     ] = None,
     engine: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--engine",
-            help="Engine hint for --job re-derivation (rigid | publication)",
+            help="Engine hint for --job re-derivation (rigid | publication; default: from ledger)",
         ),
-    ] = "publication",
+    ] = None,
     db_dir: Annotated[
         Path | None,
         typer.Option(
@@ -157,7 +157,9 @@ def _verify_artifact(artifact: Path, *, json_output: bool) -> ReconciliationRepo
     return report
 
 
-def _verify_job(job: str, *, engine: str, db_dir: Any, json_output: bool) -> ReconciliationReport:
+def _verify_job(
+    job: str, *, engine: str | None = None, db_dir: Any, json_output: bool
+) -> ReconciliationReport:
     if not job_id_is_valid(job):
         if json_output:
             print(json.dumps({"status": "error", "error": f"invalid job id {job!r}"}))

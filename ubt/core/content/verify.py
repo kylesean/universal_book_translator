@@ -45,7 +45,7 @@ def load_contract(artifact: Path | str) -> ReconciliationReport:
 
 
 def contract_from_ledger(
-    ledger: SQLiteJobLedger, job_id: str, *, engine: str = "publication"
+    ledger: SQLiteJobLedger, job_id: str, *, engine: str | None = None
 ) -> ReconciliationReport:
     """Re-derive the contract from a finished job's ledger blocks.
 
@@ -57,8 +57,9 @@ def contract_from_ledger(
     The account is the *attestation projection* the export uses (ADR-0001
     Phase 3), not a second, independent balance: one account, one mechanism.
     ``engine`` selects the asset-preservation policy (see
-    :func:`ubt.core.content.adapt.graph_from_blocks`); it cannot be read back
-    reliably from the ledger, so the caller states it (default: reflow).
+    :func:`ubt.core.content.adapt.graph_from_blocks`); if not explicitly provided,
+    it falls back to the job's persisted ``render_engine_effective`` metadata,
+    defaulting to ``publication`` (reflow) when unset.
     """
     from ubt.core.qe.fast_pass import FastPassFilter
     from ubt.layout.theme import resolve_theme
@@ -66,6 +67,10 @@ def contract_from_ledger(
     from ubt.pipeline.delivery import delivery_document, delivery_translations
     from ubt.render.typst_backend import TypstBackend
     from ubt.verify.verifier import build_verifiers
+
+    if engine is None:
+        persisted = ledger.get_job_metadata_value(job_id, "render_engine_effective")
+        engine = str(persisted) if persisted else "publication"
 
     blocks = ledger.get_all_blocks(job_id)
     graph = graph_from_blocks(blocks, engine=engine, doc_id=job_id)

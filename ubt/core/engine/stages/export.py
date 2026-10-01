@@ -1400,6 +1400,11 @@ async def run_export_stage(
         realization_plan=realization_plan,
     )
 
+    effective_engine = str(manifest.metadata.get("render_engine_effective") or render_engine)
+    await asyncio.to_thread(
+        ledger.set_job_metadata_value, actual_job_id, "render_engine_effective", effective_engine
+    )
+
     # Render skip pass-through + length conservation, before the report is
     # built (see _apply_render_skip_ledger_pass).
     await _apply_render_skip_ledger_pass(ctx, adapter, manifest, final_blocks)
