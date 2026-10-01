@@ -94,8 +94,54 @@ def looks_like_debris(text: str) -> bool:
     return bool(wordy <= 2 and len(tokens) <= 6 and _has_math(body))
 
 
+# --------------------------------------------------------------------------- #
+# Markdown content rules
+# --------------------------------------------------------------------------- #
+# Shared by the native Markdown reader and the Markdown adapter, so a line
+# cannot be a heading to one and prose to the other (ADR R3, one owner).
+_MD_HEADING = re.compile(r"^(#{1,6})\s+(.*)$")
+_TABLE_DELIMITER = re.compile(r"^\|?(\s*:?-+:?\s*\|)+\s*:?-+:?\s*\|?$")
+_MD_LIST_ITEM = re.compile(r"^(\s*)([-*+]|\d{1,9}[.)])\s+(.*)$")
+
+
+def markdown_heading(line: str) -> tuple[int, str] | None:
+    """``(level, text)`` for an ATX heading line, or ``None``."""
+    match = _MD_HEADING.match((line or "").strip())
+    if match is None:
+        return None
+    return len(match.group(1)), match.group(2).strip()
+
+
+def markdown_list_item(line: str) -> tuple[str, str] | None:
+    """``(marker, text)`` for a list-item line, or ``None``."""
+    match = _MD_LIST_ITEM.match(line or "")
+    if match is None:
+        return None
+    return match.group(2), match.group(3).strip()
+
+
+def is_markdown_table(text: str) -> bool:
+    """True when text is a GitHub-flavoured Markdown table."""
+    lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
+    if len(lines) < 2:
+        return False
+    if not all("|" in line for line in lines):
+        return False
+    return bool(_TABLE_DELIMITER.match(lines[1]))
+
+
+def is_display_math(text: str) -> bool:
+    """True for a ``$$ … $$`` display-math block."""
+    body = (text or "").strip()
+    return body.startswith("$$") and body.endswith("$$") and len(body) >= 4
+
+
 __all__ = [
     "is_bare_page_number",
+    "is_display_math",
+    "is_markdown_table",
     "looks_like_debris",
     "looks_like_listing",
+    "markdown_heading",
+    "markdown_list_item",
 ]

@@ -34,11 +34,12 @@ a page whose geometry cannot be read at all, and that is reported by omission.
 from __future__ import annotations
 
 import dataclasses
-import hashlib
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ubt.analyze._identity import file_digest
+from ubt.analyze.normalize import normalize_text
 from ubt.analyze.structure import is_bare_page_number, looks_like_debris, looks_like_listing
 from ubt.core.policy.layout_policy import FOOTER_BAND_PT, HEADER_BAND_PT
 from ubt.model.ast import (
@@ -115,7 +116,9 @@ def _join_lines(lines: list[LineBox]) -> str:
             out = out[:-1] + piece
         else:
             out = f"{out} {piece}"
-    return out
+    # Canonicalize presentation characters before any span is assigned, so the
+    # element text, the source slice and Span.chars all see the same stream.
+    return normalize_text(out)
 
 
 def _body_margin(lines: list[LineBox]) -> float:
@@ -311,14 +314,6 @@ def _page_count(pdf_path: Path) -> int:
         return len(document)
 
 
-def _file_digest(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(chunk)
-    return digest.hexdigest()[:16]
-
-
 def read_pdf(
     path: str | Path,
     *,
@@ -382,7 +377,7 @@ def read_pdf(
         regions.append(Region(id=f"r{len(regions)}", kind=current_kind, elements=tuple(current)))
 
     source = CanonicalSource(
-        doc_id=doc_id or _file_digest(pdf_path),
+        doc_id=doc_id or file_digest(pdf_path),
         path=str(pdf_path),
         text="\n".join(texts),
         pages=tuple(geometry),

@@ -10,6 +10,7 @@ from typing import Any
 
 from ubt.adapters.base import BaseDocumentAdapter, decode_markup
 from ubt.adapters.unresolved import UNRESOLVED_STATUSES, failure_note_markdown
+from ubt.analyze.structure import is_display_math, is_markdown_table, markdown_heading
 from ubt.core.cleaners.html_sanitizer import sanitize_inline_html, strip_html_mark_tags
 from ubt.core.exceptions import DocumentParseError
 from ubt.core.ir.models import (
@@ -79,19 +80,6 @@ def _sanitize_markdown_content(text: str) -> str:
     URL-scheme gating) while the surrounding text is byte-for-byte unchanged.
     """
     return sanitize_inline_html(strip_html_mark_tags(text))
-
-
-_TABLE_DELIMITER_RE = re.compile(r"^\|?(\s*:?-+:?\s*\|)+\s*:?-+:?\s*\|?$")
-
-
-def _is_markdown_table(text: str) -> bool:
-    """Return True if text is a GFM markdown table."""
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    if len(lines) < 2:
-        return False
-    if not all("|" in line for line in lines):
-        return False
-    return bool(_TABLE_DELIMITER_RE.match(lines[1]))
 
 
 class MarkdownAdapter(BaseDocumentAdapter):
@@ -234,15 +222,15 @@ class MarkdownAdapter(BaseDocumentAdapter):
             if not text:
                 return
 
-            if text.startswith("$$") and text.endswith("$$") and len(text) >= 4:
+            if is_display_math(text):
                 block_type = BlockType.FORMULA
                 flow_id = FlowID.MAIN_STORY
                 skip_translate = True
-            elif not self._plain_text and text.startswith("#"):
+            elif not self._plain_text and markdown_heading(text) is not None:
                 block_type = BlockType.HEADING
                 flow_id = FlowID.MAIN_STORY
                 skip_translate = False
-            elif not self._plain_text and _is_markdown_table(text):
+            elif not self._plain_text and is_markdown_table(text):
                 block_type = BlockType.TABLE
                 flow_id = FlowID.TABLE_GRID
                 skip_translate = False
@@ -358,7 +346,7 @@ class MarkdownAdapter(BaseDocumentAdapter):
                 continue
 
             # Check if this line is an ATX heading
-            is_heading = not self._plain_text and re.match(r"^#{1,6}\s+", line_s) is not None
+            is_heading = not self._plain_text and markdown_heading(line_s) is not None
             if is_heading:
                 flush_paragraph()
                 if line_s.startswith("# ") and current_blocks:
