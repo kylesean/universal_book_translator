@@ -39,7 +39,7 @@ from ubt.core.router.router import (
 )
 from ubt.core.validators.consistency import GlossaryConsistencyValidator
 from ubt.pipeline.facts import Terminology
-from ubt.segment.placeholders import MaskedSource, PlaceholderEngine
+from ubt.segment.placeholders import MaskedSource, default_placeholder_engine
 from ubt.translate.engine import TranslationEngine
 
 logger = logging.getLogger(__name__)
@@ -1077,14 +1077,7 @@ async def run_draft_stage(
     # The per-unit transform (mask -> restore -> judge) has one owner now
     # (ADR-0001 Phase 2): the engine holds the fixed mask order, while the
     # router/batch/retry orchestration below stays in this stage.
-    translation_engine = TranslationEngine(
-        placeholders=PlaceholderEngine(
-            code=ctx.code_masker,
-            math=ctx.math_masker,
-            soup=ctx.soup_masker,
-            citation=ctx.citation_masker,
-        )
-    )
+    translation_engine = TranslationEngine(placeholders=default_placeholder_engine())
     config = ctx.config
     # How many blocks the book holds: derived here from the ledger (it is
     # observable state, not something a stage has to hand forward) and read by

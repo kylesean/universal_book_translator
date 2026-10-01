@@ -127,4 +127,24 @@ class PlaceholderEngine:
         return RestoreOutcome(text=code.text, code=code, math=math, soup=soup, citation=citation)
 
 
-__all__ = ["MaskedSource", "PlaceholderEngine", "RestoreOutcome"]
+def default_placeholder_engine() -> PlaceholderEngine:
+    """The standard engine: the four detectors, wired in the one owned order.
+
+    Callers that want the pipeline's placeholder behaviour construct this rather
+    than restating the order (draft, export's XLIFF companion, the quality
+    report), so the order has a single owner.
+    """
+    return PlaceholderEngine(
+        code=CodeMasker(),
+        math=MathMasker(),
+        soup=SoupMathMasker(),
+        citation=CitationMasker(),
+    )
+
+
+__all__ = [
+    "MaskedSource",
+    "PlaceholderEngine",
+    "RestoreOutcome",
+    "default_placeholder_engine",
+]

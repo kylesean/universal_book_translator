@@ -33,10 +33,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
-from ubt.core.cleaners.citation_masker import CitationMasker
-from ubt.core.cleaners.code_masker import CodeMasker
-from ubt.core.cleaners.math_masker import MathMasker
-from ubt.core.cleaners.soup_math import SoupMathMasker
 from ubt.core.config import UBTConfig
 from ubt.core.engine.events import (
     EventType,
@@ -109,10 +105,6 @@ class StageContext:
     output_path: Path | None = None
     tm: TranslationMemory | None = None
     html_validator: HTMLDeltaValidator = field(default_factory=HTMLDeltaValidator)
-    code_masker: CodeMasker = field(default_factory=CodeMasker)
-    citation_masker: CitationMasker = field(default_factory=CitationMasker)
-    math_masker: MathMasker = field(default_factory=MathMasker)
-    soup_masker: SoupMathMasker = field(default_factory=SoupMathMasker)
 
     # --- Decided before staging, read by several stages -------------------
     short_chain: bool = False

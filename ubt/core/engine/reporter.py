@@ -8,10 +8,6 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
-from ubt.core.cleaners.citation_masker import CitationMasker
-from ubt.core.cleaners.code_masker import CodeMasker
-from ubt.core.cleaners.math_masker import MathMasker
-from ubt.core.cleaners.soup_math import SoupMathMasker
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.ir.models import BlockStatus, BlockType, BookManifest
 from ubt.core.qe.defect_taxonomy import INTENTIONAL_PRESERVED_SKIP_PREFIXES
@@ -20,6 +16,12 @@ from ubt.core.qe.defect_taxonomy import INTENTIONAL_PRESERVED_SKIP_PREFIXES
 # ubt.core.qe.score_policy, which both this report and the ledger's job stats
 # import so their averages cannot drift apart again.
 from ubt.core.qe.score_policy import qe_scored_values
+from ubt.segment.placeholders import default_placeholder_engine
+
+# The placeholder mask order has exactly one owner (``PlaceholderEngine``); the
+# report re-masks through it rather than restating the order, so a change to the
+# order cannot leave the report measuring a pipeline that no longer exists.
+_PLACEHOLDER_ENGINE = default_placeholder_engine()
 
 #: Bump when QualityReport's serialized shape changes so downstream consumers
 #: can validate schema compatibility.
@@ -624,15 +626,12 @@ def compute_placeholder_metrics(blocks: list[Any]) -> ReportPlaceholderMetrics:
     """Recompute placeholder retention without any pipeline or schema change.
 
     The maskers are deterministic pure functions, so re-masking each block's
-    source in the draft stage's exact order (code -> math -> soup -> citation)
-    reproduces the pre-draft masked-span count. Corrupt restores are read back
-    from the persisted ``math_token_corrupt`` flags, capped per block at its
-    masked count so re-finalized stages can never double-count the same event.
+    source through the one ``PlaceholderEngine`` (whose order the draft stage
+    also uses) reproduces the pre-draft masked-span count. Corrupt restores are
+    read back from the persisted ``math_token_corrupt`` flags, capped per block
+    at its masked count so re-finalized stages can never double-count the same
+    event.
     """
-    code_masker = CodeMasker()
-    cite_masker = CitationMasker()
-    math_masker = MathMasker()
-    soup_masker = SoupMathMasker()
     masked_total = 0
     corrupt_total = 0
     masked_blocks = 0
@@ -641,13 +640,15 @@ def compute_placeholder_metrics(blocks: list[Any]) -> ReportPlaceholderMetrics:
         source = block.source_text or ""
         if not source:
             continue
-        masked_src, code_map = code_masker.mask(source)
-        math_masked, math_map = math_masker.mask(masked_src)
-        soup_masked, soup_map = soup_masker.mask(math_masked)
-        _, cite_map = cite_masker.mask(soup_masked)
+        masked = _PLACEHOLDER_ENGINE.mask(source)
         # Count every masked span type, not just math: code/citation
         # corruption is MQM-Critical, so omitting it left retention at 1.0.
-        masked_count = len(code_map) + len(math_map) + len(soup_map) + len(cite_map)
+        masked_count = (
+            len(masked.code_map)
+            + len(masked.math_map)
+            + len(masked.soup_map)
+            + len(masked.cite_map)
+        )
         if masked_count:
             masked_blocks += 1
             masked_total += masked_count

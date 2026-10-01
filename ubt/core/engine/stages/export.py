@@ -953,21 +953,12 @@ def _write_xliff_companion(
     if not ctx.config.emit_xliff_companion:
         return None
     try:
-        from ubt.core.cleaners.citation_masker import CitationMasker
-        from ubt.core.cleaners.code_masker import CodeMasker
-        from ubt.core.cleaners.math_masker import MathMasker
-        from ubt.core.cleaners.soup_math import SoupMathMasker
         from ubt.core.job_options import companion_path
         from ubt.segment.document import segments_from_blocks
-        from ubt.segment.placeholders import PlaceholderEngine
+        from ubt.segment.placeholders import default_placeholder_engine
         from ubt.segment.xliff import to_xliff
 
-        engine = PlaceholderEngine(
-            code=CodeMasker(),
-            math=MathMasker(),
-            soup=SoupMathMasker(),
-            citation=CitationMasker(),
-        )
+        engine = default_placeholder_engine()
         segments = segments_from_blocks(blocks, engine=engine)
         if not segments:
             return None
