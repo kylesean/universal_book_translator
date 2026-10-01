@@ -125,6 +125,31 @@ class TranslationEngine:
         with contextlib.suppress(OSError, ValueError, KeyError, TypeError):
             self.cache.put(key, envelope)
 
+    def _value_key(self, kind: str, context: str) -> str:
+        from ubt.cache.store import step_key
+
+        return step_key(kind, [self.model, self.prompt_version, context], {})
+
+    def cached_value(self, context: str, *, kind: str) -> str | None:
+        """The cached text for a non-draft translate step, or ``None`` (fail-open).
+
+        A macro chunk is one provider call producing several units, so it has no
+        single masked source and cannot use :meth:`cached_draft`; it keys on its
+        own prompt digest under a distinct ``kind``, sharing the same store.
+        """
+        if self.cache is None:
+            return None
+        return self._cached_draft(self._value_key(kind, context))
+
+    def remember_value(self, context: str, value: str, *, kind: str) -> None:
+        """Store text for a non-draft translate step under ``kind`` (fail-open)."""
+        if self.cache is None:
+            return
+        key = self._value_key(kind, context)
+        envelope = json.dumps({"key": key, "text": value}, ensure_ascii=False)
+        with contextlib.suppress(OSError, ValueError, KeyError, TypeError):
+            self.cache.put(key, envelope)
+
     async def draft(self, masked_source: str, translate: TranslateFn, *, context: str = "") -> str:
         """Generate the raw draft, through the content cache when one is set.
 

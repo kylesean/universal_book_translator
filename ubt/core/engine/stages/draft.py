@@ -2,6 +2,7 @@
 
 import asyncio
 import functools
+import json
 import logging
 import random
 from collections.abc import AsyncIterator
@@ -118,6 +119,24 @@ def is_already_final(block: IRBlock) -> bool:
     return block.status in (BlockStatus.MTQE_PASSED, BlockStatus.REPAIRED)
 
 
+def _decode_chunk(raw: str | None) -> dict[str, str]:
+    """The block-id -> text map from a cached macro-chunk value (fail-closed)."""
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except (ValueError, TypeError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {str(key): str(value) for key, value in data.items()}
+
+
+def _encode_chunk(extracted: dict[str, str]) -> str:
+    """A macro-chunk result as cache text (JSON, so a file stays inspectable)."""
+    return json.dumps(extracted, ensure_ascii=False)
+
+
 @dataclass(slots=True)
 class DraftRuntime:
     """Per-run mutable mechanisms: ledger/router/adapter handles, buffers, caches.
@@ -187,6 +206,49 @@ class _DraftProcessor:
         if not self.policy.glossary_dicts:
             return None
         return GlossaryConsistencyValidator(glossary=self.policy.glossary_dicts)
+
+    def chunk_context(self, chunk: list[tuple[IRBlock, _DraftInputs]]) -> str:
+        """The content key of one macro-chunk draft prompt (ADR-0001 Phase 4).
+
+        A macro chunk is a *different* prompt from any single block's -- all the
+        chunk's blocks ride one XML request -- so it keys separately. The merged
+        glossary / first neighbour / few-shot / rolling-epoch inputs here are
+        exactly what :meth:`draft_macro_chunk_group` sends, so the key and the
+        call cannot drift.
+        """
+        from ubt.cache.store import step_key
+        from ubt.core.router.prompts import build_macro_chunk_draft_prompt
+
+        merged_glossary = "\n\n".join(
+            filter(None, dict.fromkeys(inp.glossary_table.strip() for _, inp in chunk))
+        )
+        first_inp = chunk[0][1]
+        last_inp = chunk[-1][1]
+        system, user = build_macro_chunk_draft_prompt(
+            blocks=[(b.id, inp.masked_source) for b, inp in chunk],
+            glossary_table=merged_glossary,
+            neighbor_context=first_inp.neighbor_ctx,
+            target_lang=self.policy.target_lang,
+            source_lang=self.policy.source_lang,
+            genre_profile=self.policy.profile_name,
+            rolling_summary=first_inp.macro_ctx,
+            global_glossary=self.policy.global_glossary_table,
+            few_shot_reference=first_inp.few_shot_reference or last_inp.few_shot_reference,
+            epoch_summary=first_inp.epoch_ctx,
+            domain=self.policy.domain,
+        )
+        return step_key(
+            "macro_chunk_prompt",
+            [
+                system,
+                user,
+                self.policy.source_lang,
+                self.policy.target_lang,
+                self.policy.profile_name,
+                self.policy.domain or "",
+            ],
+            {},
+        )
 
     def prompt_context(self, inputs: _DraftInputs) -> str:
         """The content key of one draft prompt (ADR-0001 Phase 4).
@@ -924,63 +986,81 @@ class _DraftProcessor:
             await self.draft_single_block(block, current_batch, rolling_prev_summary, inp)
             return
 
-        async with self.runtime.concurrency_sem:
-            blocks_to_draft = [
-                b.model_copy(update={"source_text": inp.masked_source}) for b, inp in chunk
-            ]
-            # Order-preserving dedup: a set of strings iterates in hash-seed
-            # order, so a plain set would give the same book a differently
-            # ordered term table (and therefore a different prompt) on every
-            # run.
-            merged_glossary = "\n\n".join(
-                filter(None, dict.fromkeys(inp.glossary_table.strip() for _, inp in chunk))
-            )
-            first_block, first_inp = chunk[0]
-            last_block, last_inp = chunk[-1]
-            macro_ctx = first_inp.macro_ctx
-            epoch_ctx = first_inp.epoch_ctx
-            few_shot = first_inp.few_shot_reference or last_inp.few_shot_reference
+        # Chunk-level prompt inputs, computed once so the cache key and the call
+        # cannot drift. Order-preserving dedup: a set of strings iterates in
+        # hash-seed order, so a plain set would give the same book a differently
+        # ordered term table (and therefore a different prompt) on every run.
+        merged_glossary = "\n\n".join(
+            filter(None, dict.fromkeys(inp.glossary_table.strip() for _, inp in chunk))
+        )
+        first_inp = chunk[0][1]
+        last_inp = chunk[-1][1]
+        macro_ctx = first_inp.macro_ctx
+        epoch_ctx = first_inp.epoch_ctx
+        few_shot = first_inp.few_shot_reference or last_inp.few_shot_reference
 
-            extracted_by_id: dict[str, str] = {}
-            try:
-                for attempt in range(self.policy.draft_max_retries + 1):
-                    try:
-                        extracted_by_id = await self.runtime.router.draft_macro_chunk(
-                            blocks=blocks_to_draft,
-                            glossary_table=merged_glossary,
-                            neighbor_context=first_inp.neighbor_ctx,
-                            target_lang=self.policy.target_lang,
-                            source_lang=self.policy.source_lang,
-                            genre_profile=self.policy.profile_name,
-                            domain=self.policy.domain,
-                            rolling_summary=macro_ctx,
-                            epoch_summary=epoch_ctx,
-                            global_glossary=self.policy.global_glossary_table,
-                            few_shot_reference=few_shot,
-                        )
-                        break
-                    except Exception as exc:
-                        if (
-                            not classify_provider_error(exc).retryable
-                            or attempt >= self.policy.draft_max_retries
-                        ):
-                            raise
-                        delay = min(8.0, self.policy.draft_retry_base_delay * (2**attempt))
-                        delay += random.uniform(0, delay * 0.25)
-                        await asyncio.sleep(delay)
-            except (asyncio.CancelledError, JobInterruptedError, BudgetExceededError):
-                raise
-            except Exception as exc:
-                logger.warning(
-                    "Macro-chunk draft failed for %d blocks (%s); redrafting blocks individually",
-                    len(chunk),
-                    exc,
+        extracted_by_id: dict[str, str] = {}
+        cached_context: str | None = None
+        if self.runtime.engine.cache is not None:
+            # One provider call, many units: keyed on the chunk's own prompt
+            # digest, so a re-run of the same chunk is a hit (ADR-0001 Phase 4).
+            cached_context = self.chunk_context(chunk)
+            cached_raw = await asyncio.to_thread(
+                self.runtime.engine.cached_value, cached_context, kind="translate_chunk"
+            )
+            extracted_by_id = _decode_chunk(cached_raw)
+
+        if not extracted_by_id:
+            async with self.runtime.concurrency_sem:
+                blocks_to_draft = [
+                    b.model_copy(update={"source_text": inp.masked_source}) for b, inp in chunk
+                ]
+                try:
+                    for attempt in range(self.policy.draft_max_retries + 1):
+                        try:
+                            extracted_by_id = await self.runtime.router.draft_macro_chunk(
+                                blocks=blocks_to_draft,
+                                glossary_table=merged_glossary,
+                                neighbor_context=first_inp.neighbor_ctx,
+                                target_lang=self.policy.target_lang,
+                                source_lang=self.policy.source_lang,
+                                genre_profile=self.policy.profile_name,
+                                domain=self.policy.domain,
+                                rolling_summary=macro_ctx,
+                                epoch_summary=epoch_ctx,
+                                global_glossary=self.policy.global_glossary_table,
+                                few_shot_reference=few_shot,
+                            )
+                            break
+                        except Exception as exc:
+                            if (
+                                not classify_provider_error(exc).retryable
+                                or attempt >= self.policy.draft_max_retries
+                            ):
+                                raise
+                            delay = min(8.0, self.policy.draft_retry_base_delay * (2**attempt))
+                            delay += random.uniform(0, delay * 0.25)
+                            await asyncio.sleep(delay)
+                except (asyncio.CancelledError, JobInterruptedError, BudgetExceededError):
+                    raise
+                except Exception as exc:
+                    logger.warning(
+                        "Macro-chunk draft failed for %d blocks (%s); redrafting blocks individually",
+                        len(chunk),
+                        exc,
+                    )
+                    # Empty the extraction map and fall through to the missing-block
+                    # loop below, which redrafts individually *outside* the
+                    # semaphore: draft_single_block re-acquires it, so calling it
+                    # here (while this group still holds a permit) self-deadlocks.
+                    extracted_by_id = {}
+            if extracted_by_id and cached_context is not None:
+                await asyncio.to_thread(
+                    self.runtime.engine.remember_value,
+                    cached_context,
+                    _encode_chunk(extracted_by_id),
+                    kind="translate_chunk",
                 )
-                # Empty the extraction map and fall through to the missing-block
-                # loop below, which redrafts individually *outside* the
-                # semaphore: draft_single_block re-acquires it, so calling it
-                # here (while this group still holds a permit) self-deadlocks.
-                extracted_by_id = {}
 
         missing: list[tuple[IRBlock, _DraftInputs]] = []
         for b, inp in chunk:
