@@ -7,10 +7,12 @@ facing-page interleaving, rigid typesetting) so only the extraction leg
 differs.
 
 Extraction is the native reader (:mod:`ubt.analyze.reader_pdf`): it owns
-reading order, paragraph grouping and heading detection from the page's real
-typography and emits a typed ``Document``, which the bridge projects back into
-the pipeline's ``IRBlock`` contract. ``flow_reassembly`` then applies only what
-the reader cannot (chrome, listings, math debris, fragment coalescing).
+reading order, paragraph grouping, heading detection and page furniture
+(chrome, listings, math debris) from the page's real typography and geometry,
+and emits a typed ``Document``, which the bridge projects back into the
+pipeline's ``IRBlock`` contract. No flow repair runs on this path -- the
+reader's output is already typed. (The plain-text pdf_oxide fallback, which has
+no such model, still repairs its flow.)
 
 Routing: ``UBT_PDF_ENGINE=auto`` picks this engine for clean single-column
 born-digital PDFs (see :mod:`ubt.adapters.pdf.engine_selector`); scans and
@@ -93,7 +95,13 @@ class PDFiumAdapter(DoclingPDFAdapter):
     def _extract_blocks_sync(
         self, path: Path, page_range: tuple[int, int] | None = None
     ) -> list[IRBlock]:
-        """pypdfium2 geometric extraction; degrade to plain pdf_oxide on failure."""
+        """pypdfium2 geometric extraction; degrade to plain pdf_oxide on failure.
+
+        The native reader owns classification -- reading order, grouping,
+        headings, chrome, listings, math debris -- so its output needs no flow
+        repair. The plain-text pdf_oxide fallback has no such model, so it still
+        runs ``reassemble_flow``.
+        """
         try:
             blocks = self._extract_with_pdfium(path, page_range)
         except Exception as exc:
@@ -104,16 +112,12 @@ class PDFiumAdapter(DoclingPDFAdapter):
                 exc,
             )
             blocks = self._extract_with_oxide(path)
+            from ubt.adapters.pdf.flow_reassembly import reassemble_flow
+
+            blocks, _stats = reassemble_flow(blocks, pdf_path=path)
         if page_range is not None:
             first, last = page_range
             blocks = [b for b in blocks if _block_page_in_range(b, first, last)]
-        # Evidence-based flow repair: the geometric classifier labels any short,
-        # unterminated paragraph a heading and splits paragraphs at column
-        # boundaries, which strands fragments with no paintable region. Repair
-        # roles and reunite fragments against the page's real typography.
-        from ubt.adapters.pdf.flow_reassembly import reassemble_flow
-
-        blocks, _stats = reassemble_flow(blocks, pdf_path=path)
         return blocks
 
     @pdfium_serialized
