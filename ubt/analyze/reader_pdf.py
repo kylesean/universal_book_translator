@@ -12,8 +12,10 @@ old flow lived with:
 1. a vertical gap wider than :data:`PARAGRAPH_GAP_FACTOR` of the font starts a
    new paragraph;
 2. a font-size change over :data:`FONT_CHANGE_RATIO` starts a new paragraph;
-3. a first-line indent (``x0`` moves right by more than :data:`INDENT_FACTOR`
-   font sizes) starts a new paragraph;
+3. a first-line indent -- ``x0`` moving right by more than
+   :data:`INDENT_FACTOR` font sizes *from the body margin* -- starts a new
+   paragraph; a hanging indent (the previous line is already off the margin,
+   e.g. a bullet's wrapped continuation) does not, so a list item stays whole;
 4. a line beginning with a bullet/number starts a list item;
 5. a bare number in the top or bottom margin band is a page number -- page
    furniture, kept verbatim in a ``RegionKind.PAGE_NUMBER`` region;
@@ -130,10 +132,27 @@ def _join_lines(lines: list[LineBox]) -> str:
     return out
 
 
-def _starts_new_paragraph(previous: LineBox, current: LineBox, body: float) -> bool:
+def _body_margin(lines: list[LineBox]) -> float:
+    """The page's body left margin: the modal ``x0`` of its non-empty lines."""
+    weights: dict[float, int] = {}
+    for line in lines:
+        if not line.text.strip():
+            continue
+        key = round(line.rect[0], 0)
+        weights[key] = weights.get(key, 0) + 1
+    if not weights:
+        return 0.0
+    return max(weights, key=lambda key: weights[key])
+
+
+def _starts_new_paragraph(previous: LineBox, current: LineBox, body: float, body_x0: float) -> bool:
     font = max(previous.font_size, current.font_size, body, 1.0)
-    # Column/margin jump or a first-line indent.
-    if current.rect[0] - previous.rect[0] > INDENT_FACTOR * font:
+    indent = INDENT_FACTOR * font
+    # A first-line indent -- measured from the *body margin* -- starts a
+    # paragraph. A *hanging* indent does not: when the previous line is already
+    # off the margin (a bullet's wrapped continuation, a block quote's second
+    # line), the current line continues the same unit.
+    if current.rect[0] - body_x0 > indent and previous.rect[0] - body_x0 <= indent:
         return True
     # Font-size change (a heading or a different text block).
     if abs(current.font_size - previous.font_size) > FONT_CHANGE_RATIO * font:
@@ -146,10 +165,11 @@ def _starts_new_paragraph(previous: LineBox, current: LineBox, body: float) -> b
 def _group_lines(lines: list[LineBox], body: float) -> list[list[LineBox]]:
     groups: list[list[LineBox]] = []
     current: list[LineBox] = []
+    body_x0 = _body_margin(lines)
     for line in lines:
         if not line.text.strip():
             continue
-        if current and _starts_new_paragraph(current[-1], line, body):
+        if current and _starts_new_paragraph(current[-1], line, body, body_x0):
             groups.append(current)
             current = []
         current.append(line)
