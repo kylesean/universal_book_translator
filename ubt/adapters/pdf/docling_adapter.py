@@ -46,6 +46,7 @@ from ubt.core.ir.render_plan import RenderOutcome, RenderPlan
 from ubt.model.fidelity import Fidelity
 
 if TYPE_CHECKING:
+    from ubt.cache.store import CacheStore
     from ubt.core.ports import AdapterRuntimeConfig
 
 logger = logging.getLogger(__name__)
@@ -83,6 +84,10 @@ def _docling_symbols() -> tuple[Any, Any, Any, Any]:
 
 class DoclingPDFAdapter(BasePDFEngineAdapter):
     """PDF engine adapter: IBM Docling semantic ingestion with Typst/oxide delivery."""
+
+    #: Content-addressed analyze cache (ADR-0001 Phase 4), set in apply_config.
+    #: The Docling layout+formula pass is the heaviest step of a Docling run.
+    analysis_cache: CacheStore | None = None
 
     def __init__(
         self,
@@ -191,6 +196,14 @@ class DoclingPDFAdapter(BasePDFEngineAdapter):
             reconstructor.witness_cache = (
                 DiskCacheStore(runtime_config.cache_dir) if runtime_config.cache_dir else None
             )
+        # The analyze cache (ADR-0001 Phase 4): the Docling layout+formula pass
+        # is a pure function of the file, page range, enrichment policy and
+        # parser code, so a resumed or re-run job reuses the extraction.
+        from ubt.cache.store import DiskCacheStore as _DiskCacheStore
+
+        self.analysis_cache = (
+            _DiskCacheStore(runtime_config.cache_dir) if runtime_config.cache_dir else None
+        )
 
     def close(self) -> None:
         """Release adapter-owned subprocesses (the MathJax node renderer)."""
@@ -289,7 +302,20 @@ class DoclingPDFAdapter(BasePDFEngineAdapter):
     ) -> list[IRBlock]:
         """Extract blocks synchronously via Docling or geometric pypdfium2/pdf_oxide fallback."""
         if self.is_docling_installed():
-            return self._extract_with_docling(path, page_range)
+            from ubt.adapters.pdf.analysis_cache import cached_blocks, docling_identity
+
+            # The Docling pass is the run's heaviest step; cache it on the exact
+            # inputs (file, page range, enrichment policy, parser code), ADR-0001
+            # Phase 4. The enrichment flag is output-bearing, so it is in the key.
+            enrich = self._resolve_formula_enrichment(path)
+            return cached_blocks(
+                self.analysis_cache,
+                path=path,
+                page_range=page_range,
+                identity=docling_identity(),
+                extra=f"enrich={enrich}",
+                compute=lambda: self._extract_with_docling(path, page_range),
+            )
 
         # Fast geometric extraction fallback via pypdfium2 (MIT/Apache-2.0, Zero-PyTorch)
         try:

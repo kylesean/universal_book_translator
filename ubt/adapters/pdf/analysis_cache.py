@@ -15,6 +15,7 @@ the cache must never change what the pipeline sees.
 
 from __future__ import annotations
 
+import importlib
 import logging
 from collections.abc import Callable
 from pathlib import Path
@@ -50,19 +51,50 @@ def _reader_identity() -> str:
     return _file_identity(Path(module_file))
 
 
+def _module_identity(*modules: str) -> str:
+    """Size+mtime of each named module, so a rule change invalidates the cache."""
+    parts: list[str] = []
+    for name in modules:
+        try:
+            module_file = getattr(importlib.import_module(name), "__file__", "")
+        except ImportError:
+            module_file = ""
+        parts.append(_file_identity(Path(module_file)) if module_file else name)
+    return "|".join(parts)
+
+
+def docling_identity() -> str:
+    """The Docling parser's own identity (its two rule modules)."""
+    return _module_identity("ubt.adapters.pdf.docling_parser", "ubt.adapters.pdf.docling_blocks")
+
+
 def cached_blocks(
     store: CacheStore | None,
     *,
     path: Path,
     page_range: tuple[int, int] | None,
     compute: Callable[[], list[IRBlock]],
+    identity: str | None = None,
+    extra: str = "",
 ) -> list[IRBlock]:
-    """``compute()`` through ``store`` (or straight through when ``store`` is None)."""
+    """``compute()`` through ``store`` (or straight through when ``store`` is None).
+
+    ``identity`` names the extractor whose code produced the blocks (defaults to
+    the native PDF reader); ``extra`` folds any remaining output-bearing knob
+    (e.g. Docling's enrichment policy) into the key, so two runs that differ on
+    it do not share an entry.
+    """
     if store is None:
         return compute()
     key = step_key(
         "analyze",
-        [_ANALYZE_SCHEMA, _reader_identity(), _file_identity(path), repr(page_range)],
+        [
+            _ANALYZE_SCHEMA,
+            identity or _reader_identity(),
+            _file_identity(path),
+            repr(page_range),
+            extra,
+        ],
         {},
     )
     try:
@@ -73,4 +105,4 @@ def cached_blocks(
         return compute()
 
 
-__all__ = ["cached_blocks"]
+__all__ = ["cached_blocks", "docling_identity"]

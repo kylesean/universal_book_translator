@@ -32,7 +32,6 @@ from ubt.core.ir.models import BookManifest, IRBlock
 
 if TYPE_CHECKING:
     from ubt.cache.store import CacheStore
-    from ubt.core.ports import AdapterRuntimeConfig
 
 logger = logging.getLogger(__name__)
 
@@ -96,20 +95,9 @@ class PDFiumAdapter(DoclingPDFAdapter):
     is replaced with geometric text harvesting.
     """
 
-    #: Content-addressed analyze cache (ADR-0001 Phase 4), set in apply_config.
-    analysis_cache: CacheStore | None = None
-
     @property
     def engine_name(self) -> str:
         return "pdfium"
-
-    def apply_config(self, runtime_config: AdapterRuntimeConfig) -> None:
-        """Inherit the render config, then own the analyze cache store."""
-        super().apply_config(runtime_config)
-        from ubt.cache.store import DiskCacheStore
-
-        cache_dir = getattr(runtime_config, "cache_dir", "")
-        self.analysis_cache = DiskCacheStore(cache_dir) if cache_dir else None
 
     async def extract_manifest(self, input_path: Path) -> BookManifest:
         """Manifest identical to the Docling mainline except the engine tag."""
