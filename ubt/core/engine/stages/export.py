@@ -1017,6 +1017,75 @@ def _write_xliff_companion(
         return None
 
 
+def _write_html_view(
+    ctx: StageContext,
+    rendered_path: Path,
+    document: Document,
+    translations: dict[str, str],
+    attestations: AttestationReport,
+) -> Path | None:
+    """Write a semantic HTML view of the delivery beside the artifact (ADR-0001 §4).
+
+    The same realized ``Document`` the contract is projected from, lowered to
+    HTML by the same rule as the PDF (a missing Attestation is refused). A
+    *view*, so it is read-only and best-effort: a failure is logged and skipped,
+    never allowed to sink the delivery.
+    """
+    if not ctx.config.emit_html_companion:
+        return None
+    try:
+        from ubt.core.job_options import companion_path
+        from ubt.layout.theme import direction_for
+        from ubt.render.html_view import compose_html
+
+        path = companion_path(rendered_path, ".html")
+        compose_html(
+            document,
+            attestations.attestations,
+            translations,
+            path,
+            lang=ctx.target_lang or "en",
+            direction=direction_for(ctx.target_lang or "en").value,
+        )
+        logger.info("HTML view for job %s: %s", ctx.job_id, path.name)
+        return path
+    except Exception as exc:  # a view must never sink the delivery
+        logger.warning("HTML view skipped for job %s: %s", ctx.job_id, exc)
+        return None
+
+
+def _write_epub_view(
+    ctx: StageContext,
+    rendered_path: Path,
+    document: Document,
+    translations: dict[str, str],
+    attestations: AttestationReport,
+) -> Path | None:
+    """Write an EPUB 3 view of the delivery beside the artifact (ADR-0001 §4)."""
+    if not ctx.config.emit_epub_companion:
+        return None
+    try:
+        from ubt.core.job_options import companion_path
+        from ubt.layout.theme import direction_for
+        from ubt.render.epub_view import compose_epub
+
+        path = companion_path(rendered_path, ".epub")
+        compose_epub(
+            document,
+            attestations.attestations,
+            translations,
+            path,
+            title=str(getattr(ctx.manifest, "title", "") or "UBT translation"),
+            lang=ctx.target_lang or "en",
+            direction=direction_for(ctx.target_lang or "en").value,
+        )
+        logger.info("EPUB view for job %s: %s", ctx.job_id, path.name)
+        return path
+    except Exception as exc:  # a view must never sink the delivery
+        logger.warning("EPUB view skipped for job %s: %s", ctx.job_id, exc)
+        return None
+
+
 def _attestation_payload(report: AttestationReport) -> dict[str, Any]:
     """Serialize an :class:`~ubt.pipeline.attest.AttestationReport` for the sidecar."""
     return {
@@ -1356,6 +1425,15 @@ async def run_export_stage(
     # Bilingual XLIFF companion (source + delivered target). Read-only,
     # best-effort: it cannot affect the artifact, only add a file beside it.
     await asyncio.to_thread(_write_xliff_companion, ctx, rendered_path, final_blocks)
+
+    # HTML / EPUB views of the same realized delivery (ADR-0001 §4 "later views").
+    # Read-only, best-effort companions; a view failure never sinks the PDF.
+    await asyncio.to_thread(
+        _write_html_view, ctx, rendered_path, document, translations, attestations
+    )
+    await asyncio.to_thread(
+        _write_epub_view, ctx, rendered_path, document, translations, attestations
+    )
 
     # Attestation account + artifact-level agreement, beside the artifact
     # (ADR-0001 Phase 3). Read-only, best-effort.

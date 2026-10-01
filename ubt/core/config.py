@@ -676,6 +676,14 @@ class UBTConfig(BaseSettings):
     # when realize() goes live.
     emit_attestation_shadow: bool = True
 
+    # Emit a semantic HTML view of the delivery ('*_<tag>.html') beside the
+    # artifact, and an EPUB 3 package ('*_<tag>.epub'). These are the ADR-0001 §4
+    # "later views": the same realized Document lowered to another format by the
+    # same "missing Attestation is refused" rule as the PDF. Read-only, best-effort
+    # companions -- a view failure never sinks the PDF delivery.
+    emit_html_companion: bool = True
+    emit_epub_companion: bool = True
+
     # Opt-in hard gate: abort export when the delivery contract has an
     # ERROR-severity violation (dropped text, lost/corrupt asset, or a
     # translation that could not be placed). Off by default so a partial book
