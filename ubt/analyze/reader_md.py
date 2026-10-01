@@ -26,6 +26,7 @@ from ubt.analyze._identity import file_digest
 from ubt.analyze.assemble import assemble
 from ubt.analyze.structure import (
     is_display_math,
+    is_gutenberg_marker,
     is_markdown_table,
     markdown_heading,
     markdown_list_item,
@@ -53,13 +54,17 @@ def _decode(path: Path) -> str:
     return decode_markup(path.read_bytes())
 
 
-def read_md(path: str | Path, *, doc_id: str | None = None) -> Document:
+def read_md(path: str | Path, *, doc_id: str | None = None, plain_text: bool = False) -> Document:
     """Read a Markdown/plain-text file into a typed :class:`Document`.
 
     ATX headings keep their real level, list items keep their marker, fenced
     code and ``$$ … $$`` display math are typed and kept verbatim, and GFM
     tables become a :class:`Table`. Every element carries a character range into
     the canonical text (``page`` stays 0: the format has no pages).
+
+    ``plain_text`` reads the file as blank-line-separated paragraphs and never
+    interprets Markdown syntax (``.txt`` logs and configs use ``#`` for
+    comments; interpreting it as Markdown shreds a line into a fake chapter).
     """
     md_path = Path(path)
     elements: list[ElementT] = []
@@ -111,7 +116,15 @@ def read_md(path: str | Path, *, doc_id: str | None = None) -> Document:
                 )
             )
         else:
-            emit(Paragraph(id=_id(), spine_index=_spine(), span=Span(), text=text))
+            emit(
+                Paragraph(
+                    id=_id(),
+                    spine_index=_spine(),
+                    span=Span(),
+                    text=text,
+                    skip_translate=is_gutenberg_marker(text),
+                )
+            )
 
     def flush_code() -> None:
         if not code:
@@ -151,6 +164,14 @@ def read_md(path: str | Path, *, doc_id: str | None = None) -> Document:
 
     for line in _decode(md_path).split("\n"):
         stripped = line.strip()
+
+        if plain_text:
+            # Blank lines separate paragraphs; nothing is Markdown syntax.
+            if not stripped:
+                flush_paragraph()
+            else:
+                paragraph.append(line)
+            continue
 
         # Fenced code first, so a `$$` line inside a fence stays code content.
         if stripped.startswith("```"):

@@ -166,9 +166,25 @@ def looks_like_heading(text: str) -> bool:
     return not is_list_prefix(body)
 
 
+# --------------------------------------------------------------------------- #
+# Project Gutenberg structural markers
+# --------------------------------------------------------------------------- #
+#: Transcribing these verbatim is the only correct rendering, and LLM
+#: translation of them is wasted spend (they also trip script-density repair
+#: loops). Shared by the Markdown reader and the Markdown adapter so the two
+#: cannot disagree about which lines are structural markers.
+_GUTENBERG_MARKER = re.compile(r"^\[(Illustration|Footnote)\b", re.IGNORECASE)
+
+
+def is_gutenberg_marker(text: str) -> bool:
+    """True for a Project Gutenberg ``[Illustration …]``/``[Footnote …]`` marker."""
+    return bool(_GUTENBERG_MARKER.match((text or "").strip()))
+
+
 __all__ = [
     "is_bare_page_number",
     "is_display_math",
+    "is_gutenberg_marker",
     "is_list_prefix",
     "is_markdown_table",
     "looks_like_debris",
