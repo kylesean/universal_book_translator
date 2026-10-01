@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from pathlib import Path
 
+from ubt.analyze.structure import is_list_prefix, looks_like_heading
 from ubt.core.ir.models import BlockType, BoundingBox, FlowID, IRBlock
 from ubt.core.validators.math_guard import looks_like_math_debris
 
@@ -77,9 +78,6 @@ def sample_pdf_pages(path: Path) -> tuple[int, bool, str]:
     return page_count, is_scanned, full_sample
 
 
-_LIST_PREFIXES = ("•", "-", "*", "·", "–")
-
-
 def classify_plain_text_block(
     normalized: str,
     block_idx: int,
@@ -111,13 +109,12 @@ def classify_plain_text_block(
             skip_translate=True,
             bbox=resolved_bbox,
         )
-    is_list = any(normalized.startswith(prefix) for prefix in _LIST_PREFIXES)
-    is_header = (
-        not is_list and len(normalized) < 80 and not normalized.endswith((".", "!", "?", "。"))
-    )
+    # Title and list rules live in the shared analyzer (ADR R3: one owner), so
+    # the plain-text engines cannot type a line differently from the reader.
+    is_list = is_list_prefix(normalized)
     block_type = (
         BlockType.HEADING
-        if is_header
+        if looks_like_heading(normalized)
         else (BlockType.LIST_ITEM if is_list else BlockType.NARRATIVE)
     )
     return IRBlock(

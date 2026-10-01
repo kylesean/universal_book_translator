@@ -136,11 +136,43 @@ def is_display_math(text: str) -> bool:
     return body.startswith("$$") and body.endswith("$$") and len(body) >= 4
 
 
+# --------------------------------------------------------------------------- #
+# Plain-text structure rules
+# --------------------------------------------------------------------------- #
+#: Leading glyphs a plain-text extractor treats as a list item.
+_LIST_PREFIXES = ("•", "-", "*", "·", "–")
+#: A heading is short; longer lines are prose whatever their punctuation.
+_HEADING_MAX_CHARS = 80
+
+
+def is_list_prefix(text: str) -> bool:
+    """True when a line opens with a list bullet."""
+    return any((text or "").startswith(prefix) for prefix in _LIST_PREFIXES)
+
+
+def looks_like_heading(text: str) -> bool:
+    """True for a short, bullet-free line with no terminal punctuation.
+
+    The *text-content* rule a plain-text extractor uses when it has no
+    typography to measure (ADR R3: one owner). Deliberately narrow -- a title
+    never ends in sentence punctuation and a long line is a paragraph -- so a
+    miss merely leaves a heading as prose, which still translates.
+    """
+    body = (text or "").strip()
+    if not body or len(body) >= _HEADING_MAX_CHARS:
+        return False
+    if body.endswith((".", "!", "?", "。")):
+        return False
+    return not is_list_prefix(body)
+
+
 __all__ = [
     "is_bare_page_number",
     "is_display_math",
+    "is_list_prefix",
     "is_markdown_table",
     "looks_like_debris",
+    "looks_like_heading",
     "looks_like_listing",
     "markdown_heading",
     "markdown_list_item",
