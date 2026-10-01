@@ -3,15 +3,15 @@
 These helpers were the Tail of ``docling_adapter.DoclingPDFAdapter``. They
 never touch adapter state: each one takes the mapped blocks (or a raw Docling
 item) and returns blocks, so they live here as plain functions and the
-adapter keeps thin static aliases for its historical call sites. The
-composed pipeline is :func:`postprocess_blocks`.
+adapter keeps thin static aliases for its historical call sites. The composed
+sequence is the analyzer's own stage
+(:func:`ubt.adapters.pdf.docling_parser.type_docling_blocks`).
 """
 
 from __future__ import annotations
 
 import logging
 import re
-from pathlib import Path
 from typing import Any
 
 from ubt.core.ir.models import BlockType, BoundingBox, FlowID, IRBlock
@@ -639,26 +639,8 @@ def resolve_overlapping_formula_blocks(blocks: list[IRBlock]) -> list[IRBlock]:
     return out
 
 
-def postprocess_blocks(
-    blocks: list[IRBlock],
-    *,
-    allow_cross_page: bool = True,
-    pdf_path: Path | None = None,
-) -> list[IRBlock]:
-    """Apply the caption/narrative post-pipeline in its fixed order.
-
-    Order is load-bearing: chapter fuse → embedded-caption decouple →
-    caption-body latch → span-tail attach → caption unify → overlapping
-    formula merge → flow reassembly → narrative defragment.
-    """
-    staged = resolve_overlapping_formula_blocks(
-        unify_figure_captions(
-            attach_split_caption_tails(
-                latch_caption_bodies(decouple_embedded_captions(fuse_chapter_number(blocks)))
-            )
-        )
-    )
-    from ubt.adapters.pdf.flow_reassembly import reassemble_flow
-
-    staged, _stats = reassemble_flow(staged, pdf_path=pdf_path, allow_cross_page=allow_cross_page)
-    return defragment_narrative_blocks(staged, allow_cross_page=allow_cross_page)
+# The caption/narrative typing sequence that used to live here as
+# ``postprocess_blocks`` is now the analyzer's own stage
+# (:func:`ubt.adapters.pdf.docling_parser.type_docling_blocks`): the Docling
+# analyzer produces its types directly instead of a separate post-pass applying
+# them from outside (ADR §6.1 item 9).

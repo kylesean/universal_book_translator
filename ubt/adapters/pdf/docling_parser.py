@@ -23,12 +23,18 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from ubt.adapters.pdf.docling_blocks import (
+    attach_split_caption_tails,
     chrome_key,
+    decouple_embedded_captions,
+    defragment_narrative_blocks,
+    fuse_chapter_number,
     is_inside_picture,
     is_repeat_handle,
-    postprocess_blocks,
+    latch_caption_bodies,
+    resolve_overlapping_formula_blocks,
     split_prov_spans,
     table_to_markdown,
+    unify_figure_captions,
 )
 from ubt.adapters.pdf.pdfium_gate import PDFIUM_LOCK, unify_docling_pdfium_lock
 from ubt.adapters.pdf.plain_text_extractor import pages_to_blocks
@@ -411,6 +417,29 @@ def _ensure_docling_pdfium_lock() -> None:
         "found; a concurrent docling render could race UBT pdfium work. "
         "Update ubt.adapters.pdf.pdfium_gate._DOCLING_LOCK_MODULES."
     )
+
+
+def type_docling_blocks(blocks: list[IRBlock], *, pdf_path: Path | None) -> list[IRBlock]:
+    """The analyzer's own typing stage: raw Docling blocks -> final typed blocks.
+
+    This is the Docling analyzer producing its own types (ADR §6.1 item 9). It
+    used to be a separate ``docling_blocks.postprocess_blocks`` pass called from
+    outside; the analyzer now owns the sequence end to end. The order is
+    load-bearing: chapter fuse -> embedded-caption decouple -> caption-body latch
+    -> span-tail attach -> caption unify -> overlapping-formula merge -> flow
+    reassembly -> narrative defragment.
+    """
+    from ubt.adapters.pdf.flow_reassembly import reassemble_flow
+
+    staged = resolve_overlapping_formula_blocks(
+        unify_figure_captions(
+            attach_split_caption_tails(
+                latch_caption_bodies(decouple_embedded_captions(fuse_chapter_number(blocks)))
+            )
+        )
+    )
+    staged, _stats = reassemble_flow(staged, pdf_path=pdf_path, allow_cross_page=True)
+    return defragment_narrative_blocks(staged, allow_cross_page=True)
 
 
 def extract_with_docling(
@@ -971,7 +1000,7 @@ def map_iterated_items(
                 )
             )
 
-    return postprocess_blocks(blocks, pdf_path=pdf_path)
+    return type_docling_blocks(blocks, pdf_path=pdf_path)
 
 
 def map_export_dict(data: dict[str, Any]) -> list[IRBlock]:
