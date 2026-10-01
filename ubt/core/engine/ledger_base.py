@@ -24,10 +24,9 @@ from ubt.core.ir.models import (
     BoundingBox,
     FlowID,
     IRBlock,
-    LayoutRole,
-    SemanticRole,
     StyleMeta,
 )
+from ubt.model.ast import RegionKind, SemanticKind
 
 TARGET_SCHEMA_VERSION = 11
 
@@ -670,8 +669,8 @@ class LedgerBase:
             error_flags=error_flags,
             mqm_severity=row["mqm_severity"],
             mqm_spans=mqm_spans,
-            layout_role=LayoutRole(row["layout_role"]) if row["layout_role"] else None,
-            semantic_role=SemanticRole(row["semantic_role"]) if row["semantic_role"] else None,
+            layout_role=RegionKind(row["layout_role"]) if row["layout_role"] else None,
+            semantic_role=SemanticKind(row["semantic_role"]) if row["semantic_role"] else None,
             # ``structure_role`` is derived from ``block_type`` (property), so
             # the stored column is not read back (ADR R3).
             policy_translate=bool(policy_raw) if policy_raw is not None else None,

@@ -6,6 +6,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from ubt.core.ir.run_metadata import RunMetadata
+from ubt.model.ast import RegionKind, SemanticKind
 
 
 class FlowID(StrEnum):
@@ -62,27 +63,12 @@ TERMINAL_STATUSES: frozenset[BlockStatus] = frozenset(
 MQM_SEVERITY_LEVELS: tuple[str, ...] = ("critical", "major", "minor")
 
 
-class LayoutRole(StrEnum):
-    """Page-layout role of a block (document.v1 ``layout_role`` layer)."""
-
-    BODY = "body"
-    TITLE = "title"
-    HEADER = "header"
-    FOOTER = "footer"
-    PAGE_NUMBER = "page_number"
-    CAPTION = "caption"
-    FOOTNOTE = "footnote"
-
-
-class SemanticRole(StrEnum):
-    """Semantic role of a block (document.v1 ``semantic_role`` layer)."""
-
-    MAIN_TEXT = "main_text"
-    ABSTRACT = "abstract"
-    REFERENCE = "reference"
-    METADATA = "metadata"
-    AFFILIATION = "affiliation"
-    UNKNOWN = "unknown"
+# The page-layout and semantic axes use the *typed model's* vocabulary
+# (:class:`ubt.model.ast.RegionKind` / :class:`ubt.model.ast.SemanticKind`)
+# directly. They used to be two enums per axis -- ``LayoutRole``/``SemanticRole``
+# here and their mirrors in the model -- with a hand-written bridge mapping one
+# to the other (ADR R3: one attribute, one origin). The values were identical, so
+# removing the duplicates is a pure vocabulary unification.
 
 
 class StructureRole(StrEnum):
@@ -160,8 +146,8 @@ class IRBlock(BaseModel):
     #   structure_role → derived from block_type (property, not a field),
     #   policy → policy_translate/policy_reason (+ skip_translate fallback),
     #   provenance → provenance dict (parser/provider/adapter that produced it).
-    layout_role: LayoutRole | None = None
-    semantic_role: SemanticRole | None = None
+    layout_role: RegionKind | None = None
+    semantic_role: SemanticKind | None = None
     policy_translate: bool | None = None  # None = undecided, fall back to skip_translate
     policy_reason: str | None = None  # Required when policy_translate is False
     provenance: dict[str, Any] = Field(default_factory=dict)
@@ -189,7 +175,7 @@ class IRBlock(BaseModel):
         if self.layout_role is None:
             self.layout_role = _layout_role_from_flow(self.flow_id)
         if self.semantic_role is None:
-            self.semantic_role = SemanticRole.MAIN_TEXT
+            self.semantic_role = SemanticKind.MAIN_TEXT
 
     def validate_contract(self) -> list[str]:
         """Check document-v1 invariants; returns violation messages (empty = ok)."""
@@ -205,12 +191,12 @@ class IRBlock(BaseModel):
         return violations
 
 
-def _layout_role_from_flow(flow_id: FlowID) -> LayoutRole:
+def _layout_role_from_flow(flow_id: FlowID) -> RegionKind:
     if flow_id == FlowID.CAPTION:
-        return LayoutRole.CAPTION
+        return RegionKind.CAPTION
     if flow_id == FlowID.FOOTNOTE:
-        return LayoutRole.FOOTNOTE
-    return LayoutRole.BODY
+        return RegionKind.FOOTNOTE
+    return RegionKind.BODY
 
 
 def _structure_role_from_block_type(block_type: BlockType) -> StructureRole:

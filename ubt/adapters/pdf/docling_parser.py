@@ -43,7 +43,6 @@ from ubt.core.ir.models import (
     ChapterMeta,
     FlowID,
     IRBlock,
-    LayoutRole,
 )
 from ubt.core.ir.serializer import compute_file_sha256_cached
 from ubt.core.policy.layout_policy import (
@@ -51,6 +50,7 @@ from ubt.core.policy.layout_policy import (
     VLM_CIRCUIT_FAIL_PCT,
     VLM_CIRCUIT_MIN_TRIES,
 )
+from ubt.model.ast import RegionKind
 
 if TYPE_CHECKING:
     from docling.datamodel.pipeline_options import PdfPipelineOptions
@@ -833,13 +833,13 @@ def map_iterated_items(
             # never enter translation: backfilling them garbles the
             # strip while the source remains perfectly legible.
             block_type, flow_id, skip = BlockType.HEADING, FlowID.MAIN_STORY, True
-            layout_role = LayoutRole.HEADER
+            layout_role = RegionKind.HEADER
         elif label == DocItemLabel.PAGE_FOOTER:
             text = (getattr(item, "text", "") or "").strip()
             if not text or footer_counts.get(chrome_key(text), 0) > 3 or text.isdigit():
                 continue
             block_type, flow_id, skip = BlockType.NARRATIVE, FlowID.FOOTNOTE, True
-            layout_role = LayoutRole.FOOTER
+            layout_role = RegionKind.FOOTER
         elif label == DocItemLabel.TABLE:
             text = table_to_markdown(item, doc)
             block_type, flow_id, skip = BlockType.TABLE, FlowID.TABLE_GRID, False
@@ -966,7 +966,7 @@ def map_iterated_items(
                     flow_id=FlowID.CAPTION,
                     source_text=normalize_academic_pdf_math(tail_text),
                     bbox=tail_bbox,
-                    layout_role=LayoutRole.CAPTION,
+                    layout_role=RegionKind.CAPTION,
                     provenance={"docling_span_split_tail": True},
                 )
             )

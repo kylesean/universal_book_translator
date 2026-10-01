@@ -142,14 +142,14 @@ def annotate_blocks(blocks: Sequence[IRBlock], verdicts: list[PageVerdict]) -> l
     blocks may already be wrong — the defect predates translation, so repair
     must not trust the source text verbatim either.
     """
-    from ubt.core.ir.models import LayoutRole
+    from ubt.model.ast import RegionKind
 
     dirty = dirty_pages(verdicts)
     if not dirty:
         return []
     flagged: list[IRBlock] = []
     for block in blocks:
-        if block.layout_role in (LayoutRole.HEADER, LayoutRole.FOOTER, LayoutRole.PAGE_NUMBER):
+        if block.layout_role in (RegionKind.HEADER, RegionKind.FOOTER, RegionKind.PAGE_NUMBER):
             continue
         page = block.bbox.page if block.bbox is not None else None
         if page in dirty:

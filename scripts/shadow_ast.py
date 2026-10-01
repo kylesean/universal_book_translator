@@ -23,9 +23,9 @@ from collections import Counter
 from pathlib import Path
 
 from ubt.analyze.bridge import blocks_from_document, document_from_blocks
-from ubt.core.ir.models import FlowID, IRBlock, LayoutRole, SemanticRole, StructureRole
+from ubt.core.ir.models import FlowID, IRBlock, StructureRole
 from ubt.core.qe.fast_pass import FastPassFilter
-from ubt.model.ast import Document
+from ubt.model.ast import Document, RegionKind, SemanticKind
 from ubt.verify import build_verifiers, verify_element
 
 
@@ -47,10 +47,10 @@ def _norm_layout(block: IRBlock) -> str:
     if block.layout_role is not None:
         return block.layout_role.value
     if block.flow_id is FlowID.CAPTION:
-        return LayoutRole.CAPTION.value
+        return RegionKind.CAPTION.value
     if block.flow_id is FlowID.FOOTNOTE:
-        return LayoutRole.FOOTNOTE.value
-    return LayoutRole.BODY.value
+        return RegionKind.FOOTNOTE.value
+    return RegionKind.BODY.value
 
 
 def _projection(block: IRBlock) -> dict[str, object]:
@@ -59,7 +59,7 @@ def _projection(block: IRBlock) -> dict[str, object]:
         "block_type": block.block_type.value,
         "flow_id": block.flow_id.value,
         "layout_role": _norm_layout(block),
-        "semantic_role": (block.semantic_role or SemanticRole.MAIN_TEXT).value,
+        "semantic_role": (block.semantic_role or SemanticKind.MAIN_TEXT).value,
         "structure_role": (block.structure_role or StructureRole.PARAGRAPH).value,
         "source_text": block.source_text or "",
         "skip_translate": block.skip_translate,

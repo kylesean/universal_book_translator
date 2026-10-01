@@ -43,13 +43,14 @@ from ubt.adapters.pdf.textgeom import dehyph
 from ubt.adapters.pdf.typst_fragments import sanitize_lang_tag
 from ubt.adapters.pdf.typst_math_probe import TypstMathProbe
 from ubt.core.exceptions import DocumentParseError
-from ubt.core.ir.models import BlockType, BookManifest, FlowID, IRBlock, LayoutRole
+from ubt.core.ir.models import BlockType, BookManifest, FlowID, IRBlock
 from ubt.core.policy.layout_policy import (
     FIT_PRECISION_PT,
     PROSE_BLOCK_TYPES,
     RIGID_MIN_FONT_PT,
     rigid_min_font_pt_for,
 )
+from ubt.model.ast import RegionKind
 from ubt.model.fidelity import Fidelity
 
 logger = logging.getLogger(__name__)
@@ -322,7 +323,7 @@ def _with_list_marker(block: IRBlock, text: str, zone_rows: tuple[str, ...] = ()
     """Restore dropped list bullets/numbers and format leading footnote markers as superscripts."""
     if not text:
         return text
-    if block.flow_id == FlowID.FOOTNOTE or block.layout_role == LayoutRole.FOOTNOTE:
+    if block.flow_id == FlowID.FOOTNOTE or block.layout_role == RegionKind.FOOTNOTE:
         src_m = _FOOTNOTE_NUM_RE.match((block.source_text or "").strip())
         if src_m:
             fn_num = src_m.group(1)

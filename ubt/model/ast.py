@@ -46,7 +46,7 @@ class FlowKind(StrEnum):
 
 
 class RegionKind(StrEnum):
-    """Page-furniture role of a region (mirrors ``LayoutRole``)."""
+    """Page-furniture role of a region; the one layout vocabulary (ADR R3)."""
 
     BODY = "body"
     TITLE = "title"
@@ -58,7 +58,7 @@ class RegionKind(StrEnum):
 
 
 class SemanticKind(StrEnum):
-    """Semantic axis the element type cannot express (mirrors ``SemanticRole``)."""
+    """Semantic axis the element type cannot express; the one semantic vocabulary."""
 
     MAIN_TEXT = "main_text"
     ABSTRACT = "abstract"

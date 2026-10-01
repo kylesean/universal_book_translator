@@ -27,7 +27,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-from ubt.core.ir.models import BlockType, FlowID, LayoutRole
+from ubt.core.ir.models import BlockType, FlowID
+from ubt.model.ast import RegionKind
 
 
 class Calibration(StrEnum):
@@ -261,8 +262,8 @@ RIGID_MIN_FONT_PT = _env_float("UBT_RIGID_MIN_FONT_PT", 7.0)
 RIGID_CAPTION_MIN_FONT_PT = _env_float("UBT_RIGID_CAPTION_MIN_FONT_PT", 6.5)
 RIGID_FOOTNOTE_MIN_FONT_PT = _env_float("UBT_RIGID_FOOTNOTE_MIN_FONT_PT", 6.5)
 _RIGID_REGION_FLOORS: dict[str, float] = {
-    LayoutRole.CAPTION.value: RIGID_CAPTION_MIN_FONT_PT,
-    LayoutRole.FOOTNOTE.value: RIGID_FOOTNOTE_MIN_FONT_PT,
+    RegionKind.CAPTION.value: RIGID_CAPTION_MIN_FONT_PT,
+    RegionKind.FOOTNOTE.value: RIGID_FOOTNOTE_MIN_FONT_PT,
 }
 
 

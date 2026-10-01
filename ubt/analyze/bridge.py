@@ -30,8 +30,6 @@ from ubt.core.ir.models import (
     BoundingBox,
     FlowID,
     IRBlock,
-    LayoutRole,
-    SemanticRole,
 )
 from ubt.model.ast import (
     Caption,
@@ -63,32 +61,6 @@ _FLOW_TO_KIND: dict[FlowID, FlowKind] = {
 }
 _KIND_TO_FLOW: dict[FlowKind, FlowID] = {kind: flow for flow, kind in _FLOW_TO_KIND.items()}
 
-_LAYOUT_TO_REGION: dict[LayoutRole, RegionKind] = {
-    LayoutRole.BODY: RegionKind.BODY,
-    LayoutRole.TITLE: RegionKind.TITLE,
-    LayoutRole.HEADER: RegionKind.HEADER,
-    LayoutRole.FOOTER: RegionKind.FOOTER,
-    LayoutRole.PAGE_NUMBER: RegionKind.PAGE_NUMBER,
-    LayoutRole.CAPTION: RegionKind.CAPTION,
-    LayoutRole.FOOTNOTE: RegionKind.FOOTNOTE,
-}
-_REGION_TO_LAYOUT: dict[RegionKind, LayoutRole] = {
-    region: layout for layout, region in _LAYOUT_TO_REGION.items()
-}
-
-_SEMANTIC_TO_KIND: dict[SemanticRole, SemanticKind] = {
-    SemanticRole.MAIN_TEXT: SemanticKind.MAIN_TEXT,
-    SemanticRole.ABSTRACT: SemanticKind.ABSTRACT,
-    SemanticRole.REFERENCE: SemanticKind.REFERENCE,
-    SemanticRole.METADATA: SemanticKind.METADATA,
-    SemanticRole.AFFILIATION: SemanticKind.AFFILIATION,
-    SemanticRole.UNKNOWN: SemanticKind.UNKNOWN,
-}
-_KIND_TO_SEMANTIC: dict[SemanticKind, SemanticRole] = {
-    kind: role for role, kind in _SEMANTIC_TO_KIND.items()
-}
-
-
 # --------------------------------------------------------------------------- #
 # IRBlock -> Document
 # --------------------------------------------------------------------------- #
@@ -104,7 +76,7 @@ def _span(block: IRBlock) -> Span:
 def _region_kind(block: IRBlock) -> RegionKind:
     """The page-furniture role that groups this block (layout axis, single source)."""
     if block.layout_role is not None:
-        return _LAYOUT_TO_REGION[block.layout_role]
+        return block.layout_role
     if block.flow_id is FlowID.CAPTION:
         return RegionKind.CAPTION
     if block.flow_id is FlowID.FOOTNOTE:
@@ -119,15 +91,13 @@ def element_from_block(block: IRBlock) -> ElementT:
         "spine_index": block.spine_index,
         "span": _span(block),
         "flow": _FLOW_TO_KIND.get(block.flow_id, FlowKind.MAIN),
-        "semantic": _SEMANTIC_TO_KIND.get(
-            block.semantic_role or SemanticRole.MAIN_TEXT, SemanticKind.MAIN_TEXT
-        ),
+        "semantic": block.semantic_role or SemanticKind.MAIN_TEXT,
         "skip_translate": block.skip_translate,
     }
     text = block.source_text or ""
     block_type = block.block_type
     if block_type is BlockType.NARRATIVE:
-        if block.layout_role is LayoutRole.CAPTION or block.flow_id is FlowID.CAPTION:
+        if block.layout_role is RegionKind.CAPTION or block.flow_id is FlowID.CAPTION:
             return Caption(text=text, **common)
         return Paragraph(text=text, **common)
     if block_type is BlockType.DIALOGUE:
@@ -227,10 +197,9 @@ def block_from_element(element: ElementT, *, region_kind: RegionKind) -> IRBlock
         bbox=_bbox(element.span),
         source_text=_element_source(element),
         skip_translate=element.skip_translate,
-        layout_role=_REGION_TO_LAYOUT[region_kind],
-        semantic_role=_KIND_TO_SEMANTIC[element.semantic],
+        layout_role=region_kind,
+        semantic_role=element.semantic,
     )
-    block.derive_roles()
     return block
 
 

@@ -50,10 +50,10 @@ from ubt.core.ir.models import (
     BoundingBox,
     FlowID,
     IRBlock,
-    LayoutRole,
     StyleMeta,
 )
 from ubt.core.policy.layout_policy import FOOTER_BAND_PT, HEADER_BAND_PT, PROSE_BLOCK_TYPES
+from ubt.model.ast import RegionKind
 
 if TYPE_CHECKING:
     from ubt.adapters.pdf.textgeom import LineBox
@@ -243,7 +243,7 @@ def classify_chrome_blocks(blocks: list[IRBlock], page_heights: dict[int, float]
         if not _in_margin_band(block.bbox, page_heights):
             continue
         block.skip_translate = True
-        block.layout_role = LayoutRole.PAGE_NUMBER
+        block.layout_role = RegionKind.PAGE_NUMBER
         block.provenance["flow_reassembly"] = "page_number"
         marked += 1
     return marked

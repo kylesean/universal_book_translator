@@ -14,8 +14,9 @@ import re
 from pathlib import Path
 from typing import Any
 
-from ubt.core.ir.models import BlockType, BoundingBox, FlowID, IRBlock, LayoutRole
+from ubt.core.ir.models import BlockType, BoundingBox, FlowID, IRBlock
 from ubt.core.policy.layout_policy import CAPTION_RE, PAIR_TERMINAL_PUNCT
+from ubt.model.ast import RegionKind
 
 logger = logging.getLogger(__name__)
 
@@ -211,7 +212,7 @@ def decouple_embedded_captions(blocks: list[IRBlock]) -> list[IRBlock]:
                     flow_id=FlowID.CAPTION,
                     source_text=cap_text,
                     bbox=cap_bbox,
-                    layout_role=LayoutRole.CAPTION,
+                    layout_role=RegionKind.CAPTION,
                 )
                 out.append(cap_block)
                 continue
@@ -480,7 +481,7 @@ def fuse_chapter_number(blocks: list[IRBlock]) -> list[IRBlock]:
     old_source = (head.source_text or "").strip()
     head.source_text = f"{old_source} {num}"
     head.skip_translate = False
-    head.layout_role = LayoutRole.TITLE
+    head.layout_role = RegionKind.TITLE
     if head.bbox is not None and num_block.bbox is not None:
         head_h = head.bbox.y1 - head.bbox.y0
         num_h = num_block.bbox.y1 - num_block.bbox.y0

@@ -15,7 +15,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from ubt.core.ir.models import IRBlock, LayoutRole, SemanticRole
+from ubt.core.ir.models import IRBlock
 from ubt.core.policy.layout_policy import (
     BYTE_WORD_RE,
     HEXDUMP_MIN_SHARE,
@@ -31,6 +31,7 @@ from ubt.core.policy.layout_policy import (
     UNICODE_WORD_RE,
     URL_DOI_RE,
 )
+from ubt.model.ast import RegionKind, SemanticKind
 
 # Two or more purely-lowercase words read as prose ("effective mobility"), not
 # as a figure/table label ("B1", "Fig. 3", "kg"). Rule 10 kept such prose in the
@@ -93,15 +94,15 @@ def judge_block(block: IRBlock, *, translate_chrome: bool = False) -> Verdict:
         return Verdict(False, "verdict:non_text")
     # Rule 5: chrome layout roles never enter translation (page numbers
     # never do, even under the chrome opt-in).
-    if block.layout_role in {LayoutRole.HEADER, LayoutRole.FOOTER, LayoutRole.PAGE_NUMBER} and (
-        not translate_chrome or block.layout_role is LayoutRole.PAGE_NUMBER
+    if block.layout_role in {RegionKind.HEADER, RegionKind.FOOTER, RegionKind.PAGE_NUMBER} and (
+        not translate_chrome or block.layout_role is RegionKind.PAGE_NUMBER
     ):
         return Verdict(False, "verdict:chrome")
     # Rule 6: non-prose semantic roles never enter translation.
     if block.semantic_role in {
-        SemanticRole.REFERENCE,
-        SemanticRole.METADATA,
-        SemanticRole.AFFILIATION,
+        SemanticKind.REFERENCE,
+        SemanticKind.METADATA,
+        SemanticKind.AFFILIATION,
     }:
         return Verdict(False, "verdict:non_prose_role")
     # Rule 7: identifier-only blocks (bare URL / DOI / ISBN).

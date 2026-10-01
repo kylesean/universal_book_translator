@@ -67,8 +67,9 @@ from ubt.adapters.pdf.typst_math import (
     _normalize_docling_math,
     _pandoc_math_to_typst,
 )
-from ubt.core.ir.models import BlockStatus, BlockType, FlowID, IRBlock, LayoutRole
+from ubt.core.ir.models import BlockStatus, BlockType, FlowID, IRBlock
 from ubt.core.language_profile import is_rtl_lang, resolve_font_config
+from ubt.model.ast import RegionKind
 from ubt.model.fidelity import Fidelity
 
 if TYPE_CHECKING:
@@ -2135,9 +2136,9 @@ class TypstReconstructor:
             return
 
         if block.layout_role in (
-            LayoutRole.FOOTER,
-            LayoutRole.HEADER,
-            LayoutRole.PAGE_NUMBER,
+            RegionKind.FOOTER,
+            RegionKind.HEADER,
+            RegionKind.PAGE_NUMBER,
         ) or (getattr(block, "policy_reason", None) == "verdict:chrome"):
             logger.debug("Dropping chrome block from reflow: %s", block.id)
             return
@@ -2430,7 +2431,7 @@ class TypstReconstructor:
                     )
             if (
                 block.flow_id == FlowID.CAPTION
-                or getattr(block, "layout_role", None) == LayoutRole.CAPTION
+                or getattr(block, "layout_role", None) == RegionKind.CAPTION
             ):
                 # Standardized caption styling across layouts.
                 lines.append(

@@ -13,9 +13,10 @@ from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.stage_context import StageContext
 from ubt.core.exceptions import DocumentParseError
-from ubt.core.ir.models import BlockStatus, BlockType, IRBlock, LayoutRole
+from ubt.core.ir.models import BlockStatus, BlockType, IRBlock
 from ubt.core.ir.serializer import compute_file_sha256
 from ubt.core.policy.verdict import apply_verdict, judge_block
+from ubt.model.ast import RegionKind
 
 logger = logging.getLogger(__name__)
 
@@ -370,8 +371,8 @@ async def run_ingest_stage(
                 # skip-at-parse; with the flag on they get a real translation
                 # (page numbers never do) and the rigid gate paints them.
                 if translate_chrome and b.layout_role in (
-                    LayoutRole.HEADER,
-                    LayoutRole.FOOTER,
+                    RegionKind.HEADER,
+                    RegionKind.FOOTER,
                 ):
                     b.skip_translate = False
                     b.policy_translate = None
