@@ -24,10 +24,15 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ubt.adapters.pdf.docling_adapter import DoclingPDFAdapter
 from ubt.adapters.pdf.pdfium_gate import pdfium_serialized
 from ubt.core.ir.models import BookManifest, IRBlock
+
+if TYPE_CHECKING:
+    from ubt.cache.store import CacheStore
+    from ubt.core.ports import AdapterRuntimeConfig
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +52,9 @@ def _block_page_in_range(b: IRBlock, first: int, last: int) -> bool:
 
 
 def extract_blocks_with_pdfium(
-    path: Path, page_range: tuple[int, int] | None = None
+    path: Path,
+    page_range: tuple[int, int] | None = None,
+    store: CacheStore | None = None,
 ) -> list[IRBlock]:
     """Read a born-digital PDF into typed blocks via the native reader.
 
@@ -59,18 +66,26 @@ def extract_blocks_with_pdfium(
     and the companion views keep joining on the same ids. ``pdfium_serialized``
     is unnecessary here: every pdfium call inside ``read_pdf`` is already
     serialized by the gate, and the lock is re-entrant.
+
+    ``store`` is the content-addressed analyze cache (ADR-0001 Phase 4): the
+    read is a pure function of the file, page range and reader source, so a
+    re-run reuses it. ``None`` computes straight through.
     """
+    from ubt.adapters.pdf.analysis_cache import cached_blocks
     from ubt.analyze.bridge import blocks_from_document
     from ubt.analyze.reader_pdf import read_pdf
 
-    pages: range | None = None
-    if page_range is not None:
-        pages = range(max(1, page_range[0]), page_range[1] + 1)
-    blocks = blocks_from_document(read_pdf(path, pages=pages))
-    for index, block in enumerate(blocks, start=1):
-        block.id = f"pdf_main#b{index:04d}"
-        block.spine_index = index
-    return blocks
+    def _read() -> list[IRBlock]:
+        pages: range | None = None
+        if page_range is not None:
+            pages = range(max(1, page_range[0]), page_range[1] + 1)
+        blocks = blocks_from_document(read_pdf(path, pages=pages))
+        for index, block in enumerate(blocks, start=1):
+            block.id = f"pdf_main#b{index:04d}"
+            block.spine_index = index
+        return blocks
+
+    return cached_blocks(store, path=path, page_range=page_range, compute=_read)
 
 
 class PDFiumAdapter(DoclingPDFAdapter):
@@ -81,9 +96,20 @@ class PDFiumAdapter(DoclingPDFAdapter):
     is replaced with geometric text harvesting.
     """
 
+    #: Content-addressed analyze cache (ADR-0001 Phase 4), set in apply_config.
+    analysis_cache: CacheStore | None = None
+
     @property
     def engine_name(self) -> str:
         return "pdfium"
+
+    def apply_config(self, runtime_config: AdapterRuntimeConfig) -> None:
+        """Inherit the render config, then own the analyze cache store."""
+        super().apply_config(runtime_config)
+        from ubt.cache.store import DiskCacheStore
+
+        cache_dir = getattr(runtime_config, "cache_dir", "")
+        self.analysis_cache = DiskCacheStore(cache_dir) if cache_dir else None
 
     async def extract_manifest(self, input_path: Path) -> BookManifest:
         """Manifest identical to the Docling mainline except the engine tag."""
@@ -125,4 +151,4 @@ class PDFiumAdapter(DoclingPDFAdapter):
         self, path: Path, page_range: tuple[int, int] | None = None
     ) -> list[IRBlock]:
         """Geometric line harvesting with column-aware reading order."""
-        return extract_blocks_with_pdfium(path, page_range)
+        return extract_blocks_with_pdfium(path, page_range, store=self.analysis_cache)
