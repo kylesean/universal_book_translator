@@ -2,9 +2,9 @@
 
 Extraction is a *prior*: whether a line is a listing, a page number, or math
 debris is a property of the line, decided once here -- not re-guessed by a
-second pass. Both the native reader (:mod:`ubt.analyze.reader_pdf`) and the
-Docling flow-repair pass (:mod:`ubt.adapters.pdf.flow_reassembly`) call these,
-so a line cannot be prose to one and debris to the other.
+second pass. The native reader (:mod:`ubt.analyze.reader_pdf`) and the plain-text
+fallbacks (:mod:`ubt.adapters.pdf.plain_text_extractor`) call these, so a line
+cannot be prose to one and debris to the other.
 
 Only the *text-content* rules live here. Where a line sits (the margin band that
 makes a bare number a page number) is geometry, and stays with the reader that

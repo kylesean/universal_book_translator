@@ -113,8 +113,8 @@ class PDFiumAdapter(DoclingPDFAdapter):
 
         The native reader owns classification -- reading order, grouping,
         headings, chrome, listings, math debris -- so its output needs no flow
-        repair. The plain-text pdf_oxide fallback has no such model, so it still
-        runs ``reassemble_flow``.
+        repair. The plain-text pdf_oxide fallback types directly from text
+        content (the shared analyzer rules); it too has no flow-repair pass.
         """
         try:
             blocks = self._extract_with_pdfium(path, page_range)
@@ -126,9 +126,6 @@ class PDFiumAdapter(DoclingPDFAdapter):
                 exc,
             )
             blocks = self._extract_with_oxide(path)
-            from ubt.adapters.pdf.flow_reassembly import reassemble_flow
-
-            blocks, _stats = reassemble_flow(blocks, pdf_path=path)
         if page_range is not None:
             first, last = page_range
             blocks = [b for b in blocks if _block_page_in_range(b, first, last)]

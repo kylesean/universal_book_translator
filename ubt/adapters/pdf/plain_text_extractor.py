@@ -11,9 +11,13 @@ from __future__ import annotations
 from collections.abc import Iterable
 from pathlib import Path
 
-from ubt.analyze.structure import is_list_prefix, looks_like_heading
+from ubt.analyze.structure import (
+    is_list_prefix,
+    looks_like_debris,
+    looks_like_heading,
+    looks_like_listing,
+)
 from ubt.core.ir.models import BlockType, BoundingBox, FlowID, IRBlock
-from ubt.core.validators.math_guard import looks_like_math_debris
 
 
 def sample_pdf_pages(path: Path) -> tuple[int, bool, str]:
@@ -97,9 +101,11 @@ def classify_plain_text_block(
     # the LLM as prose. Structural detection (Docling FORMULA) stays primary;
     # this is the safety net for plain-text paths (pdfium/oxide) that cannot
     # emit FORMULA. skip_translate ships it verbatim via is_static_skip.
-    # Conservative by design (looks_like_math_debris rejects CJK, citations,
-    # long passages): a miss still goes through normal QE.
-    if looks_like_math_debris(normalized):
+    # The debris/listing/title/list rules all live in the shared analyzer
+    # (ADR R3: one owner), so a plain-text engine cannot type a line differently
+    # from the reader -- the analyzer produces the types directly instead of a
+    # later flow-repair pass re-typing them.
+    if looks_like_debris(normalized):
         return IRBlock(
             id=f"pdf_main#b{block_idx:04d}",
             spine_index=block_idx,
@@ -109,8 +115,16 @@ def classify_plain_text_block(
             skip_translate=True,
             bbox=resolved_bbox,
         )
-    # Title and list rules live in the shared analyzer (ADR R3: one owner), so
-    # the plain-text engines cannot type a line differently from the reader.
+    if looks_like_listing(normalized):
+        return IRBlock(
+            id=f"pdf_main#b{block_idx:04d}",
+            spine_index=block_idx,
+            block_type=BlockType.CODE,
+            flow_id=FlowID.MAIN_STORY,
+            source_text=normalized,
+            skip_translate=True,
+            bbox=resolved_bbox,
+        )
     is_list = is_list_prefix(normalized)
     block_type = (
         BlockType.HEADING

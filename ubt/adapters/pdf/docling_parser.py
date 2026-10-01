@@ -1107,19 +1107,19 @@ def map_export_dict(data: dict[str, Any]) -> list[IRBlock]:
 
 
 def extract_with_oxide(path: Path) -> list[IRBlock]:
-    """Fallback lightweight text extractor using MIT/Apache pdf_oxide."""
+    """Fallback lightweight text extractor using MIT/Apache pdf_oxide.
+
+    The analyzer types directly from the text content (debris/listing/heading/
+    list -- the shared rules in :mod:`ubt.analyze.structure`); there is no flow
+    repair pass. With no geometry to measure, that is the strongest honest
+    typing this fallback can make.
+    """
     from ubt.adapters.pdf import oxide_render
 
     texts = oxide_render.extract_page_texts(path)
     if not texts:
         raise DocumentParseError(f"Failed to extract text from PDF with pdf_oxide: {path.name}")
-    blocks = pages_to_blocks((page_num, text) for page_num, text in enumerate(texts, start=1))
-    # Same evidence-based flow repair as the pypdfium2 path (typography-aware
-    # role validation + fragment coalescing); fail-open on any measurement error.
-    from ubt.adapters.pdf.flow_reassembly import reassemble_flow
-
-    blocks, _stats = reassemble_flow(blocks, pdf_path=path)
-    return blocks
+    return pages_to_blocks((page_num, text) for page_num, text in enumerate(texts, start=1))
 
 
 def annotate_page_kinds(path: Path, blocks: list[IRBlock]) -> dict[int, str]:
