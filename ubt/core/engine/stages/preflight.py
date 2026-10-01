@@ -20,11 +20,14 @@ from ubt.core.engine.render_preflight import run_render_preflight
 from ubt.core.engine.stage_context import StageContext
 from ubt.core.exceptions import UBTError
 from ubt.pipeline.blocks import BlockReader
+from ubt.pipeline.facts import RenderPlan
 
 logger = logging.getLogger(__name__)
 
 
-async def run_render_preflight_stage(ctx: StageContext, blocks: BlockReader) -> None:
+async def run_render_preflight_stage(
+    ctx: StageContext, render: RenderPlan, blocks: BlockReader
+) -> None:
     """Compile a source sample with the configured renderer. Yields no events."""
     if not ctx.config.render_preflight_enabled or ctx.is_mock_run:
         # A mock run rehearses the renderer through its own pipeline already.
@@ -32,6 +35,7 @@ async def run_render_preflight_stage(ctx: StageContext, blocks: BlockReader) -> 
     await run_render_preflight(
         adapter=ctx.require_adapter(),
         manifest=ctx.manifest,
+        render_plan=render,
         blocks=await blocks.current_blocks(),
         target_lang=ctx.target_lang,
     )

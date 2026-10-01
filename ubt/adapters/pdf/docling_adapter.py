@@ -42,6 +42,7 @@ from ubt.adapters.pdf.typst_fragments import sanitize_font_family
 from ubt.adapters.pdf.typst_reconstructor import TypstReconstructor
 from ubt.core.env import has_accelerator as _has_accelerator
 from ubt.core.ir.models import BookManifest, ChapterIR, IRBlock
+from ubt.core.ir.render_plan import RenderOutcome, RenderPlan
 
 if TYPE_CHECKING:
     from ubt.core.ports import AdapterRuntimeConfig
@@ -118,6 +119,10 @@ class DoclingPDFAdapter(BasePDFEngineAdapter):
         # no core -> adapter import edge). Reset on every render so stale
         # skips can never leak across jobs.
         self.last_render_skips: list[tuple[str, str]] = []
+        # Render outcome side channel (ADR-0001 renderer handshake): what the
+        # renderer actually used (post rigid downgrade), read by export and the
+        # visual gate. ``None`` until the first render. Reset on every render.
+        self.last_render_outcome: RenderOutcome | None = None
         self._renderer = DoclingRenderStrategy(
             reconstructor=self.reconstructor,
             alternator=self.alternator,
@@ -365,6 +370,7 @@ class DoclingPDFAdapter(BasePDFEngineAdapter):
         output_path: Path,
         bilingual_mode: str | None = None,
         render_engine: str | None = None,
+        render_plan: RenderPlan | None = None,
         **kwargs: Any,
     ) -> Path:
         """Render publication-grade output (delegates to DoclingRenderStrategy)."""
@@ -375,6 +381,8 @@ class DoclingPDFAdapter(BasePDFEngineAdapter):
             output_path,
             bilingual_mode,
             render_engine,
+            render_plan=render_plan,
         )
         self.last_render_skips = list(self._renderer.last_render_skips)
+        self.last_render_outcome = self._renderer.last_outcome
         return out_path

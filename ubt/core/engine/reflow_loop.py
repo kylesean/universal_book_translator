@@ -27,6 +27,7 @@ from typing import Any
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.exceptions import JobInterruptedError
 from ubt.core.ir.models import BlockStatus, BookManifest, IRBlock
+from ubt.core.ir.render_plan import RenderPlan
 from ubt.core.job_options import sidecar_path
 from ubt.core.log_aggregate import noise_report
 from ubt.core.ports import get_visual_gate_runner, is_pdf_engine_adapter
@@ -71,6 +72,7 @@ class ReflowControlLoop:
         target_lang: str,
         render_fn: RenderFn | None = None,
         router: Any | None = None,
+        render_plan: RenderPlan | None = None,
         sample_pages: int = 6,
         max_vlm_pages: int = 3,
         visual_judge_enabled: bool = False,
@@ -85,6 +87,9 @@ class ReflowControlLoop:
         self.target_lang = target_lang
         self.render_fn = render_fn
         self.router = router
+        # The render decision, so the retune re-render uses the same mode/engine
+        # (ADR-0001 renderer handshake) and the gate reads the same facing/mode.
+        self.render_plan = render_plan
         self.sample_pages = max(0, sample_pages)
         self.max_vlm_pages = max(0, max_vlm_pages)
         self.visual_judge_enabled = visual_judge_enabled
@@ -142,7 +147,12 @@ class ReflowControlLoop:
                 )[:200_000]
 
         facing_spread = False
-        if self.manifest and self.manifest.metadata:
+        if self.render_plan is not None:
+            facing_spread = bool(
+                self.render_plan.facing_spread
+                or self.render_plan.bilingual_mode in ("facing", "facing_spread")
+            )
+        elif self.manifest and self.manifest.metadata:
             facing_spread = bool(
                 self.manifest.run.facing_spread
                 or self.manifest.run.bilingual_mode in ("facing", "facing_spread")
@@ -235,6 +245,7 @@ class ReflowControlLoop:
                         target_lang=self.target_lang,
                         output_path=rendered_path,
                         job_id=self.job_id,
+                        render_plan=self.render_plan,
                     )
                     gate2 = await self._evaluate_gate(tuned_rendered, blocks)
                     if gate2.passed:

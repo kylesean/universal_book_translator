@@ -26,6 +26,7 @@ from typing import Any, cast
 from ubt.core.config import RIGID_ENGINES, canonical_render_engine
 from ubt.core.exceptions import DocumentParseError
 from ubt.core.ir.models import BlockType, IRBlock
+from ubt.core.ir.render_plan import RenderPlan
 from ubt.core.policy.adaptive_policy import resolve_pdf_engine
 from ubt.core.ports import DocumentAdapter, is_pdf_engine_adapter
 
@@ -86,6 +87,7 @@ async def run_render_preflight(
     manifest: Any,
     blocks: list[IRBlock],
     target_lang: str,
+    render_plan: RenderPlan | None = None,
 ) -> None:
     """Render a source-text sample through the adapter's real PDF path.
 
@@ -99,23 +101,24 @@ async def run_render_preflight(
     sample = select_preflight_sample(blocks)
     metadata = getattr(manifest, "metadata", None) or {}
     run_meta = getattr(manifest, "run", None)
+    # The render decision is the plan's (ADR-0001 renderer handshake); the
+    # manifest metadata copy is a fallback for callers that pass no plan.
     # Resolve the engine against ALL blocks, then force that engine onto the
     # sample. ``select_preflight_sample`` is deliberately structure-biased
     # (TABLE/FORMULA first), so resolving on the sample alone could route rigid
     # while the full document reflows: the scratch render would exercise a path
     # that never runs, and log a monolingual-downgrade warning for it.
-    effective_engine = getattr(run_meta, "render_engine_effective", None)
-    if effective_engine:
-        render_engine = str(effective_engine)
-    else:
-        requested_engine = (
-            metadata.get("render_engine")
-            or getattr(run_meta, "render_engine", None)
-            or "publication"
-        )
-        render_engine = resolve_pdf_engine(str(requested_engine), blocks, manifest=manifest)
+    requested_engine = (
+        (render_plan.render_engine if render_plan is not None else None)
+        or metadata.get("render_engine")
+        or getattr(run_meta, "render_engine", None)
+        or "publication"
+    )
+    render_engine = resolve_pdf_engine(str(requested_engine), blocks, manifest=manifest)
     bilingual_mode = (
-        getattr(run_meta, "effective_dual_mode", None)
+        (render_plan.effective_dual_mode if render_plan is not None else None)
+        or (render_plan.bilingual_mode if render_plan is not None else None)
+        or getattr(run_meta, "effective_dual_mode", None)
         or getattr(run_meta, "bilingual_mode", None)
         or metadata.get("bilingual_mode")
     )
@@ -139,6 +142,7 @@ async def run_render_preflight(
             output_path=preflight_path,
             bilingual_mode=bilingual_mode,
             render_engine=render_engine,
+            render_plan=render_plan,
         )
     except DocumentParseError as exc:
         raise DocumentParseError(

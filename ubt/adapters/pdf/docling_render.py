@@ -23,6 +23,7 @@ from ubt.adapters.pdf.typst_reconstructor import TypstReconstructor
 from ubt.core.config import canonical_render_engine
 from ubt.core.exceptions import DocumentParseError
 from ubt.core.ir.models import BlockType, BookManifest, BoundingBox, FlowID, IRBlock
+from ubt.core.ir.render_plan import RenderOutcome, RenderPlan
 from ubt.core.policy.adaptive_policy import resolve_pdf_engine
 
 logger = logging.getLogger(__name__)
@@ -199,6 +200,9 @@ class DoclingRenderStrategy:
         # Render skip side channel: plain (block_id, reason) pairs
         # from the most recent render_blocks call. Reset every render.
         self.last_render_skips: list[tuple[str, str]] = []
+        # Render outcome side channel (ADR-0001 renderer handshake): the mode the
+        # renderer actually used, after any rigid monolingual downgrade.
+        self.last_outcome: RenderOutcome | None = None
 
     async def render_blocks(
         self,
@@ -208,6 +212,7 @@ class DoclingRenderStrategy:
         output_path: Path,
         bilingual_mode: str | None = None,
         render_engine: str | None = None,
+        render_plan: RenderPlan | None = None,
     ) -> Path:
         """Render publication-grade translated output from pre-fetched blocks.
 
@@ -221,11 +226,21 @@ class DoclingRenderStrategy:
           documents take the rigid engine).
         """
         self.last_render_skips = []
+        self.last_outcome = None
         out_path = Path(output_path)
         out_path.parent.mkdir(parents=True, exist_ok=True)
 
-        active_mode = bilingual_mode or str(manifest.run.bilingual_mode or "bilingual")
-        requested_engine = render_engine or str(manifest.run.render_engine or "publication")
+        # The render decision is the plan's (ADR-0001 renderer handshake); the
+        # manifest.run copy is a transitional fallback for callers that pass no
+        # plan, and is deleted with the field once the shadow proves equivalence.
+        plan_mode = render_plan.bilingual_mode if render_plan is not None else None
+        plan_engine = render_plan.render_engine if render_plan is not None else None
+        if plan_mode is None:
+            plan_mode = manifest.run.bilingual_mode
+        if plan_engine is None:
+            plan_engine = manifest.run.render_engine
+        active_mode = bilingual_mode or str(plan_mode or "bilingual")
+        requested_engine = render_engine or str(plan_engine or "publication")
         is_pdf_target = out_path.suffix.lower() == ".pdf"
         active_engine = (
             resolve_pdf_engine(requested_engine, blocks, manifest=manifest)
@@ -242,24 +257,59 @@ class DoclingRenderStrategy:
             _warn_forced_engine(requested_engine, active_engine, blocks, manifest=manifest)
 
         # Rigid typesetting is monolingual: never let a requested bilingual
-        # mode silently produce a mono artifact. The downgrade is recorded so
-        # the quality report and the secondary-render guard can see it.
+        # mode silently produce a mono artifact. The downgrade is recorded as
+        # the renderer's *outcome* (not written back onto the run manifest) so
+        # export and the visual gate can see what actually shipped.
+        prior_downgrade = (
+            render_plan.dual_mode_downgraded
+            if render_plan is not None
+            else manifest.run.dual_mode_downgraded
+        )
+        outcome = RenderOutcome(
+            bilingual_mode=active_mode,
+            effective_dual_mode=(
+                render_plan.effective_dual_mode
+                if render_plan is not None
+                else manifest.run.effective_dual_mode
+            ),
+            dual_mode_downgraded=prior_downgrade,
+        )
         if active_engine == "rigid" and active_mode != "monolingual":
-            was_downgraded = manifest.run.dual_mode_downgraded == active_mode
-            manifest.run.dual_mode_downgraded = active_mode
+            was_downgraded = prior_downgrade == active_mode
+            outcome.dual_mode_downgraded = active_mode
             active_mode = "monolingual"
-            manifest.run.bilingual_mode = "monolingual"
-            manifest.run.effective_dual_mode = "monolingual"
+            outcome.bilingual_mode = "monolingual"
+            outcome.effective_dual_mode = "monolingual"
+            # Shadow: mirror onto the legacy manifest channel while the renderer
+            # handshake is proven equivalent; deleted with the fields.
+            manifest.run.dual_mode_downgraded = outcome.dual_mode_downgraded
+            manifest.run.bilingual_mode = outcome.bilingual_mode
+            manifest.run.effective_dual_mode = outcome.effective_dual_mode
             if not was_downgraded:
                 logger.warning(
                     "render_engine='rigid' is monolingual; requested mode %r downgraded",
-                    manifest.run.dual_mode_downgraded,
+                    outcome.dual_mode_downgraded,
                 )
+        self.last_outcome = outcome
         # The engine the renderer actually used is render *telemetry*, so its home
         # is ``manifest.metadata`` (ARTIFACT_METADATA_KEYS), read by the visual
         # gate and the quality report -- not a run decision on the manifest.
         if isinstance(getattr(manifest, "metadata", None), dict):
             manifest.metadata["render_engine_effective"] = active_engine
+
+        # Chrome/cover/facing are the plan's; the manifest.run copies are the
+        # transitional fallback for callers that pass no plan.
+        translate_chrome = (
+            render_plan.translate_chrome
+            if render_plan is not None
+            else manifest.run.translate_chrome
+        )
+        cover_mode = render_plan.cover_mode if render_plan is not None else manifest.run.cover_mode
+        facing_spread_plan = (
+            render_plan.facing_spread
+            if render_plan is not None
+            else bool(manifest.run.facing_spread)
+        )
 
         # --- Rigid typesetting (region-rigid adaptive typesetting) ---
         # Source page stays the canvas; prose regions are re-typeset, figures
@@ -270,7 +320,7 @@ class DoclingRenderStrategy:
             # stay ``None`` here forever.
             font_family = getattr(self, "font_family", None)
             rigid = RigidTypesetter(
-                translate_chrome=bool(manifest.run.translate_chrome),
+                translate_chrome=bool(translate_chrome),
                 font_family=font_family,
                 target_lang=target_lang or getattr(manifest, "target_lang", "zh") or "zh",
             )
@@ -405,7 +455,7 @@ class DoclingRenderStrategy:
             title=doc_title,
             bilingual=is_in_place,
             page_strict=not is_in_place,
-            cover_mode=str(manifest.run.cover_mode or "auto"),
+            cover_mode=str(cover_mode or "auto"),
             # Hard 1:1 pagebreaks exist only for the alternating page-zipper
             # (source/translation interleave). Monolingual reflow flows
             # continuously — forced breaks strand figure-only pages on
@@ -437,7 +487,7 @@ class DoclingRenderStrategy:
                 use_facing = (
                     active_mode in ("facing", "facing_spread")
                     or getattr(self.reconstructor, "facing_spread", False)
-                    or bool(manifest.run.facing_spread)
+                    or bool(facing_spread_plan)
                 )
                 staging_trans_pdf = out_path.with_name(f"{out_path.stem}_trans_stage.pdf")
                 # compile_pdf stages its own .typ next to the target; both the

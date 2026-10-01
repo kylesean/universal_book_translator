@@ -59,7 +59,8 @@ from ubt.core.validators.consistency import GlossaryConsistencyValidator
 from ubt.core.validators.glossary_enforcer import DeterministicGlossaryEnforcer
 from ubt.core.validators.html_delta import HTMLDeltaValidator
 from ubt.core.validators.math_guard import apply_math_guards
-from ubt.pipeline.facts import RenderPlan, Terminology
+from ubt.pipeline.facts import RenderOutcome, RenderPlan, Terminology
+from ubt.pipeline.render_shadow import render_handshake_drift
 from ubt.pipeline.services import RunServices
 
 logger = logging.getLogger(__name__)
@@ -75,13 +76,23 @@ async def _render_adapter_output(
     job_id: str | None = None,
     bilingual_mode: str | None = None,
     render_engine: str | None = None,
+    render_plan: RenderPlan | None = None,
 ) -> Path:
     """Render via ``render_blocks`` with fallback to ``render_output``.
 
     Standard adapters implement ``render_blocks(manifest, blocks, ...)``;
     external or third-party adapters implementing ``render_output(manifest, ledger, ...)``
     are invoked through the fallback branch.
+
+    ``render_plan`` is the render decision the advisories made (ADR-0001
+    renderer handshake). ``bilingual_mode``/``render_engine`` are read from it
+    when not passed explicitly; the ``manifest.run`` fallback is transitional
+    and removed with those fields.
     """
+    if bilingual_mode is None and render_plan is not None:
+        bilingual_mode = render_plan.bilingual_mode
+    if render_engine is None and render_plan is not None:
+        render_engine = render_plan.render_engine
     if bilingual_mode is None and manifest and manifest.run:
         bilingual_mode = manifest.run.bilingual_mode
     if render_engine is None and manifest and manifest.run:
@@ -97,6 +108,7 @@ async def _render_adapter_output(
                 output_path=output_path,
                 bilingual_mode=bilingual_mode,
                 render_engine=render_engine,
+                render_plan=render_plan,
             )
             return cast(Path, res)
         return await adapter.render_blocks(
@@ -119,6 +131,7 @@ async def _render_adapter_output(
             job_id=job_id,
             bilingual_mode=bilingual_mode,
             render_engine=render_engine,
+            render_plan=render_plan,
         )
         return cast(Path, res)
     return await adapter.render_output(
@@ -511,6 +524,7 @@ async def _run_visual_gate(
     adapter: DocumentAdapter,
     final_blocks: list[IRBlock],
     rendered_path: Path,
+    render: RenderPlan,
 ) -> tuple[Path, Path | None, Any]:
     """Post-render visual self-healing gate; never fatal except on cancel.
 
@@ -534,6 +548,7 @@ async def _run_visual_gate(
             target_lang=ctx.target_lang,
             render_fn=_render_adapter_output,
             router=ctx.router,
+            render_plan=render,
             sample_pages=max(0, ctx.config.visual_sample_pages),
             max_vlm_pages=max(0, ctx.config.visual_max_vlm_pages),
             visual_judge_enabled=ctx.config.visual_judge_enabled,
@@ -751,7 +766,14 @@ async def _render_complementary_artifact(
         logger.info("Complementary dual render skipped: 'rigid' is monolingual")
         secondary_render = ""
     if secondary_render:
-        primary_mode = str(manifest.run.effective_dual_mode or "inline")
+        # The mode the primary *actually* shipped (the renderer's outcome), so a
+        # rigid downgrade names the companion from the real artifact.
+        primary_outcome = getattr(adapter, "last_render_outcome", None)
+        primary_mode = str(
+            (primary_outcome.effective_dual_mode if primary_outcome else None)
+            or render.effective_dual_mode
+            or "inline"
+        )
         suffix = SECONDARY_SUFFIX.get(cast(DualMode, primary_mode), "_secondary")
         candidate = artifact.sibling(suffix)
         try:
@@ -764,6 +786,7 @@ async def _render_complementary_artifact(
                 output_path=candidate,
                 job_id=ctx.job_id,
                 bilingual_mode=secondary_render,
+                render_plan=render,
             )
             logger.info("Dual output rendered complementary artifact: %s", secondary_path)
         except Exception as exc:
@@ -778,6 +801,7 @@ async def _render_complementary_artifact(
         candidate = artifact.sibling("_rigid")
         saved_meta_effective = manifest.metadata.get("render_engine_effective")
         saved_skips = list(getattr(adapter, "last_render_skips", ()))
+        saved_outcome = getattr(adapter, "last_render_outcome", None)
         try:
             secondary_path = await _render_adapter_output(
                 adapter=adapter,
@@ -789,6 +813,7 @@ async def _render_complementary_artifact(
                 job_id=ctx.job_id,
                 bilingual_mode="monolingual",
                 render_engine="rigid",
+                render_plan=render,
             )
             logger.info(
                 "Zero-cost companion rigid PDF rendered alongside forced reflow artifact: %s",
@@ -798,14 +823,17 @@ async def _render_complementary_artifact(
             logger.warning("Companion rigid render failed (non-fatal): %s", exc)
             secondary_path = None
         finally:
-            # The companion render overwrote the primary's engine telemetry;
-            # restore it so the visual gate scores the delivered artifact.
+            # The companion render overwrote the primary's engine telemetry and
+            # outcome; restore them so the visual gate scores the delivered
+            # artifact, not the companion.
             if saved_meta_effective is not None:
                 manifest.metadata["render_engine_effective"] = saved_meta_effective
             elif "render_engine_effective" in manifest.metadata:
                 del manifest.metadata["render_engine_effective"]
             if hasattr(adapter, "last_render_skips"):
                 adapter.last_render_skips = saved_skips
+            if hasattr(adapter, "last_render_outcome"):
+                adapter.last_render_outcome = saved_outcome
     elif (
         secondary_engine == "rigid_bilingual"
         and effective_engine == "rigid"
@@ -830,7 +858,7 @@ async def _render_complementary_artifact(
                 source_pdf=ctx.source_pdf_path,
                 translated_pdf=artifact.rendered_path,
                 output_pdf=candidate,
-                facing_spread=bool(manifest.run.facing_spread),
+                facing_spread=bool(render.facing_spread),
             )
             secondary_path = Path(result.output_path)
             logger.info(
@@ -842,6 +870,22 @@ async def _render_complementary_artifact(
             secondary_path = None
     manifest.metadata.pop("suppress_render_engine_warning", None)
     return secondary_path
+
+
+def _assert_render_handshake(
+    render: RenderPlan, outcome: RenderOutcome | None, manifest: BookManifest
+) -> None:
+    """Shadow-assert the plan/outcome agree with the legacy ``manifest.run`` channel.
+
+    Transitional (ADR-0001 final cut): while the mode cluster still lives on
+    ``manifest.run``, this is the acceptance evidence that the new channel is
+    equivalent before those fields are deleted. It is removed with them.
+    """
+    drift = render_handshake_drift(render, outcome, manifest)
+    if drift:
+        raise RuntimeError(
+            "Render handshake drift (plan/outcome vs manifest.run): " + "; ".join(drift)
+        )
 
 
 def _effective_engine(ctx: StageContext) -> str:
@@ -1263,7 +1307,7 @@ async def run_export_stage(
     # (rigid) primary gets the honest ``_mono`` default name; an explicit -o is
     # respected as given.
     is_monolingual_output = (
-        str(manifest.run.effective_dual_mode or manifest.run.bilingual_mode or "") == "monolingual"
+        str(render.effective_dual_mode or render.bilingual_mode or "") == "monolingual"
     )
     target_output = resolve_target_output(
         output_path, input_path, monolingual=is_monolingual_output
@@ -1271,7 +1315,7 @@ async def run_export_stage(
     target_output.parent.mkdir(parents=True, exist_ok=True)
 
     ctx.check_cancelled()
-    effective_bilingual_mode = manifest.run.bilingual_mode if manifest else None
+    effective_bilingual_mode = render.bilingual_mode
     rendered_path = await _render_adapter_output(
         adapter=adapter,
         manifest=manifest,
@@ -1281,7 +1325,12 @@ async def run_export_stage(
         output_path=target_output,
         job_id=actual_job_id,
         bilingual_mode=effective_bilingual_mode,
+        render_plan=render,
     )
+    # What the renderer actually used (post rigid monolingual downgrade). The
+    # plan is the decision; the outcome is the handshake back (ADR-0001).
+    outcome = getattr(adapter, "last_render_outcome", None)
+    _assert_render_handshake(render, outcome, manifest)
 
     # Render skip pass-through + length conservation, before the report is
     # built (see _apply_render_skip_ledger_pass).
@@ -1328,7 +1377,7 @@ async def run_export_stage(
     # Enforcement is deferred until after _build_reports (below): a refusal
     # must still leave the quality/metrics reports on disk for audit.
     rendered_path, visual_report_path, gate = await _run_visual_gate(
-        ctx, adapter, final_blocks, rendered_path
+        ctx, adapter, final_blocks, rendered_path, render
     )
 
     # Human PE (HITL) queue export: NEEDS_HUMAN /

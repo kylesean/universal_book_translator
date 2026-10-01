@@ -88,7 +88,7 @@ async def run_stages(
     # Zero-token preflights BEFORE the bible: the bible stage's skeleton
     # extraction and abbreviation backfill are billable calls, and the
     # render/cost preflight exists to fail before any spend.
-    await run_render_preflight_stage(ctx, blocks)
+    await run_render_preflight_stage(ctx, facts.render, blocks)
     await run_cost_preflight_stage(ctx, blocks)
     async for event in run_bible_stage(ctx, facts.terminology):
         yield event
