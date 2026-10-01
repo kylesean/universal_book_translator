@@ -14,12 +14,14 @@ from ubt.core.ir.models import BlockStatus, IRBlock
 from ubt.core.memory.glossary_table import build_chunk_glossary_table
 from ubt.core.qe.defect_taxonomy import REPAIR_ERROR_PREFIX
 from ubt.pipeline.facts import Scoring, Terminology
+from ubt.pipeline.services import RunServices
 
 logger = logging.getLogger(__name__)
 
 
 async def run_repair_stage(
     ctx: StageContext,
+    services: RunServices,
     terminology: Terminology,
     scoring: Scoring,
     defer_unresolved_to_triage: bool = True,
@@ -37,13 +39,13 @@ async def run_repair_stage(
     # triage rather than force-finalized here. The flag survives as an argument
     # only because the fallback path (finalize as FAILED) is still reachable and
     # still tested.
-    repair_loop = scoring.repair_loop or ctx.repair_loop
+    repair_loop = scoring.repair_loop or services.repair_loop
     glossary_dicts = terminology.glossary_dicts
     abbreviation_entries = terminology.abbreviation_entries
     target_lang = ctx.target_lang
     source_lang = ctx.source_lang
-    fast_pass = ctx.fast_pass
-    concurrency_sem = ctx.concurrency_sem
+    fast_pass = services.fast_pass
+    concurrency_sem = services.concurrency_sem
     create_event_fn = ctx.create_event
     source_pdf_path = ctx.source_pdf_path
 

@@ -60,6 +60,7 @@ from ubt.core.validators.glossary_enforcer import DeterministicGlossaryEnforcer
 from ubt.core.validators.html_delta import HTMLDeltaValidator
 from ubt.core.validators.math_guard import apply_math_guards
 from ubt.pipeline.facts import Terminology
+from ubt.pipeline.services import RunServices
 
 logger = logging.getLogger(__name__)
 
@@ -862,7 +863,7 @@ def _effective_engine(ctx: StageContext) -> str:
 
 
 def _attest_delivery(
-    ctx: StageContext, blocks: list[IRBlock]
+    ctx: StageContext, services: RunServices, blocks: list[IRBlock]
 ) -> tuple[Document, dict[str, str], AttestationReport]:
     """Realize the delivery per element: its Document, its target map, its account.
 
@@ -882,7 +883,7 @@ def _attest_delivery(
     translations = delivery_translations(blocks, engine=_effective_engine(ctx))
     theme = resolve_theme(ctx.source_lang or "en", ctx.target_lang or "zh")
     report = attest_document(
-        document, TypstBackend(translations, theme=theme), build_verifiers(ctx.fast_pass)
+        document, TypstBackend(translations, theme=theme), build_verifiers(services.fast_pass)
     )
     return document, translations, report
 
@@ -1178,6 +1179,7 @@ async def _build_reports(
 
 async def run_export_stage(
     ctx: StageContext,
+    services: RunServices,
     terminology: Terminology,
 ) -> AsyncIterator[TranslationProgressEvent]:
     """Perform integrity checks, apply glossary enforcement (opt-in), and render output document."""
@@ -1197,7 +1199,7 @@ async def run_export_stage(
     target_lang = ctx.target_lang
     source_lang = ctx.source_lang
     glossary_dicts = terminology.glossary_dicts
-    html_validator = ctx.html_validator
+    html_validator = services.html_validator
     create_event_fn = ctx.create_event
     pe_queue_enabled = ctx.config.pe_queue_enabled
     pe_export_format = ctx.config.pe_export_format
@@ -1205,9 +1207,9 @@ async def run_export_stage(
     # also what manifest.run.adaptive_policy reports) instead of re-deriving
     # from ctx.short_chain here — a second derivation could silently drift from
     # the value the report already published.
-    visual_blocking_gate_enabled = ctx.adaptive_policy.visual_blocking
+    visual_blocking_gate_enabled = services.adaptive_policy.visual_blocking
     min_completion_ratio = ctx.config.export_min_completion_ratio
-    deterministic_glossary_enforce = ctx.adaptive_policy.deterministic_glossary
+    deterministic_glossary_enforce = services.adaptive_policy.deterministic_glossary
     ctx.check_cancelled()
     final_blocks = await _force_stale_blocks_terminal(ledger, actual_job_id)
     _check_completion_ratio(actual_job_id, final_blocks, min_completion_ratio)
@@ -1296,7 +1298,7 @@ async def run_export_stage(
     # same Document and account feed the artifact check in the audit companion.
     # Off-loop: realize() runs the verifiers over every block.
     document, translations, attestations = await asyncio.to_thread(
-        _attest_delivery, ctx, final_blocks
+        _attest_delivery, ctx, services, final_blocks
     )
 
     # Delivery contract: the attestation projection, written beside the artifact

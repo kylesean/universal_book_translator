@@ -54,6 +54,7 @@ from ubt.core.router_mode import decide
 from ubt.pipeline.blocks import BlockReader
 from ubt.pipeline.facts import RunFacts
 from ubt.pipeline.run import RunGates, run_stages
+from ubt.pipeline.services import RunServices
 
 logger = logging.getLogger(__name__)
 
@@ -798,6 +799,19 @@ class PipelineOrchestrator:
             concurrency_sem = asyncio.Semaphore(self.config.max_concurrency)
             # A dedicated per-run FastPassFilter instance avoids shared mutable state.
             runtime_fast_pass = FastPassFilter(source_lang=source_lang, target_lang=target_lang)
+            # The per-run services the stages read (ADR-0001): built here, where
+            # the whole set is visible in one place, and handed to the plan
+            # instead of being fields on the shared context.
+            services = RunServices(
+                fast_pass=runtime_fast_pass,
+                qe_runner=runtime_qe_runner,
+                repair_loop=runtime_repair_loop,
+                adaptive_policy=adaptive_policy,
+                concurrency_sem=concurrency_sem,
+                tm=tm,
+                qe_runner_explicit=self._qe_runner_explicit,
+                repair_loop_explicit=self._repair_loop_explicit,
+            )
             ctx = StageContext(
                 config=self.config,
                 router=self.router,
@@ -810,21 +824,13 @@ class PipelineOrchestrator:
                 source_lang=source_lang,
                 target_lang=target_lang,
                 profile_name=profile_name,
-                fast_pass=runtime_fast_pass,
-                qe_runner=runtime_qe_runner,
-                repair_loop=runtime_repair_loop,
-                adaptive_policy=adaptive_policy,
-                concurrency_sem=concurrency_sem,
                 create_event=self._create_progress_event,
-                tm=tm,
                 short_chain=short_chain,
                 start_chapter=start_chapter,
                 max_chapters=max_chapters,
                 # The fast lane may still be refused by the file probe the bible
                 # stage runs; this is the policy's wish, not the verdict.
                 fast_lane=adaptive_policy.fast_lane_bible,
-                qe_runner_explicit=self._qe_runner_explicit,
-                repair_loop_explicit=self._repair_loop_explicit,
                 # A callable, so the export stage reads the provider's counters
                 # when it renders rather than when the loop started.
                 measure_run_usage=self._run_usage,
@@ -873,11 +879,11 @@ class PipelineOrchestrator:
             blocks = BlockReader(ledger, actual_job_id)
 
             async def _on_export_completed(event: TranslationProgressEvent) -> None:
-                await run_tm_writeback_stage(ctx, facts.terminology)
+                await run_tm_writeback_stage(ctx, services, facts.terminology)
                 await self._run_finalize_hook(event)
 
             async for event in run_stages(
-                ctx, gates, facts, blocks=blocks, on_export_completed=_on_export_completed
+                ctx, gates, facts, services, blocks=blocks, on_export_completed=_on_export_completed
             ):
                 yield event
 

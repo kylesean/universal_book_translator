@@ -39,6 +39,7 @@ from ubt.core.router.router import (
 )
 from ubt.core.validators.consistency import GlossaryConsistencyValidator
 from ubt.pipeline.facts import Terminology
+from ubt.pipeline.services import RunServices
 from ubt.segment.placeholders import MaskedSource, default_placeholder_engine
 from ubt.translate.engine import TranslationEngine
 
@@ -1063,6 +1064,7 @@ def _restore_memory_state(
 
 async def run_draft_stage(
     ctx: StageContext,
+    services: RunServices,
     terminology: Terminology,
     chapter_id: str | None = None,
 ) -> AsyncIterator[TranslationProgressEvent]:
@@ -1089,10 +1091,10 @@ async def run_draft_stage(
         all_blocks_count = 0
     glossary_dicts = terminology.glossary_dicts
     abbreviation_entries = terminology.abbreviation_entries
-    concurrency_sem = ctx.concurrency_sem
+    concurrency_sem = services.concurrency_sem
     create_event_fn = ctx.create_event
-    tm = ctx.tm
-    fast_pass = ctx.fast_pass
+    tm = services.tm
+    fast_pass = services.fast_pass
     rolling_enabled, is_fast_path, batch_limit = resolve_draft_policy(
         manifest, profile_name, config, all_blocks_count
     )

@@ -35,6 +35,7 @@ from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.stage_context import StageContext
 from ubt.core.ir.models import BlockType, IRBlock
 from ubt.core.router.router import ModelRouter
+from ubt.pipeline.services import RunServices
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +93,7 @@ async def _translate_block(
 
 async def run_c_text_stage(
     ctx: StageContext,
+    services: RunServices,
     chapter_id: str | None = None,
 ) -> AsyncIterator[TranslationProgressEvent]:
     """Translate formula text-spans; yields its completion event when enabled.
@@ -118,7 +120,7 @@ async def run_c_text_stage(
     # Share the run-wide in-flight cap: a private semaphore let this stage run
     # concurrently with the draft/QE workers in chapter streaming and exceed the
     # configured max_concurrency by up to 2x.
-    sem = ctx.concurrency_sem
+    sem = services.concurrency_sem
     results = await asyncio.gather(
         *(_translate_block(router, target_lang, sem, b, source_lang=source_lang) for b in pending)
     )

@@ -27,6 +27,7 @@ from ubt.core.memory.tm import (
 )
 from ubt.core.qe.added_content import AddedContentGate
 from ubt.pipeline.facts import Terminology
+from ubt.pipeline.services import RunServices
 
 logger = logging.getLogger(__name__)
 
@@ -110,12 +111,14 @@ def writeback_tm_from_ledger(
     return tm.writeback(entries)
 
 
-async def run_tm_writeback_stage(ctx: StageContext, terminology: Terminology) -> None:
+async def run_tm_writeback_stage(
+    ctx: StageContext, services: RunServices, terminology: Terminology
+) -> None:
     """Flush this run's accepted blocks into the shared TM. Yields no events."""
     from ubt.core.memory.abbreviation_miner import format_abbreviations_markdown_table
     from ubt.core.memory.tm import PROMPT_VERSION, compute_tm_context
 
-    tm = ctx.tm
+    tm = services.tm
     if tm is None or ctx.is_mock_run:
         return
     try:

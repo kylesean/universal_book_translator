@@ -56,8 +56,8 @@ class Scoring:
     The gate binds the run's glossary onto the QE runner so a terminology
     violation scores at its own band, and builds the repair loop around that
     runner; repair, triage and consistency then re-score with the same one.
-    ``None`` means "use the run's own" (``ctx.qe_runner`` / ``ctx.repair_loop``),
-    so a caller that injects a runner/loop keeps it.
+    ``None`` means "use the run's own" (``services.qe_runner`` /
+    ``services.repair_loop``), so a caller that injects a runner/loop keeps it.
     """
 
     qe_runner: BaseQERunner | None = None

@@ -16,6 +16,7 @@ from ubt.core.qe.defect_taxonomy import has_structural_defect
 from ubt.core.qe.fast_pass import FastPassFilter
 from ubt.core.validators.consistency import GlossaryConsistencyValidator
 from ubt.pipeline.facts import Scoring, Terminology
+from ubt.pipeline.services import RunServices
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +112,7 @@ async def _audit_pass_sample(
 
 async def run_quality_gate_stage(
     ctx: StageContext,
+    services: RunServices,
     terminology: Terminology,
     scoring: Scoring,
     chapter_id: str | None = None,
@@ -131,16 +133,16 @@ async def run_quality_gate_stage(
     """
     ledger = ctx.ledger
     actual_job_id = ctx.job_id
-    fast_pass = ctx.fast_pass
+    fast_pass = services.fast_pass
     create_event_fn = ctx.create_event
     glossary_dicts = terminology.glossary_dicts or None
     # The gate produces the run's scoring collaborators (ADR-0001 explicit
     # params): it binds the glossary onto the QE runner and builds the repair
     # loop around it, so repair, triage and consistency re-score terminology with
     # the same runner. A runner/loop the caller injected is kept.
-    qe_runner = scoring.qe_runner or ctx.qe_runner
+    qe_runner = scoring.qe_runner or services.qe_runner
     bind_glossary = getattr(qe_runner, "with_glossary", None)
-    if not ctx.qe_runner_explicit and glossary_dicts and callable(bind_glossary):
+    if not services.qe_runner_explicit and glossary_dicts and callable(bind_glossary):
         # Both the gate's scoring branch and the repair loop's re-score must
         # classify a terminology violation at its own band instead of the 0.92
         # pass value. Heuristic and tiered runners expose ``with_glossary``
@@ -149,7 +151,9 @@ async def run_quality_gate_stage(
         # scoring.
         qe_runner = bind_glossary(glossary_dicts)
         scoring.qe_runner = qe_runner
-        scoring.repair_loop = ctx.repair_loop_for(qe_runner)
+        scoring.repair_loop = services.repair_loop_for(
+            qe_runner, config=ctx.config, router=ctx.router
+        )
     drafted_blocks = await asyncio.to_thread(
         ledger.fetch_blocks_by_status, actual_job_id, BlockStatus.DRAFTED, chapter_id=chapter_id
     )

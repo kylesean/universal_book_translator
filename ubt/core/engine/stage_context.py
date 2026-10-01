@@ -20,6 +20,11 @@ The split this enforces:
   to the stage that reads it (``terminology`` to the draft/repair/triage/… stages,
   ``layout`` to the two advisories), so the inter-stage flow is an explicit,
   typed parameter.
+- The collaborators a run *builds* for its stages (the QE runner, repair loop,
+  FastPass filter, adaptive policy, in-flight semaphore, TM, HTML validator) live
+  in :class:`~ubt.pipeline.services.RunServices`, which the plan constructs once
+  and threads, so "what the run *was configured with*" is separate from "the
+  per-run services it made for itself".
 - What a *single* stage needs for itself (``mode`` and ``max_repairs`` for
   consistency, the ``visual_*`` knobs for export) stays in that stage's own
   signature, so it remains greppable as a stage-specific tunable.
@@ -29,7 +34,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
@@ -39,16 +44,10 @@ from ubt.core.engine.events import (
     TranslationProgressEvent,
 )
 from ubt.core.engine.ledger import SQLiteJobLedger
-from ubt.core.engine.repair_loop import RepairLoop
 from ubt.core.exceptions import JobInterruptedError
 from ubt.core.ir.models import BookManifest
-from ubt.core.memory.tm import TranslationMemory
-from ubt.core.policy.adaptive_policy import AdaptivePolicy
 from ubt.core.ports import DocumentAdapter
-from ubt.core.qe.base import BaseQERunner
-from ubt.core.qe.fast_pass import FastPassFilter
 from ubt.core.router.router import ModelRouter
-from ubt.core.validators.html_delta import HTMLDeltaValidator
 
 
 async def _noop_bill() -> None:
@@ -96,13 +95,17 @@ class StageContext:
     target_lang: str
     profile_name: str
 
-    # --- Per-run collaborators (language-bound, so not orchestrator-owned) --
-    fast_pass: FastPassFilter
-    qe_runner: BaseQERunner
-    repair_loop: RepairLoop
-    adaptive_policy: AdaptivePolicy
-    concurrency_sem: asyncio.Semaphore
+    # --- Driver callbacks -------------------------------------------------
+    # The orchestrator reaching *into* a stage (progress events, and further
+    # below billing and cancellation), not a collaborator the run built for
+    # itself; these stay on the context.
     create_event: EventFactory
+
+    # --- Per-run services -------------------------------------------------
+    # The collaborators this run builds for its stages (QE runner, repair loop,
+    # FastPass filter, adaptive policy, in-flight semaphore, TM, HTML validator)
+    # live in :class:`~ubt.pipeline.services.RunServices`, constructed by the
+    # plan and handed to the stages that use them.
 
     # --- Optional, and defaulted so a stage test can omit them -------------
     #: Only the stages that read or write the artifact need this; the QE,
@@ -110,8 +113,6 @@ class StageContext:
     #: of them should not have to invent an adapter to say so.
     adapter: DocumentAdapter | None = None
     output_path: Path | None = None
-    tm: TranslationMemory | None = None
-    html_validator: HTMLDeltaValidator = field(default_factory=HTMLDeltaValidator)
 
     # --- Decided before staging, read by several stages -------------------
     short_chain: bool = False
@@ -125,11 +126,6 @@ class StageContext:
     #: The raw-completion channel the bible backfill asks the provider for.
     #: Overridable so a test can make backfill a no-op without a fake router.
     complete_raw_fn: Callable[..., Awaitable[str]] | None = None
-    #: Whether the orchestrator was handed a QE runner / repair loop (only a
-    #: runner this pipeline built itself may be re-bound to the run's
-    #: terminology, and an injected loop must stay exactly as it was given).
-    qe_runner_explicit: bool = False
-    repair_loop_explicit: bool = False
     #: Set by the driver so the export stage can bill exactly this run, at the
     #: moment it renders. A callable, not a snapshot: the numbers must be read
     measure_run_usage: Callable[[], dict[str, dict[str, int]]] = lambda: {}
@@ -183,27 +179,6 @@ class StageContext:
                 f"stage for job {self.job_id} needs a document adapter, none was set"
             )
         return self.adapter
-
-    def repair_loop_for(self, qe_runner: BaseQERunner) -> RepairLoop:
-        """A repair loop around ``qe_runner``; an injected loop is handed back as-is.
-
-        The loop shares the runner so the closed-loop re-score after a repair
-        uses the identical policy. The result is *returned*, not written back:
-        the run's own ``repair_loop`` stays what the caller supplied, and the
-        terminology-bound one is a value the plan threads (see
-        :mod:`ubt.pipeline.facts`).
-        """
-        if self.repair_loop_explicit:
-            return self.repair_loop
-        config = self.config
-        return RepairLoop(
-            router=self.router,
-            qe_runner=qe_runner,
-            max_rounds=config.max_repair_rounds,
-            qe_threshold=config.qe_threshold,
-            bottom_percentile=config.bottom_percentile,
-            rerank_k=config.rerank_k,
-        )
 
     @property
     def raw_completion(self) -> Callable[..., Awaitable[str]]:

@@ -45,6 +45,7 @@ from ubt.core.qe.defect_taxonomy import (
 )
 from ubt.core.validators.span_repair import max_severity, span_to_dict
 from ubt.pipeline.facts import Scoring, Terminology
+from ubt.pipeline.services import RunServices
 
 logger = logging.getLogger(__name__)
 
@@ -117,19 +118,20 @@ def _blocked_human_target(source_text: str) -> str:
 
 async def run_triage_stage(
     ctx: StageContext,
+    services: RunServices,
     terminology: Terminology,
     scoring: Scoring,
 ) -> AsyncIterator[TranslationProgressEvent]:
     """Classify unresolved blocks by MQM severity and route them accordingly."""
     ledger = ctx.ledger
     actual_job_id = ctx.job_id
-    repair_loop = scoring.repair_loop or ctx.repair_loop
+    repair_loop = scoring.repair_loop or services.repair_loop
     glossary_dicts = terminology.glossary_dicts
     abbreviation_entries = terminology.abbreviation_entries
     target_lang = ctx.target_lang
     source_lang = ctx.source_lang
-    fast_pass = ctx.fast_pass
-    concurrency_sem = ctx.concurrency_sem
+    fast_pass = services.fast_pass
+    concurrency_sem = services.concurrency_sem
     create_event_fn = ctx.create_event
     qe_threshold = ctx.config.qe_threshold
     repair_pending = await asyncio.to_thread(
