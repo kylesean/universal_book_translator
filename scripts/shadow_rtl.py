@@ -136,15 +136,17 @@ def _check_fonts(problems: list[str]) -> None:
 
 def _check_live_typst(problems: list[str]) -> None:
     from ubt.adapters.pdf.typst_reconstructor import TypstReconstructor
-    from ubt.core.ir.models import BlockType, IRBlock
+    from ubt.core.ir.models import BlockType, IRBlock, make_element
 
     def preamble(target: str) -> str:
         reconstructor = TypstReconstructor(target_lang=target)
         block = IRBlock(
-            id="b1",
-            spine_index=1,
-            block_type=BlockType.NARRATIVE,
-            source_text="Hello world",
+            element=make_element(
+                id="b1",
+                spine_index=1,
+                block_type=BlockType.NARRATIVE,
+                source_text="Hello world",
+            ),
             target_text="مرحبا بالعالم" if target == "ar" else "你好世界",
         )
         return reconstructor.generate_typst_source([block], target_lang=target)

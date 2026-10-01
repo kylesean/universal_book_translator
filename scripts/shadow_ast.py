@@ -25,7 +25,7 @@ from pathlib import Path
 from ubt.analyze.bridge import blocks_from_document, document_from_blocks
 from ubt.core.ir.models import FlowID, IRBlock, StructureRole
 from ubt.core.qe.fast_pass import FastPassFilter
-from ubt.model.ast import Document, RegionKind, SemanticKind
+from ubt.model.ast import Document, RegionKind
 from ubt.verify import build_verifiers, verify_element
 
 
@@ -59,7 +59,6 @@ def _projection(block: IRBlock) -> dict[str, object]:
         "block_type": block.block_type.value,
         "flow_id": block.flow_id.value,
         "layout_role": _norm_layout(block),
-        "semantic_role": (block.semantic_role or SemanticKind.MAIN_TEXT).value,
         "structure_role": (block.structure_role or StructureRole.PARAGRAPH).value,
         "source_text": block.source_text or "",
         "skip_translate": block.skip_translate,
@@ -72,13 +71,6 @@ def _projection(block: IRBlock) -> dict[str, object]:
 def _compare(
     blocks: list[IRBlock], *, doc_id: str, path: str
 ) -> tuple[Counter[str], list[str], Document]:
-    # Match the pipeline's own normalization first. Ingest calls derive_roles()
-    # before anything reads the role layers; parse_stream (used here) does not.
-    # Comparing post-derivation is the fair baseline: the AST re-derives the
-    # same values, so an explicit role that *contradicts* derivation is the only
-    # thing that could still be lost.
-    for block in blocks:
-        block.derive_roles()
     document = document_from_blocks(blocks, doc_id=doc_id, path=path)
     rebuilt = blocks_from_document(document)
     original = {block.id: block for block in blocks}

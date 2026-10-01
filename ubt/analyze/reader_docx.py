@@ -67,6 +67,10 @@ def _heading_level(paragraph: DocxParagraph) -> int | None:
 
 
 def _is_list_item(paragraph: DocxParagraph) -> bool:
+    style = getattr(paragraph, "style", None)
+    name = (getattr(style, "name", "") or "").strip().lower()
+    if name.startswith(("list", "bullet", "列表")):
+        return True
     ppr = paragraph._p.find(qn("w:pPr"))
     return ppr is not None and ppr.find(qn("w:numPr")) is not None
 

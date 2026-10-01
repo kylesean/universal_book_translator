@@ -28,7 +28,7 @@ from ubt.model.ast import Document
 #: A 1x1 transparent PNG, for the DOCX picture fixture.
 _PNG = bytes.fromhex(
     "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
-    "0000000d4944415478da63fcffff3f0300050001a5f6457d0000000049454e44ae426082"
+    "0000000d49444154789c6360606060000000050001a5f645400000000049454e44ae426082"
 )
 
 _HTML = """<!doctype html><html><head><title>t</title></head><body>

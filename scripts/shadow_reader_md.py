@@ -24,7 +24,7 @@ from pathlib import Path
 from ubt.analyze.bridge import blocks_from_document, document_from_blocks
 from ubt.analyze.normalize import normalize_text
 from ubt.analyze.reader_md import read_md
-from ubt.model.ast import Document, Formula, Heading, ListItem, Table, TextElement
+from ubt.model.ast import Document, Formula, Table, TextElement
 
 
 def _element_text(element: object) -> str:
@@ -42,19 +42,8 @@ def _tokens(text: str) -> Counter[str]:
 
 
 def _reader_tokens(document: Document) -> Counter[str]:
-    """The reader's tokens plus the structural markers it stores as fields.
-
-    The reader keeps a heading's ``#`` in ``level`` and a list item's bullet in
-    ``marker`` rather than in ``text`` (the AST represents them); folding them
-    back in makes the comparison against the adapter's flat lines meaningful.
-    """
-    counter: Counter[str] = Counter(document.source.text.split())
-    for element in document.elements:
-        if isinstance(element, Heading):
-            counter["#" * element.level] += 1
-        elif isinstance(element, ListItem) and element.marker:
-            counter[element.marker] += 1
-    return counter
+    """The reader's tokens from canonical source text."""
+    return _tokens(document.source.text)
 
 
 def _adapter_text(path: Path) -> str:
