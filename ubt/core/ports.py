@@ -9,14 +9,17 @@ This module is the single sanctioned bridge. Implementations resolve through
 function-level lazy imports (no module-level edge); the one remaining ``set_*``
 hook exists because its target is exercised with a fake in tests
 (``set_visual_gate_runner``, reset by ``reset_ports``). This file is the only
-place in ``ubt/core/`` allowed to name a ``ubt.adapters`` module, and only
-inside a function body.
+place in ``ubt/core/`` allowed to name a ``ubt.adapters`` module at runtime --
+inside a function body, or under ``TYPE_CHECKING`` (type-only imports never
+enter the runtime import graph).
 
 Scope note: keep this file to what is actually resolved through it — it is
 load-bearing architecture, and unused wrappers here read as endorsed capability.
-Do not add thin re-export wrappers around adapter helpers, or ``set_*`` hooks
-whose globals nothing ever sets (they leave the override permanently ``None`` at
-every call site). If nothing calls a piece of surface, it does not belong here.
+Most bridges are thin forwarders by design: the point is *where* the adapter is
+named, not how much logic sits behind the port. Do not add wrappers nobody
+resolves through, pure re-exports of adapter helpers, or ``set_*`` hooks whose
+globals nothing ever sets (they leave the override permanently ``None`` at every
+call site). If nothing calls a piece of surface, it does not belong here.
 """
 
 from __future__ import annotations
@@ -478,3 +481,25 @@ def sample_pdf_pages(input_path: Path) -> tuple[int, bool, str]:
     from ubt.adapters.pdf.plain_text_extractor import sample_pdf_pages as _sample
 
     return _sample(input_path)
+
+
+async def interleave_bilingual_pdf(
+    source_pdf: Path,
+    translated_pdf: Path,
+    output_pdf: Path,
+    facing_spread: bool,
+) -> str:
+    """Interleave source pages with rendered target pages (bilingual companion).
+
+    Thin bridge over the adapter's alternator so the export stage never names
+    an adapter module; returns the companion PDF's output path.
+    """
+    from ubt.adapters.pdf.alternator import BilingualAlternator
+
+    result = await BilingualAlternator().interleave_pages_async(
+        source_pdf=source_pdf,
+        translated_pdf=translated_pdf,
+        output_pdf=output_pdf,
+        facing_spread=facing_spread,
+    )
+    return str(result.output_path)

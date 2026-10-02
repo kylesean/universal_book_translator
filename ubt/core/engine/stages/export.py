@@ -39,6 +39,7 @@ from ubt.core.ports import (
     blocking_gate_tripped,
     crashed_visual_gate_result,
     get_last_render_skips,
+    interleave_bilingual_pdf,
     is_pdf_engine_adapter,
 )
 
@@ -818,15 +819,14 @@ async def _render_complementary_artifact(
             f"{base}_bilingual{artifact.target_output.suffix}"
         )
         try:
-            from ubt.adapters.pdf.alternator import BilingualAlternator
-
-            result = await BilingualAlternator().interleave_pages_async(
-                source_pdf=ctx.source_pdf_path,
-                translated_pdf=artifact.rendered_path,
-                output_pdf=candidate,
-                facing_spread=bool(render.facing_spread),
+            secondary_path = Path(
+                await interleave_bilingual_pdf(
+                    source_pdf=ctx.source_pdf_path,
+                    translated_pdf=artifact.rendered_path,
+                    output_pdf=candidate,
+                    facing_spread=bool(render.facing_spread),
+                )
             )
-            secondary_path = Path(result.output_path)
             logger.info(
                 "Zero-cost rigid bilingual companion (source + target pages) rendered: %s",
                 secondary_path,
