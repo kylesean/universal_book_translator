@@ -4,7 +4,7 @@ Single decision point for the "1 page to 1000 pages" generality goal.
 The entry (probe + route + shared ledger/TM/report contracts) is unified;
 the execution path is adaptive:
 
-- SHORT (<= ``SHORT_CHAIN_MAX_PAGES`` born-digital pages or token budget):
+- SHORT (<= ``UBTConfig.short_max_pages`` born-digital pages or token budget):
   whole-chapter rewrite + reflow + full visual gate (Codex-style, 可读优先).
 - LONG (everything else, always for scans and multi-chapter books): existing 6-stage block pipeline.
 

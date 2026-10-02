@@ -595,8 +595,9 @@ CALIBRATION: dict[str, KnobMeta] = {
     "QA_LONG_BOOK_SAMPLE": KnobMeta(H, ">100pp anchor set 10, unvalidated"),
     "SHORT_CHAIN_MAX_PAGES": KnobMeta(
         H,
-        "unified-entry router: <=30pp short chain (covers ~26pp chapters). "
-        "Bound calibrated around 20pp (flips short born digital test); 30pp ceiling balances throughput.",
+        "Registry default for the router's short-chain page cap; display only. "
+        "The live decision reads the validated UBTConfig.short_max_pages (same "
+        "UBT_SHORT_MAX_PAGES env var).",
     ),
     "FAST_LANE_MIN_TEXT_CHARS": KnobMeta(H, "200-char scan gate for the fast lane, unvalidated"),
     "LENGTH_OVERFLOW_TO_HUMAN": KnobMeta(
