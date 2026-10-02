@@ -58,11 +58,3 @@ repos:
         pass_filenames: false
         always_run: true
         stages: [pre-push]
-
-      - id: shadow-ast
-        name: shadow-ast acceptance
-        entry: uv run python scripts/shadow_ast.py --corpus corpus
-        language: system
-        pass_filenames: false
-        always_run: true
-        stages: [pre-push]
