@@ -35,6 +35,9 @@ All take `--corpus corpus` (default) and exit 0 on pass.
 
 ## Utilities
 
+- `dump_compiler_edges.py` — read-only static check of the core↔compiler import
+  discipline (§6.1 of the evolution doc): exit 1 on any module-level
+  core→{pipeline, segment, translate} edge or a `core.engine ↔ pipeline` cycle.
 - `export_pdf_to_markdown.py` — one-off PDF → Markdown extraction helper.
 - `mathjax/` — node renderer used by the formula pipeline (`render.mjs`).
 
