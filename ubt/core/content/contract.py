@@ -5,10 +5,10 @@ language- and layout-agnostic: it reads the content graph and the ledgers, not
 the render path. A regression on any path therefore surfaces the same way -- as
 an unbalanced book -- instead of as a document-type-specific bug.
 
-Severity is phased on purpose. Phase 0 can already catch *unaccounted* and
-*dropped* content (hard errors). Round-trip verification of reconstructed
-formulae/tables arrives in Phase 1, so an unverified reconstruction is a
-*warning* here and is promoted to an error once verification exists.
+Severity tracks what a delivery can prove. *Unaccounted* and *dropped*
+content are hard errors -- absence is detectable without a verifier. An
+unverified reconstruction is a *warning*: the asset was accounted for, but no
+round-trip check has proven the reconstruction faithful.
 """
 
 from __future__ import annotations
@@ -63,7 +63,7 @@ class ReconciliationReport(BaseModel):
     """The delivery contract, serialized as ``*.contract.json``.
 
     ``passed`` is the single machine-checkable verdict: no ERROR-severity
-    violation. Warnings are surfaced for audit but do not block (Phase 0).
+    violation. Warnings are surfaced for audit but do not block.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -125,7 +125,7 @@ def reconcile(graph: ContentGraph) -> ReconciliationReport:
     A text node is accounted for only when it is TRANSLATED or VERBATIM; a
     PENDING node was never decided and a SKIPPED node was dropped. An asset is
     accounted for when it is PRESERVED_OPAQUE or a *verified* RECONSTRUCTED; an
-    unverified reconstruction is a warning in Phase 0, and MISSING is an error.
+    unverified reconstruction is a warning, and MISSING is an error.
     """
     content, assets = build_ledgers(graph)
     violations: list[Violation] = []
@@ -205,7 +205,7 @@ def reconcile(graph: ContentGraph) -> ReconciliationReport:
                         node_id=asset_entry.node_id,
                         detail=(
                             f"reconstructed as {asset_entry.representation.value} without "
-                            "verification (Phase 1 gate)"
+                            "structural verification"
                         ),
                     )
                 )

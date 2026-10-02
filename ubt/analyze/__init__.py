@@ -1,6 +1,6 @@
 """``ubt.analyze`` -- turning sources into the typed Document AST.
 
-Phase 1 seeds this layer with a *bootstrap* bridge: the pipeline already knows
+A *bootstrap* bridge seeded this layer: the pipeline already knows
 how to get ``IRBlock``s out of every format, so the bridge projects those into a
 :class:`~ubt.model.ast.Document` and back. That lets the rest of the kernel
 migrate to the typed model before a native per-format reader exists, and the

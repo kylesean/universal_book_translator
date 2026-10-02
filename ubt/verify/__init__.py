@@ -11,9 +11,9 @@ Public surface:
   proves the seam changes no behaviour.
 
 This package provides the unified ``ubt.verify`` seam. It deliberately
-depends on the existing checks rather than reimplementing them: Phase 0 wraps,
-it does not replace. The render path keeps calling the old functions until
-Phase 3 lowers elements through :func:`ubt.verify.verifier.Verifier`.
+depends on the existing checks rather than reimplementing them: the seam wraps,
+it does not replace. The render path keeps calling the old functions until it
+lowers elements through :func:`ubt.verify.verifier.Verifier`.
 """
 
 from __future__ import annotations

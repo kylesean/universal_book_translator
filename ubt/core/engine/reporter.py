@@ -681,7 +681,7 @@ def _render_advisory_markdown(advisory: dict[str, Any] | None) -> str:
     rendered = advisory.get("rendered_modes", [])
     rendered_line = f"\nRendered artifacts: `{', '.join(rendered)}`." if rendered else ""
     downgrade = advisory.get("difficulty_downgrade")
-    downgrade_line = f"\nPhase-2 difficulty downgrade applied: {downgrade}." if downgrade else ""
+    downgrade_line = f"\nDifficulty downgrade applied: {downgrade}." if downgrade else ""
     return f"""
 ---
 

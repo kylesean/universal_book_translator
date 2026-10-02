@@ -1,10 +1,10 @@
 """``ubt.segment`` -- the placeholder engine: protect spans, then restore them.
 
-Phase 2 collapses the four maskers into one owner. The four *detectors* are
+The four maskers share one owner. The four *detectors* are
 unchanged (they know LaTeX vs fenced code vs citations), but the order they run
-in, the reverse order they restore in, and the integrity reporting are now
-stated once, here, instead of being restated -- and kept in sync by hand -- at
-the draft call site.
+in, the reverse order they restore in, and the integrity reporting are stated
+once, here, instead of being restated -- and kept in sync by hand -- at the
+draft call site.
 
 The order is load-bearing: **code -> math -> soup -> citation**. Earlier
 families must already be opaque to later ones, so a citation-like bracket inside

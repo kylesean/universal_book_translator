@@ -1,7 +1,8 @@
 """The verifier seam: one protocol in front of every existing check.
 
-Phase 0 does not add a checker -- it adds a *seam*. The four checks UBT already
-runs are wrapped behind a single ``Verifier`` protocol that returns :class:`Proof`:
+The seam adds no checker of its own -- it puts one protocol in front of the
+checks UBT already runs. The four are wrapped behind a single ``Verifier``
+protocol that returns :class:`Proof`:
 
 - :class:`StructuralAssetVerifier` wraps ``asset_verify.verify_asset_structure``
   (level-1 grammar/shape check on delivered formula/table text).
@@ -13,7 +14,7 @@ runs are wrapped behind a single ``Verifier`` protocol that returns :class:`Proo
 Each wrapper is a *pure mapping* from the legacy result to :class:`Proof`.
 Behaviour is unchanged on purpose -- the shadow harness
 (:mod:`ubt.verify.shadow`) exists to prove it -- so the render path can keep
-calling the old functions until Phase 3 switches it to the seam.
+calling the old functions until the pipeline lowers elements through the seam.
 
 The subjects below are frozen dataclasses, so a verifier call is explicit about
 everything it sees: no hidden reads of the ledger, the renderer or the adapter.

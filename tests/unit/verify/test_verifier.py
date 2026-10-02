@@ -1,6 +1,6 @@
 """The verifier seam: legacy verdicts mapped to :class:`Proof`.
 
-Phase 0 adds no checker -- it wraps the four existing checks behind one
+The seam adds no checker -- it wraps the four existing checks behind one
 ``Verifier`` protocol so the render path can switch to the seam later. The
 contract that matters is the mapping: each wrapper is a *pure* function from
 the legacy result to ``Proof``, and it must preserve the three-valued outcome

@@ -5,11 +5,12 @@ representation. Consumers migrate to the graph piecemeal; until they do, every
 delivery still gets a graph built here, so the reconciliation gate applies to
 *all* render paths from day one.
 
-Asset policy (Axiom A): a non-text block is only RECONSTRUCTED once a round-trip
-check exists to verify it. Phase 0 has no such check, so a rigid (source-canvas)
-render is PRESERVED_OPAQUE by construction and a reflow placement is
-RECONSTRUCTED-but-unverified -- recorded as a *warning* by
-:func:`ubt.core.content.contract.reconcile`, promoted to an error in Phase 1.
+Asset policy (Axiom A): a non-text block is only RECONSTRUCTED alongside the
+round-trip check that verifies it. A rigid (source-canvas) render is
+PRESERVED_OPAQUE by construction; a reflow placement is RECONSTRUCTED and runs
+the structural verifier in :func:`graph_from_blocks` -- anything left
+unverified is recorded as a *warning* by
+:func:`ubt.core.content.contract.reconcile`.
 """
 
 from __future__ import annotations
@@ -84,7 +85,7 @@ def _text_node(block: IRBlock, order: int, region: SourceRegion | None) -> TextN
     flags = _skip_flags(block)
     if flags and not _all_intentional(flags):
         # A translation existed but the renderer left source visible: not silent
-        # (it is recorded), so a warning in Phase 0.
+        # (it is recorded), so a warning.
         disposition, reason = TextDisposition.SOURCE_KEPT, f"render:{_skip_reason(flags[0])}"
     elif flags:  # intentional preserved element (chrome/non-prose/policy/footer)
         disposition, reason = TextDisposition.VERBATIM, f"preserved:{_skip_reason(flags[0])}"
@@ -159,9 +160,9 @@ def _asset_node(
         integrity = AssetIntegrity.PRESERVED_OPAQUE
         detail = ""
     else:
-        # Reflow reconstruction: level-1 structural verification (Phase 1a).
+        # Reflow reconstruction: level-1 structural verification.
         # A PASS is verified; a FAIL is corruption (Axiom A) and awaits the
-        # opaque source-crop fallback (Phase 1b); a SKIP stays unverified.
+        # opaque source-crop fallback; a SKIP stays unverified.
         if asset_kind is AssetKind.FIGURE:
             # A figure is placed as its original graphic, not rebuilt.
             integrity = AssetIntegrity.PRESERVED_OPAQUE

@@ -1,6 +1,6 @@
 """Differential shadow check: prove the verifier seam changes no behaviour.
 
-Phase 0 must be a pure refactor. This module runs the *legacy* check and the
+The seam migration must be a pure refactor. This module runs the *legacy* check and the
 *new* verifier on identical inputs and asserts their three-valued outcomes
 agree, so a future edit to either side cannot silently drift. It is the
 executable form of the regression differential acceptance criterion ("100% agreement over the

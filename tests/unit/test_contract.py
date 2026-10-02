@@ -11,7 +11,7 @@ checkable:
   which is an error.
 - **Axiom A (assets):** an asset is accounted for when PRESERVED_OPAQUE, a
   *verified* RECONSTRUCTED, or an intentional DROPPED. MISSING is an error; an
-  unverified reconstruction is a warning (Phase 0) and a corrupt one an error.
+  unverified reconstruction is a warning and a corrupt one an error.
 
 ``passed`` is the single machine-checkable verdict: no ERROR-severity violation.
 """

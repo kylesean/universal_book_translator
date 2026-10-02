@@ -13,7 +13,7 @@ checked*. This module is that mapping, stated once:
 
 ``verify_element`` is *total*: it returns a :class:`Proof` for every concrete
 element class, so no element can fall through un-judged. That totality is the
-Phase-1 criterion "the verifier can judge every element", checked over the
+acceptance criterion "the verifier can judge every element", checked over the
 `tests/unit/verify/test_element.py` (totality) and over real PDFs by the
 slow-tier corpus harness `scripts/shadow_reader.py`.
 """

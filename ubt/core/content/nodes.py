@@ -36,8 +36,8 @@ class TextDisposition(StrEnum):
     code listing, a proper noun, chrome). ``SOURCE_KEPT`` is an *explicit but
     unintended* keep: the node reached delivery in the source language because a
     translation could not be placed or was quarantined. It is not silent (it is
-    recorded), so it is a warning in Phase 0 and a hard error once renderers are
-    ledger-bound (Phase 2).
+    recorded), so it is a warning; it becomes a hard error once renderers are
+    ledger-bound.
     """
 
     PENDING = "pending"  # not yet decided (pre-translation)

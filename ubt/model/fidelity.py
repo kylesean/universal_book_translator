@@ -7,9 +7,8 @@ realization can be worse than the source. ``DROPPED`` sits below it only for
 elements explicitly marked decorative; anything else that would land there is a
 construction-time error, not a warning.
 
-This module also owns :class:`Proof` (the one verification vocabulary introduced
-in Phase 0 and promoted here in Phase 1) and :class:`Attestation` (a proof
-pinned to an element at a given rung). ``FIDELITY_DESCENT`` states, per element
+This module also owns :class:`Proof` (the one verification vocabulary) and
+:class:`Attestation` (a proof pinned to an element at a given rung). ``FIDELITY_DESCENT`` states, per element
 class, the order a backend tries before giving up.
 """
 

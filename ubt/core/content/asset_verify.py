@@ -1,4 +1,4 @@
-"""Structural-first asset verification (Phase 1, level 1 of 2).
+"""Structural-first asset verification (level 1 of the asset gate).
 
 A reconstructed asset is only trustworthy if it survives a check. This module
 implements the *cheap* level first -- structure, not pixels:
@@ -13,7 +13,7 @@ implements the *cheap* level first -- structure, not pixels:
   prevent.
 
 A FAIL is corruption (Axiom A), never a silent pass. ``reconcile`` records it;
-the opaque source-crop fallback for tables lands in Phase 1b.
+the opaque source-crop fallback for tables is the level still to come.
 """
 
 from __future__ import annotations
@@ -116,7 +116,7 @@ def verify_table_structure(text: str) -> VerifyResult:
     cells = _cells_from_markdown(body) or _cells_from_html(body)
     if not cells:
         # Not a recognized table grammar: cannot judge structurally. Not a
-        # corruption finding -- the pixel level (Phase 1b) covers it.
+        # corruption finding -- the pixel level covers it.
         return VerifyResult(StructuralVerdict.SKIP, "unrecognized table grammar")
     shattered = sum(1 for c in cells if len(c) <= _SHATTER_CELL_MAX)
     if shattered >= _SHATTER_MIN_CELLS and shattered / len(cells) > _SHATTER_CELL_SHARE:

@@ -10,9 +10,10 @@ imported, reasoned about, and serialized without a document in hand.
 - :mod:`ubt.model.fidelity` -- the :class:`Fidelity` lattice, :class:`Proof`,
   and :class:`Attestation`.
 
-Phase 1 centres on this layer: the pipeline's ``IRBlock`` is bridged into a
-:class:`Document` (see :mod:`ubt.analyze.bridge`) so the rest of the kernel can
-reason over typed structure instead of a bag of optional role enums.
+This layer is the kernel's centre of gravity: the pipeline's ``IRBlock`` is
+bridged into a :class:`Document` (see :mod:`ubt.analyze.bridge`) so the rest of
+the kernel can reason over typed structure instead of a bag of optional role
+enums.
 """
 
 from __future__ import annotations

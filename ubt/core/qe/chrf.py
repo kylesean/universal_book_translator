@@ -1,6 +1,6 @@
 """chrF: character n-gram F-score (Popović 2015).
 
-The Phase-2 acceptance is a *lower bound*: the refactored segment/translate path
+The masker-collapse acceptance is a *lower bound*: the refactored segment/translate path
 must not degrade the translation relative to the pre-refactor masker path. chrF
 compares the two outputs character-n-gram by character-n-gram, so a faithful
 collapse scores ~1.0 and any drift in the mask/restore contract shows up as a
