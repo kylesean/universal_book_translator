@@ -173,7 +173,7 @@ def _asset_node(
             # ``ubt.verify`` imports this package's ``asset_verify`` submodule:
             # a module-level edge here would close a cycle when ``ubt.verify``
             # is the first package imported. The behaviour is unchanged -- the
-            # seam wraps the very same check, proven by scripts/shadow_verify.py.
+            # seam wraps the very same check, pinned by tests/unit/test_shadow.py.
             from ubt.verify.verifier import StructuralAsset, StructuralAssetVerifier
 
             proof = StructuralAssetVerifier().verify(

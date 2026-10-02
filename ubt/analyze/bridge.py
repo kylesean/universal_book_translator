@@ -11,8 +11,8 @@ The round-trip preserves everything that defines the document: the element
 reading order. It deliberately does **not** carry pipeline state (status,
 ``target_text``, scores, flags): those belong to execution, not understanding.
 
-The `scripts/shadow_ast.py` acceptance proves the round-trip is lossless over
-the corpus.
+The bridge round-trip is pinned losslessly by
+`tests/unit/analyze/test_bridge_roundtrip.py`.
 """
 
 from __future__ import annotations
