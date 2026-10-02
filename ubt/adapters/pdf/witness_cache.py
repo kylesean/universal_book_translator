@@ -1,4 +1,4 @@
-"""Content-addressed caching for the pixel witnesses (ADR-0001 Phase 4).
+"""Content-addressed caching for the pixel witnesses (content-addressed cache layer).
 
 The formula and table witnesses are the render path's most expensive pure step:
 each one compiles the emitted markup with Typst in a subprocess and rasterizes

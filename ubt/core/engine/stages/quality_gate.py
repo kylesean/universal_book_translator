@@ -136,8 +136,8 @@ async def run_quality_gate_stage(
     fast_pass = services.fast_pass
     create_event_fn = ctx.create_event
     glossary_dicts = terminology.glossary_dicts or None
-    # The gate produces the run's scoring collaborators (ADR-0001 explicit
-    # params): it binds the glossary onto the QE runner and builds the repair
+    # The gate produces the run's scoring collaborators (explicit
+    # stage execution context): it binds the glossary onto the QE runner and builds the repair
     # loop around it, so repair, triage and consistency re-score terminology with
     # the same runner. A runner/loop the caller injected is kept.
     qe_runner = scoring.qe_runner or services.qe_runner

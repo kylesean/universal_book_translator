@@ -1,7 +1,7 @@
-"""Assemble a reader's elements into a ``Document`` (ADR-0001 Phase 1).
+"""Assemble a reader's elements into a ``Document`` (native AST reader and verification seam).
 
 Every native reader decides its own structure; this is the shared tail. Each
-element's text is normalized (ADR §12 Q3), then stamped with a character range
+element's text is normalized (canonical text normalization), then stamped with a character range
 into the canonical stream -- which *is* the concatenation of those texts. One
 owner for the "``Span.chars`` slices the element's own text out of
 ``CanonicalSource.text``" promise, so a reader cannot stamp offsets a different
@@ -38,7 +38,7 @@ def element_text(element: ElementT) -> str:
 
 
 def normalized(element: ElementT) -> ElementT:
-    """The element with its canonical text normalized (ADR §12 Q3)."""
+    """The element with its canonical text normalized (canonical text normalization)."""
     if isinstance(element, TextElement):
         return dataclasses.replace(element, text=normalize_text(element.text))
     if isinstance(element, Formula):

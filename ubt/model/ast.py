@@ -1,4 +1,4 @@
-"""The typed Document AST (ADR-0001 model layer).
+"""The typed Document AST (core document model).
 
 This is the one place that answers "what is this piece of the document?". An
 element's *type* is its structure; the region it sits in is its layout. ``IRBlock``
@@ -45,7 +45,7 @@ class FlowKind(StrEnum):
 
 
 class RegionKind(StrEnum):
-    """Page-furniture role of a region; the one layout vocabulary (ADR R3)."""
+    """Page-furniture role of a region; the one layout vocabulary (single source of truth)."""
 
     BODY = "body"
     TITLE = "title"
@@ -89,7 +89,7 @@ class Element:
     flow: FlowKind = FlowKind.MAIN
     skip_translate: bool = False
     #: The page-furniture role this element sits in (the extractor's finding,
-    #: ADR R3 one-layout-vocabulary). ``Region`` groups elements by it.
+    #: single layout vocabulary). ``Region`` groups elements by it.
     region: RegionKind = RegionKind.BODY
     #: Discriminator for the closed union; each concrete class narrows it.
     kind: ElementKind = ElementKind.PARAGRAPH

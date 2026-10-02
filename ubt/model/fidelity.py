@@ -1,4 +1,4 @@
-"""Fidelity lattice, proofs, and attestations (ADR-0001 model layer).
+"""Fidelity lattice, proofs, and attestations (core document model).
 
 The lattice is the whole safety story in five lines: every element is realized
 at some fidelity, and it may only ever move *down* this ordered set. The bottom

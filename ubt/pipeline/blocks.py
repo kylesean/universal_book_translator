@@ -1,4 +1,4 @@
-"""Per-run revision-guarded block view (ADR-0001 ``pipeline/blocks.py``).
+"""Per-run revision-guarded block view (revision-guarded block view).
 
 Extracted from :class:`~ubt.core.engine.stage_context.StageContext` so the shared
 context stops carrying the run's one piece of mutable state -- the block snapshot

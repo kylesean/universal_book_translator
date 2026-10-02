@@ -1,4 +1,4 @@
-"""Source geometry and the canonical text stream (ADR-0001 model layer).
+"""Source geometry and the canonical text stream (core document model).
 
 A :class:`Span` is the stable back-reference from an element to *where it came
 from*: a page, a bounding box, and (once the canonical stream exists) a

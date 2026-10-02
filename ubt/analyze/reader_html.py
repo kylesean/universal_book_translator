@@ -1,4 +1,4 @@
-"""Native HTML/XHTML reader: markup -> typed ``Document`` (ADR-0001 §12 Q5).
+"""Native HTML/XHTML reader: markup -> typed ``Document`` (native multi-format reader seam).
 
 The third native reader, and the shared walker EPUB reuses. A single HTML file is
 not paginated, so ``Span.page`` stays ``0``; the elements are decided from the DOM
@@ -10,7 +10,7 @@ the typed document can be sliced and exported without an ``IRBlock`` detour.
 
 The canonical text is the reading-order concatenation of the element texts, *not*
 the raw HTML: it is the normalized text a reader sees, which is what a span and a
-verifier should index (ADR §4.1).
+verifier should index (semantic HTML / document view index).
 """
 
 from __future__ import annotations

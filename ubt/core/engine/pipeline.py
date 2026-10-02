@@ -799,7 +799,7 @@ class PipelineOrchestrator:
             concurrency_sem = asyncio.Semaphore(self.config.max_concurrency)
             # A dedicated per-run FastPassFilter instance avoids shared mutable state.
             runtime_fast_pass = FastPassFilter(source_lang=source_lang, target_lang=target_lang)
-            # The per-run services the stages read (ADR-0001): built here, where
+            # The per-run services the stages read (document compiler architecture): built here, where
             # the whole set is visible in one place, and handed to the plan
             # instead of being fields on the shared context.
             services = RunServices(
@@ -855,7 +855,7 @@ class PipelineOrchestrator:
             )
 
             # -----------------------------------------------------------------
-            # The stage plan lives in ubt.pipeline.run (ADR-0001): this class
+            # The stage plan lives in ubt.pipeline.run (document compiler architecture): this class
             # owns the run's resources -- the writer lock, ledger, adapter,
             # router -- and the plan owns order and gating. The terminal export
             # event triggers TM writeback and the finalize hook BEFORE it is
@@ -869,13 +869,13 @@ class PipelineOrchestrator:
                 consistency=self.config.consistency_enforce != "off",
             )
             # The values a stage produces and a later one consumes live here for
-            # the whole run (ADR-0001 explicit params): the plan threads each to
+            # the whole run (explicit stage execution context): the plan threads each to
             # the stage that reads it, and the terminal hook reads the same facts
             # the stages filled.
             facts = RunFacts()
             # The run's one mutable state: the block snapshot, owned by the plan
-            # and read explicitly by the analyze-adjacent stages (ADR-0001
-            # orchestration convergence, third cut).
+            # and read explicitly by the analyze-adjacent stages (unified
+            # pipeline stage context).
             blocks = BlockReader(ledger, actual_job_id)
 
             async def _on_export_completed(event: TranslationProgressEvent) -> None:

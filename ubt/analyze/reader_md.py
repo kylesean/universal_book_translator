@@ -1,4 +1,4 @@
-"""Native Markdown reader: Markdown/text -> typed ``Document`` (ADR-0001 Phase 1, §12 Q5).
+"""Native Markdown reader: Markdown/text -> typed ``Document`` (native AST reader and format seam).
 
 The second native reader, and the first for a non-paginated format. Unlike the
 bootstrap bridge (adapter -> ``IRBlock`` -> Document), this reader decides the
@@ -7,7 +7,7 @@ structure itself from the one shared rule set
 into a :class:`~ubt.model.span.CanonicalSource` ``text``, so the typed document
 can be sliced, exported and witnessed without an ``IRBlock`` detour.
 
-Per ADR §8.7 ("add one reader at a time") this is the only non-PDF reader added:
+Following incremental native reader dispatch) this is the only non-PDF reader added:
 Markdown is the one format whose source *is* a text stream, so a genuine
 offset-stable canonical text is cheap and faithful. DOCX/EPUB/HTML wait until
 their readers can also supply real spans (page/anchor/char offsets) and the AST

@@ -208,7 +208,7 @@ class _DraftProcessor:
         return GlossaryConsistencyValidator(glossary=self.policy.glossary_dicts)
 
     def chunk_context(self, chunk: list[tuple[IRBlock, _DraftInputs]]) -> str:
-        """The content key of one macro-chunk draft prompt (ADR-0001 Phase 4).
+        """The content key of one macro-chunk draft prompt (content-addressed cache layer).
 
         A macro chunk is a *different* prompt from any single block's -- all the
         chunk's blocks ride one XML request -- so it keys separately. The merged
@@ -251,7 +251,7 @@ class _DraftProcessor:
         )
 
     def prompt_context(self, inputs: _DraftInputs) -> str:
-        """The content key of one draft prompt (ADR-0001 Phase 4).
+        """The content key of one draft prompt (content-addressed cache layer).
 
         The production generate step is *not* a pure function of the masked
         source: the same source drafted under a different glossary, neighbour
@@ -437,7 +437,7 @@ class _DraftProcessor:
         # Off-loop: regex/parse-heavy masking would otherwise serialize the
         # single event loop across concurrent draft tasks and SSE fan-out. The
         # mask order (code -> math -> soup -> citation) lives in the engine, not
-        # here (ADR-0001 Phase 2).
+        # here (translation unit segmentation layer).
         masked = await asyncio.to_thread(self.runtime.engine.mask, block.source_text)
 
         macro_ctx = ""
@@ -472,7 +472,7 @@ class _DraftProcessor:
 
         # Restore in reverse mask order (citation -> soup -> math -> code) and
         # judge: the engine owns that order and verifies every namespace with
-        # the same checksummed contract (ADR-0001 Phase 2).
+        # the same checksummed contract (translation unit segmentation layer).
         masked = MaskedSource(
             text=inputs.masked_source,
             code_map=inputs.code_map,
@@ -603,8 +603,8 @@ class _DraftProcessor:
                 return draft_raw
 
             try:
-                # The engine owns the cache-aware generate step (ADR-0001
-                # Phase 4): a hit skips the provider entirely, and a changed
+                # The engine owns the cache-aware generate step (content-addressed
+                # cache layer): a hit skips the provider entirely, and a changed
                 # prompt (context) is a miss, not a stale draft. The prompt key
                 # is built only when a cache is set, so a cache-less run pays
                 # nothing for it.
@@ -654,7 +654,7 @@ class _DraftProcessor:
 
         The cache is content-addressed on the exact prompt, so a hit is a draft
         this run would have generated identically. Finalizing it directly saves
-        the provider request entirely (ADR-0001 Phase 4) -- for the Batch API
+        the provider request entirely (content-addressed cache layer) -- for the Batch API
         paths that is a request not submitted, not just a response reused.
         """
         if self.runtime.engine.cache is None:
@@ -772,7 +772,7 @@ class _DraftProcessor:
                 retriable.append((b, inp))
                 continue
             # Record the batch's own output under the same key the interactive
-            # path reads, so a re-run reuses it (ADR-0001 Phase 4).
+            # path reads, so a re-run reuses it (content-addressed cache layer).
             if self.runtime.engine.cache is not None:
                 await asyncio.to_thread(
                     self.runtime.engine.remember_draft,
@@ -926,7 +926,7 @@ class _DraftProcessor:
                 retriable.append((b, inp))
                 continue
             # Record the batch's own output under the same key the interactive
-            # path reads, so a re-run reuses it (ADR-0001 Phase 4).
+            # path reads, so a re-run reuses it (content-addressed cache layer).
             if self.runtime.engine.cache is not None:
                 await asyncio.to_thread(
                     self.runtime.engine.remember_draft,
@@ -1003,7 +1003,7 @@ class _DraftProcessor:
         cached_context: str | None = None
         if self.runtime.engine.cache is not None:
             # One provider call, many units: keyed on the chunk's own prompt
-            # digest, so a re-run of the same chunk is a hit (ADR-0001 Phase 4).
+            # digest, so a re-run of the same chunk is a hit (content-addressed cache layer).
             cached_context = self.chunk_context(chunk)
             cached_raw = await asyncio.to_thread(
                 self.runtime.engine.cached_value, cached_context, kind="translate_chunk"
@@ -1275,15 +1275,15 @@ async def run_draft_stage(
     config = ctx.config
     from ubt.cache.store import DiskCacheStore
 
-    # The translate step's content cache (ADR-0001 Phase 4): a resumed or re-run
+    # The translate step's content cache (content-addressed cache layer): a resumed or re-run
     # job reuses drafts whose exact prompt is unchanged. Fail-open, and off when
     # UBT_CACHE_ENABLED=0.
     draft_cache = DiskCacheStore(config.cache_dir) if config.cache_enabled else None
     # The per-unit transform (mask -> restore -> judge) has one owner now
-    # (ADR-0001 Phase 2): the engine holds the fixed mask order, while the
+    # (translation unit segmentation layer): the engine holds the fixed mask order, while the
     # router/batch/retry orchestration below stays in this stage. The cache is
     # keyed on the exact prompt, so the production path and the standalone path
-    # share one content-addressed translate step (ADR-0001 Phase 4 / Plan A).
+    # share one content-addressed translate step (content-addressed cache layer).
     translation_engine = TranslationEngine(
         placeholders=default_placeholder_engine(),
         model=router.draft_model,

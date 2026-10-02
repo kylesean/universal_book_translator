@@ -1,4 +1,4 @@
-"""``ubt.segment`` -- the translation-unit layer (ADR-0001 Phase 2).
+"""``ubt.segment`` -- the translation-unit layer (translation unit segmentation layer).
 
 - :class:`~ubt.segment.placeholders.PlaceholderEngine` -- the single owner of the
   placeholder mask order and its reverse.

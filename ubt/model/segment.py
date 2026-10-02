@@ -1,4 +1,4 @@
-"""Translation units: segments and protected placeholders (ADR-0001 model layer).
+"""Translation units: segments and protected placeholders (core document model).
 
 ``IRBlock`` fused three concerns -- document structure, translation, and
 execution state -- into one type. The structure half now lives in

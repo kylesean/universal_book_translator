@@ -66,7 +66,7 @@ def extract_blocks_with_pdfium(
     is unnecessary here: every pdfium call inside ``read_pdf`` is already
     serialized by the gate, and the lock is re-entrant.
 
-    ``store`` is the content-addressed analyze cache (ADR-0001 Phase 4): the
+    ``store`` is the content-addressed analyze cache (content-addressed cache layer): the
     read is a pure function of the file, page range and reader source, so a
     re-run reuses it. ``None`` computes straight through.
     """

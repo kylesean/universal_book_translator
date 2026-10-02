@@ -1,7 +1,7 @@
 """Bridge: ``IRBlock`` <-> the typed Document AST.
 
 ``IRBlock`` carries its structure as the typed :class:`~ubt.model.ast.Element`
-it holds (ADR R3: one attribute, one origin); the pipeline's mutable fields are
+it holds (single source of truth: one attribute, one origin); the pipeline's mutable fields are
 execution state plus typography. This module projects a flat block list into a
 :class:`~ubt.model.ast.Document` and back -- the shape the lowering backends and
 the delivery contract consume.

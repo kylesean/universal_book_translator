@@ -1,9 +1,9 @@
-"""Wiring a delivered run into the attestation core (ADR-0001 Phase 3).
+"""Wiring a delivered run into the attestation core (pre-render decision plan).
 
 During the migration the existing renderer still draws, so the backends are fed
 the run's own decisions -- which engine ran, and which elements the delivery
 deliberately kept -- and reproduce them as attestations, verifying each. That is
-the ADR's "wrap" shape: the pipeline's decisions drive the backend, and the
+the wrapped backend adapter architecture: the pipeline's decisions drive the backend, and the
 backend answers for fidelity and the account.
 
 When a backend draws for real, this glue is what disappears: the decisions come

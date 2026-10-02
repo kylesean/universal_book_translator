@@ -77,7 +77,7 @@ class EventFactory(Protocol):
 class StageContext:
     """The immutable inputs and per-run collaborators a pipeline stage reads.
 
-    Frozen on purpose (ADR-0001 orchestration convergence, third cut): no stage
+    Frozen on purpose (unified pipeline stage context): no stage
     writes a field, and the run's one piece of mutable state -- the block
     snapshot -- now lives in :class:`~ubt.pipeline.blocks.BlockReader`, owned by
     the plan. ``frozen=True`` makes "a stage cannot mutate the run" a

@@ -1,8 +1,8 @@
-"""The stage plan: order and gating, stated once (ADR-0001 ``pipeline/run.py``).
+"""The stage plan: order and gating, stated once (stage execution plan).
 
 The orchestrator owns the run's resources -- the writer lock, ledger, adapter,
 router, and the per-run collaborators -- and this module owns *what runs in what
-order*. Keeping the two apart is the first slice of the ADR's orchestration
+order*. Keeping the two apart is the first slice of the orchestration
 convergence: the plan becomes one readable sequence with named gates instead of a
 stretch of the resource lifecycle, so a step's position and its gate are visible
 without the ``try/finally`` around them. It is also where the pure steps of

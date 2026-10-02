@@ -1,7 +1,7 @@
-"""Per-element attestation: realize() over a whole document (ADR-0001 Phase 3).
+"""Per-element attestation: realize() over a whole document (pre-render decision plan).
 
 ``reconcile()`` discovers violations *after* a delivery is built, by balancing
-two ledgers. This is the construction-time twin the ADR replaces it with: every
+two ledgers. This is the construction-time twin the unified attestation model replaces it with: every
 element is lowered through :func:`~ubt.pipeline.steps.realize`, and the
 attestations *are* the account -- 100% coverage, and a non-decorative element
 with no lossless realization is recorded as a violation instead of hidden.
@@ -140,7 +140,7 @@ def project_contract(report: AttestationReport, graph: ContentGraph) -> Reconcil
             kind=ViolationKind.TEXT_UNDELIVERED,
             severity=Severity.ERROR,
             node_id=element_id,
-            detail="no lossless realization (ADR-0001 Axiom B)",
+            detail="no lossless realization (lossless realization axiom)",
         )
         for element_id in report.violations
     )

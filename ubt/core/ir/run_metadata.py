@@ -67,7 +67,7 @@ class RunMetadata(BaseModel):
     # --- Bilingual / render mode ------------------------------------------
     # The whole render decision (mode, engine, chrome/cover, secondary request)
     # lives in ``RunFacts.RenderPlan`` and the renderer's result in
-    # ``RenderOutcome`` (ADR-0001 renderer handshake). Nothing is posted here:
+    # ``RenderOutcome`` (compiler render plan protocol). Nothing is posted here:
     # this was the last inter-stage bus on the manifest.
 
     # --- Extraction / formula policy --------------------------------------

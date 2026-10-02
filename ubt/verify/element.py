@@ -1,4 +1,4 @@
-"""Dispatch an AST element to its verification path (ADR-0001 Phase 1).
+"""Dispatch an AST element to its verification path (native AST reader and verification seam).
 
 The point of the typed AST is that *what an element is* decides *how it is
 checked*. This module is that mapping, stated once:

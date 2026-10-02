@@ -1,4 +1,4 @@
-"""The realization decision source (ADR-0001 Phase 3, Option A).
+"""The realization decision source (pre-render decision plan).
 
 :func:`ubt.pipeline.steps.realize` is the execution core for one element; this
 module names its document-level projection as the run's **decision plan**: per
@@ -35,7 +35,7 @@ def plan_realization(
 def plan_fidelities(plan: AttestationReport) -> dict[str, Fidelity]:
     """The plan as ``element id -> committed fidelity``, the renderer's input.
 
-    This is the value the production renderer reads (ADR-0001 Phase 3): it no
+    This is the value the production renderer reads (pre-render decision plan): it no
     longer decides per element whether to reflow or preserve -- it looks the
     decision up here. A missing id means the plan does not cover it and the
     renderer falls back to its own judgment.

@@ -85,7 +85,7 @@ def _docling_symbols() -> tuple[Any, Any, Any, Any]:
 class DoclingPDFAdapter(BasePDFEngineAdapter):
     """PDF engine adapter: IBM Docling semantic ingestion with Typst/oxide delivery."""
 
-    #: Content-addressed analyze cache (ADR-0001 Phase 4), set in apply_config.
+    #: Content-addressed analyze cache (content-addressed cache layer), set in apply_config.
     #: The Docling layout+formula pass is the heaviest step of a Docling run.
     analysis_cache: CacheStore | None = None
 
@@ -125,7 +125,7 @@ class DoclingPDFAdapter(BasePDFEngineAdapter):
         # no core -> adapter import edge). Reset on every render so stale
         # skips can never leak across jobs.
         self.last_render_skips: list[tuple[str, str]] = []
-        # Render outcome side channel (ADR-0001 renderer handshake): what the
+        # Render outcome side channel (compiler render plan protocol): what the
         # renderer actually used (post rigid downgrade), read by export and the
         # visual gate. ``None`` until the first render. Reset on every render.
         self.last_render_outcome: RenderOutcome | None = None
@@ -189,14 +189,14 @@ class DoclingPDFAdapter(BasePDFEngineAdapter):
         if hasattr(reconstructor, "math_backend"):
             reconstructor.math_backend = runtime_config.math_backend
         if hasattr(reconstructor, "witness_cache"):
-            # Content-addressed cache for the pixel witnesses (ADR-0001 Phase 4):
+            # Content-addressed cache for the pixel witnesses (content-addressed cache layer):
             # a re-render reuses the compile+raster verdict per formula/table.
             from ubt.cache.store import DiskCacheStore
 
             reconstructor.witness_cache = (
                 DiskCacheStore(runtime_config.cache_dir) if runtime_config.cache_dir else None
             )
-        # The analyze cache (ADR-0001 Phase 4): the Docling layout+formula pass
+        # The analyze cache (content-addressed cache layer): the Docling layout+formula pass
         # is a pure function of the file, page range, enrichment policy and
         # parser code, so a resumed or re-run job reuses the extraction.
         from ubt.cache.store import DiskCacheStore as _DiskCacheStore
@@ -305,8 +305,8 @@ class DoclingPDFAdapter(BasePDFEngineAdapter):
             from ubt.adapters.pdf.analysis_cache import cached_blocks, docling_identity
 
             # The Docling pass is the run's heaviest step; cache it on the exact
-            # inputs (file, page range, enrichment policy, parser code), ADR-0001
-            # Phase 4. The enrichment flag is output-bearing, so it is in the key.
+            # inputs (file, page range, enrichment policy, parser code) via the content-addressed
+            # cache layer. The enrichment flag is output-bearing, so it is in the key.
             enrich = self._resolve_formula_enrichment(path)
             return cached_blocks(
                 self.analysis_cache,

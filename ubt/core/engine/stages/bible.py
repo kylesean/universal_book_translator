@@ -71,7 +71,7 @@ async def run_bible_stage(
     """Extract, mine, and backfill translation bible for the whole book.
 
     The extracted terminology is written into the plan-owned ``terminology``
-    value (ADR-0001 explicit params) for the stages that follow, and the stage
+    value (explicit stage execution context) for the stages that follow, and the stage
     yields its own ``BIBLE_EXTRACTED`` event when it has one.
 
     ``ctx.fast_lane`` (short docs): seeds + chapter titles only —

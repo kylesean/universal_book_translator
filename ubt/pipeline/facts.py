@@ -1,4 +1,4 @@
-"""Values one stage produces and a later one consumes (ADR-0001 explicit params).
+"""Values one stage produces and a later one consumes (explicit stage execution context).
 
 The shared :class:`~ubt.core.engine.stage_context.StageContext` used to carry
 these as mutable fields, which made "what flows between stages" indistinguishable

@@ -1,4 +1,4 @@
-"""Canonical text normalization (ADR-0001 §12 Q3).
+"""Canonical text normalization (canonical text normalization).
 
 Decision: the canonical stream is stable for *presentation* characters that
 carry no translation meaning, and is otherwise left byte-faithful to the source

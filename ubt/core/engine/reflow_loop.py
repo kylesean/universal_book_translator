@@ -86,7 +86,7 @@ class ReflowControlLoop:
         self.render_fn = render_fn
         self.router = router
         # The render decision, so the retune re-render uses the same mode/engine
-        # (ADR-0001 renderer handshake) and the gate reads the same facing/mode.
+        # (compiler render plan protocol) and the gate reads the same facing/mode.
         self.render_plan = render_plan
         self.sample_pages = max(0, sample_pages)
         self.max_vlm_pages = max(0, max_vlm_pages)

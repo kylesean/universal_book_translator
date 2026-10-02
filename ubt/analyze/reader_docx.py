@@ -1,4 +1,4 @@
-"""Native DOCX reader: DOCX -> typed ``Document`` (ADR-0001 §12 Q5).
+"""Native DOCX reader: DOCX -> typed ``Document`` (native multi-format reader seam).
 
 A DOCX is a zip whose ``word/document.xml`` is a flat body of paragraphs and
 tables. The reader walks that body in order: a paragraph's style decides heading

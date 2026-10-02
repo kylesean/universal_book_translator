@@ -1,7 +1,7 @@
 """Semantic Flow-Isolated IR Data Models (Pydantic v2).
 
 ``IRBlock`` is the pipeline's mutable working record. Its *structure* is the
-typed :class:`~ubt.model.ast.Element` it carries (ADR R3: one attribute, one
+typed :class:`~ubt.model.ast.Element` it carries (single source of truth: one attribute, one
 origin); everything structural -- ``block_type``, ``flow_id``, ``region``,
 ``source_text``, ``bbox``, ``spine_index`` -- is derived from that element, so
 the two can no longer disagree. What is left on the block is execution state
@@ -252,7 +252,7 @@ def make_element(
 class IRBlock(BaseModel):
     """Atomic content block in Universal Book Translator IR.
 
-    ``element`` is the block's structure (ADR R3 single source); the remaining
+    ``element`` is the block's structure (single source of truth); the remaining
     fields are execution state and the adapter's typography. Structural reads
     go through the properties below, so a caller cannot set ``block_type`` or
     ``region`` to a value disagreeing with the element.
@@ -283,7 +283,7 @@ class IRBlock(BaseModel):
     mqm_severity: str | None = None  # "critical" | "major" | "minor" (None = not triaged)
     mqm_spans: list[dict[str, Any]] = Field(default_factory=list)  # Serialized MQMErrorSpan dicts
 
-    # Policy verdict (ADR R3: the pipeline's decision, not the extractor's)
+    # Policy verdict (single source of truth: the pipeline's decision, not the extractor's)
     policy_translate: bool | None = None  # None = undecided, fall back to skip_translate
     policy_reason: str | None = None  # Required when policy_translate is False
     provenance: dict[str, Any] = Field(default_factory=dict)

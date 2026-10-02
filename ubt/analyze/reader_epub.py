@@ -1,4 +1,4 @@
-"""Native EPUB reader: EPUB -> typed ``Document`` (ADR-0001 §12 Q5).
+"""Native EPUB reader: EPUB -> typed ``Document`` (native multi-format reader seam).
 
 An EPUB is a zip with an OPF manifest/spine; the reader walks the spine in order
 and turns each XHTML document into elements with the shared markup walker

@@ -1,10 +1,10 @@
-"""Content-addressed step cache (ADR-0001 Phase 4).
+"""Content-addressed step cache (content-addressed cache layer).
 
 A step's key is a hash of its kind, its inputs and its params: equal keys mean
 the compute is skipped and the stored value returned, so a resumed or re-run job
-recomputes only what actually changed. The ADR's guardrail is explicit -- this
+recomputes only what actually changed. The architectural guardrail is explicit -- this
 wraps expensive *pure* steps and nothing else. There is no scheduler, no
-dependency graph and no event log (ADR-0001 §8.2).
+dependency graph and no event log (content-addressed cache store).
 
 Values are text (JSON written by the caller), never pickles: a cache file stays
 inspectable, and a corrupt one is a *miss*, not an executable payload. The store

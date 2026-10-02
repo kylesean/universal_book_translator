@@ -1,4 +1,4 @@
-"""The translation engine: the one owner of the per-unit transform (ADR-0001 Phase 2).
+"""The translation engine: the one owner of the per-unit transform (translation unit segmentation layer).
 
 A translation unit is protected text, a draft, and the restored result. Every
 path that produces a draft -- the standalone reader pipeline and the draft
@@ -65,7 +65,7 @@ class TranslationEngine:
     placeholders: PlaceholderEngine
     model: str = ""
     prompt_version: str = ""
-    #: Content-addressed cache for the translate step (ADR-0001 Phase 4). The
+    #: Content-addressed cache for the translate step (content-addressed cache layer). The
     #: key is the masked source plus the model and prompt version, so a changed
     #: prompt or model cannot reuse an old draft; ``None`` calls straight through.
     cache: CacheStore | None = None
@@ -93,7 +93,7 @@ class TranslationEngine:
         its context is empty and omitted (keeping the standalone key stable); the
         production draft path's generate also depends on glossary / neighbour /
         memory context, so that context must enter the key or a changed prompt
-        would reuse a stale draft (ADR-0001 Phase 4).
+        would reuse a stale draft (content-addressed cache layer).
         """
         from ubt.cache.store import step_key
 

@@ -3,7 +3,7 @@
 Phase 0 must be a pure refactor. This module runs the *legacy* check and the
 *new* verifier on identical inputs and asserts their three-valued outcomes
 agree, so a future edit to either side cannot silently drift. It is the
-executable form of the ADR's acceptance criterion ("100% agreement over the
+executable form of the regression differential acceptance criterion ("100% agreement over the
 corpus").
 
 Agreement is judged on *semantics*, not on the legacy spelling: each legacy

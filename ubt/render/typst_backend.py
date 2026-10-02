@@ -1,4 +1,4 @@
-"""The Typst backend: re-typeset translated text into Typst source (ADR-0001 L6).
+"""The Typst backend: re-typeset translated text into Typst source (render backend lowering layer).
 
 The reflowing backend. It declares ``RECONSTRUCTED_ADAPTED`` for the text
 classes that can be re-typeset (heading, paragraph, dialogue, list item, caption)

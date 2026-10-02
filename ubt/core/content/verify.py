@@ -54,8 +54,8 @@ def contract_from_ledger(
     column and the source_lang the ingest recorded), so the translation
     predicate scores with the same profile the run used.
 
-    The account is the *attestation projection* the export uses (ADR-0001
-    Phase 3), not a second, independent balance: one account, one mechanism.
+    The account is the *attestation projection* the export uses (pre-render
+    decision plan), not a second, independent balance: one account, one mechanism.
     ``engine`` selects the asset-preservation policy (see
     :func:`ubt.core.content.adapt.graph_from_blocks`); if not explicitly provided,
     it falls back to the job's persisted ``render_engine_effective`` metadata,

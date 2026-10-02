@@ -1,4 +1,4 @@
-"""``ubt.verify`` -- the unified verification seam (ADR-0001 Phase 0).
+"""``ubt.verify`` -- the unified verification seam (unified verification baseline).
 
 Public surface:
 
@@ -10,7 +10,7 @@ Public surface:
 - :class:`ShadowRun` / :class:`AgreementReport` -- the differential harness that
   proves the seam changes no behaviour.
 
-This package is the seed of the ADR's ``ubt.verify`` layer. It deliberately
+This package provides the unified ``ubt.verify`` seam. It deliberately
 depends on the existing checks rather than reimplementing them: Phase 0 wraps,
 it does not replace. The render path keeps calling the old functions until
 Phase 3 lowers elements through :func:`ubt.verify.verifier.Verifier`.

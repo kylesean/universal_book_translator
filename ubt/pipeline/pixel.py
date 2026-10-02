@@ -1,4 +1,4 @@
-"""Delivered-artifact pixel witness (ADR-0001 Phase 1 acceptance).
+"""Delivered-artifact pixel witness (pixel witness attestation).
 
 The reconstruction witnesses (``formula_witness`` / ``table_witness``) run at
 render time, on the markup they are about to place. This is their delivered-

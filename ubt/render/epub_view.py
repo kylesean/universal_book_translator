@@ -1,4 +1,4 @@
-"""EPUB lowering: the Document as an EPUB 3 package (ADR-0001 L6, §12 Q5).
+"""EPUB lowering: the Document as an EPUB 3 package (semantic document lowering layer).
 
 The second non-PDF view. It reuses :func:`ubt.render.html_view.render_fragment`
 for the XHTML body, so the HTML and EPUB views lower elements identically, and

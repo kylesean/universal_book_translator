@@ -360,7 +360,7 @@ class UBTConfig(BaseSettings):
 
     # -- SQLite ledger storage directory ------------------------------------
     db_dir: Path = Path(".ubt/ledgers")
-    # Content-addressed step cache (ADR-0001 Phase 4). The render path's pixel
+    # Content-addressed step cache (content-addressed cache layer). The render path's pixel
     # witnesses compile + raster every formula/table, the most expensive pure
     # step of a render; a resumed or re-run job reuses the verdict when the
     # inputs are unchanged. Delete the directory to clear it; UBT_CACHE_ENABLED=0
@@ -669,15 +669,15 @@ class UBTConfig(BaseSettings):
     emit_xliff_companion: bool = True
 
     # Emit the realize()-based attestation shadow ('*_<tag>_attestations.json')
-    # beside the deliverable. A *migration* shadow (ADR-0001 Phase 3): the
+    # beside the deliverable. A *migration* shadow (pre-render decision plan): the
     # content-graph contract still decides delivery, and this records the
-    # per-element attestations the ADR will replace it with, so the two can be
+    # per-element attestations the unified attestation model replaces it with, so the two can be
     # compared on real deliveries. Read-only, CPU-only, best-effort; removed
     # when realize() goes live.
     emit_attestation_shadow: bool = True
 
     # Emit a semantic HTML view of the delivery ('*_<tag>.html') beside the
-    # artifact, and an EPUB 3 package ('*_<tag>.epub'). These are the ADR-0001 §4
+    # artifact, and an EPUB 3 package ('*_<tag>.epub'). These are the semantic document delivery view
     # "later views": the same realized Document lowered to another format by the
     # same "missing Attestation is refused" rule as the PDF. Read-only, best-effort
     # companions -- a view failure never sinks the PDF delivery.

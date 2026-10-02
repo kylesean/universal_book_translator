@@ -137,8 +137,8 @@ async def run_mode_advisory_stage(
     layout.tier_basis = tier_basis
     layout.enforcement = enforcement
 
-    # Run-policy keys: the renderer reads these off the plan (ADR-0001 renderer
-    # handshake). They are no longer posted on manifest.run.
+    # Run-policy keys: the renderer reads these off the plan (compiler
+    # render plan protocol). They are no longer posted on manifest.run.
     render.render_engine = config.render_engine
     render.translate_chrome = config.translate_chrome
     render.cover_mode = config.cover_mode

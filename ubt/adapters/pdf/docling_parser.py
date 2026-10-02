@@ -419,7 +419,7 @@ def _ensure_docling_pdfium_lock() -> None:
 def type_docling_blocks(blocks: list[IRBlock]) -> list[IRBlock]:
     """The analyzer's own typing stage: raw Docling blocks -> final typed blocks.
 
-    This is the Docling analyzer producing its own types (ADR §6.1 item 2/9). It
+    This is the Docling analyzer producing its own types (native analyzer AST type production). It
     trusts Docling's labels end to end -- reading order, chrome (PAGE_HEADER /
     PAGE_FOOTER), headings (TITLE / SECTION_HEADER), captions (CAPTION and the
     ``FIG. N`` title shape) and segmentation -- and the emission loop types
@@ -934,7 +934,7 @@ def map_iterated_items(
             continue
 
         # The analyzer types math debris and algorithm listings itself, from the
-        # shared text-content rules (ADR §6.1 item 2: the analyzer produces the
+        # shared text-content rules (native analyzer AST type production: the analyzer produces the
         # types, not a later repair pass). A short math/algorithm token is a
         # FORMULA/CODE held byte-identical; Docling's own label is only a prior.
         if not skip and block_type in PROSE_BLOCK_TYPES:

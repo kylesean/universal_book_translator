@@ -1,4 +1,4 @@
-"""``ubt.translate`` -- the translation-unit orchestration layer (ADR-0001 Phase 2).
+"""``ubt.translate`` -- the translation-unit orchestration layer (translation unit segmentation layer).
 
 :class:`~ubt.translate.engine.TranslationEngine` masks a unit's protected spans,
 sends the masked source to a provider-agnostic ``translate`` coroutine, restores

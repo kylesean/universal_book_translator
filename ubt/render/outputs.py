@@ -1,4 +1,4 @@
-"""Lowering a realized document to an artifact (ADR-0001 L6).
+"""Lowering a realized document to an artifact (render backend lowering layer).
 
 The lowering has exactly one capability today: place an element as its opaque
 source slice. Every element therefore descends to that slice, every page is

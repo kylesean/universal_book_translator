@@ -202,7 +202,7 @@ class DoclingRenderStrategy:
         # Render skip side channel: plain (block_id, reason) pairs
         # from the most recent render_blocks call. Reset every render.
         self.last_render_skips: list[tuple[str, str]] = []
-        # Render outcome side channel (ADR-0001 renderer handshake): the mode the
+        # Render outcome side channel (compiler render plan protocol): the mode the
         # renderer actually used, after any rigid monolingual downgrade.
         self.last_outcome: RenderOutcome | None = None
 
@@ -233,7 +233,7 @@ class DoclingRenderStrategy:
         out_path = Path(output_path)
         out_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # The render decision is the plan's (ADR-0001 renderer handshake). A
+        # The render decision is the plan's (compiler render plan protocol). A
         # caller that passes no plan (an external render) gets the adapter
         # defaults; the mode cluster is no longer read from manifest.run.
         plan_mode = render_plan.bilingual_mode if render_plan is not None else None

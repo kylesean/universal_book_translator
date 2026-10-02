@@ -561,7 +561,7 @@ class LedgerBase:
 
             # Migration to Version 12: drop the semantic/structure role columns.
             # ``structure_role`` is a property of ``block_type`` (never read back
-            # since ADR R3), and the semantic axis was never set to anything but
+            # since single source of truth unification), and the semantic axis was never set to anything but
             # its default, so both columns are dead weight. ``layout_role``
             # stays: it is the extractor's finding and cannot be derived.
             if current_version < 12:

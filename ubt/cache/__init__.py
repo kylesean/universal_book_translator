@@ -1,4 +1,4 @@
-"""``ubt.cache`` -- the content-addressed step cache (ADR-0001 Phase 4).
+"""``ubt.cache`` -- the content-addressed step cache (content-addressed cache layer).
 
 :func:`ubt.cache.store.step_key` names a step invocation by its content, and a
 :class:`~ubt.cache.store.CacheStore` returns the stored value or computes it

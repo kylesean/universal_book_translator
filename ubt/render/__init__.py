@@ -1,4 +1,4 @@
-"""``ubt.render`` -- lowering backends and their capability declarations (ADR-0001 L6).
+"""``ubt.render`` -- lowering backends and their capability declarations (render backend lowering layer).
 
 A backend turns one element into a realization at a fidelity it declares it can
 produce; :func:`ubt.pipeline.steps.realize` negotiates which. The concrete

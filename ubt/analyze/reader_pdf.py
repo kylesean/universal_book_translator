@@ -1,6 +1,6 @@
-"""Native PDF reader: a PDF -> the typed Document AST (ADR-0001 Phase 1).
+"""Native PDF reader: a PDF -> the typed Document AST (native AST reader and verification seam).
 
-This is the "difficulty concentrated in one place" the ADR calls for. ``adapters``
+This is the "difficulty concentrated in one place" architectural principle. ``adapters``
 supply *raw geometry* (text lines, their boxes and font metrics via
 :mod:`ubt.adapters.pdf.textgeom`); this module owns *structure* -- reading order,
 paragraph grouping, heading detection, and page furniture (chrome, listings) --

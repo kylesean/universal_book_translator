@@ -3,7 +3,7 @@
 These are the Docling adapter's raw item helpers: read a Docling item's own
 provenance (page spans, geometry) and render its grid to markup. They never
 classify or repair -- the analyzer types directly from Docling's labels in
-:func:`ubt.adapters.pdf.docling_parser.extract_with_docling` (ADR §6.1 item 2/9).
+:func:`ubt.adapters.pdf.docling_parser.extract_with_docling` (native analyzer AST type production).
 The caption fuse/decouple/latch heuristics that used to live here are deleted:
 Docling labels captions (``CAPTION``, ``PICTURE``, a ``FIG. N`` title), and the
 analyzer trusts those labels rather than re-guessing the boundaries afterwards.

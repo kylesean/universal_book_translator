@@ -102,7 +102,7 @@ def classify_plain_text_block(
     # this is the safety net for plain-text paths (pdfium/oxide) that cannot
     # emit FORMULA. skip_translate ships it verbatim via is_static_skip.
     # The debris/listing/title/list rules all live in the shared analyzer
-    # (ADR R3: one owner), so a plain-text engine cannot type a line differently
+    # (single source of truth: one owner), so a plain-text engine cannot type a line differently
     # from the reader -- the analyzer produces the types directly instead of a
     # later flow-repair pass re-typing them.
     if looks_like_debris(normalized):

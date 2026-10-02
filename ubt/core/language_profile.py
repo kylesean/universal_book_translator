@@ -137,7 +137,7 @@ DE = LanguageProfile("de", "German", 0.7, 2.0, 0.25, latin_script_ratio)
 ES = LanguageProfile("es", "Spanish", 0.6, 1.8, 0.25, latin_script_ratio)
 EN = LanguageProfile("en", "English", 0.6, 1.8, 0.25, latin_script_ratio)
 RU = LanguageProfile("ru", "Russian", 0.6, 2.0, 0.25, cyrillic_script_ratio)
-# Right-to-left targets (ADR-0001 §12 Q4): admission for a real RTL job. The
+# Right-to-left targets (RTL/bidi typesetting admission): admission for a real RTL job. The
 # direction itself is owned by ubt.layout.theme.direction_for; the profile only
 # carries the 0-token identity/ratio policy.
 AR = LanguageProfile("ar", "Arabic", 0.6, 2.0, 0.25, arabic_script_ratio)
@@ -891,7 +891,7 @@ _FONT_CONFIGS: dict[str, FontConfig] = {
         figure_prefix="Рис.",
         table_prefix="Таблица",
     ),
-    # RTL targets (ADR-0001 §12 Q4). Noto first (the family the CJK stacks rely
+    # RTL targets (RTL/bidi typesetting admission). Noto first (the family the CJK stacks rely
     # on and the most likely to be installed); the DejaVu tail is a last-resort
     # glyph source, and the probe substitutes another same-script face when the
     # configured one is absent.

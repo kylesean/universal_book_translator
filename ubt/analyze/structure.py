@@ -1,4 +1,4 @@
-"""The single classification rule set (ADR-0001 Phase 1, R3).
+"""The single classification rule set (single classification rule set, single layout vocabulary).
 
 Extraction is a *prior*: whether a line is a listing, a page number, or math
 debris is a property of the line, decided once here -- not re-guessed by a
@@ -98,7 +98,7 @@ def looks_like_debris(text: str) -> bool:
 # Markdown content rules
 # --------------------------------------------------------------------------- #
 # Shared by the native Markdown reader and the Markdown adapter, so a line
-# cannot be a heading to one and prose to the other (ADR R3, one owner).
+# cannot be a heading to one and prose to the other (single source of truth: one owner).
 _MD_HEADING = re.compile(r"^(#{1,6})\s+(.*)$")
 _TABLE_DELIMITER = re.compile(r"^\|?(\s*:?-+:?\s*\|)+\s*:?-+:?\s*\|?$")
 _MD_LIST_ITEM = re.compile(r"^(\s*)([-*+]|\d{1,9}[.)])\s+(.*)$")
@@ -154,7 +154,7 @@ def looks_like_heading(text: str) -> bool:
     """True for a short, bullet-free line with no terminal punctuation.
 
     The *text-content* rule a plain-text extractor uses when it has no
-    typography to measure (ADR R3: one owner). Deliberately narrow -- a title
+    typography to measure (single source of truth: one owner). Deliberately narrow -- a title
     never ends in sentence punctuation and a long line is a paragraph -- so a
     miss merely leaves a heading as prose, which still translates.
     """

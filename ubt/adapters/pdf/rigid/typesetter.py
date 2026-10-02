@@ -441,7 +441,7 @@ class RigidTypesetter:
 
         self.typst_binary = typst_binary or os.environ.get("UBT_TYPST_BINARY", "typst")
         self.target_lang = target_lang
-        # The decision plan (ADR-0001 Phase 3): element id -> committed fidelity.
+        # The decision plan (pre-render decision plan): element id -> committed fidelity.
         # A block the plan kept (PRESERVED_OPAQUE) is left in the source rather
         # than painted over with its translation.
         self.realization_plan = realization_plan
@@ -633,8 +633,8 @@ class RigidTypesetter:
                 self.realization_plan is not None
                 and self.realization_plan.get(block.id) is Fidelity.PRESERVED_OPAQUE
             ):
-                # The decision plan kept this element in the source (ADR-0001
-                # Phase 3): leave the source box intact rather than painting the
+                # The decision plan kept this element in the source (pre-render
+                # decision plan): leave the source box intact rather than painting the
                 # translation over it.
                 report.skipped.append((block.id, "plan:preserved"))
                 continue

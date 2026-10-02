@@ -1,4 +1,4 @@
-"""The per-run services a stage reads (ADR-0001 orchestration convergence).
+"""The per-run services a stage reads (unified pipeline orchestration).
 
 The shared :class:`~ubt.core.engine.stage_context.StageContext` used to carry
 these as fields, which mixed "what the run *was configured with*" together with

@@ -6,7 +6,7 @@ how to get ``IRBlock``s out of every format, so the bridge projects those into a
 migrate to the typed model before a native per-format reader exists, and the
 round-trip is the proof that the model loses no document structure.
 
-Native readers land beside the bridge one at a time (ADR §8.7): ``read_pdf`` for
+Native readers land beside the bridge one at a time (incremental native reader dispatch): ``read_pdf`` for
 born-digital PDF geometry, ``read_md`` for Markdown/plain text, and now
 ``read_html``/``read_epub``/``read_docx`` for markup and office formats. They
 decide the structure themselves and give every element real ``Span`` offsets, so a

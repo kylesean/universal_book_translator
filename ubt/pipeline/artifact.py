@@ -1,4 +1,4 @@
-"""Artifact-level attestation check (ADR-0001 Phase 3 acceptance).
+"""Artifact-level attestation check (artifact-level attestation check).
 
 The attestation layer says, per element, what was realized -- a verified
 translation, a reconstructed asset, or the source kept whole. This closes the
@@ -12,7 +12,7 @@ the witnesses make -- not something a text probe can confirm. A text element
 attested above the floor must show its translation in the artifact; one kept at
 the floor must show its source.
 
-During the migration this measures the ADR's "产物保真度 ≥ 现路径" on every real
+During the migration this measures the "output fidelity ≥ legacy baseline" criterion on every real
 delivery instead of only in a corpus run. It is a *report*: a missing element is
 surfaced, never silently tolerated, and never allowed to sink the artifact.
 """

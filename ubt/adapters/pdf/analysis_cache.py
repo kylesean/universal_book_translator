@@ -1,4 +1,4 @@
-"""Content-addressed caching for the analyze step (ADR-0001 Phase 4).
+"""Content-addressed caching for the analyze step (content-addressed cache layer).
 
 ``read_pdf`` is a pure transform of a PDF's bytes into a ``Document`` (and then
 into ``IRBlock``s): the same file and page range always yield the same blocks.

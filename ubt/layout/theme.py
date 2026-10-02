@@ -1,4 +1,4 @@
-"""Theme: one value for a run's presentation policy (ADR-0001 ``layout/theme.py``).
+"""Theme: one value for a run's presentation policy (presentation policy theme).
 
 Before this, "the theme" had five owners: ``language_profile`` (per-language
 fonts and localized figure/table prefixes), ``font_probe`` (which of those fonts
@@ -6,7 +6,7 @@ the machine actually has), ``typst_constants.StyleProfile`` (the emitted bilingu
 size/fill constants), ``config.font_family`` (the user override), and the
 reconstructor's own size/leading defaults. A :class:`Theme` *composes* those into
 one frozen value resolved once per run, so a renderer reads one object instead of
-five sources -- the ADR's R3 rule ("one attribute, one source").
+five sources -- the single source of truth rule ("one attribute, one source").
 
 It also owns **text direction**, a concept that had no owner at all: Typst runs
 the Unicode Bidirectional Algorithm on logical-order text and lays runs out from

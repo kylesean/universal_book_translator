@@ -1,4 +1,4 @@
-"""The overlay backend: keep the source region whole (ADR-0001 L6).
+"""The overlay backend: keep the source region whole (render backend lowering layer).
 
 This is the floor of the fidelity lattice as a backend. Where a reflowing
 backend re-typesets an element, this one places it as an *opaque source slice*

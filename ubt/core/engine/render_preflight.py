@@ -100,7 +100,7 @@ async def run_render_preflight(
 
     sample = select_preflight_sample(blocks)
     metadata = getattr(manifest, "metadata", None) or {}
-    # The render decision is the plan's (ADR-0001 renderer handshake); the
+    # The render decision is the plan's (compiler render plan protocol); the
     # manifest metadata copy is a fallback for callers that pass no plan.
     # Resolve the engine against ALL blocks, then force that engine onto the
     # sample. ``select_preflight_sample`` is deliberately structure-biased

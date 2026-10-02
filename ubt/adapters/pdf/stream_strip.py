@@ -532,7 +532,7 @@ def strip_stream_instructions(
     initial_ctm: Matrix2D = IDENTITY_MATRIX,
     resources: Any = None,
     recurse_forms: bool = True,
-    visited_forms: set[str] | None = None,
+    visited_forms: set[Any] | None = None,
     shared_forms: set[tuple[int, int]] | None = None,
     form_writes: list[tuple[Any, bytes]] | None = None,
 ) -> tuple[list[tuple[Sequence[Any], Any]], int]:
@@ -796,12 +796,20 @@ def strip_stream_instructions(
                 # no trace; report it so a lost-coverage bug is diagnosable.
                 logger.warning("stream_strip: unreadable /XObject resources (%s)", exc)
 
-            if xobjects is not None and name_str not in visited_forms:
+            if xobjects is not None:
                 try:
                     target_xobj = xobjects.get(xobj_name)
                     if target_xobj is not None and target_xobj.get(
                         pikepdf.Name("/Subtype")
                     ) == pikepdf.Name("/Form"):
+                        form_key: Any = (
+                            target_xobj.objgen
+                            if getattr(target_xobj, "is_indirect", False)
+                            else id(target_xobj)
+                        )
+                        if visited_forms is not None and form_key in visited_forms:
+                            output.append((operands, operator))
+                            continue
                         if (
                             shared_forms
                             and target_xobj.is_indirect
@@ -825,7 +833,9 @@ def strip_stream_instructions(
                             child_ctm = mul_matrix(form_matrix, ctm)
                             child_res = target_xobj.get(pikepdf.Name("/Resources")) or resources
                             form_parsed = pikepdf.parse_content_stream(target_xobj)
-                            visited_forms.add(name_str)
+                            if visited_forms is None:
+                                visited_forms = set()
+                            visited_forms.add(form_key)
                             try:
                                 sub_out, sub_dropped = strip_stream_instructions(
                                     cast(list[tuple[Sequence[Any], Any]], list(form_parsed)),
@@ -843,7 +853,7 @@ def strip_stream_instructions(
                                 # A failed recursion must not poison the set:
                                 # without this, later same-named Forms are
                                 # skipped and their text survives (fail-open).
-                                visited_forms.remove(name_str)
+                                visited_forms.remove(form_key)
                             if sub_dropped > 0:
                                 new_stream = pikepdf.unparse_content_stream(sub_out)
                                 if form_writes is not None:

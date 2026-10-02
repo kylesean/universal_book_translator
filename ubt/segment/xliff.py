@@ -1,4 +1,4 @@
-"""XLIFF 2.1 export / import for segments (ADR-0001 Phase 2).
+"""XLIFF 2.1 export / import for segments (translation unit segmentation layer).
 
 XLIFF is the translation industry's interchange format (OASIS 2.1): the same
 ``Segment`` shape CAT tools -- Trados, memoQ, Phrase -- read and write. Emitting

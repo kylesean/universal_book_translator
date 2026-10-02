@@ -1,4 +1,4 @@
-"""``ubt.pipeline`` -- the pure pipeline steps and their sequencing (ADR-0001).
+"""``ubt.pipeline`` -- the pure pipeline steps and their sequencing (document compiler architecture).
 
 :func:`ubt.pipeline.steps.realize` is the single execution core: it lowers one
 element through the fidelity descent under a backend's declared capabilities.

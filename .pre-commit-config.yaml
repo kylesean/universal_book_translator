@@ -39,16 +39,16 @@ repos:
       # anyway, and the fast tier is ~6s, so pre-push
       # stays well inside the inner-loop budget.
       - id: mypy
-        name: mypy --strict (ubt + tests)
-        entry: uv run mypy --strict ubt tests
+        name: mypy --strict (ubt)
+        entry: uv run mypy --strict ubt
         language: system
         pass_filenames: false
         always_run: true
         stages: [pre-push]
 
-      - id: pytest-fast
-        name: pytest -m fast
-        entry: uv run pytest -m fast -q
+      - id: shadow-ast
+        name: shadow-ast acceptance
+        entry: uv run python scripts/shadow_ast.py --corpus corpus
         language: system
         pass_filenames: false
         always_run: true

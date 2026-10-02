@@ -169,7 +169,7 @@ def _asset_node(
             detail = "placed"
         else:
             # Structural verification now goes through the unified verifier
-            # seam (ADR-0001). The import is function-local because
+            # seam (document compiler architecture). The import is function-local because
             # ``ubt.verify`` imports this package's ``asset_verify`` submodule:
             # a module-level edge here would close a cycle when ``ubt.verify``
             # is the first package imported. The behaviour is unchanged -- the

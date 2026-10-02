@@ -1,4 +1,4 @@
-"""The render decision and the renderer's outcome (ADR-0001 renderer handshake).
+"""The render decision and the renderer's outcome (compiler render plan protocol).
 
 ``RenderPlan`` is what the advisories decide about *this run's* render: the mode,
 the engine, the chrome/cover treatment, and whether a companion artifact was

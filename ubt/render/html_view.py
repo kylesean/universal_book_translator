@@ -1,4 +1,4 @@
-"""Semantic HTML lowering: the Document as a web view (ADR-0001 L6, §12 Q5).
+"""Semantic HTML lowering: the Document as a web view (semantic document lowering layer).
 
 The first non-PDF view, and deliberately a *view*, not a reader: it lowers the
 same typed :class:`~ubt.model.ast.Document` the kernel already realizes to

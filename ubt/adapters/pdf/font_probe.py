@@ -112,7 +112,7 @@ _CJK_SCRIPT_LANGS: frozenset[str] = frozenset(
     }
 )
 
-# Right-to-left targets (ADR-0001 §12 Q4): a Latin-only stack cannot shape
+# Right-to-left targets (RTL/bidi typesetting admission): a Latin-only stack cannot shape
 # Arabic/Hebrew either, so they get the same "substitute rather than ship tofu"
 # treatment as CJK. Markers are script-specific strings a Latin family does not
 # carry; the DejaVu tail cannot be trusted for Arabic shaping, so it is not a

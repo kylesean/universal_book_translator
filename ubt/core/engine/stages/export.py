@@ -79,8 +79,8 @@ async def _render_adapter_output(
 ) -> Path:
     """Render via ``render_blocks``.
 
-    ``render_plan`` is the render decision the advisories made (ADR-0001
-    renderer handshake); ``bilingual_mode``/``render_engine`` are read from it
+    ``render_plan`` is the render decision the advisories made (compiler
+    render plan protocol); ``bilingual_mode``/``render_engine`` are read from it
     when not passed explicitly.
     """
     if bilingual_mode is None and render_plan is not None:
@@ -846,7 +846,7 @@ def _attest_delivery(
 ) -> tuple[Document, dict[str, str], AttestationReport]:
     """Realize the delivery per element: its Document, its target map, its account.
 
-    The backend is fed the run's own decisions (ADR-0001 Phase 3 migration):
+    The backend is fed the run's own decisions (pre-render decision plan migration):
     which engine ran and which elements the delivery kept in the source.
     ``realize()`` then reproduces and *verifies* each element -- the
     construction-time core the delivery contract is projected from. ``engine`` is
@@ -874,7 +874,7 @@ def _resolve_render_engine(
 ) -> str:
     """The engine this render will use, resolved *before* the render.
 
-    The decision plan is built before the renderer runs (ADR-0001 Phase 3), so
+    The decision plan is built before the renderer runs (pre-render decision plan), so
     the engine its asset policy depends on cannot be read back from the
     renderer's telemetry afterwards. Resolving here with the same
     ``resolve_pdf_engine`` the renderer uses keeps the two in agreement.
@@ -896,8 +896,8 @@ def _deliver_contract(
 ) -> ReconciliationReport:
     """Build the content graph, project the attestations onto it, persist the contract.
 
-    The contract is a *projection* of the per-element attestations (ADR-0001
-    Phase 3): ``realize()`` is the construction-time core, and the graph supplies
+    The contract is a *projection* of the per-element attestations (pre-render
+    decision plan): ``realize()`` is the construction-time core, and the graph supplies
     only the detail the AST deliberately does not model. Always writes the
     standalone ``*_contract.json`` and returns the report. The report is advisory
     unless ``config.strict_contract`` is set, in which case the caller aborts on
@@ -994,7 +994,7 @@ def _write_html_view(
     translations: dict[str, str],
     attestations: AttestationReport,
 ) -> Path | None:
-    """Write a semantic HTML view of the delivery beside the artifact (ADR-0001 §4).
+    """Write a semantic HTML view of the delivery beside the artifact (semantic document delivery view).
 
     The same realized ``Document`` the contract is projected from, lowered to
     HTML by the same rule as the PDF (a missing Attestation is refused). A
@@ -1031,7 +1031,7 @@ def _write_epub_view(
     translations: dict[str, str],
     attestations: AttestationReport,
 ) -> Path | None:
-    """Write an EPUB 3 view of the delivery beside the artifact (ADR-0001 §4)."""
+    """Write an EPUB 3 view of the delivery beside the artifact (semantic document delivery view)."""
     if not ctx.config.emit_epub_companion:
         return None
     try:
@@ -1085,7 +1085,7 @@ def _write_attestation_shadow(
 ) -> Path | None:
     """Write the attestation account -- and the artifact check -- beside the artifact.
 
-    ADR-0001 Phase 3: the attestations *are* the delivery's account, and this
+    Pre-render decision plan: the attestations *are* the delivery's account, and this
     records them, plus whether the delivered artifact actually carries each text
     realization ("产物保真度 ≥ 现路径"). Read-only and off-loop; a failure is logged
     and skipped and can never sink the delivery.
@@ -1345,7 +1345,7 @@ async def run_export_stage(
 
     ctx.check_cancelled()
     effective_bilingual_mode = render.bilingual_mode
-    # ADR-0001 Phase 3 inversion: build the decision plan *before* the render and
+    # pre-render decision plan inversion: build the decision plan *before* the render and
     # hand it to the renderer as its per-element decision source. The engine the
     # plan's asset policy depends on is resolved here (the renderer resolves the
     # same one). The contract below is then projected from this same plan -- one
@@ -1401,7 +1401,7 @@ async def run_export_stage(
     # best-effort: it cannot affect the artifact, only add a file beside it.
     await asyncio.to_thread(_write_xliff_companion, ctx, rendered_path, final_blocks)
 
-    # HTML / EPUB views of the same realized delivery (ADR-0001 §4 "later views").
+    # HTML / EPUB views of the same realized delivery (semantic document delivery view).
     # Read-only, best-effort companions; a view failure never sinks the PDF.
     await asyncio.to_thread(
         _write_html_view, ctx, rendered_path, document, translations, attestations
@@ -1411,7 +1411,7 @@ async def run_export_stage(
     )
 
     # Attestation account + artifact-level agreement, beside the artifact
-    # (ADR-0001 Phase 3). Read-only, best-effort.
+    # (pre-render decision plan). Read-only, best-effort.
     await asyncio.to_thread(
         _write_attestation_shadow, ctx, rendered_path, document, translations, attestations
     )

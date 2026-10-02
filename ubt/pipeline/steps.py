@@ -1,4 +1,4 @@
-"""Pure pipeline steps (ADR-0001). :func:`realize` is the whole execution core.
+"""Pure pipeline steps (document compiler architecture). :func:`realize` is the whole execution core.
 
 For one element, walk its fidelity descent; the first rung the backend declares
 it can produce *and* whose result verifies is that element's realization. The

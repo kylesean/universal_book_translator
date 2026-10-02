@@ -243,7 +243,7 @@ def _resolve_content(block: IRBlock, *, ignore_target: bool = False) -> tuple[st
     empty): prefer it over raw source so Chinese books never sprout
     full-English paragraphs while discarding real translations.
 
-    ``ignore_target`` is the decision plan's verdict (ADR-0001 Phase 3): the run
+    ``ignore_target`` is the decision plan's verdict (pre-render decision plan): the run
     did not commit to deliver this block's translation (it failed verification),
     so the renderer must not reflow it -- it falls through to draft/source exactly
     as a block that never had a target.
@@ -738,8 +738,8 @@ class TypstReconstructor:
         # em units from MathJax's viewBox so every formula matches the text.
         self._active_font_pt: float = self.font_size_pt
         self._healer = TypstDiagnosticHealer(typst_binary=self.typst_binary)
-        # Optional content-addressed cache for the pixel witnesses (ADR-0001
-        # Phase 4). The witness compiles + rasters the emitted markup -- the
+        # Optional content-addressed cache for the pixel witnesses (content-addressed
+        # cache layer). The witness compiles + rasters the emitted markup -- the
         # render path's most expensive pure step -- so a resumed or re-run job
         # reuses the verdict. Set by the adapter from the run config; None
         # (the default) computes every time.
@@ -827,7 +827,7 @@ class TypstReconstructor:
         # Fresh witness audit trail per generation.
         self.last_witness_findings = []
         self.last_table_fallbacks = []
-        # The decision plan (ADR-0001 Phase 3 inversion): element id -> the
+        # The decision plan (pre-render decision plan inversion): element id -> the
         # fidelity this run committed to deliver. ``_emit_block`` reads it so the
         # renderer *follows* the plan instead of deciding reflow-vs-preserve
         # itself. ``None`` (no plan) keeps the renderer's own judgment.
@@ -928,7 +928,7 @@ class TypstReconstructor:
         # Typst lays a right-to-left run out itself (UAX #9); the text stays in
         # logical order. Emitting the direction in the live preamble is what
         # makes an RTL PDF an RTL PDF -- the L6 TypstBackend's dir: rtl is the
-        # attestation seam, not the shipped artifact (ADR-0001 §12 Q4).
+        # attestation seam, not the shipped artifact (RTL/bidi typesetting admission).
         text_dir_setting = ", dir: rtl" if is_rtl_lang(lang_code) else ""
 
         lines: list[str] = [
@@ -2091,8 +2091,8 @@ class TypstReconstructor:
         """
         ctx = context if context is not None else _EmitContext()
         profile = ctx.profile
-        # The decision plan is the renderer's per-element instruction (ADR-0001
-        # Phase 3): DROPPED is removed, PRESERVED_OPAQUE keeps the source (a
+        # The decision plan is the renderer's per-element instruction (pre-render
+        # decision plan): DROPPED is removed, PRESERVED_OPAQUE keeps the source (a
         # translation the plan did not commit to is not reflowed), and a
         # reconstructed rung reflows the target. A missing id falls back to the
         # renderer's own judgment, so a plan-less render is unchanged.

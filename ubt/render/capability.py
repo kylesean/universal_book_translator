@@ -1,4 +1,4 @@
-"""Backend capability declaration (ADR-0001 L6).
+"""Backend capability declaration (render backend lowering layer).
 
 ``rigid`` vs ``reflow`` was a whole-document choice forced by two implementations;
 the real question is per element -- can *this* backend reproduce *this* element
@@ -7,9 +7,9 @@ value and :func:`ubt.pipeline.steps.realize` walks the fidelity descent asking
 that question one element at a time, so the two engines stop being a dichotomy
 and become two backends.
 
-Capabilities are *data* (ADR-0001 invariant I4): a backend declares what it can
+Capabilities are *data* (declarative capability invariant): a backend declares what it can
 produce, and an unsupported rung is simply skipped. There is no plugin registry
--- backends are constructed where a run is assembled (ADR-0001 §8.1).
+-- backends are constructed where a run is assembled (renderer capability declaration).
 """
 
 from __future__ import annotations
