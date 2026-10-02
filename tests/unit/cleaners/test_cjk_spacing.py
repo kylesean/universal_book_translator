@@ -6,8 +6,8 @@ cleaners fix only the unambiguous cases, are gated on the target language, and
 must never touch protected spans (code, masks, ``$…$`` math) or weld a Korean
 target's word boundaries together.
 
-One documented behaviour is currently missing and is recorded with a strict
-``xfail`` (see the last test) rather than asserted as correct.
+The ideographic full stop (``。``) is part of the documented punctuation set and
+is asserted directly (see the last test).
 """
 
 from __future__ import annotations
