@@ -11,6 +11,7 @@ rows survive upgrades).
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
@@ -179,4 +180,27 @@ def _as_str(value: Any) -> str | None:
     return None if value is None else str(value)
 
 
-__all__ = ["ARTIFACT_KEYS", "ProgressSnapshot"]
+def persist_progress_metadata(
+    event: TranslationProgressEvent, ledger_path: Path, job_id: str
+) -> None:
+    """Persist a finished run's artifact triple and cost into its ledger.
+
+    The one fold both completion hooks share (the REST manager's in-lock hook
+    and the queue worker's): ``ProgressSnapshot.from_event`` is the same
+    projection the SSE record shows, so what is persisted cannot drift from
+    what subscribers were told. A missing ledger file is a no-op — the run
+    never got one.
+    """
+    from ubt.core.engine.ledger import SQLiteJobLedger
+
+    progress = ProgressSnapshot.from_event(event)
+    if not ledger_path.exists():
+        return
+    with SQLiteJobLedger(ledger_path) as ldg:
+        for metadata_key in (*ARTIFACT_KEYS, "estimated_cost_usd"):
+            value = getattr(progress, metadata_key)
+            if value is not None:
+                ldg.set_job_metadata_value(job_id, metadata_key, value)
+
+
+__all__ = ["ARTIFACT_KEYS", "ProgressSnapshot", "persist_progress_metadata"]

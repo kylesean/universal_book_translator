@@ -27,7 +27,7 @@ from ubt.core.engine.dry_run import create_dry_run_orchestrator
 from ubt.core.engine.events import TranslationProgressEvent
 from ubt.core.engine.job_queue import JobQueue, JobStatus, QueuedJob
 from ubt.core.engine.pipeline import PipelineOrchestrator
-from ubt.core.engine.progress import ProgressSnapshot
+from ubt.core.engine.progress import ProgressSnapshot, persist_progress_metadata
 from ubt.core.exceptions import (
     JobInterruptedError,
     LeaseLostError,
@@ -110,20 +110,9 @@ class JobWorker:
         output_path = Path(str(payload["output_path"])) if payload.get("output_path") else None
 
         def _persist_metadata(event: TranslationProgressEvent) -> None:
-            from ubt.core.engine.ledger import SQLiteJobLedger
-            from ubt.core.engine.progress import ARTIFACT_KEYS, ProgressSnapshot
-
-            progress = ProgressSnapshot.from_event(event)
-            db_dir = Path(job_config.db_dir)
-            job_id = job.job_id
-            ledger_path = db_dir / f"{job_id}.sqlite"
-            if not ledger_path.exists():
-                return
-            with SQLiteJobLedger(ledger_path) as ldg:
-                for metadata_key in (*ARTIFACT_KEYS, "estimated_cost_usd"):
-                    value = getattr(progress, metadata_key)
-                    if value is not None:
-                        ldg.set_job_metadata_value(job_id, metadata_key, value)
+            persist_progress_metadata(
+                event, Path(job_config.db_dir) / f"{job.job_id}.sqlite", job.job_id
+            )
 
         # Rehearsal is decided from THIS process's key (see the helper).
         if _should_rehearse(payload, job_config):

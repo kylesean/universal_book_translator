@@ -13,9 +13,8 @@ from ubt.core.config import UBTConfig
 from ubt.core.engine.dry_run import create_dry_run_orchestrator
 from ubt.core.engine.events import TranslationProgressEvent
 from ubt.core.engine.job_queue import TERMINAL_JOB_STATUSES, JobStatus
-from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.pipeline import PipelineOrchestrator
-from ubt.core.engine.progress import ARTIFACT_KEYS, ProgressSnapshot
+from ubt.core.engine.progress import ProgressSnapshot, persist_progress_metadata
 from ubt.core.exceptions import UBTError
 from ubt.core.job_options import (
     apply_config_overrides,
@@ -209,14 +208,8 @@ class JobManager:
         """
 
         def _persist(event: TranslationProgressEvent) -> None:
-            progress = ProgressSnapshot.from_event(event)
-            ledger_path = Path(job_config.db_dir) / f"{record.job_id}.sqlite"
-            if not ledger_path.exists():
-                return
-            with SQLiteJobLedger(ledger_path) as ldg:
-                for metadata_key in (*ARTIFACT_KEYS, "estimated_cost_usd"):
-                    value = getattr(progress, metadata_key)
-                    if value is not None:
-                        ldg.set_job_metadata_value(record.job_id, metadata_key, value)
+            persist_progress_metadata(
+                event, Path(job_config.db_dir) / f"{record.job_id}.sqlite", record.job_id
+            )
 
         return _persist
