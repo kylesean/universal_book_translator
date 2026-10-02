@@ -18,7 +18,12 @@ from typing import Any
 from bs4 import BeautifulSoup, Tag
 from bs4.element import AttributeValueList
 
-from ubt.adapters.base import BILINGUAL_TARGET_CLASS, BaseDocumentAdapter, decode_markup
+from ubt.adapters.base import (
+    BILINGUAL_TARGET_CLASS,
+    BaseDocumentAdapter,
+    decode_markup,
+    parse_pipe_table_cells,
+)
 from ubt.adapters.epub.adapter import take_preserved_inline_children
 from ubt.adapters.unresolved import failure_note, is_unresolved
 from ubt.analyze.assemble import number
@@ -38,20 +43,6 @@ logger = logging.getLogger(__name__)
 
 # Marker class added to injected bilingual target nodes.
 _TARGET_CSS_CLASS = BILINGUAL_TARGET_CLASS
-
-
-def parse_pipe_table_cells(markup: str) -> list[list[str]]:
-    """Parse GitHub-flavoured markdown pipe table markup into grid rows."""
-    rows: list[list[str]] = []
-    for line in markup.strip().splitlines():
-        line = line.strip()
-        if not line or not line.startswith("|"):
-            continue
-        cells = [c.strip() for c in line.strip("|").split("|")]
-        if cells and all(set(c).issubset({"-", ":", " "}) for c in cells):
-            continue
-        rows.append(cells)
-    return rows
 
 
 class HTMLAdapter(BaseDocumentAdapter):
