@@ -1,9 +1,12 @@
 # Delivery-contract verification corpus
 
-The unit-test suite was removed; **this corpus is the regression gate**. It does
-not test implementation details. It asserts the delivery *contract* — the two
-axioms — on real documents, and `ubt verify --corpus` fails the build when a
-document loses text or assets.
+This corpus is the **real-document gate**: it asserts the delivery *contract* —
+the two axioms — on actual PDFs, and `ubt verify --corpus` fails the build when
+a document loses text or assets. It complements (not replaces) the automated
+suite in `tests/`, which pins the per-module contracts on synthetic fixtures
+(`docs/guides/TESTING_STRATEGY.md`). Consumers: the `ubt verify` CLI, the
+slow-tier corpus harnesses (`scripts/shadow_*.py` via
+`tests/integration/test_corpus_acceptance.py`), and manual acceptance runs.
 
 > The contract is engine-, language- and layout-agnostic. A regression on any
 > render path shows up the same way: as an unbalanced book.
@@ -26,7 +29,8 @@ path; a case whose file is absent is reported `skip` (or `fail` under
 ```bash
 # Translate every case's source document (dry-run, no API key) and verify the
 # contract each run writes. This is the full gate: the pipeline itself is the
-# ground truth, not a hand-written fixture.
+# ground truth, not a hand-written fixture. The slow test tier runs exactly
+# this command automatically (pytest -m slow), skip when documents are absent.
 uv run ubt verify --corpus corpus --run --require-all
 
 # Verify only what is already on disk (no translation).
