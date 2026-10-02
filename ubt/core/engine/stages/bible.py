@@ -169,8 +169,7 @@ async def run_bible_stage(
         # external glossary (and the fresh seeds) live in bible.glossary;
         # returning the payload would discard them, so the pipeline would
         # enforce the previous run's renderings.
-        glossary_dicts = [e.model_dump() for e in bible.glossary if e.translation]
-        abbreviation_entries = [e.model_dump() for e in bible.glossary if not e.translation]
+        glossary_dicts, abbreviation_entries = _split_bible_entries(bible.glossary)
         logger.info(
             "Reusing cached translation bible for %s (%d translated, %d pending entries)",
             actual_job_id,

@@ -6,6 +6,14 @@ drifted (term selection and abbreviation merging were re-implemented three
 times). All stages now call these helpers, and so does the TM context hash —
 the sheet the prompt carries and the sheet the fingerprint records must be the
 same bytes, or a glossary change fails to invalidate cached translations.
+
+The dict shape these helpers accept is not a second glossary schema: every
+entry is a :class:`~ubt.core.memory.bible.BibleEntry` projection. Dicts are
+born only in the bible stage's ``_split_bible_entries`` (fed by validated
+models) and read back from the bible cache through ``BibleEntry.model_validate``
+— external glossary files are parsed into ``BibleEntry`` at load — so the
+model is the single schema and these ``dict`` parameters are its serialized
+form.
 """
 
 from typing import Any
