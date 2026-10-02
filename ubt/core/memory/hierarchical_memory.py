@@ -20,17 +20,15 @@ from typing import Any
 from ubt.core.ir.models import IRBlock
 from ubt.core.memory.neighbor_window import DEFAULT_NEIGHBOR_CHARS, NeighborContextBuilder
 from ubt.core.memory.rolling_summary import (
-    build_summary_prompt,
     deterministic_summary,
     extract_chapter_id,
+    llm_summary,
 )
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_STEP_CHARS = 3500
 DEFAULT_L3_EPOCH_STEPS = 4
-_MIN_SUMMARY_CHARS = 10
-_MAX_SUMMARY_CHARS = 800
 _MAX_L3_CHARS = 1200
 
 
@@ -155,20 +153,12 @@ class HierarchicalMemoryManager:
 
         summary = ""
         if content:
-            try:
-                system_prompt, user_prompt = build_summary_prompt(content, target_lang)
-                raw = await complete_fn(system_prompt, user_prompt)
-                cleaned = (raw or "").strip().strip('"“”').strip()
-                normalized = " ".join(cleaned.split())
-                if len(normalized) >= _MIN_SUMMARY_CHARS:
-                    # Truncate an over-long summary at a sentence boundary
-                    # instead of discarding it for a short head excerpt.
-                    summary = deterministic_summary(normalized, _MAX_SUMMARY_CHARS)
-            except Exception as exc:
-                logger.warning("Hierarchical macro summary LLM call failed: %s", exc)
-
-            if not summary:
-                summary = deterministic_summary(content)
+            summary = await llm_summary(
+                content,
+                complete_fn,
+                target_lang,
+                context="Hierarchical macro summary LLM call failed",
+            ) or deterministic_summary(content)
 
         snapshot = StepSnapshot(
             step_index=self._step_counter,

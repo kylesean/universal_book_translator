@@ -8,6 +8,7 @@ blocks on summarization.
 """
 
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -91,6 +92,34 @@ def build_summary_prompt(chapter_text: str, target_lang: str) -> tuple[str, str]
     return system_prompt, user_prompt
 
 
+async def llm_summary(
+    content: str,
+    complete: Callable[[str, str], Awaitable[str]],
+    target_lang: str,
+    *,
+    context: str,
+) -> str | None:
+    """The LLM-summary fold shared by the rolling and hierarchical summarizers.
+
+    Prompt -> complete -> strip echo quotes -> normalize whitespace -> accept a
+    summary at or above ``_MIN_SUMMARY_CHARS``, truncated at a sentence
+    boundary (the tail is the part continuation needs, and the bulk call was
+    already paid for). Returns ``None`` when there is nothing usable — call
+    failure, empty echo, or a sub-minimum fragment — so each caller applies its
+    own :func:`deterministic_summary` fallback policy.
+    """
+    try:
+        system_prompt, user_prompt = build_summary_prompt(content, target_lang)
+        raw = await complete(system_prompt, user_prompt)
+        cleaned = (raw or "").strip().strip('"“”').strip()
+        normalized = " ".join(cleaned.split())
+        if len(normalized) >= _MIN_SUMMARY_CHARS:
+            return deterministic_summary(normalized, _MAX_SUMMARY_CHARS)
+    except Exception as exc:
+        logger.warning("%s: %s", context, exc)
+    return None
+
+
 async def summarize_chapter(
     blocks: list[Any],
     complete: Any,  # Callable[[str, str], Awaitable[str]]
@@ -100,17 +129,10 @@ async def summarize_chapter(
     chapter_text = collect_chapter_text(blocks)
     if not chapter_text:
         return ""
-    try:
-        system_prompt, user_prompt = build_summary_prompt(chapter_text, target_lang)
-        raw = await complete(system_prompt, user_prompt)
-        summary = (raw or "").strip().strip('"“”').strip()
-        normalized = " ".join(summary.split())
-        if len(normalized) >= _MIN_SUMMARY_CHARS:
-            # A valid summary longer than the cap is truncated at a sentence
-            # boundary, not discarded for a short head excerpt: the tail is the
-            # part the next chapter's continuity needs, and the bulk call was
-            # already paid for.
-            return deterministic_summary(normalized, _MAX_SUMMARY_CHARS)
-    except Exception as exc:
-        logger.warning("Failed to parse rolling summary: %s", exc)
-    return deterministic_summary(chapter_text)
+    summary = await llm_summary(
+        chapter_text,
+        complete,
+        target_lang,
+        context="Failed to parse rolling summary",
+    )
+    return summary or deterministic_summary(chapter_text)
