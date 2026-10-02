@@ -258,6 +258,72 @@ def main() -> int:
         else:
             print("  pass  EPUBAdapter render (mono + bi)")
 
+        # DOCXAdapter parse and render verification
+        from docx import Document as CheckDocx
+
+        from ubt.adapters.docx.adapter import DOCXAdapter
+        from ubt.model.ast import Table as ASTTable
+
+        docx_adapter = DOCXAdapter()
+
+        async def _test_docx_adapter() -> list[str]:
+            errs: list[str] = []
+            manifest = await docx_adapter.extract_manifest(docx_path)
+            blocks = []
+            async for ch in docx_adapter.parse_stream(docx_path):
+                blocks.extend(ch.blocks)
+            if len(blocks) != 6:
+                errs.append(f"DOCXAdapter expected 6 blocks, got {len(blocks)}")
+            for b in blocks:
+                if not b.skip_translate:
+                    if isinstance(b.element, ASTTable):
+                        b.target_text = "| tr:A | tr:B |\n| --- | --- |\n| tr:1 | tr:2 |"
+                    else:
+                        b.target_text = f"tr:{b.source_text}"
+            out_mono = tmp / "rendered_mono.docx"
+            await docx_adapter.render_blocks(
+                manifest, blocks, "zh", out_mono, bilingual_mode="monolingual"
+            )
+            if not out_mono.exists():
+                errs.append("DOCXAdapter monolingual render output missing")
+            else:
+                doc_mono = CheckDocx(str(out_mono))
+                mono_text = " ".join(p.text for p in doc_mono.paragraphs)
+                if "tr:Chapter One" not in mono_text:
+                    errs.append("DOCXAdapter monolingual render missing target text in paragraphs")
+                table_text = " ".join(
+                    cell.text for row in doc_mono.tables[0].rows for cell in row.cells
+                )
+                if "tr:A" not in table_text:
+                    errs.append("DOCXAdapter monolingual render missing target text in table")
+
+            out_bi = tmp / "rendered_bi.docx"
+            await docx_adapter.render_blocks(
+                manifest, blocks, "zh", out_bi, bilingual_mode="bilingual"
+            )
+            if not out_bi.exists():
+                errs.append("DOCXAdapter bilingual render output missing")
+            else:
+                doc_bi = CheckDocx(str(out_bi))
+                bi_text = " ".join(p.text for p in doc_bi.paragraphs)
+                if "Chapter One" not in bi_text or "tr:Chapter One" not in bi_text:
+                    errs.append("DOCXAdapter bilingual render missing source or target text")
+                bi_table_text = " ".join(
+                    cell.text for row in doc_bi.tables[0].rows for cell in row.cells
+                )
+                if "tr:A" not in bi_table_text:
+                    errs.append("DOCXAdapter bilingual render missing target text in table")
+            return errs
+
+        docx_adapter_errs = asyncio.run(_test_docx_adapter())
+        if docx_adapter_errs:
+            failed += 1
+            print("  FAIL  DOCXAdapter")
+            for err in docx_adapter_errs:
+                print(f"        {err}")
+        else:
+            print("  pass  DOCXAdapter render (mono + bi)")
+
     print(f"\n  readers={len(cases)} failed={failed} -> {'PASS' if not failed else 'FAIL'}")
     return 0 if not failed else 1
 

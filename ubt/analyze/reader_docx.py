@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from docx import Document as DocxDocument
 from docx.document import Document as _DocxDocument
@@ -90,35 +90,46 @@ def _image_assets(paragraph: DocxParagraph, document: _DocxDocument) -> list[str
     return assets
 
 
-def _iter_blocks(document: _DocxDocument) -> Iterator[DocxParagraph | DocxTable]:
-    """Yield paragraphs and tables from the document body, in reading order."""
+def _collect_blocks(container: Any, document: _DocxDocument) -> Iterator[DocxParagraph | DocxTable]:
     from docx.oxml.table import CT_Tbl
     from docx.oxml.text.paragraph import CT_P
 
-    for child in document.element.body.iterchildren():
-        if isinstance(child, CT_P):
+    for child in container.iterchildren():
+        if isinstance(child, CT_P) or child.tag == qn("w:p"):
             yield DocxParagraph(child, document)
-        elif isinstance(child, CT_Tbl):
+        elif isinstance(child, CT_Tbl) or child.tag == qn("w:tbl"):
             yield DocxTable(child, document)
+        elif child.tag == qn("w:sdt"):
+            content = child.find(qn("w:sdtContent"))
+            if content is not None:
+                yield from _collect_blocks(content, document)
 
 
-def read_docx(path: str | Path, *, doc_id: str | None = None) -> Document:
-    """Read a DOCX into a typed :class:`Document` with real spans."""
-    docx_path = Path(path)
-    document = DocxDocument(str(docx_path))
-    out: list[ElementT] = []
+def _iter_blocks(document: _DocxDocument) -> Iterator[DocxParagraph | DocxTable]:
+    """Yield paragraphs and tables from the document body, in reading order."""
+    yield from _collect_blocks(document.element.body, document)
+
+
+def walk_docx_elements(
+    document: _DocxDocument,
+) -> list[tuple[ElementT, DocxParagraph | DocxTable]]:
+    """Emit (Element, docx block) pairs for one DOCX document body, in reading order."""
+    out: list[tuple[ElementT, DocxParagraph | DocxTable]] = []
     for block in _iter_blocks(document):
         if isinstance(block, DocxTable):
             rows = [[_clean(cell.text) for cell in row.cells] for row in block.rows]
             markup = pipe_table(rows)
             if markup:
                 out.append(
-                    Table(
-                        id="",
-                        spine_index=0,
-                        span=Span(),
-                        markup=markup,
-                        confidence=Confidence.VERIFIED,
+                    (
+                        Table(
+                            id="",
+                            spine_index=0,
+                            span=Span(),
+                            markup=markup,
+                            confidence=Confidence.VERIFIED,
+                        ),
+                        block,
                     )
                 )
             continue
@@ -126,31 +137,46 @@ def read_docx(path: str | Path, *, doc_id: str | None = None) -> Document:
         level = _heading_level(block)
         if level is not None and text:
             out.append(
-                Heading(
-                    id="",
-                    spine_index=0,
-                    span=Span(),
-                    text=text,
-                    level=level,
-                    confidence=Confidence.VERIFIED,
+                (
+                    Heading(
+                        id="",
+                        spine_index=0,
+                        span=Span(),
+                        text=text,
+                        level=level,
+                        confidence=Confidence.VERIFIED,
+                    ),
+                    block,
                 )
             )
         elif _is_list_item(block) and text:
-            out.append(ListItem(id="", spine_index=0, span=Span(), text=text, marker="•"))
+            out.append((ListItem(id="", spine_index=0, span=Span(), text=text, marker="•"), block))
         elif text:
-            out.append(Paragraph(id="", spine_index=0, span=Span(), text=text))
+            out.append((Paragraph(id="", spine_index=0, span=Span(), text=text), block))
         for asset_id in _image_assets(block, document):
             out.append(
-                Figure(
-                    id="",
-                    spine_index=0,
-                    span=Span(),
-                    asset_id=asset_id,
-                    confidence=Confidence.VERIFIED,
+                (
+                    Figure(
+                        id="",
+                        spine_index=0,
+                        span=Span(),
+                        asset_id=asset_id,
+                        confidence=Confidence.VERIFIED,
+                    ),
+                    block,
                 )
             )
-    elements = number(out, "docx")
-    return assemble(elements, doc_id=doc_id or file_digest(docx_path), path=str(docx_path))
+    return out
 
 
-__all__ = ["read_docx"]
+def read_docx(path: str | Path, *, doc_id: str | None = None) -> Document:
+    """Read a DOCX into a typed :class:`Document` with real spans."""
+    docx_path = Path(path)
+    document = DocxDocument(str(docx_path))
+    pairs = walk_docx_elements(document)
+    elements = [p[0] for p in pairs]
+    numbered = number(elements, "docx")
+    return assemble(numbered, doc_id=doc_id or file_digest(docx_path), path=str(docx_path))
+
+
+__all__ = ["read_docx", "walk_docx_elements"]
