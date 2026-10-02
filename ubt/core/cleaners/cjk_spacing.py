@@ -19,9 +19,10 @@ from __future__ import annotations
 
 import re
 
+from ubt.core.cjk_ranges import CJK_BMP_CLASS
 from ubt.core.cleaners.inline_math import iter_inline_math
 
-_CJK = r"一-鿿㐀-䶿豈-﫿぀-ヿ가-힯"
+_CJK = CJK_BMP_CLASS
 _CJK_PUNCT = r"，。；：、？！（）》”’】…—「『～·《“‘【〈〔［｛"
 
 # Horizontal whitespace only — never swallow newlines or other vertical

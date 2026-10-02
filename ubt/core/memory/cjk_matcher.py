@@ -2,10 +2,10 @@ import functools
 import re
 from typing import Any
 
-# CJK character range definitions and ``is_cjk_char`` are centralized in
-# ``ubt.core.validators.glossary_enforcer`` to guarantee consistent matching
-# semantics across both the matcher and drift detectors.
-from ubt.core.validators.glossary_enforcer import is_cjk_char as is_cjk_char
+# ``is_cjk_char`` and the canonical CJK ranges are centralized in
+# ``ubt.core.cjk_ranges``; the boundary class below is generated from the same
+# tuples, so the regex and the predicate can never disagree about a block.
+from ubt.core.cjk_ranges import CJK_FULL_CLASS, is_cjk_char
 
 try:
     import ahocorasick  # type: ignore[import-not-found]
@@ -18,8 +18,9 @@ except ImportError:
 # direct scan; small books keep the old loop (identical semantics).
 _AHO_MIN_TERMS = 8
 
-# CJK character ranges (ideographs, kana, hangul) that constitute word boundaries for non-CJK terms:
-_CJK_CHARS_REGEX = r"\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af"
+# CJK ranges (ideographs, kana, hangul) that constitute word boundaries for
+# non-CJK terms, rendered from the canonical tuples in cjk_ranges.
+_CJK_CHARS_REGEX = CJK_FULL_CLASS
 
 
 @functools.lru_cache(maxsize=4096)

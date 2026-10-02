@@ -26,6 +26,13 @@ from collections.abc import Sequence
 from typing import Protocol
 
 from ubt.adapters.pdf.overlay_text import math_span_extents
+from ubt.core.cjk_ranges import (
+    CJK_EXT_A,
+    CJK_PUNCTUATION,
+    CJK_UNIFIED,
+    FULLWIDTH_FORMS,
+    GENERAL_PUNCTUATION,
+)
 from ubt.core.policy.layout_policy import (
     CJK_CLOSE_PUNCT,
     CJK_OPEN_PUNCT,
@@ -73,12 +80,15 @@ class EmWidth:
 
 def _is_cjk(ch: str) -> bool:
     o = ord(ch)
-    return (
-        0x4E00 <= o <= 0x9FFF
-        or 0x3400 <= o <= 0x4DBF
-        or 0x3000 <= o <= 0x303F
-        or 0xFF00 <= o <= 0xFFEF
-        or 0x2000 <= o <= 0x206F
+    return any(
+        lo <= o <= hi
+        for lo, hi in (
+            CJK_UNIFIED,
+            CJK_EXT_A,
+            CJK_PUNCTUATION,
+            FULLWIDTH_FORMS,
+            GENERAL_PUNCTUATION,
+        )
     )
 
 

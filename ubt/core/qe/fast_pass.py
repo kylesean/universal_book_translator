@@ -11,6 +11,7 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
+from ubt.core.cjk_ranges import CJK_SCRIPT_CLASS, HAN_UNIFIED_CLASS
 from ubt.core.cleaners.math_masker import extract_math_spans
 from ubt.core.language_profile import (
     ZH,
@@ -53,7 +54,7 @@ _REPETITION_PATTERN = re.compile(r"(.{4,20}?)\1{3,}")  # Detect 4+ repetitions o
 # sparse numeric tables like repeated "| 0 | 0 |" rows don't trip it).
 _REPETITION_LINE_RUN = 4
 _REPETITION_LINE_MIN_LETTERS = 3
-_LINE_LETTER_RE = re.compile(r"[A-Za-z\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]")
+_LINE_LETTER_RE = re.compile(f"[A-Za-z{CJK_SCRIPT_CLASS}]")
 # URLs survive translation verbatim, so they are stripped before script-density
 # measurement (same rationale as HTML tags). Bare domains without a scheme or
 # www. prefix are left in place: indistinguishable from ordinary latin tokens.
@@ -298,7 +299,7 @@ def _is_exempt_repetition(src_clean: str, tgt_clean: str, m: re.Match[str]) -> b
     # (matching repeat count, anchored at identical boundaries, and covering comparable span).
     for sm in _REPETITION_PATTERN.finditer(src_clean):
         s_unit = sm.group(1)
-        if re.search(r"[\w\u4e00-\u9fff]", s_unit) and not re.match(
+        if re.search(f"[\\w{HAN_UNIFIED_CLASS}]", s_unit) and not re.match(
             r"^\|?[\s\-:|]+\|?$", sm.group(0).strip()
         ):
             src_reps = len(sm.group(0)) // max(1, len(s_unit))
@@ -325,7 +326,7 @@ def _is_exempt_repetition(src_clean: str, tgt_clean: str, m: re.Match[str]) -> b
 # otherwise clear every gate and be released as MTQE_PASSED.
 _ECHO_MIN_LEN = 16
 _ECHO_FORMATTING_ONLY_RE = re.compile(r"^[`#*_\s0-9.|\-:=]+$")
-_ECHO_WORD_RE = re.compile(r"[A-Za-z\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]{4}")
+_ECHO_WORD_RE = re.compile(f"[A-Za-z{CJK_SCRIPT_CLASS}]{{4}}")
 _ECHO_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9'\-]{2,}")
 # Math and inline code are contractually verbatim in any translation, so they
 # carry no translation signal: mask them before counting retained words.
@@ -339,7 +340,7 @@ _NEAR_ECHO_RETENTION = 0.9
 # retention test is only meaningful for a Latin-script target: once the target
 # itself is written in a CJK script, the passage is translated. Mirror the
 # token floor.
-_CJK_SCRIPT_RE = re.compile(r"[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]")
+_CJK_SCRIPT_RE = re.compile(f"[{CJK_SCRIPT_CLASS}]")
 _NEAR_ECHO_CJK_EXEMPT = _NEAR_ECHO_MIN_TOKENS
 # Same exemption for RTL targets: an Arabic/Hebrew passage that carries a few
 # Latin proper nouns across verbatim is translated by definition, exactly as a
@@ -641,7 +642,7 @@ class FastPassFilter:
             for m in _REPETITION_PATTERN.finditer(tgt_clean):
                 repeated_unit = m.group(1)
                 # Ignore pure punctuation/formatting repeats (e.g. markdown table lines |---|---|, dashes, dots)
-                if not re.search(r"[\w\u4e00-\u9fff]", repeated_unit):
+                if not re.search(f"[\\w{HAN_UNIFIED_CLASS}]", repeated_unit):
                     continue
                 matched_text = m.group(0)
                 if re.match(r"^\|?[\s\-:|]+\|?$", matched_text.strip()):

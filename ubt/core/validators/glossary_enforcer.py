@@ -18,7 +18,10 @@ try:
 except ImportError:
     _HAS_AHOCORASICK = False
 
+from ubt.core.cjk_ranges import CJK_RANGES, contains_cjk, is_cjk_char
 from ubt.core.cleaners.inline_math import inline_math_spans
+
+__all__ = ["CJK_RANGES", "contains_cjk", "is_cjk_char"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,28 +33,6 @@ class EnforcementRecord:
     start_pos: int
     end_pos: int
     rule_source: str
-
-
-# Canonical CJK Unicode codepoint ranges, shared across glossary enforcement
-# and CJK matching (ideographs, kana, and hangul).
-CJK_RANGES: tuple[tuple[int, int], ...] = (
-    (0x3400, 0x4DBF),  # CJK Extension A
-    (0x4E00, 0x9FFF),  # CJK Unified Ideographs
-    (0xF900, 0xFAFF),  # CJK Compatibility Ideographs
-    (0x20000, 0x2A6DF),  # CJK Extension B
-    (0x2A700, 0x2B73F),  # CJK Extension C
-    (0x3040, 0x309F),  # Hiragana
-    (0x30A0, 0x30FF),  # Katakana
-    (0xAC00, 0xD7AF),  # Hangul Syllables
-)
-
-
-def is_cjk_char(ch: str) -> bool:
-    """Check whether a character falls in a shared CJK range (ideographs + kana + hangul)."""
-    if not ch:
-        return False
-    code = ord(ch)
-    return any(lo <= code <= hi for lo, hi in CJK_RANGES)
 
 
 def _is_latin_word_char(ch: str) -> bool:

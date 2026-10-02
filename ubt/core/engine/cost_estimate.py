@@ -27,6 +27,12 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from ubt.core.cjk_ranges import (
+    CJK_COMPAT,
+    COST_CJK_WIDE,
+    HAN_ASTRAL_WIDE,
+    HANGUL_SYLLABLES,
+)
 from ubt.core.router.pricing import (
     billing_enabled_for_local_endpoints,
     endpoint_is_local,
@@ -72,11 +78,9 @@ def count_text_tokens(text: str) -> int:
         cp = ord(ch)
         if cp < 128:
             ascii_chars += 1
-        elif (
-            0x3000 <= cp <= 0x9FFF
-            or 0xAC00 <= cp <= 0xD7AF
-            or 0xF900 <= cp <= 0xFAFF
-            or 0x20000 <= cp <= 0x2FA1F
+        elif any(
+            lo <= cp <= hi
+            for lo, hi in (COST_CJK_WIDE, HANGUL_SYLLABLES, CJK_COMPAT, HAN_ASTRAL_WIDE)
         ):
             cjk_chars += 1
         else:

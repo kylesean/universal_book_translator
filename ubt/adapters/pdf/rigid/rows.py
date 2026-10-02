@@ -14,6 +14,7 @@ from __future__ import annotations
 import re
 
 from ubt.adapters.pdf.textgeom import SUPERSCRIPT_DECODE_MAP, LineBox, dehyph
+from ubt.core.cjk_ranges import HAN_UNIFIED_CLASS
 
 # Stopwords never count as content hits: a caption riding three of them
 # must not clear the hit gate against a giant OCR-soup block.
@@ -83,7 +84,7 @@ _CLAIM_STOPWORDS = frozenset(
     ]
 )
 
-_CJK_RE = re.compile("[\u4e00-\u9fff]")
+_CJK_RE = re.compile(f"[{HAN_UNIFIED_CLASS}]")
 _MIN_CLAIM_CHARS = 3
 # Breaker: isolated equation numbers (e.g. "(3.1)"), citation brackets
 # (e.g. "[1]"), or bare numbers must never be reclaimed as narrative

@@ -26,10 +26,11 @@ import re
 import unicodedata
 from typing import Any
 
+from ubt.core.cjk_ranges import HAN_UNIFIED_CLASS
 from ubt.core.cleaners.math_text import skeleton_holds
 from ubt.core.ir.models import BlockStatus, BlockType, IRBlock
 
-_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+_CJK_RE = re.compile(f"[{HAN_UNIFIED_CLASS}]")
 # Bracketed numeric citations ([1], [12-14], [3, 7]) are prose accessories,
 # not math: strip them before analysis so "Research anchors: [1], [6]" stays
 # prose. (Same shape as CitationMasker._CITATION_PATTERN, duplicated to keep

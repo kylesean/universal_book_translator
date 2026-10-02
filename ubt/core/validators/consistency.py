@@ -4,6 +4,7 @@ import re
 from decimal import Decimal
 from typing import Any
 
+from ubt.core.cjk_ranges import HAN_UNIFIED_CLASS
 from ubt.core.language_profile import LanguagePairPolicy, LanguageProfile
 from ubt.core.policy.layout_policy import CN_MEASURE_WORDS
 from ubt.core.validators.base import ContentValidator, ValidationResult
@@ -131,9 +132,9 @@ _CN_MEASURE_RE = "|".join(
 )
 _CN_NUMERAL_CONTEXT_RE = re.compile(
     rf"(?<=第)[{_CN_NUMERAL_CHARS}]+"
-    rf"|(?<![\u4e00-\u9fff])[{_CN_NUMERAL_CHARS}]{{2,}}"
+    rf"|(?<![{HAN_UNIFIED_CLASS}])[{_CN_NUMERAL_CHARS}]{{2,}}"
     rf"|[{_CN_NUMERAL_CHARS}]+(?={_CN_MEASURE_RE})"
-    rf"|[{_CN_NUMERAL_CHARS}]{{2,}}(?![\u4e00-\u9fff])"
+    rf"|[{_CN_NUMERAL_CHARS}]{{2,}}(?![{HAN_UNIFIED_CLASS}])"
 )
 # Century/decade idiom: '20世纪80年代' == '二十世纪八十年代' == EN 'the 1980s'.
 # (century - 1) * 100 + decade, e.g. 20世纪80年代 -> 1980年代. Either side may be

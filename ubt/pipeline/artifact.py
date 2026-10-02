@@ -24,6 +24,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from ubt.core.cjk_ranges import CJK_BMP_CLASS
 from ubt.core.job_options import SidecarKind, companion_path, sidecar_path
 from ubt.model.ast import Document, Element
 from ubt.model.fidelity import Attestation, Fidelity
@@ -39,7 +40,7 @@ _MIN_PROBE = 4
 #: realization without mistaking layout for loss.
 _MIN_OVERLAP = 0.6
 
-_CJK_RANGE = r"\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff\u3040-\u30ff\uac00-\ud7af"
+_CJK_RANGE = CJK_BMP_CLASS
 _TOKEN_RE = re.compile(rf"[{_CJK_RANGE}]|[^\s\W_]+(?:-[^\s\W_]+)*")
 
 

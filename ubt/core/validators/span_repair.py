@@ -12,8 +12,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
+from ubt.core.cjk_ranges import is_cjk_char
 from ubt.core.validators.consistency import canonicalize_numeric_token
-from ubt.core.validators.glossary_enforcer import is_cjk_char
 
 
 def _is_cjk_expansion_blocked(

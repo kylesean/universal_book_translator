@@ -20,6 +20,8 @@ import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from ubt.core.cjk_ranges import HAN_RANGES
+
 
 def _prose_total(text: str) -> int:
     return max(1, len(text.replace(" ", "")))
@@ -28,9 +30,7 @@ def _prose_total(text: str) -> int:
 def cjk_script_ratio(text: str) -> float:
     """Fraction of CJK Unified Ideographs / Extension A among non-space chars."""
     total = _prose_total(text)
-    count = sum(
-        1 for c in text for lo, hi in ((0x3400, 0x4DBF), (0x4E00, 0x9FFF)) if lo <= ord(c) <= hi
-    )
+    count = sum(1 for c in text for lo, hi in HAN_RANGES if lo <= ord(c) <= hi)
     return count / total
 
 

@@ -15,6 +15,7 @@ import re
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
+from ubt.core.cjk_ranges import HAN_SPAN_KANA_HANGUL_CLASS
 from ubt.core.ir.models import BlockType, IRBlock
 from ubt.core.memory.bible import BibleEntry, clean_bible_entry
 
@@ -22,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 _SKELETON_MAX_CHARS = 6000
 _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
-_CJK_CHAR_RE = re.compile(r"[\u3400-\u9fff\u3040-\u30ff\uac00-\ud7af]")
+_CJK_CHAR_RE = re.compile(f"[{HAN_SPAN_KANA_HANGUL_CLASS}]")
 
 
 def _document_text(blocks: Sequence[IRBlock] | Sequence[str]) -> str:

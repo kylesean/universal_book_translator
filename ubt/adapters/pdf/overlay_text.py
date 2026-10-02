@@ -40,6 +40,7 @@ from collections.abc import Callable, Sequence
 
 from ubt.adapters.pdf.textgeom import SUPERSCRIPT_DECODE_MAP
 from ubt.adapters.pdf.typst_symbols import INLINE_SYMBOLS
+from ubt.core.cjk_ranges import HAN_UNIFIED_CLASS, HAN_UNIFIED_RANGES
 from ubt.core.cleaners.cjk_spacing import apply_pangu_spacing, normalize_publishing_cjk
 from ubt.core.cleaners.html_sanitizer import strip_html_mark_tags
 from ubt.core.cleaners.math_masker import MathMasker
@@ -535,25 +536,25 @@ def restore_zone_superscripts(text: str, zone_rows: Sequence[str]) -> str:
     out = text
     # 1. Prefix superscripts (e.g. '¹Peking University' or ' ²DeepSeek-AI' or '¹Data retrieved...')
     prefix_supers = re.findall(
-        r"(?:^|(?<=\s))([⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾˒]+)(?=[A-Za-z\u4e00-\u9fff])", joined_rows
+        rf"(?:^|(?<=\s))([⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾˒]+)(?=[A-Za-z{HAN_UNIFIED_CLASS}])", joined_rows
     )
     for sup_tok in prefix_supers:
         ascii_tok = sup_tok.translate(SUPERSCRIPT_DECODE_MAP)
         if not ascii_tok:
             continue
-        pat = re.compile(rf"(^|(?<=\s)){re.escape(ascii_tok)}\s+(?=[A-Za-z\u4e00-\u9fff])")
+        pat = re.compile(rf"(^|(?<=\s)){re.escape(ascii_tok)}\s+(?=[A-Za-z{HAN_UNIFIED_CLASS}])")
         out = pat.sub(rf"\g<1>{sup_tok}", out, count=1)
 
     # 2. Suffix superscripts (e.g. 'Yifan Shi¹˒²', 'Wei Zhang¹', 'executable code¹', 'extensions.¹')
     suffix_supers = re.findall(
-        r"(?<=[A-Za-z0-9\u4e00-\u9fff.])[ \t]*([⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾˒]+)", joined_rows
+        rf"(?<=[A-Za-z0-9{HAN_UNIFIED_CLASS}.])[ \t]*([⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾˒]+)", joined_rows
     )
     for sup_tok in suffix_supers:
         ascii_tok = sup_tok.translate(SUPERSCRIPT_DECODE_MAP)
         if not ascii_tok:
             continue
         pat = re.compile(
-            rf"(?:(?<=[A-Za-z\u4e00-\u9fff])[ \t]+|(?<=[。．.）)])[ \t]*){re.escape(ascii_tok)}(?=\s|[，,。.;；:：!！?？\u4e00-\u9fff]|$)"
+            rf"(?:(?<=[A-Za-z{HAN_UNIFIED_CLASS}])[ \t]+|(?<=[。．.）)])[ \t]*){re.escape(ascii_tok)}(?=\s|[，,。.;；:：!！?？{HAN_UNIFIED_CLASS}]|$)"
         )
         out = pat.sub(sup_tok, out, count=1)
 
@@ -577,7 +578,10 @@ def _emit_typst_superscripts(escaped_text: str) -> str:
             start > 0
             and escaped_text[start - 1].isspace()
             and end < len(escaped_text)
-            and (escaped_text[end].isalnum() or "\u4e00" <= escaped_text[end] <= "\u9fff")
+            and (
+                escaped_text[end].isalnum()
+                or any(lo <= ord(escaped_text[end]) <= hi for lo, hi in HAN_UNIFIED_RANGES)
+            )
         ):
             return f"#h(1.2em){sup_node}"
         return sup_node

@@ -17,6 +17,7 @@ fails closed into the repair loop instead of shipping silent math loss.
 
 import re
 
+from ubt.core.cjk_ranges import HAN_UNIFIED_CLASS
 from ubt.core.cleaners.math_masker import MathMasker
 
 _GREEK_RE = re.compile(r"[\u0370-\u03ff\u1f00-\u1fff]")
@@ -24,7 +25,7 @@ _MATH_OP_RE = re.compile(
     r"[∀∂∃∅∇∈∋∏∑√∞∧∨∩∪∴∵∼≈≠≡≤≥≪≫⊂⊃⊆⊇⊕⊖⊗⊘⋅∘∙±×÷¬¯°′″¼½¾¹²³∀∃∠⊥∥→←↑↓⇒⇔−│‖⟨⟩⌈⌉⌊⌋]"
 )
 _SUB_SUP_RE = re.compile(r"[₀-₉₍₎₊₋₌₎ⁿ⁰-⁹⁺⁻⁼⁽⁾²³¹]")
-_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+_CJK_RE = re.compile(f"[{HAN_UNIFIED_CLASS}]")
 
 _RUN_CHAR_RE = re.compile(
     r"[A-Za-z0-9\u0370-\u03ff\u1f00-\u1fff_^'{}\[\]()\/|+\-*=<>,.;:!%&?°′″±×÷¬¯²³¹₀-₉₍₎₊₋₌₎ⁿ⁰-⁹⁺⁻⁼⁽⁾∀∂∃∅∇∈∋∏∑√∞∧∨∩∪∴∵∼≈≠≡≤≥≪≫⊂⊃⊆⊇⊕⊖⊗⊘⋅∘∙∠⊥∥→←↑↓⇒⇔−│‖⟨⟩⌈⌉⌊⌋]"

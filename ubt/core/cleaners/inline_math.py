@@ -18,6 +18,8 @@ from __future__ import annotations
 import re
 from collections.abc import Iterator
 
+from ubt.core.cjk_ranges import HAN_KANA_HANGUL_RANGES
+
 #: Inline ``$...$`` whose delimiters do not touch whitespace.
 INLINE_DOLLAR_PATTERN = re.compile(r"\$(?!\s)([^$\n]+?)(?<!\s)\$")
 
@@ -27,14 +29,8 @@ _CURRENCY_PATTERN = re.compile(r"^\d[\d,.]*$")
 _CURRENCY_RANGE_PATTERN = re.compile(r"^\d[\d,.]*\s*[-–—]\s*(?:\$?\d[\d,.]*)?$")
 # Signs the interior is real math: a \command, sub/superscript, or brace.
 _LATEX_SIGNAL_PATTERN = re.compile(r"\\[A-Za-z]+|[_^{}]")
-# CJK Unified Ideographs + kana + hangul ranges
-_CJK_RANGES = (
-    (0x4E00, 0x9FFF),
-    (0x3400, 0x4DBF),
-    (0x3040, 0x309F),
-    (0x30A0, 0x30FF),
-    (0xAC00, 0xD7AF),
-)
+# Han (incl. Extension A) + kana + hangul, from the shared tier table.
+_CJK_RANGES = HAN_KANA_HANGUL_RANGES
 
 
 def _has_bare_cjk(content: str) -> bool:

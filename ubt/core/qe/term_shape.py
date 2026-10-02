@@ -13,6 +13,8 @@ disagreed with the omission gate on the very same text.
 
 import re
 
+from ubt.core.cjk_ranges import CJK_WIDE_CLASS
+
 _CAMEL_HUMP_RE = re.compile(r"[a-z][A-Z]")
 _ALL_CAPS_RE = re.compile(r"^[A-Z0-9_]+$")
 _HAS_DIGIT_RE = re.compile(r"\d")
@@ -26,10 +28,7 @@ _HAS_DIGIT_RE = re.compile(r"\d")
 # omission gate. The adjacency test is scoped to CJK/East-Asian ranges, not
 # "any non-ASCII byte", because accented Latin (Café!Go) is whitespace-delimited
 # and must not split on '!'.
-_CJK_ADJ = (
-    r"[\u3000-\u303f\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff"
-    r"\uf900-\ufaff\uac00-\ud7af\uff00-\uffef]"
-)
+_CJK_ADJ = f"[{CJK_WIDE_CLASS}]"
 _SENT_END_RE = re.compile(
     r"[。！？؟؛۔]"
     r"|[.!?]['\"”’\)\]]*(?=\s|$)"
