@@ -21,6 +21,8 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Protocol
 
+from ubt.core.fs_perms import restrict_dir_to_owner, restrict_file_to_owner
+
 logger = logging.getLogger(__name__)
 
 
@@ -57,11 +59,13 @@ class CacheStore(Protocol):
 
 
 class DiskCacheStore:
-    """One JSON-text file per key, two levels deep under ``root``.
+    """One owner-restricted JSON-text file per key, two levels deep under ``root``.
 
     The two-character shard directory keeps a large cache from putting thousands
     of entries in one directory; the temp-file + rename write makes a concurrent
-    reader see either the old value or the new one, never a partial file.
+    reader see either the old value or the new one, never a partial file. Cache
+    values are derived from (possibly sensitive) book text, so the shard
+    directory and every file are limited to their owner.
     """
 
     def __init__(self, root: str | Path) -> None:
@@ -79,9 +83,10 @@ class DiskCacheStore:
     def put(self, key: str, value: str) -> None:
         path = self._path(key)
         try:
-            path.parent.mkdir(parents=True, exist_ok=True)
+            restrict_dir_to_owner(path.parent)
             tmp = path.parent / f"{path.name}.tmp"
             tmp.write_text(value, encoding="utf-8")
+            restrict_file_to_owner(tmp)
             tmp.replace(path)
         except OSError as exc:
             logger.debug("cache write failed for %s: %s", key, exc)

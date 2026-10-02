@@ -15,7 +15,6 @@ text layer, pikepdf for content-stream operator counts. No PyMuPDF.
 from __future__ import annotations
 
 import contextlib
-import hashlib
 import json
 import logging
 from collections.abc import Sequence
@@ -26,7 +25,7 @@ from typing import Any
 
 from ubt.adapters.pdf import pdf_struct
 from ubt.adapters.pdf.pdfium_gate import pdfium_serialized
-from ubt.core.fs_perms import restrict_dir_to_owner, restrict_file_to_owner
+from ubt.cache.store import DiskCacheStore, step_key
 from ubt.core.policy.layout_policy import (
     PDF_PATH_OPS,
     PDF_TEXT_OPS,
@@ -352,22 +351,21 @@ def collect_page_facts(pdf_path: Path) -> list[PageFacts]:
 
 
 # Bump when ``PageFacts`` fields or ``classify_page`` thresholds change. The
-# cache key must cover the profiler *logic*, not just the PDF bytes: an
-# mtime-only key silently reused profiles from older rules for any PDF that had
-# not been edited (see ``_cache_key``).
-_PROFILE_CACHE_VERSION = 2
+# The key must cover the profiler *logic*, not just the PDF bytes: an
+# mtime-only key silently reused profiles from older rules for any PDF that
+# had not been edited. Bumped to 3 for the DiskCacheStore migration (its sharded
+# layout never reads the old flat files, so the bump only documents it).
+_PROFILE_CACHE_VERSION = 3
 
 
 def _cache_key(pdf_path: Path) -> str:
-    h = hashlib.sha256()
-    h.update(f"v{_PROFILE_CACHE_VERSION}".encode())
-    h.update(str(pdf_path.resolve()).encode())
+    inputs = [str(pdf_path.resolve())]
     try:
         st = pdf_path.stat()
-        h.update(f"{st.st_size}:{st.st_mtime_ns}".encode())
+        inputs.append(f"{st.st_size}:{st.st_mtime_ns}")
     except OSError:
         pass
-    return h.hexdigest()[:32]
+    return step_key("pdf_page_profile", inputs, {"version": _PROFILE_CACHE_VERSION})
 
 
 def profile_pdf(pdf_path: Path, cache_dir: Path | None = None) -> list[PageProfile]:
@@ -380,29 +378,23 @@ def profile_pdf(pdf_path: Path, cache_dir: Path | None = None) -> list[PageProfi
     PDF still re-profiles via size/mtime).
     """
     pdf_path = Path(pdf_path)
-    cache_file: Path | None = None
+    store: DiskCacheStore | None = None
     if cache_dir is not None:
-        cache_file = Path(cache_dir) / f"{_cache_key(pdf_path)}.json"
-        if cache_file.exists():
+        store = DiskCacheStore(cache_dir)
+        raw = store.get(_cache_key(pdf_path))
+        if raw is not None:
             try:
-                raw = json.loads(cache_file.read_text(encoding="utf-8"))
                 return [
                     PageProfile(facts=PageFacts(**item["facts"]), kind=PageKind(item["kind"]))
-                    for item in raw
+                    for item in json.loads(raw)
                 ]
             except (ValueError, KeyError, TypeError) as exc:
-                logger.debug("profiler: ignoring corrupt cache %s: %s", cache_file, exc)
+                logger.debug("profiler: ignoring corrupt profile cache: %s", exc)
     profiles = [PageProfile(facts=f, kind=classify_page(f)) for f in collect_page_facts(pdf_path)]
     # An empty profile means the probe failed (pdfium could not open the
     # document); caching it would serve one transient failure as the PDF's
     # permanent profile — the key covers only path/size/mtime.
-    if cache_file is not None and profiles:
-        try:
-            cache_file.parent.mkdir(parents=True, exist_ok=True)
-            restrict_dir_to_owner(cache_file.parent)
-            payload = [{"facts": asdict(p.facts), "kind": p.kind.value} for p in profiles]
-            cache_file.write_text(json.dumps(payload), encoding="utf-8")
-            restrict_file_to_owner(cache_file)
-        except OSError as exc:
-            logger.debug("profiler: cannot write cache %s: %s", cache_file, exc)
+    if store is not None and profiles:
+        payload = [{"facts": asdict(p.facts), "kind": p.kind.value} for p in profiles]
+        store.put(_cache_key(pdf_path), json.dumps(payload))
     return profiles
