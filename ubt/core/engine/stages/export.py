@@ -853,6 +853,7 @@ def _attest_delivery(
     resolved by the caller *before* the render, so the plan exists before the
     renderer reads it.
     """
+    # Lazy: a module-level ubt.pipeline edge recreates the core.engine <-> pipeline cycle.
     from ubt.layout.theme import resolve_theme
     from ubt.pipeline.attest import attest_document
     from ubt.pipeline.delivery import delivery_document, delivery_translations
@@ -905,6 +906,8 @@ def _deliver_contract(
     delivered artifact or a finished job's ledger.
     """
     from ubt.core.content import graph_from_blocks
+
+    # Lazy: a module-level ubt.pipeline edge recreates the core.engine <-> pipeline cycle.
     from ubt.pipeline.attest import project_contract
 
     manifest = ctx.manifest
@@ -959,6 +962,9 @@ def _write_xliff_companion(
         return None
     try:
         from ubt.core.job_options import companion_path
+
+        # Lazy: the compiler packages depend on core; a module-level edge would
+        # reverse the layering.
         from ubt.segment.document import segments_from_blocks
         from ubt.segment.placeholders import default_placeholder_engine
         from ubt.segment.xliff import to_xliff
@@ -1094,6 +1100,8 @@ def _write_attestation_shadow(
         return None
     try:
         from ubt.core.job_options import companion_path
+
+        # Lazy: a module-level ubt.pipeline edge recreates the core.engine <-> pipeline cycle.
         from ubt.pipeline.artifact import check_artifact
 
         payload = _attestation_payload(report)
@@ -1354,6 +1362,7 @@ async def run_export_stage(
     document, translations, attestations = await asyncio.to_thread(
         _attest_delivery, ctx, services, final_blocks, render_engine
     )
+    # Lazy: a module-level ubt.pipeline edge recreates the core.engine <-> pipeline cycle.
     from ubt.pipeline.decisions import plan_fidelities
 
     realization_plan = plan_fidelities(attestations)
@@ -1457,6 +1466,7 @@ async def run_export_stage(
     # render-mode override plumbing.
     # The two artifact identities (requested target vs returned file, which the
     # visual gate may have rewritten) named once, where the render returns.
+    # Lazy: a module-level ubt.pipeline edge recreates the core.engine <-> pipeline cycle.
     from ubt.pipeline.artifact import delivered_artifact
 
     artifact = delivered_artifact(rendered_path, target_output)

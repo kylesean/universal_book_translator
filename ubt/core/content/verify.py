@@ -63,6 +63,9 @@ def contract_from_ledger(
     """
     from ubt.core.qe.fast_pass import FastPassFilter
     from ubt.layout.theme import resolve_theme
+
+    # Lazy: ubt.pipeline.attest imports ubt.core.content, so a module-level
+    # import here would be a circular import.
     from ubt.pipeline.attest import attest_document, project_contract
     from ubt.pipeline.delivery import delivery_document, delivery_translations
     from ubt.render.typst_backend import TypstBackend
