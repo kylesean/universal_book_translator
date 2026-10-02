@@ -2,7 +2,7 @@
 
 ``IRBlock`` is the pipeline's mutable working record. Its *structure* is the
 typed :class:`~ubt.model.ast.Element` it carries (ADR R3: one attribute, one
-origin); everything structural -- ``block_type``, ``flow_id``, ``layout_role``,
+origin); everything structural -- ``block_type``, ``flow_id``, ``region``,
 ``source_text``, ``bbox``, ``spine_index`` -- is derived from that element, so
 the two can no longer disagree. What is left on the block is execution state
 (status, translation, scores) plus the adapter's typography.
@@ -92,18 +92,6 @@ TERMINAL_STATUSES: frozenset[BlockStatus] = frozenset(
 MQM_SEVERITY_LEVELS: tuple[str, ...] = ("critical", "major", "minor")
 
 
-class StructureRole(StrEnum):
-    """Structural role of a block (document.v1 ``structure_role`` layer)."""
-
-    PARAGRAPH = "paragraph"
-    HEADING = "heading"
-    LIST_ITEM = "list_item"
-    TABLE = "table"
-    FIGURE = "figure"
-    FORMULA = "formula"
-    CODE = "code"
-
-
 class BoundingBox(BaseModel):
     """Bounding box for fixed layout formats (e.g. PDF)."""
 
@@ -190,7 +178,7 @@ def _replace_element(element: ElementT, **changes: Any) -> ElementT:
     return dataclasses.replace(element, **changes)
 
 
-def _layout_role_from_flow(flow_id: FlowID) -> RegionKind:
+def _region_from_flow(flow_id: FlowID) -> RegionKind:
     if flow_id == FlowID.CAPTION:
         return RegionKind.CAPTION
     if flow_id == FlowID.FOOTNOTE:
@@ -238,7 +226,7 @@ def make_element(
         "span": _span_of(bbox, chars),
         "confidence": confidence,
         "flow": _FLOW_TO_KIND.get(flow_id, FlowKind.MAIN),
-        "region": region if region is not None else _layout_role_from_flow(flow_id),
+        "region": region if region is not None else _region_from_flow(flow_id),
         "skip_translate": skip_translate,
     }
     if block_type is BlockType.HEADING:
@@ -267,7 +255,7 @@ class IRBlock(BaseModel):
     ``element`` is the block's structure (ADR R3 single source); the remaining
     fields are execution state and the adapter's typography. Structural reads
     go through the properties below, so a caller cannot set ``block_type`` or
-    ``layout_role`` to a value disagreeing with the element.
+    ``region`` to a value disagreeing with the element.
     """
 
     model_config = ConfigDict(extra="ignore", arbitrary_types_allowed=True)
@@ -324,10 +312,6 @@ class IRBlock(BaseModel):
         return self.element.region
 
     @property
-    def layout_role(self) -> RegionKind:
-        return self.element.region
-
-    @property
     def source_text(self) -> str:
         return _element_source(self.element)
 
@@ -343,11 +327,6 @@ class IRBlock(BaseModel):
     def skip_translate(self, value: bool) -> None:
         if self.element.skip_translate != value:
             self.element = _replace_element(self.element, skip_translate=value)
-
-    @property
-    def structure_role(self) -> StructureRole:
-        """Structural role, derived from the element type."""
-        return _structure_role_from_block_type(self.block_type)
 
     @property
     def is_finalized(self) -> bool:
@@ -393,20 +372,6 @@ class IRBlock(BaseModel):
         if self.policy_translate is False and not (self.policy_reason or "").strip():
             violations.append(f"block {self.id}: policy_translate=False requires policy_reason")
         return violations
-
-
-def _structure_role_from_block_type(block_type: BlockType) -> StructureRole:
-    mapping = {
-        BlockType.NARRATIVE: StructureRole.PARAGRAPH,
-        BlockType.DIALOGUE: StructureRole.PARAGRAPH,
-        BlockType.HEADING: StructureRole.HEADING,
-        BlockType.CODE: StructureRole.CODE,
-        BlockType.FORMULA: StructureRole.FORMULA,
-        BlockType.IMAGE: StructureRole.FIGURE,
-        BlockType.TABLE: StructureRole.TABLE,
-        BlockType.LIST_ITEM: StructureRole.LIST_ITEM,
-    }
-    return mapping[block_type]
 
 
 class ChapterMeta(BaseModel):

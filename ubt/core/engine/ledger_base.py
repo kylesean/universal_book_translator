@@ -95,7 +95,7 @@ def _upsert_blocks_batch(cursor: sqlite3.Cursor, job_id: str, blocks: Sequence[I
             b.mtqe_score,
             b.repair_rounds,
             json.dumps(b.error_flags, ensure_ascii=False),
-            b.layout_role.value if b.layout_role else None,
+            b.region.value if b.region else None,
             (1 if b.policy_translate else 0) if b.policy_translate is not None else None,
             b.policy_reason,
             json.dumps(b.provenance, ensure_ascii=False),

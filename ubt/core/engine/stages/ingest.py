@@ -368,7 +368,7 @@ async def run_ingest_stage(
                 # Chrome opt-in: the adapter marks running heads and footers
                 # skip-at-parse; with the flag on they get a real translation
                 # (page numbers never do) and the rigid gate paints them.
-                if translate_chrome and b.layout_role in (
+                if translate_chrome and b.region in (
                     RegionKind.HEADER,
                     RegionKind.FOOTER,
                 ):

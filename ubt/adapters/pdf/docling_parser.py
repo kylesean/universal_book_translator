@@ -848,7 +848,7 @@ def map_iterated_items(
                 )
             continue
 
-        layout_role = None
+        region = None
         if label == DocItemLabel.PAGE_HEADER:
             text = (getattr(item, "text", "") or "").strip()
             if not text or header_counts.get(chrome_key(text), 0) > 3:
@@ -857,13 +857,13 @@ def map_iterated_items(
             # never enter translation: backfilling them garbles the
             # strip while the source remains perfectly legible.
             block_type, flow_id, skip = BlockType.HEADING, FlowID.MAIN_STORY, True
-            layout_role = RegionKind.HEADER
+            region = RegionKind.HEADER
         elif label == DocItemLabel.PAGE_FOOTER:
             text = (getattr(item, "text", "") or "").strip()
             if not text or footer_counts.get(chrome_key(text), 0) > 3 or text.isdigit():
                 continue
             block_type, flow_id, skip = BlockType.NARRATIVE, FlowID.FOOTNOTE, True
-            layout_role = RegionKind.FOOTER
+            region = RegionKind.FOOTER
         elif label == DocItemLabel.TABLE:
             text = table_to_markdown(item, doc)
             block_type, flow_id, skip = BlockType.TABLE, FlowID.TABLE_GRID, False
@@ -987,7 +987,7 @@ def map_iterated_items(
                     source_text=text,
                     bbox=item_bbox,
                     skip_translate=skip,
-                    region=layout_role,
+                    region=region,
                 ),
                 provenance=block_provenance,
             )

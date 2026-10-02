@@ -92,10 +92,10 @@ def judge_block(block: IRBlock, *, translate_chrome: bool = False) -> Verdict:
     # Rule 4: non-text block types / adapter-marked skips keep origin.
     if block.skip_translate or block.block_type in NON_TEXT_BLOCK_TYPES:
         return Verdict(False, "verdict:non_text")
-    # Rule 5: chrome layout roles never enter translation (page numbers
+    # Rule 5: chrome regions never enter translation (page numbers
     # never do, even under the chrome opt-in).
-    if block.layout_role in {RegionKind.HEADER, RegionKind.FOOTER, RegionKind.PAGE_NUMBER} and (
-        not translate_chrome or block.layout_role is RegionKind.PAGE_NUMBER
+    if block.region in {RegionKind.HEADER, RegionKind.FOOTER, RegionKind.PAGE_NUMBER} and (
+        not translate_chrome or block.region is RegionKind.PAGE_NUMBER
     ):
         return Verdict(False, "verdict:chrome")
     # Rule 6: identifier-only blocks (bare URL / DOI / ISBN).

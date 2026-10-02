@@ -267,7 +267,7 @@ _RIGID_REGION_FLOORS: dict[str, float] = {
 }
 
 
-def rigid_min_font_pt_for(layout_role: object, *, default: float = RIGID_MIN_FONT_PT) -> float:
+def rigid_min_font_pt_for(region: object, *, default: float = RIGID_MIN_FONT_PT) -> float:
     """Font floor for a block's region.
 
     Body/title/header regions use the body floor; captions and footnotes — the
@@ -275,7 +275,7 @@ def rigid_min_font_pt_for(layout_role: object, *, default: float = RIGID_MIN_FON
     cannot fit its region floor is dropped to source-visible, so a lower floor
     there only ever adds delivered text.
     """
-    return _RIGID_REGION_FLOORS.get(str(getattr(layout_role, "value", layout_role)), default)
+    return _RIGID_REGION_FLOORS.get(str(getattr(region, "value", region)), default)
 
 
 # Complex-page nets: row-fragment glue. Thresholds measured on chapter-1

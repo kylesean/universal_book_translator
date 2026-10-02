@@ -50,19 +50,19 @@ def skip_reason(
     if block.bbox is None:
         return "no_bbox"
     src = (block.source_text or "").strip()
-    if block.layout_role is RegionKind.PAGE_NUMBER:
+    if block.region is RegionKind.PAGE_NUMBER:
         return "chrome"
     # A band block whose text carries no letters is a page number in all but
     # name ("78" roled HEADER): never paintable, even under the opt-in.
     painting_chrome = (
-        translate_chrome and block.layout_role in _CHROME_ROLES and any(c.isalpha() for c in src)
+        translate_chrome and block.region in _CHROME_ROLES and any(c.isalpha() for c in src)
     )
-    if block.layout_role in _CHROME_ROLES and not painting_chrome:
+    if block.region in _CHROME_ROLES and not painting_chrome:
         return "chrome"
     if painting_chrome and (block.skip_translate or block.policy_translate is False):
         # Frozen ledgers and explicit keeps still hold their source.
         return "policy"
-    if block.layout_role != RegionKind.TITLE:
+    if block.region != RegionKind.TITLE:
         if block.skip_translate or block.policy_translate is False:
             return "policy"
     elif block.skip_translate:
@@ -72,7 +72,7 @@ def skip_reason(
         return "caption"
     if FOOTER_PATTERNS.search(src):
         return "footer"
-    if block.layout_role != RegionKind.TITLE and not painting_chrome:
+    if block.region != RegionKind.TITLE and not painting_chrome:
         if y1 > page_h - HEADER_BAND_PT and len(src) < BAND_TEXT_MAX_LEN:
             return "header_band"
         if y0 < FOOTER_BAND_PT and len(src) < BAND_TEXT_MAX_LEN:

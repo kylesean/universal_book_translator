@@ -149,7 +149,7 @@ def annotate_blocks(blocks: Sequence[IRBlock], verdicts: list[PageVerdict]) -> l
         return []
     flagged: list[IRBlock] = []
     for block in blocks:
-        if block.layout_role in (RegionKind.HEADER, RegionKind.FOOTER, RegionKind.PAGE_NUMBER):
+        if block.region in (RegionKind.HEADER, RegionKind.FOOTER, RegionKind.PAGE_NUMBER):
             continue
         page = block.bbox.page if block.bbox is not None else None
         if page in dirty:

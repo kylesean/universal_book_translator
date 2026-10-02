@@ -2134,7 +2134,7 @@ class TypstReconstructor:
         if not content:
             return
 
-        if block.layout_role in (
+        if block.region in (
             RegionKind.FOOTER,
             RegionKind.HEADER,
             RegionKind.PAGE_NUMBER,
@@ -2428,10 +2428,7 @@ class TypstReconstructor:
                     escaped_content = _attach_footnote_to_prose(
                         escaped_content, marker_num, fn_callout
                     )
-            if (
-                block.flow_id == FlowID.CAPTION
-                or getattr(block, "layout_role", None) == RegionKind.CAPTION
-            ):
+            if block.flow_id == FlowID.CAPTION or block.region == RegionKind.CAPTION:
                 # Standardized caption styling across layouts.
                 lines.append(
                     f'#align(center)[#text(size: {profile.caption_size}, fill: {profile.caption_fill}, style: "italic")[{escaped_content}]]'

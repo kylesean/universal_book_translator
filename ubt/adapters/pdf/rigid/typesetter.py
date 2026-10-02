@@ -323,7 +323,7 @@ def _with_list_marker(block: IRBlock, text: str, zone_rows: tuple[str, ...] = ()
     """Restore dropped list bullets/numbers and format leading footnote markers as superscripts."""
     if not text:
         return text
-    if block.flow_id == FlowID.FOOTNOTE or block.layout_role == RegionKind.FOOTNOTE:
+    if block.flow_id == FlowID.FOOTNOTE or block.region == RegionKind.FOOTNOTE:
         src_m = _FOOTNOTE_NUM_RE.match((block.source_text or "").strip())
         if src_m:
             fn_num = src_m.group(1)
@@ -638,7 +638,7 @@ class RigidTypesetter:
                 # translation over it.
                 report.skipped.append((block.id, "plan:preserved"))
                 continue
-            floor = rigid_min_font_pt_for(block.layout_role, default=self.min_font_pt)
+            floor = rigid_min_font_pt_for(block.region, default=self.min_font_pt)
             text = prepare_overlay_text(
                 (block.target_text or "").strip(), target_lang=self.target_lang
             )

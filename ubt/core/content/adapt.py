@@ -108,7 +108,7 @@ def _text_node(block: IRBlock, order: int, region: SourceRegion | None) -> TextN
         source_region=region,
         block_type=str(block.block_type),
         flow_id=str(block.flow_id),
-        layout_role=str(block.layout_role) if block.layout_role else "",
+        region=str(block.region) if block.region else "",
     )
 
 

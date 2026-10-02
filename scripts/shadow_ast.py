@@ -7,7 +7,7 @@ the document-defining fields are identical. This is the ADR's Phase-1 gate: the
 new model captures the real documents, not a toy.
 
 Compared (document structure): id, spine_index, block_type, flow_id,
-layout_role, semantic_role, structure_role, source_text, skip_translate, bbox.
+region, source_text, skip_translate, bbox.
 Not compared (execution state the AST deliberately does not model): status,
 target_text, scores, flags, provenance.
 
@@ -23,7 +23,7 @@ from collections import Counter
 from pathlib import Path
 
 from ubt.analyze.bridge import blocks_from_document, document_from_blocks
-from ubt.core.ir.models import FlowID, IRBlock, StructureRole
+from ubt.core.ir.models import FlowID, IRBlock
 from ubt.core.qe.fast_pass import FastPassFilter
 from ubt.model.ast import Document, RegionKind
 from ubt.verify import build_verifiers, verify_element
@@ -43,9 +43,9 @@ def _parse_blocks(document: Path, engine: str) -> list[IRBlock]:
     return asyncio.run(collect())
 
 
-def _norm_layout(block: IRBlock) -> str:
-    if block.layout_role is not None:
-        return block.layout_role.value
+def _norm_region(block: IRBlock) -> str:
+    if block.region is not None:
+        return block.region.value
     if block.flow_id is FlowID.CAPTION:
         return RegionKind.CAPTION.value
     if block.flow_id is FlowID.FOOTNOTE:
@@ -58,8 +58,7 @@ def _projection(block: IRBlock) -> dict[str, object]:
         "spine_index": block.spine_index,
         "block_type": block.block_type.value,
         "flow_id": block.flow_id.value,
-        "layout_role": _norm_layout(block),
-        "structure_role": (block.structure_role or StructureRole.PARAGRAPH).value,
+        "region": _norm_region(block),
         "source_text": block.source_text or "",
         "skip_translate": block.skip_translate,
         "bbox": None

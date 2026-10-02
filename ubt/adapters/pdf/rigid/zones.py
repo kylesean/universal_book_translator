@@ -159,7 +159,7 @@ def _clamp_window(
     allow_chrome_bands: bool,
 ) -> tuple[float, float]:
     """Clamp a zone's y-span to the block's allowed page band."""
-    if allow_chrome_bands and block.layout_role in (RegionKind.HEADER, RegionKind.FOOTER):
+    if allow_chrome_bands and block.region in (RegionKind.HEADER, RegionKind.FOOTER):
         window = (CHROME_MARGIN_PT, facts.height - CHROME_MARGIN_PT)
     else:
         window = content_window(facts)
@@ -325,7 +325,7 @@ def _resolve_horizontal_span_and_align(
         and (
             len(best) == 1
             or block.block_type == BlockType.HEADING
-            or block.layout_role == RegionKind.FOOTNOTE
+            or block.region == RegionKind.FOOTNOTE
         )
     ):
         return x0, right_limit, "left"

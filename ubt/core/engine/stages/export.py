@@ -27,7 +27,6 @@ from ubt.core.engine.stage_context import StageContext
 from ubt.core.exceptions import (
     IntegrityViolationError,
     JobInterruptedError,
-    RenderBlocksNotImplementedError,
     UBTError,
 )
 from ubt.core.ir.models import BlockStatus, BookManifest, IRBlock
@@ -78,11 +77,7 @@ async def _render_adapter_output(
     render_plan: RenderPlan | None = None,
     realization_plan: Mapping[str, Any] | None = None,
 ) -> Path:
-    """Render via ``render_blocks`` with fallback to ``render_output``.
-
-    Standard adapters implement ``render_blocks(manifest, blocks, ...)``;
-    external or third-party adapters implementing ``render_output(manifest, ledger, ...)``
-    are invoked through the fallback branch.
+    """Render via ``render_blocks``.
 
     ``render_plan`` is the render decision the advisories made (ADR-0001
     renderer handshake); ``bilingual_mode``/``render_engine`` are read from it
@@ -93,49 +88,24 @@ async def _render_adapter_output(
     if render_engine is None and render_plan is not None:
         render_engine = render_plan.render_engine
 
-    try:
-        if is_pdf_engine_adapter(adapter):
-            pdf_adapter = cast(Any, adapter)
-            res = await pdf_adapter.render_blocks(
-                manifest=manifest,
-                blocks=blocks,
-                target_lang=target_lang,
-                output_path=output_path,
-                bilingual_mode=bilingual_mode,
-                render_engine=render_engine,
-                render_plan=render_plan,
-                realization_plan=realization_plan,
-            )
-            return cast(Path, res)
-        return await adapter.render_blocks(
+    if is_pdf_engine_adapter(adapter):
+        pdf_adapter = cast(Any, adapter)
+        res = await pdf_adapter.render_blocks(
             manifest=manifest,
             blocks=blocks,
             target_lang=target_lang,
             output_path=output_path,
             bilingual_mode=bilingual_mode,
-        )
-    except RenderBlocksNotImplementedError:
-        pass
-    # Fallback path for adapters implementing render_output(manifest, ledger, ...).
-    if is_pdf_engine_adapter(adapter):
-        pdf_adapter = cast(Any, adapter)
-        res = await pdf_adapter.render_output(
-            manifest=manifest,
-            ledger=ledger,
-            target_lang=target_lang,
-            output_path=output_path,
-            job_id=job_id,
-            bilingual_mode=bilingual_mode,
             render_engine=render_engine,
             render_plan=render_plan,
+            realization_plan=realization_plan,
         )
         return cast(Path, res)
-    return await adapter.render_output(
+    return await adapter.render_blocks(
         manifest=manifest,
-        ledger=ledger,
+        blocks=blocks,
         target_lang=target_lang,
         output_path=output_path,
-        job_id=job_id,
         bilingual_mode=bilingual_mode,
     )
 

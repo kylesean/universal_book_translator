@@ -116,7 +116,7 @@ class TextNode(BaseModel):
     # Provenance back to the IR block, so a violation can name the origin.
     block_type: str = ""
     flow_id: str = ""
-    layout_role: str = ""
+    region: str = ""
 
 
 class AssetDescriptor(BaseModel):
