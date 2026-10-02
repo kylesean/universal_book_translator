@@ -46,7 +46,7 @@ from ubt.core.ir.models import (
     IRBlock,
 )
 from ubt.core.ir.serializer import compute_file_sha256_cached
-from ubt.model.ast import ListItem, Table
+from ubt.model.ast import ListItem, Table, TextElement
 
 logger = logging.getLogger(__name__)
 
@@ -359,7 +359,7 @@ def _parse_chapter_blocks(
     chapter_blocks: list[IRBlock] = []
 
     for elem, (_orig_elem, dom_node) in zip(numbered, pairs, strict=True):
-        text = elem.text if elem.is_text else ""
+        text = elem.text if isinstance(elem, TextElement) else ""
         if not text and not elem.is_asset:
             continue
         if (is_page_slice or fp.footer_disclaimers) and text:

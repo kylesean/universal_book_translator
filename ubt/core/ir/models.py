@@ -320,6 +320,10 @@ class IRBlock(BaseModel):
         return _KIND_TO_FLOW.get(self.element.flow, FlowID.MAIN_STORY)
 
     @property
+    def region(self) -> RegionKind:
+        return self.element.region
+
+    @property
     def layout_role(self) -> RegionKind:
         return self.element.region
 
