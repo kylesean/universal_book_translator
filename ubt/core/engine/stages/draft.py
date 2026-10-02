@@ -1,5 +1,7 @@
 """Streaming draft translation with keyset pagination."""
 
+from __future__ import annotations
+
 import asyncio
 import functools
 import json
@@ -7,8 +9,9 @@ import logging
 import random
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from ubt.core import ports
 from ubt.core.config import UBTConfig
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.ledger import SQLiteJobLedger
@@ -41,8 +44,9 @@ from ubt.core.router.router import (
 from ubt.core.validators.consistency import GlossaryConsistencyValidator
 from ubt.pipeline.facts import Terminology
 from ubt.pipeline.services import RunServices
-from ubt.segment.placeholders import MaskedSource, default_placeholder_engine
-from ubt.translate.engine import TranslationEngine
+
+if TYPE_CHECKING:
+    from ubt.translate.engine import TranslationEngine
 
 logger = logging.getLogger(__name__)
 
@@ -473,7 +477,7 @@ class _DraftProcessor:
         # Restore in reverse mask order (citation -> soup -> math -> code) and
         # judge: the engine owns that order and verifies every namespace with
         # the same checksummed contract (translation unit segmentation layer).
-        masked = MaskedSource(
+        masked = ports.masked_source(
             text=inputs.masked_source,
             code_map=inputs.code_map,
             math_map=inputs.math_map,
@@ -1284,8 +1288,8 @@ async def run_draft_stage(
     # router/batch/retry orchestration below stays in this stage. The cache is
     # keyed on the exact prompt, so the production path and the standalone path
     # share one content-addressed translate step (content-addressed cache layer).
-    translation_engine = TranslationEngine(
-        placeholders=default_placeholder_engine(),
+    translation_engine = ports.translation_engine(
+        placeholders=ports.placeholder_engine(),
         model=router.draft_model,
         prompt_version=PROMPT_VERSION,
         cache=draft_cache,

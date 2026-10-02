@@ -10,18 +10,19 @@ from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.ir.models import BlockStatus, BlockType, BookManifest
+from ubt.core.ports import placeholder_engine
 from ubt.core.qe.defect_taxonomy import INTENTIONAL_PRESERVED_SKIP_PREFIXES
 
 # The QE-scored population policy (placeholder/skip exclusion) lives in
 # ubt.core.qe.score_policy, which both this report and the ledger's job stats
 # import so their averages cannot drift apart again.
 from ubt.core.qe.score_policy import qe_scored_values
-from ubt.segment.placeholders import default_placeholder_engine
 
 # The placeholder mask order has exactly one owner (``PlaceholderEngine``); the
 # report re-masks through it rather than restating the order, so a change to the
-# order cannot leave the report measuring a pipeline that no longer exists.
-_PLACEHOLDER_ENGINE = default_placeholder_engine()
+# order cannot leave the report measuring a pipeline that no longer exists. The
+# engine is named in ``ubt.segment``, so core reaches it only through the port.
+_PLACEHOLDER_ENGINE = placeholder_engine()
 
 #: Bump when QualityReport's serialized shape changes so downstream consumers
 #: can validate schema compatibility.

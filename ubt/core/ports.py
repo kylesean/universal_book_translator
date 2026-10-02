@@ -1,15 +1,18 @@
 """Dependency-inversion ports for the core domain.
 
-``ubt.core`` must never import ``ubt.adapters`` at module scope: adapters
-already depend on core (IR models, exceptions), so the reverse edge is a
-package-level cycle that also drags adapter-weight dependencies (docling,
-typst tooling) into the core import graph.
+``ubt.core`` must never import a package that depends back on it at module
+scope. Two families matter: the adapters (``ubt.adapters`` -- they already
+depend on core's IR models and exceptions, so the reverse edge is a
+package-level cycle that also drags adapter-weight dependencies such as
+docling and typst tooling into the core import graph) and the compiler
+packages (``ubt.pipeline`` / ``ubt.segment`` / ``ubt.translate`` -- a
+module-level edge from core closes the ``core.engine <-> pipeline`` cycle).
 
 This module is the single sanctioned bridge. Implementations resolve through
 function-level lazy imports (no module-level edge); the one remaining ``set_*``
 hook exists because its target is exercised with a fake in tests
 (``set_visual_gate_runner``, reset by ``reset_ports``). This file is the only
-place in ``ubt/core/`` allowed to name a ``ubt.adapters`` module at runtime --
+place in ``ubt/core/`` allowed to name an external module at runtime --
 inside a function body, or under ``TYPE_CHECKING`` (type-only imports never
 enter the runtime import graph).
 
@@ -503,3 +506,58 @@ async def interleave_bilingual_pdf(
         facing_spread=facing_spread,
     )
     return str(result.output_path)
+
+
+# --------------------------------------------------------------------------- #
+# Translation-unit layer bridges (``ubt.segment`` / ``ubt.translate``).
+#
+# The mask order, its exact reverse, and the per-unit judgement live in the
+# compiler. ``ubt/core`` names them only here, inside function bodies, so the
+# module-level core import graph never reaches the compiler packages -- the
+# reverse edge is what makes the ``core.engine <-> pipeline`` cycle.
+# --------------------------------------------------------------------------- #
+
+
+def placeholder_engine() -> Any:
+    """The default placeholder engine (the one mask-order owner in ``ubt.segment``)."""
+    from ubt.segment.placeholders import default_placeholder_engine
+
+    return default_placeholder_engine()
+
+
+def masked_source(
+    *,
+    text: str,
+    code_map: dict[str, str],
+    math_map: dict[str, str],
+    soup_map: dict[str, str],
+    cite_map: dict[str, str],
+) -> Any:
+    """Rebuild a ``MaskedSource`` from the per-family maps a draft carries."""
+    from ubt.segment.placeholders import MaskedSource
+
+    return MaskedSource(
+        text=text,
+        code_map=code_map,
+        math_map=math_map,
+        soup_map=soup_map,
+        cite_map=cite_map,
+    )
+
+
+def translation_engine(
+    *,
+    placeholders: Any,
+    model: str = "",
+    prompt_version: str = "",
+    cache: Any = None,
+) -> Any:
+    """Build the per-unit transform engine (mask -> restore -> judge)."""
+    from ubt.translate.engine import TranslationEngine
+
+    return TranslationEngine(
+        placeholders=placeholders,
+        model=model,
+        prompt_version=prompt_version,
+        cache=cache,
+    )
