@@ -30,7 +30,7 @@ from ubt.core.ir.models import BlockStatus, BookManifest, IRBlock
 from ubt.core.ir.render_plan import RenderPlan
 from ubt.core.job_options import sidecar_path
 from ubt.core.log_aggregate import noise_report
-from ubt.core.ports import get_visual_gate_runner, is_pdf_engine_adapter
+from ubt.core.ports import DocumentAdapter, get_visual_gate_runner
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ class ReflowControlLoop:
 
     def __init__(
         self,
-        adapter: Any,
+        adapter: DocumentAdapter,
         manifest: BookManifest,
         ledger: SQLiteJobLedger,
         job_id: str,
@@ -197,7 +197,7 @@ class ReflowControlLoop:
         # quarantine below instead of a re-render that cannot change them.
         render_fn = self.render_fn
         healing_relevant = bool(
-            bad and is_pdf_engine_adapter(self.adapter) and render_fn is not None
+            bad and self.adapter.engine_name is not None and render_fn is not None
         )
         retune_possible = healing_relevant and self._typography_retune_possible()
         if healing_relevant and not retune_possible:

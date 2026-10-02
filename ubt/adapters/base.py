@@ -112,6 +112,16 @@ class BaseDocumentAdapter(ABC):
     #: every page.
     supports_page_selection: bool = False
 
+    @property
+    def engine_name(self) -> str | None:
+        """PDF engine identifier; ``None`` for non-PDF adapters.
+
+        A non-``None`` name is the PDF-engine capability marker that
+        :class:`BasePDFEngineAdapter` narrows to ``str``; callers tell a PDF
+        engine from a text-only adapter through this, not a ``hasattr`` probe.
+        """
+        return None
+
     def apply_config(self, runtime_config: AdapterRuntimeConfig) -> None:
         """Accept engine-level runtime knobs from the pipeline.
 

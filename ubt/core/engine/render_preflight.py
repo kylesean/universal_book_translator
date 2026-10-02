@@ -21,14 +21,14 @@ import logging
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from ubt.core.config import RIGID_ENGINES, canonical_render_engine
 from ubt.core.exceptions import DocumentParseError
 from ubt.core.ir.models import BlockType, IRBlock
 from ubt.core.ir.render_plan import RenderPlan
 from ubt.core.policy.adaptive_policy import resolve_pdf_engine
-from ubt.core.ports import DocumentAdapter, is_pdf_engine_adapter
+from ubt.core.ports import DocumentAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +95,7 @@ async def run_render_preflight(
     fails; a non-PDF adapter or an empty sample skips, because text-only
     outputs never touch Typst. Callers run this before any billable stage.
     """
-    if not is_pdf_engine_adapter(adapter) or not blocks:
+    if adapter.engine_name is None or not blocks:
         return
 
     sample = select_preflight_sample(blocks)
@@ -123,7 +123,6 @@ async def run_render_preflight(
     # warning for a route the live manifest never took.
     if canonical_render_engine(render_engine) in RIGID_ENGINES:
         bilingual_mode = "monolingual"
-    pdf_adapter = cast(Any, adapter)
     # Render into an isolated copy: the scratch compile must not write its
     # route/downgrade facts back onto the live run manifest.
     scratch_manifest = _isolated_manifest(manifest)
@@ -131,7 +130,7 @@ async def run_render_preflight(
     tmp_dir = Path(tempfile.mkdtemp(prefix="ubt-preflight-"))
     preflight_path = tmp_dir / "preflight.pdf"
     try:
-        await pdf_adapter.render_blocks(
+        await adapter.render_blocks(
             manifest=scratch_manifest,
             blocks=sample,
             target_lang=target_lang,

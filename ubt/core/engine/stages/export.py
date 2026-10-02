@@ -40,7 +40,6 @@ from ubt.core.ports import (
     crashed_visual_gate_result,
     get_last_render_skips,
     interleave_bilingual_pdf,
-    is_pdf_engine_adapter,
 )
 
 if TYPE_CHECKING:
@@ -89,9 +88,8 @@ async def _render_adapter_output(
     if render_engine is None and render_plan is not None:
         render_engine = render_plan.render_engine
 
-    if is_pdf_engine_adapter(adapter):
-        pdf_adapter = cast(Any, adapter)
-        res = await pdf_adapter.render_blocks(
+    if adapter.engine_name is not None:
+        return await adapter.render_blocks(
             manifest=manifest,
             blocks=blocks,
             target_lang=target_lang,
@@ -101,7 +99,6 @@ async def _render_adapter_output(
             render_plan=render_plan,
             realization_plan=realization_plan,
         )
-        return cast(Path, res)
     return await adapter.render_blocks(
         manifest=manifest,
         blocks=blocks,
@@ -762,7 +759,7 @@ async def _render_complementary_artifact(
     elif (
         secondary_engine == "rigid"
         and effective_engine != "rigid"
-        and is_pdf_engine_adapter(adapter)
+        and adapter.engine_name is not None
         and artifact.target_output.suffix.lower() == ".pdf"
     ):
         candidate = artifact.sibling("_rigid")
@@ -882,7 +879,7 @@ def _resolve_render_engine(
     """
     from ubt.core.policy.adaptive_policy import resolve_pdf_engine
 
-    if not is_pdf_engine_adapter(adapter) or not blocks:
+    if adapter.engine_name is None or not blocks:
         return "publication"
     requested = str(render.render_engine or ctx.config.render_engine or "publication")
     return resolve_pdf_engine(requested, blocks, manifest=ctx.manifest)

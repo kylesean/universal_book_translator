@@ -86,7 +86,17 @@ def apply_runtime_config(adapter: Any, runtime_config: AdapterRuntimeConfig) -> 
 
 @runtime_checkable
 class DocumentAdapter(Protocol):
-    """Protocol for document format adapters accessed through the ports bridge."""
+    """Protocol for document format adapters accessed through the ports bridge.
+
+    Signatures mirror the real SPI (:class:`ubt.adapters.base.BaseDocumentAdapter`),
+    including ``render_engine`` and adapter-specific ``**kwargs``, so a call site
+    typed against this protocol can name the engine knobs without a ``cast(Any)``.
+    ``engine_name`` is the PDF-engine capability: a non-``None`` name marks a
+    ``BasePDFEngineAdapter``.
+    """
+
+    @property
+    def engine_name(self) -> str | None: ...
 
     async def extract_manifest(self, input_path: Path) -> BookManifest: ...
 
@@ -101,6 +111,8 @@ class DocumentAdapter(Protocol):
         target_lang: str,
         output_path: Path,
         bilingual_mode: str | None = None,
+        render_engine: str | None = None,
+        **kwargs: Any,
     ) -> Path: ...
 
     async def render_output(
@@ -111,6 +123,7 @@ class DocumentAdapter(Protocol):
         output_path: Path,
         job_id: str | None = None,
         bilingual_mode: str | None = None,
+        **kwargs: Any,
     ) -> Path: ...
 
     def apply_config(self, runtime_config: AdapterRuntimeConfig) -> None: ...
@@ -290,11 +303,6 @@ def is_visual_scalpel_applicable(
     from ubt.adapters.pdf.visual_scalpel import is_visual_scalpel_applicable as _check
 
     return _check(block, source_pdf_path=source_pdf_path, qe_threshold_for_vision=vision_threshold)
-
-
-def is_pdf_engine_adapter(adapter: Any) -> bool:
-    """Structural check for PDF engine adapters (duck-typed, no import edge)."""
-    return hasattr(adapter, "engine_name")
 
 
 def get_last_render_skips(adapter: Any) -> list[tuple[str, str]]:
