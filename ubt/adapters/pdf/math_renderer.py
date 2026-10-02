@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ubt.cache.dirs import cache_root
 from ubt.core.env import subprocess_env
 from ubt.core.fs_perms import restrict_dir_to_owner
 
@@ -43,22 +44,10 @@ _PROBE_TIMEOUT_S = 20.0
 
 
 # Cache directory for SVG/PNG artifacts; deterministic names keep repeated
-# runs free and let _stage_image_assets copy stable references. Lives under
-# the per-user cache root (the same ``UBT_CACHE_DIR`` convention svg_diagram's
-# probe cache uses, with the XDG default) — never a predictable world-writable
-# /tmp path, which other users on a shared machine could pre-create or
-# symlink. Still cross-process, so one run's renders serve the next.
-def _ubt_cache_root() -> Path:
-    env = os.environ.get("UBT_CACHE_DIR")
-    if env:
-        return Path(env).expanduser()
-    xdg = os.environ.get("XDG_CACHE_HOME")
-    if xdg:
-        return Path(xdg).expanduser() / "ubt"
-    return Path.home() / ".cache" / "ubt"
-
-
-MATH_CACHE_DIR = _ubt_cache_root() / "math_svg"
+# runs free and let _stage_image_assets copy stable references. Under the
+# shared per-user cache root (see :func:`ubt.cache.dirs.cache_root`); still
+# cross-process, so one run's renders serve the next.
+MATH_CACHE_DIR = cache_root() / "math_svg"
 
 
 @dataclass(frozen=True)

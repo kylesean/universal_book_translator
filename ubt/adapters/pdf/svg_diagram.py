@@ -30,7 +30,6 @@ import hashlib
 import io
 import json
 import logging
-import os
 import re
 import shutil
 import subprocess
@@ -44,6 +43,7 @@ from typing import TYPE_CHECKING, Any
 
 from ubt.adapters.pdf import oxide_render, pdf_struct
 from ubt.adapters.pdf.stream_strip import mul_matrix
+from ubt.cache.dirs import cache_root
 from ubt.core.env import subprocess_env
 from ubt.core.exceptions import DocumentParseError
 from ubt.core.ir.models import BoundingBox
@@ -319,7 +319,7 @@ def _probe_rendering_cached(binary: str, mtime_ns: int) -> bool:
 def _probe_disk_path(binary: str) -> Path | None:
     """Cache file for the SVG probe result (survives across pytest processes)."""
     try:
-        root = Path(os.environ.get("UBT_CACHE_DIR", Path.home() / ".cache" / "ubt"))
+        root = cache_root()
         digest = hashlib.sha1(binary.encode("utf-8")).hexdigest()[:16]
         return root / f"typst-svg-probe-{digest}.json"
     except Exception:  # cache must never break probing

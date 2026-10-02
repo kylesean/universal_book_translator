@@ -30,6 +30,7 @@ from typing import Any
 from ubt.adapters.pdf import pdf_struct
 from ubt.adapters.pdf.page_profiler import PageKind, column_right_share
 from ubt.adapters.pdf.pdfium_gate import pdfium_serialized
+from ubt.cache.dirs import cache_root
 from ubt.core.policy.layout_policy import (
     PDF_PATH_OPS,
     PROBE_COLUMN_SHARE,
@@ -75,7 +76,9 @@ class PDFRoutePlan:
 # Where cheap page-profile facts are memoized. The cache key is
 # (resolved path, size, mtime), so the engine probe, the ingest-plan builder and
 # the parser all hit one entry per file instead of each re-scanning the document.
-PROFILE_CACHE_DIR = Path(".ubt/profile_cache")
+# Under the shared cache root: CWD-relative paths silently forked the cache per
+# working directory.
+PROFILE_CACHE_DIR = cache_root() / "profile_cache"
 
 
 def build_page_ingest_plans(pdf_path: Path, cache_dir: Path | None = None) -> list[PageIngestPlan]:
