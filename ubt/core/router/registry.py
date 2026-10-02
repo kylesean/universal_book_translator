@@ -4,19 +4,16 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import threading
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from ubt.core.router.capabilities import (
     ExtractionStrategy,
     ModelProfile,
     PromptStrategy,
 )
-
-if TYPE_CHECKING:
-    from ubt.core.config import UBTConfig
 
 logger = logging.getLogger(__name__)
 
@@ -169,18 +166,21 @@ class ModelCapabilityRegistry:
             ),
         ]
 
-    def _load_environment_profiles(self, config: UBTConfig | None = None) -> None:
-        """Load external profiles from UBTConfig (single env source).
+    def _load_environment_profiles(self) -> None:
+        """Load external profiles from the process environment.
 
-        Reads ``model_profiles_json`` / ``model_profiles_file`` from the
-        canonical config layer instead of ``os.getenv`` directly.
+        Reads ``UBT_MODEL_PROFILES_JSON`` / ``UBT_MODEL_PROFILES_FILE``
+        directly instead of through ``UBTConfig``. This runs inside
+        ``get_default_registry()``'s bootstrap lock, and building a
+        ``UBTConfig`` here re-enters that bootstrap: with a capability
+        override set, ``UBTConfig._check_invariants`` calls
+        ``get_default_registry()`` to register the override — against the
+        non-reentrant lock this thread already holds. The process environment
+        is the config layer's only external source (no dotenv), so the direct
+        read sees exactly what ``UBTConfig`` would.
         """
-        if config is None:
-            from ubt.core.config import UBTConfig as _UBTConfig
-
-            config = _UBTConfig()
         # 1. Direct JSON array string in UBT_MODEL_PROFILES_JSON
-        json_env = config.model_profiles_json.strip()
+        json_env = os.environ.get("UBT_MODEL_PROFILES_JSON", "").strip()
         if json_env:
             try:
                 raw_list = json.loads(json_env)
@@ -199,7 +199,7 @@ class ModelCapabilityRegistry:
                 )
 
         # 2. File path in UBT_MODEL_PROFILES_FILE
-        file_env = config.model_profiles_file.strip()
+        file_env = os.environ.get("UBT_MODEL_PROFILES_FILE", "").strip()
         if file_env:
             p = Path(file_env)
             if p.is_file():

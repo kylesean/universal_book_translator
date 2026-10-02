@@ -801,8 +801,9 @@ class UBTConfig(BaseSettings):
     strict_auth: bool = False
     env: str = "development"
     allowed_dirs: str = ""
-    model_profiles_json: str = ""
-    model_profiles_file: str = ""
+    # UBT_MODEL_PROFILES_JSON / UBT_MODEL_PROFILES_FILE are consumed directly
+    # by ModelCapabilityRegistry._load_environment_profiles: the registry
+    # bootstraps under a lock that a UBTConfig built there must not re-enter.
 
     # -- Human PE (HITL) queue: MQM severity triage + post-editing ---------------
     # MQM severity triage (Critical -> escalated repair / BLOCKED_HUMAN;
