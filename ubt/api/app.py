@@ -6,7 +6,6 @@ import ipaddress
 import json
 import logging
 import os
-import sys
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -85,20 +84,6 @@ __all__ = [
     "apply_config_overrides",
     "run_kwargs_from_request",
 ]
-
-
-def _get_ledger_cls() -> type[Any]:
-    """Resolve SQLiteJobLedger dynamically so test monkeypatching is respected."""
-    app_mod = sys.modules.get("ubt.api.app")
-    return getattr(app_mod, "SQLiteJobLedger", SQLiteJobLedger) if app_mod else SQLiteJobLedger
-
-
-def _open_read_ledger(ledger_cls: type[Any], db_path: Path) -> Any:
-    """Instantiate a ledger in read-only mode, tolerating test mocks without read_only."""
-    try:
-        return ledger_cls(db_path, read_only=True)
-    except TypeError:
-        return ledger_cls(db_path)
 
 
 #: Local-only bind addresses. Anything else exposes the service to the network
@@ -286,9 +271,7 @@ def create_app(
     # guard was absent on the default ``ubt-api`` deployment while CLI/worker
     # (which go through ``build_rate_limiter``/pipeline) kept it.
     shared_rate_limiter = None if router is not None else build_rate_limiter(app_config)
-    app_mod = sys.modules.get("ubt.api.app")
-    job_manager_cls = getattr(app_mod, "JobManager", JobManager) if app_mod else JobManager
-    manager: JobManager = job_manager_cls(
+    manager: JobManager = JobManager(
         router=router,
         qe_runner=qe_runner,
         rate_limiter=shared_rate_limiter,
@@ -349,8 +332,7 @@ def create_app(
         db_path = app_config.db_dir / f"{valid_id}.sqlite"
         if db_path.exists():
             try:
-                ledger_cls = _get_ledger_cls()
-                with _open_read_ledger(ledger_cls, db_path) as ledger:
+                with SQLiteJobLedger(db_path, read_only=True) as ledger:
                     value = ledger.get_job_metadata_value(valid_id, key)
             except Exception:
                 value = None
@@ -709,8 +691,7 @@ def create_app(
                                 return
                             time.sleep(0.1)
                     try:
-                        ledger_cls = _get_ledger_cls()
-                        with ledger_cls(db_path) as ledger:
+                        with SQLiteJobLedger(db_path) as ledger:
                             # Prevent rewriting a finished job to CANCELLED if it
                             # already reached a terminal status.
                             if ledger.get_job_status(valid_id) in TERMINAL_JOB_STATUSES:
@@ -762,8 +743,7 @@ def create_app(
         db_path = app_config.db_dir / f"{valid_id}.sqlite"
         if db_path.exists():
             try:
-                ledger_cls = _get_ledger_cls()
-                with _open_read_ledger(ledger_cls, db_path) as ledger:
+                with SQLiteJobLedger(db_path, read_only=True) as ledger:
                     snap = ledger.get_job_snapshot(valid_id)
                     if snap:
                         created_str = str(snap.get("created_at", ""))
@@ -1096,8 +1076,7 @@ def create_app(
             try:
 
                 def _fetch_visual_report() -> Any:
-                    ledger_cls = _get_ledger_cls()
-                    with _open_read_ledger(ledger_cls, db_path) as ledger:
+                    with SQLiteJobLedger(db_path, read_only=True) as ledger:
                         return ledger.get_visual_report(valid_id)
 
                 snap_report = await asyncio.to_thread(_fetch_visual_report)

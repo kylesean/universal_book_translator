@@ -3,7 +3,6 @@
 import logging
 import os
 import secrets
-import sys
 from pathlib import Path
 
 from fastapi import Header, HTTPException, status
@@ -265,15 +264,8 @@ def resolve_secure_path(
     # operator explicitly whitelisted is exempt: otherwise the conventional
     # data location (/var/lib/ubt/...) could never be served, so a whitelist
     # that satisfies the non-loopback startup guardrail stayed unusable.
-    app_mod = sys.modules.get("ubt.api.app")
-    disallowed_prefixes = (
-        getattr(app_mod, "SYSTEM_DISALLOWED_PREFIXES", SYSTEM_DISALLOWED_PREFIXES)
-        if app_mod is not None
-        else SYSTEM_DISALLOWED_PREFIXES
-    )
-
     if not (explicit_whitelist and contained):
-        for disallowed in disallowed_prefixes:
+        for disallowed in SYSTEM_DISALLOWED_PREFIXES:
             if resolved == disallowed or disallowed in resolved.parents:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
