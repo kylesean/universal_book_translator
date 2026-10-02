@@ -39,8 +39,21 @@ repos:
       # anyway, and the fast tier is ~6s, so pre-push
       # stays well inside the inner-loop budget.
       - id: mypy
-        name: mypy --strict (ubt)
-        entry: uv run mypy --strict ubt
+        name: mypy --strict (ubt, tests)
+        entry: uv run mypy --strict ubt tests
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+
+      # The fast tier is the inner-loop contract: pure-logic units that must
+      # stay green before a push (docs/guides/TESTING_STRATEGY.md). Whole-tree
+      # (pass_filenames off) so a clean changed-file set cannot hide a break in
+      # an untouched test. `-m fast` overrides the `-m 'not slow and not
+      # legacy_drift'` in addopts.
+      - id: pytest-fast
+        name: pytest -m fast
+        entry: uv run pytest -m fast -q
         language: system
         pass_filenames: false
         always_run: true
