@@ -12,7 +12,6 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
-from ubt.core.qe.term_drift import detect_target_term_violations
 from ubt.core.validators.consistency import canonicalize_numeric_token
 from ubt.core.validators.glossary_enforcer import is_cjk_char
 
@@ -130,6 +129,12 @@ class MQMSpanAnnotator:
         #    protected-span-aware matching matching the exporter's expectations.
         #    Ordered by glossary sequence with stable span identifiers.
         if glossary_entries:
+            # Deferred import, same constraint as GlossaryConsistencyValidator:
+            # ``ubt.core.qe``'s package __init__ pulls in fast_pass, which
+            # imports this package -- a module-level edge would invert the
+            # validators-first import order every caller relies on.
+            from ubt.core.qe.term_drift import detect_target_term_violations
+
             for violation in detect_target_term_violations(draft_text, glossary_entries):
                 is_alias = violation.kind == "alias"
                 reason = (

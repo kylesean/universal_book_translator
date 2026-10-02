@@ -8,10 +8,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from ubt.core.engine.reporter import QualityReport
 from ubt.core.metrics.schema import SCHEMA_VERSION, KpiSet
+
+if TYPE_CHECKING:
+    # Annotation-only: a module-level edge would make the metrics package
+    # statically depend back on core.engine, which calls into it at export.
+    from ubt.core.engine.reporter import QualityReport
 
 _SEVERITIES = ("info", "major", "critical")
 
