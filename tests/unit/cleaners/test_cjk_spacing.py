@@ -59,7 +59,7 @@ def test_is_gated_to_spaceless_scripts() -> None:
     # Korean separates words with spaces; running the removal rules would weld
     # them ("이것은 테스트 입니다" -> "이것은테스트입니다").
     assert normalize_cjk_spacing("이것은 테스트 입니다", target_lang="ko") == "이것은 테스트 입니다"
-    assert normalize_cjk_spacing("テスト 。", target_lang="ja") == "テスト 。"
+    assert normalize_cjk_spacing("テスト 、", target_lang="ja") == "テスト、"
 
 
 def test_is_idempotent() -> None:
@@ -142,19 +142,10 @@ def test_composed_pipeline_is_idempotent() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Confirmed defect: the documented ideographic full stop is not covered.
+# The ideographic full stop is part of the documented punctuation set.
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Confirmed: ubt/core/cleaners/cjk_spacing.py:25 _CJK_PUNCT omits U+3002 '。' "
-        "even though the module docstring (lines 10-11) lists it among the punctuation "
-        "whose adjacent spaces are stripped, so '测试 。继续' keeps its stray space. "
-        "Add '。' to _CJK_PUNCT and remove this marker."
-    ),
-)
 def test_documented_ideographic_period_spacing_is_normalized() -> None:
     assert normalize_cjk_spacing("测试 。继续") == "测试。继续"
     assert normalize_cjk_spacing("测试。 继续") == "测试。继续"

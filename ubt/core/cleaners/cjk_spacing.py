@@ -22,7 +22,7 @@ import re
 from ubt.core.cleaners.inline_math import iter_inline_math
 
 _CJK = r"一-鿿㐀-䶿豈-﫿぀-ヿ가-힯"
-_CJK_PUNCT = r"，；：、？！（）》”’】…—「『～·《“‘【〈〔［｛"
+_CJK_PUNCT = r"，。；：、？！（）》”’】…—「『～·《“‘【〈〔［｛"
 
 # Horizontal whitespace only — never swallow newlines or other vertical
 # Whitespace. A bare ``\s+`` would also match ``\n`` and
