@@ -39,9 +39,16 @@ def _block_network(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(socket, "create_connection", _blocked)
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def clean_ubt_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """Remove every ``UBT_*`` variable so ``UBTConfig`` sees only field defaults."""
+    """Remove every ``UBT_*`` variable so ``UBTConfig`` sees only field defaults.
+
+    Ambient configuration is process-global: without this, a developer shell
+    export can change provider keys, spend ceilings, feature switches, and
+    queue mode underneath every fast test that builds ``UBTConfig``. Tests
+    asserting a default must opt out explicitly by setting the variable after
+    requesting this fixture.
+    """
     import os
 
     for name in [key for key in os.environ if key.startswith(_UBT_ENV_PREFIX)]:
