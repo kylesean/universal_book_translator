@@ -16,13 +16,13 @@ The split this enforces:
   :attr:`~StageContext.manifest` — the run's inputs; a stage reads the config
   field it needs instead of receiving it as a parameter.
 - What one stage *produces* and a later one consumes lives in
-  :mod:`ubt.pipeline.facts` now, not here: the plan owns the value and hands it
+  :mod:`ubt.core.engine.facts` now, not here: the plan owns the value and hands it
   to the stage that reads it (``terminology`` to the draft/repair/triage/… stages,
   ``layout`` to the two advisories), so the inter-stage flow is an explicit,
   typed parameter.
 - The collaborators a run *builds* for its stages (the QE runner, repair loop,
   FastPass filter, adaptive policy, in-flight semaphore, TM, HTML validator) live
-  in :class:`~ubt.pipeline.services.RunServices`, which the plan constructs once
+  in :class:`~ubt.core.engine.services.RunServices`, which the plan constructs once
   and threads, so "what the run *was configured with*" is separate from "the
   per-run services it made for itself".
 - What a *single* stage needs for itself (``mode`` and ``max_repairs`` for
@@ -84,7 +84,7 @@ class StageContext:
     may write (``RunMetadata`` validates every assignment) -- page selection at
     ingest, delivery status at advisory -- and the reporter reads it back.
     Block-level mutable state stays out of the context entirely: it lives in
-    :class:`~ubt.pipeline.blocks.BlockReader`, owned by the plan.
+    :class:`~ubt.core.engine.blocks.BlockReader`, owned by the plan.
     """
 
     # --- The run's inputs -------------------------------------------------
@@ -107,7 +107,7 @@ class StageContext:
     # --- Per-run services -------------------------------------------------
     # The collaborators this run builds for its stages (QE runner, repair loop,
     # FastPass filter, adaptive policy, in-flight semaphore, TM, HTML validator)
-    # live in :class:`~ubt.pipeline.services.RunServices`, constructed by the
+    # live in :class:`~ubt.core.engine.services.RunServices`, constructed by the
     # plan and handed to the stages that use them.
 
     # --- Optional, and defaulted so a stage test can omit them -------------
@@ -155,10 +155,10 @@ class StageContext:
 
     # --- Produced by an earlier stage -------------------------------------
     # Values one stage produces and a later one consumes live in
-    # :mod:`ubt.pipeline.facts` now: the plan owns them and passes the value to
+    # :mod:`ubt.core.engine.facts` now: the plan owns them and passes the value to
     # the stage that reads it, so the inter-stage flow is an explicit, typed
     # parameter instead of a field on this shared object. The block snapshot
-    # lives in :class:`~ubt.pipeline.blocks.BlockReader`, owned by the plan.
+    # lives in :class:`~ubt.core.engine.blocks.BlockReader`, owned by the plan.
 
     @property
     def is_mock_run(self) -> bool:

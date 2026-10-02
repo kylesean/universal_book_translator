@@ -11,9 +11,12 @@ from pathlib import Path
 from typing import Any
 
 from ubt.core.config import UBTConfig
+from ubt.core.engine.blocks import BlockReader
 from ubt.core.engine.events import EventType, TranslationProgressEvent
+from ubt.core.engine.facts import RunFacts
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.repair_loop import RepairLoop
+from ubt.core.engine.services import RunServices
 from ubt.core.engine.stage_context import StageContext
 from ubt.core.engine.stages import (
     apply_layout_tradeoff_advisory,
@@ -51,10 +54,7 @@ from ubt.core.router.rate_limiter import AdaptiveTokenBucket
 from ubt.core.router.registry import get_default_registry
 from ubt.core.router.router import ModelRouter
 from ubt.core.router_mode import decide
-from ubt.pipeline.blocks import BlockReader
-from ubt.pipeline.facts import RunFacts
 from ubt.pipeline.run import RunGates, run_stages
-from ubt.pipeline.services import RunServices
 
 logger = logging.getLogger(__name__)
 

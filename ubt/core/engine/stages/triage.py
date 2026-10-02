@@ -28,6 +28,8 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from ubt.core.engine.events import EventType, TranslationProgressEvent
+from ubt.core.engine.facts import Scoring, Terminology
+from ubt.core.engine.services import RunServices
 from ubt.core.engine.stage_context import StageContext
 from ubt.core.ir.models import BlockStatus, IRBlock
 from ubt.core.memory.glossary_table import build_chunk_glossary_table
@@ -44,8 +46,6 @@ from ubt.core.qe.defect_taxonomy import (
     is_transient_lifecycle_only,
 )
 from ubt.core.validators.span_repair import max_severity, span_to_dict
-from ubt.pipeline.facts import Scoring, Terminology
-from ubt.pipeline.services import RunServices
 
 logger = logging.getLogger(__name__)
 

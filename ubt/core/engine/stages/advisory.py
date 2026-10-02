@@ -24,7 +24,10 @@ from collections.abc import AsyncIterator
 from typing import Any, Literal
 
 from ubt.core.config import RIGID_ENGINES, DualMode, canonical_render_engine
+from ubt.core.engine.blocks import BlockReader
 from ubt.core.engine.events import EventType, TranslationProgressEvent
+from ubt.core.engine.facts import LayoutAdvisory, RenderPlan
+from ubt.core.engine.services import RunServices
 from ubt.core.engine.stage_context import StageContext
 from ubt.core.ir.models import BookManifest
 from ubt.core.policy.adaptive_policy import (
@@ -45,9 +48,6 @@ from ubt.core.ports import (
     inspect_font_encoding_damage,
     summarize_font_encoding_damage,
 )
-from ubt.pipeline.blocks import BlockReader
-from ubt.pipeline.facts import LayoutAdvisory, RenderPlan
-from ubt.pipeline.services import RunServices
 
 logger = logging.getLogger(__name__)
 

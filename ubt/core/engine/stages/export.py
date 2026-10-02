@@ -49,6 +49,8 @@ if TYPE_CHECKING:
     from ubt.model.ast import Document
     from ubt.pipeline.artifact import ArtifactReport, DeliveredArtifact
     from ubt.pipeline.attest import AttestationReport
+from ubt.core.engine.facts import RenderPlan, Terminology
+from ubt.core.engine.services import RunServices
 from ubt.core.qe.defect_taxonomy import (
     INTENTIONAL_PRESERVED_SKIP_PREFIXES as _INTENTIONAL_PRESERVED_SKIP_PREFIXES,
 )
@@ -59,8 +61,6 @@ from ubt.core.validators.consistency import GlossaryConsistencyValidator
 from ubt.core.validators.glossary_enforcer import DeterministicGlossaryEnforcer
 from ubt.core.validators.html_delta import HTMLDeltaValidator
 from ubt.core.validators.math_guard import apply_math_guards
-from ubt.pipeline.facts import RenderPlan, Terminology
-from ubt.pipeline.services import RunServices
 
 logger = logging.getLogger(__name__)
 

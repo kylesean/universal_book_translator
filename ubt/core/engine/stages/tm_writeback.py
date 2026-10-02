@@ -16,7 +16,9 @@ import asyncio
 import logging
 from typing import Any
 
+from ubt.core.engine.facts import Terminology
 from ubt.core.engine.ledger import SQLiteJobLedger
+from ubt.core.engine.services import RunServices
 from ubt.core.engine.stage_context import StageContext
 from ubt.core.ir.models import BlockStatus
 from ubt.core.memory.glossary_table import build_global_glossary_table
@@ -26,8 +28,6 @@ from ubt.core.memory.tm import (
     TranslationMemory,
 )
 from ubt.core.qe.added_content import AddedContentGate
-from ubt.pipeline.facts import Terminology
-from ubt.pipeline.services import RunServices
 
 logger = logging.getLogger(__name__)
 

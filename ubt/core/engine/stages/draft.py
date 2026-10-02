@@ -14,8 +14,10 @@ from typing import TYPE_CHECKING, Any
 from ubt.core import ports
 from ubt.core.config import UBTConfig
 from ubt.core.engine.events import EventType, TranslationProgressEvent
+from ubt.core.engine.facts import Terminology
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.ledger_flusher import CheckpointBatchFlusher
+from ubt.core.engine.services import RunServices
 from ubt.core.engine.stage_context import StageContext
 from ubt.core.exceptions import BudgetExceededError, JobInterruptedError, UBTError
 from ubt.core.ir.models import BlockStatus, BlockType, BookManifest, IRBlock
@@ -42,8 +44,6 @@ from ubt.core.router.router import (
     classify_provider_error,
 )
 from ubt.core.validators.consistency import GlossaryConsistencyValidator
-from ubt.pipeline.facts import Terminology
-from ubt.pipeline.services import RunServices
 
 if TYPE_CHECKING:
     from ubt.translate.engine import TranslationEngine

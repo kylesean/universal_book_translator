@@ -19,7 +19,10 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 
+from ubt.core.engine.blocks import BlockReader
 from ubt.core.engine.events import EventType, TranslationProgressEvent
+from ubt.core.engine.facts import RunFacts
+from ubt.core.engine.services import RunServices
 from ubt.core.engine.stage_context import StageContext
 from ubt.core.engine.stages import (
     run_bible_stage,
@@ -38,9 +41,6 @@ from ubt.core.engine.stages import (
     run_repair_stage,
     run_triage_stage,
 )
-from ubt.pipeline.blocks import BlockReader
-from ubt.pipeline.facts import RunFacts
-from ubt.pipeline.services import RunServices
 
 #: Called with the terminal export event, *before* it is yielded.
 ExportHook = Callable[[TranslationProgressEvent], Awaitable[None]]
@@ -72,8 +72,8 @@ async def run_stages(
     """Run the stage plan, yielding every progress event in order.
 
     ``facts`` carries the values a stage produces and a later one consumes (see
-    :mod:`ubt.pipeline.facts`); ``services`` carries the per-run collaborators the
-    orchestrator built (see :mod:`ubt.pipeline.services`). The plan threads each
+    :mod:`ubt.core.engine.facts`); ``services`` carries the per-run collaborators the
+    orchestrator built (see :mod:`ubt.core.engine.services`). The plan threads each
     to the stage that reads it, so neither is a field on the shared context.
 
     ``on_export_completed`` runs on the terminal export event *before* it is

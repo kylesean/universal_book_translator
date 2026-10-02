@@ -8,13 +8,13 @@ from pathlib import Path
 from typing import Any
 
 from ubt.core.engine.events import EventType, TranslationProgressEvent
+from ubt.core.engine.facts import Scoring, Terminology
+from ubt.core.engine.services import RunServices
 from ubt.core.engine.stage_context import StageContext
 from ubt.core.exceptions import BudgetExceededError, JobInterruptedError
 from ubt.core.ir.models import BlockStatus, IRBlock
 from ubt.core.memory.glossary_table import build_chunk_glossary_table
 from ubt.core.qe.defect_taxonomy import REPAIR_ERROR_PREFIX
-from ubt.pipeline.facts import Scoring, Terminology
-from ubt.pipeline.services import RunServices
 
 logger = logging.getLogger(__name__)
 

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from ubt.core.engine.events import EventType, TranslationProgressEvent
+from ubt.core.engine.facts import Terminology
 from ubt.core.engine.stage_context import StageContext
 from ubt.core.memory.abbreviation_backfill import backfill_abbreviation_translations
 from ubt.core.memory.abbreviation_miner import mine_abbreviations_stream
@@ -16,7 +17,6 @@ from ubt.core.memory.character_miner import mine_characters_stream
 from ubt.core.memory.seed_glossary import load_external_glossary, seed_entries_for_profile
 from ubt.core.memory.tm import PROMPT_VERSION
 from ubt.core.ports import is_fast_lane_eligible
-from ubt.pipeline.facts import Terminology
 
 logger = logging.getLogger(__name__)
 

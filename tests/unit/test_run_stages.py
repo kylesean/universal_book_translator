@@ -32,17 +32,17 @@ import pytest
 
 import ubt.pipeline.run as run_plan
 from ubt.core.engine.events import EventType, TranslationProgressEvent
+from ubt.core.engine.facts import RunFacts
 from ubt.core.engine.stage_context import EventFactory, StageContext
-from ubt.pipeline.facts import RunFacts
 from ubt.pipeline.run import RunGates, run_stages
 
 if TYPE_CHECKING:
     from ubt.core.config import UBTConfig
+    from ubt.core.engine.blocks import BlockReader
     from ubt.core.engine.ledger import SQLiteJobLedger
+    from ubt.core.engine.services import RunServices
     from ubt.core.ir.models import BookManifest
     from ubt.core.router.router import ModelRouter
-    from ubt.pipeline.blocks import BlockReader
-    from ubt.pipeline.services import RunServices
 
 pytestmark = pytest.mark.fast
 

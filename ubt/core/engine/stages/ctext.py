@@ -32,10 +32,10 @@ from ubt.core.cleaners.math_text import (
     translate_math_text,
 )
 from ubt.core.engine.events import EventType, TranslationProgressEvent
+from ubt.core.engine.services import RunServices
 from ubt.core.engine.stage_context import StageContext
 from ubt.core.ir.models import BlockType, IRBlock
 from ubt.core.router.router import ModelRouter
-from ubt.pipeline.services import RunServices
 
 logger = logging.getLogger(__name__)
 
