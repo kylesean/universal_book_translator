@@ -1,17 +1,7 @@
-# Stage-1 CI — INERT until moved into `.github/workflows/`.
+# The gate CI repeats is the local one (`.pre-commit-config.yaml`): lint and
+# format on every commit, types + the fast test tier on push. CI must repeat a
+# gate that already passes, never be the first place it runs.
 #
-# GitHub only loads workflows from the exact path `.github/workflows/`; this
-# directory is deliberately not that path, so nothing runs while the repo is
-# private and iterating fast. The local pre-commit/pre-push gate
-# (`.pre-commit-config.yaml`) is the active gate in the meantime.
-#
-# Activation is a two-step move, documented in
-# docs/guides/CI_AND_QUALITY_GATES.md:
-#
-#     git mv .github/workflows.disabled/ci.yml .github/workflows/ci.yml
-#
-# Do that only once ``uv run pre-commit run --all-files`` is green on `main`:
-# CI must repeat a gate that already passes, never be the first place it runs.
 # Keep this job Linux-only / single-Python / fast-tier on purpose. The Windows
 # matrix, macOS portability, `pdf` extra, and nightly real-model jobs are
 # stage 2–3 — add each only when it can stay green.

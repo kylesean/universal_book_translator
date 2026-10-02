@@ -1,8 +1,6 @@
-# Local quality gates for a private, fast-iterating repo.
-#
-# Remote CI is intentionally not enabled yet — see
-# docs/guides/CI_AND_QUALITY_GATES.md for the phased rollout. Until then these
-# hooks ARE the gate: lint/format on every commit, types + fast tests on push.
+# Local quality gates: lint/format on every commit, types + fast tests on push.
+# Remote CI (`.github/workflows/ci.yml`) repeats exactly these gates on main
+# pushes and PRs — see docs/guides/CI_AND_QUALITY_GATES.md for the rollout plan.
 #
 #   uv sync --extra dev          # provides pre-commit, ruff, mypy, pytest
 #   uv run pre-commit install    # installs both the pre-commit and pre-push hooks
