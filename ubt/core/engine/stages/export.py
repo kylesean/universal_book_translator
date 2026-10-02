@@ -902,13 +902,11 @@ def _deliver_contract(
     an ERROR-severity violation; ``ubt verify`` applies the same contract to a
     delivered artifact or a finished job's ledger.
     """
-    from ubt.core.content import graph_from_blocks
-
-    # Lazy: a module-level ubt.pipeline edge recreates the core.engine <-> pipeline cycle.
-    from ubt.pipeline.attest import project_contract
+    from ubt.core.content.project import contract_from_attestations
 
     manifest = ctx.manifest
-    graph = graph_from_blocks(
+    contract = contract_from_attestations(
+        report,
         blocks,
         engine=engine,
         doc_id=str(getattr(manifest, "doc_id", "") or ""),
@@ -921,7 +919,6 @@ def _deliver_contract(
             str(item) for item in (manifest.metadata.get("table_fallback_findings") or []) if item
         ],
     )
-    contract = project_contract(report, graph)
     payload = contract.model_dump(mode="json")
     contract_path = sidecar_path(rendered_path, "contract.json")
     try:

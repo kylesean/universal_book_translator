@@ -20,7 +20,6 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from ubt.core.content.adapt import graph_from_blocks
 from ubt.core.content.contract import ReconciliationReport
 from ubt.core.job_options import sidecar_path
 
@@ -61,12 +60,13 @@ def contract_from_ledger(
     it falls back to the job's persisted ``render_engine_effective`` metadata,
     defaulting to ``publication`` (reflow) when unset.
     """
+    from ubt.core.content.project import contract_from_attestations
     from ubt.core.qe.fast_pass import FastPassFilter
     from ubt.layout.theme import resolve_theme
 
     # Lazy: ubt.pipeline.attest imports ubt.core.content, so a module-level
     # import here would be a circular import.
-    from ubt.pipeline.attest import attest_document, project_contract
+    from ubt.pipeline.attest import attest_document
     from ubt.pipeline.delivery import delivery_document, delivery_translations
     from ubt.render.typst_backend import TypstBackend
     from ubt.verify.verifier import build_verifiers
@@ -76,7 +76,6 @@ def contract_from_ledger(
         engine = str(persisted) if persisted else "publication"
 
     blocks = ledger.get_all_blocks(job_id)
-    graph = graph_from_blocks(blocks, engine=engine, doc_id=job_id)
     source_lang = str(ledger.get_job_metadata_value(job_id, "source_lang") or "en")
     target_lang = str(ledger.get_job_target_lang(job_id) or "zh")
     report = attest_document(
@@ -87,7 +86,7 @@ def contract_from_ledger(
         ),
         build_verifiers(FastPassFilter(source_lang=source_lang, target_lang=target_lang)),
     )
-    return project_contract(report, graph)
+    return contract_from_attestations(report, blocks, engine=engine, doc_id=job_id)
 
 
 class CorpusCase(BaseModel):
