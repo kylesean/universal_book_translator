@@ -8,6 +8,7 @@ it lives here rather than being reached into from ``math_masker``'s private
 namespace by its siblings.
 """
 
+import functools
 import hashlib
 import re
 from collections import Counter
@@ -123,6 +124,31 @@ class UnmaskReport:
             and not self.reordered
             and not self.duplicated
         )
+
+
+@functools.lru_cache(maxsize=48)
+def token_patterns(mask_prefix: str, core: str) -> tuple[re.Pattern[str], re.Pattern[str]]:
+    """``(fuzzy, scan)`` token-shape patterns for a masker's prefix.
+
+    ``core`` is the domain word carried by the prefix (``MATH`` / ``CODE`` /
+    ``CITE``). The fuzzy pattern is what an echo looks like after surviving
+    bracket/casing/spacing mutations (``⟦CITE_MASK_0001-abc⟧``,
+    ``[cite_mask_0001]``, ``【CITE_MASK_0001】``, a bare ``CITE_MASK_0001``)
+    with an optional checksum; the scan pattern is the strict shape the
+    restore scanner runs. One owner for all masker families, like
+    :class:`RestoreStyle`.
+    """
+    clean_prefix = re.sub(r"^[⟦\[【(\s]+|[⟧\]】)\s]+$", "", mask_prefix).rstrip(":_")
+    prefix_pattern = re.sub(r"[:_]+", r"[:_]?", re.escape(clean_prefix))
+    upper = clean_prefix.upper()
+    if core in upper and upper != f"{core}_MASK":
+        prefix_pattern = rf"(?:{prefix_pattern}|{core}[:_]?MASK|{core})"
+    fuzzy = re.compile(
+        r"[⟦\[【(]?\s*" + prefix_pattern + r"[:_]?(\d{1,6})(?:-([0-9a-z]{3}))?\s*[⟧\]】)]?",
+        re.IGNORECASE,
+    )
+    scan = re.compile(prefix_pattern + r"[:_]?(\d{1,6})(?:-([0-9a-z]{3}))?", re.IGNORECASE)
+    return fuzzy, scan
 
 
 @dataclass(frozen=True, slots=True)

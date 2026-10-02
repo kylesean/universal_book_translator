@@ -1,36 +1,13 @@
 """Code block and inline identifier token masking for syntax protection."""
 
-import functools
 import re
 
-from ubt.core.cleaners.mask_tokens import RestoreStyle, UnmaskReport, restore_masked
+from ubt.core.cleaners.mask_tokens import RestoreStyle, UnmaskReport, restore_masked, token_patterns
 from ubt.core.cleaners.mask_tokens import order_by_position as _order_by_position
 from ubt.core.cleaners.mask_tokens import token_checksum as _token_checksum
 
 _FENCED_CODE_PATTERN = re.compile(r"```[\w]*\n[\s\S]*?\n```|```[\s\S]*?```")
 _INLINE_CODE_PATTERN = re.compile(r"`[^`\n]+`")
-
-
-@functools.lru_cache(maxsize=16)
-def _get_code_fuzzy_pattern(mask_prefix: str) -> re.Pattern[str]:
-    """Token shape surviving bracket/casing/spacing mutations and an optional checksum."""
-    clean_prefix = re.sub(r"^[⟦\[【(\s]+|[⟧\]】)\s]+$", "", mask_prefix).rstrip(":_")
-    prefix_pattern = re.sub(r"[:_]+", r"[:_]?", re.escape(clean_prefix))
-    if "CODE" in clean_prefix.upper() and clean_prefix.upper() != "CODE_MASK":
-        prefix_pattern = rf"(?:{prefix_pattern}|CODE[:_]?MASK|CODE)"
-    return re.compile(
-        r"[⟦\[【(]?\s*" + prefix_pattern + r"[:_]?(\d{1,6})(?:-([0-9a-z]{3}))?\s*[⟧\]】)]?",
-        re.IGNORECASE,
-    )
-
-
-@functools.lru_cache(maxsize=16)
-def _get_code_scan_pattern(mask_prefix: str) -> re.Pattern[str]:
-    clean_prefix = re.sub(r"^[⟦\[【(\s]+|[⟧\]】)\s]+$", "", mask_prefix).rstrip(":_")
-    prefix_pattern = re.sub(r"[:_]+", r"[:_]?", re.escape(clean_prefix))
-    if "CODE" in clean_prefix.upper() and clean_prefix.upper() != "CODE_MASK":
-        prefix_pattern = rf"(?:{prefix_pattern}|CODE[:_]?MASK|CODE)"
-    return re.compile(prefix_pattern + r"[:_]?(\d{1,6})(?:-([0-9a-z]{3}))?", re.IGNORECASE)
 
 
 class CodeMasker:
@@ -72,9 +49,10 @@ class CodeMasker:
         return restore_masked(text, mapping, self._restore_style())
 
     def _restore_style(self) -> RestoreStyle:
+        fuzzy, scan = token_patterns(self.mask_prefix, "CODE")
         return RestoreStyle(
-            scan_pattern=_get_code_scan_pattern(self.mask_prefix),
-            fuzzy_pattern=_get_code_fuzzy_pattern(self.mask_prefix),
+            scan_pattern=scan,
+            fuzzy_pattern=fuzzy,
             checksumless_restores=True,
             nested=False,
         )

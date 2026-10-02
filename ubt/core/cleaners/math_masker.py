@@ -19,42 +19,16 @@ never masked. A ``$…$`` span is math only when its content is not a bare
 number.
 """
 
-import functools
 import re
 
 from ubt.core.cleaners.inline_math import (
     is_math_content,
 )
-from ubt.core.cleaners.mask_tokens import RestoreStyle, UnmaskReport, restore_masked
+from ubt.core.cleaners.mask_tokens import RestoreStyle, UnmaskReport, restore_masked, token_patterns
 from ubt.core.cleaners.mask_tokens import order_by_position as _order_by_position
 from ubt.core.cleaners.mask_tokens import token_checksum as _token_checksum
 
 _MASK_PREFIX = "⟦MATH_MASK_"
-
-
-@functools.lru_cache(maxsize=16)
-def _get_math_fuzzy_pattern(mask_prefix: str) -> re.Pattern[str]:
-    """Token shape surviving bracket/casing/spacing mutations and an optional checksum."""
-    clean_prefix = re.sub(r"^[⟦\[【(\s]+|[⟧\]】)\s]+$", "", mask_prefix).rstrip(":_")
-    prefix_pattern = re.sub(r"[:_]+", r"[:_]?", re.escape(clean_prefix))
-    if "MATH" in clean_prefix.upper() and clean_prefix.upper() != "MATH_MASK":
-        prefix_pattern = rf"(?:{prefix_pattern}|MATH[:_]?MASK|MATH)"
-    return re.compile(
-        r"[⟦\[【(]?\s*" + prefix_pattern + r"[:_]?(\d{1,6})(?:-([0-9a-z]{3}))?\s*[⟧\]】)]?",
-        re.IGNORECASE,
-    )
-
-
-@functools.lru_cache(maxsize=16)
-def _get_math_scan_pattern(mask_prefix: str) -> re.Pattern[str]:
-    clean_prefix = re.sub(r"^[⟦\[【(\s]+|[⟧\]】)\s]+$", "", mask_prefix).rstrip(":_")
-    prefix_pattern = re.sub(r"[:_]+", r"[:_]?", re.escape(clean_prefix))
-    if "MATH" in clean_prefix.upper() and clean_prefix.upper() != "MATH_MASK":
-        prefix_pattern = rf"(?:{prefix_pattern}|MATH[:_]?MASK|MATH)"
-    return re.compile(
-        prefix_pattern + r"[:_]?(\d{1,6})(?:-([0-9a-z]{3}))?",
-        re.IGNORECASE,
-    )
 
 
 _DISPLAY_DOLLAR_PATTERN = re.compile(r"\$\$\s*(.+?)\s*\$\$", re.DOTALL)
@@ -146,9 +120,10 @@ class MathMasker:
         return restore_masked(text, mapping, self._restore_style())
 
     def _restore_style(self) -> RestoreStyle:
+        fuzzy, scan = token_patterns(self.mask_prefix, "MATH")
         return RestoreStyle(
-            scan_pattern=_get_math_scan_pattern(self.mask_prefix),
-            fuzzy_pattern=_get_math_fuzzy_pattern(self.mask_prefix),
+            scan_pattern=scan,
+            fuzzy_pattern=fuzzy,
             checksumless_restores=True,
             nested=True,
         )
