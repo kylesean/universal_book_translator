@@ -220,6 +220,42 @@ def structural_page_shares(facts: Sequence[PageFacts]) -> tuple[float, float]:
     return multicolumn / n, structural / n
 
 
+@dataclass(frozen=True, slots=True)
+class PageProbe:
+    """One pdfium page's text-layer read, shared by the profiler and the sampler."""
+
+    width_pt: float
+    height_pt: float
+    n_chars: int
+    text: str
+    n_rect_rows: int
+    rects: tuple[Rect, ...]
+
+
+def probe_pdfium_page(page: Any) -> PageProbe:
+    """Read one pypdfium2 page: counts, extracted text, and text rectangles.
+
+    The single place that owns the pdfium read sequence (textpage lifecycle,
+    the guarded text extraction, the rect sweep); the full-document profiler
+    and the engine sampler both consume it, so their per-page facts cannot
+    disagree about how a page is read.
+    """
+    width = float(page.get_width())
+    height = float(page.get_height())
+    textpage = page.get_textpage()
+    try:
+        n_chars = int(textpage.count_chars())
+        try:
+            text = textpage.get_text_range(0, -1)
+        except Exception:
+            text = ""
+        n_rect_rows = int(textpage.count_rects(0, -1))
+        rects = tuple(textpage.get_rect(i) for i in range(n_rect_rows))
+    finally:
+        textpage.close()
+    return PageProbe(width, height, n_chars, text, n_rect_rows, rects)
+
+
 @pdfium_serialized
 def _pdfium_facts(pdf_path: Path) -> list[dict[str, Any]]:
     """Text-layer facts per page via pypdfium2 (empty list on failure)."""
@@ -237,29 +273,17 @@ def _pdfium_facts(pdf_path: Path) -> list[dict[str, Any]]:
         for idx in range(len(pdf)):
             page = pdf[idx]
             try:
-                width = float(page.get_width())
-                height = float(page.get_height())
-                textpage = page.get_textpage()
-                try:
-                    n_chars = int(textpage.count_chars())
-                    try:
-                        text = textpage.get_text_range(0, -1)
-                    except Exception:
-                        text = ""
-                    n_rects = int(textpage.count_rects(0, -1))
-                    rects = [textpage.get_rect(i) for i in range(n_rects)]
-                    out.append(
-                        {
-                            "width_pt": width,
-                            "height_pt": height,
-                            "n_chars": n_chars,
-                            "n_rect_rows": n_rects,
-                            "right_row_share": column_right_share(rects, width),
-                            "formula_density": formula_debris_share(text),
-                        }
-                    )
-                finally:
-                    textpage.close()
+                probe = probe_pdfium_page(page)
+                out.append(
+                    {
+                        "width_pt": probe.width_pt,
+                        "height_pt": probe.height_pt,
+                        "n_chars": probe.n_chars,
+                        "n_rect_rows": probe.n_rect_rows,
+                        "right_row_share": column_right_share(list(probe.rects), probe.width_pt),
+                        "formula_density": formula_debris_share(probe.text),
+                    }
+                )
             finally:
                 page.close()
     finally:

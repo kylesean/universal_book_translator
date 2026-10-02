@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from ubt.adapters.pdf import pdf_struct
-from ubt.adapters.pdf.page_profiler import PageKind, column_right_share
+from ubt.adapters.pdf.page_profiler import PageKind, column_right_share, probe_pdfium_page
 from ubt.adapters.pdf.pdfium_gate import pdfium_serialized
 from ubt.cache.dirs import cache_root
 from ubt.core.policy.layout_policy import (
@@ -178,31 +178,23 @@ def inspect_pdf_route_plan(
             for idx in page_indices:
                 page = pdf[idx]
                 try:
-                    textpage = page.get_textpage()
-                    try:
-                        n_chars = textpage.count_chars()
-                        sampled_char_counts.append(n_chars)
-                        if n_chars < PROBE_MIN_CHARS:
-                            continue
-                        try:
-                            probe_text = textpage.get_text_range(0, -1)
-                        except Exception:
-                            probe_text = ""
-                        if formula_debris_share(probe_text) >= PROBE_FORMULA_SHARE:
-                            logger.debug(
-                                "PDF engine probe: formula-dense page %d in '%s'; using docling",
-                                idx + 1,
-                                pdf_path.name,
-                            )
-                            has_formulas = True
-                        n_rects = textpage.count_rects(0, -1)
-                        if n_rects >= PROBE_MIN_ROWS:
-                            page_width = page.get_width()
-                            rects = [textpage.get_rect(i) for i in range(n_rects)]
-                            if column_right_share(rects, page_width) > PROBE_COLUMN_SHARE:
-                                has_multicolumn = True
-                    finally:
-                        textpage.close()
+                    probe = probe_pdfium_page(page)
+                    sampled_char_counts.append(probe.n_chars)
+                    if probe.n_chars < PROBE_MIN_CHARS:
+                        continue
+                    if formula_debris_share(probe.text) >= PROBE_FORMULA_SHARE:
+                        logger.debug(
+                            "PDF engine probe: formula-dense page %d in '%s'; using docling",
+                            idx + 1,
+                            pdf_path.name,
+                        )
+                        has_formulas = True
+                    if (
+                        probe.n_rect_rows >= PROBE_MIN_ROWS
+                        and column_right_share(list(probe.rects), probe.width_pt)
+                        > PROBE_COLUMN_SHARE
+                    ):
+                        has_multicolumn = True
                 finally:
                     page.close()
 
