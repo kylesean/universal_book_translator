@@ -1,0 +1,80 @@
+"""merge_row_fragments: row glue must not collapse a page into one line.
+
+pdfium emits one rect per glyph run and merge_row_fragments glues them back
+into visual rows. The band-formation pass assumes rows never overlap, but a
+fragment far taller than a row (vertical sidebar text, rotated watermarks)
+overlaps dozens of rows; if it seeds a band, every row in its y-span joins it
+and half the page becomes one glued line — which then steals zones from
+neighbouring blocks in the rigid typesetter (arXiv 2609.32391 wiped its
+introduction paragraph). These tests pin the seal: super-tall fragments stay
+their own line and never absorb normal rows.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from ubt.adapters.pdf.textgeom import LineBox, merge_row_fragments
+
+pytestmark = pytest.mark.fast
+
+
+def _sidebar() -> LineBox:
+    """The real shape: arXiv's rotated identifier column, h = 340.8pt."""
+    return LineBox("arXiv:2609.32391v2 [cs.AI] 29 Sep 2026", (24.0, 225.6, 42.2, 566.4))
+
+
+def test_tall_sidebar_fragment_does_not_swallow_overlapping_rows() -> None:
+    rows = [
+        LineBox("A continual-learning agent is a system comprising", (70.8, 227.3, 541.3, 235.0)),
+        LineBox("habits, and workflow state. Across such a lifecycle", (71.2, 215.4, 540.4, 224.6)),
+        _sidebar(),
+    ]
+    merged = merge_row_fragments(rows)
+    assert len(merged) == 3
+    by_text = {ln.text: ln.rect for ln in merged}
+    assert by_text["arXiv:2609.32391v2 [cs.AI] 29 Sep 2026"] == (24.0, 225.6, 42.2, 566.4)
+    assert by_text["A continual-learning agent is a system comprising"] == (
+        70.8,
+        227.3,
+        541.3,
+        235.0,
+    )
+
+
+def test_tall_fragment_survives_alongside_a_full_page_of_rows() -> None:
+    # A whole middle-of-page column of overlapping-x rows plus the sidebar:
+    # nothing may chain into one glued line.
+    rows = [_sidebar()]
+    y = 540.0
+    for i in range(20):
+        rows.append(LineBox(f"body text line {i}", (70.8, y - 8.0, 540.0, y)))
+        y -= 12.0
+    merged = merge_row_fragments(rows)
+    assert len(merged) == 21
+
+
+def test_normal_row_fragments_still_glue() -> None:
+    # The regression must not break the pass's purpose: word fragments on one
+    # visual row still merge.
+    rows = [
+        LineBox("Continual-learning", (88.2, 541.1, 180.0, 549.0)),
+        LineBox("agents", (184.0, 541.1, 230.0, 549.0)),
+        LineBox("are systems of models", (234.0, 541.1, 380.0, 549.0)),
+        LineBox("Next row", (88.0, 529.1, 200.0, 536.9)),
+    ]
+    merged = merge_row_fragments(rows)
+    assert len(merged) == 2
+    assert merged[0].text == "Continual-learning agents are systems of models"
+
+
+def test_superscript_attaches_to_its_row_not_a_tall_fragment() -> None:
+    rows = [
+        _sidebar(),
+        LineBox("base", (88.0, 529.1, 120.0, 536.9)),
+        LineBox("2", (121.0, 531.0, 125.0, 537.5)),  # small fragment, h < 0.7*med
+    ]
+    merged = merge_row_fragments(rows)
+    texts = [ln.text for ln in merged]
+    assert any("base 2" in t or "base2" in t for t in texts)
+    assert "arXiv:2609.32391v2 [cs.AI] 29 Sep 2026" in texts

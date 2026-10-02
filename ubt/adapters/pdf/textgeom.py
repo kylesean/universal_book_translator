@@ -21,6 +21,7 @@ from ubt.core.policy.layout_policy import (
     CONTROL_RE,
     FOLD_MAP,
     ROW_MERGE_GAP_PT,
+    ROW_MERGE_TALL_FACTOR,
     ROW_MERGE_Y_TOL,
     WS_RE,
 )
@@ -309,11 +310,21 @@ def merge_row_fragments(
     strips spaces for matching, so pairing is unaffected). Cross-gutter
     merges cannot happen (real gutters dwarf the gap cap). Runs before
     ``column_order``.
+
+    Fragments far taller than the median row (vertical sidebar text, rotated
+    watermarks) are excluded from band formation entirely: seeded as a band,
+    every normal row overlapping their huge y-span would join it and collapse
+    half the page into one glued row (arXiv 2609.32391). Each stays its own
+    sealed band that neither pass may join.
     """
     sized = [(ln.rect[3] - ln.rect[1], ln) for ln in lines]
     heights = sorted(h for h, _ in sized if h > 0)
     med = heights[len(heights) // 2] if heights else 0.0
-    core = [ln for h, ln in sized if h >= 0.7 * med]
+    # A median of 0 means most fragments carry no height; the tall cut would
+    # seal everything, so keep the historical behaviour on such pages.
+    tall_cut = ROW_MERGE_TALL_FACTOR * med if med > 0 else float("inf")
+    core = [ln for h, ln in sized if 0.7 * med <= h <= tall_cut]
+    tall = [ln for h, ln in sized if h > tall_cut]
     small = [ln for h, ln in sized if h < 0.7 * med]
     bands: list[dict[str, Any]] = []  # top-down: {"y0","y1","frags"}
     for ln in sorted(core, key=lambda v: (-v.rect[3], v.rect[0])):
@@ -340,6 +351,9 @@ def merge_row_fragments(
             bands.append({"y0": y0, "y1": y1, "frags": [ln]})
         else:
             hit["frags"].append(ln)
+    # Sealed bands go in last so neither pass above can ever join them.
+    for ln in tall:
+        bands.append({"y0": ln.rect[1], "y1": ln.rect[3], "frags": [ln]})
     merged: list[LineBox] = []
     for band in bands:
         row = sorted(band["frags"], key=lambda v: v.rect[0])

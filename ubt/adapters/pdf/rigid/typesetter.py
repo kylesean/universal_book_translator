@@ -378,19 +378,38 @@ def _reclaim_zone_down(
     return zone.with_y0(new_y0)
 
 
-def _overflow_zone_down(zone: Zone, min_y: float) -> Zone:
-    """Extend a zone down to the page content bottom, ignoring neighbours.
+def _overflow_zone_down(
+    zone: Zone,
+    min_y: float,
+    page_rects: list[tuple[str, Rect]] | None = None,
+    gap_pt: float = RECLAIM_GAP_PT,
+) -> Zone:
+    """Extend a zone down toward the page content bottom, stopping at neighbours.
 
-    Bounded overflow (Axiom B): when a translation cannot fit its region even at
-    the degraded floor, prefer painting it below the source box — down to the
-    page's content bottom — over leaving the source visible. It is bounded by
-    the *page*, not by neighbours, so the text may run into blank space or, at
-    worst, over a neighbour: the agreed priority order puts translation
-    completeness above pixel layout. A no-op zone is returned unchanged.
+    Bounded overflow (Axiom B): when a translation cannot fit its region even
+    at the degraded floor, prefer painting it below the source box — down to
+    the page's content bottom — over leaving the source visible. The extension
+    is bounded by the nearest occupied rectangle below that overlaps the zone's
+    horizontal span (the same rule as ``_reclaim_zone_down``, without its
+    budget): painting into genuinely blank space keeps the translation
+    complete, but running over a neighbour's ink destroys both texts, so a
+    neighbour-bounded zone that still cannot fit fails closed at the caller as
+    ``spill`` (source visible, loss recorded). A no-op zone is returned
+    unchanged.
     """
     if min_y >= zone.y0 - 0.5:
         return zone
-    return zone.with_y0(min_y)
+    floor = min_y
+    for other_id, (ox0, other_bottom, ox1, other_top) in page_rects or ():
+        if other_id == zone.block_id:
+            continue
+        if ox1 <= zone.x0 or ox0 >= zone.x1:  # no horizontal overlap → different column
+            continue
+        if other_bottom < zone.y0:  # neighbour reaches our bottom line or below
+            floor = max(floor, other_top + gap_pt)
+    if floor >= zone.y0 - 0.5:
+        return zone
+    return zone.with_y0(floor)
 
 
 def _boxes_for(zone: Zone, size_pt: float) -> list[Rect]:
@@ -714,10 +733,16 @@ class RigidTypesetter:
                     report.degraded_blocks.append(block.id)
             if pending is None and eff_zones:
                 # Bounded overflow: even the floor does not fit, so extend the
-                # last zone to the page's content bottom and retry. Translation
-                # completeness outranks pixel layout, so the text may paint past
-                # its source box rather than leave the source visible.
-                overflow_last = _overflow_zone_down(eff_zones[-1], CONTENT_BOTTOM_PT)
+                # last zone down through confirmed-blank space to the page's
+                # content bottom and retry. Translation completeness outranks
+                # pixel layout, but the extension stops at the nearest occupied
+                # rect below — painting over a neighbour's ink destroys both
+                # texts, and a zone that still cannot fit fails closed below.
+                overflow_last = _overflow_zone_down(
+                    eff_zones[-1],
+                    CONTENT_BOTTOM_PT,
+                    page_zone_rects.get(eff_zones[-1].page, []),
+                )
                 if overflow_last is not eff_zones[-1]:
                     trial = self._paginate(
                         text, (*eff_zones[:-1], overflow_last), RIGID_DEGRADED_FIT_FLOOR_PT

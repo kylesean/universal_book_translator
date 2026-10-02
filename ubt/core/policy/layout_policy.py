@@ -283,6 +283,10 @@ def rigid_min_font_pt_for(region: object, *, default: float = RIGID_MIN_FONT_PT)
 # sits between word gaps (<10pt) and column gutters.
 ROW_MERGE_GAP_PT = _env_float("UBT_ROW_MERGE_GAP_PT", 24.0)
 ROW_MERGE_Y_TOL = _env_float("UBT_ROW_MERGE_Y_TOL", 0.5)
+# A fragment this many times the median row height is not a row (vertical
+# sidebar text, rotated watermarks); it must never seed a band that normal
+# rows join, or the whole span collapses into one glued line.
+ROW_MERGE_TALL_FACTOR = _env_float("UBT_ROW_MERGE_TALL_FACTOR", 3.0)
 
 # ---------------------------------------------------------------------------
 # PDF operator inventory (page profiler / engine selector)
