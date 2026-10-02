@@ -36,7 +36,16 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 from ubt.core.ir.models import BookManifest, ChapterIR, IRBlock
 
 if TYPE_CHECKING:
+    # Type-only edges: they keep the port's signature checked against the
+    # stage contracts without entering the runtime import graph (the
+    # layering invariant in docs/design/unified-compiler-evolution.md §6.1
+    # forbids only module-level edges).
+    from ubt.core.engine.blocks import BlockReader
+    from ubt.core.engine.events import TranslationProgressEvent
+    from ubt.core.engine.facts import RunFacts
     from ubt.core.engine.ledger import SQLiteJobLedger
+    from ubt.core.engine.services import RunServices
+    from ubt.core.engine.stage_context import StageContext
 
 
 @dataclass(frozen=True)
@@ -583,17 +592,22 @@ def translation_engine(
 
 
 def run_stage_plan(
-    ctx: Any,
-    facts: Any,
-    services: Any,
+    ctx: StageContext,
+    facts: RunFacts,
+    services: RunServices,
     *,
     chapter_streaming: bool,
     c_text: bool,
     consistency: bool,
-    blocks: Any,
-    on_export_completed: Callable[[Any], Awaitable[None]] | None = None,
-) -> AsyncIterator[Any]:
-    """Run the compiler's stage plan over the run's resources, yielding events."""
+    blocks: BlockReader,
+    on_export_completed: Callable[[TranslationProgressEvent], Awaitable[None]] | None = None,
+) -> AsyncIterator[TranslationProgressEvent]:
+    """Run the compiler's stage plan over the run's resources, yielding events.
+
+    Every parameter type lives in ``ubt.core.engine`` (the stage contracts
+    moved there), so the seam is fully checked without naming the compiler
+    package in an annotation.
+    """
     from ubt.pipeline.run import RunGates, run_stages
 
     return run_stages(
