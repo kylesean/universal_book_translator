@@ -212,12 +212,13 @@ def _sandbox_path(raw: str, *, must_exist: bool) -> Path:
     without sandbox restriction.
 
     The allowlist is the REST ``resolve_secure_path`` default, re-implemented
-    here instead of imported on purpose: ``ubt.api``'s package ``__init__``
-    imports ``ubt.api.app``, whose module body *builds the FastAPI app and
-    reconfigures root logging* — unacceptable side effects inside a stdio MCP
-    server. The allowlist *source* is still shared: ``UBT_ALLOWED_DIRS`` when
-    the operator sets it, else the working directory plus ``config.db_dir``,
-    exactly like ``ubt/api/security.py``.
+    here instead of imported on purpose: ``ubt.api.security`` imports
+    ``fastapi`` at module scope, and the stdio MCP server must not require a
+    web-framework dependency to run. The allowlist *primitives* are shared —
+    ``SYSTEM_DISALLOWED_PREFIXES`` and ``is_sensitive_path_part`` come from
+    ``ubt.core.fs_perms`` — and the base precedence (``UBT_ALLOWED_DIRS`` when
+    the operator sets it, else the working directory plus ``config.db_dir``)
+    matches ``ubt/api/security.py``.
     """
     candidate = str(raw).strip()
     if not candidate:
@@ -254,8 +255,9 @@ def _sandbox_path(raw: str, *, must_exist: bool) -> Path:
     # started in $HOME has its whole home directory inside the default
     # allowlist, and a prompt-injected agent must not be able to read
     # ``.ssh``/``.env``/``credentials.json`` through these tools. Shared from
-    # ``ubt.core.fs_perms`` — importing ``ubt.api.security`` would build the
-    # FastAPI app as a side effect (see this function's docstring).
+    # ``ubt.core.fs_perms`` — importing ``ubt.api.security`` would drag in
+    # fastapi, which the stdio MCP server does not require (see this
+    # function's docstring).
     for part in resolved.parts:
         if is_sensitive_path_part(part):
             raise UBTError(

@@ -77,11 +77,14 @@ class EventFactory(Protocol):
 class StageContext:
     """The immutable inputs and per-run collaborators a pipeline stage reads.
 
-    Frozen on purpose (unified pipeline stage context): no stage
-    writes a field, and the run's one piece of mutable state -- the block
-    snapshot -- now lives in :class:`~ubt.pipeline.blocks.BlockReader`, owned by
-    the plan. ``frozen=True`` makes "a stage cannot mutate the run" a
-    compile/runtime invariant rather than a convention.
+    Frozen on purpose (unified pipeline stage context): ``frozen=True`` stops a
+    stage from *rebinding* any field -- config, ledger, collaborators cannot be
+    swapped mid-run. It does not deep-freeze the object graph: run-level mutable
+    state flows through ``ctx.manifest.run``, the one sanctioned channel a stage
+    may write (``RunMetadata`` validates every assignment) -- page selection at
+    ingest, delivery status at advisory -- and the reporter reads it back.
+    Block-level mutable state stays out of the context entirely: it lives in
+    :class:`~ubt.pipeline.blocks.BlockReader`, owned by the plan.
     """
 
     # --- The run's inputs -------------------------------------------------

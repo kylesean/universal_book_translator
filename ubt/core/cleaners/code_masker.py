@@ -44,7 +44,7 @@ class CodeMasker:
 
         Tokens carry a checksum suffix (``⟦CODE_MASK_0001-a3f⟧``) binding the
         index to the masked original; see
-        :func:`~ubt.core.cleaners.math_masker._token_checksum`.
+        :func:`~ubt.core.cleaners.mask_tokens.token_checksum`.
         """
         mapping: dict[str, str] = {}
         counter = 1
