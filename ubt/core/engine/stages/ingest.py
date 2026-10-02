@@ -49,9 +49,21 @@ def update_bibliography_section_state(
       the next 4 blocks after that sub-heading is still a bibliography entry.
     - A real post-bibliography section heading (e.g. ``Appendix A``) whose upcoming
       blocks are normal prose cleanly resets ``in_bibliography=False``.
+    - A narrative block the per-block rules find translatable also closes the
+      section: body content can follow the entries before any heading appears
+      (a table caption between the reference list and ``Appendix A``, arXiv
+      2609.32391). Blocks that merely classify as odd (garbled OCR entries,
+      debris, bylines) keep the section open, so only genuinely translatable
+      prose closes it.
     """
     b = blocks[idx]
     if b.block_type is not BlockType.HEADING:
+        if (
+            in_bibliography
+            and b.block_type is BlockType.NARRATIVE
+            and classify_skip(b.source_text or "") is None
+        ):
+            return False
         return in_bibliography
     h_txt = (b.source_text or "").strip()
     next_slice = blocks[idx + 1 : idx + 5]

@@ -182,6 +182,27 @@ def test_narrative_prose_overrides_a_bibliography_shape(text: str) -> None:
     assert classify_skip(text) is None
 
 
+def test_inline_citation_prose_is_not_a_bibliography_entry() -> None:
+    # "et al." in an in-text citation cannot authenticate the et-al tier by
+    # itself: body prose cites "(Wang et al., 2023)" constantly, and counting
+    # those matches toward the author gate shipped whole paragraphs verbatim
+    # (arXiv 2609.32391 introduction).
+    assert (
+        classify_skip(
+            "A continual-learning agent is a system comprising a memory layer that "
+            "retains accumulated experience (Wang et al., 2023; Park et al., 2023), "
+            "and model training that refines its behavior across sessions."
+        )
+        is None
+    )
+
+
+def test_et_al_with_an_independent_author_signal_still_skips() -> None:
+    # An initial-based name or a venue must back the et-al tier.
+    assert classify_skip("A. Wang et al. 2019") == BIB
+    assert classify_skip("Smith et al. IEEE, 2019") == BIB
+
+
 # --- author byline ----------------------------------------------------------
 
 

@@ -160,6 +160,11 @@ def _is_bib_entry(text: str) -> bool:
         extra_books = tuple(_EXTRA_BIB_BOOK_PATTERNS)
 
     authors = len(_ETAL_RE.findall(text)) + len(_AUTHOR_RE.findall(text))
+    # ``et al.`` matches cannot authenticate the et-al tier below: body prose
+    # cites "(Wang et al., 2023)" far too often (arXiv 2609.32391 shipped its
+    # introduction untranslated). Only an author signal independent of
+    # ``et al.`` — an initial-based name — may back that tier.
+    initial_authors = len(_AUTHOR_RE.findall(text))
     if not _YEAR_RE.search(text):
         return False
     full_name_start = _NAME_LIST_START_RE.match(text) is not None
@@ -178,7 +183,7 @@ def _is_bib_entry(text: str) -> bool:
         and (_PAGES_RE.search(text) or _VOLUME_RE.search(text) or _PAGE_RANGE_RE.search(text))
     ):
         return True
-    if _ETAL_RE.search(text) and (venue_hit or _IN_VENUE_RE.search(text) or authors >= 1):
+    if _ETAL_RE.search(text) and (venue_hit or _IN_VENUE_RE.search(text) or initial_authors >= 1):
         return True
     if _URL_RE.search(text) and (
         venue_hit or _IN_VENUE_RE.search(text) or authors >= 1 or full_name_start
