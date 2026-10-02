@@ -44,6 +44,7 @@ from ubt.core.ports import (
     DocumentAdapter,
     apply_runtime_config,
     resolve_adapter,
+    run_stage_plan,
 )
 from ubt.core.qe.base import BaseQERunner
 from ubt.core.qe.comet_runner import HeuristicQERunner, SubprocessQERunner
@@ -54,7 +55,6 @@ from ubt.core.router.rate_limiter import AdaptiveTokenBucket
 from ubt.core.router.registry import get_default_registry
 from ubt.core.router.router import ModelRouter
 from ubt.core.router_mode import decide
-from ubt.pipeline.run import RunGates, run_stages
 
 logger = logging.getLogger(__name__)
 
@@ -855,19 +855,13 @@ class PipelineOrchestrator:
             )
 
             # -----------------------------------------------------------------
-            # The stage plan lives in ubt.pipeline.run (document compiler architecture): this class
-            # owns the run's resources -- the writer lock, ledger, adapter,
-            # router -- and the plan owns order and gating. The terminal export
-            # event triggers TM writeback and the finalize hook BEFORE it is
-            # yielded, so a caller that breaks immediately does not lose those
-            # writes to GeneratorExit.
+            # The stage plan lives in ubt.pipeline.run (document compiler architecture),
+            # reached through the ``run_stage_plan`` port: this class owns the run's
+            # resources -- the writer lock, ledger, adapter, router -- and the plan
+            # owns order and gating. The terminal export event triggers TM writeback
+            # and the finalize hook BEFORE it is yielded, so a caller that breaks
+            # immediately does not lose those writes to GeneratorExit.
             # -----------------------------------------------------------------
-            gates = RunGates(
-                chapter_streaming=self.config.chapter_streaming_enabled
-                and len(manifest.chapters) > 1,
-                c_text=self.config.c_text_enabled,
-                consistency=self.config.consistency_enforce != "off",
-            )
             # The values a stage produces and a later one consumes live here for
             # the whole run (explicit stage execution context): the plan threads each to
             # the stage that reads it, and the terminal hook reads the same facts
@@ -882,8 +876,16 @@ class PipelineOrchestrator:
                 await run_tm_writeback_stage(ctx, services, facts.terminology)
                 await self._run_finalize_hook(event)
 
-            async for event in run_stages(
-                ctx, gates, facts, services, blocks=blocks, on_export_completed=_on_export_completed
+            async for event in run_stage_plan(
+                ctx,
+                facts,
+                services,
+                chapter_streaming=self.config.chapter_streaming_enabled
+                and len(manifest.chapters) > 1,
+                c_text=self.config.c_text_enabled,
+                consistency=self.config.consistency_enforce != "off",
+                blocks=blocks,
+                on_export_completed=_on_export_completed,
             ):
                 yield event
 
