@@ -154,13 +154,6 @@ class MathMasker:
         )
 
 
-def count_math_spans(text: str) -> int:
-    """Number of inline-math spans in text (0-token diagnostics)."""
-    probe = MathMasker()
-    _, mapping = probe.mask(text)
-    return len(mapping)
-
-
 def extract_math_spans(text: str) -> list[str]:
     """Inline-math span contents in order (for preservation comparison)."""
     _, mapping = MathMasker().mask(text)

@@ -171,8 +171,6 @@ def test_math_currency_is_not_masked() -> None:
 
 
 def test_math_span_helpers() -> None:
-    # ``count_math_spans`` is intentionally not tested: the review report flags it
-    # as dead code (Q5) pending a delete-or-wire decision.
     assert extract_math_spans("a $x$ b $y$") == ["$x$", "$y$"]
 
 
