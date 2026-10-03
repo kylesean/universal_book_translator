@@ -84,6 +84,32 @@ JOB_ID_MAX_LEN = 128
 # so anything but an ISO-ish tag is markup in disguise.
 LANG_CODE_RE = re.compile(r"[A-Za-z]{2,3}(?:[_-][A-Za-z0-9]{2,4})?")
 LANG_CODE_PATTERN = rf"^{LANG_CODE_RE.pattern}$"
+
+
+def lang_pair_validation_error(source_lang: str | None, target_lang: str | None) -> str | None:
+    """The single language-code gate shared by every entry point.
+
+    Returns a human-readable error for the first violation, or None. One
+    wording on purpose: the CLI, the API and MCP each used to word this check
+    differently and the messages drifted apart.
+    """
+    from ubt.core.language_profile import is_supported_lang, supported_lang_codes
+
+    for key, value in (("source-lang", source_lang), ("target-lang", target_lang)):
+        if value is not None and LANG_CODE_RE.fullmatch(str(value)) is None:
+            return (
+                f"Invalid {key}: {str(value)!r}. Use an ISO-ish language code "
+                "such as 'en', 'zh' or 'zh-CN'."
+            )
+    if target_lang is not None and not is_supported_lang(str(target_lang)):
+        return (
+            f"Unsupported target-lang: {str(target_lang)!r}. Supported base "
+            f"languages: {', '.join(supported_lang_codes())} (region tags such as "
+            "'zh-CN' are accepted)."
+        )
+    return None
+
+
 #: Domain-profile names index a packaged resource directory
 #: (``ubt/resources/glossaries/<profile>/<src>-<tgt>.json``), so they must be a
 #: single safe path component — a separator or ``..`` would escape the tree.

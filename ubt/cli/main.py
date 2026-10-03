@@ -33,13 +33,13 @@ from ubt.core.job_options import (
     JOB_ID_MAX_LEN,
     apply_config_overrides,
     job_id_is_valid,
+    lang_pair_validation_error,
     overrides_from_request,
     run_kwargs_from_request,
 )
 from ubt.core.job_options import (
     LANG_CODE_RE as LANG_CODE_RE,
 )
-from ubt.core.language_profile import is_supported_lang, supported_lang_codes
 from ubt.core.log_config import setup_logging
 from ubt.core.metrics import (
     KPI_DEFINITIONS,
@@ -150,22 +150,11 @@ async def _run_translation(
             "ubt.core.job_options, same as API/MCP)"
         )
     # Language codes reach the ledger file name (derive_job_id) and, after
-    # sanitizing, Typst markup; the API and MCP surfaces already reject
-    # anything non-ISO-ish up front, the CLI was the lone pass-through.
-    for key in ("source_lang", "target_lang"):
-        value = request.get(key)
-        if value is not None and LANG_CODE_RE.fullmatch(str(value)) is None:
-            raise UBTError(
-                f"Invalid {key.replace('_', '-')} {value!r}: use an ISO-ish "
-                "language code such as 'en', 'zh' or 'zh-CN' (the shared "
-                "rule in ubt.core.job_options, same as API/MCP)"
-            )
-    target_lang_value = request.get("target_lang")
-    if target_lang_value is not None and not is_supported_lang(str(target_lang_value)):
-        raise UBTError(
-            f"Unsupported target-lang {target_lang_value!r}: supported base languages "
-            f"are {', '.join(supported_lang_codes())} (region tags such as 'zh-CN' are accepted)"
-        )
+    # sanitizing, Typst markup. One shared gate — the CLI's hand-rolled copy
+    # used to word it differently from the API/MCP surfaces.
+    lang_error = lang_pair_validation_error(request.get("source_lang"), request.get("target_lang"))
+    if lang_error is not None:
+        raise UBTError(lang_error)
     overrides: dict[str, Any] = overrides_from_request(request)
 
     # ``overrides_from_request`` already applied the shared adaptive default, so

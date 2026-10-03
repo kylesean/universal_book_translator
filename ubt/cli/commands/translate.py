@@ -613,51 +613,24 @@ def translate(
         "visual_judge_model": visual_judge_model,
     }
 
-    from ubt.core.job_options import LANG_CODE_RE
-    from ubt.core.language_profile import is_supported_lang, supported_lang_codes
+    from ubt.core.job_options import lang_pair_validation_error
 
-    for key in ("source_lang", "target_lang"):
-        value = request.get(key)
-        if value is not None and LANG_CODE_RE.fullmatch(str(value)) is None:
-            if json_output:
-                print(
-                    json.dumps(
-                        {
-                            "status": "failed",
-                            "error": (
-                                f"Invalid {key.replace('_', '-')}: {str(value)!r}. "
-                                "Use an ISO-ish language code such as 'en', 'zh' or 'zh-CN'."
-                            ),
-                        }
-                    )
-                )
-            else:
-                console.print(
-                    f"[bold red]Invalid {key.replace('_', '-')}:[/] {escape(str(value))!r}. "
-                    "Use an ISO-ish language code such as 'en', 'zh' or 'zh-CN'."
-                )
-            raise typer.Exit(code=1)
-
-    # A well-formed but unsupported target (e.g. 'pt-BR') would otherwise ingest
-    # the whole book and only then raise "Unknown language profile" in the
-    # pipeline. Reject it here, before any token is spent.
-    target_lang_value = request.get("target_lang")
-    if target_lang_value is not None and not is_supported_lang(str(target_lang_value)):
-        err_msg = (
-            f"Unsupported target-lang: {str(target_lang_value)!r}. Supported base "
-            f"languages: {', '.join(supported_lang_codes())} (region tags such as "
-            "'zh-CN' are accepted)."
-        )
+    # Usage errors exit 2 (typer's own convention for bad usage); runtime
+    # failures keep exit 1. The language gate is the shared one — this
+    # command's hand-rolled copy used to word it differently from the API/MCP
+    # surfaces, and the wordings drifted.
+    lang_error = lang_pair_validation_error(request.get("source_lang"), request.get("target_lang"))
+    if lang_error is not None:
         if json_output:
-            print(json.dumps({"status": "failed", "error": err_msg}))
+            print(json.dumps({"status": "failed", "error": lang_error}))
         else:
-            console.print(
-                f"[bold red]Unsupported target-lang:[/] "
-                f"{escape(str(target_lang_value))!r}. Supported base languages: "
-                f"{', '.join(supported_lang_codes())} (region tags such as 'zh-CN' are accepted)."
-            )
-        raise typer.Exit(code=1)
+            key_part, _, rest = lang_error.partition(":")
+            console.print(f"[bold red]{key_part}:[/]{rest}")
+        raise typer.Exit(code=2)
 
+    # A well-formed but unsupported profile would otherwise ingest the whole
+    # book and only then fail in the pipeline. Reject it here, before any
+    # token is spent.
     if not profile_name_is_valid(profile):
         err_msg = (
             f"Invalid domain profile: {profile!r}. Use a name of letters, digits, "
@@ -671,7 +644,7 @@ def translate(
                 f"Use a name of letters, digits, '-' or '_' "
                 f"(examples: {_PROFILE_EXAMPLES})."
             )
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=2)
 
     # ``verbose`` is this command's own flag, but the global ``-v`` (main
     # callback) also enables DEBUG; re-calling setup_logging here with
@@ -684,11 +657,12 @@ def translate(
         setup_logging(console=console)
 
     if not input_path.exists():
+        # A bad path is bad usage, not a runtime failure: exit 2.
         if json_output:
             print(json.dumps({"status": "failed", "error": f"Input file not found: {input_path}"}))
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=2)
         console.print(f"[bold red]Error:[/] Input file not found: {input_path}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=2)
 
     if not json_output:
         console.print(
