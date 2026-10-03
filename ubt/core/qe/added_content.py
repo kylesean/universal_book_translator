@@ -47,7 +47,7 @@ from dataclasses import dataclass, field
 # "图 3.9" are the same reference written two ways and must collapse to one
 # token, or every correctly translated figure callout would look fabricated.
 _REF_KEYWORD = (
-    r"(?:FIG|Figs?|Figures?|Eqs?|Equations?|Tables?|Tabs?|Secs?|Sections?|Chaps?|Chapters?|"
+    r"(?:§+|FIG|Figs?|Figures?|Eqs?|Equations?|Tables?|Tabs?|Secs?|Sections?|Chaps?|Chapters?|"
     r"Apps?|Appendi(?:x|ces)|"
     r"图|式|表|方程|附录|附錄)"
 )

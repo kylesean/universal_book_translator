@@ -281,3 +281,20 @@ def test_matching_is_case_sensitive() -> None:
 def test_protected_spans_hide_target_violations() -> None:
     glossary = [{"source": "FinFET", "translation": "鳍式场效应晶体管"}]
     assert detect_target_term_violations("`FinFET`", glossary) == ()
+
+
+def test_acronym_alias_matches_case_sensitively() -> None:
+    # An acronym alias like "BE" for "best-effort" must not match the common English verb "be"
+    glossary = [{"source": "best-effort", "translation": "BE尽力而为", "aliases": ["BE"]}]
+    findings = detect_term_drift(
+        "This model can be used for translation.", "该模型可用于翻译。", glossary
+    )
+    assert not findings[0].occurs_in_source
+    assert not findings[0].drifted
+
+    # But it must match uppercase "BE"
+    findings_be = detect_term_drift(
+        "For BE tasks, we need...", "对于普通任务，我们需要...", glossary
+    )
+    assert findings_be[0].occurs_in_source
+    assert findings_be[0].drifted

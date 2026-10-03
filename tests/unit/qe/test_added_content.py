@@ -168,3 +168,13 @@ def test_the_decision_defaults_are_empty() -> None:
     assert decision.leaked_headings == ()
     assert decision.source_refs == frozenset()
     assert decision.target_refs == frozenset()
+
+
+def test_section_symbol_reference_is_not_fabricated() -> None:
+    # A source text with "in §8.4" translated as "在第 8.4 节" must not be flagged
+    src = "In our evaluation in §8.4, DAMON with balloon free-page reporting reduces memory consumption by 21.2%."
+    tgt = "在第 8.4 节的评估中，DAMON 结合 balloon 空闲页报告在未引入显著 CPU 开销的情况下，将内存消耗降低了 21.2%。"
+    decision = AddedContentGate().evaluate(src, tgt)
+    assert decision.passed is True
+    assert "8.4" in decision.source_refs
+    assert "8.4" in decision.target_refs

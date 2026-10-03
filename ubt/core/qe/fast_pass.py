@@ -59,6 +59,7 @@ _LINE_LETTER_RE = re.compile(f"[A-Za-z{CJK_SCRIPT_CLASS}]")
 # measurement (same rationale as HTML tags). Bare domains without a scheme or
 # www. prefix are left in place: indistinguishable from ordinary latin tokens.
 _URL_RE = re.compile(r"https?://[^\s<>\"]+|www\.[^\s<>\"]+", re.IGNORECASE)
+_EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 # Untranslatable residue stripped before script-density measurement.
 # Citation markers, markdown table structure, numerals and isolated
 # single letters (K/V/x formula debris) must survive translation verbatim
@@ -906,6 +907,7 @@ class FastPassFilter:
         # required to survive verbatim and must not dilute the ratio.
         prose_only = re.sub(r"<[^>]+>", "", tgt_clean)
         prose_only = _URL_RE.sub("", prose_only)
+        prose_only = _EMAIL_RE.sub("", prose_only)
         residue = _CITATION_SPAN_RE.sub("", prose_only)
         residue = residue.replace("|", "")
         residue = _TABLE_SEP_RE.sub("", residue)

@@ -275,3 +275,31 @@ def test_decision_defaults() -> None:
     metrics = OmissionMetrics(0, 0, 0.0, 1.0, 1.0, 1.0)
     decision = OmissionDecision(passed=True, reason="ok", metrics=metrics)
     assert decision.metrics is metrics
+
+
+def test_translatable_microvm_term_passes() -> None:
+    decision = OmissionGate().evaluate(
+        "In production, containers and microVMs dominate.",
+        "在生产环境中，容器和微虚拟机占据主导地位。",
+    )
+    assert decision.passed is True
+
+
+def test_ocr_glued_prose_not_tracked_as_identifier() -> None:
+    assert "WeuseAppArmorprofiles" not in identifier_terms(
+        "File access control. WeuseAppArmorprofiles to control file read/write permissions."
+    )
+
+
+def test_clause_merged_sentences_with_full_recall_pass() -> None:
+    src = (
+        "Workloads. Our workloads are drawn from real RL training and evaluation scenarios. "
+        "The task suites include internal benchmarks, SWE-bench (Jimenez et al., 2024), "
+        "Terminal-Bench (Merrill et al., 2026), and similar domains."
+    )
+    tgt = (
+        "工作负载取自真实 RL 强化学习训练与评测场景，任务套件包括内部基准、"
+        "SWE-bench (Jimenez et al., 2024)、Terminal-Bench (Merrill et al., 2026) 及同类领域。"
+    )
+    decision = OmissionGate().evaluate(src, tgt)
+    assert decision.passed is True

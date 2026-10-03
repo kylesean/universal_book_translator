@@ -202,6 +202,14 @@ _COMMON_CAPS_WORDS = frozenset(
 )
 
 
+_OCR_GLUED_PROSE_PREFIX_RE = re.compile(
+    r"^(?:We|In|This|The|That|There|These|Those|Our|It|As|If|When|While|For|With|By|To|From)"
+    r"(?:use|uses|used|show|shows|showed|find|finds|found|present|presents|evaluate|evaluates|"
+    r"this|that|these|those|is|are|was|were|have|has|had|can|could|will|would|an|a|the)",
+    re.IGNORECASE,
+)
+
+
 def is_identifier_shaped(term: str) -> bool:
     """Whether a source-verbatim Latin term must survive translation verbatim.
 
@@ -214,6 +222,8 @@ def is_identifier_shaped(term: str) -> bool:
     "Omission suspected" and quarantined as BLOCKED_HUMAN.
     """
     if term.lower() in _STRUCTURAL_DOCUMENT_LABELS:
+        return False
+    if _OCR_GLUED_PROSE_PREFIX_RE.match(term):
         return False
     m = _STRUCTURAL_LABEL_WITH_NUM_RE.match(term)
     if m and m.group(1).lower() in _STRUCTURAL_DOCUMENT_LABELS:

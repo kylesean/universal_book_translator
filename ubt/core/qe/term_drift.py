@@ -208,8 +208,13 @@ def detect_term_drift(
         # the validator used): whether the term is carried matters, which
         # surface carried it does not change the verdict.
         for surface in term.source_surfaces:
+            # Acronym aliases and short uppercase terms (e.g. "BE" for "best-effort",
+            # "RL", "LS", "MIG", "OCI", "SDK") must match case-sensitively in source text.
+            # Otherwise, an alias like "BE" matches the ubiquitous English verb "be"
+            # (as in "can be", "to be"), falsely accusing almost every block of drifting "best-effort".
+            is_acronym = surface.isupper() and len(surface) <= 5
             hits = find_term_occurrences(
-                source_text, surface, source_protected, case_insensitive=True
+                source_text, surface, source_protected, case_insensitive=not is_acronym
             )
             if hits:
                 matched = surface

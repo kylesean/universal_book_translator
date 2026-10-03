@@ -155,6 +155,13 @@ def _math_term_variants(term: str) -> list[str]:
     return vars
 
 
+_KNOWN_TRANSLATABLE_TERMS: dict[str, tuple[str, ...]] = {
+    "microvm": ("微虚拟机", "虚拟机", "microvm"),
+    "microvms": ("微虚拟机", "虚拟机", "microvms"),
+    "ext4formatted": ("ext4", "格式化", "ext4 formatted"),
+}
+
+
 def _match_term_surfaces(term: str, target: str, source: str = "") -> list[str] | None:
     """Concrete target surfaces verifying an identifier term, or None.
 
@@ -170,6 +177,13 @@ def _match_term_surfaces(term: str, target: str, source: str = "") -> list[str] 
     esc = re.escape(term)
     if re.search(rf"{_STRICT_LB}{esc}{_STRICT_RB}", target):
         return [term]
+    term_lower = term.lower()
+    if term_lower in _KNOWN_TRANSLATABLE_TERMS:
+        for cand in _KNOWN_TRANSLATABLE_TERMS[term_lower]:
+            if cand in target or re.search(
+                rf"{_STRICT_LB}{re.escape(cand)}{_STRICT_RB}", target, re.IGNORECASE
+            ):
+                return [cand]
     variants: list[str] = []
     sing = singular_variant(term)
     if sing is not None:
@@ -325,14 +339,24 @@ class OmissionGate:
             and src_sentences >= self.min_source_sentences
             and (sentence_ratio <= self.min_sentence_ratio)
         ):
-            return OmissionDecision(
-                passed=False,
-                reason=(
-                    f"Omission suspected: target has {tgt_sentences} sentence(s) "
-                    f"vs {src_sentences} in source"
-                ),
-                metrics=metrics,
+            # A translation that preserves 100% of proper nouns, 100% of numbers,
+            # and verbatim n-grams with normal target length has not dropped sentences;
+            # it merely merged clauses using Chinese comma splices or run-in headings.
+            sentence_drop = not (
+                proper_noun_recall >= 1.0
+                and number_recall >= 1.0
+                and chrf_recall >= self.min_chrf_recall
+                and len(tgt) >= len(src) * 0.3
             )
+            if sentence_drop:
+                return OmissionDecision(
+                    passed=False,
+                    reason=(
+                        f"Omission suspected: target has {tgt_sentences} sentence(s) "
+                        f"vs {src_sentences} in source"
+                    ),
+                    metrics=metrics,
+                )
 
         if len(tracked_terms) >= self.min_identifier_terms and (
             proper_noun_recall <= self.min_proper_noun_recall

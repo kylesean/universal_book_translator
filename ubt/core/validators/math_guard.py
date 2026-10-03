@@ -160,7 +160,7 @@ def _strip_code_snake_case(text: str) -> str:
 # scores high on letter density but contains no math to redelimit, so routing
 # it to repair asks the model for something that does not exist and the block
 # can never clear the gate.
-_MATH_CANDIDATE_RE = re.compile(r"[A-Za-z]\s*\d|[\\_^]|[\u0370-\u03ff]")
+_MATH_CANDIDATE_RE = re.compile(r"\b[A-Za-z]\s*\d|[\\_^]|[\u0370-\u03ff]")
 
 
 def target_missing_math_delimiters(source: str, target: str) -> bool:
@@ -202,7 +202,11 @@ def target_missing_math_delimiters(source: str, target: str) -> bool:
         score += 1
     # Density, not absolute count: three lone "a"s make a math row in a
     # 16-token fragment but are ordinary articles in a 75-word paragraph.
-    isolated = _ISOLATED_LETTER_RE2.findall(source)
+    # Exclude English possessives ('s) and slash abbreviations (I/O, A/B)
+    # so standard computing prose does not inflate isolated letter density.
+    src_clean_isolated = re.sub(r"['’]s\b", "", source)
+    src_clean_isolated = re.sub(r"\b[A-Za-z]/[A-Za-z]\b", "", src_clean_isolated)
+    isolated = _ISOLATED_LETTER_RE2.findall(src_clean_isolated)
     tokens = source.split()
     if (
         len(isolated) >= _MIN_ISOLATED_LETTERS

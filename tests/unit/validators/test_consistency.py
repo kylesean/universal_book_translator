@@ -446,3 +446,11 @@ def test_dash_variant_ranges_canonicalize_to_hyphen() -> None:
         "延迟降低 10-20 毫秒，此前为 5-10 倍。",
     )
     assert res.is_valid, res.message
+
+
+def test_bare_count_multiplier_scale_equivalence() -> None:
+    validator = NumericConsistencyValidator()
+    src = "measured over more than 1.5 million containers and 390K microVMs"
+    tgt = "基于超过 150 万个容器和 39 万个微虚拟机测得"
+    res = validator.validate(src, tgt)
+    assert res.is_valid, res.message

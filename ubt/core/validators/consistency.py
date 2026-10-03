@@ -360,7 +360,19 @@ _SCALE_ADJACENCY_RE = re.compile(
     # Exclude "pp" (percentage points) and "ppm"/"ppb"/"ppt" from being misread
     # as pico-unit combinations.
     r"(?P<sym_unit>(?!pp[mbt]?(?![a-zA-Z]))[kMmGTµμnp](?:[A-Z][a-z]{0,2}|[a-z]))(?![a-zA-Z])"
+    # Bare count multiplier: '390K', '30k', '10M', '2B' (common in technical counts)
+    r"|(?<![a-zA-Z])(?P<count>\d[\d,]*(?:\.\d+)?)[ \t]?"
+    r"(?P<count_unit>[KkMBb])(?![a-zA-Z0-9])"
 )
+
+#: Bare count multipliers (390K -> 390,000, 10M -> 10,000,000, 2B -> 2,000,000,000).
+_COUNT_SCALE_FACTORS: dict[str, Decimal] = {
+    "k": Decimal(1000),
+    "K": Decimal(1000),
+    "M": Decimal(1_000_000),
+    "b": Decimal(1_000_000_000),
+    "B": Decimal(1_000_000_000),
+}
 
 #: SI prefix symbols, case-sensitive (``M`` mega vs ``m`` milli).
 _SI_SYMBOL_FACTORS: dict[str, Decimal] = {
@@ -402,12 +414,19 @@ def _scale_map(text: str) -> dict[str, set[str]]:
     """Map each unit-scaled number's textual form to the values it may denote here."""
     out: dict[str, set[str]] = {}
     for match in _SCALE_ADJACENCY_RE.finditer(text):
-        raw = match.group("cn") or match.group("en") or match.group("si") or match.group("sym")
+        raw = (
+            match.group("cn")
+            or match.group("en")
+            or match.group("si")
+            or match.group("sym")
+            or match.group("count")
+        )
         unit = (
             match.group("cn_unit")
             or match.group("en_unit")
             or match.group("si_unit")
             or match.group("sym_unit")
+            or match.group("count_unit")
         )
         if raw is None or unit is None:
             continue
@@ -416,11 +435,12 @@ def _scale_map(text: str) -> dict[str, set[str]]:
             if nxt and nxt in _CN_UNIT_PREFIX_SUFFIXES:
                 # '10千克' — a unit prefix, not a magnitude.
                 continue
-        factor = (
-            _SI_SYMBOL_FACTORS.get(unit[0])
-            if match.group("sym") is not None
-            else _SCALE_FACTORS.get(unit.lower())
-        )
+        if match.group("count") is not None:
+            factor = _COUNT_SCALE_FACTORS.get(unit)
+        elif match.group("sym") is not None:
+            factor = _SI_SYMBOL_FACTORS.get(unit[0])
+        else:
+            factor = _SCALE_FACTORS.get(unit.lower())
         value = _to_decimal(canonicalize_numeric_token(raw))
         if factor is None or value is None:
             continue
@@ -670,7 +690,7 @@ class NumericConsistencyValidator(ContentValidator):
         # tokens -- the same view ``src_nums`` came from.
         scaled_spans: list[tuple[int, int]] = []
         for scale_match in _SCALE_ADJACENCY_RE.finditer(src_view):
-            for group in ("cn", "en", "si", "sym"):
+            for group in ("cn", "en", "si", "sym", "count"):
                 if scale_match.group(group) is not None:
                     scaled_spans.append(scale_match.span(group))
                     break
