@@ -15,6 +15,7 @@ from ubt.core.engine.blocks import BlockReader
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.facts import RunFacts
 from ubt.core.engine.ledger import SQLiteJobLedger
+from ubt.core.engine.plan import RunGates, run_stages
 from ubt.core.engine.repair_loop import RepairLoop
 from ubt.core.engine.services import RunServices
 from ubt.core.engine.stage_context import StageContext
@@ -44,7 +45,6 @@ from ubt.core.ports import (
     DocumentAdapter,
     apply_runtime_config,
     resolve_adapter,
-    run_stage_plan,
 )
 from ubt.core.qe.base import BaseQERunner
 from ubt.core.qe.comet_runner import HeuristicQERunner, SubprocessQERunner
@@ -917,12 +917,12 @@ class PipelineOrchestrator:
             )
 
             # -----------------------------------------------------------------
-            # The stage plan lives in ubt.pipeline.run (document compiler architecture),
-            # reached through the ``run_stage_plan`` port: this class owns the run's
-            # resources -- the writer lock, ledger, adapter, router -- and the plan
-            # owns order and gating. The terminal export event triggers TM writeback
-            # and the finalize hook BEFORE it is yielded, so a caller that breaks
-            # immediately does not lose those writes to GeneratorExit.
+            # The stage plan (ubt.core.engine.plan) owns order and gating: this
+            # class owns the run's resources -- the writer lock, ledger, adapter,
+            # router -- and the plan owns what runs in what order. The terminal
+            # export event triggers TM writeback and the finalize hook BEFORE it
+            # is yielded, so a caller that breaks immediately does not lose
+            # those writes to GeneratorExit.
             # -----------------------------------------------------------------
             # The values a stage produces and a later one consumes live here for
             # the whole run (explicit stage execution context): the plan threads each to
@@ -938,14 +938,17 @@ class PipelineOrchestrator:
                 await run_tm_writeback_stage(ctx, services, facts.terminology)
                 await self._run_finalize_hook(event)
 
-            async for event in run_stage_plan(
-                ctx,
-                facts,
-                services,
+            gates = RunGates(
                 chapter_streaming=self.config.chapter_streaming_enabled
                 and len(manifest.chapters) > 1,
                 c_text=self.config.c_text_enabled,
                 consistency=self.config.consistency_enforce != "off",
+            )
+            async for event in run_stages(
+                ctx,
+                gates,
+                facts,
+                services,
                 blocks=blocks,
                 on_export_completed=_on_export_completed,
             ):

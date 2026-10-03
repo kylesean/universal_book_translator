@@ -28,7 +28,7 @@ call site). If nothing calls a piece of surface, it does not belong here.
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
@@ -40,12 +40,7 @@ if TYPE_CHECKING:
     # stage contracts without entering the runtime import graph (the
     # layering invariant in docs/design/unified-compiler-evolution.md §6.1
     # forbids only module-level edges).
-    from ubt.core.engine.blocks import BlockReader
-    from ubt.core.engine.events import TranslationProgressEvent
-    from ubt.core.engine.facts import RunFacts
     from ubt.core.engine.ledger import SQLiteJobLedger
-    from ubt.core.engine.services import RunServices
-    from ubt.core.engine.stage_context import StageContext
 
 
 @dataclass(frozen=True)
@@ -577,48 +572,4 @@ def translation_engine(
         model=model,
         prompt_version=prompt_version,
         cache=cache,
-    )
-
-
-# --------------------------------------------------------------------------- #
-# Stage-plan bridge (``ubt.pipeline.run``).
-#
-# The order and gating of the stages live in the compiler's plan. The
-# orchestrator names it only here, inside the function body, so ``core.engine``
-# has no module-level edge to the compiler package -- that edge is the root of
-# the ``core.engine <-> pipeline`` cycle. The plan owns its own gate type, so the
-# orchestrator hands it the decisions.
-# --------------------------------------------------------------------------- #
-
-
-def run_stage_plan(
-    ctx: StageContext,
-    facts: RunFacts,
-    services: RunServices,
-    *,
-    chapter_streaming: bool,
-    c_text: bool,
-    consistency: bool,
-    blocks: BlockReader,
-    on_export_completed: Callable[[TranslationProgressEvent], Awaitable[None]] | None = None,
-) -> AsyncIterator[TranslationProgressEvent]:
-    """Run the compiler's stage plan over the run's resources, yielding events.
-
-    Every parameter type lives in ``ubt.core.engine`` (the stage contracts
-    moved there), so the seam is fully checked without naming the compiler
-    package in an annotation.
-    """
-    from ubt.pipeline.run import RunGates, run_stages
-
-    return run_stages(
-        ctx,
-        RunGates(
-            chapter_streaming=chapter_streaming,
-            c_text=c_text,
-            consistency=consistency,
-        ),
-        facts,
-        services,
-        blocks=blocks,
-        on_export_completed=on_export_completed,
     )
