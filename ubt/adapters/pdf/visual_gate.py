@@ -636,7 +636,7 @@ def blocking_gate_tripped(
 #: A text line box whose raster crop carries less than this fraction of
 #: non-white pixels is treated as unprinted (painted over / white-on-white).
 OCCLUSION_INK_FLOOR = 0.02
-OCCLUSION_MIN_BOX_PX = 8
+OCCLUSION_MIN_BOX_PX = 20
 
 
 def text_occlusion_findings(
@@ -679,7 +679,9 @@ def text_occlusion_findings(
                     right = min(width_px, int((bbox.x1 - media_x0) * scale))
                     top = max(0, int((media_y1 - bbox.y1) * scale))
                     bottom = min(height_px, int((media_y1 - bbox.y0) * scale))
-                    if right - left < OCCLUSION_MIN_BOX_PX or bottom - top < 4:
+                    w_px = right - left
+                    h_px = bottom - top
+                    if w_px < OCCLUSION_MIN_BOX_PX or h_px < 6 or w_px * h_px < 150:
                         continue
                     crop = grey.crop((left, top, right, bottom))
                     # ``grey`` is mode "L", so the values are plain ints, but

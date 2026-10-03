@@ -126,6 +126,11 @@ async def run_render_preflight(
     # Render into an isolated copy: the scratch compile must not write its
     # route/downgrade facts back onto the live run manifest.
     scratch_manifest = _isolated_manifest(manifest)
+    if hasattr(scratch_manifest, "metadata"):
+        if isinstance(scratch_manifest.metadata, dict):
+            scratch_manifest.metadata["suppress_render_engine_warning"] = True
+        elif scratch_manifest.metadata is None:
+            scratch_manifest.metadata = {"suppress_render_engine_warning": True}
 
     tmp_dir = Path(tempfile.mkdtemp(prefix="ubt-preflight-"))
     preflight_path = tmp_dir / "preflight.pdf"

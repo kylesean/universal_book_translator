@@ -528,31 +528,42 @@ def _is_decorative_chapter_banner(
     ):
         return True
 
-    # 2. Must be close to a chapter heading (level 1 or matching chapter pattern)
-    has_adjacent_heading = False
+    # 2. Must be close to a chapter heading (explicit "Chapter" or "第X章")
+    has_adjacent_chapter_heading = False
     for offset in (-2, -1, 1, 2):
         pos = idx + offset
         if 0 <= pos < len(blocks) and blocks[pos].block_type == BlockType.HEADING:
-            has_adjacent_heading = True
-            break
-    if not has_adjacent_heading:
+            cand = blocks[pos]
+            txt = (cand.source_text or cand.target_text or "").strip()
+            if re.search(r"\bchapter\b", txt, re.IGNORECASE) or re.search(
+                r"第\s*([0-9]+|[一二三四五六七八九十]+)\s*章", txt
+            ):
+                has_adjacent_chapter_heading = True
+                break
+    if not has_adjacent_chapter_heading:
         return False
 
     # 3. Check if there is an explicit figure caption attached (real content figures have captions)
-    for offset in (-1, 1, 2):
+    for offset in (-2, -1, 1, 2, 3):
         pos = idx + offset
         if 0 <= pos < len(blocks):
-            txt = (blocks[pos].source_text or "").strip().lower()
-            if txt.startswith(("fig", "figure", "图")):
+            cand = blocks[pos]
+            if cand.block_type == BlockType.CAPTION:
+                return False
+            txt = (cand.source_text or cand.target_text or "").strip().lower()
+            if (
+                txt.startswith(("fig", "figure", "图", "table", "表"))
+                or "figure " in txt
+                or "fig. " in txt
+            ):
                 return False
 
     # 4. Check bounding box or image aspect ratio
+    # Ornamental ribbons are very thin horizontal bars (aspect ratio >= 4.0 and height <= 80 pt)
     if blk.bbox:
         width = blk.bbox.x1 - blk.bbox.x0
         height = blk.bbox.y1 - blk.bbox.y0
-        # Aspect-only: a bare ``height <= 90`` dropped every small (but real)
-        # figure sitting near a heading, whatever its shape.
-        if height > 0 and width / height >= 2.0:
+        if height > 0 and width / height >= 4.0 and height <= 80:
             return True
 
     if asset_path and Path(asset_path).exists():
@@ -561,7 +572,7 @@ def _is_decorative_chapter_banner(
 
             with Image.open(asset_path) as img:
                 w, h = img.size
-                if h > 0 and (w / h >= 2.0 or h <= 90):
+                if h > 0 and w / h >= 4.0 and h <= 80:
                     return True
         except Exception as exc:
             # The aspect probe decides decorative-vs-content; an unreadable
@@ -1608,6 +1619,7 @@ class TypstReconstructor:
                     )
                     self.last_image_skips.append((str(block.id), "decorative_banner"))
                     continue
+            ctx = _EmitContext(profile=_FLOWING_STYLE, siblings=blocks, index=i)
             self._emit_block(
                 block,
                 lines,
@@ -1616,6 +1628,7 @@ class TypstReconstructor:
                 ref_numbers=ref_numbers,
                 formula_map=formula_map,
                 footnote_attachments=attached_footnotes.get(i),
+                context=ctx,
             )
             prev_block = block
 
