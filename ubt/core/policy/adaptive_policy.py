@@ -110,7 +110,7 @@ def resolve_adaptive_policy(
         if norm_engine in ("publication", "rigid", "auto")
         else "publication",
         fast_lane_bible=is_short,
-        visual_blocking=True if is_short else config.visual_blocking_gate_enabled,
+        visual_blocking=is_short or config.visual_blocking_gate_enabled,
         deterministic_glossary=is_short,
         reason=(
             f"Canonical frozen-math publication pipeline ({route_decision.pages}pp"

@@ -10,10 +10,13 @@ module and no heavy PDF dependency directly).
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 class MathDensity(StrEnum):
@@ -147,7 +150,10 @@ def sample_document(path: Path, ext: str) -> tuple[int, bool, str]:
             text = path.read_text(encoding="utf-8", errors="ignore")
             ch_count = max(1, len(re.findall(r"^#+\s+", text, re.MULTILINE)))
             return ch_count, False, text[:15000]
-        except Exception:
+        except Exception as exc:
+            # The probe never raises (analyze_archetype's contract), but a
+            # corrupt file degrading to "empty document" must leave a trace.
+            logger.warning("Document probe failed for %s (%s): %s", path, ext, exc)
             return 1, False, ""
     elif ext in ("html", "htm"):
         try:
@@ -163,7 +169,10 @@ def sample_document(path: Path, ext: str) -> tuple[int, bool, str]:
                 headings = len(re.findall(r"<h[1-6][\s>]", raw, re.IGNORECASE))
             ch_count = max(1, headings)
             return ch_count, False, text[:15000]
-        except Exception:
+        except Exception as exc:
+            # The probe never raises (analyze_archetype's contract), but a
+            # corrupt file degrading to "empty document" must leave a trace.
+            logger.warning("Document probe failed for %s (%s): %s", path, ext, exc)
             return 1, False, ""
     elif ext == "docx":
         try:
@@ -177,7 +186,10 @@ def sample_document(path: Path, ext: str) -> tuple[int, bool, str]:
                 len([p for p in doc.paragraphs if p.style and "heading" in p.style.name.lower()]),
             )
             return ch_count, False, sample
-        except Exception:
+        except Exception as exc:
+            # The probe never raises (analyze_archetype's contract), but a
+            # corrupt file degrading to "empty document" must leave a trace.
+            logger.warning("Document probe failed for %s (%s): %s", path, ext, exc)
             return 1, False, ""
     elif ext == "epub":
         try:
@@ -196,7 +208,10 @@ def sample_document(path: Path, ext: str) -> tuple[int, bool, str]:
                     epub_parts.append(soup.get_text())
             sample = "\n".join(epub_parts)
             return len(html_files), False, sample
-        except Exception:
+        except Exception as exc:
+            # The probe never raises (analyze_archetype's contract), but a
+            # corrupt file degrading to "empty document" must leave a trace.
+            logger.warning("Document probe failed for %s (%s): %s", path, ext, exc)
             return 1, False, ""
 
     return 1, False, ""

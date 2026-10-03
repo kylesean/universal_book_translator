@@ -40,7 +40,13 @@ if TYPE_CHECKING:
     # stage contracts without entering the runtime import graph (the
     # layering invariant in docs/design/unified-compiler-evolution.md §6.1
     # forbids only module-level edges).
+    from ubt.adapters.pdf.engine_selector import PDFRoutePlan
+    from ubt.adapters.pdf.extraction_witness import PageVerdict
+    from ubt.adapters.pdf.page_profiler import PageKind
+    from ubt.adapters.pdf.visual_gate import VisualGateResult
     from ubt.core.engine.ledger import SQLiteJobLedger
+    from ubt.segment.placeholders import MaskedSource, PlaceholderEngine
+    from ubt.translate.engine import TranslationEngine
 
 
 @dataclass(frozen=True)
@@ -174,7 +180,7 @@ def get_visual_gate_runner() -> VisualGateRunnerFn:
     return run_visual_gate
 
 
-def crashed_visual_gate_result(message: str) -> Any:
+def crashed_visual_gate_result(message: str) -> VisualGateResult:
     """Gate result reporting the gate itself as failed (visual state unknown).
 
     The gate dataclasses live in the adapters layer, so core stages build the
@@ -252,7 +258,7 @@ def map_blocks_to_output_pages(blocks: list[Any], pages: list[str]) -> dict[str,
     return dict(_map(blocks, pages))
 
 
-def inspect_font_encoding_damage(pdf_path: Path) -> Any:
+def inspect_font_encoding_damage(pdf_path: Path) -> list[PageVerdict]:
     """Run the extraction witness; returns per-page verdicts."""
     from ubt.adapters.pdf.extraction_witness import inspect_pdf
 
@@ -431,7 +437,7 @@ def is_typst_math_well_formed(expr: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def inspect_pdf_route_plan(input_path: Path) -> Any:
+def inspect_pdf_route_plan(input_path: Path) -> PDFRoutePlan:
     """Return the doc-wide PDFRoutePlan (primary_engine / has_* flags)."""
     from ubt.adapters.pdf.engine_selector import PROFILE_CACHE_DIR
     from ubt.adapters.pdf.engine_selector import inspect_pdf_route_plan as _plan
@@ -447,7 +453,7 @@ def profile_pdf_pages(input_path: Path) -> list[Any]:
     return list(_profile(input_path, cache_dir=PROFILE_CACHE_DIR))
 
 
-def page_kind_enum() -> Any:
+def page_kind_enum() -> type[PageKind]:
     """Return the adapter-side PageKind enum (kept out of the core import graph)."""
     from ubt.adapters.pdf.page_profiler import PageKind
 
@@ -530,7 +536,7 @@ async def interleave_bilingual_pdf(
 # --------------------------------------------------------------------------- #
 
 
-def placeholder_engine() -> Any:
+def placeholder_engine() -> PlaceholderEngine:
     """The default placeholder engine (the one mask-order owner in ``ubt.segment``)."""
     from ubt.segment.placeholders import default_placeholder_engine
 
@@ -544,7 +550,7 @@ def masked_source(
     math_map: dict[str, str],
     soup_map: dict[str, str],
     cite_map: dict[str, str],
-) -> Any:
+) -> MaskedSource:
     """Rebuild a ``MaskedSource`` from the per-family maps a draft carries."""
     from ubt.segment.placeholders import MaskedSource
 
@@ -559,11 +565,11 @@ def masked_source(
 
 def translation_engine(
     *,
-    placeholders: Any,
+    placeholders: PlaceholderEngine,
     model: str = "",
     prompt_version: str = "",
     cache: Any = None,
-) -> Any:
+) -> TranslationEngine:
     """Build the per-unit transform engine (mask -> restore -> judge)."""
     from ubt.translate.engine import TranslationEngine
 

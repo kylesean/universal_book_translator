@@ -182,6 +182,8 @@ def resolve_checkpoint(model_arg: str) -> str:
             if resolved and Path(str(resolved)).is_file():
                 return str(resolved)
         except Exception:
+            # Local-resolution probe: a missing candidate is expected, and the
+            # final download below raises if nothing resolves.
             pass
 
     return str(download_model(model_arg))

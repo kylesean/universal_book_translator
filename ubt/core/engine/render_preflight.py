@@ -113,11 +113,12 @@ async def run_render_preflight(
         or "publication"
     )
     render_engine = resolve_pdf_engine(str(requested_engine), blocks, manifest=manifest)
-    bilingual_mode = (
-        (render_plan.effective_dual_mode if render_plan is not None else None)
-        or (render_plan.bilingual_mode if render_plan is not None else None)
-        or metadata.get("bilingual_mode")
-    )
+    if render_plan is not None:
+        bilingual_mode = (
+            render_plan.effective_dual_mode or render_plan.bilingual_mode
+        ) or metadata.get("bilingual_mode")
+    else:
+        bilingual_mode = metadata.get("bilingual_mode")
     # Rigid is monolingual: match the scratch mode to the resolved engine so the
     # rehearsal is faithful and the scratch copy does not emit a downgrade
     # warning for a route the live manifest never took.

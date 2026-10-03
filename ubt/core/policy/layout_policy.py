@@ -684,9 +684,9 @@ def is_rigid_non_prose_degradable(
     BLOCKED_HUMAN would abort export catastrophically.
     """
     bt = getattr(block_type, "value", block_type or "")
-    is_non_prose = str(bt).lower() in ("table", "code", "formula", "image") or (
-        str(bt).lower() not in {str(t.value).lower() for t in PROSE_BLOCK_TYPES}
-    )
+    # Non-prose is simply the complement of PROSE_BLOCK_TYPES; the explicit
+    # four-way list was redundant (table/code/formula/image are all outside it).
+    is_non_prose = str(bt).lower() not in {str(t.value).lower() for t in PROSE_BLOCK_TYPES}
     if not is_non_prose:
         return False
 

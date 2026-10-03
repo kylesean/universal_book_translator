@@ -157,7 +157,7 @@ class DraftRuntime:
     tm: TranslationMemory | None
     active_fast_pass: FastPassFilter
     counters: dict[str, int]
-    flusher: CheckpointBatchFlusher | None
+    flusher: CheckpointBatchFlusher
     batch_active: bool
     chapter_summaries: dict[str, str] = field(default_factory=dict)
     latest_chapter_summary: str = ""
@@ -366,19 +366,11 @@ class _DraftProcessor:
                             "mtqe_score": 1.0,
                             "tm_hit": True,
                         }
-                        if self.runtime.flusher is not None:
-                            # Buffering accepts the write: a failing flush is
-                            # retried and finally raised at the next enqueue /
-                            # close, so the count may not precede the ledger.
-                            await self.runtime.flusher.enqueue(update)
-                            saved = True
-                        else:
-                            saved = (
-                                await asyncio.to_thread(
-                                    self.runtime.ledger.save_checkpoints_batch, [update]
-                                )
-                                > 0
-                            )
+                        # Buffering accepts the write: a failing flush is
+                        # retried and finally raised at the next enqueue /
+                        # close, so the count may not precede the ledger.
+                        await self.runtime.flusher.enqueue(update)
+                        saved = True
                         if saved:
                             self.runtime.counters["tm_exact_hits"] += 1
                         return None
@@ -518,10 +510,7 @@ class _DraftProcessor:
             "draft_text": final_draft,
             "error_flags": error_flags or None,
         }
-        if self.runtime.flusher is not None:
-            await self.runtime.flusher.enqueue(update)
-        else:
-            await asyncio.to_thread(self.runtime.ledger.save_checkpoints_batch, [update])
+        await self.runtime.flusher.enqueue(update)
 
     async def draft_single_block(
         self,
@@ -540,10 +529,7 @@ class _DraftProcessor:
                 "status": BlockStatus.MTQE_PASSED,
                 "mtqe_score": 1.0,
             }
-            if self.runtime.flusher is not None:
-                await self.runtime.flusher.enqueue(skip_update)
-            else:
-                await asyncio.to_thread(self.runtime.ledger.save_checkpoints_batch, [skip_update])
+            await self.runtime.flusher.enqueue(skip_update)
             return
 
         async with self.runtime.concurrency_sem:
@@ -644,12 +630,7 @@ class _DraftProcessor:
                     "status": BlockStatus.FAILED,
                     "error_flags": [f"{prefix} {exc}"],
                 }
-                if self.runtime.flusher is not None:
-                    await self.runtime.flusher.enqueue(fail_update)
-                else:
-                    await asyncio.to_thread(
-                        self.runtime.ledger.save_checkpoints_batch, [fail_update]
-                    )
+                await self.runtime.flusher.enqueue(fail_update)
 
     async def finalize_cache_hits(
         self, prepared: list[tuple[IRBlock, _DraftInputs]]
@@ -835,14 +816,12 @@ class _DraftProcessor:
                     prepared.append((b, inputs))
 
         if not prepared:
-            if self.runtime.flusher is not None:
-                await self.runtime.flusher.flush_all()
+            await self.runtime.flusher.flush_all()
             return True
         # A cache hit needs no batch request: finalize it and submit the rest.
         prepared = await self.finalize_cache_hits(prepared)
         if not prepared:
-            if self.runtime.flusher is not None:
-                await self.runtime.flusher.flush_all()
+            await self.runtime.flusher.flush_all()
             return True
 
         async def _batch_status_callback(status: str, job_dict: dict[str, Any]) -> None:
@@ -972,8 +951,7 @@ class _DraftProcessor:
                 if isinstance(res, Exception):
                     logger.warning("Whole-book interactive fallback failed: %s", res)
 
-        if self.runtime.flusher is not None:
-            await self.runtime.flusher.flush_all()
+        await self.runtime.flusher.flush_all()
         return True
 
     async def draft_macro_chunk_group(
@@ -1158,11 +1136,8 @@ class _DraftProcessor:
                         }
                     )
         if stranded:
-            if self.runtime.flusher is not None:
-                for update in stranded:
-                    await self.runtime.flusher.enqueue(update)
-            else:
-                await asyncio.to_thread(self.runtime.ledger.save_checkpoints_batch, stranded)
+            for update in stranded:
+                await self.runtime.flusher.enqueue(update)
         if critical_exc is not None:
             raise critical_exc
 

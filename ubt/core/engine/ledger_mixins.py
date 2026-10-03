@@ -594,7 +594,11 @@ class LedgerJobsMixin(LedgerBase):
                         res = meta["visual_report"]
                         if isinstance(res, dict):
                             return cast(dict[str, Any], res)
-                except Exception:
+                except Exception as exc:
+                    # Corrupt metadata must not break the read, but a torn
+                    # value and an absent visual report should not look
+                    # identical to whoever is debugging the job.
+                    logger.debug("Unreadable visual_report metadata for %s: %s", job_id, exc)
                     return None
             return None
 

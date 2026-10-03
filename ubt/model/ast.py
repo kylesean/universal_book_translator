@@ -225,12 +225,6 @@ class Document:
     def elements(self) -> tuple[ElementT, ...]:
         return tuple(el for region in self.regions for el in region.elements)
 
-    def element(self, element_id: str) -> ElementT | None:
-        for element in self.elements:
-            if element.id == element_id:
-                return element
-        return None
-
 
 __all__ = [
     "ASSET_ELEMENTS",

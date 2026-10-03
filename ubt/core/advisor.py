@@ -11,28 +11,17 @@ same advice over the same engine seams. The re-exports below keep
 from __future__ import annotations
 
 import importlib.util
+import logging
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ubt.core.archetype import (
     DocCategory,
     MathDensity,
     analyze_archetype,
 )
-
-__all__ = [
-    "DocCategory",
-    "MathDensity",
-    "analyze_archetype",
-    "AdvisoryReport",
-    "DocumentAdvisor",
-]
-
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from ubt.core.assess import AssessmentReport
 from ubt.core.config import (
     MOCK_API_KEY,
     RIGID_ENGINES,
@@ -47,6 +36,19 @@ from ubt.core.env import has_accelerator as _has_accelerator
 from ubt.core.policy.adaptive_policy import resolve_render_engine_from_signals
 from ubt.core.presets import Preset
 from ubt.core.router_mode import decide as decide_route
+
+if TYPE_CHECKING:
+    from ubt.core.assess import AssessmentReport
+
+logger = logging.getLogger(__name__)
+
+__all__ = [
+    "DocCategory",
+    "MathDensity",
+    "analyze_archetype",
+    "AdvisoryReport",
+    "DocumentAdvisor",
+]
 
 
 @dataclass(frozen=True)
@@ -281,7 +283,10 @@ class DocumentAdvisor:
             from ubt.core.assess import assess_document
 
             assessment = assess_document(path, config)
-        except Exception:
+        except Exception as exc:
+            # A probe failure degrades the advisory, it must not sink it —
+            # but leave a trace instead of dropping the assessment silently.
+            logger.debug("Deep assessment failed for %s: %s", path.name, exc)
             assessment = None
 
         return AdvisoryReport(

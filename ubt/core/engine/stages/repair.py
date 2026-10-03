@@ -58,8 +58,15 @@ async def run_repair_stage(
                 p = Path(str(snapshot["source_path"]))
                 if p.suffix.lower() == ".pdf" and p.exists():
                     resolved_pdf_path = p
-        except Exception:
-            pass
+        except Exception as exc:
+            # No resolvable source PDF only degrades the visual evidence a
+            # repair round can attach; say why instead of failing silently.
+            logger.warning(
+                "Could not resolve the source PDF snapshot for %s; "
+                "visual repair evidence is unavailable: %s",
+                actual_job_id,
+                exc,
+            )
 
     for round_idx in range(max_repair_rounds):
         ctx.check_cancelled()
