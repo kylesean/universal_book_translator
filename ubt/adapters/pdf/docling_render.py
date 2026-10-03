@@ -40,7 +40,7 @@ def record_witness_findings(reconstructor: TypstReconstructor, manifest: BookMan
     visible in the publication quality report, exactly like
     the syntax fallbacks above.
     """
-    findings = list(getattr(reconstructor, "last_witness_findings", []) or [])
+    findings = list(reconstructor.last_witness_findings)
     if not findings:
         return
     recorded = manifest.metadata.setdefault("formula_witness_findings", [])
@@ -57,7 +57,7 @@ def record_table_fallbacks(reconstructor: TypstReconstructor, manifest: BookMani
     its source graphic (Axiom A: preserve whole, never ship a shattered grid).
     The substitution is lossless but must stay visible in the audit.
     """
-    findings = list(getattr(reconstructor, "last_table_fallbacks", []) or [])
+    findings = list(reconstructor.last_table_fallbacks)
     if not findings:
         return
     recorded = manifest.metadata.setdefault("table_fallback_findings", [])
@@ -92,7 +92,7 @@ def record_syntax_fallbacks(reconstructor: TypstReconstructor, manifest: BookMan
     publication quality report instead of leaving them only in the .typ
     source and logs.
     """
-    fallbacks = list(getattr(reconstructor, "last_syntax_fallbacks", []) or [])
+    fallbacks = list(reconstructor.last_syntax_fallbacks)
     if not fallbacks:
         return
     recorded = manifest.metadata.setdefault("typst_syntax_fallbacks", [])

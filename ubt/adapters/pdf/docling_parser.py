@@ -510,6 +510,11 @@ def extract_with_docling(
             # retry below pops it, so it must be restored once the ladder is done.
             # Leaving it popped silently disabled offline mode for every in-flight
             # job in a long-lived server.
+            # Known tradeoff: the pop spans the whole retry conversion, so a
+            # concurrently-running job sees the mutated env in that window.
+            # The mutation only happens on the rare offline-retry path, and
+            # serializing conversions behind a lock for it would stall every
+            # other job — accepted and documented rather than locked.
             offline_before = os.environ.get("HF_HUB_OFFLINE")
             # The retry below may point HF at the third-party hf-mirror.com — but
             # only with the operator's explicit opt-in (UBT_ALLOW_HF_MIRROR=1, the

@@ -1085,7 +1085,6 @@ class RigidTypesetter:
             raise DocumentParseError(f"Source PDF not found for rigid render: {source_pdf}")
         out_path = Path(output_path)
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        _ = target_lang
 
         import tempfile
 

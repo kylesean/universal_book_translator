@@ -184,18 +184,18 @@ class DoclingPDFAdapter(BasePDFEngineAdapter):
         # Setter mirrors the sanitized name onto the render strategy + reconstructor.
         self.font_family = runtime_config.font_family
         reconstructor = self.reconstructor
-        if hasattr(reconstructor, "formula_render"):
-            reconstructor.formula_render = runtime_config.formula_render
-        if hasattr(reconstructor, "math_backend"):
-            reconstructor.math_backend = runtime_config.math_backend
-        if hasattr(reconstructor, "witness_cache"):
-            # Content-addressed cache for the pixel witnesses (content-addressed cache layer):
-            # a re-render reuses the compile+raster verdict per formula/table.
-            from ubt.cache.store import DiskCacheStore
+        # Direct assignment: these attributes are set unconditionally in
+        # TypstReconstructor.__init__, and the hasattr guards contradicted
+        # this adapter's own no-probe policy (see ports.py).
+        reconstructor.formula_render = runtime_config.formula_render
+        reconstructor.math_backend = runtime_config.math_backend
+        # Content-addressed cache for the pixel witnesses (content-addressed cache layer):
+        # a re-render reuses the compile+raster verdict per formula/table.
+        from ubt.cache.store import DiskCacheStore
 
-            reconstructor.witness_cache = (
-                DiskCacheStore(runtime_config.cache_dir) if runtime_config.cache_dir else None
-            )
+        reconstructor.witness_cache = (
+            DiskCacheStore(runtime_config.cache_dir) if runtime_config.cache_dir else None
+        )
         # The analyze cache (content-addressed cache layer): the Docling layout+formula pass
         # is a pure function of the file, page range, enrichment policy and
         # parser code, so a resumed or re-run job reuses the extraction.
