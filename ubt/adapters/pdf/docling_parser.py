@@ -1144,6 +1144,16 @@ def annotate_page_kinds(path: Path, blocks: list[IRBlock]) -> dict[int, str]:
     return kinds
 
 
+def _has_text_content(blocks: list[IRBlock]) -> bool:
+    """Return True if the parsed blocks contain any actual readable/translatable text."""
+    for b in blocks:
+        if b.block_type == BlockType.IMAGE:
+            continue
+        if b.source_text and b.source_text.strip():
+            return True
+    return False
+
+
 def _reject_empty_book(
     path: Path, blocks: list[IRBlock], ocr_mode: str | None = None
 ) -> list[IRBlock]:
@@ -1154,14 +1164,13 @@ def _reject_empty_book(
     make downstream stages "succeed" and export an empty book with every
     counter at zero — the classic silent-data-loss shape.
     """
-    if blocks:
+    if _has_text_content(blocks):
         return blocks
     mode_note = f" (ocr_mode='{ocr_mode}')" if ocr_mode else ""
     raise DocumentParseError(
         f"No content could be parsed from '{path.name}': every page lacks an "
-        f"extractable text layer{mode_note}. Enable OCR (--ocr vlm with "
-        "--ocr-api-key, a Docker OCR sidecar, or pip install "
-        "rapidocr-onnxruntime) or set UBT_VLM_SCAN_FALLBACK=missing."
+        f"extractable text layer{mode_note}. Enable OCR (--ocr rapidocr, "
+        "a Docker OCR sidecar, or --ocr cloud) or set UBT_VLM_SCAN_FALLBACK=missing."
     )
 
 
@@ -1240,20 +1249,27 @@ def vlm_fallback_missing_pages(
 
     mode = get_fallback_mode()
     if mode == VlmFallbackMode.OFF:
-        return _reject_empty_book(path, blocks)
+        clean_ocr_mode = (ocr_mode or "").strip().lower()
+        if (clean_ocr_mode and clean_ocr_mode not in ("off", "auto")) or (
+            not _has_text_content(blocks) and clean_ocr_mode != "off"
+        ):
+            mode = VlmFallbackMode.MISSING
+        else:
+            return _reject_empty_book(path, blocks, ocr_mode=ocr_mode)
 
     import pypdfium2 as pdfium
 
-    # A block whose provenance entry carries no geometry has bbox=None but
-    # still knows its page (see ``map_iterated_items``); excluding such pages
-    # from the covered set made mode="missing" re-transcribe them through the
-    # paid VLM path while the originals were retained — the page shipped twice.
-    covered = {b.bbox.page for b in blocks if b.bbox is not None}
+    # A page with only image blocks has no extractable text layer; pages with
+    # genuine textual blocks are covered, while image-only or empty pages require OCR.
+    text_covered: set[int] = set()
     for block in blocks:
-        if block.bbox is None:
-            source_page = block.provenance.get("source_page")
-            if source_page is not None:
-                covered.add(int(source_page))
+        if block.block_type != BlockType.IMAGE and block.source_text and block.source_text.strip():
+            if block.bbox is not None:
+                text_covered.add(block.bbox.page)
+            else:
+                source_page = block.provenance.get("source_page")
+                if source_page is not None:
+                    text_covered.add(int(source_page))
     with PDFIUM_LOCK:
         try:
             probe_doc = pdfium.PdfDocument(str(path))
@@ -1267,7 +1283,7 @@ def vlm_fallback_missing_pages(
 
     first = page_range[0] if page_range else 1
     last = min(page_range[1], total) if page_range else total
-    missing = [p for p in range(first, last + 1) if p not in covered]
+    missing = [p for p in range(first, last + 1) if p not in text_covered]
     proofread_pages: set[int] = set()
 
     if mode in (VlmFallbackMode.WEAK, VlmFallbackMode.ALL):
@@ -1286,7 +1302,7 @@ def vlm_fallback_missing_pages(
                 plans = build_page_ingest_plans(path, cache_dir=PROFILE_CACHE_DIR)
                 for p in plans:
                     if (
-                        p.page_number in covered
+                        p.page_number in text_covered
                         and p.kind.value != "editable_text"
                         and first <= p.page_number <= last
                     ):

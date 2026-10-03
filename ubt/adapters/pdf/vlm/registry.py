@@ -210,6 +210,15 @@ def probe_effective_driver(
         )
 
     if clean_mode == "rapidocr":
+        from ubt.adapters.pdf.vlm.drivers.rapidocr_driver import RapidOcrDriver
+
+        if not RapidOcrDriver.is_available():
+            logger.warning(
+                "OCR mode 'rapidocr' was requested, but rapidocr or its inference engine "
+                "(onnxruntime) is not operational in this environment. Install them with: "
+                "uv sync --all-extras (or uv pip install onnxruntime rapidocr)"
+            )
+            return None, None
         return "rapidocr", get_driver("rapidocr")
 
     # Explicit custom registered driver
@@ -232,15 +241,10 @@ def probe_effective_driver(
 
     # 2. Local rapidocr before any cloud route: a book page must not leave
     # the machine while a local engine can read it.
-    try:
-        try:
-            import rapidocr  # noqa: F401
-        except ImportError:
-            import rapidocr_onnxruntime  # noqa: F401
+    from ubt.adapters.pdf.vlm.drivers.rapidocr_driver import RapidOcrDriver
 
+    if RapidOcrDriver.is_available():
         return "rapidocr", get_driver("rapidocr")
-    except ImportError:
-        pass
 
     # 3. Cloud OCR / Vision only when page egress is allowed.
     if not allow_page_upload:

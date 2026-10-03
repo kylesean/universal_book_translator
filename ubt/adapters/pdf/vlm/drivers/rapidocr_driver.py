@@ -8,6 +8,8 @@ download) fail only when the driver actually recognizes.
 
 from __future__ import annotations
 
+import contextlib
+import io
 from typing import Any
 
 from ubt.adapters.pdf.vlm.types import PageTranscript, VlmLine
@@ -22,16 +24,43 @@ class RapidOcrDriver:
     def __init__(self) -> None:
         self._engine: Any = None  # constructed on first recognize
 
+    @classmethod
+    def is_available(cls) -> bool:
+        """Fast check to verify rapidocr and its inference backend (e.g. onnxruntime) can initialize."""
+        try:
+            with (
+                contextlib.redirect_stdout(io.StringIO()),
+                contextlib.redirect_stderr(io.StringIO()),
+            ):
+                driver = cls()
+                engine = driver._get_engine()
+                return engine is not None
+        except Exception:
+            return False
+
     def _get_engine(self) -> Any:
         if self._engine is None:
+            err: Exception | None = None
             try:
                 from rapidocr import RapidOCR as _RapidOCRMain
 
                 self._engine = _RapidOCRMain()
-            except ImportError:
+                return self._engine
+            except Exception as exc:
+                err = exc
+
+            try:
                 from rapidocr_onnxruntime import RapidOCR as _RapidOCROnnx
 
                 self._engine = _RapidOCROnnx()
+                return self._engine
+            except Exception as exc:
+                err = exc
+
+            raise ImportError(
+                f"rapidocr engine could not be initialized ({err}). "
+                "Ensure onnxruntime and rapidocr are installed: pip install onnxruntime rapidocr"
+            ) from err
         return self._engine
 
     def recognize(

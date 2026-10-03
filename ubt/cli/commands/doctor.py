@@ -506,6 +506,50 @@ def doctor_command(
         record("PDF engine", "OK", f"registered engine: {config.pdf_engine}")
     else:
         record("PDF engine", "WARN", f"'{config.pdf_engine}' is not a registered engine")
+
+    # -- OCR engine readiness ------------------------------------------------
+    if config.ocr_mode != "off":
+        from ubt.adapters.pdf.vlm.drivers.rapidocr_driver import RapidOcrDriver
+        from ubt.adapters.pdf.vlm.drivers.sidecar_driver import SidecarOcrDriver
+
+        has_sidecar = SidecarOcrDriver.is_healthy()
+        has_rapidocr = RapidOcrDriver.is_available()
+        rapidocr_spec = (
+            importlib.util.find_spec("rapidocr") is not None
+            or importlib.util.find_spec("rapidocr_onnxruntime") is not None
+        )
+
+        if has_sidecar:
+            record("OCR engine", "OK", "sidecar service online (http://localhost:8765)")
+        elif has_rapidocr:
+            record("OCR engine", "OK", "local rapidocr + onnxruntime operational")
+        elif rapidocr_spec:
+            record(
+                "OCR engine",
+                "WARN",
+                "rapidocr installed but inference backend (onnxruntime) is missing — scanned PDFs cannot be OCRed",
+                fix="uv sync --all-extras (or uv pip install onnxruntime)",
+            )
+        elif config.ocr_mode in ("cloud", "vlm"):
+            if config.allow_page_upload:
+                record("OCR engine", "OK", f"cloud/vlm egress enabled ({config.ocr_mode})")
+            else:
+                record(
+                    "OCR engine",
+                    "WARN",
+                    f"ocr_mode='{config.ocr_mode}' but allow_page_upload=False — scanned pages cannot egress",
+                    fix="enable page upload or install local rapidocr/sidecar",
+                )
+        else:
+            record(
+                "OCR engine",
+                "WARN",
+                "no local OCR engine operational (sidecar offline, rapidocr/onnxruntime not installed) — scanned PDFs will fail",
+                fix="uv sync --all-extras (or docker run -d -p 8765:8765 ubt-ocr-sidecar)",
+            )
+    else:
+        record("OCR engine", "SKIP", "ocr_mode=off")
+
     record(
         "Render",
         "OK",
