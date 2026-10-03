@@ -18,6 +18,11 @@ from ubt.core.router.registry import get_default_registry
 
 logger = logging.getLogger(__name__)
 
+# Connect/pool phases fail fast; only the read/write phases deserve the full
+# api_timeout (180s default). A single-float timeout pinned a pool slot for
+# three minutes on a dead endpoint before failing.
+_CONNECT_TIMEOUT_S = 10.0
+
 
 def hostname_of(url: str) -> str:
     """Lowercased hostname of a URL, tolerating a missing scheme.
@@ -299,7 +304,12 @@ class BaseTransport(ABC):
     def _get_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(
-                timeout=self._timeout,
+                timeout=httpx.Timeout(
+                    connect=_CONNECT_TIMEOUT_S,
+                    read=self._timeout,
+                    write=self._timeout,
+                    pool=self._timeout,
+                ),
                 transport=self._transport,
                 limits=self._limits,
             )

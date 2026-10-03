@@ -444,6 +444,22 @@ async def ubt_translate_book(
     return {"job_id": record.job_id, "status": JobStatus.SUBMITTED, "rehearsal": rehearsal}
 
 
+# A per-job ledger goes quiet only when nothing writes checkpoints to it
+# anymore; during a live run the pipeline flushes continuously. A non-terminal
+# row past this window is reported FAILED in the disk fallback (mirroring the
+# REST fallback); a fresh mtime keeps it RUNNING, because a live run in another
+# process must not be told to re-run.
+_LEDGER_STALENESS_S = 300.0
+
+
+def _ledger_is_stale(db_path: Path) -> bool:
+    """True when the per-job ledger has had no write within the staleness window."""
+    try:
+        return (time.time() - db_path.stat().st_mtime) > _LEDGER_STALENESS_S
+    except OSError:
+        return True
+
+
 @mcp.tool()
 @_mcp_error_boundary
 async def ubt_job_status(job_id: str, db_dir: str | None = None) -> dict[str, Any]:
@@ -492,6 +508,7 @@ async def ubt_job_status(job_id: str, db_dir: str | None = None) -> dict[str, An
         # FAILED before the restart must not read as "running" forever to a
         # polling agent.
         persisted = await asyncio.to_thread(ledger.get_job_status, jid)
+        interrupted = False
         if persisted == "failed":
             status = JobStatus.FAILED
         elif persisted == "cancelled":
@@ -502,6 +519,15 @@ async def ubt_job_status(job_id: str, db_dir: str | None = None) -> dict[str, An
             status = JobStatus.COMPLETED
         else:
             status = JobStatus.RUNNING
+            # The row keeps its creation status until finalize_job, so a
+            # process that died mid-run leaves it non-terminal forever; the
+            # REST disk fallback downgrades it. Here the downgrade waits for
+            # the ledger to go quiet first — a live run in another process
+            # keeps writing checkpoints, and reporting that failed would make
+            # a polling agent restart a job that is still translating.
+            if persisted not in TERMINAL_JOB_STATUSES and _ledger_is_stale(db_path):
+                status = JobStatus.FAILED
+                interrupted = True
         disk: dict[str, Any] = {
             "job_id": jid,
             "status": status,
@@ -515,7 +541,12 @@ async def ubt_job_status(job_id: str, db_dir: str | None = None) -> dict[str, An
             "visual_report_file": progress.visual_report_file,
         }
         if status == JobStatus.FAILED:
-            disk["error"] = "job terminated with status=failed before the restart"
+            disk["error"] = (
+                "Job was interrupted before it reached a terminal state (no ledger "
+                "write within the staleness window); re-run it to resume."
+                if interrupted
+                else "job terminated with status=failed before the restart"
+            )
         return disk
     finally:
         ledger.close()

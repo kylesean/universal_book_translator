@@ -20,6 +20,7 @@ import logging
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Protocol
+from uuid import uuid4
 
 from ubt.core.fs_perms import restrict_dir_to_owner, restrict_file_to_owner
 
@@ -84,7 +85,10 @@ class DiskCacheStore:
         path = self._path(key)
         try:
             restrict_dir_to_owner(path.parent)
-            tmp = path.parent / f"{path.name}.tmp"
+            # Unique temp name: two processes writing the same key would
+            # otherwise interleave on one fixed .tmp file and rename a torn
+            # value into place.
+            tmp = path.parent / f"{path.name}.{uuid4().hex}.tmp"
             tmp.write_text(value, encoding="utf-8")
             restrict_file_to_owner(tmp)
             tmp.replace(path)

@@ -877,12 +877,18 @@ class ModelRouter:
                     return res, candidate
                 return res
             except ModelProviderError as exc:
+                # Re-read the clock: ``now`` was taken at entry, and the retries
+                # and fallback walk above can burn minutes. A cooldown computed
+                # from the entry timestamp would already be expired when
+                # written, leaving the breaker permanently closed under a
+                # slow-failing chain.
+                failure_now = time.monotonic()
                 failures, exp = self._model_circuit.get(candidate, (0, 0.0))
                 # Half-open: if cooldown expired, treat as single probe failure
-                if exp > 0 and exp <= now:
+                if exp > 0 and exp <= failure_now:
                     failures = 2
                 failures += 1
-                cooldown = (now + 60.0) if failures >= 3 else 0.0
+                cooldown = (failure_now + 60.0) if failures >= 3 else 0.0
                 self._model_circuit[candidate] = (failures, cooldown)
                 if cooldown > 0:
                     logger.warning(

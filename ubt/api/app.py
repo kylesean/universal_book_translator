@@ -66,6 +66,11 @@ from ubt.core.router.router import ModelRouter
 
 logger = logging.getLogger(__name__)
 
+# Strong references to fire-and-forget tasks: the event loop holds only weak
+# references, so an unreferenced task can be garbage-collected mid-flight and
+# its work silently never happen.
+_background_tasks: set[asyncio.Task[None]] = set()
+
 # Public symbol exports and test instrumentation hooks
 __all__ = [
     "JobManager",
@@ -744,7 +749,11 @@ def create_app(
             except Exception as exc:
                 logger.debug("Could not persist cancellation for %s: %s", valid_id, exc)
 
-        asyncio.create_task(asyncio.to_thread(_finalize_cancelled_ledger))
+        # Pin the task: without a strong reference the event loop may collect
+        # it before the thread pool finishes, losing the terminal ledger write.
+        task = asyncio.create_task(asyncio.to_thread(_finalize_cancelled_ledger))
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
         return {"job_id": valid_id, "status": JobStatus.CANCELLED}
 
     @api_app.get(
@@ -792,6 +801,10 @@ def create_app(
                         try:
                             created_dt = datetime.fromisoformat(created_str)
                         except Exception:
+                            # Malformed created_at in a corrupt/legacy ledger row:
+                            # report a present-time placeholder rather than a
+                            # fabricated earlier date — clients act on status,
+                            # not on this field.
                             created_dt = datetime.now(UTC)
 
                         progress = ProgressSnapshot.from_ledger(

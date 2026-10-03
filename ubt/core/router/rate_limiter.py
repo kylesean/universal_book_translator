@@ -487,7 +487,12 @@ class SqliteTokenBucket(AdaptiveTokenBucket):
             self._refill(state, now, last_update)
             if state.consecutive_429 > 0:
                 state.consecutive_429 = 0
-            state.rpm_capacity = min(float(self.max_rpm), state.rpm_capacity + 1.0)
+            # Same AIMD increment law as the in-process bucket: additive, at
+            # most 1.0 RPM per window (1/capacity per success). A flat +1.0
+            # let N workers reporting concurrently climb N times faster than
+            # one worker, defeating the shared bucket's rate ceiling.
+            increment = min(1.0, max(0.05, 1.0 / max(1.0, float(state.rpm_capacity))))
+            state.rpm_capacity = min(float(self.max_rpm), state.rpm_capacity + increment)
             if state.tpm_capacity < self.max_tpm:
                 state.tpm_capacity = min(
                     float(self.max_tpm), state.tpm_capacity + self.initial_tpm / 60.0

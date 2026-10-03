@@ -68,6 +68,40 @@ async def test_router_circuit_breaker_tripping_and_skip() -> None:
 
 
 @pytest.mark.asyncio
+async def test_circuit_cooldown_uses_failure_time_not_entry_time() -> None:
+    """A chain that burns wall-clock time must not write an already-expired cooldown.
+
+    The entry timestamp predates the retries and fallback walk; a cooldown
+    computed from it can be expired the moment it is written, so the breaker
+    never actually opens under a slow-failing chain.
+    """
+    provider = MockModelProvider()
+    router = ModelRouter(provider=provider, draft_model="failing-model", fallback_models=[])
+    clock = {"t": 1000.0}
+
+    def fake_monotonic() -> float:
+        return clock["t"]
+
+    async def slow_failure(*args: object, **kwargs: object) -> str:
+        clock["t"] += 30.0  # emulate wall-clock burn during the failed call
+        raise ModelProviderError("429 Too Many Requests")
+
+    with (
+        patch.object(router, "_execute_single_model", side_effect=slow_failure),
+        patch("ubt.core.router.router.time.monotonic", fake_monotonic),
+    ):
+        for _ in range(3):
+            with pytest.raises(ModelProviderError):
+                await router._execute_with_retry("sys", "user", "failing-model", 0.3)
+
+    fails, cooldown = router._model_circuit["failing-model"]
+    assert fails == 3
+    # Third failure lands at t=1090, so the failure-based cooldown is 1150. An
+    # entry-based one (t=1060 + 60 = 1120) would already lag the burned time.
+    assert cooldown == pytest.approx(1150.0)
+
+
+@pytest.mark.asyncio
 async def test_router_unstructured_auth_error_fails_fast() -> None:
     """Verify that an unstructured 401 error in string fails fast without running fallbacks."""
     provider = MockModelProvider()
