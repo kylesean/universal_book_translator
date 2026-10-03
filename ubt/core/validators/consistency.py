@@ -246,11 +246,13 @@ def normalize_for_numeric_matching(text: str, lang: str = "zh") -> str:
         def _scale_sequence(m: re.Match[str]) -> str:
             # Sum the whole adjacent run: "1亿2000万" is 120000000, not
             # "10000000020000000" (each magnitude scaled and concatenated).
-            total = 0.0
+            # Decimal, not float: 万亿-scale sums exceed float's 2^53
+            # exact-integer range, and this must fold exactly like
+            # _cn_compound_runs below, which already uses Decimal.
+            total = Decimal(0)
             for num, unit in _WAN_YI_RE.findall(m.group(0)):
-                value = float(num) if "." in num else int(num)
-                total += value * (10000 if unit == "万" else 100_000_000)
-            return str(int(round(total)))
+                total += Decimal(num) * _CN_SCALE_FACTORS[unit]
+            return str(round(total))
 
         text = _WAN_YI_SEQ_RE.sub(_scale_sequence, text)
     text = _THOUSANDS_COMMA_RE.sub("", text)
@@ -752,6 +754,14 @@ class NumericConsistencyValidator(ContentValidator):
             if num in exempt_numbers:
                 continue
             if num in compound_satisfied:
+                # The compound total being restated satisfies only its
+                # constituents. The same digits may also occur bare elsewhere
+                # in the source; that bare occurrence still needs its own
+                # value, so fall through to the bare check (same rule as the
+                # scaled path below) instead of waving the key through.
+                if num not in bare_numbers or _bare_satisfied(num):
+                    continue
+                lost_numbers.append(num)
                 continue
             # Magnitude: a source quantity written with a scale word ('250万',
             # '2.5 million') must be restated at that magnitude. Bare surviving

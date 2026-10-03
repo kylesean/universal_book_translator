@@ -202,24 +202,43 @@ def _has_repeated_line_run(text: str) -> bool:
     of identical rows is faithfully repeated in the target, and quarantining it
     sent a correct block to repair (a flat 0.2 flag score) for nothing.
     """
-    run_line: str | None = None
-    run_len = 0
-    for raw in text.splitlines():
-        line = raw.strip()
-        if not line:
-            run_line = None
-            run_len = 0
-            continue
-        if line == run_line:
-            run_len += 1
-        else:
-            run_line = line
-            run_len = 1
-        if run_len >= _REPETITION_LINE_RUN and len(_LINE_LETTER_RE.findall(line)) >= (
-            _REPETITION_LINE_MIN_LETTERS
-        ):
-            return True
-    return False
+    return _detect_line_repetition_loop(text) is not None
+
+
+# Repetition-exemption tolerances. These are empirical calibration bands, not
+# derived values: they bound how much noisier the target repetition may be
+# than its source counterpart before the exemption stops applying.
+_REPETITION_SRC_ATTEST_COUNT = 3  # source repeats attesting a legitimate shape
+_REPETITION_COUNT_SLACK = 2  # target may exceed the attested source count by this
+_TABLE_COLUMN_SLACK = 2  # tolerated source/target table column-count difference
+_TABLE_CELL_MIN_REPEATS = 3  # cells repeated this often attest column repetition
+_TABLE_CELL_REPEAT_SLACK = 1  # source cells may trail the target's top count by this
+_REFRAIN_REPEAT_SLACK = 1  # tolerated refrain repeat-count difference
+_REFRAIN_EDGE_SLACK_CHARS = 5  # refrain may fall short of the text edges by this many chars
+_REFRAIN_COVERAGE_RATIO = 0.3  # refrain must cover this fraction of its text
+
+
+def _strip_verbatim_term(residue: str, term: str) -> str:
+    """Strip a source-verbatim term from the residue without eating into words.
+
+    Plain ``str.replace`` lets the term OR consume the PRI|OR|ITY of an
+    untranslated "PRIORITY", inflating script density and hiding a real echo.
+    Letter-only terms get a letter-boundary guard (a CJK neighbour still
+    matches, so CJK-adjacent carry-overs keep stripping); terms carrying
+    digits or punctuation (GQA-8) keep plain replacement.
+    """
+    if term.isalpha():
+        return re.sub(rf"(?<![A-Za-z]){re.escape(term)}(?![A-Za-z])", "", residue)
+    return residue.replace(term, "")
+
+
+def _is_prose_block(block_type: Any) -> bool:
+    """Whether the block type gates the prose-only checks (empty/unknown -> prose).
+
+    Shared by the decide and reassess paths so the two gates cannot drift.
+    """
+    value = getattr(block_type, "value", block_type or "")
+    return not value or str(value).lower() in {str(t.value).lower() for t in PROSE_BLOCK_TYPES}
 
 
 def _is_exempt_repetition(src_clean: str, tgt_clean: str, m: re.Match[str]) -> bool:
@@ -241,7 +260,7 @@ def _is_exempt_repetition(src_clean: str, tgt_clean: str, m: re.Match[str]) -> b
     if len(clean_unit) >= 2:
         src_cnt = src_clean.count(clean_unit)
         tgt_cnt = tgt_clean.count(clean_unit)
-        if src_cnt >= 3 and tgt_cnt <= src_cnt + 2:
+        if src_cnt >= _REPETITION_SRC_ATTEST_COUNT and tgt_cnt <= src_cnt + _REPETITION_COUNT_SLACK:
             return True
         if src_cnt > 0 and src_cnt >= tgt_cnt:
             return True
@@ -263,8 +282,6 @@ def _is_exempt_repetition(src_clean: str, tgt_clean: str, m: re.Match[str]) -> b
     if tgt_line and tgt_line.count("|") >= 2:
         tgt_cells = [c.strip() for c in tgt_line.strip().strip("|").split("|")]
         # Only consider repetition across cells (not in-cell runaway text loop)
-        from collections import Counter
-
         tgt_counts = Counter(c for c in tgt_cells if c and not re.match(r"^[-:| ]+$", c))
         if tgt_counts:
             top_tgt_cell, top_tgt_cnt = tgt_counts.most_common(1)[0]
@@ -275,7 +292,7 @@ def _is_exempt_repetition(src_clean: str, tgt_clean: str, m: re.Match[str]) -> b
                 or (top_tgt_cell != "" and top_tgt_cell in repeated_unit)
                 or "|" in repeated_unit
             )
-            if top_tgt_cnt >= 3 and cell_matches_unit:
+            if top_tgt_cnt >= _TABLE_CELL_MIN_REPEATS and cell_matches_unit:
                 src_lines = src_clean.splitlines()
                 # Check corresponding or compatible source table row
                 candidate_src_lines: list[str] = []
@@ -288,11 +305,15 @@ def _is_exempt_repetition(src_clean: str, tgt_clean: str, m: re.Match[str]) -> b
                 )
                 for s_ln in candidate_src_lines:
                     s_cells = [c.strip() for c in s_ln.strip().strip("|").split("|")]
-                    if abs(len(s_cells) - len(tgt_cells)) <= 2:
+                    if abs(len(s_cells) - len(tgt_cells)) <= _TABLE_COLUMN_SLACK:
                         s_counts = Counter(
                             c for c in s_cells if c and not re.match(r"^[-:| ]+$", c)
                         )
-                        if any(cnt >= 3 or cnt >= top_tgt_cnt - 1 for cnt in s_counts.values()):
+                        if any(
+                            cnt >= _TABLE_CELL_MIN_REPEATS
+                            or cnt >= top_tgt_cnt - _TABLE_CELL_REPEAT_SLACK
+                            for cnt in s_counts.values()
+                        ):
                             return True
 
     # 4. Source in-line pattern repetition (e.g. poetry, song refrain, in-line repeated phrases)
@@ -305,14 +326,15 @@ def _is_exempt_repetition(src_clean: str, tgt_clean: str, m: re.Match[str]) -> b
         ):
             src_reps = len(sm.group(0)) // max(1, len(s_unit))
             tgt_reps = len(matched_text) // max(1, len(repeated_unit))
-            if abs(src_reps - tgt_reps) <= 1:
+            if abs(src_reps - tgt_reps) <= _REFRAIN_REPEAT_SLACK:
                 aligned_start = sm.start() == 0 and m.start() == 0
                 aligned_end = (
-                    abs(len(src_clean) - sm.end()) <= 5 and abs(len(tgt_clean) - m.end()) <= 5
+                    abs(len(src_clean) - sm.end()) <= _REFRAIN_EDGE_SLACK_CHARS
+                    and abs(len(tgt_clean) - m.end()) <= _REFRAIN_EDGE_SLACK_CHARS
                 )
                 covers_substantial = (
-                    len(sm.group(0)) >= len(src_clean) * 0.3
-                    and len(matched_text) >= len(tgt_clean) * 0.3
+                    len(sm.group(0)) >= len(src_clean) * _REFRAIN_COVERAGE_RATIO
+                    and len(matched_text) >= len(tgt_clean) * _REFRAIN_COVERAGE_RATIO
                 )
                 if (aligned_start or aligned_end) and covers_substantial:
                     return True
@@ -598,8 +620,7 @@ class FastPassFilter:
         # only gates below share this one computation. (Without the shared
         # computation, formula blocks misroute to repair — which rightly
         # ignores skip_translate — and are left stale-FAILED.)
-        _bt = getattr(block_type, "value", block_type or "")
-        _is_prose = not _bt or str(_bt).lower() in {str(t.value).lower() for t in PROSE_BLOCK_TYPES}
+        _is_prose = _is_prose_block(block_type)
 
         if not tgt_clean:
             return FastPassDecision(
@@ -847,8 +868,7 @@ class FastPassFilter:
 
         src_clean = source_text.strip()
         tgt_clean = target_text.strip()
-        _bt = getattr(block_type, "value", block_type or "")
-        _is_prose = not _bt or str(_bt).lower() in {str(t.value).lower() for t in PROSE_BLOCK_TYPES}
+        _is_prose = _is_prose_block(block_type)
 
         # 4. Standalone number preservation check
         num_res = self.numeric_validator.validate(src_clean, tgt_clean)
@@ -929,13 +949,13 @@ class FastPassFilter:
                 and term[1:].islower()
                 and term not in _COMMON_SENTENCE_STARTERS
             ):
-                residue = residue.replace(term, "")
+                residue = _strip_verbatim_term(residue, term)
                 # Plural-tolerant strip: source 'FinFETs' rendered as target
                 # 'FinFET' is correct — leaving it in the residue would
                 # dilute script density (same rule as the omission gate).
                 sing = singular_variant(term)
                 if sing is not None:
-                    residue = residue.replace(sing, "")
+                    residue = _strip_verbatim_term(residue, sing)
         # Language identity lives in letters: punctuation carries no script
         # signal and only dilutes the ratio (decimal points, parens, slashes
         # dominate tables and formulas).

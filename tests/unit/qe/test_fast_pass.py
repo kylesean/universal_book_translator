@@ -27,6 +27,7 @@ from ubt.core.qe.fast_pass import (
     _has_repeated_line_run,
     _math_spans_equivalent,
     _normalize_math_body,
+    _strip_verbatim_term,
     grid_columns,
     is_near_verbatim_echo,
     is_verbatim_echo,
@@ -255,3 +256,31 @@ def test_emails_and_author_lines_not_rejected_as_near_verbatim_echo() -> None:
     src = "Youngmok Jung: yjung24@apple.com, Manjot Bilkhu: mbilkhu@apple.com"
     tgt = "Youngmok Jung：yjung24@apple.com，Manjot Bilkhu：mbilkhu@apple.com"
     assert is_near_verbatim_echo(src, tgt, target_is_cjk=True) is False
+
+
+# --------------------------------------------------------------------------- #
+# Verbatim-term residue stripping.
+# --------------------------------------------------------------------------- #
+
+
+def test_verbatim_term_strip_keeps_letter_boundaries() -> None:
+    # A bare substring strip would eat the PRI|OR|ITY of an untranslated word.
+    residue = _strip_verbatim_term("PRIORITY data", "OR")
+    assert "PRIORITY" in residue
+    assert _strip_verbatim_term("low OR high", "OR") == "low  high"
+    # CJK-adjacent carry-overs still strip: the guard is letter-only, and a
+    # CJK character is not a letter boundary blocker.
+    assert _strip_verbatim_term("内存PagedAttention池", "PagedAttention") == "内存池"
+    # Identifier-shaped terms carrying digits keep plain replacement.
+    assert _strip_verbatim_term("GQA-8 blocks", "GQA-8") == " blocks"
+
+
+def test_repetition_detectors_agree() -> None:
+    # _has_repeated_line_run delegates to the loop detector; pin the contract
+    # so the two entry points cannot drift apart again.
+    loop = "This is a repeated hallucination line.\n" * 4
+    assert _has_repeated_line_run(loop) is True
+    assert _detect_line_repetition_loop(loop) is not None
+    plain = "alpha\nbeta\ngamma\n"
+    assert _has_repeated_line_run(plain) is False
+    assert _detect_line_repetition_loop(plain) is None

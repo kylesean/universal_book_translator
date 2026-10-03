@@ -155,6 +155,11 @@ def _math_term_variants(term: str) -> list[str]:
     return vars
 
 
+# Deliberate runtime allowlist (introduced in 60c7060 after corpus tuning):
+# identifier terms a correct translation may legitimately render other than
+# verbatim, mapped to the target surfaces that verify the translation.
+# Extend only with corpus-attested cases — every entry here exempts an
+# omission in the production gate.
 _KNOWN_TRANSLATABLE_TERMS: dict[str, tuple[str, ...]] = {
     "microvm": ("微虚拟机", "虚拟机", "microvm"),
     "microvms": ("微虚拟机", "虚拟机", "microvms"),

@@ -454,3 +454,23 @@ def test_bare_count_multiplier_scale_equivalence() -> None:
     tgt = "基于超过 150 万个容器和 39 万个微虚拟机测得"
     res = validator.validate(src, tgt)
     assert res.is_valid, res.message
+
+
+def test_compound_satisfaction_does_not_waive_bare_occurrences() -> None:
+    # Restating the compound total ("3亿5000万" -> "3.5 亿") satisfies only the
+    # compound's constituents; a bare "3" elsewhere in the source still needs
+    # its own occurrence, exactly like the scaled-number path.
+    validator = NumericConsistencyValidator()
+    res = validator.validate(
+        "The cluster spans 3亿5000万 requests in total, stored on 3 disks.",
+        "集群总共处理 3.5 亿个请求。",
+    )
+    assert not res.is_valid, res.message
+    assert "3" in res.details["lost_numbers"]
+
+
+def test_wan_yi_scale_folding_is_exact() -> None:
+    # 9007199254740993亿 exceeds float's 2^53 exact-integer range; the fold
+    # must use Decimal so the normalized value keeps every digit (same
+    # arithmetic as _cn_compound_runs).
+    assert "900719925474099300000000" in normalize_for_numeric_matching("9007199254740993亿")

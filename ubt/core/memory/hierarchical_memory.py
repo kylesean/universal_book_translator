@@ -20,6 +20,7 @@ from typing import Any
 from ubt.core.ir.models import IRBlock
 from ubt.core.memory.neighbor_window import DEFAULT_NEIGHBOR_CHARS, NeighborContextBuilder
 from ubt.core.memory.rolling_summary import (
+    collect_chapter_text,
     deterministic_summary,
     extract_chapter_id,
     llm_summary,
@@ -30,6 +31,9 @@ logger = logging.getLogger(__name__)
 DEFAULT_STEP_CHARS = 3500
 DEFAULT_L3_EPOCH_STEPS = 4
 _MAX_L3_CHARS = 1200
+# A chapter transition forces a macro snapshot only once the buffer holds real
+# content; below this the transition folds into the next regular snapshot.
+_SNAPSHOT_MIN_BUFFER_CHARS = 300
 
 
 @dataclass(slots=True)
@@ -104,6 +108,15 @@ class HierarchicalMemoryManager:
         text = block.target_text or block.draft_text or block.source_text or ""
         self._current_buffer_chars += len(text)
 
+    def discard_pending_blocks(self) -> None:
+        """Drop buffered blocks without summarizing (shutdown/teardown path).
+
+        Clears the char counter too — the same pairing the post-snapshot reset
+        uses — so a reused manager never inherits stale buffer accounting.
+        """
+        self._unsummarized_blocks.clear()
+        self._current_buffer_chars = 0
+
     def should_trigger_snapshot(self, next_block: IRBlock | None = None) -> bool:
         """Check if buffer has accumulated enough content or crossed a chapter boundary."""
         if not self._unsummarized_blocks:
@@ -121,7 +134,10 @@ class HierarchicalMemoryManager:
                 curr_ch
                 and next_ch
                 and curr_ch != next_ch
-                and (self._current_buffer_chars >= 300 or len(self._unsummarized_blocks) >= 2)
+                and (
+                    self._current_buffer_chars >= _SNAPSHOT_MIN_BUFFER_CHARS
+                    or len(self._unsummarized_blocks) >= 2
+                )
             ):
                 return True
 
@@ -143,13 +159,9 @@ class HierarchicalMemoryManager:
         last_block = blocks_to_summarize[-1]
         chapter_id = extract_chapter_id(first_block.id)
 
-        # Collect text
-        parts: list[str] = []
-        for b in blocks_to_summarize:
-            t = b.target_text or b.draft_text or b.source_text or ""
-            if t.strip():
-                parts.append(t.strip())
-        content = "\n".join(parts)[:3000].strip()
+        # Same assembly rules as the per-chapter rolling summary — one owner
+        # for the truncation policy so the two callers cannot drift.
+        content = collect_chapter_text(blocks_to_summarize)
 
         summary = ""
         if content:

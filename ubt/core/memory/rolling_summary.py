@@ -49,7 +49,7 @@ def collect_chapter_text(blocks: list[Any], max_chars: int = _MAX_INPUT_CHARS) -
         if not text or not text.strip():
             continue
         parts.append(text.strip())
-        total += len(text) + 1
+        total += len(text.strip()) + 1
         if total >= max_chars:
             break
     return "\n".join(parts)[:max_chars].strip()
@@ -133,6 +133,6 @@ async def summarize_chapter(
         chapter_text,
         complete,
         target_lang,
-        context="Failed to parse rolling summary",
+        context="Rolling summary LLM call failed",
     )
     return summary or deterministic_summary(chapter_text)

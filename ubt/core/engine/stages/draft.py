@@ -1553,7 +1553,7 @@ async def run_draft_stage(
             await asyncio.to_thread(
                 _persist_memory_state, ledger, actual_job_id, memory_mgr, processor
             )
-        memory_mgr._unsummarized_blocks.clear()
+        memory_mgr.discard_pending_blocks()
         if (
             counters["tm_exact_hits"]
             or counters["batch_drafted"]
