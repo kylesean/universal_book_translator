@@ -53,7 +53,8 @@ def document_from_blocks(
         current.append(element)
     if current:
         regions.append(Region(id=f"r{len(regions)}", kind=current_kind, elements=tuple(current)))
-    source = CanonicalSource(doc_id=doc_id, path=path, pages=tuple(pages))
+    canonical_text = "\n".join(b.source_text for b in ordered)
+    source = CanonicalSource(doc_id=doc_id, path=path, text=canonical_text, pages=tuple(pages))
     return Document(source=source, regions=tuple(regions))
 
 

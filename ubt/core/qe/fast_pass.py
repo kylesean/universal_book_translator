@@ -462,7 +462,12 @@ def grid_columns(line: str) -> int | None:
     stripped = line.strip()
     if stripped.count("|") < 2:
         return None
-    return len(stripped.strip("|").split("|"))
+    if stripped.startswith("|"):
+        stripped = stripped[1:]
+    if stripped.endswith("|") and not stripped.endswith(r"\|"):
+        stripped = stripped[:-1]
+    cells = re.split(r"(?<!\\)\|", stripped)
+    return len(cells) if cells else None
 
 
 def markdown_grid_shape(text: str) -> list[int]:

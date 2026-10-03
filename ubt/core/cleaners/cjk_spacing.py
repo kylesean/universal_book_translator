@@ -20,7 +20,7 @@ from __future__ import annotations
 import re
 
 from ubt.core.cjk_ranges import CJK_BMP_CLASS
-from ubt.core.cleaners.inline_math import iter_inline_math
+from ubt.core.validators.glossary_enforcer import extract_protected_spans
 
 _CJK = CJK_BMP_CLASS
 _CJK_PUNCT = r"，。；：、？！（）》”’】…—「『～·《“‘【〈〔［｛"
@@ -61,27 +61,31 @@ _SINGLE_ELLIPSIS = re.compile(
 _EXCESS_ELLIPSIS = re.compile(rf"(?<=[{_CJK}])(?:\u2026){{3,}}|(?:\u2026){{3,}}(?=[{_CJK}])")
 _SPACED_EM_DASH = re.compile(rf"(?<=[{_CJK}])\s*——\s*(?=[{_CJK}])")
 _SPACED_ELLIPSIS = re.compile(rf"(?<=[{_CJK}])\s*……\s*(?=[{_CJK}])")
-_OTHER_PROTECTED_RE = re.compile(
-    r"(⟦[^⟧]*⟧|```[\w]*\n[\s\S]*?\n```|```[\s\S]*?```|`[^`\n]+`|\$\$[\s\S]*?\$\$)"
-)
+
+
+def _merge_intervals(intervals: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    if not intervals:
+        return []
+    sorted_intervals = sorted(intervals)
+    merged = [sorted_intervals[0]]
+    for start, end in sorted_intervals[1:]:
+        prev_start, prev_end = merged[-1]
+        if start <= prev_end:
+            merged[-1] = (prev_start, max(prev_end, end))
+        else:
+            merged.append((start, end))
+    return merged
 
 
 def _split_protected(text: str) -> list[str]:
     """Split text into alternating [unprotected, protected, ...] segments.
 
-    Guards code blocks, code spans, maskers, display math, and genuine inline math,
-    without treating unspaced CJK currency (e.g. $5到$10) as math.
+    Guards code blocks, code spans, maskers, LaTeX math, HTML tags, and genuine inline math,
+    preventing spacing corruption inside syntactic tokens.
     """
-    intervals: list[tuple[int, int]] = []
-    for m in _OTHER_PROTECTED_RE.finditer(text):
-        intervals.append((m.start(), m.end()))
-    for m in iter_inline_math(text):
-        start, end = m.start(), m.end()
-        if not any(start < prev_end and end > prev_start for prev_start, prev_end in intervals):
-            intervals.append((start, end))
+    intervals = _merge_intervals(extract_protected_spans(text))
     if not intervals:
         return [text]
-    intervals.sort()
     parts: list[str] = []
     last = 0
     for start, end in intervals:

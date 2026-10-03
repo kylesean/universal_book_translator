@@ -19,7 +19,6 @@ from ubt.model.ast import (
     ElementT,
     Formula,
     Region,
-    RegionKind,
     Table,
     TextElement,
 )
@@ -82,7 +81,12 @@ def assemble(
         text = element_text(element)
         stamped.append(
             dataclasses.replace(
-                element, span=Span(page=element.span.page, chars=(cursor, cursor + len(text)))
+                element,
+                span=Span(
+                    page=element.span.page,
+                    chars=(cursor, cursor + len(text)),
+                    bbox=element.span.bbox,
+                ),
             )
         )
         texts.append(text)
@@ -90,8 +94,20 @@ def assemble(
     source = CanonicalSource(doc_id=doc_id, path=path, text="\n".join(texts), pages=pages)
     if not stamped:
         return Document(source=source, regions=())
-    region = Region(id="r0", kind=RegionKind.BODY, elements=tuple(stamped))
-    return Document(source=source, regions=(region,))
+    regions: list[Region] = []
+    current_kind = stamped[0].region
+    current: list[ElementT] = []
+    for el in stamped:
+        if current and el.region is not current_kind:
+            regions.append(
+                Region(id=f"r{len(regions)}", kind=current_kind, elements=tuple(current))
+            )
+            current = []
+            current_kind = el.region
+        current.append(el)
+    if current:
+        regions.append(Region(id=f"r{len(regions)}", kind=current_kind, elements=tuple(current)))
+    return Document(source=source, regions=tuple(regions))
 
 
 __all__ = ["assemble", "element_text", "normalized", "number"]

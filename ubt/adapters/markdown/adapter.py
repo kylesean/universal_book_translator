@@ -50,8 +50,37 @@ def _with_heading_marker(block: IRBlock, target: str) -> str:
     """
     if block.block_type is not BlockType.HEADING or target.lstrip().startswith("#"):
         return target
+    level = getattr(block.element, "level", None)
+    if isinstance(level, int) and 1 <= level <= 6:
+        return f"{'#' * level} {target}"
     marker = re.match(r"(#{1,6})\s+", block.source_text or "")
-    return f"{marker.group(1)} {target}" if marker else target
+    return f"{marker.group(1)} {target}" if marker else f"# {target}"
+
+
+def _with_list_marker(block: IRBlock, target: str) -> str:
+    """Prepend list marker (e.g. '-' or '1.') to list item if missing."""
+    if block.block_type is not BlockType.LIST_ITEM:
+        return target
+    marker = getattr(block.element, "marker", "")
+    if not marker:
+        src_match = re.match(r"^(\s*[-*+]\s+|\s*\d+\.\s+)", block.source_text or "")
+        if src_match:
+            marker = src_match.group(1).rstrip()
+    if marker:
+        clean_marker = marker.rstrip()
+        stripped_target = target.lstrip()
+        if not re.match(r"^([-*+]\s+|\d+\.\s+)", stripped_target):
+            return f"{clean_marker} {stripped_target}"
+    return target
+
+
+def _format_markdown_block(block: IRBlock, target: str) -> str:
+    """Format heading or list item markers onto translated markdown block."""
+    if block.block_type is BlockType.HEADING:
+        return _with_heading_marker(block, target)
+    if block.block_type is BlockType.LIST_ITEM:
+        return _with_list_marker(block, target)
+    return target
 
 
 def _format_failure_note(status: BlockStatus) -> str:
@@ -261,15 +290,11 @@ class MarkdownAdapter(BaseDocumentAdapter):
                 else:
                     rendered_sections.append(f"{b.source_text}\n\n{note}\n\n{draft_block}")
             elif is_monolingual:
-                rendered_sections.append(_with_heading_marker(b, clean_target))
+                rendered_sections.append(_format_markdown_block(b, clean_target))
             else:
                 # Interleave source and target bilingual paragraphs (default: alternating)
                 # (LLM output is untrusted — strip dangerous HTML and error marks).
-                target_formatted = (
-                    _with_heading_marker(b, clean_target)
-                    if b.block_type is BlockType.HEADING
-                    else clean_target
-                )
+                target_formatted = _format_markdown_block(b, clean_target)
                 rendered_sections.append(f"{b.source_text}\n\n{target_formatted}")
 
         full_content = "\n\n".join(rendered_sections) + "\n"

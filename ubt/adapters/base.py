@@ -72,7 +72,12 @@ def parse_pipe_table_cells(markup: str) -> list[list[str]]:
         line = line.strip()
         if not line or not line.startswith("|"):
             continue
-        cells = [c.strip() for c in line.strip("|").split("|")]
+        stripped = line
+        if stripped.startswith("|"):
+            stripped = stripped[1:]
+        if stripped.endswith("|") and not stripped.endswith(r"\|"):
+            stripped = stripped[:-1]
+        cells = [c.strip() for c in re.split(r"(?<!\\)\|", stripped)]
         if cells and all(set(c).issubset({"-", ":", " "}) for c in cells):
             continue
         rows.append(cells)

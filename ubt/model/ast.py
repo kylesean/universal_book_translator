@@ -134,6 +134,7 @@ class ListItem(TextElement):
 
 @dataclass(frozen=True, slots=True)
 class Caption(TextElement):
+    region: RegionKind = RegionKind.CAPTION
     kind: Literal[ElementKind.CAPTION] = ElementKind.CAPTION
 
 
