@@ -41,7 +41,7 @@ import tempfile
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from ubt.adapters.pdf import oxide_render, pdf_struct
 from ubt.core.policy.layout_policy import (
@@ -682,11 +682,21 @@ def text_occlusion_findings(
                     if right - left < OCCLUSION_MIN_BOX_PX or bottom - top < 4:
                         continue
                     crop = grey.crop((left, top, right, bottom))
-                    pixels = list(crop.getdata())
+                    # ``grey`` is mode "L", so the values are plain ints, but
+                    # Pillow's annotation for get_flattened_data admits float
+                    # and per-pixel tuples. getdata is deprecated (removal in
+                    # Pillow 14); the fallback is for older Pillows.
+                    raw = (
+                        crop.get_flattened_data()
+                        if hasattr(crop, "get_flattened_data")
+                        else crop.getdata()
+                    )
+                    pixels = cast("list[int]", list(raw))
                     if not pixels:
                         continue
                     ink = sum(1 for px in pixels if px < 245) / len(pixels)
-                    if ink < OCCLUSION_INK_FLOOR:
+                    dark_pixels = sum(1 for px in pixels if px < 200)
+                    if ink < OCCLUSION_INK_FLOOR and dark_pixels < 10:
                         occluded += 1
                         if not sample:
                             sample = (
