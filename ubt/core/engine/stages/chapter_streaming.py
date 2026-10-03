@@ -145,11 +145,11 @@ async def run_chapter_streaming_pipeline(
                     t.cancel()
             await asyncio.gather(draft_task, qe_task, return_exceptions=True)
             if not isinstance(exc, asyncio.CancelledError):
-                with suppress(asyncio.QueueFull):
-                    event_queue.put_nowait(exc)
+                with suppress(asyncio.CancelledError):
+                    await event_queue.put(exc)
         finally:
-            with suppress(asyncio.QueueFull):
-                event_queue.put_nowait(_DONE)
+            with suppress(asyncio.CancelledError):
+                await event_queue.put(_DONE)
 
     supervisor_task = asyncio.create_task(supervisor(), name=f"chapter_supervisor_{ctx.job_id}")
 

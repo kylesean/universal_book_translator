@@ -254,7 +254,7 @@ class JobWorker:
             )
 
     # -- execution ------------------------------------------------------------
-    async def execute(self, job: QueuedJob, worker_id: str | None = None) -> None:
+    async def execute(self, job: QueuedJob, worker_id: str | None = None) -> bool:
         """Run one claimed job to a terminal queue state.
 
         ``worker_id`` must be the id that claimed the job (a slot id under
@@ -304,13 +304,17 @@ class JobWorker:
                     ):
                         raise JobInterruptedError(f"job {job.job_id} cancelled by request")
 
-            completed = await self._q(
-                self.queue.complete,
-                job.job_id,
-                owner,
-                status=JobStatus.COMPLETED,
-                progress=progress,
-            )
+            completed = False
+            try:
+                completed = await self._q(
+                    self.queue.complete,
+                    job.job_id,
+                    owner,
+                    status=JobStatus.COMPLETED,
+                    progress=progress,
+                )
+            except Exception as q_exc:
+                logger.error("Job %s: failed to mark completed in queue: %s", job.job_id, q_exc)
             if completed:
                 logger.info("Job %s completed", job.job_id)
             else:
@@ -324,19 +328,21 @@ class JobWorker:
                     "terminal write skipped (ledger holds the artifact)",
                     job.job_id,
                 )
+            return True
         except asyncio.CancelledError:
             # Task is tearing down; shield the terminal write so it still lands
             # off-loop rather than being cancelled mid-flight and leaving the job
             # stuck in ``running``.
-            await asyncio.shield(
-                self._q(
-                    self.queue.complete,
-                    job.job_id,
-                    owner,
-                    status=JobStatus.CANCELLED,
-                    progress=progress,
+            with suppress(Exception):
+                await asyncio.shield(
+                    self._q(
+                        self.queue.complete,
+                        job.job_id,
+                        owner,
+                        status=JobStatus.CANCELLED,
+                        progress=progress,
+                    )
                 )
-            )
             with suppress(Exception):
                 await asyncio.shield(
                     self._write_abort_ledger(
@@ -358,6 +364,7 @@ class JobWorker:
             logger.warning(
                 "Job %s: lease lost, stopping without a queue terminal write", job.job_id
             )
+            return True
         except JobInterruptedError:
             if lease_lost.is_set():
                 # Lease loss and a user cancel raced; the lease loss wins —
@@ -372,19 +379,21 @@ class JobWorker:
                     "Job %s: cancel signalled but lease already lost; treating as lease loss",
                     job.job_id,
                 )
-                return
-            await self._q(
-                self.queue.complete,
-                job.job_id,
-                owner,
-                status=JobStatus.CANCELLED,
-                progress=progress,
-            )
+                return True
+            with suppress(Exception):
+                await self._q(
+                    self.queue.complete,
+                    job.job_id,
+                    owner,
+                    status=JobStatus.CANCELLED,
+                    progress=progress,
+                )
             with suppress(Exception):
                 await self._write_abort_ledger(
                     job, job_config, status="cancelled", reason="cancelled_by_request"
                 )
             logger.info("Job %s cancelled by request", job.job_id)
+            return True
         except LedgerWriterLockConflictError as exc:
             # Another process currently holds the writer lock on disk (e.g. former worker
             # lost lease due to heartbeat jitter/GC pause but hasn't exited or released lock yet).
@@ -395,13 +404,14 @@ class JobWorker:
                 job.job_id,
                 exc,
             )
-            await self._q(
-                self.queue.release_claim,
-                job.job_id,
-                owner,
-                error=f"{type(exc).__name__}: writer lock held (slot requeued)",
-                decrement_attempt=True,
-            )
+            with suppress(Exception):
+                await self._q(
+                    self.queue.release_claim,
+                    job.job_id,
+                    owner,
+                    error=f"{type(exc).__name__}: writer lock held (slot requeued)",
+                    decrement_attempt=True,
+                )
             # Back off before the slot re-claims. The job is QUEUED again and
             # ``_slot`` claims immediately, so without this the same worker
             # grabs it, hits the same still-held lock, and spins: attempts are
@@ -409,21 +419,24 @@ class JobWorker:
             # never returns and the job is executed a second time the moment
             # the lock frees.
             await asyncio.sleep(self.poll_interval)
+            return False
         except Exception as exc:  # a job failure is terminal, not fatal
             self.failed_jobs += 1
             logger.warning("Job %s failed: %s", job.job_id, exc, exc_info=True)
-            await self._q(
-                self.queue.complete,
-                job.job_id,
-                owner,
-                status=JobStatus.FAILED,
-                # Never echo ``str(exc)``: provider error bodies and parse
-                # failures can carry source book text or host paths. The full
-                # detail is logged above; the client gets the class + job id
-                # (same product guarantee the embedded API manager applies).
-                error=f"{type(exc).__name__} (see server logs; job_id={job.job_id})",
-                progress=progress,
-            )
+            with suppress(Exception):
+                await self._q(
+                    self.queue.complete,
+                    job.job_id,
+                    owner,
+                    status=JobStatus.FAILED,
+                    # Never echo ``str(exc)``: provider error bodies and parse
+                    # failures can carry source book text or host paths. The full
+                    # detail is logged above; the client gets the class + job id
+                    # (same product guarantee the embedded API manager applies).
+                    error=f"{type(exc).__name__} (see server logs; job_id={job.job_id})",
+                    progress=progress,
+                )
+            return True
         finally:
             heartbeat.cancel()
             with suppress(asyncio.CancelledError):
@@ -436,8 +449,7 @@ class JobWorker:
         )
         if job is None:
             return False
-        await self.execute(job)
-        return True
+        return await self.execute(job)
 
     # -- loops ----------------------------------------------------------------
     async def _slot(self, worker_id: str, *, drain: bool) -> int:
@@ -452,8 +464,9 @@ class JobWorker:
                 with suppress(TimeoutError):
                     await asyncio.wait_for(self._stop.wait(), timeout=self.poll_interval)
                 continue
-            await self.execute(job, worker_id)
-            processed += 1
+            executed = await self.execute(job, worker_id)
+            if executed:
+                processed += 1
         return processed
 
     async def run_until_idle(self) -> int:

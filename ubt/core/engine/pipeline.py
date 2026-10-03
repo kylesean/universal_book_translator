@@ -783,59 +783,55 @@ class PipelineOrchestrator:
                 engine_signature=engine_signature(self.config),
             )
         self._billing_sessions[actual_job_id] = run_session
-        # The ledger itself is created inside the try below, so a failure in
-        # routing, TM construction, or anywhere else before staging cannot leak
-        # the SQLite connection + WAL. The except / finally blocks guard on None
-        # (same pattern as `tm` below).
         ledger: SQLiteJobLedger | None = None
-
-        # Adaptive short/long chain router (heuristic features per carrier;
-        # see ubt.core.router_mode.decide).
-        route_decision = decide(
-            input_path,
-            short_max_pages=self.config.short_max_pages,
-            exec_mode=self.config.exec_mode,
-        )
-        short_chain = route_decision.mode == "short"
-        if self.config.exec_mode == "short" and not short_chain:
-            raise DocumentParseError(
-                f"exec_mode='short' forced but {input_path.name} routed "
-                f"{route_decision.mode} ({route_decision.reason}) — refusing to "
-                "burn chapter-scale context on a long book; use --mode auto/long"
-            )
-        manifest.run.route_decision = route_decision.to_dict()
-        manifest.run.route_mode = route_decision.mode
-        manifest.run.formula_mode = self.config.formula_mode
-        manifest.run.config_snapshot = {
-            "draft_model": self.config.draft_model,
-            "repair_model": self.config.repair_model,
-            "qe_engine": self.config.qe_engine,
-            "qe_threshold": self.config.qe_threshold,
-            "max_repair_rounds": self.config.max_repair_rounds,
-            "prompt_strategy": self.config.prompt_strategy,
-            "rerank_k": self.config.rerank_k,
-        }
-        if short_chain:
-            logger.info(
-                "Short chain for job %s: %s",
-                actual_job_id,
-                route_decision.reason,
-            )
-
-        # Shared translation memory across jobs. Created lazily per run inside
-        # the guarded block so construction failures are handled cleanly.
         tm: TranslationMemory | None = None
+        writer_lock: LedgerWriterLock | None = None
 
-        db_path = self.config.db_dir / f"{actual_job_id}.sqlite"
-        # Single-writer guard, taken *before* the failure-marking try/finally:
-        # a losing second writer must not write job state into the winner's
-        # ledger (the engine claims no per-block leases; this lock is the only
-        # cross-process job mutual exclusion).
-        writer_lock = LedgerWriterLock(db_path, actual_job_id)
-        writer_lock.acquire()
-
-        # Staged execution lifecycle with guaranteed resource cleanup and failure handling.
         try:
+            # Adaptive short/long chain router (heuristic features per carrier;
+            # see ubt.core.router_mode.decide).
+            route_decision = decide(
+                input_path,
+                short_max_pages=self.config.short_max_pages,
+                exec_mode=self.config.exec_mode,
+            )
+            short_chain = route_decision.mode == "short"
+            if self.config.exec_mode == "short" and not short_chain:
+                raise DocumentParseError(
+                    f"exec_mode='short' forced but {input_path.name} routed "
+                    f"{route_decision.mode} ({route_decision.reason}) — refusing to "
+                    "burn chapter-scale context on a long book; use --mode auto/long"
+                )
+            manifest.run.route_decision = route_decision.to_dict()
+            manifest.run.route_mode = route_decision.mode
+            manifest.run.formula_mode = self.config.formula_mode
+            manifest.run.config_snapshot = {
+                "draft_model": self.config.draft_model,
+                "repair_model": self.config.repair_model,
+                "qe_engine": self.config.qe_engine,
+                "qe_threshold": self.config.qe_threshold,
+                "max_repair_rounds": self.config.max_repair_rounds,
+                "prompt_strategy": self.config.prompt_strategy,
+                "rerank_k": self.config.rerank_k,
+            }
+            if short_chain:
+                logger.info(
+                    "Short chain for job %s: %s",
+                    actual_job_id,
+                    route_decision.reason,
+                )
+
+            # Shared translation memory across jobs. Created lazily per run inside
+            # the guarded block so construction failures are handled cleanly.
+            db_path = self.config.db_dir / f"{actual_job_id}.sqlite"
+            # Single-writer guard, taken *before* the failure-marking try/finally:
+            # a losing second writer must not write job state into the winner's
+            # ledger (the engine claims no per-block leases; this lock is the only
+            # cross-process job mutual exclusion).
+            writer_lock = LedgerWriterLock(db_path, actual_job_id)
+            writer_lock.acquire()
+
+            # Staged execution lifecycle with guaranteed resource cleanup and failure handling.
             ledger = SQLiteJobLedger(db_path)
             if self.config.tm_enabled:
                 self.config.db_dir.mkdir(parents=True, exist_ok=True)
@@ -1021,7 +1017,7 @@ class PipelineOrchestrator:
                     logger.debug("Error closing TM for job %s: %s", actual_job_id, tm_exc)
             # Adapters may own subprocesses (the MathJax node renderer); close
             # them per run so a long-lived server does not accumulate children.
-            if adapter is not None:
+            if adapter is not None and self.custom_adapter is None:
                 await _close_adapter_off_loop(adapter, actual_job_id)
             if self._owns_router:
                 try:
@@ -1033,10 +1029,13 @@ class PipelineOrchestrator:
                     await self.qe_runner.aclose()
                 except Exception as qe_exc:
                     logger.debug("Error closing QE runner for job %s: %s", actual_job_id, qe_exc)
-            try:
-                writer_lock.release()
-            except Exception as lock_exc:
-                logger.debug("Error releasing writer lock for job %s: %s", actual_job_id, lock_exc)
+            if writer_lock is not None:
+                try:
+                    writer_lock.release()
+                except Exception as lock_exc:
+                    logger.debug(
+                        "Error releasing writer lock for job %s: %s", actual_job_id, lock_exc
+                    )
             session = self._billing_sessions.pop(actual_job_id, None)
             if session is not None:
                 self._completed_sessions[actual_job_id] = session
