@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import AsyncIterator
+from contextlib import suppress
 from typing import Any
 
 from ubt.core.engine.events import EventType, TranslationProgressEvent
@@ -62,7 +63,7 @@ async def run_chapter_streaming_pipeline(
 
     queue_size = getattr(ctx.config, "chapter_streaming_queue_size", 2)
     qe_queue: asyncio.Queue[ChapterMeta | None] = asyncio.Queue(maxsize=max(1, int(queue_size)))
-    event_queue: asyncio.Queue[Any] = asyncio.Queue()
+    event_queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=500)
     c_text_enabled = bool(ctx.config.c_text_enabled)
 
     async def draft_worker() -> None:
@@ -79,13 +80,25 @@ async def run_chapter_streaming_pipeline(
                 ):
                     await event_queue.put(event)
                 await qe_queue.put(ch)
-        finally:
             await qe_queue.put(None)
+        except BaseException:
+            # Drain and push sentinel non-blockingly so we never hang waiting on a full queue
+            # if qe_repair_worker died or was cancelled.
+            while not qe_queue.empty():
+                try:
+                    qe_queue.get_nowait()
+                    qe_queue.task_done()
+                except (asyncio.QueueEmpty, ValueError):
+                    break
+            with suppress(asyncio.QueueFull):
+                qe_queue.put_nowait(None)
+            raise
 
     async def qe_repair_worker() -> None:
         while True:
             ch = await qe_queue.get()
             if ch is None:
+                qe_queue.task_done()
                 break
             try:
                 ctx.check_cancelled()
@@ -126,14 +139,17 @@ async def run_chapter_streaming_pipeline(
             # Concurrently await both workers so failure in either triggers immediate reaction
             await asyncio.gather(draft_task, qe_task)
         except BaseException as exc:
-            # Cancel sibling tasks on unhandled error
-            if not draft_task.done():
-                draft_task.cancel()
-            if not qe_task.done():
-                qe_task.cancel()
-            await event_queue.put(exc)
+            # Cancel sibling tasks on unhandled error and wait for them to finish
+            for t in (draft_task, qe_task):
+                if not t.done():
+                    t.cancel()
+            await asyncio.gather(draft_task, qe_task, return_exceptions=True)
+            if not isinstance(exc, asyncio.CancelledError):
+                with suppress(asyncio.QueueFull):
+                    event_queue.put_nowait(exc)
         finally:
-            await event_queue.put(_DONE)
+            with suppress(asyncio.QueueFull):
+                event_queue.put_nowait(_DONE)
 
     supervisor_task = asyncio.create_task(supervisor(), name=f"chapter_supervisor_{ctx.job_id}")
 
@@ -150,4 +166,8 @@ async def run_chapter_streaming_pipeline(
         for t in (supervisor_task, qe_task, draft_task):
             if not t.done():
                 t.cancel()
+        # Drain event queue to release any worker or supervisor suspended on put()
+        while not event_queue.empty():
+            with suppress(Exception):
+                event_queue.get_nowait()
         await asyncio.gather(supervisor_task, qe_task, draft_task, return_exceptions=True)

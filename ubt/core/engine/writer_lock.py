@@ -50,7 +50,12 @@ def _try_exclusive_lock(fd: int) -> None:
 
 def _unlock(fd: int) -> None:
     if sys.platform == "win32":
-        return  # closing the handle already released the msvcrt lock
+        import msvcrt
+
+        with suppress(OSError):
+            os.lseek(fd, _LOCK_BYTE_OFFSET, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        return
     import fcntl
 
     fcntl.flock(fd, fcntl.LOCK_UN)
@@ -87,14 +92,12 @@ class LedgerWriterLock:
                 "--job-id.",
                 details={"job_id": self.job_id, "holder_pid": holder},
             ) from exc
-        except ImportError:  # pragma: no cover - exotic platforms
+        except ImportError as exc:  # pragma: no cover - exotic platforms
             os.close(fd)
-            logger.warning(
-                "No platform file-locking module available; job %s runs without "
-                "single-writer protection.",
-                self.job_id,
-            )
-            return
+            raise RuntimeError(
+                f"Cannot acquire writer lock for job '{self.job_id}': platform file-locking "
+                "module is unavailable. Single-writer safety cannot be guaranteed."
+            ) from exc
         with suppress(OSError):
             # Back to byte 0: _try_exclusive_lock left the handle positioned at the
             # lock byte, and the pid has to land where _read_holder_pid looks.

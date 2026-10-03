@@ -7,6 +7,7 @@ import logging
 import os
 import re
 from collections.abc import AsyncIterator, Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -137,9 +138,9 @@ def engine_signature(config: Any) -> str:
     """
     fields = getattr(type(config), "model_fields", {})
     parts: list[str] = []
-    for field, tag in _ENGINE_SIGNATURE_FIELDS:
-        value = getattr(config, field, None)
-        field_info = fields.get(field)
+    for fname, tag in _ENGINE_SIGNATURE_FIELDS:
+        value = getattr(config, fname, None)
+        field_info = fields.get(fname)
         default = getattr(field_info, "default", None)
         if value is not None and value != default:
             parts.append(f"{tag}{re.sub(r'[^A-Za-z0-9]', '', str(value))}")
@@ -182,6 +183,16 @@ async def _mark_failed_unless_completed(
         logger.warning("Failed to finalize aborted job %s in ledger: %s", job_id, fin_exc)
 
 
+@dataclass
+class _RunBillingSession:
+    """Encapsulates per-job billing counters and locks for orchestrator re-entrancy."""
+
+    sink: dict[str, dict[str, int]] | None = None
+    baseline: dict[str, dict[str, int]] = field(default_factory=dict)
+    billed_usage: dict[str, dict[str, int]] = field(default_factory=dict)
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+
 class PipelineOrchestrator:
     """Orchestrates the 6-stage universal book translation lifecycle."""
 
@@ -196,6 +207,7 @@ class PipelineOrchestrator:
         finalize_job: Callable[[TranslationProgressEvent], None] | None = None,
     ) -> None:
         self.config = config or UBTConfig.from_env()
+        self.config.bootstrap_runtime_environment()
 
         if router is None:
             if not self.config.draft_model:
@@ -342,23 +354,63 @@ class PipelineOrchestrator:
         # router (API JobManager) would otherwise be closed by whichever job
         # finishes first, killing in-flight requests of concurrent jobs.
         self._owns_router = router is None
-        # Per-run usage snapshot so cost/cache metrics are the job's own delta,
-        # not the shared provider's lifetime totals. Unused when the provider
-        # can attribute per run (``_run_usage_sink``), which is exact.
-        self._run_usage_baseline: dict[str, dict[str, int]] = {}
-        # This run's private usage counter, fed by the provider on every call it
-        # makes in this task's context. None = provider without attribution.
-        self._run_usage_sink: dict[str, dict[str, int]] | None = None
-        # The part of ``_run_usage()`` already folded into the ledger this run.
-        # ``_run_usage()`` is cumulative, so billing the whole of it on every
-        # progress event re-adds every earlier event's tokens; only the delta
-        # against this snapshot is new spend.
-        self._billed_run_usage: dict[str, dict[str, int]] = {}
-        # Chapter-streaming runs the draft and QE/repair workers concurrently
-        # and both bill through _create_progress_event: snapshot-delta, the
-        # ledger read-merge-write, and the baseline write-back must be one
-        # critical section or a reordered completion double-counts spend.
-        self._billing_lock = asyncio.Lock()
+        # Per-run billing sessions keyed by job_id for concurrent multi-job safety.
+        self._billing_sessions: dict[str, _RunBillingSession] = {}
+        self._completed_sessions: dict[str, _RunBillingSession] = {}
+        self._default_session = _RunBillingSession()
+
+    @property
+    def _run_usage_sink(self) -> dict[str, dict[str, int]] | None:
+        if self._billing_sessions:
+            return next(reversed(self._billing_sessions.values())).sink
+        return self._default_session.sink
+
+    @_run_usage_sink.setter
+    def _run_usage_sink(self, val: dict[str, dict[str, int]] | None) -> None:
+        if self._billing_sessions:
+            next(reversed(self._billing_sessions.values())).sink = val
+        self._default_session.sink = val
+
+    @property
+    def _run_usage_baseline(self) -> dict[str, dict[str, int]]:
+        if self._billing_sessions:
+            return next(reversed(self._billing_sessions.values())).baseline
+        return self._default_session.baseline
+
+    @_run_usage_baseline.setter
+    def _run_usage_baseline(self, val: dict[str, dict[str, int]]) -> None:
+        if self._billing_sessions:
+            next(reversed(self._billing_sessions.values())).baseline = val
+        self._default_session.baseline = val
+
+    @property
+    def _billed_run_usage(self) -> dict[str, dict[str, int]]:
+        if self._billing_sessions:
+            return next(reversed(self._billing_sessions.values())).billed_usage
+        return self._default_session.billed_usage
+
+    @_billed_run_usage.setter
+    def _billed_run_usage(self, val: dict[str, dict[str, int]]) -> None:
+        if self._billing_sessions:
+            next(reversed(self._billing_sessions.values())).billed_usage = val
+        self._default_session.billed_usage = val
+
+    @property
+    def _billing_lock(self) -> asyncio.Lock:
+        if self._billing_sessions:
+            return next(reversed(self._billing_sessions.values())).lock
+        return self._default_session.lock
+
+    def _get_billing_session(self, job_id: str | None = None) -> _RunBillingSession:
+        if job_id:
+            if job_id in self._billing_sessions:
+                return self._billing_sessions[job_id]
+            if job_id in self._completed_sessions:
+                return self._completed_sessions[job_id]
+            raise KeyError(f"No active or recent billing session for job '{job_id}'")
+        if self._billing_sessions:
+            return next(reversed(self._billing_sessions.values()))
+        return self._default_session
 
     @property
     def _is_mock_run(self) -> bool:
@@ -475,7 +527,13 @@ class PipelineOrchestrator:
                 delta[model] = diff
         return delta
 
-    def _run_usage(self) -> dict[str, dict[str, int]]:
+    def _session_usage(self, session: _RunBillingSession) -> dict[str, dict[str, int]]:
+        if session.sink is not None:
+            # Copy: the provider keeps accumulating into this dict concurrently.
+            return {model: dict(totals) for model, totals in list(session.sink.items())}
+        return self._usage_delta(session.baseline, self.router.usage_totals_by_model())
+
+    def _run_usage(self, job_id: str | None = None) -> dict[str, dict[str, int]]:
         """Tokens this run spent, per model.
 
         Prefer the provider's per-run sink: it is exact even when several jobs
@@ -483,24 +541,23 @@ class PipelineOrchestrator:
         to diffing the process-wide counters against the start-of-run snapshot
         (correct for a solo CLI run, blended for a shared one).
         """
-        if self._run_usage_sink is not None:
-            # Copy: the provider keeps accumulating into this dict concurrently.
-            return {model: dict(totals) for model, totals in self._run_usage_sink.items()}
-        return self._usage_delta(self._run_usage_baseline, self.router.usage_totals_by_model())
+        try:
+            session = self._get_billing_session(job_id)
+        except KeyError:
+            return {}
+        return self._session_usage(session)
 
-    async def _bill_run(
-        self, job_id: str, ledger: SQLiteJobLedger, *, raise_on_budget: bool
+    async def _bill_session(
+        self,
+        session: _RunBillingSession,
+        job_id: str,
+        ledger: SQLiteJobLedger,
+        *,
+        raise_on_budget: bool,
     ) -> JobBill:
-        """Fold this run's usage into the job's absolute ledger figure once.
-
-        Shared by the progress-event path and the export-stage hook that persists
-        post-visual-gate spend before the report reads the ledger. The budget only
-        stops the job at the progress-event call site; the export event is let
-        through so the artifact and report still say what the job spent.
-        """
-        async with self._billing_lock:
-            run_usage = self._run_usage()
-            newly_spent = self._usage_delta(self._billed_run_usage, run_usage)
+        async with session.lock:
+            run_usage = self._session_usage(session)
+            newly_spent = self._usage_delta(session.billed_usage, run_usage)
             bill = await bill_job_run(
                 ledger,
                 job_id,
@@ -515,12 +572,25 @@ class PipelineOrchestrator:
                     **self.router.billing_endpoint_map(),
                 },
             )
-            self._billed_run_usage = run_usage
+            session.billed_usage = run_usage
             if raise_on_budget:
                 violation = budget_violation(bill, self.config.budget_usd, job_id)
                 if violation is not None:
                     raise BudgetExceededError(violation)
         return bill
+
+    async def _bill_run(
+        self, job_id: str, ledger: SQLiteJobLedger, *, raise_on_budget: bool
+    ) -> JobBill:
+        """Fold this run's usage into the job's absolute ledger figure once.
+
+        Shared by the progress-event path and the export-stage hook that persists
+        post-visual-gate spend before the report reads the ledger. The budget only
+        stops the job at the progress-event call site; the export event is let
+        through so the artifact and report still say what the job spent.
+        """
+        session = self._get_billing_session(job_id)
+        return await self._bill_session(session, job_id, ledger, raise_on_budget=raise_on_budget)
 
     async def _create_progress_event(
         self,
@@ -633,12 +703,10 @@ class PipelineOrchestrator:
         await asyncio.to_thread(warn_world_readable, self.config.db_dir, scan_dirs)
         # Bill this run alone: take a provider-side sink when the provider can
         # attribute per run, otherwise a snapshot to diff the shared counters in.
-        self._run_usage_sink = self.router.begin_usage_sink()
-        self._run_usage_baseline = (
-            {} if self._run_usage_sink is not None else self.router.usage_totals_by_model()
-        )
-        # Fresh run: nothing of this run's spend is in the ledger yet.
-        self._billed_run_usage = {}
+        sink = self.router.begin_usage_sink()
+        baseline = {} if sink is not None else self.router.usage_totals_by_model()
+        run_session = _RunBillingSession(sink=sink, baseline=baseline, billed_usage={})
+        self._default_session = run_session
         if self.config.qe_engine == "tiered" and not self.config.qe_judge_enabled:
             logger.warning(
                 "qe_engine='tiered' selected without UBT_QE_JUDGE_ENABLED=true: "
@@ -714,6 +782,7 @@ class PipelineOrchestrator:
                 profile_name=profile_name,
                 engine_signature=engine_signature(self.config),
             )
+        self._billing_sessions[actual_job_id] = run_session
         # The ledger itself is created inside the try below, so a failure in
         # routing, TM construction, or anywhere else before staging cannot leak
         # the SQLite connection + WAL. The except / finally blocks guard on None
@@ -833,8 +902,10 @@ class PipelineOrchestrator:
                 fast_lane=adaptive_policy.fast_lane_bible,
                 # A callable, so the export stage reads the provider's counters
                 # when it renders rather than when the loop started.
-                measure_run_usage=self._run_usage,
-                bill_run_usage=lambda: self._bill_run(actual_job_id, ledger, raise_on_budget=False),
+                measure_run_usage=lambda: self._session_usage(run_session),
+                bill_run_usage=lambda: self._bill_session(
+                    run_session, actual_job_id, ledger, raise_on_budget=False
+                ),
                 cancel_token=cancel_token,
             )
             logger.info(
@@ -966,3 +1037,8 @@ class PipelineOrchestrator:
                 writer_lock.release()
             except Exception as lock_exc:
                 logger.debug("Error releasing writer lock for job %s: %s", actual_job_id, lock_exc)
+            session = self._billing_sessions.pop(actual_job_id, None)
+            if session is not None:
+                self._completed_sessions[actual_job_id] = session
+                if len(self._completed_sessions) > 100:
+                    self._completed_sessions.pop(next(iter(self._completed_sessions)))

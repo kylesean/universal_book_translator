@@ -225,11 +225,12 @@ class LedgerJobsMixin(LedgerBase):
                         "refusing to rewrite it (resume with a restored ledger "
                         "or start over with --fresh)"
                     ) from exc
+            path = "$." + json.dumps(key)
             conn.execute(
                 "UPDATE job_meta "
-                "   SET metadata_json = json_set(COALESCE(NULLIF(metadata_json, ''), '{}'), '$.' || ?, json(?)) "
+                "   SET metadata_json = json_set(COALESCE(NULLIF(metadata_json, ''), '{}'), ?, json(?)) "
                 " WHERE job_id = ?",
-                (key, val_json, actual_id),
+                (path, val_json, actual_id),
             )
             conn.commit()
 
@@ -253,6 +254,51 @@ class LedgerJobsMixin(LedgerBase):
         figure it wants recorded.
         """
         self.set_job_metadata_value(job_id, "usage_totals", _as_usage_totals(totals_by_model))
+
+    def atomic_increment_job_usage(
+        self, job_id: str, increment: dict[str, dict[str, int]]
+    ) -> dict[str, dict[str, int]]:
+        """Atomically merge increment into job_meta.usage_totals within a single transaction."""
+        with self._get_conn() as conn:
+            actual_id = self._resolve_actual_job_id(conn, job_id)
+            conn.execute("BEGIN IMMEDIATE;")
+            row = conn.execute(
+                "SELECT metadata_json FROM job_meta WHERE job_id = ?", (actual_id,)
+            ).fetchone()
+            if not row:
+                conn.execute("ROLLBACK;")
+                raise LedgerError(
+                    f"cannot increment usage: job '{actual_id}' has no "
+                    "job_meta row (was the job initialized?)"
+                )
+            raw = row["metadata_json"]
+            prior: dict[str, dict[str, int]] = {}
+            if raw:
+                try:
+                    meta = json.loads(raw)
+                    if not isinstance(meta, dict):
+                        conn.execute("ROLLBACK;")
+                        raise LedgerError(
+                            f"job_meta.metadata_json for '{actual_id}' is not a JSON object"
+                        )
+                    if "usage_totals" in meta:
+                        prior = _as_usage_totals(meta["usage_totals"])
+                except (TypeError, ValueError) as exc:
+                    conn.execute("ROLLBACK;")
+                    raise LedgerError(
+                        f"job_meta.metadata_json for '{actual_id}' is corrupt; "
+                        "refusing to rewrite it"
+                    ) from exc
+            lifetime = merge_usage_totals(prior, increment)
+            val_json = json.dumps(_as_usage_totals(lifetime), ensure_ascii=False)
+            conn.execute(
+                "UPDATE job_meta "
+                "   SET metadata_json = json_set(COALESCE(NULLIF(metadata_json, ''), '{}'), '$.usage_totals', json(?)) "
+                " WHERE job_id = ?",
+                (val_json, actual_id),
+            )
+            conn.commit()
+            return lifetime
 
     def get_job_status(self, job_id: str) -> str | None:
         """job_meta.status written by finalize_job ('completed'/'failed'/…).
@@ -385,21 +431,22 @@ class LedgerJobsMixin(LedgerBase):
                 (actual_id,),
             )
             row = cursor.fetchone()
-            scores_cursor = conn.execute(
-                f"""
-                SELECT mtqe_score FROM blocks
-                WHERE job_id = ? AND {QE_SCORED_SQL}
-                ORDER BY mtqe_score ASC
-                """,  # noqa: S608 — policy constant, not user input
-                (actual_id,),
-            )
-            scores = [
-                r["mtqe_score"] for r in scores_cursor.fetchall() if r["mtqe_score"] is not None
-            ]
             b15_avg = 0.0
-            if scores:
-                cutoff = max(1, int(len(scores) * 0.15))
-                b15_avg = round(sum(scores[:cutoff]) / cutoff, 4)
+            if row and row["avg_score"] is not None:
+                scores_cursor = conn.execute(
+                    f"""
+                    SELECT mtqe_score FROM blocks
+                    WHERE job_id = ? AND {QE_SCORED_SQL}
+                    ORDER BY mtqe_score ASC
+                    """,  # noqa: S608 — policy constant, not user input
+                    (actual_id,),
+                )
+                scores = [
+                    r["mtqe_score"] for r in scores_cursor.fetchall() if r["mtqe_score"] is not None
+                ]
+                if scores:
+                    cutoff = max(1, int(len(scores) * 0.15))
+                    b15_avg = round(sum(scores[:cutoff]) / cutoff, 4)
 
             conn.execute("COMMIT;")
             return {

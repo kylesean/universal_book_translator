@@ -75,14 +75,19 @@ async def bill_job_run(
     ``UBT_BUDGET_USD`` on spend the job never made. Callers that cannot track
     the delta may omit it, which is correct for a one-shot write.
     """
-    prior = await asyncio.to_thread(ledger.get_job_usage, job_id)
     if not run_usage:
+        prior = await asyncio.to_thread(ledger.get_job_usage, job_id)
         return JobBill(
             run_usage={}, lifetime_usage=prior, base_url=base_url, endpoint_map=endpoint_map
         )
     increment = run_usage if newly_spent is None else newly_spent
-    lifetime = merge_usage_totals(prior, increment)
-    await asyncio.to_thread(ledger.record_job_usage, job_id, lifetime)
+    atomic_fn = getattr(ledger, "atomic_increment_job_usage", None)
+    if callable(atomic_fn):
+        lifetime = await asyncio.to_thread(atomic_fn, job_id, increment)
+    else:
+        prior = await asyncio.to_thread(ledger.get_job_usage, job_id)
+        lifetime = merge_usage_totals(prior, increment)
+        await asyncio.to_thread(ledger.record_job_usage, job_id, lifetime)
     return JobBill(
         run_usage=run_usage,
         lifetime_usage=lifetime,

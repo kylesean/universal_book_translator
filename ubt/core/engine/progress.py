@@ -12,12 +12,15 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict
 
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.job_options import artifact_and_report_paths
+
+if TYPE_CHECKING:
+    from ubt.core.engine.ledger import SQLiteJobLedger
 
 # Fields that only exist once a render has named them, as opposed to the
 # counters, which every row reports from the first event.
@@ -181,7 +184,9 @@ def _as_str(value: Any) -> str | None:
 
 
 def persist_progress_metadata(
-    event: TranslationProgressEvent, ledger_path: Path, job_id: str
+    event: TranslationProgressEvent,
+    ledger_or_path: SQLiteJobLedger | Path,
+    job_id: str,
 ) -> None:
     """Persist a finished run's artifact triple and cost into its ledger.
 
@@ -194,6 +199,14 @@ def persist_progress_metadata(
     from ubt.core.engine.ledger import SQLiteJobLedger
 
     progress = ProgressSnapshot.from_event(event)
+    if isinstance(ledger_or_path, SQLiteJobLedger):
+        for metadata_key in (*ARTIFACT_KEYS, "estimated_cost_usd"):
+            value = getattr(progress, metadata_key)
+            if value is not None:
+                ledger_or_path.set_job_metadata_value(job_id, metadata_key, value)
+        return
+
+    ledger_path = Path(ledger_or_path)
     if not ledger_path.exists():
         return
     with SQLiteJobLedger(ledger_path) as ldg:

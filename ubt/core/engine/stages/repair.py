@@ -9,6 +9,7 @@ from typing import Any
 
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.facts import Scoring, Terminology
+from ubt.core.engine.ledger_flusher import CheckpointBatchFlusher
 from ubt.core.engine.services import RunServices
 from ubt.core.engine.stage_context import StageContext
 from ubt.core.exceptions import BudgetExceededError, JobInterruptedError
@@ -113,7 +114,15 @@ async def run_repair_stage(
                 "error_flags": [*cand.error_flags, f"{REPAIR_ERROR_PREFIX} {res}"],
             }
 
-        async def _repair_and_record(cand: IRBlock) -> None:
+        flusher = CheckpointBatchFlusher(
+            ledger=ledger,
+            flush_interval=float(getattr(ctx.config, "ledger_flush_interval", 0.25)),
+            max_batch_size=int(getattr(ctx.config, "ledger_flush_batch_size", 50)),
+        )
+
+        async def _repair_and_record(
+            cand: IRBlock, flusher: CheckpointBatchFlusher = flusher
+        ) -> None:
             """Persist each candidate the moment its repair returns.
 
             Recording per candidate ensures that cancellations or failures during
@@ -129,12 +138,16 @@ async def run_repair_stage(
             except BaseException as res:  # mirrors return_exceptions=True
                 logger.warning("Repair failed for block %s: %s", cand.id, res)
                 update = _record_failure(cand, res)
-            await asyncio.to_thread(ledger.save_checkpoints_batch, [update])
+            await flusher.enqueue(update)
 
-        results = await asyncio.gather(
-            *[_repair_and_record(cand) for cand in repair_candidates],
-            return_exceptions=True,
-        )
+        try:
+            results = await asyncio.gather(
+                *[_repair_and_record(cand) for cand in repair_candidates],
+                return_exceptions=True,
+            )
+        finally:
+            await flusher.close()
+
         for outcome in results:
             if isinstance(
                 outcome, (BudgetExceededError, JobInterruptedError, asyncio.CancelledError)
