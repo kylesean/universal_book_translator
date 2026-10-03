@@ -433,3 +433,16 @@ def test_hyphenated_words_not_treated_as_negative_tokens() -> None:
     tgt = "在第 5 轮检查点和第 1 梯队模型上训练"
     res = validator.validate(src, tgt)
     assert res.is_valid, res.message
+
+
+def test_dash_variant_ranges_canonicalize_to_hyphen() -> None:
+    # PDF extraction emits en/em dashes for ranges; a hyphen in the target is
+    # the same numeric fact.
+    assert canonicalize_numeric_token("10\u201320") == "10-20"
+    assert canonicalize_numeric_token("10\u201420") == "10-20"
+    validator = NumericConsistencyValidator()
+    res = validator.validate(
+        "Latency drops by 10\u201320 ms versus 5\u201310\u00d7 before.",
+        "延迟降低 10-20 毫秒，此前为 5-10 倍。",
+    )
+    assert res.is_valid, res.message

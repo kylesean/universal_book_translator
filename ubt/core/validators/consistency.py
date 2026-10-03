@@ -212,6 +212,7 @@ def canonicalize_numeric_token(s: str) -> str:
     t = _THOUSANDS_COMMA_RE.sub("", t)
     t = _THOUSANDS_DOT_RE.sub("", t)
     t = _DECIMAL_COMMA_RE.sub(".", t)
+    t = re.sub(r"[–—~～]", "-", t)
     return _strip_trailing_decimal_zeros(t)
 
 
@@ -256,6 +257,7 @@ def normalize_for_numeric_matching(text: str, lang: str = "zh") -> str:
     text = _THOUSANDS_DOT_RE.sub("", text)
     text = _DECIMAL_COMMA_RE.sub(".", text)
     text = _strip_trailing_decimal_zeros(text)
+    text = re.sub(r"[–—~～]", "-", text)
     return text.replace(",", "").replace("，", "")
 
 
