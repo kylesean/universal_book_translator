@@ -111,6 +111,8 @@ _STRUCTURAL_DOCUMENT_LABELS = frozenset(
     }
 )
 
+_STRUCTURAL_LABEL_WITH_NUM_RE = re.compile(r"^([A-Za-z]+)[._\s-]*\d+(?:[._\-]\d+)*(?:[A-Za-z])?$")
+
 
 # Common English words that are all-caps-shaped when a heading/emphasis run is
 # uppercased. They are prose, not source-verbatim identifiers, so the omission
@@ -213,6 +215,9 @@ def is_identifier_shaped(term: str) -> bool:
     """
     if term.lower() in _STRUCTURAL_DOCUMENT_LABELS:
         return False
+    m = _STRUCTURAL_LABEL_WITH_NUM_RE.match(term)
+    if m and m.group(1).lower() in _STRUCTURAL_DOCUMENT_LABELS:
+        return False
     if _HAS_DIGIT_RE.search(term) or _CAMEL_HUMP_RE.search(term):
         return True
     if "_" in term or "." in term:
@@ -238,9 +243,15 @@ def is_verbatim_carryover(term: str) -> bool:
     """
     if term.lower() in _STRUCTURAL_DOCUMENT_LABELS:
         return False
+    m = _STRUCTURAL_LABEL_WITH_NUM_RE.match(term)
+    if m and m.group(1).lower() in _STRUCTURAL_DOCUMENT_LABELS:
+        return False
     return bool(
         _CAMEL_HUMP_RE.search(term) or _ALL_CAPS_RE.match(term) or _HAS_DIGIT_RE.search(term)
     )
+
+
+_SPACED_DECIMAL_RE = re.compile(r"(?<=\d)\s*\.\s*(?=\d)")
 
 
 def count_sentences(text: str) -> int:
@@ -249,7 +260,10 @@ def count_sentences(text: str) -> int:
     The ONE sentence counter of the QE subsystem: academic abbreviation
     periods are masked before splitting, so 'Eq. 3.14 shows x. Then y.' is two
     sentences, not three, on every side that compares sentence counts.
+    Spaced decimals from PDF extraction ('19 . 6%') are collapsed to '19.6%'
+    so the dot is not falsely matched as terminal punctuation followed by space.
     """
-    masked = _ABBREV_RE.sub(lambda m: m.group(0)[:-1] + _ABBREV_DOT, text)
+    cleaned = _SPACED_DECIMAL_RE.sub(".", text)
+    masked = _ABBREV_RE.sub(lambda m: m.group(0)[:-1] + _ABBREV_DOT, cleaned)
     fragments = [f.strip() for f in _SENT_END_RE.split(masked)]
     return sum(1 for f in fragments if f)

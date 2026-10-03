@@ -27,7 +27,26 @@ pytestmark = pytest.mark.fast
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.parametrize("term", ["fig", "Fig", "TABLE", "eq", "no", "pp", "appendix"])
+@pytest.mark.parametrize(
+    "term",
+    [
+        "fig",
+        "Fig",
+        "TABLE",
+        "eq",
+        "no",
+        "pp",
+        "appendix",
+        "Figure1",
+        "Figure1a",
+        "Fig.1",
+        "Fig-2",
+        "Table3",
+        "Table-1",
+        "Eq4",
+        "Sec5.1",
+    ],
+)
 def test_structural_document_labels_are_not_identifiers(term: str) -> None:
     assert is_identifier_shaped(term) is False
 
@@ -123,6 +142,7 @@ def test_abbreviation_periods_do_not_split() -> None:
 def test_decimal_points_do_not_split() -> None:
     assert count_sentences("3.14 is pi") == 1
     assert count_sentences("a.b.c") == 1
+    assert count_sentences("It rose by 19 . 6% versus 1 . 1% before.") == 1
 
 
 def test_latin_bang_needs_whitespace_or_a_cjk_neighbour() -> None:
