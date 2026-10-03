@@ -10,9 +10,9 @@ from ubt.core.engine.pipeline import PipelineOrchestrator, _RunBillingSession
 pytestmark = pytest.mark.fast
 
 
-def test_billing_session_isolation():
+def test_billing_session_isolation() -> None:
     """Verify that multiple jobs on the same orchestrator maintain isolated billing state."""
-    config = UBTConfig(draft_model="mock-draft", mock_llm=True)
+    config = UBTConfig(draft_model="mock-draft")
     mock_router = MagicMock()
     mock_router.usage_totals_by_model.return_value = {
         "model-a": {"prompt_tokens": 100, "completion_tokens": 50}

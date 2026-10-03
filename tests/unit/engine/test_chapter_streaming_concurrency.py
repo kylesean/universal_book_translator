@@ -95,7 +95,7 @@ async def test_chapter_streaming_normal_completion(monkeypatch: pytest.MonkeyPat
 
     events: list[TranslationProgressEvent] = []
     async for event in run_chapter_streaming_pipeline(
-        ctx,  # type: ignore[arg-type]
+        ctx,
         SimpleNamespace(),  # type: ignore[arg-type]
         Terminology(glossary_dicts=[], abbreviation_entries=[]),
         Scoring(),
@@ -145,7 +145,7 @@ async def test_chapter_streaming_consumer_crash_does_not_deadlock(
         # Wrap in wait_for to guarantee no deadlock occurs
         async with asyncio.timeout(2.0):
             async for _ in run_chapter_streaming_pipeline(
-                ctx,  # type: ignore[arg-type]
+                ctx,
                 SimpleNamespace(),  # type: ignore[arg-type]
                 Terminology(glossary_dicts=[], abbreviation_entries=[]),
                 Scoring(),
