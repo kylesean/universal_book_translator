@@ -33,6 +33,7 @@ from ubt.core.exceptions import (
     UnsupportedDocumentFormatError,
 )
 from ubt.core.fs_perms import warn_world_readable
+from ubt.core.ir.models import BookManifest
 from ubt.core.job_options import default_output_dir_for_scan
 from ubt.core.memory.tm import (
     TranslationMemory,
@@ -190,6 +191,19 @@ class _RunBillingSession:
     baseline: dict[str, dict[str, int]] = field(default_factory=dict)
     billed_usage: dict[str, dict[str, int]] = field(default_factory=dict)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+
+@dataclass(frozen=True)
+class _RunPreparation:
+    """Everything one run needs resolved before the resource lifecycle starts."""
+
+    adapter: DocumentAdapter
+    manifest: BookManifest
+    source_lang: str
+    qe_runner: BaseQERunner
+    repair_loop: RepairLoop
+    actual_job_id: str
+    run_session: _RunBillingSession
 
 
 class PipelineOrchestrator:
@@ -661,21 +675,23 @@ class PipelineOrchestrator:
         except Exception as exc:
             logger.warning("finalize_job hook failed for job %s: %s", event.job_id, exc)
 
-    async def run(
+    async def _prepare_run(
         self,
         input_path: Path,
-        output_path: Path | None = None,
-        target_lang: str = "zh",
-        profile_name: str = "general",
-        job_id: str | None = None,
-        start_chapter: int = 1,
-        max_chapters: int | None = None,
-        source_lang: str = "",
-        cancel_token: asyncio.Event | None = None,
-    ) -> AsyncIterator[TranslationProgressEvent]:
-        """Execute the modular six-stage translation pipeline yielding real-time progress events."""
-        if not input_path.exists():
-            raise DocumentParseError(f"Input document does not exist: {input_path}")
+        output_path: Path | None,
+        target_lang: str,
+        profile_name: str,
+        job_id: str | None,
+        start_chapter: int,
+        max_chapters: int | None,
+        source_lang: str,
+    ) -> _RunPreparation:
+        """Resolve the run's pre-flight: disclosures, adapter contract, manifest, billing.
+
+        Kept out of :meth:`run` so that method is the resource lifecycle alone
+        (writer lock, ledger, stage plan, teardown) rather than pre-flight plus
+        lifecycle in one body.
+        """
         self._preflight_budget_pricing()
         # Disclose, once per run, whether book page images may leave this
         # machine (visual repair / cloud OCR / VLM judge) — this must never
@@ -778,6 +794,48 @@ class PipelineOrchestrator:
                 engine_signature=engine_signature(self.config),
             )
         self._billing_sessions[actual_job_id] = run_session
+        return _RunPreparation(
+            adapter=adapter,
+            manifest=manifest,
+            source_lang=source_lang,
+            qe_runner=runtime_qe_runner,
+            repair_loop=runtime_repair_loop,
+            actual_job_id=actual_job_id,
+            run_session=run_session,
+        )
+
+    async def run(
+        self,
+        input_path: Path,
+        output_path: Path | None = None,
+        target_lang: str = "zh",
+        profile_name: str = "general",
+        job_id: str | None = None,
+        start_chapter: int = 1,
+        max_chapters: int | None = None,
+        source_lang: str = "",
+        cancel_token: asyncio.Event | None = None,
+    ) -> AsyncIterator[TranslationProgressEvent]:
+        """Execute the modular six-stage translation pipeline yielding real-time progress events."""
+        if not input_path.exists():
+            raise DocumentParseError(f"Input document does not exist: {input_path}")
+        prep = await self._prepare_run(
+            input_path=input_path,
+            output_path=output_path,
+            target_lang=target_lang,
+            profile_name=profile_name,
+            job_id=job_id,
+            start_chapter=start_chapter,
+            max_chapters=max_chapters,
+            source_lang=source_lang,
+        )
+        adapter = prep.adapter
+        manifest = prep.manifest
+        source_lang = prep.source_lang
+        runtime_qe_runner = prep.qe_runner
+        runtime_repair_loop = prep.repair_loop
+        actual_job_id = prep.actual_job_id
+        run_session = prep.run_session
         ledger: SQLiteJobLedger | None = None
         tm: TranslationMemory | None = None
         writer_lock: LedgerWriterLock | None = None
