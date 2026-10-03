@@ -26,6 +26,7 @@ from ubt.adapters.pdf.docling_blocks import (
     chrome_key,
     is_inside_picture,
     is_repeat_handle,
+    merge_table_continuation_fragments,
     resolve_overlapping_formula_blocks,
     split_prov_spans,
     table_to_markdown,
@@ -426,12 +427,13 @@ def type_docling_blocks(blocks: list[IRBlock]) -> list[IRBlock]:
     debris/listing directly from the shared rules. There is no caption fuse /
     decouple / latch pass re-guessing boundaries afterwards.
 
-    The one remaining stage is a rendering-correctness merge, not typing:
-    vertically overlapping FORMULA boxes (Docling's detector emits two for an
-    equation paired with a commutative diagram) are unioned so the shared region
-    is cropped once instead of twice.
+    Rendering-correctness merges:
+    1. Vertically overlapping FORMULA boxes are unioned so the shared region is cropped once;
+    2. Loose code/formula fragments stranded immediately below a table are merged into the table.
     """
-    return resolve_overlapping_formula_blocks(blocks)
+    blocks = resolve_overlapping_formula_blocks(blocks)
+    blocks = merge_table_continuation_fragments(blocks)
+    return blocks
 
 
 def extract_with_docling(

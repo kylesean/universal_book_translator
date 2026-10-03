@@ -244,3 +244,97 @@ def resolve_overlapping_formula_blocks(blocks: list[IRBlock]) -> list[IRBlock]:
                 continue
         out.append(b)
     return out
+
+
+def merge_table_continuation_fragments(blocks: list[IRBlock]) -> list[IRBlock]:
+    """Merge loose code/formula/narrative fragments immediately below a table into the table block.
+
+    Docling occasionally fails to include the bottom row(s) of a complex table (e.g.
+    method signatures, key-value rows, or formulas) into the table item, emitting
+    them as a constellation of tiny formula/narrative fragments directly underneath
+    the table grid. In rigid typesetting, these fragments get translated into
+    narrow bboxes causing catastrophic multi-line overlapping and layout wreckage.
+    Merging them into the preceding table block extends the table's protective
+    envelope and preserves the entire table structure intact.
+    """
+    if len(blocks) < 2:
+        return blocks
+
+    out: list[IRBlock] = []
+    i = 0
+    n = len(blocks)
+
+    while i < n:
+        cur = blocks[i]
+        out.append(cur)
+        i += 1
+
+        if cur.block_type != BlockType.TABLE or cur.bbox is None:
+            continue
+
+        tbl_box = cur.bbox
+        cur_bottom = tbl_box.y0
+        merged_texts: list[str] = []
+        min_x0 = tbl_box.x0
+        max_x1 = tbl_box.x1
+
+        while i < n:
+            nxt = blocks[i]
+            nb = nxt.bbox
+            if nb is None or nb.page != tbl_box.page:
+                break
+            # Hard barriers: never swallow another table, heading, or caption
+            if nxt.block_type in (BlockType.TABLE, BlockType.HEADING):
+                break
+            ntxt = (nxt.source_text or "").strip()
+            if ntxt.lower().startswith(("table ", "figure ", "fig. ")):
+                break
+
+            # Fragment must be below the original table top
+            if nb.y1 > tbl_box.y0 + 5.0:
+                break
+
+            # Proximity to the current lowest row of the table
+            # Allow same-row blocks (nb.y1 can be slightly above cur_bottom)
+            gap = cur_bottom - nb.y1
+            if gap > 25.0:
+                break
+
+            # Horizontal containment within the table column envelope
+            if not (nb.x0 >= tbl_box.x0 - 25.0 and nb.x1 <= tbl_box.x1 + 25.0):
+                break
+
+            # Fragment characteristics: formula, code, short phrase, or tabular code signature
+            is_fragment = (
+                nxt.block_type in (BlockType.FORMULA, BlockType.CODE)
+                or len(ntxt) < 120
+                or any(sym in ntxt for sym in ("->", "←→", "| None", "tuple[", ":", "()"))
+            )
+            if not is_fragment:
+                break
+
+            # Absorb fragment
+            min_x0 = min(min_x0, nb.x0)
+            max_x1 = max(max_x1, nb.x1)
+            cur_bottom = min(cur_bottom, nb.y0)
+            if ntxt:
+                merged_texts.append(ntxt)
+            i += 1
+
+        if merged_texts:
+            new_box = BoundingBox(
+                page=tbl_box.page,
+                x0=min_x0,
+                y0=cur_bottom,
+                x1=max_x1,
+                y1=tbl_box.y1,
+            )
+            cur.set_bbox(new_box)
+            prev_txt = (cur.source_text or "").strip()
+            extra_txt = "\n".join(merged_texts)
+            merged_full = f"{prev_txt}\n{extra_txt}".strip()
+            cur.set_source_text(merged_full)
+            if cur.target_text is not None:
+                cur.target_text = merged_full
+
+    return out
