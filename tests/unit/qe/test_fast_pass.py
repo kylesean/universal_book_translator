@@ -249,3 +249,9 @@ def test_a_repetition_loop_is_rejected() -> None:
     decision = _filter().evaluate("A completely different source sentence.", loop)
     assert not decision.passed
     assert "loop hallucination" in decision.reason
+
+
+def test_emails_and_author_lines_not_rejected_as_near_verbatim_echo() -> None:
+    src = "Youngmok Jung: yjung24@apple.com, Manjot Bilkhu: mbilkhu@apple.com"
+    tgt = "Youngmok Jung：yjung24@apple.com，Manjot Bilkhu：mbilkhu@apple.com"
+    assert is_near_verbatim_echo(src, tgt, target_is_cjk=True) is False

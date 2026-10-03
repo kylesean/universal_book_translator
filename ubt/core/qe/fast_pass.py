@@ -328,9 +328,14 @@ _ECHO_MIN_LEN = 16
 _ECHO_FORMATTING_ONLY_RE = re.compile(r"^[`#*_\s0-9.|\-:=]+$")
 _ECHO_WORD_RE = re.compile(f"[A-Za-z{CJK_SCRIPT_CLASS}]{{4}}")
 _ECHO_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9'\-]{2,}")
-# Math and inline code are contractually verbatim in any translation, so they
-# carry no translation signal: mask them before counting retained words.
-_ECHO_MASK_RE = re.compile(r"\$[^$]*\$|\\\[.+?\\\]|\\\(.+?\\\)|`[^`]*`", re.S)
+# Math, inline code, URLs and email addresses are contractually verbatim in any translation,
+# so they carry no translation signal: mask them before counting retained words.
+_ECHO_MASK_RE = re.compile(
+    r"\$[^$]*\$|\\\[.+?\\\]|\\\(.+?\\\)|`[^`]*`"
+    r"|https?://\S+"
+    r"|\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b",
+    re.S,
+)
 _NEAR_ECHO_MIN_TOKENS = 8
 _NEAR_ECHO_RETENTION = 0.9
 # A CJK target legitimately carries its Latin proper nouns across verbatim
