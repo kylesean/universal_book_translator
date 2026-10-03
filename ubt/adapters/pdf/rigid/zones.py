@@ -261,8 +261,13 @@ def _resolve_horizontal_span_and_align(
         return x0, x1, "left"
     page_mid = page_w / 2.0
     block_mid = (x0 + x1) / 2.0
-    content_left = min((r.rect[0] for r in all_rows), default=70.0)
-    content_right = max((r.rect[2] for r in all_rows), default=page_w - 70.0)
+    body_candidate_rows = [
+        r for r in all_rows if (r.rect[2] - r.rect[0]) >= 60.0 and r.rect[0] >= 40.0
+    ]
+    content_left = min((r.rect[0] for r in (body_candidate_rows or all_rows)), default=70.0)
+    content_right = max(
+        (r.rect[2] for r in (body_candidate_rows or all_rows)), default=page_w - 70.0
+    )
 
     # Check if any foreign block or image occupies the same vertical band [y0, y1]
     owned_ids = {id(ln) for ln in best}
@@ -301,13 +306,19 @@ def _resolve_horizontal_span_and_align(
                 right_limit = min(right_limit, rx0 - ZONE_GAP_PT)
 
     # 1. Center alignment: block and all its lines are symmetric around page midpoint.
-    # Indented list items (BlockType.LIST_ITEM) are never centered blocks even when
-    # their lines happen to reach near the right margin.
+    # Indented list items and multi-line column-spanning narrative paragraphs are never
+    # centered blocks even when full-width lines are symmetric around the page midpoint.
     lines_centered = all(abs((ln.rect[0] + ln.rect[2]) / 2.0 - page_mid) <= 18.0 for ln in best)
     is_indented_from_margins = x0 > content_left + 12.0
     is_centered_heading = block.block_type == BlockType.HEADING and len(best) <= 2
+    is_multi_line_body_prose = (
+        block.block_type in (BlockType.NARRATIVE, BlockType.LIST_ITEM)
+        and len(best) >= 2
+        and (x1 - x0) >= 0.38 * page_w
+    )
     if (
         block.block_type != BlockType.LIST_ITEM
+        and not is_multi_line_body_prose
         and not has_left_obstacle
         and not has_right_obstacle
         and abs(block_mid - page_mid) <= 14.0
