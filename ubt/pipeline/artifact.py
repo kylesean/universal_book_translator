@@ -98,23 +98,22 @@ def _artifact_tokens(artifact: Path) -> frozenset[str]:
     if needed.
     """
     from ubt.adapters.pdf import pdf_struct, textgeom
-    from ubt.adapters.pdf.pdfium_gate import pdfium_serialized
+    from ubt.adapters.pdf.pdfium_gate import open_document, pdfium_serialized
 
     @pdfium_serialized
     def _read_all_text(p: Path) -> str:
-        import pypdfium2 as pdfium
-
-        pdf = pdfium.PdfDocument(str(p))
         chunks: list[str] = []
-        try:
-            for page in pdf:
-                tp = page.get_textpage()
+        with open_document(p) as pdf:
+            for idx in range(len(pdf)):
+                page = pdf[idx]
                 try:
-                    chunks.append(tp.get_text_range())
+                    tp = page.get_textpage()
+                    try:
+                        chunks.append(tp.get_text_range())
+                    finally:
+                        tp.close()
                 finally:
-                    tp.close()
-        finally:
-            pdf.close()
+                    page.close()
         return " ".join(chunks)
 
     try:
