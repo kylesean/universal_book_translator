@@ -398,3 +398,38 @@ def test_glossary_is_sorted_by_source_length_descending() -> None:
         ]
     )
     assert [entry["source"] for entry in validator.glossary] == ["AlphaBeta", "A"]
+
+
+def test_percentage_points_pp_not_treated_as_pico_scale() -> None:
+    validator = NumericConsistencyValidator()
+    # "14.5 pp" is percentage points, not 14.5 pico-p.
+    src = "DS-Vision shows a similar 14.5 pp gap."
+    tgt = "DS-Vision 表现出类似的 14.5 个百分点差距。"
+    res = validator.validate(src, tgt)
+    assert res.is_valid, res.message
+
+    src2 = "12.3, 14.8, 17.4 and 11.6 pp from shortest to longest"
+    tgt2 = "从最短到最长分别为 12.3、14.8、17.4 和 11.6 个百分点"
+    res2 = validator.validate(src2, tgt2)
+    assert res2.is_valid, res2.message
+
+
+def test_pdf_spaced_decimals_collapse() -> None:
+    validator = NumericConsistencyValidator()
+    src = "in 19 . 6% of facts versus 1 . 1% before, with p = 0 . 007"
+    tgt = "在 19.6% 的事实中，相比之前的 1.1%，p = 0.007"
+    res = validator.validate(src, tgt)
+    assert res.is_valid, res.message
+
+    src_table = "+ 24 . 7 pp and + 11 . 8 pp"
+    tgt_table = "+24.7 个百分点和 +11.8 个百分点"
+    res_table = validator.validate(src_table, tgt_table)
+    assert res_table.is_valid, res_table.message
+
+
+def test_hyphenated_words_not_treated_as_negative_tokens() -> None:
+    validator = NumericConsistencyValidator()
+    src = "trained on epoch-5 checkpoints and tier-1 models"
+    tgt = "在第 5 轮检查点和第 1 梯队模型上训练"
+    res = validator.validate(src, tgt)
+    assert res.is_valid, res.message

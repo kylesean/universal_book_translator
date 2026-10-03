@@ -173,6 +173,16 @@ def _expand_scientific_not(text: str) -> str:
     return _SCI_NOTATION_RE.sub(_repl, text)
 
 
+# PDF extraction commonly puts spaces around decimal points ('19 . 6', '0 . 007', '+ 24 . 7').
+# Collapse them so they tokenize as single decimals instead of separate integers.
+_SPACED_DECIMAL_RE = re.compile(r"(?<![\w.])(\d+)\s*\.\s*(\d+)(?![\w.])")
+
+
+def _collapse_spaced_decimals(text: str) -> str:
+    """Collapse PDF extraction spaces around decimal points ('19 . 6' -> '19.6')."""
+    return _SPACED_DECIMAL_RE.sub(r"\1.\2", text)
+
+
 # Locale separator canonicalization: '1,500' (EN thousands),
 # '1.500' (DE thousands) and decimal '15,6' (DE/FR) must all survive the
 # digit-presence check regardless of the target language's convention.
@@ -217,6 +227,7 @@ def normalize_for_numeric_matching(text: str, lang: str = "zh") -> str:
     text = text.translate(_FULLWIDTH_DIGITS)
     text = text.translate(_ARABIC_INDIC_DIGITS)
     text = _expand_scientific_not(text)
+    text = _collapse_spaced_decimals(text)
     text = _SUB_SUP_DIGITS_RE.sub(lambda m: _SUB_SUP_DIGITS_MAP[m.group(0)], text)
     if lang == "zh" or any(c in text for c in _CN_DIGIT_VALUES):
         # Century/decade idiom BEFORE the context normaliser: the latter can
@@ -344,7 +355,9 @@ _SCALE_ADJACENCY_RE = re.compile(
     # lowercase letter (kg, ms, nm), never a longer lowercase run: that shape is
     # a word ("3 mol"), and reading its "m" as milli would invent a scale and
     # wave a genuine 1000x error through the gate.
-    r"(?P<sym_unit>[kMmGTµμnp](?:[A-Z][a-z]{0,2}|[a-z]))(?![a-zA-Z])"
+    # Exclude "pp" (percentage points) and "ppm"/"ppb"/"ppt" from being misread
+    # as pico-unit combinations.
+    r"(?P<sym_unit>(?!pp[mbt]?(?![a-zA-Z]))[kMmGTµμnp](?:[A-Z][a-z]{0,2}|[a-z]))(?![a-zA-Z])"
 )
 
 #: SI prefix symbols, case-sensitive (``M`` mega vs ``m`` milli).
@@ -574,6 +587,7 @@ class NumericConsistencyValidator(ContentValidator):
         # token '102', and since those characters are not in \d's class they
         # are simply not numeric tokens on the source side.
         src_view = _expand_scientific_not(original.translate(_FULLWIDTH_DIGITS))
+        src_view = _collapse_spaced_decimals(src_view)
         src_nums = {canonicalize_numeric_token(m) for m in _NUM.findall(src_view)}
         # Residual ambiguity: a dot followed by exactly three digits is
         # BOTH a German-style thousands separator and a three-decimal
@@ -596,10 +610,13 @@ class NumericConsistencyValidator(ContentValidator):
         src_nums.discard("")
         # A digit run immediately preceded by a minus sign is a negative
         # quantity; the sign is part of the fact, so a dropped '−' must fail
-        # even though the digits survive.
+        # even though the digits survive. Hyphenated words ('epoch-5', 'tier-1')
+        # are not negative quantities.
         negative_tokens: set[str] = set()
         for match in _NUM.finditer(src_view):
             if match.start() > 0 and src_view[match.start() - 1] in "-−":
+                if match.start() > 1 and src_view[match.start() - 2].isalpha():
+                    continue
                 canon = canonicalize_numeric_token(match.group(0))
                 if canon:
                     negative_tokens.add(canon)
@@ -641,7 +658,7 @@ class NumericConsistencyValidator(ContentValidator):
         lost_numbers: list[str] = []
         # Scale equivalence is computed once per pair: the values the source
         # states next to a scale word, and every value the target states.
-        src_scales = _scale_map(original)
+        src_scales = _scale_map(src_view)
         # Canonical digit runs that occur *bare* somewhere (not part of a scale
         # match). ``src_scales`` is keyed by the digits, so a bare '250' and a
         # scaled '250万' collapse to one key; without this set the loop below
