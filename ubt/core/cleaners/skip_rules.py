@@ -106,7 +106,9 @@ _WORD_RE = re.compile(r"[A-Za-z]{2,}")
 # (superscript/inline digits, *, †, ‡), with no year/venue/title (which would
 # make it a reference instead). Distinct from _is_bib_entry by requiring the
 # whole block to be names — prose never matches because its words are lowercase.
-_BYLINE_NAME_RE = re.compile(r"[A-Z][A-Za-z'’\-]+")
+# Split on [A-Z][a-z...]+ so camelCase concatenated names from PDF extraction
+# ("YoungmokJung") tokenize into constituent given name and surname ("Youngmok", "Jung").
+_BYLINE_NAME_RE = re.compile(r"[A-Z][a-z'’\-]+")
 _BYLINE_SEGMENT_RE = re.compile(
     r"^(?:and\s+|&\s+)?"  # trailing-list conjunction
     r"[A-Z][A-Za-z'’\-]+"  # first name token

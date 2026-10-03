@@ -217,6 +217,7 @@ def test_et_al_with_an_independent_author_signal_still_skips() -> None:
         "John Smith Jr., Jane Doe",
         "Duomin Wang, Jane Doe,",  # trailing separator
         "Duomin Wang\u2020, Jane Doe\u2021",  # dagger affiliations
+        "YoungmokJung , Sirajul Salekin , Henry Tran",  # camelCase concatenated author names
     ],
 )
 def test_author_byline_is_skipped(text: str) -> None:
