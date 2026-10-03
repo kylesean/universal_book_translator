@@ -185,10 +185,12 @@ class OpenAIResponsesTransport(BaseTransport):
 
         if response.status_code == 429:
             raise ModelProviderError(
-                "Rate limit exceeded (HTTP 429)",
+                f"Rate limit exceeded (HTTP 429): {response.text[:500]}",
                 details={
                     "status_code": 429,
-                    "retry_after": response.headers.get("retry-after"),
+                    "retry_after": response.headers.get("retry-after")
+                    or response.headers.get("retry-after-ms"),
+                    "body": response.text[:2000],
                 },
             )
         if response.status_code != 200:

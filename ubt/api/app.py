@@ -8,6 +8,7 @@ import logging
 import os
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -185,6 +186,17 @@ def _public_artifact(value: Any) -> Any:
     fallback) still resolve the stored absolute path server-side.
     """
     return Path(value).name if isinstance(value, str) and value else value
+
+
+_SSE_POLL_EXECUTOR: ThreadPoolExecutor | None = None
+
+
+def _get_sse_poll_executor() -> ThreadPoolExecutor:
+    """Isolated, bounded thread pool for SSE queue polling to prevent default thread pool exhaustion."""
+    global _SSE_POLL_EXECUTOR
+    if _SSE_POLL_EXECUTOR is None:
+        _SSE_POLL_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="ubt-sse-poll")
+    return _SSE_POLL_EXECUTOR
 
 
 def _public_progress(progress: dict[str, Any]) -> dict[str, Any]:
@@ -706,7 +718,7 @@ def create_app(
                     # then finalize; if it is still held, the pipeline itself
                     # will land the terminal status.
                     lock = LedgerWriterLock(db_path, valid_id)
-                    deadline = time.monotonic() + 10.0
+                    deadline = time.monotonic() + 2.0
                     while True:
                         try:
                             lock.acquire()
@@ -732,7 +744,7 @@ def create_app(
             except Exception as exc:
                 logger.debug("Could not persist cancellation for %s: %s", valid_id, exc)
 
-        await asyncio.to_thread(_finalize_cancelled_ledger)
+        asyncio.create_task(asyncio.to_thread(_finalize_cancelled_ledger))
         return {"job_id": valid_id, "status": JobStatus.CANCELLED}
 
     @api_app.get(
@@ -866,7 +878,9 @@ def create_app(
         if not await _tenant_allows_async(valid_id, _tenant_from_header(x_ubt_tenant)):
             raise _cross_tenant_404(valid_id)
         if job_queue is not None:
-            initial_job = await asyncio.to_thread(job_queue.get, valid_id)
+            initial_job = await asyncio.get_running_loop().run_in_executor(
+                _get_sse_poll_executor(), job_queue.get, valid_id
+            )
             if initial_job is None:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
@@ -894,7 +908,9 @@ def create_app(
                     while True:
                         if await request.is_disconnected():
                             break
-                        job = await asyncio.to_thread(job_queue.get, valid_id)
+                        job = await asyncio.get_running_loop().run_in_executor(
+                            _get_sse_poll_executor(), job_queue.get, valid_id
+                        )
                         if job is None:
                             break
                         progress_payload = {**ProgressSnapshot().to_payload(), **job.progress}

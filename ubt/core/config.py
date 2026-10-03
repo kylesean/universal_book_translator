@@ -594,8 +594,12 @@ class UBTConfig(BaseSettings):
         description="Maximum chapters buffered between draft and repair in chapter streaming",
     )
 
-    # -- Draft retry (transient provider failures) ---------------------------
-    draft_max_retries: int = Field(default=2, ge=0)
+    # -- Draft retry (delegated to ModelRouter by default) -------------------
+    draft_max_retries: int = Field(
+        default=0,
+        ge=0,
+        description="Stage-level outer retry count (default 0 delegates retries and fallback to ModelRouter)",
+    )
     draft_retry_base_delay: float = Field(default=1.0, ge=0.0)
 
     # -- Hierarchical memory step snapshots --------------------------------------

@@ -238,10 +238,20 @@ def _parse_retry_after(value: str | None) -> float | None:
     return max(0.0, (when - now).total_seconds())
 
 
+_QUOTA_EXHAUSTED_PHRASES: tuple[str, ...] = (
+    "insufficient_quota",
+    "quota_exceeded",
+    "exceeded your current quota",
+    "credit balance",
+    "balance is too low",
+    "billing details",
+)
+
+
 def classify_provider_error(exc: BaseException) -> ProviderErrorAction:
     """Classify a provider failure as retryable or fail-fast (pure function).
 
-    - 402 → fail-fast with a top-up hint (billing, not a bug);
+    - 402 or quota exhausted → fail-fast with a top-up hint (billing, not a bug);
     - 400/401/403 → fail-fast (retrying burns quota for nothing);
     - 429/5xx/408/timeouts/connection errors → retryable with backoff;
     - anything unrecognized → retryable (retrying an unknown failure is safer
@@ -259,6 +269,11 @@ def classify_provider_error(exc: BaseException) -> ProviderErrorAction:
                     status = int(match.group(1))
         if status == 402:
             return ProviderErrorAction(False, top_up_hint=True, reason="payment_required")
+        body_text = str(details.get("body", "")).lower()
+        msg_text = str(exc).lower()
+        combined = f"{msg_text} {body_text}"
+        if any(phrase in combined for phrase in _QUOTA_EXHAUSTED_PHRASES):
+            return ProviderErrorAction(False, top_up_hint=True, reason="quota_exhausted")
         if status in _FAIL_FAST_STATUS:
             return ProviderErrorAction(False, reason=f"http_{status}")
         if status in _RETRYABLE_STATUS or status is None:
@@ -542,20 +557,24 @@ class ModelRouter:
         """Release the underlying provider's HTTP connection pool."""
         closer = getattr(self.provider, "aclose", None)
         if callable(closer):
-            await closer()
+            with suppress(Exception):
+                await closer()
         if self.repair_provider is not None and self.repair_provider is not self.provider:
             repair_closer = getattr(self.repair_provider, "aclose", None)
             if callable(repair_closer):
-                await repair_closer()
+                with suppress(Exception):
+                    await repair_closer()
         if self._fallback_provider is not None:
             fallback_closer = getattr(self._fallback_provider, "aclose", None)
             if callable(fallback_closer):
-                await fallback_closer()
+                with suppress(Exception):
+                    await fallback_closer()
             self._fallback_provider = None
         if self.rate_limiter is not None:
             rl_closer = getattr(self.rate_limiter, "close", None)
             if callable(rl_closer):
-                rl_closer()
+                with suppress(Exception):
+                    rl_closer()
 
     def _get_profile(self, model_name: str | None = None) -> ModelProfile:
         """Resolve model capability profile from registry, or default to standard LLM."""
@@ -993,6 +1012,7 @@ class ModelRouter:
                         model=model,
                         temperature=effective_temp,
                         partial=result,
+                        is_repair=is_repair,
                     )
                 return result
             except ModelProviderError as exc:
@@ -1004,7 +1024,7 @@ class ModelRouter:
                 if not action.retryable:
                     if action.top_up_hint:
                         raise ModelProviderError(
-                            f"{exc} [fail-fast: HTTP 402 — billing/quota exhausted, "
+                            f"{exc} [fail-fast: billing/quota exhausted, "
                             "top up the provider account before retrying]",
                             doc_id=exc.doc_id,
                             details=details,
@@ -1068,6 +1088,7 @@ class ModelRouter:
         model: str,
         temperature: float | None,
         partial: str,
+        is_repair: bool = False,
     ) -> str:
         """Continue a token-limit-truncated generation.
 
@@ -1096,7 +1117,7 @@ class ModelRouter:
                 # capacity for a self-inflicted breach.
                 prompt_tokens = _estimate_prompt_tokens(system_prompt, continuation_prompt)
                 await self.rate_limiter.acquire(estimated_tokens=prompt_tokens * 2)
-                active_provider = self._provider_for(model)
+                active_provider = self._provider_for(model, is_repair=is_repair)
                 continuation, finish_reason = await active_provider.generate_with_finish_reason(
                     prompt=continuation_prompt,
                     system_prompt=system_prompt,
