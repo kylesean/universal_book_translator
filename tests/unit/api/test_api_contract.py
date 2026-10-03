@@ -263,3 +263,56 @@ def test_resubmit_with_same_id_is_idempotent(authed: TestClient, tmp_path: Path)
     second = authed.post("/jobs/submit", json=payload, headers=_AUTH)
     assert second.status_code == 202
     assert second.json()["job_id"] == first.json()["job_id"]
+
+
+def test_submit_capacity_exceeded_is_429(
+    authed: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ubt.api.manager import JobManager
+    from ubt.core.exceptions import ServerCapacityError
+
+    doc = _write_doc(tmp_path)
+    monkeypatch.setattr(
+        JobManager,
+        "create_job",
+        lambda self, *args, **kwargs: (_ for _ in ()).throw(
+            ServerCapacityError("Server at capacity")
+        ),
+    )
+    response = authed.post("/jobs/submit", json={"input_path": str(doc)}, headers=_AUTH)
+    assert response.status_code == 429
+    assert "Server at capacity" in response.json()["detail"]
+
+
+def test_submit_unsupported_format_is_415(
+    authed: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ubt.api.manager import JobManager
+    from ubt.core.exceptions import UnsupportedDocumentFormatError
+
+    doc = _write_doc(tmp_path)
+    monkeypatch.setattr(
+        JobManager,
+        "create_job",
+        lambda self, *args, **kwargs: (_ for _ in ()).throw(
+            UnsupportedDocumentFormatError("Unsupported format")
+        ),
+    )
+    response = authed.post("/jobs/submit", json={"input_path": str(doc)}, headers=_AUTH)
+    assert response.status_code == 415
+
+
+def test_submit_budget_exceeded_is_402(
+    authed: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ubt.api.manager import JobManager
+    from ubt.core.exceptions import BudgetExceededError
+
+    doc = _write_doc(tmp_path)
+    monkeypatch.setattr(
+        JobManager,
+        "create_job",
+        lambda self, *args, **kwargs: (_ for _ in ()).throw(BudgetExceededError("Budget exceeded")),
+    )
+    response = authed.post("/jobs/submit", json={"input_path": str(doc)}, headers=_AUTH)
+    assert response.status_code == 402

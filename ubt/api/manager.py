@@ -15,7 +15,7 @@ from ubt.core.engine.events import TranslationProgressEvent
 from ubt.core.engine.job_queue import TERMINAL_JOB_STATUSES, JobStatus
 from ubt.core.engine.pipeline import PipelineOrchestrator
 from ubt.core.engine.progress import ProgressSnapshot, persist_progress_metadata
-from ubt.core.exceptions import UBTError
+from ubt.core.exceptions import ServerCapacityError
 from ubt.core.job_options import (
     apply_config_overrides,
     overrides_from_request,
@@ -81,7 +81,7 @@ class JobManager:
             if rec.status in (JobStatus.SUBMITTED, JobStatus.RUNNING)
         )
         if running >= self.max_running_jobs:
-            raise UBTError(
+            raise ServerCapacityError(
                 f"Server at capacity: {running} jobs active (max {self.max_running_jobs})",
                 details={"running": running, "max": self.max_running_jobs},
             )

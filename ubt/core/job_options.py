@@ -228,7 +228,7 @@ def apply_config_overrides(base: UBTConfig, overrides: Mapping[str, Any]) -> UBT
     job_config = base.model_copy(deep=True)
     valid_fields = set(UBTConfig.model_fields)
 
-    provider_name = overrides.get("provider") or os.getenv("UBT_PROVIDER")
+    provider_name = overrides.get("provider") or base.provider or os.getenv("UBT_PROVIDER")
     # The same ladder ``from_env`` uses: ``[defaults]`` + provider block, under
     # the request's explicit values, with environment-pinned fields above it.
     # ``repair_model`` follows the effective draft via ``_check_invariants``,

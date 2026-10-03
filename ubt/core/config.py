@@ -993,7 +993,25 @@ class UBTConfig(BaseSettings):
                 "host in brackets: http://[::1]:11434/v1)."
             )
 
-        # Dynamic custom pricing & free endpoint registration
+        # The vision-LLM OCR route bills a model the operator must name: UBT
+        # ships no vendor default, so an explicitly requested 'vlm' with no
+        # model is unbuildable. 'cloud' (a REST endpoint such as Baidu/Azure,
+        # which sends no model field) and 'auto' (the driver re-checks) pass.
+        if self.ocr_mode == "vlm" and not self.ocr_model.strip():
+            raise ValueError(
+                "ocr_mode='vlm' requires a model (UBT_OCR_MODEL): the vision OCR "
+                "channel bills the model you name, and UBT ships no vendor default. "
+                "Set UBT_OCR_MODEL, choose a local engine (UBT_VLM_DRIVER=rapidocr), "
+                "or set UBT_OCR_MODE=off."
+            )
+
+        return self
+
+    def bootstrap_runtime_environment(self) -> None:
+        """Register dynamic custom pricing, free endpoints, and model capability profiles configured on this instance.
+
+        Explicit runtime bootstrap so that pure config parsing and validation remain free of process-wide global side effects.
+        """
         if self.is_free and self.base_url:
             from ubt.core.router.pricing import declare_custom_free_endpoint
 
@@ -1006,7 +1024,6 @@ class UBTConfig(BaseSettings):
             if self.repair_model and self.repair_model != self.draft_model:
                 register_custom_model_pricing(self.repair_model, self.cost_per_mtok)
 
-        # Dynamic model capability profile registration
         if (
             self.capability_profile
             or self.supports_temperature is not None
@@ -1038,20 +1055,6 @@ class UBTConfig(BaseSettings):
                     )
                     reg.register(new_prof, override=True)
 
-        # The vision-LLM OCR route bills a model the operator must name: UBT
-        # ships no vendor default, so an explicitly requested 'vlm' with no
-        # model is unbuildable. 'cloud' (a REST endpoint such as Baidu/Azure,
-        # which sends no model field) and 'auto' (the driver re-checks) pass.
-        if self.ocr_mode == "vlm" and not self.ocr_model.strip():
-            raise ValueError(
-                "ocr_mode='vlm' requires a model (UBT_OCR_MODEL): the vision OCR "
-                "channel bills the model you name, and UBT ships no vendor default. "
-                "Set UBT_OCR_MODEL, choose a local engine (UBT_VLM_DRIVER=rapidocr), "
-                "or set UBT_OCR_MODE=off."
-            )
-
-        return self
-
     def is_strict_auth(self) -> bool:
         """Whether the API must enforce authentication (strict/production)."""
         return bool(self.strict_auth) or self.env == "production"
@@ -1081,7 +1084,7 @@ class UBTConfig(BaseSettings):
         return parse_page_ranges(self.pages)
 
     @classmethod
-    def from_env(cls, **overrides: Any) -> UBTConfig:
+    def from_env(cls, bootstrap: bool = True, **overrides: Any) -> UBTConfig:
         """Canonical constructor: ``[defaults]``, provider block, env, then overrides.
 
         None values are skipped, so optional CLI flags can be passed straight
@@ -1096,7 +1099,10 @@ class UBTConfig(BaseSettings):
         provider_name = clean.get("provider") or os.getenv("UBT_PROVIDER")
         fields = load_layer(str(provider_name) if provider_name else None)
         clean = merge_provider_under(clean, fields, env_supplied=_env_supplied_field_names())
-        return cls(**clean)
+        cfg = cls(**clean)
+        if bootstrap:
+            cfg.bootstrap_runtime_environment()
+        return cfg
 
 
 def _env_supplied_field_names() -> set[str]:

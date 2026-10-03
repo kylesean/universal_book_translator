@@ -40,7 +40,14 @@ from ubt.core.engine.events import TranslationProgressEvent
 from ubt.core.engine.job_queue import TERMINAL_JOB_STATUSES, JobQueue, JobStatus
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.progress import ARTIFACT_KEYS, ProgressSnapshot
-from ubt.core.exceptions import UBTError
+from ubt.core.exceptions import (
+    BudgetExceededError,
+    DocumentParseError,
+    QueueDepthExceededError,
+    ServerCapacityError,
+    UBTError,
+    UnsupportedDocumentFormatError,
+)
 from ubt.core.job_options import (
     JOB_ID_RE,
     LANG_CODE_PATTERN,
@@ -602,11 +609,14 @@ def create_app(
                     tenant_id=_tenant_from_header(x_ubt_tenant),
                     priority=int(req.priority),
                 )
-            except UBTError as exc:
-                # QueueDepthExceededError: the intake is full. 429 with the
-                # reason, matching the embedded path's at-capacity response.
+            except QueueDepthExceededError as exc:
                 raise HTTPException(
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail=str(exc),
+                ) from exc
+            except UBTError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
                     detail=str(exc),
                 ) from exc
             return JobSubmitResponse(
@@ -618,9 +628,29 @@ def create_app(
             )
         try:
             record = manager.create_job(safe_req, job_id=requested_id)
-        except (RuntimeError, UBTError) as exc:
+        except (ServerCapacityError, QueueDepthExceededError) as exc:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=str(exc),
+            ) from exc
+        except UnsupportedDocumentFormatError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                detail=str(exc),
+            ) from exc
+        except DocumentParseError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
+        except BudgetExceededError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail=str(exc),
+            ) from exc
+        except (RuntimeError, UBTError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail=str(exc),
             ) from exc
 
