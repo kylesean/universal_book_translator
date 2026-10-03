@@ -218,6 +218,7 @@ def test_et_al_with_an_independent_author_signal_still_skips() -> None:
         "Duomin Wang, Jane Doe,",  # trailing separator
         "Duomin Wang\u2020, Jane Doe\u2021",  # dagger affiliations
         "YoungmokJung , Sirajul Salekin , Henry Tran",  # camelCase concatenated author names
+        "Duomin Wang, Y.C. Yan, Jane Doe",  # authors with initials in list
     ],
 )
 def test_author_byline_is_skipped(text: str) -> None:
@@ -305,3 +306,32 @@ def test_debris_rule_does_not_fire_on_real_content(text: str) -> None:
 )
 def test_ordinary_prose_is_translated(text: str) -> None:
     assert classify_skip(text) is None
+
+
+def test_narrative_with_in_text_citations_is_not_bib_entry() -> None:
+    # Paragraphs citing earlier works with in-text (et al., year) citations and abbreviations
+    # like 3FS. or I/O. must never be classified as bibliography entries.
+    p1 = (
+        "The agentic training pipeline encompasses environment and data construction, "
+        "RL rollouts, reward computation, policy updates, and periodic evaluation. "
+        "In RL (Guo et al., 2025; Ouyang et al., 2022), training proceeds as a feedback "
+        "loop with three stages."
+    )
+    p2 = (
+        "Base image and workspace storage. The sandbox runtime uses 3FS as a shared backing store "
+        "for base images and workspace images. MicroVM disk images use an OverlayBD (Li et al., 2020) "
+        "format over the same storage."
+    )
+    p3 = (
+        "Existing on-demand image distribution systems often combine a container registry with "
+        "peer-to-peer delivery to prevent the registry from becoming a bottleneck (Wang et al., 2021). "
+        "However, 3FS exhibits highly asymmetric I/O. This asymmetry dictates our design."
+    )
+    p4 = (
+        "3FS deployment. Each 3FS (An et al., 2024) storage server is equipped with 20 × 15TB SSDs "
+        "and 2 × 400Gbps RDMA NICs. CPU nodes access 3FS through its FUSE-based client."
+    )
+    assert classify_skip(p1) is None
+    assert classify_skip(p2) is None
+    assert classify_skip(p3) is None
+    assert classify_skip(p4) is None

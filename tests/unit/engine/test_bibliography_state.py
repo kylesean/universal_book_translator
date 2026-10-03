@@ -75,3 +75,14 @@ def test_section_stays_closed_once_a_narrative_block_closes_it() -> None:
     state = update_bibliography_section_state(blocks, 0, True)
     assert state is False
     assert update_bibliography_section_state(blocks, 1, state) is False
+
+
+def test_narrative_block_surrounded_by_bib_entries_keeps_section_open() -> None:
+    # A narrative entry that does not meet the standalone bib regex (like Kimi Team)
+    # must not prematurely close the section if followed by more bibliography entries.
+    kimi = _block(
+        "b_kimi", BlockType.NARRATIVE, "Kimi Team. Kimi K2.5: Visual agentic intelligence, 2026."
+    )
+    next_bib = _block("b_next", BlockType.LIST_ITEM, "J. Smith. IEEE, 245-247, 2019.")
+    blocks = [kimi, next_bib]
+    assert update_bibliography_section_state(blocks, 0, True) is True

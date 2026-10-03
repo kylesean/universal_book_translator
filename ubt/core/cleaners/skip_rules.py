@@ -40,7 +40,7 @@ _ONLINE_BIB_RE = re.compile(r"\[Online\]\.?\s*Available:\s*https?://", re.IGNORE
 # citations are kept in the original language — translating author names,
 # venues, or DOIs breaks retrievability and is never publication-grade.
 _ETAL_RE = re.compile(r"\bet\.?\s+al\.")
-_AUTHOR_RE = re.compile(r"[A-Z]\.-?[A-Z]?\s*[A-Z][a-z]+")
+_AUTHOR_RE = re.compile(r"(?<![A-Za-z0-9/])[A-Z]\.-?[A-Z]?\s*[A-Z][a-z]+")
 _YEAR_RE = re.compile(r"\b(19|20)\d{2}\b")
 _BIB_VENUE_RE = re.compile(
     r"Technical Digest|Trans\.|Symposium|Conference|Manual|Chapter \d|"
@@ -82,7 +82,9 @@ _PAGE_RANGE_TAIL_RE = re.compile(r"\b\d{1,4}\s*[-–—]\s*\d{1,4}\s*\.?\s*$")
 # gates above — every arXiv/NeurIPS/GitHub entry slipped through to the LLM
 # and came back with transliterated author names (arXiv 2609.20519).
 _URL_RE = re.compile(r"https?://", re.IGNORECASE)
-_IN_VENUE_RE = re.compile(r"\bIn\s+[A-Z][\w'’\-]+")
+_IN_VENUE_RE = re.compile(
+    r"\bIn\s+(?:the\s+)?(?:\d{4}\s+)?(?:[A-Z][A-Za-z0-9]*\s+)*(?:Proceedings|Proc\.|Conference|Conf\.|Symposium|Symp\.|Workshop|Transactions|Trans\.|Journal|Advances|ACM|IEEE|USENIX|NeurIPS|ICML|ICLR|CVPR|ECCV|ICCV|AAAI|IJCAI|ACL|EMNLP|NAACL|COLING|KDD|WWW|SIGMOD|VLDB|OSDI|SOSP|NSDI|EuroSys|FAST|ASPLOS|MICRO|ISCA|HPCA|ATC)\b"
+)
 _PAGES_RE = re.compile(r"\bpages?\s+[\d,]+(?:\s*[-–—]\s*[\d,]+)?", re.IGNORECASE)
 _VOLUME_RE = re.compile(r"\bvolume\s+\d+", re.IGNORECASE)
 _PAGE_RANGE_RE = re.compile(r"\b\d{2,6}\s*[-–—]\s*\d{2,6}\b")
@@ -109,10 +111,11 @@ _WORD_RE = re.compile(r"[A-Za-z]{2,}")
 # Split on [A-Z][a-z...]+ so camelCase concatenated names from PDF extraction
 # ("YoungmokJung") tokenize into constituent given name and surname ("Youngmok", "Jung").
 _BYLINE_NAME_RE = re.compile(r"[A-Z][a-z'’\-]+")
+_INITIAL_RE = re.compile(r"[A-Z]\.")
 _BYLINE_SEGMENT_RE = re.compile(
     r"^(?:and\s+|&\s+)?"  # trailing-list conjunction
-    r"[A-Z][A-Za-z'’\-]+"  # first name token
-    r"(?:[\s,]+(?:[A-Z][A-Za-z'’\-]+|Jr\.?|Sr\.?|[A-Z]\.))*"  # more name tokens / initials
+    r"(?:[A-Z][A-Za-z'’\-]+|(?:[A-Z]\.)+)"  # first name token or initial(s)
+    r"(?:[\s,]+(?:[A-Z][A-Za-z'’\-]+|Jr\.?|Sr\.?|(?:[A-Z]\.)+))*"  # more name tokens / initials
     # Affiliation markers / superscripts. Written as ONE character class, not
     # ``(?:[\s,]*+(?:\d+|¹|ⁿ|…)+)*``: the old nested quantifiers made
     # ``"Aa Aa, Bb " + "1"*n + "!"`` backtrack exponentially (11.7 s at n=18,
@@ -150,6 +153,12 @@ def _is_bib_entry(text: str) -> bool:
     """Label-free bibliography signature (tiers A/B, see above)."""
     if _NARRATIVE_PROSE_RE.search(text):
         return False
+    # Narrative discourse guard: 3 or more continuous sentences (>35 words)
+    # is narrative prose, never a single bibliography entry.
+    sentences = [s.strip() for s in re.split(r"[.!?]\s+[A-Z]", text) if s.strip()]
+    if len(sentences) >= 3 and len(text.split()) > 35:
+        return False
+
     if (
         _ONLINE_BIB_RE.search(text)
         or _SHORT_ARTICLE_BIB_RE.match(text)
@@ -161,12 +170,19 @@ def _is_bib_entry(text: str) -> bool:
         extra_venues = tuple(_EXTRA_BIB_VENUE_PATTERNS)
         extra_books = tuple(_EXTRA_BIB_BOOK_PATTERNS)
 
-    authors = len(_ETAL_RE.findall(text)) + len(_AUTHOR_RE.findall(text))
+    # In-text parenthetical citations like "(Wang et al., 2023)" are not
+    # bibliography author declarations. Filter parenthetical spans when
+    # counting et-al occurrences.
+    clean_text_no_parens = re.sub(r"\([^)]*\)", "", text)
+    clean_etal_hits = len(_ETAL_RE.findall(clean_text_no_parens))
+    clean_author_hits = len(_AUTHOR_RE.findall(clean_text_no_parens))
+
+    authors = clean_etal_hits + clean_author_hits
     # ``et al.`` matches cannot authenticate the et-al tier below: body prose
     # cites "(Wang et al., 2023)" far too often (arXiv 2609.32391 shipped its
     # introduction untranslated). Only an author signal independent of
     # ``et al.`` — an initial-based name — may back that tier.
-    initial_authors = len(_AUTHOR_RE.findall(text))
+    initial_authors = clean_author_hits
     if not _YEAR_RE.search(text):
         return False
     full_name_start = _NAME_LIST_START_RE.match(text) is not None
@@ -185,7 +201,7 @@ def _is_bib_entry(text: str) -> bool:
         and (_PAGES_RE.search(text) or _VOLUME_RE.search(text) or _PAGE_RANGE_RE.search(text))
     ):
         return True
-    if _ETAL_RE.search(text) and (venue_hit or _IN_VENUE_RE.search(text) or initial_authors >= 1):
+    if clean_etal_hits >= 1 and (venue_hit or _IN_VENUE_RE.search(text) or initial_authors >= 1):
         return True
     if _URL_RE.search(text) and (
         venue_hit or _IN_VENUE_RE.search(text) or authors >= 1 or full_name_start
@@ -216,11 +232,10 @@ def _is_author_byline(text: str) -> bool:
     no year (a year would make it a reference, handled by _is_bib_entry).
 
     A segment also needs at least TWO name tokens: real bylines carry a given
-    name and a surname ("Duomin Wang 1", "Jane Doe ¹"), while a title-case
-    heading list ("Purpose, Scope, and Audience", "War and Peace") is one word
-    per segment. Misclassifying those as a byline ships an untranslated heading
-    with MTQE_PASSED and no flag — the loss is silent either way, so the rule
-    now errs towards spending tokens.
+    name and a surname ("Duomin Wang 1", "Jane Doe ¹"), or initials plus a
+    surname ("Y.C. Yan"), while a title-case heading list ("Purpose, Scope, and
+    Audience", "War and Peace") is one word per segment. Misclassifying those as
+    a byline ships an untranslated heading with MTQE_PASSED and no flag.
     """
     if _YEAR_RE.search(text) or contains_cjk(text):
         return False
@@ -229,9 +244,16 @@ def _is_author_byline(text: str) -> bool:
     segments = [s.strip() for s in re.split(r",| and ", cleaned) if s.strip()]
     if len(segments) < 2:
         return False
-    return all(
-        _BYLINE_SEGMENT_RE.match(seg) and len(_BYLINE_NAME_RE.findall(seg)) >= 2 for seg in segments
-    )
+    for seg in segments:
+        if not _BYLINE_SEGMENT_RE.match(seg):
+            return False
+        full_names = len(_BYLINE_NAME_RE.findall(seg))
+        initials = len(_INITIAL_RE.findall(seg))
+        if not (full_names >= 2 or (initials >= 1 and full_names >= 1)):
+            return False
+    if len(segments) < 3:
+        return all(len(_BYLINE_NAME_RE.findall(seg)) >= 2 for seg in segments)
+    return any(len(_BYLINE_NAME_RE.findall(seg)) >= 2 for seg in segments)
 
 
 def classify_skip(

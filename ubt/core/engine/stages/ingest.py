@@ -63,10 +63,15 @@ def update_bibliography_section_state(
             and b.block_type is BlockType.NARRATIVE
             and classify_skip(b.source_text or "") is None
         ):
-            return False
+            next_slice = blocks[idx + 1 : idx + 7]
+            has_upcoming_bib = any(
+                classify_skip(nb.source_text or "") is not None for nb in next_slice
+            )
+            if not has_upcoming_bib:
+                return False
         return in_bibliography
     h_txt = (b.source_text or "").strip()
-    next_slice = blocks[idx + 1 : idx + 5]
+    next_slice = blocks[idx + 1 : idx + 7]
     has_upcoming_bib = any(classify_skip(nb.source_text or "") is not None for nb in next_slice)
     if _BIB_SECTION_HEADING_RE.match(h_txt):
         return has_upcoming_bib
