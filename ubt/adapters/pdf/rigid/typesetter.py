@@ -733,11 +733,12 @@ class RigidTypesetter:
                     report.degraded_blocks.append(block.id)
             if pending is None and eff_zones:
                 # Bounded overflow: even the floor does not fit, so extend the
-                # last zone down through confirmed-blank space to the page's
-                # content bottom and retry. Translation completeness outranks
-                # pixel layout, but the extension stops at the nearest occupied
-                # rect below — painting over a neighbour's ink destroys both
-                # texts, and a zone that still cannot fit fails closed below.
+                # last zone downward and retry. Preferred: stop at the nearest
+                # occupied rect below, which never paints over ink. When even
+                # that cannot fit, the agreed Axiom-B priority order applies —
+                # translation completeness outranks pixel layout — so the
+                # extension falls back to the page's content bottom (at worst
+                # over a neighbour's ink) before failing closed below.
                 overflow_last = _overflow_zone_down(
                     eff_zones[-1],
                     CONTENT_BOTTOM_PT,
@@ -750,6 +751,15 @@ class RigidTypesetter:
                     if trial is not None:
                         pending = trial
                         eff_zones = (*eff_zones[:-1], overflow_last)
+                        report.overflow_blocks.append(block.id)
+                if pending is None:
+                    page_bottom_last = eff_zones[-1].with_y0(CONTENT_BOTTOM_PT)
+                    trial = self._paginate(
+                        text, (*eff_zones[:-1], page_bottom_last), RIGID_DEGRADED_FIT_FLOOR_PT
+                    )
+                    if trial is not None:
+                        pending = trial
+                        eff_zones = (*eff_zones[:-1], page_bottom_last)
                         report.overflow_blocks.append(block.id)
             if pending is None:
                 # Still nothing fits a whole page: keep the source visible and

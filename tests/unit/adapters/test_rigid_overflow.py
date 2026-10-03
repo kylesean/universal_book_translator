@@ -1,14 +1,15 @@
-"""Bounded overflow must stop at neighbours, not run over their ink.
+"""Bounded overflow prefers clean space, then the page bottom — never silently.
 
 When a translation cannot fit its zone even at the degraded floor, the rigid
 planner extends the last zone downward ("bounded overflow", Axiom B: a
-translated paragraph beats a blank box). The extension used to run to the
-page's content bottom *ignoring neighbours* — a Docling table-row fragment
-whose text is far larger than its box (arXiv 2609.32391 p22) then painted its
-translation over the adjacent fragments, destroying both. The extension now
-stops at the nearest occupied rect below; a zone that still cannot fit falls
-through to the existing ``spill`` fail-closed path (source visible, loss
-recorded).
+translated paragraph beats a blank box). The preferred extension stops at the
+nearest occupied rect below — running to the page's content bottom *ignoring*
+neighbours (the old behaviour) let a Docling fragment with text far larger
+than its box (arXiv 2609.32391 p22) paint over the adjacent fragments,
+destroying both. When the neighbour-bounded floor still cannot fit, the
+agreed priority order applies — completeness above pixel layout — so the
+extension falls back to the page's content bottom before the caller's
+``spill`` fail-closed path (source visible, loss recorded).
 """
 
 from __future__ import annotations
