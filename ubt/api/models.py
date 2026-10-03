@@ -13,6 +13,7 @@ from ubt.core.config import (
     FormulaRender,
     MathBackend,
     OcrMode,
+    PdfEngine,
     PromptStrategyName,
     QeEngine,
     RenderEngine,
@@ -69,6 +70,10 @@ class JobSubmitRequest(BaseModel):
     render_engine: RenderEngine | None = Field(
         default=None,
         description="PDF render engine (rigid, reflow, publication, auto)",
+    )
+    pdf_engine: PdfEngine | None = Field(
+        default=None,
+        description="PDF extraction/parser engine (docling, pdfium, auto)",
     )
     dual_mode: DualMode | None = Field(
         default=None,

@@ -15,7 +15,12 @@ from ubt.core.engine.events import TranslationProgressEvent
 from ubt.core.engine.job_queue import TERMINAL_JOB_STATUSES, JobStatus
 from ubt.core.engine.pipeline import PipelineOrchestrator
 from ubt.core.engine.progress import ProgressSnapshot, persist_progress_metadata
-from ubt.core.exceptions import ServerCapacityError
+from ubt.core.exceptions import (
+    BudgetExceededError,
+    QueueDepthExceededError,
+    ServerCapacityError,
+    UnsupportedDocumentFormatError,
+)
 from ubt.core.job_options import (
     apply_config_overrides,
     overrides_from_request,
@@ -184,11 +189,17 @@ class JobManager:
             raise
         except Exception as exc:
             record.status = JobStatus.FAILED
-            # Do not echo the raw exception: provider error bodies and parse
-            # failures can contain source book text or host paths. The full
-            # detail is logged server-side; the client gets a correlation id.
+            # Do not echo raw generic exceptions: provider error bodies and parse
+            # failures can contain source book text or host paths. Safe domain
+            # errors (budget, format) are actionable and safe to display directly.
             logger.exception("Job %s failed: %s", record.job_id, exc)
-            record.error = f"{type(exc).__name__} (see server logs; job_id={record.job_id})"
+            if isinstance(
+                exc,
+                (BudgetExceededError, UnsupportedDocumentFormatError, QueueDepthExceededError),
+            ):
+                record.error = f"{type(exc).__name__}: {exc}"
+            else:
+                record.error = f"{type(exc).__name__} (see server logs; job_id={record.job_id})"
         finally:
             # Broadcast termination sentinel (non-blocking)
             for sub_q in list(record.subscribers):

@@ -1050,7 +1050,7 @@ def create_app(
                 or (app_config.db_dir / f"{valid_id}.sqlite").exists()
             )
             raise HTTPException(
-                status_code=404 if not known else 400,
+                status_code=404 if not known else 409,
                 detail=(
                     f"Job not found: {valid_id}"
                     if not known
@@ -1169,7 +1169,7 @@ def create_app(
             )
             job_exists = (record is not None) or in_queue or db_path.exists()
             raise HTTPException(
-                status_code=400 if job_exists else 404,
+                status_code=409 if job_exists else 404,
                 detail=(
                     "Translated file is not ready for download."
                     if job_exists

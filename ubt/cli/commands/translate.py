@@ -24,6 +24,7 @@ from ubt.core.config import (
     FormulaRender,
     MathBackend,
     OcrMode,
+    PdfEngine,
     PromptStrategyName,
     QeEngine,
     canonical_render_engine,
@@ -343,6 +344,14 @@ def translate(
             show_default=False,
         ),
     ] = None,
+    pdf_engine: Annotated[
+        PdfEngine | None,
+        typer.Option(
+            "--pdf-engine",
+            help="PDF 提取/解析引擎：'docling' (默认布局解析器), 'pdfium' (快速文本提取), 或 'auto'",
+            show_default=False,
+        ),
+    ] = None,
     dual_mode: Annotated[
         DualMode | None,
         typer.Option(
@@ -536,6 +545,7 @@ def translate(
         "preset": preset,
         "facing_spread": facing_spread,
         "render_engine": render_engine,
+        "pdf_engine": pdf_engine,
         "emit_both": emit_both,
         "cover_mode": cover_mode,
         "prompt_strategy": prompt_strategy,
