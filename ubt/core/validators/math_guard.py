@@ -320,6 +320,13 @@ RENDERABLE_LATEX_COMMANDS = frozenset(
         "ldots",
         "le",
         "leftarrow",
+        "hat",
+        "tilde",
+        "vec",
+        "bar",
+        "overline",
+        "dot",
+        "ddot",
         "llless",
         "lnot",
         "lor",
@@ -373,6 +380,13 @@ _LATEX_CMD_RE = re.compile(r"\\([a-zA-Z]+)")
 #: fabricated; only the encoding moved. Normalizing the source to LaTeX before
 #: the comparison fixes the class rather than growing a per-symbol allowlist.
 _UNICODE_TO_LATEX = {
+    "ˆ": "hat",
+    "̂": "hat",
+    "^": "hat",
+    "˜": "tilde",
+    "̃": "tilde",
+    "̄": "bar",
+    "⃗": "vec",
     "∈": "in",
     "∉": "notin",
     "⊆": "subseteq",

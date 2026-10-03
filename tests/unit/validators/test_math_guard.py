@@ -128,6 +128,16 @@ def test_source_command_set_is_empty_for_plain_text() -> None:
     assert _source_command_set("plain prose") == set()
 
 
+def test_source_command_set_expands_unicode_accents() -> None:
+    # Docling flattens a hat to the combining/spacing circumflex or a bare
+    # caret; either spelling must excuse a target's \hat.
+    assert _source_command_set("x\u0302") == {"hat"}
+    assert _source_command_set("x\u02c6") == {"hat"}
+    assert _source_command_set("x^") == {"hat"}
+    assert _source_command_set("y\u0303") == {"tilde"}
+    assert _source_command_set("z\u0304") == {"bar"}
+
+
 @pytest.mark.parametrize(
     ("source", "target", "expected"),
     [
@@ -135,6 +145,9 @@ def test_source_command_set_is_empty_for_plain_text() -> None:
         (r"\frac{a}{b}", r"\frac{a}{b}", []),
         ("x \u2208 S", r"x \in S", []),  # unicode symbol excuses its LaTeX spelling
         ("Z", r"\mathbb{R}", ["mathbb"]),  # no source blackboard letter: bare command novel
+        ("x\u0302", r"\hat{x}", []),  # combining circumflex reads as \hat
+        ("v", r"\vec{v}", []),  # accents are renderable reconstruction
+        ("x", r"\ddot{x}", []),
     ],
 )
 def test_novel_unsupported_latex_commands(source: str, target: str, expected: list[str]) -> None:
@@ -148,6 +161,9 @@ def test_blackboard_letter_identity_is_compared() -> None:
 
 def test_renderable_command_set_contains_the_documented_members() -> None:
     assert {"text", "mathrm", "frac", "in", "alpha"} <= RENDERABLE_LATEX_COMMANDS
+    # Math accents: a translator re-encoding a flattened accent may use any of
+    # these, and they all have a Typst spelling downstream.
+    assert {"hat", "tilde", "vec", "bar", "overline", "dot", "ddot"} <= (RENDERABLE_LATEX_COMMANDS)
 
 
 # --------------------------------------------------------------------------- #

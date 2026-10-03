@@ -342,6 +342,13 @@ _TYPST_MATH_WORDS = frozenset(_LATEX_CMD_MAP.values()) | {
     "integral",
     "partial",
     "cal",
+    "hat",
+    "tilde",
+    "vec",
+    "overline",
+    "dot",
+    "ddot",
+    "diaer",
 }
 # Word runs for the upright-label quoter. Dotted Typst identifiers
 # (plus.minus, lt.eq, lt.double from the map above) must match as ONE
@@ -460,6 +467,18 @@ def typstify_math(body: str) -> str | None:
             break
         body = t2
 
+    # Convert math accents \hat{a} -> hat(a), \hat a -> hat(a), etc.
+    for _ in range(3):
+        t1 = _ACCENT_CMD_RE.sub(
+            lambda m: f"{_ACCENT_FN_MAP.get(m.group(1), m.group(1))}({m.group(2)})", body
+        )
+        t2 = _ACCENT_BARE_CMD_RE.sub(
+            lambda m: f"{_ACCENT_FN_MAP.get(m.group(1), m.group(1))}({m.group(2)})", t1
+        )
+        if t2 == body:
+            break
+        body = t2
+
     marked = _TEXTLIKE_CMD_RE.sub(lambda m: "\0" + m.group(1) + "\0", body)
 
     def _cmd(match: re.Match[str]) -> str:
@@ -506,6 +525,9 @@ _LABEL_SEP_RE = re.compile(r"^[\s,;:|/\-\u00b7\d]*$")
 _STRING_RE = re.compile(r'#"([^"]*)"')
 _FRAC_RE = re.compile(r"\\frac\{([^{}]*)\}\{([^{}]*)\}")
 _SQRT_RE = re.compile(r"\\sqrt\{([^{}]*)\}")
+_ACCENT_CMD_RE = re.compile(r"\\(hat|tilde|vec|bar|overline|dot|ddot)\{([^{}]*)\}")
+_ACCENT_BARE_CMD_RE = re.compile(r"\\(hat|tilde|vec|bar|overline|dot|ddot)\s+([A-Za-z0-9])")
+_ACCENT_FN_MAP: dict[str, str] = {"bar": "overline", "ddot": "diaer"}
 
 
 def _collapse_label_group(match: re.Match[str]) -> str:
