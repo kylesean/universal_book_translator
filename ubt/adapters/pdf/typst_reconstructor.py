@@ -548,7 +548,7 @@ def _is_decorative_chapter_banner(
         pos = idx + offset
         if 0 <= pos < len(blocks):
             cand = blocks[pos]
-            if cand.block_type == BlockType.CAPTION:
+            if cand.flow_id == FlowID.CAPTION:
                 return False
             txt = (cand.source_text or cand.target_text or "").strip().lower()
             if (

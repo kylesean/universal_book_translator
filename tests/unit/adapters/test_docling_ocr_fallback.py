@@ -32,8 +32,9 @@ def _make_block(
         source_text=text,
         spine_index=spine_index,
         bbox=BoundingBox(x0=10, y0=10, x1=100, y1=50, page=page),
+        skip_translate=skip,
     )
-    return IRBlock(element=elem, skip_translate=skip)
+    return IRBlock(element=elem)
 
 
 def test_has_text_content_detection() -> None:
