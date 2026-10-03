@@ -121,8 +121,8 @@ def project_contract(report: AttestationReport, graph: ContentGraph) -> Reconcil
     here, the construction-time loss ``realize()`` refuses to hide and the graph
     cannot see (the block still carries a target).
     """
-    base = reconcile(graph)
-    content, _ = build_ledgers(graph)
+    content, assets = build_ledgers(graph)
+    base = reconcile(graph, ledgers=(content, assets))
     attested = {attestation.element_id: attestation.fidelity for attestation in report.attestations}
     demoted = tuple(
         Violation(

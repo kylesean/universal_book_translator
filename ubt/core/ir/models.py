@@ -11,8 +11,9 @@ the two can no longer disagree. What is left on the block is execution state
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Mapping
 from enum import StrEnum
-from typing import Annotated, Any
+from typing import Annotated, Any, Self
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -345,19 +346,51 @@ class IRBlock(BaseModel):
     def set_source_text(self, text: str) -> None:
         self.element = _with_element_source(self.element, text)
 
-    def with_source_text(self, text: str) -> IRBlock:
-        """A copy whose carried source text is replaced (rebuilds the element).
+    def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = False) -> Self:
+        """A copy of the model, supporting updates to both execution state and structural element fields."""
+        if not update:
+            return super().model_copy(deep=deep)
 
-        ``model_copy(update={"source_text": ...})`` cannot be used: it writes the
-        key into ``__dict__`` and the structural property ignores it.
-        """
-        copy = self.model_copy()
-        copy.set_source_text(text)
-        return copy
+        remaining_update = dict(update)
+        element = remaining_update.pop("element", self.element)
+        element_changes: dict[str, Any] = {}
+
+        # 1. Structural aliases
+        if "source_text" in remaining_update:
+            element = _with_element_source(element, remaining_update.pop("source_text"))
+        if "flow_id" in remaining_update:
+            flow_val = remaining_update.pop("flow_id")
+            element_changes["flow"] = _FLOW_TO_KIND.get(flow_val, FlowKind.MAIN)
+        if "bbox" in remaining_update:
+            bbox_val = remaining_update.pop("bbox")
+            page = bbox_val.page if bbox_val is not None else element.span.page
+            new_span = _span_of(bbox_val, element.span.chars)
+            if bbox_val is None and page:
+                new_span = dataclasses.replace(new_span, page=page)
+            element_changes["span"] = new_span
+
+        # 2. Dynamic element fields (id, spine_index, skip_translate, region, level, marker, etc.)
+        el_fields = {f.name for f in dataclasses.fields(element)}
+        for f in list(remaining_update.keys()):
+            if f in el_fields:
+                element_changes[f] = remaining_update.pop(f)
+
+        if element_changes:
+            element = _replace_element(element, **element_changes)
+
+        remaining_update["element"] = element
+        return super().model_copy(update=remaining_update, deep=deep)
+
+    def with_source_text(self, text: str) -> IRBlock:
+        """A copy whose carried source text is replaced (rebuilds the element)."""
+        return self.model_copy(update={"source_text": text})
 
     def set_bbox(self, bbox: BoundingBox | None) -> None:
-        chars = self.element.span.chars
-        self.element = _replace_element(self.element, span=_span_of(bbox, chars))
+        page = bbox.page if bbox is not None else self.element.span.page
+        new_span = _span_of(bbox, self.element.span.chars)
+        if bbox is None and page:
+            new_span = dataclasses.replace(new_span, page=page)
+        self.element = _replace_element(self.element, span=new_span)
 
     def validate_contract(self) -> list[str]:
         """Check document-v1 invariants; returns violation messages (empty = ok)."""

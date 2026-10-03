@@ -18,7 +18,7 @@ from enum import StrEnum
 from pydantic import BaseModel, ConfigDict, Field
 
 from ubt.core.content.graph import ContentGraph
-from ubt.core.content.ledger import build_ledgers
+from ubt.core.content.ledger import AssetLedger, ContentLedger, build_ledgers
 from ubt.core.content.nodes import AssetIntegrity, TextDisposition
 
 
@@ -111,7 +111,10 @@ class ReconciliationReport(BaseModel):
         )
 
 
-def reconcile(graph: ContentGraph) -> ReconciliationReport:
+def reconcile(
+    graph: ContentGraph,
+    ledgers: tuple[ContentLedger, AssetLedger] | None = None,
+) -> ReconciliationReport:
     """The contract as the content graph *alone* can see it.
 
     Not the delivery verdict any more: the export projects its contract from the
@@ -127,7 +130,7 @@ def reconcile(graph: ContentGraph) -> ReconciliationReport:
     accounted for when it is PRESERVED_OPAQUE or a *verified* RECONSTRUCTED; an
     unverified reconstruction is a warning, and MISSING is an error.
     """
-    content, assets = build_ledgers(graph)
+    content, assets = ledgers if ledgers is not None else build_ledgers(graph)
     violations: list[Violation] = []
 
     delivered = verbatim = source_kept = skipped = pending = 0
