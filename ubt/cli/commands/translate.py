@@ -73,6 +73,20 @@ def _is_interactive() -> bool:
 _PROFILE_EXAMPLES = "general, textbook, paper, fiction, humanities, semiconductor"
 
 
+def _clean_stale_companions(output: Path | None) -> None:
+    if output is None:
+        return
+    stem = output.stem
+    names = [f"{stem}_rigid.pdf", f"{stem}_reflow.pdf"]
+    if stem.endswith("_mono"):
+        names.append(f"{stem[: -len('_mono')]}_bilingual{output.suffix}")
+    for n in names:
+        p = output.with_name(n)
+        if p.exists() and p != output:
+            with contextlib.suppress(OSError):
+                p.unlink()
+
+
 def _refuse_existing_output(output: Path | None, *, fresh: bool | None) -> Path | None:
     """Mirror the API 409 / MCP ToolError overwrite guard on the CLI surface.
 
@@ -80,7 +94,10 @@ def _refuse_existing_output(output: Path | None, *, fresh: bool | None) -> Path 
     unless the caller asks for a fresh run; the CLI used to overwrite silently,
     and even its default output name collides on a second run.
     """
-    if output is None or fresh:
+    if output is None:
+        return None
+    if fresh:
+        _clean_stale_companions(output)
         return output
     if output.exists():
         raise typer.BadParameter(
@@ -106,12 +123,14 @@ def _report_degrades_bilingual_delivery(report_data: dict[str, Any]) -> bool:
         rendered_modes == ["monolingual"]
         or effective == "monolingual"
         or "dual_mode_downgraded" in report_data
-        or "overlay engine" in report_data.get("delivery_status", "")
-        or "overlay engine" in report_data.get("delivery_warning", "")
+        or "overlay engine" in (report_data.get("delivery_status") or "")
+        or "overlay engine" in (report_data.get("delivery_warning") or "")
     )
 
 
-def _find_companion_paths(result_path: Path) -> list[Path]:
+def _find_companion_paths(
+    result_path: Path, *, report_data: dict[str, Any] | None = None
+) -> list[Path]:
     """Existing complementary artifacts the pipeline wrote beside the primary.
 
     The pipeline may emit a fidelity rigid companion (``_rigid``) and/or a
@@ -119,10 +138,21 @@ def _find_companion_paths(result_path: Path) -> list[Path]:
     took the auto-named ``_mono`` delivery).
     """
     stem = result_path.stem
-    names = [f"{stem}_rigid.pdf", f"{stem}_reflow.pdf"]
+    names: list[str] = []
+    is_rigid = False
+    if report_data:
+        is_rigid = (
+            report_data.get("render_engine") == "rigid"
+            or report_data.get("effective_engine") == "rigid"
+            or "overlay engine" in (report_data.get("delivery_status") or "")
+            or "overlay engine" in (report_data.get("delivery_warning") or "")
+        )
+    if not is_rigid and not stem.endswith("_rigid"):
+        names.append(f"{stem}_rigid.pdf")
+    names.append(f"{stem}_reflow.pdf")
     if stem.endswith("_mono"):
         names.append(f"{stem[: -len('_mono')]}_bilingual{result_path.suffix}")
-    return [p for p in (result_path.with_name(n) for n in names) if p.exists()]
+    return [p for p in (result_path.with_name(n) for n in names) if p.exists() and p != result_path]
 
 
 def translate(
@@ -147,10 +177,10 @@ def translate(
             "--profile",
             "--domain-profile",
             "-p",
-            help="Domain profile name (e.g. general, textbook, paper, fiction, "
-            "humanities, semiconductor); also names a packaged glossary directory",
+            help="Domain profile name (e.g. auto, general, textbook, paper, fiction, "
+            "humanities, semiconductor); 'auto' infers from document archetype",
         ),
-    ] = "general",
+    ] = "auto",
     glossary: Annotated[
         Path | None,
         typer.Option(
@@ -517,6 +547,18 @@ def translate(
     ] = False,
 ) -> None:
     """Translate an entire book end-to-end with 4-layer defense and live dual dashboard."""
+    if profile == "auto":
+        if input_path.exists():
+            from ubt.core.archetype import analyze_archetype, infer_profile_from_archetype
+
+            try:
+                arch = analyze_archetype(input_path)
+                profile = infer_profile_from_archetype(arch, path=input_path)
+            except Exception:
+                profile = "general"
+        else:
+            profile = "general"
+
     # The shared job-request surface (ubt.core.job_options): keys are
     # UBTConfig field names (plus the ``glossary`` alias), ``None`` means
     # "flag not passed" and falls through to env/preset. CLI flag names
@@ -808,7 +850,11 @@ def translate(
             raise typer.Exit(code=1)
         report_path = sidecar_path(result_path, "quality_report.json")
         visual_path = sidecar_path(result_path, "visual_report.json")
-        companions = _find_companion_paths(result_path)
+        report_data: dict[str, Any] = {}
+        if report_path.exists():
+            with contextlib.suppress(Exception):
+                report_data = json.loads(report_path.read_text(encoding="utf-8"))
+        companions = _find_companion_paths(result_path, report_data=report_data)
         if strict:
             strict_fn = _get_strict_failures()
             failures = strict_fn(report_path)
@@ -863,11 +909,9 @@ def translate(
                 )
             )
         is_bilingual = True
-        if report_path.exists():
-            with contextlib.suppress(Exception):
-                report_data = json.loads(report_path.read_text(encoding="utf-8"))
-                if _report_degrades_bilingual_delivery(report_data):
-                    is_bilingual = False
+        if report_data:
+            if _report_degrades_bilingual_delivery(report_data):
+                is_bilingual = False
         elif dual_mode == "monolingual" or canonical_render_engine(render_engine) == "rigid":
             is_bilingual = False
 

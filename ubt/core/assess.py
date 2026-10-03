@@ -422,6 +422,9 @@ def _recommend_route(
             struct_share=1.0 if (has_vector_signal or scanned) else 0.0,
             has_geometry=True,
             multicolumn_share=1.0 if has_multicolumn_signal else 0.0,
+            structural_page_share=float(pdf.get("structural_page_share") or 0.0),
+            profile="paper" if arch.category == DocCategory.ACADEMIC_PAPER else None,
+            category=arch.category,
         )
         render_engine = "rigid" if canonical == "rigid" else "reflow"
     else:
@@ -429,7 +432,11 @@ def _recommend_route(
 
     dual_mode = "monolingual" if render_engine in RIGID_ENGINES else "inline"
     preset = "publication" if (math_heavy or academic) else "standard"
-    profile = "textbook" if (math_heavy or academic) else "general"
+    profile = (
+        "paper"
+        if arch.category == DocCategory.ACADEMIC_PAPER
+        else ("textbook" if (math_heavy or academic) else "general")
+    )
 
     if route is not None:
         mode, reason = route.mode, route.reason

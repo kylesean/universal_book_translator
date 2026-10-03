@@ -364,8 +364,26 @@ def apply_layout_tradeoff_advisory(
     directly would silently skip the advisory on auto-routed documents — exactly
     when the reader did not choose the tradeoff and most needs to see it.
     """
+    rd = getattr(getattr(manifest, "run", None), "route_decision", None)
+    structural_page_share = 0.0
+    if isinstance(rd, dict):
+        try:
+            structural_page_share = float(rd.get("structural_page_share") or 0.0)
+        except (TypeError, ValueError):
+            structural_page_share = 0.0
+
+    profile = getattr(manifest, "profile", None) or getattr(manifest, "profile_name", None)
+    metadata = getattr(manifest, "metadata", None)
+    category = metadata.get("category") if isinstance(metadata, dict) else None
+
     active = resolve_render_engine_from_signals(
-        requested_engine, has_math=formula_heavy, struct_share=0.0, has_geometry=True
+        requested_engine,
+        has_math=formula_heavy,
+        struct_share=0.0,
+        has_geometry=True,
+        structural_page_share=structural_page_share,
+        profile=profile,
+        category=category,
     )
     if not (formula_heavy and active == "rigid"):
         return

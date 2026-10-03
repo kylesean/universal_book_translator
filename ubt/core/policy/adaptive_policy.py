@@ -37,6 +37,11 @@ STRUCT_SHARE_AUTO = 0.20
 # the cutoff has wide margin.
 MULTICOLUMN_SHARE_AUTO = 0.25
 
+# Page-level structural share above which the rigid engine wins the auto
+# dispatch (aligns with COMPANION_STRUCTURAL_SHARE in advisory stage):
+# complex layouts with figures/tables across pages should render rigid.
+STRUCTURAL_PAGE_SHARE_AUTO = 0.15
+
 
 class Granularity(StrEnum):
     """Execution chunking granularity for the unified translation pipeline.
@@ -122,6 +127,9 @@ def resolve_render_engine_from_signals(
     struct_share: float,
     has_geometry: bool = True,
     multicolumn_share: float = 0.0,
+    structural_page_share: float = 0.0,
+    profile: str | None = None,
+    category: Any | None = None,
 ) -> str:
     """Canonical render-route decision from document facts, without IR blocks.
 
@@ -160,11 +168,17 @@ def resolve_render_engine_from_signals(
     # 2609.20519 case is caught by it (7/15 columnar pages) even though its
     # IR block-count share (8.6%) and FORMULA-block count (0) both miss.
     # Plain prose has no such risk and gets the reflow route's better typography.
+    is_paper = (profile or "").strip().lower() in ("paper", "academic_paper") or str(
+        category or ""
+    ).lower() in ("academic_paper", "doccategory.academic_paper")
+
     return (
         "rigid"
         if has_math
         or struct_share >= STRUCT_SHARE_AUTO
         or multicolumn_share >= MULTICOLUMN_SHARE_AUTO
+        or structural_page_share >= STRUCTURAL_PAGE_SHARE_AUTO
+        or is_paper
         else "publication"
     )
 
@@ -177,7 +191,7 @@ def resolve_pdf_engine(
     """Resolve the PDF render engine for one render call from its IR blocks and manifest.
 
     Derives the routing signals the canonical dispatcher needs
-    (``has_math`` / ``struct_share`` / ``multicolumn_share`` / ``has_geometry``)
+    (``has_math`` / ``struct_share`` / ``multicolumn_share`` / ``structural_page_share`` / ``has_geometry``)
     from the block mix and manifest facts, then delegates to
     :func:`resolve_render_engine_from_signals`.
     """
@@ -188,6 +202,10 @@ def resolve_pdf_engine(
     has_math = False
     struct_share = 0.0
     multicolumn_share = 0.0
+    structural_page_share = 0.0
+    profile = getattr(manifest, "profile", None) or getattr(manifest, "profile_name", None)
+    category = None
+
     if materialized:
         # ``has_math`` is driven by explicit FORMULA blocks only. An inline
         # ``$x$`` anywhere in prose used to flip this True via
@@ -203,6 +221,10 @@ def resolve_pdf_engine(
         ) / len(materialized)
 
     if manifest is not None:
+        metadata = getattr(manifest, "metadata", None)
+        if isinstance(metadata, dict):
+            profile = profile or metadata.get("profile") or metadata.get("profile_name")
+            category = metadata.get("category")
         rd = getattr(manifest.run, "route_decision", None)
         if isinstance(rd, dict):
             if rd.get("formula_heavy"):
@@ -213,6 +235,10 @@ def resolve_pdf_engine(
                 multicolumn_share = float(rd.get("multicolumn_page_share") or 0.0)
             except (TypeError, ValueError):
                 multicolumn_share = 0.0
+            try:
+                structural_page_share = float(rd.get("structural_page_share") or 0.0)
+            except (TypeError, ValueError):
+                structural_page_share = 0.0
 
     return resolve_render_engine_from_signals(
         requested,
@@ -220,4 +246,7 @@ def resolve_pdf_engine(
         struct_share=struct_share,
         has_geometry=has_geometry,
         multicolumn_share=multicolumn_share,
+        structural_page_share=structural_page_share,
+        profile=profile,
+        category=category,
     )

@@ -353,3 +353,27 @@ def test_pdf_engine_no_manifest_uses_block_signals_only() -> None:
 def test_pdf_engine_unknown_request_falls_back_to_publication() -> None:
     blocks = [_block("p", BlockType.NARRATIVE, bbox=_box())]
     assert resolve_pdf_engine("weird", blocks) == "publication"
+
+
+def test_pdf_engine_manifest_structural_page_share_routes_rigid() -> None:
+    blocks = [_block("p", BlockType.NARRATIVE, bbox=_box())]
+    run = RunMetadata(route_decision={"structural_page_share": 0.18})
+    assert resolve_pdf_engine("auto", blocks, _manifest(run)) == "rigid"
+
+
+def test_pdf_engine_paper_profile_routes_rigid() -> None:
+    assert (
+        resolve_render_engine_from_signals(
+            "auto", has_math=False, struct_share=0.0, profile="paper"
+        )
+        == "rigid"
+    )
+
+
+def test_pdf_engine_academic_paper_category_routes_rigid() -> None:
+    assert (
+        resolve_render_engine_from_signals(
+            "auto", has_math=False, struct_share=0.0, category="DocCategory.ACADEMIC_PAPER"
+        )
+        == "rigid"
+    )

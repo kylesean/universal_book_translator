@@ -246,14 +246,32 @@ def detect_domain(text: str) -> tuple[str, float]:
     return "general", 0.1
 
 
-def classify_category(ext: str, math_density: MathDensity, domain: str, pages: int) -> DocCategory:
+_ARXIV_RE = re.compile(r"\b\d{4}\.\d{4,5}(?:v\d+)?\b", re.IGNORECASE)
+_ARXIV_TEXT_RE = re.compile(r"\barxiv:\s*\d{4}\.\d{4,5}", re.IGNORECASE)
+
+
+def classify_category(
+    ext: str,
+    math_density: MathDensity,
+    domain: str,
+    pages: int,
+    path: Path | None = None,
+    text: str = "",
+) -> DocCategory:
     """Classify into high-level category for user presentation."""
-    if ext == "pdf" and (
-        math_density == MathDensity.HIGH or domain in ("semiconductor", "computer_science")
-    ):
-        if pages <= 30:
+    # Explicit arXiv naming or citation in text guarantees academic paper
+    stem = path.stem.lower() if path is not None else ""
+    if ext == "pdf":
+        if (
+            _ARXIV_RE.search(stem) or "arxiv" in stem or _ARXIV_TEXT_RE.search(text)
+        ) and pages <= 120:
             return DocCategory.ACADEMIC_PAPER
-        return DocCategory.TECHNICAL_BOOK
+
+        if math_density == MathDensity.HIGH or domain in ("semiconductor", "computer_science"):
+            if pages <= 80:
+                return DocCategory.ACADEMIC_PAPER
+            return DocCategory.TECHNICAL_BOOK
+
     if (
         ext in ("epub", "md", "markdown", "html", "htm", "txt")
         and domain == "general"
@@ -263,13 +281,28 @@ def classify_category(ext: str, math_density: MathDensity, domain: str, pages: i
     return DocCategory.GENERAL
 
 
+def infer_profile_from_archetype(arch: Archetype, path: Path | None = None) -> str:
+    """Infer the optimal domain profile (e.g. 'paper', 'semiconductor', 'general') from an archetype."""
+    if arch.category == DocCategory.ACADEMIC_PAPER:
+        return "paper"
+    if path is not None and (_ARXIV_RE.search(path.stem) or "arxiv" in path.stem.lower()):
+        return "paper"
+    if arch.detected_domain in ("semiconductor", "humanities"):
+        return arch.detected_domain
+    if arch.category == DocCategory.LITERATURE:
+        return "fiction"
+    return "general"
+
+
 def analyze_archetype(path: Path) -> Archetype:
     """Sample a cold file and return its archetype facts. Never raises on probe failure."""
     ext = path.suffix.lower().lstrip(".")
     count, is_scanned, sample_text = sample_document(path, ext)
     math_density = detect_math_density(sample_text)
     detected_domain, domain_confidence = detect_domain(sample_text)
-    category = classify_category(ext, math_density, detected_domain, count)
+    category = classify_category(
+        ext, math_density, detected_domain, count, path=path, text=sample_text
+    )
     return Archetype(
         format_ext=ext,
         page_or_ch_count=count,

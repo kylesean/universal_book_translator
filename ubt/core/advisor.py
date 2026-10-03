@@ -159,6 +159,7 @@ class DocumentAdvisor:
         route_mode = "auto"
         route_reason = "结构化文档，无需 PDF 路由探测"
         route_multicolumn_share = 0.0
+        route_structural_page_share = 0.0
         if format_ext == "pdf":
             try:
                 route = decide_route(
@@ -171,6 +172,9 @@ class DocumentAdvisor:
                 route_multicolumn_share = float(
                     getattr(route, "multicolumn_page_share", 0.0) or 0.0
                 )
+                route_structural_page_share = float(
+                    getattr(route, "structural_page_share", 0.0) or 0.0
+                )
             except Exception:  # probing must never block the wizard
                 route_mode = "auto"
                 route_reason = "路由探测不可用，按默认策略执行"
@@ -178,10 +182,7 @@ class DocumentAdvisor:
         # 1. Render engine recommendation — predicted through the same canonical
         # resolver the runtime ``auto`` dispatch uses
         # (``adaptive_policy.resolve_render_engine_from_signals``), so the advice
-        # matches the route that actually runs. A purely academic/technical
-        # classification is not a routing signal on its own: academic prose with
-        # no math or figures reflows better. The probe cannot see the block mix,
-        # so it estimates the structure signal from its scan fact.
+        # matches the route that actually runs.
         if format_ext == "pdf":
             canonical = resolve_render_engine_from_signals(
                 "auto",
@@ -189,6 +190,9 @@ class DocumentAdvisor:
                 struct_share=1.0 if is_scanned else 0.0,
                 has_geometry=True,
                 multicolumn_share=route_multicolumn_share,
+                structural_page_share=route_structural_page_share,
+                profile="paper" if category == DocCategory.ACADEMIC_PAPER else detected_domain,
+                category=category,
             )
             if canonical == "rigid":
                 recommended_render_engine: RenderEngine = "rigid"
