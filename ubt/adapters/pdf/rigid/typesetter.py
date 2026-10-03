@@ -230,6 +230,8 @@ def _strip_and_merge_page(
     strip_rects: list[Rect],
     protected_rects: list[Rect],
     shared_forms: set[tuple[int, int]],
+    *,
+    source_pdf: Path | str = "",
 ) -> tuple[int, bool]:
     """Strip one page's source text and paint its translation overlay.
 
@@ -300,6 +302,19 @@ def _strip_and_merge_page(
                 float(media[3]),
             ),
         )
+        if source_pdf:
+            try:
+                from ubt.adapters.pdf.rigid.annotations import relocate_page_annotations
+
+                relocate_page_annotations(
+                    page=page,
+                    page_no=page_no,
+                    source_pdf=source_pdf,
+                    overlay_path=overlay_path,
+                    strip_rects=strip_rects,
+                )
+            except Exception as annot_exc:
+                logger.debug("Annotation relocation failed on page %d: %s", page_no, annot_exc)
     except Exception as exc:
         if stats.rollback is not None:
             stats.rollback()
@@ -1199,6 +1214,7 @@ class RigidTypesetter:
                             erase_rects.get(page_no, []),
                             guards,
                             shared_forms,
+                            source_pdf=source_pdf,
                         )
                         page_reports[page_no].stripped_ops += dropped
                         if not painted:

@@ -1,0 +1,227 @@
+"""Dynamic PDF Link Annotation Relocation for Rigid Typesetting.
+
+When the rigid typesetter overlays translated text onto a PDF page, the original
+text is stripped and the new translation is painted at new coordinates. In the
+original PDF, interactive elements like hyperlinks and academic citations
+(e.g., [1], Shi et al., 2026) are stored as `/Subtype /Link` annotation
+dictionaries with static bounding boxes (`/Rect`).
+
+Because translated words occupy different horizontal and vertical positions,
+leaving `/Rect` unchanged renders the links non-clickable ("dead text") at their
+new positions, while creating confusing "ghost click" zones at the old coordinates.
+
+This module inspects the source page and the compiled overlay PDF, locates the
+new character/glyph bounding boxes of corresponding citations and links, and
+dynamically rewrites the `/Rect` coordinates on the output page, while pruning
+unmatched ghost links.
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+from collections.abc import Sequence
+from decimal import Decimal
+from pathlib import Path
+
+import pikepdf
+import pypdfium2 as pdfium
+
+from ubt.adapters.pdf.pdfium_gate import PDFIUM_LOCK
+
+logger = logging.getLogger(__name__)
+
+Rect = tuple[float, float, float, float]
+
+_CITE_KEY_RE = re.compile(r"cite\.([a-zA-Z]+)(\d{4})?", re.IGNORECASE)
+_BRACKET_NUM_RE = re.compile(r"\[(\d{1,4}(?:[-–—]\d{1,4})?)\]")
+
+
+def _rect_intersects_any(rect: Sequence[float], strip_rects: Sequence[Rect]) -> bool:
+    """True if rect [x0, y0, x1, y1] overlaps any rect in strip_rects."""
+    rx0, ry0, rx1, ry1 = rect[0], rect[1], rect[2], rect[3]
+    for sx0, sy0, sx1, sy1 in strip_rects:
+        if not (rx1 < sx0 or rx0 > sx1 or ry1 < sy0 or ry0 > sy1):
+            return True
+    return False
+
+
+def _extract_candidates_from_annot(
+    annot: pikepdf.Object,
+    src_text: str,
+) -> list[str]:
+    """Derive prioritized search tokens for a link annotation."""
+    candidates: list[str] = []
+    clean_src = src_text.strip("(),;[]'\" \t\r\n")
+
+    # 1. Bracket-style citation in source text: "[12]" or "[1-3]"
+    bracket_m = _BRACKET_NUM_RE.search(src_text)
+    if bracket_m:
+        candidates.append(bracket_m.group(0))
+        candidates.append(bracket_m.group(1))
+
+    # 2. Check Action / Dest dictionary
+    action = annot.get("/A")
+    dest = str(action.get("/D")) if action and "/D" in action else ""
+    if not dest:
+        dest_val = annot.get("/Dest")
+        if dest_val is not None:
+            dest = str(dest_val)
+
+    uri = str(action.get("/URI")) if action and "/URI" in action else ""
+
+    # Named citation target (LaTeX / hyperref convention: 'cite.shi2026harbor')
+    if dest and "cite." in dest.lower():
+        m = _CITE_KEY_RE.search(dest)
+        if m:
+            author, year = m.group(1), m.group(2)
+            if author and len(author) >= 2:
+                candidates.append(author)
+            if year:
+                candidates.append(year)
+
+    if uri:
+        # For URLs, search for the full URI or domain/path fragment
+        candidates.append(uri)
+        domain_m = re.search(r"https?://([^/\s]+)", uri)
+        if domain_m:
+            candidates.append(domain_m.group(1))
+
+    # Clean text from source box (e.g. 'Shi et al.', '2026', 'Table 1')
+    if clean_src and len(clean_src) >= 2 and clean_src not in candidates:
+        candidates.append(clean_src)
+
+    return candidates
+
+
+def relocate_page_annotations(
+    *,
+    page: pikepdf.Page,
+    page_no: int,
+    source_pdf: Path | str,
+    overlay_path: str,
+    strip_rects: Sequence[Rect],
+) -> int:
+    """Relocate PDF `/Subtype /Link` annotations on `page` to match overlay text.
+
+    Returns the count of successfully relocated annotations.
+    """
+    annots = page.get("/Annots")
+    if not annots or not strip_rects:
+        return 0
+
+    if not Path(overlay_path).is_file():
+        return 0
+
+    # Collect indices of link annotations in stripped zones
+    link_indices: list[int] = []
+    for idx, a in enumerate(annots):
+        if a.get("/Subtype") == "/Link" and "/Rect" in a:
+            rect = [float(x) for x in a["/Rect"]]
+            if _rect_intersects_any(rect, strip_rects):
+                link_indices.append(idx)
+
+    if not link_indices:
+        return 0
+
+    relocated_count = 0
+    dead_indices: set[int] = set()
+
+    with PDFIUM_LOCK:
+        try:
+            src_doc = pdfium.PdfDocument(str(source_pdf))
+            overlay_doc = pdfium.PdfDocument(str(overlay_path))
+        except Exception as exc:
+            logger.debug("Failed opening PDF for annot relocation on page %d: %s", page_no, exc)
+            return 0
+
+        try:
+            if page_no - 1 >= len(src_doc) or len(overlay_doc) < 1:
+                return 0
+
+            src_page = src_doc[page_no - 1]
+            overlay_page = overlay_doc[0]
+
+            tp_src = src_page.get_textpage()
+            tp_overlay = overlay_page.get_textpage()
+            overlay_text = tp_overlay.get_text_range()
+
+            for idx in link_indices:
+                annot = annots[idx]
+                rect = [float(x) for x in annot["/Rect"]]
+                rx0, ry0, rx1, ry1 = rect
+                orig_y = (ry0 + ry1) / 2.0
+
+                # Expand slightly by 1pt to avoid clipping adjacent punctuation
+                src_text = tp_src.get_text_bounded(
+                    rx0 - 1.0, ry0 - 1.0, rx1 + 1.0, ry1 + 1.0
+                ).strip()
+                candidates = _extract_candidates_from_annot(annot, src_text)
+
+                best_box: list[float] | None = None
+                min_dist = float("inf")
+
+                for cand in candidates:
+                    if not cand or len(cand) < 2:
+                        continue
+                    cand_lower = cand.lower()
+                    pos = 0
+                    while True:
+                        hit_idx = overlay_text.lower().find(cand_lower, pos)
+                        if hit_idx == -1:
+                            break
+                        end_idx = hit_idx + len(cand)
+                        boxes = [tp_overlay.get_charbox(c) for c in range(hit_idx, end_idx)]
+                        if boxes:
+                            bx0 = min(b[0] for b in boxes)
+                            by0 = min(b[1] for b in boxes)
+                            bx1 = max(b[2] for b in boxes)
+                            by1 = max(b[3] for b in boxes)
+                            cand_y = (by0 + by1) / 2.0
+                            dist = abs(cand_y - orig_y)
+                            if dist < min_dist:
+                                min_dist = dist
+                                best_box = [bx0, by0, bx1, by1]
+                        pos = end_idx
+
+                    # If we found a match within 45pt vertical distance, consider it resolved
+                    if best_box is not None and min_dist < 45.0:
+                        break
+
+                # Accept matches within reasonable vertical reading context (80pt)
+                if best_box is not None and min_dist < 80.0:
+                    annot["/Rect"] = pikepdf.Array(
+                        [
+                            Decimal(f"{best_box[0]:.2f}"),
+                            Decimal(f"{best_box[1]:.2f}"),
+                            Decimal(f"{best_box[2]:.2f}"),
+                            Decimal(f"{best_box[3]:.2f}"),
+                        ]
+                    )
+                    relocated_count += 1
+                else:
+                    # Unmatched link in a stripped region: mark for pruning to avoid ghost clicks
+                    dead_indices.add(idx)
+
+            tp_src.close()
+            tp_overlay.close()
+            src_page.close()
+            overlay_page.close()
+            src_doc.close()
+            overlay_doc.close()
+        except Exception as exc:
+            logger.debug("Error during annot relocation on page %d: %s", page_no, exc)
+
+    # Prune ghost links so users don't encounter dead/phantom click zones
+    if dead_indices:
+        filtered_annots = pikepdf.Array([a for i, a in enumerate(annots) if i not in dead_indices])
+        page["/Annots"] = filtered_annots
+
+    if relocated_count > 0:
+        logger.info(
+            "Relocated %d PDF link annotation(s) on page %d to matching translated glyphs",
+            relocated_count,
+            page_no,
+        )
+
+    return relocated_count
