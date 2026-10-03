@@ -10,15 +10,21 @@ placeholder -- plus the document header (languages, original file name).
 
 from __future__ import annotations
 
+import xml.etree.ElementTree as ET
+from types import SimpleNamespace
+from typing import cast
+
 import pytest
 
 from ubt.core.cleaners.citation_masker import CitationMasker
 from ubt.core.cleaners.code_masker import CodeMasker
 from ubt.core.cleaners.math_masker import MathMasker
 from ubt.core.cleaners.soup_math import SoupMathMasker
-from ubt.model.segment import Segment, SegmentState
+from ubt.core.ir.models import BlockStatus
+from ubt.model.segment import Placeholder, Segment, SegmentState
+from ubt.segment.document import _block_state
 from ubt.segment.placeholders import PlaceholderEngine
-from ubt.segment.xliff import from_xliff, to_xliff, xml_safe
+from ubt.segment.xliff import _read_inline, from_xliff, to_xliff, xml_safe
 
 pytestmark = pytest.mark.fast
 
@@ -130,3 +136,27 @@ def test_an_empty_view_round_trips_as_an_empty_view() -> None:
 )
 def test_xml_safe_strips_only_what_xml_cannot_carry(raw: str, expected: str) -> None:
     assert xml_safe(raw) == expected
+
+
+def test_read_inline_keeps_non_ph_inline_markup() -> None:
+    # CAT tools emit paired inline markup (<pc>); treating every child as a
+    # placeholder used to append an empty token and drop the wrapped text.
+    element = ET.fromstring(
+        '<source xmlns="urn:oasis:names:tc:xliff:document:2.1">'
+        'Hello <ph dataRef="p1"/> and <pc>bold text</pc> end</source>'
+    )
+    placeholders: dict[str, Placeholder] = {}
+    text = _read_inline(element, placeholders)
+    assert text == "Hello p1 and bold text end"
+    assert "p1" in placeholders
+
+
+def test_block_state_fails_loud_on_unmapped_status() -> None:
+    # A BlockStatus missing from the mapping is IR drift; silently labelling
+    # the segment NEW would tell a reviewer to translate a block whose real
+    # state is unknown.
+    drafted = cast("BlockStatus", SimpleNamespace(value="drafted"))
+    assert _block_state(drafted) is SegmentState.TRANSLATED
+    bogus = cast("BlockStatus", SimpleNamespace(value="not_a_real_status"))
+    with pytest.raises(ValueError, match="unmapped BlockStatus"):
+        _block_state(bogus)

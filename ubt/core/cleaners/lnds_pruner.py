@@ -170,17 +170,21 @@ def collect_dropped_line_indices(
     """Identify lines that are Calibre structural noise or monotonic LNDS page numbers."""
     page_number_lines = set() if strip_all_page_numbers else detect_page_number_lines(lines)
 
-    def prev_nonblank(idx: int) -> str | None:
-        for j in range(idx - 1, -1, -1):
-            if lines[j].strip():
-                return lines[j]
-        return None
-
-    def next_nonblank(idx: int) -> str | None:
-        for j in range(idx + 1, len(lines)):
-            if lines[j].strip():
-                return lines[j]
-        return None
+    # One pass in each direction instead of a linear walk per digit line:
+    # page-number-dense chapters (numbers interleaved with blanks) made the
+    # per-line scans approach O(n^2).
+    prev_nonblank_line: list[str | None] = [None] * len(lines)
+    last: str | None = None
+    for i, line in enumerate(lines):
+        prev_nonblank_line[i] = last
+        if line.strip():
+            last = line
+    next_nonblank_line: list[str | None] = [None] * len(lines)
+    nxt: str | None = None
+    for i in range(len(lines) - 1, -1, -1):
+        next_nonblank_line[i] = nxt
+        if lines[i].strip():
+            nxt = lines[i]
 
     dropped: set[int] = set()
     # Last number of a colon-introduced ordered list, so a 4+ item list whose
@@ -195,8 +199,8 @@ def collect_dropped_line_indices(
             continue
 
         if is_ascii_digit_line(line):
-            prev = prev_nonblank(i)
-            nxt = next_nonblank(i)
+            prev = prev_nonblank_line[i]
+            nxt = next_nonblank_line[i]
             value = int(line.strip())
 
             # Protection for TOC entries and ordered list numbering

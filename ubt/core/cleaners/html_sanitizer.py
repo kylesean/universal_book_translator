@@ -869,6 +869,24 @@ def _comment_end(markup: str, start: int) -> int:
     return best
 
 
+_CLOSING_TAG_RES: dict[str, re.Pattern[str]] = {}
+
+
+def _closing_tag_re(name: str) -> re.Pattern[str]:
+    """Closing-tag pattern for one tag name, compiled once instead of per occurrence.
+
+    Shared by the drop-with-content probe, ``_copy_raw_text`` and
+    ``_skip_element``; a many-``<script>`` document used to recompile the
+    pattern (and, in the probe, slice-copy the whole remaining markup) for
+    every occurrence.
+    """
+    pattern = _CLOSING_TAG_RES.get(name)
+    if pattern is None:
+        pattern = re.compile(rf"</\s*{name}\b[^>]*>", re.IGNORECASE)
+        _CLOSING_TAG_RES[name] = pattern
+    return pattern
+
+
 class _SourceTagScrubber:
     """Decide, per tag, what a source document must lose — and change nothing else.
 
@@ -960,7 +978,7 @@ class _SourceTagScrubber:
                 # tag and delete the rest of the member — the bug for void
                 # ``<embed>`` and for prose about a tag name. Escape the tag to
                 # inert text instead; a paired container still drops above.
-                if re.search(rf"</\s*{name}\b", markup[index:], re.IGNORECASE):
+                if _closing_tag_re(name).search(markup, index):
                     index = cls._skip_element(markup, index, name)
                     continue
                 out.append("&lt;" + raw_tag[1:-1] + "&gt;")
@@ -981,7 +999,7 @@ class _SourceTagScrubber:
         unscrubbed tag past the attribute scrubber. The first closing tag ends
         the body, matching HTML; with none, the remainder is copied inert.
         """
-        closing = re.compile(rf"</\s*{name}\b[^>]*>", re.IGNORECASE)
+        closing = _closing_tag_re(name)
         match = closing.search(markup, start)
         transform = scrub_css_text if name == "style" else None
         if match is None:
@@ -1001,7 +1019,7 @@ class _SourceTagScrubber:
         ends the element at the first closing tag, and for the remaining
         containers over-deleting an unpaired nesting is the safe direction.
         """
-        closing = re.compile(rf"</\s*{name}\b[^>]*>", re.IGNORECASE)
+        closing = _closing_tag_re(name)
         match = closing.search(markup, start)
         return len(markup) if match is None else match.end()
 

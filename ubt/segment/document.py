@@ -22,7 +22,7 @@ from ubt.model.segment import Segment, SegmentState
 from ubt.segment.xliff import xml_safe
 
 if TYPE_CHECKING:
-    from ubt.core.ir.models import IRBlock
+    from ubt.core.ir.models import BlockStatus, IRBlock
     from ubt.segment.placeholders import PlaceholderEngine
 
 #: Pipeline block status -> the coarser XLIFF lifecycle a reviewer works in.
@@ -40,6 +40,20 @@ _BLOCK_STATE: dict[str, SegmentState] = {
     "needs_human": SegmentState.TRANSLATED,
     "blocked_human": SegmentState.BLOCKED,
 }
+
+
+def _block_state(status: BlockStatus) -> SegmentState:
+    """Map a block status to its XLIFF lifecycle state.
+
+    A status missing from ``_BLOCK_STATE`` is IR drift (a lifecycle stage this
+    export does not understand) — fail loud instead of silently labelling the
+    segment NEW, which would tell a reviewer to translate a block whose real
+    state is unknown.
+    """
+    try:
+        return _BLOCK_STATE[status.value]
+    except KeyError as exc:
+        raise ValueError(f"unmapped BlockStatus for export: {status.value!r}") from exc
 
 
 def segments_from_blocks(blocks: Sequence[IRBlock], *, engine: PlaceholderEngine) -> list[Segment]:
@@ -66,7 +80,7 @@ def segments_from_blocks(blocks: Sequence[IRBlock], *, engine: PlaceholderEngine
                 source=masked.text,
                 placeholders=masked.placeholders,
                 target=xml_safe(target) if target.strip() else None,
-                state=_BLOCK_STATE.get(block.status.value, SegmentState.NEW),
+                state=_block_state(block.status),
             )
         )
     return segments

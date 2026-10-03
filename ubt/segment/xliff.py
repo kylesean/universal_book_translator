@@ -106,18 +106,31 @@ def _emit_inline(element: ET.Element, text: str, placeholders: tuple[Placeholder
         element.text = xml_safe(text)
 
 
+def _local_name(tag: object) -> str:
+    """Tag name without the XLIFF namespace brace, for interchange robustness."""
+    return tag.rsplit("}", 1)[-1] if isinstance(tag, str) else ""
+
+
 def _read_inline(element: ET.Element, placeholders: dict[str, Placeholder]) -> str:
-    """Rebuild the text, replacing every ``<ph>`` with its ``dataRef`` token."""
+    """Rebuild the text, replacing every ``<ph>`` with its ``dataRef`` token.
+
+    Only ``<ph>`` maps to a placeholder. CAT tools also emit paired inline
+    markup (``<pc>``); treating every child as a placeholder used to append an
+    empty token and silently drop the wrapped text, breaking the roundtrip.
+    """
     parts: list[str] = [element.text or ""]
     for child in element:
-        token = child.get("dataRef") or child.get("data-ref") or ""
-        if token:
-            placeholders[token] = Placeholder(
-                token=token,
-                kind=child.get("type") or "",
-                original=child.text or "",
-            )
-        parts.append(token)
+        if _local_name(child.tag) == "ph":
+            token = child.get("dataRef") or child.get("data-ref") or ""
+            if token:
+                placeholders[token] = Placeholder(
+                    token=token,
+                    kind=child.get("type") or "",
+                    original=child.text or "",
+                )
+            parts.append(token)
+        else:
+            parts.append("".join(child.itertext()))
         parts.append(child.tail or "")
     return "".join(parts)
 

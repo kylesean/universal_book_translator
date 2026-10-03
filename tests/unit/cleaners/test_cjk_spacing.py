@@ -149,3 +149,13 @@ def test_composed_pipeline_is_idempotent() -> None:
 def test_documented_ideographic_period_spacing_is_normalized() -> None:
     assert normalize_cjk_spacing("测试 。继续") == "测试。继续"
     assert normalize_cjk_spacing("测试。 继续") == "测试。继续"
+
+
+def test_normalize_cjk_spacing_never_rewrites_protected_spans() -> None:
+    # Module contract: code/math span bytes are untouched. The four de-spacing
+    # rules used to run on the whole string, swallowing the word gap inside a
+    # CJK-bearing code span.
+    text = "代码 `中文 中文` 结尾，你好 世界"
+    out = normalize_cjk_spacing(text, "zh")
+    assert "`中文 中文`" in out
+    assert "你好世界" in out

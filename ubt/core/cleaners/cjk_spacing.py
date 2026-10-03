@@ -119,18 +119,40 @@ def normalize_cjk_spacing(text: str, target_lang: str = "zh") -> str:
     every language, so that rule runs regardless of ``target_lang``; the
     space-removal rules need a spaceless writing system (see
     :data:`_SPACELESS_SCRIPT_LANGS`) or they delete a Korean target's word
-    boundaries.
+    boundaries. Like :func:`apply_pangu_spacing`, the de-spacing rules never
+    rewrite the bytes inside an inline code/math span.
     """
     if not text or not any(c in text for c in " \t\u3000"):
         return text
     out = _WS_BEFORE_NEWLINE.sub("\n", text)
     if not (target_lang or "").lower().startswith(_SPACELESS_SCRIPT_LANGS):
         return out
-    out = _BETWEEN_CJK.sub(r"\1", out)
-    out = _BEFORE_PUNCT.sub(r"\1", out)
-    out = _BEFORE_ASCII_PUNCT.sub(r"\1", out)
-    out = _AFTER_PUNCT.sub(r"\1", out)
-    return out
+    # Same protection contract as the sibling functions below: running the
+    # de-spacing rules on the whole string used to swallow the space inside a
+    # CJK-bearing code span ("中文 中文" in `...` lost its word gap).
+    parts = _split_protected(out)
+    for i in range(0, len(parts), 2):
+        seg = parts[i]
+        seg = _BETWEEN_CJK.sub(r"\1", seg)
+        seg = _BEFORE_PUNCT.sub(r"\1", seg)
+        seg = _BEFORE_ASCII_PUNCT.sub(r"\1", seg)
+        seg = _AFTER_PUNCT.sub(r"\1", seg)
+        parts[i] = seg
+    return "".join(parts)
+
+
+# Pangu spacing rules, precompiled once: re.sub with an rf-string pattern goes
+# through the internal pattern cache on every call for every segment.
+_PANGU_CJK_THEN_LATIN = re.compile(rf"([{_CJK}])({_LATIN_OR_NUM})")
+_PANGU_LATIN_THEN_CJK = re.compile(rf"({_LATIN_OR_NUM})([{_CJK}])")
+_PANGU_CJK_THEN_BRACKET = re.compile(rf"([{_CJK}])({_OPEN_BRACKET}{_LATIN_OR_NUM})")
+_PANGU_BRACKET_THEN_CJK = re.compile(rf"({_LATIN_OR_NUM}{_CLOSE_BRACKET})([{_CJK}])")
+_PANGU_DIGIT_THEN_BRACKET = re.compile(rf"(\d)({_OPEN_BRACKET}[a-zA-Z0-9])")
+_PANGU_PERCENT_THEN_CJK = re.compile(rf"({_LATIN_OR_NUM}%)([{_CJK}])")
+_PANGU_ENDS_WITH_CJK = re.compile(rf"[{_CJK}]$")
+_PANGU_STARTS_WITH_CJK = re.compile(rf"^[{_CJK}]")
+_PANGU_CJK_TRAILING_WS = re.compile(rf"([{_CJK}])[ \t\u3000]{{2,}}")
+_PANGU_CJK_LEADING_WS = re.compile(rf"[ \t\u3000]{{2,}}([{_CJK}])")
 
 
 def apply_pangu_spacing(text: str, target_lang: str = "zh") -> str:
@@ -153,28 +175,28 @@ def apply_pangu_spacing(text: str, target_lang: str = "zh") -> str:
     for i in range(0, len(parts), 2):
         seg = parts[i]
         # 1. CJK + Latin/Num
-        seg = re.sub(rf"([{_CJK}])({_LATIN_OR_NUM})", r"\1 \2", seg)
+        seg = _PANGU_CJK_THEN_LATIN.sub(r"\1 \2", seg)
         # 2. Latin/Num + CJK
-        seg = re.sub(rf"({_LATIN_OR_NUM})([{_CJK}])", r"\1 \2", seg)
+        seg = _PANGU_LATIN_THEN_CJK.sub(r"\1 \2", seg)
         # 2b. CJK + half-width bracket with Latin/Num/Math: e.g. 式(3.1) -> 式 (3.1)
-        seg = re.sub(rf"([{_CJK}])({_OPEN_BRACKET}{_LATIN_OR_NUM})", r"\1 \2", seg)
+        seg = _PANGU_CJK_THEN_BRACKET.sub(r"\1 \2", seg)
         # 2c. Half-width bracket with Latin/Num/Math + CJK: e.g. (3.1)出发 -> (3.1) 出发
-        seg = re.sub(rf"({_LATIN_OR_NUM}{_CLOSE_BRACKET})([{_CJK}])", r"\1 \2", seg)
+        seg = _PANGU_BRACKET_THEN_CJK.sub(r"\1 \2", seg)
         # 2d. Num + half-width bracket with Latin/Num: e.g. 图 3.1(a) -> 图 3.1 (a)
         # Only a *digit* may precede the bracket. A letter is an identifier, and
         # ``sin(x)`` / ``f(x)`` are function calls, not bracketed references — the
         # old ``_LATIN_OR_NUM`` rule inserted a space and broke them.
-        seg = re.sub(rf"(\d)({_OPEN_BRACKET}[a-zA-Z0-9])", r"\1 \2", seg)
+        seg = _PANGU_DIGIT_THEN_BRACKET.sub(r"\1 \2", seg)
         # 3. Number/Latin + % + CJK (e.g. 15% 的性能)
-        seg = re.sub(rf"({_LATIN_OR_NUM}%)([{_CJK}])", r"\1 \2", seg)
+        seg = _PANGU_PERCENT_THEN_CJK.sub(r"\1 \2", seg)
         # 6. Clean spaces around CJK punctuation
         seg = _BEFORE_PUNCT.sub(r"\1", seg)
         seg = _AFTER_PUNCT.sub(r"\1", seg)
 
         # Space between CJK and adjacent protected math/mask spans
-        if i + 1 < len(parts) and seg and re.search(rf"[{_CJK}]$", seg):
+        if i + 1 < len(parts) and seg and _PANGU_ENDS_WITH_CJK.search(seg):
             seg = seg + " "
-        if i > 0 and seg and re.match(rf"^[{_CJK}]", seg):
+        if i > 0 and seg and _PANGU_STARTS_WITH_CJK.match(seg):
             seg = " " + seg
         parts[i] = seg
 
@@ -183,8 +205,8 @@ def apply_pangu_spacing(text: str, target_lang: str = "zh") -> str:
     # code/math span, which the module contract says must never be touched.
     for i in range(0, len(parts), 2):
         seg = parts[i]
-        seg = re.sub(rf"([{_CJK}])[ \t\u3000]{{2,}}", r"\1 ", seg)
-        seg = re.sub(rf"[ \t\u3000]{{2,}}([{_CJK}])", r" \1", seg)
+        seg = _PANGU_CJK_TRAILING_WS.sub(r"\1 ", seg)
+        seg = _PANGU_CJK_LEADING_WS.sub(r" \1", seg)
         parts[i] = seg
     return "".join(parts)
 

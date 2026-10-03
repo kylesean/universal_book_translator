@@ -525,9 +525,10 @@ class EPUBAdapter(BaseDocumentAdapter):
                 if is_page_slice or len(chapters) >= 50:
                     metadata["is_page_slice_epub"] = is_page_slice
                     sample_texts: list[str] = []
+                    sample_names = set(zf.namelist())
                     sample_range = chapters[min(5, len(chapters) - 1) : min(35, len(chapters))]
                     for c in sample_range:
-                        if c.source_file and c.source_file in zf.namelist():
+                        if c.source_file and c.source_file in sample_names:
                             sample_raw = _read_epub_member(zf, c.source_file)
                             if sample_raw is None:
                                 continue
@@ -574,8 +575,11 @@ class EPUBAdapter(BaseDocumentAdapter):
         is_page_slice = bool(manifest.metadata.get("is_page_slice_epub", False))
 
         with zipfile.ZipFile(input_path) as zf:
+            # One central-directory read for the whole stream: per-chapter
+            # namelist() calls rebuilt the full member list every iteration.
+            member_names = set(zf.namelist())
             for chapter in manifest.chapters:
-                if not chapter.source_file or chapter.source_file not in zf.namelist():
+                if not chapter.source_file or chapter.source_file not in member_names:
                     continue
 
                 # Per-chapter zip read + BeautifulSoup parse + block build is

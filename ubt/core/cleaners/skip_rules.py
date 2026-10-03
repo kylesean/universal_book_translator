@@ -42,10 +42,16 @@ _ONLINE_BIB_RE = re.compile(r"\[Online\]\.?\s*Available:\s*https?://", re.IGNORE
 _ETAL_RE = re.compile(r"\bet\.?\s+al\.")
 _AUTHOR_RE = re.compile(r"(?<![A-Za-z0-9/])[A-Z]\.-?[A-Z]?\s*[A-Z][a-z]+")
 _YEAR_RE = re.compile(r"\b(19|20)\d{2}\b")
+# Publisher strings shared by the venue and book-title cues — one list so a
+# new publisher is added once. The conference-acronym lists in _BIB_VENUE_RE
+# and _IN_VENUE_RE below deliberately stay separate: their word-boundary
+# contexts differ (ACL needs a \b in one and not the other), so extend those
+# two in lockstep instead of sharing a string.
+_BIB_PUBLISHERS = r"Pearson|Prentice|Elsevier|Wiley|Springer"
 _BIB_VENUE_RE = re.compile(
     r"Technical Digest|Trans\.|Symposium|Conference|Manual|Chapter \d|"
-    r"pp?\.\s*\d|doi\.org|\bdoi:\s*10\.|https?://|University|Pearson|Prentice|Elsevier|"
-    r"Wiley|SISPAD|IEDM|VLSI|IEEE Access|IEEE\b|Journal\b|"
+    rf"pp?\.\s*\d|doi\.org|\bdoi:\s*10\.|https?://|University|{_BIB_PUBLISHERS}|"
+    r"SISPAD|IEDM|VLSI|IEEE Access|IEEE\b|Journal\b|"
     r"Solid-State|Electron Device|Lett\.|Semicond\.|Nanotech|Microelectron|"
     r"Appl\. Phys|Proc\.|Proceedings of\b|CoRR\b|\bvol\.\s*(?:\d+|abs/)|"
     # Modern ML/Systems venues: the arXiv-era reference list a survey or
@@ -53,12 +59,12 @@ _BIB_VENUE_RE = re.compile(
     # author count, so the venue string is the only reliable cue.
     r"Neural Information Processing|Learning Representations|Machine Learning|"
     r"Computational Linguistics|Natural Language Processing|Artificial Intelligence|"
-    r"Association for Computing|ACM\b|PMLR|Springer|NeurIPS|ICML|ICLR|ACL\b|EMNLP|"
+    r"Association for Computing|ACM\b|PMLR|NeurIPS|ICML|ICLR|ACL\b|EMNLP|"
     r"Technical Report|Preprint",
     re.IGNORECASE,
 )
 _BIB_BOOK_RE = re.compile(
-    r"Chapter \d|Pearson|Prentice|Elsevier|Wiley|Springer|Manual\b|"
+    rf"Chapter \d|{_BIB_PUBLISHERS}|Manual\b|"
     r"University of California|Inc\b|Publishers?\b|Publishing\b|McGraw|"
     r"MIT Press|Addison[- ]?Wesley|O['’]Reilly|Cambridge University Press|"
     r"Oxford University Press|Academic Press|Manning\b|Morgan Kaufmann|CRC Press|"
