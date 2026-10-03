@@ -1311,13 +1311,9 @@ def vlm_fallback_missing_pages(
 
     effective_mode = ocr_mode or os.environ.get("UBT_OCR_MODE", "auto")
     effective_endpoint = ocr_endpoint or os.environ.get("UBT_OCR_ENDPOINT")
-    # OPENAI_API_KEY stays an OCR interop fallback (the same provider key,
-    # not a security boundary); it is deliberately not aliased onto the
-    # config's ocr_api_key field, so it cannot bleed into the outbound
-    # credential.
-    effective_api_key = (
-        ocr_api_key or os.environ.get("UBT_OCR_API_KEY") or os.environ.get("OPENAI_API_KEY")
-    )
+    # OCR credentials resolve strictly from explicit config or UBT_OCR_API_KEY,
+    # never ambient credentials from other programs.
+    effective_api_key = ocr_api_key or os.environ.get("UBT_OCR_API_KEY")
     # The resolved config wins over the environment for the same reason it does
     # for the endpoint: the assessor and the spend pre-flight price this exact
     # model, so the channel that bills must use it.

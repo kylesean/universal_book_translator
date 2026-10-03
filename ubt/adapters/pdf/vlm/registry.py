@@ -61,12 +61,7 @@ def _cloud_endpoint(endpoint: str | None) -> str:
     """
     from ubt.adapters.pdf.vlm.drivers.cloud_driver import DEFAULT_OPENAI_ENDPOINT
 
-    return (
-        endpoint
-        or os.environ.get("UBT_OCR_ENDPOINT")
-        or os.environ.get("OPENAI_BASE_URL")
-        or DEFAULT_OPENAI_ENDPOINT
-    ).rstrip("/")
+    return (endpoint or os.environ.get("UBT_OCR_ENDPOINT") or DEFAULT_OPENAI_ENDPOINT).rstrip("/")
 
 
 def _looks_like_vision_endpoint(endpoint: str) -> bool:
@@ -250,9 +245,7 @@ def probe_effective_driver(
     # 3. Cloud OCR / Vision only when page egress is allowed.
     if not allow_page_upload:
         return None, None
-    has_cloud_key = bool(
-        api_key or os.environ.get("UBT_OCR_API_KEY") or os.environ.get("OPENAI_API_KEY")
-    )
+    has_cloud_key = bool(api_key or os.environ.get("UBT_OCR_API_KEY"))
     has_cloud_endpoint = bool(endpoint or os.environ.get("UBT_OCR_ENDPOINT"))
     if has_cloud_key or (has_cloud_endpoint and not _endpoint_is_local(target_ep)):
         from ubt.adapters.pdf.vlm.drivers.cloud_driver import CloudOcrDriver

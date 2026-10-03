@@ -75,14 +75,9 @@ class CloudOcrDriver:
         extra_headers: dict[str, str] | None = None,
     ) -> None:
         self.endpoint = (
-            endpoint
-            or os.environ.get("UBT_OCR_ENDPOINT")
-            or os.environ.get("OPENAI_BASE_URL")
-            or DEFAULT_OPENAI_ENDPOINT
+            endpoint or os.environ.get("UBT_OCR_ENDPOINT") or DEFAULT_OPENAI_ENDPOINT
         ).rstrip("/")
-        self.api_key = (
-            api_key or os.environ.get("UBT_OCR_API_KEY") or os.environ.get("OPENAI_API_KEY")
-        )
+        self.api_key = api_key or os.environ.get("UBT_OCR_API_KEY")
         self.provider = provider or os.environ.get("UBT_OCR_PROVIDER", "auto")
         self.timeout = timeout
         self.extra_headers = dict(extra_headers or {})

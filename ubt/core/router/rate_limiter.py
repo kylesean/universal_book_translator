@@ -75,6 +75,7 @@ class AdaptiveTokenBucket:
         self._lock: asyncio.Lock | None = None
         self._thread_lock = threading.Lock()
         self.consecutive_429 = 0
+        self._waiters: int = 0
 
     @property
     def lock(self) -> asyncio.Lock:
@@ -122,10 +123,14 @@ class AdaptiveTokenBucket:
                         else 0.0
                     )
                     wait_time = max(wait_rpm, wait_tpm)
-                    jitter = random.uniform(0.01, 0.05)
+                    self._waiters += 1
+                    # Stagger jitter proportionally to the number of waiters to prevent thundering herd
+                    jitter = random.uniform(0.01, 0.05) + min(0.5, self._waiters * 0.02)
                     sleep_duration = max(0.01, min(wait_time + jitter, 5.0))
 
             await asyncio.sleep(sleep_duration)
+            with self._thread_lock:
+                self._waiters = max(0, self._waiters - 1)
 
     def report_429(self) -> None:
         """Multiplicative decrease on rate-limit exhaustion, once per episode:
@@ -173,7 +178,11 @@ class AdaptiveTokenBucket:
             self.tpm_tokens = min(self.tpm_capacity, self.tpm_tokens + elapsed * self.tpm_fill_rate)
             if self.consecutive_429 > 0:
                 self.consecutive_429 = 0
-            new_rpm = min(float(self.max_rpm), self.capacity + 1.0)
+            # Standard congestion-avoidance AIMD: capacity increases additively by at most
+            # 1.0 RPM per full window (1 / capacity per request), avoiding bursty saw-tooth oscillations
+            # under concurrent completions.
+            increment = min(1.0, max(0.05, 1.0 / max(1.0, self.capacity)))
+            new_rpm = min(float(self.max_rpm), self.capacity + increment)
             self.capacity = new_rpm
             self.fill_rate = self.capacity / 60.0
             # Recover TPM capacity by one second's worth of refill per

@@ -1028,6 +1028,13 @@ class UBTConfig(BaseSettings):
             if self.repair_model and self.repair_model != self.draft_model:
                 register_custom_model_pricing(self.repair_model, self.cost_per_mtok)
 
+        if self.local_endpoints:
+            from ubt.core.router.pricing import declare_custom_free_endpoint
+
+            for ep in self.local_endpoints.replace(os.pathsep, ",").split(","):
+                if ep.strip():
+                    declare_custom_free_endpoint(ep.strip())
+
         if (
             self.capability_profile
             or self.supports_temperature is not None
@@ -1088,7 +1095,7 @@ class UBTConfig(BaseSettings):
         return parse_page_ranges(self.pages)
 
     @classmethod
-    def from_env(cls, bootstrap: bool = True, **overrides: Any) -> UBTConfig:
+    def from_env(cls, bootstrap: bool = False, **overrides: Any) -> UBTConfig:
         """Canonical constructor: ``[defaults]``, provider block, env, then overrides.
 
         None values are skipped, so optional CLI flags can be passed straight

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import re
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
@@ -241,11 +240,7 @@ class PipelineOrchestrator:
                 from ubt.core.providers import load_layer
 
                 r_fields = load_layer(self.config.repair_provider)
-                r_key = (
-                    str(r_fields.get("api_key", ""))
-                    or os.environ.get("UBT_LLM_API_KEY")
-                    or self.config.api_key.get_secret_value()
-                )
+                r_key = str(r_fields.get("api_key", "")) or self.config.api_key.get_secret_value()
                 repair_provider = create_model_provider(
                     api_key=r_key,
                     base_url=str(r_fields.get("base_url", self.config.base_url)),
