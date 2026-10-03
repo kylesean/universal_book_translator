@@ -1237,16 +1237,32 @@ def _restore_memory_state(
     )
 
 
-async def run_draft_stage(
-    ctx: StageContext,
-    services: RunServices,
-    terminology: Terminology,
-    chapter_id: str | None = None,
-) -> AsyncIterator[TranslationProgressEvent]:
-    """Execute streaming drafted translation across keyset pagination batches."""
+@dataclass(slots=True)
+class _DraftAssembly:
+    """Everything the draft streaming loop consumes, built once up front."""
+
+    processor: _DraftProcessor
+    flusher: CheckpointBatchFlusher
+    memory_mgr: HierarchicalMemoryManager
+    counters: dict[str, int]
+    create_event_fn: Any
+    router: ModelRouter
+    target_lang: str
+    batch_limit: int
+    rolling_enabled: bool
+    is_fast_path: bool
+
+
+async def _build_draft_runtime(
+    ctx: StageContext, services: RunServices, terminology: Terminology
+) -> _DraftAssembly:
+    """Assemble the draft stage's collaborators: cache, engine, memory, flusher, policy.
+
+    Kept apart from :func:`run_draft_stage` so the streaming loop reads as the
+    loop alone; this is the config-unpacking and object-assembly half.
+    """
     ledger = ctx.ledger
     actual_job_id = ctx.job_id
-    manifest = ctx.manifest
     profile_name = ctx.profile_name
     target_lang = ctx.target_lang
     source_lang = ctx.source_lang
@@ -1284,7 +1300,7 @@ async def run_draft_stage(
     tm = services.tm
     fast_pass = services.fast_pass
     rolling_enabled, is_fast_path, batch_limit = resolve_draft_policy(
-        manifest, profile_name, config, all_blocks_count
+        ctx.manifest, profile_name, config, all_blocks_count
     )
 
     memory_mgr = HierarchicalMemoryManager(step_chars=int(config.step_chars))
@@ -1371,6 +1387,40 @@ async def run_draft_stage(
             macro_chunk_size=max(1, int(config.macro_chunk_size)),
         ),
     )
+    return _DraftAssembly(
+        processor=processor,
+        flusher=flusher,
+        memory_mgr=memory_mgr,
+        counters=counters,
+        create_event_fn=create_event_fn,
+        router=router,
+        target_lang=target_lang,
+        batch_limit=batch_limit,
+        rolling_enabled=rolling_enabled,
+        is_fast_path=is_fast_path,
+    )
+
+
+async def run_draft_stage(
+    ctx: StageContext,
+    services: RunServices,
+    terminology: Terminology,
+    chapter_id: str | None = None,
+) -> AsyncIterator[TranslationProgressEvent]:
+    """Execute streaming drafted translation across keyset pagination batches."""
+    assembly = await _build_draft_runtime(ctx, services, terminology)
+    processor = assembly.processor
+    flusher = assembly.flusher
+    memory_mgr = assembly.memory_mgr
+    counters = assembly.counters
+    create_event_fn = assembly.create_event_fn
+    router = assembly.router
+    target_lang = assembly.target_lang
+    batch_limit = assembly.batch_limit
+    rolling_enabled = assembly.rolling_enabled
+    ledger = ctx.ledger
+    actual_job_id = ctx.job_id
+    config = ctx.config
 
     # Resume recovery: re-queue blocks stranded in FAILED /
     # NEEDS_HUMAN by transient drafting/repair errors, so an API outage does
