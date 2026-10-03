@@ -312,11 +312,20 @@ class OpenAICompatibleProvider(BaseModelProvider):
         self._cumulative_totals: dict[str, int] = new_usage_totals()
         self._model_totals: dict[str, dict[str, int]] = {}
 
-        # Initialize modular transports sharing client, metrics, and configuration
+        # Initialize modular transports sharing client, metrics, and configuration.
+        # If client is not explicitly provided, create one shared httpx.AsyncClient
+        # so all transports share the HTTP keep-alive connection pool.
+        self._owned_client = client is None
+        self._shared_client = client or httpx.AsyncClient(
+            timeout=self._timeout,
+            transport=self._transport,
+            limits=self._limits,
+        )
+
         shared_kw: _SharedTransportKwargs = {
             "timeout": self._timeout,
             "transport": self._transport,
-            "client": client,
+            "client": self._shared_client,
             "limits": self._limits,
             "extra_headers": self._extra_headers,
             "sanitize_output": self._sanitize_output,
@@ -379,6 +388,12 @@ class OpenAICompatibleProvider(BaseModelProvider):
         await self._anthropic_transport.aclose()
         await self._responses_transport.aclose()
         await self._gemini_transport.aclose()
+        if (
+            self._owned_client
+            and self._shared_client is not None
+            and not self._shared_client.is_closed
+        ):
+            await self._shared_client.aclose()
 
     async def close(self) -> None:
         """Alias for aclose()."""

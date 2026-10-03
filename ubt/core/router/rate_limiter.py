@@ -72,9 +72,19 @@ class AdaptiveTokenBucket:
         self.backoff_cooldown_sec = backoff_cooldown_sec
         self.last_backoff_monotonic = 0.0
         self.last_update = time.monotonic()
-        self.lock = asyncio.Lock()
+        self._lock: asyncio.Lock | None = None
         self._thread_lock = threading.Lock()
         self.consecutive_429 = 0
+
+    @property
+    def lock(self) -> asyncio.Lock:
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
+
+    @lock.setter
+    def lock(self, val: asyncio.Lock) -> None:
+        self._lock = val
 
     async def acquire(self, estimated_tokens: int = 500) -> None:
         """Acquire one RPM token and ``estimated_tokens`` TPM tokens.
@@ -260,6 +270,7 @@ class SqliteTokenBucket(AdaptiveTokenBucket):
         eff_tpm = int(max(initial_tpm, self.min_tpm))
         self._initial_rpm = float(eff_rpm)
         self._initial_tpm = float(eff_tpm)
+        self._closed = False
         # The configured rates are part of the row identity, so a config change
         # (e.g. raising UBT_RATE_LIMIT_RPM) starts a clean bucket instead of an
         # existing row outranking this process's settings and inheriting an old
@@ -374,6 +385,9 @@ class SqliteTokenBucket(AdaptiveTokenBucket):
         stays mutually exclusive with the synchronous ``report_*`` mutators even
         once ``acquire`` moves off the loop.
         """
+        with self._thread_lock:
+            if self._closed:
+                return True, 0.0
         with self._txn() as conn:
             state, last_update = self._load(conn)
             now = time.time()
@@ -414,10 +428,12 @@ class SqliteTokenBucket(AdaptiveTokenBucket):
         would last-write-wins the refill accounting.
         """
         raw_need = float(max(1, estimated_tokens))
-        while True:
+        while not self._closed:
             async with self.lock:
+                if self._closed:
+                    return
                 acquired, sleep_duration = await asyncio.to_thread(self._acquire_step, raw_need)
-            if acquired:
+            if acquired or self._closed:
                 return
             await asyncio.sleep(sleep_duration)
 
@@ -495,8 +511,10 @@ class SqliteTokenBucket(AdaptiveTokenBucket):
 
     def close(self) -> None:
         """Release the SQLite handle (each instance owns its own connection)."""
-        with self._thread_lock, suppress(sqlite3.Error):
-            self._conn.close()
+        with self._thread_lock:
+            self._closed = True
+            with suppress(sqlite3.Error):
+                self._conn.close()
 
 
 def build_rate_limiter(

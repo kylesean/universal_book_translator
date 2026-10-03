@@ -334,7 +334,7 @@ class BaseTransport(ABC):
 
     @property
     def usage_totals_by_model(self) -> dict[str, dict[str, int]]:
-        return {model: dict(totals) for model, totals in self._model_totals.items()}
+        return {model: dict(totals) for model, totals in list(self._model_totals.items())}
 
     def begin_usage_sink(self) -> dict[str, dict[str, int]]:
         return attach_usage_sink()

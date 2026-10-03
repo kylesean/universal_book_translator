@@ -11,7 +11,9 @@ import logging
 import os
 import random
 import re
+import time
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol, overload
 
@@ -164,6 +166,11 @@ def _is_chain_fail_fast(exc: ModelProviderError) -> bool:
         # entry can succeed either.
         return True
     status = (exc.details or {}).get("status_code")
+    if status is None:
+        match = re.search(r"\b([45]\d\d)\b", str(exc))
+        if match:
+            with suppress(ValueError, TypeError):
+                status = int(match.group(1))
     if status in _FAIL_FAST_STATUS:
         return not any(phrase in str(exc).lower() for phrase in _MODEL_IDENTITY_PHRASES)
     return False
@@ -245,6 +252,11 @@ def classify_provider_error(exc: BaseException) -> ProviderErrorAction:
         if details.get("fail_fast"):
             return ProviderErrorAction(False, reason="tagged_fail_fast")
         status = details.get("status_code")
+        if status is None:
+            match = re.search(r"\b([45]\d\d)\b", str(exc))
+            if match:
+                with suppress(ValueError, TypeError):
+                    status = int(match.group(1))
         if status == 402:
             return ProviderErrorAction(False, top_up_hint=True, reason="payment_required")
         if status in _FAIL_FAST_STATUS:
@@ -401,10 +413,16 @@ class ModelRouter:
         self.draft_reasoning_effort = draft_reasoning_effort
         self.repair_reasoning_effort = repair_reasoning_effort
         self.registry = registry or ModelCapabilityRegistry()
+        # In-memory circuit breaker for fallback candidates: model -> (failure_count, cooldown_until_monotonic)
+        self._model_circuit: dict[str, tuple[int, float]] = {}
 
-    def _provider_for(self, model: str | None = None) -> BaseModelProvider:
-        """Select primary provider or specialized repair provider based on target model."""
-        if model is not None and model == self.repair_model and self.repair_provider is not None:
+    def _provider_for(
+        self, model: str | None = None, *, is_repair: bool = False
+    ) -> BaseModelProvider:
+        """Select primary provider or specialized repair provider based on target model or repair context."""
+        if (
+            is_repair or (model is not None and model == self.repair_model)
+        ) and self.repair_provider is not None:
             return self.repair_provider
         return self.provider
 
@@ -757,6 +775,7 @@ class ModelRouter:
         prompt_builder: Callable[[str], tuple[str, str]] | None = ...,
         max_tokens_fn: Callable[[str, ModelProfile], int | None] | None = ...,
         return_model: Literal[False] = ...,
+        is_repair: bool = ...,
     ) -> str: ...
 
     @overload
@@ -772,6 +791,7 @@ class ModelRouter:
         prompt_builder: Callable[[str], tuple[str, str]] | None = ...,
         max_tokens_fn: Callable[[str, ModelProfile], int | None] | None = ...,
         return_model: Literal[True],
+        is_repair: bool = ...,
     ) -> tuple[str, str]: ...
 
     async def _execute_with_retry(
@@ -786,6 +806,7 @@ class ModelRouter:
         prompt_builder: Callable[[str], tuple[str, str]] | None = None,
         max_tokens_fn: Callable[[str, ModelProfile], int | None] | None = None,
         return_model: bool = False,
+        is_repair: bool = False,
     ) -> str | tuple[str, str]:
         """Execute with per-model retry, then model-level fallback.
 
@@ -800,7 +821,17 @@ class ModelRouter:
         # also listed in fallback_models) would retry the same failing model an
         # extra time per block with no chance of success.
         chain = list(dict.fromkeys([model, *self.fallback_models]))
-        for index, candidate in enumerate(chain):
+        now = time.monotonic()
+        # Circuit breaker: prune expired entries when table exceeds bound
+        if len(self._model_circuit) > 100:
+            self._model_circuit = {
+                m: (cnt, exp) for m, (cnt, exp) in self._model_circuit.items() if exp > now
+            }
+        # Circuit breaker: prioritize candidates whose circuit is healthy (cooldown expired)
+        healthy = [c for c in chain if self._model_circuit.get(c, (0, 0.0))[1] <= now]
+        effective_chain = healthy or chain
+
+        for index, candidate in enumerate(effective_chain):
             cand_profile = self._get_profile(candidate)
             cand_effort = reasoning_effort if cand_profile.supports_reasoning_effort else None
             if prompt_builder is not None:
@@ -820,25 +851,40 @@ class ModelRouter:
                     temperature=temperature,
                     reasoning_effort=cand_effort,
                     max_tokens=cand_max_tokens,
+                    is_repair=is_repair,
                 )
+                self._model_circuit[candidate] = (0, 0.0)
                 if return_model:
                     return res, candidate
                 return res
             except ModelProviderError as exc:
+                failures, exp = self._model_circuit.get(candidate, (0, 0.0))
+                # Half-open: if cooldown expired, treat as single probe failure
+                if exp > 0 and exp <= now:
+                    failures = 2
+                failures += 1
+                cooldown = (now + 60.0) if failures >= 3 else 0.0
+                self._model_circuit[candidate] = (failures, cooldown)
+                if cooldown > 0:
+                    logger.warning(
+                        "Model %s tripped circuit breaker (%d consecutive failures); cooling down for 60s",
+                        candidate,
+                        failures,
+                    )
                 # Billing and credential-side failures cannot resolve by
                 # renaming the model: fail the chain fast instead of burning
                 # one call per entry on every block of the book.
                 if _is_chain_fail_fast(exc):
                     raise
-                if index >= len(chain) - 1:
+                if index >= len(effective_chain) - 1:
                     raise
                 logger.warning(
                     "Model %s failed (%s), falling back to %s",
                     candidate,
                     exc,
-                    chain[index + 1],
+                    effective_chain[index + 1],
                 )
-        raise ModelProviderError(f"All models in the fallback chain failed: {chain}")
+        raise ModelProviderError(f"All models in the fallback chain failed: {effective_chain}")
 
     async def _execute_single_model(
         self,
@@ -848,6 +894,8 @@ class ModelRouter:
         temperature: float,
         reasoning_effort: str | None = None,
         max_tokens: int | None = None,
+        *,
+        is_repair: bool = False,
     ) -> str:
         """Execute inference with rate limiter acquisition, parameter pre-cleaning, and backoff retry on 429."""
         profile = self._get_profile(model)
@@ -883,7 +931,7 @@ class ModelRouter:
             completion_tokens = max_tokens if max_tokens else prompt_tokens
             estimated_tokens = prompt_tokens + max(completion_tokens, 0)
             await self.rate_limiter.acquire(estimated_tokens=estimated_tokens)
-            active_provider = self._provider_for(model)
+            active_provider = self._provider_for(model, is_repair=is_repair)
             try:
                 try:
                     result, finish_reason = await active_provider.generate_with_finish_reason(
@@ -1691,6 +1739,7 @@ class ModelRouter:
             reasoning_effort=effort,
             prompt_builder=_build_repair_prompts,
             return_model=True,
+            is_repair=True,
         )
         actual_profile = self._get_profile(actual_model)
         return TranslationOutputExtractor.extract(

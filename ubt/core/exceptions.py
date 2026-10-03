@@ -96,6 +96,10 @@ class QueueDepthExceededError(UBTError):
     """
 
 
+class ServerCapacityError(UBTError):
+    """Raised when the server has reached maximum concurrent running jobs."""
+
+
 class RenderBlocksNotImplementedError(NotImplementedError):
     """The base ``render_blocks`` stub signaling fallback to ``render_output``.
 
