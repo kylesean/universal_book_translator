@@ -11,7 +11,7 @@ the two can no longer disagree. What is left on the block is execution state
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from enum import StrEnum
 from typing import Annotated, Any, Self
 
@@ -380,6 +380,16 @@ class IRBlock(BaseModel):
 
         remaining_update["element"] = element
         return super().model_copy(update=remaining_update, deep=deep)
+
+    @classmethod
+    def from_element(cls, element: ElementT, *, style: StyleMeta | None = None) -> IRBlock:
+        """Create a pipeline execution block wrapping an immutable document AST element."""
+        return cls(element=element, style=style)
+
+    @classmethod
+    def from_elements(cls, elements: Iterable[ElementT]) -> list[IRBlock]:
+        """Wrap an iterable of document AST elements into pipeline execution blocks."""
+        return [cls(element=el) for el in elements]
 
     def with_source_text(self, text: str) -> IRBlock:
         """A copy whose carried source text is replaced (rebuilds the element)."""

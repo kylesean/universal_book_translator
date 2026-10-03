@@ -72,3 +72,18 @@ def test_ir_block_model_copy_mixed_structural_and_execution_state() -> None:
     assert copied.target_text == "Target Translation"
     assert copied.status == BlockStatus.MTQE_PASSED
     assert copied.mtqe_score == 0.98
+
+
+def test_ir_block_from_element_factories() -> None:
+    el1 = make_element(id="e1", spine_index=0, block_type=BlockType.NARRATIVE, source_text="One")
+    el2 = make_element(id="e2", spine_index=1, block_type=BlockType.NARRATIVE, source_text="Two")
+
+    block1 = IRBlock.from_element(el1)
+    assert block1.element is el1
+    assert block1.id == "e1"
+    assert block1.source_text == "One"
+
+    blocks = IRBlock.from_elements([el1, el2])
+    assert len(blocks) == 2
+    assert blocks[0].id == "e1"
+    assert blocks[1].id == "e2"
