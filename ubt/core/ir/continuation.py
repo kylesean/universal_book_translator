@@ -21,6 +21,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from ubt.core.cjk_ranges import is_cjk_wide_char
+from ubt.core.ir.bifurcation import SEMANTIC_BREAK_FLAG
 from ubt.core.ir.models import (
     BlockType,
     BoundingBox,
@@ -113,6 +114,11 @@ def _is_furniture(block: IRBlock) -> bool:
 def _candidate(block: IRBlock) -> bool:
     """A block that can start or extend a run: flowing prose with real geometry."""
     if block.block_type not in _PROSE_TYPES or block.skip_translate:
+        return False
+    # A block a semantic break split out is *not* a continuation: the break is
+    # the decision that the layout parser glued separate passages together.
+    # Re-fusing here would undo the bifurcation before the compositor sees it.
+    if SEMANTIC_BREAK_FLAG in block.error_flags or "bifurcated_from" in block.provenance:
         return False
     text = block.source_text.strip()
     if not text or _BARE_NUMBER_RE.match(text):

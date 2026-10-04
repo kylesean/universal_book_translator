@@ -22,6 +22,10 @@ from ubt.core.ir.models import IRBlock, _with_element_source
 from ubt.model.span import CompositeSpan, Span
 
 SEMANTIC_BREAK_TOKEN: str = "⟦SEMANTIC_BREAK⟧"
+#: ``error_flags`` marker stamped on every block a semantic break split out. The
+#: continuation heuristic consults it so it can never re-fuse what the break
+#: deliberately separated.
+SEMANTIC_BREAK_FLAG: str = "bifurcated:semantic_break"
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?。！？…])\s+")
 
 
@@ -70,7 +74,7 @@ def bifurcate_block(block: IRBlock) -> list[IRBlock]:
     - CompositeSpan: unbinds the physical box chain into individual single-box blocks,
       restoring individual box spans and source text from provenance if available.
     - Single-box: splits into sibling IRBlocks sharing the bounding box, tagged with
-      'bifurcated:semantic_break' in error_flags, so the downstream typesetter formats
+      `SEMANTIC_BREAK_FLAG` in error_flags, so the downstream typesetter formats
       them as distinct paragraphs within that box.
     """
     raw_text = block.target_text or block.draft_text or ""
@@ -110,7 +114,7 @@ def bifurcate_block(block: IRBlock) -> list[IRBlock]:
             new_block.draft_text = part
             new_block.target_text = part
             new_block.status = block.status
-            new_block.error_flags = [*block.error_flags, "bifurcated:semantic_break"]
+            new_block.error_flags = [*block.error_flags, SEMANTIC_BREAK_FLAG]
             new_block.provenance = {
                 **block.provenance,
                 "bifurcated_from": block.id,
@@ -133,7 +137,7 @@ def bifurcate_block(block: IRBlock) -> list[IRBlock]:
         new_block.draft_text = part
         new_block.target_text = part
         new_block.status = block.status
-        new_block.error_flags = [*block.error_flags, "bifurcated:semantic_break"]
+        new_block.error_flags = [*block.error_flags, SEMANTIC_BREAK_FLAG]
         new_block.provenance = {
             **block.provenance,
             "bifurcated_from": block.id,
@@ -152,6 +156,7 @@ def bifurcate_blocks(blocks: Sequence[IRBlock]) -> list[IRBlock]:
 
 
 __all__ = [
+    "SEMANTIC_BREAK_FLAG",
     "SEMANTIC_BREAK_TOKEN",
     "bifurcate_block",
     "bifurcate_blocks",

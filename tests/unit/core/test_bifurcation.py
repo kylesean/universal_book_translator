@@ -172,3 +172,32 @@ def test_overlays_from_blocks_multi_box_bifurcation_emits_separate_overlays() ->
     assert overlays[1].page == 2
     assert overlays[1].text == "第二页。"
     assert overlays[1].bbox == (50, 500, 200, 700)
+
+
+def test_overlays_from_blocks_multi_box_bifurcation_with_lowercase_continuation() -> None:
+    # The second box of a *real* continuation starts lowercase -- that is exactly
+    # what fused the blocks. The continuation heuristic must not re-fuse the
+    # blocks a semantic break split out of that fused block.
+    box1 = PhysicalBox.of(1, (50, 100, 200, 300))
+    box2 = PhysicalBox.of(2, (50, 500, 200, 700))
+    elem = Paragraph(
+        id="fused_p",
+        span=CompositeSpan(boxes=(box1, box2)),
+        text="x",
+        spine_index=0,
+    )
+    block = IRBlock(element=elem)
+    block.provenance = {
+        "fused_block_ids": ["p1_b", "p2_b"],
+        "fused_sources": ["The machine relies on", "attention and runs a forward pass."],
+    }
+    block.target_text = f"第一部分。{SEMANTIC_BREAK_TOKEN}第二部分。"
+
+    plan = {
+        "fused_p": Fidelity.RECONSTRUCTED_ADAPTED,
+        "p1_b": Fidelity.RECONSTRUCTED_ADAPTED,
+        "p2_b": Fidelity.RECONSTRUCTED_ADAPTED,
+    }
+    overlays = overlays_from_blocks([block], plan)
+    assert len(overlays) == 2
+    assert [overlay.text for overlay in overlays] == ["第一部分。", "第二部分。"]
