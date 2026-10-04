@@ -31,6 +31,7 @@ from ubt.render.outputs import (
     LayerCompositor,
     Overlay,
     _dedup_identical_streams,
+    _line_slack,
     bilingual_request_text,
     overlays_from_document,
 )
@@ -44,6 +45,9 @@ _PAGE = (
 #: A generous region box (the extractor's own bboxes are tight line boxes; a
 #: fake fragment needs room to hold text at a normal point size).
 _REGION = (54.0, 700.0, 354.0, 730.0)
+#: The compositor adds the line slack below a box before fitting and drawing, so
+#: an overlay with no source size (the tests') draws into the region plus this.
+_SLACK = _line_slack(None)
 
 
 def _flat(text: str) -> str:
@@ -160,7 +164,7 @@ def test_a_region_is_masked_and_its_fragment_stamped(tmp_path: Path) -> None:
     assert "TRANSLATED REGION TEXT" in _text(output)
     # The box handed to the typesetter is the region size, in points.
     assert spy.calls == [
-        ("TRANSLATED REGION TEXT", _REGION[2] - _REGION[0], _REGION[3] - _REGION[1])
+        ("TRANSLATED REGION TEXT", _REGION[2] - _REGION[0], _REGION[3] - _REGION[1] + _SLACK)
     ]
 
 
@@ -232,7 +236,9 @@ def test_a_math_overlay_uses_the_math_typesetter(tmp_path: Path) -> None:
     LayerCompositor(source, typesetter=spy).compose([overlay], output)
 
     assert spy.calls == []  # prose typesetter untouched
-    assert spy.math_calls == [("e^{i\\pi}+1=0", _REGION[2] - _REGION[0], _REGION[3] - _REGION[1])]
+    assert spy.math_calls == [
+        ("e^{i\\pi}+1=0", _REGION[2] - _REGION[0], _REGION[3] - _REGION[1] + _SLACK)
+    ]
 
 
 def test_an_overlay_box_past_the_page_is_clamped(tmp_path: Path) -> None:
@@ -246,7 +252,7 @@ def test_an_overlay_box_past_the_page_is_clamped(tmp_path: Path) -> None:
 
     _text, width, height = spy.calls[0]
     assert width == 612.0 - 100.0
-    assert height == 792.0 - 700.0
+    assert height == 792.0 - 700.0 + _SLACK
 
 
 def test_identical_streams_are_deduplicated() -> None:
@@ -284,7 +290,7 @@ def test_the_compositor_prefetches_single_box_fragments(tmp_path: Path) -> None:
         ("text", "second"),
     ]
     (_kind, _text, width, height, _fs) = spy.prefetched[0]
-    assert (width, height) == (_REGION[2] - _REGION[0], _REGION[3] - _REGION[1])
+    assert (width, height) == (_REGION[2] - _REGION[0], _REGION[3] - _REGION[1] + _SLACK)
 
 
 def test_an_in_place_bilingual_overlay_stamps_both_languages(tmp_path: Path) -> None:
@@ -300,7 +306,12 @@ def test_an_in_place_bilingual_overlay_stamps_both_languages(tmp_path: Path) -> 
     (placement,) = composition.placements
     assert placement.placed_as is Fidelity.RECONSTRUCTED_ADAPTED
     assert spy.bilingual_calls == [
-        ("SOURCE TEXT", "TRANSLATED TEXT", _REGION[2] - _REGION[0], _REGION[3] - _REGION[1])
+        (
+            "SOURCE TEXT",
+            "TRANSLATED TEXT",
+            _REGION[2] - _REGION[0],
+            _REGION[3] - _REGION[1] + _SLACK,
+        )
     ]
     assert spy.calls == []  # the monolingual path is not used for a bilingual overlay
     text = _text(output)

@@ -249,6 +249,21 @@ _UNIFORM_MIN_SCALE = 0.7
 #: not. Only a box that cannot hold even this many points descends.
 _MIN_FONT_PT = 2.0
 _FIT_TOL = 0.5
+#: Paragraph leading (extra inter-line space, in em) for every typeset fragment.
+#: Typst adds it on top of the font's own line height, so a loose value makes a
+#: multi-line fragment taller than the source's single-spaced block and forces
+#: the fit to shrink. The source's own line pitch is roughly ``1.2em`` (the font's
+#: own line height), so no extra leading keeps the drawn pitch close to it.
+_PAR_LEADING_EM = 0.0
+#: Vertical slack (as a fraction of the source font size) added *below* an overlay
+#: box before fitting and drawing. The extracted box is the glyph ink, not the
+#: line box: it stops at the last line's descender and omits the leading, so a
+#: fragment drawn at the source size overflows it and the fit shrinks the whole
+#: document. One line's leading is enough to hold the drawn fragment; taking it
+#: below the box leaves the top (and so the baseline) fixed.
+_LINE_SLACK_RATIO = 0.30
+#: Source font size assumed when a block carries none, for the slack above.
+_DEFAULT_SLACK_FONT_PT = 10.0
 #: Only streams at least this large are deduplicated; below it the win is nil.
 _DEDUP_MIN_BYTES = 8192
 
@@ -262,6 +277,12 @@ _BILINGUAL_FILL = "#5b5b5b"
 #: Bilingual prefetch requests reuse the ``(kind, text, w, h)`` request shape by
 #: joining the target and source with this control separator.
 _BILINGUAL_SEP = "\x1f"
+
+
+def _line_slack(font_size: float | None) -> float:
+    """Points of extra height to add below an overlay box (see ``_LINE_SLACK_RATIO``)."""
+    size = font_size if font_size and font_size > 0 else _DEFAULT_SLACK_FONT_PT
+    return _LINE_SLACK_RATIO * size
 
 
 def bilingual_request_text(target: str, source: str) -> str:
@@ -303,11 +324,13 @@ class TypstFragmentTypesetter:
         cache_dir: Path | str | None = None,
         target_lang: str = "zh",
         math_probe: TypstMathProbe | None = None,
+        par_leading_em: float = _PAR_LEADING_EM,
     ) -> None:
         self._binary = binary
         self._size_pt = size_pt
         self._font = font
         self._target_lang = target_lang
+        self._par_leading_em = par_leading_em
         #: Inline math is emitted only when a probe (the same Typst that will
         #: compile the fragment) validates it; the probe is pure-cache, so a
         #: paragraph measured at several sizes converts once.
@@ -328,11 +351,13 @@ class TypstFragmentTypesetter:
         self._measure_cache: dict[tuple[str, float, float], float] = {}
         self._heading_cache: dict[tuple[str, float, float], float] = {}
         self._bilingual_cache: dict[tuple[str, float, float], float] = {}
-        #: Per style class (``text`` / ``heading``), the one size every box in
-        #: that class draws at, chosen by ``prefetch`` as the smallest that fits
-        #: them all. Empty until ``prefetch`` runs, so a direct ``typeset`` call
-        #: keeps the per-box fit.
-        self._uniform_sizes: dict[str, float] = {}
+        #: Per style class -- ``(kind, round(source font size))`` -- the one size
+        #: every box in that class draws at, chosen by ``prefetch`` as the smallest
+        #: that fits them all. Keying by the source size keeps the document's size
+        #: hierarchy (body vs footnote vs heading level) while making same-size
+        #: boxes uniform. Empty until ``prefetch`` runs, so a direct ``typeset``
+        #: call keeps the per-box fit.
+        self._uniform_sizes: dict[tuple[str, int], float] = {}
 
     @property
     def _font_line(self) -> str:
@@ -398,7 +423,7 @@ class TypstFragmentTypesetter:
         weight_line = ', weight: "bold"' if (kind == "heading" or is_bold) else ""
         return (
             f"#set page(width: {width_pt}pt, height: auto, margin: 0pt)\n"
-            f"#set par(leading: 0.52em)\n"
+            f"#set par(leading: {self._par_leading_em}em)\n"
             f'#set text(size: {size_pt}pt{weight_line}, top-edge: "ascender", bottom-edge: "descender"{font_line})\n'
             f"{body}\n"
         )
@@ -553,6 +578,7 @@ class TypstFragmentTypesetter:
         kind: str = "text",
         max_size_pt: float | None = None,
         is_bold: bool = False,
+        font_size: float | None = None,
     ) -> float | None:
         fitted = self._fit_sizes(
             [(text, width_pt, height_pt)],
@@ -562,11 +588,11 @@ class TypstFragmentTypesetter:
         )[0]
         if fitted is None:
             return None
-        # Uniform document typography (plan A): every box in a style class draws
-        # at one size, the smallest that fits them all. ``prefetch`` chose it, so
-        # a box here fits by construction; ``min`` only guards a box it never saw
-        # (a multi-box overlay) from overflowing.
-        uniform = self._uniform_sizes.get(kind)
+        # Uniform document typography: every box in a style class draws at one
+        # size, the smallest that fits them all. ``prefetch`` chose it, so a box
+        # here fits by construction; ``min`` only guards a box it never saw (a
+        # multi-box overlay) from overflowing.
+        uniform = self._uniform_sizes.get((kind, round(font_size) if font_size else 0))
         return min(fitted, uniform) if uniform is not None else fitted
 
     # -- In-place bilingual: target above a smaller, muted source -------------- #
@@ -580,7 +606,7 @@ class TypstFragmentTypesetter:
         font_line = self._font_line
         return (
             f"#set page(width: {width_pt}pt, height: auto, margin: 0pt)\n"
-            f"#set par(leading: 0.52em)\n"
+            f"#set par(leading: {self._par_leading_em}em)\n"
             f'#set text(size: {size_pt}pt, top-edge: "ascender", bottom-edge: "descender"{font_line})\n'
             f"{self._body_markup(target)}\n"
             f"#v({_BILINGUAL_GAP_EM}em)\n"
@@ -594,7 +620,7 @@ class TypstFragmentTypesetter:
         font_line = self._font_line
         return (
             f"#set page(width: {width_pt}pt, height: {height_pt}pt, margin: 0pt)\n"
-            f"#set par(leading: 0.52em)\n"
+            f"#set par(leading: {self._par_leading_em}em)\n"
             f'#set text(size: {size_pt}pt, top-edge: "ascender", bottom-edge: "descender"{font_line})\n'
             f"#box(width: {width_pt}pt, height: {height_pt}pt, clip: true)[\n"
             f"{self._body_markup(target)}\n"
@@ -686,7 +712,7 @@ class TypstFragmentTypesetter:
         weight_line = ', weight: "bold"' if (kind == "heading" or is_bold) else ""
         return (
             f"#set page(width: {width_pt}pt, height: {height_pt}pt, margin: 0pt)\n"
-            f"#set par(leading: 0.52em)\n"
+            f"#set par(leading: {self._par_leading_em}em)\n"
             f'#set text(size: {size_pt}pt{weight_line}, top-edge: "ascender", bottom-edge: "descender"{font_line})\n'
             f"#box(width: {width_pt}pt, height: {height_pt}pt, clip: true)[{body}]\n"
         )
@@ -712,7 +738,13 @@ class TypstFragmentTypesetter:
         else:
             max_size = 24.0 if kind == "heading" else self._size_pt
         size_pt = self._fit_size(
-            text, width_pt, height_pt, kind=kind, max_size_pt=max_size, is_bold=is_bold
+            text,
+            width_pt,
+            height_pt,
+            kind=kind,
+            max_size_pt=max_size,
+            is_bold=is_bold,
+            font_size=font_size,
         )
         if size_pt is None:
             return None
@@ -746,7 +778,7 @@ class TypstFragmentTypesetter:
         weight_line = ', weight: "bold"' if is_bold else ""
         return (
             f"#set page(width: {width_pt}pt, height: {height_pt}pt, margin: 0pt)\n"
-            f"#set par(leading: 0.52em)\n"
+            f"#set par(leading: {self._par_leading_em}em)\n"
             f'#set text(size: {size_pt}pt{weight_line}, top-edge: "ascender", bottom-edge: "descender"{self._font_line})\n'
             f"#box(width: {width_pt}pt, height: {height_pt}pt, clip: true)["
             f"#box(width: 100%)[{body}#h(4pt)"
@@ -900,40 +932,45 @@ class TypstFragmentTypesetter:
         box finds the split file. Each request is ``(kind, text, width_pt,
         height_pt, font_size)``; ``kind == "math"`` selects the math source.
 
-        Uniform document typography (plan A): within each style class every box
-        is fitted, then all draw at the *smallest* size that fits them all, so a
-        page (and the whole document) carries one body size and one heading size
-        instead of a different size per paragraph.
+        Uniform document typography: within each style class every box is fitted,
+        then all draw at the *smallest* size that fits them all, so a page (and
+        the whole document) carries one size per class instead of a different size
+        per paragraph. The class is ``(kind, round(source font size))``, so the
+        source's own hierarchy -- body vs footnote vs heading level -- survives.
         """
         unique = list(dict.fromkeys(requests))
         if not unique:
             return
-        # A fresh document owns a fresh uniform size.
+        # A fresh document owns fresh uniform sizes.
         self._uniform_sizes.clear()
         # Resolve every inline-math body up front so fitting's measure calls hit
         # the probe cache instead of spawning a Typst process per formula.
         self._math_probe.check_many(self._math_bodies([text for _kind, text, *_rest in unique]))
         pages: list[tuple[str, str]] = []
-        for kind in ("text", "heading"):
-            items = [
-                (text, width_pt, height_pt, font_size)
-                for request_kind, text, width_pt, height_pt, font_size in unique
-                if request_kind == kind
-            ]
-            if not items:
+        groups: dict[tuple[str, int], list[tuple[str, float, float, float | None]]] = {}
+        for request_kind, text, width_pt, height_pt, font_size in unique:
+            if request_kind not in ("text", "heading"):
                 continue
+            bucket = round(font_size) if font_size else 0
+            groups.setdefault((request_kind, bucket), []).append(
+                (text, width_pt, height_pt, font_size)
+            )
+        for (kind, bucket), items in groups.items():
             triples = [(text, width_pt, height_pt) for text, width_pt, height_pt, _ in items]
             caps = [self._cap_for(kind, font_size) for _, _, _, font_size in items]
             sizes = self._fit_sizes(triples, kind=kind, max_size_pt=caps)
             uniform = self._uniform_size(sizes)
             if uniform is not None:
-                self._uniform_sizes[kind] = uniform
+                self._uniform_sizes[(kind, bucket)] = uniform
             for (text, width_pt, height_pt, _font_size), size_pt in zip(items, sizes, strict=True):
-                if size_pt is not None:
-                    draw_size = uniform if uniform is not None else size_pt
-                    pages.append(
-                        (self._text_source(text, width_pt, height_pt, draw_size, kind=kind), "")
-                    )
+                if size_pt is None:
+                    continue
+                # Draw at the class size when it fits, else the box's own fit, so
+                # the prefetched fragment is the one the draw-time lookup wants.
+                draw_size = min(size_pt, uniform) if uniform is not None else size_pt
+                pages.append(
+                    (self._text_source(text, width_pt, height_pt, draw_size, kind=kind), "")
+                )
 
         bilingual_items = [
             (*text.partition(_BILINGUAL_SEP)[::2], width_pt, height_pt)
@@ -1058,6 +1095,10 @@ class _StampedPart:
     page_no: int
     bbox: BBox
     form: pikepdf.Object
+    #: The source box to mask. ``bbox`` is expanded below by the line slack so the
+    #: fragment fits at the source size, but the mask must not grow into the next
+    #: line, so it stays at the extracted box.
+    mask_bbox: BBox | None = None
 
 
 class LayerCompositor:
@@ -1155,7 +1196,7 @@ class LayerCompositor:
             if overlay.kind == "toc":
                 continue
             width = boxes[0].bbox[2] - boxes[0].bbox[0]
-            height = boxes[0].bbox[3] - boxes[0].bbox[1]
+            height = boxes[0].bbox[3] - boxes[0].bbox[1] + _line_slack(overlay.font_size)
             if overlay.source:
                 requests.append(
                     (
@@ -1194,13 +1235,18 @@ class LayerCompositor:
             )
             source_by_box = {(part.box.page, part.box.bbox): part.text for part in source_parts}
         stamped: list[_StampedPart] = []
+        slack = _line_slack(overlay.font_size)
         for part in parts:
             source = source_by_box.get((part.box.page, part.box.bbox), "")
             if not part.text.strip() and not source.strip():
                 continue
-            form = self._compile_form(composed, overlay, part, source)
+            x0, y0, x1, y1 = part.box.bbox
+            form = self._compile_form(composed, overlay, part, source, y1 - y0 + slack)
             if form is not None:
-                stamped.append(_StampedPart(overlay, part.box.page, part.box.bbox, form))
+                draw_bbox = (x0, y0 - slack, x1, y1)
+                stamped.append(
+                    _StampedPart(overlay, part.box.page, draw_bbox, form, mask_bbox=part.box.bbox)
+                )
         return stamped
 
     def _compile_form(
@@ -1209,13 +1255,19 @@ class LayerCompositor:
         overlay: Overlay,
         part: FlowPlacement,
         source: str,
+        height: float,
     ) -> pikepdf.Object | None:
-        """Typeset one flowed part and copy it into the artifact as a Form."""
+        """Typeset one flowed part and copy it into the artifact as a Form.
+
+        ``height`` is the draw height: the extracted box plus the line slack, so
+        the fragment can be fitted (and drawn) at the source size rather than
+        shrunk to the ink box.
+        """
         typesetter = self._typesetter
         if typesetter is None:
             return None
-        x0, y0, x1, y1 = part.box.bbox
-        width, height = x1 - x0, y1 - y0
+        x0, _y0, x1, _y1 = part.box.bbox
+        width = x1 - x0
         if width <= 0 or height <= 0:
             return None
         bilingual = getattr(typesetter, "typeset_bilingual", None)
@@ -1267,7 +1319,7 @@ class LayerCompositor:
         if self._strip:
             stats = strip_page_text_pikepdf(
                 page,
-                [item.bbox for item in items],
+                [item.mask_bbox or item.bbox for item in items],
                 protected_rects=[],
                 page_no=page_no,
                 shared_forms=shared_forms,
@@ -1280,7 +1332,7 @@ class LayerCompositor:
         else:
             red, green, blue = self._background
             for item in items:
-                x0, y0, x1, y1 = item.bbox
+                x0, y0, x1, y1 = item.mask_bbox or item.bbox
                 mask = pikepdf.Stream(
                     composed,
                     f"q {red} {green} {blue} rg {x0} {y0} {x1 - x0} {y1 - y0} re f Q".encode(

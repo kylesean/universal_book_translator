@@ -21,7 +21,12 @@ from ubt.adapters.pdf.visual_gate import (
     text_occlusion_findings,
 )
 from ubt.model.fidelity import Fidelity
-from ubt.render.outputs import LayerCompositor, Overlay, TypstFragmentTypesetter
+from ubt.render.outputs import (
+    LayerCompositor,
+    Overlay,
+    TypstFragmentTypesetter,
+    _line_slack,
+)
 
 pytestmark = [
     pytest.mark.slow,
@@ -172,16 +177,54 @@ def test_boxes_in_a_style_class_share_one_uniform_size() -> None:
             ("text", "another short one", 120.0, 40.0, 12.0),
         ]
         typesetter.prefetch(requests)
-        uniform = typesetter._uniform_sizes["text"]
+        uniform = typesetter._uniform_sizes[("text", 12)]
         cap = 12.0 * 1.05
         assert uniform is not None
         assert uniform <= cap
         sizes = [
-            typesetter._fit_size(text, w, h, max_size_pt=cap) for _k, text, w, h, _fs in requests
+            typesetter._fit_size(text, w, h, max_size_pt=cap, font_size=fs)
+            for _k, text, w, h, fs in requests
         ]
         # No box exceeds the shared size; the boxes that fit there all draw at it.
         assert all(size is not None and size <= uniform for size in sizes), sizes
         assert sizes.count(uniform) >= 2, sizes
+    finally:
+        typesetter.close()
+
+
+def test_the_source_size_hierarchy_survives_the_uniform_fit() -> None:
+    # The uniform class is (kind, source size), so a 13pt heading and an 11pt one
+    # keep distinct sizes instead of collapsing onto the smallest of the two.
+    typesetter = TypstFragmentTypesetter()
+    try:
+        # Box heights track the source size, as an extracted heading's ink does.
+        requests = [
+            ("heading", "Short heading", 120.0, 10.5, 11.0),
+            ("heading", "Short heading", 120.0, 12.0, 13.0),
+        ]
+        typesetter.prefetch(requests)
+        small = typesetter._uniform_sizes[("heading", 11)]
+        large = typesetter._uniform_sizes[("heading", 13)]
+        assert small < large, (small, large)
+    finally:
+        typesetter.close()
+
+
+def test_the_line_slack_lets_a_box_hold_the_source_size() -> None:
+    # The extracted box is the glyph ink, which is shorter than a drawn line box,
+    # so a fragment at the source size needs the line leading below it. Without
+    # the slack the fit would shrink it well below the source size.
+    typesetter = TypstFragmentTypesetter()
+    try:
+        text = "一段中文正文，用来测量行框余量"
+        ink_height = 9.5  # a single extracted line at ~10.9pt
+        without = typesetter._fit_size(text, 200.0, ink_height, font_size=10.9)
+        with_slack = typesetter._fit_size(
+            text, 200.0, ink_height + _line_slack(10.9), font_size=10.9
+        )
+        assert without is not None and with_slack is not None
+        assert with_slack > without, (without, with_slack)
+        assert with_slack > 0.9 * 10.9, with_slack
     finally:
         typesetter.close()
 
