@@ -35,7 +35,7 @@ from ubt.adapters.pdf.pdfium_gate import PDFIUM_LOCK, unify_docling_pdfium_lock
 from ubt.adapters.pdf.plain_text_extractor import pages_to_blocks
 from ubt.analyze.structure import looks_like_debris, looks_like_listing
 from ubt.core.cleaners.lnds_pruner import normalize_academic_pdf_math
-from ubt.core.config import RIGID_ENGINES
+from ubt.core.config import INPLACE_ENGINES, canonical_render_engine
 from ubt.core.exceptions import DocumentParseError
 from ubt.core.fs_perms import restrict_dir_to_owner, restrict_file_to_owner
 from ubt.core.ir.models import (
@@ -55,6 +55,7 @@ from ubt.core.policy.layout_policy import (
     VLM_CIRCUIT_MIN_TRIES,
 )
 from ubt.model.ast import RegionKind
+from ubt.model.span import CompositeSpan, PhysicalBox
 
 if TYPE_CHECKING:
     from docling.datamodel.pipeline_options import PdfPipelineOptions
@@ -110,7 +111,7 @@ def resolve_formula_enrichment(
     render_engine = str(render_engine).lower().strip()
     formula_render = str(formula_render).lower().strip()
 
-    if render_engine in RIGID_ENGINES:
+    if canonical_render_engine(render_engine) in INPLACE_ENGINES:
         logger.info(
             "Docling formula enrichment set to False (auto: render_engine='%s' preserves "
             "original vector formulas on canvas; skipping redundant VLM math OCR)",
@@ -953,28 +954,37 @@ def map_iterated_items(
         last_kept_label = label
         last_kept_page = item_page
 
-        # Extract page number and bounding box from provenance metadata.
+        # Extract page numbers and bounding boxes from provenance metadata.
         # A provenance entry without a bbox leaves ``item_bbox`` None rather
-        # than fabricating a zero-area box at the page origin: the rigid zone
+        # than fabricating a zero-area box at the page origin: the zone
         # builder skips bbox-less blocks, but an origin box seeds a bogus zone
         # and pollutes the per-page guards with a phantom rect.
-        item_bbox = None
+        boxes: list[PhysicalBox] = []
         for prov in getattr(item, "prov", []) or []:
-            page_no = getattr(prov, "page_no", 0)
+            page_no = int(getattr(prov, "page_no", 0))
             prov_bbox = getattr(prov, "bbox", None)
-            if prov_bbox is None:
+            if prov_bbox is None or page_no < 1:
                 continue
+            bx0 = float(getattr(prov_bbox, "l", 0.0))
+            by0 = float(getattr(prov_bbox, "b", 0.0))
+            bx1 = float(getattr(prov_bbox, "r", 0.0))
+            by1 = float(getattr(prov_bbox, "t", 0.0))
+            if bx1 > bx0 and by1 > by0:
+                boxes.append(PhysicalBox.of(page_no, (bx0, by0, bx1, by1)))
+
+        item_bbox = None
+        composite_span: CompositeSpan | None = None
+        if boxes:
+            first_box = boxes[0]
             item_bbox = BoundingBox(
-                page=page_no,
-                x0=float(getattr(prov_bbox, "l", 0.0)),
-                y0=float(getattr(prov_bbox, "b", 0.0)),
-                x1=float(getattr(prov_bbox, "r", 0.0)),
-                y1=float(getattr(prov_bbox, "t", 0.0)),
+                page=first_box.page,
+                x0=first_box.bbox[0],
+                y0=first_box.bbox[1],
+                x1=first_box.bbox[2],
+                y1=first_box.bbox[3],
             )
-            # The first provenance entry is often a page-only anchor for a
-            # cross-page item. Keep scanning until a later entry supplies the
-            # geometry the renderer can actually use.
-            break
+            if len(boxes) > 1:
+                composite_span = CompositeSpan(boxes=tuple(boxes))
 
         # The page is known even when the provenance entry carries no bbox.
         # Recording it lets page-strict reflow keep the block on its own page
@@ -983,6 +993,10 @@ def map_iterated_items(
         block_provenance: dict[str, Any] = {}
         if item_page is not None:
             block_provenance["source_page"] = int(item_page)
+        if len(boxes) > 1:
+            block_provenance["physical_boxes"] = [
+                {"page": b.page, "bbox": list(b.bbox)} for b in boxes
+            ]
 
         blocks.append(
             IRBlock(
@@ -993,6 +1007,7 @@ def map_iterated_items(
                     flow_id=flow_id,
                     source_text=text,
                     bbox=item_bbox,
+                    span=composite_span,
                     skip_translate=skip,
                     region=region,
                 ),

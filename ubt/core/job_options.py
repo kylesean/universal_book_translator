@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, Literal, get_args
 
 from ubt.core.config import (
-    RIGID_ENGINES,
+    INPLACE_ENGINES,
     CoverMode,
     DualMode,
     ExecMode,
@@ -218,7 +218,7 @@ def adaptive_dual_mode(
     """Profile/engine-aware ``dual_mode`` default, shared by CLI, API and MCP.
 
     An explicit ``dual_mode`` always wins. Otherwise:
-    - the rigid engine is monolingual-only, so it forces ``monolingual``;
+    - a source-canvas engine defaults to ``monolingual`` (an explicit mode opts in);
     - academic papers and fiction/novels read better monolingual;
     - everything else stays unset to follow config / ``UBT_DUAL_MODE``.
     """
@@ -226,7 +226,9 @@ def adaptive_dual_mode(
         return explicit_dual_mode
     norm_profile = (profile or "").strip().lower()
     norm_engine = (render_engine or "").strip().lower()
-    if norm_engine in RIGID_ENGINES or canonical_render_engine(norm_engine) == "rigid":
+    # A source-canvas engine defaults to monolingual; a bilingual artifact needs
+    # an explicit mode, which the caller above already wins with.
+    if canonical_render_engine(norm_engine) in INPLACE_ENGINES:
         return "monolingual"
     if norm_profile in ("paper", "fiction", "novel"):
         return "monolingual"

@@ -13,9 +13,8 @@ Each knob carries a calibration status (see :data:`CALIBRATION`):
   before anyone "tunes" it for another book;
 - ``HYPOTHESIS`` — principled default with no empirical backing yet.
 
-Discipline (see docs/design/knob-calibration-protocol.md): new knobs land HERE with
-status + rationale, never inline in a module. Statuses are promoted by evidence,
-never by feel.
+Discipline: new knobs land HERE with status + rationale, never inline in a
+module. Statuses are promoted by evidence, never by feel.
 """
 
 from __future__ import annotations
@@ -28,7 +27,6 @@ from enum import StrEnum
 from typing import Any
 
 from ubt.core.ir.models import BlockType, FlowID
-from ubt.model.ast import RegionKind
 
 
 class Calibration(StrEnum):
@@ -99,23 +97,13 @@ BAND_TEXT_MAX_LEN = 30
 # ---------------------------------------------------------------------------
 PAIR_TERMINAL_PUNCT = frozenset({".", "。", "!", "！", "?", "？", ":", "：", ";", "；"})
 
-# ---------------------------------------------------------------------------
-# Text fitting (text_fit.py)
-# ---------------------------------------------------------------------------
-# Em advance widths (fractions of em) — conservative upper bounds, shaped
-# Typst output only ever shrinks below them.
-EM_CJK_ADV = 1.0
-EM_ASCII_ADV = 0.55
-EM_PUNCT_ADV = 0.62
-EM_SPACE_ADV = 0.32
-
 
 def _env_float(name: str, default: float) -> float:
     """Calibration override: env wins, otherwise the frozen default.
 
-    Lets the knob matrix (docs/design/knob-calibration-protocol.md) sweep values
-    without touching source defaults — the default stays the object under
-    test. Invalid values fall back silently so a typo never breaks a run.
+    Lets a calibration sweep try values without touching source defaults — the
+    default stays the object under test. Invalid values fall back silently so a
+    typo never breaks a run.
     """
     try:
         return float(os.environ[name])
@@ -230,52 +218,9 @@ CN_MEASURE_WORDS = (
 # START with a closer. "…—·" are neutral (no adjustment either way).
 CJK_OPEN_PUNCT = frozenset("「『（《〈【")
 CJK_CLOSE_PUNCT = frozenset("，。、；：？！」』）》〉】")
-# Punctuation squeeze: Typst compresses CJK punctuation (edge compression,
-# adjacent-punct shrinking), so advance-sum overstates shaped width. The
-# discount scales with punctuation density (pure ASCII: zero — no behaviour
-# change where no slack provably exists) and caps out at 6%.
-PUNCT_SQUEEZE_CAP = _env_float("UBT_PUNCT_SQUEEZE_CAP", 0.06)
-PUNCT_SQUEEZE_PER_PUNCT = _env_float("UBT_PUNCT_SQUEEZE_PER_PUNCT", 0.02)
-
-
-# Fitter defaults: footnote-grade floor (CJK legible), precision matching the
-# Typst emit rounding, underfill double-gate (relative + absolute so display
-# type is exempt).
-# FIT_MIN_FONT_PT is the ``FlowFitter`` DEFAULT and nothing more: the rigid
-# typesetter always passes its own floor (RIGID_MIN_FONT_PT) into the fitter.
-FIT_MIN_FONT_PT = _env_float("UBT_FIT_MIN_FONT_PT", 6.5)
-FIT_PRECISION_PT = 0.1
-# Rigid-typesetter floor — the value actually in force for every rigid
-# page render. Was an inline literal in typesetter.py, which is exactly what
-# This module's registry discipline forbids. Deliberately distinct
-# from FIT_MIN_FONT_PT: rigid paint-back shrinks text inside the source
-# page's own zones, where the 6.5pt footnote floor reads as damage.
-# 7.0: lowered from 7.5 after the coverage sweep showed 7.5 sits
-# past the spill cliff on two corpora (single- and two-column). Blocks that need
-# <7.5pt now render instead of failing closed to source-visible; see the
-# CALIBRATION rationale and scripts/rigid_coverage_sweep.py.
-RIGID_MIN_FONT_PT = _env_float("UBT_RIGID_MIN_FONT_PT", 7.0)
-# Region-tiered floors: a region the source itself sets in small type may go
-# below the body floor, because the block would otherwise fail closed and leave
-# the source visible — a still-legible target beats an untranslated line. Both
-# mirror FIT_MIN_FONT_PT (6.5, validated on chapter-1 tiny print).
-RIGID_CAPTION_MIN_FONT_PT = _env_float("UBT_RIGID_CAPTION_MIN_FONT_PT", 6.5)
-RIGID_FOOTNOTE_MIN_FONT_PT = _env_float("UBT_RIGID_FOOTNOTE_MIN_FONT_PT", 6.5)
-_RIGID_REGION_FLOORS: dict[str, float] = {
-    RegionKind.CAPTION.value: RIGID_CAPTION_MIN_FONT_PT,
-    RegionKind.FOOTNOTE.value: RIGID_FOOTNOTE_MIN_FONT_PT,
-}
-
-
-def rigid_min_font_pt_for(region: object, *, default: float = RIGID_MIN_FONT_PT) -> float:
-    """Font floor for a block's region.
-
-    Body/title/header regions use the body floor; captions and footnotes — the
-    source's own small-print regions — may shrink one step further. A block that
-    cannot fit its region floor is dropped to source-visible, so a lower floor
-    there only ever adds delivered text.
-    """
-    return _RIGID_REGION_FLOORS.get(str(getattr(region, "value", region)), default)
+# The fitter/rigid min-font knobs (PUNCT_SQUEEZE_*, FIT_*, RIGID_*,
+# rigid_min_font_pt_for) belonged to the retired rigid typesetter and its
+# FlowFitter; both are gone, so the constants went with them.
 
 
 # Complex-page nets: row-fragment glue. Thresholds measured on chapter-1
@@ -503,59 +448,9 @@ CALIBRATION: dict[str, KnobMeta] = {
     "FOOTER_BAND_PT": KnobMeta(S, "55pt band clears chapter-1 footers"),
     "BAND_TEXT_MAX_LEN": KnobMeta(S, "30-char cut separates chrome from body"),
     "PAIR_TERMINAL_PUNCT": KnobMeta(P, "terminal set, behaviour-tested"),
-    # Fitting: mixed evidence.
-    "EM_CJK_ADV": KnobMeta(P, "CJK advance == 1em by font design"),
-    "EM_ASCII_ADV": KnobMeta(H, "0.55 literature average, uncalibrated vs fontTools"),
-    "EM_PUNCT_ADV": KnobMeta(H, "0.62 literature average, uncalibrated vs fontTools"),
-    "EM_SPACE_ADV": KnobMeta(H, "0.32 literature average, uncalibrated vs fontTools"),
     "CJK_PUNCT_CHARS": KnobMeta(P, "punctuation inventory, behaviour-tested"),
     "CJK_OPEN_PUNCT": KnobMeta(P, "kinsoku opener set, behaviour-tested"),
     "CJK_CLOSE_PUNCT": KnobMeta(P, "kinsoku closer set, behaviour-tested"),
-    "PUNCT_SQUEEZE_CAP": KnobMeta(
-        H,
-        "6% cap held: matrix 9-cell sweep shows zero delta (corpus too clean "
-        "to test, 3 overflows/206 blocks); mechanism unit-tested, needs stress corpus. "
-        "Knob sensitivity: broad range (0.04 to 6e4) all green — only cap<=0 flips a test, "
-        "and that is the disabled branch (text_fit.py:114), not the 6%",
-    ),
-    "PUNCT_SQUEEZE_PER_PUNCT": KnobMeta(
-        S,
-        "2%/punct calibrated: matrix per01==base on books 2+3, rate insensitive. "
-        "Sensitivity analysis: ±1.5x invisible, and the first value "
-        "anything reacts to is 2e4 (3 tests incl. the rigid overlay golden)",
-    ),
-    "FIT_MIN_FONT_PT": KnobMeta(
-        S,
-        "6.5 footnote floor validated on chapter-1 tiny print — FlowFitter default "
-        "only; the rigid engine runs RIGID_MIN_FONT_PT (7.0) instead",
-    ),
-    "FIT_PRECISION_PT": KnobMeta(P, "0.1 matches Typst :.1f emit rounding by construction"),
-    "RIGID_MIN_FONT_PT": KnobMeta(
-        S,
-        "7.0 rigid-engine floor, lowered from 7.5. Two-corpus matrix "
-        "sweep by scripts/rigid_coverage_sweep.py: synthetic-mono (251 blocks / "
-        "13 pp) latin expansion held ~74% to ratio 1.4 at 7.0 but fell 74%->26% "
-        "above 1.15 at 7.5; synthetic-duo pages 1-6 (201 blocks, two-column) held "
-        "56% vs 40% at latin ratio 1.2 and 41% vs 32% at cjk ratio 0.6. So 7.5 sat "
-        "past the knee; this floor, not margin_reclaim_pt, is the rigid capacity "
-        "knob. Blocks needing <7.5pt now render instead of failing closed to "
-        "source-visible. Real-corpus (ForMaT) confirmation and the human visual "
-        "pass remain open; override per-run with UBT_RIGID_MIN_FONT_PT",
-    ),
-    "RIGID_CAPTION_MIN_FONT_PT": KnobMeta(
-        S,
-        "6.5 caption-region floor (region tiering): captions are set in small "
-        "type in the source, and one that cannot fit the 7.0 body floor fails "
-        "closed and leaves the source visible. Aligned with FIT_MIN_FONT_PT; the "
-        "synthetic corpora carry no captions (docling-only classification), so "
-        "the value itself stays single-doc",
-    ),
-    "RIGID_FOOTNOTE_MIN_FONT_PT": KnobMeta(
-        S,
-        "6.5 footnote-region floor (region tiering), reusing the FIT_MIN_FONT_PT "
-        "value validated on chapter-1 tiny print; the body floor would fail "
-        "footnotes closed and leave the source visible",
-    ),
     "ROW_MERGE_GAP_PT": KnobMeta(
         H,
         "24pt row-glue cap, set between word gaps and gutters; sensitivity sweep: 16–36pt "
@@ -693,7 +588,7 @@ def is_rigid_non_prose_degradable(
     flags_list = list(error_flags)
     has_render_skip = any("render_skip:non_prose" in f for f in flags_list)
     engine = (render_engine or "").strip().lower()
-    is_rigid = engine in ("rigid", "inplace", "hybrid") or has_render_skip
+    is_rigid = engine in ("rigid", "inplace", "hybrid", "composite") or has_render_skip
     if not is_rigid:
         return False
 
@@ -702,9 +597,6 @@ def is_rigid_non_prose_degradable(
 
 
 __all__ = [
-    "RIGID_MIN_FONT_PT",
-    "RIGID_CAPTION_MIN_FONT_PT",
-    "RIGID_FOOTNOTE_MIN_FONT_PT",
     "ASCII_WORD_RE",
     "BAND_TEXT_MAX_LEN",
     "BG_SAMPLE_SCALE",
@@ -729,13 +621,7 @@ __all__ = [
     "TARGET_NUMBERED_RE",
     "CONT_SENTENCE_END_RE",
     "CONT_UPPER_START_RE",
-    "EM_ASCII_ADV",
-    "EM_CJK_ADV",
-    "EM_PUNCT_ADV",
-    "EM_SPACE_ADV",
     "FAST_LANE_MIN_TEXT_CHARS",
-    "FIT_MIN_FONT_PT",
-    "FIT_PRECISION_PT",
     "FOLD_MAP",
     "FOOTER_BAND_PT",
     "FOOTER_PATTERNS",

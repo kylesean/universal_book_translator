@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ubt.core.archetype import DocCategory, MathDensity, analyze_archetype
-from ubt.core.config import RIGID_ENGINES
+from ubt.core.config import INPLACE_ENGINES, canonical_render_engine
 from ubt.core.engine.cost_estimate import (
     estimate_draft_cost_from_totals,
     measure_prefix_tokens,
@@ -430,7 +430,9 @@ def _recommend_route(
     else:
         render_engine = "reflow"
 
-    dual_mode = "monolingual" if render_engine in RIGID_ENGINES else "inline"
+    dual_mode = (
+        "monolingual" if canonical_render_engine(render_engine) in INPLACE_ENGINES else "inline"
+    )
     preset = "publication" if (math_heavy or academic) else "standard"
     profile = (
         "paper"
@@ -798,18 +800,6 @@ def _synthesize_warnings(
         )
         quality_signals.append(
             f"字体 witness：confirmed {wit['confirmed_pages']} 页 / at-risk {wit['at_risk_pages']} 页"
-        )
-    effective_engine = (
-        config.render_engine if config.render_engine != "auto" else route.recommended_render_engine
-    )
-    if effective_engine in RIGID_ENGINES and config.dual_mode != "monolingual":
-        warnings.append(
-            AssessmentWarning(
-                "OVERLAY_CONFLICT",
-                "warn",
-                f"Rigid/Overlay 引擎仅支持 monolingual 输出，当前 --dual-mode '{config.dual_mode}' 将被降级；"
-                "需要中英对照请改用 reflow (注意公式/图表排版风险)。",
-            )
         )
     if arch.math_density == MathDensity.HIGH and config.formula_enrichment == "off":
         warnings.append(

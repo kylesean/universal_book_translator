@@ -1,10 +1,9 @@
 """CJK width metrics (fontTools advance sums, conservative vs Typst).
 
-The **production width authority** for the overlay fitter: the rigid
-typesetter injects :func:`text_width_pt` into ``FlowFitter`` (see
-``RigidTypesetter._fitter_obj``). ``text_fit.EmWidth`` is the font-free
-fallback for tests and font-less environments only — do not add a third width
-model.
+The width authority for overlay fitting: an unshaped advance-sum width that
+stays conservative against Typst's shaped output (kerning and punctuation
+compression only ever shrink it). :func:`resolve_cjk_ttc` is the piece the
+runtime doctor check uses to resolve a CJK font.
 
 Unshaped advance-sum width. Conservative vs Typst's shaped output
 (kerning/punctuation compression only ever shrink it) *given* the rigid
@@ -142,4 +141,13 @@ def text_width_pt(font: Any, text: str, size_pt: float) -> float:
     return total / upm * size_pt
 
 
-__all__ = ["load_width_font", "resolve_cjk_ttc", "text_width_pt"]
+_FONT_FAMILY_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._-]*")
+
+
+def sanitize_font_family(value: str | None) -> str | None:
+    """Return a font family usable in ``#set text(font: ...)`` or ``None``."""
+    clean = (value or "").strip()
+    return clean if _FONT_FAMILY_RE.fullmatch(clean) else None
+
+
+__all__ = ["load_width_font", "resolve_cjk_ttc", "sanitize_font_family", "text_width_pt"]

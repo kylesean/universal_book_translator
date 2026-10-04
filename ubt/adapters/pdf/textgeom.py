@@ -48,7 +48,7 @@ def _aggregate_line_styles(items: Sequence[LineBox]) -> tuple[float, bool, bool]
         if ln.font_size >= 4.5
     ]
     if not valid:
-        fallback_sz = max((ln.font_size for ln in items if ln.font_size > 0.0), default=0.0)
+        fallback_sz = max((ln.font_size for ln in items if ln.font_size >= 4.5), default=0.0)
         any_bold = any(ln.bold for ln in items)
         any_italic = any(ln.italic for ln in items)
         return fallback_sz, any_bold, any_italic
@@ -109,11 +109,18 @@ def _probe_rect_font_style(
         samples.append((fsize, is_bold, is_italic))
 
     if not samples:
-        return 0.0, False, False
-    normal = [s for s in samples if s[0] >= 4.5] or samples
-    best_size = max(s[0] for s in normal)
-    is_bold = sum(1 for s in normal if s[1]) >= (len(normal) + 1) // 2
-    is_italic = sum(1 for s in normal if s[2]) >= (len(normal) + 1) // 2
+        rect_h = max(0.0, top - bottom)
+        return (rect_h if rect_h >= 4.5 else 0.0), False, False
+    normal = [s for s in samples if s[0] >= 4.5]
+    if normal:
+        best_size = max(s[0] for s in normal)
+    else:
+        # FPDFText_GetFontSize returned 1.0 (or <4.5) because font was scaled via text matrix Tm.
+        # Fall back to the physical line bounding box height.
+        rect_h = max(0.0, top - bottom)
+        best_size = rect_h if rect_h >= 4.5 else 0.0
+    is_bold = sum(1 for s in samples if s[1]) >= (len(samples) + 1) // 2
+    is_italic = sum(1 for s in samples if s[2]) >= (len(samples) + 1) // 2
     return best_size, is_bold, is_italic
 
 

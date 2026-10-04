@@ -54,7 +54,7 @@ from ubt.model.ast import (
     Region,
     RegionKind,
 )
-from ubt.model.span import CanonicalSource, PageGeometry, Span
+from ubt.model.span import CanonicalSource, CompositeSpan, PageGeometry, Span
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -303,7 +303,11 @@ def _classify(
 
 def _with_chars(element: ElementT, chars: tuple[int, int]) -> ElementT:
     """Return a copy of ``element`` whose span carries a character range."""
-    span = Span(page=element.span.page, bbox=element.span.bbox, chars=chars)
+    span: Span | CompositeSpan
+    if isinstance(element.span, CompositeSpan):
+        span = CompositeSpan(boxes=element.span.boxes, chars=chars)
+    else:
+        span = Span(page=element.span.page, bbox=element.span.bbox, chars=chars)
     return dataclasses.replace(element, span=span)
 
 

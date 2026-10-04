@@ -6,7 +6,7 @@ slow test tier, never collected by pytest (`testpaths = ["tests"]`).
 
 ## Slow-tier corpus harnesses (kept)
 
-Six acceptance harnesses need real PDFs or render subprocesses, so they are
+Seven acceptance harnesses need real PDFs or render subprocesses, so they are
 invoked as subprocesses by `tests/integration/test_corpus_acceptance.py`
 (`pytest -m slow`) and double as on-demand acceptance tools:
 
@@ -18,6 +18,7 @@ invoked as subprocesses by `tests/integration/test_corpus_acceptance.py`
 | `shadow_overlay.py` | the overlay backend places every element as an opaque source slice |
 | `shadow_outputs.py` | overlay lowering composes mixed realizations losslessly |
 | `shadow_delivered_pixel.py` | the pixel witness runs fail-closed on the *delivered* artifact |
+| `shadow_compositor.py` | the LayerCompositor 3-layer composition engine renders and deduplicates over real documents |
 
 All take `--corpus corpus` (default) and exit 0 on pass.
 
@@ -29,7 +30,7 @@ All take `--corpus corpus` (default) and exit 0 on pass.
 ## Benchmarks & sweeps (not tests)
 
 - `cost_benchmark.py` — writes `docs/benchmarks/` (see that README).
-- `knob_sweep.py`, `oxide_render_ab.py`, `rigid_coverage_sweep.py`,
+- `knob_sweep.py`, `oxide_render_ab.py`,
   `biou_score.py`, `fidelity_baseline.py`, `run_real_benchmark.sh`,
   `formula_matrix.sh` — experiment/benchmark harnesses for tuning and A/B runs.
 

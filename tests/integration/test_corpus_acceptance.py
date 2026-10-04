@@ -37,6 +37,7 @@ _CASES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("shadow_overlay", ()),
     ("shadow_outputs", ()),
     ("shadow_delivered_pixel", ()),
+    ("shadow_compositor", ()),
 )
 
 
@@ -49,7 +50,7 @@ def _skip_without_corpus() -> None:
 @pytest.mark.parametrize(("script", "extra"), _CASES, ids=[c[0] for c in _CASES])
 def test_the_corpus_acceptance_harness_passes(script: str, extra: tuple[str, ...]) -> None:
     _skip_without_corpus()
-    if script == "shadow_typst" and shutil.which("typst") is None:
+    if script in ("shadow_typst", "shadow_compositor") and shutil.which("typst") is None:
         pytest.skip("typst is not installed")
     proc = subprocess.run(  # noqa: S603
         [sys.executable, str(_REPO / "scripts" / f"{script}.py"), "--corpus", "corpus", *extra],
@@ -66,10 +67,11 @@ def test_the_corpus_acceptance_harness_passes(script: str, extra: tuple[str, ...
         )
 
 
+@pytest.mark.timeout(900)
 def test_the_ubt_verify_corpus_gate_passes() -> None:
     """``ubt verify --run``: the corpus README's full gate, in the suite.
 
-    The six harnesses above check components; this one runs the *real
+    The seven harnesses above check components; this one runs the *real
     pipeline* over every corpus document (dry-run provider, no API key) and
     reconciles each delivery contract against its ``cases.json`` thresholds —
     the ground truth the corpus was created for.
@@ -89,7 +91,7 @@ def test_the_ubt_verify_corpus_gate_passes() -> None:
         cwd=_REPO,
         capture_output=True,
         text=True,
-        timeout=540,
+        timeout=900,
     )
     if proc.returncode != 0:
         pytest.fail(

@@ -52,6 +52,39 @@ cp ~/Downloads/2609.20519v1.pdf ~/Downloads/2608.25512v1.pdf \
 uv run ubt verify --corpus corpus --run --require-all
 ```
 
+## Thresholds and CI coverage
+
+The `expect` floors are **regression floors, not targets**: each is set a few
+points below the current dry-run baseline so a real regression trips it while
+normal parser/renderer churn does not. Measured with the dry-run (echo) provider
+on the reference corpus:
+
+| case | `min_delivered_ratio` | observed (dry run) |
+| --- | --- | --- |
+| `twocol-paper-2609` | 0.55 | 0.601 |
+| `paper-2608` | 0.57 | 0.621 |
+| `paper-2609-22978` | 0.66 | 0.759 |
+| `book-chapter-3` | 0.60 | 0.639 |
+
+When a real engine change moves a case, re-derive its floor and keep a margin
+larger than the run-to-run noise rather than tightening the floor onto the
+observed value.
+
+Two deliberate exclusions from the automated CI gate:
+
+- **CI does not run this gate.** The GitHub `gate` job runs `pytest -m fast`;
+  this corpus is in the `slow` tier and its documents are not committed, so CI
+  skips it (`_skip_without_corpus`). It runs locally, and in any CI that has the
+  corpus checked out or mounted, via `pytest -m slow` or
+  `ubt verify --corpus corpus --run --require-all`. The `fast`-tier ingest
+  regression net that does run in CI is
+  `tests/unit/adapters/test_pdf_adapter_e2e.py` (synthetic PDFs, no toolchain).
+- **The `shadow_reader` coverage floor is relaxed to 0.97** in
+  `tests/integration/test_corpus_acceptance.py` (`--min-coverage 0.97`) even
+  though the script defaults to 0.98: the scanned-heavy `book-chapter-3` tops out
+  at ~0.973 while still round-tripping losslessly. The relaxation is pinned next
+  to the case in the harness, not here, so it moves with the harness.
+
 ## Case schema (`cases.json`)
 
 ```jsonc
@@ -69,7 +102,8 @@ uv run ubt verify --corpus corpus --run --require-all
         "max_errors": 0,            // ERROR-severity violations allowed (default 0)
         "max_missing_assets": 0,    // lost non-text nodes allowed
         "max_source_kept": 5,       // text nodes allowed to ship source
-        "min_accounted_ratio": 0.9  // (translated + verbatim) / total_text floor
+        "min_accounted_ratio": 0.9, // (translated + verbatim) / total_text floor
+        "min_delivered_ratio": 0.6  // translated / total_text floor (stricter)
       }
     }
   ]

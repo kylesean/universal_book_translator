@@ -23,7 +23,6 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from ubt.core.config import RIGID_ENGINES, canonical_render_engine
 from ubt.core.exceptions import DocumentParseError
 from ubt.core.ir.models import BlockType, IRBlock
 from ubt.core.ir.render_plan import RenderPlan
@@ -119,11 +118,6 @@ async def run_render_preflight(
         ) or metadata.get("bilingual_mode")
     else:
         bilingual_mode = metadata.get("bilingual_mode")
-    # Rigid is monolingual: match the scratch mode to the resolved engine so the
-    # rehearsal is faithful and the scratch copy does not emit a downgrade
-    # warning for a route the live manifest never took.
-    if canonical_render_engine(render_engine) in RIGID_ENGINES:
-        bilingual_mode = "monolingual"
     # Render into an isolated copy: the scratch compile must not write its
     # route/downgrade facts back onto the live run manifest.
     scratch_manifest = _isolated_manifest(manifest)

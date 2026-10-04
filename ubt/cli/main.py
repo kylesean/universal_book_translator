@@ -22,7 +22,6 @@ from ubt.cli.commands.verify import verify_command
 from ubt.cli.commands.worker import worker_command
 from ubt.core.config import (
     MOCK_API_KEY,
-    RIGID_ENGINES,
     UBTConfig,
 )
 from ubt.core.engine.dry_run import create_dry_run_orchestrator
@@ -114,7 +113,8 @@ def resolve_cli_adaptive_dual_mode(
     When unset (None), derives the smart default:
     - Academic papers ('paper') default to 'monolingual' (standard academic publication format);
     - Novels / fiction ('fiction', 'novel') default to 'monolingual' (continuous prose reading);
-    - Rigid engine ('rigid', 'inplace') defaults to 'monolingual' (rigid is strictly monolingual-only);
+    - Rigid engine ('rigid', 'inplace') defaults to 'monolingual' (a source-canvas
+      page is crispest monolingual; pass --dual-mode explicitly for a bilingual artifact);
     - Other combinations (e.g. 'general', 'textbook', 'humanities' on reflow) leave it
       unset to follow config / UBT_DUAL_MODE / 'inline'.
     """
@@ -173,18 +173,6 @@ async def _run_translation(
     # "_build_config", …)` rebinds this same global at call time, so the old
     # `sys.modules.get(...)._build_config` lookup was pure indirection.
     config = _build_config(overrides)
-
-    if (
-        explicit_dual is not None
-        and config.render_engine in RIGID_ENGINES
-        and config.dual_mode != "monolingual"
-    ):
-        warning_console = _err_console if quiet else console
-        warning_console.print(
-            f"[yellow]Warning:[/] --render-engine rigid is monolingual-only: the requested "
-            f"--dual-mode '{config.dual_mode}' will be downgraded to 'monolingual'. "
-            "Use --render-engine reflow for a bilingual artifact."
-        )
 
     if not dry_run:
         api_key_missing = not config.api_key.get_secret_value() or (

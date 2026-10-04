@@ -135,30 +135,15 @@ def _check_fonts(problems: list[str]) -> None:
 
 
 def _check_live_typst(problems: list[str]) -> None:
-    from ubt.adapters.pdf.typst_reconstructor import TypstReconstructor
-    from ubt.core.ir.models import BlockType, IRBlock, make_element
+    from ubt.layout.theme import Direction
+    from ubt.render.typst_backend import text_fragment
 
-    def preamble(target: str) -> str:
-        reconstructor = TypstReconstructor(target_lang=target)
-        block = IRBlock(
-            element=make_element(
-                id="b1",
-                spine_index=1,
-                block_type=BlockType.NARRATIVE,
-                source_text="Hello world",
-            ),
-            target_text="مرحبا بالعالم" if target == "ar" else "你好世界",
-        )
-        return reconstructor.generate_typst_source([block], target_lang=target)
-
-    arabic = preamble("ar")
-    if "dir: rtl" not in arabic:
-        problems.append("live Typst preamble has no dir: rtl for ar")
-    if 'lang: "ar"' not in arabic:
-        problems.append("live Typst preamble has no lang for ar")
-    for ltr in ("en", "zh"):
-        if "dir: rtl" in preamble(ltr):
-            problems.append(f"live Typst preamble emitted dir: rtl for {ltr}")
+    arabic = text_fragment("مرحبا بالعالم", direction=Direction.RTL)
+    if not arabic or "dir: rtl" not in arabic:
+        problems.append("live Typst fragment has no dir: rtl for ar")
+    ltr = text_fragment("你好世界", direction=Direction.LTR)
+    if ltr and "dir: rtl" in ltr:
+        problems.append("live Typst fragment emitted dir: rtl for zh")
 
 
 def _check_views(problems: list[str]) -> None:

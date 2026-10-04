@@ -36,7 +36,7 @@ from ubt.model.ast import (
     Table,
     TextElement,
 )
-from ubt.model.span import Span
+from ubt.model.span import CompositeSpan, Span
 
 
 class FlowID(StrEnum):
@@ -193,7 +193,7 @@ def _span_of(bbox: BoundingBox | None, chars: tuple[int, int] | None = None) -> 
     return Span(page=bbox.page, bbox=(bbox.x0, bbox.y0, bbox.x1, bbox.y1), chars=chars)
 
 
-def _bbox_of(span: Span) -> BoundingBox | None:
+def _bbox_of(span: Span | CompositeSpan) -> BoundingBox | None:
     if span.bbox is None:
         return None
     x0, y0, x1, y1 = span.bbox
@@ -209,6 +209,7 @@ def make_element(
     region: RegionKind | None = None,
     source_text: str = "",
     bbox: BoundingBox | None = None,
+    span: Span | CompositeSpan | None = None,
     skip_translate: bool = False,
     confidence: Confidence = Confidence.INFERRED,
     level: int = 1,
@@ -224,7 +225,7 @@ def make_element(
     common: dict[str, Any] = {
         "id": id,
         "spine_index": spine_index,
-        "span": _span_of(bbox, chars),
+        "span": span if span is not None else _span_of(bbox, chars),
         "confidence": confidence,
         "flow": _FLOW_TO_KIND.get(flow_id, FlowKind.MAIN),
         "region": region if region is not None else _region_from_flow(flow_id),

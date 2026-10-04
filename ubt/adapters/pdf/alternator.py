@@ -115,8 +115,7 @@ class BilingualAlternator:
                     logger.warning(
                         "Page count mismatch in bilingual interleaving: "
                         "source PDF has %d pages but translated PDF has %d pages. "
-                        "Missing pages will be padded with blank pages. "
-                        "Enable page_strict mode in TypstReconstructor to fix alignment.",
+                        "Missing pages will be padded with blank pages.",
                         src_len,
                         trans_len,
                     )

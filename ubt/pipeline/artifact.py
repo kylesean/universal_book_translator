@@ -26,6 +26,7 @@ from pathlib import Path
 
 from ubt.core.cjk_ranges import CJK_BMP_CLASS
 from ubt.core.job_options import SidecarKind, companion_path, sidecar_path
+from ubt.core.qe.fast_pass import strip_rehearsal_marker
 from ubt.model.ast import Document, Element
 from ubt.model.fidelity import Attestation, Fidelity
 from ubt.model.span import CanonicalSource
@@ -145,10 +146,15 @@ def _expected(
     source: CanonicalSource,
     delivered: Mapping[str, str],
 ) -> str:
-    """The text the attestation says the artifact carries for this element."""
+    """The text the attestation says the artifact carries for this element.
+
+    A leading rehearsal prefix is stripped to match the renderer, which never
+    places it (see :func:`ubt.core.qe.fast_pass.strip_rehearsal_marker`); without
+    this the audit demanded a marker the artifact is right not to contain.
+    """
     if fidelity > Fidelity.PRESERVED_OPAQUE:
-        return delivered.get(element.id, "")
-    return source_slice(element, source)
+        return strip_rehearsal_marker(delivered.get(element.id, ""))
+    return strip_rehearsal_marker(source_slice(element, source))
 
 
 def check_artifact(

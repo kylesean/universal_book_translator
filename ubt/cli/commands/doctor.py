@@ -574,27 +574,10 @@ def doctor_command(
             "--render-engine with a text output format",
         )
 
-    try:
-        from ubt.adapters.pdf.math_renderer import MathjaxRenderer
-
-        mathjax_ready = MathjaxRenderer().available()
-    except Exception:
-        mathjax_ready = False
-    if config.math_backend != "mathjax":
-        record("MathJax", "SKIP", f"math_backend={config.math_backend}")
-    elif mathjax_ready:
-        record(
-            "MathJax", "OK", "node + scripts/mathjax/node_modules present (vector display formulas)"
-        )
+    if has_typst:
+        record("Typst Math", "OK", "Typst native formula micro-typesetter available")
     else:
-        record(
-            "MathJax",
-            "WARN",
-            "math_backend='mathjax' but Node or scripts/mathjax/node_modules is "
-            "missing \u2014 display formulas degrade to the typst backend",
-            fix="run npm ci in scripts/mathjax (source checkout), or set "
-            "UBT_MATH_BACKEND=typst/image to stop advertising vector math",
-        )
+        record("Typst Math", "WARN", "Typst not available; formulas will remain as source graphics")
 
     try:
         from ubt.adapters.pdf.font_probe import (

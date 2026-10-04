@@ -28,6 +28,7 @@ from ubt.core.ir.models import (
     make_element,
 )
 from ubt.model.ast import RegionKind
+from ubt.model.span import CompositeSpan, PhysicalBox
 
 TARGET_SCHEMA_VERSION = 12
 
@@ -660,6 +661,28 @@ class LedgerBase:
         policy_raw = row["policy_translate"]
 
         region = RegionKind(row["layout_role"]) if row["layout_role"] else None
+        span: CompositeSpan | None = None
+        phys_boxes = provenance.get("physical_boxes")
+        if isinstance(phys_boxes, list) and len(phys_boxes) > 1:
+            try:
+                boxes = tuple(
+                    PhysicalBox.of(
+                        int(b["page"]),
+                        (
+                            float(b["bbox"][0]),
+                            float(b["bbox"][1]),
+                            float(b["bbox"][2]),
+                            float(b["bbox"][3]),
+                        ),
+                    )
+                    for b in phys_boxes
+                    if isinstance(b, dict) and "page" in b and "bbox" in b and len(b["bbox"]) == 4
+                )
+                if len(boxes) > 1:
+                    span = CompositeSpan(boxes=boxes)
+            except (ValueError, KeyError, TypeError):
+                span = None
+
         return IRBlock(
             element=make_element(
                 id=row["block_id"],
@@ -669,6 +692,7 @@ class LedgerBase:
                 region=region,
                 source_text=row["source_text"],
                 bbox=bbox,
+                span=span,
                 skip_translate=bool(row["skip_translate"]),
             ),
             style=style,

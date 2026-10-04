@@ -37,9 +37,8 @@ from ubt.core.ir.models import BookManifest, ChapterIR, IRBlock
 
 if TYPE_CHECKING:
     # Type-only edges: they keep the port's signature checked against the
-    # stage contracts without entering the runtime import graph (the
-    # layering invariant in docs/design/unified-compiler-evolution.md §6.1
-    # forbids only module-level edges).
+    # stage contracts without entering the runtime import graph. The layering
+    # invariant forbids *module-level* edges only; a TYPE_CHECKING edge is not one.
     from ubt.adapters.pdf.engine_selector import PDFRoutePlan
     from ubt.adapters.pdf.extraction_witness import PageVerdict
     from ubt.adapters.pdf.page_profiler import PageKind
@@ -232,30 +231,6 @@ def asset_skip_findings(blocks: list[Any], skips: list[tuple[str, str]]) -> list
     from ubt.adapters.pdf.artifact_parity import asset_skip_findings as _classify
 
     return list(_classify(blocks, skips))
-
-
-def extract_output_page_texts(pdf_path: Path) -> list[str]:
-    """Per-page text (1-based order) of a rendered PDF.
-
-    Bridge to the adapter's pdf_oxide extractor so ``ubt/core`` stays free of
-    the oxide import edge. Never raises: ``[]`` means "no text signal", which
-    the caller reads as "cannot map blocks to output pages".
-    """
-    from ubt.adapters.pdf.oxide_render import extract_page_texts
-
-    return list(extract_page_texts(pdf_path))
-
-
-def map_blocks_to_output_pages(blocks: list[Any], pages: list[str]) -> dict[str, int]:
-    """Map each IR block id to the 1-based output page its target text landed on.
-
-    Bridge to the adapter-side matcher (see ``output_page_map``). Only blocks
-    whose rendered target text is long enough and appears on exactly one page
-    are mapped; the rest are omitted so the caller falls back to ``bbox.page``.
-    """
-    from ubt.adapters.pdf.output_page_map import map_blocks_to_output_pages as _map
-
-    return dict(_map(blocks, pages))
 
 
 def inspect_font_encoding_damage(pdf_path: Path) -> list[PageVerdict]:

@@ -57,4 +57,26 @@ def typst_compile(
     return proc.returncode == 0, proc.stderr[-1500:]
 
 
-__all__ = ["resolve_typst_binary", "typst_available", "typst_compile"]
+def typst_version(binary: str = "typst") -> str | None:
+    """Return the installed Typst version string, or None if unavailable."""
+    resolved = resolve_typst_binary(binary)
+    if resolved is None:
+        return None
+    try:
+        proc = subprocess.run(
+            [resolved, "--version"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=5.0,
+            env=subprocess_env(),
+        )
+        if proc.returncode == 0:
+            return proc.stdout.strip()
+    except Exception:
+        pass
+    return None
+
+
+__all__ = ["resolve_typst_binary", "typst_available", "typst_compile", "typst_version"]

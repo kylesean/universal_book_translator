@@ -1,7 +1,6 @@
 """LaTeX/math-to-Typst conversion chain.
 
-Extracted from :mod:`ubt.adapters.pdf.typst_reconstructor` (god-file split):
-group reader, Docling-math normalization, pandoc + regex converters, OCR
+Group reader, Docling-math normalization, pandoc + regex converters, OCR
 cleanup, delimiter checks, and formula emission. No table/text/image logic.
 """
 

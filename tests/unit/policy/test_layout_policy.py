@@ -22,9 +22,7 @@ from ubt.core.policy.layout_policy import (
     calibration_summary,
     formula_debris_share,
     is_rigid_non_prose_degradable,
-    rigid_min_font_pt_for,
 )
-from ubt.model.ast import RegionKind
 
 pytestmark = pytest.mark.fast
 
@@ -59,57 +57,8 @@ def test_every_calibration_key_resolves_to_a_module_attribute() -> None:
 
 def test_calibration_summary_matches_registry() -> None:
     summary = calibration_summary()
-    assert summary == {"proven": 32, "single_doc": 35, "hypothesis": 20}
+    assert summary == {"proven": 30, "single_doc": 30, "hypothesis": 16}
     assert sum(summary.values()) == len(CALIBRATION)
-
-
-# --------------------------------------------------------------------------- #
-# Region-tiered rigid font floors
-# --------------------------------------------------------------------------- #
-
-
-def test_rigid_floor_constants_are_pinned() -> None:
-    assert lp.RIGID_MIN_FONT_PT == 7.0
-    assert lp.RIGID_CAPTION_MIN_FONT_PT == 6.5
-    assert lp.RIGID_FOOTNOTE_MIN_FONT_PT == 6.5
-    assert lp.FIT_MIN_FONT_PT == 6.5
-
-
-@pytest.mark.parametrize(
-    "region",
-    [
-        RegionKind.BODY,
-        RegionKind.TITLE,
-        RegionKind.HEADER,
-        RegionKind.FOOTER,
-        RegionKind.PAGE_NUMBER,
-    ],
-)
-def test_body_regions_use_the_body_floor(region: RegionKind) -> None:
-    assert rigid_min_font_pt_for(region) == 7.0
-
-
-def test_caption_and_footnote_regions_step_down() -> None:
-    assert rigid_min_font_pt_for(RegionKind.CAPTION) == 6.5
-    assert rigid_min_font_pt_for(RegionKind.FOOTNOTE) == 6.5
-
-
-@pytest.mark.parametrize("region", ["caption", "footnote"])
-def test_region_accepts_bare_strings(region: str) -> None:
-    assert rigid_min_font_pt_for(region) == 6.5
-
-
-def test_unknown_or_missing_region_uses_the_default() -> None:
-    assert rigid_min_font_pt_for(None) == 7.0
-    assert rigid_min_font_pt_for("nonsense") == 7.0
-    assert rigid_min_font_pt_for("nonsense", default=9.0) == 9.0
-
-
-def test_region_with_a_value_attribute_is_read_through_it() -> None:
-    class _Region:
-        value = "footnote"
-
-    assert rigid_min_font_pt_for(_Region()) == 6.5
 
 
 # --------------------------------------------------------------------------- #

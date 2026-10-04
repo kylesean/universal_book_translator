@@ -771,7 +771,8 @@ async def run_visual_gate(
     # blank_page_candidates extracts every page's text in-process — CPU
     # bound; keep it off the loop so concurrent SSE streams and lease
     # renewals are never frozen.
-    for page in await asyncio.to_thread(blank_page_candidates, pdf_path):
+    blank_cand_pages = set(await asyncio.to_thread(blank_page_candidates, pdf_path))
+    for page in sorted(blank_cand_pages):
         if page in exempt_blank_pages:
             continue
         findings.append(
@@ -838,7 +839,7 @@ async def run_visual_gate(
             for page, png in sorted(pngs.items()):
                 # pixel_findings decodes the PNG with PIL (CPU-bound) — keep it off the loop too.
                 p_findings = await asyncio.to_thread(pixel_findings, png, page)
-                if page in exempt_blank_pages:
+                if page in exempt_blank_pages or page not in blank_cand_pages:
                     p_findings = [f for f in p_findings if f.code != "blank_page"]
                 findings.extend(p_findings)
         if vlm_judge is not None and pngs and max_vlm_pages > 0:

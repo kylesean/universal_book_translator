@@ -23,7 +23,7 @@ import logging
 from collections.abc import AsyncIterator
 from typing import Any, Literal
 
-from ubt.core.config import RIGID_ENGINES, DualMode, canonical_render_engine
+from ubt.core.config import INPLACE_ENGINES, DualMode
 from ubt.core.engine.blocks import BlockReader
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.facts import LayoutAdvisory, RenderPlan
@@ -165,11 +165,11 @@ async def run_mode_advisory_stage(
     effective_mode: DualMode = (
         advisory.recommended if auto_mode and advisory.tier == "discourage" else tier_basis
     )
-    # Rigid typesetting is monolingual: downgrade and record here so the
-    # quality report and the render adapter agree on the artifact.
+    # A source-canvas engine serves every mode (monolingual, in-place bilingual,
+    # or a source/target page zip), so no requested mode is downgraded here.
     engine_advisory_msg: str | None = None
     effective_engine: str
-    if config.render_engine in RIGID_ENGINES:
+    if config.render_engine in INPLACE_ENGINES:
         effective_engine = config.render_engine
     else:
         effective_engine = (
@@ -181,38 +181,7 @@ async def run_mode_advisory_stage(
             effective_engine = resolve_pdf_engine("auto", current_blocks, manifest=manifest)
     if (
         ctx.source_pdf_path is not None
-        and effective_engine in RIGID_ENGINES
-        and effective_mode != "monolingual"
-    ):
-        render.dual_mode_downgraded = effective_mode
-        effective_mode = "monolingual"
-        engine_name = effective_engine
-        # Both rigid names reflow onto the source page, so the way back to a
-        # bilingual artifact is `reflow` — the old text sent 'overlay' users to
-        # 'publication', which is that same engine under its other name.
-        engine_advisory_msg = (
-            f"Render-engine advisory: '{engine_name}' is monolingual; the requested dual "
-            f"mode '{render.dual_mode_downgraded}' was downgraded to "
-            f"'monolingual'. Use --render-engine reflow (or --preset publication) "
-            "for bilingual output."
-        )
-        # Auto-routed rigid is a borderline judgement and rigid is monolingual:
-        # emit a zero-token bilingual companion by interleaving the source pages
-        # with the rigid target pages (fidelity + bilingual, no re-render).
-        # Explicit --render-engine rigid is the user's own choice.
-        if (
-            config.emit_companion_bilingual
-            and canonical_render_engine(config.render_engine) == "auto"
-        ):
-            render.emit_secondary_engine = "rigid_bilingual"
-            engine_advisory_msg += (
-                " A zero-token bilingual companion (source + translated pages) was "
-                "scheduled so the bilingual delivery is preserved."
-            )
-        logger.warning("Job %s: %s", ctx.job_id, engine_advisory_msg)
-    elif (
-        ctx.source_pdf_path is not None
-        and effective_engine not in RIGID_ENGINES
+        and effective_engine not in INPLACE_ENGINES
         and (
             config.emit_companion_rigid
             or (
@@ -294,7 +263,7 @@ async def run_difficulty_advisory_stage(
     else:
         effective_mode = pre_downgrade  # type: ignore[assignment]
     effective_engine: str
-    if config.render_engine in RIGID_ENGINES:
+    if config.render_engine in INPLACE_ENGINES:
         effective_engine = config.render_engine
     else:
         effective_engine = (
@@ -305,13 +274,7 @@ async def run_difficulty_advisory_stage(
         if effective_engine == "auto":
             current_blocks = await blocks.current_blocks()
             effective_engine = resolve_pdf_engine("auto", current_blocks, manifest=manifest)
-    if (
-        ctx.source_pdf_path is not None
-        and effective_engine in RIGID_ENGINES
-        and effective_mode != "monolingual"
-    ):
-        render.dual_mode_downgraded = effective_mode
-        effective_mode = "monolingual"
+    # A source-canvas engine serves every mode, so no requested mode downgrades.
     if effective_mode != pre_downgrade:
         logger.warning(
             "Bilingual advisory downgrade for job %s: '%s' -> '%s' (%s)",

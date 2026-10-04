@@ -43,6 +43,54 @@ class Span:
 
 
 @dataclass(frozen=True, slots=True)
+class PhysicalBox:
+    """One rectangular container along an element's reading-order box chain."""
+
+    page: int
+    bbox: BBox
+    available_width: float
+    available_height: float
+
+    @classmethod
+    def of(cls, page: int, bbox: BBox) -> PhysicalBox:
+        return cls(page, bbox, bbox[2] - bbox[0], bbox[3] - bbox[1])
+
+
+@dataclass(frozen=True, slots=True)
+class CompositeSpan:
+    """A semantic element spread across several physical boxes.
+
+    The geometry layer's answer to the tension between PDF's discrete 2D boxes
+    and the 1D reading-order flow: one element (say, a paragraph crossing a page
+    boundary) owns a chain of boxes in reading order, and the BreakageSolver
+    flows its target text across them.
+    """
+
+    boxes: tuple[PhysicalBox, ...]
+    chars: tuple[int, int] | None = None
+
+    @property
+    def is_composite(self) -> bool:
+        return len(self.boxes) > 1
+
+    @property
+    def page(self) -> int:
+        return self.boxes[0].page if self.boxes else 0
+
+    @property
+    def bbox(self) -> BBox | None:
+        return self.boxes[0].bbox if self.boxes else None
+
+    @property
+    def on_page(self) -> bool:
+        return self.page > 0
+
+    @property
+    def placed(self) -> bool:
+        return self.on_page and bool(self.boxes)
+
+
+@dataclass(frozen=True, slots=True)
 class PageGeometry:
     """Physical size of one source page, in points."""
 
@@ -74,4 +122,4 @@ class CanonicalSource:
         return None
 
 
-__all__ = ["BBox", "CanonicalSource", "PageGeometry", "Span"]
+__all__ = ["BBox", "CanonicalSource", "CompositeSpan", "PageGeometry", "PhysicalBox", "Span"]

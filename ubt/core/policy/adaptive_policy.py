@@ -107,7 +107,7 @@ def resolve_adaptive_policy(
     return AdaptivePolicy(
         granularity=Granularity.MICRO,
         render_engine=norm_engine
-        if norm_engine in ("publication", "rigid", "auto")
+        if norm_engine in ("publication", "rigid", "auto", "composite")
         else "publication",
         fast_lane_bible=is_short,
         visual_blocking=is_short or config.visual_blocking_gate_enabled,
@@ -139,48 +139,27 @@ def resolve_render_engine_from_signals(
     from cheap document probes), so the route a user is quoted is the route that
     actually runs.
 
-    ``publication``/``reflow`` and ``rigid`` pass through; ``auto`` routes to
-    rigid when the document carries math, is structure-dense, or is laid out in
-    columns **and** has usable geometry. Rigid typesets from source boxes, so a
-    plain-text fallback that stamps zero-area bboxes must reflow instead.
-    Unknown names fall back to publication.
+    ``publication``/``reflow`` and ``rigid`` pass through as compatibility
+    aliases; ``auto`` routes to ``composite`` (the unified LayerCompositor).
+    Unknown names fall back to ``composite``.
     """
     norm = canonical_render_engine(requested) if requested else "auto"
-    if norm in ("publication", "rigid"):
+    if norm in ("publication", "rigid", "composite"):
         return norm
     if norm != "auto":
-        logger.warning("Unknown render_engine=%r, falling back to 'publication'", requested)
-        return "publication"
+        logger.warning("Unknown render_engine=%r, falling back to 'composite'", requested)
+        return "composite"
     if not has_geometry:
         logger.warning(
             "render_engine='auto': no usable geometry (plain-text fallback "
-            "extraction); routing to 'publication' reflow"
+            "extraction); routing to 'composite'"
         )
-        return "publication"
-    # Structure-dense documents take the rigid engine: reflow rebuilds the
-    # page from extracted structure, and extraction is exactly where these
-    # documents fail -- multi-row table headers shatter into single-character
-    # cells and TikZ/matplotlib figures go missing wholesale (arXiv
-    # 2609.20519: 4 of 6 figures lost, Table 1 unusable). Rigid keeps the
-    # source page as the canvas, so untouched geometry cannot be corrupted.
-    # ``multicolumn_share`` is the page-level form of the same tell: a
-    # multi-column body is what a reflow re-typeset mangles most, and the
-    # 2609.20519 case is caught by it (7/15 columnar pages) even though its
-    # IR block-count share (8.6%) and FORMULA-block count (0) both miss.
-    # Plain prose has no such risk and gets the reflow route's better typography.
-    is_paper = (profile or "").strip().lower() in ("paper", "academic_paper") or str(
-        category or ""
-    ).lower() in ("academic_paper", "doccategory.academic_paper")
+        return "composite"
 
-    return (
-        "rigid"
-        if has_math
-        or struct_share >= STRUCT_SHARE_AUTO
-        or multicolumn_share >= MULTICOLUMN_SHARE_AUTO
-        or structural_page_share >= STRUCTURAL_PAGE_SHARE_AUTO
-        or is_paper
-        else "publication"
-    )
+    # In the unified document compiler architecture, all layout profiles
+    # (formula-heavy, multi-column, and plain prose) converge to composite
+    # (LayerCompositor with VirtualFlowContinuum & BreakageSolver).
+    return "composite"
 
 
 def resolve_pdf_engine(

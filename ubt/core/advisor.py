@@ -24,7 +24,6 @@ from ubt.core.archetype import (
 )
 from ubt.core.config import (
     MOCK_API_KEY,
-    RIGID_ENGINES,
     DualMode,
     ExecMode,
     FormulaEnrichment,
@@ -94,11 +93,6 @@ class AdvisoryReport:
     def check_conflict(self, chosen_render_engine: str, chosen_dual_mode: str) -> list[str]:
         """Check for physical layout or architectural conflicts if user overrides recommendations."""
         warnings: list[str] = []
-        if chosen_render_engine in RIGID_ENGINES and chosen_dual_mode != "monolingual":
-            warnings.append(
-                f"【版式说明】Overlay 引擎以源页面为画布、只覆盖正文区域，当前仅支持纯目标语言 (monolingual) 输出；"
-                f"请求的 '{chosen_dual_mode}' 将被降级为 monolingual。需要中英对照请改用 reflow 引擎。"
-            )
         if (
             self.format_ext == "pdf"
             and self.recommended_render_engine == "rigid"

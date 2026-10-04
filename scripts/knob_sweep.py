@@ -45,13 +45,12 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 #: the KPI goldens. Chosen by consumer, not by name (the by-name blind spot is
 #: the gap this harness exists to close — see 附录 B of the protocol doc).
 DEFAULT_TARGETS = (
-    "tests/baselines",
-    "tests/unit/test_rigid_zones.py",
-    "tests/unit/test_rigid_overlay_golden.py",
-    "tests/unit/test_text_fit.py",
-    "tests/unit/test_router_mode.py",
-    "tests/unit/test_short_doc_render_routing.py",
-    "tests/unit/test_reflow_control_loop.py",
+    "tests/unit/policy/test_adaptive_policy.py",
+    "tests/unit/policy/test_layout_policy.py",
+    "tests/unit/render/test_layer_compositor.py",
+    "tests/unit/test_render_plan_fields.py",
+    "tests/unit/test_router_circuit_breaker.py",
+    "tests/unit/adapters/test_pdf_adapter_e2e.py",
 )
 
 

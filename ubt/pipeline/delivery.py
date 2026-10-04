@@ -15,6 +15,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from ubt.analyze.bridge import document_from_blocks
+from ubt.core.config import INPLACE_ENGINES, canonical_render_engine
 from ubt.core.content.adapt import kept_in_source
 from ubt.core.ir.models import BlockType, IRBlock
 from ubt.model.ast import Document
@@ -40,14 +41,14 @@ def delivery_translations(blocks: Sequence[IRBlock], *, engine: str) -> dict[str
     is not a realization either -- the engine is the whole-document choice the
     per-element backends replace, and it is exactly what this map carries.
     """
-    rigid = engine == "rigid"
+    inplace = canonical_render_engine(engine) in INPLACE_ENGINES
     placed: dict[str, str] = {}
     for block in blocks:
         target = block.target_text or ""
         if not target.strip():
             continue
         if block.block_type in _ASSET_TYPES:
-            if rigid:
+            if inplace:
                 continue
         elif kept_in_source(block):
             continue

@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from ubt.core.cleaners.cjk_spacing import normalize_publishing_cjk
-from ubt.core.config import DualMode
+from ubt.core.config import INPLACE_ENGINES, DualMode, canonical_render_engine
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.pe_queue import PEQueueResult, export_pe_queue
@@ -39,7 +39,6 @@ from ubt.core.ports import (
     blocking_gate_tripped,
     crashed_visual_gate_result,
     get_last_render_skips,
-    interleave_bilingual_pdf,
 )
 
 if TYPE_CHECKING:
@@ -758,7 +757,7 @@ async def _render_complementary_artifact(
             secondary_path = None
     elif (
         secondary_engine == "rigid"
-        and effective_engine != "rigid"
+        and canonical_render_engine(effective_engine) not in INPLACE_ENGINES
         and adapter.engine_name is not None
         and artifact.target_output.suffix.lower() == ".pdf"
     ):
@@ -798,39 +797,6 @@ async def _render_complementary_artifact(
                 adapter.last_render_skips = saved_skips
             if hasattr(adapter, "last_render_outcome"):
                 adapter.last_render_outcome = saved_outcome
-    elif (
-        secondary_engine == "rigid_bilingual"
-        and effective_engine == "rigid"
-        and artifact.target_output.suffix.lower() == ".pdf"
-        and ctx.source_pdf_path is not None
-    ):
-        # Auto-routed rigid: the primary is a monolingual overlay. The bilingual
-        # companion interleaves the SOURCE pages with the rigid TARGET pages, so
-        # the reader gets 1:1 fidelity and the translation side by side without a
-        # second re-typeset (fidelity and bilingual are no longer a tradeoff). An
-        # auto-named primary is ``<stem>_mono``; restore the canonical
-        # ``<stem>_bilingual`` name for the companion.
-        stem = artifact.target_output.stem
-        base = stem[: -len("_mono")] if stem.endswith("_mono") else stem
-        candidate = artifact.target_output.with_name(
-            f"{base}_bilingual{artifact.target_output.suffix}"
-        )
-        try:
-            secondary_path = Path(
-                await interleave_bilingual_pdf(
-                    source_pdf=ctx.source_pdf_path,
-                    translated_pdf=artifact.rendered_path,
-                    output_pdf=candidate,
-                    facing_spread=bool(render.facing_spread),
-                )
-            )
-            logger.info(
-                "Zero-cost rigid bilingual companion (source + target pages) rendered: %s",
-                secondary_path,
-            )
-        except Exception as exc:
-            logger.warning("Rigid bilingual interleave failed (non-fatal): %s", exc)
-            secondary_path = None
     manifest.metadata.pop("suppress_render_engine_warning", None)
     return secondary_path
 

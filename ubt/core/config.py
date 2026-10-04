@@ -62,7 +62,7 @@ PdfEngine = str
 QeEngine = Literal["heuristic", "comet", "cometkiwi", "neural", "subprocess", "tiered"]
 DualMode = Literal["inline", "alternating", "monolingual", "facing", "auto"]
 PeExportFormat = Literal["csv", "xliff", "none"]
-RenderEngine = Literal["rigid", "reflow", "auto", "publication"]
+RenderEngine = Literal["rigid", "reflow", "auto", "publication", "composite"]
 # One canonical name per render route: `rigid` keeps each block on its source
 # page geometry and paints the translated text back into the original bounding
 # boxes, so every non-text element stays pixel-intact; `reflow` (a.k.a.
@@ -70,6 +70,16 @@ RenderEngine = Literal["rigid", "reflow", "auto", "publication"]
 # selects per document.
 RIGID_ENGINES: frozenset[str] = frozenset({"rigid"})
 PUBLICATION_ENGINES: frozenset[str] = frozenset({"publication", "reflow"})
+#: Engines that keep the source page as the canvas and paint onto it rather than
+#: re-typesetting a fresh document: ``rigid`` (per-region) and ``composite``
+#: (three-layer absolute composition). Both are monolingual by construction.
+COMPOSITE_ENGINES: frozenset[str] = frozenset({"composite"})
+INPLACE_ENGINES: frozenset[str] = RIGID_ENGINES | COMPOSITE_ENGINES | PUBLICATION_ENGINES
+
+#: Bilingual modes that pair whole source and target pages (a page zipper), as
+#: opposed to interleaving source and target within a page. A source-canvas
+#: engine is page-aligned with the source, so it can serve exactly these.
+PAGE_BILINGUAL_MODES: frozenset[str] = frozenset({"alternating", "facing", "facing_spread"})
 # Engine alias mapping to fold input variants onto canonical engine names.
 # Shared by ``canonical_render_engine`` and the ``render_engine`` field validator.
 RENDER_ENGINE_LEGACY_ALIASES: dict[str, str] = {
@@ -88,6 +98,8 @@ def canonical_render_engine(value: str | None) -> str:
     engine = RENDER_ENGINE_LEGACY_ALIASES.get(engine, engine)
     if engine in RIGID_ENGINES:
         return "rigid"
+    if engine in COMPOSITE_ENGINES:
+        return "composite"
     if engine in PUBLICATION_ENGINES or not engine:
         return "publication"
     return engine

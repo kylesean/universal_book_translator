@@ -37,24 +37,6 @@ logger = logging.getLogger(__name__)
 RenderFn = Callable[..., Awaitable[Path]]
 
 
-def effective_render_engine(manifest: Any) -> str:
-    """Engine the renderer actually used, from the render telemetry.
-
-    ``manifest.metadata["render_engine_effective"]`` is written by the PDF
-    renderer for both of its tracks (it is render telemetry, so it lives in
-    ``manifest.metadata``, not on ``manifest.run``). Without it the geometry
-    predicates treat every render -- including a reflowed publication -- as
-    geometry-preserving, which injects bogus page_count/image_count parity
-    majors into the visual gate.
-    """
-    metadata = getattr(manifest, "metadata", None)
-    if isinstance(metadata, dict):
-        engine = metadata.get("render_engine_effective")
-        if engine:
-            return str(engine)
-    return ""
-
-
 class ReflowControlLoop:
     """Visual gate reflow control loop and self-healing orchestration.
 
@@ -107,26 +89,13 @@ class ReflowControlLoop:
 
         return _judge
 
-    def _typography_retune_possible(self) -> bool:
-        """False for the rigid engine, which never reads the retuned knobs.
-
-        ``docling_adapter.render_blocks`` returns to ``RigidTypesetter``
-        before the Typst reconstructor whenever ``render_engine_effective`` is
-        ``rigid``; rigid sizes come from the source zone's median line
-        height, so mutating ``reconstructor.font_size_pt`` / ``leading_em``
-        cannot change a single glyph. A retune would only burn a full
-        re-render and report a heal that provably cannot happen.
-        """
-        return effective_render_engine(self.manifest) != "rigid"
-
     def _output_keeps_source_geometry(self) -> bool:
         """Whether the rendered page still is the source page.
 
-        ``render_engine_effective`` is written by the PDF renderer for both of
-        its tracks; anything else (a re-flowed publication render) places text
-        by its own layout, so the IR bboxes no longer describe the artifact.
+        All PDF render routes use LayerCompositor and keep the source page as
+        the base canvas, so the IR bboxes faithfully describe the artifact.
         """
-        return effective_render_engine(self.manifest) != "publication"
+        return True
 
     async def _evaluate_gate(
         self,
@@ -189,112 +158,20 @@ class ReflowControlLoop:
         healing_strategy: str | None = None
         healing_skipped_reason: str | None = None
 
-        bad = [f for f in gate.findings if getattr(f, "severity", "") in ("major", "critical")]
-
-        # Attempt self-healing only if we have layout-related visual issues.
-        # The rigid engine is never retunable (see
-        # _typography_retune_possible), so its defects go straight to the
-        # quarantine below instead of a re-render that cannot change them.
-        render_fn = self.render_fn
-        healing_relevant = bool(
-            bad and self.adapter.engine_name is not None and render_fn is not None
-        )
-        retune_possible = healing_relevant and self._typography_retune_possible()
-        if healing_relevant and not retune_possible:
-            healing_skipped_reason = "rigid_engine_not_retunable"
-            logger.info(
-                "ReflowControlLoop: typography self-healing not applicable for job %s "
-                "(rigid engine sizes come from source zone geometry); "
-                "quarantining failing pages only",
-                self.job_id,
-            )
-        if retune_possible and render_fn is not None:
-            if self.cancel_token is not None and self.cancel_token.is_set():
-                raise JobInterruptedError(f"Job {self.job_id} cancelled before typography retune")
-            recon = getattr(self.adapter, "reconstructor", None)
-            if recon is not None:
-                orig_font_size = getattr(recon, "font_size_pt", 10.5)
-                orig_leading = getattr(recon, "leading_em", 0.85)
-                try:
-                    # Strategy 1: typography tightening (scale font to 92%, leading to 0.75em)
-                    tuned_font = round(orig_font_size * 0.92, 2)
-                    tuned_leading = 0.75
-                    recon.font_size_pt = tuned_font
-                    recon.leading_em = tuned_leading
-                    logger.info(
-                        "ReflowControlLoop: attempting typography self-healing for job %s "
-                        "(font: %.2fpt -> %.2fpt, leading: %.2fem -> %.2fem)",
-                        self.job_id,
-                        orig_font_size,
-                        tuned_font,
-                        orig_leading,
-                        tuned_leading,
-                    )
-                    tuned_rendered = await render_fn(
-                        adapter=self.adapter,
-                        manifest=self.manifest,
-                        ledger=self.ledger,
-                        blocks=blocks,
-                        target_lang=self.target_lang,
-                        output_path=rendered_path,
-                        job_id=self.job_id,
-                        render_plan=self.render_plan,
-                    )
-                    gate2 = await self._evaluate_gate(tuned_rendered, blocks)
-                    if gate2.passed:
-                        gate = gate2
-                        rendered_path = tuned_rendered
-                        self_healed = True
-                        healing_strategy = "typography_tuning"
-                        logger.info(
-                            "ReflowControlLoop: self-healing SUCCEEDED via typography tuning for job %s",
-                            self.job_id,
-                        )
-                    else:
-                        # Tuning did not clear the defects; keep the tuned
-                        # artifact and let the page quarantine below own the
-                        # failing pages.
-                        gate = gate2
-                        rendered_path = tuned_rendered
-                finally:
-                    recon.font_size_pt = orig_font_size
-                    recon.leading_em = orig_leading
-
-        # If gate still has unresolved major or critical findings, quarantine blocks on failing pages
+        # All PDF targets render through LayerCompositor onto the source canvas,
+        # so geometry is preserved. If gate has major or critical findings,
+        # quarantine blocks on failing pages directly.
         bad_after = [
             f for f in gate.findings if getattr(f, "severity", "") in ("major", "critical")
         ]
         if bad_after:
             failing_pages = {f.page for f in bad_after if getattr(f, "page", None) is not None}
-            keeps_geometry = self._output_keeps_source_geometry()
-            # Under a reflow render the source bbox says nothing about where the
-            # text landed, so recover each block's output page from the
-            # artifact's own text layer before matching it against the gate's
-            # findings (which are always output pages). The geometry-preserving
-            # route keeps bbox.page: its canvas *is* the source page.
-            output_page_of: dict[str, int] = {}
-            if not keeps_geometry:
-                try:
-                    from ubt.core.ports import extract_output_page_texts, map_blocks_to_output_pages
-
-                    output_page_of = map_blocks_to_output_pages(
-                        blocks, extract_output_page_texts(rendered_path)
-                    )
-                except Exception as exc:  # pragma: no cover - mapping must never break export
-                    logger.debug("output-page mapping skipped for job %s: %s", self.job_id, exc)
             quarantined: list[dict[str, Any]] = []
-            # Only ever escalate to NEEDS_HUMAN: FAILED and BLOCKED_HUMAN are
-            # strictly stronger verdicts and must not be downgraded into a
-            # re-review queue. skip_translate blocks are verbatim passthrough
-            # (bibliography etc.) and carry no machine translation to quarantine.
             preserved = (BlockStatus.FAILED, BlockStatus.BLOCKED_HUMAN)
             for b in blocks:
                 if b.skip_translate or b.status in preserved:
                     continue
-                if keeps_geometry:
-                    page = b.bbox.page if b.bbox is not None else None
-                else:
-                    page = output_page_of.get(b.id)
+                page = b.bbox.page if b.bbox is not None else None
                 if page is not None and page in failing_pages:
                     b.status = BlockStatus.NEEDS_HUMAN
                     codes = [

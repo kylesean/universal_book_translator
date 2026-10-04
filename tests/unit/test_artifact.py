@@ -20,11 +20,15 @@ from pathlib import Path
 
 import pytest
 
+from ubt.core.ir.models import BlockType, make_element
+from ubt.core.qe.fast_pass import REHEARSAL_MARKER, strip_rehearsal_marker
 from ubt.model.fidelity import Fidelity
+from ubt.model.span import CanonicalSource
 from ubt.pipeline.artifact import (
     ArtifactReport,
     DeliveredArtifact,
     ElementCheck,
+    _expected,
     _normalize,
     _present,
     _tokenize,
@@ -155,3 +159,36 @@ def test_summary_line_states_how_many_realizations_were_carried() -> None:
     assert report.summary_line() == "[FAIL] artifact carries 1/2 text realization(s)"
     passing = ArtifactReport(total=1, checks=(_check("e1", True),))
     assert passing.summary_line() == "[PASS] artifact carries 1/1 text realization(s)"
+
+
+# --------------------------------------------------------------------------- #
+# The rehearsal prefix: the renderer strips it, so the audit must not demand it.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    [REHEARSAL_MARKER, "[Mock Translation]", "[mock translation]", "[Mock  Translation]"],
+)
+def test_strip_rehearsal_marker_removes_every_spelling(prefix: str) -> None:
+    assert strip_rehearsal_marker(f"{prefix} Hello world") == "Hello world"
+    assert strip_rehearsal_marker("Hello world") == "Hello world"
+
+
+def test_a_rehearsal_heading_is_found_in_an_artifact_without_the_marker() -> None:
+    # Regression: the PDF renderer strips the dry-run's prefix before placing
+    # text, so the artifact never carries it. Before this was shared, a 3-token
+    # heading needed the marker's 4 CJK tokens inside the overlap floor
+    # (3/7 < 0.6) and every rehearsal delivery reported the heading "missing".
+    element = make_element(
+        id="e1",
+        spine_index=1,
+        block_type=BlockType.HEADING,
+        source_text="The Attention Machine",
+    )
+    source = CanonicalSource(doc_id="d", text="The Attention Machine")
+    delivered = {"e1": f"{REHEARSAL_MARKER} The Attention Machine"}
+
+    expected = _expected(element, Fidelity.RECONSTRUCTED_ADAPTED, source, delivered)
+    assert expected == "The Attention Machine"
+    assert _present(expected, frozenset(_tokenize("The Attention Machine"))) is True

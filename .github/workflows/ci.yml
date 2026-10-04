@@ -2,9 +2,11 @@
 # format on every commit, types + the fast test tier on push. CI must repeat a
 # gate that already passes, never be the first place it runs.
 #
-# Keep this job Linux-only / single-Python / fast-tier on purpose. The Windows
-# matrix, macOS portability, `pdf` extra, and nightly real-model jobs are
-# stage 2–3 — add each only when it can stay green.
+# Keep this job Linux-only / single-Python on purpose. The Windows matrix,
+# macOS portability, `pdf` extra, and nightly real-model jobs are stage 2-3 --
+# add each only when it can stay green. The slow tier runs here too, on the
+# synthetic PDF render e2e, with a checksum-pinned typst; the real-document
+# corpus harnesses in that tier skip without the gitignored documents.
 name: CI
 
 on:
@@ -62,3 +64,29 @@ jobs:
         env:
           PYTHONIOENCODING: "utf-8"
         run: uv run pytest -m fast -q
+
+      # The slow tier's synthetic PDF render e2e
+      # (tests/integration/test_synthetic_render_e2e.py) shells out to the
+      # external typst compiler, which `uv sync --extra dev` does not provide.
+      # Pin the release version and verify its official SHA-256 rather than
+      # trusting a mutable "latest"/tag download. The real-document corpus
+      # harnesses in the same tier skip without the gitignored documents, so
+      # this step stays seconds.
+      - name: Install typst (checksum-pinned)
+        env:
+          TYPST_VERSION: "0.15.1"
+          TYPST_SHA256: "a6d077d0a95eed5a2eba715b2dae06be954f624ccbf85758a03f389ded33118c"
+        run: |
+          archive="typst-x86_64-unknown-linux-musl.tar.xz"
+          curl --proto '=https' --tlsv1.2 -fsSL \
+            "https://github.com/typst/typst/releases/download/v${TYPST_VERSION}/${archive}" \
+            -o "/tmp/${archive}"
+          echo "${TYPST_SHA256}  /tmp/${archive}" | sha256sum -c -
+          tar -xJf "/tmp/${archive}" -C /tmp
+          sudo install "/tmp/typst-x86_64-unknown-linux-musl/typst" /usr/local/bin/typst
+          typst --version
+
+      - name: Slow test tier (synthetic PDF render e2e)
+        env:
+          PYTHONIOENCODING: "utf-8"
+        run: uv run pytest -m slow -q

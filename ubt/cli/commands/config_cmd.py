@@ -1,9 +1,8 @@
 """Introspect the ``UBTConfig`` surface: every field, its env var(s), its value.
 
 The env-var list is derived from the model schema, so a field cannot be added
-without appearing here. This is the live counterpart to the hand-maintained
-table in ``docs/guides/USER_GUIDE.md`` (a test pins the two together), and the way to
-answer "which env var sets X?" without grepping the codebase.
+without appearing here -- the one way to answer "which env var sets X?" without
+grepping the codebase.
 """
 
 from __future__ import annotations

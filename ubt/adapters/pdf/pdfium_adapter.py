@@ -78,7 +78,10 @@ def extract_blocks_with_pdfium(
         pages: range | None = None
         if page_range is not None:
             pages = range(max(1, page_range[0]), page_range[1] + 1)
+        from ubt.core.ir.continuation import fuse_continuation_blocks
+
         blocks = blocks_from_document(read_pdf(path, pages=pages))
+        blocks = fuse_continuation_blocks(blocks)
         for index, block in enumerate(blocks, start=1):
             block.set_id(f"pdf_main#b{index:04d}")
             block.set_spine_index(index)

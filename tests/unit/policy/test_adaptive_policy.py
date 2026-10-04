@@ -191,6 +191,13 @@ def test_rigid_request_passes_through_without_geometry() -> None:
     )
 
 
+def test_composite_request_passes_through() -> None:
+    assert (
+        resolve_render_engine_from_signals("composite", has_math=True, struct_share=0.5)
+        == "composite"
+    )
+
+
 def test_inplace_alias_resolves_to_rigid() -> None:
     assert (
         resolve_render_engine_from_signals("inplace", has_math=False, struct_share=0.0) == "rigid"
@@ -198,70 +205,72 @@ def test_inplace_alias_resolves_to_rigid() -> None:
 
 
 def test_hybrid_alias_falls_into_auto_dispatch() -> None:
-    assert resolve_render_engine_from_signals("hybrid", has_math=True, struct_share=0.0) == "rigid"
+    assert (
+        resolve_render_engine_from_signals("hybrid", has_math=True, struct_share=0.0) == "composite"
+    )
 
 
-def test_unknown_engine_warns_and_falls_back_to_publication(
+def test_unknown_engine_warns_and_falls_back_to_composite(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     with caplog.at_level(logging.WARNING, logger="ubt.core.policy.adaptive_policy"):
         engine = resolve_render_engine_from_signals("weird", has_math=True, struct_share=0.9)
-    assert engine == "publication"
+    assert engine == "composite"
     assert any("Unknown render_engine" in record.message for record in caplog.records)
 
 
-def test_auto_with_math_takes_rigid() -> None:
-    assert resolve_render_engine_from_signals("auto", has_math=True, struct_share=0.0) == "rigid"
-
-
-@pytest.mark.parametrize(
-    ("share", "expected"),
-    [(0.199, "publication"), (0.20, "rigid"), (0.5, "rigid")],
-)
-def test_auto_structure_share_boundary(share: float, expected: str) -> None:
+def test_auto_with_math_takes_composite() -> None:
     assert (
-        resolve_render_engine_from_signals("auto", has_math=False, struct_share=share) == expected
+        resolve_render_engine_from_signals("auto", has_math=True, struct_share=0.0) == "composite"
     )
 
 
-@pytest.mark.parametrize(
-    ("share", "expected"),
-    [(0.249, "publication"), (0.25, "rigid"), (0.4, "rigid")],
-)
-def test_auto_multicolumn_share_boundary(share: float, expected: str) -> None:
+@pytest.mark.parametrize("share", [0.0, 0.199, 0.20, 0.5])
+def test_auto_structure_share_converges_to_composite(share: float) -> None:
+    assert (
+        resolve_render_engine_from_signals("auto", has_math=False, struct_share=share)
+        == "composite"
+    )
+
+
+@pytest.mark.parametrize("share", [0.0, 0.249, 0.25, 0.4])
+def test_auto_multicolumn_share_converges_to_composite(share: float) -> None:
     assert (
         resolve_render_engine_from_signals(
             "auto", has_math=False, struct_share=0.0, multicolumn_share=share
         )
-        == expected
+        == "composite"
     )
 
 
-def test_auto_without_geometry_reflows_even_with_math(
+def test_auto_without_geometry_warns_and_falls_back_to_composite(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     with caplog.at_level(logging.WARNING, logger="ubt.core.policy.adaptive_policy"):
         engine = resolve_render_engine_from_signals(
             "auto", has_math=True, struct_share=0.9, has_geometry=False
         )
-    assert engine == "publication"
+    assert engine == "composite"
     assert any("no usable geometry" in record.message for record in caplog.records)
 
 
 def test_empty_request_is_treated_as_auto() -> None:
-    assert resolve_render_engine_from_signals("", has_math=True, struct_share=0.0) == "rigid"
+    assert resolve_render_engine_from_signals("", has_math=True, struct_share=0.0) == "composite"
 
 
-def test_plain_prose_auto_reflows() -> None:
+def test_plain_prose_auto_takes_composite() -> None:
     assert (
-        resolve_render_engine_from_signals("auto", has_math=False, struct_share=0.0)
-        == "publication"
+        resolve_render_engine_from_signals("auto", has_math=False, struct_share=0.0) == "composite"
     )
 
 
 def test_request_is_case_and_whitespace_insensitive() -> None:
     assert (
         resolve_render_engine_from_signals("  RIGID ", has_math=False, struct_share=0.0) == "rigid"
+    )
+    assert (
+        resolve_render_engine_from_signals("  COMPOSITE ", has_math=False, struct_share=0.0)
+        == "composite"
     )
 
 
@@ -272,22 +281,18 @@ def test_request_is_case_and_whitespace_insensitive() -> None:
 
 def test_pdf_engine_derives_geometry_from_blocks() -> None:
     blocks = [_block("a", BlockType.NARRATIVE, bbox=_box())]
-    assert resolve_pdf_engine("auto", blocks) == "publication"
+    assert resolve_pdf_engine("auto", blocks) == "composite"
 
 
-def test_pdf_engine_zero_area_bbox_is_not_geometry() -> None:
-    # A stamped zero-area box (plain-text fallback) must not count as geometry:
-    # a formula with no usable box reflows rather than routing rigid.
+def test_pdf_engine_zero_area_bbox_converges_to_composite() -> None:
     blocks = [_block("f", BlockType.FORMULA, bbox=_box(x1=0.0, y1=0.0))]
-    assert resolve_pdf_engine("auto", blocks) == "publication"
+    assert resolve_pdf_engine("auto", blocks) == "composite"
 
 
-def test_pdf_engine_formula_block_drives_has_math() -> None:
-    # 1 formula among 6 blocks: struct share ~0.167 stays below the threshold,
-    # so rigid can only come from the formula block itself.
+def test_pdf_engine_formula_block_routes_composite() -> None:
     blocks = [_block(f"p{i}", BlockType.NARRATIVE, bbox=_box()) for i in range(5)]
     blocks.append(_block("f", BlockType.FORMULA, bbox=_box()))
-    assert resolve_pdf_engine("auto", blocks) == "rigid"
+    assert resolve_pdf_engine("auto", blocks) == "composite"
 
 
 def test_pdf_engine_structural_share_reaches_threshold() -> None:
@@ -298,82 +303,59 @@ def test_pdf_engine_structural_share_reaches_threshold() -> None:
         _block("p4", BlockType.NARRATIVE, bbox=_box()),
         _block("t", BlockType.TABLE, bbox=_box()),
     ]
-    # 1 / 5 = 0.20 exactly -> rigid.
-    assert resolve_pdf_engine("auto", blocks) == "rigid"
+    assert resolve_pdf_engine("auto", blocks) == "composite"
 
 
-def test_pdf_engine_no_blocks_reflows() -> None:
-    assert resolve_pdf_engine("auto", []) == "publication"
+def test_pdf_engine_no_blocks_routes_composite() -> None:
+    assert resolve_pdf_engine("auto", []) == "composite"
 
 
 def test_pdf_engine_requested_rigid_short_circuits() -> None:
     assert resolve_pdf_engine("rigid", [_block("p", BlockType.NARRATIVE)]) == "rigid"
 
 
-def test_pdf_engine_manifest_formula_heavy_forces_math() -> None:
+def test_pdf_engine_requested_composite_short_circuits() -> None:
+    assert resolve_pdf_engine("composite", [_block("p", BlockType.NARRATIVE)]) == "composite"
+
+
+def test_pdf_engine_manifest_formula_heavy_routes_composite() -> None:
     blocks = [_block("p", BlockType.NARRATIVE, bbox=_box())]
     run = RunMetadata(route_decision={"formula_heavy": True})
-    assert resolve_pdf_engine("auto", blocks, _manifest(run)) == "rigid"
+    assert resolve_pdf_engine("auto", blocks, _manifest(run)) == "composite"
 
 
-def test_pdf_engine_manifest_multicolumn_share_routes_rigid() -> None:
+def test_pdf_engine_manifest_multicolumn_share_routes_composite() -> None:
     blocks = [_block("p", BlockType.NARRATIVE, bbox=_box())]
     run = RunMetadata(route_decision={"multicolumn_page_share": 0.3})
-    assert resolve_pdf_engine("auto", blocks, _manifest(run)) == "rigid"
+    assert resolve_pdf_engine("auto", blocks, _manifest(run)) == "composite"
 
 
-def test_pdf_engine_manifest_multicolumn_share_accepts_numeric_string() -> None:
-    blocks = [_block("p", BlockType.NARRATIVE, bbox=_box())]
-    run = RunMetadata(route_decision={"multicolumn_page_share": "0.25"})
-    assert resolve_pdf_engine("auto", blocks, _manifest(run)) == "rigid"
-
-
-@pytest.mark.parametrize("bad", [None, "abc", {}])
-def test_pdf_engine_manifest_multicolumn_share_invalid_is_zero(bad: object) -> None:
-    blocks = [_block("p", BlockType.NARRATIVE, bbox=_box())]
-    run = RunMetadata(route_decision={"multicolumn_page_share": bad})
-    assert resolve_pdf_engine("auto", blocks, _manifest(run)) == "publication"
-
-
-def test_pdf_engine_manifest_route_decision_non_dict_is_ignored() -> None:
-    blocks = [_block("p", BlockType.NARRATIVE, bbox=_box())]
-    run = RunMetadata(route_decision={"formula_heavy": False})
-    assert resolve_pdf_engine("auto", blocks, _manifest(run)) == "publication"
-
-
-def test_pdf_engine_no_manifest_uses_block_signals_only() -> None:
+def test_pdf_engine_no_manifest_routes_composite() -> None:
     blocks = [
         _block("p", BlockType.NARRATIVE, bbox=_box()),
         _block("t", BlockType.TABLE, bbox=_box()),
     ]
-    # 1 / 2 = 0.5 -> rigid without any manifest.
-    assert resolve_pdf_engine("auto", blocks, None) == "rigid"
+    assert resolve_pdf_engine("auto", blocks, None) == "composite"
 
 
-def test_pdf_engine_unknown_request_falls_back_to_publication() -> None:
+def test_pdf_engine_unknown_request_falls_back_to_composite() -> None:
     blocks = [_block("p", BlockType.NARRATIVE, bbox=_box())]
-    assert resolve_pdf_engine("weird", blocks) == "publication"
+    assert resolve_pdf_engine("weird", blocks) == "composite"
 
 
-def test_pdf_engine_manifest_structural_page_share_routes_rigid() -> None:
-    blocks = [_block("p", BlockType.NARRATIVE, bbox=_box())]
-    run = RunMetadata(route_decision={"structural_page_share": 0.18})
-    assert resolve_pdf_engine("auto", blocks, _manifest(run)) == "rigid"
-
-
-def test_pdf_engine_paper_profile_routes_rigid() -> None:
+def test_pdf_engine_paper_profile_routes_composite() -> None:
     assert (
         resolve_render_engine_from_signals(
             "auto", has_math=False, struct_share=0.0, profile="paper"
         )
-        == "rigid"
+        == "composite"
     )
 
 
-def test_pdf_engine_academic_paper_category_routes_rigid() -> None:
+def test_pdf_engine_academic_paper_category_routes_composite() -> None:
     assert (
         resolve_render_engine_from_signals(
             "auto", has_math=False, struct_share=0.0, category="DocCategory.ACADEMIC_PAPER"
         )
-        == "rigid"
+        == "composite"
     )

@@ -1,6 +1,6 @@
-"""Dynamic PDF Link Annotation Relocation for Rigid Typesetting.
+"""Dynamic PDF Link Annotation Relocation.
 
-When the rigid typesetter overlays translated text onto a PDF page, the original
+When an overlay typesetter replaces translated text on a PDF page, the original
 text is stripped and the new translation is painted at new coordinates. In the
 original PDF, interactive elements like hyperlinks and academic citations
 (e.g., [1], Shi et al., 2026) are stored as `/Subtype /Link` annotation
@@ -101,10 +101,16 @@ def relocate_page_annotations(
     source_pdf: Path | str,
     overlay_path: str,
     strip_rects: Sequence[Rect],
+    overlay_page_no: int = 0,
 ) -> int:
     """Relocate PDF `/Subtype /Link` annotations on `page` to match overlay text.
 
-    Returns the count of successfully relocated annotations.
+    ``overlay_path`` is a translated page image; ``overlay_page_no`` (0-based)
+    selects which page of it holds the translation for ``page_no``. A per-page
+    overlay passes 0 (its only page); a whole composed document passes
+    ``page_no - 1``.
+
+    Returns the count of modified annotations (relocated + pruned).
     """
     annots = page.get("/Annots")
     if not annots or not strip_rects:
@@ -135,12 +141,16 @@ def relocate_page_annotations(
             logger.debug("Failed opening PDF for annot relocation on page %d: %s", page_no, exc)
             return 0
 
+        src_page = None
+        overlay_page = None
+        tp_src = None
+        tp_overlay = None
         try:
-            if page_no - 1 >= len(src_doc) or len(overlay_doc) < 1:
+            if page_no - 1 >= len(src_doc) or len(overlay_doc) <= overlay_page_no:
                 return 0
 
             src_page = src_doc[page_no - 1]
-            overlay_page = overlay_doc[0]
+            overlay_page = overlay_doc[overlay_page_no]
 
             tp_src = src_page.get_textpage()
             tp_overlay = overlay_page.get_textpage()
@@ -202,17 +212,22 @@ def relocate_page_annotations(
                 else:
                     # Unmatched link in a stripped region: mark for pruning to avoid ghost clicks
                     dead_indices.add(idx)
-
-            tp_src.close()
-            tp_overlay.close()
-            src_page.close()
-            overlay_page.close()
-            src_doc.close()
-            overlay_doc.close()
         except Exception as exc:
             logger.debug("Error during annot relocation on page %d: %s", page_no, exc)
+        finally:
+            if tp_src is not None:
+                tp_src.close()
+            if tp_overlay is not None:
+                tp_overlay.close()
+            if src_page is not None:
+                src_page.close()
+            if overlay_page is not None:
+                overlay_page.close()
+            src_doc.close()
+            overlay_doc.close()
 
     # Prune ghost links so users don't encounter dead/phantom click zones
+    pruned_count = len(dead_indices)
     if dead_indices:
         filtered_annots = pikepdf.Array([a for i, a in enumerate(annots) if i not in dead_indices])
         page["/Annots"] = filtered_annots
@@ -223,5 +238,11 @@ def relocate_page_annotations(
             relocated_count,
             page_no,
         )
+    if pruned_count > 0:
+        logger.info(
+            "Pruned %d dead/phantom link annotation(s) on page %d",
+            pruned_count,
+            page_no,
+        )
 
-    return relocated_count
+    return relocated_count + pruned_count

@@ -149,10 +149,20 @@ def _find_companion_paths(
         )
     if not is_rigid and not stem.endswith("_rigid"):
         names.append(f"{stem}_rigid.pdf")
-    names.append(f"{stem}_reflow.pdf")
     if stem.endswith("_mono"):
         names.append(f"{stem[: -len('_mono')]}_bilingual{result_path.suffix}")
-    return [p for p in (result_path.with_name(n) for n in names) if p.exists() and p != result_path]
+
+    res_mtime = result_path.stat().st_mtime if result_path.exists() else 0.0
+    companions: list[Path] = []
+    for p in (result_path.with_name(n) for n in names):
+        if not p.exists() or p == result_path:
+            continue
+        # Stale artifact rejection: a companion must have been written in the same
+        # run window as the primary deliverable (within 180s), not days ago.
+        if res_mtime > 0 and abs(p.stat().st_mtime - res_mtime) > 180:
+            continue
+        companions.append(p)
+    return companions
 
 
 def translate(

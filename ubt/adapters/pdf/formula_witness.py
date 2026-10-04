@@ -11,8 +11,8 @@ measuring pixels would report those differences as errors.
 
 The witness is zero-token and fail-open by design: any measurement problem
 returns ``unwitnessable`` and the caller keeps whatever it had. A formula that
-fails a structural check is swapped for its source graphic by the caller
-(``TypstReconstructor._witness_math_lines``), which is lossless.
+fails a structural check is swapped for its source graphic by the caller,
+which is lossless.
 
 Calibration on chapter-3's 68 rendered display formulas (tight source crops
 with glue-bled neighbour lines trimmed): the surviving flags are

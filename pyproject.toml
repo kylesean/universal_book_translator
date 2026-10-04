@@ -6,16 +6,16 @@ build-backend = "hatchling.build"
 packages = ["ubt"]
 
 # The sdist has no install use beyond source builds, so keep it to what a
-# distributor actually needs. Without this it bundled 174 tests/ entries
-# (including the 11 MB tests/baselines/standard-alice EPUB), making every PyPI
-# sdist download ~13 MB.
+# distributor actually needs. Without this it bundled every ``tests/`` entry --
+# fixtures plus generated PDFs/EPUBs -- and every PyPI sdist download paid for
+# them.
 #
 # ``docs/`` is intentionally unversioned (gitignored) and changes too often to
 # track, so it is excluded from the sdist too. ``README.md`` no longer links
-# into it, so the archive stays self-consistent without it. The generated
-# synthetic corpus lives under ``tests/fixtures/``, which is both gitignored and
-# covered by the ``tests/`` exclude below, so no regenerated PDF can reach the
-# archive.
+# into it, so the archive stays self-consistent without it. Test-generated
+# fixtures are written under ``tests/`` at run time (gitignored, e.g. the
+# ``pypdf`` builders in ``tests/pdf_builders.py``) and are covered by the
+# ``tests/`` exclude below, so none can reach the archive.
 [tool.hatch.build.targets.sdist]
 exclude = [
     "tests/",
@@ -81,19 +81,18 @@ dev = [
     # cap (6h on GitHub Actions). 600s rather than 300s: the deterministic tier
     # is seconds (slowest baseline e2e ≈ 1.4s), but the
     # slow-marked live neural-QE cases inherit addopts whenever addopts is not
-    # overridden, and a CometKiwi subprocess has already blown a 300s budget in
-    # this repo's own notes (tests/integration/test_local_model_baseline.py).
+    # overridden, and a CometKiwi subprocess has already blown a 300s budget on
+    # this project before.
     # Anyone running the live tiers should pass `-o addopts=""`, which clears
     # the timeout along with the marker filter (it replaces addopts wholesale).
     "pytest-timeout>=2.3,<3.0",
     "mypy>=1.10.0",
     "ruff>=0.4.8",
-    # CI parity: ubt/mcp/server.py imports mcp at module scope and
-    # tests/unit/test_mcp_server.py imports that module, so the `dev` env used
-    # by the CI matrix must carry it. Without this pin `uv sync --extra dev`
-    # left mcp absent, and `mypy --strict ubt tests` failed with
-    # import-not-found on ubt/mcp/server.py while pytest errored at
-    # collection. Kept in lockstep with the `mcp` extra below on purpose —
+    # CI parity: ubt/mcp/server.py imports mcp at module scope, so the `dev`
+    # env used by the CI matrix must carry it or `mypy --strict ubt tests`
+    # fails with import-not-found on that module. Without this pin
+    # `uv sync --extra dev` left mcp absent and the type gate broke.
+    # Kept in lockstep with the `mcp` extra below on purpose —
     # optional-dependencies cannot reference another extra.
     "mcp>=2.0.0",
     # Fixture PDFs are written with pypdf (tests/pdf_builders.py) — a
@@ -255,9 +254,10 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 # Default loop runs the fast subset; heavy integration/baselines opt in via
-# `pytest -o addopts=""` (everything) or `-m slow` (slow only). Remote CI is
-# parked under .github/workflows.disabled/ during private iteration, so the
-# local git hooks are the gate (see docs/guides/CI_AND_QUALITY_GATES.md).
+# `pytest -o addopts=""` (everything) or `-m slow` (slow only). Remote CI
+# (.github/workflows/ci.yml) runs the fast tier everywhere and the slow tier
+# with a checksum-pinned typst; the local git hooks stay the inner-loop gate
+# (see docs/guides/CI_AND_QUALITY_GATES.md).
 #
 # `--timeout=600` (pytest-timeout, dev extra) caps any single test: a hang fails
 # in 10 minutes instead of sitting until the runner's wall-clock cap. It rides

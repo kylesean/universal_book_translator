@@ -13,6 +13,7 @@ from __future__ import annotations
 import html
 import re
 
+from ubt.core.ir.bifurcation import SEMANTIC_BREAK_TOKEN
 from ubt.core.language_profile import PROFILES
 
 #: Wrapper tags the extractor treats as the answer envelope. A source span that
@@ -270,6 +271,7 @@ def build_rich_draft_prompt(
         f"   - Autonomously correct minor OCR typos, broken ligatures, and hyphenation in context.\n"
         f"   - If sidebar/callout text is horizontally interleaved across columns with the main narrative, disentangle them: translate the main narrative coherently, separating sidebars/notes clearly.\n"
         f"   - Format distinct conceptual thoughts into natural, readable paragraphs separated by double newlines (\\n\\n).\n"
+        f"   - [Semantic Break & Layout Collision Detection]: If the input paragraph contains an accidental layout collision (e.g. text from two different columns glued together, mid-sentence column jumps, or stray page numbers/headers inserted into prose), insert the delimiter {SEMANTIC_BREAK_TOKEN} at the boundary between the disjoint passages in your translation so the system can bifurcate them into distinct blocks.\n"
         f"   - DO NOT transcribe or echo nonsensical OCR symbol strings, stray page numbers, or broken publisher boilerplate fragments into the target output.\n"
         f"5. [Scientific Math & Formula Fidelity]:\n"
         f"   - Reconstruct all inline physical variables, mathematical symbols, Greek letters, and sub/superscript notations (such as Vtm, kBT/q, Vch(0)=Vs, psi(x,y), ni, eps_si) into standard LaTeX inline math syntax enclosed by single dollar signs ($...$, e.g. $V_{{tm}}$, $k_B T / q$, $V_{{ch}}(0) = V_s$, $\\psi(x, y)$). Never leave them as flattened plain ASCII strings.\n"

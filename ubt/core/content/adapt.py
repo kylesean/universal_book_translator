@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Sequence
 
+from ubt.core.config import INPLACE_ENGINES, canonical_render_engine
 from ubt.core.content.graph import ContentGraph
 from ubt.core.content.nodes import (
     AssetDescriptor,
@@ -143,19 +144,22 @@ def _asset_node(
     reasons = {_skip_reason(f) for f in flags}
     verified = False
     corrupt = False
+    # Every source-canvas engine (``rigid``/``composite``) keeps the page as the
+    # canvas, so its non-text nodes survive whole rather than being reconstructed.
+    inplace = canonical_render_engine(engine) in INPLACE_ENGINES
     if reasons & _DECORATIVE_SKIP_REASONS:
         integrity = AssetIntegrity.DROPPED
         detail = "intentional:" + ",".join(sorted(reasons & _DECORATIVE_SKIP_REASONS))
     elif flags and not _all_intentional(flags):
         integrity = AssetIntegrity.MISSING
         detail = f"render:{_skip_reason(flags[0])}"
-    elif engine != "rigid" and block.id in substituted_ids:
+    elif not inplace and block.id in substituted_ids:
         # The formula witness failed and the renderer swapped in the source
         # graphic: lossless by construction, so the asset is preserved opaque.
         integrity = AssetIntegrity.PRESERVED_OPAQUE
         detail = "witness_substituted"
         verified = True
-    elif engine == "rigid":
+    elif inplace:
         # The source canvas is kept, so every non-text node survives whole.
         integrity = AssetIntegrity.PRESERVED_OPAQUE
         detail = ""

@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Literal
 
-from ubt.model.span import CanonicalSource, Span
+from ubt.model.span import CanonicalSource, CompositeSpan, Span
 
 
 class Confidence(StrEnum):
@@ -81,7 +81,7 @@ class Element:
 
     id: str
     spine_index: int
-    span: Span
+    span: Span | CompositeSpan
     confidence: Confidence = Confidence.INFERRED
     #: A decorative element (banner, ornament) may be dropped; anything else
     #: must resolve to a translated or preserved realization.

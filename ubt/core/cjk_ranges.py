@@ -118,6 +118,14 @@ def is_cjk_char(ch: str) -> bool:
     return any(lo <= code <= hi for lo, hi in CJK_RANGES)
 
 
+def is_cjk_wide_char(ch: str) -> bool:
+    """True when the character falls in :data:`CJK_WIDE_RANGES` (ideographs + punctuation + fullwidth forms)."""
+    if not ch:
+        return False
+    code = ord(ch)
+    return any(lo <= code <= hi for lo, hi in CJK_WIDE_RANGES)
+
+
 def contains_cjk(text: str) -> bool:
     """True when any character of the string falls in :data:`CJK_RANGES`."""
     return any(is_cjk_char(ch) for ch in text)

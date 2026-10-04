@@ -2,7 +2,7 @@
 
 Before this, "the theme" had five owners: ``language_profile`` (per-language
 fonts and localized figure/table prefixes), ``font_probe`` (which of those fonts
-the machine actually has), ``typst_constants.StyleProfile`` (the emitted bilingual
+the machine actually has), bilingual style profiles (the emitted bilingual
 size/fill constants), ``config.font_family`` (the user override), and the
 reconstructor's own size/leading defaults. A :class:`Theme` *composes* those into
 one frozen value resolved once per run, so a renderer reads one object instead of

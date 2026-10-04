@@ -10,8 +10,7 @@ this module rasterizes the emitted Typst table and compares its structure
 
 Like the formula witness it is zero-token and fail-open: any measurement
 problem returns ``unwitnessable`` and the caller keeps the reconstruction. A
-table that fails is swapped for its source graphic by
-``TypstReconstructor._crop_table_fallback`` (lossless, Axiom A).
+table that fails is swapped for its source graphic (lossless, Axiom A).
 
 The tolerances are wider than the formula band on purpose: a Typst booktabs
 table legitimately differs from the source's ruled grid in stroke weight,

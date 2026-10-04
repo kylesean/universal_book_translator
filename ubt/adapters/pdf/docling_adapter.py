@@ -38,8 +38,7 @@ from ubt.adapters.pdf.docling_parser import (
     extract_manifest as parser_extract_manifest,
 )
 from ubt.adapters.pdf.docling_render import DoclingRenderStrategy
-from ubt.adapters.pdf.typst_fragments import sanitize_font_family
-from ubt.adapters.pdf.typst_reconstructor import TypstReconstructor
+from ubt.adapters.pdf.font_metrics import sanitize_font_family
 from ubt.core.env import has_accelerator as _has_accelerator
 from ubt.core.ir.models import BookManifest, ChapterIR, IRBlock
 from ubt.core.ir.render_plan import RenderOutcome, RenderPlan
@@ -91,7 +90,6 @@ class DoclingPDFAdapter(BasePDFEngineAdapter):
 
     def __init__(
         self,
-        reconstructor: TypstReconstructor | None = None,
         alternator: BilingualAlternator | None = None,
         diagram_localizer: DiagramLocalizer | None = None,
         ocr_mode: str = "auto",
@@ -104,7 +102,6 @@ class DoclingPDFAdapter(BasePDFEngineAdapter):
         font_family: str | None = None,
         allow_page_upload: bool = False,
     ) -> None:
-        self.reconstructor = reconstructor or TypstReconstructor()
         self.alternator = alternator or BilingualAlternator()
         self.diagram_localizer = diagram_localizer or DiagramLocalizer()
         self.ocr_mode = ocr_mode
@@ -130,7 +127,6 @@ class DoclingPDFAdapter(BasePDFEngineAdapter):
         # visual gate. ``None`` until the first render. Reset on every render.
         self.last_render_outcome: RenderOutcome | None = None
         self._renderer = DoclingRenderStrategy(
-            reconstructor=self.reconstructor,
             alternator=self.alternator,
             diagram_localizer=self.diagram_localizer,
             font_family=None,
@@ -142,7 +138,7 @@ class DoclingPDFAdapter(BasePDFEngineAdapter):
 
     @property
     def font_family(self) -> str | None:
-        """Publication font family, mirrored onto both render engines.
+        """Publication font family, mirrored onto the render strategy.
 
         The pipeline pushes the configured value in through duck-typing
         (``hasattr(adapter, "font_family")``), so this must be a property: a
@@ -158,7 +154,6 @@ class DoclingPDFAdapter(BasePDFEngineAdapter):
         clean = sanitize_font_family(value)
         self._font_family = clean
         self._renderer.font_family = clean
-        self.reconstructor.font_family = clean
 
     def apply_config(self, runtime_config: AdapterRuntimeConfig) -> None:
         """Take the OCR / formula / render knobs the pipeline resolved for this run.
@@ -181,35 +176,20 @@ class DoclingPDFAdapter(BasePDFEngineAdapter):
         # The page-image egress gate comes from the resolved config, not a
         # second ``os.environ`` read in the parser.
         self.allow_page_upload = runtime_config.allow_page_upload
-        # Setter mirrors the sanitized name onto the render strategy + reconstructor.
+        # Setter mirrors the sanitized name onto the render strategy.
         self.font_family = runtime_config.font_family
-        reconstructor = self.reconstructor
-        # Direct assignment: these attributes are set unconditionally in
-        # TypstReconstructor.__init__, and the hasattr guards contradicted
-        # this adapter's own no-probe policy (see ports.py).
-        reconstructor.formula_render = runtime_config.formula_render
-        reconstructor.math_backend = runtime_config.math_backend
-        # Content-addressed cache for the pixel witnesses (content-addressed cache layer):
-        # a re-render reuses the compile+raster verdict per formula/table.
-        from ubt.cache.store import DiskCacheStore
-
-        reconstructor.witness_cache = (
-            DiskCacheStore(runtime_config.cache_dir) if runtime_config.cache_dir else None
-        )
         # The analyze cache (content-addressed cache layer): the Docling layout+formula pass
         # is a pure function of the file, page range, enrichment policy and
         # parser code, so a resumed or re-run job reuses the extraction.
-        from ubt.cache.store import DiskCacheStore as _DiskCacheStore
+        from ubt.cache.store import DiskCacheStore
 
         self.analysis_cache = (
-            _DiskCacheStore(runtime_config.cache_dir) if runtime_config.cache_dir else None
+            DiskCacheStore(runtime_config.cache_dir) if runtime_config.cache_dir else None
         )
 
     def close(self) -> None:
-        """Release adapter-owned subprocesses (the MathJax node renderer)."""
-        closer = getattr(self.reconstructor, "close", None)
-        if callable(closer):
-            closer()
+        """Release adapter-owned subprocesses / resources."""
+        pass
 
     @property
     def engine_name(self) -> str:
@@ -378,16 +358,24 @@ class DoclingPDFAdapter(BasePDFEngineAdapter):
         self, path: Path, page_range: tuple[int, int] | None = None
     ) -> list[IRBlock]:
         """Extract structured blocks using IBM Docling (delegates to docling_parser)."""
-        return extract_with_docling(
+        from ubt.adapters.pdf.docling_crosscheck import cross_check_blocks_with_pdfium
+        from ubt.core.ir.continuation import fuse_continuation_blocks
+
+        blocks = extract_with_docling(
             path,
             page_range,
             symbols=_docling_symbols,
             enrich=self._resolve_formula_enrichment(path),
         )
+        blocks = cross_check_blocks_with_pdfium(blocks, path)
+        return fuse_continuation_blocks(blocks)
 
     def _extract_with_oxide(self, path: Path) -> list[IRBlock]:
         """Fallback lightweight text extractor using pdf_oxide."""
-        return extract_with_oxide(path)
+        from ubt.core.ir.continuation import fuse_continuation_blocks
+
+        blocks = extract_with_oxide(path)
+        return fuse_continuation_blocks(blocks)
 
     async def render_blocks(
         self,
