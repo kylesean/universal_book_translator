@@ -219,7 +219,10 @@ def _terminology_and_structure_pass(
         if fb.target_text and not fb.skip_translate:
             # 0. Glossary enforcement (opt-in)
             # Establish canonical terminology first so subsequent publishing polish formats it properly.
-            if glossary_enforcer:
+            # A quarantined block ships the source verbatim, so substituting
+            # target-language terms into it (and later validating it against the
+            # glossary) can only produce Chinglish mash and false drift.
+            if glossary_enforcer and fb.status is not BlockStatus.BLOCKED_HUMAN:
                 enforced_text, records = glossary_enforcer.enforce(fb.target_text)
                 if records:
                     enforced_spans += len(records)
@@ -246,19 +249,20 @@ def _terminology_and_structure_pass(
                     }
                 )
 
-            glossary_res = glossary_validator.validate(fb.source_text, fb.target_text)
-            if not glossary_res.is_valid:
-                flag = f"glossary_inconsistency: {glossary_res.message}"
-                if flag not in fb.error_flags:
-                    fb.error_flags.append(flag)
-                    modified_checkpoints.append(
-                        {
-                            "block_id": fb.id,
-                            "target_text": fb.target_text,
-                            "status": fb.status,
-                            "error_flags": fb.error_flags,
-                        }
-                    )
+            if fb.status is not BlockStatus.BLOCKED_HUMAN:
+                glossary_res = glossary_validator.validate(fb.source_text, fb.target_text)
+                if not glossary_res.is_valid:
+                    flag = f"glossary_inconsistency: {glossary_res.message}"
+                    if flag not in fb.error_flags:
+                        fb.error_flags.append(flag)
+                        modified_checkpoints.append(
+                            {
+                                "block_id": fb.id,
+                                "target_text": fb.target_text,
+                                "status": fb.status,
+                                "error_flags": fb.error_flags,
+                            }
+                        )
 
             # 2. Structural HTML delta validation (preserve draft with warning mark)
             html_res = html_validator.validate(fb.source_text, fb.target_text)
