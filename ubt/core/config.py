@@ -1085,8 +1085,12 @@ class UBTConfig(BaseSettings):
     def allowed_base_dirs(self) -> list[Path]:
         """Parse allowed_dirs into resolved base directories.
 
-        Supports ``os.pathsep`` (';' on Windows, ':' on POSIX) as well as comma/semicolon,
-        avoiding accidental splitting of Windows drive letters (e.g. C:\\path).
+        Splits on comma and semicolon always, plus the platform path separator
+        (``os.pathsep``: ':' on POSIX, ';' on Windows) when it is not already
+        one of them. On Windows the pathsep is ';' and is already covered, so a
+        drive letter's ':' is never treated as a separator (``C:\\path`` stays
+        whole); on POSIX ':' is the pathsep and is added, so a pathsep-joined
+        list works.
         """
         import os
         import re
@@ -1094,8 +1098,11 @@ class UBTConfig(BaseSettings):
         bases: list[Path] = []
         raw = self.allowed_dirs.strip()
         if raw:
-            parts = re.split(r"[,;]", raw) if os.pathsep != ":" else re.split(r"[:,;]", raw)
-            for part in parts:
+            separators = {",", ";"}
+            if os.pathsep:
+                separators.add(os.pathsep)
+            char_class = "[" + re.escape("".join(sorted(separators))) + "]"
+            for part in re.split(char_class, raw):
                 if part.strip():
                     p = Path(part.strip()).resolve()
                     if p not in bases:
