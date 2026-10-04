@@ -6,9 +6,11 @@ delivery still gets a graph built here, so the reconciliation gate applies to
 *all* render paths from day one.
 
 Asset policy (Axiom A): a non-text block is only RECONSTRUCTED alongside the
-round-trip check that verifies it. A rigid (source-canvas) render is
-PRESERVED_OPAQUE by construction; a reflow placement is RECONSTRUCTED and runs
-the structural verifier in :func:`graph_from_blocks` -- anything left
+round-trip check that verifies it. Every canonical PDF engine (``rigid`` /
+``composite`` / ``publication``) composes onto the source page through the
+unified LayerCompositor, so its non-text nodes are PRESERVED_OPAQUE by
+construction; only a non-source-canvas engine name falls back to RECONSTRUCTED
+and runs the structural verifier in :func:`graph_from_blocks` -- anything left
 unverified is recorded as a *warning* by
 :func:`ubt.core.content.contract.reconcile`.
 """
@@ -144,8 +146,9 @@ def _asset_node(
     reasons = {_skip_reason(f) for f in flags}
     verified = False
     corrupt = False
-    # Every source-canvas engine (``rigid``/``composite``) keeps the page as the
-    # canvas, so its non-text nodes survive whole rather than being reconstructed.
+    # Every canonical PDF engine (``rigid``/``composite``/``publication``) keeps
+    # the source page as the canvas, so its non-text nodes survive whole rather
+    # than being reconstructed.
     inplace = canonical_render_engine(engine) in INPLACE_ENGINES
     if reasons & _DECORATIVE_SKIP_REASONS:
         integrity = AssetIntegrity.DROPPED
@@ -223,11 +226,13 @@ def graph_from_blocks(
 ) -> ContentGraph:
     """Build the delivery contract's content graph from the delivered blocks.
 
-    ``engine`` selects the asset-preservation policy: ``rigid`` preserves every
-    non-text node whole, ``publication``/``reflow`` reconstructs it and runs the
-    structural verification. ``witness_findings`` / ``table_fallbacks`` are the
-    ``"<block_id>: <detail>"`` lines for assets the renderer swapped for their
-    source graphic; those are honoured as preserved-opaque, not reconstructions.
+    ``engine`` selects the asset-preservation policy. Every canonical PDF engine
+    (``rigid``/``composite``/``publication``) composes onto the source page, so
+    its non-text nodes are preserved whole; the reconstruction path is a fallback
+    for non-source-canvas engine names only. ``witness_findings`` /
+    ``table_fallbacks`` are the ``"<block_id>: <detail>"`` lines for assets the
+    renderer swapped for their source graphic; those are honoured as
+    preserved-opaque, not reconstructions.
     """
     substituted_ids = frozenset(
         f.split(":", 1)[0].strip() for f in (*witness_findings, *table_fallbacks) if f and ":" in f

@@ -9,8 +9,8 @@ This module runs the *real* PDF render path over a handful of source-text
 blocks, before Stage 3, so toolchain-shaped failures (missing binary, version
 drift, generated markup the compiler rejects) exit non-zero at zero token cost.
 It is not a full rehearsal: defects that only appear once translated text
-exists (e.g. the `#box[...](...)` code-mode crash fixed by a98a315) still fall
-through to the Stage 6 healer — what changes is that a book cannot finish
+exists (e.g. the `#box[...](...)` code-mode crash fixed by a98a315) still
+surface only at export — what changes is that a book cannot finish
 translation only to discover the renderer itself is dead.
 """
 

@@ -75,8 +75,7 @@ async def run_extraction_witness_stage(ctx: StageContext, blocks: BlockReader) -
 
     Math-bearing fonts with no ``/ToUnicode`` make every library guess the same
     wrong thing, so cross-channel agreement *hides* the damage; this looks for it
-    directly and flags the confirmed pages while the text is still cheap to
-    re-do (docs/design/PDF_SKILL_BORROWINGS.md).
+    directly and flags the confirmed pages while the text is still cheap to re-do.
     """
     if ctx.source_pdf_path is None:
         return
@@ -107,8 +106,8 @@ async def run_extraction_witness_stage(ctx: StageContext, blocks: BlockReader) -
             logger.warning(
                 "Extraction witness for job %s: %d/%d pages carry "
                 "font-encoding damage (%d residue chars); formulas in "
-                "source text are already wrong before translation — "
-                "see docs/design/PDF_SKILL_BORROWINGS.md",
+                "source text are already wrong before translation — treat the "
+                "affected pages as visual-fallback candidates",
                 ctx.job_id,
                 stats["confirmed_pages"],
                 stats["pages"],
@@ -193,8 +192,8 @@ async def run_mode_advisory_stage(
         render.emit_secondary_engine = "rigid"
         engine_advisory_msg = (
             "Layout tradeoff advisory: this structure-bearing PDF is rendered with "
-            "the reflow engine as requested; a zero-cost companion '*_rigid.pdf' "
-            "artifact was scheduled for layout-faithful verification."
+            "the requested engine; a zero-cost companion '*_rigid.pdf' artifact "
+            "was scheduled for layout-faithful verification."
         )
         logger.warning("Job %s: %s", ctx.job_id, engine_advisory_msg)
     adv_dict = dict(advisory.to_dict())
@@ -316,16 +315,13 @@ def apply_layout_tradeoff_advisory(
 ) -> None:
     """Surface the rigid-on-formula-dense tradeoff in the delivered report.
 
-    The rigid engine keeps figures and multi-row tables exactly where they are
-    (the reflow engine shatters them — arXiv 2609.20519 lost 4/6 figures and
-    Table 1), at the cost of imperfect inline-math typography. ``auto`` selects
-    rigid for these documents on purpose, so this is an advisory the reader can
-    weigh, never an UNSUITABLE stop.
+    The source-canvas composition keeps figures and multi-row tables exactly
+    where they are, at the cost of imperfect inline-math typography. When the
+    user forces ``rigid`` on such a document, this advisory lets the reader
+    weigh the tradeoff; it is never an UNSUITABLE stop.
 
-    The criterion resolves the engine the run will actually use:
-    ``requested_engine`` is still ``auto`` here, so comparing it to ``rigid``
-    directly would silently skip the advisory on auto-routed documents — exactly
-    when the reader did not choose the tradeoff and most needs to see it.
+    The criterion resolves the engine the run will actually use, so only an
+    explicit ``rigid`` request reaches the advisory.
     """
     rd = getattr(getattr(manifest, "run", None), "route_decision", None)
     structural_page_share = 0.0

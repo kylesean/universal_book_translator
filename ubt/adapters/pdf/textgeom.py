@@ -1,6 +1,6 @@
 """PDF text geometry: pdfium line extraction plus row/column primitives.
 
-Pure geometry layer shared by the rigid typesetter and the VLM coordinate
+Pure geometry layer shared by the PDF compositor and the VLM coordinate
 bridge: pdfium line rects in column-aware reading order, word-soup row glue,
 normalized matching text, and small rect helpers. No Typst, no raster
 sampling, no ledger policy — safe to unit-test with synthetic rects.

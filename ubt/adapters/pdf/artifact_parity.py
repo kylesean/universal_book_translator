@@ -306,16 +306,15 @@ def asset_skip_findings(
 ) -> list[ParityFinding]:
     """Classify the renderer's asset skips into visual-gate findings.
 
-    A reflow render that fails to stage a content figure drops it from the
-    delivered PDF while still reporting full render coverage; the only other
-    signal is a ``//`` comment in the ``.typ`` source. Classify each skip by the
+    A render that fails to stage a content figure drops it from the delivered
+    PDF while still reporting full render coverage. Classify each skip by the
     IR block it names: a content image/table that could not be embedded is a
     delivery defect (``major``, code ``content_asset_missing``), while a
     decorative banner or a missing cover is cosmetic (``info``). A decorative
     reason wins over the block type, so a decorative banner typed as an IMAGE
     block is not escalated. The caller decides which render route this applies
-    to — it is meaningful for reflow, whose pages re-stage every asset, and not
-    for rigid, whose skip reasons are text-placement rather than asset loss.
+    to — it is meaningful only where the renderer re-stages assets, and not
+    where skip reasons are text-placement rather than asset loss.
     """
     by_id = {str(getattr(b, "id", "")): b for b in blocks}
     findings: list[ParityFinding] = []

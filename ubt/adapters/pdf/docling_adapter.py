@@ -7,7 +7,7 @@ The adapter orchestrates three extracted modules:
   fallback, textless-page VLM tiering, page-kind profiling);
 - :mod:`ubt.adapters.pdf.docling_blocks` — pure block shaping;
 - :mod:`ubt.adapters.pdf.docling_render` — IRBlocks → delivered artifact
-  (Typst reflow, rigid typesetting, bilingual interleaving, diagrams).
+  (LayerCompositor source-canvas composition, bilingual interleaving, diagrams).
 
 It keeps the module-level ``_docling_symbols`` / ``_has_accelerator`` import
 seams and the tested private-method surface as thin delegates so existing
@@ -143,7 +143,7 @@ class DoclingPDFAdapter(BasePDFEngineAdapter):
         The pipeline pushes the configured value in through duck-typing
         (``hasattr(adapter, "font_family")``), so this must be a property: a
         plain attribute would stop at the adapter while the render strategy
-        and the reflow emitter kept their own construction-time copies. Markup
+        kept its own construction-time copy. Markup
         characters are dropped because the name is interpolated into
         ``#set text(font: "...")``.
         """

@@ -1,8 +1,7 @@
 """Typst compilation primitives shared by the PDF typesetting paths.
 
-Subprocess probe used by the rigid typesetter (per-page overlay compile)
-and the math probe. The in-place statement-bisect fallback was retired with
-its engine.
+Subprocess probe used by the fragment typesetter (per-fragment compile) and the
+math probe. The in-place statement-bisect fallback was retired with its engine.
 
 Both helpers are total: a missing binary, a timeout, or an OS error becomes a
 ``(False, message)`` verdict (or a clean availability check) instead of an

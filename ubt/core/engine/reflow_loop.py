@@ -1,16 +1,14 @@
-"""Visual gate reflow control loop and self-healing orchestration.
+"""Visual gate control loop and quarantine orchestration.
 
-Coordinates post-render visual verification (T0/T1/T2) and single-pass
-self-healing:
+Coordinates post-render visual verification (T0/T1/T2):
 1. Runs post-render Visual Gate;
-2. If major/critical layout defects are found:
-   - Round 1: attempts typography tuning (scale: 92%, leading: 0.75em).
-     The rigid engine is excluded: it typesets from source zone geometry
-     and returns before the Typst reconstructor, so the retune would spend a
-     full re-render without changing a glyph;
-3. If defects persist after self-healing:
-   - Marks affected page blocks as NEEDS_HUMAN with visual_gate_failed flags;
-   - Persists visual_report.json to disk and SQLite ledger.
+2. If major/critical layout defects are found, marks the affected page blocks
+   as NEEDS_HUMAN with visual_gate_failed flags;
+3. Persists visual_report.json to disk and SQLite ledger.
+
+All PDF targets render through the unified LayerCompositor onto the source
+canvas, so there is no typography-retune self-healing pass: a defect is
+quarantined directly rather than re-rendered at a different scale.
 """
 
 from __future__ import annotations
@@ -126,12 +124,9 @@ class ReflowControlLoop:
         if isinstance(getattr(self.manifest, "metadata", None), dict):
             padding_pages = tuple(self.manifest.metadata.get("render_padding_pages") or ())
         # T1 (out of bounds) and the overlap check both read the SOURCE page's
-        # bboxes. That is the artifact for the rigid overlay, whose canvas is
-        # the original page, and for the alternating zipper, whose pages are the
-        # source pages. The reflow engine rebuilds every page at A4 and re-flows
-        # blocks across it, so a source rectangle says nothing about where its
-        # text landed and must not be fed to the gate as bounds (a narrower A4
-        # output would then flag every source-width block as out of bounds).
+        # bboxes, which describe the artifact: every PDF route composes onto the
+        # source page canvas, so a block's source rectangle is where its text
+        # lands.
         gate_blocks = blocks if self._output_keeps_source_geometry() else ()
         vlm_judge = self._build_vlm_judge()
         return await runner(
@@ -240,13 +235,12 @@ class ReflowControlLoop:
                 },
             )
 
-        # T0.55 asset-inclusion parity (reflow route only). The renderer records
-        # every figure/asset it could not stage; a reflow that drops a content
-        # figure still reports full render coverage, so this is the only gate
-        # that sees it. Rigid is excluded on purpose: its skip reasons are
-        # text-placement decisions (non_prose/spill), and its assets stay on the
-        # source canvas — asset loss there is already caught by
-        # ``image_count_changed`` above.
+        # T0.55 asset-inclusion parity. Guarded on a non-source-canvas engine:
+        # every PDF route currently composes onto the source page
+        # (LayerCompositor), so ``_output_keeps_source_geometry()`` is True and
+        # this gate is a no-op today. It stays as the guard for any engine whose
+        # output is re-typeset away from the source geometry, where a dropped
+        # content figure would otherwise go unreported.
         if not self._output_keeps_source_geometry():
             try:
                 from ubt.core.ports import asset_skip_findings, get_last_render_skips
@@ -264,12 +258,11 @@ class ReflowControlLoop:
                     stats={**gate.stats, "asset_skip_findings": len(skip_findings)},
                 )
 
-        # T0.6 render fidelity (advisory ruler, never a gate). The rigid route
-        # promises every non-text region stays pixel-intact, so its residual and
-        # painted coverage are measured on every run; the flag is an explicit
-        # opt-in for any other engine (a reflow render moves text off its source
-        # box, so the mask rectangles would be meaningless). ``gate.passed`` is
-        # untouched, so delivery is never blocked by it.
+        # T0.6 render fidelity (advisory ruler, never a gate). Every PDF route
+        # composes onto the source canvas, so the residual and painted coverage
+        # are measurable on every run; the flag is an explicit opt-in for any
+        # non-source-canvas engine. ``gate.passed`` is untouched, so delivery is
+        # never blocked by it.
         if source_pdf.exists() and (
             self._output_keeps_source_geometry() or self.render_fidelity_enabled
         ):

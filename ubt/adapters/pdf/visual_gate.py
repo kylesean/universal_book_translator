@@ -237,9 +237,9 @@ class _ArtifactBox:
 def artifact_text_boxes(pdf_path: Path, pages: Sequence[int]) -> list[_ArtifactBox]:
     """Per-line text boxes read from the rendered artifact itself (pdfium).
 
-    The deterministic T1 checks used the IR's *source* bboxes, which cannot see
-    a render that moved or clipped text inside a page — and were skipped
-    entirely on the reflow route. These are the artifact's own pdfium text rects
+    The deterministic T1 checks cannot rely on the IR's *source* bboxes alone:
+    they cannot see a render that moved or clipped text inside a page. These
+    are the artifact's own pdfium text rects
     (raw, not merged into reading-order lines: merging folds two overprinted runs
     at the same position into one rect and hides the very overlap T1 looks for).
     """
@@ -784,10 +784,9 @@ async def run_visual_gate(
             )
         )
     # T1 reads the artifact's OWN text boxes, not the IR's source bboxes: the IR
-    # cannot see a render that moved or clipped text inside a page, and it was
-    # skipped entirely on the reflow route. Fall back to the IR only when pdfium
-    # yields nothing, and say the artifact was not verified rather than report a
-    # clean pass.
+    # cannot see a render that moved or clipped text inside a page. Fall back to
+    # the IR only when pdfium yields nothing, and say the artifact was not
+    # verified rather than report a clean pass.
     geometry_pages = _geometry_pages(total)
     artifact_boxes = await asyncio.to_thread(artifact_text_boxes, pdf_path, geometry_pages)
     bounds = await asyncio.to_thread(page_bounds, pdf_path)

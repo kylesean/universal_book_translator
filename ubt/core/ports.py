@@ -294,7 +294,7 @@ def get_last_render_skips(adapter: Any) -> list[tuple[str, str]]:
     """Return the adapter's last-render per-block skip ledger.
 
     Duck-typed side channel: adapters that track fail-closed render skips
-    (the PDF rigid typesetter's ``spill`` / ``no_zone`` blocks) expose
+    (the PDF compositor's unstageable blocks) expose
     them as plain ``(block_id, reason)`` string tuples via
     ``last_render_skips``.
     Adapters without the attribute yield []. Never raises: malformed

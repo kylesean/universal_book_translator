@@ -1,7 +1,6 @@
 """Dump the core→compiler module-level import edges (read-only; exits non-zero on violation).
 
-The acceptance tool for the layering invariant documented in
-``docs/design/unified-compiler-evolution.md`` §6.1: a module-level ``ubt.core``
+The acceptance tool for the layering invariant: a module-level ``ubt.core``
 import of ``ubt.pipeline`` / ``ubt.segment`` / ``ubt.translate`` is a forbidden
 reverse edge, and a ``ubt.core.engine <-> ubt.pipeline`` package cycle fails
 this check. TYPE_CHECKING imports never enter the runtime import graph and are
@@ -14,7 +13,7 @@ import ast
 from pathlib import Path
 
 COMPILER = ("ubt.pipeline", "ubt.segment", "ubt.translate", "ubt.model")
-#: The zero-out-edge shared leaf: core→model is an inward edge, exempted in §6.1.
+#: The zero-out-edge shared leaf: core→model is an inward edge, exempted by design.
 _EXEMPT_LEAF = "ubt.model"
 
 

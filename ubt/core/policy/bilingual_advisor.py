@@ -55,7 +55,7 @@ _PROFILE_SENSITIVITY = {"paper": 1.0, "textbook": 1.0, "general": 0.8}
 
 # Advisor DualMode -> adapter render bilingual_mode value.
 # "monolingual" needs no adapter change: it maps to bilingual=False
-# (target-only), which the Typst reconstructor already supports.
+# (target-only), which the fragment typesetter already supports.
 RENDER_MODE_VALUE: dict[DualMode, str] = {
     "inline": "bilingual",
     "alternating": "alternating",

@@ -846,7 +846,12 @@ class ModelRouter:
             self._model_circuit = {
                 m: (cnt, exp) for m, (cnt, exp) in self._model_circuit.items() if exp > now
             }
-        # Circuit breaker: prioritize candidates whose circuit is healthy (cooldown expired)
+        # Circuit breaker: prioritize candidates whose circuit is healthy
+        # (cooldown expired). When *every* candidate is cooling the full chain is
+        # retried deliberately rather than failing the block: the cooldown is a
+        # 60s probe window, so refusing outright would sink a whole book during a
+        # transient provider-wide outage. The breaker still spares the healthy
+        # path from probing a known-bad model.
         healthy = [c for c in chain if self._model_circuit.get(c, (0, 0.0))[1] <= now]
         effective_chain = healthy or chain
 

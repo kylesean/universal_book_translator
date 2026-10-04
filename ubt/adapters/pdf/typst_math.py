@@ -229,7 +229,7 @@ def _sanitize_typst_math_variables(s: str) -> str:
     corruption is silent: it compiles with exit 0 and the atom-count gates see
     the same content, so the reader just gets ``hat(θ)`` printed where θ̂
     belonged. A pandoc identifier Typst truly rejects fails the compile and the
-    healer degrades that one formula to a verbatim line, which is the honest
+    fallback degrades that one formula to a verbatim line, which is the honest
     failure mode.
     """
     s, masked_spans = _mask_code_spans(s)
@@ -884,7 +884,7 @@ def _latex_math_to_typst_regex(latex: str) -> str:
             # into one identifier (``4\pi\varepsilon`` -> ``4piepsilon``), which
             # Typst rejects as an unknown variable -- and the identifier
             # sanitizer will not touch a token that starts after a digit, so the
-            # whole document's compile fails until the healer quotes it into a
+            # whole document's compile fails until the fallback quotes it into a
             # visibly wrong equation.
             out.append(_TEX_SYMBOL_MAP[cmd] + " ")
         else:
