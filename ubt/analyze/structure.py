@@ -151,10 +151,13 @@ def is_list_prefix(text: str) -> bool:
 
 
 #: Ordered markers a PDF line can open with: ``1.``, ``1.1.``, ``1)``, ``(1)``,
-#: ``a.``, ``(a)``, ``一、``. A trailing space is required so ``1.5`` stays a
-#: decimal, and dotted section numbers (a TOC title) match whole.
+#: ``a.``, ``(a)``, ``一、``, and their full-width forms (``（1）``, ``１.``). A
+#: trailing space is required so ``1.5`` stays a decimal, and dotted section
+#: numbers (a TOC title) match whole.
 _PDF_ORDERED_MARKER_RE = re.compile(
-    r"^\s*(\(?\d{1,3}(?:\.\d{1,3})*[.)]|\(?[a-zA-Z][.)]|[一二三四五六七八九十百]+[、.)])\s+"
+    r"^\s*([（(]?[0-9０-９]{1,3}(?:[.．][0-9０-９]{1,3})*[.．、)）]"
+    r"|[（(]?[a-zA-ZＡ-Ｚａ-ｚ][.．)）]"
+    r"|[一二三四五六七八九十百]+[、.．)）])\s+"
 )
 #: Unambiguous bullet glyphs -- a marker whether or not a space follows.
 _PDF_BULLETS = ("•", "◦", "‣", "▪", "●")

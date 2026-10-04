@@ -204,12 +204,14 @@ class FragmentTypesetter(Protocol):
 
 #: A translated list item that already opens with a marker (the model
 #: reproduced the bullet) is left untouched; only a markerless item gets one.
+#: Full-width forms (``（1）``, ``１.``, ``（a）``) are matched too, so a model
+#: that switches to CJK punctuation does not get a second marker.
 _LEADING_MARKER_RE = re.compile(
     r"^\s*(?:"
     r"[•⁃◦▪●*\-]"  # unordered bullet
-    r"|\(?\d{1,3}[.)、]"  # 1. 1) (1) 1、
-    r"|\(?[a-zA-Z][.)]"  # a. a) (a)
-    r"|[一二三四五六七八九十百]+[、.)]"  # 一、 二）
+    r"|[（(]?[0-9０-９]{1,3}[.．、)）]"  # 1. 1) (1) 1、 （1） １.
+    r"|[（(]?[a-zA-ZＡ-Ｚａ-ｚ][.．)）]"  # a. a) (a) （a）
+    r"|[一二三四五六七八九十百]+[、.．)）]"  # 一、 二）
     r")\s*"
 )
 

@@ -51,6 +51,16 @@ def test_an_item_with_no_extracted_marker_falls_back_to_a_bullet(marker: str | N
     assert overlay.text == "• 第一项"
 
 
+@pytest.mark.parametrize(
+    "target", ["1. 引言", "（1）引言", "１. 引言", "（a）项", "一、项", "3、项"]
+)
+def test_a_full_width_ordered_marker_is_not_doubled(target: str) -> None:
+    # A model that switches to CJK punctuation must not get a second marker.
+    block = _block(BlockType.LIST_ITEM, source="first item", target=target, marker="1.")
+    (overlay,) = overlays_from_blocks([block], None)
+    assert overlay.text == target
+
+
 def test_a_non_list_block_is_left_untouched() -> None:
     block = _block(BlockType.NARRATIVE, source="A paragraph.", target="一段。")
     (overlay,) = overlays_from_blocks([block], None)
