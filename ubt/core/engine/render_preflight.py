@@ -27,7 +27,7 @@ from ubt.core.exceptions import DocumentParseError
 from ubt.core.ir.models import BlockType, IRBlock
 from ubt.core.ir.render_plan import RenderPlan
 from ubt.core.policy.adaptive_policy import resolve_pdf_engine
-from ubt.core.ports import DocumentAdapter
+from ubt.core.ports import DocumentAdapter, get_last_render_skips
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +64,21 @@ def select_preflight_sample(
     return sorted(picked, key=lambda b: b.spine_index)
 
 
+def _placeholder_blocks(sample: list[IRBlock]) -> list[IRBlock]:
+    """The sample carrying each source text as its placeholder translation.
+
+    The compositor only overlays a block that already holds target text; a
+    source-only sample renders Layer 0 alone and never reaches the typesetter,
+    which would make this gate blind to a dead Typst toolchain. Substituting the
+    source text keeps the rehearsal on the real render path and hands the
+    compiler the markup (math, escapes) it has to accept.
+    """
+    return [
+        block.model_copy(update={"target_text": (block.source_text or "").strip() or "preflight"})
+        for block in sample
+    ]
+
+
 def _isolated_manifest(manifest: Any) -> Any:
     """Return a throwaway copy so a scratch render cannot mutate the run.
 
@@ -98,6 +113,7 @@ async def run_render_preflight(
         return
 
     sample = select_preflight_sample(blocks)
+    scratch_blocks = _placeholder_blocks(sample)
     metadata = getattr(manifest, "metadata", None) or {}
     # The render decision is the plan's (compiler render plan protocol); the
     # manifest metadata copy is a fallback for callers that pass no plan.
@@ -132,13 +148,26 @@ async def run_render_preflight(
     try:
         await adapter.render_blocks(
             manifest=scratch_manifest,
-            blocks=sample,
+            blocks=scratch_blocks,
             target_lang=target_lang,
             output_path=preflight_path,
             bilingual_mode=bilingual_mode,
             render_engine=render_engine,
             render_plan=render_plan,
         )
+        # LayerCompositor records a failed fragment as a skip and keeps the
+        # source instead of raising, so a dead toolchain would still exit zero.
+        # The preflight must fail when nothing at all was drawn, or a broken
+        # Typst only surfaces after the whole book has been billed.
+        from ubt.render.outputs import overlays_from_blocks
+
+        expected = overlays_from_blocks(scratch_blocks, None)
+        skips = get_last_render_skips(adapter)
+        if expected and len(skips) >= len(expected):
+            raise DocumentParseError(
+                f"Render pre-flight could not typeset any of the {len(expected)} "
+                f"sample fragment(s): {skips[:3]}"
+            )
     except DocumentParseError as exc:
         raise DocumentParseError(
             "Render pre-flight failed before any translation was billed "
