@@ -54,6 +54,10 @@ _REPETITION_PATTERN = re.compile(r"(.{4,20}?)\1{3,}")  # Detect 4+ repetitions o
 # sparse numeric tables like repeated "| 0 | 0 |" rows don't trip it).
 _REPETITION_LINE_RUN = 4
 _REPETITION_LINE_MIN_LETTERS = 3
+#: How many more identical lines the target may repeat than the source before a
+#: line-level repetition counts as a runaway loop rather than a preserved
+#: refrain. Mirrors ``_REPETITION_COUNT_SLACK`` for the flat detector.
+_REPETITION_LINE_RUN_SLACK = 2
 _LINE_LETTER_RE = re.compile(f"[A-Za-z{CJK_SCRIPT_CLASS}]")
 # URLs survive translation verbatim, so they are stripped before script-density
 # measurement (same rationale as HTML tags). Bare domains without a scheme or
@@ -166,14 +170,15 @@ _COMMON_SENTENCE_STARTERS = frozenset(
 )
 
 
-def _detect_line_repetition_loop(text: str) -> str | None:
-    """Return the first newline-separated hallucination-loop line, or None.
+def _repeated_line_runs(text: str) -> list[tuple[str, int]]:
+    """Contiguous runs of stripped-identical, letter-bearing lines (line, length).
 
-    A contiguous run of 4+ stripped-identical non-empty lines carrying 3+
-    letters/CJK is a loop. Blank lines reset the run: legitimate stanzas /
-    verses separated by whitespace stay exempt, and non-contiguous repeats
-    (list labels, table headers recurring between sections) never trigger.
+    A run is a sequence of 4+ stripped-identical non-empty lines carrying 3+
+    letters/CJK. Blank lines reset the run: legitimate stanzas / verses
+    separated by whitespace stay exempt, and non-contiguous repeats (list
+    labels, table headers recurring between sections) never trigger.
     """
+    runs: list[tuple[str, int]] = []
     run_line: str | None = None
     run_len = 0
     for raw in text.splitlines():
@@ -190,8 +195,25 @@ def _detect_line_repetition_loop(text: str) -> str | None:
         if run_len >= _REPETITION_LINE_RUN and len(_LINE_LETTER_RE.findall(line)) >= (
             _REPETITION_LINE_MIN_LETTERS
         ):
-            return line
-    return None
+            runs.append((line, run_len))
+    return runs
+
+
+def _detect_line_repetition_loop(text: str) -> str | None:
+    """Return the first newline-separated hallucination-loop line, or None."""
+    runs = _repeated_line_runs(text)
+    return runs[0][0] if runs else None
+
+
+def _max_repeated_line_run(text: str) -> int:
+    """Length of the longest repeated-line run in ``text`` (0 when none).
+
+    Used to align a target's line repetition against the source's: a target run
+    no longer than the source's own run is a faithfully preserved refrain, but a
+    runaway loop that repeats far more lines than the source did is a
+    hallucination even when the source repeats something unrelated.
+    """
+    return max((run_len for _, run_len in _repeated_line_runs(text)), default=0)
 
 
 def _has_repeated_line_run(text: str) -> bool:
@@ -681,31 +703,36 @@ class FastPassFilter:
             )
 
         # 2. Hallucination repetition check (ignoring formatting and markdown table dividers).
-        # A source refrain/table may legitimately repeat; in that case the target
-        # must not be rejected merely for preserving the same structure.
-        source_has_repeated_lines = _has_repeated_line_run(src_clean)
-        if not source_has_repeated_lines:
-            for m in _REPETITION_PATTERN.finditer(tgt_clean):
-                repeated_unit = m.group(1)
-                # Ignore pure punctuation/formatting repeats (e.g. markdown table lines |---|---|, dashes, dots)
-                if not re.search(f"[\\w{HAN_UNIFIED_CLASS}]", repeated_unit):
-                    continue
-                matched_text = m.group(0)
-                if re.match(r"^\|?[\s\-:|]+\|?$", matched_text.strip()):
-                    continue
-                if _is_exempt_repetition(src_clean, tgt_clean, m):
-                    continue
-                return FastPassDecision(
-                    passed=False,
-                    reason="Repetitive loop hallucination detected",
-                    target_ratio=0.0,
-                    length_ratio=0.0,
-                )
+        # A source refrain/table may legitimately repeat, but the exemption is
+        # per-match and source-aligned (``_is_exempt_repetition``): a blanket
+        # "the source repeats anything, so skip every repetition check" let a
+        # runaway target loop pass whenever the source happened to carry an
+        # unrelated repeated line.
+        for m in _REPETITION_PATTERN.finditer(tgt_clean):
+            repeated_unit = m.group(1)
+            # Ignore pure punctuation/formatting repeats (e.g. markdown table lines |---|---|, dashes, dots)
+            if not re.search(f"[\\w{HAN_UNIFIED_CLASS}]", repeated_unit):
+                continue
+            matched_text = m.group(0)
+            if re.match(r"^\|?[\s\-:|]+\|?$", matched_text.strip()):
+                continue
+            if _is_exempt_repetition(src_clean, tgt_clean, m):
+                continue
+            return FastPassDecision(
+                passed=False,
+                reason="Repetitive loop hallucination detected",
+                target_ratio=0.0,
+                length_ratio=0.0,
+            )
 
         # 2b. Line-level loop detection: catch the newline-separated shape the
         # flat regex above cannot express (repeated sentence lines, the most
-        # common hallucination-loop form).
-        if not source_has_repeated_lines and _detect_line_repetition_loop(tgt_clean) is not None:
+        # common hallucination-loop form). A target run is exempt only when the
+        # source carries a run at least as long (within slack): a faithful
+        # refrain survives, a runaway loop that repeats far more lines than the
+        # source did is still caught.
+        tgt_line_run = _max_repeated_line_run(tgt_clean)
+        if tgt_line_run > _max_repeated_line_run(src_clean) + _REPETITION_LINE_RUN_SLACK:
             return FastPassDecision(
                 passed=False,
                 reason="Repetitive loop hallucination detected (repeated lines)",

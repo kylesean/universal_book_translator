@@ -11,8 +11,9 @@ in both directions, and the helpers below carry contracts worth pinning:
   difference, but a target written in a CJK script (for a different-script
   source) is translated by definition, and a ``--dry-run`` rehearsal is not a
   defect;
-- a repetition loop is a hallucination only when the source does not repeat the
-  same shape (refrains and repeated table rows are faithful).
+- a repetition loop is a hallucination only when it is not aligned to a source
+  repetition (a target refrain no longer than the source's is faithful, but a
+  runaway loop that repeats far more lines than the source is still caught).
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from ubt.core.qe.fast_pass import (
     _detect_line_repetition_loop,
     _has_repeated_line_run,
     _math_spans_equivalent,
+    _max_repeated_line_run,
     _normalize_math_body,
     _strip_verbatim_term,
     grid_columns,
@@ -250,6 +252,30 @@ def test_a_repetition_loop_is_rejected() -> None:
     decision = _filter().evaluate("A completely different source sentence.", loop)
     assert not decision.passed
     assert "loop hallucination" in decision.reason
+
+
+def test_a_runaway_loop_is_rejected_even_when_the_source_repeats_elsewhere() -> None:
+    # The source carries an unrelated 4-line refrain; the target repeats its own
+    # line 8 times. The old blanket "source repeats anything -> skip every
+    # repetition check" let this hallucination loop through.
+    src = "refrain here\n" * 4 + "A completely different closing sentence about the topic."
+    tgt = "This is a repeated hallucination line.\n" * 8
+    assert _max_repeated_line_run(src) == 4
+    assert _max_repeated_line_run(tgt) == 8
+    decision = _filter().evaluate(src, tgt)
+    assert not decision.passed
+    assert "loop hallucination" in decision.reason
+
+
+def test_a_faithful_refrain_is_not_a_line_loop() -> None:
+    # Source and target repeat the same number of lines: a preserved refrain.
+    # The line-run gate must not fire (the run is not longer than the source's).
+    src = "refrain here\n" * 4 + "closing line"
+    tgt = "副歌在此\n" * 4 + "结尾行"
+    assert _max_repeated_line_run(src) == 4
+    assert _max_repeated_line_run(tgt) == 4
+    decision = _filter().evaluate(src, tgt)
+    assert "loop hallucination" not in decision.reason
 
 
 def test_emails_and_author_lines_not_rejected_as_near_verbatim_echo() -> None:
