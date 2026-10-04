@@ -266,6 +266,13 @@ def normalize_for_numeric_matching(text: str, lang: str = "zh") -> str:
 _RANGE_DELIMITERS = re.compile(r"[-–—/]")
 _GLUED_PAGE_RANGE_SOURCE_RE = re.compile(r"\bpp\.?\s*(?P<digits>\d{4})\b", re.IGNORECASE)
 _FLATTENED_FOOTNOTE_RE = re.compile(r"(?<=\w)\s+(?P<marker>[1-9])\s+(?=[.,])")
+# A leading ordered-list marker ("(1) ...", "1. ...", "1) ...") is editorial
+# structure, not a numeric fact: the translator drops it and the renderer
+# restores the marker, so the numeric check must not read it as a lost number.
+_LEADING_LIST_MARKER_RE = re.compile(
+    r"^\s*(?:\(\s*\d{1,3}\s*\)|\uff08\s*\d{1,3}\s*\uff09|\d{1,3}\s*[.)\u3001])",
+    re.MULTILINE,
+)
 
 
 def _glued_page_range_is_preserved(original: str, translated: str, num: str) -> bool:
@@ -667,6 +674,9 @@ class NumericConsistencyValidator(ContentValidator):
         # spaced single digit before punctuation ("plugins 5 ,"). Such a
         # reference is editorial metadata, not a numeric fact to translate.
         exempt_spans.extend((m.start(), m.end()) for m in _FLATTENED_FOOTNOTE_RE.finditer(src_view))
+        exempt_spans.extend(
+            (m.start(), m.end()) for m in _LEADING_LIST_MARKER_RE.finditer(src_view)
+        )
 
         exempt_numbers: set[str] = set()
         if exempt_spans:

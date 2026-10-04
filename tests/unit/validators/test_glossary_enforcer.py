@@ -265,3 +265,18 @@ def test_no_rules_is_unchanged() -> None:
 def test_empty_text_is_unchanged() -> None:
     out, records = _enforce([{"source": "A", "translation": "\u7532"}], "")
     assert (out, records) == ("", [])
+
+
+def test_cjk_latin_spacing_is_tolerated_when_judging_a_term() -> None:
+    # Pangu spacing renders "CPU调度" as "CPU 调度"; the drift judge must still
+    # see the term as rendered (whitespace is allowed only at the CJK boundary).
+    assert find_term_occurrences(
+        "基于 QoS 的 CPU 调度可在", "CPU调度", case_insensitive=True, allow_cjk_latin_space=True
+    )
+    assert find_term_occurrences(
+        "基于 QoS 的 CPU调度可在", "CPU调度", case_insensitive=True, allow_cjk_latin_space=True
+    )
+    # The default (rewriter) path stays exact.
+    assert find_term_occurrences("CPU 调度", "CPU调度") == []
+    # No whitespace is allowed inside a Latin run.
+    assert find_term_occurrences("CP U调度", "CPU调度", allow_cjk_latin_space=True) == []

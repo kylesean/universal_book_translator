@@ -474,3 +474,21 @@ def test_wan_yi_scale_folding_is_exact() -> None:
     # must use Decimal so the normalized value keeps every digit (same
     # arithmetic as _cn_compound_runs).
     assert "900719925474099300000000" in normalize_for_numeric_matching("9007199254740993亿")
+
+
+def test_a_leading_list_marker_is_not_a_lost_number() -> None:
+    # "(1) Rollout..." translated without the marker is correct: the marker is
+    # editorial structure (the renderer restores it), not a numeric fact.
+    res = _check(
+        "(1) Rollout and evaluation jobs create sandboxes in a bursty manner. "
+        "A single job may request up to 32K sandbox instances.",
+        "部署与评估任务以突发式方式创建沙箱。单个任务可能请求多达 32K 个沙箱实例。",
+    )
+    assert res.is_valid
+
+
+def test_a_real_number_after_a_list_marker_is_still_required() -> None:
+    # Exempting the marker must not exempt a genuine number elsewhere.
+    res = _check("(1) The limit is 42 units.", "（1）上限为个单元。")
+    assert not res.is_valid
+    assert "42" in res.details["lost_numbers"]

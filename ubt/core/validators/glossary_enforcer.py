@@ -78,12 +78,31 @@ def extract_protected_spans(text: str) -> list[tuple[int, int]]:
     return spans
 
 
+def _term_pattern(term: str) -> str:
+    """A term's regex, allowing optional whitespace at CJK<->Latin boundaries.
+
+    CJK/Latin spacing inserts a space the term itself does not carry
+    (``CPU调度`` renders as ``CPU 调度``), so an exact match reports a correctly
+    rendered term as drifted. Whitespace is allowed only where the term crosses
+    the CJK/Latin boundary, never inside a Latin run.
+    """
+    parts: list[str] = []
+    previous = ""
+    for ch in term:
+        if previous and is_cjk_char(previous) != is_cjk_char(ch):
+            parts.append(r"\s*")
+        parts.append(re.escape(ch))
+        previous = ch
+    return "".join(parts)
+
+
 def find_term_occurrences(
     text: str,
     term: str,
     protected: list[tuple[int, int]] | None = None,
     *,
     case_insensitive: bool = False,
+    allow_cjk_latin_space: bool = False,
 ) -> list[tuple[int, int]]:
     """Boundary-aware occurrences of ``term`` in ``text``, excluding protected spans.
 
@@ -108,8 +127,9 @@ def find_term_occurrences(
     if protected is None:
         protected = extract_protected_spans(text)
     flags = re.IGNORECASE if case_insensitive else 0
+    pattern = _term_pattern(term) if allow_cjk_latin_space else re.escape(term)
     found: list[tuple[int, int]] = []
-    for match in re.finditer(re.escape(term), text, flags):
+    for match in re.finditer(pattern, text, flags):
         start, end = match.start(), match.end()
         if check_left and start > 0 and _is_latin_word_char(text[start - 1]):
             continue

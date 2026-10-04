@@ -178,3 +178,23 @@ def test_section_symbol_reference_is_not_fabricated() -> None:
     assert decision.passed is True
     assert "8.4" in decision.source_refs
     assert "8.4" in decision.target_refs
+
+
+def test_a_translated_listing_callout_is_not_fabricated() -> None:
+    # Source "List. 1" -> target "列表 1": the list keyword must be recognized
+    # on both sides. Without it the single 表 (table) matched inside 列表 (list),
+    # fabricating a reference the source's "List. 1" never produced.
+    decision = AddedContentGate().evaluate(
+        "List. 1 shows a minimal container session through libdsec.",
+        "列表 1 展示了通过 libdsec 实现的最小容器会话。",
+    )
+    assert decision.passed is True
+    assert "1" in decision.source_refs
+    assert "1" in decision.target_refs
+
+
+def test_a_listing_keyword_without_a_number_is_not_a_reference() -> None:
+    # "list of items" has no callout number and must not become one.
+    decision = AddedContentGate().evaluate("A list of items follows.", "接下来是项目列表。")
+    assert decision.passed is True
+    assert decision.source_refs == frozenset()

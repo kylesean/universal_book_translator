@@ -53,6 +53,10 @@ _REPETITION_PATTERN = re.compile(r"(.{4,20}?)\1{3,}")  # Detect 4+ repetitions o
 # letters/CJK (word content bar shared with the flat check, minus digits so
 # sparse numeric tables like repeated "| 0 | 0 |" rows don't trip it).
 _REPETITION_LINE_RUN = 4
+#: A blank line resets the contiguous run (stanzas), but a hallucination loop
+#: often separates its repeats with ``\n\n``; a run this long is a loop even
+#: with blank gaps.
+_REPETITION_BLANK_SEPARATED_RUN = 6
 _REPETITION_LINE_MIN_LETTERS = 3
 #: How many more identical lines the target may repeat than the source before a
 #: line-level repetition counts as a runaway loop rather than a preserved
@@ -225,6 +229,38 @@ def _has_repeated_line_run(text: str) -> bool:
     sent a correct block to repair (a flat 0.2 flag score) for nothing.
     """
     return _detect_line_repetition_loop(text) is not None
+
+
+def _repeated_line_runs_across_blanks(text: str) -> list[tuple[str, int]]:
+    """Identical non-empty lines with blank-line gaps tolerated (line, length).
+
+    The contiguous detector resets on a blank line to spare legitimate stanzas,
+    but a model loop commonly separates its repeats with ``\n\n`` and slips
+    past it. This counts non-empty identical lines ignoring blanks; the caller
+    only treats a run long enough to be a runaway loop as one.
+    """
+    runs: list[tuple[str, int]] = []
+    run_line: str | None = None
+    run_len = 0
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line == run_line:
+            run_len += 1
+        else:
+            run_line = line
+            run_len = 1
+        if run_len >= _REPETITION_BLANK_SEPARATED_RUN and len(_LINE_LETTER_RE.findall(line)) >= (
+            _REPETITION_LINE_MIN_LETTERS
+        ):
+            runs.append((line, run_len))
+    return runs
+
+
+def _max_repeated_line_run_across_blanks(text: str) -> int:
+    """Longest blank-separated repeated-line run in ``text`` (0 when none)."""
+    return max((run_len for _, run_len in _repeated_line_runs_across_blanks(text)), default=0)
 
 
 # Repetition-exemption tolerances. These are empirical calibration bands, not
@@ -736,6 +772,20 @@ class FastPassFilter:
             return FastPassDecision(
                 passed=False,
                 reason="Repetitive loop hallucination detected (repeated lines)",
+                target_ratio=0.0,
+                length_ratio=0.0,
+            )
+
+        # 2b-bis. Blank-separated loop: the shape above resets on a blank line
+        # (stanzas), so a model repeating a sentence as ``line\n\nline\n\n``
+        # slips past it. A run this long is a runaway loop, not a refrain.
+        tgt_blank_run = _max_repeated_line_run_across_blanks(tgt_clean)
+        if tgt_blank_run >= _REPETITION_BLANK_SEPARATED_RUN and tgt_blank_run > (
+            _max_repeated_line_run_across_blanks(src_clean) + _REPETITION_LINE_RUN_SLACK
+        ):
+            return FastPassDecision(
+                passed=False,
+                reason="Repetitive loop hallucination detected (blank-separated lines)",
                 target_ratio=0.0,
                 length_ratio=0.0,
             )

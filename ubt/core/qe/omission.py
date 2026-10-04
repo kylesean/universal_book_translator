@@ -57,6 +57,11 @@ _LATIN_RUN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_+\-]*")
 # Numeric tokens (same shape as NumericConsistencyValidator's scanner).
 _NUM_TOKEN_RE = re.compile(r"\d[\d,.\-–—/]*\d|\d")
 _RANGE_DELIMITERS_RE = re.compile(r"[-–—/]")
+#: A range's delimiter is notation, not content: "10-50" and "10至50" (Chinese
+#: "to") state the same interval. Fold both to "-" before n-gram scoring, or a
+#: correct range render shares no delimiter gram with the source and deflates
+#: verbatim recall below the omission floor.
+_RANGE_FOLD_RE = re.compile(r"(?<=\d)\s*(?:[-–—~～]|至|到)\s*(?=\d)")
 
 
 _STRICT_LB = r"(?<![A-Za-z0-9])"
@@ -432,7 +437,7 @@ class OmissionGate:
         -> grams of "1500000"), so a correct "150万" rendering matches.
         """
         grams: Counter[str] = Counter()
-        for m in _NUM_TOKEN_RE.findall(magnitude_rewritten(src)):
+        for m in _NUM_TOKEN_RE.findall(_RANGE_FOLD_RE.sub("-", magnitude_rewritten(src))):
             canon = canonicalize_numeric_token(m)
             if canon:
                 grams += _char_ngrams(canon, self.ngram_sizes)
@@ -450,7 +455,7 @@ class OmissionGate:
         # normalizing: the zh normalizer would otherwise read '百万' as '100万'
         # first and lose the magnitude.
         target_view = normalize_for_numeric_matching(
-            magnitude_rewritten(tgt), lang=self.target_lang
+            _RANGE_FOLD_RE.sub("-", magnitude_rewritten(tgt)), lang=self.target_lang
         )
         tgt_grams = _char_ngrams(target_view, self.ngram_sizes)
         overlap = sum(min(cnt, tgt_grams[gram]) for gram, cnt in src_grams.items())

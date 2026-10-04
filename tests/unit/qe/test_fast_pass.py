@@ -310,3 +310,22 @@ def test_repetition_detectors_agree() -> None:
     plain = "alpha\nbeta\ngamma\n"
     assert _has_repeated_line_run(plain) is False
     assert _detect_line_repetition_loop(plain) is None
+
+
+def test_a_blank_separated_repetition_loop_is_rejected() -> None:
+    # A model loop often separates its repeats with a blank line, which the
+    # contiguous detector resets on (to spare stanzas). A run this long is a
+    # runaway loop, not a refrain.
+    src = "Agentic sandbox workloads have several properties that shape the platform design:"
+    tgt = "代理型沙箱工作负载具备若干特性，这些特性直接影响了平台的设计：\n\n" * 8
+    decision = _filter().evaluate(src, tgt)
+    assert not decision.passed
+    assert "loop hallucination" in decision.reason
+
+
+def test_a_short_blank_separated_refrain_is_not_a_loop() -> None:
+    # Below the runaway threshold the stanza exemption still holds.
+    src = "A source line."
+    tgt = "同一行\n\n同一行\n\n同一行\n\n同一行"
+    decision = _filter().evaluate(src, tgt)
+    assert "loop hallucination" not in decision.reason

@@ -225,13 +225,21 @@ def detect_term_drift(
         if source_hits:
             hits = list(
                 find_term_occurrences(
-                    target_text, term.expected, target_protected, case_insensitive=True
+                    target_text,
+                    term.expected,
+                    target_protected,
+                    case_insensitive=True,
+                    allow_cjk_latin_space=True,
                 )
             )
             if not hits and term.inflected_variants:
                 for variant in term.inflected_variants:
                     var_hits = find_term_occurrences(
-                        target_text, variant, target_protected, case_insensitive=True
+                        target_text,
+                        variant,
+                        target_protected,
+                        case_insensitive=True,
+                        allow_cjk_latin_space=True,
                     )
                     if var_hits:
                         hits.extend(var_hits)

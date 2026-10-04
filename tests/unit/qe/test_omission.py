@@ -303,3 +303,22 @@ def test_clause_merged_sentences_with_full_recall_pass() -> None:
     )
     decision = OmissionGate().evaluate(src, tgt)
     assert decision.passed is True
+
+
+def test_a_translated_range_delimiter_does_not_deflate_recall() -> None:
+    # "10-50" and "10至50" (Chinese "to") state the same interval; without
+    # folding the delimiter the range's grams share nothing and verbatim
+    # recall drops below the floor for a correct translation.
+    src = (
+        "Figure 12 | Host memory usage (left) and CPU utilization (right) across the four "
+        "Firecracker configurations under a real agentic RL workload. The CPU panel uses an "
+        "expanded time scale for the first 10 minutes and a compressed scale for the 10-50 "
+        "minute interval."
+    )
+    tgt = (
+        "图12 | 在真实智能体强化学习工作负载下，四种Firecracker配置对应的宿主机内存使用量（左）"
+        "与CPU利用率（右）。CPU面板对前10分钟采用扩展时间尺度，对10至50分钟区间则采用压缩尺度。"
+    )
+    decision = OmissionGate().evaluate(src, tgt)
+    assert decision.passed is True
+    assert decision.metrics.verbatim_chrf_recall >= 0.7

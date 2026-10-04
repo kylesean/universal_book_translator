@@ -48,8 +48,12 @@ from dataclasses import dataclass, field
 # token, or every correctly translated figure callout would look fabricated.
 _REF_KEYWORD = (
     r"(?:§+|FIG|Figs?|Figures?|Eqs?|Equations?|Tables?|Tabs?|Secs?|Sections?|Chaps?|Chapters?|"
-    r"Apps?|Appendi(?:x|ces)|"
-    r"图|式|表|方程|附录|附錄)"
+    r"Apps?|Appendi(?:x|ces)|List(?:ing)?s?|"
+    # ``列表`` before ``表``: without the list keyword the single ``表``
+    # (table) matched inside ``列表 1`` (Listing 1), fabricating a reference the
+    # source's ``List. 1`` never produced — the false positive that quarantined
+    # every translated listing callout.
+    r"图|式|列表|清单|清單|表|方程|附录|附錄)"
 )
 # Version-shaped number: chapter-3 uses "3.11", three-level section numbers use
 # "3.4.1" and appendices use "A.10". The appendix letter is uppercase by
