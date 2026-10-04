@@ -374,7 +374,21 @@ _TEXTLIKE_CMD_RE = re.compile(r"\\(?:text|mathrm)\{([^{}]*)\}")
 _LATEX_SPACES_RE = re.compile(
     r"\\(?:quad|qquad|enspace|thinspace|thickspace|medspace|negthinspace|[,;! ])"
 )
-_LATEX_DELIM_SIZE_RE = re.compile(r"\\(?:big|Big|bigg|Bigg)[lmr]?")
+#: Delimiter sizing/auto-sizing modifiers that carry no glyph of their own.
+#: The negative lookahead stops ``\right`` from eating the head of a real
+#: command (``\rightleftharpoons``, ``\leftrightarrow``), and ``[lmr]?``
+#: consumes the ``\bigl``/``\bigr``/``\bigm`` variants before that check.
+_LATEX_DELIM_SIZE_RE = re.compile(r"\\(?:bigg|Bigg|big|Big|left|right)(?:[lmr])?(?![a-zA-Z])")
+
+
+def typstify_math_span(content: str) -> str | None:
+    """Convert one delimited math span to a Typst math body, or ``None``.
+
+    The single entry point for "span in, body out" so the renderer and the
+    probe prefetch agree on exactly which bodies reach :func:`typstify_math`.
+    """
+    body = _math_inner(content)
+    return typstify_math(body) if body is not None else None
 
 
 def _styled_unicode_to_typst(ch: str) -> str | None:
@@ -631,8 +645,7 @@ def render_overlay_line(
             escaped = typst_escape(strip_cjk_latin_spaces(content, target_lang=target_lang))
             out.append(_emit_typst_superscripts(escaped))
             continue
-        body = _math_inner(content)
-        typst = typstify_math(body) if body is not None else None
+        typst = typstify_math_span(content)
         if typst is not None and math_probe is not None and math_probe(typst):
             out.append(f"${typst}$")
         else:

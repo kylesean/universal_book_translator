@@ -42,13 +42,17 @@ def _file_identity(path: Path) -> str:
 
 
 def _reader_identity() -> str:
-    """Size+mtime of the reader module, so a rule change invalidates the cache."""
-    from ubt.analyze import reader_pdf
+    """Size+mtime of the reader's rule modules, so a rule change invalidates the cache.
 
-    module_file = getattr(reader_pdf, "__file__", "")
-    if not module_file:
-        return "unknown"
-    return _file_identity(Path(module_file))
+    The reader imports its list/heading/chrome rules from ``structure`` and its
+    text canonicalization from ``normalize``; keying only on ``reader_pdf``
+    would serve stale blocks after a change to either.
+    """
+    return _module_identity(
+        "ubt.analyze.reader_pdf",
+        "ubt.analyze.structure",
+        "ubt.analyze.normalize",
+    )
 
 
 def _module_identity(*modules: str) -> str:

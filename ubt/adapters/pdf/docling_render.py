@@ -139,7 +139,7 @@ class DoclingRenderStrategy:
             font = theme.font_stack
         profile = getattr(manifest, "profile", "") or ""
         base_size = 9.96 if profile == "paper" else theme.base_size_pt
-        typesetter = TypstFragmentTypesetter(font=font, size_pt=base_size)
+        typesetter = TypstFragmentTypesetter(font=font, size_pt=base_size, target_lang=target_lang)
         compositor = LayerCompositor(source_pdf, typesetter=typesetter)
         try:
             composition = await asyncio.to_thread(compositor.compose, overlays, output_path)

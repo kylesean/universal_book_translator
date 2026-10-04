@@ -150,6 +150,42 @@ def is_list_prefix(text: str) -> bool:
     return any((text or "").startswith(prefix) for prefix in _LIST_PREFIXES)
 
 
+#: Ordered markers a PDF line can open with: ``1.``, ``1.1.``, ``1)``, ``(1)``,
+#: ``a.``, ``(a)``, ``一、``. A trailing space is required so ``1.5`` stays a
+#: decimal, and dotted section numbers (a TOC title) match whole.
+_PDF_ORDERED_MARKER_RE = re.compile(
+    r"^\s*(\(?\d{1,3}(?:\.\d{1,3})*[.)]|\(?[a-zA-Z][.)]|[一二三四五六七八九十百]+[、.)])\s+"
+)
+#: Unambiguous bullet glyphs -- a marker whether or not a space follows.
+_PDF_BULLETS = ("•", "◦", "‣", "▪", "●")
+#: Ambiguous dash/star forms -- a marker only before whitespace, so ``-3`` and
+#: ``*ptr`` stay prose.
+_PDF_DASH_BULLETS = ("-", "*", "·", "–")
+
+
+def pdf_list_marker(text: str) -> tuple[str, str] | None:
+    """``(marker, text)`` for a PDF list-item line, or ``None``.
+
+    The native PDF reader and the overlay builder share this one rule, so a line
+    the reader types as a list item is one the marker restorer recognises (and
+    vice versa). Ordered markers keep their number/parenthesis and are stripped
+    from the returned text; the reader stores that marker on the element.
+    """
+    stripped = (text or "").lstrip()
+    if not stripped:
+        return None
+    if stripped[0] in _PDF_BULLETS:
+        return stripped[0], stripped[1:].strip()
+    if stripped[0] in _PDF_DASH_BULLETS:
+        if len(stripped) > 1 and stripped[1].isspace():
+            return stripped[0], stripped[1:].strip()
+        return None
+    match = _PDF_ORDERED_MARKER_RE.match(text)
+    if match is not None:
+        return match.group(1), (text or "")[match.end() :].strip()
+    return None
+
+
 def looks_like_heading(text: str) -> bool:
     """True for a short, bullet-free line with no terminal punctuation.
 

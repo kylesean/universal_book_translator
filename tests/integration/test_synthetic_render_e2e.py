@@ -145,6 +145,28 @@ async def test_the_ledger_records_a_completed_job(tmp_path: Path) -> None:
         ledger.close()
 
 
+async def test_the_render_wires_the_run_target_language_into_the_typesetter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Regression: the compositor constructed the fragment typesetter without
+    # ``target_lang``, so it fell back to the "zh" default and a non-Chinese
+    # render applied Chinese CJK-spacing rules. The run's target language must
+    # reach the typesetter.
+    import ubt.render.outputs as outputs
+
+    seen: list[str | None] = []
+    original_init = outputs.TypstFragmentTypesetter.__init__
+
+    def _recording_init(self: object, *args: object, **kwargs: object) -> None:
+        seen.append(kwargs.get("target_lang"))  # type: ignore[arg-type]
+        original_init(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(outputs.TypstFragmentTypesetter, "__init__", _recording_init)
+    await _run(tmp_path)
+    assert seen, "the render never constructed a fragment typesetter"
+    assert all(lang == "es" for lang in seen), seen
+
+
 async def test_the_attestation_artifact_check_finds_every_realization(tmp_path: Path) -> None:
     # Regression: the renderer strips the rehearsal prefix, so the artifact check
     # must compare against the rendered text. When only one side knew the prefix,

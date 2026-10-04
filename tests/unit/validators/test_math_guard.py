@@ -144,10 +144,27 @@ def test_source_command_set_expands_unicode_accents() -> None:
         ("x", r"\mathrm{2D}", []),  # \mathrm is renderable
         (r"\frac{a}{b}", r"\frac{a}{b}", []),
         ("x \u2208 S", r"x \in S", []),  # unicode symbol excuses its LaTeX spelling
-        ("Z", r"\mathbb{R}", ["mathbb"]),  # no source blackboard letter: bare command novel
+        ("Z", r"\mathbb{R}", []),  # \mathbb is renderable; only a changed letter is novel
         ("x\u0302", r"\hat{x}", []),  # combining circumflex reads as \hat
         ("v", r"\vec{v}", []),  # accents are renderable reconstruction
         ("x", r"\ddot{x}", []),
+        # Font styles the renderer converts (bb/frak/cal) must not be flagged as
+        # hallucinations just because the source carried the Unicode glyph.
+        ("L", r"\mathcal{L}", []),
+        ("g", r"\mathfrak{g}", []),
+        # Operator symbols the inline converter now renders; the source carries
+        # the Unicode glyph while the model re-encodes it as LaTeX.
+        ("", r"\diamond", []),
+        ("\u22c4", r"\diamond", []),
+        ("", r"\leadsto", []),
+        ("", r"\coloneqq", []),
+        # Auto-sizing delimiters and the bracket/floor glyphs they wrap.
+        ("", r"\left( x \right)", []),
+        ("", r"\left\llbracket x \right\rrbracket", []),
+        ("", r"\left\lfloor x \right\rfloor", []),
+        ("", r"\leftrightarrow", []),
+        # Bold/italic wrappers stay refused: upright would be a styling lie.
+        ("v", r"\mathbf{v}", ["mathbf"]),
     ],
 )
 def test_novel_unsupported_latex_commands(source: str, target: str, expected: list[str]) -> None:
@@ -164,6 +181,19 @@ def test_renderable_command_set_contains_the_documented_members() -> None:
     # Math accents: a translator re-encoding a flattened accent may use any of
     # these, and they all have a Typst spelling downstream.
     assert {"hat", "tilde", "vec", "bar", "overline", "dot", "ddot"} <= (RENDERABLE_LATEX_COMMANDS)
+    # Font styles the inline converter handles with dedicated pre-passes.
+    assert {"mathbb", "mathfrak", "mathcal"} <= RENDERABLE_LATEX_COMMANDS
+
+
+def test_renderable_commands_are_the_render_table_not_a_hand_mirror() -> None:
+    # The gate must allow exactly what the inline converter can compile. This is
+    # the regression that let \mathcal/\mathfrak/\mathbb be flagged as
+    # unrenderable while the renderer converted them: a hand-maintained mirror
+    # drifted from the render table.
+    from ubt.core.math_symbols import INLINE_RENDERABLE_COMMANDS, INLINE_SYMBOLS
+
+    assert RENDERABLE_LATEX_COMMANDS is INLINE_RENDERABLE_COMMANDS
+    assert set(INLINE_SYMBOLS) <= RENDERABLE_LATEX_COMMANDS
 
 
 # --------------------------------------------------------------------------- #

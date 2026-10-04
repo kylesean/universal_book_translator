@@ -40,7 +40,12 @@ from typing import TYPE_CHECKING
 
 from ubt.analyze._identity import file_digest
 from ubt.analyze.normalize import normalize_text
-from ubt.analyze.structure import is_bare_page_number, looks_like_debris, looks_like_listing
+from ubt.analyze.structure import (
+    is_bare_page_number,
+    looks_like_debris,
+    looks_like_listing,
+    pdf_list_marker,
+)
 from ubt.core.policy.layout_policy import FOOTER_BAND_PT, HEADER_BAND_PT
 from ubt.model.ast import (
     CodeBlock,
@@ -70,9 +75,55 @@ INDENT_FACTOR = 1.0
 #: Font size, relative to the page body size, at which a line reads as a heading.
 HEADING_RATIOS = ((1.5, 1), (1.3, 2), (1.15, 3))
 _HEADING_MAX_CHARS = 100
-_LIST_PREFIXES = ("\u2022", "\u25e6", "\u2023", "-", "*", "\u00b7", "\u2013")
 _SENTENCE_END = (".", "!", "?", "\u3002", ":", ";")
 _WS_RE = re.compile(r"\s+")
+
+# --- Table of contents ----------------------------------------------------- #
+#: A TOC title opens with a section number: ``1.``, ``1.1.``, ``4.3.``.
+_SECTION_NUM_RE = re.compile(r"^\d{1,3}(?:\.\d{1,3})*\.?\s+\S")
+#: A TOC page number is a bare arabic/roman numeral.
+_TOC_PAGE_RE = re.compile(r"^[0-9ivxlcdmIVXLCDM]+$")
+#: Baselines within this many points are the same TOC row.
+_TOC_BASELINE_TOL_PT = 2.5
+#: A TOC page number sits in the right margin; a title starts in the left half.
+_TOC_PAGE_MIN_X_RATIO = 0.6
+_TOC_TITLE_MAX_X_RATIO = 0.6
+#: Fewer pairs than this and the page is not a TOC (a stray numbered line is not).
+_TOC_MIN_PAIRS = 3
+
+
+def _find_toc_pairs(lines: list[LineBox], width: float) -> list[tuple[LineBox, LineBox, str]]:
+    """Pair TOC title lines with their right-margin page numbers by baseline.
+
+    ``textgeom`` reads a title and its page number as two lines (the dot-leader
+    gutter separates them), so the reader must pair them back or a table of
+    contents scatters into translated titles plus a run of bare page-number
+    blocks. A page only counts as a TOC when several such pairs exist, so a
+    single numbered line in the body never triggers it.
+    """
+    if width <= 0:
+        return []
+    right_numbers = [
+        line
+        for line in lines
+        if _TOC_PAGE_RE.match(line.text.strip()) and line.rect[0] > _TOC_PAGE_MIN_X_RATIO * width
+    ]
+    pairs: list[tuple[LineBox, LineBox, str]] = []
+    used: set[int] = set()
+    for line in lines:
+        title = line.text.strip()
+        if not _SECTION_NUM_RE.match(title) or line.rect[0] > _TOC_TITLE_MAX_X_RATIO * width:
+            continue
+        baseline = (line.rect[1] + line.rect[3]) / 2.0
+        for candidate in right_numbers:
+            if id(candidate) in used:
+                continue
+            candidate_baseline = (candidate.rect[1] + candidate.rect[3]) / 2.0
+            if abs(candidate_baseline - baseline) <= _TOC_BASELINE_TOL_PT:
+                pairs.append((line, candidate, candidate.text.strip()))
+                used.add(id(candidate))
+                break
+    return pairs if len(pairs) >= _TOC_MIN_PAIRS else []
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -84,6 +135,8 @@ class _Group:
     bbox: tuple[float, float, float, float]
     max_size: float
     all_bold: bool
+    #: Set for a table-of-contents row: the page number its leaders point at.
+    toc_page: str | None = None
 
 
 def _body_size(lines: list[LineBox]) -> float:
@@ -158,7 +211,11 @@ def _group_lines(lines: list[LineBox], body: float) -> list[list[LineBox]]:
     for line in lines:
         if not line.text.strip():
             continue
-        if current and _starts_new_paragraph(current[-1], line, body, body_x0):
+        # Rule 4: a line opening a list item starts a new group, so consecutive
+        # bullets/numbers are separate items rather than one merged paragraph.
+        # A wrapped continuation carries no marker, so it stays with its item.
+        starts_list = pdf_list_marker(line.text) is not None
+        if current and (starts_list or _starts_new_paragraph(current[-1], line, body, body_x0)):
             groups.append(current)
             current = []
         current.append(line)
@@ -167,7 +224,9 @@ def _group_lines(lines: list[LineBox], body: float) -> list[list[LineBox]]:
     return groups
 
 
-def _group_from_lines(lines: list[LineBox], page: int) -> _Group | None:
+def _group_from_lines(
+    lines: list[LineBox], page: int, *, toc_page: str | None = None
+) -> _Group | None:
     text = _join_lines(lines)
     if not text:
         return None
@@ -183,6 +242,7 @@ def _group_from_lines(lines: list[LineBox], page: int) -> _Group | None:
         ),
         max_size=max(sizes) if sizes else 0.0,
         all_bold=all(line.bold for line in lines),
+        toc_page=toc_page,
     )
 
 
@@ -227,6 +287,22 @@ def _classify(
     """
     confidence = Confidence.INFERRED
     span = Span(page=group.page, bbox=group.bbox)
+    if group.toc_page is not None:
+        # A TOC row is structure, not prose: the dot leaders and the page number
+        # are the source's own layout, which the compositor cannot rebuild from
+        # text. Keep the row verbatim so the source canvas carries it intact
+        # instead of translating the title and scattering the page numbers.
+        return (
+            Paragraph(
+                id=element_id,
+                spine_index=spine_index,
+                text=f"{group.text} {group.toc_page}",
+                skip_translate=True,
+                span=span,
+                confidence=confidence,
+            ),
+            RegionKind.BODY,
+        )
     if _is_page_number(group, page_height):
         return (
             Paragraph(
@@ -239,19 +315,9 @@ def _classify(
             ),
             RegionKind.PAGE_NUMBER,
         )
-    if group.text.startswith(_LIST_PREFIXES):
-        marker = group.text[0]
-        return (
-            ListItem(
-                id=element_id,
-                spine_index=spine_index,
-                text=group.text[len(marker) :].strip(),
-                marker=marker,
-                span=span,
-                confidence=confidence,
-            ),
-            RegionKind.BODY,
-        )
+    # Heading before list: a numbered section title (``1.1. Background``) shares
+    # the ordered-marker shape with a list item, and only the typography tells
+    # them apart -- a heading is larger/bold, a list item is body text.
     level = _heading_level(group, body)
     if level is not None:
         return (
@@ -260,6 +326,20 @@ def _classify(
                 spine_index=spine_index,
                 text=group.text,
                 level=level,
+                span=span,
+                confidence=confidence,
+            ),
+            RegionKind.BODY,
+        )
+    list_marker = pdf_list_marker(group.text)
+    if list_marker is not None:
+        marker, item_text = list_marker
+        return (
+            ListItem(
+                id=element_id,
+                spine_index=spine_index,
+                text=item_text,
+                marker=marker,
                 span=span,
                 confidence=confidence,
             ),
@@ -349,9 +429,20 @@ def read_pdf(
         # extract_lines already glues row fragments and applies column reading
         # order (textgeom.py), so it returns ready-to-group lines.
         ordered = list(lines)
+        # Pair each TOC title with its right-margin page number and drop the
+        # standalone number lines, so the TOC row is one preserved element.
+        toc_pairs = _find_toc_pairs(ordered, width)
+        toc_page_by_id = {id(title): page for title, _number, page in toc_pairs}
+        drop_ids = {id(number) for _title, number, _page in toc_pairs}
+        if drop_ids:
+            ordered = [line for line in ordered if id(line) not in drop_ids]
         body = _body_size(ordered)
         for line_group in _group_lines(ordered, body):
-            group = _group_from_lines(line_group, page_no)
+            toc_page = next(
+                (toc_page_by_id[id(line)] for line in line_group if id(line) in toc_page_by_id),
+                None,
+            )
+            group = _group_from_lines(line_group, page_no, toc_page=toc_page)
             if group is None:
                 continue
             element, region_kind = _classify(

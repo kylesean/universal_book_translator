@@ -29,6 +29,7 @@ source (no mask is painted), so it can never lose content.
 from __future__ import annotations
 
 import hashlib
+import re
 import shutil
 import tempfile
 import threading
@@ -42,6 +43,7 @@ import pikepdf
 from ubt.adapters.pdf import pdf_struct
 from ubt.adapters.pdf.stream_strip import shared_form_objgens, strip_page_text_pikepdf
 from ubt.adapters.pdf.typst_compile import typst_compile
+from ubt.adapters.pdf.typst_math_probe import TypstMathProbe
 from ubt.cache.dirs import cache_root
 from ubt.core.ir.bifurcation import bifurcate_blocks
 from ubt.core.ir.continuation import find_continuation_runs, join_continuous_text
@@ -197,8 +199,35 @@ class FragmentTypesetter(Protocol):
         ...
 
 
-#: Typst markup characters that must be backslash-escaped to render literally.
-_MARKUP_ESCAPE = str.maketrans({char: "\\" + char for char in "\\#$[]@<>*_`~"})
+#: A translated list item that already opens with a marker (the model
+#: reproduced the bullet) is left untouched; only a markerless item gets one.
+_LEADING_MARKER_RE = re.compile(
+    r"^\s*(?:"
+    r"[•⁃◦▪●*\-]"  # unordered bullet
+    r"|\(?\d{1,3}[.)、]"  # 1. 1) (1) 1、
+    r"|\(?[a-zA-Z][.)]"  # a. a) (a)
+    r"|[一二三四五六七八九十百]+[、.)]"  # 一、 二）
+    r")\s*"
+)
+
+
+def _with_list_marker(block: IRBlock, text: str) -> str:
+    """Restore a dropped list bullet/number onto a translated target.
+
+    The reader stores a ``ListItem``'s marker on the element and strips it from
+    the element text, so the compositor -- which draws only the text -- loses the
+    bullet once the source glyph is masked away with the region. An ordered
+    number the extractor did not keep is unrecoverable here, so a markerless item
+    falls back to the unordered bullet, exactly as the retired rigid typesetter
+    did. A text that already opens with a marker is left byte-identical.
+    """
+    if not text or block.block_type is not BlockType.LIST_ITEM:
+        return text
+    if _LEADING_MARKER_RE.match(text):
+        return text
+    marker = getattr(block.element, "marker", "") or "•"
+    return f"{marker} {text}"
+
 
 #: Font-size floor (pt) for a fragment, and the slack (pt) a fit search allows.
 #: The floor is low so a text block whose extracted box is tiny still typesets
@@ -259,10 +288,17 @@ class TypstFragmentTypesetter:
         size_pt: float = 12.0,
         font: str | Sequence[str] | None = None,
         cache_dir: Path | str | None = None,
+        target_lang: str = "zh",
+        math_probe: TypstMathProbe | None = None,
     ) -> None:
         self._binary = binary
         self._size_pt = size_pt
         self._font = font
+        self._target_lang = target_lang
+        #: Inline math is emitted only when a probe (the same Typst that will
+        #: compile the fragment) validates it; the probe is pure-cache, so a
+        #: paragraph measured at several sizes converts once.
+        self._math_probe = math_probe if math_probe is not None else TypstMathProbe(binary)
         if cache_dir in (":temp:", "temp"):
             self._work = Path(tempfile.mkdtemp(prefix="ubt-fragment-"))
             self._is_temp = True
@@ -275,6 +311,7 @@ class TypstFragmentTypesetter:
             self._is_temp = False
             self._work.mkdir(parents=True, exist_ok=True)
         self._write_lock = threading.Lock()
+        self._body_cache: dict[str, str] = {}
         self._measure_cache: dict[tuple[str, float, float], float] = {}
         self._heading_cache: dict[tuple[str, float, float], float] = {}
         self._bilingual_cache: dict[tuple[str, float, float], float] = {}
@@ -308,6 +345,27 @@ class TypstFragmentTypesetter:
             return None
         return pdf_path
 
+    def _body_markup(self, text: str) -> str:
+        """The Typst body for a fragment: prose escaped, inline math in math mode.
+
+        Inline ``$...$`` / ``\\(...\\)`` spans the model emitted are converted
+        with :func:`typstify_math` and emitted in math mode only when the math
+        probe compiles them; a span that does not compile falls back to escaped
+        literal text, never worse than the escape-only path. Everything else is
+        escaped exactly as before, so a math-free fragment is byte-identical.
+        Cached by input text: one paragraph is measured at several sizes but
+        converted once.
+        """
+        cached = self._body_cache.get(text)
+        if cached is not None:
+            return cached
+        from ubt.adapters.pdf.overlay_text import prepare_overlay_text, render_overlay_line
+
+        prepared = prepare_overlay_text(text, target_lang=self._target_lang)
+        body = render_overlay_line(prepared, self._math_probe.check, target_lang=self._target_lang)
+        self._body_cache[text] = body
+        return body
+
     def _measure_source(
         self,
         text: str,
@@ -317,7 +375,7 @@ class TypstFragmentTypesetter:
         kind: str = "text",
         is_bold: bool = False,
     ) -> str:
-        body = text.translate(_MARKUP_ESCAPE)
+        body = self._body_markup(text)
         font_line = self._font_line
         weight_line = ', weight: "bold"' if (kind == "heading" or is_bold) else ""
         return (
@@ -490,10 +548,10 @@ class TypstFragmentTypesetter:
             f"#set page(width: {width_pt}pt, height: auto, margin: 0pt)\n"
             f"#set par(leading: 0.52em)\n"
             f'#set text(size: {size_pt}pt, top-edge: "ascender", bottom-edge: "descender"{font_line})\n'
-            f"{target.translate(_MARKUP_ESCAPE)}\n"
+            f"{self._body_markup(target)}\n"
             f"#v({_BILINGUAL_GAP_EM}em)\n"
             f'#text(size: {size_pt * _BILINGUAL_RATIO}pt, fill: rgb("{_BILINGUAL_FILL}"))'
-            f"[{source.translate(_MARKUP_ESCAPE)}]\n"
+            f"[{self._body_markup(source)}]\n"
         )
 
     def _bilingual_text_source(
@@ -505,10 +563,10 @@ class TypstFragmentTypesetter:
             f"#set par(leading: 0.52em)\n"
             f'#set text(size: {size_pt}pt, top-edge: "ascender", bottom-edge: "descender"{font_line})\n'
             f"#box(width: {width_pt}pt, height: {height_pt}pt, clip: true)[\n"
-            f"{target.translate(_MARKUP_ESCAPE)}\n"
+            f"{self._body_markup(target)}\n"
             f"#v({_BILINGUAL_GAP_EM}em)\n"
             f'#text(size: {size_pt * _BILINGUAL_RATIO}pt, fill: rgb("{_BILINGUAL_FILL}"))'
-            f"[{source.translate(_MARKUP_ESCAPE)}]\n"
+            f"[{self._body_markup(source)}]\n"
             f"]\n"
         )
 
@@ -589,7 +647,7 @@ class TypstFragmentTypesetter:
         kind: str = "text",
         is_bold: bool = False,
     ) -> str:
-        body = text.translate(_MARKUP_ESCAPE)
+        body = self._body_markup(text)
         font_line = self._font_line
         weight_line = ', weight: "bold"' if (kind == "heading" or is_bold) else ""
         return (
@@ -697,6 +755,31 @@ class TypstFragmentTypesetter:
             for _, source, tag in pending:
                 self._compile(source, tag=tag)
 
+    def _math_bodies(self, texts: Sequence[str]) -> list[str]:
+        """The converted Typst math bodies in ``texts``, deduplicated.
+
+        Fitting measures each paragraph through ``_body_markup``, whose math
+        probe would otherwise spawn one Typst process per formula. Collecting
+        the bodies here lets :meth:`TypstMathProbe.check_many` resolve the whole
+        document's math in a handful of compiles before fitting starts.
+        """
+        from ubt.adapters.pdf.overlay_text import (
+            prepare_overlay_text,
+            split_math_spans,
+            typstify_math_span,
+        )
+
+        bodies: list[str] = []
+        for text in texts:
+            prepared = prepare_overlay_text(text, target_lang=self._target_lang)
+            for is_math, content in split_math_spans(prepared):
+                if not is_math:
+                    continue
+                converted = typstify_math_span(content)
+                if converted is not None:
+                    bodies.append(converted)
+        return list(dict.fromkeys(bodies))
+
     def prefetch(self, requests: Sequence[tuple[str, str, float, float]]) -> None:
         """Fit and compile a whole document's fragments in a handful of calls.
 
@@ -711,6 +794,11 @@ class TypstFragmentTypesetter:
         unique = list(dict.fromkeys(requests))
         if not unique:
             return
+        # Resolve every inline-math body up front so fitting's measure calls hit
+        # the probe cache instead of spawning a Typst process per formula.
+        self._math_probe.check_many(
+            self._math_bodies([text for _kind, text, _width, _height in unique])
+        )
         text_items = [
             (text, width_pt, height_pt)
             for kind, text, width_pt, height_pt in unique
@@ -1188,12 +1276,25 @@ def overlays_from_blocks(
         if run is not None and all(
             _overlayable(by_id[block_id], realization_plan) for block_id in run.block_ids
         ):
+            run_blocks = [by_id[block_id] for block_id in run.block_ids]
+            # A run reads as one element, so only its first block can carry a
+            # list marker (a wrapped list item continues without a second bullet).
             text = join_continuous_text(
-                [by_id[block_id].target_text or "" for block_id in run.block_ids]
+                [
+                    _with_list_marker(run_block, run_block.target_text or "")
+                    if index == 0
+                    else (run_block.target_text or "")
+                    for index, run_block in enumerate(run_blocks)
+                ]
             )
             source = (
                 join_continuous_text(
-                    [by_id[block_id].source_text or "" for block_id in run.block_ids]
+                    [
+                        _with_list_marker(run_block, run_block.source_text or "")
+                        if index == 0
+                        else (run_block.source_text or "")
+                        for index, run_block in enumerate(run_blocks)
+                    ]
                 )
                 if bilingual
                 else ""
@@ -1231,7 +1332,11 @@ def overlays_from_blocks(
                 if block.block_type == BlockType.FORMULA
                 else ("heading" if block.block_type == BlockType.HEADING else "text")
             )
-            source = (block.source_text or "").strip() if bilingual and kind == "text" else ""
+            source = (
+                _with_list_marker(block, (block.source_text or "").strip())
+                if bilingual and kind == "text"
+                else ""
+            )
             span = block.element.span
             boxes = span.boxes if isinstance(span, CompositeSpan) else ()
             bbox_tuple = (box.x0, box.y0, box.x1, box.y1)
@@ -1239,7 +1344,7 @@ def overlays_from_blocks(
             if not boxes and loc_key in by_loc:
                 idx = by_loc[loc_key]
                 existing = overlays[idx]
-                target_chunk = (block.target_text or "").strip()
+                target_chunk = _with_list_marker(block, (block.target_text or "").strip())
                 new_text = (
                     f"{existing.text}\n\n{target_chunk}"
                     if existing.text and target_chunk
@@ -1266,7 +1371,7 @@ def overlays_from_blocks(
                 block.id,
                 box.page,
                 bbox_tuple,
-                (block.target_text or "").strip(),
+                _with_list_marker(block, (block.target_text or "").strip()),
                 boxes=boxes,
                 kind=kind,
                 source=source,

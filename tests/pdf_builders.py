@@ -132,4 +132,46 @@ def write_two_column_pdf(
     return path
 
 
-__all__ = ["PAGE_HEIGHT", "PAGE_WIDTH", "write_text_pdf", "write_two_column_pdf"]
+def write_toc_pdf(
+    path: Path,
+    entries: Sequence[tuple[str, str]],
+    *,
+    width: float = PAGE_WIDTH,
+    height: float = PAGE_HEIGHT,
+    margin: float = _MARGIN,
+) -> Path:
+    """Write a one-page table of contents: each ``(title, page)`` on one row.
+
+    The page number sits near the right margin on the title's own baseline,
+    with the dot-leader gutter between them -- the shape the native reader must
+    pair back into a single TOC row (``textgeom`` reads the two as separate
+    lines). At least three rows are needed for the reader to call it a TOC.
+    """
+    page_number_x = width - margin - 90.0
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=width, height=height)
+    ops: list[str] = []
+    for index, (title, page_no) in enumerate(entries):
+        y = height - margin - index * _LEADING
+        for x, text in ((margin, title), (page_number_x, page_no)):
+            ops.append("BT")
+            ops.append(f"/F1 {_FONT_SIZE} Tf")
+            ops.append(f"1 0 0 1 {x} {y} Tm")
+            ops.append(f"({_escape(text)}) Tj")
+            ops.append("ET")
+    contents = DecodedStreamObject()
+    contents.set_data("\n".join(ops).encode("latin-1"))
+    page[NameObject("/Contents")] = writer._add_object(contents)  # noqa: SLF001
+    _attach_font(writer, page)
+    with path.open("wb") as handle:
+        writer.write(handle)
+    return path
+
+
+__all__ = [
+    "PAGE_HEIGHT",
+    "PAGE_WIDTH",
+    "write_text_pdf",
+    "write_toc_pdf",
+    "write_two_column_pdf",
+]

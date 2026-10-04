@@ -158,3 +158,37 @@ def test_the_compositor_stamps_a_real_typst_fragment(tmp_path: Path) -> None:
     assert placement.placed_as is Fidelity.RECONSTRUCTED_ADAPTED
     assert pdf_struct.page_sizes(output) == pdf_struct.page_sizes(source)
     assert "TRANSLATED REGION TEXT" in _text(output)
+
+
+def test_the_typst_typesetter_renders_inline_math_not_literal_latex(tmp_path: Path) -> None:
+    # Regression: the unified typesetter escaped the whole body, so an inline
+    # ``$...$`` span the model emitted was printed verbatim as ``\Gamma``. The
+    # body now goes through the overlay renderer, which emits strings the probe
+    # compiles in math mode; the control sequences must not survive literally.
+    typesetter = TypstFragmentTypesetter()
+    try:
+        fragment = typesetter.typeset(r"类型判断 $\Gamma \vdash t : T$ 表示上下文", 320.0, 40.0)
+        assert fragment is not None, "Typst failed to typeset inline math"
+        text = _text(fragment)
+        assert "\\Gamma" not in text and "\\vdash" not in text, text
+        assert "Γ" in text, text
+    finally:
+        typesetter.close()
+
+
+def test_the_compositor_draws_an_inline_math_target_onto_the_region(tmp_path: Path) -> None:
+    source = write_text_pdf(tmp_path / "source.pdf", [_PAGE])
+    output = tmp_path / "out.pdf"
+    typesetter = TypstFragmentTypesetter()
+    try:
+        composition = LayerCompositor(source, typesetter=typesetter).compose(
+            [Overlay("e1", 1, _REGION, r"类型判断 $\Gamma \vdash t : T$ 表示上下文")], output
+        )
+    finally:
+        typesetter.close()
+
+    (placement,) = composition.placements
+    assert placement.placed_as is Fidelity.RECONSTRUCTED_ADAPTED
+    text = _text(output)
+    assert "\\Gamma" not in text, text
+    assert "Γ" in text, text
