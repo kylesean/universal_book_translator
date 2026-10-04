@@ -139,6 +139,23 @@ def test_abbreviation_periods_do_not_split() -> None:
     assert count_sentences("etc. and more") == 1
 
 
+def test_reference_labels_are_masked_only_before_a_number_or_citation() -> None:
+    # 'No.'/'Ref.'/'Eq.' introduce a number/citation -> not a sentence break.
+    assert count_sentences("See No. 5 for details.") == 1
+    assert count_sentences("Ref. [3] proves it.") == 1
+    assert count_sentences("Eq. (3.11) gives the bound.") == 1
+
+
+def test_ordinary_words_ending_a_sentence_are_still_counted() -> None:
+    # These spellings share a prefix with reference labels but are plain words
+    # here; masking their period would under-count the source and could drop it
+    # below min_source_sentences, silently disarming the omission gate.
+    assert count_sentences("This is a lab. We test the model. It works.") == 3
+    assert count_sentences("We report the max. The min is lower.") == 2
+    assert count_sentences("The answer is no. We disagree.") == 2
+    assert count_sentences("They measured the var. The mean is stable.") == 2
+
+
 def test_decimal_points_do_not_split() -> None:
     assert count_sentences("3.14 is pi") == 1
     assert count_sentences("a.b.c") == 1

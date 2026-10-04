@@ -35,26 +35,33 @@ _SENT_END_RE = re.compile(
     rf"|(?<={_CJK_ADJ})[!?]"
     rf"|[!?](?={_CJK_ADJ})"
 )
-# Academic abbreviations whose period is not a sentence break. Without this,
+# Cross-reference labels whose period is not a sentence break. Without masking,
 # 'Eq. (3.11)' / 'Fig. 3.5' inflate the source sentence count while the zh
 # translation ('式(3.11)' / '图3.5') carries no Latin period — a systematic
-# sentence-ratio false positive on formula-dense narrative. Masked with a
-# private-use placeholder before splitting (trade-off: a real sentence break
-# after a trailing 'etc.' is merged; abbreviations mid-sentence dominate).
-_ABBREV_RE = re.compile(
+# sentence-ratio false positive on formula-dense narrative. The period is
+# masked ONLY when the label introduces a number or citation token, which is
+# what separates the label 'No. 5' from the ordinary sentence-final word
+# 'no.' / 'lab.' / 'max.': an earlier table matched those on whitespace alone,
+# so 'This is a lab. We test the model.' counted two sentences instead of
+# three and could drop the source below ``min_source_sentences``, silently
+# disarming the omission gate. Masked with a private-use placeholder.
+_REF_ABBREV_RE = re.compile(
     r"\b(?:"
-    r"Eqs?|Eqns?|Figs?|Secs?|Refs?|Chap|App|Appx|No|Vol|pp?|"
-    r"Avg|Avgs|Eff|Effs|Std|Stds|Min|Mins|Max|Maxs|dev|devs|"
-    r"Stat|Stats|Conf|Confs|Proc|Procs|Tab|Tabs|"
-    r"Dept|Depts|Univ|Univs|Approx|Est|Def|Defs|"
-    r"Thm|Thms|Lem|Lems|Prop|Props|Cor|Cors|"
-    r"Intl|Trans|Soc|Inst|Ed|Eds|"
-    r"Temp|Temps|Coeff|Coeffs|Var|Vars|Med|Meds|"
-    r"Freq|Freqs|Diff|Diffs|Corr|Corrs|Acc|Prec|"
-    r"Dist|Dists|Prob|Probs|Param|Params|"
-    r"Corp|Assn|Lab|Labs|Rep|Reps|Ser|"
-    r"e\.g|i\.e|etc|vs|cf|al|Dr|Prof|St"
-    r")\.(?=[\s|,\)\]]|$)",
+    r"Eqs?|Eqns?|Figs?|Secs?|Refs?|Chaps?|Appx?|Vols?|Nos?|pp?|"
+    r"Algos?|Tabs?|Thms?|Lems?|Props?|Cors?|Defs?|Ests?|"
+    r"Labs?|Mins?|Maxs?|Vars?|Meds?|Diffs?|Accs?|Probs?|Dists?|"
+    r"Params?|Freqs?|Precs?|Corrs?|Temps?|Coeffs?|Stats?|Stds?|"
+    r"Avgs?|Effs?|Confs?|Procs?|Depts?|Univs?|Intls?|Trans|Socs?|Insts?|"
+    r"Reps?|Sers?|Corp|Assn|Approx"
+    r")\.(?=\s*[\d\[\(])",
+    re.IGNORECASE,
+)
+# Latin and honorific abbreviations whose period is part of the token itself.
+# Masked on whitespace/EOL as before (documented trade-off: a genuine sentence
+# break after a trailing 'etc.'/'Dr.' merges; these spellings are not ordinary
+# sentence-final words the way 'lab.'/'max.' were).
+_LATIN_ABBREV_RE = re.compile(
+    r"\b(?:e\.g|i\.e|etc|vs|cf|al|Dr|Prof|St)\.(?=[\s|,\)\]]|$)",
     re.IGNORECASE,
 )
 _ABBREV_DOT = "\ue000"
@@ -267,13 +274,17 @@ _SPACED_DECIMAL_RE = re.compile(r"(?<=\d)\s*\.\s*(?=\d)")
 def count_sentences(text: str) -> int:
     """Count sentence fragments split on terminal punctuation (both scripts).
 
-    The ONE sentence counter of the QE subsystem: academic abbreviation
+    The ONE sentence counter of the QE subsystem: academic cross-reference
     periods are masked before splitting, so 'Eq. 3.14 shows x. Then y.' is two
-    sentences, not three, on every side that compares sentence counts.
-    Spaced decimals from PDF extraction ('19 . 6%') are collapsed to '19.6%'
-    so the dot is not falsely matched as terminal punctuation followed by space.
+    sentences, not three, on every side that compares sentence counts. A
+    reference label is only masked when it introduces a number/citation
+    ('No. 5', 'Ref. [3]'), so an ordinary word that merely looks abbreviated
+    ('lab.', 'max.') still ends its sentence and is counted. Spaced decimals
+    from PDF extraction ('19 . 6%') are collapsed to '19.6%' so the dot is not
+    falsely matched as terminal punctuation followed by space.
     """
     cleaned = _SPACED_DECIMAL_RE.sub(".", text)
-    masked = _ABBREV_RE.sub(lambda m: m.group(0)[:-1] + _ABBREV_DOT, cleaned)
+    masked = _REF_ABBREV_RE.sub(lambda m: m.group(0)[:-1] + _ABBREV_DOT, cleaned)
+    masked = _LATIN_ABBREV_RE.sub(lambda m: m.group(0)[:-1] + _ABBREV_DOT, masked)
     fragments = [f.strip() for f in _SENT_END_RE.split(masked)]
     return sum(1 for f in fragments if f)
