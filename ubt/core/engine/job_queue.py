@@ -120,6 +120,7 @@ class JobQueue:
         tenant_max_running: Mapping[str, int] | None = None,
         default_tenant_max_running: int = DEFAULT_TENANT_MAX_RUNNING,
         max_queued: int = 1000,
+        terminal_retention: int = 1000,
     ) -> None:
         self.db_path = Path(db_path)
         self.timeout = timeout
@@ -132,6 +133,15 @@ class JobQueue:
         # intake (``POST /jobs/submit`` in a loop) fills the queue's SQLite file
         # long before anything retires it.
         self.max_queued = max(1, int(max_queued))
+        # Terminal (completed/failed/cancelled) rows are kept for status queries
+        # and submit idempotency, but nothing retired them, so the queue file
+        # grew with every run. The newest ``terminal_retention`` are preserved;
+        # older ones are pruned (see :meth:`prune_terminal`).
+        self.terminal_retention = max(0, int(terminal_retention))
+        # Amortize the O(rows) prune: run it once this many terminal rows have
+        # accumulated since the last one, not on every completion.
+        self._prune_batch = max(1, self.terminal_retention)
+        self._terminal_since_prune = 0
         self._conn: sqlite3.Connection | None = None
         self._lock = threading.Lock()
         self._init_schema()
@@ -195,6 +205,56 @@ class JobQueue:
 
     def __exit__(self, *exc: object) -> None:
         self.close()
+
+    # -- retention ------------------------------------------------------------
+    def prune_terminal(self, *, keep: int | None = None) -> int:
+        """Delete terminal rows beyond the newest ``keep``; returns rows removed.
+
+        The queue never retired finished jobs, so its SQLite file grew with
+        every run. The newest ``keep`` (default :attr:`terminal_retention`) stay
+        so recent ids remain queryable for status and submit idempotency; older
+        terminal rows are dropped. Callers must treat a pruned id as unknown.
+        """
+        limit = self.terminal_retention if keep is None else max(0, int(keep))
+        statuses = tuple(s.value for s in TERMINAL_JOB_STATUSES)
+        placeholders = ",".join("?" for _ in statuses)
+        with self._get_conn() as conn:
+            conn.execute("BEGIN IMMEDIATE;")
+            try:
+                cursor = conn.execute(
+                    f"""
+                    DELETE FROM job_queue
+                     WHERE status IN ({placeholders})
+                       AND job_id NOT IN (
+                           SELECT job_id FROM job_queue
+                            WHERE status IN ({placeholders})
+                            ORDER BY COALESCE(finished_at, enqueued_at) DESC
+                            LIMIT ?
+                       )
+                    """,
+                    (*statuses, *statuses, limit),
+                )
+                removed = int(cursor.rowcount)
+                conn.execute("COMMIT;")
+            except BaseException:
+                self._safe_rollback()
+                raise
+        return max(0, removed)
+
+    def _note_terminal(self, count: int = 1) -> None:
+        """Count terminal transitions; prune once the batch fills.
+
+        Must be called *outside* a ``_get_conn`` block: :meth:`prune_terminal`
+        takes the same non-reentrant lock.
+        """
+        if count <= 0:
+            return
+        self._terminal_since_prune += count
+        if self._terminal_since_prune < self._prune_batch:
+            return
+        self._terminal_since_prune = 0
+        with suppress(sqlite3.Error):
+            self.prune_terminal()
 
     # -- row mapping ----------------------------------------------------------
     @staticmethod
@@ -492,7 +552,10 @@ class JobQueue:
                     JobStatus.RUNNING.value,
                 ),
             )
-            return cursor.rowcount == 1
+            finished = cursor.rowcount == 1
+        if finished:
+            self._note_terminal()
+        return finished
 
     def release_claim(
         self,
@@ -509,6 +572,8 @@ class JobQueue:
         exhaust the job's max_attempts.
         """
         attempt_clause = ", attempts = MAX(0, attempts - 1)" if decrement_attempt else ""
+        terminal_cancelled = False
+        result = False
         with self._get_conn() as conn:
             conn.execute("BEGIN IMMEDIATE;")
             try:
@@ -532,28 +597,33 @@ class JobQueue:
                         ),
                     )
                     conn.execute("COMMIT;")
-                    return True
-                cursor = conn.execute(
-                    f"""
-                    UPDATE job_queue
-                       SET status = ?, worker_id = NULL, lease_expires_at = NULL,
-                           heartbeat_at = NULL, error = COALESCE(?, error)
-                           {attempt_clause}
-                     WHERE job_id = ? AND worker_id = ? AND status = ?
-                    """,
-                    (
-                        JobStatus.QUEUED.value,
-                        error,
-                        job_id,
-                        worker_id,
-                        JobStatus.RUNNING.value,
-                    ),
-                )
-                conn.execute("COMMIT;")
-                return cursor.rowcount == 1
+                    terminal_cancelled = True
+                    result = True
+                else:
+                    cursor = conn.execute(
+                        f"""
+                        UPDATE job_queue
+                           SET status = ?, worker_id = NULL, lease_expires_at = NULL,
+                               heartbeat_at = NULL, error = COALESCE(?, error)
+                               {attempt_clause}
+                         WHERE job_id = ? AND worker_id = ? AND status = ?
+                        """,
+                        (
+                            JobStatus.QUEUED.value,
+                            error,
+                            job_id,
+                            worker_id,
+                            JobStatus.RUNNING.value,
+                        ),
+                    )
+                    conn.execute("COMMIT;")
+                    result = cursor.rowcount == 1
             except BaseException:
                 self._safe_rollback()
                 raise
+        if terminal_cancelled:
+            self._note_terminal()
+        return result
 
     def reclaim_stale(self, *, now: float | None = None) -> tuple[int, int]:
         """Requeue / fail jobs whose lease expired; returns ``(requeued, failed)``."""
@@ -566,6 +636,8 @@ class JobQueue:
             except BaseException:
                 self._safe_rollback()
                 raise
+        if failed:
+            self._note_terminal(failed)
         return requeued, failed
 
     @staticmethod
@@ -615,6 +687,8 @@ class JobQueue:
     def request_cancel(self, job_id: str, *, now: float | None = None) -> QueuedJob | None:
         """Cancel a queued job outright; flag a running one for its worker."""
         ts = time.time() if now is None else now
+        missing = False
+        terminal_cancelled = False
         with self._get_conn() as conn:
             conn.execute("BEGIN IMMEDIATE;")
             try:
@@ -623,22 +697,26 @@ class JobQueue:
                 ).fetchone()
                 if row is None:
                     conn.execute("COMMIT;")
-                    return None
-                if row["status"] == JobStatus.QUEUED.value:
-                    conn.execute(
-                        "UPDATE job_queue SET status = ?, finished_at = ? WHERE job_id = ?",
-                        (JobStatus.CANCELLED.value, ts, job_id),
-                    )
-                elif row["status"] == JobStatus.RUNNING.value:
-                    conn.execute(
-                        "UPDATE job_queue SET cancel_requested = 1 WHERE job_id = ?",
-                        (job_id,),
-                    )
-                conn.execute("COMMIT;")
+                    missing = True
+                else:
+                    if row["status"] == JobStatus.QUEUED.value:
+                        conn.execute(
+                            "UPDATE job_queue SET status = ?, finished_at = ? WHERE job_id = ?",
+                            (JobStatus.CANCELLED.value, ts, job_id),
+                        )
+                        terminal_cancelled = True
+                    elif row["status"] == JobStatus.RUNNING.value:
+                        conn.execute(
+                            "UPDATE job_queue SET cancel_requested = 1 WHERE job_id = ?",
+                            (job_id,),
+                        )
+                    conn.execute("COMMIT;")
             except BaseException:
                 self._safe_rollback()
                 raise
-        return self.get(job_id)
+        if terminal_cancelled:
+            self._note_terminal()
+        return None if missing else self.get(job_id)
 
     # -- queries --------------------------------------------------------------
     def get(self, job_id: str) -> QueuedJob | None:

@@ -457,3 +457,49 @@ def test_rows_persist_across_reopen(tmp_path: Path) -> None:
         assert job is not None
         assert job.payload == {"v": 1}
         assert job.status is JobStatus.QUEUED
+
+
+# --------------------------------------------------------------------------- #
+# Terminal-row retention: the queue file must not grow with every run.
+# --------------------------------------------------------------------------- #
+
+
+def _finish(queue: JobQueue, job_id: str, *, now: float) -> None:
+    queue.enqueue(job_id, {}, now=now)
+    queue.claim("w", now=now + 0.1)
+    queue.complete(job_id, "w", status=JobStatus.COMPLETED, now=now + 0.2)
+
+
+def _terminal_ids(queue: JobQueue) -> set[str]:
+    with queue._get_conn() as conn:
+        rows = conn.execute(
+            "SELECT job_id FROM job_queue WHERE status IN ('completed','failed','cancelled')"
+        ).fetchall()
+    return {str(row[0]) for row in rows}
+
+
+def test_prune_terminal_keeps_only_the_newest(tmp_path: Path) -> None:
+    queue = _queue(tmp_path)
+    for i in range(5):
+        _finish(queue, f"j{i}", now=float(i))
+    removed = queue.prune_terminal(keep=2)
+    assert removed == 3
+    assert _terminal_ids(queue) == {"j3", "j4"}
+
+
+def test_terminal_retention_bounds_growth(tmp_path: Path) -> None:
+    # retention=2 -> prune every 2 terminal writes, so at most retention + the
+    # in-flight batch survives instead of all six.
+    queue = _queue(tmp_path, terminal_retention=2)
+    for i in range(6):
+        _finish(queue, f"j{i}", now=float(i))
+    assert len(_terminal_ids(queue)) <= 3
+
+
+def test_prune_terminal_never_drops_live_rows(tmp_path: Path) -> None:
+    queue = _queue(tmp_path)
+    _finish(queue, "done", now=1.0)
+    queue.enqueue("queued", {}, now=2.0)
+    queue.prune_terminal(keep=0)
+    assert queue.get("queued") is not None
+    assert queue.get("done") is None
