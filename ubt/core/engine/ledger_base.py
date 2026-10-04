@@ -27,10 +27,10 @@ from ubt.core.ir.models import (
     StyleMeta,
     make_element,
 )
-from ubt.model.ast import RegionKind
+from ubt.model.ast import Confidence, RegionKind
 from ubt.model.span import CompositeSpan, PhysicalBox
 
-TARGET_SCHEMA_VERSION = 12
+TARGET_SCHEMA_VERSION = 13
 
 # Every column ``_row_to_block`` reads by name. Kept as a literal (not derived
 # from the CREATE statement) to guarantee all required schema fields are verified
@@ -59,6 +59,10 @@ _REQUIRED_BLOCK_COLUMNS = frozenset(
         "policy_translate",
         "policy_reason",
         "provenance_json",
+        "level",
+        "marker",
+        "confidence",
+        "decorative",
     }
 )
 
@@ -102,6 +106,10 @@ def _upsert_blocks_batch(cursor: sqlite3.Cursor, job_id: str, blocks: Sequence[I
             json.dumps(b.provenance, ensure_ascii=False),
             b.mqm_severity,
             json.dumps(b.mqm_spans, ensure_ascii=False) if b.mqm_spans else None,
+            getattr(b.element, "level", None),
+            getattr(b.element, "marker", None),
+            b.element.confidence.value,
+            1 if b.element.decorative else 0,
         )
         for b in blocks
     ]
@@ -116,8 +124,9 @@ def _upsert_blocks_batch(cursor: sqlite3.Cursor, job_id: str, blocks: Sequence[I
             layout_role,
             policy_translate, policy_reason, provenance_json,
             mqm_severity, mqm_spans_json,
+            level, marker, confidence, decorative,
             updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         ON CONFLICT(job_id, block_id) DO UPDATE SET
             flow_id = excluded.flow_id,
             spine_index = excluded.spine_index,
@@ -167,6 +176,10 @@ def _upsert_blocks_batch(cursor: sqlite3.Cursor, job_id: str, blocks: Sequence[I
             policy_translate = excluded.policy_translate,
             policy_reason = excluded.policy_reason,
             provenance_json = excluded.provenance_json,
+            level = excluded.level,
+            marker = excluded.marker,
+            confidence = excluded.confidence,
+            decorative = excluded.decorative,
             mqm_severity = COALESCE(excluded.mqm_severity, blocks.mqm_severity),
             mqm_spans_json = COALESCE(excluded.mqm_spans_json, blocks.mqm_spans_json),
             updated_at = CURRENT_TIMESTAMP
@@ -348,6 +361,10 @@ class LedgerBase:
                         policy_translate INTEGER DEFAULT NULL,
                         policy_reason TEXT DEFAULT NULL,
                         provenance_json TEXT DEFAULT NULL,
+                        level INTEGER DEFAULT NULL,
+                        marker TEXT DEFAULT NULL,
+                        confidence TEXT DEFAULT NULL,
+                        decorative INTEGER DEFAULT NULL,
                         PRIMARY KEY (job_id, block_id),
                         FOREIGN KEY(job_id) REFERENCES job_meta(job_id)
                     );
@@ -367,7 +384,7 @@ class LedgerBase:
                     CREATE INDEX IF NOT EXISTS idx_blocks_job_mtqe ON blocks(job_id, mtqe_score);
                     CREATE INDEX IF NOT EXISTS idx_blocks_pending ON blocks(job_id, status, spine_index, block_id);
                     CREATE INDEX IF NOT EXISTS idx_blocks_rollup ON blocks(job_id, skip_translate, mtqe_score, status);
-                    PRAGMA user_version = 12;
+                    PRAGMA user_version = 13;
                 """)
                 current_version = TARGET_SCHEMA_VERSION
 
@@ -576,6 +593,28 @@ class LedgerBase:
                     conn.execute("ALTER TABLE blocks DROP COLUMN structure_role;")
                 conn.execute("PRAGMA user_version = 12;")
 
+            # Migration to Version 13: persist the typed element's structural
+            # fields. ``level`` (heading depth), ``marker`` (list bullet),
+            # ``confidence`` and ``decorative`` live on the element but had no
+            # column, so ``_row_to_block`` re-materialized every block from
+            # ``make_element`` defaults: a resumed ``### Section`` came back as
+            # ``# Section`` and every list lost its bullet (the renderers read
+            # ``getattr(element, "level", 1)`` and saw the default).
+            if current_version < 13:
+                columns = {
+                    str(row["name"])
+                    for row in conn.execute("PRAGMA table_info(blocks);").fetchall()
+                }
+                for name, decl in (
+                    ("level", "INTEGER DEFAULT NULL"),
+                    ("marker", "TEXT DEFAULT NULL"),
+                    ("confidence", "TEXT DEFAULT NULL"),
+                    ("decorative", "INTEGER DEFAULT NULL"),
+                ):
+                    if name not in columns:
+                        conn.execute(f"ALTER TABLE blocks ADD COLUMN {name} {decl};")
+                conn.execute("PRAGMA user_version = 13;")
+
             # Guard against TARGET_SCHEMA_VERSION drift: migrations above must
             # land exactly on the declared target, otherwise future restarts
             # silently skip new migrations.
@@ -661,6 +700,12 @@ class LedgerBase:
         policy_raw = row["policy_translate"]
 
         region = RegionKind(row["layout_role"]) if row["layout_role"] else None
+        confidence_raw = row["confidence"]
+        confidence = Confidence(confidence_raw) if confidence_raw else Confidence.INFERRED
+        level_raw = row["level"]
+        level = int(level_raw) if level_raw is not None else 1
+        marker = row["marker"] or ""
+        decorative = bool(row["decorative"])
         span: CompositeSpan | None = None
         phys_boxes = provenance.get("physical_boxes")
         if isinstance(phys_boxes, list) and len(phys_boxes) > 1:
@@ -694,6 +739,10 @@ class LedgerBase:
                 bbox=bbox,
                 span=span,
                 skip_translate=bool(row["skip_translate"]),
+                confidence=confidence,
+                decorative=decorative,
+                level=level,
+                marker=marker,
             ),
             style=style,
             draft_text=row["draft_text"],

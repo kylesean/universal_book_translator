@@ -42,6 +42,7 @@ from ubt.core.ir.models import (
     IRBlock,
     make_element,
 )
+from ubt.model.ast import Confidence, Heading, ListItem
 
 pytestmark = pytest.mark.fast
 
@@ -286,6 +287,49 @@ def test_append_chapter_updates_total_blocks_and_upserts(ledger: SQLiteJobLedger
     ledger.append_chapter("job", _chapter("ch1", [_block("ch1#1", text="v2")]))
     assert ledger.get_total_blocks("job") == 1  # upsert, not duplicate
     assert ledger.get_block("ch1#1", job_id="job").source_text == "v2"  # type: ignore[union-attr]
+
+
+def test_append_chapter_roundtrips_structural_element_fields(ledger: SQLiteJobLedger) -> None:
+    # A resumed job re-materializes every block through ``_row_to_block``; the
+    # element's level/marker/confidence/decorative must survive, or a
+    # ``### Section`` comes back as ``# Section`` and lists lose their bullet.
+    _init(ledger)
+    heading = IRBlock(
+        element=make_element(
+            id="ch1#h",
+            spine_index=0,
+            block_type=BlockType.HEADING,
+            source_text="Section",
+            level=3,
+            confidence=Confidence.UNKNOWN,
+            decorative=True,
+        ),
+        status=BlockStatus.DRAFTED,
+    )
+    item = IRBlock(
+        element=make_element(
+            id="ch1#l",
+            spine_index=1,
+            block_type=BlockType.LIST_ITEM,
+            source_text="first",
+            marker="1.",
+        ),
+        status=BlockStatus.DRAFTED,
+    )
+    ledger.append_chapter("job", _chapter("ch1", [heading, item]))
+
+    stored_heading = ledger.get_block("ch1#h", job_id="job")
+    assert stored_heading is not None
+    assert isinstance(stored_heading.element, Heading)
+    assert stored_heading.element.level == 3
+    assert stored_heading.element.confidence is Confidence.UNKNOWN
+    assert stored_heading.element.decorative is True
+
+    stored_item = ledger.get_block("ch1#l", job_id="job")
+    assert stored_item is not None
+    assert isinstance(stored_item.element, ListItem)
+    assert stored_item.element.marker == "1."
+    assert stored_item.element.confidence is Confidence.INFERRED
 
 
 def test_save_checkpoint_records_state(ledger: SQLiteJobLedger) -> None:
