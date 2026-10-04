@@ -84,9 +84,9 @@ class _FragmentSpy:
         self.calls: list[tuple[str, float, float]] = []
         self.math_calls: list[tuple[str, float, float]] = []
         self.bilingual_calls: list[tuple[str, str, float, float]] = []
-        self.prefetched: list[tuple[str, str, float, float]] = []
+        self.prefetched: list[tuple[str, str, float, float, float | None]] = []
 
-    def prefetch(self, requests: Sequence[tuple[str, str, float, float]]) -> None:
+    def prefetch(self, requests: Sequence[tuple[str, str, float, float, float | None]]) -> None:
         self.prefetched.extend(requests)
 
     def typeset(
@@ -279,11 +279,11 @@ def test_the_compositor_prefetches_single_box_fragments(tmp_path: Path) -> None:
 
     LayerCompositor(source, typesetter=spy).compose(overlays, tmp_path / "out.pdf")
 
-    assert [(kind, text) for kind, text, _w, _h in spy.prefetched] == [
+    assert [(kind, text) for kind, text, _w, _h, _fs in spy.prefetched] == [
         ("text", "first"),
         ("text", "second"),
     ]
-    (_kind, _text, width, height) = spy.prefetched[0]
+    (_kind, _text, width, height, _fs) = spy.prefetched[0]
     assert (width, height) == (_REGION[2] - _REGION[0], _REGION[3] - _REGION[1])
 
 
@@ -315,7 +315,7 @@ def test_the_compositor_prefetches_a_bilingual_overlay_as_one_request(tmp_path: 
     LayerCompositor(source, typesetter=spy).compose([overlay], tmp_path / "out.pdf")
 
     (request,) = spy.prefetched
-    kind, text, _w, _h = request
+    kind, text, _w, _h, _fs = request
     assert kind == "bilingual"
     assert text == bilingual_request_text("TARGET", "SOURCE")
 

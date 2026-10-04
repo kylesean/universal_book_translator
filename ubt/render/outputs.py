@@ -234,6 +234,14 @@ def _with_list_marker(block: IRBlock, text: str) -> str:
     return f"{marker} {text}"
 
 
+#: The shared class size is the Nth percentile of the per-box fits. The literal
+#: minimum is pathological: one degenerate box (a 2pt sliver) would drag the
+#: whole document to 2pt. A low percentile keeps the overwhelmingly common size
+#: while the handful of genuinely over-constrained boxes shrink on their own.
+_UNIFORM_PERCENTILE = 10
+#: ...and it never drops below this fraction of the class's median source size,
+#: so a small document with one over-long box cannot collapse its body size.
+_UNIFORM_MIN_SCALE = 0.7
 #: Font-size floor (pt) for a fragment, and the slack (pt) a fit search allows.
 #: The floor is low so a text block whose extracted box is tiny still typesets
 #: (at a proportionally tiny size) instead of descending to source -- a source
@@ -320,6 +328,11 @@ class TypstFragmentTypesetter:
         self._measure_cache: dict[tuple[str, float, float], float] = {}
         self._heading_cache: dict[tuple[str, float, float], float] = {}
         self._bilingual_cache: dict[tuple[str, float, float], float] = {}
+        #: Per style class (``text`` / ``heading``), the one size every box in
+        #: that class draws at, chosen by ``prefetch`` as the smallest that fits
+        #: them all. Empty until ``prefetch`` runs, so a direct ``typeset`` call
+        #: keeps the per-box fit.
+        self._uniform_sizes: dict[str, float] = {}
 
     @property
     def _font_line(self) -> str:
@@ -463,12 +476,24 @@ class TypstFragmentTypesetter:
         for item, height in zip(todo, heights, strict=True):
             store[item] = height
 
+    def _caps_for(self, count: int, max_size_pt: float | Sequence[float] | None) -> list[float]:
+        """The per-box starting size cap (the source size, never below the floor)."""
+        if isinstance(max_size_pt, (list, tuple)):
+            return [
+                float(cap) if cap is not None and cap >= _MIN_FONT_PT else self._size_pt
+                for cap in max_size_pt
+            ]
+        single = max_size_pt if isinstance(max_size_pt, (int, float)) else None
+        if single is None or single < _MIN_FONT_PT:
+            return [self._size_pt] * count
+        return [float(single)] * count
+
     def _fit_sizes(
         self,
         items: Sequence[tuple[str, float, float]],
         *,
         kind: str = "text",
-        max_size_pt: float | None = None,
+        max_size_pt: float | Sequence[float] | None = None,
         is_bold: bool = False,
     ) -> list[float | None]:
         """Fit every box at once, one batched measure per correction round.
@@ -481,14 +506,10 @@ class TypstFragmentTypesetter:
         occluded line.
         """
         results: list[float | None] = [None] * len(items)
-        cap = (
-            max_size_pt
-            if (max_size_pt is not None and max_size_pt >= _MIN_FONT_PT)
-            else self._size_pt
-        )
+        caps = self._caps_for(len(items), max_size_pt)
         sizes: list[float | None] = [
             min(cap, height_pt * 0.85) if width_pt > 0 and height_pt > 0 and text.strip() else None
-            for text, width_pt, height_pt in items
+            for (text, width_pt, height_pt), cap in zip(items, caps, strict=True)
         ]
         cache = self._heading_cache if (kind == "heading" or is_bold) else self._measure_cache
         active = [
@@ -533,12 +554,20 @@ class TypstFragmentTypesetter:
         max_size_pt: float | None = None,
         is_bold: bool = False,
     ) -> float | None:
-        return self._fit_sizes(
+        fitted = self._fit_sizes(
             [(text, width_pt, height_pt)],
             kind=kind,
             max_size_pt=max_size_pt,
             is_bold=is_bold,
         )[0]
+        if fitted is None:
+            return None
+        # Uniform document typography (plan A): every box in a style class draws
+        # at one size, the smallest that fits them all. ``prefetch`` chose it, so
+        # a box here fits by construction; ``min`` only guards a box it never saw
+        # (a multi-box overlay) from overflowing.
+        uniform = self._uniform_sizes.get(kind)
+        return min(fitted, uniform) if uniform is not None else fitted
 
     # -- In-place bilingual: target above a smaller, muted source -------------- #
 
@@ -837,7 +866,30 @@ class TypstFragmentTypesetter:
                     bodies.append(converted)
         return list(dict.fromkeys(bodies))
 
-    def prefetch(self, requests: Sequence[tuple[str, str, float, float]]) -> None:
+    @staticmethod
+    def _uniform_size(sizes: Sequence[float | None]) -> float | None:
+        """The class's one shared size: a low percentile of the per-box fits.
+
+        Floored at :data:`_UNIFORM_MIN_SCALE` of the class's *median* fit, so a
+        small document whose single over-long box fits at 2pt cannot collapse the
+        whole body to 2pt — that one box shrinks on its own instead.
+        """
+        fitted = sorted(size for size in sizes if size is not None)
+        if not fitted:
+            return None
+        index = min(len(fitted) - 1, len(fitted) * _UNIFORM_PERCENTILE // 100)
+        floor = _UNIFORM_MIN_SCALE * fitted[len(fitted) // 2]
+        return max(fitted[index], floor)
+
+    def _cap_for(self, kind: str, font_size: float | None) -> float:
+        """The starting size cap for one box, mirroring ``typeset``'s ``max_size``."""
+        if font_size is None or font_size <= 0:
+            return 24.0 if kind == "heading" else self._size_pt
+        if kind == "heading":
+            return max(font_size, 24.0)
+        return font_size * 1.05
+
+    def prefetch(self, requests: Sequence[tuple[str, str, float, float, float | None]]) -> None:
         """Fit and compile a whole document's fragments in a handful of calls.
 
         A Typst invocation costs ~0.7s of startup regardless of how many
@@ -846,44 +898,46 @@ class TypstFragmentTypesetter:
         fragment as a page of one document and splits the pages back out.
         Content addressing keeps it idempotent: a later ``typeset`` for the same
         box finds the split file. Each request is ``(kind, text, width_pt,
-        height_pt)``; ``kind == "math"`` selects the math source, else text.
+        height_pt, font_size)``; ``kind == "math"`` selects the math source.
+
+        Uniform document typography (plan A): within each style class every box
+        is fitted, then all draw at the *smallest* size that fits them all, so a
+        page (and the whole document) carries one body size and one heading size
+        instead of a different size per paragraph.
         """
         unique = list(dict.fromkeys(requests))
         if not unique:
             return
+        # A fresh document owns a fresh uniform size.
+        self._uniform_sizes.clear()
         # Resolve every inline-math body up front so fitting's measure calls hit
         # the probe cache instead of spawning a Typst process per formula.
-        self._math_probe.check_many(
-            self._math_bodies([text for _kind, text, _width, _height in unique])
-        )
-        text_items = [
-            (text, width_pt, height_pt)
-            for kind, text, width_pt, height_pt in unique
-            if kind == "text"
-        ]
-        sizes = self._fit_sizes(text_items, kind="text")
+        self._math_probe.check_many(self._math_bodies([text for _kind, text, *_rest in unique]))
         pages: list[tuple[str, str]] = []
-        for (text, width_pt, height_pt), size_pt in zip(text_items, sizes, strict=True):
-            if size_pt is not None:
-                pages.append(
-                    (self._text_source(text, width_pt, height_pt, size_pt, kind="text"), "")
-                )
-
-        heading_items = [
-            (text, width_pt, height_pt)
-            for kind, text, width_pt, height_pt in unique
-            if kind == "heading"
-        ]
-        heading_sizes = self._fit_sizes(heading_items, kind="heading", max_size_pt=24.0)
-        for (text, width_pt, height_pt), size_pt in zip(heading_items, heading_sizes, strict=True):
-            if size_pt is not None:
-                pages.append(
-                    (self._text_source(text, width_pt, height_pt, size_pt, kind="heading"), "")
-                )
+        for kind in ("text", "heading"):
+            items = [
+                (text, width_pt, height_pt, font_size)
+                for request_kind, text, width_pt, height_pt, font_size in unique
+                if request_kind == kind
+            ]
+            if not items:
+                continue
+            triples = [(text, width_pt, height_pt) for text, width_pt, height_pt, _ in items]
+            caps = [self._cap_for(kind, font_size) for _, _, _, font_size in items]
+            sizes = self._fit_sizes(triples, kind=kind, max_size_pt=caps)
+            uniform = self._uniform_size(sizes)
+            if uniform is not None:
+                self._uniform_sizes[kind] = uniform
+            for (text, width_pt, height_pt, _font_size), size_pt in zip(items, sizes, strict=True):
+                if size_pt is not None:
+                    draw_size = uniform if uniform is not None else size_pt
+                    pages.append(
+                        (self._text_source(text, width_pt, height_pt, draw_size, kind=kind), "")
+                    )
 
         bilingual_items = [
             (*text.partition(_BILINGUAL_SEP)[::2], width_pt, height_pt)
-            for kind, text, width_pt, height_pt in unique
+            for kind, text, width_pt, height_pt, _font_size in unique
             if kind == "bilingual"
         ]
         for (target, source, width_pt, height_pt), size_pt in zip(
@@ -896,7 +950,7 @@ class TypstFragmentTypesetter:
                         "bilingual:",
                     )
                 )
-        for kind, text, width_pt, height_pt in unique:
+        for kind, text, width_pt, height_pt, _font_size in unique:
             if kind != "math":
                 continue
             math_source = self._math_source(text, width_pt, height_pt)
@@ -1092,7 +1146,7 @@ class LayerCompositor:
         prefetch = getattr(self._typesetter, "prefetch", None)
         if prefetch is None:
             return
-        requests: list[tuple[str, str, float, float]] = []
+        requests: list[tuple[str, str, float, float, float | None]] = []
         for overlay, boxes in prepared:
             if len(boxes) != 1:
                 continue
@@ -1109,10 +1163,11 @@ class LayerCompositor:
                         bilingual_request_text(overlay.text, overlay.source),
                         width,
                         height,
+                        overlay.font_size,
                     )
                 )
             else:
-                requests.append((overlay.kind, overlay.text, width, height))
+                requests.append((overlay.kind, overlay.text, width, height, overlay.font_size))
         prefetch(requests)
 
     def _compile_overlay(

@@ -70,13 +70,13 @@ def test_prefetch_compiles_many_fragments_in_batches(tmp_path: Path) -> None:
     # The whole point of batching: every fragment resolves to its own PDF without
     # one Typst process per fragment.
     requests = [
-        ("text", f"fragment number {index} with a few words here", 200.0, 12.0)
+        ("text", f"fragment number {index} with a few words here", 200.0, 12.0, None)
         for index in range(30)
     ]
     typesetter = TypstFragmentTypesetter()
     try:
         typesetter.prefetch(requests)
-        for _kind, text, width_pt, height_pt in requests:
+        for _kind, text, width_pt, height_pt, _font_size in requests:
             fragment = typesetter.typeset(text, width_pt, height_pt)
             assert fragment is not None and fragment.exists()
     finally:
@@ -158,6 +158,32 @@ def test_the_compositor_stamps_a_real_typst_fragment(tmp_path: Path) -> None:
     assert placement.placed_as is Fidelity.RECONSTRUCTED_ADAPTED
     assert pdf_struct.page_sizes(output) == pdf_struct.page_sizes(source)
     assert "TRANSLATED REGION TEXT" in _text(output)
+
+
+def test_boxes_in_a_style_class_share_one_uniform_size() -> None:
+    # Plan A: every body box draws at the smallest size that fits them all, so a
+    # page does not mix a different size per paragraph.
+    typesetter = TypstFragmentTypesetter()
+    try:
+        requests = [
+            ("text", "short caption", 120.0, 40.0, 12.0),
+            ("text", "a much longer paragraph that has to wrap many times " * 4, 120.0, 40.0, 12.0),
+            ("text", "a medium paragraph that wraps a couple of lines here", 120.0, 40.0, 12.0),
+            ("text", "another short one", 120.0, 40.0, 12.0),
+        ]
+        typesetter.prefetch(requests)
+        uniform = typesetter._uniform_sizes["text"]
+        cap = 12.0 * 1.05
+        assert uniform is not None
+        assert uniform <= cap
+        sizes = [
+            typesetter._fit_size(text, w, h, max_size_pt=cap) for _k, text, w, h, _fs in requests
+        ]
+        # No box exceeds the shared size; the boxes that fit there all draw at it.
+        assert all(size is not None and size <= uniform for size in sizes), sizes
+        assert sizes.count(uniform) >= 2, sizes
+    finally:
+        typesetter.close()
 
 
 def test_the_typst_typesetter_renders_inline_math_not_literal_latex(tmp_path: Path) -> None:
