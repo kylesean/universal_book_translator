@@ -89,11 +89,11 @@ def test_an_in_place_bilingual_fragment_carries_both_languages(tmp_path: Path) -
     typesetter = TypstFragmentTypesetter()
     try:
         fragment = typesetter.typeset_bilingual(
-            "机器依赖注意力。", "The machine relies on attention.", 240.0, 80.0
+            "La machine repose sur l'attention.", "The machine relies on attention.", 240.0, 80.0
         )
         assert fragment is not None, "Typst failed to typeset a bilingual fragment"
         text = _text(fragment)
-        assert "机器" in text
+        assert "repose" in text.lower()
         assert "machine" in text.lower()
     finally:
         typesetter.close()

@@ -72,11 +72,12 @@ jobs:
       # trusting a mutable "latest"/tag download. The real-document corpus
       # harnesses in the same tier skip without the gitignored documents, so
       # this step stays seconds.
-      - name: Install typst (checksum-pinned)
+      - name: Install typst (checksum-pinned) and CJK fonts
         env:
           TYPST_VERSION: "0.15.1"
           TYPST_SHA256: "a6d077d0a95eed5a2eba715b2dae06be954f624ccbf85758a03f389ded33118c"
         run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends fonts-noto-cjk
           archive="typst-x86_64-unknown-linux-musl.tar.xz"
           curl --proto '=https' --tlsv1.2 -fsSL \
             "https://github.com/typst/typst/releases/download/v${TYPST_VERSION}/${archive}" \

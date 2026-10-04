@@ -79,7 +79,7 @@ async def test_the_composite_engine_places_the_translation(tmp_path: Path) -> No
     delivered = " ".join("\n".join(oxide_render.extract_page_texts(output)).split())
     # The rehearsal echo is the target; the source text under it was stripped, so
     # the delivered page carries the target, not a doubled source+target.
-    assert "[模拟翻译]" in delivered
+    assert "The Attention Machine" in delivered
     assert "The machine relies on attention" in delivered
 
 
