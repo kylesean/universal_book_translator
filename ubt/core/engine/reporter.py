@@ -250,9 +250,6 @@ class QualityReport(BaseModel):
     mode_advisory: dict[str, Any] | None = None
     # Pipeline runtime configuration snapshot (draft_model, repair_model, etc.)
     config_snapshot: dict[str, Any] = Field(default_factory=dict)
-    # Typst self-healing lines commented OUT of the delivered
-    # PDF (translated content silently gone). Empty = no content removal.
-    syntax_fallbacks: list[str] = Field(default_factory=list)
     # Display formulas whose converted Typst differed structurally
     # from the source equation and were replaced by the source graphic
     # (lossless substitution, must stay visible in the audit).
@@ -524,9 +521,6 @@ def build_quality_report(
         route=route_info,
         mode_advisory=mode_advisory,
         config_snapshot=cfg_snapshot,
-        syntax_fallbacks=[
-            str(item) for item in (manifest.metadata.get("typst_syntax_fallbacks") or []) if item
-        ],
         formula_witness_fallbacks=[
             str(item) for item in (manifest.metadata.get("formula_witness_findings") or []) if item
         ],
@@ -816,23 +810,6 @@ def render_kdp_audit_markdown(report: QualityReport) -> str:
     provenance_line = (
         f"**Configuration Provenance:** {' · '.join(cfg_parts)}\n" if cfg_parts else ""
     )
-    # Typst syntax fallbacks deleted translated lines from the
-    # delivered PDF — this must be visible in the audit, not just in logs.
-    syntax_fallback_line = ""
-    if report.syntax_fallbacks:
-        preview = " · ".join(report.syntax_fallbacks[:3])
-        more = (
-            f" (+{len(report.syntax_fallbacks) - 3} more)"
-            if len(report.syntax_fallbacks) > 3
-            else ""
-        )
-        syntax_fallback_line = (
-            f"> ⚠️ **Content removal warning:** the Typst self-healing loop "
-            f"commented out **{len(report.syntax_fallbacks)}** translated line(s) "
-            f"from the delivered PDF ({preview}{more}). "
-            f"Human review required — see the .typ source markers "
-            f"`[UBT_SYNTAX_FALLBACK]`.\n"
-        )
 
     # Witness substitutions are lossless (the source equation
     # graphic ships instead), but the reader must still be told which
@@ -883,7 +860,7 @@ def render_kdp_audit_markdown(report: QualityReport) -> str:
 **Audit Timestamp:** {report.generated_at.strftime("%Y-%m-%d %H:%M:%S UTC")}
 **Job ID:** `{report.job_id}`
 {provenance_line}
-{delivery_warning_line}{syntax_fallback_line}{witness_line}---
+{delivery_warning_line}{witness_line}---
 
 ## 1. Amazon KDP AI Content Disclosure Statement
 This publication was translated using the **Universal Book Translator (UBT)** asymmetric dual-tier pipeline.

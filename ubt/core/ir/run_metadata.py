@@ -45,7 +45,6 @@ ARTIFACT_METADATA_KEYS: Final[frozenset[str]] = frozenset(
         "formula_witness_findings",
         "render_engine_effective",
         "render_padding_pages",
-        "typst_syntax_fallbacks",
         "typst_version",
     }
 )

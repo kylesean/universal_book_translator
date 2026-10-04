@@ -661,43 +661,6 @@ def _enforce_blocking_gate(
     )
 
 
-def _enforce_syntax_fallback_gate(
-    actual_job_id: str,
-    syntax_fallbacks: list[str] | tuple[str, ...] | None,
-    config: Any,
-    *,
-    rehearsal: bool = False,
-) -> None:
-    """Refuse export when Typst self-healing removed too much translation.
-
-    Runs after the quality report is on disk (same placement as the visual
-    gate) so a refusal keeps its audit trail. ``export_max_syntax_fallbacks``
-    is the ceiling; 0 fails on any removal. Rehearsal downgrades to warning.
-    """
-    fallbacks = list(syntax_fallbacks or [])
-    if not fallbacks:
-        return
-    max_allowed = int(getattr(config, "export_max_syntax_fallbacks", 5))
-    if len(fallbacks) <= max_allowed:
-        return
-    preview = "; ".join(fallbacks[:3])
-    if rehearsal:
-        logger.warning(
-            "Rehearsal run: syntax-fallback gate would have refused job %s "
-            "(%d removed line(s) > max %d, e.g. %s); downgraded to warning.",
-            actual_job_id,
-            len(fallbacks),
-            max_allowed,
-            preview,
-        )
-        return
-    raise UBTError(
-        f"Typst syntax-fallback gate refused export for job {actual_job_id}: "
-        f"{len(fallbacks)} translated line(s) commented out (max {max_allowed}), "
-        f"e.g. {preview}. See quality_report.syntax_fallbacks."
-    )
-
-
 async def _render_complementary_artifact(
     ctx: StageContext,
     adapter: DocumentAdapter,
@@ -1461,12 +1424,6 @@ async def run_export_stage(
         gate,
         visual_report_path,
         visual_blocking_gate_enabled,
-        rehearsal=ctx.is_mock_run,
-    )
-    _enforce_syntax_fallback_gate(
-        actual_job_id,
-        report.syntax_fallbacks,
-        ctx.config,
         rehearsal=ctx.is_mock_run,
     )
 

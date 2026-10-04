@@ -3,8 +3,8 @@
 # Formula engine matrix runner
 #
 # Runs tests/fixtures/synthetic-duo.pdf through every math_backend / formula_render
-# combination, then prints a Markdown summary of page counts, syntax
-# fallbacks, witness fallbacks and wall time per scenario.
+# combination, then prints a Markdown summary of page counts, witness
+# fallbacks and wall time per scenario.
 #
 # Default is --dry-run (MockProvider, zero API cost). Use --real to translate
 # with the configured provider; the ledger is reused per scenario job id, so a
@@ -77,8 +77,8 @@ SUMMARY="${OUT_DIR}/summary.md"
     echo "- pages: ${PAGES:-all}"
     echo "- generated: $(date -Iseconds)"
     echo
-    echo "| scenario | backend | render | pages | syntax fallbacks | witness fallbacks | wall |"
-    echo "|---|---|---|---|---|---|---|"
+    echo "| scenario | backend | render | pages | witness fallbacks | wall |"
+    echo "|---|---|---|---|---|---|"
 } > "${SUMMARY}"
 
 failures=0
@@ -114,19 +114,17 @@ for scenario in "${SCENARIOS[@]}"; do
     elapsed=$(( $(date +%s) - start ))
     pages="-"
     [[ -f "${output}" ]] && pages="$(pdfinfo "${output}" 2>/dev/null | awk '/^Pages:/ {print $2}')"
-    counts="$(python3 - "${report}" <<'PY'
+    witness="$(python3 - "${report}" <<'PY'
 import json, sys
 try:
     report = json.load(open(sys.argv[1], encoding="utf-8"))
-    print(f"{len(report.get('syntax_fallbacks') or [])}|{len(report.get('formula_witness_fallbacks') or [])}")
+    print(len(report.get("formula_witness_fallbacks") or []))
 except (OSError, ValueError):
-    print("-|-")
+    print("-")
 PY
 )"
-    syntax="${counts%%|*}"
-    witness="${counts##*|}"
     {
-        echo "| ${name} | ${backend} | ${render} | ${pages} | ${syntax} | ${witness} | ${elapsed}s |"
+        echo "| ${name} | ${backend} | ${render} | ${pages} | ${witness} | ${elapsed}s |"
     } >> "${SUMMARY}"
 done
 

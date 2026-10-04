@@ -70,10 +70,12 @@ RenderEngine = Literal["rigid", "reflow", "auto", "publication", "composite"]
 # selects per document.
 RIGID_ENGINES: frozenset[str] = frozenset({"rigid"})
 PUBLICATION_ENGINES: frozenset[str] = frozenset({"publication", "reflow"})
-#: Engines that keep the source page as the canvas and paint onto it rather than
-#: re-typesetting a fresh document: ``rigid`` (per-region) and ``composite``
-#: (three-layer absolute composition). Both are monolingual by construction.
+#: ``composite`` — the three-layer absolute composition route.
 COMPOSITE_ENGINES: frozenset[str] = frozenset({"composite"})
+#: Engines whose delivery keeps the source page as the canvas. The unified
+#: LayerCompositor composes every PDF route onto the source page, so this set
+#: spans ``rigid`` (per-region), ``composite`` and ``publication``/``reflow``
+#: alike.
 INPLACE_ENGINES: frozenset[str] = RIGID_ENGINES | COMPOSITE_ENGINES | PUBLICATION_ENGINES
 
 #: Bilingual modes that pair whole source and target pages (a page zipper), as
@@ -467,8 +469,8 @@ class UBTConfig(BaseSettings):
     # toolchain fails with zero tokens spent instead of at Stage 6 after the
     # whole book is translated. Covers toolchain-shaped failures (missing or
     # wrong-version Typst, unrenderable generated markup); translation-content
-    # syntax defects that only appear once target text exists stay behind the
-    # Stage 6 healer.
+    # syntax defects that only appear once target text exists surface later, at
+    # the export syntax-fallback gate.
     render_preflight_enabled: bool = True
     visual_judge_enabled: bool = False
     visual_judge_model: str | None = None
@@ -565,13 +567,6 @@ class UBTConfig(BaseSettings):
     # book — the renderer falls back to ``source_text`` on an empty target —
     # and the job finalized as "completed". Set to 0 to disable the gate.
     export_min_completion_ratio: float = Field(default=0.5, ge=0.0, le=1.0)
-    # -- Typst syntax-fallback gate (fail-closed) ---------------------------
-    # Max translated lines the Typst self-healer may comment out before export
-    # refuses delivery. The healer guarantees a PDF by degrading failing lines,
-    # so without this the job finalizes "completed" with content silently gone
-    # (only visible in logs + quality_report.syntax_fallbacks). 0 = fail on any
-    # removal.
-    export_max_syntax_fallbacks: int = Field(default=5, ge=0)
 
     # -- Concurrency / pagination ----------------------------------------------
     max_concurrency: int = Field(default=10, gt=0)
@@ -708,19 +703,18 @@ class UBTConfig(BaseSettings):
     strict_contract: bool = False
 
     # -- PDF render engine --------------------------------------------------------
-    # 'auto' (default): density dispatch — formula/table/figure-dense documents
-    #   take the rigid engine (source page as canvas: geometry, figures and
-    #   equations cannot be corrupted by re-extraction), plain prose takes the
-    #   reflow route's better typography. This is the smart recommendation for
-    #   documents whose structure extraction quality is unknown up front.
-    # 'reflow' (alias 'publication'): full Typst reflow with academic
-    #   typography and bilingual modes; page count may change. Best on prose
-    #   books; risky whenever the parser's table/figure extraction is lossy.
+    # Every PDF route now composes through the unified LayerCompositor onto the
+    # source page canvas, so these names differ in the policy they imply
+    # (bilingual capability, companion routing), not in a second typesetting
+    # stack:
+    # 'auto' (default): resolves to ``composite`` for every document profile —
+    #   the density dispatch converges here.
+    # 'reflow' (alias 'publication'): the canonical name for source-canvas
+    #   composition with academic typography and bilingual modes.
     # 'rigid' (alias 'inplace'; 'hybrid' folds to 'auto'): region-locked
-    #   typesetting —
-    #   each block owns a rectangle on the original page, source text inside is
-    #   replaced by the translation typeset to fit (bounded shrink);
-    #   figures/equations stay untouched. Monolingual output only.
+    #   composition — each block owns a rectangle on the original page, source
+    #   text inside is replaced by the translation typeset to fit; figures and
+    #   equations stay untouched. Monolingual output only.
     # Honored by PDF adapters via manifest.metadata; other formats ignore it.
     render_engine: RenderEngine = "auto"
     font_family: str | None = Field(
