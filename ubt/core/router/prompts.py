@@ -42,6 +42,28 @@ _DRAFT_SOURCE_TAILS = (
 )
 _DRAFT_MINIMAL_ANCHOR = "Output ONLY the translation without any title, prefix, or commentary:\n\n"
 
+#: A source this short, with no sentence-ending punctuation, is a heading,
+#: label, or list item rather than prose: a model that expands it into a
+#: sentence/paragraph trips the QE length gate and the block falls back to the
+#: source. Nudge it to translate in kind. Appended after the existing
+#: instruction so ``draft_source_from_prompt``'s anchors still parse.
+_SHORT_SOURCE_MAX_CHARS = 60
+_SHORT_SOURCE_HINT = (
+    " The source is a short heading or label: render it as an equally short "
+    "heading or label, never expanded into a sentence or paragraph, and add no "
+    "explanation of your own."
+)
+
+
+def _short_source_hint(source_text: str) -> str:
+    """A "do not expand" clause for a heading-like source, else empty."""
+    stripped = (source_text or "").strip()
+    if not stripped or len(stripped) > _SHORT_SOURCE_MAX_CHARS:
+        return ""
+    if stripped.endswith((".", "?", "!", "。", "？", "！", ":", "：", ";", "；")):
+        return ""
+    return _SHORT_SOURCE_HINT
+
 
 def draft_source_from_prompt(prompt: str) -> str:
     """Recover the source span a draft prompt carried.
@@ -107,7 +129,7 @@ def build_minimal_draft_prompt(
     elif genre_profile and genre_profile.lower() not in ("general", "unknown", "auto"):
         domain_hint = f" Use standard {genre_profile} domain terminology."
     parts.append(
-        f"Translate the following {src_name} text into fluent, natural {tgt_name}.{domain_hint} Output ONLY the translation without any title, prefix, or commentary:\n\n{_neutralize_reserved_tags(source_text).strip()}"
+        f"Translate the following {src_name} text into fluent, natural {tgt_name}.{domain_hint}{_short_source_hint(source_text)} Output ONLY the translation without any title, prefix, or commentary:\n\n{_neutralize_reserved_tags(source_text).strip()}"
     )
     return "", "\n\n".join(parts)
 
@@ -204,7 +226,7 @@ def build_hybrid_draft_prompt(
         "Translate only the text under this heading. Any read-only reference "
         "context shown above is not part of the task: do not translate it, "
         "summarise it, repeat it, or carry its citations and equation numbers "
-        "into the output.\n\n"
+        f"into the output.{_short_source_hint(source_text)}\n\n"
         f"Provide the direct {tgt_name} translation below without preface or commentary:"
     )
     return system_prompt, "\n".join(user_parts)
@@ -317,7 +339,7 @@ def build_rich_draft_prompt(
         "Translate only the text under this heading. Any read-only reference "
         "context shown above is not part of the task: do not translate it, "
         "summarise it, repeat it, or carry its citations and equation numbers "
-        "into the output.\n\n"
+        f"into the output.{_short_source_hint(source_text)}\n\n"
         "### Translation:"
     )
     return system_prompt, "\n".join(user_parts)
