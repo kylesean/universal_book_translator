@@ -24,6 +24,26 @@ logger = logging.getLogger(__name__)
 _CONNECT_TIMEOUT_S = 10.0
 
 
+def retry_after_seconds(headers: httpx.Headers) -> str | None:
+    """``Retry-After`` in seconds, normalizing a millisecond ``Retry-After-Ms``.
+
+    RFC 7231 ``Retry-After`` is delta-seconds or an HTTP-date, which the router
+    parses as seconds. Some gateways (Azure OpenAI, one-api) instead send
+    ``Retry-After-Ms`` in milliseconds; the millisecond value must be divided
+    here or a 20s pause becomes a 20000s sleep.
+    """
+    value = headers.get("retry-after")
+    if value:
+        return str(value)
+    ms = headers.get("retry-after-ms")
+    if not ms:
+        return None
+    try:
+        return str(float(ms) / 1000.0)
+    except (TypeError, ValueError):
+        return None
+
+
 def hostname_of(url: str) -> str:
     """Lowercased hostname of a URL, tolerating a missing scheme.
 

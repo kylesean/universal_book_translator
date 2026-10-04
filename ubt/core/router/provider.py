@@ -15,6 +15,7 @@ from pydantic import SecretStr
 
 from ubt.core.router.transports.anthropic import AnthropicMessagesTransport
 from ubt.core.router.transports.base import (
+    _CONNECT_TIMEOUT_S,
     BaseTransport,
     _extract_cached_tokens,
     _usage_sink,
@@ -317,7 +318,16 @@ class OpenAICompatibleProvider(BaseModelProvider):
         # so all transports share the HTTP keep-alive connection pool.
         self._owned_client = client is None
         self._shared_client = client or httpx.AsyncClient(
-            timeout=self._timeout,
+            # Connect/pool fail fast; only read/write deserve the full api_timeout.
+            # A bare float here would silently override the transports' own
+            # connect=10s and pin a pool slot for the whole api_timeout on a dead
+            # endpoint (see BaseTransport._get_client).
+            timeout=httpx.Timeout(
+                connect=_CONNECT_TIMEOUT_S,
+                read=self._timeout,
+                write=self._timeout,
+                pool=self._timeout,
+            ),
             transport=self._transport,
             limits=self._limits,
         )

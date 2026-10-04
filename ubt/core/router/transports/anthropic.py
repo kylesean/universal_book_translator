@@ -12,6 +12,7 @@ from ubt.core.router.transports.base import (
     BaseTransport,
     _heal_drop_temperature,
     _heal_drop_thinking,
+    retry_after_seconds,
 )
 
 logger = logging.getLogger(__name__)
@@ -136,8 +137,7 @@ class AnthropicMessagesTransport(BaseTransport):
                 f"Rate limit exceeded (HTTP 429): {response.text[:500]}",
                 details={
                     "status_code": 429,
-                    "retry_after": response.headers.get("retry-after")
-                    or response.headers.get("retry-after-ms"),
+                    "retry_after": retry_after_seconds(response.headers),
                     "body": response.text[:2000],
                 },
             )
