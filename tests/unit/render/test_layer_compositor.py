@@ -164,6 +164,24 @@ def test_a_region_is_masked_and_its_fragment_stamped(tmp_path: Path) -> None:
     ]
 
 
+def test_overlapping_overlays_do_not_erase_each_other(tmp_path: Path) -> None:
+    # The source strip runs once per page, before any overlay is stamped. A
+    # per-overlay strip recursed into the Form of an overlay already drawn on
+    # the same page and deleted its glyphs when the two boxes overlapped.
+    source = write_text_pdf(tmp_path / "source.pdf", [_PAGE])
+    output = tmp_path / "out.pdf"
+    spy = _FragmentSpy(tmp_path)
+    first = Overlay("e1", 1, (54.0, 640.0, 300.0, 700.0), "TRANSLATED ONE")
+    second = Overlay("e2", 1, (100.0, 660.0, 360.0, 720.0), "TRANSLATED TWO")
+
+    composition = LayerCompositor(source, typesetter=spy).compose([first, second], output)
+
+    assert all(p.placed_as is Fidelity.RECONSTRUCTED_ADAPTED for p in composition.placements)
+    text = _text(output)
+    assert "TRANSLATED ONE" in text
+    assert "TRANSLATED TWO" in text
+
+
 def test_a_failed_fragment_descends_and_leaves_the_source_untouched(tmp_path: Path) -> None:
     source = write_text_pdf(tmp_path / "source.pdf", [_PAGE])
     output = tmp_path / "out.pdf"

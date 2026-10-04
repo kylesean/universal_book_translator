@@ -851,6 +851,16 @@ def _clamp_page_boxes(
     return tuple(clamped)
 
 
+@dataclass(frozen=True, slots=True)
+class _StampedPart:
+    """One compiled fragment waiting to be stamped onto its page."""
+
+    overlay: Overlay
+    page_no: int
+    bbox: BBox
+    form: pikepdf.Object
+
+
 class LayerCompositor:
     """Compose pages from L0 source + L1 mask + L2 fragment (prototype).
 
@@ -882,7 +892,6 @@ class LayerCompositor:
         self._strip = strip
 
     def compose(self, overlays: Sequence[Overlay], output_path: str | Path) -> Composition:
-        placements: list[Placement] = []
         output = Path(output_path)
         with pdf_struct.open_pdf(self._source) as src, pikepdf.new() as composed:
             # Layer 0: every source page carried over whole, before any drawing.
@@ -892,43 +901,42 @@ class LayerCompositor:
                 index: pdf_struct.page_size(page) for index, page in enumerate(src.pages, start=1)
             }
             shared_forms = shared_form_objgens(composed) if self._strip else set()
-            # Clamp each region to its page once, then compile every fragment (in
-            # parallel) before drawing: the per-fragment subprocess compiles are
-            # the whole cost of a large document.
+            # Clamp each region to its page once, then compile every fragment
+            # before any strip: the per-fragment subprocess compiles are the whole
+            # cost of a large document.
+            resolved: list[tuple[Overlay, tuple[PhysicalBox, ...] | None]] = []
             prepared: list[tuple[Overlay, tuple[PhysicalBox, ...]]] = []
             for overlay in overlays:
                 boxes = _clamp_page_boxes(overlay.flow_boxes, page_sizes)
-                if not boxes:
-                    placements.append(
-                        Placement(
-                            overlay.element_id,
-                            overlay.page,
-                            Fidelity.RECONSTRUCTED_ADAPTED,
-                            Fidelity.PRESERVED_OPAQUE,
-                            "no usable box; source kept",
-                        )
-                    )
-                    continue
-                prepared.append((overlay, boxes))
+                resolved.append((overlay, boxes or None))
+                if boxes:
+                    prepared.append((overlay, boxes))
             self._prefetch(prepared)
-            # Layers 1 and 2 per overlay: mask each region, then stamp its fragment.
+            # Layer 2 is typeset first and Layer 1 strips *once per page*, before
+            # any overlay is stamped: a per-overlay strip recursed into the Forms
+            # of overlays drawn earlier on the same page and erased them whenever
+            # their boxes overlapped.
+            stamped: dict[int, list[_StampedPart]] = {}
             for overlay, boxes in prepared:
-                drawn = self._draw(composed, overlay, boxes, shared_forms=shared_forms)
-                placements.append(
-                    Placement(
-                        overlay.element_id,
-                        overlay.page,
-                        Fidelity.RECONSTRUCTED_ADAPTED,
-                        Fidelity.RECONSTRUCTED_ADAPTED if drawn else Fidelity.PRESERVED_OPAQUE,
-                        "layer-compositor" if drawn else "no fragment; source kept",
-                    )
-                )
+                for item in self._compile_overlay(composed, overlay, boxes):
+                    stamped.setdefault(item.page_no, []).append(item)
+            drawn_ids: set[int] = set()
+            for page_no in sorted(stamped):
+                page = composed.pages[page_no - 1]
+                if self._stamp_page(
+                    composed, page, page_no, stamped[page_no], shared_forms=shared_forms
+                ):
+                    drawn_ids.update(id(item.overlay) for item in stamped[page_no])
+            placements = tuple(
+                self._placement(overlay, boxes, drawn=id(overlay) in drawn_ids)
+                for overlay, boxes in resolved
+            )
             # Each fragment carries its own copy of the shared font/CMap; collapse
             # the duplicates before writing so the artifact is not tens of MB.
             _dedup_identical_streams(composed)
             output.parent.mkdir(parents=True, exist_ok=True)
             composed.save(str(output))
-        return Composition(output_path=output, placements=tuple(placements))
+        return Composition(output_path=output, placements=placements)
 
     def _prefetch(self, prepared: Sequence[tuple[Overlay, tuple[PhysicalBox, ...]]]) -> None:
         """Warm the fragment cache for every single-box overlay, concurrently.
@@ -958,17 +966,13 @@ class LayerCompositor:
                 requests.append((overlay.kind, overlay.text, width, height))
         prefetch(requests)
 
-    def _draw(
-        self,
-        composed: pikepdf.Pdf,
-        overlay: Overlay,
-        boxes: tuple[PhysicalBox, ...],
-        *,
-        shared_forms: set[tuple[int, int]],
-    ) -> bool:
+    def _compile_overlay(
+        self, composed: pikepdf.Pdf, overlay: Overlay, boxes: tuple[PhysicalBox, ...]
+    ) -> list[_StampedPart]:
+        """Compile every box's fragment for one overlay, returning the drawable ones."""
         typesetter = self._typesetter
         if typesetter is None or not (overlay.text.strip() or overlay.source.strip()):
-            return False
+            return []
         parts: tuple[FlowPlacement, ...] = (
             (FlowPlacement(boxes[0], overlay.text),)
             if len(boxes) == 1
@@ -985,101 +989,120 @@ class LayerCompositor:
                 else solve_flow(overlay.source, boxes, typesetter.measure)
             )
             source_by_box = {(part.box.page, part.box.bbox): part.text for part in source_parts}
-        drawn_any = False
+        stamped: list[_StampedPart] = []
         for part in parts:
             source = source_by_box.get((part.box.page, part.box.bbox), "")
             if not part.text.strip() and not source.strip():
                 continue
-            page = composed.pages[part.box.page - 1]
-            if self._draw_part(
-                typesetter,
-                page,
-                composed,
-                part.text,
-                part.box.bbox,
-                page_no=part.box.page,
-                shared_forms=shared_forms,
-                kind=overlay.kind,
-                source=source,
-                font_size=overlay.font_size,
-                is_bold=overlay.is_bold,
-            ):
-                drawn_any = True
-        return drawn_any
+            form = self._compile_form(composed, overlay, part, source)
+            if form is not None:
+                stamped.append(_StampedPart(overlay, part.box.page, part.box.bbox, form))
+        return stamped
 
-    def _draw_part(
+    def _compile_form(
         self,
-        typesetter: FragmentTypesetter,
-        page: pikepdf.Page,
         composed: pikepdf.Pdf,
-        text: str,
-        bbox: BBox,
-        *,
-        page_no: int,
-        shared_forms: set[tuple[int, int]],
-        kind: str = "text",
-        source: str = "",
-        font_size: float | None = None,
-        is_bold: bool = False,
-    ) -> bool:
-        x0, y0, x1, y1 = bbox
-        page_w, page_h = pdf_struct.page_size(page)
-        # Extraction boxes can spill past the mediabox by a point or two; drawing
-        # the fragment there trips the visual gate's ``block_out_of_bounds``, so
-        # clamp to the page and drop a region the clamp collapses entirely.
-        x0, x1 = max(0.0, min(x0, page_w)), max(0.0, min(x1, page_w))
-        y0, y1 = max(0.0, min(y0, page_h)), max(0.0, min(y1, page_h))
-        bbox = (x0, y0, x1, y1)
+        overlay: Overlay,
+        part: FlowPlacement,
+        source: str,
+    ) -> pikepdf.Object | None:
+        """Typeset one flowed part and copy it into the artifact as a Form."""
+        typesetter = self._typesetter
+        if typesetter is None:
+            return None
+        x0, y0, x1, y1 = part.box.bbox
         width, height = x1 - x0, y1 - y0
         if width <= 0 or height <= 0:
-            return False
+            return None
         bilingual = getattr(typesetter, "typeset_bilingual", None)
         fragment: Path | None
-        if kind == "math":
-            fragment = typesetter.typeset_math(text, width, height)
+        if overlay.kind == "math":
+            fragment = typesetter.typeset_math(part.text, width, height)
         elif source.strip() and bilingual is not None:
-            fragment = bilingual(source, text, width, height)
+            fragment = bilingual(source, part.text, width, height)
         else:
             try:
                 fragment = typesetter.typeset(
-                    text, width, height, kind=kind, font_size=font_size, is_bold=is_bold
+                    part.text,
+                    width,
+                    height,
+                    kind=overlay.kind,
+                    font_size=overlay.font_size,
+                    is_bold=overlay.is_bold,
                 )
             except TypeError:
                 try:
-                    fragment = typesetter.typeset(text, width, height, kind=kind)
+                    fragment = typesetter.typeset(part.text, width, height, kind=overlay.kind)
                 except TypeError:
-                    fragment = typesetter.typeset(text, width, height)
+                    fragment = typesetter.typeset(part.text, width, height)
         if fragment is None:
-            return False
+            return None
         try:
             with pikepdf.open(fragment) as frag:
                 if not frag.pages:
-                    return False
-                form = composed.copy_foreign(frag.pages[0].as_form_xobject())
+                    return None
+                return composed.copy_foreign(frag.pages[0].as_form_xobject())
         except Exception:  # a bad fragment must fall back to source, never crash the run
-            return False
+            return None
+
+    def _stamp_page(
+        self,
+        composed: pikepdf.Pdf,
+        page: pikepdf.Page,
+        page_no: int,
+        items: Sequence[_StampedPart],
+        *,
+        shared_forms: set[tuple[int, int]],
+    ) -> bool:
+        """Mask and stamp every compiled fragment for one page; False descends them."""
         if self._strip:
             stats = strip_page_text_pikepdf(
                 page,
-                [bbox],
+                [item.bbox for item in items],
                 protected_rects=[],
                 page_no=page_no,
                 shared_forms=shared_forms,
             )
             # A strip that could not remove the source text (or that had to leave
             # a page-shared form intact) must not be covered by an overlay, or the
-            # text would double. Descend to the source instead.
+            # text would double. Descend the page's overlays to the source.
             if stats.aborted or stats.shared_forms_skipped:
                 return False
         else:
             red, green, blue = self._background
-            mask = pikepdf.Stream(
-                composed,
-                f"q {red} {green} {blue} rg {x0} {y0} {width} {height} re f Q".encode("ascii"),
-            )
-            page.contents_add(mask, prepend=False)
-        page.add_overlay(form, pikepdf.Rectangle(x0, y0, x1, y1))
+            for item in items:
+                x0, y0, x1, y1 = item.bbox
+                mask = pikepdf.Stream(
+                    composed,
+                    f"q {red} {green} {blue} rg {x0} {y0} {x1 - x0} {y1 - y0} re f Q".encode(
+                        "ascii"
+                    ),
+                )
+                page.contents_add(mask, prepend=False)
+        for item in items:
+            x0, y0, x1, y1 = item.bbox
+            page.add_overlay(item.form, pikepdf.Rectangle(x0, y0, x1, y1))
         return True
+
+    @staticmethod
+    def _placement(
+        overlay: Overlay, boxes: tuple[PhysicalBox, ...] | None, *, drawn: bool
+    ) -> Placement:
+        if not boxes:
+            return Placement(
+                overlay.element_id,
+                overlay.page,
+                Fidelity.RECONSTRUCTED_ADAPTED,
+                Fidelity.PRESERVED_OPAQUE,
+                "no usable box; source kept",
+            )
+        return Placement(
+            overlay.element_id,
+            overlay.page,
+            Fidelity.RECONSTRUCTED_ADAPTED,
+            Fidelity.RECONSTRUCTED_ADAPTED if drawn else Fidelity.PRESERVED_OPAQUE,
+            "layer-compositor" if drawn else "no fragment; source kept",
+        )
 
 
 def overlays_from_document(
