@@ -28,6 +28,7 @@ from pydantic import SecretStr
 from ubt.api.app import create_app
 from ubt.api.security import _require_api_key_gate, resolve_secure_path
 from ubt.core.config import UBTConfig
+from ubt.core.job_options import resolve_target_output
 
 _API_KEY = "test-key-contract"
 _AUTH = {"X-API-Key": _API_KEY}
@@ -253,6 +254,55 @@ def test_submit_conflicting_output_is_409(authed: TestClient, tmp_path: Path) ->
     )
     assert response.status_code == 409
     assert "output_path already exists" in response.json()["detail"]
+
+
+def test_submit_fresh_does_not_overwrite_an_unrelated_existing_file(
+    authed: TestClient, tmp_path: Path
+) -> None:
+    # ``fresh`` resumes the ledger; it must not license clobbering an arbitrary
+    # file inside the sandbox (ubt.toml, job_queue.sqlite, another job's output).
+    doc = _write_doc(tmp_path)
+    secret = tmp_path / "ubt.toml"
+    secret.write_text("[provider]\napi_key = 'do-not-lose-me'\n", encoding="utf-8")
+    response = authed.post(
+        "/jobs/submit",
+        json={"input_path": str(doc), "output_path": str(secret), "fresh": True},
+        headers=_AUTH,
+    )
+    assert response.status_code == 409
+    assert "output_path already exists" in response.json()["detail"]
+    # The colliding file must be untouched.
+    assert "do-not-lose-me" in secret.read_text(encoding="utf-8")
+
+
+def test_is_own_prior_output_requires_the_same_job(tmp_path: Path) -> None:
+    from ubt.api.app import _is_own_prior_output
+
+    class _Prior:
+        def __init__(self, payload: dict[str, Any]) -> None:
+            self.payload = payload
+
+    class _Queue:
+        def __init__(self, prior: Any) -> None:
+            self._prior = prior
+
+        def get(self, job_id: str) -> Any:
+            return self._prior
+
+    class _Manager:
+        def get_job(self, job_id: str) -> Any:
+            return None
+
+    doc = tmp_path / "book.md"
+    doc.write_text("x", encoding="utf-8")
+    out = tmp_path / "book.pdf"
+    prior = _Prior({"input_path": str(doc), "output_path": str(out)})
+    target = resolve_target_output(out, doc)
+    assert _is_own_prior_output("job-1", target, _Queue(prior), _Manager()) is True
+    # A different job id may not overwrite another job's output.
+    assert _is_own_prior_output("job-2", target, _Queue(None), _Manager()) is False
+    # No job id at all is never authorized.
+    assert _is_own_prior_output(None, target, _Queue(prior), _Manager()) is False
 
 
 def test_resubmit_with_same_id_is_idempotent(authed: TestClient, tmp_path: Path) -> None:

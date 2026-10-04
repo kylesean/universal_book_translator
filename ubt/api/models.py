@@ -57,6 +57,11 @@ class JobSubmitRequest(BaseModel):
         description="Source ISO language code",
         pattern=LANG_CODE_PATTERN,
     )
+    # NOTE: source_lang is shape-validated only, on purpose. The shared gate
+    # (``lang_pair_validation_error``) and ``get_pair_policy`` tolerate an
+    # unknown source by falling back to the target profile's defaults, so
+    # requiring a source profile here would make the API stricter than the CLI
+    # and reject jobs the engine runs fine. Only the *target* needs a profile.
     profile: str = Field(
         default="general",
         description="Domain profile (general, textbook, paper)",

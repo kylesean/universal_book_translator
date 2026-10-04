@@ -256,6 +256,46 @@ def _terminal_frame(status: str, output_file: str | None, error: str | None) -> 
     )
 
 
+def _is_own_prior_output(
+    requested_id: str | None,
+    target_candidate: Path,
+    job_queue: Any,
+    manager: Any,
+) -> bool:
+    """Whether ``target_candidate`` is the output recorded for ``requested_id``.
+
+    Overwrite is a *re-run of the same job*, not a licence to truncate any file
+    inside the sandbox. ``fresh`` resumes the ledger; it does not authorize
+    clobbering ``ubt.toml`` / ``job_queue.sqlite`` / another job's ledger. A
+    submit naming an existing path may overwrite it only when that path is what
+    this very job id already resolved to.
+    """
+    if requested_id is None:
+        return False
+    prior: Any = None
+    if job_queue is not None:
+        prior = job_queue.get(requested_id)
+    if prior is None:
+        prior = manager.get_job(requested_id)
+    if prior is None:
+        return False
+    payload = getattr(prior, "payload", None)
+    if not isinstance(payload, dict):
+        request = getattr(prior, "request", None)
+        payload = request.model_dump() if request is not None else None
+    if not isinstance(payload, dict):
+        return False
+    prior_out = payload.get("output_path")
+    prior_in = payload.get("input_path")
+    if not prior_out or not prior_in:
+        return False
+    try:
+        prior_target = resolve_target_output(Path(prior_out), prior_in)
+        return prior_target.resolve() == target_candidate.resolve()
+    except (OSError, ValueError):
+        return False
+
+
 def create_app(
     config: UBTConfig | None = None,
     router: ModelRouter | None = None,
@@ -543,7 +583,11 @@ def create_app(
                 if resolved_out is not None
                 else None
             )
-            if target_candidate is not None and target_candidate.exists() and not req.fresh:
+            if (
+                target_candidate is not None
+                and target_candidate.exists()
+                and not _is_own_prior_output(requested_id, target_candidate, job_queue, manager)
+            ):
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="output_path already exists; refusing to overwrite it",
@@ -573,7 +617,11 @@ def create_app(
                 if resolved_out is not None
                 else None
             )
-            if target_candidate is not None and target_candidate.exists() and not req.fresh:
+            if (
+                target_candidate is not None
+                and target_candidate.exists()
+                and not _is_own_prior_output(requested_id, target_candidate, job_queue, manager)
+            ):
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="output_path already exists; refusing to overwrite it",
