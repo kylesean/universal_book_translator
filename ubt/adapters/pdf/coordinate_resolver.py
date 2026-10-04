@@ -42,7 +42,10 @@ class PageBBoxResolver:
         """Resolve arbitrary raw bbox to canonical PDF bottom-left points (x0, y0, x1, y1).
 
         coord_system can be:
-        - "auto": automatic detection.
+        - "auto": automatic detection from this single box. Ambiguous when the
+          box fits inside the page (a normalized-1000 box in an A4 page's
+          top-left is indistinguishable from native points); prefer
+          :meth:`infer_coord_system` once per page and pass the result.
         - "normalized_1": [0, 1] relative coordinates.
         - "normalized_1000": [0, 1000] integer-grid coordinates.
         - "image_pixel": pixel coordinates from rendered/scanned image.
@@ -132,6 +135,54 @@ class PageBBoxResolver:
             return None
 
         return self._apply_rotation(rx0, ry0, rx1, ry1)
+
+    @staticmethod
+    def infer_coord_system(
+        boxes: Sequence[Sequence[float] | None],
+        page_width: float,
+        page_height: float,
+        image_width: float | None = None,
+        image_height: float | None = None,
+    ) -> str:
+        """Infer ONE coordinate system for a whole page from the boxes on it.
+
+        Per-box ``auto`` cannot separate a normalized-1000 box that happens to
+        sit in the top-left of an A4 page (``x1 <= 595, y1 <= 842``) from a
+        native PDF-point box: both fit the page. The page's *extremes*
+        disambiguate -- a real OCR page has boxes near the right/bottom edge, so
+        the largest coordinate reaches the grid maximum. Deciding once per page
+        also keeps every box on that page in the same space; mixed per-box
+        detection scaled only the small boxes, misplacing them by a factor.
+
+        Returns ``"auto"`` when no usable box is present, so the caller falls
+        back to :meth:`resolve_bbox`.
+        """
+        max_x = 0.0
+        max_y = 0.0
+        for box in boxes:
+            if box is None or len(box) < 4:
+                continue
+            try:
+                max_x = max(max_x, abs(float(box[0])), abs(float(box[2])))
+                max_y = max(max_y, abs(float(box[1])), abs(float(box[3])))
+            except (TypeError, ValueError):
+                continue
+        if max_x == 0.0 and max_y == 0.0:
+            return "auto"
+        m = max(max_x, max_y)
+        page_max = max(page_width, page_height)
+        if m <= 1.05:
+            return "normalized_1"
+        if (
+            image_width
+            and image_height
+            and m > page_max
+            and m <= max(image_width, image_height) * 1.05
+        ):
+            return "image_pixel"
+        if m <= 1005.0 and m > page_max:
+            return "normalized_1000"
+        return "pdf_points"
 
     def _apply_rotation(self, x0: float, y0: float, x1: float, y1: float) -> Rect:
         """Apply page rotation if needed (PDF coordinate rotation)."""

@@ -238,7 +238,18 @@ class CloudOcrDriver:
 
         # 1. Standard format: {"lines": [{"text": ..., "box": ...}]}
         if "lines" in data and isinstance(data["lines"], list):
-            coord_system = data.get("coord_system", "auto")
+            coord_system = data.get("coord_system")
+            if not coord_system:
+                # Decide the space once for the whole page: a per-box ``auto``
+                # misreads a normalized-1000 box that fits inside the page as
+                # native points, misplacing it by a factor.
+                coord_system = PageBBoxResolver.infer_coord_system(
+                    [item.get("box") or item.get("bbox") for item in data["lines"]],
+                    page_size_pt[0],
+                    page_size_pt[1],
+                    img_w,
+                    img_h,
+                )
             for idx, item in enumerate(data["lines"]):
                 text = str(item.get("text", "")).strip()
                 if not text:

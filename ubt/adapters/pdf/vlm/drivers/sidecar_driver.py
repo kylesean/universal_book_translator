@@ -115,14 +115,24 @@ class SidecarOcrDriver:
             raise RuntimeError(f"OCR Sidecar request failed at {ocr_url}: {exc}") from exc
 
         raw_lines = payload.get("lines") or []
-        coord_system = payload.get("coord_system", "auto")
-
         resolver = PageBBoxResolver(
             page_width=page_size_pt[0],
             page_height=page_size_pt[1],
             image_width=img_w,
             image_height=img_h,
         )
+        coord_system = payload.get("coord_system")
+        if not coord_system:
+            # Decide the space once for the whole page: a per-box ``auto``
+            # misreads a normalized-1000 box that happens to fit inside the page
+            # as native points, scaling only some boxes and misplacing them.
+            coord_system = PageBBoxResolver.infer_coord_system(
+                [item.get("box") or item.get("bbox") for item in raw_lines],
+                page_size_pt[0],
+                page_size_pt[1],
+                img_w,
+                img_h,
+            )
 
         vlm_lines: list[VlmLine] = []
         for idx, item in enumerate(raw_lines):
