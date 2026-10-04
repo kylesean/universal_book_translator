@@ -55,3 +55,15 @@ def test_a_non_list_block_is_left_untouched() -> None:
     block = _block(BlockType.NARRATIVE, source="A paragraph.", target="一段。")
     (overlay,) = overlays_from_blocks([block], None)
     assert overlay.text == "一段。"
+
+
+def test_a_toc_row_becomes_a_toc_overlay_carrying_its_page_number() -> None:
+    # The reader stores the page number in provenance (toc_entry/toc_page); the
+    # overlay must keep the TOC kind and the number so the compositor can redraw
+    # title + leaders + number instead of a plain text overlay.
+    block = _block(BlockType.NARRATIVE, source="3. Effects", target="3. 效应")
+    block.provenance = {"toc_entry": True, "toc_page": "9"}
+    (overlay,) = overlays_from_blocks([block], None)
+    assert overlay.kind == "toc"
+    assert overlay.toc_page == "9"
+    assert overlay.text == "3. 效应"

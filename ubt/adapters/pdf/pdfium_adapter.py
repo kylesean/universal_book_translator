@@ -85,6 +85,13 @@ def extract_blocks_with_pdfium(
         for index, block in enumerate(blocks, start=1):
             block.set_id(f"pdf_main#b{index:04d}")
             block.set_spine_index(index)
+            # The reader keeps a TOC row's page number on the element (the
+            # bridge preserves it); move it into provenance so it survives the
+            # ledger round-trip and reaches the TOC-aware renderer.
+            toc_page = getattr(block.element, "toc_page", "")
+            if toc_page:
+                block.provenance["toc_entry"] = True
+                block.provenance["toc_page"] = toc_page
         return blocks
 
     return cached_blocks(store, path=path, page_range=page_range, compute=_read)

@@ -19,12 +19,12 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from pdf_builders import write_text_pdf, write_toc_pdf
+from pdf_builders import PAGE_WIDTH, write_text_pdf, write_toc_pdf
 
 from ubt.analyze.bridge import blocks_from_document
 from ubt.analyze.reader_pdf import read_pdf
 from ubt.analyze.structure import pdf_list_marker
-from ubt.core.ir.models import BlockType
+from ubt.core.ir.models import BlockType, IRBlock
 
 pytestmark = pytest.mark.fast
 
@@ -40,6 +40,10 @@ pytestmark = pytest.mark.fast
         ("一、 中文", ("一、", "中文")),
         ("- item", ("-", "item")),
         ("• bullet", ("•", "bullet")),
+        # Full-width forms a CJK source or a model may use.
+        ("（1） 全角项", ("（1）", "全角项")),
+        ("１. 全角数字", ("１.", "全角数字")),
+        ("（a） 全角字母", ("（a）", "全角字母")),
         # Ambiguous forms stay prose: a decimal, a signed number, a year, a deref.
         ("1.5 ratio", None),
         ("-3 is negative", None),
@@ -52,7 +56,7 @@ def test_pdf_list_marker(line: str, expected: tuple[str, str] | None) -> None:
     assert pdf_list_marker(line) == expected
 
 
-def _blocks(path: Path):
+def _blocks(path: Path) -> list[IRBlock]:
     return blocks_from_document(read_pdf(path))
 
 
@@ -95,7 +99,7 @@ def test_a_wrapped_continuation_stays_with_its_item(tmp_path: Path) -> None:
     assert "wrap onto a second line" in items[0].source_text
 
 
-def test_a_toc_is_kept_as_preserved_rows_not_scattered_page_numbers(tmp_path: Path) -> None:
+def test_a_toc_row_is_one_translatable_entry_with_its_page_number(tmp_path: Path) -> None:
     source = write_toc_pdf(
         tmp_path / "toc.pdf",
         [
@@ -106,13 +110,53 @@ def test_a_toc_is_kept_as_preserved_rows_not_scattered_page_numbers(tmp_path: Pa
         ],
     )
     blocks = _blocks(source)
-    rows = [block.source_text for block in blocks]
-    assert rows == [
-        "1. Introduction 1",
-        "1.1. Background 2",
-        "1.2. Method 3",
-        "2. Results 7",
-    ]
-    # The page numbers are part of the row, not separate translatable blocks.
-    assert all(block.skip_translate for block in blocks)
+    rows = {block.source_text: block for block in blocks}
+    # The title is the translatable text; the page number rides on the element
+    # so the compositor can redraw the whole row (title + leaders + number).
+    assert set(rows) == {"1. Introduction", "1.1. Background", "1.2. Method", "2. Results"}
+    assert [getattr(rows[t].element, "toc_page", "") for t in rows] == ["1", "2", "3", "7"]
+    assert not any(block.skip_translate for block in blocks)
+    # The row's box spans title through page number, so masking clears the
+    # source title/leaders/number in one region.
+    for block in blocks:
+        assert block.bbox is not None and block.bbox.x1 > 0.7 * PAGE_WIDTH
+    # The page numbers are not separate blocks that would scatter.
     assert not any(block.source_text.strip().isdigit() for block in blocks)
+
+
+def test_unnumbered_rows_join_a_confirmed_toc(tmp_path: Path) -> None:
+    # A confirmed TOC page (>= 3 numbered rows) also pairs unnumbered rows such
+    # as Abstract / References, so those entries keep their leaders and number.
+    source = write_toc_pdf(
+        tmp_path / "toc.pdf",
+        [
+            ("1. Introduction", "1"),
+            ("1.1. Background", "2"),
+            ("1.2. Method", "3"),
+            ("References", "42"),
+            ("Acknowledgments", "43"),
+        ],
+    )
+    blocks = _blocks(source)
+    toc = {block.source_text: getattr(block.element, "toc_page", "") for block in blocks}
+    assert toc["References"] == "42"
+    assert toc["Acknowledgments"] == "43"
+
+
+def test_a_page_of_right_margin_numbers_without_section_titles_is_not_a_toc(
+    tmp_path: Path,
+) -> None:
+    # An equation/table page also carries right-margin numerals; without several
+    # numbered section titles the page must not be mistaken for a TOC (which
+    # would strip the numbers and re-type the body lines as entries).
+    source = write_toc_pdf(
+        tmp_path / "equations.pdf",
+        [
+            ("x = y + 1", "1"),
+            ("z = w * 2", "2"),
+            ("a = b - 3", "3"),
+            ("c = d / 4", "4"),
+        ],
+    )
+    blocks = _blocks(source)
+    assert not any(getattr(block.element, "toc_page", "") for block in blocks)

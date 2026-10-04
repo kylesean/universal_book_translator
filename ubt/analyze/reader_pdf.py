@@ -98,8 +98,11 @@ def _find_toc_pairs(lines: list[LineBox], width: float) -> list[tuple[LineBox, L
     ``textgeom`` reads a title and its page number as two lines (the dot-leader
     gutter separates them), so the reader must pair them back or a table of
     contents scatters into translated titles plus a run of bare page-number
-    blocks. A page only counts as a TOC when several such pairs exist, so a
-    single numbered line in the body never triggers it.
+    blocks. A page only counts as a TOC when several numbered rows pair up
+    (``_TOC_MIN_PAIRS``); once it does, unnumbered rows on the same page
+    (``Abstract``, ``References``, ``Acknowledgments``) are paired too. The
+    numbered-pair floor is what keeps an equation page -- which also has
+    right-margin numerals -- from being mistaken for a TOC.
     """
     if width <= 0:
         return []
@@ -108,22 +111,42 @@ def _find_toc_pairs(lines: list[LineBox], width: float) -> list[tuple[LineBox, L
         for line in lines
         if _TOC_PAGE_RE.match(line.text.strip()) and line.rect[0] > _TOC_PAGE_MIN_X_RATIO * width
     ]
-    pairs: list[tuple[LineBox, LineBox, str]] = []
+
+    def _left(line: LineBox) -> bool:
+        return line.rect[0] <= _TOC_TITLE_MAX_X_RATIO * width
+
+    def _baseline(line: LineBox) -> float:
+        return (line.rect[1] + line.rect[3]) / 2.0
+
+    def _pair(titles: list[LineBox], used: set[int]) -> list[tuple[LineBox, LineBox, str]]:
+        out: list[tuple[LineBox, LineBox, str]] = []
+        for line in titles:
+            baseline = _baseline(line)
+            for candidate in right_numbers:
+                if id(candidate) in used:
+                    continue
+                if abs(_baseline(candidate) - baseline) <= _TOC_BASELINE_TOL_PT:
+                    out.append((line, candidate, candidate.text.strip()))
+                    used.add(id(candidate))
+                    break
+        return out
+
     used: set[int] = set()
-    for line in lines:
-        title = line.text.strip()
-        if not _SECTION_NUM_RE.match(title) or line.rect[0] > _TOC_TITLE_MAX_X_RATIO * width:
-            continue
-        baseline = (line.rect[1] + line.rect[3]) / 2.0
-        for candidate in right_numbers:
-            if id(candidate) in used:
-                continue
-            candidate_baseline = (candidate.rect[1] + candidate.rect[3]) / 2.0
-            if abs(candidate_baseline - baseline) <= _TOC_BASELINE_TOL_PT:
-                pairs.append((line, candidate, candidate.text.strip()))
-                used.add(id(candidate))
-                break
-    return pairs if len(pairs) >= _TOC_MIN_PAIRS else []
+    numbered = [ln for ln in lines if _left(ln) and _SECTION_NUM_RE.match(ln.text.strip())]
+    pairs = _pair(numbered, used)
+    if len(pairs) < _TOC_MIN_PAIRS:
+        return []
+    paired_ids = {id(title) for title, _number, _page in pairs}
+    unnumbered = [
+        ln
+        for ln in lines
+        if _left(ln)
+        and id(ln) not in paired_ids
+        and not _SECTION_NUM_RE.match(ln.text.strip())
+        and any(ch.isalpha() for ch in ln.text.strip())
+    ]
+    pairs.extend(_pair(unnumbered, used))
+    return pairs
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -225,21 +248,28 @@ def _group_lines(lines: list[LineBox], body: float) -> list[list[LineBox]]:
 
 
 def _group_from_lines(
-    lines: list[LineBox], page: int, *, toc_page: str | None = None
+    lines: list[LineBox],
+    page: int,
+    *,
+    toc_page: str | None = None,
+    toc_bbox: tuple[float, float, float, float] | None = None,
 ) -> _Group | None:
     text = _join_lines(lines)
     if not text:
         return None
     sizes = [line.font_size for line in lines if line.font_size > 0]
+    # A TOC row's box spans the whole row (title through page number), so the
+    # compositor can redraw title + leaders + number across the row width.
+    bbox = toc_bbox or (
+        min(line.rect[0] for line in lines),
+        min(line.rect[1] for line in lines),
+        max(line.rect[2] for line in lines),
+        max(line.rect[3] for line in lines),
+    )
     return _Group(
         text=text,
         page=page,
-        bbox=(
-            min(line.rect[0] for line in lines),
-            min(line.rect[1] for line in lines),
-            max(line.rect[2] for line in lines),
-            max(line.rect[3] for line in lines),
-        ),
+        bbox=bbox,
         max_size=max(sizes) if sizes else 0.0,
         all_bold=all(line.bold for line in lines),
         toc_page=toc_page,
@@ -288,16 +318,17 @@ def _classify(
     confidence = Confidence.INFERRED
     span = Span(page=group.page, bbox=group.bbox)
     if group.toc_page is not None:
-        # A TOC row is structure, not prose: the dot leaders and the page number
-        # are the source's own layout, which the compositor cannot rebuild from
-        # text. Keep the row verbatim so the source canvas carries it intact
-        # instead of translating the title and scattering the page numbers.
+        # A TOC row translates like prose, but its dot leaders and page number
+        # are source layout the compositor must redraw (the reader drops the
+        # leader/​number lines, so a plain text overlay would leave a gap). Keep
+        # the title as the translatable text and carry the page number for the
+        # TOC-aware renderer; the box spans the whole row.
         return (
             Paragraph(
                 id=element_id,
                 spine_index=spine_index,
-                text=f"{group.text} {group.toc_page}",
-                skip_translate=True,
+                text=group.text,
+                toc_page=group.toc_page,
                 span=span,
                 confidence=confidence,
             ),
@@ -429,10 +460,20 @@ def read_pdf(
         # extract_lines already glues row fragments and applies column reading
         # order (textgeom.py), so it returns ready-to-group lines.
         ordered = list(lines)
-        # Pair each TOC title with its right-margin page number and drop the
-        # standalone number lines, so the TOC row is one preserved element.
+        # Pair each TOC title with its right-margin page number, drop the
+        # standalone number lines, and widen each row's box to span the whole
+        # row so the compositor can redraw title + leaders + number.
         toc_pairs = _find_toc_pairs(ordered, width)
         toc_page_by_id = {id(title): page for title, _number, page in toc_pairs}
+        toc_bbox_by_id = {
+            id(title): (
+                min(title.rect[0], number.rect[0]),
+                min(title.rect[1], number.rect[1]),
+                max(title.rect[2], number.rect[2]),
+                max(title.rect[3], number.rect[3]),
+            )
+            for title, number, _page in toc_pairs
+        }
         drop_ids = {id(number) for _title, number, _page in toc_pairs}
         if drop_ids:
             ordered = [line for line in ordered if id(line) not in drop_ids]
@@ -442,7 +483,11 @@ def read_pdf(
                 (toc_page_by_id[id(line)] for line in line_group if id(line) in toc_page_by_id),
                 None,
             )
-            group = _group_from_lines(line_group, page_no, toc_page=toc_page)
+            toc_bbox = next(
+                (toc_bbox_by_id[id(line)] for line in line_group if id(line) in toc_bbox_by_id),
+                None,
+            )
+            group = _group_from_lines(line_group, page_no, toc_page=toc_page, toc_bbox=toc_bbox)
             if group is None:
                 continue
             element, region_kind = _classify(

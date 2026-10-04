@@ -157,11 +157,14 @@ class Overlay:
     bbox: BBox
     text: str
     boxes: tuple[PhysicalBox, ...] = ()
-    #: ``"text"`` typesets prose; ``"math"`` typesets ``text`` as a formula.
+    #: ``"text"`` typesets prose; ``"math"`` typesets ``text`` as a formula;
+    #: ``"toc"`` typesets ``text`` as a TOC title with leaders and ``toc_page``.
     kind: str = "text"
     #: The source text, for an in-place bilingual overlay (target over source).
     #: Empty for a monolingual overlay.
     source: str = ""
+    #: For a ``"toc"`` overlay, the page number its dot leaders point at.
+    toc_page: str = ""
     font_size: float | None = None
     is_bold: bool = False
 
@@ -696,6 +699,58 @@ class TypstFragmentTypesetter:
             return 0.0
         return self._measure_height(text, width_pt, self._size_pt)
 
+    def _toc_source(
+        self,
+        title: str,
+        page: str,
+        width_pt: float,
+        height_pt: float,
+        size_pt: float,
+        *,
+        is_bold: bool = False,
+    ) -> str:
+        from ubt.adapters.pdf.overlay_text import typst_escape
+
+        body = self._body_markup(title)
+        weight_line = ', weight: "bold"' if is_bold else ""
+        return (
+            f"#set page(width: {width_pt}pt, height: {height_pt}pt, margin: 0pt)\n"
+            f"#set par(leading: 0.52em)\n"
+            f'#set text(size: {size_pt}pt{weight_line}, top-edge: "ascender", bottom-edge: "descender"{self._font_line})\n'
+            f"#box(width: {width_pt}pt, height: {height_pt}pt, clip: true)["
+            f"#box(width: 100%)[{body}#h(4pt)"
+            f"#box(width: 1fr, repeat(gap: 3.5pt)[.])#h(4pt){typst_escape(page.strip())}]"
+            f"]\n"
+        )
+
+    def typeset_toc(
+        self,
+        title: str,
+        page: str,
+        width_pt: float,
+        height_pt: float,
+        *,
+        is_bold: bool = False,
+    ) -> Path | None:
+        """Typeset one translated TOC row: title, dot leaders, page number.
+
+        Mirrors the retired rigid typesetter's TOC emission. The reader drops
+        the source's leader and page-number lines, so the row must be redrawn
+        whole or the translation would sit in a title-width slot with a broken
+        leader. ``page`` may be empty, in which case only the leaders are drawn.
+        """
+        if width_pt <= 0 or height_pt <= 0 or not title.strip():
+            return None
+        size_pt = self._fit_size(
+            title, width_pt, height_pt, kind="text", max_size_pt=self._size_pt, is_bold=is_bold
+        )
+        if size_pt is None:
+            return None
+        return self._compile(
+            self._toc_source(title, page, width_pt, height_pt, size_pt, is_bold=is_bold),
+            tag="toc:",
+        )
+
     def _math_source(self, latex: str, width_pt: float, height_pt: float) -> str | None:
         if width_pt <= 0 or height_pt <= 0 or not latex.strip():
             return None
@@ -1039,6 +1094,10 @@ class LayerCompositor:
         for overlay, boxes in prepared:
             if len(boxes) != 1:
                 continue
+            # A TOC row's fragment depends on its page number, which the prefetch
+            # request tuple does not carry; it compiles on demand instead.
+            if overlay.kind == "toc":
+                continue
             width = boxes[0].bbox[2] - boxes[0].bbox[0]
             height = boxes[0].bbox[3] - boxes[0].bbox[1]
             if overlay.source:
@@ -1103,9 +1162,14 @@ class LayerCompositor:
         if width <= 0 or height <= 0:
             return None
         bilingual = getattr(typesetter, "typeset_bilingual", None)
+        toc_typeset = getattr(typesetter, "typeset_toc", None)
         fragment: Path | None
         if overlay.kind == "math":
             fragment = typesetter.typeset_math(part.text, width, height)
+        elif overlay.kind == "toc" and toc_typeset is not None:
+            fragment = toc_typeset(
+                part.text, overlay.toc_page, width, height, is_bold=overlay.is_bold
+            )
         elif source.strip() and bilingual is not None:
             fragment = bilingual(source, part.text, width, height)
         else:
@@ -1327,11 +1391,16 @@ def overlays_from_blocks(
         if _overlayable(block, realization_plan):
             box = block.bbox
             assert box is not None  # narrowed by _overlayable's guard
-            kind = (
-                "math"
-                if block.block_type == BlockType.FORMULA
-                else ("heading" if block.block_type == BlockType.HEADING else "text")
-            )
+            if block.provenance.get("toc_entry"):
+                # A translated table-of-contents row: the compositor redraws the
+                # leaders and the page number the reader stripped.
+                kind = "toc"
+            elif block.block_type == BlockType.FORMULA:
+                kind = "math"
+            elif block.block_type == BlockType.HEADING:
+                kind = "heading"
+            else:
+                kind = "text"
             source = (
                 _with_list_marker(block, (block.source_text or "").strip())
                 if bilingual and kind == "text"
@@ -1375,6 +1444,7 @@ def overlays_from_blocks(
                 boxes=boxes,
                 kind=kind,
                 source=source,
+                toc_page=str(block.provenance.get("toc_page", "")),
                 font_size=font_size,
                 is_bold=is_bold,
             )

@@ -192,3 +192,34 @@ def test_the_compositor_draws_an_inline_math_target_onto_the_region(tmp_path: Pa
     text = _text(output)
     assert "\\Gamma" not in text, text
     assert "Γ" in text, text
+
+
+def test_a_toc_overlay_renders_title_leaders_and_page_number(tmp_path: Path) -> None:
+    # A translated TOC row must carry its dot leaders and page number: the reader
+    # drops the source's leader/number lines, so a plain text overlay would sit
+    # in a title-width slot with no leader. The TOC kind redraws the whole row.
+    source = write_text_pdf(tmp_path / "source.pdf", [_PAGE])
+    output = tmp_path / "out.pdf"
+    typesetter = TypstFragmentTypesetter()
+    try:
+        LayerCompositor(source, typesetter=typesetter).compose(
+            [
+                Overlay(
+                    "toc1",
+                    1,
+                    (54.0, 640.0, 500.0, 654.0),
+                    "3. 可逆效应与反应式余效应",
+                    kind="toc",
+                    toc_page="9",
+                )
+            ],
+            output,
+        )
+    finally:
+        typesetter.close()
+
+    text = _text(output)
+    assert "可逆效应与反应式余效应" in text, text
+    assert "9" in text, text
+    # The dot leaders were regenerated, not lost.
+    assert "." in text, text

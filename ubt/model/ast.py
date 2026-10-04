@@ -118,6 +118,11 @@ class Heading(TextElement):
 
 @dataclass(frozen=True, slots=True)
 class Paragraph(TextElement):
+    #: For a table-of-contents row, the page number its dot leaders point at.
+    #: The reader pairs the row's title with the right-margin number and keeps
+    #: only the title as translatable text; the compositor redraws the leaders
+    #: and the number so a translated entry keeps its TOC layout.
+    toc_page: str = ""
     kind: Literal[ElementKind.PARAGRAPH] = ElementKind.PARAGRAPH
 
 
