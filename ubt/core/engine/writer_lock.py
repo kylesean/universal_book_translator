@@ -11,6 +11,7 @@ reads) never take it.
 
 from __future__ import annotations
 
+import errno
 import logging
 import os
 import sys
@@ -21,6 +22,17 @@ from typing import Any
 from ubt.core.exceptions import LedgerWriterLockConflictError
 
 logger = logging.getLogger(__name__)
+
+#: errno values that mean "the lock is held by someone else", as opposed to a
+#: real failure to lock at all. ``fcntl.flock`` raises ``EAGAIN``/``EWOULDBLOCK``
+#: on contention; ``msvcrt.locking`` raises ``EACCES`` (and sometimes
+#: ``EDEADLK``). Anything else (``EOPNOTSUPP`` on NFS/overlayfs, ``EBADF``,
+#: ``EINVAL``) is not contention and must not be reported as "already being
+#: written": doing so made the worker requeue the same job forever and
+#: ``run_until_idle`` never return.
+_LOCK_BUSY_ERRNOS = frozenset(
+    {errno.EACCES, errno.EAGAIN, errno.EWOULDBLOCK, errno.EDEADLK, errno.EBUSY}
+)
 
 #: Byte offset the Windows lock is taken at, deliberately past the holder pid.
 #:
@@ -82,6 +94,17 @@ class LedgerWriterLock:
             _try_exclusive_lock(fd)
         except OSError as exc:
             os.close(fd)
+            if exc.errno not in _LOCK_BUSY_ERRNOS:
+                # Not contention: the filesystem cannot lock at all (NFS /
+                # overlayfs EOPNOTSUPP, a bad fd, ...). Report it as a hard
+                # failure so the job fails loudly instead of being requeued
+                # forever behind a lock that can never be taken.
+                raise RuntimeError(
+                    f"Cannot acquire writer lock for job '{self.job_id}' at "
+                    f"{self.lock_path}: {exc.strerror or exc} (errno {exc.errno}). "
+                    "The filesystem does not support advisory file locking, so "
+                    "single-writer safety cannot be guaranteed."
+                ) from exc
             holder = self._read_holder_pid()
             raise LedgerWriterLockConflictError(
                 f"Job {self.job_id} is already being written by another process"

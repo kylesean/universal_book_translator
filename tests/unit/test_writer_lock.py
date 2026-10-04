@@ -18,12 +18,14 @@ Every check runs against a throwaway ``tmp_path`` ledger.
 from __future__ import annotations
 
 import contextlib
+import errno
 import os
 import stat
 import subprocess
 import sys
 from collections.abc import Iterator
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -227,6 +229,32 @@ def test_context_manager_releases_on_exception(tmp_path: Path) -> None:
     successor = LedgerWriterLock(db_path, "job-b")
     successor.acquire()
     successor.release()
+
+
+def test_unsupported_filesystem_error_is_not_a_lock_conflict(tmp_path: Path) -> None:
+    # EOPNOTSUPP (NFS/overlayfs) is not contention; reporting it as "already
+    # being written" made the worker requeue the same job forever.
+    lock = LedgerWriterLock(tmp_path / "job.db", "job-a")
+    with (
+        patch(
+            "ubt.core.engine.writer_lock._try_exclusive_lock",
+            side_effect=OSError(errno.EOPNOTSUPP, "Operation not supported"),
+        ),
+        pytest.raises(RuntimeError, match="does not support advisory file locking"),
+    ):
+        lock.acquire()
+
+
+def test_busy_errno_is_still_a_lock_conflict(tmp_path: Path) -> None:
+    lock = LedgerWriterLock(tmp_path / "job.db", "job-a")
+    with (
+        patch(
+            "ubt.core.engine.writer_lock._try_exclusive_lock",
+            side_effect=OSError(errno.EAGAIN, "Resource temporarily unavailable"),
+        ),
+        pytest.raises(LedgerWriterLockConflictError),
+    ):
+        lock.acquire()
 
 
 # --------------------------------------------------------------------------- #
