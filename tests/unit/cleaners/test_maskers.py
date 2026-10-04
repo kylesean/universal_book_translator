@@ -200,6 +200,19 @@ def test_citation_masks_only_numeric_markers() -> None:
     assert CitationMasker().unmask(masked, mapping) == text
 
 
+def test_citation_leaves_code_subscripts_and_link_text_alone() -> None:
+    # ``arr[0]`` / ``matrix[12]`` are subscripts, ``[1](url)`` is link text; none
+    # is a citation, and masking them made the model's necessary edit read as
+    # cite corruption.
+    text = "Set arr[0] and matrix[12] to x; see [1](https://example.com) and cite [7]."
+    masked, mapping = CitationMasker().mask(text)
+    assert len(mapping) == 1  # only [7]
+    assert "arr[0]" in masked
+    assert "matrix[12]" in masked
+    assert "[1](https://example.com)" in masked
+    assert CitationMasker().unmask(masked, mapping) == text
+
+
 def test_inline_math_guard_rejects_bare_numbers() -> None:
     assert not is_math_content("5")
     assert not is_math_content("3.50")

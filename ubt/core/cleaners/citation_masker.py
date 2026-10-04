@@ -21,8 +21,16 @@ from ubt.core.cleaners.mask_tokens import token_checksum as _token_checksum
 
 _MASK_PREFIX = "⟦CITE_MASK_"
 
-# Bracketed numeric citation: [12], [12-14], [1, 2, 3], [5-7, 9]
-_CITATION_PATTERN = re.compile(r"\[\s*\d+(?:\s*[-–]\s*\d+)?(?:\s*,\s*\d+(?:\s*[-–]\s*\d+)?)*\s*\]")
+# Bracketed numeric citation: [12], [12-14], [1, 2, 3], [5-7, 9]. A citation
+# stands as its own token, so the leading lookbehind and trailing lookahead keep
+# out the look-alikes that are not citations: a code/array subscript glued to an
+# identifier (``arr[0]``, ``matrix[12]``) and Markdown link text (``[1](url)``).
+# Masking those made the model's necessary edit read as ``cite_token_corrupt``.
+_CITATION_PATTERN = re.compile(
+    r"(?<![\w\]\)])"
+    r"\[\s*\d+(?:\s*[-–]\s*\d+)?(?:\s*,\s*\d+(?:\s*[-–]\s*\d+)?)*\s*\]"
+    r"(?!\()"
+)
 
 
 class CitationMasker:
