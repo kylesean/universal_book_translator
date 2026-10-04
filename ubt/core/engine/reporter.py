@@ -594,18 +594,21 @@ def summarize_render_skips(defect_flags: dict[str, int]) -> tuple[int, int, str]
 
 
 # `math_token_corrupt missing=[..] mismatched=[..] mutated=[..] [reordered=[..]]
-# [duplicated=[..]]` (draft stage). ``reordered``/``duplicated`` are optional:
-# a block whose masked spans came back out of order or doubled is just as corrupt
-# as one with a missing span, so both must count or the KDP audit prints "Full
-# retention" while the ledger flags corruption.
+# [duplicated=[..]]` (draft stage). One rule for all four maskers -- math, cite,
+# code AND soup -- so the alternation must list every family the draft stage can
+# emit: dropping ``soup`` made a corrupt soup span invisible to the counter and
+# the KDP audit printed "Full retention" while the ledger flagged corruption.
+# ``reordered``/``duplicated`` are optional: a block whose masked spans came
+# back out of order or doubled is just as corrupt as one with a missing span, so
+# both must count.
 _CORRUPT_FLAG_RE = re.compile(
-    r"(?:math|cite|code)_token_corrupt missing=(\[.*?\]) mismatched=(\[.*?\]) mutated=(\[.*?\])"
+    r"(?:math|cite|code|soup)_token_corrupt missing=(\[.*?\]) mismatched=(\[.*?\]) mutated=(\[.*?\])"
     r"(?: reordered=(\[.*?\]))?(?: duplicated=(\[.*?\]))?"
 )
 
 
 def _parse_corrupt_count(flag: str) -> int:
-    """Count corrupt spans encoded in one math_token_corrupt error flag."""
+    """Count corrupt spans encoded in one ``*_token_corrupt`` error flag."""
     match = _CORRUPT_FLAG_RE.search(flag)
     if match is None:
         return 0
