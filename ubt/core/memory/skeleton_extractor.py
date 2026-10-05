@@ -50,7 +50,9 @@ def _count_term_occurrences(term: str, text: str) -> int:
     if pattern:
         pattern += r"\s+"
     pattern += rf"{re.escape(words[-1])}(?:s|es|ed|ing)?"
-    return len(re.findall(rf"(?<![A-Za-z0-9]){pattern}(?![A-Za-z0-9])", text, re.IGNORECASE))
+    # ``\w`` boundaries are Unicode-aware: an ASCII-only lookaround counted
+    # Cyrillic terms inside longer words ("код" in "закодированный").
+    return len(re.findall(rf"(?<!\w){pattern}(?!\w)", text, re.IGNORECASE))
 
 
 def build_document_skeleton(
