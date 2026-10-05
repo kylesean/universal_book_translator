@@ -21,7 +21,7 @@ import dataclasses
 
 from ubt.core.ir.models import IRBlock
 from ubt.model.ast import Document, ElementT, Region, RegionKind
-from ubt.model.span import CanonicalSource, PageGeometry
+from ubt.model.span import CanonicalSource, CompositeSpan, PageGeometry
 
 
 def element_from_block(block: IRBlock) -> ElementT:
@@ -60,7 +60,16 @@ def document_from_blocks(
 
 def block_from_element(element: ElementT, *, region_kind: RegionKind) -> IRBlock:
     """Rebuild one ``IRBlock`` from its element (structure only; no pipeline state)."""
-    return IRBlock(element=dataclasses.replace(element, region=region_kind))
+    block = IRBlock(element=dataclasses.replace(element, region=region_kind))
+    span = element.span
+    if isinstance(span, CompositeSpan) and len(span.boxes) > 1:
+        # Mirror the element's box chain into the one provenance key the ledger
+        # can rebuild a CompositeSpan from (ledger_base._row_to_block); without
+        # it the chain collapses to the first box across the round-trip.
+        block.provenance = {
+            "physical_boxes": [{"page": box.page, "bbox": list(box.bbox)} for box in span.boxes]
+        }
+    return block
 
 
 def blocks_from_document(document: Document) -> list[IRBlock]:
