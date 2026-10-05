@@ -176,13 +176,24 @@ class OpenAIResponsesTransport(BaseTransport):
                         self._model_reasoning_mode[target_model] = "nested_minimal"
                         response = retry_resp
                     else:
-                        self._model_reasoning_mode[target_model] = "none"
-                        response = await self._request_json(
+                        retry_resp = await self._request_json(
                             client, responses_url, _without_reasoning()
                         )
+                        # Latch only on a proven outcome: an unrelated 400
+                        # ("Unrecognized request argument supplied: seed")
+                        # fails every retry identically, and latching "none"
+                        # on it would silently disable reasoning for the model
+                        # for the rest of the process.
+                        if retry_resp.status_code == 200:
+                            self._model_reasoning_mode[target_model] = "none"
+                        response = retry_resp
                 else:
-                    self._model_reasoning_mode[target_model] = "none"
-                    response = await self._request_json(client, responses_url, _without_reasoning())
+                    retry_resp = await self._request_json(
+                        client, responses_url, _without_reasoning()
+                    )
+                    if retry_resp.status_code == 200:
+                        self._model_reasoning_mode[target_model] = "none"
+                    response = retry_resp
 
         if response.status_code == 429:
             raise ModelProviderError(
