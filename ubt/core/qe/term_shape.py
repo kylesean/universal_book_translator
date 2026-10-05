@@ -64,6 +64,14 @@ _LATIN_ABBREV_RE = re.compile(
     r"\b(?:e\.g|i\.e|etc|vs|cf|al|Dr|Prof|St)\.(?=[\s|,\)\]]|$)",
     re.IGNORECASE,
 )
+# Dotted initialisms (U.S./U.K./D.C.) are masked only mid-sentence — followed
+# by a lowercase continuation or punctuation — because unlike 'etc.' they sit
+# right next to real sentence boundaries constantly ("...in the U.S. Next
+# year..."), and masking those boundary occurrences would erase true sentence
+# breaks and under-count the source side of the omission gate.
+_INITIALISM_ABBREV_RE = re.compile(
+    r"\b(?:U\.S|U\.K|D\.C)\.(?=\s*[a-z(\[]|[,;:\)\]])",
+)
 _ABBREV_DOT = "\ue000"
 
 
@@ -286,5 +294,6 @@ def count_sentences(text: str) -> int:
     cleaned = _SPACED_DECIMAL_RE.sub(".", text)
     masked = _REF_ABBREV_RE.sub(lambda m: m.group(0)[:-1] + _ABBREV_DOT, cleaned)
     masked = _LATIN_ABBREV_RE.sub(lambda m: m.group(0)[:-1] + _ABBREV_DOT, masked)
+    masked = _INITIALISM_ABBREV_RE.sub(lambda m: m.group(0)[:-1] + _ABBREV_DOT, masked)
     fragments = [f.strip() for f in _SENT_END_RE.split(masked)]
     return sum(1 for f in fragments if f)
