@@ -128,11 +128,12 @@ def _candidate(block: IRBlock) -> bool:
 
 
 def _lowercase_start(text: str) -> bool:
-    """False for a Latin block that opens with a capital, a list marker, or a number.
+    """False for a block that opens with a capital, a list marker, or a number.
 
-    Case is the cheap continuation signal Latin script gives us. Proper nouns
-    lose the flow but are still delivered, just not merged. CJK has no case,
-    so it is never rejected here.
+    Case is the cheap continuation signal cased scripts give us. Proper nouns
+    lose the flow but are still delivered, just not merged. ``isupper`` is
+    script-agnostic, so a Cyrillic/Greek/accented-Latin capital vetoes fusion
+    exactly like a Latin one; CJK has no case and is never rejected here.
     """
     stripped = text.lstrip(" \"'“‘([<{«\t\r\n")
     if not stripped:
@@ -142,7 +143,7 @@ def _lowercase_start(text: str) -> bool:
     first = stripped[:1]
     if first.isdigit():
         return False
-    return not (first.isascii() and first.isalpha() and first.isupper())
+    return not (first.isalpha() and first.isupper())
 
 
 def _column_jump(previous: BoundingBox, following: BoundingBox) -> bool:
