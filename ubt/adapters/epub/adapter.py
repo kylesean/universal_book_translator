@@ -96,15 +96,26 @@ def _read_epub_member(zf: zipfile.ZipFile, name: str) -> bytes | None:
 _XML_DECL_ENCODING_RE = re.compile(
     r"""(<\?xml[^>]*?\bencoding\s*=\s*["'])([A-Za-z0-9._-]+)(["'])""", re.IGNORECASE
 )
+_META_CHARSET_RE = re.compile(
+    r"""(<meta[^>]*?\bcharset\s*=\s*["']?)([A-Za-z0-9._-]+)""", re.IGNORECASE
+)
+_META_CONTENT_TYPE_RE = re.compile(
+    r"""(<meta[^>]*?\bcontent\s*=\s*["'][^"']*?charset=)([A-Za-z0-9._-]+)""", re.IGNORECASE
+)
 
 
 def _force_utf8_declaration(text: str) -> str:
-    """Rewrite a non-UTF-8 XML declaration to ``utf-8`` after a re-encode.
+    """Rewrite legacy encoding declarations to ``utf-8`` after a re-encode.
 
-    A member decoded with its declared encoding is written back as UTF-8; if the
-    declaration still named the old encoding the reader would mis-decode it.
+    A member decoded with its declared encoding is written back as UTF-8; the
+    XML declaration must say utf-8, and so must a legacy ``<meta charset>`` /
+    ``http-equiv Content-Type``: an EPUB2 chapter parsed with the XML builder
+    keeps its meta verbatim, and a reader honoring the stale ``gbk`` declaration
+    would render the re-encoded bytes as mojibake.
     """
-    return _XML_DECL_ENCODING_RE.sub(r"\1utf-8\3", text, count=1)
+    text = _XML_DECL_ENCODING_RE.sub(r"\1utf-8\3", text, count=1)
+    text = _META_CHARSET_RE.sub(r"\1utf-8", text)
+    return _META_CONTENT_TYPE_RE.sub(r"\1utf-8", text)
 
 
 _NAMED_HTML_ENTITY_RE = re.compile(r"&([a-zA-Z][a-zA-Z0-9]*);")
@@ -228,7 +239,14 @@ def wrap_nested_direct_blocks(soup: BeautifulSoup) -> None:
     This ensures that e.g. nested lists (<li>Item text <ul><li>Subitem</li></ul></li>)
     do not lose the parent item's direct text node when scanning for leaf blocks.
     """
-    block_tag_names = set(BLOCK_TAGS) | {"ul", "ol", "table", "tbody", "thead", "tfoot", "tr"}
+    block_tag_names = (
+        set(BLOCK_TAGS)
+        | {"ul", "ol", "table", "tbody", "thead", "tfoot", "tr"}
+        # Content-model block containers: folding one of these into a
+        # synthesized <p> emits <p><dl>…</dl></p>, which is invalid XHTML and
+        # coalesces figure/definition structure into a translated paragraph.
+        | {"dl", "figure", "hr", "details"}
+    )
     for tag in soup.find_all(
         ["li", "blockquote", "div", "dd", "td", "th", "section", "article", "main", "body"]
     ):
@@ -975,6 +993,23 @@ class EPUBAdapter(BaseDocumentAdapter):
                             last_node.insert_after(new_tag)
                             last_node = new_tag
                             injected_count += 1
+            elif isinstance(dom_node, list) and dom_node:
+                # A bare text-run block (text sitting directly inside
+                # <blockquote>/<figure>/<details>): extraction counted it, so
+                # injection must too, or the chapter ships untranslated even
+                # though the block was translated and billed.
+                if is_monolingual:
+                    dom_node[0].replace_with(BeautifulSoup(target_text, "html.parser"))
+                    for rem in dom_node[1:]:
+                        rem.extract()
+                else:
+                    target_tag = soup.new_tag("p")
+                    target_tag["class"] = AttributeValueList([BILINGUAL_TARGET_CLASS])
+                    target_tag.append(
+                        BeautifulSoup(sanitize_html_fragment(target_text), "html.parser")
+                    )
+                    dom_node[-1].insert_after(target_tag)
+                injected_count += 1
 
         if injected_count > 0:
             # Inject styling into <head>. The stylesheet ships once
