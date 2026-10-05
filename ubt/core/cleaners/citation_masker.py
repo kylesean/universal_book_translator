@@ -26,11 +26,16 @@ _MASK_PREFIX = "⟦CITE_MASK_"
 
 # Bracketed numeric citation: [12], [12-14], [1, 2, 3], [5-7, 9]. A citation
 # stands as its own token, so the leading lookbehind and trailing lookahead keep
-# out the look-alikes that are not citations: a code/array subscript glued to an
-# identifier (``arr[0]``, ``matrix[12]``) and Markdown link text (``[1](url)``).
-# Masking those made the model's necessary edit read as ``cite_token_corrupt``.
+# out the look-alikes that are not citations: a code/array subscript glued to a
+# lowercase identifier (``arr[0]``, ``matrix[12]``) and Markdown link text
+# (``[1](url)``). The glue blocklist is deliberately lowercase-ASCII only: the
+# previous ``\w`` blocklist also un-invited real citations glued to CJK text
+# (``结果表明[12]``) or to a previous citation (``[3][12]``). Known residual:
+# a citation glued to a Latin name ("Smith[12]", no space) still reads as a
+# subscript — the spaced style ("Smith [12]") is the dominant Latin form and
+# is masked normally.
 _CITATION_PATTERN = re.compile(
-    r"(?<![\w\]\)])"
+    r"(?<![a-z0-9_)])"
     r"\[\s*\d+(?:\s*[-–]\s*\d+)?(?:\s*,\s*\d+(?:\s*[-–]\s*\d+)?)*\s*\]"
     r"(?!\()"
 )
