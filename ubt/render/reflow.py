@@ -41,8 +41,14 @@ MeasureMany = Callable[
 CapSize = Callable[[str, float | None], float]
 
 #: A vertical gap larger than this many line heights splits a band (a section
-#: break, a column change), so unrelated prose is never pulled together.
-_BAND_GAP_FACTOR = 1.6
+#: break, a column change), so unrelated prose is never pulled together. A
+#: source that separates paragraphs with a blank line leaves a gap near two line
+#: heights (a run-in "Action Fusion." paragraph, say); 1.6 was too tight and left
+#: such a page with no band at all, so it never reflowed and its text fell back
+#: to the smaller document-wide fitted size. Structural breaks that carry no
+#: figure/table/heading are the only thing this guards, and those gaps sit well
+#: above 2.5 line heights.
+_BAND_GAP_FACTOR = 2.5
 #: Assumed line height (em) when turning a font size into a band-gap threshold.
 _LINE_HEIGHT_EM = 1.2
 #: Horizontal overlap (pt) two boxes need to belong to the same band.

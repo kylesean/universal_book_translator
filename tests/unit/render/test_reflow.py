@@ -62,6 +62,20 @@ def test_gaps_between_paragraphs_are_uniform() -> None:
     assert gap_ab == pytest.approx(gap_bc)
 
 
+def test_a_blank_line_between_paragraphs_does_not_split_the_band() -> None:
+    # A source that separates paragraphs by a blank line leaves a gap near two
+    # line heights (font 11 -> 13.2pt, so 26pt). Such a page must still form a
+    # band; otherwise it never reflows and its text falls back to the smaller
+    # document-wide fitted size, reading as a shrunken page.
+    a = _ov("a", 1, (10.0, 100.0, 200.0, 140.0))
+    b = _ov("b", 1, (10.0, 34.0, 200.0, 74.0))  # 26pt gap
+
+    out = reflow_overlays([a, b], [], measure_many=_measure(20.0), cap_size=_cap)
+    by_id = {ov.element_id: ov for ov in out}
+
+    assert by_id["a"].fixed_box and by_id["b"].fixed_box
+
+
 def test_a_band_whose_target_overflows_is_left_on_the_source_boxes() -> None:
     a = _ov("a", 1, (10.0, 100.0, 200.0, 140.0))
     b = _ov("b", 1, (10.0, 50.0, 200.0, 90.0))
