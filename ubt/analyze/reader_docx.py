@@ -117,7 +117,22 @@ def walk_docx_elements(
     out: list[tuple[ElementT, DocxParagraph | DocxTable]] = []
     for block in _iter_blocks(document):
         if isinstance(block, DocxTable):
-            rows = [[_clean(cell.text) for cell in row.cells] for row in block.rows]
+            rows = []
+            for row in block.rows:
+                # python-docx repeats one merged _tc once per spanned grid
+                # column; emit its text once and blank the continuations so
+                # the grid geometry survives (matching the Docling table path).
+                # Raw repetition double-bills the text and shifts every later
+                # cell when the model normalizes the duplicate column.
+                seen_tcs: set[int] = set()
+                cells: list[str] = []
+                for cell in row.cells:
+                    if id(cell._tc) in seen_tcs:
+                        cells.append("")
+                    else:
+                        seen_tcs.add(id(cell._tc))
+                        cells.append(_clean(cell.text))
+                rows.append(cells)
             markup = pipe_table(rows)
             if markup:
                 out.append(
