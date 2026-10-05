@@ -91,7 +91,10 @@ def _term_pattern(term: str) -> str:
     previous = ""
     for ch in term:
         if previous and is_cjk_char(previous) != is_cjk_char(ch):
-            parts.append(r"\s*")
+            # Horizontal whitespace only: ``\s`` also matches newlines, which
+            # let a term's halves match across a line or paragraph break
+            # ("CPU\n调度器" counting as "CPU调度").
+            parts.append(r"[ \t]*")
         parts.append(re.escape(ch))
         previous = ch
     return "".join(parts)
