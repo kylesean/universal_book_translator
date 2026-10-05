@@ -52,7 +52,17 @@ def _extract_candidates_from_annot(
 ) -> list[str]:
     """Derive prioritized search tokens for a link annotation."""
     candidates: list[str] = []
-    clean_src = src_text.strip("(),;[]'\" \t\r\n")
+    raw = src_text.strip()
+    clean_src = raw.strip("(),;[]'\" \t\r\n")
+
+    # 0. The literal text the annotation covers. A multi-citation bracket
+    # ("[1,2,3,4]") stores one annotation per number, so this is a *fragment*
+    # ("[1,", "2,", "4]") that the translated page keeps verbatim. Trying it
+    # first relocates single-digit citations the rules below miss: the bracket
+    # regex needs a closing "]", and a lone "1" was never added as a candidate
+    # (the length guard), so their links stayed dead at the stripped source rect.
+    if len(raw) >= 2:
+        candidates.append(raw)
 
     # 1. Bracket-style citation in source text: "[12]" or "[1-3]"
     bracket_m = _BRACKET_NUM_RE.search(src_text)
@@ -88,7 +98,13 @@ def _extract_candidates_from_annot(
             candidates.append(domain_m.group(1))
 
     # Clean text from source box (e.g. 'Shi et al.', '2026', 'Table 1')
-    if clean_src and len(clean_src) >= 2 and clean_src not in candidates:
+    if (
+        clean_src
+        and len(clean_src) >= 2
+        and clean_src not in candidates
+        or clean_src.isdigit()
+        and clean_src not in candidates
+    ):
         candidates.append(clean_src)
 
     return candidates
@@ -172,7 +188,11 @@ def relocate_page_annotations(
                 min_dist = float("inf")
 
                 for cand in candidates:
-                    if not cand or len(cand) < 2:
+                    if not cand:
+                        continue
+                    # Short candidates are unsafe in general, but a lone digit
+                    # is a real citation number (see _extract_candidates_from_annot).
+                    if len(cand) < 2 and not cand.isdigit():
                         continue
                     cand_lower = cand.lower()
                     pos = 0

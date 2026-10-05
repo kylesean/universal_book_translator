@@ -41,6 +41,23 @@ def test_extract_candidates_from_annot() -> None:
     assert "2025" in candidates
 
 
+def test_extract_candidates_keeps_single_digit_fragment() -> None:
+    # A multi-citation bracket ("[1,2,3,4]") is stored as one annotation per
+    # number, so the text under each rect is a fragment ("[1,", "2,", "4]").
+    # These must yield a usable token; previously the digit was dropped and only
+    # the (untranslated) author/year remained, leaving single-digit links dead.
+    annot = pikepdf.Dictionary(
+        {
+            "/Subtype": "/Link",
+            "/A": pikepdf.Dictionary({"/S": "/GoTo", "/D": "cite.chen2021codex"}),
+        }
+    )
+    for fragment, digit in (("[1,", "1"), ("2,", "2"), ("4]", "4"), ("[9,", "9")):
+        candidates = _extract_candidates_from_annot(annot, fragment)
+        assert fragment in candidates, fragment
+        assert digit in candidates, fragment
+
+
 def test_relocate_page_annotations_no_annots(tmp_path: Path) -> None:
     pdf_path = tmp_path / "test.pdf"
     pdf = pikepdf.new()
