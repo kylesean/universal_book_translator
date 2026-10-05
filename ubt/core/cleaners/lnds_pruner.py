@@ -372,7 +372,13 @@ def strip_textbook_ocr_artifacts(content: str, source_lang: str = "en") -> str:
     # Strip decorative '=' / '~' separator lines while preserving in-prose math/symbols.
     content = re.sub(r"(?m)^[ \t]*[=~]{1,20}[ \t]*$", "", content)
 
-    return re.sub(r"[ \t]+", " ", content).strip()
+    # Collapse horizontal whitespace runs — but never inside fenced code, where
+    # leading indentation is semantics (a collapsed fence turns valid Python
+    # into an IndentationError). Segments alternate prose / fence on "```".
+    segments = content.split("```")
+    for i in range(0, len(segments), 2):
+        segments[i] = re.sub(r"[ \t]+", " ", segments[i])
+    return "```".join(segments).strip()
 
 
 def clean_calibre_and_lnds_pages(
@@ -409,7 +415,12 @@ class LNDSPageCleaner:
             isolated single-paragraph block will NOT trigger LNDS sequence stripping.
             For document translation pipelines, always use :meth:`clean_chapter_blocks`.
         """
-        cleaned_text = self.clean(block.source_text)
+        cleaned_text = strip_calibre_markup(block.source_text)
+        if block.block_type is not BlockType.CODE:
+            # CODE blocks ship verbatim, so their whitespace is semantics: the
+            # OCR-artifact pass ends in a horizontal-whitespace collapse that
+            # turns valid indentation into an IndentationError.
+            cleaned_text = strip_textbook_ocr_artifacts(cleaned_text, source_lang=self.source_lang)
         return block.with_source_text(cleaned_text)
 
     def clean_chapter_blocks(self, blocks: list[IRBlock]) -> list[IRBlock]:
@@ -423,9 +434,13 @@ class LNDSPageCleaner:
         pre_cleaned_block_lines: list[list[str]] = []
 
         for b_idx, b in enumerate(blocks):
-            blines = strip_textbook_ocr_artifacts(
-                strip_calibre_markup(b.source_text), source_lang=self.source_lang
-            ).split("\n")
+            text = strip_calibre_markup(b.source_text)
+            if b.block_type is not BlockType.CODE:
+                # CODE blocks ship verbatim, so their whitespace is semantics:
+                # the OCR-artifact pass ends in a horizontal-whitespace
+                # collapse that turns valid indentation into an IndentationError.
+                text = strip_textbook_ocr_artifacts(text, source_lang=self.source_lang)
+            blines = text.split("\n")
             pre_cleaned_block_lines.append(blines)
             for l_idx, line in enumerate(blines):
                 global_lines.append(line)
