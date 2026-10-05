@@ -234,6 +234,9 @@ class TMHit:
     target_text: str
     similarity: float
     provenance: str
+    #: Serialized target-side emphasis runs (see ``ubt.core.ir.emphasis``); empty
+    #: when the stored translation carried no preserved emphasis.
+    runs_json: str = ""
 
 
 @dataclass(frozen=True)
@@ -247,6 +250,7 @@ class TMPendingEntry:
     provenance: str = PROVENANCE_MACHINE
     domain: str | None = None
     context_hash: str = ""  # must match the lookup context to ever hit
+    runs_json: str = ""
 
 
 @dataclass(frozen=True)
@@ -356,6 +360,7 @@ class TranslationMemory:
                     domain TEXT,
                     use_count INTEGER NOT NULL DEFAULT 0,
                     context_hash TEXT NOT NULL DEFAULT '',
+                    runs_json TEXT NOT NULL DEFAULT '',
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
                 )
@@ -398,6 +403,17 @@ class TranslationMemory:
                     "CREATE UNIQUE INDEX IF NOT EXISTS tm_exact "
                     "ON tm_entries(src_lang, tgt_lang, src_hash, context_hash)"
                 )
+            # Target-side emphasis runs, so an exact hit can restore the bold the
+            # marker mechanism preserved instead of serving a plain translation.
+            # Gated on column existence so existing databases migrate idempotently.
+            if "runs_json" not in cols:
+                try:
+                    conn.execute(
+                        "ALTER TABLE tm_entries ADD COLUMN runs_json TEXT NOT NULL DEFAULT ''"
+                    )
+                except sqlite3.OperationalError as exc:
+                    if "duplicate column" not in str(exc).lower():
+                        raise
             try:
                 conn.execute(
                     "CREATE VIRTUAL TABLE IF NOT EXISTS tm_fts USING fts5("
@@ -526,7 +542,7 @@ class TranslationMemory:
         with self._lock, self._get_conn() as conn:
             cursor = conn.execute(
                 """
-                SELECT id, src_text, tgt_text, provenance, context_hash, domain
+                SELECT id, src_text, tgt_text, provenance, context_hash, domain, runs_json
                 FROM tm_entries
                 WHERE src_lang = ? AND tgt_lang = ? AND src_hash = ?
                 """,
@@ -557,7 +573,10 @@ class TranslationMemory:
                 # row shadow the reviewed rendering — contradicting the
                 # writeback contract that human review is the highest-trust
                 # signal in the pipeline.
-                r_id, _, _, prov, r_ctx, r_domain = r
+                r_id = int(r[0])
+                prov = str(r[3])
+                r_ctx = str(r[4] or "")
+                r_domain = r[5]
                 is_human = 1 if prov == PROVENANCE_HUMAN_PE else 0
                 exact_ctx = (
                     1
@@ -565,7 +584,7 @@ class TranslationMemory:
                     else 0
                 )
                 same_domain = 1 if domain and r_domain == domain else 0
-                return (is_human, exact_ctx, same_domain, int(r_id))
+                return (is_human, exact_ctx, same_domain, r_id)
 
             best_row = max(valid_rows, key=_candidate_rank)
             hit_id = int(best_row[0])
@@ -576,6 +595,7 @@ class TranslationMemory:
             target_text=str(best_row[2]),
             similarity=1.0,
             provenance=str(best_row[3]),
+            runs_json=str(best_row[6] or ""),
         )
 
     def lookup_fuzzy(
@@ -843,8 +863,8 @@ class TranslationMemory:
                             """
                             INSERT INTO tm_entries (
                                 src_lang, tgt_lang, src_hash, src_text, tgt_text,
-                                provenance, domain, context_hash
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                provenance, domain, context_hash, runs_json
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                             ON CONFLICT(src_lang, tgt_lang, src_hash, context_hash) DO UPDATE SET
                                 tgt_text = excluded.tgt_text,
                                 -- Keep the stored label honest: the conflict
@@ -856,6 +876,10 @@ class TranslationMemory:
                                     WHEN tm_entries.provenance = 'human_pe' THEN 'human_pe'
                                     ELSE excluded.provenance
                                 END,
+                                -- The stored emphasis must track the stored text,
+                                -- or a hit would bold a span the new text no
+                                -- longer has.
+                                runs_json = excluded.runs_json,
                                 -- a writeback means "Stored again", not
                                 -- "served again", so use_count is intentionally NOT
                                 -- bumped here. The former `use_count + 1` conflated
@@ -872,6 +896,7 @@ class TranslationMemory:
                                 entry.provenance,
                                 entry.domain,
                                 entry.context_hash,
+                                entry.runs_json,
                             ),
                         )
                         stored += 1

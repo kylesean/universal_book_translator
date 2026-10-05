@@ -144,6 +144,11 @@ class StyleMeta(BaseModel):
     #: Styled spans of the source text (colour, superscript, weight), applied to
     #: the target where the span survives verbatim. Empty for an unstyled block.
     inline_runs: tuple[InlineRun, ...] = ()
+    #: Styled spans of the *target* text the model bracketed with the bold
+    #: sentinels (see :mod:`ubt.core.ir.emphasis`), for emphasis the translation
+    #: rewrote and the source-derived ``inline_runs`` cannot locate. Kept apart
+    #: from ``inline_runs`` so a re-draft still has the source spans to re-inject.
+    target_runs: tuple[InlineRun, ...] = ()
 
 
 # --------------------------------------------------------------------------- #

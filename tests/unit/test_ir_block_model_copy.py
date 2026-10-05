@@ -4,7 +4,16 @@ from __future__ import annotations
 
 import pytest
 
-from ubt.core.ir.models import BlockStatus, BlockType, BoundingBox, FlowID, IRBlock, make_element
+from ubt.core.ir.models import (
+    BlockStatus,
+    BlockType,
+    BoundingBox,
+    FlowID,
+    InlineRun,
+    IRBlock,
+    StyleMeta,
+    make_element,
+)
 from ubt.model.ast import RegionKind
 
 pytestmark = pytest.mark.fast
@@ -87,3 +96,17 @@ def test_ir_block_from_element_factories() -> None:
     assert len(blocks) == 2
     assert blocks[0].id == "e1"
     assert blocks[1].id == "e2"
+
+
+def test_style_meta_round_trips_target_runs() -> None:
+    style = StyleMeta(
+        inline_runs=(InlineRun(text="50.0%", bold=True),),
+        target_runs=(InlineRun(text="重点", bold=True),),
+    )
+    restored = StyleMeta.model_validate_json(style.model_dump_json())
+    assert restored.inline_runs == style.inline_runs
+    assert restored.target_runs == style.target_runs
+
+
+def test_style_meta_defaults_target_runs_to_empty() -> None:
+    assert StyleMeta().target_runs == ()

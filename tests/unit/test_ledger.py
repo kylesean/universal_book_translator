@@ -39,7 +39,9 @@ from ubt.core.ir.models import (
     BookManifest,
     ChapterIR,
     FlowID,
+    InlineRun,
     IRBlock,
+    StyleMeta,
     make_element,
 )
 from ubt.model.ast import Confidence, Heading, ListItem
@@ -365,6 +367,41 @@ def test_save_checkpoint_records_state(ledger: SQLiteJobLedger) -> None:
 def test_save_checkpoint_returns_false_for_an_unknown_block(ledger: SQLiteJobLedger) -> None:
     _init(ledger)
     assert ledger.save_checkpoint("ghost", BlockStatus.DRAFTED, job_id="job") is False
+
+
+def test_save_checkpoint_persists_style(ledger: SQLiteJobLedger) -> None:
+    _init(ledger)
+    ledger.append_chapter("job", _chapter("ch1", [_block("ch1#1")]))
+    style = StyleMeta(target_runs=(InlineRun(text="重点", bold=True),))
+    assert ledger.save_checkpoint("ch1#1", BlockStatus.DRAFTED, style=style, job_id="job") is True
+    block = ledger.get_block("ch1#1", job_id="job")
+    assert block is not None and block.style is not None
+    assert block.style.target_runs == style.target_runs
+
+
+def test_save_checkpoints_batch_persists_style_and_preserves_when_omitted(
+    ledger: SQLiteJobLedger,
+) -> None:
+    _init(ledger)
+    ledger.append_chapter("job", _chapter("ch1", [_block("ch1#1")]))
+    style = StyleMeta(target_runs=(InlineRun(text="重点", bold=True),))
+    ledger.save_checkpoints_batch(
+        [{"block_id": "ch1#1", "status": BlockStatus.DRAFTED, "target_text": "x", "style": style}],
+        job_id="job",
+    )
+    block = ledger.get_block("ch1#1", job_id="job")
+    assert block is not None and block.style is not None
+    assert block.style.target_runs == style.target_runs
+
+    # A later repair/consistency/export checkpoint omits style: the parsed runs
+    # must survive so the render can still locate them (graceful degradation).
+    ledger.save_checkpoints_batch(
+        [{"block_id": "ch1#1", "status": BlockStatus.DRAFTED, "target_text": "x repaired"}],
+        job_id="job",
+    )
+    block = ledger.get_block("ch1#1", job_id="job")
+    assert block is not None and block.style is not None
+    assert block.style.target_runs == style.target_runs
 
 
 def test_save_checkpoints_batch_counts_and_preserves_omitted_flags(

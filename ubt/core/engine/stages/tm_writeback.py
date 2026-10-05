@@ -20,6 +20,7 @@ from ubt.core.engine.facts import Terminology
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.services import RunServices
 from ubt.core.engine.stage_context import StageContext
+from ubt.core.ir.emphasis import runs_to_json
 from ubt.core.ir.models import BlockStatus
 from ubt.core.memory.glossary_table import build_global_glossary_table
 from ubt.core.memory.tm import (
@@ -77,6 +78,17 @@ def tm_writeback_text(block: Any) -> str:
     return str(getattr(block, "draft_text", None) or getattr(block, "target_text", "") or "")
 
 
+def tm_writeback_runs(block: Any) -> str:
+    """The block's target-side emphasis runs, serialized for the TM entry.
+
+    Stored alongside the text so an exact hit restores the bold the marker
+    mechanism preserved instead of serving a plain translation.
+    """
+    style = getattr(block, "style", None)
+    runs = getattr(style, "target_runs", ()) if style is not None else ()
+    return runs_to_json(runs) if runs else ""
+
+
 def writeback_tm_from_ledger(
     ledger: SQLiteJobLedger,
     job_id: str,
@@ -105,6 +117,7 @@ def writeback_tm_from_ledger(
             provenance=PROVENANCE_MACHINE,
             domain=domain,
             context_hash=tm_context,
+            runs_json=tm_writeback_runs(b),
         )
         for b in finalized
     ]

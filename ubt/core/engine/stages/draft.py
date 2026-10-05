@@ -21,7 +21,8 @@ from ubt.core.engine.ledger_flusher import CheckpointBatchFlusher
 from ubt.core.engine.services import RunServices
 from ubt.core.engine.stage_context import StageContext
 from ubt.core.exceptions import BudgetExceededError, JobInterruptedError, UBTError
-from ubt.core.ir.models import BlockStatus, BlockType, BookManifest, IRBlock
+from ubt.core.ir.emphasis import mark_bold_spans, parse_bold, runs_from_json
+from ubt.core.ir.models import BlockStatus, BlockType, BookManifest, IRBlock, StyleMeta
 from ubt.core.memory.abbreviation_miner import format_abbreviations_markdown_table
 from ubt.core.memory.glossary_table import (
     build_chunk_glossary_table,
@@ -55,6 +56,24 @@ ACADEMIC_PROFILES = frozenset(
     {"academic", "textbook", "paper", "technical", "nonfiction", "non-fiction"}
 )
 _SKIPPED_TYPES = frozenset({BlockType.IMAGE, BlockType.FORMULA})
+
+
+def _source_with_bold_markers(block: IRBlock) -> str:
+    """The source text with ``⟦B⟧…⟦/B⟧`` around each source-side bold span.
+
+    Whole-block bold is already rendered from ``provenance["is_bold"]``; only a
+    *partial* bold block needs the model to carry the emphasis into the target,
+    because a source-derived inline run the translation rewrote has no target
+    substring for the render to locate. The markers ride the masked source and
+    are parsed back out in :meth:`_DraftProcessor.finalize_draft`.
+    """
+    style = block.style
+    if style is None or block.provenance.get("is_bold"):
+        return block.source_text
+    spans = [run.text for run in style.inline_runs if run.bold and run.text.strip()]
+    if not spans:
+        return block.source_text
+    return mark_bold_spans(block.source_text, spans)
 
 
 @dataclass
@@ -341,6 +360,11 @@ class _DraftProcessor:
         Returns ``None`` when the block was already checkpointed from
         an exact TM hit (funnel tier 1) or an MT-tier draft.
         """
+        # A partial-bold block needs the model's emphasis markers to reach the
+        # target. A TM entry written before emphasis runs existed carries none,
+        # so such a hit is refused (below) and the block is re-drafted; a hit
+        # that *does* carry runs restores the bold without a model call.
+        needs_emphasis = _source_with_bold_markers(block) != block.source_text
         if self.runtime.tm is not None:
             exact_hit = await asyncio.to_thread(
                 self.runtime.tm.lookup_exact,
@@ -353,6 +377,13 @@ class _DraftProcessor:
                 # glossary/prompt change would no longer invalidate exact hits.
                 None,
             )
+            if exact_hit is not None and needs_emphasis and not exact_hit.runs_json:
+                logger.info(
+                    "TM exact hit for block %s predates emphasis runs; re-drafting "
+                    "to preserve bold",
+                    block.id,
+                )
+                exact_hit = None
             if exact_hit is not None:
                 fp_decision = await asyncio.to_thread(
                     self.runtime.active_fast_pass.evaluate,
@@ -390,6 +421,14 @@ class _DraftProcessor:
                             violation,
                         )
                     else:
+                        # Restore the emphasis the entry stored, so a TM hit keeps
+                        # the bold without a model call.
+                        tm_runs = runs_from_json(exact_hit.runs_json)
+                        style = (
+                            (block.style or StyleMeta()).model_copy(update={"target_runs": tm_runs})
+                            if tm_runs or block.style is not None
+                            else None
+                        )
                         update = {
                             "block_id": block.id,
                             "target_text": exact_hit.target_text,
@@ -397,6 +436,7 @@ class _DraftProcessor:
                             "status": BlockStatus.MTQE_PASSED,
                             "mtqe_score": 1.0,
                             "tm_hit": True,
+                            "style": style,
                         }
                         # Buffering accepts the write: a failing flush is
                         # retried and finally raised at the next enqueue /
@@ -466,7 +506,7 @@ class _DraftProcessor:
         # single event loop across concurrent draft tasks and SSE fan-out. The
         # mask order (code -> math -> soup -> citation) lives in the engine, not
         # here (translation unit segmentation layer).
-        masked = await asyncio.to_thread(self.runtime.engine.mask, block.source_text)
+        masked = await asyncio.to_thread(self.runtime.engine.mask, _source_with_bold_markers(block))
 
         macro_ctx = ""
         if self.policy.rolling_enabled:
@@ -513,7 +553,11 @@ class _DraftProcessor:
             email_map=inputs.email_map,
         )
         result = await asyncio.to_thread(self.runtime.engine.resolve, raw_text, masked)
-        final_draft = result.text
+        # The model bracketed emphasized target text with ⟦B⟧ … ⟦/B⟧; parse the
+        # runs out (and strip every marker, balanced or not) so the target text
+        # is always clean and the render can re-apply the weight the source-
+        # derived inline run cannot locate.
+        final_draft, target_runs = parse_bold(result.text)
         if block.block_type == BlockType.HEADING:
             trimmed = trim_heading_expansion(block.source_text, final_draft)
             if trimmed != final_draft:
@@ -542,8 +586,15 @@ class _DraftProcessor:
 
         restore_clean = result.clean
 
+        # Overwrite (never merge) the target runs: an empty result must clear a
+        # stale run from a previous draft of the same block.
+        new_style = (
+            (block.style or StyleMeta()).model_copy(update={"target_runs": target_runs})
+            if target_runs or block.style is not None
+            else None
+        )
         drafted_block = block.model_copy(
-            update={"target_text": final_draft, "draft_text": final_draft}
+            update={"target_text": final_draft, "draft_text": final_draft, "style": new_style}
         )
         self.runtime.memory_mgr.record_drafted_block(drafted_block)
 
@@ -553,6 +604,7 @@ class _DraftProcessor:
             "status": BlockStatus.DRAFTED if restore_clean else BlockStatus.REPAIR_PENDING,
             "draft_text": final_draft,
             "error_flags": error_flags or None,
+            "style": new_style,
         }
         await self.runtime.flusher.enqueue(update)
 

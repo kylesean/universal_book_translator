@@ -254,6 +254,72 @@ _LEADING_MARKER_RE = re.compile(
 )
 
 
+def _fold_char(ch: str) -> str:
+    """Fold one char for tolerant matching.
+
+    Full-width ASCII becomes half-width, the ideographic space a plain space,
+    and the unicode dash/quote variants their ASCII forms — so a run text the
+    extractor and the target spell differently still matches.
+    """
+    code = ord(ch)
+    if code == 0x3000:
+        return " "
+    if 0xFF01 <= code <= 0xFF5E:
+        return chr(code - 0xFEE0)
+    if code == 0x2212 or 0x2010 <= code <= 0x2015:
+        return "-"
+    if code in (0x2018, 0x2019, 0x02BC, 0x0060, 0x00B4):
+        return "'"
+    if code in (0x201C, 0x201D):
+        return '"'
+    return ch
+
+
+def _fold_for_match(text: str) -> tuple[str, list[int], list[int]]:
+    """Fold ``text`` for tolerant matching, with a map back to original indices.
+
+    Drops all whitespace and folds full-width ASCII to half-width, so a run text
+    recorded before the target's publishing normalization still matches it: the
+    CJK pass inserts a space between Latin and CJK (``SoL-Pi通过`` -> ``SoL-Pi
+    通过``) that the draft-time run text does not carry. ``starts[i]`` is the
+    original index of folded char ``i``; ``ends[i]`` is one past it.
+    """
+    folded: list[str] = []
+    starts: list[int] = []
+    ends: list[int] = []
+    index = 0
+    length = len(text)
+    while index < length:
+        ch = text[index]
+        if ch.isspace():
+            index += 1
+            continue
+        folded.append(_fold_char(ch))
+        starts.append(index)
+        ends.append(index + 1)
+        index += 1
+    return "".join(folded), starts, ends
+
+
+def _folded_find(text: str, needle: str, from_index: int = 0) -> tuple[int, int] | None:
+    """Find ``needle`` in ``text`` ignoring whitespace/full-width differences.
+
+    Returns the matched ``(start, end)`` in the *original* text, or ``None``.
+    """
+    folded_needle = _fold_for_match(needle)[0].strip()
+    if not folded_needle:
+        return None
+    folded_text, starts, ends = _fold_for_match(text)
+    position = 0
+    if from_index > 0:
+        while position < len(starts) and starts[position] < from_index:
+            position += 1
+    at = folded_text.find(folded_needle, position)
+    if at < 0:
+        return None
+    return starts[at], ends[at + len(folded_needle) - 1]
+
+
 def _locate_runs(
     text: str, runs: Sequence[StyledRun]
 ) -> list[tuple[int, int, bool, bool, bool, str | None]]:
@@ -261,7 +327,9 @@ def _locate_runs(
 
     A run whose text is not present (a span the translation rewrote) is skipped;
     the sequential cursor keeps repeated tokens (a year, an author) aligned to
-    their occurrence rather than the first one on the page.
+    their occurrence rather than the first one on the page. A span that survives
+    only after the target's CJK normalization (whitespace collapsed, full-width
+    punctuation/digits folded) is found by the tolerant fallback.
     """
     spans: list[tuple[int, int, bool, bool, bool, str | None]] = []
     cursor = 0
@@ -271,26 +339,40 @@ def _locate_runs(
         index = text.find(run.text, cursor)
         if index < 0:
             index = text.find(run.text)
-        if index < 0:
-            continue
-        spans.append(
-            (
-                index,
-                index + len(run.text),
-                run.bold,
-                run.italic,
-                run.superscript,
-                run.color_hex,
+        if index >= 0:
+            spans.append(
+                (
+                    index,
+                    index + len(run.text),
+                    run.bold,
+                    run.italic,
+                    run.superscript,
+                    run.color_hex,
+                )
             )
-        )
-        cursor = index + len(run.text)
+            cursor = index + len(run.text)
+            continue
+        located = _folded_find(text, run.text, cursor)
+        if located is None:
+            located = _folded_find(text, run.text, 0)
+        if located is None:
+            continue
+        start, end = located
+        spans.append((start, end, run.bold, run.italic, run.superscript, run.color_hex))
+        cursor = end
     return spans
 
 
 def _styled_runs(block: IRBlock) -> tuple[StyledRun, ...]:
-    """The block's source-derived inline runs as renderable target runs."""
+    """The block's source- and target-derived inline runs, as renderable runs.
+
+    Source-derived runs (``inline_runs``) come first: they are usually the more
+    specific span (a blue citation inside a bold sentence), and the renderer's
+    ``next(...)`` span lookup lets the first enclosing span win. Target-derived
+    runs (``target_runs``, the model's ``⟦B⟧`` markers) follow.
+    """
     style = block.style
-    if style is None or not style.inline_runs:
+    if style is None:
         return ()
     return tuple(
         StyledRun(
@@ -300,7 +382,7 @@ def _styled_runs(block: IRBlock) -> tuple[StyledRun, ...]:
             superscript=run.superscript,
             color_hex=run.color_hex,
         )
-        for run in style.inline_runs
+        for run in (*style.inline_runs, *style.target_runs)
         if run.text
     )
 

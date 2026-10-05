@@ -253,7 +253,11 @@ def styled_runs_in_box(
 
     def _flush() -> None:
         nonlocal buffer, style
-        text = "".join(buffer)
+        # A trailing space rides the run it follows; keep it out of the run text
+        # so the render can still locate the span in a CJK target, where the
+        # source's space is usually dropped or replaced by full-width punctuation
+        # ("50.0% " -> "50.0%；"). Internal spaces are preserved.
+        text = "".join(buffer).rstrip()
         if text and style is not None and style != (False, False, False, None):
             runs.append((text, style[0], style[1], style[2], style[3]))
         buffer = []

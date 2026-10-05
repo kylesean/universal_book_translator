@@ -14,6 +14,7 @@ import html
 import re
 
 from ubt.core.ir.bifurcation import SEMANTIC_BREAK_TOKEN
+from ubt.core.ir.emphasis import BOLD_CLOSE, BOLD_OPEN, strip_emphasis_markers
 from ubt.core.language_profile import PROFILES
 
 #: Wrapper tags the extractor treats as the answer envelope. A source span that
@@ -62,6 +63,26 @@ _SHORT_SOURCE_HINT = (
     "explanation of your own."
 )
 
+#: The draft stage brackets a partial bold source span with these sentinels (see
+#: :mod:`ubt.core.ir.emphasis`); the model must carry them onto the translated
+#: text so the render can re-apply the weight the source-derived run cannot
+#: locate. The rule is static so the prompt prefix stays cacheable.
+_EMPHASIS_RULE = (
+    f"9. [Emphasis Preservation]: Source text bracketed by {BOLD_OPEN} ... "
+    f"{BOLD_CLOSE} is bold. Wrap the corresponding translated text with the SAME "
+    f"{BOLD_OPEN} ... {BOLD_CLOSE} markers, kept balanced and in place. Never "
+    "translate, drop, reorder, duplicate, or add emphasis markers of your own."
+)
+_EMPHASIS_HINT = (
+    f" Preserve any {BOLD_OPEN} ... {BOLD_CLOSE} emphasis markers around the "
+    "corresponding translated text, balanced and in place."
+)
+
+
+def _has_emphasis(text: str) -> bool:
+    """True when the (masked) source carries the draft's bold sentinels."""
+    return strip_emphasis_markers(text) != text
+
 
 def _short_source_hint(source_text: str, block_type: str | None = None) -> str:
     """A "do not expand" clause for a heading-like source, else empty.
@@ -71,7 +92,7 @@ def _short_source_hint(source_text: str, block_type: str | None = None) -> str:
     caller that passes no type (the cost probe, older call sites) falls back to
     the short-and-unpunctuated heuristic.
     """
-    stripped = (source_text or "").strip()
+    stripped = strip_emphasis_markers(source_text or "").strip()
     if not stripped:
         return ""
     is_heading = str(block_type or "").strip().lower() in _HEADING_BLOCK_TYPES
@@ -96,17 +117,17 @@ def draft_source_from_prompt(prompt: str) -> str:
     if "<blocks>" in prompt:
         remainder = prompt.split("<blocks>", 1)[1]
         if "</blocks>" in remainder:
-            return remainder.split("</blocks>", 1)[0].strip()
-        return remainder.strip()
+            return strip_emphasis_markers(remainder.split("</blocks>", 1)[0].strip())
+        return strip_emphasis_markers(remainder.strip())
     if _DRAFT_SOURCE_MARKER in prompt:
         remainder = prompt.split(_DRAFT_SOURCE_MARKER, 1)[1]
         for tail in _DRAFT_SOURCE_TAILS:
             if tail in remainder:
                 remainder = remainder.split(tail, 1)[0]
                 break
-        return remainder.strip()
+        return strip_emphasis_markers(remainder.strip())
     if _DRAFT_MINIMAL_ANCHOR in prompt:
-        return prompt.rsplit(_DRAFT_MINIMAL_ANCHOR, 1)[1].strip()
+        return strip_emphasis_markers(prompt.rsplit(_DRAFT_MINIMAL_ANCHOR, 1)[1].strip())
     return prompt.strip()
 
 
@@ -142,7 +163,7 @@ def build_minimal_draft_prompt(
     parts = []
     if glossary_sections:
         parts.append("Glossary:\n" + "\n\n".join(glossary_sections))
-    if few_shot_reference.strip():
+    if few_shot_reference.strip() and not _has_emphasis(source_text):
         parts.append(few_shot_reference.strip())
     domain_hint = ""
     if domain:
@@ -150,7 +171,7 @@ def build_minimal_draft_prompt(
     elif genre_profile and genre_profile.lower() not in ("general", "unknown", "auto"):
         domain_hint = f" Use standard {genre_profile} domain terminology."
     parts.append(
-        f"Translate the following {src_name} text into fluent, natural {tgt_name}.{domain_hint}{_short_source_hint(source_text, block_type)} Output ONLY the translation without any title, prefix, or commentary:\n\n{_neutralize_reserved_tags(source_text).strip()}"
+        f"Translate the following {src_name} text into fluent, natural {tgt_name}.{domain_hint}{_short_source_hint(source_text, block_type)}{_EMPHASIS_HINT} Output ONLY the translation without any title, prefix, or commentary:\n\n{_neutralize_reserved_tags(source_text).strip()}"
     )
     return "", "\n\n".join(parts)
 
@@ -216,12 +237,14 @@ def build_hybrid_draft_prompt(
             f"{style_desc}\n"
             "Translate accurately while maintaining natural target language flow, idiomatic register, and domain terminology.\n"
             "Typography & Terminology: In Chinese target text, maintain standard spacing between Chinese characters and English words, numbers, or inline formulas. "
-            "Use authoritative discipline terminology suited to the active subject domain and preserve standard uppercase technical acronyms."
+            "Use authoritative discipline terminology suited to the active subject domain and preserve standard uppercase technical acronyms.\n"
+            + _EMPHASIS_RULE
         )
     else:
         system_prompt = (
             f"{style_desc}\n"
-            "Translate accurately while maintaining natural target language flow, idiomatic register, and domain terminology."
+            "Translate accurately while maintaining natural target language flow, idiomatic register, and domain terminology.\n"
+            + _EMPHASIS_RULE
         )
 
     user_parts: list[str] = []
@@ -240,7 +263,7 @@ def build_hybrid_draft_prompt(
     if neighbor_context.strip():
         user_parts.append(f"{neighbor_context.strip()}\n")
 
-    if few_shot_reference.strip():
+    if few_shot_reference.strip() and not _has_emphasis(source_text):
         user_parts.append(f"{few_shot_reference.strip()}\n")
 
     user_parts.append(
@@ -328,7 +351,8 @@ def build_rich_draft_prompt(
         f"7. [Domain Terminology & Acronyms]:\n"
         f"   - Consistently use standard national and discipline terminology appropriate for the document's subject field.\n"
         f"   - Standard domain acronyms must be preserved in uppercase Latin letters when introduced, accompanied by their established target language translation in parentheses where appropriate. NEVER mechanically duplicate or invent awkward pseudo-translations.\n"
-        "8. Output your final translation strictly enclosed inside <translation>...</translation> tags. Any thinking, context analysis, or commentary must remain outside these tags. Do not include markdown code fences.",
+        "8. Output your final translation strictly enclosed inside <translation>...</translation> tags. Any thinking, context analysis, or commentary must remain outside these tags. Do not include markdown code fences.\n"
+        + _EMPHASIS_RULE,
     ]
 
     if global_glossary.strip():
@@ -354,7 +378,7 @@ def build_rich_draft_prompt(
     if neighbor_context.strip():
         user_parts.append(f"{neighbor_context.strip()}\n")
 
-    if few_shot_reference.strip():
+    if few_shot_reference.strip() and not _has_emphasis(source_text):
         user_parts.append(f"{few_shot_reference.strip()}\n")
 
     user_parts.append(
@@ -439,7 +463,8 @@ def build_macro_chunk_draft_prompt(
         f"7. [Domain Terminology & Acronyms]:\n"
         f"   - Consistently use standard national and discipline terminology appropriate for the document's subject field.\n"
         f"   - Standard domain acronyms must be preserved in uppercase Latin letters when introduced, accompanied by their established target language translation in parentheses where appropriate. NEVER mechanically duplicate or invent awkward pseudo-translations.\n"
-        '8. [Structured Macro-Blocks Output]: You must output your translation inside <blocks>...</blocks> tags. Each block must be enclosed in a <block id="...">...</block> tag with the EXACT matching id from the source. Translate ONLY the text of each block. Do not include markdown code fences or conversational commentary outside the tags.',
+        '8. [Structured Macro-Blocks Output]: You must output your translation inside <blocks>...</blocks> tags. Each block must be enclosed in a <block id="...">...</block> tag with the EXACT matching id from the source. Translate ONLY the text of each block. Do not include markdown code fences or conversational commentary outside the tags.\n'
+        + _EMPHASIS_RULE,
     ]
 
     if global_glossary.strip():
@@ -462,7 +487,7 @@ def build_macro_chunk_draft_prompt(
     if neighbor_context.strip():
         user_parts.append(f"{neighbor_context.strip()}\n")
 
-    if few_shot_reference.strip():
+    if few_shot_reference.strip() and not any(_has_emphasis(text) for _, text in blocks):
         user_parts.append(f"{few_shot_reference.strip()}\n")
 
     # Escape source text and ids: a block containing </block> or </blocks>

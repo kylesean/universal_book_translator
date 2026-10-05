@@ -308,6 +308,7 @@ def _store(
     provenance: str = PROVENANCE_MACHINE,
     domain: str | None = None,
     context_hash: str = "",
+    runs_json: str = "",
 ) -> int:
     return memory.writeback(
         [
@@ -319,6 +320,7 @@ def _store(
                 provenance=provenance,
                 domain=domain,
                 context_hash=context_hash,
+                runs_json=runs_json,
             )
         ]
     )
@@ -328,6 +330,24 @@ def test_writeback_then_exact_lookup_round_trips(tm: TranslationMemory) -> None:
     assert _store(tm, "The cat sat.", "\u732b\u5750\u7740\u3002") == 1
     hit = tm.lookup_exact("en", "zh", "The cat sat.")
     assert hit == TMHit("The cat sat.", "\u732b\u5750\u7740\u3002", 1.0, PROVENANCE_MACHINE)
+
+
+def test_exact_lookup_round_trips_the_stored_emphasis_runs(tm: TranslationMemory) -> None:
+    runs = '[{"text": "50.0%", "bold": true}]'
+    _store(tm, "Cost fell 50.0%.", "\u6210\u672c\u964d\u4f4e 50.0%\u3002", runs_json=runs)
+    hit = tm.lookup_exact("en", "zh", "Cost fell 50.0%.")
+    assert hit is not None
+    assert hit.runs_json == runs
+
+
+def test_a_rewrite_updates_the_stored_runs(tm: TranslationMemory) -> None:
+    _store(tm, "Cost fell 50.0%.", "\u65e7\u8bd1\u6587", runs_json="")
+    runs = '[{"text": "50.0%", "bold": true}]'
+    _store(tm, "Cost fell 50.0%.", "\u65b0\u8bd1\u6587 50.0%", runs_json=runs)
+    hit = tm.lookup_exact("en", "zh", "Cost fell 50.0%.")
+    assert hit is not None
+    assert hit.target_text == "\u65b0\u8bd1\u6587 50.0%"
+    assert hit.runs_json == runs
 
 
 def test_exact_lookup_is_normalized(tm: TranslationMemory) -> None:

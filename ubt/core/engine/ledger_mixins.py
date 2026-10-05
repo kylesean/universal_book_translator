@@ -40,6 +40,23 @@ from ubt.core.qe.score_policy import QE_SCORED_SQL
 #: overwrite any of these (the string mirror of the queue's terminal set).
 
 
+def _style_json(style: Any) -> str | None:
+    """Serialize a checkpoint's style for the ``style_json`` column.
+
+    Accepts a ``StyleMeta`` (the draft stage's parsed target runs), a raw JSON
+    string, or ``None``; ``None`` leaves the stored column untouched via the
+    caller's ``COALESCE``.
+    """
+    if style is None:
+        return None
+    if isinstance(style, str):
+        return style
+    dump = getattr(style, "model_dump_json", None)
+    if dump is not None:
+        return cast(str, dump())
+    return json.dumps(style, ensure_ascii=False)
+
+
 def _chapter_match(chapter_id: str) -> tuple[str, tuple[str, ...]]:
     """SQL fragment + params selecting every block that belongs to one chapter.
 
@@ -844,6 +861,7 @@ class LedgerBlocksMixin(LedgerBase):
         tm_hit: bool | None = None,
         mqm_severity: str | None = None,
         mqm_spans: list[dict[str, Any]] | None = None,
+        style: Any | None = None,
         job_id: str | None = None,
     ) -> bool:
         """Atomically commit progress checkpoint for a single block."""
@@ -880,6 +898,9 @@ class LedgerBlocksMixin(LedgerBase):
             if mqm_spans is not None:
                 updates.append("mqm_spans_json = ?")
                 params.append(json.dumps(mqm_spans, ensure_ascii=False))
+            if style is not None:
+                updates.append("style_json = ?")
+                params.append(_style_json(style))
 
             where = "WHERE block_id = ?"
             if scope is not None:
@@ -950,6 +971,10 @@ class LedgerBlocksMixin(LedgerBase):
                 mqm_severity = item.get("mqm_severity")
                 mqm_spans = item.get("mqm_spans")
                 glossary_hits = item.get("glossary_hits")
+                # Omitted (repair/consistency/export checkpoints) -> COALESCE
+                # preserves the stored style, so a target-side run the draft
+                # parsed survives a later text rewrite.
+                style = item.get("style")
 
                 status_val = status.value if isinstance(status, BlockStatus) else str(status)
 
@@ -972,6 +997,7 @@ class LedgerBlocksMixin(LedgerBase):
                         mqm_severity = COALESCE(?, mqm_severity),
                         mqm_spans_json = COALESCE(?, mqm_spans_json),
                         glossary_hits_json = COALESCE(?, glossary_hits_json),
+                        style_json = COALESCE(?, style_json),
                         updated_at = CURRENT_TIMESTAMP
                     WHERE block_id = ?
                 """
@@ -990,6 +1016,7 @@ class LedgerBlocksMixin(LedgerBase):
                     json.dumps(glossary_hits, ensure_ascii=False)
                     if glossary_hits is not None
                     else None,
+                    _style_json(style),
                     block_id,
                 ]
                 if status_val not in terminal_values and not allow_terminal_override:
