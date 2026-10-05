@@ -128,9 +128,14 @@ class AdaptiveTokenBucket:
                     jitter = random.uniform(0.01, 0.05) + min(0.5, self._waiters * 0.02)
                     sleep_duration = max(0.01, min(wait_time + jitter, 5.0))
 
-            await asyncio.sleep(sleep_duration)
-            with self._thread_lock:
-                self._waiters = max(0, self._waiters - 1)
+            try:
+                await asyncio.sleep(sleep_duration)
+            finally:
+                # A cancellation during the sleep (job cancel/shutdown) must
+                # still release the waiter slot, or every later acquire pays
+                # stale-waiter jitter for the rest of the process.
+                with self._thread_lock:
+                    self._waiters = max(0, self._waiters - 1)
 
     def report_429(self) -> None:
         """Multiplicative decrease on rate-limit exhaustion, once per episode:
