@@ -103,9 +103,12 @@ _PAGE_RANGE_RE = re.compile(r"\b\d{2,6}\s*[-–—]\s*\d{2,6}\b")
 # page range ("This approach was published by Springer in 2019, spanning pages
 # 45-60."), shipping the sentence untranslated.
 _NAME_LIST_START_RE = re.compile(r"^[A-Z][A-Za-z'’\-]+\s+[A-Z][A-Za-z'’\-]+\s*[,.]")
-# A "real word": two or more consecutive ASCII letters. Single letters
-# (K/V/x), digits and punctuation do not count as translatable content.
-_WORD_RE = re.compile(r"[A-Za-z]{2,}")
+# A "real word": two or more consecutive letters in any script (``[^\W\d_]``
+# is "word char minus digits/underscore", i.e. Unicode letters). Single letters
+# (K/V/x), digits and punctuation do not count as translatable content. The
+# ASCII-only predecessor classified every Cyrillic/Arabic/Hebrew/Greek
+# paragraph as symbol debris and shipped whole books untranslated.
+_WORD_RE = re.compile(r"[^\W\d_]{2,}")
 
 # --- Author byline (a paper's name list under the title) --------------------
 # GB/T 7714 and general Chinese academic practice keep foreign author names in
