@@ -534,8 +534,12 @@ class _DraftProcessor:
 
         return inputs
 
-    async def finalize_draft(self, block: IRBlock, raw_text: str, inputs: _DraftInputs) -> None:
-        """Unmask, record in hierarchical memory, and checkpoint a draft."""
+    async def finalize_draft(self, block: IRBlock, raw_text: str, inputs: _DraftInputs) -> bool:
+        """Unmask, record in hierarchical memory, and checkpoint a draft.
+
+        Returns whether the protective spans restored cleanly — the caller's
+        signal for whether this raw draft is worth caching.
+        """
         # A block that reached finalize_draft drafted successfully, so the
         # fail-fast breaker only counts *consecutive* non-retryable failures.
         self.runtime.fail_fast_consecutive = 0
@@ -607,6 +611,7 @@ class _DraftProcessor:
             "style": new_style,
         }
         await self.runtime.flusher.enqueue(update)
+        return restore_clean
 
     async def draft_single_block(
         self,
@@ -854,15 +859,17 @@ class _DraftProcessor:
                 retriable.append((b, inp))
                 continue
             # Record the batch's own output under the same key the interactive
-            # path reads, so a re-run reuses it (content-addressed cache layer).
-            if self.runtime.engine.cache is not None:
+            # path reads, so a re-run reuses it (content-addressed cache layer)
+            # — but only once the restore judged clean: a cached defective
+            # draft replays on every later run, and only repair could recover it.
+            clean = await self.finalize_draft(b, r.text, inp)
+            if clean and self.runtime.engine.cache is not None:
                 await asyncio.to_thread(
                     self.runtime.engine.remember_draft,
                     inp.masked_source,
                     r.text,
                     context=self.prompt_context(inp),
                 )
-            await self.finalize_draft(b, r.text, inp)
             self.runtime.counters["batch_drafted"] += 1
         if retriable:
             self.runtime.counters["batch_fallbacks"] += len(retriable)
@@ -1007,15 +1014,17 @@ class _DraftProcessor:
                 retriable.append((b, inp))
                 continue
             # Record the batch's own output under the same key the interactive
-            # path reads, so a re-run reuses it (content-addressed cache layer).
-            if self.runtime.engine.cache is not None:
+            # path reads, so a re-run reuses it (content-addressed cache layer)
+            # — but only once the restore judged clean: a cached defective
+            # draft replays on every later run, and only repair could recover it.
+            clean = await self.finalize_draft(b, r.text, inp)
+            if clean and self.runtime.engine.cache is not None:
                 await asyncio.to_thread(
                     self.runtime.engine.remember_draft,
                     inp.masked_source,
                     r.text,
                     context=self.prompt_context(inp),
                 )
-            await self.finalize_draft(b, r.text, inp)
             self.runtime.counters["batch_drafted"] += 1
 
         if retriable:
@@ -1132,21 +1141,31 @@ class _DraftProcessor:
                     # semaphore: draft_single_block re-acquires it, so calling it
                     # here (while this group still holds a permit) self-deadlocks.
                     extracted_by_id = {}
-            if extracted_by_id and cached_context is not None:
-                await asyncio.to_thread(
-                    self.runtime.engine.remember_value,
-                    cached_context,
-                    _encode_chunk(extracted_by_id),
-                    kind="translate_chunk",
-                )
 
         missing: list[tuple[IRBlock, _DraftInputs]] = []
+        clean_by_id: dict[str, bool] = {}
         for b, inp in chunk:
             text = extracted_by_id.get(b.id)
             if text and text.strip():
-                await self.finalize_draft(b, text.strip(), inp)
+                clean_by_id[b.id] = await self.finalize_draft(b, text.strip(), inp)
             else:
                 missing.append((b, inp))
+
+        # Cache the chunk's extraction map only when every block in it restored
+        # cleanly: one dirty draft would otherwise be replayed from the map on
+        # every resume of the run.
+        if (
+            extracted_by_id
+            and cached_context is not None
+            and clean_by_id
+            and all(clean_by_id.get(b.id, False) for b, _ in chunk)
+        ):
+            await asyncio.to_thread(
+                self.runtime.engine.remember_value,
+                cached_context,
+                _encode_chunk(extracted_by_id),
+                kind="translate_chunk",
+            )
 
         if missing:
             logger.info(
