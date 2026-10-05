@@ -390,7 +390,8 @@ def test_measure_bilingual_and_math_sources_all_name_a_weight(tmp_path: Path) ->
     key = bilingual_request_text("目标", "源文")
     assert 'weight: "regular"' in ts._bilingual_measure_source(key, 100.0, 10.0)
     assert 'weight: "regular"' in ts._bilingual_text_source("目标", "源文", 100.0, 20.0, 10.0)
-    assert 'weight: "regular"' in ts._math_source("$x$", 100.0, 20.0)
+    math_src = ts._math_source("$x$", 100.0, 20.0)
+    assert math_src is not None and 'weight: "regular"' in math_src
 
 
 def test_a_batched_document_does_not_leak_bold_into_later_sections(tmp_path: Path) -> None:
