@@ -277,6 +277,11 @@ class StreamStripStats:
     #: Forms skipped because they are referenced by more than one page; rewriting
     #: one in place would erase text on every page that draws it.
     shared_forms_skipped: int = 0
+    #: Forms whose text survives inside the strip rects because their
+    #: resources were unreadable or their recursion failed. A caller that
+    #: paints an overlay afterwards must descend instead — the source text is
+    #: still live and the overlay would double it.
+    forms_survived: int = 0
     aborted: str | None = None
     #: Restores the pre-strip Contents and Form streams. Set only after a
     #: successful commit; a caller that paints a translation afterwards uses it
@@ -795,6 +800,7 @@ def strip_stream_instructions(
                 # Silently skipping the form's text here would drop content with
                 # no trace; report it so a lost-coverage bug is diagnosable.
                 logger.warning("stream_strip: unreadable /XObject resources (%s)", exc)
+                stats.forms_survived += 1
 
             if xobjects is not None:
                 try:
@@ -867,6 +873,7 @@ def strip_stream_instructions(
                                 dropped_count += sub_dropped
                 except Exception as exc:
                     logger.debug("Error processing Form XObject %s: %s", name_str, exc)
+                    stats.forms_survived += 1
 
             output.append((operands, operator))
             continue

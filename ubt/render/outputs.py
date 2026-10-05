@@ -578,6 +578,18 @@ class TypstFragmentTypesetter:
             return f", font: ({fonts_quoted})"
         return f', font: "{self._font}"'
 
+    @property
+    def _dir_line(self) -> str:
+        """The text-direction setup line, non-empty only for RTL targets.
+
+        Every fragment source (measure and draw, monolingual and bilingual)
+        must carry it or an Arabic/Hebrew book typesets with an LTR base
+        direction — wrong bidi ordering at every run boundary.
+        """
+        from ubt.adapters.pdf.font_probe import needs_rtl
+
+        return "#set text(dir: rtl)\n" if needs_rtl(self._target_lang) else ""
+
     def _key(self, source: str, tag: str = "") -> str:
         return hashlib.sha256((tag + source).encode("utf-8")).hexdigest()[:16]
 
@@ -641,6 +653,7 @@ class TypstFragmentTypesetter:
             f"#set page(width: {width_pt}pt, height: auto, margin: 0pt)\n"
             f"{_par_line(self._par_leading_em)}\n"
             f'#set text(size: {size_pt}pt{weight_line}, top-edge: "ascender", bottom-edge: "descender"{font_line})\n'
+            f"{self._dir_line}"
             f"{_indent_hspace(indent_pt)}{body}\n"
         )
 
@@ -835,6 +848,7 @@ class TypstFragmentTypesetter:
             f"#set page(width: {width_pt}pt, height: auto, margin: 0pt)\n"
             f"#set par(leading: {self._par_leading_em}em)\n"
             f'#set text(size: {size_pt}pt{_WEIGHT_REGULAR}, top-edge: "ascender", bottom-edge: "descender"{font_line})\n'
+            f"{self._dir_line}"
             f"{self._body_markup(target)}\n"
             f"#v({_BILINGUAL_GAP_EM}em)\n"
             f'#text(size: {size_pt * _BILINGUAL_RATIO}pt, fill: rgb("{_BILINGUAL_FILL}"))'
@@ -849,6 +863,7 @@ class TypstFragmentTypesetter:
             f"#set page(width: {width_pt}pt, height: {height_pt}pt, margin: 0pt)\n"
             f"#set par(leading: {self._par_leading_em}em)\n"
             f'#set text(size: {size_pt}pt{_WEIGHT_REGULAR}, top-edge: "ascender", bottom-edge: "descender"{font_line})\n'
+            f"{self._dir_line}"
             f"#box(width: {width_pt}pt, height: {height_pt}pt, clip: true)[\n"
             f"{self._body_markup(target)}\n"
             f"#v({_BILINGUAL_GAP_EM}em)\n"
@@ -943,6 +958,7 @@ class TypstFragmentTypesetter:
             f"#set page(width: {width_pt}pt, height: {height_pt}pt, margin: 0pt)\n"
             f"{_par_line(self._par_leading_em)}\n"
             f'#set text(size: {size_pt}pt{weight_line}, top-edge: "ascender", bottom-edge: "descender"{font_line})\n'
+            f"{self._dir_line}"
             f"#box(width: {width_pt}pt, height: {height_pt}pt, clip: true)[{_indent_hspace(indent_pt)}{body}]\n"
         )
 
@@ -1404,22 +1420,26 @@ def _dedup_identical_streams(pdf: pikepdf.Pdf) -> None:
 
 
 def _clamp_page_boxes(
-    boxes: Sequence[PhysicalBox], page_sizes: Mapping[int, tuple[float, float]]
+    boxes: Sequence[PhysicalBox], page_bounds: Mapping[int, tuple[float, float, float, float]]
 ) -> tuple[PhysicalBox, ...]:
     """Intersect each box with its page mediabox; drop one the clamp collapses.
 
     Extraction boxes can spill past the page edge by a point or two, and drawing
-    a fragment there trips the visual gate's ``block_out_of_bounds``.
+    a fragment there trips the visual gate's ``block_out_of_bounds``. The clamp
+    uses the origin-carrying mediabox (``pdf_struct.page_box``): a page of
+    ``[10 10 610 810]`` has the same 600x800 size as ``[0 0 600 800]`` but its
+    visible right edge sits at x=610, and clamping to the size alone silently
+    dropped every overlay near that edge.
     """
     clamped: list[PhysicalBox] = []
     for box in boxes:
-        size = page_sizes.get(box.page)
-        if size is None:
+        bounds = page_bounds.get(box.page)
+        if bounds is None:
             continue
         x0, y0, x1, y1 = box.bbox
-        width, height = size
-        cx0, cx1 = max(0.0, min(x0, width)), max(0.0, min(x1, width))
-        cy0, cy1 = max(0.0, min(y0, height)), max(0.0, min(y1, height))
+        px0, py0, px1, py1 = bounds
+        cx0, cx1 = max(px0, min(x0, px1)), max(px0, min(x1, px1))
+        cy0, cy1 = max(py0, min(y0, py1)), max(py0, min(y1, py1))
         if cx1 <= cx0 or cy1 <= cy0:
             continue
         clamped.append(PhysicalBox.of(box.page, (cx0, cy0, cx1, cy1)))
@@ -1479,8 +1499,8 @@ class LayerCompositor:
         # relocated citation link pointing at a destination that no longer
         # existed. The pages are the canvas, so the non-text layers stay intact.
         with pdf_struct.open_pdf(self._source) as composed:
-            page_sizes = {
-                index: pdf_struct.page_size(page)
+            page_bounds = {
+                index: pdf_struct.page_box(page)
                 for index, page in enumerate(composed.pages, start=1)
             }
             shared_forms = shared_form_objgens(composed) if self._strip else set()
@@ -1490,7 +1510,7 @@ class LayerCompositor:
             resolved: list[tuple[Overlay, tuple[PhysicalBox, ...] | None]] = []
             prepared: list[tuple[Overlay, tuple[PhysicalBox, ...]]] = []
             for overlay in overlays:
-                boxes = _clamp_page_boxes(overlay.flow_boxes, page_sizes)
+                boxes = _clamp_page_boxes(overlay.flow_boxes, page_bounds)
                 resolved.append((overlay, boxes or None))
                 if boxes:
                     prepared.append((overlay, boxes))
@@ -1799,10 +1819,11 @@ class LayerCompositor:
                 page_no=page_no,
                 shared_forms=shared_forms,
             )
-            # A strip that could not remove the source text (or that had to leave
-            # a page-shared form intact) must not be covered by an overlay, or the
-            # text would double. Descend the page's overlays to the source.
-            if stats.aborted or stats.shared_forms_skipped:
+            # A strip that could not remove the source text (a page-shared
+            # form left intact, or a form whose resources were unreadable or
+            # failed to recurse so its text survives) must not be covered by
+            # an overlay, or the text would double. Descend to the source.
+            if stats.aborted or stats.shared_forms_skipped or stats.forms_survived:
                 return False
         else:
             red, green, blue = self._background
@@ -1815,9 +1836,19 @@ class LayerCompositor:
                     ),
                 )
                 page.contents_add(mask, prepend=False)
+        media = [float(v) for v in page.MediaBox]
+        mb_x0, mb_y0, mb_x1, mb_y1 = media[0], media[1], media[2], media[3]
         for item in items:
             x0, y0, x1, y1 = item.bbox
-            page.add_overlay(item.form, pikepdf.Rectangle(x0, y0, x1, y1))
+            # The draw box carries the line slack added after the page clamp;
+            # re-clamp here so a bottom-margin fragment cannot draw below the
+            # mediabox and trip the visual gate's out-of-bounds check. The
+            # clamped band is normally blank, so the proportional squash this
+            # add_overlay rect implies is bounded by the slack itself.
+            page.add_overlay(
+                item.form,
+                pikepdf.Rectangle(max(x0, mb_x0), max(y0, mb_y0), min(x1, mb_x1), min(y1, mb_y1)),
+            )
         return True
 
     @staticmethod
