@@ -10,6 +10,7 @@ import pytest
 from ubt.adapters.pdf.link_annotations import (
     _extract_candidates_from_annot,
     _rect_intersects_any,
+    _standalone_number,
     relocate_page_annotations,
 )
 
@@ -56,6 +57,58 @@ def test_extract_candidates_keeps_single_digit_fragment() -> None:
         candidates = _extract_candidates_from_annot(annot, fragment)
         assert fragment in candidates, fragment
         assert digit in candidates, fragment
+
+
+def test_extract_candidates_rebuilds_a_translated_cross_reference() -> None:
+    # A figure/table/section reference has its label translated ("Figure" ->
+    # "图"), so the source fragment no longer matches. The number survives, so
+    # rebuild the localized form from the target language's caption prefix.
+    annot = pikepdf.Dictionary(
+        {
+            "/Subtype": "/Link",
+            "/A": pikepdf.Dictionary({"/S": "/GoTo", "/D": "figure.caption.1"}),
+        }
+    )
+    candidates = _extract_candidates_from_annot(
+        annot, "(Figure 1(", figure_prefix="图", table_prefix="表"
+    )
+    assert "图 1" in candidates
+    assert "图1" in candidates
+
+
+def test_extract_candidates_reads_the_displayed_number_not_the_dest_counter() -> None:
+    # The destination counter is not the displayed number: table.caption.5 is
+    # "Table 1" in the source. The number must come from the source fragment, or
+    # the link would relocate onto the wrong table.
+    annot = pikepdf.Dictionary(
+        {
+            "/Subtype": "/Link",
+            "/A": pikepdf.Dictionary({"/S": "/GoTo", "/D": "table.caption.5"}),
+        }
+    )
+    candidates = _extract_candidates_from_annot(
+        annot, "Table 1", figure_prefix="图", table_prefix="表"
+    )
+    assert "表 1" in candidates
+    assert "表 5" not in candidates
+
+
+def test_extract_candidates_section_uses_the_bare_number() -> None:
+    annot = pikepdf.Dictionary(
+        {
+            "/Subtype": "/Link",
+            "/A": pikepdf.Dictionary({"/S": "/GoTo", "/D": "subsection.3.4"}),
+        }
+    )
+    candidates = _extract_candidates_from_annot(annot, "Sec. 3.4")
+    assert "3.4" in candidates
+
+
+def test_standalone_number_rejects_a_longer_number() -> None:
+    assert _standalone_number("表 1", 2, 3)
+    assert not _standalone_number("表 10", 2, 3)
+    assert not _standalone_number("13.1", 1, 3)  # the "3.1" inside "13.1"
+    assert _standalone_number("第 3.1 节", 2, 5)
 
 
 def test_relocate_page_annotations_no_annots(tmp_path: Path) -> None:

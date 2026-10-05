@@ -184,12 +184,12 @@ class DoclingRenderStrategy:
             for placement in composition.placements
             if placement.descended
         ]
-        self._relocate_link_annotations(source_pdf, composition.output_path, overlays)
+        self._relocate_link_annotations(source_pdf, composition.output_path, overlays, target_lang)
         record_toolchain_versions(manifest)
         return composition.output_path
 
     def _relocate_link_annotations(
-        self, source_pdf: str, output_path: Path, overlays: Sequence[Overlay]
+        self, source_pdf: str, output_path: Path, overlays: Sequence[Overlay], target_lang: str
     ) -> None:
         """Move link annotations under replaced regions onto the translated glyphs.
 
@@ -201,7 +201,9 @@ class DoclingRenderStrategy:
         import pikepdf
 
         from ubt.adapters.pdf.link_annotations import relocate_page_annotations
+        from ubt.core.language_profile import resolve_font_config
 
+        font_config = resolve_font_config(target_lang)
         strip_by_page: dict[int, list[tuple[float, float, float, float]]] = {}
         for overlay in overlays:
             # A reflowed overlay draws elsewhere but the source link still sits
@@ -223,6 +225,8 @@ class DoclingRenderStrategy:
                         overlay_path=str(output_path),
                         strip_rects=strip_by_page[page_no],
                         overlay_page_no=page_no - 1,
+                        figure_prefix=font_config.figure_prefix,
+                        table_prefix=font_config.table_prefix,
                     )
                 if mutated:
                     pdf.save(str(output_path))

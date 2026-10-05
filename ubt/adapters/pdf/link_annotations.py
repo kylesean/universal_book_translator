@@ -35,6 +35,27 @@ Rect = tuple[float, float, float, float]
 
 _CITE_KEY_RE = re.compile(r"cite\.([a-zA-Z]+)(\d{4})?", re.IGNORECASE)
 _BRACKET_NUM_RE = re.compile(r"\[(\d{1,4}(?:[-–—]\d{1,4})?)\]")
+# A cross-reference's *displayed* number ("Figure 1", "Table 4", "Sec. 3.1").
+# The label is translated ("Figure" -> "图") but the number is invariant, so it
+# is the token to search for on the translated page. Note the destination key's
+# counter is NOT the displayed number (e.g. table.caption.5 shows "Table 1"),
+# which is why the number is read from the source fragment instead.
+_NUMBER_RE = re.compile(r"\d+(?:\.\d+)*")
+
+
+def _is_number_token(text: str) -> bool:
+    """True for a candidate that ends in a number ("1", "3.1", "表 1")."""
+    return bool(text) and text[-1].isdigit()
+
+
+def _standalone_number(text: str, start: int, end: int) -> bool:
+    """True if ``text[start:end]`` ends at a whole number, not a longer one.
+
+    Rejects "1" matching inside "10" and "表 1" inside "表 10".
+    """
+    if start > 0 and (text[start - 1].isdigit() or text[start - 1] == "."):
+        return False
+    return not (end < len(text) and (text[end].isdigit() or text[end] == "."))
 
 
 def _rect_intersects_any(rect: Sequence[float], strip_rects: Sequence[Rect]) -> bool:
@@ -49,8 +70,16 @@ def _rect_intersects_any(rect: Sequence[float], strip_rects: Sequence[Rect]) -> 
 def _extract_candidates_from_annot(
     annot: pikepdf.Object,
     src_text: str,
+    *,
+    figure_prefix: str = "",
+    table_prefix: str = "",
 ) -> list[str]:
-    """Derive prioritized search tokens for a link annotation."""
+    """Derive prioritized search tokens for a link annotation.
+
+    ``figure_prefix``/``table_prefix`` are the target language's caption labels
+    (e.g. "图"/"表" for Chinese), used to rebuild a cross-reference whose label
+    the translation replaced.
+    """
     candidates: list[str] = []
     raw = src_text.strip()
     clean_src = raw.strip("(),;[]'\" \t\r\n")
@@ -90,6 +119,24 @@ def _extract_candidates_from_annot(
             if year:
                 candidates.append(year)
 
+    # Cross-reference target ("figure.caption.3", "table.caption.5",
+    # "subsection.3.1"). The destination tells us the *kind*; the displayed
+    # number lives in the source fragment ("Figure 1", "Table 4", "Sec. 3.1").
+    # Rebuild the localized form ("图 1", "表 4") the translated page carries.
+    if dest:
+        low_dest = dest.lower()
+        number_m = _NUMBER_RE.search(raw)
+        if number_m:
+            number = number_m.group(0)
+            if "figure" in low_dest and figure_prefix:
+                candidates.append(f"{figure_prefix} {number}")
+                candidates.append(f"{figure_prefix}{number}")
+            elif "table" in low_dest and table_prefix:
+                candidates.append(f"{table_prefix} {number}")
+                candidates.append(f"{table_prefix}{number}")
+            elif "section" in low_dest:
+                candidates.append(number)
+
     if uri:
         # For URLs, search for the full URI or domain/path fragment
         candidates.append(uri)
@@ -97,14 +144,11 @@ def _extract_candidates_from_annot(
         if domain_m:
             candidates.append(domain_m.group(1))
 
-    # Clean text from source box (e.g. 'Shi et al.', '2026', 'Table 1')
-    if (
-        clean_src
-        and len(clean_src) >= 2
-        and clean_src not in candidates
-        or clean_src.isdigit()
-        and clean_src not in candidates
-    ):
+    # Clean text from source box (e.g. 'Shi et al.', '2026', 'Table 1'). A lone
+    # digit ("[1," -> "1") is a valid last resort: the target keeps the number
+    # even when its punctuation was rewritten, and the vertical distance guard
+    # below keeps the match near the source line.
+    if clean_src not in candidates and (len(clean_src) >= 2 or clean_src.isdigit()):
         candidates.append(clean_src)
 
     return candidates
@@ -118,13 +162,16 @@ def relocate_page_annotations(
     overlay_path: str,
     strip_rects: Sequence[Rect],
     overlay_page_no: int = 0,
+    figure_prefix: str = "",
+    table_prefix: str = "",
 ) -> int:
     """Relocate PDF `/Subtype /Link` annotations on `page` to match overlay text.
 
     ``overlay_path`` is a translated page image; ``overlay_page_no`` (0-based)
     selects which page of it holds the translation for ``page_no``. A per-page
     overlay passes 0 (its only page); a whole composed document passes
-    ``page_no - 1``.
+    ``page_no - 1``. ``figure_prefix``/``table_prefix`` are the target language's
+    caption labels, used to rebuild a translated cross-reference.
 
     Returns the count of modified annotations (relocated + pruned).
     """
@@ -182,7 +229,12 @@ def relocate_page_annotations(
                 src_text = tp_src.get_text_bounded(
                     rx0 - 1.0, ry0 - 1.0, rx1 + 1.0, ry1 + 1.0
                 ).strip()
-                candidates = _extract_candidates_from_annot(annot, src_text)
+                candidates = _extract_candidates_from_annot(
+                    annot,
+                    src_text,
+                    figure_prefix=figure_prefix,
+                    table_prefix=table_prefix,
+                )
 
                 best_box: list[float] | None = None
                 min_dist = float("inf")
@@ -194,6 +246,7 @@ def relocate_page_annotations(
                     # is a real citation number (see _extract_candidates_from_annot).
                     if len(cand) < 2 and not cand.isdigit():
                         continue
+                    is_number = _is_number_token(cand)
                     cand_lower = cand.lower()
                     pos = 0
                     while True:
@@ -201,6 +254,11 @@ def relocate_page_annotations(
                         if hit_idx == -1:
                             break
                         end_idx = hit_idx + len(cand)
+                        # A bare number must be a whole token: "1" must not match
+                        # the "1" inside "10" or "3.1".
+                        if is_number and not _standalone_number(overlay_text, hit_idx, end_idx):
+                            pos = end_idx
+                            continue
                         boxes = [tp_overlay.get_charbox(c) for c in range(hit_idx, end_idx)]
                         if boxes:
                             bx0 = min(b[0] for b in boxes)
