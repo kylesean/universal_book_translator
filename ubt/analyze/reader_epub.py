@@ -17,6 +17,7 @@ import functools
 import posixpath
 import zipfile
 from pathlib import Path
+from urllib.parse import unquote
 
 from bs4 import BeautifulSoup
 from lxml import etree
@@ -52,7 +53,10 @@ def _spine(zf: zipfile.ZipFile, opf_path: str) -> list[str]:
     for itemref in root.findall(f".//{{{_OPF_NS}}}spine/{{{_OPF_NS}}}itemref"):
         href = manifest.get(itemref.get("idref") or "")
         if href:
-            spine.append(posixpath.normpath(posixpath.join(base, href)))
+            # OPF hrefs are percent-encoded (common with %20 or non-ASCII
+            # member names); joining the raw value makes the archive lookup
+            # KeyError and the chapter silently vanish from the document.
+            spine.append(posixpath.normpath(posixpath.join(base, unquote(href))))
     return spine
 
 
