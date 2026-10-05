@@ -668,6 +668,16 @@ class FastPassFilter:
         self.omission_gate = OmissionGate(target_lang=self.profile.code)
         self.added_content_gate = AddedContentGate()
 
+    def set_glossary(self, glossary: Any) -> None:
+        """Bind the run's glossary into the omission gate (see :meth:`OmissionGate.set_glossary`).
+
+        Called by the draft stage once the translation Bible exists; every
+        later FastPass verdict in the run (repair re-checks, triage) then
+        accepts a term's canonical glossary rendering instead of demanding the
+        source surface verbatim.
+        """
+        self.omission_gate.set_glossary(glossary)
+
     @property
     def policy(self) -> LanguageProfile | LanguagePairPolicy:
         """Active language profile or dynamic language pair policy."""

@@ -161,12 +161,62 @@ def test_match_camel_decomposition_parts() -> None:
     assert _match_term_surfaces("whereQ0", "where Q0", "whereQ0 text") == ["Q0"]
 
 
+def test_a_hyphenated_qualifier_verifies_via_its_acronym_head() -> None:
+    # Camel-splitting the whole term shears the acronym ("Qo" + "S-aware"), so
+    # a target that kept "QoS" verbatim failed the gate and a correct
+    # translation was quarantined. Hyphen components are taken whole.
+    assert _match_term_surfaces("QoS-aware", "QoS感知的CPU调度", "QoS-aware CPU") == ["QoS"]
+    assert _match_term_surfaces("eBPF-based", "基于eBPF的隔离", "eBPF-based isolation") == ["eBPF"]
+
+
+def test_a_hyphenated_term_still_demands_its_digit_component() -> None:
+    # "GQA-8" must not pass on a bare "GQA": the version digit is content.
+    assert _match_term_surfaces("GQA-8", "GQA配置", "GQA-8 config") is None
+    assert _match_term_surfaces("GQA-8", "GQA-8 配置", "GQA-8 config") == ["GQA-8"]
+
+
 def test_a_fully_dropped_camel_term_fails() -> None:
     assert _match_term_surfaces("DataLoader", "nothing here", "DataLoader text") is None
 
 
 def test_an_unmatched_term_is_none() -> None:
     assert _match_term_surfaces("FinFET", "无") is None
+
+
+# --------------------------------------------------------------------------- #
+# glossary-aware identifier recall
+# --------------------------------------------------------------------------- #
+
+_FN_CALL_GLOSSARY = [
+    {"source": "FnCall", "translation": "函数调用接口", "aliases": []},
+    {"source": "software development kit", "translation": "软件开发工具包", "aliases": ["SDK"]},
+]
+
+
+def test_a_glossary_rendering_counts_as_keeping_the_term() -> None:
+    # The Bible demands 函数调用接口; the verbatim recall demanded FnCall.
+    # A block can satisfy one or the other, never both — the glossary wins.
+    src = "It exposes FnCall and an SDK for tools."
+    tgt = "它提供函数调用接口与软件开发工具包（SDK）。"
+    gate = OmissionGate(target_lang="zh", glossary=_FN_CALL_GLOSSARY)
+    assert gate.evaluate(src, tgt).passed
+    # Without the glossary bound, FnCall reads as a dropped identifier.
+    assert not OmissionGate(target_lang="zh").evaluate(src, tgt).passed
+
+
+def test_set_glossary_binds_after_construction() -> None:
+    gate = OmissionGate(target_lang="zh")
+    gate.set_glossary(_FN_CALL_GLOSSARY)
+    assert gate.evaluate(
+        "It exposes FnCall and an SDK.", "它提供函数调用接口与软件开发工具包。"
+    ).passed
+
+
+def test_a_glossary_term_absent_from_the_target_is_still_missing() -> None:
+    src = "It exposes FnCall and an SDK for tools."
+    tgt = "它提供接口与工具包。"
+    gate = OmissionGate(target_lang="zh", glossary=_FN_CALL_GLOSSARY)
+    assert not gate.evaluate(src, tgt).passed
 
 
 # --------------------------------------------------------------------------- #

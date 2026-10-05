@@ -1321,6 +1321,11 @@ async def _build_draft_runtime(
 
     tm_fuzzy_threshold = max(0.0, min(1.0, float(config.tm_fuzzy_threshold)))
     active_fast_pass = fast_pass or FastPassFilter(source_lang=source_lang, target_lang=target_lang)
+    # The Bible exists now; teach the omission gate that a term the glossary
+    # renders in the target language is kept, not omitted. Without this the two
+    # gates contradict each other on entries like FnCall -> 函数调用接口 and the
+    # correct translation is quarantined as an omission.
+    active_fast_pass.set_glossary(glossary_dicts)
     batch_active = bool(config.batch_enabled) and (router.supports_batch_api)
     batch_min_blocks = max(2, int(config.batch_min_blocks))
     batch_poll_interval = max(0.5, float(config.batch_poll_interval))

@@ -36,7 +36,9 @@ sentence merging (3-of-4) still passes.
 
 import re
 from collections import Counter
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import Any
 
 from ubt.core.qe.term_shape import count_sentences as count_sentences
 from ubt.core.qe.term_shape import is_identifier_shaped
@@ -215,9 +217,18 @@ def _match_term_surfaces(term: str, target: str, source: str = "") -> list[str] 
     for cand in _merge_candidates(term, source):
         if re.search(rf"{_STRICT_LB}{re.escape(cand)}{_STRICT_RB}", target):
             return [cand]
-    parts = [p for p in _CAMEL_SPLIT_RE.split(term) if len(p) >= 2]
+    # A hyphenated qualifier ("QoS-aware", "eBPF-based") is an acronym head
+    # plus a prose tail: the head is the part a translation must carry. Camel
+    # splitting the whole term shears the acronym instead ("Qo" + "S-aware"),
+    # so a target that kept "QoS" verbatim failed the gate and a correct
+    # translation was quarantined. Hyphen components are therefore taken whole
+    # (no camel split: "eBPF" must not shear into "e" + "BPF").
+    if "-" in term:
+        parts = [p for p in term.split("-") if len(p) >= 2 or p.isdigit()]
+    else:
+        parts = [p for p in _CAMEL_SPLIT_RE.split(term) if len(p) >= 2]
     if len(parts) > 1:
-        needed = [p for p in parts if _is_identifier_shaped(p)]
+        needed = [p for p in parts if _is_identifier_shaped(p) or p.isdigit()]
         if needed:
             hits: list[str] = []
             for p in needed:
@@ -289,6 +300,7 @@ class OmissionGate:
         min_chrf_recall: float = 0.7,
         min_chrf_ngrams: int = 8,
         ngram_sizes: tuple[int, ...] = (2, 3, 4),
+        glossary: Sequence[Mapping[str, Any]] | None = None,
     ) -> None:
         self.target_lang = target_lang
         self.min_sentence_ratio = min_sentence_ratio
@@ -298,6 +310,50 @@ class OmissionGate:
         self.min_chrf_recall = min_chrf_recall
         self.min_chrf_ngrams = min_chrf_ngrams
         self.ngram_sizes = ngram_sizes
+        self._glossary_surfaces: list[tuple[str, str]] = []
+        self.set_glossary(glossary)
+
+    def set_glossary(self, glossary: Sequence[Mapping[str, Any]] | None) -> None:
+        """Bind the run's glossary so a term's canonical rendering counts as kept.
+
+        The Bible may assign an identifier-shaped source term a translating
+        rendering ("SDK" -> "软件开发工具包", "FnCall" -> "函数调用接口"). The
+        glossary validator then *demands* that rendering while the verbatim
+        identifier recall here *demands* the source surface — a block cannot
+        satisfy both, and the correct translation was quarantined as an
+        omission. A tracked term whose glossary rendering occurs in the target
+        is therefore verified, not missing.
+        """
+        surfaces: list[tuple[str, str]] = []
+        for entry in glossary or []:
+            rendering = str(entry.get("translation") or entry.get("expected") or "").strip()
+            if not rendering:
+                continue
+            sources = [
+                str(entry.get("source") or "").strip(),
+                *(str(a) for a in entry.get("aliases") or []),
+            ]
+            for surface in sources:
+                if surface:
+                    surfaces.append((surface.casefold(), rendering))
+        self._glossary_surfaces = surfaces
+
+    def _glossary_verifies(self, term: str, target: str) -> str | None:
+        """The glossary rendering present in the target for ``term``, or None.
+
+        Returned surface feeds the residue recall below, which scores what the
+        target actually carries: the rendering, not the source term the
+        translation was told to replace.
+        """
+        folded = term.casefold()
+        for surface, rendering in self._glossary_surfaces:
+            surface_matches = surface == folded or (
+                len(folded) >= 3
+                and re.search(rf"(?<![a-z0-9]){re.escape(folded)}(?![a-z0-9])", surface)
+            )
+            if surface_matches and rendering in target:
+                return rendering
+        return None
 
     def evaluate(
         self,
@@ -327,6 +383,10 @@ class OmissionGate:
         for t in sorted(tracked_terms):
             hit = _match_term_surfaces(t, tgt, src)
             if hit is None:
+                rendering = self._glossary_verifies(t, tgt) if self._glossary_surfaces else None
+                if rendering is not None:
+                    surfaces.append(rendering)
+                    continue
                 missing_terms.append(t)
             else:
                 surfaces.extend(hit)
