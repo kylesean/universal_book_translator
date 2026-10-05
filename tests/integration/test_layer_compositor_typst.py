@@ -165,47 +165,23 @@ def test_the_compositor_stamps_a_real_typst_fragment(tmp_path: Path) -> None:
     assert "TRANSLATED REGION TEXT" in _text(output)
 
 
-def test_boxes_in_a_style_class_share_one_uniform_size() -> None:
-    # Plan A: every body box draws at the smallest size that fits them all, so a
-    # page does not mix a different size per paragraph.
+def test_each_box_draws_at_the_size_that_fits_it() -> None:
+    # A box the target does not overflow keeps its source size; only a cramped one
+    # shrinks. (A document-wide shared size was tried and rejected: it dragged the
+    # boxes that did fit down to the low percentile of the cramped ones, so a page
+    # that failed to reflow read as uniformly shrunken next to its neighbours.)
     typesetter = TypstFragmentTypesetter()
     try:
-        requests = [
-            ("text", "short caption", 120.0, 40.0, 12.0),
-            ("text", "a much longer paragraph that has to wrap many times " * 4, 120.0, 40.0, 12.0),
-            ("text", "a medium paragraph that wraps a couple of lines here", 120.0, 40.0, 12.0),
-            ("text", "another short one", 120.0, 40.0, 12.0),
-        ]
-        typesetter.prefetch(requests)
-        uniform = typesetter._uniform_sizes[("text", 12)]
         cap = 12.0 * 1.05
-        assert uniform is not None
-        assert uniform <= cap
-        sizes = [
-            typesetter._fit_size(text, w, h, max_size_pt=cap, font_size=fs)
-            for _k, text, w, h, fs in requests
-        ]
-        # No box exceeds the shared size; the boxes that fit there all draw at it.
-        assert all(size is not None and size <= uniform for size in sizes), sizes
-        assert sizes.count(uniform) >= 2, sizes
-    finally:
-        typesetter.close()
-
-
-def test_the_source_size_hierarchy_survives_the_uniform_fit() -> None:
-    # The uniform class is (kind, source size), so a 13pt heading and an 11pt one
-    # keep distinct sizes instead of collapsing onto the smallest of the two.
-    typesetter = TypstFragmentTypesetter()
-    try:
-        # Box heights track the source size, as an extracted heading's ink does.
-        requests = [
-            ("heading", "Short heading", 120.0, 10.5, 11.0),
-            ("heading", "Short heading", 120.0, 12.0, 13.0),
-        ]
-        typesetter.prefetch(requests)
-        small = typesetter._uniform_sizes[("heading", 11)]
-        large = typesetter._uniform_sizes[("heading", 13)]
-        assert small < large, (small, large)
+        roomy = typesetter._fit_size("short caption", 120.0, 40.0, max_size_pt=cap)
+        cramped = typesetter._fit_size(
+            "a much longer paragraph that has to wrap many times " * 4,
+            120.0,
+            40.0,
+            max_size_pt=cap,
+        )
+        assert roomy == pytest.approx(cap), roomy
+        assert cramped is not None and cramped < cap
     finally:
         typesetter.close()
 
@@ -218,10 +194,8 @@ def test_the_line_slack_lets_a_box_hold_the_source_size() -> None:
     try:
         text = "一段中文正文，用来测量行框余量"
         ink_height = 9.5  # a single extracted line at ~10.9pt
-        without = typesetter._fit_size(text, 200.0, ink_height, font_size=10.9)
-        with_slack = typesetter._fit_size(
-            text, 200.0, ink_height + _line_slack(10.9), font_size=10.9
-        )
+        without = typesetter._fit_size(text, 200.0, ink_height)
+        with_slack = typesetter._fit_size(text, 200.0, ink_height + _line_slack(10.9))
         assert without is not None and with_slack is not None
         assert with_slack > without, (without, with_slack)
         assert with_slack > 0.9 * 10.9, with_slack

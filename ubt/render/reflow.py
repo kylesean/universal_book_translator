@@ -198,8 +198,9 @@ def reflow_overlays(
         if overlay.element_id in reflowable_ids:
             continue
         obstacle_boxes.extend(overlay.flow_boxes)
-    # One draw size per style class across the whole document, so same-size body
-    # text stays uniform after the reflow (the compositor's uniform rule).
+    # One draw size per style class, so same-size body text stays uniform after
+    # the reflow. It is the source-size cap the compositor's fit path also uses,
+    # so a reflowed paragraph and a lone fitted one land on the same size.
     class_sizes: dict[tuple[str, int], float] = {}
     for overlay in reflowable:
         cls = (overlay.kind, round(overlay.font_size) if overlay.font_size else 0)

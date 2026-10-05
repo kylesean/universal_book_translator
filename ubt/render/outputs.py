@@ -405,14 +405,6 @@ def _with_list_marker(block: IRBlock, text: str) -> str:
     return f"{marker} {text}"
 
 
-#: The shared class size is the Nth percentile of the per-box fits. The literal
-#: minimum is pathological: one degenerate box (a 2pt sliver) would drag the
-#: whole document to 2pt. A low percentile keeps the overwhelmingly common size
-#: while the handful of genuinely over-constrained boxes shrink on their own.
-_UNIFORM_PERCENTILE = 10
-#: ...and it never drops below this fraction of the class's median source size,
-#: so a small document with one over-long box cannot collapse its body size.
-_UNIFORM_MIN_SCALE = 0.7
 #: Font-size floor (pt) for a fragment, and the slack (pt) a fit search allows.
 #: The floor is low so a text block whose extracted box is tiny still typesets
 #: (at a proportionally tiny size) instead of descending to source -- a source
@@ -558,13 +550,6 @@ class TypstFragmentTypesetter:
         self._indent_cache: dict[Any, float] = {}
         #: Measure cache for the reflow fit, keyed by the full 6-tuple item.
         self._fixed_measure_cache: dict[Any, float] = {}
-        #: Per style class -- ``(kind, round(source font size))`` -- the one size
-        #: every box in that class draws at, chosen by ``prefetch`` as the smallest
-        #: that fits them all. Keying by the source size keeps the document's size
-        #: hierarchy (body vs footnote vs heading level) while making same-size
-        #: boxes uniform. Empty until ``prefetch`` runs, so a direct ``typeset``
-        #: call keeps the per-box fit.
-        self._uniform_sizes: dict[tuple[str, int], float] = {}
 
     @property
     def _font_line(self) -> str:
@@ -818,22 +803,19 @@ class TypstFragmentTypesetter:
         kind: str = "text",
         max_size_pt: float | None = None,
         is_bold: bool = False,
-        font_size: float | None = None,
     ) -> float | None:
-        fitted = self._fit_sizes(
+        # Each box draws at the largest size that fits it, capped at its source
+        # size (``max_size_pt``). A box that fits at the source size keeps it; only
+        # a box the target overflows shrinks. A document-wide shared size was
+        # tried and rejected: it dragged every box that *did* fit down to the low
+        # percentile of the cramped ones, so a page whose paragraphs did not
+        # reflow read as uniformly shrunken next to its neighbours.
+        return self._fit_sizes(
             [(text, width_pt, height_pt)],
             kind=kind,
             max_size_pt=max_size_pt,
             is_bold=is_bold,
         )[0]
-        if fitted is None:
-            return None
-        # Uniform document typography: every box in a style class draws at one
-        # size, the smallest that fits them all. ``prefetch`` chose it, so a box
-        # here fits by construction; ``min`` only guards a box it never saw (a
-        # multi-box overlay) from overflowing.
-        uniform = self._uniform_sizes.get((kind, round(font_size) if font_size else 0))
-        return min(fitted, uniform) if uniform is not None else fitted
 
     # -- In-place bilingual: target above a smaller, muted source -------------- #
 
@@ -990,7 +972,6 @@ class TypstFragmentTypesetter:
             kind=kind,
             max_size_pt=max_size,
             is_bold=is_bold,
-            font_size=font_size,
         )
         if size_pt is None:
             return None
@@ -1217,21 +1198,6 @@ class TypstFragmentTypesetter:
                     bodies.append(converted)
         return list(dict.fromkeys(bodies))
 
-    @staticmethod
-    def _uniform_size(sizes: Sequence[float | None]) -> float | None:
-        """The class's one shared size: a low percentile of the per-box fits.
-
-        Floored at :data:`_UNIFORM_MIN_SCALE` of the class's *median* fit, so a
-        small document whose single over-long box fits at 2pt cannot collapse the
-        whole body to 2pt — that one box shrinks on its own instead.
-        """
-        fitted = sorted(size for size in sizes if size is not None)
-        if not fitted:
-            return None
-        index = min(len(fitted) - 1, len(fitted) * _UNIFORM_PERCENTILE // 100)
-        floor = _UNIFORM_MIN_SCALE * fitted[len(fitted) // 2]
-        return max(fitted[index], floor)
-
     def _cap_for(self, kind: str, font_size: float | None) -> float:
         """The starting size cap for one box, mirroring ``typeset``'s ``max_size``."""
         if font_size is None or font_size <= 0:
@@ -1258,17 +1224,13 @@ class TypstFragmentTypesetter:
         the box already equals the fragment's natural height, so it is compiled
         at ``cap_size`` instead of being fitted.
 
-        Uniform document typography: within each style class every box is fitted,
-        then all draw at the *smallest* size that fits them all, so a page (and
-        the whole document) carries one size per class instead of a different size
-        per paragraph. The class is ``(kind, round(source font size))``, so the
-        source's own hierarchy -- body vs footnote vs heading level -- survives.
+        Each box draws at the largest size that fits it, capped at its source
+        size, so a box the target does not overflow keeps the source size and only
+        a cramped one shrinks.
         """
         unique = list(dict.fromkeys(requests))
         if not unique:
             return
-        # A fresh document owns fresh uniform sizes.
-        self._uniform_sizes.clear()
         parsed: list[tuple[str, str, float, float, float | None, float | None, bool, bool]] = []
         for request in unique:
             request_kind, text, width_pt, height_pt, font_size, *rest = request
@@ -1282,30 +1244,19 @@ class TypstFragmentTypesetter:
         # the probe cache instead of spawning a Typst process per formula.
         self._math_probe.check_many(self._math_bodies([text for _kind, text, *_rest in unique]))
         pages: list[tuple[str, str]] = []
-        groups: dict[tuple[str, int], list[tuple[str, float, float, float | None]]] = {}
+        groups: dict[str, list[tuple[str, float, float, float | None]]] = {}
         for request_kind, text, width_pt, height_pt, font_size, _indent, fixed, _bold in parsed:
             if fixed or request_kind not in ("text", "heading"):
                 continue
-            bucket = round(font_size) if font_size else 0
-            groups.setdefault((request_kind, bucket), []).append(
-                (text, width_pt, height_pt, font_size)
-            )
-        for (kind, bucket), items in groups.items():
+            groups.setdefault(request_kind, []).append((text, width_pt, height_pt, font_size))
+        for kind, items in groups.items():
             triples = [(text, width_pt, height_pt) for text, width_pt, height_pt, _ in items]
             caps = [self._cap_for(kind, font_size) for _, _, _, font_size in items]
             sizes = self._fit_sizes(triples, kind=kind, max_size_pt=caps)
-            uniform = self._uniform_size(sizes)
-            if uniform is not None:
-                self._uniform_sizes[(kind, bucket)] = uniform
             for (text, width_pt, height_pt, _font_size), size_pt in zip(items, sizes, strict=True):
                 if size_pt is None:
                     continue
-                # Draw at the class size when it fits, else the box's own fit, so
-                # the prefetched fragment is the one the draw-time lookup wants.
-                draw_size = min(size_pt, uniform) if uniform is not None else size_pt
-                pages.append(
-                    (self._text_source(text, width_pt, height_pt, draw_size, kind=kind), "")
-                )
+                pages.append((self._text_source(text, width_pt, height_pt, size_pt, kind=kind), ""))
 
         # Reflowed boxes: exact size, exact height, no fit search.
         for request_kind, text, width_pt, height_pt, font_size, indent, fixed, is_bold in parsed:
