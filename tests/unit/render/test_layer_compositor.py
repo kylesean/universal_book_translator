@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import pytest
 from pdf_builders import write_text_pdf
@@ -89,9 +89,9 @@ class _FragmentSpy:
         self.calls: list[tuple[str, float, float]] = []
         self.math_calls: list[tuple[str, float, float]] = []
         self.bilingual_calls: list[tuple[str, str, float, float]] = []
-        self.prefetched: list[tuple[str, str, float, float, float | None]] = []
+        self.prefetched: list[tuple[Any, ...]] = []
 
-    def prefetch(self, requests: Sequence[tuple[str, str, float, float, float | None]]) -> None:
+    def prefetch(self, requests: Sequence[tuple[Any, ...]]) -> None:
         self.prefetched.extend(requests)
 
     def typeset(
@@ -103,6 +103,7 @@ class _FragmentSpy:
         kind: str = "text",
         font_size: float | None = None,
         is_bold: bool = False,
+        runs: tuple[Any, ...] = (),
     ) -> Path | None:
         self.calls.append((text, width_pt, height_pt))
         if self._fail:
@@ -167,6 +168,32 @@ def test_a_region_is_masked_and_its_fragment_stamped(tmp_path: Path) -> None:
     assert spy.calls == [
         ("TRANSLATED REGION TEXT", _REGION[2] - _REGION[0], _REGION[3] - _REGION[1] + _SLACK)
     ]
+
+
+def test_a_reflowed_overlay_draws_at_its_box_and_masks_the_source(tmp_path: Path) -> None:
+    # A reflowed overlay draws at its new box with no line slack, but the source
+    # text is erased at the *original* box, so the mask follows ``mask_boxes``.
+    source = write_text_pdf(tmp_path / "source.pdf", [_PAGE])
+    output = tmp_path / "out.pdf"
+    spy = _FragmentSpy(tmp_path)
+    draw = (54.0, 640.0, 354.0, 670.0)
+    overlay = Overlay(
+        "e1",
+        1,
+        draw,
+        "TRANSLATED REFLOW",
+        fixed_box=True,
+        mask_boxes=(PhysicalBox.of(1, _REGION),),
+    )
+
+    LayerCompositor(source, typesetter=spy).compose([overlay], output)
+
+    # No slack: the drawn height is exactly the box height.
+    assert spy.calls == [("TRANSLATED REFLOW", draw[2] - draw[0], draw[3] - draw[1])]
+    text = _text(output)
+    assert "TRANSLATED REFLOW" in text
+    # The source line that sat in the original box was stripped, not left behind.
+    assert _flat(_PAGE[1]) not in text
 
 
 def test_overlapping_overlays_do_not_erase_each_other(tmp_path: Path) -> None:
@@ -286,11 +313,11 @@ def test_the_compositor_prefetches_single_box_fragments(tmp_path: Path) -> None:
 
     LayerCompositor(source, typesetter=spy).compose(overlays, tmp_path / "out.pdf")
 
-    assert [(kind, text) for kind, text, _w, _h, _fs in spy.prefetched] == [
+    assert [(request[0], request[1]) for request in spy.prefetched] == [
         ("text", "first"),
         ("text", "second"),
     ]
-    (_kind, _text, width, height, _fs) = spy.prefetched[0]
+    width, height = spy.prefetched[0][2], spy.prefetched[0][3]
     assert (width, height) == (_REGION[2] - _REGION[0], _REGION[3] - _REGION[1] + _SLACK)
 
 

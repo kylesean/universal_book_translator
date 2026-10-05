@@ -131,7 +131,7 @@ def relocate_page_annotations(
         return 0
 
     relocated_count = 0
-    dead_indices: set[int] = set()
+    kept_count = 0
 
     with PDFIUM_LOCK:
         try:
@@ -210,8 +210,11 @@ def relocate_page_annotations(
                     )
                     relocated_count += 1
                 else:
-                    # Unmatched link in a stripped region: mark for pruning to avoid ghost clicks
-                    dead_indices.add(idx)
+                    # No translated glyph matched the candidate. Keep the link
+                    # where it is: a citation whose click zone sits a few points
+                    # off is still a working reference, whereas pruning it makes
+                    # the citation dead. Ghost clicks are the lesser failure.
+                    kept_count += 1
         except Exception as exc:
             logger.debug("Error during annot relocation on page %d: %s", page_no, exc)
         finally:
@@ -226,23 +229,17 @@ def relocate_page_annotations(
             src_doc.close()
             overlay_doc.close()
 
-    # Prune ghost links so users don't encounter dead/phantom click zones
-    pruned_count = len(dead_indices)
-    if dead_indices:
-        filtered_annots = pikepdf.Array([a for i, a in enumerate(annots) if i not in dead_indices])
-        page["/Annots"] = filtered_annots
-
     if relocated_count > 0:
         logger.info(
             "Relocated %d PDF link annotation(s) on page %d to matching translated glyphs",
             relocated_count,
             page_no,
         )
-    if pruned_count > 0:
+    if kept_count > 0:
         logger.info(
-            "Pruned %d dead/phantom link annotation(s) on page %d",
-            pruned_count,
+            "Kept %d link annotation(s) at their source rect on page %d (no translated match)",
+            kept_count,
             page_no,
         )
 
-    return relocated_count + pruned_count
+    return relocated_count + kept_count

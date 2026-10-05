@@ -1,16 +1,19 @@
-"""Read-only citation masking for bracketed numeric references.
+"""Read-only citation masking for inline reference markers.
 
 Academic text carries inline citation markers ([12], [12-14], [3, 7, 21],
-``cf. [5]``) that LLM translation routinely corrupts: numbers get re-numbered,
-ranges are translated as prose ("12 到 14"), or markers are dropped entirely.
-Since citations must survive translation verbatim, they are masked behind
-deterministic tokens before drafting and unmasked afterwards — the same
-placeholder-protection contract as :class:`~ubt.core.cleaners.code_masker.CodeMasker`.
+``cf. [5]``) and author-year references ((Guo et al., 2025; Jimenez et al.,
+2024), (DeepSeek-AI, 2026)) that LLM translation routinely corrupts: numbers get
+re-numbered, ranges are translated as prose ("12 到 14"), "et al." is localized
+into the middle of a reference, or markers are dropped entirely. Citations are
+identifiers — they must stay retrievable and match the reference list — so they
+are masked behind deterministic tokens before drafting and unmasked afterwards,
+the same placeholder-protection contract as
+:class:`~ubt.core.cleaners.code_masker.CodeMasker`.
 
-Spoken-form citations like "(Smith et al., 2021)" are intentionally NOT masked
-in this iteration: they are free text whose translation is expected to adapt
-("et al." conventions differ per language). Bracketed numeric markers are the
-hard invariant.
+Both forms are protected: bracketed numeric markers and parenthesised
+author-year references. Only a *reference-shaped* parenthetical is masked (an
+author token immediately followed by ``(et al.)? , YYYY``), so an ordinary aside
+like ``(DSH)``, ``(RL)`` or ``(see note)`` stays prose and is still translated.
 """
 
 import re
@@ -31,10 +34,21 @@ _CITATION_PATTERN = re.compile(
     r"\[\s*\d+(?:\s*[-–]\s*\d+)?(?:\s*,\s*\d+(?:\s*[-–]\s*\d+)?)*\s*\]"
     r"(?!\()"
 )
+# Parenthesised author-year reference: (Guo et al., 2025), (DeepSeek-AI, 2026),
+# and the semicolon-joined multi form (Xie et al., 2024; Zhou et al., 2024). An
+# author token is a capitalised word (optionally ``et al.``) immediately followed
+# by ``, YYYY``; the immediate-comma requirement is what keeps ``(Section 2,
+# 2024)`` and ``(DSH)`` out.
+_PAREN_CITATION_PATTERN = re.compile(
+    r"\("
+    r"[A-Z][\w.'’\-]*(?:\s+et\s+al\.?)?\s*,\s*(?:19|20)\d{2}[a-z]?"
+    r"(?:\s*;\s*[A-Z][\w.'’\-]*(?:\s+et\s+al\.?)?\s*,\s*(?:19|20)\d{2}[a-z]?)*"
+    r"\s*\)"
+)
 
 
 class CitationMasker:
-    """Masks bracketed numeric citations before translation and unmasks afterwards."""
+    """Masks inline citations before translation and unmasks afterwards."""
 
     def __init__(self, mask_prefix: str = _MASK_PREFIX) -> None:
         self.mask_prefix = mask_prefix
@@ -58,6 +72,7 @@ class CitationMasker:
             return token
 
         masked = _CITATION_PATTERN.sub(_replace, text)
+        masked = _PAREN_CITATION_PATTERN.sub(_replace, masked)
         return masked, _order_by_position(masked, mapping)
 
     def unmask(self, text: str, mapping: dict[str, str]) -> str:

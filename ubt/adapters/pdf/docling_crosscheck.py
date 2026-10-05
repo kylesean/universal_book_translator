@@ -23,7 +23,13 @@ import logging
 from collections.abc import Sequence
 from pathlib import Path
 
-from ubt.adapters.pdf.textgeom import LineBox, extract_lines
+from ubt.adapters.pdf.textgeom import (
+    CharStyle,
+    LineBox,
+    extract_char_styles,
+    extract_lines,
+    styled_runs_in_box,
+)
 from ubt.core.ir.models import BlockType, IRBlock
 from ubt.model.ast import Confidence
 from ubt.model.span import CompositeSpan, PhysicalBox
@@ -79,6 +85,7 @@ def cross_check_blocks_with_pdfium(
     path = Path(pdf_path)
     output: list[IRBlock] = []
     lines_by_page: dict[int, list[LineBox]] = {}
+    chars_by_page: dict[int, list[CharStyle]] = {}
 
     for block in blocks:
         if block.block_type not in _VERIFIABLE_TYPES or block.skip_translate:
@@ -168,11 +175,13 @@ def cross_check_blocks_with_pdfium(
         if all_inter_lines:
             try:
                 from ubt.adapters.pdf.textgeom import _aggregate_line_styles
-                from ubt.core.ir.models import StyleMeta
+                from ubt.core.ir.models import InlineRun, StyleMeta
 
                 fsz, is_bold, is_italic = _aggregate_line_styles(all_inter_lines)
                 if fsz >= 4.5:
-                    block.style = StyleMeta(font_size=fsz)
+                    # Preserve any style already found (e.g. the first-line indent
+                    # the parser recorded): a bare StyleMeta would drop it.
+                    block.style = (block.style or StyleMeta()).model_copy(update={"font_size": fsz})
                     block.provenance["font_size"] = fsz
                 if is_bold:
                     block.provenance["is_bold"] = True
@@ -180,6 +189,25 @@ def cross_check_blocks_with_pdfium(
                     block.provenance["is_italic"] = True
             except Exception as exc:
                 logger.debug("Failed to extract line styles for block %s: %s", block.id, exc)
+
+        # Inline runs: a colour change (a blue citation) or a raised marker (a
+        # footnote dagger) lives on individual characters, which the line-level
+        # aggregate above cannot see. Probe them so the render can re-apply the
+        # style where the span survives translation verbatim.
+        probe_page = bbox.page
+        if probe_page not in chars_by_page:
+            try:
+                chars_by_page[probe_page] = extract_char_styles(path, probe_page)
+            except Exception as exc:
+                logger.debug("PDFium char probe failed for page %d: %s", probe_page, exc)
+                chars_by_page[probe_page] = []
+        runs = styled_runs_in_box(chars_by_page[probe_page], (bbox.x0, bbox.y0, bbox.x1, bbox.y1))
+        if runs:
+            inline = tuple(
+                InlineRun(text=text, bold=bold, italic=italic, superscript=super_, color_hex=color)
+                for text, bold, italic, super_, color in runs
+            )
+            block.style = (block.style or StyleMeta()).model_copy(update={"inline_runs": inline})
 
         output.append(block)
 

@@ -1,14 +1,15 @@
 """``ubt.segment`` -- the placeholder engine: protect spans, then restore them.
 
-The four maskers share one owner. The four *detectors* are
+The maskers share one owner. The *detectors* are
 unchanged (they know LaTeX vs fenced code vs citations), but the order they run
 in, the reverse order they restore in, and the integrity reporting are stated
 once, here, instead of being restated -- and kept in sync by hand -- at the
 draft call site.
 
-The order is load-bearing: **code -> math -> soup -> citation**. Earlier
+The order is load-bearing: **email -> code -> math -> soup -> citation**. Earlier
 families must already be opaque to later ones, so a citation-like bracket inside
-a math span is caught as math, not stolen by the citation pass. Restore runs the
+a math span is caught as math, not stolen by the citation pass, and an address
+inside a URL is caught by the URL pass, not the bare-email pass. Restore runs the
 exact reverse, threading the text so every namespace is verified with the same
 checksummed contract.
 """
@@ -19,12 +20,13 @@ from dataclasses import dataclass
 
 from ubt.core.cleaners.citation_masker import CitationMasker
 from ubt.core.cleaners.code_masker import CodeMasker
+from ubt.core.cleaners.email_masker import EmailMasker
 from ubt.core.cleaners.mask_tokens import UnmaskReport
 from ubt.core.cleaners.math_masker import MathMasker
 from ubt.core.cleaners.soup_math import SoupMathMasker
 from ubt.model.segment import Placeholder
 
-_KINDS = ("code", "math", "soup", "citation")
+_KINDS = ("email", "code", "math", "soup", "citation")
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +34,7 @@ class MaskedSource:
     """A source string with its protected spans replaced, plus the per-family maps."""
 
     text: str
+    email_map: dict[str, str]
     code_map: dict[str, str]
     math_map: dict[str, str]
     soup_map: dict[str, str]
@@ -47,6 +50,7 @@ class MaskedSource:
         translator or an XLIFF reader sees.
         """
         maps = {
+            "email": self.email_map,
             "code": self.code_map,
             "math": self.math_map,
             "soup": self.soup_map,
@@ -65,6 +69,7 @@ class RestoreOutcome:
     """The restored text plus one integrity report per family."""
 
     text: str
+    email: UnmaskReport
     code: UnmaskReport
     math: UnmaskReport
     soup: UnmaskReport
@@ -74,6 +79,7 @@ class RestoreOutcome:
     def reports(self) -> tuple[tuple[str, UnmaskReport], ...]:
         """(flag-label, report) in the order the draft stage records them."""
         return (
+            ("email_token_corrupt", self.email),
             ("soup_token_corrupt", self.soup),
             ("math_token_corrupt", self.math),
             ("cite_token_corrupt", self.citation),
@@ -91,18 +97,24 @@ class PlaceholderEngine:
     def __init__(
         self,
         *,
+        email: EmailMasker,
         code: CodeMasker,
         math: MathMasker,
         soup: SoupMathMasker,
         citation: CitationMasker,
     ) -> None:
+        self._email = email
         self._code = code
         self._math = math
         self._soup = soup
         self._citation = citation
 
     def mask(self, text: str) -> MaskedSource:
-        masked, code_map = self._code.mask(text)
+        # Gate 1: addresses and URLs are the most literal spans; masking them
+        # first keeps a URL's ``user@host`` from being split by the email pass
+        # and a query string's brackets from being read as a citation.
+        masked, email_map = self._email.mask(text)
+        masked, code_map = self._code.mask(masked)
         # Gate 2: inline math is masked before citations so mathematical
         # intervals ($x \in [0, 1]$) and matrix brackets are protected as math
         # atoms and never intercepted by the citation pass.
@@ -113,6 +125,7 @@ class PlaceholderEngine:
         masked, cite_map = self._citation.mask(masked)
         return MaskedSource(
             text=masked,
+            email_map=email_map,
             code_map=code_map,
             math_map=math_map,
             soup_map=soup_map,
@@ -124,17 +137,21 @@ class PlaceholderEngine:
         soup = self._soup.unmask_checked(citation.text, masked.soup_map or {})
         math = self._math.unmask_checked(soup.text, masked.math_map)
         code = self._code.unmask_checked(math.text, masked.code_map)
-        return RestoreOutcome(text=code.text, code=code, math=math, soup=soup, citation=citation)
+        email = self._email.unmask_checked(code.text, masked.email_map)
+        return RestoreOutcome(
+            text=email.text, email=email, code=code, math=math, soup=soup, citation=citation
+        )
 
 
 def default_placeholder_engine() -> PlaceholderEngine:
-    """The standard engine: the four detectors, wired in the one owned order.
+    """The standard engine: the detectors, wired in the one owned order.
 
     Callers that want the pipeline's placeholder behaviour construct this rather
     than restating the order (draft, export's XLIFF companion, the quality
     report), so the order has a single owner.
     """
     return PlaceholderEngine(
+        email=EmailMasker(),
         code=CodeMasker(),
         math=MathMasker(),
         soup=SoupMathMasker(),

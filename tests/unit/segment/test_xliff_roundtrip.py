@@ -18,6 +18,7 @@ import pytest
 
 from ubt.core.cleaners.citation_masker import CitationMasker
 from ubt.core.cleaners.code_masker import CodeMasker
+from ubt.core.cleaners.email_masker import EmailMasker
 from ubt.core.cleaners.math_masker import MathMasker
 from ubt.core.cleaners.soup_math import SoupMathMasker
 from ubt.core.ir.models import BlockStatus
@@ -42,6 +43,7 @@ _TEXTS = (
 
 def _engine() -> PlaceholderEngine:
     return PlaceholderEngine(
+        email=EmailMasker(),
         code=CodeMasker(),
         math=MathMasker(),
         soup=SoupMathMasker(),

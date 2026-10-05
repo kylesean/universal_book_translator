@@ -105,6 +105,28 @@ class BoundingBox(BaseModel):
     y1: float
 
 
+class InlineRun(BaseModel):
+    """A styled span of a block's source text, found by the pdfium char probe.
+
+    ``text`` is the span's literal characters (not offsets): the renderer maps it
+    onto the translated text by locating the same substring, which only succeeds
+    for spans that survive translation verbatim (masked citations and emails,
+    footnote symbols). A translated span simply finds no match and is drawn plain.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    text: str
+    bold: bool = False
+    italic: bool = False
+    #: Raised marker (e.g. the footnote daggers ``†``/``‡``): a smaller font size
+    #: than the block's body text.
+    superscript: bool = False
+    #: ``#RRGGBB`` when the source drew the span in a non-black fill (a blue
+    #: citation link); ``None`` for default black.
+    color_hex: str | None = None
+
+
 class StyleMeta(BaseModel):
     """Typography and layout metadata (the adapter's finding, not structure)."""
 
@@ -115,6 +137,13 @@ class StyleMeta(BaseModel):
     color_hex: str | None = None
     alignment: str | None = None
     line_height: float | None = None
+    #: First-line indent (pt) of a body paragraph, measured from the source's
+    #: own line boxes. Rendered as a leading ``#h`` on the first line; ``None``
+    #: for headings, list items, and paragraphs the source did not indent.
+    first_line_indent_pt: float | None = None
+    #: Styled spans of the source text (colour, superscript, weight), applied to
+    #: the target where the span survives verbatim. Empty for an unstyled block.
+    inline_runs: tuple[InlineRun, ...] = ()
 
 
 # --------------------------------------------------------------------------- #

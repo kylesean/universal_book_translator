@@ -53,6 +53,7 @@ _PROTECTED_SPAN_PATTERNS = (
     re.compile(r"~~~[\s\S]*?~~~"),  # Tilde fenced code blocks ~~~...~~~
     re.compile(r"`[^`\n]+`"),  # Inline code `...`
     re.compile(r"https?://[^\s<>'\"\)\]]+"),  # Standalone URLs
+    re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}"),  # Email addresses
     re.compile(r"\$\$[\s\S]*?\$\$"),  # Display math $$...$$
     re.compile(r"\\\[[\s\S]*?\\\]"),  # LaTeX display \[...\]
     re.compile(r"\\\([\s\S]*?\\\)"),  # LaTeX inline \(...\)

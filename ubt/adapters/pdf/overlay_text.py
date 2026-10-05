@@ -628,31 +628,98 @@ def _emit_typst_superscripts(escaped_text: str) -> str:
     return res
 
 
+def _wrap_style(
+    segment: str, bold: bool, italic: bool, superscript: bool, color_hex: str | None
+) -> str:
+    """Wrap an escaped segment in the Typst markup its source style calls for.
+
+    Applied after escaping, so the injected markup is never escaped. Superscript
+    reuses the same ``#super`` shape :func:`_emit_typst_superscripts` emits, so a
+    geometrically-raised dagger and a Unicode superscript render alike.
+    """
+    if superscript:
+        segment = f"#super(typographic: false, size: 0.62em)[{segment}]"
+    if italic:
+        segment = f"#emph[{segment}]"
+    if bold:
+        segment = f"#strong[{segment}]"
+    if color_hex:
+        segment = f'#text(fill: rgb("{color_hex}"))[{segment}]'
+    return segment
+
+
 def render_overlay_line(
     line: str,
     math_probe: Callable[[str], bool] | None = None,
     target_lang: str = "zh",
+    run_spans: Sequence[tuple[int, int, bool, bool, bool, str | None]] = (),
 ) -> str:
-    """Render one fitter-flowed line to Typst source."""
+    """Render one fitter-flowed line to Typst source.
+
+    ``run_spans`` are character ranges of ``line`` to wrap in style markup
+    (colour / superscript / weight); a range overlapping a math span is dropped in
+    favour of the math rendering. They are applied after escaping, so the markup
+    survives.
+    """
     if math_probe is not None:
         line = _wrap_prose_styled_unicode(line)
-    parts = split_math_spans(line)
+    math_spans: list[tuple[int, int]] = []
+    offset = 0
+    for is_math, content in split_math_spans(line):
+        if is_math:
+            math_spans.append((offset, offset + len(content)))
+        offset += len(content)
+    boundaries: set[int] = {0, len(line)}
+    for start, end in math_spans:
+        boundaries.update((start, end))
+    for span in run_spans:
+        boundaries.update((span[0], span[1]))
+    ordered = sorted(bound for bound in boundaries if 0 <= bound <= len(line))
     out: list[str] = []
-    for is_math, content in parts:
-        if not is_math:
-            if content.count("$") % 2 and _MATHY_RE.search(content):
-                content = content.replace("$", "")
-            escaped = typst_escape(strip_cjk_latin_spaces(content, target_lang=target_lang))
-            out.append(_emit_typst_superscripts(escaped))
+    for start, end in zip(ordered, ordered[1:], strict=False):
+        if end <= start:
             continue
-        typst = typstify_math_span(content)
-        if typst is not None and math_probe is not None and math_probe(typst):
-            out.append(f"${typst}$")
+        content = line[start:end]
+        if any(s <= start and end <= e for s, e in math_spans):
+            typst = typstify_math_span(content)
+            if typst is not None and math_probe is not None and math_probe(typst):
+                out.append(f"${typst}$")
+            else:
+                fallback = content.replace("$", "")
+                escaped = typst_escape(strip_cjk_latin_spaces(fallback, target_lang=target_lang))
+                out.append(_emit_typst_superscripts(escaped))
+            continue
+        if content.count("$") % 2 and _MATHY_RE.search(content):
+            content = content.replace("$", "")
+        escaped = typst_escape(strip_cjk_latin_spaces(content, target_lang=target_lang))
+        rendered = _emit_typst_superscripts(escaped)
+        style = next((s for s in run_spans if s[0] <= start and end <= s[1]), None)
+        if style is not None:
+            rendered = _wrap_style(rendered, style[2], style[3], style[4], style[5])
+        out.append(rendered)
+    return _break_run_call_chains(out)
+
+
+def _break_run_call_chains(segments: Sequence[str]) -> str:
+    """Join segments without letting a styled run absorb a following ``(``.
+
+    A styled run ends in ``]`` (``#strong[...]``). Typst parses a following ``(``
+    as another call on that run's *result* — ``#strong[x](y)`` calls the content
+    ``x`` as a function — so a citation's opening paren right after a bold run
+    (``#strong[Firecracker microVMs ](Agache et al., 2020)``) fails to compile
+    and the whole fragment descends to the source. Emit that one literal ``(`` as
+    an explicit ``#text("(")``, which renders identically and ends the code
+    expression cleanly. A literal ``[`` needs no such guard: ``typst_escape``
+    already backslash-escapes it.
+    """
+    merged: list[str] = []
+    for segment in segments:
+        if merged and merged[-1].endswith("]") and segment[:1] == "(":
+            merged.append('#text("(")')
+            merged.append(segment[1:])
         else:
-            fallback = content.replace("$", "")
-            escaped = typst_escape(strip_cjk_latin_spaces(fallback, target_lang=target_lang))
-            out.append(_emit_typst_superscripts(escaped))
-    return "".join(out)
+            merged.append(segment)
+    return "".join(merged)
 
 
 def prepare_overlay_text(raw: str, target_lang: str = "zh") -> str:

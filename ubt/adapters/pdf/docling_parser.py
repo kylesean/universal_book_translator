@@ -33,7 +33,7 @@ from ubt.adapters.pdf.docling_blocks import (
 )
 from ubt.adapters.pdf.pdfium_gate import PDFIUM_LOCK, unify_docling_pdfium_lock
 from ubt.adapters.pdf.plain_text_extractor import pages_to_blocks
-from ubt.analyze.structure import looks_like_debris, looks_like_listing
+from ubt.analyze.structure import looks_like_debris, looks_like_listing, pdf_list_marker
 from ubt.core.cleaners.lnds_pruner import normalize_academic_pdf_math
 from ubt.core.config import INPLACE_ENGINES, canonical_render_engine
 from ubt.core.exceptions import DocumentParseError
@@ -45,6 +45,7 @@ from ubt.core.ir.models import (
     ChapterMeta,
     FlowID,
     IRBlock,
+    StyleMeta,
     make_element,
 )
 from ubt.core.ir.serializer import compute_file_sha256_cached
@@ -418,6 +419,150 @@ def _ensure_docling_pdfium_lock() -> None:
     )
 
 
+#: An ordered-marker run must be at least this long to be re-typed as a list:
+#: a lone ``(2024) ...`` citation opens like a marker but is not a list item.
+_ORDERED_MARKER_MIN_RUN = 2
+#: Ordered-marker shapes (numbered ``(1)`` / ``1.`` / ``1)``, lettered ``a.`` /
+#: ``(a)``, CJK ``一、``). Bullets are deliberately excluded: Docling already
+#: types real bullet lists, so a bullet match here is more likely a symbol.
+_ORDERED_MARKER_RE = re.compile(
+    r"^(?:"
+    r"[（(]?[0-9０-９]{1,3}(?:[.．][0-9０-９]{1,3})*[.．、)）]"
+    r"|[（(]?[a-zA-ZＡ-Ｚａ-ｚ][.．)）]"
+    r"|[一二三四五六七八九十百]+[、.．)）]"
+    r")$"
+)
+#: A first-line indent is this many em beyond the body margin (matches
+#: ``reader_pdf.INDENT_FACTOR``); the two readers must agree on what an indent is.
+_INDENT_FACTOR = 1.0
+#: A single-line block carries no body margin to compare against, so an indent
+#: is only measurable on a block of at least this many source lines.
+_INDENT_MIN_LINES = 2
+
+
+def _ordered_marker(block: IRBlock) -> tuple[str, str] | None:
+    """``(marker, text)`` when a body paragraph opens with an ordered marker.
+
+    Docling's own list typing misses parenthesized enumerations like ``(1)`` that
+    it reads as one paragraph, so the marker survives only if the LLM reproduces
+    it -- which it does inconsistently. Re-typing the run here lets the
+    compositor's marker restorer put the number back deterministically.
+    """
+    if block.skip_translate or block.block_type is not BlockType.NARRATIVE:
+        return None
+    if block.region is not RegionKind.BODY:
+        return None
+    parsed = pdf_list_marker(block.source_text or "")
+    if parsed is None:
+        return None
+    marker, text = parsed
+    if not _ORDERED_MARKER_RE.match(marker):
+        return None
+    return marker, text
+
+
+def _as_list_item(block: IRBlock, marker: str, text: str) -> IRBlock:
+    element = make_element(
+        id=block.id,
+        spine_index=block.spine_index,
+        block_type=BlockType.LIST_ITEM,
+        flow_id=block.flow_id,
+        region=block.region,
+        source_text=text,
+        bbox=block.bbox,
+        span=block.element.span,
+        skip_translate=block.skip_translate,
+        confidence=block.element.confidence,
+        decorative=block.element.decorative,
+        marker=marker,
+    )
+    return block.model_copy(update={"element": element})
+
+
+def restore_ordered_markers(blocks: list[IRBlock]) -> list[IRBlock]:
+    """Re-type runs of marker-led body paragraphs as list items.
+
+    Only a *run* (``_ORDERED_MARKER_MIN_RUN`` or more consecutive marker-led
+    paragraphs) is converted, so a paragraph that merely starts with a bracketed
+    year or a reference stays prose.
+    """
+    out = list(blocks)
+    index = 0
+    while index < len(out):
+        if _ordered_marker(out[index]) is None:
+            index += 1
+            continue
+        run: list[tuple[int, str, str]] = []
+        cursor = index
+        while cursor < len(out):
+            parsed = _ordered_marker(out[cursor])
+            if parsed is None:
+                break
+            run.append((cursor, parsed[0], parsed[1]))
+            cursor += 1
+        if len(run) >= _ORDERED_MARKER_MIN_RUN:
+            for position, marker, text in run:
+                out[position] = _as_list_item(out[position], marker, text)
+        index = cursor
+    return out
+
+
+def _line_in_box(rect: tuple[float, float, float, float], box: BoundingBox) -> bool:
+    center_y = (rect[1] + rect[3]) / 2.0
+    if not (box.y0 - 1.0 <= center_y <= box.y1 + 1.0):
+        return False
+    return min(rect[2], box.x1) - max(rect[0], box.x0) > 1.0
+
+
+def _first_line_indent(box: BoundingBox, lines: list[Any]) -> float | None:
+    """Indent (pt) of the block's first line past its own body margin, or ``None``."""
+    inside = [line for line in lines if line.text.strip() and _line_in_box(line.rect, box)]
+    if len(inside) < _INDENT_MIN_LINES:
+        return None
+    inside.sort(key=lambda line: -line.rect[3])
+    body_x0 = min(float(line.rect[0]) for line in inside[1:])
+    first = inside[0]
+    indent = float(first.rect[0]) - body_x0
+    font = float(first.font_size) if first.font_size and first.font_size > 0 else (box.y1 - box.y0)
+    if indent > _INDENT_FACTOR * max(font, 1.0) and indent < (box.x1 - box.x0) * 0.5:
+        return indent
+    return None
+
+
+def annotate_first_line_indents(blocks: list[IRBlock], pdf_path: Path | None) -> list[IRBlock]:
+    """Record a body paragraph's first-line indent from the page's own line boxes.
+
+    Docling gives one bounding box per paragraph (the margin), so the indent is
+    invisible in its output; the pdfium line rects carry it. A page whose lines
+    cannot be read (a scan with no text layer) simply gets no indent.
+    """
+    if pdf_path is None:
+        return blocks
+    from ubt.adapters.pdf.textgeom import extract_lines
+
+    lines_by_page: dict[int, list[Any]] = {}
+    for block in blocks:
+        if block.skip_translate or block.block_type is not BlockType.NARRATIVE:
+            continue
+        if block.region is not RegionKind.BODY:
+            continue
+        box = block.bbox
+        if box is None or box.page <= 0:
+            continue
+        page = int(box.page)
+        if page not in lines_by_page:
+            try:
+                lines_by_page[page] = list(extract_lines(pdf_path, page)[0])
+            except Exception:
+                lines_by_page[page] = []
+        indent = _first_line_indent(box, lines_by_page[page])
+        if indent is not None:
+            block.style = (block.style or StyleMeta()).model_copy(
+                update={"first_line_indent_pt": indent}
+            )
+    return blocks
+
+
 def type_docling_blocks(blocks: list[IRBlock]) -> list[IRBlock]:
     """The analyzer's own typing stage: raw Docling blocks -> final typed blocks.
 
@@ -434,6 +579,7 @@ def type_docling_blocks(blocks: list[IRBlock]) -> list[IRBlock]:
     """
     blocks = resolve_overlapping_formula_blocks(blocks)
     blocks = merge_table_continuation_fragments(blocks)
+    blocks = restore_ordered_markers(blocks)
     return blocks
 
 
@@ -1031,7 +1177,7 @@ def map_iterated_items(
                 )
             )
 
-    return type_docling_blocks(blocks)
+    return type_docling_blocks(annotate_first_line_indents(blocks, pdf_path))
 
 
 def map_export_dict(data: dict[str, Any]) -> list[IRBlock]:

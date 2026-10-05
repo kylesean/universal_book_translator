@@ -48,6 +48,14 @@ _DRAFT_MINIMAL_ANCHOR = "Output ONLY the translation without any title, prefix, 
 #: source. Nudge it to translate in kind. Appended after the existing
 #: instruction so ``draft_source_from_prompt``'s anchors still parse.
 _SHORT_SOURCE_MAX_CHARS = 60
+#: A source the extractor *labelled* a heading is heading-like whatever its
+#: length -- a paper title routinely runs past the short-source heuristic
+#: (``DeepSeek Elastic Compute (DSec): A Sandbox Infrastructure ...`` is 96
+#: chars) and a small model then expands it into a title-plus-abstract-summary
+#: draft that the QE length gate quarantines. The cap stays to keep a
+#: mislabelled long paragraph from being told to "render equally short".
+_HEADING_MAX_CHARS = 200
+_HEADING_BLOCK_TYPES = frozenset({"heading", "title"})
 _SHORT_SOURCE_HINT = (
     " The source is a short heading or label: render it as an equally short "
     "heading or label, never expanded into a sentence or paragraph, and add no "
@@ -55,12 +63,24 @@ _SHORT_SOURCE_HINT = (
 )
 
 
-def _short_source_hint(source_text: str) -> str:
-    """A "do not expand" clause for a heading-like source, else empty."""
+def _short_source_hint(source_text: str, block_type: str | None = None) -> str:
+    """A "do not expand" clause for a heading-like source, else empty.
+
+    The block's own type is the reliable signal: an explicit ``heading`` fires
+    the clause up to :data:`_HEADING_MAX_CHARS` regardless of punctuation. A
+    caller that passes no type (the cost probe, older call sites) falls back to
+    the short-and-unpunctuated heuristic.
+    """
     stripped = (source_text or "").strip()
-    if not stripped or len(stripped) > _SHORT_SOURCE_MAX_CHARS:
+    if not stripped:
         return ""
-    if stripped.endswith((".", "?", "!", "。", "？", "！", ":", "：", ";", "；")):
+    is_heading = str(block_type or "").strip().lower() in _HEADING_BLOCK_TYPES
+    limit = _HEADING_MAX_CHARS if is_heading else _SHORT_SOURCE_MAX_CHARS
+    if len(stripped) > limit:
+        return ""
+    if not is_heading and stripped.endswith(
+        (".", "?", "!", "。", "？", "！", ":", "：", ";", "；")
+    ):
         return ""
     return _SHORT_SOURCE_HINT
 
@@ -99,6 +119,7 @@ def build_minimal_draft_prompt(
     few_shot_reference: str = "",
     genre_profile: str = "general",
     domain: str | None = None,
+    block_type: str | None = None,
 ) -> tuple[str, str]:
     """Direct, minimalist draft prompt without metaprompts.
 
@@ -129,7 +150,7 @@ def build_minimal_draft_prompt(
     elif genre_profile and genre_profile.lower() not in ("general", "unknown", "auto"):
         domain_hint = f" Use standard {genre_profile} domain terminology."
     parts.append(
-        f"Translate the following {src_name} text into fluent, natural {tgt_name}.{domain_hint}{_short_source_hint(source_text)} Output ONLY the translation without any title, prefix, or commentary:\n\n{_neutralize_reserved_tags(source_text).strip()}"
+        f"Translate the following {src_name} text into fluent, natural {tgt_name}.{domain_hint}{_short_source_hint(source_text, block_type)} Output ONLY the translation without any title, prefix, or commentary:\n\n{_neutralize_reserved_tags(source_text).strip()}"
     )
     return "", "\n\n".join(parts)
 
@@ -146,6 +167,7 @@ def build_hybrid_draft_prompt(
     few_shot_reference: str = "",
     epoch_summary: str = "",
     domain: str | None = None,
+    block_type: str | None = None,
 ) -> tuple[str, str]:
     """Hybrid draft prompt for instruction-tuned models requiring concise instructions.
 
@@ -226,7 +248,7 @@ def build_hybrid_draft_prompt(
         "Translate only the text under this heading. Any read-only reference "
         "context shown above is not part of the task: do not translate it, "
         "summarise it, repeat it, or carry its citations and equation numbers "
-        f"into the output.{_short_source_hint(source_text)}\n\n"
+        f"into the output.{_short_source_hint(source_text, block_type)}\n\n"
         f"Provide the direct {tgt_name} translation below without preface or commentary:"
     )
     return system_prompt, "\n".join(user_parts)
@@ -244,6 +266,7 @@ def build_rich_draft_prompt(
     few_shot_reference: str = "",
     epoch_summary: str = "",
     domain: str | None = None,
+    block_type: str | None = None,
 ) -> tuple[str, str]:
     """Construct full prompt aligned with 2024-2026 Prefix/Prompt Caching topology and XML schema."""
     src_profile = PROFILES.get(source_lang.strip().lower()) if source_lang else None
@@ -339,7 +362,7 @@ def build_rich_draft_prompt(
         "Translate only the text under this heading. Any read-only reference "
         "context shown above is not part of the task: do not translate it, "
         "summarise it, repeat it, or carry its citations and equation numbers "
-        f"into the output.{_short_source_hint(source_text)}\n\n"
+        f"into the output.{_short_source_hint(source_text, block_type)}\n\n"
         "### Translation:"
     )
     return system_prompt, "\n".join(user_parts)

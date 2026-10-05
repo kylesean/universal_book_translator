@@ -596,7 +596,7 @@ def summarize_render_skips(defect_flags: dict[str, int]) -> tuple[int, int, str]
 # back out of order or doubled is just as corrupt as one with a missing span, so
 # both must count.
 _CORRUPT_FLAG_RE = re.compile(
-    r"(?:math|cite|code|soup)_token_corrupt missing=(\[.*?\]) mismatched=(\[.*?\]) mutated=(\[.*?\])"
+    r"(?:email|math|cite|code|soup)_token_corrupt missing=(\[.*?\]) mismatched=(\[.*?\]) mutated=(\[.*?\])"
     r"(?: reordered=(\[.*?\]))?(?: duplicated=(\[.*?\]))?"
 )
 
@@ -639,7 +639,8 @@ def compute_placeholder_metrics(blocks: list[Any]) -> ReportPlaceholderMetrics:
         # Count every masked span type, not just math: code/citation
         # corruption is MQM-Critical, so omitting it left retention at 1.0.
         masked_count = (
-            len(masked.code_map)
+            len(masked.email_map)
+            + len(masked.code_map)
             + len(masked.math_map)
             + len(masked.soup_map)
             + len(masked.cite_map)

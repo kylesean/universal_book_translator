@@ -60,9 +60,11 @@ def test_relocate_page_annotations_no_annots(tmp_path: Path) -> None:
         assert count == 0
 
 
-def test_relocate_page_annotations_prunes_dead_link(tmp_path: Path) -> None:
+def test_relocate_page_annotations_keeps_an_unmatched_link(tmp_path: Path) -> None:
     # A link annotation in a stripped zone that cannot be matched to translated
-    # text is pruned from /Annots, and reported in the modified count.
+    # text is KEPT at its source rect: dropping it would make the citation dead,
+    # and a slightly-off click zone is the lesser failure. It still counts as
+    # modified (touched) so the caller knows a pass ran.
     pdf_path = tmp_path / "test.pdf"
     pdf = pikepdf.new()
     page = pdf.add_blank_page(page_size=(200, 200))
@@ -89,4 +91,6 @@ def test_relocate_page_annotations_prunes_dead_link(tmp_path: Path) -> None:
         )
         assert count == 1
         annots_after = page.get("/Annots")
-        assert annots_after is not None and len(annots_after) == 0
+        assert annots_after is not None and len(annots_after) == 1
+        # The rect is unchanged: no translated glyph matched.
+        assert [float(v) for v in annots_after[0]["/Rect"]] == [10.0, 10.0, 50.0, 50.0]

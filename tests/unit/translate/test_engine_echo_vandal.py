@@ -21,6 +21,7 @@ import pytest
 
 from ubt.core.cleaners.citation_masker import CitationMasker
 from ubt.core.cleaners.code_masker import CodeMasker
+from ubt.core.cleaners.email_masker import EmailMasker
 from ubt.core.cleaners.math_masker import MathMasker
 from ubt.core.cleaners.soup_math import SoupMathMasker
 from ubt.model.ast import Document, ElementT, Paragraph, Region, RegionKind
@@ -55,6 +56,7 @@ def _document() -> Document:
 
 def _engine() -> TranslationEngine:
     placeholders = PlaceholderEngine(
+        email=EmailMasker(),
         code=CodeMasker(),
         math=MathMasker(),
         soup=SoupMathMasker(),

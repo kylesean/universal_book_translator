@@ -25,6 +25,7 @@ from ubt.core.policy.layout_policy import (
     ROW_MERGE_Y_TOL,
     WS_RE,
 )
+from ubt.model.span import BBox
 
 
 @dataclass
@@ -122,6 +123,154 @@ def _probe_rect_font_style(
     is_bold = sum(1 for s in samples if s[1]) >= (len(samples) + 1) // 2
     is_italic = sum(1 for s in samples if s[2]) >= (len(samples) + 1) // 2
     return best_size, is_bold, is_italic
+
+
+@dataclass(frozen=True, slots=True)
+class CharStyle:
+    """One pdfium character: its box, glyph, and ground-truth style.
+
+    The line-level probes (:func:`_probe_rect_font_style`) collapse a line to a
+    single style, losing *within-line* changes -- a blue citation link, a raised
+    footnote dagger. This keeps the per-character facts so a caller can recover
+    those runs.
+    """
+
+    rect: tuple[float, float, float, float]
+    text: str
+    font_size: float
+    bold: bool
+    color_hex: str | None
+
+
+def _hex_if_colored(red: int, green: int, blue: int) -> str | None:
+    """``#RRGGBB`` for a non-black fill, ``None`` for default black."""
+    if (red, green, blue) == (0, 0, 0):
+        return None
+    return f"#{red:02x}{green:02x}{blue:02x}"
+
+
+@pdfium_serialized
+def extract_char_styles(pdf_path: Path, page_no: int) -> list[CharStyle]:
+    """Per-character box/text/style for one page, straight from pdfium.
+
+    Characters arrive in content-stream order, which for a single block is
+    reading order. A character with no box (a synthetic space) is skipped.
+    """
+    import ctypes
+
+    import pypdfium2 as pdfium
+    import pypdfium2.raw as pdfium_c
+
+    pdf = pdfium.PdfDocument(str(pdf_path))
+    try:
+        if not 1 <= page_no <= len(pdf):
+            raise DocumentParseError(f"page {page_no} out of range in {pdf_path.name}")
+        page = pdf[page_no - 1]
+        try:
+            textpage = page.get_textpage()
+            try:
+                out: list[CharStyle] = []
+                for index in range(textpage.count_chars()):
+                    code = pdfium_c.FPDFText_GetUnicode(textpage, index)
+                    if code == 0 or code > 0x10FFFF:
+                        continue
+                    left = ctypes.c_double()
+                    right = ctypes.c_double()
+                    bottom = ctypes.c_double()
+                    top = ctypes.c_double()
+                    # pdfium's argument order is (left, right, bottom, top).
+                    if not pdfium_c.FPDFText_GetCharBox(
+                        textpage,
+                        index,
+                        ctypes.byref(left),
+                        ctypes.byref(right),
+                        ctypes.byref(bottom),
+                        ctypes.byref(top),
+                    ):
+                        continue
+                    size = float(pdfium_c.FPDFText_GetFontSize(textpage, index))
+                    weight = int(pdfium_c.FPDFText_GetFontWeight(textpage, index))
+                    red = ctypes.c_uint()
+                    green = ctypes.c_uint()
+                    blue = ctypes.c_uint()
+                    alpha = ctypes.c_uint()
+                    pdfium_c.FPDFText_GetFillColor(
+                        textpage,
+                        index,
+                        ctypes.byref(red),
+                        ctypes.byref(green),
+                        ctypes.byref(blue),
+                        ctypes.byref(alpha),
+                    )
+                    out.append(
+                        CharStyle(
+                            rect=(left.value, bottom.value, right.value, top.value),
+                            text=chr(code),
+                            font_size=size,
+                            bold=weight >= 600,
+                            color_hex=_hex_if_colored(red.value, green.value, blue.value),
+                        )
+                    )
+                return out
+            finally:
+                textpage.close()
+        finally:
+            page.close()
+    finally:
+        pdf.close()
+
+
+def _char_center_in_box(rect: tuple[float, float, float, float], box: BBox) -> bool:
+    cx = (rect[0] + rect[2]) / 2.0
+    cy = (rect[1] + rect[3]) / 2.0
+    return box[0] - 1.0 <= cx <= box[2] + 1.0 and box[1] - 1.0 <= cy <= box[3] + 1.0
+
+
+def styled_runs_in_box(
+    chars: Sequence[CharStyle],
+    box: BBox,
+    *,
+    superscript_ratio: float = 0.8,
+) -> list[tuple[str, bool, bool, bool, str | None]]:
+    """Merge a page's characters inside ``box`` into ``(text, bold, italic,
+    superscript, color_hex)`` runs of constant style.
+
+    Only non-default runs are returned (bold / superscript / coloured): plain
+    body text needs no run and would only bloat the block's style. A raised
+    marker is a glyph smaller than ``superscript_ratio`` of the box's median size
+    (the footnote daggers are ~0.73x the body); a whitespace glyph is neutral and
+    rides the surrounding run rather than starting one of its own (pdfium reports
+    synthetic spaces with a degenerate 1pt box).
+    """
+    inside = [c for c in chars if c.text and _char_center_in_box(c.rect, box)]
+    if not inside:
+        return []
+    sizes = sorted(c.font_size for c in inside if c.font_size >= 4.5 and not c.text.isspace())
+    base = sizes[len(sizes) // 2] if sizes else 0.0
+    runs: list[tuple[str, bool, bool, bool, str | None]] = []
+    buffer: list[str] = []
+    style: tuple[bool, bool, bool, str | None] | None = None
+
+    def _flush() -> None:
+        nonlocal buffer, style
+        text = "".join(buffer)
+        if text and style is not None and style != (False, False, False, None):
+            runs.append((text, style[0], style[1], style[2], style[3]))
+        buffer = []
+
+    for char in inside:
+        if char.text.isspace():
+            if buffer:
+                buffer.append(char.text)
+            continue
+        raised = base > 0 and char.font_size >= 4.5 and char.font_size < superscript_ratio * base
+        current = (char.bold, False, raised, char.color_hex)
+        if style is not None and current != style:
+            _flush()
+        style = current
+        buffer.append(char.text)
+    _flush()
+    return runs
 
 
 def synthetic_vlm_lines(blocks: Sequence[IRBlock]) -> list[LineBox]:

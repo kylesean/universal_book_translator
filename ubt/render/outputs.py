@@ -36,7 +36,7 @@ import threading
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import ClassVar, Protocol
+from typing import Any, ClassVar, Protocol
 
 import pikepdf
 
@@ -131,9 +131,10 @@ def compose(
 
     source = Path(source_pdf)
     output = Path(output_path)
-    with pdf_struct.open_pdf(source) as src, pikepdf.new() as composed:
-        for page in src.pages:
-            composed.pages.append(page)
+    # Open the source as the working document (rather than a blank PDF we copy
+    # pages into) so the catalog survives: named destinations, outlines and
+    # metadata are what the source's GoTo citation links resolve against.
+    with pdf_struct.open_pdf(source) as composed:
         output.parent.mkdir(parents=True, exist_ok=True)
         composed.save(str(output))
     return Composition(output_path=output, placements=placements)
@@ -142,6 +143,22 @@ def compose(
 # --------------------------------------------------------------------------- #
 # LayerCompositor (prototype): three-layer absolute page composition.
 # --------------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True, slots=True)
+class StyledRun:
+    """A span of the *target* text to draw with a source-derived style.
+
+    ``text`` is the literal span; the renderer locates it in the fragment body
+    (after normalization) and wraps it in Typst markup. Only spans that survive
+    translation verbatim are mapped here (see :func:`_map_inline_runs`).
+    """
+
+    text: str
+    bold: bool = False
+    italic: bool = False
+    superscript: bool = False
+    color_hex: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,10 +184,30 @@ class Overlay:
     toc_page: str = ""
     font_size: float | None = None
     is_bold: bool = False
+    #: First-line indent (pt) for a body paragraph, from the source's typography.
+    #: Emitted as Typst ``par.first-line-indent``; ``None``/0 disables it.
+    indent_pt: float | None = None
+    #: The *original* source geometry to mask and relocate links against. A
+    #: reflowed overlay draws at ``bbox``/``boxes`` but must still erase the
+    #: source text where it was, so the mask follows this chain, not the draw box.
+    #: Empty means "the draw box is also the source box" (the legacy path).
+    mask_boxes: tuple[PhysicalBox, ...] = ()
+    #: A reflowed overlay whose box height already equals the fragment's natural
+    #: height: the compositor must not add line slack or run the fit search, or
+    #: the drawn text would be shorter than its box (a gap) or shrunk to fit it.
+    fixed_box: bool = False
+    #: Source-derived styled spans to re-apply to the target (a blue citation, a
+    #: raised footnote dagger) where the span survives verbatim.
+    runs: tuple[StyledRun, ...] = ()
 
     @property
     def flow_boxes(self) -> tuple[PhysicalBox, ...]:
         return self.boxes or (PhysicalBox.of(self.page, self.bbox),)
+
+    @property
+    def mask_flow_boxes(self) -> tuple[PhysicalBox, ...]:
+        """The chain to mask/link against: the source geometry when reflowed."""
+        return self.mask_boxes or self.flow_boxes
 
 
 class FragmentTypesetter(Protocol):
@@ -191,6 +228,7 @@ class FragmentTypesetter(Protocol):
         kind: str = "text",
         font_size: float | None = None,
         is_bold: bool = False,
+        runs: tuple[StyledRun, ...] = (),
     ) -> Path | None: ...
 
     def measure(self, text: str, width_pt: float) -> float:
@@ -214,6 +252,57 @@ _LEADING_MARKER_RE = re.compile(
     r"|[一二三四五六七八九十百]+[、.．)）]"  # 一、 二）
     r")\s*"
 )
+
+
+def _locate_runs(
+    text: str, runs: Sequence[StyledRun]
+) -> list[tuple[int, int, bool, bool, bool, str | None]]:
+    """Locate each run's literal span in ``text``, in order.
+
+    A run whose text is not present (a span the translation rewrote) is skipped;
+    the sequential cursor keeps repeated tokens (a year, an author) aligned to
+    their occurrence rather than the first one on the page.
+    """
+    spans: list[tuple[int, int, bool, bool, bool, str | None]] = []
+    cursor = 0
+    for run in runs:
+        if not run.text:
+            continue
+        index = text.find(run.text, cursor)
+        if index < 0:
+            index = text.find(run.text)
+        if index < 0:
+            continue
+        spans.append(
+            (
+                index,
+                index + len(run.text),
+                run.bold,
+                run.italic,
+                run.superscript,
+                run.color_hex,
+            )
+        )
+        cursor = index + len(run.text)
+    return spans
+
+
+def _styled_runs(block: IRBlock) -> tuple[StyledRun, ...]:
+    """The block's source-derived inline runs as renderable target runs."""
+    style = block.style
+    if style is None or not style.inline_runs:
+        return ()
+    return tuple(
+        StyledRun(
+            text=run.text,
+            bold=run.bold,
+            italic=run.italic,
+            superscript=run.superscript,
+            color_hex=run.color_hex,
+        )
+        for run in style.inline_runs
+        if run.text
+    )
 
 
 def _with_list_marker(block: IRBlock, text: str) -> str:
@@ -250,11 +339,13 @@ _UNIFORM_MIN_SCALE = 0.7
 _MIN_FONT_PT = 2.0
 _FIT_TOL = 0.5
 #: Paragraph leading (extra inter-line space, in em) for every typeset fragment.
-#: Typst adds it on top of the font's own line height, so a loose value makes a
-#: multi-line fragment taller than the source's single-spaced block and forces
-#: the fit to shrink. The source's own line pitch is roughly ``1.2em`` (the font's
-#: own line height), so no extra leading keeps the drawn pitch close to it.
-_PAR_LEADING_EM = 0.0
+#: Typst adds it on top of the font's own line height; the source's own pitch is
+#: roughly ``1.2em``. A small positive value opens the drawn lines for readability
+#: (``0.0`` left a 1.05em pitch that reads cramped in CJK) while keeping a
+#: multi-line fragment close to the source's block height. A reflowed overlay
+#: measures its natural height *at this leading*, so the value costs no fit
+#: shrink there.
+_PAR_LEADING_EM = 0.18
 #: Vertical slack (as a fraction of the source font size) added *below* an overlay
 #: box before fitting and drawing. The extracted box is the glyph ink, not the
 #: line box: it stops at the last line's descender and omits the leading, so a
@@ -288,6 +379,24 @@ _WEIGHT_BOLD = ', weight: "bold"'
 
 def _text_weight_line(bold: bool) -> str:
     return _WEIGHT_BOLD if bold else _WEIGHT_REGULAR
+
+
+def _par_line(leading_em: float) -> str:
+    """The shared ``#set par(...)`` rule for every typeset fragment."""
+    return f"#set par(leading: {leading_em}em)"
+
+
+def _indent_hspace(indent_pt: float | None) -> str:
+    """A first-line indent as a non-weak horizontal space.
+
+    Typst's ``par.first-line-indent`` deliberately skips the *first* paragraph of
+    a block, and a fragment is one paragraph -- so it never indented. A leading
+    ``#h`` is not trimmed at line start only when a non-space token follows it, so
+    an empty content block trails it; the space shifts the first line while the
+    wrapped lines stay at the margin, which is exactly an indent. The empty block
+    renders nothing (no glyph, no ink).
+    """
+    return f"#h({indent_pt}pt, weak: false)#[]" if indent_pt and indent_pt > 0 else ""
 
 
 def _line_slack(font_size: float | None) -> float:
@@ -358,10 +467,15 @@ class TypstFragmentTypesetter:
             self._is_temp = False
             self._work.mkdir(parents=True, exist_ok=True)
         self._write_lock = threading.Lock()
-        self._body_cache: dict[str, str] = {}
+        self._body_cache: dict[Any, str] = {}
         self._measure_cache: dict[tuple[str, float, float], float] = {}
         self._heading_cache: dict[tuple[str, float, float], float] = {}
         self._bilingual_cache: dict[tuple[str, float, float], float] = {}
+        #: Measure cache for indent-bearing overlays, keyed with the indent so a
+        #: paragraph's indented and unindented wraps do not collide.
+        self._indent_cache: dict[Any, float] = {}
+        #: Measure cache for the reflow fit, keyed by the full 6-tuple item.
+        self._fixed_measure_cache: dict[Any, float] = {}
         #: Per style class -- ``(kind, round(source font size))`` -- the one size
         #: every box in that class draws at, chosen by ``prefetch`` as the smallest
         #: that fits them all. Keying by the source size keeps the document's size
@@ -399,7 +513,7 @@ class TypstFragmentTypesetter:
             return None
         return pdf_path
 
-    def _body_markup(self, text: str) -> str:
+    def _body_markup(self, text: str, runs: tuple[StyledRun, ...] = ()) -> str:
         """The Typst body for a fragment: prose escaped, inline math in math mode.
 
         Inline ``$...$`` / ``\\(...\\)`` spans the model emitted are converted
@@ -407,17 +521,25 @@ class TypstFragmentTypesetter:
         probe compiles them; a span that does not compile falls back to escaped
         literal text, never worse than the escape-only path. Everything else is
         escaped exactly as before, so a math-free fragment is byte-identical.
-        Cached by input text: one paragraph is measured at several sizes but
-        converted once.
+        ``runs`` wrap verbatim spans in colour/superscript/weight markup (injected
+        after escaping, so the markup itself is not escaped). Cached by
+        ``(text, runs)``: one paragraph is measured at several sizes but converted
+        once.
         """
-        cached = self._body_cache.get(text)
+        cache_key = (text, runs)
+        cached = self._body_cache.get(cache_key)
         if cached is not None:
             return cached
         from ubt.adapters.pdf.overlay_text import prepare_overlay_text, render_overlay_line
 
         prepared = prepare_overlay_text(text, target_lang=self._target_lang)
-        body = render_overlay_line(prepared, self._math_probe.check, target_lang=self._target_lang)
-        self._body_cache[text] = body
+        body = render_overlay_line(
+            prepared,
+            self._math_probe.check,
+            target_lang=self._target_lang,
+            run_spans=_locate_runs(prepared, runs),
+        )
+        self._body_cache[cache_key] = body
         return body
 
     def _measure_source(
@@ -428,15 +550,16 @@ class TypstFragmentTypesetter:
         *,
         kind: str = "text",
         is_bold: bool = False,
+        indent_pt: float | None = None,
     ) -> str:
         body = self._body_markup(text)
         font_line = self._font_line
         weight_line = _text_weight_line(kind == "heading" or is_bold)
         return (
             f"#set page(width: {width_pt}pt, height: auto, margin: 0pt)\n"
-            f"#set par(leading: {self._par_leading_em}em)\n"
+            f"{_par_line(self._par_leading_em)}\n"
             f'#set text(size: {size_pt}pt{weight_line}, top-edge: "ascender", bottom-edge: "descender"{font_line})\n'
-            f"{body}\n"
+            f"{_indent_hspace(indent_pt)}{body}\n"
         )
 
     def _measure_height(
@@ -447,15 +570,26 @@ class TypstFragmentTypesetter:
         *,
         kind: str = "text",
         is_bold: bool = False,
+        indent_pt: float | None = None,
     ) -> float:
-        cache = self._heading_cache if (kind == "heading" or is_bold) else self._measure_cache
-        cached = cache.get((text, width_pt, size_pt))
+        # A first-line indent changes wrapping (and so height) only for the
+        # indented overlay; it gets its own cache so the shared fit cache keeps
+        # its 3-tuple key (and the fit path never passes an indent).
+        if indent_pt and indent_pt > 0:
+            key: tuple[Any, ...] = (text, width_pt, size_pt, indent_pt)
+            cache: dict[Any, float] = self._indent_cache
+        else:
+            key = (text, width_pt, size_pt)
+            cache = self._heading_cache if (kind == "heading" or is_bold) else self._measure_cache
+        cached = cache.get(key)
         if cached is not None:
             return cached
         height = self._measure_one(
-            self._measure_source(text, width_pt, size_pt, kind=kind, is_bold=is_bold)
+            self._measure_source(
+                text, width_pt, size_pt, kind=kind, is_bold=is_bold, indent_pt=indent_pt
+            )
         )
-        cache[(text, width_pt, size_pt)] = height
+        cache[key] = height
         return height
 
     def _measure_one(self, source: str) -> float:
@@ -470,30 +604,30 @@ class TypstFragmentTypesetter:
 
     def _batch_measure(
         self,
-        items: Sequence[tuple[str, float, float]],
+        items: Sequence[tuple[Any, ...]],
         *,
-        build: Callable[[str, float, float], str] | None = None,
-        cache: dict[tuple[str, float, float], float] | None = None,
+        build: Callable[..., str] | None = None,
+        cache: dict[Any, float] | None = None,
     ) -> None:
-        """Height of many ``(text, width, size)`` items in one Typst invocation.
+        """Height of many items in one Typst invocation.
 
         A single document renders every not-yet-measured item as an auto-height
         page; the page heights are the natural text heights. Batching is what
         makes a whole document cheap: a Typst invocation costs ~0.7s of startup
         regardless of how many fragments it lays out.
 
-        ``build`` renders one item's measure source and ``cache`` stores the
-        heights; both default to the single-text path, and the bilingual fit
-        passes its own so one batching implementation serves both.
+        ``build`` renders one item's measure source (called as ``build(*item)``)
+        and ``cache`` stores the heights; both default to the single-text path,
+        and the bilingual fit passes its own so one batching implementation
+        serves both. The reflow fit passes 6-tuples that carry the indent,
+        weight, and kind.
         """
         build = build or self._measure_source
         store = self._measure_cache if cache is None else cache
         todo = [item for item in dict.fromkeys(items) if item not in store]
         if not todo:
             return
-        batch = "\n#pagebreak()\n".join(
-            build(text, width_pt, size_pt).rstrip("\n") for text, width_pt, size_pt in todo
-        )
+        batch = "\n#pagebreak()\n".join(build(*item).rstrip("\n") for item in todo)
         pdf_path = self._compile(batch, tag="measure-batch:")
         heights: list[float] | None = None
         if pdf_path is not None:
@@ -506,8 +640,8 @@ class TypstFragmentTypesetter:
         if heights is None:
             # The batch failed (or a page collapsed); measure each item alone so a
             # single bad fragment cannot lose the whole document's fragments.
-            for text, width_pt, size_pt in todo:
-                store[(text, width_pt, size_pt)] = self._measure_one(build(text, width_pt, size_pt))
+            for item in todo:
+                store[item] = self._measure_one(build(*item))
             return
         for item, height in zip(todo, heights, strict=True):
             store[item] = height
@@ -717,15 +851,17 @@ class TypstFragmentTypesetter:
         *,
         kind: str = "text",
         is_bold: bool = False,
+        indent_pt: float | None = None,
+        runs: tuple[StyledRun, ...] = (),
     ) -> str:
-        body = self._body_markup(text)
+        body = self._body_markup(text, runs)
         font_line = self._font_line
         weight_line = _text_weight_line(kind == "heading" or is_bold)
         return (
             f"#set page(width: {width_pt}pt, height: {height_pt}pt, margin: 0pt)\n"
-            f"#set par(leading: {self._par_leading_em}em)\n"
+            f"{_par_line(self._par_leading_em)}\n"
             f'#set text(size: {size_pt}pt{weight_line}, top-edge: "ascender", bottom-edge: "descender"{font_line})\n'
-            f"#box(width: {width_pt}pt, height: {height_pt}pt, clip: true)[{body}]\n"
+            f"#box(width: {width_pt}pt, height: {height_pt}pt, clip: true)[{_indent_hspace(indent_pt)}{body}]\n"
         )
 
     def typeset(
@@ -737,6 +873,7 @@ class TypstFragmentTypesetter:
         kind: str = "text",
         font_size: float | None = None,
         is_bold: bool = False,
+        runs: tuple[StyledRun, ...] = (),
     ) -> Path | None:
         if width_pt <= 0 or height_pt <= 0 or not text.strip():
             return None
@@ -760,8 +897,81 @@ class TypstFragmentTypesetter:
         if size_pt is None:
             return None
         return self._compile(
-            self._text_source(text, width_pt, height_pt, size_pt, kind=kind, is_bold=is_bold)
+            self._text_source(
+                text, width_pt, height_pt, size_pt, kind=kind, is_bold=is_bold, runs=runs
+            )
         )
+
+    def typeset_fixed(
+        self,
+        text: str,
+        width_pt: float,
+        height_pt: float,
+        size_pt: float,
+        *,
+        kind: str = "text",
+        is_bold: bool = False,
+        indent_pt: float | None = None,
+        runs: tuple[StyledRun, ...] = (),
+    ) -> Path | None:
+        """Typeset at an exact size into an exact box (a reflowed overlay).
+
+        The reflow pass already measured the fragment at ``size_pt`` and set the
+        box to that natural height, so the fit search would only re-derive (and
+        occasionally shrink below) the size it chose. Compiling the source
+        directly also matches the string ``prefetch`` warmed, so the cache hits.
+        """
+        if width_pt <= 0 or height_pt <= 0 or not text.strip() or size_pt <= 0:
+            return None
+        return self._compile(
+            self._text_source(
+                text,
+                width_pt,
+                height_pt,
+                size_pt,
+                kind=kind,
+                is_bold=is_bold,
+                indent_pt=indent_pt,
+                runs=runs,
+            )
+        )
+
+    def measure_fixed(
+        self,
+        text: str,
+        width_pt: float,
+        size_pt: float,
+        *,
+        kind: str = "text",
+        is_bold: bool = False,
+        indent_pt: float | None = None,
+    ) -> float:
+        """Natural height of ``text`` at an explicit size and indent."""
+        if width_pt <= 0 or not text.strip():
+            return 0.0
+        return self._measure_height(
+            text, width_pt, size_pt, kind=kind, is_bold=is_bold, indent_pt=indent_pt
+        )
+
+    def measure_many_fixed(
+        self,
+        items: Sequence[tuple[str, float, float, float | None, str, bool]],
+    ) -> list[float]:
+        """Natural heights of many reflow items in one batched Typst invocation.
+
+        Items are ``(text, width_pt, size_pt, indent_pt, kind, is_bold)``. One
+        auto-height page per item keeps the reflow fit to a single compiler call,
+        which is what makes a whole-document reflow affordable.
+        """
+        keys = [tuple(item) for item in items]
+        self._batch_measure(
+            keys,
+            build=lambda t, w, s, ind, kind, bold: self._measure_source(
+                t, w, s, kind=kind, is_bold=bold, indent_pt=ind
+            ),
+            cache=self._fixed_measure_cache,
+        )
+        return [self._fixed_measure_cache.get(key, float("inf")) for key in keys]
 
     def measure(self, text: str, width_pt: float) -> float:
         """Height of the text laid out at ``width_pt`` (Typst ``height: auto``).
@@ -932,7 +1142,11 @@ class TypstFragmentTypesetter:
             return max(font_size, 24.0)
         return font_size * 1.05
 
-    def prefetch(self, requests: Sequence[tuple[str, str, float, float, float | None]]) -> None:
+    def cap_size(self, kind: str, font_size: float | None) -> float:
+        """The starting size cap for a box: the source size (never below the floor)."""
+        return self._cap_for(kind, font_size)
+
+    def prefetch(self, requests: Sequence[tuple[Any, ...]]) -> None:
         """Fit and compile a whole document's fragments in a handful of calls.
 
         A Typst invocation costs ~0.7s of startup regardless of how many
@@ -941,7 +1155,10 @@ class TypstFragmentTypesetter:
         fragment as a page of one document and splits the pages back out.
         Content addressing keeps it idempotent: a later ``typeset`` for the same
         box finds the split file. Each request is ``(kind, text, width_pt,
-        height_pt, font_size)``; ``kind == "math"`` selects the math source.
+        height_pt, font_size)``; ``kind == "math"`` selects the math source. A
+        reflowed overlay appends ``(indent_pt, fixed, is_bold)``: ``fixed`` means
+        the box already equals the fragment's natural height, so it is compiled
+        at ``cap_size`` instead of being fitted.
 
         Uniform document typography: within each style class every box is fitted,
         then all draw at the *smallest* size that fits them all, so a page (and
@@ -954,13 +1171,22 @@ class TypstFragmentTypesetter:
             return
         # A fresh document owns fresh uniform sizes.
         self._uniform_sizes.clear()
+        parsed: list[tuple[str, str, float, float, float | None, float | None, bool, bool]] = []
+        for request in unique:
+            request_kind, text, width_pt, height_pt, font_size, *rest = request
+            indent = rest[0] if len(rest) > 0 else None
+            fixed = bool(rest[1]) if len(rest) > 1 else False
+            is_bold = bool(rest[2]) if len(rest) > 2 else False
+            parsed.append(
+                (request_kind, text, width_pt, height_pt, font_size, indent, fixed, is_bold)
+            )
         # Resolve every inline-math body up front so fitting's measure calls hit
         # the probe cache instead of spawning a Typst process per formula.
         self._math_probe.check_many(self._math_bodies([text for _kind, text, *_rest in unique]))
         pages: list[tuple[str, str]] = []
         groups: dict[tuple[str, int], list[tuple[str, float, float, float | None]]] = {}
-        for request_kind, text, width_pt, height_pt, font_size in unique:
-            if request_kind not in ("text", "heading"):
+        for request_kind, text, width_pt, height_pt, font_size, _indent, fixed, _bold in parsed:
+            if fixed or request_kind not in ("text", "heading"):
                 continue
             bucket = round(font_size) if font_size else 0
             groups.setdefault((request_kind, bucket), []).append(
@@ -983,9 +1209,29 @@ class TypstFragmentTypesetter:
                     (self._text_source(text, width_pt, height_pt, draw_size, kind=kind), "")
                 )
 
+        # Reflowed boxes: exact size, exact height, no fit search.
+        for request_kind, text, width_pt, height_pt, font_size, indent, fixed, is_bold in parsed:
+            if not fixed or request_kind not in ("text", "heading"):
+                continue
+            size_pt = self._cap_for(request_kind, font_size)
+            pages.append(
+                (
+                    self._text_source(
+                        text,
+                        width_pt,
+                        height_pt,
+                        size_pt,
+                        kind=request_kind,
+                        is_bold=is_bold,
+                        indent_pt=indent,
+                    ),
+                    "",
+                )
+            )
+
         bilingual_items = [
             (*text.partition(_BILINGUAL_SEP)[::2], width_pt, height_pt)
-            for kind, text, width_pt, height_pt, _font_size in unique
+            for kind, text, width_pt, height_pt, *_rest in unique
             if kind == "bilingual"
         ]
         for (target, source, width_pt, height_pt), size_pt in zip(
@@ -998,7 +1244,7 @@ class TypstFragmentTypesetter:
                         "bilingual:",
                     )
                 )
-        for kind, text, width_pt, height_pt, _font_size in unique:
+        for kind, text, width_pt, height_pt, *_rest in unique:
             if kind != "math":
                 continue
             math_source = self._math_source(text, width_pt, height_pt)
@@ -1144,12 +1390,16 @@ class LayerCompositor:
 
     def compose(self, overlays: Sequence[Overlay], output_path: str | Path) -> Composition:
         output = Path(output_path)
-        with pdf_struct.open_pdf(self._source) as src, pikepdf.new() as composed:
-            # Layer 0: every source page carried over whole, before any drawing.
-            for page in src.pages:
-                composed.pages.append(page)
+        # Layer 0 is the source document itself. Opening it as the working
+        # document -- instead of a blank PDF we copy pages into -- keeps the
+        # catalog (named destinations, outlines, metadata, AcroForm) that the
+        # source's internal GoTo links resolve against; a blank shell left every
+        # relocated citation link pointing at a destination that no longer
+        # existed. The pages are the canvas, so the non-text layers stay intact.
+        with pdf_struct.open_pdf(self._source) as composed:
             page_sizes = {
-                index: pdf_struct.page_size(page) for index, page in enumerate(src.pages, start=1)
+                index: pdf_struct.page_size(page)
+                for index, page in enumerate(composed.pages, start=1)
             }
             shared_forms = shared_form_objgens(composed) if self._strip else set()
             # Clamp each region to its page once, then compile every fragment
@@ -1198,7 +1448,7 @@ class LayerCompositor:
         prefetch = getattr(self._typesetter, "prefetch", None)
         if prefetch is None:
             return
-        requests: list[tuple[str, str, float, float, float | None]] = []
+        requests: list[tuple[Any, ...]] = []
         for overlay, boxes in prepared:
             if len(boxes) != 1:
                 continue
@@ -1207,7 +1457,11 @@ class LayerCompositor:
             if overlay.kind == "toc":
                 continue
             width = boxes[0].bbox[2] - boxes[0].bbox[0]
-            height = boxes[0].bbox[3] - boxes[0].bbox[1] + _line_slack(overlay.font_size)
+            # A reflowed box already equals the fragment's natural height, so the
+            # line slack (which exists to defeat the ink-box shrink) must not be
+            # added; the prefetched source must match the draw-time one.
+            slack = 0.0 if overlay.fixed_box else _line_slack(overlay.font_size)
+            height = boxes[0].bbox[3] - boxes[0].bbox[1] + slack
             if overlay.source:
                 requests.append(
                     (
@@ -1219,8 +1473,71 @@ class LayerCompositor:
                     )
                 )
             else:
-                requests.append((overlay.kind, overlay.text, width, height, overlay.font_size))
+                requests.append(
+                    (
+                        overlay.kind,
+                        overlay.text,
+                        width,
+                        height,
+                        overlay.font_size,
+                        overlay.indent_pt,
+                        overlay.fixed_box,
+                    )
+                )
         prefetch(requests)
+
+    def _flow_plan(
+        self,
+        overlay: Overlay,
+        boxes: tuple[PhysicalBox, ...],
+        *,
+        text: str | None = None,
+    ) -> tuple[tuple[FlowPlacement, ...], float | None]:
+        """Split a continuation paragraph across its boxes at ONE consistent size.
+
+        A paragraph that crosses a page/column boundary owns several boxes. The
+        whole target is measured at the size it would draw at; if it does not fit
+        the boxes' total capacity, the size is scaled down so the *whole*
+        paragraph shrinks uniformly -- never one box tiny and its neighbour
+        normal. The chosen size is returned so every part draws at exactly it,
+        instead of each box re-fitting (and re-shrinking) on its own.
+        """
+        typesetter = self._typesetter
+        body = overlay.text if text is None else text
+        assert typesetter is not None
+        cap = getattr(typesetter, "cap_size", None)
+        measure_fixed = getattr(typesetter, "measure_fixed", None)
+        if cap is None or measure_fixed is None:
+            return solve_flow(body, boxes, typesetter.measure), None
+        base = cap(overlay.kind, overlay.font_size)
+
+        def _measure(size: float) -> Callable[[str, float], float]:
+            return lambda token, width: measure_fixed(
+                token,
+                width,
+                size,
+                kind=overlay.kind,
+                is_bold=overlay.is_bold,
+                indent_pt=overlay.indent_pt,
+            )
+
+        width = boxes[0].bbox[2] - boxes[0].bbox[0]
+        # Match ``solve_flow``'s own capacity (the bare box height, without the
+        # line slack the draw adds): sizing against the slack-inflated capacity
+        # would let the flow overflow the last box, which then clips its text.
+        capacity = sum(box.bbox[3] - box.bbox[1] for box in boxes)
+        size = base
+        height = measure_fixed(
+            body,
+            width,
+            size,
+            kind=overlay.kind,
+            is_bold=overlay.is_bold,
+            indent_pt=overlay.indent_pt,
+        )
+        if capacity > 0 and height > capacity:
+            size = max(_MIN_FONT_PT, size * capacity / height)
+        return solve_flow(body, boxes, _measure(size)), size
 
     def _compile_overlay(
         self, composed: pikepdf.Pdf, overlay: Overlay, boxes: tuple[PhysicalBox, ...]
@@ -1229,11 +1546,12 @@ class LayerCompositor:
         typesetter = self._typesetter
         if typesetter is None or not (overlay.text.strip() or overlay.source.strip()):
             return []
-        parts: tuple[FlowPlacement, ...] = (
-            (FlowPlacement(boxes[0], overlay.text),)
-            if len(boxes) == 1
-            else solve_flow(overlay.text, boxes, typesetter.measure)
-        )
+        slack = 0.0 if overlay.fixed_box else _line_slack(overlay.font_size)
+        draw_size: float | None = None
+        if len(boxes) == 1:
+            parts: tuple[FlowPlacement, ...] = (FlowPlacement(boxes[0], overlay.text),)
+        else:
+            parts, draw_size = self._flow_plan(overlay, boxes)
         # In-place bilingual: flow the source through the same boxes and pair it
         # with the target part sharing each box, so a multi-box paragraph keeps
         # both languages rather than repeating one in every box.
@@ -1242,21 +1560,30 @@ class LayerCompositor:
             source_parts = (
                 (FlowPlacement(boxes[0], overlay.source),)
                 if len(boxes) == 1
-                else solve_flow(overlay.source, boxes, typesetter.measure)
+                else self._flow_plan(overlay, boxes, text=overlay.source)[0]
             )
             source_by_box = {(part.box.page, part.box.bbox): part.text for part in source_parts}
         stamped: list[_StampedPart] = []
-        slack = _line_slack(overlay.font_size)
-        for part in parts:
+        for index, part in enumerate(parts):
             source = source_by_box.get((part.box.page, part.box.bbox), "")
             if not part.text.strip() and not source.strip():
                 continue
             x0, y0, x1, y1 = part.box.bbox
-            form = self._compile_form(composed, overlay, part, source, y1 - y0 + slack)
+            form = self._compile_form(
+                composed, overlay, part, source, y1 - y0 + slack, exact_size=draw_size
+            )
             if form is not None:
                 draw_bbox = (x0, y0 - slack, x1, y1)
+                # Mask the *source* geometry: a reflowed overlay draws at
+                # ``draw_bbox`` but the source text still sits where the block was,
+                # so its mask follows ``mask_boxes`` rather than the draw box.
+                mask_bbox = (
+                    overlay.mask_boxes[index].bbox
+                    if index < len(overlay.mask_boxes)
+                    else part.box.bbox
+                )
                 stamped.append(
-                    _StampedPart(overlay, part.box.page, draw_bbox, form, mask_bbox=part.box.bbox)
+                    _StampedPart(overlay, part.box.page, draw_bbox, form, mask_bbox=mask_bbox)
                 )
         return stamped
 
@@ -1267,12 +1594,15 @@ class LayerCompositor:
         part: FlowPlacement,
         source: str,
         height: float,
+        *,
+        exact_size: float | None = None,
     ) -> pikepdf.Object | None:
         """Typeset one flowed part and copy it into the artifact as a Form.
 
         ``height`` is the draw height: the extracted box plus the line slack, so
         the fragment can be fitted (and drawn) at the source size rather than
-        shrunk to the ink box.
+        shrunk to the ink box. ``exact_size`` (a continuation run's uniform size)
+        draws the part at that size instead of re-fitting it per box.
         """
         typesetter = self._typesetter
         if typesetter is None:
@@ -1283,6 +1613,7 @@ class LayerCompositor:
             return None
         bilingual = getattr(typesetter, "typeset_bilingual", None)
         toc_typeset = getattr(typesetter, "typeset_toc", None)
+        fixed_typeset = getattr(typesetter, "typeset_fixed", None)
         fragment: Path | None
         if overlay.kind == "math":
             fragment = typesetter.typeset_math(part.text, width, height)
@@ -1292,6 +1623,46 @@ class LayerCompositor:
             )
         elif source.strip() and bilingual is not None:
             fragment = bilingual(source, part.text, width, height)
+        elif overlay.fixed_box or exact_size is not None:
+            # Reflowed (fixed_box) or a continuation part (exact_size): the size is
+            # already decided, so compile at exactly it -- no per-box fit shrink.
+            cap = getattr(typesetter, "cap_size", None)
+            size_pt = exact_size
+            if size_pt is None and cap is not None:
+                size_pt = cap(overlay.kind, overlay.font_size)
+            if size_pt is None:
+                size_pt = overlay.font_size if overlay.font_size and overlay.font_size > 0 else 10.0
+            if fixed_typeset is not None:
+                try:
+                    fragment = fixed_typeset(
+                        part.text,
+                        width,
+                        height,
+                        size_pt,
+                        kind=overlay.kind,
+                        is_bold=overlay.is_bold,
+                        indent_pt=overlay.indent_pt,
+                        runs=overlay.runs,
+                    )
+                except TypeError:
+                    fragment = fixed_typeset(
+                        part.text,
+                        width,
+                        height,
+                        size_pt,
+                        kind=overlay.kind,
+                        is_bold=overlay.is_bold,
+                        indent_pt=overlay.indent_pt,
+                    )
+            else:
+                fragment = typesetter.typeset(
+                    part.text,
+                    width,
+                    height,
+                    kind=overlay.kind,
+                    font_size=overlay.font_size,
+                    is_bold=overlay.is_bold,
+                )
         else:
             try:
                 fragment = typesetter.typeset(
@@ -1301,12 +1672,23 @@ class LayerCompositor:
                     kind=overlay.kind,
                     font_size=overlay.font_size,
                     is_bold=overlay.is_bold,
+                    runs=overlay.runs,
                 )
             except TypeError:
                 try:
-                    fragment = typesetter.typeset(part.text, width, height, kind=overlay.kind)
+                    fragment = typesetter.typeset(
+                        part.text,
+                        width,
+                        height,
+                        kind=overlay.kind,
+                        font_size=overlay.font_size,
+                        is_bold=overlay.is_bold,
+                    )
                 except TypeError:
-                    fragment = typesetter.typeset(part.text, width, height)
+                    try:
+                        fragment = typesetter.typeset(part.text, width, height, kind=overlay.kind)
+                    except TypeError:
+                        fragment = typesetter.typeset(part.text, width, height)
         if fragment is None:
             return None
         try:
@@ -1504,6 +1886,7 @@ def overlays_from_blocks(
                     source=source,
                     font_size=font_size,
                     is_bold=is_bold,
+                    runs=_styled_runs(by_id[block.id]),
                 )
             )
             consumed.update(run.block_ids)
@@ -1556,6 +1939,13 @@ def overlays_from_blocks(
             is_bold = bool(
                 block.provenance.get("is_bold") or (block.block_type == BlockType.HEADING)
             )
+            # A first-line indent is a body-paragraph attribute; headings and list
+            # items carry their own leading (level/marker), so they never indent.
+            indent_pt = (
+                getattr(block.style, "first_line_indent_pt", None)
+                if kind == "text" and block.block_type is BlockType.NARRATIVE
+                else None
+            )
             overlay = Overlay(
                 block.id,
                 box.page,
@@ -1567,6 +1957,8 @@ def overlays_from_blocks(
                 toc_page=str(block.provenance.get("toc_page", "")),
                 font_size=font_size,
                 is_bold=is_bold,
+                indent_pt=indent_pt,
+                runs=_styled_runs(block),
             )
             overlays.append(overlay)
             if not boxes:

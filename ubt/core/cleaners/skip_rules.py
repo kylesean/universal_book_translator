@@ -8,6 +8,9 @@ machine translation is either meaningless or actively harmful:
 - social-handle watermarks / running-head chrome (``@techNmak ...``);
 - bibliography entries (paper titles must stay searchable in the original
   language; translating them breaks retrievability);
+- front-matter bibliographic identity — the author-affiliation/email line and
+  the ``∗/†/‡`` symbol legend (institution names, contact addresses and
+  cross-reference markers must stay one-to-one with the author list);
 - pure symbol / numeric debris (shattered equation fragments, table number
   runs) with no translatable words.
 
@@ -132,6 +135,37 @@ _BYLINE_SEGMENT_RE = re.compile(
     r"[\s,0-9¹ⁿ∗*†‡§¶]*$"
 )
 _SUPERSCRIPT_DIGITS = "⁰¹²³⁴⁵⁶⁷⁸⁹"
+
+# --- Front-matter bibliographic identity ------------------------------------
+# The author-affiliation block, its contact email, and the symbol legend
+# ("∗ Corresponding author. † DSec project developers. ‡ Tsinghua University.")
+# are bibliographic identity matter, not prose: GB/T 7714 and general academic
+# practice keep institution names, addresses and the ∗/†/‡ cross-reference
+# markers verbatim so the symbols stay one-to-one with the author list.
+# Translating only half of the cluster is the failure mode this rule prevents:
+# docling labels the legend FOOTNOTE (region BODY) but the author bio
+# PAGE_FOOTER (region FOOTER), so a per-item policy translated the legend while
+# the FOOTER chrome rule kept the bio — a mixed-language page footer. One shape
+# rule keeps the whole front-matter identity cluster together.
+#
+# Markers are the typographic referential set (∗ U+2217, † U+2020, ‡ U+2021,
+# § U+00A7, ¶ U+00B6) plus an ASCII ``*`` only when it stands as its own token
+# (so multiplication ``a*b`` and Markdown bullets do not register).
+_REFERENTIAL_MARKER_RE = re.compile(r"[∗†‡§¶]|(?<![A-Za-z0-9])\*(?![A-Za-z0-9])")
+_EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
+#: Institution nouns that mark an affiliation line. Deliberately proper-noun
+#: vocabulary ("University", "Institute", …), never a generic word like
+#: "research", so ordinary prose that merely mentions an organisation is not
+#: swept in — the marker/email requirement below is the second gate.
+_INSTITUTION_RE = re.compile(
+    r"\b(?:Universit(?:y|ies|ät|é|e)|Institute|Institut|Academy|Laboratory|"
+    r"Laboratoire|College|School|Labs?)\b",
+    re.IGNORECASE,
+)
+#: Identity lines are short. A long block that merely mentions a university or
+#: prints a contact address is prose (an acknowledgements paragraph, a call for
+#: contributions) and must stay translatable.
+_IDENTITY_MAX_WORDS = 40
 
 _EXTRA_BIB_VENUE_PATTERNS: list[re.Pattern[str]] = []
 _EXTRA_BIB_BOOK_PATTERNS: list[re.Pattern[str]] = []
@@ -262,6 +296,34 @@ def _is_author_byline(text: str) -> bool:
     return any(len(_BYLINE_NAME_RE.findall(seg)) >= 2 for seg in segments)
 
 
+def _is_bibliographic_identity(text: str) -> bool:
+    """True for a front-matter author/affiliation/legend line.
+
+    Fires on the two shapes that carry the ∗/†/‡ cross-reference cluster:
+
+    * a referential marker plus an institution cue or a contact email
+      (``DeepSeek-AI ‡ Tsinghua University research@deepseek.com``);
+    * two or more markers, i.e. a symbol legend
+      (``∗ Corresponding author. † … ‡ …``);
+    * an institution cue plus a contact email.
+
+    Kept precision-first by three guards: CJK blocks are excluded (already in
+    the target script), blocks over ``_IDENTITY_MAX_WORDS`` are excluded (prose
+    that merely names a university), and a marker/email must accompany the
+    institution word so an acknowledgements sentence is not swept in.
+    """
+    if contains_cjk(text) or len(text.split()) > _IDENTITY_MAX_WORDS:
+        return False
+    markers = len(_REFERENTIAL_MARKER_RE.findall(text))
+    has_email = _EMAIL_RE.search(text) is not None
+    has_institution = _INSTITUTION_RE.search(text) is not None
+    if markers >= 2:
+        return True
+    if markers >= 1 and (has_institution or has_email):
+        return True
+    return has_email and has_institution
+
+
 def classify_skip(
     source_text: str, *, is_heading: bool = False, in_bibliography: bool = False
 ) -> str | None:
@@ -290,6 +352,8 @@ def classify_skip(
         return "bibliography entry (kept verbatim for retrievability)"
     if not is_heading and _is_author_byline(text):
         return "author byline (foreign names kept in romanization per GB/T 7714)"
+    if not is_heading and _is_bibliographic_identity(text):
+        return "bibliographic identity (affiliation/legend kept verbatim)"
     if not contains_cjk(text) and _WORD_RE.search(text) is None:
         return "pure symbol/numeric debris (no translatable words)"
     return None

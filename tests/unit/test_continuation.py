@@ -237,6 +237,36 @@ def test_fuse_continuation_blocks_creates_composite_span() -> None:
     assert fused.provenance.get("fused_block_ids") == ["b1", "b2"]
 
 
+def test_fused_span_survives_the_ledger_round_trip() -> None:
+    # The ledger rebuilds a block's span from provenance["physical_boxes"], so a
+    # fused block must record them or its box chain is lost and the whole target
+    # is squeezed into the first (single-line) box.
+    import tempfile
+    from pathlib import Path
+
+    from ubt.core.engine.ledger import SQLiteJobLedger
+    from ubt.core.engine.ledger_base import _upsert_blocks_batch
+    from ubt.core.ir.continuation import fuse_continuation_blocks
+    from ubt.model.span import CompositeSpan
+
+    first = _block("b1", "The machine relies on attention", page=1, spine=1)
+    second = _block("b2", "and runs a forward pass.", page=2, spine=2)
+    fused = fuse_continuation_blocks([first, second])[0]
+    assert [box["page"] for box in fused.provenance["physical_boxes"]] == [1, 2]
+
+    ledger = SQLiteJobLedger(Path(tempfile.mkdtemp()) / "l.sqlite")
+    with ledger._get_conn() as conn:
+        conn.execute(
+            "INSERT INTO job_meta(job_id,doc_id,source_path,target_lang,total_blocks,status)"
+            " VALUES(?,?,?,?,?,?)",
+            ("job_x", "doc", "/x.pdf", "zh", 1, "running"),
+        )
+        _upsert_blocks_batch(conn.cursor(), "job_x", [fused])
+    (reloaded,) = ledger.get_all_blocks("job_x")
+    assert isinstance(reloaded.element.span, CompositeSpan)
+    assert [box.page for box in reloaded.element.span.boxes] == [1, 2]
+
+
 def test_fused_block_flows_through_overlay_builder() -> None:
     from ubt.core.ir.continuation import fuse_continuation_blocks
 

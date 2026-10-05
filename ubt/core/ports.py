@@ -525,12 +525,14 @@ def masked_source(
     math_map: dict[str, str],
     soup_map: dict[str, str],
     cite_map: dict[str, str],
+    email_map: dict[str, str] | None = None,
 ) -> MaskedSource:
     """Rebuild a ``MaskedSource`` from the per-family maps a draft carries."""
     from ubt.segment.placeholders import MaskedSource
 
     return MaskedSource(
         text=text,
+        email_map=email_map or {},
         code_map=code_map,
         math_map=math_map,
         soup_map=soup_map,

@@ -259,6 +259,11 @@ def fuse_continuation_blocks(blocks: Sequence[IRBlock]) -> list[IRBlock]:
             **block.provenance,
             "fused_block_ids": list(run.block_ids),
             "fused_sources": [b.source_text for b in run_blocks],
+            # The box chain must survive the ledger round-trip: ``_row_to_block``
+            # rebuilds the CompositeSpan from ``physical_boxes`` alone, so without
+            # this the fused paragraph comes back as a single first-box overlay and
+            # its whole target is squeezed into one line (a jarring shrink).
+            "physical_boxes": [{"page": box.page, "bbox": list(box.bbox)} for box in run.boxes],
         }
         if joined_target:
             fused.target_text = joined_target

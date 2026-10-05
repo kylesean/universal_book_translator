@@ -22,6 +22,7 @@ import pytest
 
 from ubt.core.cleaners.citation_masker import CitationMasker
 from ubt.core.cleaners.code_masker import CodeMasker
+from ubt.core.cleaners.email_masker import EmailMasker
 from ubt.core.cleaners.inline_math import inline_math_spans, is_math_content
 from ubt.core.cleaners.mask_tokens import (
     UnmaskReport,
@@ -45,6 +46,7 @@ _MASKER_CASES: list[tuple[str, Callable[[], _Masker], str]] = [
     ("math", MathMasker, "Energy is $E=mc^2$ and inline \\(x^2\\) too."),
     ("code", CodeMasker, "Use `print(x)` then:\n```py\nprint(1)\n```\ndone"),
     ("citation", CitationMasker, "See [12] and [3, 7, 21] and [5-7]."),
+    ("email", EmailMasker, "Contact research@deepseek.com or see https://example.org/x?y=1."),
 ]
 
 
@@ -191,13 +193,34 @@ def test_code_masks_fenced_and_inline() -> None:
     assert CodeMasker().unmask(masked, mapping) == text
 
 
-def test_citation_masks_only_numeric_markers() -> None:
-    text = "See [12], [3, 7, 21], [5-7], but (Smith et al., 2021) and [see note] stay."
+def test_citation_masks_numeric_and_author_year_forms() -> None:
+    text = "See [12], [3, 7, 21], [5-7], and (Smith et al., 2021), but [see note] stays."
     masked, mapping = CitationMasker().mask(text)
-    assert len(mapping) == 3
-    assert "(Smith et al., 2021)" in masked
+    assert len(mapping) == 4
+    assert "(Smith et al., 2021)" not in masked
     assert "[see note]" in masked
     assert CitationMasker().unmask(masked, mapping) == text
+
+
+def test_citation_masks_multi_and_organisation_author_year() -> None:
+    text = (
+        "adopted (Guo et al., 2025; Jimenez et al., 2024; OpenAI et al., 2024). "
+        "and (DeepSeek-AI, 2026) and (Xie et al., 2024; Zhou et al., 2024)."
+    )
+    masked, mapping = CitationMasker().mask(text)
+    assert set(mapping.values()) == {
+        "(Guo et al., 2025; Jimenez et al., 2024; OpenAI et al., 2024)",
+        "(DeepSeek-AI, 2026)",
+        "(Xie et al., 2024; Zhou et al., 2024)",
+    }
+    assert CitationMasker().unmask(masked, mapping) == text
+
+
+def test_citation_leaves_non_reference_parentheses_alone() -> None:
+    # An acronym, a numbered reference, and a numbered table are not citations.
+    text = "Use (DSH) and (RL), see (3.1) and (Section 2, 2024) and (Table 3, 2024)."
+    _, mapping = CitationMasker().mask(text)
+    assert mapping == {}
 
 
 def test_citation_leaves_code_subscripts_and_link_text_alone() -> None:
@@ -211,6 +234,30 @@ def test_citation_leaves_code_subscripts_and_link_text_alone() -> None:
     assert "matrix[12]" in masked
     assert "[1](https://example.com)" in masked
     assert CitationMasker().unmask(masked, mapping) == text
+
+
+def test_email_masks_addresses_and_urls_but_keeps_trailing_punctuation() -> None:
+    text = "Write to research@deepseek.com, or read https://openreview.net/forum?id=VTF8yNQM66."
+    masked, mapping = EmailMasker().mask(text)
+    assert set(mapping.values()) == {
+        "research@deepseek.com",
+        "https://openreview.net/forum?id=VTF8yNQM66",
+    }
+    # The sentence's comma/period stay in the prose, not inside the token.
+    assert "research@deepseek.com" not in masked
+    assert masked.endswith(".")
+    assert EmailMasker().unmask(masked, mapping) == text
+
+
+def test_email_masks_a_mailto_url_as_one_span_not_a_bare_address() -> None:
+    text = "Mail mailto:someone@example.org now."
+    _, mapping = EmailMasker().mask(text)
+    assert list(mapping.values()) == ["mailto:someone@example.org"]
+
+
+def test_email_leaves_plain_words_and_at_signs_alone() -> None:
+    _, mapping = EmailMasker().mask("cost @ 5 USD and 2 @ home")
+    assert mapping == {}
 
 
 def test_inline_math_guard_rejects_bare_numbers() -> None:

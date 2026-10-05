@@ -68,8 +68,21 @@ def _module_identity(*modules: str) -> str:
 
 
 def docling_identity() -> str:
-    """The Docling parser's own identity (its two rule modules)."""
-    return _module_identity("ubt.adapters.pdf.docling_parser", "ubt.adapters.pdf.docling_blocks")
+    """The Docling extractor's own identity (every module that shapes its blocks).
+
+    Beyond the parser and its block-shaping rules, the cross-check writes block
+    style (font size, first-line indent, inline runs) and ``textgeom`` supplies
+    the pdfium probes it reads, while ``ubt.core.ir.models`` carries the payload's
+    shape. A change to any of them must invalidate the cached blocks -- keying
+    only the first two served stale blocks whose ``inline_runs`` were empty.
+    """
+    return _module_identity(
+        "ubt.adapters.pdf.docling_parser",
+        "ubt.adapters.pdf.docling_blocks",
+        "ubt.adapters.pdf.docling_crosscheck",
+        "ubt.adapters.pdf.textgeom",
+        "ubt.core.ir.models",
+    )
 
 
 def cached_blocks(

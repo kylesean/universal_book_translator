@@ -7,6 +7,7 @@ import functools
 import json
 import logging
 import random
+import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -70,6 +71,11 @@ class _DraftInputs:
     few_shot_reference: str
     epoch_ctx: str = ""
     soup_map: Any = None
+    email_map: Any = None
+    #: The block's ``BlockType`` value. Travels into the prompt builder so a
+    #: heading gets the "do not expand" clause, and into the cache key so a
+    #: heading and a prose block with identical source text do not collide.
+    block_type: str = ""
 
 
 def resolve_draft_policy(
@@ -121,6 +127,30 @@ def is_static_skip(block: IRBlock) -> bool:
 def is_already_final(block: IRBlock) -> bool:
     """Batch-path early exit for blocks finalized by a concurrent stage."""
     return block.status in (BlockStatus.MTQE_PASSED, BlockStatus.REPAIRED)
+
+
+#: A blank-line paragraph break, the shape a heading's appended "explanation"
+#: or abstract summary takes (``title\n\n<pages of prose>``).
+_HEADING_PARAGRAPH_RE = re.compile(r"\n\s*\n")
+
+
+def trim_heading_expansion(source_text: str, draft: str) -> str:
+    """Drop the paragraphs a model appended after a heading's translation.
+
+    A small model told to translate a title sometimes keeps writing -- an
+    explanation of the title, or a summary of the abstract -- and the QE length
+    gate then quarantines the block, which falls back to the source
+    (``pdf_main#b0003``: a 96-char title drafted as a title plus an
+    abstract-summary paragraph, ratio 3.35). A heading is one line, so when the
+    source carries no line break and the draft does, the leading paragraph is
+    the translation and the rest is fabrication. A source that already breaks
+    (a genuine multi-line heading) is left alone, and a single-paragraph draft
+    is returned untouched.
+    """
+    if not draft or "\n" in source_text.strip():
+        return draft
+    first = _HEADING_PARAGRAPH_RE.split(draft, maxsplit=1)[0].strip()
+    return first or draft
 
 
 def _decode_chunk(raw: str | None) -> dict[str, str]:
@@ -280,11 +310,12 @@ class _DraftProcessor:
             epoch_summary=inputs.epoch_ctx,
             model=self.runtime.router.draft_model,
             domain=self.policy.domain,
+            block_type=inputs.block_type or None,
         )
-        # The prompt already carries the languages/profile/domain, but fold them
-        # in explicitly too: the key must separate two runs that differ on any
-        # output-bearing axis even if a future prompt builder stopped embedding
-        # one of them.
+        # The prompt already carries the languages/profile/domain/block-type,
+        # but fold them in explicitly too: the key must separate two runs that
+        # differ on any output-bearing axis even if a future prompt builder
+        # stopped embedding one of them.
         return step_key(
             "draft_prompt",
             [
@@ -294,6 +325,7 @@ class _DraftProcessor:
                 self.policy.target_lang,
                 self.policy.profile_name,
                 self.policy.domain or "",
+                inputs.block_type,
             ],
             {},
         )
@@ -451,11 +483,13 @@ class _DraftProcessor:
             cite_map=masked.cite_map,
             math_map=masked.math_map,
             soup_map=masked.soup_map,
+            email_map=masked.email_map,
             glossary_table=glossary_table,
             neighbor_ctx=neighbor_ctx,
             macro_ctx=macro_ctx,
             epoch_ctx=epoch_ctx,
             few_shot_reference=few_shot_reference,
+            block_type=str(block.block_type),
         )
 
         return inputs
@@ -466,18 +500,28 @@ class _DraftProcessor:
         # fail-fast breaker only counts *consecutive* non-retryable failures.
         self.runtime.fail_fast_consecutive = 0
 
-        # Restore in reverse mask order (citation -> soup -> math -> code) and
-        # judge: the engine owns that order and verifies every namespace with
-        # the same checksummed contract (translation unit segmentation layer).
+        # Restore in reverse mask order (citation -> soup -> math -> code ->
+        # email) and judge: the engine owns that order and verifies every
+        # namespace with the same checksummed contract (translation unit
+        # segmentation layer).
         masked = ports.masked_source(
             text=inputs.masked_source,
             code_map=inputs.code_map,
             math_map=inputs.math_map,
             soup_map=inputs.soup_map,
             cite_map=inputs.cite_map,
+            email_map=inputs.email_map,
         )
         result = await asyncio.to_thread(self.runtime.engine.resolve, raw_text, masked)
         final_draft = result.text
+        if block.block_type == BlockType.HEADING:
+            trimmed = trim_heading_expansion(block.source_text, final_draft)
+            if trimmed != final_draft:
+                logger.info(
+                    "Heading %s draft carried an appended paragraph; kept the leading one",
+                    block.id,
+                )
+                final_draft = trimmed
 
         error_flags: list[str] = list(block.error_flags)
         # One rule for all four maskers: a restore that is not clean (missing /
@@ -718,6 +762,7 @@ class _DraftProcessor:
                         epoch_summary=inp.epoch_ctx,
                         global_glossary=self.policy.global_glossary_table,
                         few_shot_reference=inp.few_shot_reference,
+                        block_type=inp.block_type,
                     )
                     for b, inp in prepared
                 ],
@@ -860,6 +905,7 @@ class _DraftProcessor:
                         epoch_summary=inp.epoch_ctx,
                         global_glossary=self.policy.global_glossary_table,
                         few_shot_reference=inp.few_shot_reference,
+                        block_type=inp.block_type,
                     )
                     for b, inp in prepared
                 ],

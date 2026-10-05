@@ -324,6 +324,7 @@ class BatchDraftRequest:
     epoch_summary: str = ""
     temperature: float = 0.3
     domain: str | None = None
+    block_type: str = ""
 
 
 @dataclass
@@ -614,6 +615,7 @@ class ModelRouter:
         epoch_summary: str = "",
         model: str | None = None,
         domain: str | None = None,
+        block_type: str | None = None,
     ) -> tuple[str, str]:
         """Construct draft prompt using strategy configured on the model capability profile."""
         profile = self._get_profile(model or self.draft_model)
@@ -627,6 +629,7 @@ class ModelRouter:
                 few_shot_reference=few_shot_reference,
                 genre_profile=genre_profile,
                 domain=domain,
+                block_type=block_type,
             )
         if profile.prompt_strategy == PromptStrategy.HYBRID:
             return build_hybrid_draft_prompt(
@@ -641,6 +644,7 @@ class ModelRouter:
                 few_shot_reference=few_shot_reference,
                 epoch_summary=epoch_summary,
                 domain=domain,
+                block_type=block_type,
             )
         return build_rich_draft_prompt(
             source_text=source_text,
@@ -654,6 +658,7 @@ class ModelRouter:
             few_shot_reference=few_shot_reference,
             epoch_summary=epoch_summary,
             domain=domain,
+            block_type=block_type,
         )
 
     def build_repair_prompt(
@@ -1277,6 +1282,7 @@ class ModelRouter:
                 epoch_summary=epoch_summary,
                 model=cand_model,
                 domain=domain,
+                block_type=block.block_type,
             )
 
         def _calc_max_tokens(cand_model: str, cand_profile: ModelProfile) -> int | None:
@@ -1466,6 +1472,7 @@ class ModelRouter:
                 epoch_summary=req.epoch_summary,
                 model=self.draft_model,
                 domain=req.domain,
+                block_type=req.block_type or None,
             )
             messages: list[dict[str, str]] = []
             if system_prompt.strip():

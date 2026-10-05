@@ -23,6 +23,7 @@ from ubt.core.ir.models import BlockType, BookManifest, IRBlock
 from ubt.core.ir.render_plan import RenderOutcome, RenderPlan
 from ubt.core.policy.adaptive_policy import resolve_pdf_engine
 from ubt.model.fidelity import Fidelity
+from ubt.model.span import PhysicalBox
 
 if TYPE_CHECKING:
     from ubt.render.outputs import Overlay
@@ -43,6 +44,28 @@ def record_toolchain_versions(manifest: BookManifest) -> None:
         version = None
     if isinstance(version, str) and version:
         manifest.metadata["typst_version"] = version
+
+
+def _reflow_obstacles(blocks: Sequence[IRBlock]) -> list[PhysicalBox]:
+    """Boxes the page reflow must not cross: everything it does not draw itself.
+
+    Figures, tables, code, formulas and any block held byte-identical are fixed
+    furniture on the source canvas; a reflowed paragraph that crossed one would
+    overlap it. Their boxes bound the bands.
+    """
+    obstacles: list[PhysicalBox] = []
+    for block in blocks:
+        box = block.bbox
+        if box is None or box.page <= 0:
+            continue
+        if block.skip_translate or block.block_type in (
+            BlockType.TABLE,
+            BlockType.IMAGE,
+            BlockType.CODE,
+            BlockType.FORMULA,
+        ):
+            obstacles.append(PhysicalBox.of(box.page, (box.x0, box.y0, box.x1, box.y1)))
+    return obstacles
 
 
 def _warn_forced_engine(
@@ -120,6 +143,7 @@ class DoclingRenderStrategy:
             TypstFragmentTypesetter,
             overlays_from_blocks,
         )
+        from ubt.render.reflow import reflow_overlays
 
         source_pdf = str(getattr(manifest, "source_path", "") or "")
         if not source_pdf or not Path(source_pdf).exists():
@@ -140,6 +164,16 @@ class DoclingRenderStrategy:
         profile = getattr(manifest, "profile", "") or ""
         base_size = 9.96 if profile == "paper" else theme.base_size_pt
         typesetter = TypstFragmentTypesetter(font=font, size_pt=base_size, target_lang=target_lang)
+        # Repack the page's prose into its bands so a shorter CJK target hugs the
+        # source instead of leaving the source box's slack as inter-paragraph
+        # gaps. The measure is batched (one Typst invocation), and a band that
+        # does not fit keeps its source geometry.
+        overlays = reflow_overlays(
+            overlays,
+            _reflow_obstacles(list(blocks)),
+            measure_many=typesetter.measure_many_fixed,
+            cap_size=typesetter.cap_size,
+        )
         compositor = LayerCompositor(source_pdf, typesetter=typesetter)
         try:
             composition = await asyncio.to_thread(compositor.compose, overlays, output_path)
@@ -170,7 +204,9 @@ class DoclingRenderStrategy:
 
         strip_by_page: dict[int, list[tuple[float, float, float, float]]] = {}
         for overlay in overlays:
-            for box in overlay.flow_boxes:
+            # A reflowed overlay draws elsewhere but the source link still sits
+            # under the *original* box, so detection uses the mask geometry.
+            for box in overlay.mask_flow_boxes:
                 strip_by_page.setdefault(box.page, []).append(box.bbox)
         if not strip_by_page:
             return

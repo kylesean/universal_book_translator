@@ -18,13 +18,18 @@ import time
 
 import pytest
 
-from ubt.core.cleaners.skip_rules import _is_author_byline, classify_skip
+from ubt.core.cleaners.skip_rules import (
+    _is_author_byline,
+    _is_bibliographic_identity,
+    classify_skip,
+)
 
 pytestmark = pytest.mark.fast
 
 HANDLE = "social-handle watermark / running-head chrome"
 BIB = "bibliography entry (kept verbatim for retrievability)"
 BYLINE = "author byline (foreign names kept in romanization per GB/T 7714)"
+IDENTITY = "bibliographic identity (affiliation/legend kept verbatim)"
 DEBRIS = "pure symbol/numeric debris (no translatable words)"
 
 
@@ -266,6 +271,69 @@ def test_byline_scan_is_linear_on_an_adversarial_tail() -> None:
     elapsed = time.perf_counter() - started
     assert result is False
     assert elapsed < 1.0
+
+
+# --- front-matter bibliographic identity ------------------------------------
+# The author-affiliation/email line and the ∗/†/‡ symbol legend must stay with
+# the author list: translating half the cluster yields a mixed-language footer
+# (arXiv 2609.22978 p1). Body prose that merely names a university, or prints a
+# contact address, must still be translated.
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # Real affiliation line (arXiv 2609.22978): marker + institution + email.
+        "DeepSeek-AI \u2021 Tsinghua University research@deepseek.com",
+        # Real symbol legend: three referential markers, institution present.
+        "\u2217 Corresponding author. \u2020 DSec project developers. \u2021 Tsinghua University.",
+        # Institution + contact email, no marker.
+        "DeepSeek-AI, Tsinghua University, research@deepseek.com",
+        # Two markers alone mark a legend.
+        "\u2217 Equal contribution. \u2020 Work done while at DeepSeek-AI.",
+        # ASCII asterisk used as a standalone footnote marker.
+        "* Equal contribution. \u2020 Corresponding author.",
+    ],
+)
+def test_bibliographic_identity_is_skipped(text: str) -> None:
+    assert classify_skip(text) == IDENTITY
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # Prose that merely names an institution, no marker/email.
+        "The dataset was released by Tsinghua University.",
+        # Prose with a contact address but no institution cue.
+        "Contact us at research@deepseek.com for access to the dataset.",
+        # A long block is prose even when it names a university and a marker.
+        "The dataset was released by Tsinghua University. \u2020 "
+        + "This section describes how we collected the corpus and cleaned it. " * 4,
+        # Multiplication is not a footnote marker.
+        "The product a*b is bounded, and Stanford University publishes the report.",
+        # CJK text is already in the target script.
+        "\u6e05\u534e\u5927\u5b66 \u2021 research@deepseek.com",
+        # The paper title is prose to translate, not identity matter.
+        "DeepSeek Elastic Compute (DSec): A Sandbox Infrastructure for "
+        "Effective Agentic Training at Scale",
+    ],
+)
+def test_identity_near_misses_stay_translatable(text: str) -> None:
+    assert classify_skip(text) is None
+
+
+def test_heading_is_never_bibliographic_identity() -> None:
+    # A heading that happens to carry a marker is structure, not identity matter.
+    text = "Affiliations \u2020 Tsinghua University"
+    assert classify_skip(text, is_heading=True) is None
+    assert classify_skip(text) == IDENTITY
+
+
+def test_identity_word_cap_boundary() -> None:
+    # 38 words (incl. the marker) is under the 40-word cap -> identity;
+    # 43 words is prose and must stay translatable.
+    assert _is_bibliographic_identity("Tsinghua University \u2020 " + "word " * 35) is True
+    assert _is_bibliographic_identity("Tsinghua University \u2020 " + "word " * 40) is False
 
 
 # --- pure symbol / numeric debris -------------------------------------------

@@ -38,7 +38,7 @@ class Placeholder:
     """
 
     token: str
-    kind: str  # "code" | "math" | "soup" | "citation"
+    kind: str  # "email" | "code" | "math" | "soup" | "citation"
     original: str
 
 
