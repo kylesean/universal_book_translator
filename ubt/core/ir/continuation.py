@@ -88,6 +88,11 @@ def join_continuous_text(pieces: Sequence[str]) -> str:
     for piece in clean[1:]:
         if out and piece and is_cjk_wide_char(out[-1]) and is_cjk_wide_char(piece[0]):
             out += piece
+        elif out.endswith("-") and piece[:1].isalpha():
+            # A page-final hard hyphen must not grow a space ("atten- tion");
+            # keep the hyphen rather than dehyphenate, which would corrupt
+            # real compounds ("well-" + "known").
+            out += piece
         else:
             out = f"{out} {piece}"
     return out
