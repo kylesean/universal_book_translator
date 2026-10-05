@@ -118,6 +118,11 @@ class TranslationEngine:
         """Store a raw draft under its masked source + prompt context (fail-open)."""
         if self.cache is None:
             return
+        # An empty (refused/filtered) draft must not be cached: it would replay
+        # on every later run as a hit, and only the repair stage could ever
+        # recover the block. Re-drafting is the recovery path here.
+        if not raw or not raw.strip():
+            return
         key = self._cache_key(masked_source, context)
         # A JSON envelope carrying the key makes a truncated, hand-edited or
         # split-brain entry a miss rather than a silently wrong draft.
@@ -144,6 +149,8 @@ class TranslationEngine:
     def remember_value(self, context: str, value: str, *, kind: str) -> None:
         """Store text for a non-draft translate step under ``kind`` (fail-open)."""
         if self.cache is None:
+            return
+        if not value or not value.strip():
             return
         key = self._value_key(kind, context)
         envelope = json.dumps({"key": key, "text": value}, ensure_ascii=False)
@@ -185,7 +192,10 @@ class TranslationEngine:
         if not isinstance(data, dict) or data.get("key") != key:
             return None
         text = data.get("text")
-        return text if isinstance(text, str) else None
+        if not isinstance(text, str) or not text.strip():
+            # An empty cached draft is a refusal fossil, not a translation.
+            return None
+        return text
 
     async def translate_text(
         self, element_id: str, text: str, translate: TranslateFn, *, context: str = ""
