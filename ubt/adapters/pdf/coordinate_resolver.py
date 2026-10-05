@@ -173,6 +173,15 @@ class PageBBoxResolver:
         page_max = max(page_width, page_height)
         if m <= 1.05:
             return "normalized_1"
+        # normalized_1000 is tested BEFORE image_pixel: the sidecar drivers
+        # always pass the rendered image size, so a normalized-1000 payload
+        # (max ≈ 1000, page ≈ 842, image ≈ 1275+) would otherwise fall into
+        # the image-pixel branch and be scaled by page/image instead of
+        # page/1000. A true image-pixel page with max > 1005 still lands here
+        # correctly; only a tiny (≤1005px) scan is ambiguous, and it resolves
+        # to normalized_1000 exactly as the per-box auto used to.
+        if m <= 1005.0 and m > page_max:
+            return "normalized_1000"
         if (
             image_width
             and image_height
@@ -180,8 +189,6 @@ class PageBBoxResolver:
             and m <= max(image_width, image_height) * 1.05
         ):
             return "image_pixel"
-        if m <= 1005.0 and m > page_max:
-            return "normalized_1000"
         return "pdf_points"
 
     def _apply_rotation(self, x0: float, y0: float, x1: float, y1: float) -> Rect:
