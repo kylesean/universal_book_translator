@@ -159,6 +159,15 @@ class DOCXAdapter(BaseDocumentAdapter):
 
                 children = list(getattr(node, "children", []))
                 if not children:
+                    if tag == "br":
+                        # A childless <br> carries no text; skipping it fused
+                        # the words around the break ("line1<br>line2" ->
+                        # "line1line2").
+                        run = para.add_run()
+                        run.add_break()
+                        if src_rpr is not None:
+                            run._r.insert(0, deepcopy(src_rpr))
+                        return
                     text = str(node) if not hasattr(node, "get_text") else node.get_text()
                     if text:
                         run = para.add_run(text)
