@@ -91,7 +91,11 @@ def pipe_table(rows: list[list[str]]) -> str:
 
     def _line(row: list[str]) -> str:
         padded = (row + [""] * width)[:width]
-        return "| " + " | ".join(padded) + " |"
+        # A literal | inside a cell would terminate the cell at parse time
+        # (parse_pipe_table_cells splits on unescaped |); escape it, matching
+        # the Docling table path.
+        escaped = [cell.replace("|", r"\|") for cell in padded]
+        return "| " + " | ".join(escaped) + " |"
 
     lines = [_line(rows[0]), "| " + " | ".join(["---"] * width) + " |"]
     lines.extend(_line(row) for row in rows[1:])

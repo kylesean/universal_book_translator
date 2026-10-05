@@ -77,8 +77,12 @@ def parse_pipe_table_cells(markup: str) -> list[list[str]]:
             stripped = stripped[1:]
         if stripped.endswith("|") and not stripped.endswith(r"\|"):
             stripped = stripped[:-1]
-        cells = [c.strip() for c in re.split(r"(?<!\\)\|", stripped)]
-        if cells and all(set(c).issubset({"-", ":", " "}) for c in cells):
+        cells = [c.strip().replace(r"\|", "|") for c in re.split(r"(?<!\\)\|", stripped)]
+        # Only a separator row in the canonical ``---``/``:---:`` form is
+        # dropped. The previous "all of -, :, space" test also ate real data
+        # rows of single-dash placeholder cells (``| - | - |``), shifting every
+        # later row on write-back.
+        if cells and all(re.fullmatch(r":?-{2,}:?", c) for c in cells):
             continue
         rows.append(cells)
     return rows
