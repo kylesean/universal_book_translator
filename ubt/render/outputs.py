@@ -277,6 +277,17 @@ _BILINGUAL_FILL = "#5b5b5b"
 #: Bilingual prefetch requests reuse the ``(kind, text, w, h)`` request shape by
 #: joining the target and source with this control separator.
 _BILINGUAL_SEP = "\x1f"
+#: Every fragment's ``#set text`` names an explicit weight. Typst ``#set`` rules
+#: apply from their position to the end of the enclosing content, and a batched
+#: fragment document is one flat flow: a bold fragment (a section heading) would
+#: otherwise leak its weight into every later section whose ``#set text`` omits
+#: the parameter, bolding whole pages of body text.
+_WEIGHT_REGULAR = ', weight: "regular"'
+_WEIGHT_BOLD = ', weight: "bold"'
+
+
+def _text_weight_line(bold: bool) -> str:
+    return _WEIGHT_BOLD if bold else _WEIGHT_REGULAR
 
 
 def _line_slack(font_size: float | None) -> float:
@@ -420,7 +431,7 @@ class TypstFragmentTypesetter:
     ) -> str:
         body = self._body_markup(text)
         font_line = self._font_line
-        weight_line = ', weight: "bold"' if (kind == "heading" or is_bold) else ""
+        weight_line = _text_weight_line(kind == "heading" or is_bold)
         return (
             f"#set page(width: {width_pt}pt, height: auto, margin: 0pt)\n"
             f"#set par(leading: {self._par_leading_em}em)\n"
@@ -607,7 +618,7 @@ class TypstFragmentTypesetter:
         return (
             f"#set page(width: {width_pt}pt, height: auto, margin: 0pt)\n"
             f"#set par(leading: {self._par_leading_em}em)\n"
-            f'#set text(size: {size_pt}pt, top-edge: "ascender", bottom-edge: "descender"{font_line})\n'
+            f'#set text(size: {size_pt}pt{_WEIGHT_REGULAR}, top-edge: "ascender", bottom-edge: "descender"{font_line})\n'
             f"{self._body_markup(target)}\n"
             f"#v({_BILINGUAL_GAP_EM}em)\n"
             f'#text(size: {size_pt * _BILINGUAL_RATIO}pt, fill: rgb("{_BILINGUAL_FILL}"))'
@@ -621,7 +632,7 @@ class TypstFragmentTypesetter:
         return (
             f"#set page(width: {width_pt}pt, height: {height_pt}pt, margin: 0pt)\n"
             f"#set par(leading: {self._par_leading_em}em)\n"
-            f'#set text(size: {size_pt}pt, top-edge: "ascender", bottom-edge: "descender"{font_line})\n'
+            f'#set text(size: {size_pt}pt{_WEIGHT_REGULAR}, top-edge: "ascender", bottom-edge: "descender"{font_line})\n'
             f"#box(width: {width_pt}pt, height: {height_pt}pt, clip: true)[\n"
             f"{self._body_markup(target)}\n"
             f"#v({_BILINGUAL_GAP_EM}em)\n"
@@ -709,7 +720,7 @@ class TypstFragmentTypesetter:
     ) -> str:
         body = self._body_markup(text)
         font_line = self._font_line
-        weight_line = ', weight: "bold"' if (kind == "heading" or is_bold) else ""
+        weight_line = _text_weight_line(kind == "heading" or is_bold)
         return (
             f"#set page(width: {width_pt}pt, height: {height_pt}pt, margin: 0pt)\n"
             f"#set par(leading: {self._par_leading_em}em)\n"
@@ -775,7 +786,7 @@ class TypstFragmentTypesetter:
         from ubt.adapters.pdf.overlay_text import typst_escape
 
         body = self._body_markup(title)
-        weight_line = ', weight: "bold"' if is_bold else ""
+        weight_line = _text_weight_line(is_bold)
         return (
             f"#set page(width: {width_pt}pt, height: {height_pt}pt, margin: 0pt)\n"
             f"#set par(leading: {self._par_leading_em}em)\n"
@@ -825,7 +836,7 @@ class TypstFragmentTypesetter:
         size_pt = max(4.0, min(height_pt * 0.85, 24.0))
         return (
             f"#set page(width: {width_pt}pt, height: {height_pt}pt, margin: 0pt)\n"
-            f"#set text(size: {size_pt}pt)\n"
+            f"#set text(size: {size_pt}pt{_WEIGHT_REGULAR})\n"
             f"#box(width: {width_pt}pt, height: {height_pt}pt, clip: true)[$ {converted} $]\n"
         )
 

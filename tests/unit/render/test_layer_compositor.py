@@ -30,6 +30,7 @@ from ubt.model.span import PhysicalBox
 from ubt.render.outputs import (
     LayerCompositor,
     Overlay,
+    TypstFragmentTypesetter,
     _dedup_identical_streams,
     _line_slack,
     bilingual_request_text,
@@ -356,3 +357,53 @@ def test_text_flows_across_a_chain_of_boxes(tmp_path: Path) -> None:
     delivered = _text(output)
     assert "Alpha beta gamma." in delivered
     assert "Delta epsilon zeta. Eta theta." in delivered
+
+
+# --------------------------------------------------------------------------- #
+# Typst fragment source: every section names its weight explicitly
+# --------------------------------------------------------------------------- #
+
+
+def _typesetter(tmp_path: Path) -> TypstFragmentTypesetter:
+    return TypstFragmentTypesetter(
+        font=("Noto Serif CJK SC",), size_pt=10.0, cache_dir=tmp_path, target_lang="zh"
+    )
+
+
+def test_a_plain_fragment_source_names_weight_regular(tmp_path: Path) -> None:
+    ts = _typesetter(tmp_path)
+    src = ts._text_source("正文", 100.0, 20.0, 10.0, kind="text", is_bold=False)
+    assert 'weight: "regular"' in src
+    assert 'weight: "bold"' not in src
+
+
+def test_a_heading_fragment_source_names_weight_bold(tmp_path: Path) -> None:
+    ts = _typesetter(tmp_path)
+    src = ts._text_source("标题", 100.0, 20.0, 10.0, kind="heading")
+    assert 'weight: "bold"' in src
+
+
+def test_measure_bilingual_and_math_sources_all_name_a_weight(tmp_path: Path) -> None:
+    ts = _typesetter(tmp_path)
+    assert 'weight: "regular"' in ts._measure_source("正文", 100.0, 10.0)
+    assert 'weight: "bold"' in ts._measure_source("标题", 100.0, 10.0, kind="heading")
+    key = bilingual_request_text("目标", "源文")
+    assert 'weight: "regular"' in ts._bilingual_measure_source(key, 100.0, 10.0)
+    assert 'weight: "regular"' in ts._bilingual_text_source("目标", "源文", 100.0, 20.0, 10.0)
+    assert 'weight: "regular"' in ts._math_source("$x$", 100.0, 20.0)
+
+
+def test_a_batched_document_does_not_leak_bold_into_later_sections(tmp_path: Path) -> None:
+    # Typst ``#set`` rules apply to the end of the enclosing content: a bold
+    # section (a heading) once leaked its weight into every following section
+    # whose ``#set text`` omitted the parameter, bolding whole pages of body
+    # text. Every section must therefore carry an explicit weight.
+    ts = _typesetter(tmp_path)
+    heading = ts._text_source("标题", 100.0, 20.0, 10.0, kind="heading")
+    body = ts._text_source("正文", 100.0, 20.0, 10.0, kind="text")
+    batch = f"{heading}\n#pagebreak()\n{body}"
+    sections = batch.split("#pagebreak()")
+    for section in sections:
+        set_line = next(ln for ln in section.splitlines() if ln.startswith("#set text"))
+        assert 'weight: "' in set_line, section
+    assert 'weight: "regular"' in sections[1]
