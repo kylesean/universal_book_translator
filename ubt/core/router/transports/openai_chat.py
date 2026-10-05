@@ -154,7 +154,13 @@ class OpenAIChatTransport(BaseTransport):
             msg = choice["message"]
             content = msg.get("content")
             if content is None:
-                content = msg.get("reasoning_content") or ""
+                # A null content is a content-filter refusal or a malformed
+                # response, never a translation; returning reasoning_content
+                # here shipped the chain-of-thought as the draft.
+                raise ModelProviderError(
+                    "LLM response has no message content "
+                    f"(finish_reason={choice.get('finish_reason') or 'unknown'})"
+                )
             content_str = str(content)
             finish_reason = choice.get("finish_reason")
             return self._finalize_output(content_str, target_model), finish_reason

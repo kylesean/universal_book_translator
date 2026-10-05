@@ -22,6 +22,12 @@ _REASONING_EFFORT_BUDGETS: dict[str, int] = {
 #: ``finishReason`` values that mean the model was cut off by the token limit.
 _LENGTH_REASONS = frozenset({"MAX_TOKENS"})
 
+#: ``finishReason`` values that mean safety/recitation policy removed the
+#: candidate content entirely.
+_BLOCKED_FINISH_REASONS = frozenset(
+    {"SAFETY", "RECITATION", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII"}
+)
+
 #: Substrings of a lowercased 400 body that mean the request was rejected
 #: *because of* ``thinkingConfig`` — the only case where dropping it and
 #: retrying is a real fix. Without this gate any 400 (a bad model name, say)
@@ -152,6 +158,20 @@ class GeminiTransport(BaseTransport):
         error = data.get("error")
         if isinstance(error, dict):
             raise ModelProviderError(f"Gemini API error: {error.get('message', error)}")
+        # Safety blocks arrive as a 200 with promptFeedback/candidate finish
+        # reasons instead of an error object; reading them as success would
+        # ship an empty draft and burn futile repair rounds.
+        block_reason = str((data.get("promptFeedback") or {}).get("blockReason") or "")
+        if block_reason:
+            raise ModelProviderError(f"Gemini blocked the prompt (blockReason={block_reason})")
+        candidates = data.get("candidates") or []
+        if not candidates:
+            raise ModelProviderError("Gemini returned no candidates")
+        candidate_reason = str((candidates[0] or {}).get("finishReason") or "")
+        if candidate_reason in _BLOCKED_FINISH_REASONS:
+            raise ModelProviderError(
+                f"Gemini blocked the response (finishReason={candidate_reason})"
+            )
 
     async def generate(
         self,

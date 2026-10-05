@@ -175,6 +175,14 @@ class AnthropicMessagesTransport(BaseTransport):
 
         result = text.strip()
         stop_reason = str(data.get("stop_reason") or "")
+        # A 200 with no text (a refusal stop_reason, or thinking-only content)
+        # is a provider refusal, not a translation; reading it as success would
+        # ship an empty draft and burn futile repair rounds.
+        if not result:
+            if stop_reason == "refusal":
+                raise ModelProviderError("Anthropic refused the request (stop_reason=refusal)")
+            if not (data.get("content") or []):
+                raise ModelProviderError("Anthropic returned no content blocks")
         finish_reason = (
             "length"
             if stop_reason == "max_tokens"
