@@ -64,7 +64,10 @@ def _partition_source_by_parts(
         if current_chars >= target_quota and part_idx < len(parts) - 1:
             part_idx += 1
 
-    return [" ".join(bucket) if bucket else full_source for bucket in assigned]
+    # An empty bucket gets no source text: filling it with ``full_source``
+    # made every sibling after the first carry the whole paragraph, and the
+    # bilingual in-box merge then repeated the source once per break.
+    return [" ".join(bucket) if bucket else "" for bucket in assigned]
 
 
 def bifurcate_block(block: IRBlock) -> list[IRBlock]:
