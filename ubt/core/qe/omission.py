@@ -300,9 +300,15 @@ class OmissionGate:
         min_chrf_recall: float = 0.7,
         min_chrf_ngrams: int = 8,
         ngram_sizes: tuple[int, ...] = (2, 3, 4),
+        min_length_ratio: float = 0.3,
         glossary: Sequence[Mapping[str, Any]] | None = None,
     ) -> None:
         self.target_lang = target_lang
+        # The sentence-merge exemption floor must come from the pair's
+        # calibrated length band (0.2 for en->zh), not a global constant: a
+        # hardcoded 0.3 quarantines faithful compressive translations the pair
+        # policy explicitly accepts.
+        self.min_length_ratio = min_length_ratio
         self.min_sentence_ratio = min_sentence_ratio
         self.min_source_sentences = min_source_sentences
         self.min_proper_noun_recall = min_proper_noun_recall
@@ -416,7 +422,7 @@ class OmissionGate:
                 proper_noun_recall >= 1.0
                 and number_recall >= 1.0
                 and chrf_recall >= self.min_chrf_recall
-                and len(tgt) >= len(src) * 0.3
+                and len(tgt) >= len(src) * self.min_length_ratio
             )
             if sentence_drop:
                 return OmissionDecision(

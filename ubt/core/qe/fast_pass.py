@@ -667,7 +667,9 @@ class FastPassFilter:
         self.same_script_gate = getattr(self.profile, "same_script_gate", None)
         self.html_validator = HTMLDeltaValidator()
         self.numeric_validator = NumericConsistencyValidator(profile=self.profile)
-        self.omission_gate = OmissionGate(target_lang=self.profile.code)
+        self.omission_gate = OmissionGate(
+            target_lang=self.profile.code, min_length_ratio=self.min_length_ratio
+        )
         self.added_content_gate = AddedContentGate()
 
     def set_glossary(self, glossary: Any) -> None:
