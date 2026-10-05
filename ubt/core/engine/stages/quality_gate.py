@@ -9,6 +9,7 @@ from ubt.core.engine.services import RunServices
 from ubt.core.engine.stage_context import StageContext
 from ubt.core.exceptions import MTQEEvaluationError
 from ubt.core.ir.models import BlockStatus, IRBlock
+from ubt.core.memory.cjk_matcher import count_term_in_text
 from ubt.core.qe.base import BaseQERunner
 from ubt.core.qe.comet_runner import (
     HeuristicQERunner,
@@ -40,8 +41,12 @@ def _fast_pass_screen(
     for b in blocks:
         # Record the enforced glossary terms present in this block's
         # target, so ``glossary_hits`` is populated rather than always [].
+        # Boundary-aware matching (not ``t in target``) so "cat" is not
+        # recorded as a hit inside "category".
         terms = glossary_terms or []
-        b.glossary_hits = [t for t in terms if t and t in (b.target_text or "")]
+        b.glossary_hits = [
+            t for t in terms if t and count_term_in_text(str(t), b.target_text or "") > 0
+        ]
         decision = fast_pass.evaluate(
             b.source_text,
             b.target_text or "",
