@@ -349,6 +349,14 @@ async def ubt_translate_book(
     if output_path is not None:
         resolved_out = _safe_output_path(output_path)
         target_candidate = resolve_target_output(resolved_out, resolved)
+        try:
+            same_as_input = target_candidate.resolve() == Path(resolved).resolve()
+        except OSError:
+            same_as_input = False
+        if same_as_input:
+            # fresh=True resumes the ledger; it is not a licence to overwrite
+            # the source document itself.
+            raise ToolError("output_path equals the input document; refusing to overwrite it")
         if target_candidate.exists() and not fresh:
             raise ToolError(f"output_path already exists; refusing to overwrite it: {output_path}")
         output_path = str(target_candidate)

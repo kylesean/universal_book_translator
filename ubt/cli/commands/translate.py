@@ -29,7 +29,12 @@ from ubt.core.config import (
     QeEngine,
     canonical_render_engine,
 )
-from ubt.core.job_options import profile_name_is_valid, sidecar_path
+from ubt.core.job_options import (
+    default_output_path,
+    profile_name_is_valid,
+    resolve_target_output,
+    sidecar_path,
+)
 from ubt.core.log_config import setup_logging
 from ubt.core.presets import Preset
 
@@ -73,7 +78,7 @@ def _is_interactive() -> bool:
 _PROFILE_EXAMPLES = "general, textbook, paper, fiction, humanities, semiconductor"
 
 
-def _clean_stale_companions(output: Path | None) -> None:
+def _clean_stale_companions(output: Path | None, *, input_path: Path | None = None) -> None:
     if output is None:
         return
     stem = output.stem
@@ -82,24 +87,60 @@ def _clean_stale_companions(output: Path | None) -> None:
         names.append(f"{stem[: -len('_mono')]}_bilingual{output.suffix}")
     for n in names:
         p = output.with_name(n)
-        if p.exists() and p != output:
-            with contextlib.suppress(OSError):
-                p.unlink()
+        if not p.exists() or p == output:
+            continue
+        if input_path is not None and _same_file(p, input_path):
+            # A name-pattern match on the input document itself: -o X_mono.md
+            # beside an input named X_bilingual.md must not delete the source.
+            continue
+        with contextlib.suppress(OSError):
+            p.unlink()
 
 
-def _refuse_existing_output(output: Path | None, *, fresh: bool | None) -> Path | None:
+def _same_file(left: Path, right: Path) -> bool:
+    try:
+        return left.resolve() == right.resolve()
+    except OSError:
+        return False
+
+
+def _refuse_existing_output(
+    output: Path | None, *, fresh: bool | None, input_path: Path
+) -> Path | None:
     """Mirror the API 409 / MCP ToolError overwrite guard on the CLI surface.
 
     The other two entry points refuse to overwrite an existing deliverable
     unless the caller asks for a fresh run; the CLI used to overwrite silently,
     and even its default output name collides on a second run.
     """
+    if output is not None and _same_file(output, input_path):
+        raise typer.BadParameter(
+            f"output path equals the input document; refusing to overwrite it: {output}"
+        )
     if output is None:
+        # The default deliverable is resolved inside the export stage, so guard
+        # both default names here — a second run without --fresh must fail
+        # loudly instead of overwriting the first delivery.
+        if not fresh:
+            for candidate in (
+                default_output_path(input_path, monolingual=False),
+                default_output_path(input_path, monolingual=True),
+            ):
+                if candidate.exists():
+                    raise typer.BadParameter(
+                        f"default output already exists; refusing to overwrite it: {candidate} "
+                        "(pass --fresh to overwrite or -o to choose another path)"
+                    )
         return None
     if fresh:
-        _clean_stale_companions(output)
+        _clean_stale_companions(output, input_path=input_path)
         return output
-    if output.exists():
+    candidate = output
+    if output.is_dir() or str(output).endswith(("/", "\\")):
+        # Directory form resolves to a labelled file inside it (job_options
+        # documents this); guard the resolved candidate, not the directory.
+        candidate = resolve_target_output(output, input_path)
+    if candidate.exists():
         raise typer.BadParameter(
             f"output path already exists; refusing to overwrite it: {output} "
             "(pass --fresh to overwrite)"
@@ -805,7 +846,7 @@ def translate(
                 else:
                     request["emit_companion_rigid"] = True
 
-    output = _refuse_existing_output(output, fresh=fresh)
+    output = _refuse_existing_output(output, fresh=fresh, input_path=input_path)
     try:
         run_fn = _get_run_translation()
         result_path = asyncio.run(
