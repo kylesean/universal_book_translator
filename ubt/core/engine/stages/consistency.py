@@ -157,7 +157,14 @@ async def run_consistency_stage(
     )
     updates = _split_repair_results(results)
     if updates:
-        await asyncio.to_thread(ledger.save_checkpoints_batch, updates)
+        # The blocks entering this stage are usually terminal (MTQE_PASSED /
+        # REPAIRED), and the demoted REPAIR_PENDING + GLOSSARY_VIOLATION_MARKER
+        # verdict below is exactly what triage re-reads — a default
+        # (terminal-guarded) batch write would silently drop it and a drifted
+        # block would ship clean.
+        await asyncio.to_thread(
+            ledger.save_checkpoints_batch, updates, allow_terminal_override=True
+        )
 
     event = await create_event_fn(
         EventType.REPAIR_BATCH_COMPLETED,
