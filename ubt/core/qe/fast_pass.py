@@ -62,7 +62,9 @@ _REPETITION_LINE_MIN_LETTERS = 3
 #: line-level repetition counts as a runaway loop rather than a preserved
 #: refrain. Mirrors ``_REPETITION_COUNT_SLACK`` for the flat detector.
 _REPETITION_LINE_RUN_SLACK = 2
-_LINE_LETTER_RE = re.compile(f"[A-Za-z{CJK_SCRIPT_CLASS}]")
+#: Any Unicode letter (``[^\W\d_]`` = word char minus digits/underscore). The
+#: ASCII+CJK predecessor left Cyrillic/Greek/Arabic repetition loops invisible.
+_LINE_LETTER_RE = re.compile(r"[^\W\d_]")
 # URLs survive translation verbatim, so they are stripped before script-density
 # measurement (same rationale as HTML tags). Bare domains without a scheme or
 # www. prefix are left in place: indistinguishable from ordinary latin tokens.
@@ -407,8 +409,8 @@ def _is_exempt_repetition(src_clean: str, tgt_clean: str, m: re.Match[str]) -> b
 # otherwise clear every gate and be released as MTQE_PASSED.
 _ECHO_MIN_LEN = 16
 _ECHO_FORMATTING_ONLY_RE = re.compile(r"^[`#*_\s0-9.|\-:=]+$")
-_ECHO_WORD_RE = re.compile(f"[A-Za-z{CJK_SCRIPT_CLASS}]{{4}}")
-_ECHO_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9'\-]{2,}")
+_ECHO_WORD_RE = re.compile(r"[^\W\d_]{4}")
+_ECHO_TOKEN_RE = re.compile(r"[^\W\d_][\w'\-]{2,}")
 # Math, inline code, URLs and email addresses are contractually verbatim in any translation,
 # so they carry no translation signal: mask them before counting retained words.
 _ECHO_MASK_RE = re.compile(
