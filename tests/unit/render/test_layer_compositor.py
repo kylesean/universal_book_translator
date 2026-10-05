@@ -196,6 +196,33 @@ def test_a_reflowed_overlay_draws_at_its_box_and_masks_the_source(tmp_path: Path
     assert _flat(_PAGE[1]) not in text
 
 
+def test_a_continuation_box_the_target_does_not_reach_is_still_masked(tmp_path: Path) -> None:
+    # A paragraph crossing a page break owns two boxes: most of it on page 1 and
+    # the spilled tail on page 2. When the (shorter) translation fits the first
+    # box alone, the flow leaves the second empty -- but its source tail still
+    # sits there, so it must be erased or a stray source word survives next to
+    # the translation.
+    source = write_text_pdf(tmp_path / "source.pdf", [["The paragraph begins here"], ["agent."]])
+    output = tmp_path / "out.pdf"
+    spy = _FragmentSpy(tmp_path)
+    first = (54.0, 700.0, 354.0, 730.0)
+    second = (54.0, 725.0, 120.0, 745.0)
+    overlay = Overlay(
+        "e1",
+        1,
+        first,
+        "TRANSLATED",  # 10 chars: fits the first box under the spy's length measure
+        boxes=(PhysicalBox.of(1, first), PhysicalBox.of(2, second)),
+    )
+
+    LayerCompositor(source, typesetter=spy).compose([overlay], output)
+
+    pages = oxide_render.extract_page_texts(output)
+    assert "TRANSLATED" in _flat(pages[0])
+    # The page-2 tail was erased, not left as stray source.
+    assert "agent." not in _flat(pages[1])
+
+
 def test_overlapping_overlays_do_not_erase_each_other(tmp_path: Path) -> None:
     # The source strip runs once per page, before any overlay is stamped. A
     # per-overlay strip recursed into the Form of an overlay already drawn on

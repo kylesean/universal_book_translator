@@ -1404,7 +1404,11 @@ class _StampedPart:
     overlay: Overlay
     page_no: int
     bbox: BBox
-    form: pikepdf.Object
+    #: The fragment to draw, or ``None`` for a mask-only part: a continuation box
+    #: the (shorter) target never reached. The box still holds the source tail of
+    #: the paragraph being replaced, so it must be erased even though it draws
+    #: nothing.
+    form: pikepdf.Object | None
     #: The source box to mask. ``bbox`` is expanded below by the line slack so the
     #: fragment fits at the source size, but the mask must not grow into the next
     #: line, so it stays at the extracted box.
@@ -1617,9 +1621,27 @@ class LayerCompositor:
             )
             source_by_box = {(part.box.page, part.box.bbox): part.text for part in source_parts}
         stamped: list[_StampedPart] = []
+        multi_box = len(boxes) > 1
         for index, part in enumerate(parts):
             source = source_by_box.get((part.box.page, part.box.bbox), "")
+            # Mask the *source* geometry: a reflowed overlay draws at its own box
+            # but the source text still sits where the block was, so the mask
+            # follows ``mask_boxes`` rather than the draw box.
+            mask_bbox = (
+                overlay.mask_boxes[index].bbox if index < len(overlay.mask_boxes) else part.box.bbox
+            )
             if not part.text.strip() and not source.strip():
+                # A continuation box the (shorter) target did not reach. Its
+                # source still sits there -- the tail of the very paragraph we
+                # re-rendered in the earlier boxes -- so erase it even though
+                # this box draws nothing. Skipping it leaves that tail (e.g. a
+                # word spilled to the next page) as stray source text.
+                if multi_box:
+                    stamped.append(
+                        _StampedPart(
+                            overlay, part.box.page, part.box.bbox, None, mask_bbox=mask_bbox
+                        )
+                    )
                 continue
             x0, y0, x1, y1 = part.box.bbox
             form = self._compile_form(
@@ -1627,14 +1649,6 @@ class LayerCompositor:
             )
             if form is not None:
                 draw_bbox = (x0, y0 - slack, x1, y1)
-                # Mask the *source* geometry: a reflowed overlay draws at
-                # ``draw_bbox`` but the source text still sits where the block was,
-                # so its mask follows ``mask_boxes`` rather than the draw box.
-                mask_bbox = (
-                    overlay.mask_boxes[index].bbox
-                    if index < len(overlay.mask_boxes)
-                    else part.box.bbox
-                )
                 stamped.append(
                     _StampedPart(overlay, part.box.page, draw_bbox, form, mask_bbox=mask_bbox)
                 )
@@ -1790,6 +1804,10 @@ class LayerCompositor:
         media = [float(v) for v in page.MediaBox]
         mb_x0, mb_y0, mb_x1, mb_y1 = media[0], media[1], media[2], media[3]
         for item in items:
+            if item.form is None:
+                # A mask-only continuation box: the source tail is erased above,
+                # but there is no fragment to draw.
+                continue
             x0, y0, x1, y1 = item.bbox
             # The draw box carries the line slack added after the page clamp;
             # re-clamp here so a bottom-margin fragment cannot draw below the
