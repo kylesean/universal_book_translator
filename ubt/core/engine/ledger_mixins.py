@@ -354,6 +354,26 @@ class LedgerJobsMixin(LedgerBase):
             stored = row["target_lang"]
             return str(stored) if stored else None
 
+    def get_job_source_path(self, job_id: str) -> str | None:
+        """Source document path stored at ingest (None if unspecified).
+
+        The delivery render composes onto this PDF as its canvas, so the L3
+        single-page preview needs the same path back from the ledger.
+        """
+        with self._get_conn() as conn:
+            try:
+                actual_id = self._resolve_actual_job_id(conn, job_id)
+            except sqlite3.Error as exc:
+                logger.warning("get_job_source_path(%r): job_id resolution failed: %s", job_id, exc)
+                return None
+            row = conn.execute(
+                "SELECT source_path FROM job_meta WHERE job_id = ?", (actual_id,)
+            ).fetchone()
+            if not row:
+                return None
+            stored = row["source_path"]
+            return str(stored) if stored else None
+
     def resolve_job_id(self, job_id: str) -> str | None:
         """The stored job_id this handle resolves ``job_id`` to (exact id, or the
         latest job for a doc_id), or ``None`` when no such job exists here.

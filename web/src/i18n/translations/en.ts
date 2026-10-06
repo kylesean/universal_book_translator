@@ -176,5 +176,8 @@ export const en: TranslationDictionary = {
       'Pixel-witness view pending: needs a PDF.js canvas and a single-page incremental re-render backend.',
     prevIssue: 'Previous issue (Shift+F8)',
     nextIssue: 'Next issue (F8)',
+    previewPage: 'Preview this page',
+    previewLoading: 'Re-rendering this page...',
+    previewFailed: 'Page preview unavailable (needs typst and a source PDF).',
   },
 }

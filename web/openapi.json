@@ -1077,6 +1077,108 @@
         }
       }
     },
+    "/jobs/{job_id}/pages/{page}/preview": {
+      "get": {
+        "tags": [
+          "Jobs"
+        ],
+        "summary": "Preview Page",
+        "description": "Re-compose one source page with the current ledger text, as PNG.\n\nReuses the delivery compositor (source page as canvas) for a single page,\nso a human edit can be previewed without re-rendering the book. 503 when\nthe page has nothing to compose or the rasterizer is unavailable.",
+        "operationId": "preview_page_jobs__job_id__pages__page__preview_get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "page",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Page"
+            }
+          },
+          {
+            "name": "dpi",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 110,
+              "title": "Dpi"
+            }
+          },
+          {
+            "name": "bilingual",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Bilingual"
+            }
+          },
+          {
+            "name": "x-ubt-tenant",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Ubt-Tenant"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/model-profiles": {
       "get": {
         "tags": [

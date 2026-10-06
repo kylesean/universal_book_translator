@@ -277,6 +277,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/jobs/{job_id}/pages/{page}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preview Page
+         * @description Re-compose one source page with the current ledger text, as PNG.
+         *
+         *     Reuses the delivery compositor (source page as canvas) for a single page,
+         *     so a human edit can be previewed without re-rendering the book. 503 when
+         *     the page has nothing to compose or the rasterizer is unavailable.
+         */
+        get: operations["preview_page_jobs__job_id__pages__page__preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/model-profiles": {
         parameters: {
             query?: never;
@@ -1354,6 +1378,44 @@ export interface operations {
                 "application/json": components["schemas"]["SegmentEditRequest"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_page_jobs__job_id__pages__page__preview_get: {
+        parameters: {
+            query?: {
+                dpi?: number;
+                bilingual?: boolean;
+            };
+            header?: {
+                "x-ubt-tenant"?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path: {
+                job_id: string;
+                page: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

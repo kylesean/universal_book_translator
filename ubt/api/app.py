@@ -6,6 +6,7 @@ import ipaddress
 import json
 import logging
 import os
+import tempfile
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -87,6 +88,7 @@ from ubt.core.qe import BaseQERunner
 from ubt.core.router import ModelProfile, get_default_registry
 from ubt.core.router.rate_limiter import build_rate_limiter
 from ubt.core.router.router import ModelRouter
+from ubt.render.page_preview import PagePreviewUnavailable, render_page_preview
 
 logger = logging.getLogger(__name__)
 
@@ -1590,6 +1592,66 @@ def create_app(
             match = next((b for b in blocks if b.id == block_id), None)
             updated = serialize_segment(match) if match is not None else None
         return JSONResponse({**result, "job_id": valid_id, "segment": updated})
+
+    @api_app.get("/jobs/{job_id}/pages/{page}/preview", tags=["Jobs"])
+    async def preview_page(
+        job_id: str,
+        page: int,
+        dpi: int = 110,
+        bilingual: bool = False,
+        x_ubt_tenant: str | None = Header(default=None),
+    ) -> Response:
+        """Re-compose one source page with the current ledger text, as PNG.
+
+        Reuses the delivery compositor (source page as canvas) for a single page,
+        so a human edit can be previewed without re-rendering the book. 503 when
+        the page has nothing to compose or the rasterizer is unavailable.
+        """
+        valid_id = validate_job_id(job_id)
+        if not await _tenant_allows_async(valid_id, _tenant_from_header(x_ubt_tenant)):
+            raise _cross_tenant_404(valid_id)
+        if page < 1:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="page must be >= 1"
+            )
+        blocks = await _read_job_blocks(valid_id)
+        if blocks is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"Job not found: {valid_id}"
+            )
+
+        def _meta() -> tuple[str | None, str | None]:
+            with SQLiteJobLedger(_job_db_path(valid_id), read_only=True) as ledger:
+                return (
+                    ledger.get_job_source_path(valid_id),
+                    ledger.get_job_target_lang(valid_id),
+                )
+
+        source_path, target_lang = await asyncio.to_thread(_meta)
+        if not source_path:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Job has no source document to preview against.",
+            )
+        resolved_source = resolve_secure_path(source_path, must_exist=True, config=app_config)
+
+        with tempfile.TemporaryDirectory(prefix="ubt_page_preview_") as tmp:
+            try:
+                png = await asyncio.to_thread(
+                    render_page_preview,
+                    source_pdf=resolved_source,
+                    blocks=blocks,
+                    target_lang=target_lang or "zh",
+                    page=page,
+                    workdir=Path(tmp),
+                    bilingual=bilingual,
+                    dpi=min(max(dpi, 40), 200),
+                )
+            except PagePreviewUnavailable as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
+                ) from exc
+        return Response(content=png, media_type="image/png")
 
     @api_app.get(
         "/api/v1/model-profiles",

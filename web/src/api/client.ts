@@ -309,6 +309,20 @@ export async function listIssues(jobId: string): Promise<IssuesReport> {
   return res.json()
 }
 
+/**
+ * URL of the single-page re-render preview (PNG). Composed server-side from the
+ * current ledger text via the delivery compositor; `cacheBust` forces a refetch
+ * after an edit.
+ */
+export function pagePreviewUrl(jobId: string, page: number, opts: { dpi?: number; cacheBust?: number } = {}): string {
+  const query = new URLSearchParams()
+  if (opts.dpi !== undefined) query.set('dpi', String(opts.dpi))
+  if (opts.cacheBust !== undefined) query.set('t', String(opts.cacheBust))
+  const suffix = query.toString()
+  const base = `${BASE_URL}/jobs/${encodeURIComponent(jobId)}/pages/${page}/preview`
+  return suffix ? `${base}?${suffix}` : base
+}
+
 export async function editSegment(
   jobId: string,
   blockId: string,

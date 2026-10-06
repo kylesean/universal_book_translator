@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import {
   SplitSquareVertical,
   Save,
@@ -8,10 +9,18 @@ import {
   ChevronUp,
   ChevronDown,
   CheckCircle2,
+  ImageOff,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
-import { listSegments, listIssues, editSegment, type Segment, type IssuesReport } from '@/api/client'
+import {
+  listSegments,
+  listIssues,
+  editSegment,
+  pagePreviewUrl,
+  type Segment,
+  type IssuesReport,
+} from '@/api/client'
 import { useI18n } from '@/i18n/I18nContext'
 
 interface ReviewWorkbenchProps {
@@ -35,7 +44,7 @@ const ISSUE_LABELS: Record<string, string> = {
   render: 'Render/overflow',
 }
 
-const PAGE_LIMIT = 200
+const PAGE_LIMIT = 500
 
 export function ReviewWorkbench({ jobId }: ReviewWorkbenchProps) {
   const { t } = useI18n()
@@ -51,8 +60,10 @@ export function ReviewWorkbench({ jobId }: ReviewWorkbenchProps) {
   const [saving, setSaving] = useState<Record<string, boolean>>({})
   const [saved, setSaved] = useState<Record<string, boolean>>({})
   const [issueCursor, setIssueCursor] = useState(0)
+  const [openPreviews, setOpenPreviews] = useState<Record<number, boolean>>({})
+  const [previewBust, setPreviewBust] = useState(0)
 
-  const cardRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const scrollRef = useRef<HTMLDivElement>(null)
 
   const load = useCallback(async () => {
     if (!jobId) return
@@ -80,17 +91,34 @@ export function ReviewWorkbench({ jobId }: ReviewWorkbenchProps) {
     void load()
   }, [load])
 
-  const issueSegments = useMemo(
-    () => segments.filter((s) => s.issues.length > 0 || s.status === 'needs_human' || s.status === 'blocked_human'),
+  // Virtualize the segment list: a 10k-segment book keeps a constant DOM node
+  // count (PRD §9 risk 1) instead of one card per segment.
+  const virtualizer = useVirtualizer({
+    count: segments.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 210,
+    overscan: 6,
+  })
+
+  const issueIndices = useMemo(
+    () =>
+      segments
+        .map((segment, index) => ({ segment, index }))
+        .filter(
+          ({ segment }) =>
+            segment.issues.length > 0 ||
+            segment.status === 'needs_human' ||
+            segment.status === 'blocked_human'
+        )
+        .map(({ index }) => index),
     [segments]
   )
 
   const jumpToIssue = (delta: number) => {
-    if (issueSegments.length === 0) return
-    const next = (issueCursor + delta + issueSegments.length) % issueSegments.length
+    if (issueIndices.length === 0) return
+    const next = (issueCursor + delta + issueIndices.length) % issueIndices.length
     setIssueCursor(next)
-    const target = cardRefs.current[issueSegments[next].block_id]
-    target?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    virtualizer.scrollToIndex(issueIndices[next], { align: 'center' })
   }
 
   const handleSave = async (segment: Segment) => {
@@ -110,11 +138,20 @@ export function ReviewWorkbench({ jobId }: ReviewWorkbenchProps) {
         delete next[segment.block_id]
         return next
       })
+      // The edit changed the ledger text: any open page preview is now stale.
+      if (segment.page !== null && openPreviews[segment.page]) {
+        setPreviewBust(Date.now())
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save revision')
     } finally {
       setSaving((prev) => ({ ...prev, [segment.block_id]: false }))
     }
+  }
+
+  const togglePreview = (page: number | null) => {
+    if (page === null) return
+    setOpenPreviews((prev) => ({ ...prev, [page]: !prev[page] }))
   }
 
   if (!jobId) {
@@ -132,6 +169,35 @@ export function ReviewWorkbench({ jobId }: ReviewWorkbenchProps) {
   const ribbonCounts = issues
     ? Object.entries(issues.counts).filter(([, value]) => value > 0)
     : []
+
+  const previewPages = Array.from(
+    new Set(segments.map((segment) => segment.page).filter((page): page is number => page !== null))
+  )
+
+  const renderPreview = (page: number) => (
+    <div className="mt-3 rounded-[6px] border border-[var(--paper-border)] bg-[var(--paper-subsurface)] overflow-hidden">
+      <div className="h-7 px-3 flex items-center justify-between text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] border-b border-[var(--paper-border)]">
+        <span>
+          {t.review.previewPage} · P{page}
+        </span>
+      </div>
+      <img
+        src={pagePreviewUrl(jobId, page, { dpi: 110, cacheBust: previewBust })}
+        alt={`Page ${page} preview`}
+        className="w-full max-h-[560px] object-contain bg-white"
+        onError={(e) => {
+          const target = e.currentTarget
+          target.style.display = 'none'
+          const sibling = target.nextElementSibling as HTMLElement | null
+          if (sibling) sibling.style.display = 'flex'
+        }}
+      />
+      <div className="hidden items-center gap-2 p-4 text-xs text-[var(--ink-secondary)]">
+        <ImageOff className="h-4 w-4 shrink-0" />
+        {t.review.previewFailed}
+      </div>
+    </div>
+  )
 
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-[var(--paper-bg)] text-[var(--ink-primary)]">
@@ -238,138 +304,182 @@ export function ReviewWorkbench({ jobId }: ReviewWorkbenchProps) {
       )}
 
       {viewMode === 'segments' ? (
-        <div className="flex-1 overflow-y-auto px-8 py-6 space-y-4 max-w-5xl mx-auto w-full">
-          {loading ? (
-            <div className="py-12 text-center text-[var(--ink-muted)]">
-              <Loader2 className="h-5 w-5 animate-spin mx-auto" />
-            </div>
-          ) : segments.length === 0 ? (
-            <div className="py-12 text-center text-xs text-[var(--ink-muted)]">
-              {t.review.noSegments}
-            </div>
-          ) : (
-            <>
-              {segments.map((seg) => {
+        loading ? (
+          <div className="flex-1 flex items-center justify-center text-[var(--ink-muted)]">
+            <Loader2 className="h-5 w-5 animate-spin" />
+          </div>
+        ) : segments.length === 0 ? (
+          <div className="flex-1 flex items-center justify-center text-xs text-[var(--ink-muted)]">
+            {t.review.noSegments}
+          </div>
+        ) : (
+          <div ref={scrollRef} className="flex-1 overflow-y-auto">
+            <div
+              className="relative w-full max-w-5xl mx-auto py-6"
+              style={{ height: virtualizer.getTotalSize() }}
+            >
+              {virtualizer.getVirtualItems().map((virtualRow) => {
+                const seg = segments[virtualRow.index]
                 const draft = drafts[seg.block_id] ?? seg.target_text
                 const dirty = draft !== seg.target_text
+                const previewOpen = seg.page !== null && openPreviews[seg.page]
                 return (
                   <div
                     key={seg.block_id}
-                    ref={(el) => {
-                      cardRefs.current[seg.block_id] = el
-                    }}
-                    className={`rounded-lg border transition-colors shadow-2xs bg-[var(--paper-surface)] ${
-                      seg.issues.length > 0
-                        ? 'border-[#b45309]/50'
-                        : 'border-[var(--paper-border)]'
-                    }`}
+                    data-index={virtualRow.index}
+                    ref={virtualizer.measureElement}
+                    className="absolute top-0 left-0 w-full px-8"
+                    style={{ transform: `translateY(${virtualRow.start}px)` }}
                   >
-                    <div className="h-8 px-3.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] flex items-center justify-between text-xs font-mono text-[var(--ink-muted)]">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[var(--ink-primary)] font-bold">{seg.block_id}</span>
-                        {seg.page !== null && <span>Page {seg.page}</span>}
-                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-[var(--paper-border)] text-[var(--ink-secondary)] font-semibold">
-                          {seg.block_type}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {seg.issues.map((kind) => (
-                          <span
-                            key={kind}
-                            className="text-[10px] px-1.5 py-0.5 rounded bg-[#b45309]/15 text-[#b45309] font-semibold"
-                          >
-                            {ISSUE_LABELS[kind] ?? kind}
-                          </span>
-                        ))}
-                        {seg.mtqe_score !== null && (
-                          <span className="font-semibold text-[var(--ink-primary)]">
-                            QE {(seg.mtqe_score * 100).toFixed(0)}%
-                          </span>
-                        )}
-                        {seg.human_verified ? (
-                          <Badge variant="success" dot>
-                            {t.review.humanVerified}
-                          </Badge>
-                        ) : (
-                          <Badge
-                            variant={seg.issues.length > 0 ? 'warning' : 'outline'}
-                            dot
-                          >
-                            {seg.status.toUpperCase()}
-                          </Badge>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-[var(--paper-border)] text-xs">
-                      <div className="p-4 text-[var(--ink-secondary)] font-mono leading-relaxed select-text bg-[var(--paper-subsurface)]/20">
-                        <div className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] mb-1 font-semibold">
-                          {t.review.sourceSegment}
-                        </div>
-                        {seg.source_text}
-                      </div>
-
-                      <div className="p-4 flex flex-col justify-between bg-[var(--paper-surface)]">
-                        <div>
-                          <div className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] mb-1.5 flex items-center justify-between font-semibold">
-                            <span>{t.review.targetSegment}</span>
-                            {saved[seg.block_id] && (
-                              <span className="text-[#15803d] font-sans font-medium">
-                                {t.review.saved}
+                    <div className="pb-4">
+                      <div
+                        className={`rounded-lg border transition-colors shadow-2xs bg-[var(--paper-surface)] ${
+                          seg.issues.length > 0
+                            ? 'border-[#b45309]/50'
+                            : 'border-[var(--paper-border)]'
+                        }`}
+                      >
+                        <div className="h-8 px-3.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] flex items-center justify-between text-xs font-mono text-[var(--ink-muted)]">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[var(--ink-primary)] font-bold">
+                              {seg.block_id}
+                            </span>
+                            {seg.page !== null && (
+                              <button
+                                onClick={() => togglePreview(seg.page)}
+                                title={t.review.previewPage}
+                                className={`px-1.5 py-0.5 rounded text-[10px] font-semibold transition-colors ${
+                                  previewOpen
+                                    ? 'bg-[var(--ink-primary)] text-[var(--paper-bg)]'
+                                    : 'bg-[var(--paper-border)] text-[var(--ink-secondary)] hover:text-[var(--ink-primary)]'
+                                }`}
+                              >
+                                Page {seg.page}
+                              </button>
+                            )}
+                            <span className="text-[10px] px-1.5 py-0.2 rounded bg-[var(--paper-border)] text-[var(--ink-secondary)] font-semibold">
+                              {seg.block_type}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {seg.issues.map((kind) => (
+                              <span
+                                key={kind}
+                                className="text-[10px] px-1.5 py-0.5 rounded bg-[#b45309]/15 text-[#b45309] font-semibold"
+                              >
+                                {ISSUE_LABELS[kind] ?? kind}
+                              </span>
+                            ))}
+                            {seg.mtqe_score !== null && (
+                              <span className="font-semibold text-[var(--ink-primary)]">
+                                QE {(seg.mtqe_score * 100).toFixed(0)}%
                               </span>
                             )}
+                            {seg.human_verified ? (
+                              <Badge variant="success" dot>
+                                {t.review.humanVerified}
+                              </Badge>
+                            ) : (
+                              <Badge variant={seg.issues.length > 0 ? 'warning' : 'outline'} dot>
+                                {seg.status.toUpperCase()}
+                              </Badge>
+                            )}
                           </div>
-                          <textarea
-                            value={draft}
-                            onChange={(e) =>
-                              setDrafts((prev) => ({ ...prev, [seg.block_id]: e.target.value }))
-                            }
-                            rows={3}
-                            className="w-full bg-transparent text-[var(--ink-primary)] text-xs resize-none focus:outline-none font-mono leading-relaxed placeholder:text-[var(--ink-muted)]"
-                          />
                         </div>
 
-                        <div className="flex items-center justify-end gap-2 pt-2.5 border-t border-[var(--paper-border)] mt-3">
-                          <Button
-                            onClick={() => handleSave(seg)}
-                            variant="primary"
-                            size="sm"
-                            disabled={!dirty || saving[seg.block_id]}
-                            className="text-[11px] h-6 px-2.5 font-bold"
-                          >
-                            {saving[seg.block_id] ? (
-                              <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                            ) : (
-                              <Save className="h-3 w-3 mr-1" />
-                            )}
-                            {saving[seg.block_id] ? t.review.saving : t.review.saveFeedback}
-                          </Button>
+                        <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-[var(--paper-border)] text-xs">
+                          <div className="p-4 text-[var(--ink-secondary)] font-mono leading-relaxed select-text bg-[var(--paper-subsurface)]/20">
+                            <div className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] mb-1 font-semibold">
+                              {t.review.sourceSegment}
+                            </div>
+                            {seg.source_text}
+                          </div>
+
+                          <div className="p-4 flex flex-col justify-between bg-[var(--paper-surface)]">
+                            <div>
+                              <div className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] mb-1.5 flex items-center justify-between font-semibold">
+                                <span>{t.review.targetSegment}</span>
+                                {saved[seg.block_id] && (
+                                  <span className="text-[#15803d] font-sans font-medium">
+                                    {t.review.saved}
+                                  </span>
+                                )}
+                              </div>
+                              <textarea
+                                value={draft}
+                                onChange={(e) =>
+                                  setDrafts((prev) => ({
+                                    ...prev,
+                                    [seg.block_id]: e.target.value,
+                                  }))
+                                }
+                                rows={3}
+                                className="w-full bg-transparent text-[var(--ink-primary)] text-xs resize-none focus:outline-none font-mono leading-relaxed placeholder:text-[var(--ink-muted)]"
+                              />
+                            </div>
+
+                            <div className="flex items-center justify-end gap-2 pt-2.5 border-t border-[var(--paper-border)] mt-3">
+                              <Button
+                                onClick={() => handleSave(seg)}
+                                variant="primary"
+                                size="sm"
+                                disabled={!dirty || saving[seg.block_id]}
+                                className="text-[11px] h-6 px-2.5 font-bold"
+                              >
+                                {saving[seg.block_id] ? (
+                                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                ) : (
+                                  <Save className="h-3 w-3 mr-1" />
+                                )}
+                                {saving[seg.block_id] ? t.review.saving : t.review.saveFeedback}
+                              </Button>
+                            </div>
+                          </div>
                         </div>
                       </div>
+
+                      {previewOpen && seg.page !== null && renderPreview(seg.page)}
                     </div>
                   </div>
                 )
               })}
-
-              {total > segments.length && (
-                <div className="text-center text-[11px] text-[var(--ink-muted)] pt-2">
-                  {segments.length} / {total}
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      ) : (
-        /* Visual witness mode — backend support (page rasterization + single-page
-           incremental re-render) is not built yet; show an honest placeholder
-           rather than a fake diff. */
-        <div className="flex-1 flex items-center justify-center p-8 text-center">
-          <div className="max-w-md space-y-2">
-            <Eye className="h-8 w-8 mx-auto text-[var(--paper-border-hover)]" />
-            <p className="text-xs text-[var(--ink-secondary)] leading-relaxed">
-              {t.review.visualPending}
-            </p>
+            </div>
           </div>
+        )
+      ) : (
+        /* Visual witness: the single-page re-render preview. */
+        <div className="flex-1 overflow-y-auto px-8 py-6 max-w-5xl mx-auto w-full space-y-4">
+          {previewPages.length === 0 ? (
+            <div className="py-12 text-center text-xs text-[var(--ink-muted)]">
+              {t.review.noSegments}
+            </div>
+          ) : (
+            previewPages.map((page) => (
+              <div key={page} className="rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] shadow-2xs overflow-hidden">
+                <div className="h-8 px-3.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] flex items-center justify-between text-xs font-mono text-[var(--ink-muted)]">
+                  <span className="flex items-center gap-1.5">
+                    <Eye className="h-3.5 w-3.5" /> Page {page}
+                  </span>
+                  <span>{t.review.previewPage}</span>
+                </div>
+                <img
+                  src={pagePreviewUrl(jobId, page, { dpi: 110, cacheBust: previewBust })}
+                  alt={`Page ${page}`}
+                  className="w-full max-h-[720px] object-contain bg-white"
+                  onError={(e) => {
+                    const target = e.currentTarget
+                    target.style.display = 'none'
+                    const sibling = target.nextElementSibling as HTMLElement | null
+                    if (sibling) sibling.style.display = 'flex'
+                  }}
+                />
+                <div className="hidden items-center gap-2 p-4 text-xs text-[var(--ink-secondary)]">
+                  <ImageOff className="h-4 w-4 shrink-0" />
+                  {t.review.previewFailed}
+                </div>
+              </div>
+            ))
+          )}
         </div>
       )}
     </div>

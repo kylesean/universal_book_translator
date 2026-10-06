@@ -175,5 +175,8 @@ export interface TranslationDictionary {
     visualPending: string
     prevIssue: string
     nextIssue: string
+    previewPage: string
+    previewLoading: string
+    previewFailed: string
   }
 }

@@ -175,5 +175,8 @@ export const zh: TranslationDictionary = {
     visualPending: '像素叠差视图待实现：需要 PDF.js 画布与单页增量重渲染后端支持。',
     prevIssue: '上一处 (Shift+F8)',
     nextIssue: '下一处 (F8)',
+    previewPage: '预览本页排版',
+    previewLoading: '正在重渲染本页...',
+    previewFailed: '本页预览不可用（需要 typst 与源 PDF）。',
   },
 }
