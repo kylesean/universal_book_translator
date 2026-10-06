@@ -260,6 +260,27 @@ class JobAssessRequest(BaseModel):
         return _require_supported_target_lang(value)
 
 
+class GlossaryTermRequest(BaseModel):
+    """One glossary term to add to (or remove from) the configured glossary file."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source: str = Field(..., min_length=1, description="Source term")
+    target: str = Field(default="", description="Target translation (required when adding)")
+
+
+class TMevictRequest(BaseModel):
+    """Translation-memory rows to evict, by id."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Bounded so one request cannot submit an unbounded delete set (the store
+    # deletes in batches, but the parsed list is held whole first).
+    ids: list[int] = Field(
+        default_factory=list, max_length=10_000, description="TM entry ids to delete"
+    )
+
+
 class JobSubmitResponse(BaseModel):
     """Response returned upon successful job enqueueing."""
 

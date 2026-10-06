@@ -1,0 +1,73 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Default: Crisp Cotton / 纯质棉白纸 (#faf8f5) */
+  --paper-bg: #faf8f5;
+  --paper-surface: #ffffff;
+  --paper-subsurface: #f4f1ea;
+  --paper-border: #e6e2d8;
+  --paper-border-hover: #d5cfc2;
+
+  --ink-primary: #18181b;
+  --ink-secondary: #52525b;
+  --ink-muted: #8c877d;
+  --ink-highlight: #15803d;
+  --ink-amber: #b45309;
+  --ink-rose: #b91c1c;
+
+  --btn-bg: #18181b;
+  --btn-fg: #faf8f5;
+  --btn-hover: #27272a;
+  --btn-badge-bg: #3f3f46;
+  --btn-badge-fg: #f4f4f5;
+
+  color-scheme: light;
+}
+
+[data-paper-tone="dowling"] {
+  /* Classic Dowling / 原色道林暖纸 (#f5f2e9) */
+  --paper-bg: #f5f2e9;
+  --paper-surface: #fcfbf7;
+  --paper-subsurface: #ebe6d8;
+  --paper-border: #ded7c6;
+  --paper-border-hover: #cfc7b3;
+
+  --ink-primary: #1c1917;
+  --ink-secondary: #57534e;
+  --ink-muted: #8c8577;
+  --ink-highlight: #15803d;
+  --ink-amber: #c2410c;
+  --ink-rose: #b91c1c;
+
+  --btn-bg: #1c1917;
+  --btn-fg: #fcfbf7;
+  --btn-hover: #292524;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--paper-bg);
+  color: var(--ink-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Geist", "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom editorial paper scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--paper-bg);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--paper-border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--paper-border-hover);
+}

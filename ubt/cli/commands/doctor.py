@@ -167,12 +167,6 @@ def doctor_command(
     with ``status``/``summary``/``checks`` so a CI gate need not scrape the
     human checklist.
     """
-    # Imported here, not at module scope: `ubt doctor` is not `ubt --help`, but
-    # every command module is imported when the Typer app is built, so a
-    # module-scope adapter import makes `ubt version` pay the whole
-    # docling/pdf_oxide/pikepdf graph (~80 ms) before parsing an argument.
-    from ubt.adapters import is_pdf_engine_registered
-
     try:
         config = UBTConfig.from_env()
     except ValidationError as exc:
@@ -209,6 +203,28 @@ def doctor_command(
         else:
             console.print(f"[bold red]Configuration invalid:[/] {exc}")
         raise typer.Exit(code=2) from exc
+
+    checks = collect_checks(config, probe=probe)
+    if json_output:
+        _emit_json(checks)
+    else:
+        _emit_human(checks)
+    if any(check.status == "FAIL" for check in checks):
+        raise typer.Exit(code=1)
+
+
+def collect_checks(config: UBTConfig, *, probe: bool = False) -> list[_Check]:
+    """Run every read-only self-check and return the results.
+
+    Shared by ``ubt doctor`` and the console's ``/system/doctor`` endpoint so the
+    two surfaces cannot drift. Read-only and offline unless ``probe`` is set, in
+    which case the provider endpoint is contacted once.
+    """
+    # Imported here, not at module scope: `ubt doctor` is not `ubt --help`, but
+    # every command module is imported when the Typer app is built, so a
+    # module-scope adapter import makes `ubt version` pay the whole
+    # docling/pdf_oxide/pikepdf graph (~80 ms) before parsing an argument.
+    from ubt.adapters import is_pdf_engine_registered
 
     checks: list[_Check] = []
     group = _GROUPS[0]
@@ -660,9 +676,4 @@ def doctor_command(
     except ImportError:
         record("CJK font (metrics)", "SKIP", "font metrics module unavailable")
 
-    if json_output:
-        _emit_json(checks)
-    else:
-        _emit_human(checks)
-    if any(check.status == "FAIL" for check in checks):
-        raise typer.Exit(code=1)
+    return checks

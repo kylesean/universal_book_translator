@@ -23,6 +23,8 @@ output/
 tmp/
 scratch/
 scripts/mathjax/node_modules/
+web/node_modules/
+web/dist/
 
 # Docs are intentionally unversioned: they change too often to track. The
 # `docs/` tree stays in the working copy; it is just never committed. Code and

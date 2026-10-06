@@ -5,6 +5,14 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["ubt"]
 
+# The operator console is a prebuilt Vite bundle copied into ubt/api/static by
+# scripts/build_console_assets.py. It is force-included so a `pip install`ed
+# wheel serves the console with no Node.js/pnpm on the end-user machine (PRD
+# §7.1.2 / §9). Run the asset build before packaging; a source tree without a
+# built frontend has nothing to embed.
+[tool.hatch.build.targets.wheel.force-include]
+"ubt/api/static" = "ubt/api/static"
+
 # The sdist has no install use beyond source builds, so keep it to what a
 # distributor actually needs. Without this it bundled every ``tests/`` entry --
 # fixtures plus generated PDFs/EPUBs -- and every PyPI sdist download paid for

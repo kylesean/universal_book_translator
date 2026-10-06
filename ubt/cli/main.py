@@ -14,6 +14,7 @@ from rich.table import Table
 from ubt import __version__
 from ubt.cli.commands.assess import _assess_money, assess_cmd
 from ubt.cli.commands.config_cmd import config_command
+from ubt.cli.commands.console import console_command
 from ubt.cli.commands.doctor import doctor_command
 from ubt.cli.commands.status import inspect_book, job_status, pe_import, recheck_gates_cmd
 from ubt.cli.commands.translate import console as console
@@ -552,6 +553,8 @@ app.command(name="doctor")(doctor_command)
 app.command(name="worker")(worker_command)
 app.command(name="config")(config_command)
 app.command(name="verify")(verify_command)
+app.command(name="console")(console_command)
+app.command(name="web")(console_command)
 
 __all__ = [
     "app",

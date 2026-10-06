@@ -18,12 +18,22 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, 
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from ubt import __version__
+from ubt.api.assets import (
+    GlossaryFormatError,
+    add_glossary_term,
+    evict_tm_entries,
+    list_tm_entries,
+    read_glossary_terms,
+    remove_glossary_term,
+)
 from ubt.api.manager import JobManager, JobRecord
 from ubt.api.models import (
+    GlossaryTermRequest,
     JobAssessRequest,
     JobStatusResponse,
     JobSubmitRequest,
     JobSubmitResponse,
+    TMevictRequest,
 )
 from ubt.api.security import (
     SENSITIVE_FILENAME_PARTS,
@@ -53,10 +63,12 @@ from ubt.core.job_options import (
     JOB_ID_RE,
     LANG_CODE_PATTERN,
     apply_config_overrides,
+    companion_path,
     default_output_path,
     overrides_from_request,
     resolve_target_output,
     run_kwargs_from_request,
+    sidecar_path,
 )
 from ubt.core.log_config import setup_logging
 from ubt.core.qe import BaseQERunner
@@ -233,6 +245,50 @@ def _public_report(value: Any) -> Any:
     if isinstance(value, list):
         return [_public_report(item) for item in value]
     return value
+
+
+#: Deliverable key -> (human label, media type). The *path* for a key is derived
+#: from the job's primary artifact by :func:`_deliverable_paths`; this table only
+#: names the keys the API is willing to serve, so an unknown key is a 404 rather
+#: than a path guess.
+DELIVERABLE_LABELS: dict[str, tuple[str, str]] = {
+    "primary": ("Translated document", "application/octet-stream"),
+    "rigid": ("Rigid companion PDF", "application/pdf"),
+    "secondary": ("Complementary mono/dual document", "application/octet-stream"),
+    "epub": ("Reflowable EPUB", "application/epub+zip"),
+    "contract": ("Delivery contract (JSON)", "application/json"),
+    "quality_report": ("Quality report (JSON)", "application/json"),
+    "visual_report": ("Visual gate report (JSON)", "application/json"),
+    "metrics": ("Run metrics (JSON)", "application/json"),
+}
+
+
+def _deliverable_paths(output_file: str | Path) -> dict[str, Path]:
+    """Every deliverable that hangs off a job's primary artifact.
+
+    Uses the export stage's own naming helpers (``sidecar_path`` /
+    ``companion_path`` plus the ``_rigid`` / ``_mono`` / ``_dual`` siblings)
+    rather than a second copy of the rule, so the API and the writer cannot
+    drift. Missing files are still returned as candidate paths; the caller
+    filters by existence.
+    """
+    out = Path(output_file)
+    stem, suffix = out.stem, out.suffix
+    paths: dict[str, Path] = {
+        "primary": out,
+        "rigid": out.with_name(f"{stem}_rigid{suffix}"),
+        "epub": companion_path(out, ".epub"),
+        "contract": sidecar_path(out, "contract.json"),
+        "quality_report": sidecar_path(out, "quality_report.json"),
+        "visual_report": sidecar_path(out, "visual_report.json"),
+        "metrics": sidecar_path(out, "metrics.json"),
+    }
+    for tag in ("_mono", "_dual"):
+        candidate = out.with_name(f"{stem}{tag}{suffix}")
+        if candidate.exists():
+            paths["secondary"] = candidate
+            break
+    return paths
 
 
 def _progress_frame(snapshot: dict[str, Any], status: str) -> str:
@@ -412,6 +468,14 @@ def create_app(
 
     async def _artifact_path_async(valid_id: str, key: str) -> str | None:
         return await asyncio.to_thread(_artifact_path, valid_id, key)
+
+    async def _primary_output_file(valid_id: str) -> str | None:
+        """The primary artifact path for a job, from memory then durable stores."""
+        record = manager.get_job(valid_id)
+        output_file = record.progress.output_file if record else None
+        if not output_file:
+            output_file = await _artifact_path_async(valid_id, "output_file")
+        return output_file
 
     async def _verify_request_key(
         request: Request,
@@ -1251,6 +1315,115 @@ def create_app(
         )
 
     @api_app.get(
+        "/jobs/{job_id}/deliverables",
+        tags=["Jobs"],
+    )
+    async def list_deliverables(
+        job_id: str, x_ubt_tenant: str | None = Header(default=None)
+    ) -> JSONResponse:
+        """List the deliverables a finished job actually left on disk.
+
+        A run may emit a rigid companion, a complementary dual/mono render, an
+        EPUB and the JSON sidecars depending on its flags; the UI must render
+        only what exists rather than offer four fixed buttons. Keys match
+        :data:`DELIVERABLE_LABELS`.
+        """
+        valid_id = validate_job_id(job_id)
+        if not await _tenant_allows_async(valid_id, _tenant_from_header(x_ubt_tenant)):
+            raise _cross_tenant_404(valid_id)
+        output_file = await _primary_output_file(valid_id)
+        if not output_file:
+            record = manager.get_job(valid_id)
+            in_queue = (
+                job_queue is not None
+                and (await asyncio.to_thread(job_queue.get, valid_id)) is not None
+            )
+            known = (
+                record is not None
+                or in_queue
+                or (app_config.db_dir / f"{valid_id}.sqlite").exists()
+            )
+            raise HTTPException(
+                status_code=409 if known else 404,
+                detail=(
+                    "Deliverables are not ready yet." if known else f"Job not found: {valid_id}"
+                ),
+            )
+
+        items: list[dict[str, Any]] = []
+        for key, candidate in _deliverable_paths(output_file).items():
+            try:
+                resolved = resolve_secure_path(candidate, must_exist=False, config=app_config)
+            except HTTPException:
+                continue
+            if resolved.is_file():
+                label, media_type = DELIVERABLE_LABELS[key]
+                items.append(
+                    {
+                        "key": key,
+                        "label": label,
+                        "filename": resolved.name,
+                        "size_bytes": resolved.stat().st_size,
+                        "media_type": media_type,
+                    }
+                )
+        return JSONResponse({"job_id": valid_id, "deliverables": items})
+
+    @api_app.get(
+        "/jobs/{job_id}/download/{key}",
+        tags=["Jobs"],
+    )
+    async def download_deliverable(
+        job_id: str, key: str, x_ubt_tenant: str | None = Header(default=None)
+    ) -> FileResponse:
+        """Serve one deliverable by key (see :data:`DELIVERABLE_LABELS`)."""
+        valid_id = validate_job_id(job_id)
+        if not await _tenant_allows_async(valid_id, _tenant_from_header(x_ubt_tenant)):
+            raise _cross_tenant_404(valid_id)
+        if key not in DELIVERABLE_LABELS:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Unknown deliverable: {key}",
+            )
+        output_file = await _primary_output_file(valid_id)
+        if not output_file:
+            record = manager.get_job(valid_id)
+            in_queue = (
+                job_queue is not None
+                and (await asyncio.to_thread(job_queue.get, valid_id)) is not None
+            )
+            known = (
+                record is not None
+                or in_queue
+                or (app_config.db_dir / f"{valid_id}.sqlite").exists()
+            )
+            raise HTTPException(
+                status_code=409 if known else 404,
+                detail=(
+                    "Deliverables are not ready yet." if known else f"Job not found: {valid_id}"
+                ),
+            )
+
+        candidate = _deliverable_paths(output_file).get(key)
+        if candidate is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Deliverable not available: {key}",
+            )
+        resolved = resolve_secure_path(candidate, must_exist=True, config=app_config)
+        if not resolved.is_file():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Deliverable not available: {key}",
+            )
+        _, media_type = DELIVERABLE_LABELS[key]
+        return FileResponse(
+            path=resolved,
+            filename=resolved.name,
+            media_type=media_type,
+        )
+
+    @api_app.get(
         "/api/v1/model-profiles",
         response_model=list[ModelProfile],
         tags=["Model Profiles"],
@@ -1290,6 +1463,117 @@ def create_app(
                 detail=str(exc),
             ) from exc
         return profile
+
+    @api_app.get("/system/doctor", tags=["System"])
+    async def system_doctor(probe: bool = False) -> JSONResponse:
+        """Engine Doctor self-check (the ``ubt doctor`` checklist as JSON).
+
+        Reuses the CLI's ``collect_checks`` so the console and the command line
+        report the same verdicts. ``probe=true`` additionally contacts the
+        provider endpoint (a live network call), so it is off by default.
+        """
+        from ubt.cli.commands.doctor import _overall_status, _summary, collect_checks
+
+        checks = await asyncio.to_thread(collect_checks, app_config, probe=probe)
+        summary = _summary(checks)
+        return JSONResponse(
+            {
+                "status": _overall_status(summary),
+                "summary": summary,
+                "checks": [
+                    {
+                        "group": check.group,
+                        "name": check.name,
+                        "status": check.status,
+                        "detail": check.detail,
+                        "fix": check.fix,
+                    }
+                    for check in checks
+                ],
+            }
+        )
+
+    # -- Language Assets (glossary file + shared translation memory) ----------
+    # The glossary is the *operator-configured* external file; the console edits
+    # that one file rather than inventing a second terminology store, and never
+    # accepts a caller-supplied path (the write surface stays bounded to what the
+    # operator already pointed the engine at).
+    def _resolved_glossary_path() -> Path:
+        configured = app_config.glossary_path
+        if configured is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "No glossary file is configured. Set glossary_path in ubt.toml "
+                    "or pass --glossary."
+                ),
+            )
+        return resolve_secure_path(configured, must_exist=True, config=app_config)
+
+    def _tm_path() -> Path:
+        return app_config.db_dir / "tm.sqlite"
+
+    @api_app.get("/assets/glossary", tags=["Assets"])
+    async def get_glossary() -> JSONResponse:
+        path = _resolved_glossary_path()
+        try:
+            terms = await asyncio.to_thread(read_glossary_terms, path)
+        except GlossaryFormatError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        return JSONResponse({"path": path.name, "terms": terms})
+
+    @api_app.post("/assets/glossary", tags=["Assets"])
+    async def upsert_glossary_term(req: GlossaryTermRequest) -> JSONResponse:
+        if not req.target.strip():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="target is required when adding a term",
+            )
+        path = _resolved_glossary_path()
+        try:
+            await asyncio.to_thread(add_glossary_term, path, req.source, req.target)
+            terms = await asyncio.to_thread(read_glossary_terms, path)
+        except GlossaryFormatError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        return JSONResponse({"path": path.name, "terms": terms})
+
+    @api_app.delete("/assets/glossary", tags=["Assets"])
+    async def delete_glossary_term(source: str) -> JSONResponse:
+        path = _resolved_glossary_path()
+        try:
+            removed = await asyncio.to_thread(remove_glossary_term, path, source)
+            terms = await asyncio.to_thread(read_glossary_terms, path)
+        except GlossaryFormatError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        return JSONResponse({"path": path.name, "removed": removed, "terms": terms})
+
+    @api_app.get("/assets/tm", tags=["Assets"])
+    async def get_translation_memory(
+        limit: int = 200,
+        offset: int = 0,
+        src_lang: str | None = None,
+        tgt_lang: str | None = None,
+    ) -> JSONResponse:
+        data = await asyncio.to_thread(
+            list_tm_entries,
+            _tm_path(),
+            limit=min(max(limit, 1), 1000),
+            offset=max(offset, 0),
+            src_lang=src_lang,
+            tgt_lang=tgt_lang,
+        )
+        return JSONResponse(data)
+
+    @api_app.post("/assets/tm/evict", tags=["Assets"])
+    async def evict_translation_memory(req: TMevictRequest) -> JSONResponse:
+        removed = await asyncio.to_thread(evict_tm_entries, _tm_path(), req.ids)
+        return JSONResponse({"removed": removed})
+
+    static_dir = Path(__file__).resolve().parent / "static"
+    if static_dir.exists() and (static_dir / "index.html").exists():
+        from fastapi.staticfiles import StaticFiles
+
+        api_app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="console")
 
     return api_app
 

@@ -1,0 +1,2257 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Universal Book Translator API",
+    "description": "Industrial asynchronous bilingual translation microservice with SSE streaming.",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Health",
+        "operationId": "health_health_get",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Health Health Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/assess": {
+      "post": {
+        "tags": [
+          "Jobs"
+        ],
+        "summary": "Assess a document quote, risks and route without spend",
+        "operationId": "assess_job_jobs_assess_post",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobAssessRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Assess Job Jobs Assess Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/submit": {
+      "post": {
+        "tags": [
+          "Jobs"
+        ],
+        "summary": "Submit Job",
+        "operationId": "submit_job_jobs_submit_post",
+        "parameters": [
+          {
+            "name": "x-ubt-tenant",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Ubt-Tenant"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobSubmitRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobSubmitResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{job_id}/cancel": {
+      "post": {
+        "tags": [
+          "Jobs"
+        ],
+        "summary": "Cancel Job",
+        "description": "Cancel an in-flight job (idempotent: terminal jobs return as-is).",
+        "operationId": "cancel_job_jobs__job_id__cancel_post",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "x-ubt-tenant",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Ubt-Tenant"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Cancel Job Jobs  Job Id  Cancel Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{job_id}/status": {
+      "get": {
+        "tags": [
+          "Jobs"
+        ],
+        "summary": "Get Status",
+        "operationId": "get_status_jobs__job_id__status_get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "x-ubt-tenant",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Ubt-Tenant"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobStatusResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{job_id}/stream": {
+      "get": {
+        "tags": [
+          "Jobs"
+        ],
+        "summary": "Stream Progress",
+        "description": "SSE: ``event: progress`` snapshots until one ``event: <status>`` terminal frame.\n\nBoth deployment modes emit that one contract (see ``_progress_frame`` /\n``_terminal_frame``); the payload never depends on how the server was\nstarted.",
+        "operationId": "stream_progress_jobs__job_id__stream_get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "x-ubt-tenant",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Ubt-Tenant"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{job_id}/report": {
+      "get": {
+        "tags": [
+          "Jobs"
+        ],
+        "summary": "Get Report",
+        "operationId": "get_report_jobs__job_id__report_get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "x-ubt-tenant",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Ubt-Tenant"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{job_id}/visual-report": {
+      "get": {
+        "tags": [
+          "Jobs"
+        ],
+        "summary": "Get Visual Report",
+        "operationId": "get_visual_report_jobs__job_id__visual_report_get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "x-ubt-tenant",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Ubt-Tenant"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{job_id}/download": {
+      "get": {
+        "tags": [
+          "Jobs"
+        ],
+        "summary": "Download File",
+        "operationId": "download_file_jobs__job_id__download_get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "x-ubt-tenant",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Ubt-Tenant"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{job_id}/deliverables": {
+      "get": {
+        "tags": [
+          "Jobs"
+        ],
+        "summary": "List Deliverables",
+        "description": "List the deliverables a finished job actually left on disk.\n\nA run may emit a rigid companion, a complementary dual/mono render, an\nEPUB and the JSON sidecars depending on its flags; the UI must render\nonly what exists rather than offer four fixed buttons. Keys match\n:data:`DELIVERABLE_LABELS`.",
+        "operationId": "list_deliverables_jobs__job_id__deliverables_get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "x-ubt-tenant",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Ubt-Tenant"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{job_id}/download/{key}": {
+      "get": {
+        "tags": [
+          "Jobs"
+        ],
+        "summary": "Download Deliverable",
+        "description": "Serve one deliverable by key (see :data:`DELIVERABLE_LABELS`).",
+        "operationId": "download_deliverable_jobs__job_id__download__key__get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Key"
+            }
+          },
+          {
+            "name": "x-ubt-tenant",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Ubt-Tenant"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/model-profiles": {
+      "get": {
+        "tags": [
+          "Model Profiles"
+        ],
+        "summary": "List Model Profiles",
+        "description": "List all currently registered model capability profiles.",
+        "operationId": "list_model_profiles_api_v1_model_profiles_get",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ModelProfile"
+                  },
+                  "title": "Response List Model Profiles Api V1 Model Profiles Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Model Profiles"
+        ],
+        "summary": "Register Model Profile",
+        "description": "Register a custom model capability profile (built-in profiles cannot be overridden).",
+        "operationId": "register_model_profile_api_v1_model_profiles_post",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelProfile"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelProfile"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/system/doctor": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "System Doctor",
+        "description": "Engine Doctor self-check (the ``ubt doctor`` checklist as JSON).\n\nReuses the CLI's ``collect_checks`` so the console and the command line\nreport the same verdicts. ``probe=true`` additionally contacts the\nprovider endpoint (a live network call), so it is off by default.",
+        "operationId": "system_doctor_system_doctor_get",
+        "parameters": [
+          {
+            "name": "probe",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Probe"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/assets/glossary": {
+      "get": {
+        "tags": [
+          "Assets"
+        ],
+        "summary": "Get Glossary",
+        "operationId": "get_glossary_assets_glossary_get",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Assets"
+        ],
+        "summary": "Upsert Glossary Term",
+        "operationId": "upsert_glossary_term_assets_glossary_post",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GlossaryTermRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Assets"
+        ],
+        "summary": "Delete Glossary Term",
+        "operationId": "delete_glossary_term_assets_glossary_delete",
+        "parameters": [
+          {
+            "name": "source",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Source"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/assets/tm": {
+      "get": {
+        "tags": [
+          "Assets"
+        ],
+        "summary": "Get Translation Memory",
+        "operationId": "get_translation_memory_assets_tm_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 200,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "src_lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Src Lang"
+            }
+          },
+          {
+            "name": "tgt_lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tgt Lang"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/assets/tm/evict": {
+      "post": {
+        "tags": [
+          "Assets"
+        ],
+        "summary": "Evict Translation Memory",
+        "operationId": "evict_translation_memory_assets_tm_evict_post",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TMevictRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ExtractionStrategy": {
+        "type": "string",
+        "enum": [
+          "xml_tag",
+          "raw",
+          "cp",
+          "auto"
+        ],
+        "title": "ExtractionStrategy",
+        "description": "Output extraction strategy."
+      },
+      "GlossaryTermRequest": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Source",
+            "description": "Source term"
+          },
+          "target": {
+            "type": "string",
+            "title": "Target",
+            "description": "Target translation (required when adding)",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "source"
+        ],
+        "title": "GlossaryTermRequest",
+        "description": "One glossary term to add to (or remove from) the configured glossary file."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "JobAssessRequest": {
+        "properties": {
+          "input_path": {
+            "type": "string",
+            "title": "Input Path",
+            "description": "Path to source document file"
+          },
+          "deep": {
+            "type": "boolean",
+            "title": "Deep",
+            "description": "Run deep real adapter ingest for exact counts",
+            "default": false
+          },
+          "target_lang": {
+            "type": "string",
+            "pattern": "^[A-Za-z]{2,3}(?:[_-][A-Za-z0-9]{2,4})?$",
+            "title": "Target Lang",
+            "description": "Target ISO language code",
+            "default": "zh"
+          },
+          "source_lang": {
+            "type": "string",
+            "pattern": "^[A-Za-z]{2,3}(?:[_-][A-Za-z0-9]{2,4})?$",
+            "title": "Source Lang",
+            "description": "Source ISO language code",
+            "default": "en"
+          },
+          "preset": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Preset"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Quality preset (publication, standard, preview)"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "input_path"
+        ],
+        "title": "JobAssessRequest",
+        "description": "Payload to assess a cold document without translating."
+      },
+      "JobStatusResponse": {
+        "properties": {
+          "total_blocks": {
+            "type": "integer",
+            "title": "Total Blocks",
+            "default": 0
+          },
+          "completed_blocks": {
+            "type": "integer",
+            "title": "Completed Blocks",
+            "default": 0
+          },
+          "repaired_blocks": {
+            "type": "integer",
+            "title": "Repaired Blocks",
+            "default": 0
+          },
+          "failed_blocks": {
+            "type": "integer",
+            "title": "Failed Blocks",
+            "default": 0
+          },
+          "needs_human_blocks": {
+            "type": "integer",
+            "title": "Needs Human Blocks",
+            "default": 0
+          },
+          "blocked_human_blocks": {
+            "type": "integer",
+            "title": "Blocked Human Blocks",
+            "default": 0
+          },
+          "processed_blocks": {
+            "type": "integer",
+            "title": "Processed Blocks",
+            "default": 0
+          },
+          "progress_percent": {
+            "type": "number",
+            "title": "Progress Percent",
+            "default": 0.0
+          },
+          "current_avg_qe": {
+            "type": "number",
+            "title": "Current Avg Qe",
+            "default": 0.0
+          },
+          "bottom_15_avg_qe": {
+            "type": "number",
+            "title": "Bottom 15 Avg Qe",
+            "default": 0.0
+          },
+          "estimated_cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Cost Usd"
+          },
+          "output_file": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output File"
+          },
+          "report_file": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Report File"
+          },
+          "visual_report_file": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visual Report File"
+          },
+          "job_id": {
+            "type": "string",
+            "title": "Job Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "queue_position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Queue Position"
+          },
+          "rehearsal": {
+            "type": "boolean",
+            "title": "Rehearsal",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id",
+          "status",
+          "created_at"
+        ],
+        "title": "JobStatusResponse",
+        "description": "Real-time job status and metric counters.\n\nThe telemetry fields are the shared :class:`ProgressSnapshot` -- one\ndefinition for the queue row, the in-memory record and this response."
+      },
+      "JobSubmitRequest": {
+        "properties": {
+          "input_path": {
+            "type": "string",
+            "title": "Input Path",
+            "description": "Path to source document file"
+          },
+          "output_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Path",
+            "description": "Optional target path for bilingual file"
+          },
+          "target_lang": {
+            "type": "string",
+            "pattern": "^[A-Za-z]{2,3}(?:[_-][A-Za-z0-9]{2,4})?$",
+            "title": "Target Lang",
+            "description": "Target ISO language code",
+            "default": "zh"
+          },
+          "source_lang": {
+            "type": "string",
+            "pattern": "^[A-Za-z]{2,3}(?:[_-][A-Za-z0-9]{2,4})?$",
+            "title": "Source Lang",
+            "description": "Source ISO language code",
+            "default": "en"
+          },
+          "profile": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "title": "Profile",
+            "description": "Domain profile (general, textbook, paper)",
+            "default": "general"
+          },
+          "draft_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft Model",
+            "description": "Override draft model tier"
+          },
+          "repair_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repair Model",
+            "description": "Override repair model tier"
+          },
+          "preset": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Preset"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Quality preset (publication, standard, preview)"
+          },
+          "render_engine": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "rigid",
+                  "reflow",
+                  "auto",
+                  "publication",
+                  "composite"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Render Engine",
+            "description": "PDF render engine (rigid, reflow, publication, auto)"
+          },
+          "pdf_engine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pdf Engine",
+            "description": "PDF extraction/parser engine (docling, pdfium, auto)"
+          },
+          "dual_mode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "inline",
+                  "alternating",
+                  "monolingual",
+                  "facing",
+                  "auto"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dual Mode",
+            "description": "Bilingual mode (inline, alternating, facing, monolingual, auto)"
+          },
+          "pages": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pages",
+            "description": "Page range filter (e.g. 1-10)"
+          },
+          "glossary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Glossary",
+            "description": "Path to an external glossary file to enforce (CLI/MCP parity)"
+          },
+          "exec_mode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "short",
+                  "long"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exec Mode",
+            "description": "Execution mode (auto, short, long)"
+          },
+          "formula_mode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "strict",
+                  "readable"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Formula Mode",
+            "description": "Formula handling (strict, readable)"
+          },
+          "budget_usd": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Usd",
+            "description": "Hard USD cap for this job across every resume; the run fails once priced cost exceeds it"
+          },
+          "max_concurrency": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Concurrency",
+            "description": "Concurrent LLM requests for this job"
+          },
+          "batch_limit": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batch Limit",
+            "description": "Blocks per draft batch"
+          },
+          "macro_chunk_size": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 30.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Macro Chunk Size",
+            "description": "Consecutive micro-blocks packed into one draft request (1 = single block)"
+          },
+          "short_max_pages": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Short Max Pages",
+            "description": "Page ceiling for the short execution chain"
+          },
+          "enable_rolling_summary": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enable Rolling Summary",
+            "description": "Carry a rolling chapter summary across draft batches"
+          },
+          "chapter_streaming_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter Streaming Enabled",
+            "description": "Translate chapter-by-chapter as discovery lands"
+          },
+          "offline_batch_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Offline Batch Enabled",
+            "description": "Route drafting through the provider's offline batch API"
+          },
+          "qe_engine": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "heuristic",
+                  "comet",
+                  "cometkiwi",
+                  "neural",
+                  "subprocess",
+                  "tiered"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qe Engine",
+            "description": "QE runner (heuristic, comet, cometkiwi, neural, subprocess, tiered)"
+          },
+          "visual_judge_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visual Judge Enabled",
+            "description": "Enable the VLM visual judge over rendered pages"
+          },
+          "visual_judge_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visual Judge Model",
+            "description": "Model the visual judge runs on"
+          },
+          "prompt_strategy": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "minimal",
+                  "hybrid",
+                  "rich"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Strategy",
+            "description": "Prompt depth (auto, minimal, hybrid, rich)"
+          },
+          "translate_chrome": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Translate Chrome",
+            "description": "Translate running heads, footers and page chrome"
+          },
+          "facing_spread": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Facing Spread",
+            "description": "Lay the bilingual output out as facing pages"
+          },
+          "emit_both": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emit Both",
+            "description": "Emit both the reflow and the rigid deliverable"
+          },
+          "emit_companion_rigid": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emit Companion Rigid",
+            "description": "Emit a zero-cost '*_rigid.pdf' source-fidelity companion alongside the reflow output"
+          },
+          "cover_mode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "always",
+                  "never"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Mode",
+            "description": "Cover handling (auto, always, never)"
+          },
+          "formula_enrichment": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "on",
+                  "off"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Formula Enrichment",
+            "description": "Formula enrichment (auto, on, off)"
+          },
+          "formula_render": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "native",
+                  "image",
+                  "witness"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Formula Render",
+            "description": "Formula rendering (native, image, witness)"
+          },
+          "math_backend": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "typst",
+                  "mathjax",
+                  "image"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Math Backend",
+            "description": "Math typesetting backend (typst, mathjax, image)"
+          },
+          "ocr_mode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "sidecar",
+                  "cloud",
+                  "vlm",
+                  "rapidocr",
+                  "off"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ocr Mode",
+            "description": "OCR engine (auto, sidecar, cloud, vlm, rapidocr, off)"
+          },
+          "domain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domain",
+            "description": "Domain descriptor used for glossary and chrome hints"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id",
+            "description": "Optional stable job id (idempotency key)"
+          },
+          "priority": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Priority",
+            "description": "Queue priority (higher = sooner)",
+            "default": 0
+          },
+          "dry_run": {
+            "type": "boolean",
+            "title": "Dry Run",
+            "description": "Zero-token rehearsal run (echo provider)",
+            "default": false
+          },
+          "fresh": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fresh",
+            "description": "Discard prior ledger state instead of resuming (unset follows UBT_FRESH)"
+          },
+          "start_chapter": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Chapter",
+            "description": "First chapter of the window (run-only key)"
+          },
+          "max_chapters": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Chapters",
+            "description": "Chapter-window length (run-only key)"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "input_path"
+        ],
+        "title": "JobSubmitRequest",
+        "description": "Payload to initiate an asynchronous translation job."
+      },
+      "JobSubmitResponse": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "title": "Job Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "stream_url": {
+            "type": "string",
+            "title": "Stream Url"
+          },
+          "status_url": {
+            "type": "string",
+            "title": "Status Url"
+          },
+          "rehearsal": {
+            "type": "boolean",
+            "title": "Rehearsal",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id",
+          "status",
+          "stream_url",
+          "status_url"
+        ],
+        "title": "JobSubmitResponse",
+        "description": "Response returned upon successful job enqueueing."
+      },
+      "ModelProfile": {
+        "properties": {
+          "model_pattern": {
+            "type": "string",
+            "title": "Model Pattern",
+            "description": "Exact model name or substring pattern used to resolve this profile."
+          },
+          "prompt_strategy": {
+            "$ref": "#/components/schemas/PromptStrategy",
+            "description": "Prompt assembly strategy (RICH, MINIMAL, HYBRID).",
+            "default": "rich"
+          },
+          "extraction_strategy": {
+            "$ref": "#/components/schemas/ExtractionStrategy",
+            "description": "Output parsing strategy (XML_TAG, RAW, CONVERSATIONAL_PREFIX, AUTO).",
+            "default": "auto"
+          },
+          "supports_reasoning_effort": {
+            "type": "boolean",
+            "title": "Supports Reasoning Effort",
+            "description": "Whether the provider/model accepts the reasoning_effort parameter.",
+            "default": false
+          },
+          "supports_system_prompt": {
+            "type": "boolean",
+            "title": "Supports System Prompt",
+            "description": "Whether the model supports system turns; if False, merged into user prompt.",
+            "default": true
+          },
+          "supports_temperature": {
+            "type": "boolean",
+            "title": "Supports Temperature",
+            "description": "Whether model supports explicit temperature control.",
+            "default": true
+          },
+          "supports_vision": {
+            "type": "boolean",
+            "title": "Supports Vision",
+            "description": "Whether the model natively accepts image inputs (multimodal / VLM).",
+            "default": false
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name",
+            "description": "Human-readable model name for diagnostics and logging.",
+            "default": ""
+          },
+          "deployment_backend": {
+            "type": "string",
+            "title": "Deployment Backend",
+            "description": "Backend identifier if specialized. The self-hosted families ('self_hosted', 'ollama', 'llama.cpp', 'llama-swap', 'vllm', 'lmstudio', ...) enable the local retry when a gateway drops the model; 'ollama' is kept as a legacy alias.",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "model_pattern"
+        ],
+        "title": "ModelProfile",
+        "description": "Declarative capability profile for a translation model.\n\nDecouples model execution logic from brittle name matching, enabling\nenterprise self-hosted models to configure behavior declaratively."
+      },
+      "Preset": {
+        "type": "string",
+        "enum": [
+          "publication",
+          "standard",
+          "preview",
+          "fast"
+        ],
+        "title": "Preset",
+        "description": "User-facing quality tiers."
+      },
+      "PromptStrategy": {
+        "type": "string",
+        "enum": [
+          "rich",
+          "minimal",
+          "hybrid"
+        ],
+        "title": "PromptStrategy",
+        "description": "Prompt assembly strategy."
+      },
+      "TMevictRequest": {
+        "properties": {
+          "ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "maxItems": 10000,
+            "title": "Ids",
+            "description": "TM entry ids to delete"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "TMevictRequest",
+        "description": "Translation-memory rows to evict, by id."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}
