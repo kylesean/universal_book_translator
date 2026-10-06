@@ -223,10 +223,29 @@ def _terminology_and_structure_pass(
             # target-language terms into it (and later validating it against the
             # glossary) can only produce Chinglish mash and false drift.
             if glossary_enforcer and fb.status is not BlockStatus.BLOCKED_HUMAN:
-                enforced_text, records = glossary_enforcer.enforce(fb.target_text)
+                enforced_text, records, quarantined = glossary_enforcer.enforce_audited(
+                    fb.target_text
+                )
                 if records:
                     enforced_spans += len(records)
                     fb.target_text = enforced_text
+                    modified_checkpoints.append(
+                        {
+                            "block_id": fb.id,
+                            "target_text": fb.target_text,
+                            "status": fb.status,
+                            "error_flags": fb.error_flags,
+                        }
+                    )
+                if quarantined:
+                    for q in quarantined:
+                        flag = (
+                            f"glossary_quarantine_compound: {q.original_span}->{q.corrected_span}"
+                        )
+                        if flag not in fb.error_flags:
+                            fb.error_flags.append(flag)
+                    if fb.status not in (BlockStatus.BLOCKED_HUMAN, BlockStatus.FAILED):
+                        fb.status = BlockStatus.NEEDS_HUMAN
                     modified_checkpoints.append(
                         {
                             "block_id": fb.id,
@@ -785,18 +804,21 @@ def _attest_delivery(
     """
     # Lazy: a module-level ubt.pipeline edge recreates the core.engine <-> pipeline cycle.
     from ubt.layout.theme import resolve_theme
-    from ubt.pipeline.attest import attest_document
+    from ubt.pipeline.attest import attest_blocks
     from ubt.pipeline.delivery import delivery_document, delivery_translations
     from ubt.render.typst_backend import TypstBackend
     from ubt.verify.verifier import build_verifiers
 
     doc_id = str(getattr(ctx.manifest, "doc_id", "") or "")
-    document = delivery_document(blocks, doc_id=doc_id)
     translations = delivery_translations(blocks, engine=engine)
     theme = resolve_theme(ctx.source_lang or "en", ctx.target_lang or "zh")
-    report = attest_document(
-        document, TypstBackend(translations, theme=theme), build_verifiers(services.fast_pass)
+    report = attest_blocks(
+        blocks,
+        TypstBackend(translations, theme=theme),
+        build_verifiers(services.fast_pass),
+        doc_id=doc_id,
     )
+    document = delivery_document(blocks, doc_id=doc_id)
     return document, translations, report
 
 

@@ -124,13 +124,49 @@ def split_prov_spans(item: Any) -> tuple[str, str, BoundingBox | None] | None:
     return head, tail, tail_bbox
 
 
+#: A figure label may hang a few points past the plot area's edge (an axis
+#: title's baseline sits just below it); this share of the block's own area
+#: overlapping the picture is enough to anchor the label to the figure.
+_PICTURE_LABEL_SHARE = 0.5
+
+
+def _overlap_share(box: Any, pbox: Any) -> float:
+    """Fraction of ``box``'s own area that lies inside ``pbox``."""
+    width = min(float(getattr(box, "r", 0.0)), float(getattr(pbox, "r", 0.0))) - max(
+        float(getattr(box, "l", 0.0)), float(getattr(pbox, "l", 0.0))
+    )
+    height = min(float(getattr(box, "t", 0.0)), float(getattr(pbox, "t", 0.0))) - max(
+        float(getattr(box, "b", 0.0)), float(getattr(pbox, "b", 0.0))
+    )
+    area = (float(getattr(box, "r", 0.0)) - float(getattr(box, "l", 0.0))) * (
+        float(getattr(box, "t", 0.0)) - float(getattr(box, "b", 0.0))
+    )
+    if area <= 0 or width <= 0 or height <= 0:
+        return 0.0
+    return (width * height) / area
+
+
 def is_inside_picture(
     page_no: int,
     bbox: Any,
     picture_boxes: list[tuple[int, Any]],
     margin_pt: float = 2.0,
 ) -> bool:
-    """True if bbox lies fully within any collected picture bbox (same page)."""
+    """Whether a Docling item is the picture's own text (same page).
+
+    A figure's text sits *on* the picture rather than neatly inside it: an axis
+    title's baseline hangs a few points below the plot area's bbox, and a rotated
+    axis label straddles its edge. Requiring full containment let exactly those
+    labels through as ordinary prose, which then reached the translator and was
+    painted into its ~100pt box at the source's 15pt size -- wrecking the figure's
+    layout and leaving the figure half translated, because its tick labels, legend
+    and in-chart annotations stay in the preserved source graphic.
+
+    A label belongs to the figure when it is fully inside it, when most of its own
+    area overlaps it, or when its centre falls inside it. A caption is placed
+    *below* the picture with no overlap at all, so captions and footnotes stay
+    translatable (the caller keeps them out of this test).
+    """
     for pno, pbox in picture_boxes:
         if pno != page_no:
             continue
@@ -140,6 +176,12 @@ def is_inside_picture(
             and pbox.b - margin_pt <= bbox.b
             and bbox.t <= pbox.t + margin_pt
         ):
+            return True
+        if _overlap_share(bbox, pbox) >= _PICTURE_LABEL_SHARE:
+            return True
+        centre_x = (float(bbox.l) + float(bbox.r)) / 2.0
+        centre_y = (float(bbox.b) + float(bbox.t)) / 2.0
+        if pbox.l <= centre_x <= pbox.r and pbox.b <= centre_y <= pbox.t:
             return True
     return False
 

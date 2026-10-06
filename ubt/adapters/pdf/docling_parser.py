@@ -1163,6 +1163,14 @@ def map_iterated_items(
         if not is_caption_cand and label != DocItemLabel.FOOTNOTE:
             for prov in prov_list:
                 if is_inside_picture(prov.page_no, prov.bbox, picture_boxes):
+                    # Figure-internal text (an axis title, a legend label): the
+                    # figure is preserved as a canvas asset, so its own text stays
+                    # in the source graphic rather than being translated over it.
+                    logger.debug(
+                        "Docling item on page %s dropped as picture text: %r",
+                        prov.page_no,
+                        text[:60],
+                    )
                     text = ""
                     break
         if not text:

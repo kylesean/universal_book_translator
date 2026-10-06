@@ -73,6 +73,7 @@ dependencies = [
     # decode_markup; without it those bytes decode to U+FFFD before any sniffer
     # can look at them.
     "charset-normalizer>=3.3.0",
+    "jieba>=0.42.1",
 ]
 
 [project.scripts]
@@ -129,6 +130,13 @@ ocr = [
     # to the BGR ndarray rapidocr's ONNX models expect. rapidocr currently
     # depends on numpy, but the driver imports it by name, so it is declared
     # here rather than relied on transitively.
+    "numpy>=1.26.0",
+]
+# Academic pipeline suite (Docling + Classical detector OCR + ONNX runtime).
+academic = [
+    "docling>=2.0.0",
+    "rapidocr>=3.9.0",
+    "onnxruntime>=1.29.0",
     "numpy>=1.26.0",
 ]
 # Second witness: DeepSeek-OCR VLM (proofread grade, ~7 GB weights,

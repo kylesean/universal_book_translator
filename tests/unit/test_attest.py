@@ -238,3 +238,36 @@ def test_summary_line_reports_fail_with_the_violation_count() -> None:
     line = report.summary_line()
     assert line.startswith("[FAIL] 1 element(s):")
     assert line.endswith("| 1 violation(s)")
+
+
+def test_attest_blocks_directly_lowers_elements_and_attaches_attestation() -> None:
+    from ubt.core.ir.models import IRBlock
+    from ubt.pipeline.attest import attest_blocks
+
+    backend = _FakeBackend(
+        supported={(Paragraph, Fidelity.PRESERVED_OPAQUE)},
+        produced={(Paragraph, Fidelity.PRESERVED_OPAQUE): Produced("opaque")},
+    )
+    b1 = IRBlock.from_element(_paragraph("p1"))
+    b2 = IRBlock.from_element(_paragraph("p2"))
+
+    report = attest_blocks([b1, b2], backend, _OK, doc_id="direct_doc")
+    assert report.total == 2
+    assert report.passed
+    assert b1.attestation is not None
+    assert b1.attestation.fidelity == Fidelity.PRESERVED_OPAQUE
+    assert b2.attestation is not None
+    assert b2.attestation.element_id == "p2"
+
+
+def test_irblock_attest_method_attests_single_block() -> None:
+    from ubt.core.ir.models import IRBlock
+
+    backend = _FakeBackend(
+        supported={(Paragraph, Fidelity.PRESERVED_OPAQUE)},
+        produced={(Paragraph, Fidelity.PRESERVED_OPAQUE): Produced("opaque")},
+    )
+    block = IRBlock.from_element(_paragraph("p_single"))
+    att = block.attest(backend, _OK)
+    assert att.fidelity == Fidelity.PRESERVED_OPAQUE
+    assert block.attestation == att

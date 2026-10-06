@@ -71,8 +71,7 @@ def extract_blocks_with_pdfium(
     re-run reuses it. ``None`` computes straight through.
     """
     from ubt.adapters.pdf.analysis_cache import cached_blocks
-    from ubt.analyze.bridge import blocks_from_document
-    from ubt.analyze.reader_pdf import read_pdf
+    from ubt.analyze.reader_pdf import read_pdf_blocks
 
     def _read() -> list[IRBlock]:
         pages: range | None = None
@@ -80,7 +79,7 @@ def extract_blocks_with_pdfium(
             pages = range(max(1, page_range[0]), page_range[1] + 1)
         from ubt.core.ir.continuation import fuse_continuation_blocks
 
-        blocks = blocks_from_document(read_pdf(path, pages=pages))
+        blocks = read_pdf_blocks(path, pages=pages)
         blocks = fuse_continuation_blocks(blocks)
         for index, block in enumerate(blocks, start=1):
             block.set_id(f"pdf_main#b{index:04d}")

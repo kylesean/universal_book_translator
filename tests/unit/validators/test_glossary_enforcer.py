@@ -280,3 +280,32 @@ def test_cjk_latin_spacing_is_tolerated_when_judging_a_term() -> None:
     assert find_term_occurrences("CPU 调度", "CPU调度") == []
     # No whitespace is allowed inside a Latin run.
     assert find_term_occurrences("CP U调度", "CPU调度", allow_cjk_latin_space=True) == []
+
+
+def test_single_character_cjk_embedded_in_compound_is_quarantined_not_corrupted() -> None:
+    glossary = [{"source": "cloud", "translation": "端", "aliases": ["云"]}]
+    enforcer = DeterministicGlossaryEnforcer(glossary)
+    out, applied, quarantined = enforcer.enforce_audited("我们正在使用云计算平台")
+    assert out == "我们正在使用云计算平台"
+    assert applied == []
+    assert len(quarantined) == 1
+    assert quarantined[0].original_span == "云"
+
+
+def test_cjk_term_inside_larger_compound_token_is_quarantined() -> None:
+    glossary = [{"source": "status", "translation": "态势", "aliases": ["状态"]}]
+    enforcer = DeterministicGlossaryEnforcer(glossary)
+    out, applied, quarantined = enforcer.enforce_audited("这是系统的初始状态")
+    assert out == "这是系统的初始状态"
+    assert applied == []
+    assert len(quarantined) >= 1
+    assert quarantined[0].original_span == "状态"
+
+
+def test_standalone_cjk_term_is_safely_replaced() -> None:
+    glossary = [{"source": "status", "translation": "态势", "aliases": ["状态"]}]
+    enforcer = DeterministicGlossaryEnforcer(glossary)
+    out, applied, quarantined = enforcer.enforce_audited("状态：正常。")
+    assert out == "态势：正常。"
+    assert len(applied) == 1
+    assert quarantined == []

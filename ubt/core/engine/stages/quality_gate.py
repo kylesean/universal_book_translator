@@ -11,10 +11,7 @@ from ubt.core.exceptions import MTQEEvaluationError
 from ubt.core.ir.models import BlockStatus, IRBlock
 from ubt.core.memory.cjk_matcher import count_term_in_text
 from ubt.core.qe.base import BaseQERunner
-from ubt.core.qe.comet_runner import (
-    HeuristicQERunner,
-    glossary_violation_flag,
-)
+from ubt.core.qe.comet_runner import glossary_violation_flag
 from ubt.core.qe.defect_taxonomy import has_structural_defect
 from ubt.core.qe.fast_pass import FastPassFilter
 from ubt.core.validators.consistency import GlossaryConsistencyValidator
@@ -192,22 +189,20 @@ async def run_quality_gate_stage(
         await asyncio.to_thread(ledger.save_checkpoints_batch, passed_updates)
 
     if suspicious_blocks:
-        if isinstance(qe_runner, HeuristicQERunner):
-            # score_from_flags caps a glossary violation at its own band
-            # while every other defect class keeps its existing value.
-            scores = [HeuristicQERunner.score_from_flags(b.error_flags) for b in suspicious_blocks]
-        else:
+        calibrated = getattr(qe_runner, "is_calibrated", lambda: False)()
+        if calibrated:
             pairs = [{"src": b.source_text, "mt": b.target_text or ""} for b in suspicious_blocks]
-            scores = await qe_runner.score_pairs(pairs)
-
-        # A runner that violates its one-score-per-pair contract must fail the
-        # stage loudly: silently truncating leaves blocks unscored in the
-        # ledger while the job reports progress.
-        if len(scores) != len(suspicious_blocks):
-            raise MTQEEvaluationError(
-                f"QE runner returned {len(scores)} score(s) for {len(suspicious_blocks)} block(s)",
-                details={"expected": len(suspicious_blocks), "got": len(scores)},
-            )
+            scores: list[float | None] = [float(s) for s in await qe_runner.score_pairs(pairs)]
+            if len(scores) != len(suspicious_blocks):
+                raise MTQEEvaluationError(
+                    f"QE runner returned {len(scores)} score(s) for {len(suspicious_blocks)} block(s)",
+                    details={"expected": len(suspicious_blocks), "got": len(scores)},
+                )
+        else:
+            # Bi-modal Gate Track 1: Structural Integrity.
+            # When uncalibrated (HeuristicQERunner), do NOT fabricate continuous pseudo-scores.
+            # Explicitly mark mtqe_score = None and route to REPAIR_PENDING based on structural defect flags.
+            scores = [None] * len(suspicious_blocks)
 
         engine = getattr(qe_runner, "last_engine", None)
         if engine is not None:
@@ -238,13 +233,15 @@ async def run_quality_gate_stage(
                 pdfium_only = stats.get("pdfium_only", 0)
                 total = matched + vlm_only + pdfium_only
                 if total > 0 and (matched / total) >= 0.8 and not needs_review:
-                    score = min(1.0, score + 0.05)
+                    if score is not None:
+                        score = min(1.0, score + 0.05)
                 elif (
                     needs_review or (total > 0 and (vlm_only / total) > 0.5)
                 ) and "Visual witness discrepancy" not in b.error_flags:
                     b.error_flags.append("Visual witness discrepancy")
             elif "proofread" in anchor_prov and not needs_review:
-                score = min(1.0, score + 0.05)
+                if score is not None:
+                    score = min(1.0, score + 0.05)
             elif needs_review:
                 if "Visual witness discrepancy" not in b.error_flags:
                     b.error_flags.append("Visual witness discrepancy")

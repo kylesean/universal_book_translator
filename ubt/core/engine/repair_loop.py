@@ -64,7 +64,7 @@ class RepairLoop:
         self.max_rounds = max_rounds
         self.qe_threshold = qe_threshold
         self.bottom_percentile = bottom_percentile
-        self.fast_pass = fast_pass
+        self.fast_pass = fast_pass or getattr(qe_runner, "fast_pass", None)
         # MQM Critical escalation: flagship repair tier gets
         # extra rounds beyond the standard circuit breaker before a block is
         # declared BLOCKED_HUMAN.
@@ -353,6 +353,42 @@ class RepairLoop:
         chosen_text: str
         _chosen_flags: list[str]
         new_score: float | None = None
+
+        if not self.qe_runner.is_calibrated():
+            # Track 1 (Structural Integrity): Uncalibrated runner.
+            # Lifecycle is strictly determined by structural validity and absence of error flags.
+            if valid_tier1:
+                t1_chosen_text, _, t1_chosen_flags = valid_tier1[0]
+                block.target_text = t1_chosen_text
+                block.mtqe_score = None
+                block.error_flags = list(t1_chosen_flags)
+            elif valid_tier2:
+                t2_chosen_text, _, t2_chosen_flags = valid_tier2[0]
+                block.target_text = t2_chosen_text
+                block.mtqe_score = None
+                block.error_flags = list(t2_chosen_flags)
+            else:
+                all_fallback = tier1_candidates + tier2_candidates
+                fallback_flags = (
+                    all_fallback[0][2]
+                    if all_fallback
+                    else ["repair_structural_failure: no repair candidate"]
+                )
+                block.target_text = draft_text
+                block.mtqe_score = None
+                merged = list(block.error_flags)
+                for flag in fallback_flags:
+                    if flag not in merged:
+                        merged.append(flag)
+                block.error_flags = merged
+
+            if not block.error_flags:
+                block.status = BlockStatus.REPAIRED
+            elif block.repair_rounds >= rounds_cap:
+                block.status = BlockStatus.FAILED
+            else:
+                block.status = BlockStatus.REPAIR_PENDING
+            return block
 
         if valid_tier1:
             if self._rerank_enabled() and len(valid_tier1) >= 2:

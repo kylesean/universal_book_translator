@@ -255,14 +255,16 @@ class DeterministicGlossaryEnforcer:
 
         return True
 
-    def enforce(self, target_text: str) -> tuple[str, list[EnforcementRecord]]:
-        """Enforce glossary consistency on target_text in a single atomic pass.
+    def enforce_audited(
+        self, target_text: str
+    ) -> tuple[str, list[EnforcementRecord], list[EnforcementRecord]]:
+        """Enforce glossary consistency on target_text with compound audit.
 
         Returns:
-            (corrected_text, list_of_enforcement_records)
+            (corrected_text, list_of_applied_records, list_of_quarantined_records)
         """
         if not target_text or not self._rules:
-            return target_text, []
+            return target_text, [], []
 
         raw_matches: list[
             tuple[int, int, str, str, str]
@@ -288,7 +290,7 @@ class DeterministicGlossaryEnforcer:
                         raw_matches.append((m.start(), m.end(), pattern, repl, rule))
 
         if not raw_matches:
-            return target_text, []
+            return target_text, [], []
 
         # Protected structure guard: prevent substitutions inside HTML tags,
         # LaTeX math environments, markdown URLs, or deterministic maskers.
@@ -302,31 +304,69 @@ class DeterministicGlossaryEnforcer:
             raw_matches = filtered_by_protection
 
         if not raw_matches:
-            return target_text, []
+            return target_text, [], []
 
-        # CJK compound guard. A CJK alias inside a larger CJK run is almost
-        # always part of a longer word ('关注' in '关注度很高'), so swapping it
-        # for a LONGER rendering ('注意力') produces garbage ('注意力度很高').
-        # Skip any CJK-pattern match flanked by CJK when the replacement is
-        # longer than the pattern. The guard used to also require the pattern to
-        # be contained in its own replacement, so a full swap ('关注' ->
-        # '注意力') was still corrupted. Equal-length swaps ('操作记忆' ->
-        # '工作记忆', '甲乙' -> '乙丙') are unaffected, so running-text
-        # enforcement — the enforcer's core use — is preserved.
+        # CJK compound & token boundary guard.
+        # A CJK alias inside a larger CJK run is almost always part of a longer word
+        # (e.g., '关注' in '关注度很高', '云' in '云计算', '状态' in '初始状态').
+        # Mechanically replacing it destroys natural compound words and produces severe grammatical errors.
+        # 1. Single-character CJK term flanked by CJK characters is inherently unsafe.
+        # 2. Longer replacement flanked by CJK characters is unsafe (prevents expanding fragments).
+        # 3. Tokenizer-aware boundary check (jieba): match MUST align with token boundaries.
+        # Unsafe matches are quarantined into audit records rather than violently applied.
+        token_boundaries: tuple[set[int], set[int]] | None = None
+        has_cjk_matches = any(
+            bool(p) and all(is_cjk_char(ch) for ch in p) for _, _, p, _, _ in raw_matches
+        )
+        if has_cjk_matches:
+            try:
+                import jieba  # type: ignore[import-untyped]
+
+                # Seed tokenization with known multi-character glossary patterns
+                for pat in self._rules:
+                    if len(pat) >= 2 and all(is_cjk_char(ch) for ch in pat):
+                        jieba.add_word(pat, freq=1000000)
+                tokens = list(jieba.tokenize(target_text))
+                token_boundaries = ({s for _, s, _ in tokens}, {e for _, _, e in tokens})
+            except Exception:
+                token_boundaries = None
+
         filtered_by_compound: list[tuple[int, int, str, str, str]] = []
+        quarantined_matches: list[tuple[int, int, str, str, str]] = []
+
         for start, end, pattern, repl, rule in raw_matches:
             cjk_pattern = bool(pattern) and all(is_cjk_char(ch) for ch in pattern)
-            if cjk_pattern and len(repl) > len(pattern):
+            is_unsafe = False
+            if cjk_pattern:
                 flanked = (start > 0 and is_cjk_char(target_text[start - 1])) or (
                     end < len(target_text) and is_cjk_char(target_text[end])
                 )
-                if flanked:
-                    continue
-            filtered_by_compound.append((start, end, pattern, repl, rule))
+                if (len(pattern) == 1 or len(repl) > len(pattern)) and flanked:
+                    is_unsafe = True
+                elif token_boundaries is not None and flanked:
+                    t_starts, t_ends = token_boundaries
+                    if start not in t_starts or end not in t_ends:
+                        is_unsafe = True
+
+            if is_unsafe:
+                quarantined_matches.append((start, end, pattern, repl, rule))
+            else:
+                filtered_by_compound.append((start, end, pattern, repl, rule))
         raw_matches = filtered_by_compound
 
+        quarantined_records: list[EnforcementRecord] = [
+            EnforcementRecord(
+                original_span=orig,
+                corrected_span=repl,
+                start_pos=start,
+                end_pos=end,
+                rule_source=f"quarantined_compound:{rule}",
+            )
+            for start, end, orig, repl, rule in quarantined_matches
+        ]
+
         if not raw_matches:
-            return target_text, []
+            return target_text, [], quarantined_records
 
         # Idempotency guard:
         # On resume/re-run the enforcer sees text that already contains its own
@@ -357,7 +397,7 @@ class DeterministicGlossaryEnforcer:
         raw_matches = filtered_matches
 
         if not raw_matches:
-            return target_text, []
+            return target_text, [], quarantined_records
 
         # Disambiguate overlapping matches with true longest-match-first
         # Semantics (the doc promised longest-match, the code did
@@ -375,9 +415,8 @@ class DeterministicGlossaryEnforcer:
                 continue
             taken.append((start, end))
             non_overlapping.append((start, end, pattern, repl, rule))
-
         if not non_overlapping:
-            return target_text, []
+            return target_text, [], quarantined_records
 
         # Single-pass string assembly proceeds in text order.
         non_overlapping.sort(key=lambda item: item[0])
@@ -405,4 +444,13 @@ class DeterministicGlossaryEnforcer:
         if curr_idx < len(target_text):
             pieces.append(target_text[curr_idx:])
 
-        return "".join(pieces), records
+        return "".join(pieces), records, quarantined_records
+
+    def enforce(self, target_text: str) -> tuple[str, list[EnforcementRecord]]:
+        """Enforce glossary consistency on target_text in a single atomic pass.
+
+        Returns:
+            (corrected_text, list_of_enforcement_records)
+        """
+        corrected, applied, _ = self.enforce_audited(target_text)
+        return corrected, applied

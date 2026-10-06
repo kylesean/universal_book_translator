@@ -20,7 +20,12 @@ not model (why a kept node was kept) -- not a second, independent audit.
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from ubt.core.ir.models import IRBlock
 
 from ubt.core.content.contract import (
     ReconciliationReport,
@@ -99,6 +104,45 @@ def attest_document(
     )
 
 
+def attest_blocks(
+    blocks: Sequence[IRBlock],
+    backend: Backend,
+    verifiers: Verifiers,
+    *,
+    source: Any = None,
+    doc_id: str = "",
+) -> AttestationReport:
+    """Lower every block's wrapped element directly without packing into Document AST."""
+    from ubt.model.span import CanonicalSource
+
+    if source is None:
+        canonical_text = "\n".join(b.source_text for b in blocks)
+        source = CanonicalSource(doc_id=doc_id, text=canonical_text)
+
+    text: Counter[str] = Counter()
+    assets: Counter[str] = Counter()
+    violations: list[str] = []
+    attestations: list[Attestation] = []
+    for block in blocks:
+        element = block.element
+        try:
+            attestation = realize(element, backend, verifiers, source)
+        except IntegrityViolation:
+            violations.append(element.id)
+            continue
+        (text if element.is_text else assets)[attestation.fidelity.name] += 1
+        attestations.append(attestation)
+        block.attestation = attestation
+
+    return AttestationReport(
+        total=len(blocks),
+        text=tuple(sorted(text.items())),
+        assets=tuple(sorted(assets.items())),
+        violations=tuple(violations),
+        attestations=tuple(attestations),
+    )
+
+
 def project_contract(report: AttestationReport, graph: ContentGraph) -> ReconciliationReport:
     """Project the per-element attestations onto the delivery contract.
 
@@ -164,4 +208,4 @@ def project_contract(report: AttestationReport, graph: ContentGraph) -> Reconcil
     )
 
 
-__all__ = ["AttestationReport", "attest_document", "project_contract"]
+__all__ = ["AttestationReport", "attest_blocks", "attest_document", "project_contract"]
