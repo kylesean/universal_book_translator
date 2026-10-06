@@ -56,26 +56,49 @@ def _median(values: list[float]) -> float:
     return ordered[len(ordered) // 2] if ordered else 10.0
 
 
+def order_lines_by_column(
+    boxes: list[tuple[float, float, float, float]],
+    page_width: float,
+) -> list[int]:
+    """Reading-order permutation of line indices for a column-aware page.
+
+    A VLM driver recognizes text in its own order — typically top-down across
+    the whole page — which interleaves the columns of a multi-column scan
+    (line 1 of column 1, line 1 of column 2, line 2 of column 1, …). The pdfium
+    path already owns a gutter detector, so reuse it here rather than keeping a
+    second column heuristic. A single-column page (or an unreadable width) keeps
+    its order.
+    """
+    if len(boxes) <= 1 or page_width <= 0:
+        return list(range(len(boxes)))
+    from ubt.adapters.pdf.textgeom import LineBox, column_order
+
+    line_boxes = [LineBox("", box) for box in boxes]
+    ordered = column_order(line_boxes, page_width)
+    position = {id(lb): i for i, lb in enumerate(line_boxes)}
+    return [position[id(lb)] for lb in ordered]
+
+
 def group_lines_to_paragraphs(
     lines: list[tuple[str, tuple[float, float, float, float]]],
     gap_mult: float = 1.5,
 ) -> list[list[int]]:
-    """Group line indices into paragraphs by vertical rhythm.
+    """Group line indices into paragraphs by vertical rhythm, in the given order.
 
-    Without this, a dense scan page yields hundreds of line-blocks and the
-    LLM stages grind for hours. Same-column overlap + gap ≤ mult*median
-    line height joins; anything else breaks. Pure function.
+    ``lines`` must already be in reading order (see :func:`order_lines_by_column`):
+    grouping only decides where one paragraph ends and the next begins. Without
+    it, a dense scan page yields hundreds of line-blocks and the LLM stages grind
+    for hours. Same-column overlap + gap ≤ mult*median line height joins;
+    anything else breaks. Pure function.
     """
     if not lines:
         return []
     heights = [b[3] - b[1] for _, b in lines]
     med = _median(heights)
-    order = sorted(range(len(lines)), key=lambda i: (-lines[i][1][3], lines[i][1][0]))
     groups: list[list[int]] = []
     current: list[int] = []
     prev_box: tuple[float, float, float, float] | None = None
-    for i in order:
-        box = lines[i][1]
+    for i, (_text, box) in enumerate(lines):
         if prev_box is not None:
             gap = prev_box[1] - box[3]
             x_overlap = min(prev_box[2], box[2]) - max(prev_box[0], box[0])
@@ -171,8 +194,11 @@ def transcribe_page_to_blocks(
         stats.pdfium_only,
     )
     blocks: list[IRBlock] = []
-    # Paragraph grouping first: hundreds of line-blocks would grind the LLM
-    # stages for hours; rhythm-joined paragraphs translate AND align better.
+    # Column-aware reading order first: a two-column scan would otherwise be
+    # read line-by-line across the gutter. Then paragraph grouping: hundreds of
+    # line-blocks would grind the LLM stages for hours, and rhythm-joined
+    # paragraphs translate AND align better.
+    anchored = [anchored[i] for i in order_lines_by_column([a.box for a in anchored], width)]
     groups = group_lines_to_paragraphs([(a.text, a.box) for a in anchored])
     for g, member_ids in enumerate(groups):
         members = [anchored[i] for i in member_ids]

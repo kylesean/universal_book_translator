@@ -177,6 +177,10 @@ class JobSubmitRequest(BaseModel):
     emit_both: bool | None = Field(
         default=None, description="Emit both the reflow and the rigid deliverable"
     )
+    emit_companion_rigid: bool | None = Field(
+        default=None,
+        description="Emit a zero-cost '*_rigid.pdf' source-fidelity companion alongside the reflow output",
+    )
     cover_mode: CoverMode | None = Field(
         default=None, description="Cover handling (auto, always, never)"
     )

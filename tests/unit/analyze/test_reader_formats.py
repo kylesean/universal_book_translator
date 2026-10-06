@@ -21,7 +21,7 @@ from ubt.analyze.bridge import blocks_from_document, document_from_blocks
 from ubt.analyze.reader_docx import read_docx
 from ubt.analyze.reader_epub import read_epub
 from ubt.analyze.reader_html import read_html
-from ubt.model.ast import Document
+from ubt.model.ast import Document, Table
 
 #: A 1x1 transparent PNG, for the DOCX picture fixture.
 _PNG = bytes.fromhex(
@@ -186,3 +186,28 @@ def test_the_expected_structure_is_present(
     counts = Counter(element.kind.value for element in document.elements)
     for kind, minimum in expect.items():
         assert counts.get(kind, 0) >= minimum, f"{name}: expected >= {minimum} {kind}"
+
+
+def test_docx_vertically_merged_cell_is_emitted_once(tmp_path: Path) -> None:
+    # python-docx resolves a vMerge continuation row's cell to the restart cell
+    # above, so a per-row dedup repeated the merged value on every row. A
+    # table-scoped set emits it once and blanks the continuations.
+    from docx import Document as DocxDocument
+
+    path = tmp_path / "vmerge.docx"
+    doc = DocxDocument()
+    table = doc.add_table(rows=3, cols=2)
+    table.cell(0, 0).text = "Header"
+    table.cell(0, 1).text = "r0"
+    table.cell(1, 1).text = "r1"
+    table.cell(2, 1).text = "r2"
+    table.cell(0, 0).merge(table.cell(2, 0))
+    doc.save(str(path))
+
+    document = read_docx(path)
+    tables = [e for e in document.elements if isinstance(e, Table)]
+    assert len(tables) == 1
+    markup = tables[0].markup
+    assert markup.count("Header") == 1
+    assert "| Header | r0 |" in markup
+    assert "|  | r1 |" in markup

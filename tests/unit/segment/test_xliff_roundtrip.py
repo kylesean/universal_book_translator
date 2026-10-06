@@ -153,6 +153,19 @@ def test_read_inline_keeps_non_ph_inline_markup() -> None:
     assert "p1" in placeholders
 
 
+def test_read_inline_keeps_a_ph_without_dataref() -> None:
+    # A third-party CAT tool may emit <ph id="1">Foo</ph> with no dataRef; the
+    # visible text must survive, not be replaced by an empty token.
+    element = ET.fromstring(
+        '<source xmlns="urn:oasis:names:tc:xliff:document:2.1">'
+        'see <ph id="1" type="bold">Foo</ph> now</source>'
+    )
+    placeholders: dict[str, Placeholder] = {}
+    text = _read_inline(element, placeholders)
+    assert text == "see Foo now"
+    assert placeholders == {}
+
+
 def test_block_state_fails_loud_on_unmapped_status() -> None:
     # A BlockStatus missing from the mapping is IR drift; silently labelling
     # the segment NEW would tell a reviewer to translate a block whose real

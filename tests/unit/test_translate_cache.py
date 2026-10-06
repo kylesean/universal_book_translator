@@ -278,3 +278,31 @@ def test_value_cache_is_absent_without_a_store() -> None:
     engine = _engine(None)
     engine.remember_value("chunk-A", "value", kind="translate_chunk")
     assert engine.cached_value("chunk-A", kind="translate_chunk") is None
+
+
+# --------------------------------------------------------------------------- #
+# Bounded store: the cache never deleted an entry, so it grew without bound.
+# --------------------------------------------------------------------------- #
+
+
+def test_disk_cache_prunes_oldest_entries_past_the_cap() -> None:
+    import time
+
+    with tempfile.TemporaryDirectory() as root:
+        store = DiskCacheStore(root, max_entries=3)
+        for i in range(3):
+            store.put(step_key("k", [str(i)], {}), f"v{i}")
+            time.sleep(0.01)
+        assert len(list(Path(root).rglob("*.json"))) == 3
+
+        # Writing past the cap prunes the oldest down to the hysteresis target.
+        store.put(step_key("k", ["new"], {}), "vnew")
+        store.prune()
+        remaining = sorted(p.name for p in Path(root).rglob("*.json"))
+        assert len(remaining) <= 3
+        assert store._path(step_key("k", ["new"], {})).exists()
+
+
+def test_disk_cache_prune_never_raises_on_a_missing_root() -> None:
+    store = DiskCacheStore("/nonexistent/ubt-cache-does-not-exist", max_entries=10)
+    assert store.prune() == 0

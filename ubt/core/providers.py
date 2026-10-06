@@ -73,6 +73,11 @@ PROVIDER_ALLOWED_KEYS = frozenset(
         "reasoning_dialect",
         "repair_provider",
         "ocr_api_key",
+        # Run-level, not provider-level, but a real ``UBTConfig`` field: the CLI
+        # (``--db-dir``) and ``UBT_DB_DIR`` both set it, so the ``[defaults]``
+        # block (documented as the config baseline) must accept it too or the
+        # same key is settable on every surface except the config file.
+        "db_dir",
     }
 )
 

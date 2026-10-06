@@ -117,6 +117,10 @@ def _read_inline(element: ET.Element, placeholders: dict[str, Placeholder]) -> s
     Only ``<ph>`` maps to a placeholder. CAT tools also emit paired inline
     markup (``<pc>``); treating every child as a placeholder used to append an
     empty token and silently drop the wrapped text, breaking the roundtrip.
+
+    A ``<ph>`` without ``dataRef``/``data-ref`` carries no token to restore, so
+    its visible text is kept verbatim (a third-party CAT tool may emit
+    ``<ph id="1">Foo</ph>``); appending the empty token instead dropped it.
     """
     parts: list[str] = [element.text or ""]
     for child in element:
@@ -128,7 +132,9 @@ def _read_inline(element: ET.Element, placeholders: dict[str, Placeholder]) -> s
                     kind=child.get("type") or "",
                     original=child.text or "",
                 )
-            parts.append(token)
+                parts.append(token)
+            else:
+                parts.append("".join(child.itertext()))
         else:
             parts.append("".join(child.itertext()))
         parts.append(child.tail or "")

@@ -185,3 +185,12 @@ async def test_docx_adapter_parses_and_renders(tmp_path: Path, docx_book: Path) 
     bi_text = " ".join(p.text for p in bi_doc.paragraphs)
     assert "Chapter One" in bi_text  # the source stays beside the target
     assert "tr:Chapter One" in bi_text
+
+
+def test_epub_natural_sort_orders_embedded_numbers_numerically() -> None:
+    from ubt.adapters.epub.adapter import _natural_sort_key
+
+    names = ["ch10.xhtml", "ch2.xhtml", "ch1.xhtml"]
+    assert sorted(names, key=_natural_sort_key) == ["ch1.xhtml", "ch2.xhtml", "ch10.xhtml"]
+    # A plain lexicographic sort would put ch10 before ch2.
+    assert sorted(names) != sorted(names, key=_natural_sort_key)

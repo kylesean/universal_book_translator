@@ -105,3 +105,35 @@ def test_preflight_fails_when_no_fragment_can_be_typeset(
                 adapter=adapter, manifest=manifest, blocks=blocks, target_lang="zh"
             )
         )
+
+
+def test_preflight_sample_reaches_the_typesetter_for_a_formula_heavy_book(
+    tmp_path: Path,
+) -> None:
+    # A formula/table-heavy book's sample is all static-skip blocks; the old
+    # placeholder kept skip_translate=True, so overlays_from_blocks returned
+    # nothing and the "nothing was drawn" guard was inert (a dead Typst passed).
+    from ubt.core.engine.render_preflight import (
+        _placeholder_blocks,
+        select_preflight_sample,
+    )
+    from ubt.render.outputs import overlays_from_blocks
+
+    blocks = [
+        IRBlock(
+            element=make_element(
+                id=f"b{i}",
+                spine_index=i,
+                block_type=BlockType.FORMULA,
+                flow_id=FlowID.MAIN_STORY,
+                source_text=f"x_{i} = y_{i} + 1",
+                bbox=BoundingBox(page=1, x0=54.0, y0=700.0 - i * 20, x1=354.0, y1=712.0 - i * 20),
+                skip_translate=True,
+            )
+        )
+        for i in range(8)
+    ]
+
+    sample = select_preflight_sample(blocks)
+    assert sample  # the sample is not empty
+    assert len(overlays_from_blocks(_placeholder_blocks(sample), None)) >= 1

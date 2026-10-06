@@ -124,6 +124,13 @@ _WORD_RE = re.compile(r"[^\W\d_]{2,}")
 # ("YoungmokJung") tokenize into constituent given name and surname ("Youngmok", "Jung").
 _BYLINE_NAME_RE = re.compile(r"[A-Z][a-z'’\-]+")
 _INITIAL_RE = re.compile(r"[A-Z]\.")
+#: Superscript forms ``textgeom.to_unicode_superscript`` emits for an
+#: affiliation run: the digits plus the punctuation of ``"1,2"`` / ``"+1"``
+#: (a superscript comma U+02D2 between two affiliation digits is the common
+#: "Shi¹˒²" shape). The byline tokenizer and the affiliation tail below must
+#: accept all of them, or a multi-affiliation byline ("Yifan Shi¹˒², Wei
+#: Zhang¹") is not recognized and its given names get sent to the translator.
+_SUPERSCRIPT_MARKS = "⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾˒"
 _BYLINE_SEGMENT_RE = re.compile(
     r"^(?:and\s+|&\s+)?"  # trailing-list conjunction
     r"(?:[A-Z][A-Za-z'’\-]+|(?:[A-Z]\.)+)"  # first name token or initial(s)
@@ -135,9 +142,8 @@ _BYLINE_SEGMENT_RE = re.compile(
     # crafted/malformed line could stall the ingest worker. The accepted set is
     # unchanged — the tail is any run of digits, separators or affiliation
     # symbols — and the scan is now linear.
-    r"[\s,0-9¹ⁿ∗*†‡§¶]*$"
+    rf"[\s,0-9ⁿ∗*†‡§¶{_SUPERSCRIPT_MARKS}]*$"
 )
-_SUPERSCRIPT_DIGITS = "⁰¹²³⁴⁵⁶⁷⁸⁹"
 
 # --- Front-matter bibliographic identity ------------------------------------
 # The author-affiliation block, its contact email, and the symbol legend
@@ -282,8 +288,9 @@ def _is_author_byline(text: str) -> bool:
     """
     if _YEAR_RE.search(text) or contains_cjk(text):
         return False
-    # Superscript affiliation digits are stripped so "Li¹²" tokenizes as a name.
-    cleaned = "".join(" " if c in _SUPERSCRIPT_DIGITS else c for c in text)
+    # Superscript affiliation marks are stripped so "Li¹²"/"Shi¹˒²" tokenize as
+    # a name (the superscript comma would otherwise break the segment shape).
+    cleaned = "".join(" " if c in _SUPERSCRIPT_MARKS else c for c in text)
     segments = [s.strip() for s in re.split(r",| and ", cleaned) if s.strip()]
     if len(segments) < 2:
         return False

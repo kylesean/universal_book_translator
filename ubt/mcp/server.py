@@ -332,6 +332,7 @@ async def ubt_translate_book(
     translate_chrome: bool | None = None,
     facing_spread: bool | None = None,
     emit_both: bool | None = None,
+    emit_companion_rigid: bool | None = None,
     cover_mode: str | None = None,
     formula_enrichment: str | None = None,
     formula_render: str | None = None,
@@ -434,6 +435,7 @@ async def ubt_translate_book(
         "translate_chrome": translate_chrome,
         "facing_spread": facing_spread,
         "emit_both": emit_both,
+        "emit_companion_rigid": emit_companion_rigid,
         "cover_mode": cover_mode,
         "formula_enrichment": formula_enrichment,
         "formula_render": formula_render,
@@ -579,7 +581,10 @@ async def ubt_cancel_job(job_id: str, db_dir: str | None = None) -> dict[str, An
     db_path = base / f"{jid}.sqlite"
     if not db_path.exists():
         raise ToolError(f"no such job: {jid}")
-    ledger = SQLiteJobLedger(db_path)
+    # Construction runs mkdir/chmod, sqlite3.connect (WAL pragmas) and schema
+    # migration -- all blocking. Off the loop, like the reads/writes below, or a
+    # cancel stalls every concurrent SSE subscriber sharing this event loop.
+    ledger = await asyncio.to_thread(SQLiteJobLedger, db_path)
     try:
         current_status = await asyncio.to_thread(ledger.get_job_status, jid)
         if current_status is None:
@@ -615,7 +620,7 @@ async def ubt_cancel_job(job_id: str, db_dir: str | None = None) -> dict[str, An
                 lock.release()
         return {"job_id": jid, "status": current_status}
     finally:
-        ledger.close()
+        await asyncio.to_thread(ledger.close)
 
 
 @mcp.tool()

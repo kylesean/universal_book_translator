@@ -40,7 +40,7 @@ from typing import Any
 
 from rapidfuzz import fuzz, process
 
-from ubt.core.fs_perms import restrict_dir_to_owner, restrict_sqlite_family
+from ubt.core.fs_perms import ensure_private_dir, restrict_sqlite_family
 
 logger = logging.getLogger(__name__)
 
@@ -326,8 +326,10 @@ class TranslationMemory:
         self._init_db()
         # tm.sqlite accumulates the bilingual sentence pool of every book this
         # machine has touched, and SQLite creates it 0666&~umask -- world
-        # readable on a shared host.
-        restrict_dir_to_owner(self.db_path.parent)
+        # readable on a shared host. The parent is the operator's ``db_dir``:
+        # only tighten it when UBT creates it, so an existing shared directory
+        # is not silently rewritten (matches the ledger; see ensure_private_dir).
+        ensure_private_dir(self.db_path.parent)
         restrict_sqlite_family(self.db_path)
 
     # ------------------------------------------------------------------

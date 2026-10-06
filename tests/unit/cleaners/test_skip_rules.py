@@ -219,6 +219,10 @@ def test_et_al_with_an_independent_author_signal_still_skips() -> None:
         "Duomin Wang and Jane Doe",
         "Duomin Wang 1, Jane Doe 2",
         "Li\u00b9\u00b2 Zhang, Wang\u00b3 Li",  # superscript affiliations
+        # Multi-affiliation byline: textgeom superscripts "Shi¹,²" to "Shi¹˒²"
+        # (U+02D2 superscript comma). The tail class must accept it or the
+        # byline is missed and the given names get translated (arXiv 2608.25512).
+        "Yifan Shi\u00b9\u02d2\u00b2 , Wei Zhang\u00b9 , Tianyi Cui\u00b2",
         "John Smith Jr., Jane Doe",
         "Duomin Wang, Jane Doe,",  # trailing separator
         "Duomin Wang\u2020, Jane Doe\u2021",  # dagger affiliations

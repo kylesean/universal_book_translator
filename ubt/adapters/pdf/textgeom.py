@@ -8,6 +8,7 @@ sampling, no ledger policy — safe to unit-test with synthetic rects.
 
 from __future__ import annotations
 
+import dataclasses
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -548,6 +549,58 @@ def merge_row_fragments(
     return merged
 
 
+#: Horizontal slack for treating two fragments as sharing an edge. pdfium's
+#: ``get_text_bounded`` selects every character whose box *intersects* the query
+#: rect, so a fragment over-reads the glyph sitting on its right edge into the
+#: next fragment: the two rects then overlap in x (or abut, gap == 0). Real
+#: space-separated words leave a small positive gap (the space's width), so a
+#: sub-point tolerance separates a double-count from two adjacent words.
+_OVERREAD_X_TOL_PT = 0.05
+
+
+def _merge_boundary_overreads(fragments: list[LineBox]) -> list[LineBox]:
+    """Fold a fragment's duplicated boundary run back into its left neighbour.
+
+    ``get_text_bounded`` returns a character when its box intersects the query
+    rect, so two adjacent fragments both report the glyph on their shared edge:
+    ``"creating 𝑚"`` + ``"𝑚"`` -> ``"creating 𝑚 𝑚"``, ``"It is D"`` +
+    ``"Definition 33"`` -> ``"It is D Definition 33"``. Those fragments overlap
+    in x and share a baseline; the longest run where the left text ends with the
+    right text's prefix is the double-count, so it is spliced out (no separating
+    space) and the two collapse into one.
+
+    The x-overlap gate is what keeps genuine adjacent words apart: "dynamic" and
+    "composition" collide on ``c`` but their rects are separated by the space, so
+    they are never folded.
+    """
+    merged: list[LineBox] = []
+    for ln in fragments:
+        if merged:
+            prev = merged[-1]
+            px0, py0, px1, py1 = prev.rect
+            x0, y0, x1, y1 = ln.rect
+            if (
+                x0 - px1 <= _OVERREAD_X_TOL_PT
+                and min(py1, y1) - max(py0, y0) > 0
+                and ln.text
+                and prev.text
+            ):
+                a, b = prev.text, ln.text
+                for k in range(min(len(a), len(b)), 0, -1):
+                    if a.endswith(b[:k]):
+                        merged[-1] = dataclasses.replace(
+                            prev,
+                            text=a + b[k:],
+                            rect=(min(px0, x0), min(py0, y0), max(px1, x1), max(py1, y1)),
+                        )
+                        break
+                else:
+                    merged.append(ln)
+                continue
+        merged.append(ln)
+    return merged
+
+
 def _glue_run(run: list[LineBox]) -> LineBox:
     """One row run into a single LineBox (union box, space-joined text).
 
@@ -583,6 +636,7 @@ def _glue_run(run: list[LineBox]) -> LineBox:
         if not dup:
             kept.append(ln)
             kept_norms.append(nl)
+    kept = _merge_boundary_overreads(kept)
     x0 = min(ln.rect[0] for ln in kept)
     y0 = min(ln.rect[1] for ln in kept)
     x1 = max(ln.rect[2] for ln in kept)

@@ -69,6 +69,17 @@ def _is_safe_epub_member_name(name: str) -> bool:
     return ":" not in normalized.split("/", 1)[0]
 
 
+def _natural_sort_key(name: str) -> list[object]:
+    """Sort key ordering embedded integers numerically (``ch2`` before ``ch10``).
+
+    Used only by the no-spine fallback below. A plain ``sorted()`` is
+    lexicographic, so a spineless EPUB of ``ch1.xhtml``/``ch2.xhtml``/``ch10.xhtml``
+    would read ``ch1, ch10, ch2`` -- whole chapters out of order. Splitting digit
+    runs out and comparing them as ints restores the author's order.
+    """
+    return [int(part) if part.isdigit() else part for part in re.split(r"(\d+)", name)]
+
+
 #: Refuse to materialise a single member beyond this. A "zip bomb" member
 #: declares an enormous uncompressed size; ``zipfile`` stops at the declared
 #: size, so capping it before ``read`` is what keeps one crafted member from
@@ -518,10 +529,13 @@ class EPUBAdapter(BaseDocumentAdapter):
                 # If no spine items found, fallback to sorting html files directly
                 if not chapters:
                     html_files = sorted(
-                        n
-                        for n in zf.namelist()
-                        if n.lower().endswith((".xhtml", ".html", ".htm"))
-                        and "toc" not in n.lower()
+                        (
+                            n
+                            for n in zf.namelist()
+                            if n.lower().endswith((".xhtml", ".html", ".htm"))
+                            and "toc" not in n.lower()
+                        ),
+                        key=_natural_sort_key,
                     )
                     for idx, hf in enumerate(html_files, 1):
                         chapters.append(

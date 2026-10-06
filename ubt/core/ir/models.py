@@ -383,8 +383,16 @@ class IRBlock(BaseModel):
     def set_source_text(self, text: str) -> None:
         self.element = _with_element_source(self.element, text)
 
-    def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = False) -> Self:
-        """A copy of the model, supporting updates to both execution state and structural element fields."""
+    def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = True) -> Self:
+        """A copy of the model, supporting updates to both execution state and structural element fields.
+
+        Defaults to ``deep=True``: a shallow copy shares the mutable state
+        containers (``error_flags``, ``glossary_hits``, ``mqm_spans``,
+        ``provenance``), so a later ``copy.error_flags.append(...)`` would mutate
+        the original block. The deep copy is cheap (small scalar fields plus one
+        element dataclass) and removes the whole class of aliasing bugs; pass
+        ``deep=False`` only when the copy is read and never mutated.
+        """
         if not update:
             return super().model_copy(deep=deep)
 

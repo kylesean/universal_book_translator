@@ -1588,12 +1588,24 @@ async def run_draft_stage(
                 cursor_block_id_init = chunk[-1].id
 
             if all_pending_blocks:
+                stats_before = await asyncio.to_thread(ledger.get_job_stats, actual_job_id)
                 handled = await processor.run_whole_book_batch(
                     all_pending_blocks,
                     ctx,
                     create_event_fn=create_event_fn,
                 )
                 await flusher.flush_all()
+                # The fail-fast circuit the interactive loop applies below: this
+                # path returns before reaching it, so a dead provider would burn
+                # every remaining block through the batch fallback instead of
+                # aborting the job the way the interactive path does.
+                if processor.runtime.fail_fast_consecutive >= processor.policy.fail_fast_threshold:
+                    raise UBTError(
+                        f"Whole-book offline batch aborted after "
+                        f"{processor.runtime.fail_fast_consecutive} consecutive "
+                        "non-retryable provider failures (fail-fast circuit). "
+                        f"Last error: {processor.runtime.last_fail_fast_reason}"
+                    )
                 if handled:
                     remaining = await asyncio.to_thread(
                         ledger.fetch_pending_blocks,
@@ -1602,9 +1614,30 @@ async def run_draft_stage(
                         chapter_id=chapter_id,
                     )
                     if not remaining:
+                        stats_after = await asyncio.to_thread(ledger.get_job_stats, actual_job_id)
+                        # FAILED is terminal, so "no pending blocks" alone read an
+                        # all-failed batch as a clean success. Require delivered
+                        # work (drafted / completed / flagged-for-review) before
+                        # logging success; an empty delta means every line failed.
+                        delivered = sum(
+                            stats_after[key] - stats_before[key]
+                            for key in (
+                                "drafted",
+                                "completed",
+                                "needs_human",
+                                "blocked_human",
+                            )
+                        )
+                        if delivered <= 0:
+                            raise UBTError(
+                                f"Whole-book offline batch drafted 0 of "
+                                f"{len(all_pending_blocks)} block(s) for {chapter_id}: "
+                                "the provider rejected every line "
+                                f"(failed={stats_after['failed']})"
+                            )
                         logger.info(
-                            "Whole-book offline batch draft succeeded: %d blocks drafted",
-                            len(all_pending_blocks),
+                            "Whole-book offline batch draft succeeded: %d block(s) drafted",
+                            delivered,
                         )
                         if memory_mgr.should_trigger_snapshot():
                             try:

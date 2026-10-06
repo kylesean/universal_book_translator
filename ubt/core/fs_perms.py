@@ -125,6 +125,26 @@ def restrict_dir_to_owner(path: Path) -> Path:
     return path
 
 
+def ensure_private_dir(path: Path) -> Path:
+    """Create ``path`` if absent and restrict it to its owner; leave an existing
+    directory's mode untouched.
+
+    The ledger's parent is the operator-configurable ``db_dir``. Chmod'ing a
+    directory UBT did not create (a shared workspace, a team cache, ``/tmp``) is
+    a surprising side effect on someone else's path, so only a directory UBT
+    itself creates is tightened here. An existing world-readable ``db_dir`` is
+    reported by :func:`warn_world_readable` instead of silently rewritten.
+    """
+    try:
+        existed = path.exists()
+        path.mkdir(parents=True, exist_ok=True)
+        if not existed:
+            path.chmod(BOOK_TEXT_DIR_MODE)
+    except OSError as exc:
+        logger.debug("Could not ensure private dir %s: %s", path, exc)
+    return path
+
+
 def restrict_file_to_owner(path: Path) -> None:
     """Limit an existing file to its owner; a no-op when it is absent."""
     try:

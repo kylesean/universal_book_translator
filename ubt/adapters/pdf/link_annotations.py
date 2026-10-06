@@ -247,13 +247,19 @@ def relocate_page_annotations(
                     if len(cand) < 2 and not cand.isdigit():
                         continue
                     is_number = _is_number_token(cand)
-                    cand_lower = cand.lower()
+                    # Case-insensitive search on the ORIGINAL string: the match
+                    # indices feed ``tp_overlay.get_charbox`` and
+                    # ``_standalone_number(overlay_text, ...)``, so they must
+                    # index ``overlay_text``, not a lower-cased copy whose length
+                    # can differ (a length-changing case fold would shift every
+                    # later glyph and mislocate the link).
+                    cand_re = re.compile(re.escape(cand), re.IGNORECASE)
                     pos = 0
                     while True:
-                        hit_idx = overlay_text.lower().find(cand_lower, pos)
-                        if hit_idx == -1:
+                        match = cand_re.search(overlay_text, pos)
+                        if match is None:
                             break
-                        end_idx = hit_idx + len(cand)
+                        hit_idx, end_idx = match.start(), match.end()
                         # A bare number must be a whole token: "1" must not match
                         # the "1" inside "10" or "3.1".
                         if is_number and not _standalone_number(overlay_text, hit_idx, end_idx):

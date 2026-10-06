@@ -15,9 +15,24 @@ import logging
 import re
 from typing import Any
 
+from ubt.analyze.structure import looks_like_debris, looks_like_listing
 from ubt.core.ir.models import BlockType, BoundingBox, IRBlock
 
 logger = logging.getLogger(__name__)
+
+#: Unambiguous tabular/code punctuation for absorbing a table's stray bottom
+#: fragments. A bare ":" was removed: it matched ordinary prose.
+_TABULAR_MARKERS = ("->", "←→", "| None", "tuple[", "()", "|")
+
+#: A single code-shaped token: CamelCase (``ScheduleSource``), snake_case
+#: (``next_fire``), or carrying a digit. Anchored to the whole fragment, so any
+#: whitespace disqualifies it — a plain one-word prose fragment is never
+#: absorbed, while a stray table signature still is.
+_CODE_IDENTIFIER_RE = re.compile(
+    r"^(?:[A-Za-z_][A-Za-z0-9_]*[a-z][A-Z][A-Za-z0-9_]*"
+    r"|[A-Za-z]+_[A-Za-z0-9_]+"
+    r"|[A-Za-z_][A-Za-z0-9_]*\d[A-Za-z0-9_]*)$"
+)
 
 _DIGIT_RUN_RE = re.compile(r"\d+")
 _BARE_HANDLE_RE = re.compile(r"^@[\w.\-]+$")
@@ -304,11 +319,18 @@ def merge_table_continuation_fragments(blocks: list[IRBlock]) -> list[IRBlock]:
             if not (nb.x0 >= tbl_box.x0 - 25.0 and nb.x1 <= tbl_box.x1 + 25.0):
                 break
 
-            # Fragment characteristics: formula, code, short phrase, or tabular code signature
+            # Fragment characteristics: formula, code, or a tabular/code-shaped
+            # phrase. The old gate also accepted any block under 120 chars or
+            # one containing a bare ":", so a short body sentence directly below
+            # a table ("The results are shown below:") was swallowed into the
+            # table block and shipped as grid markup instead of translated
+            # prose. Only unambiguous structural markers qualify now.
             is_fragment = (
                 nxt.block_type in (BlockType.FORMULA, BlockType.CODE)
-                or len(ntxt) < 120
-                or any(sym in ntxt for sym in ("->", "←→", "| None", "tuple[", ":", "()"))
+                or looks_like_debris(ntxt)
+                or looks_like_listing(ntxt)
+                or _CODE_IDENTIFIER_RE.match(ntxt) is not None
+                or (len(ntxt) < 120 and any(sym in ntxt for sym in _TABULAR_MARKERS))
             )
             if not is_fragment:
                 break

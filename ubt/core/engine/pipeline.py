@@ -1042,7 +1042,13 @@ class PipelineOrchestrator:
                 logger.error("Pipeline failed for job %s: %s", actual_job_id, exc)
             else:
                 logger.exception("Pipeline failed for job %s: %s", actual_job_id, exc)
-            await _mark_failed_unless_completed(ledger, actual_job_id, status="failed")
+            # Shielded like the GeneratorExit / cancel branches above: a second
+            # cancellation arriving while this terminal write is in flight must
+            # not abandon it, or the job reads as "running" forever and keeps
+            # counting against max_running_jobs.
+            await asyncio.shield(
+                _mark_failed_unless_completed(ledger, actual_job_id, status="failed")
+            )
             failure_event = TranslationProgressEvent(
                 event_type=EventType.PIPELINE_FAILED,
                 job_id=actual_job_id,

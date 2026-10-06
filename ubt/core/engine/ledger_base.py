@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Self
 
 from ubt.core.exceptions import LedgerError
-from ubt.core.fs_perms import restrict_dir_to_owner, restrict_sqlite_family
+from ubt.core.fs_perms import ensure_private_dir, restrict_sqlite_family
 from ubt.core.ir.models import (
     TERMINAL_STATUSES,
     BlockStatus,
@@ -200,7 +200,9 @@ class LedgerBase:
         self.timeout = timeout
         self.read_only = read_only
         if not read_only:
-            restrict_dir_to_owner(self.db_path.parent)
+            # Only a directory UBT itself creates is tightened to owner-only;
+            # an existing user-chosen db_dir keeps its mode (see ensure_private_dir).
+            ensure_private_dir(self.db_path.parent)
         self._lock = threading.RLock()
         self._conn: sqlite3.Connection | None = None
         # Bumped by every committed write to a block row. :class:`StageContext`

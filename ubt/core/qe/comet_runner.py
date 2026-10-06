@@ -160,6 +160,15 @@ class SubprocessQERunner(BaseQERunner):
         # rest of the run falls back to per-call invocation (also manual
         # rollback: UBT_COMET_RESIDENT=0 disables residency from the start).
         self._resident_broken = False
+        # In-process heuristic used to re-score whenever the scorer reports a
+        # non-neural engine. The scorer's own fallback is a length-ratio number
+        # (0.1-0.85) on a different scale than the pipeline's 12-band
+        # HeuristicQERunner, so leaving it in place drifted the quality gate's
+        # threshold and could pass a structurally-broken block at ~0.85.
+        self._heuristic: HeuristicQERunner | None = None
+        self._source_lang = "en"
+        self._target_lang = "zh"
+        self._glossary: list[dict[str, Any]] | None = None
         if model_name.startswith("Unbabel/wmt22-cometkiwi"):
             # The default QE weights are CC-BY-NC-SA-4.0 (non-commercial),
             # which clashes with the commercial (KDP) delivery this gate is
@@ -191,6 +200,34 @@ class SubprocessQERunner(BaseQERunner):
     def reset_residency(self) -> None:
         """Re-enable the resident scorer for a new run (see BaseQERunner)."""
         self._resident_broken = False
+
+    def with_languages(self, source_lang: str, target_lang: str) -> "SubprocessQERunner":
+        """Bind the language pair for the in-process fallback heuristic."""
+        if (self._source_lang, self._target_lang) != (source_lang, target_lang):
+            self._source_lang, self._target_lang = source_lang, target_lang
+            self._heuristic = None
+        return self
+
+    def with_glossary(self, glossary: list[dict[str, Any]] | None) -> "SubprocessQERunner":
+        """Bind the run's glossary for the in-process fallback heuristic.
+
+        Only the fallback path consults it (the neural scorer measures fluency,
+        not terminology); binding it keeps a torch-missing run's terminology
+        scoring identical to the pipeline's own ``HeuristicQERunner``.
+        """
+        if glossary and glossary is not self._glossary:
+            self._glossary = glossary
+            self._heuristic = None
+        return self
+
+    def _heuristic_runner(self) -> "HeuristicQERunner":
+        if self._heuristic is None:
+            self._heuristic = HeuristicQERunner(
+                target_lang=self._target_lang,
+                source_lang=self._source_lang,
+                glossary=self._glossary,
+            )
+        return self._heuristic
 
     def _coerce_reply(self, decoded: Any, stdout_str: str) -> tuple[list[float], str]:
         """Extract (scores, engine) from a decoded IPC reply.
@@ -428,7 +465,22 @@ class SubprocessQERunner(BaseQERunner):
         checkpoint for every QE batch. The resident ``--serve`` session loads
         once and answers JSON-lines requests; the per-call path remains as the
         failure fallback and the documented rollback (UBT_COMET_RESIDENT=0).
+
+        When the scorer reports a non-neural engine (torch/comet unimportable in
+        its environment, or ``UBT_COMET_MOCK``), its own length-ratio fallback is
+        discarded and the batch is re-scored in-process by the pipeline's
+        ``HeuristicQERunner``, so the fallback never drifts the quality gate onto
+        a foreign scale.
         """
+        if not pairs:
+            return []
+        scores = await self._score_via_backend(pairs)
+        if self._last_engine != "neural":
+            return await self._heuristic_runner().score_pairs(pairs)
+        return scores
+
+    async def _score_via_backend(self, pairs: list[dict[str, str]]) -> list[float]:
+        """Resident-or-spawn scoring without the fallback-scale correction."""
         if not pairs:
             return []
         if self._resident_enabled():

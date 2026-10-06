@@ -42,14 +42,26 @@ _SAMPLE_PREFERENCE = (
 )
 
 
-def _sample_key(block: IRBlock) -> tuple[int, int]:
-    """Rank blocks so the sample exercises the most markup-sensitive paths."""
+def _sample_key(block: IRBlock) -> tuple[int, int, int]:
+    """Rank blocks so the sample exercises the most markup-sensitive paths.
+
+    Blocks the compositor can never draw above the source (tables, figures,
+    bbox-less blocks) rank last: ``overlays_from_blocks`` excludes them, so a
+    sample made only of them renders Layer 0 alone and the pre-flight never
+    reaches the typesetter — a dead Typst toolchain would pass silently. Within
+    the drawable set, inline math and structure blocks come first.
+    """
+    drawable = (
+        block.bbox is not None
+        and block.bbox.page > 0
+        and block.block_type not in (BlockType.TABLE, BlockType.IMAGE)
+    )
     inline_math = "$" in (block.source_text or "")
     try:
         type_rank = _SAMPLE_PREFERENCE.index(block.block_type)
     except ValueError:
         type_rank = len(_SAMPLE_PREFERENCE)
-    return (0 if inline_math else 1, type_rank)
+    return (0 if drawable else 1, 0 if inline_math else 1, type_rank)
 
 
 def select_preflight_sample(
@@ -72,9 +84,19 @@ def _placeholder_blocks(sample: list[IRBlock]) -> list[IRBlock]:
     which would make this gate blind to a dead Typst toolchain. Substituting the
     source text keeps the rehearsal on the real render path and hands the
     compiler the markup (math, escapes) it has to accept.
+
+    ``skip_translate`` is cleared too: a formula/table sample is a static skip
+    by policy, and ``overlays_from_blocks`` never draws a skip block, so without
+    this the substituted text would still be excluded and the gate would stay
+    blind exactly on the formula/table-heavy books it most needs to check.
     """
     return [
-        block.model_copy(update={"target_text": (block.source_text or "").strip() or "preflight"})
+        block.model_copy(
+            update={
+                "target_text": (block.source_text or "").strip() or "preflight",
+                "skip_translate": False,
+            }
+        )
         for block in sample
     ]
 

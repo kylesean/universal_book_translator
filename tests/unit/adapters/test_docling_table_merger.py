@@ -90,3 +90,28 @@ def test_merge_table_continuation_fragments_does_not_swallow_distant_prose() -> 
     assert merged[0].bbox is not None
     assert merged[0].bbox.y0 == 300.0
     assert merged[1].id == "b02"
+
+
+def test_merge_table_continuation_fragments_does_not_swallow_near_prose() -> None:
+    # A short body sentence sits within the gap/containment window; the old
+    # gate absorbed anything under 120 chars or containing ":", so it was
+    # swallowed into the table as grid markup instead of translated as prose.
+    tbl = _make_block("b01", BlockType.TABLE, 1, 70.0, 200.0, 540.0, 400.0, "| A | B |")
+    prose = _make_block(
+        "b02",
+        BlockType.NARRATIVE,
+        1,
+        70.0,
+        188.0,
+        540.0,
+        198.0,
+        "The results are shown below:",
+    )
+
+    blocks = [tbl, prose]
+    merged = merge_table_continuation_fragments(blocks)
+
+    assert len(merged) == 2
+    assert merged[1].id == "b02"
+    assert merged[0].bbox is not None
+    assert merged[0].bbox.y0 == 200.0

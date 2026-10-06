@@ -21,6 +21,7 @@ from docx import Document as DocxDocument
 from docx.document import Document as _DocxDocument
 from docx.oxml.ns import qn
 from docx.table import Table as DocxTable
+from docx.table import _Cell as _DocxCell
 from docx.text.paragraph import Paragraph as DocxParagraph
 
 from ubt.analyze._identity import file_digest
@@ -118,20 +119,35 @@ def walk_docx_elements(
     for block in _iter_blocks(document):
         if isinstance(block, DocxTable):
             rows = []
-            for row in block.rows:
-                # python-docx repeats one merged _tc once per spanned grid
-                # column; emit its text once and blank the continuations so
-                # the grid geometry survives (matching the Docling table path).
-                # Raw repetition double-bills the text and shifts every later
-                # cell when the model normalizes the duplicate column.
-                seen_tcs: set[int] = set()
+            # Walk the raw ``<w:tr>/<w:tc>`` grid rather than ``row.cells``.
+            # python-docx's grid collapses both merges onto the origin cell:
+            # a horizontal ``gridSpan`` cell repeats once per spanned column,
+            # and a vertical ``vMerge`` continuation row resolves to the restart
+            # cell above (so a merged header repeated on every row). Reading the
+            # XML, a gridSpan cell is emitted once and padded, and a vMerge
+            # continuation is blanked -- the grid geometry survives and no cell
+            # text is double-billed. ``_Cell`` is python-docx's own text reader,
+            # so paragraph/line-break handling stays identical.
+            for tr in block._tbl.tr_lst:
                 cells: list[str] = []
-                for cell in row.cells:
-                    if id(cell._tc) in seen_tcs:
-                        cells.append("")
-                    else:
-                        seen_tcs.add(id(cell._tc))
-                        cells.append(_clean(cell.text))
+                for tc in tr.tc_lst:
+                    tcpr = tc.find(qn("w:tcPr"))
+                    grid_span = 1
+                    continuation = False
+                    if tcpr is not None:
+                        gs = tcpr.find(qn("w:gridSpan"))
+                        if gs is not None:
+                            try:
+                                grid_span = max(1, int(gs.get(qn("w:val")) or "1"))
+                            except (TypeError, ValueError):
+                                grid_span = 1
+                        vm = tcpr.find(qn("w:vMerge"))
+                        # A vMerge without val="restart" is a continuation of the
+                        # cell above; its own ``<w:tc>`` carries no text.
+                        if vm is not None and (vm.get(qn("w:val")) or "continue") != "restart":
+                            continuation = True
+                    cells.append("" if continuation else _clean(_DocxCell(tc, block).text))
+                    cells.extend([""] * (grid_span - 1))
                 rows.append(cells)
             markup = pipe_table(rows)
             if markup:

@@ -83,6 +83,23 @@ def test_ir_block_model_copy_mixed_structural_and_execution_state() -> None:
     assert copied.mtqe_score == 0.98
 
 
+def test_ir_block_model_copy_isolates_mutable_state() -> None:
+    # A shallow copy shares error_flags/provenance, so a later append on the
+    # copy mutated the original block. The default is deep now.
+    el = make_element(id="b1", spine_index=1, block_type=BlockType.NARRATIVE, source_text="Hi")
+    block = IRBlock(element=el)
+    block.error_flags.append("orig")
+    block.provenance["k"] = "v"
+
+    copied = block.model_copy(update={"target_text": "你好"})
+    assert copied.error_flags is not block.error_flags
+    assert copied.provenance is not block.provenance
+    copied.error_flags.append("added_on_copy")
+    copied.provenance["k2"] = "v2"
+    assert block.error_flags == ["orig"]
+    assert block.provenance == {"k": "v"}
+
+
 def test_ir_block_from_element_factories() -> None:
     el1 = make_element(id="e1", spine_index=0, block_type=BlockType.NARRATIVE, source_text="One")
     el2 = make_element(id="e2", spine_index=1, block_type=BlockType.NARRATIVE, source_text="Two")

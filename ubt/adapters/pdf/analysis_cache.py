@@ -44,14 +44,17 @@ def _file_identity(path: Path) -> str:
 def _reader_identity() -> str:
     """Size+mtime of the reader's rule modules, so a rule change invalidates the cache.
 
-    The reader imports its list/heading/chrome rules from ``structure`` and its
-    text canonicalization from ``normalize``; keying only on ``reader_pdf``
-    would serve stale blocks after a change to either.
+    The reader imports its list/heading/chrome rules from ``structure``, its
+    text canonicalization from ``normalize``, and the pdfium line/row geometry
+    (rect harvesting, row glue, column order) from ``textgeom``; keying only on
+    ``reader_pdf`` would serve stale blocks after a change to any of them — a
+    ``textgeom`` fix would be invisible on every cached re-run.
     """
     return _module_identity(
         "ubt.analyze.reader_pdf",
         "ubt.analyze.structure",
         "ubt.analyze.normalize",
+        "ubt.adapters.pdf.textgeom",
     )
 
 
