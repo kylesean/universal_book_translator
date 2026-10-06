@@ -581,46 +581,44 @@ async def ubt_cancel_job(job_id: str, db_dir: str | None = None) -> dict[str, An
     db_path = base / f"{jid}.sqlite"
     if not db_path.exists():
         raise ToolError(f"no such job: {jid}")
-    # Construction runs mkdir/chmod, sqlite3.connect (WAL pragmas) and schema
-    # migration -- all blocking. Off the loop, like the reads/writes below, or a
-    # cancel stalls every concurrent SSE subscriber sharing this event loop.
-    ledger = await asyncio.to_thread(SQLiteJobLedger, db_path)
-    try:
-        current_status = await asyncio.to_thread(ledger.get_job_status, jid)
-        if current_status is None:
-            raise ToolError(f"no such job: {jid}")
-        if current_status not in TERMINAL_JOB_STATUSES:
-            # The running pipeline holds the job-level writer lock for the whole
-            # run; taking it here too is what keeps a cancellation from
-            # clobbering the pipeline's checkpoints (mirrors the REST surface).
-            lock = LedgerWriterLock(db_path, jid)
-            deadline = time.monotonic() + _CANCEL_LOCK_WAIT_SEC
-            while True:
-                try:
-                    lock.acquire()
-                    break
-                except LedgerWriterLockConflictError:
-                    if time.monotonic() >= deadline:
-                        logger.info(
-                            "MCP cancel for %s: writer lock still held; the running "
-                            "pipeline will finalize it.",
-                            jid,
-                        )
-                        return {"job_id": jid, "status": current_status}
-                    await asyncio.sleep(0.1)
+
+    # Everything below (mkdir/chmod, WAL pragmas, schema migration, reads and
+    # the finalize write) is blocking AND the migration must not race a
+    # pipeline that holds the writer lock on a legacy (pre-v13) database:
+    # mirror the REST cancel surface — acquire the lock first, then construct
+    # the ledger under it, all in one worker thread off the event loop.
+    def _cancel_locked() -> dict[str, Any]:
+        lock = LedgerWriterLock(db_path, jid)
+        deadline = time.monotonic() + _CANCEL_LOCK_WAIT_SEC
+        while True:
             try:
-                # Re-check under the lock: the pipeline may have finalized while
-                # we waited, and a finished job must not be rewritten.
-                status_now = await asyncio.to_thread(ledger.get_job_status, jid)
-                if status_now is not None and status_now not in TERMINAL_JOB_STATUSES:
-                    await asyncio.to_thread(ledger.finalize_job, jid, status=JobStatus.CANCELLED)
-                    return {"job_id": jid, "status": JobStatus.CANCELLED}
-                return {"job_id": jid, "status": status_now or current_status}
+                lock.acquire()
+                break
+            except LedgerWriterLockConflictError:
+                if time.monotonic() >= deadline:
+                    logger.info(
+                        "MCP cancel for %s: writer lock still held; the running "
+                        "pipeline will finalize it.",
+                        jid,
+                    )
+                    return {"job_id": jid, "status": JobStatus.RUNNING}
+                time.sleep(0.1)
+        try:
+            ledger = SQLiteJobLedger(db_path)
+            try:
+                status = ledger.get_job_status(jid)
+                if status is None:
+                    raise ToolError(f"no such job: {jid}")
+                if status in TERMINAL_JOB_STATUSES:
+                    return {"job_id": jid, "status": status}
+                ledger.finalize_job(jid, status=JobStatus.CANCELLED)
+                return {"job_id": jid, "status": JobStatus.CANCELLED}
             finally:
-                lock.release()
-        return {"job_id": jid, "status": current_status}
-    finally:
-        await asyncio.to_thread(ledger.close)
+                ledger.close()
+        finally:
+            lock.release()
+
+    return await asyncio.to_thread(_cancel_locked)
 
 
 @mcp.tool()
