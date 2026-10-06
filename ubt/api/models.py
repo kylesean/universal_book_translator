@@ -479,6 +479,14 @@ class TMImportRequest(BaseModel):
     )
 
 
+class JobUploadResponse(BaseModel):
+    """Result of staging an uploaded source document on the server."""
+
+    file_path: str = Field(..., description="Server-side path to pass as input_path")
+    file_name: str = Field(..., description="Original client-side file name")
+    size_bytes: int = Field(..., ge=0, description="Stored file size in bytes")
+
+
 class JobSubmitResponse(BaseModel):
     """Response returned upon successful job enqueueing."""
 

@@ -48,6 +48,7 @@ export interface TranslationDictionary {
     dropzoneTitle: string
     dropzoneSubtitle: string
     dropzoneActive: string
+    uploading: string
     orBrowse: string
     manualPathPlaceholder: string
     languages: string
@@ -110,6 +111,8 @@ export interface TranslationDictionary {
     noMatch: string
     resumeCompile: string
     resuming: string
+    downloadPrimary: string
+    noDeliverables: string
   }
   quality: {
     title: string

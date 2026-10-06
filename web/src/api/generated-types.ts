@@ -38,6 +38,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/jobs/upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Stage a source document server-side; returns the input_path to submit */
+        post: operations["upload_source_document_jobs_upload_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/jobs/submit": {
         parameters: {
             query?: never;
@@ -741,6 +758,11 @@ export interface components {
             /** Detail Zh */
             detail_zh: string;
         };
+        /** Body_upload_source_document_jobs_upload_post */
+        Body_upload_source_document_jobs_upload_post: {
+            /** File */
+            file: string;
+        };
         /**
          * ExtractionStrategy
          * @description Output extraction strategy.
@@ -1198,6 +1220,27 @@ export interface components {
             has_output: boolean;
         };
         /**
+         * JobUploadResponse
+         * @description Result of staging an uploaded source document on the server.
+         */
+        JobUploadResponse: {
+            /**
+             * File Path
+             * @description Server-side path to pass as input_path
+             */
+            file_path: string;
+            /**
+             * File Name
+             * @description Original client-side file name
+             */
+            file_name: string;
+            /**
+             * Size Bytes
+             * @description Stored file size in bytes
+             */
+            size_bytes: number;
+        };
+        /**
          * ModelProfile
          * @description Declarative capability profile for a translation model.
          *
@@ -1466,6 +1509,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["JobAssessResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_source_document_jobs_upload_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_source_document_jobs_upload_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobUploadResponse"];
                 };
             };
             /** @description Validation Error */

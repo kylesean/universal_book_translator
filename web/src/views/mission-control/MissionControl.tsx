@@ -7,6 +7,7 @@ import {
   SplitSquareVertical,
   Activity,
   RotateCcw,
+  Download,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
@@ -15,6 +16,8 @@ import {
   cancelJob,
   resumeJob,
   listJobs,
+  listDeliverables,
+  deliverableDownloadUrl,
   subscribeJobProgress,
   type JobSummary,
   type ProgressStreamFrame,
@@ -49,6 +52,7 @@ export function MissionControl() {
   const [avgQe, setAvgQe] = useState<number>(0)
   const [jobs, setJobs] = useState<JobSummary[]>([])
   const [resuming, setResuming] = useState(false)
+  const [downloading, setDownloading] = useState(false)
 
   const logContainerRef = useRef<HTMLDivElement>(null)
 
@@ -161,6 +165,26 @@ export function MissionControl() {
     }
   }
 
+  // Completed run → open the primary translated document in a new tab. The
+  // deliverable list names what actually exists on disk, so no key guessing.
+  const handleDownload = async () => {
+    if (!currentJobId || downloading) return
+    setDownloading(true)
+    try {
+      const items = await listDeliverables(currentJobId)
+      const primary = items.find((d) => d.key === 'primary') ?? items[0]
+      if (primary) {
+        window.open(deliverableDownloadUrl(currentJobId, primary.key), '_blank')
+      } else {
+        alert(t.mission.noDeliverables)
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Download failed')
+    } finally {
+      setDownloading(false)
+    }
+  }
+
   const pipelineStages = [
     { key: 'extract', label: '1. Extract' },
     { key: 'segment', label: '2. Chunk' },
@@ -234,6 +258,13 @@ export function MissionControl() {
         </div>
 
         <div className="flex items-center gap-2">
+          {currentJobId && isCompleted && (
+            <Button onClick={handleDownload} variant="primary" size="sm" disabled={downloading}>
+              <Download className="h-3.5 w-3.5 mr-1" />
+              {t.mission.downloadPrimary}
+            </Button>
+          )}
+
           <Button
             onClick={() => currentJobId && onInspectQuality(currentJobId)}
             disabled={!currentJobId}

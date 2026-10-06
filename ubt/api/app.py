@@ -6,6 +6,7 @@ import ipaddress
 import json
 import logging
 import os
+import re
 import tempfile
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -13,9 +14,20 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from ubt import __version__
@@ -41,6 +53,7 @@ from ubt.api.models import (
     JobStatusResponse,
     JobSubmitRequest,
     JobSubmitResponse,
+    JobUploadResponse,
     SegmentEditRequest,
     SystemInfoResponse,
     TermPropagationRequest,
@@ -84,6 +97,7 @@ from ubt.core.exceptions import (
     UBTError,
     UnsupportedDocumentFormatError,
 )
+from ubt.core.fs_perms import ensure_private_dir
 from ubt.core.ir.models import IRBlock
 from ubt.core.job_options import (
     JOB_ID_RE,
@@ -121,6 +135,7 @@ __all__ = [
     "JobSubmitRequest",
     "JobAssessRequest",
     "JobSubmitResponse",
+    "JobUploadResponse",
     "JobStatusResponse",
     "SYSTEM_DISALLOWED_PREFIXES",
     "SENSITIVE_FILENAME_PARTS",
@@ -145,6 +160,10 @@ __all__ = [
 #: Local-only bind addresses. Anything else exposes the service to the network
 #: and therefore requires the isolation guards below.
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "::ffff:127.0.0.1"})
+
+#: Cap for staged uploads. Books are large but not unbounded; this also keeps
+#: a rogue multipart body from filling the disk the ledger lives on.
+UPLOAD_MAX_BYTES = 512 * 1024 * 1024  # 512 MB
 
 
 def _bind_isolation_gaps(cfg: UBTConfig) -> list[str]:
@@ -644,6 +663,95 @@ def create_app(
                 return await _assess()
         return await _assess()
 
+    def _managed_dir(name: str) -> Path:
+        """A UBT-managed subtree under ``db_dir`` (or the operator allowlist).
+
+        ``db_dir`` is an implicit sandbox base, so managed trees (uploaded
+        sources, derived deliverables) pass :func:`resolve_secure_path` with no
+        operator configuration. When an operator allowlist excludes ``db_dir``,
+        placing files there would 403 on the very next request — fall back to
+        the first allowlisted base instead.
+        """
+        db_sub = (app_config.db_dir / name).resolve()
+        bases = effective_allowed_bases(app_config)
+        if any(db_sub == b or b in db_sub.parents for b in bases):
+            return db_sub
+        if bases:
+            return (bases[0] / name).resolve()
+        return db_sub
+
+    def _uploads_dir() -> Path:
+        """Staging area for documents uploaded through the web console."""
+        return _managed_dir("uploads")
+
+    @api_app.post(
+        "/jobs/upload",
+        response_model=JobUploadResponse,
+        status_code=status.HTTP_201_CREATED,
+        tags=["Jobs"],
+        summary="Stage a source document server-side; returns the input_path to submit",
+    )
+    async def upload_source_document(
+        file: Annotated[UploadFile, File()],
+    ) -> JobUploadResponse:
+        # Browsers cannot send a usable filesystem path (File.path is an
+        # Electron-only property), so the wizard uploads the bytes here and
+        # submits the returned server-side path instead of a client guess.
+        from ubt.adapters.factory import supported_suffixes
+
+        original_name = Path(file.filename or "").name.strip()
+        if not original_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Missing file name",
+            )
+        suffix = Path(original_name).suffix.lower()
+        known = supported_suffixes()
+        if suffix not in known:
+            raise HTTPException(
+                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                detail=f"Unsupported document format '{suffix or '(none)'}'. Supported: {', '.join(known)}.",
+            )
+
+        # Collisions cannot clobber a prior upload: every staged file gets a
+        # timestamped, uuid-prefixed name. The readable stem is kept so the
+        # operator can still tell the staged copies apart on disk.
+        stem = (
+            re.sub(r"[^\w.\- ]+", "_", Path(original_name).stem, flags=re.UNICODE).strip()
+            or "upload"
+        )
+        uploads_dir = ensure_private_dir(_uploads_dir())
+        dest = (
+            uploads_dir / f"{datetime.now(UTC):%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:8]}-{stem}{suffix}"
+        )
+
+        size = 0
+        try:
+            with dest.open("wb") as out:
+                while chunk := await file.read(1024 * 1024):
+                    size += len(chunk)
+                    if size > UPLOAD_MAX_BYTES:
+                        raise HTTPException(
+                            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                            detail=(
+                                f"Uploaded file exceeds the {UPLOAD_MAX_BYTES // (1024 * 1024)} MB limit"
+                            ),
+                        )
+                    out.write(chunk)
+        except HTTPException:
+            dest.unlink(missing_ok=True)
+            raise
+        except OSError as exc:
+            dest.unlink(missing_ok=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to store upload: {exc}",
+            ) from exc
+        finally:
+            await file.close()
+
+        return JobUploadResponse(file_path=str(dest), file_name=original_name, size_bytes=size)
+
     @api_app.post(
         "/jobs/submit",
         response_model=JobSubmitResponse,
@@ -656,6 +764,9 @@ def create_app(
     ) -> JobSubmitResponse:
         resolved_in = resolve_secure_path(req.input_path, must_exist=True, config=app_config)
         requested_id = validate_job_id(req.job_id) if req.job_id else None
+        # Resolve the id once (client-supplied or server-generated) so the
+        # default deliverable directory can be derived per-job before enqueue.
+        submit_id = requested_id or f"job_{uuid.uuid4().hex[:12]}"
 
         # Submit idempotency: if this job_id is already known and still live (or
         # completed), return it before checking output collisions (a completed
@@ -714,24 +825,16 @@ def create_app(
                     detail="output_path already exists; refusing to overwrite it",
                 )
         else:
-            default_out = default_output_path(resolved_in)
-            # Place the server-derived default inside the sandbox the validator
-            # will enforce. With no UBT_ALLOWED_DIRS the default deliverable
-            # (~/Documents/UBT/...) sits outside the implicit cwd+db_dir bases,
-            # so an allowlist-less deployment 403'd on every submit that
-            # omitted output_path.
-            bases = effective_allowed_bases(app_config)
-            try:
-                default_resolved = default_out.resolve()
-                if not any(default_resolved == b or b in default_resolved.parents for b in bases):
-                    if any(
-                        resolved_in.parent == b or b in resolved_in.parent.parents for b in bases
-                    ):
-                        default_out = resolved_in.parent / default_out.name
-                    elif bases:
-                        default_out = bases[0] / default_out.name
-            except Exception:
-                pass
+            # Server-derived default: deliverables live in their own per-job
+            # directory under the managed ``outputs`` tree — never beside the
+            # staged upload, which would mix sources with translations. The
+            # directory is sandbox-valid by construction (_managed_dir), so the
+            # old "shoe-horn ~/Documents/UBT into the bases" dance is gone.
+            # The CLI keeps its ``~/Documents/UBT`` default; this only shapes
+            # what the API derives on the operator's behalf.
+            default_out = ensure_private_dir(_managed_dir("outputs") / submit_id) / (
+                default_output_path(resolved_in).name
+            )
             resolved_out = resolve_secure_path(default_out, must_exist=False, config=app_config)
             target_candidate = (
                 resolve_target_output(resolved_out, resolved_in)
@@ -777,7 +880,7 @@ def create_app(
                 safe_req.input_path,
             )
         if job_queue is not None:
-            queued_id = requested_id or f"job_{uuid.uuid4().hex[:12]}"
+            queued_id = submit_id
             queued_payload = safe_req.model_dump()
             if auto_rehearsal:
                 # The worker recomputes rehearsal from its OWN key; this
@@ -813,7 +916,7 @@ def create_app(
                 rehearsal=safe_req.dry_run,
             )
         try:
-            record = manager.create_job(safe_req, job_id=requested_id)
+            record = manager.create_job(safe_req, job_id=submit_id)
         except (ServerCapacityError, QueueDepthExceededError) as exc:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,

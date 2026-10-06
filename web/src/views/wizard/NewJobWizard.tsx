@@ -10,7 +10,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
-import { assessJob, submitJob, type JobAssessResponse } from '@/api/client'
+import { assessJob, submitJob, uploadSourceDocument, type JobAssessResponse } from '@/api/client'
 import { useI18n } from '@/i18n/I18nContext'
 
 /** Human-readable duration from a seconds estimate (e.g. "3m", "1.2h"). */
@@ -37,6 +37,7 @@ export function NewJobWizard() {
   const [isAssessing, setIsAssessing] = useState(false)
   const [assessment, setAssessment] = useState<JobAssessResponse | null>(null)
   const [assessError, setAssessError] = useState<string | null>(null)
+  const [isUploading, setIsUploading] = useState(false)
 
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
@@ -62,27 +63,40 @@ export function NewJobWizard() {
     }
   }
 
+  // Browsers do not expose a real filesystem path (`File.path` exists only in
+  // Electron), so the picked file is uploaded to the server and the staged
+  // path it returns becomes the assess/submit input. A previously staged file
+  // stays valid — the manual path field still allows server-side paths too.
+  const handleFile = async (file: File) => {
+    setFileName(file.name)
+    setFileSize((file.size / (1024 * 1024)).toFixed(1) + ' MB')
+    setIsUploading(true)
+    setAssessError(null)
+    setAssessment(null)
+    try {
+      const staged = await uploadSourceDocument(file)
+      setFilePath(staged.file_path)
+      runAssess(staged.file_path)
+    } catch (err) {
+      setAssessError(err instanceof Error ? err.message : 'Upload failed')
+    } finally {
+      setIsUploading(false)
+    }
+  }
+
   const handleFileDrop = (e: React.DragEvent) => {
     e.preventDefault()
     setIsDragOver(false)
+    if (isUploading) return
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      const file = e.dataTransfer.files[0]
-      setFileName(file.name)
-      setFileSize((file.size / (1024 * 1024)).toFixed(1) + ' MB')
-      const path = (file as any).path || file.name
-      setFilePath(path)
-      runAssess(path)
+      void handleFile(e.dataTransfer.files[0])
     }
   }
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      const file = e.target.files[0]
-      setFileName(file.name)
-      setFileSize((file.size / (1024 * 1024)).toFixed(1) + ' MB')
-      const path = (file as any).path || file.name
-      setFilePath(path)
-      runAssess(path)
+      void handleFile(e.target.files[0])
+      e.target.value = '' // allow re-picking the same file after an edit
     }
   }
 
@@ -174,7 +188,7 @@ export function NewJobWizard() {
               type="file"
               ref={fileInputRef}
               onChange={handleFileInputChange}
-              accept=".pdf,.epub,.md,.txt"
+              accept=".pdf,.epub,.docx,.md,.markdown,.txt,.html,.htm"
               className="hidden"
             />
             <div
@@ -192,10 +206,18 @@ export function NewJobWizard() {
               }`}
             >
               <div className="h-10 w-10 mx-auto rounded-full bg-[var(--paper-subsurface)] border border-[var(--paper-border)] flex items-center justify-center text-[var(--ink-secondary)] mb-2.5 shadow-2xs">
-                <UploadCloud className="h-5 w-5" />
+                {isUploading ? (
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                ) : (
+                  <UploadCloud className="h-5 w-5" />
+                )}
               </div>
               <div className="text-xs font-semibold text-[var(--ink-primary)]">
-                {isDragOver ? t.wizard.dropzoneActive : t.wizard.dropzoneTitle}
+                {isUploading
+                  ? t.wizard.uploading
+                  : isDragOver
+                    ? t.wizard.dropzoneActive
+                    : t.wizard.dropzoneTitle}
               </div>
               <div className="text-[11px] text-[var(--ink-secondary)] mt-1">
                 {t.wizard.dropzoneSubtitle}

@@ -10,6 +10,7 @@ export type JobAssessResponse = paths['/jobs/assess']['post']['responses']['200'
 export type JobSubmitRequest = paths['/jobs/submit']['post']['requestBody']['content']['application/json']
 export type JobSubmitResponse = paths['/jobs/submit']['post']['responses']['202']['content']['application/json']
 export type JobStatusResponse = paths['/jobs/{job_id}/status']['get']['responses']['200']['content']['application/json']
+export type JobUploadResponse = paths['/jobs/upload']['post']['responses']['201']['content']['application/json']
 export type JobSummary = paths['/jobs']['get']['responses']['200']['content']['application/json']['jobs'][number]
 export type ModelProfile = paths['/api/v1/model-profiles']['get']['responses']['200']['content']['application/json'][number]
 export type SystemInfo = paths['/system/info']['get']['responses']['200']['content']['application/json']
@@ -110,6 +111,24 @@ export async function submitJob(req: JobSubmitRequest): Promise<JobSubmitRespons
   if (!res.ok) {
     const errorBody = await res.json().catch(() => ({ detail: res.statusText }))
     throw new Error(errorBody.detail || 'Job submission failed')
+  }
+  return res.json()
+}
+
+/**
+ * Upload a source document to the server and return the staged path.
+ *
+ * Browsers cannot expose a real filesystem path (`File.path` is an
+ * Electron-only property), so the wizard stages the bytes here and submits
+ * the returned `file_path` as `input_path` instead of a client-side guess.
+ */
+export async function uploadSourceDocument(file: File): Promise<JobUploadResponse> {
+  const form = new FormData()
+  form.append('file', file)
+  const res = await fetch(`${BASE_URL}/jobs/upload`, { method: 'POST', body: form })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(typeof body.detail === 'string' ? body.detail : 'Upload failed')
   }
   return res.json()
 }

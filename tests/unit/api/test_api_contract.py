@@ -390,6 +390,68 @@ def test_submit_capacity_exceeded_is_429(
     assert "Server at capacity" in response.json()["detail"]
 
 
+def test_default_output_lands_in_per_job_outputs_dir(
+    authed: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No ``output_path`` → the API derives ``db_dir/outputs/<job_id>/<stem>_bilingual<ext>``.
+
+    Deliverables must not sit beside the staged upload (sources and
+    translations mixed in one directory) nor silently in the caller's cwd —
+    the per-job directory is the contract the console's deliverable links and
+    the operator's cleanup scripts both rely on.
+    """
+    from ubt.api.manager import JobManager
+    from ubt.core.exceptions import DocumentParseError
+
+    doc = _write_doc(tmp_path)
+    captured: dict[str, Any] = {}
+
+    def _capture(self: JobManager, request: Any, job_id: str | None = None) -> Any:
+        captured["request"] = request
+        captured["job_id"] = job_id
+        raise DocumentParseError("stop before the run starts")
+
+    monkeypatch.setattr(JobManager, "create_job", _capture)
+    response = authed.post("/jobs/submit", json={"input_path": str(doc)}, headers=_AUTH)
+    assert response.status_code == 400
+
+    job_id = captured["job_id"]
+    assert isinstance(job_id, str) and job_id.startswith("job_")
+    out = Path(captured["request"].output_path)
+    assert out.parent == (tmp_path / "db" / "outputs" / job_id).resolve()
+    assert out.name == "input_bilingual.md"
+    # The directory exists before the worker starts, and the source staging
+    # area stays free of deliverables.
+    assert out.parent.is_dir()
+    assert "uploads" not in out.parts
+
+
+def test_default_output_dir_honors_requested_job_id(
+    authed: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ubt.api.manager import JobManager
+    from ubt.core.exceptions import DocumentParseError
+
+    doc = _write_doc(tmp_path)
+    captured: dict[str, Any] = {}
+
+    def _capture(self: JobManager, request: Any, job_id: str | None = None) -> Any:
+        captured["request"] = request
+        captured["job_id"] = job_id
+        raise DocumentParseError("stop before the run starts")
+
+    monkeypatch.setattr(JobManager, "create_job", _capture)
+    response = authed.post(
+        "/jobs/submit", json={"input_path": str(doc), "job_id": "myjob123"}, headers=_AUTH
+    )
+    assert response.status_code == 400
+    assert captured["job_id"] == "myjob123"
+    assert (
+        Path(captured["request"].output_path).parent
+        == (tmp_path / "db" / "outputs" / "myjob123").resolve()
+    )
+
+
 def test_submit_unsupported_format_is_415(
     authed: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

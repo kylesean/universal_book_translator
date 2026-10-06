@@ -118,6 +118,65 @@
         }
       }
     },
+    "/jobs/upload": {
+      "post": {
+        "tags": [
+          "Jobs"
+        ],
+        "summary": "Stage a source document server-side; returns the input_path to submit",
+        "operationId": "upload_source_document_jobs_upload_post",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_source_document_jobs_upload_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobUploadResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/jobs/submit": {
       "post": {
         "tags": [
@@ -2602,6 +2661,20 @@
         "title": "AssessWarning",
         "description": "One degraded probe: a stable machine code plus Chinese human copy."
       },
+      "Body_upload_source_document_jobs_upload_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_source_document_jobs_upload_post"
+      },
       "ExtractionStrategy": {
         "type": "string",
         "enum": [
@@ -3628,6 +3701,34 @@
         ],
         "title": "JobSummary",
         "description": "One row of the operator console's job queue."
+      },
+      "JobUploadResponse": {
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "title": "File Path",
+            "description": "Server-side path to pass as input_path"
+          },
+          "file_name": {
+            "type": "string",
+            "title": "File Name",
+            "description": "Original client-side file name"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Size Bytes",
+            "description": "Stored file size in bytes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file_path",
+          "file_name",
+          "size_bytes"
+        ],
+        "title": "JobUploadResponse",
+        "description": "Result of staging an uploaded source document on the server."
       },
       "ModelProfile": {
         "properties": {
