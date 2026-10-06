@@ -173,6 +173,73 @@ def _layout_band(
     return placed
 
 
+def _partition_columns(overlays: Sequence[Overlay]) -> list[list[Overlay]]:
+    """Partition a page's reflowable overlays into column clusters.
+
+    In multi-column pages (academic papers, multi-column books), overlays from
+    different columns must not be interleaved into a single top-down sequence;
+    otherwise horizontal overlap checks fail between adjacent elements from
+    different columns, collapsing all bands to singletons and dropping them.
+
+    This function detects column gutters and splits overlays into distinct
+    column buckets. Single-column layouts remain intact as a single cluster.
+    """
+    if len(overlays) <= 1:
+        return [list(overlays)]
+
+    min_x = min(ov.bbox[0] for ov in overlays)
+    max_x = max(ov.bbox[2] for ov in overlays)
+    span = max_x - min_x
+    if span <= 20.0:
+        return [list(overlays)]
+
+    candidates = [ov for ov in overlays if (ov.bbox[2] - ov.bbox[0]) <= 0.75 * span]
+    if len(candidates) < 2:
+        return [list(overlays)]
+
+    def center(ov: Overlay) -> float:
+        return (ov.bbox[0] + ov.bbox[2]) / 2.0
+
+    def side_span(cands: list[Overlay]) -> float:
+        if not cands:
+            return 0.0
+        return max(ov.bbox[2] for ov in cands) - min(ov.bbox[0] for ov in cands)
+
+    def crossings(split: float) -> int:
+        return sum(1 for ov in candidates if ov.bbox[0] < split < ov.bbox[2])
+
+    split_points = sorted({ov.bbox[0] for ov in candidates} | {ov.bbox[2] for ov in candidates})
+    best_split: float | None = None
+    best_crossings = len(candidates) + 1
+    for split in split_points:
+        left = [ov for ov in candidates if center(ov) < split]
+        right = [ov for ov in candidates if center(ov) >= split]
+        if not left or not right:
+            continue
+        if side_span(left) <= 0.15 * span or side_span(right) <= 0.15 * span:
+            continue
+        crossed = crossings(split)
+        if crossed < best_crossings:
+            best_crossings = crossed
+            best_split = split
+
+    if best_split is None or best_crossings > 0.1 * len(candidates):
+        return [list(overlays)]
+
+    full_width = [ov for ov in overlays if ov.bbox[0] < best_split < ov.bbox[2]]
+    left = [ov for ov in overlays if ov not in full_width and center(ov) < best_split]
+    right = [ov for ov in overlays if ov not in full_width and center(ov) >= best_split]
+
+    res: list[list[Overlay]] = []
+    if full_width:
+        res.append(full_width)
+    if left:
+        res.extend(_partition_columns(left))
+    if right:
+        res.extend(_partition_columns(right))
+    return res
+
+
 def reflow_overlays(
     overlays: Sequence[Overlay],
     obstacles: Sequence[PhysicalBox],
@@ -214,25 +281,27 @@ def reflow_overlays(
         by_page.setdefault(overlay.page, []).append(overlay)
     new_by_id: dict[str, Overlay] = {}
     for page, page_overlays in by_page.items():
-        ordered = sorted(page_overlays, key=lambda ov: (-ov.bbox[3], ov.bbox[0]))
-        for band in _form_bands(ordered, obstacles_by_page.get(page, [])):
-            placed = _layout_band(
-                band,
-                class_sizes,
-                measure_many,
-                gap_em=gap_em,
-                gap_max_em=gap_max_em,
-            )
-            if placed is None:
-                continue
-            for overlay, new_bbox in placed:
-                new_by_id[overlay.element_id] = replace(
-                    overlay,
-                    bbox=new_bbox,
-                    boxes=(),
-                    mask_boxes=(PhysicalBox.of(overlay.page, overlay.bbox),),
-                    fixed_box=True,
+        columns = _partition_columns(page_overlays)
+        for col_overlays in columns:
+            ordered = sorted(col_overlays, key=lambda ov: (-ov.bbox[3], ov.bbox[0]))
+            for band in _form_bands(ordered, obstacles_by_page.get(page, [])):
+                placed = _layout_band(
+                    band,
+                    class_sizes,
+                    measure_many,
+                    gap_em=gap_em,
+                    gap_max_em=gap_max_em,
                 )
+                if placed is None:
+                    continue
+                for overlay, new_bbox in placed:
+                    new_by_id[overlay.element_id] = replace(
+                        overlay,
+                        bbox=new_bbox,
+                        boxes=(),
+                        mask_boxes=(PhysicalBox.of(overlay.page, overlay.bbox),),
+                        fixed_box=True,
+                    )
     if not new_by_id:
         return tuple(overlays)
     return tuple(new_by_id.get(overlay.element_id, overlay) for overlay in overlays)

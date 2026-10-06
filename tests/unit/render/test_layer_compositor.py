@@ -463,3 +463,27 @@ def test_a_batched_document_does_not_leak_bold_into_later_sections(tmp_path: Pat
         set_line = next(ln for ln in section.splitlines() if ln.startswith("#set text"))
         assert 'weight: "' in set_line, section
     assert 'weight: "regular"' in sections[1]
+
+
+def test_multiple_overlays_on_same_page_coalesce_into_single_page_form_xobject(
+    tmp_path: Path,
+) -> None:
+    # When multiple overlays exist on the same page, LayerCompositor consolidates
+    # them into a single page-level Form XObject, avoiding Form XObject proliferation
+    # and quadratic stream rewriting.
+    import pikepdf
+
+    source = write_text_pdf(tmp_path / "source.pdf", [_PAGE])
+    output = tmp_path / "out.pdf"
+    spy = _FragmentSpy(tmp_path)
+    first = Overlay("e1", 1, (54.0, 640.0, 300.0, 700.0), "FRAGMENT ONE")
+    second = Overlay("e2", 1, (54.0, 560.0, 300.0, 620.0), "FRAGMENT TWO")
+    third = Overlay("e3", 1, (54.0, 480.0, 300.0, 540.0), "FRAGMENT THREE")
+
+    composition = LayerCompositor(source, typesetter=spy).compose([first, second, third], output)
+
+    assert all(p.placed_as is Fidelity.RECONSTRUCTED_ADAPTED for p in composition.placements)
+    with pikepdf.open(output) as pdf:
+        page = pdf.pages[0]
+        # The page's own Resources /XObject must contain exactly 1 top-level Form XObject
+        assert len(page.Resources.XObject) == 1

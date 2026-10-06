@@ -140,3 +140,55 @@ def test_the_class_size_is_the_document_minimum_cap() -> None:
 
     # Different font sizes are different style classes, so each keeps its own cap.
     assert seen == [pytest.approx(12.0 * 1.05), pytest.approx(9.0 * 1.05)]
+
+
+def test_two_column_page_reflows_both_columns_independently() -> None:
+    # Academic 2-column layout: Left column and Right column each have 2 paragraphs.
+    # When interleaved by top-down y order, the old code failed _x_overlap between
+    # adjacent left/right items and collapsed all bands to length 1 (no reflow).
+    # The column-partitioned reflow must reflow both columns independently.
+    l1 = _ov("l1", 1, (10.0, 100.0, 200.0, 140.0))
+    l2 = _ov("l2", 1, (10.0, 50.0, 200.0, 90.0))
+    r1 = _ov("r1", 1, (300.0, 95.0, 490.0, 135.0))
+    r2 = _ov("r2", 1, (300.0, 45.0, 490.0, 85.0))
+
+    # Interleaved input order: L1, R1, L2, R2
+    out = reflow_overlays([l1, r1, l2, r2], [], measure_many=_measure(20.0), cap_size=_cap)
+    by_id = {ov.element_id: ov for ov in out}
+
+    assert by_id["l1"].fixed_box and by_id["l2"].fixed_box
+    assert by_id["r1"].fixed_box and by_id["r2"].fixed_box
+
+    # Left column stays within [10.0, 200.0]
+    assert by_id["l1"].bbox[0] == 10.0 and by_id["l1"].bbox[2] == 200.0
+    assert by_id["l2"].bbox[0] == 10.0 and by_id["l2"].bbox[2] == 200.0
+
+    # Right column stays within [300.0, 490.0]
+    assert by_id["r1"].bbox[0] == 300.0 and by_id["r1"].bbox[2] == 490.0
+    assert by_id["r2"].bbox[0] == 300.0 and by_id["r2"].bbox[2] == 490.0
+
+    # Vertical order preserved and gaps are positive in both columns
+    gap_left = by_id["l1"].bbox[1] - by_id["l2"].bbox[3]
+    gap_right = by_id["r1"].bbox[1] - by_id["r2"].bbox[3]
+    assert gap_left > 0.0
+    assert gap_right > 0.0
+
+
+def test_two_column_page_with_full_width_abstract_reflows_correctly() -> None:
+    # A page with a full-width abstract (2 paragraphs) at top, followed by
+    # a 2-column section below. All three sections must reflow without bridging.
+    abs1 = _ov("abs1", 1, (10.0, 200.0, 490.0, 240.0))
+    abs2 = _ov("abs2", 1, (10.0, 150.0, 490.0, 190.0))
+    l1 = _ov("l1", 1, (10.0, 90.0, 200.0, 130.0))
+    l2 = _ov("l2", 1, (10.0, 40.0, 200.0, 80.0))
+    r1 = _ov("r1", 1, (300.0, 85.0, 490.0, 125.0))
+    r2 = _ov("r2", 1, (300.0, 35.0, 490.0, 75.0))
+
+    out = reflow_overlays(
+        [abs1, abs2, l1, r1, l2, r2], [], measure_many=_measure(20.0), cap_size=_cap
+    )
+    by_id = {ov.element_id: ov for ov in out}
+
+    assert by_id["abs1"].fixed_box and by_id["abs2"].fixed_box
+    assert by_id["l1"].fixed_box and by_id["l2"].fixed_box
+    assert by_id["r1"].fixed_box and by_id["r2"].fixed_box

@@ -1868,21 +1868,46 @@ class LayerCompositor:
                 page.contents_add(mask, prepend=False)
         media = [float(v) for v in page.MediaBox]
         mb_x0, mb_y0, mb_x1, mb_y1 = media[0], media[1], media[2], media[3]
-        for item in items:
-            if item.form is None:
-                # A mask-only continuation box: the source tail is erased above,
-                # but there is no fragment to draw.
-                continue
+        valid_items = [item for item in items if item.form is not None]
+        if not valid_items:
+            return True
+        if len(valid_items) == 1:
+            item = valid_items[0]
+            assert item.form is not None
             x0, y0, x1, y1 = item.bbox
-            # The draw box carries the line slack added after the page clamp;
-            # re-clamp here so a bottom-margin fragment cannot draw below the
-            # mediabox and trip the visual gate's out-of-bounds check. The
-            # clamped band is normally blank, so the proportional squash this
-            # add_overlay rect implies is bounded by the slack itself.
             page.add_overlay(
                 item.form,
                 pikepdf.Rectangle(max(x0, mb_x0), max(y0, mb_y0), min(x1, mb_x1), min(y1, mb_y1)),
             )
+        else:
+            # Batch all fragment forms for this page into a single page-level Form XObject.
+            # This collapses N separate Form XObjects and repeated stream coalescing into one,
+            # drastically reducing PDF resource dictionary bloat and viewer decoding overhead.
+            xobjects = pikepdf.Dictionary()
+            cs_parts: list[bytes] = []
+            for idx, item in enumerate(valid_items):
+                assert item.form is not None
+                x0, y0, x1, y1 = item.bbox
+                rect = pikepdf.Rectangle(
+                    max(x0, mb_x0), max(y0, mb_y0), min(x1, mb_x1), min(y1, mb_y1)
+                )
+                name = pikepdf.Name(f"/Fm{idx}")
+                xobjects[name] = item.form
+                cs = page.calc_form_xobject_placement(
+                    item.form,
+                    name,
+                    rect,
+                    invert_transformations=True,
+                    allow_shrink=True,
+                    allow_expand=False,
+                )
+                cs_parts.append(cs)
+            page_form = pikepdf.Stream(composed, b"".join(cs_parts))
+            page_form[pikepdf.Name.Type] = pikepdf.Name.XObject
+            page_form[pikepdf.Name.Subtype] = pikepdf.Name.Form
+            page_form[pikepdf.Name.BBox] = pikepdf.Array([mb_x0, mb_y0, mb_x1, mb_y1])
+            page_form[pikepdf.Name.Resources] = pikepdf.Dictionary(XObject=xobjects)
+            page.add_overlay(page_form, pikepdf.Rectangle(mb_x0, mb_y0, mb_x1, mb_y1))
         return True
 
     @staticmethod
