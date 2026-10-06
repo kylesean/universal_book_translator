@@ -149,6 +149,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/jobs/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove a finished job's ledger and deliverables from the console
+         * @description Delete one job's history: the db_dir ledger plus its deliverable dir.
+         *
+         *     A running job must reach a terminal status first — deletion is history
+         *     management, not a stop button. A non-terminal queue-mode record is
+         *     likewise refused: the durable queue owns its rows (``prune_terminal``
+         *     is their lifecycle) and removing the ledger underneath a worker would
+         *     desynchronize its view.
+         */
+        delete: operations["delete_job_jobs__job_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/jobs/{job_id}/status": {
         parameters: {
             query?: never;
@@ -849,6 +875,24 @@ export interface components {
             meta: {
                 [key: string]: unknown;
             };
+        };
+        /**
+         * JobDeleteResponse
+         * @description Result of removing a finished job's history from the console.
+         */
+        JobDeleteResponse: {
+            /** Job Id */
+            job_id: string;
+            /**
+             * Removed Ledger
+             * @description The db_dir ledger file(s) were deleted
+             */
+            removed_ledger: boolean;
+            /**
+             * Removed Outputs
+             * @description The per-job deliverable directory was deleted
+             */
+            removed_outputs: boolean;
         };
         /**
          * JobListResponse
@@ -1684,6 +1728,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_job_jobs__job_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-ubt-tenant"?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDeleteResponse"];
                 };
             };
             /** @description Validation Error */

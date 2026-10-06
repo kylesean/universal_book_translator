@@ -113,6 +113,8 @@ export const zh: TranslationDictionary = {
     resuming: '续跑中…',
     downloadPrimary: '下载译文',
     noDeliverables: '产物尚未就绪',
+    deleteJob: '删除任务记录',
+    deleteConfirm: '确定删除该任务的历史记录与产物吗？此操作不可恢复。',
   },
   quality: {
     title: '质量门禁与出版凭证 (Quality Gate)',

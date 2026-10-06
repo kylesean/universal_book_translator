@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import tempfile
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -49,6 +50,7 @@ from ubt.api.models import (
     GlossaryTermRequest,
     JobAssessRequest,
     JobAssessResponse,
+    JobDeleteResponse,
     JobListResponse,
     JobStatusResponse,
     JobSubmitRequest,
@@ -1141,6 +1143,71 @@ def create_app(
                 "stream_url": f"/jobs/{valid_id}/stream",
                 "status_url": f"/jobs/{valid_id}/status",
             }
+        )
+
+    @api_app.delete(
+        "/jobs/{job_id}",
+        response_model=JobDeleteResponse,
+        tags=["Jobs"],
+        summary="Remove a finished job's ledger and deliverables from the console",
+    )
+    async def delete_job(
+        job_id: str, x_ubt_tenant: str | None = Header(default=None)
+    ) -> JobDeleteResponse:
+        """Delete one job's history: the db_dir ledger plus its deliverable dir.
+
+        A running job must reach a terminal status first — deletion is history
+        management, not a stop button. A non-terminal queue-mode record is
+        likewise refused: the durable queue owns its rows (``prune_terminal``
+        is their lifecycle) and removing the ledger underneath a worker would
+        desynchronize its view.
+        """
+        valid_id = validate_job_id(job_id)
+        if not await _tenant_allows_async(valid_id, _tenant_from_header(x_ubt_tenant)):
+            raise _cross_tenant_404(valid_id)
+
+        record = manager.get_job(valid_id)
+        if record is not None and record.status not in TERMINAL_JOB_STATUSES:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Job is {record.status}; cancel it and wait for a "
+                    "terminal status before deleting."
+                ),
+            )
+        if job_queue is not None:
+            queued = await asyncio.to_thread(job_queue.get, valid_id)
+            if queued is not None and queued.status not in TERMINAL_JOB_STATUSES:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        f"Queue record is {queued.status.value}; only a "
+                        "terminal job can be deleted."
+                    ),
+                )
+
+        def _remove() -> tuple[bool, bool]:
+            # job ids are [A-Za-z0-9_-]+ (validate_job_id), so the glob is
+            # literal — exactly the ledger plus its -shm/-wal/.writer.lock.
+            ledger_gone = False
+            for path in sorted(app_config.db_dir.glob(f"{valid_id}.sqlite*")):
+                path.unlink(missing_ok=True)
+                ledger_gone = True
+            outputs_dir = _managed_dir("outputs") / valid_id
+            outputs_gone = outputs_dir.is_dir()
+            if outputs_gone:
+                shutil.rmtree(outputs_dir, ignore_errors=True)
+            return ledger_gone, outputs_gone
+
+        ledger_gone, outputs_gone = await asyncio.to_thread(_remove)
+        manager.forget_job(valid_id)
+        if not ledger_gone and not outputs_gone and record is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Job not found: {valid_id}",
+            )
+        return JobDeleteResponse(
+            job_id=valid_id, removed_ledger=ledger_gone, removed_outputs=outputs_gone
         )
 
     @api_app.get(

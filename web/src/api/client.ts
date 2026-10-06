@@ -158,6 +158,16 @@ export async function resumeJob(jobId: string): Promise<{ job_id: string; status
   return res.json()
 }
 
+/** Remove a finished job's ledger and deliverables from the console. */
+export async function deleteJob(jobId: string): Promise<{ job_id: string }> {
+  const res = await fetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(body.detail || 'Failed to delete job')
+  }
+  return res.json()
+}
+
 /** The job queue: every ledger under db_dir, newest first. */
 export async function listJobs(limit = 200): Promise<JobSummary[]> {
   const res = await fetch(`${BASE_URL}/jobs?limit=${limit}`)

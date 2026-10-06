@@ -8,6 +8,7 @@ import {
   Activity,
   RotateCcw,
   Download,
+  Trash2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
@@ -15,6 +16,7 @@ import {
   getJobStatus,
   cancelJob,
   resumeJob,
+  deleteJob,
   listJobs,
   listDeliverables,
   deliverableDownloadUrl,
@@ -182,6 +184,25 @@ export function MissionControl() {
       alert(err instanceof Error ? err.message : 'Download failed')
     } finally {
       setDownloading(false)
+    }
+  }
+
+  // History management: removes the ledger + deliverables of a finished job.
+  // The backend refuses anything still running; the confirm spells out that
+  // this is permanent, unlike cancel.
+  const handleDeleteJob = async (jobId: string) => {
+    if (!window.confirm(t.mission.deleteConfirm)) return
+    try {
+      await deleteJob(jobId)
+      if (jobId === currentJobId) {
+        setLogs((prev) => [
+          ...prev,
+          { text: '[USER_SIGNAL] Job history deleted from the console.', level: 'WARN' },
+        ])
+      }
+      await refreshQueue()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Delete failed')
     }
   }
 
@@ -365,14 +386,25 @@ export function MissionControl() {
                       {formatTimestamp(job.updated_at)}
                     </td>
                     <td className="py-2 px-3 text-right">
-                      <Button
-                        onClick={() => onSelectJob(job.job_id)}
-                        variant="secondary"
-                        size="sm"
-                        className="text-[11px] h-6 px-2"
-                      >
-                        {t.mission.selectJob}
-                      </Button>
+                      <div className="flex items-center justify-end gap-1.5">
+                        <Button
+                          onClick={() => onSelectJob(job.job_id)}
+                          variant="secondary"
+                          size="sm"
+                          className="text-[11px] h-6 px-2"
+                        >
+                          {t.mission.selectJob}
+                        </Button>
+                        <Button
+                          onClick={() => handleDeleteJob(job.job_id)}
+                          variant="secondary"
+                          size="sm"
+                          className="h-6 px-1.5 text-[#b91c1c] hover:bg-[#b91c1c]/10"
+                          title={t.mission.deleteJob}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}

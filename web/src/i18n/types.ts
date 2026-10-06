@@ -113,6 +113,8 @@ export interface TranslationDictionary {
     resuming: string
     downloadPrimary: string
     noDeliverables: string
+    deleteJob: string
+    deleteConfirm: string
   }
   quality: {
     title: string

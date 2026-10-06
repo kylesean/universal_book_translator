@@ -113,6 +113,8 @@ export const en: TranslationDictionary = {
     resuming: 'Resuming…',
     downloadPrimary: 'Download Translation',
     noDeliverables: 'Deliverables are not ready yet',
+    deleteJob: 'Delete job history',
+    deleteConfirm: "Delete this job's history and deliverables? This cannot be undone.",
   },
   quality: {
     title: 'Quality Gate & Attestation',

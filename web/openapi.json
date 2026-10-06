@@ -480,6 +480,81 @@
         }
       }
     },
+    "/jobs/{job_id}": {
+      "delete": {
+        "tags": [
+          "Jobs"
+        ],
+        "summary": "Remove a finished job's ledger and deliverables from the console",
+        "description": "Delete one job's history: the db_dir ledger plus its deliverable dir.\n\nA running job must reach a terminal status first \u2014 deletion is history\nmanagement, not a stop button. A non-terminal queue-mode record is\nlikewise refused: the durable queue owns its rows (``prune_terminal``\nis their lifecycle) and removing the ledger underneath a worker would\ndesynchronize its view.",
+        "operationId": "delete_job_jobs__job_id__delete",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "x-ubt-tenant",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Ubt-Tenant"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobDeleteResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/jobs/{job_id}/status": {
       "get": {
         "tags": [
@@ -2840,6 +2915,32 @@
         ],
         "title": "JobAssessResponse",
         "description": "The full pre-flight assessment report."
+      },
+      "JobDeleteResponse": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "title": "Job Id"
+          },
+          "removed_ledger": {
+            "type": "boolean",
+            "title": "Removed Ledger",
+            "description": "The db_dir ledger file(s) were deleted"
+          },
+          "removed_outputs": {
+            "type": "boolean",
+            "title": "Removed Outputs",
+            "description": "The per-job deliverable directory was deleted"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id",
+          "removed_ledger",
+          "removed_outputs"
+        ],
+        "title": "JobDeleteResponse",
+        "description": "Result of removing a finished job's history from the console."
       },
       "JobListResponse": {
         "properties": {

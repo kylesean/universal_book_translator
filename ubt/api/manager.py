@@ -130,6 +130,17 @@ class JobManager:
     def get_job(self, job_id: str) -> JobRecord | None:
         return self.jobs.get(job_id)
 
+    def forget_job(self, job_id: str) -> JobRecord | None:
+        """Drop a terminal job from the in-memory map (console delete support).
+
+        A non-terminal record is kept: the running pipeline still holds
+        references to it, and dropping those would orphan a live run.
+        """
+        record = self.jobs.get(job_id)
+        if record is None or record.status not in TERMINAL_JOB_STATUSES:
+            return None
+        return self.jobs.pop(job_id)
+
     async def execute_job(self, record: JobRecord, config: UBTConfig) -> None:
         record.status = JobStatus.RUNNING
         try:

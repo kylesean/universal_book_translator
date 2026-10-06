@@ -487,6 +487,14 @@ class JobUploadResponse(BaseModel):
     size_bytes: int = Field(..., ge=0, description="Stored file size in bytes")
 
 
+class JobDeleteResponse(BaseModel):
+    """Result of removing a finished job's history from the console."""
+
+    job_id: str
+    removed_ledger: bool = Field(..., description="The db_dir ledger file(s) were deleted")
+    removed_outputs: bool = Field(..., description="The per-job deliverable directory was deleted")
+
+
 class JobSubmitResponse(BaseModel):
     """Response returned upon successful job enqueueing."""
 
