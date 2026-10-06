@@ -792,7 +792,7 @@ def _attest_delivery(
     services: RunServices,
     blocks: list[IRBlock],
     engine: str,
-) -> tuple[Document, dict[str, str], AttestationReport]:
+) -> tuple[dict[str, str], AttestationReport]:
     """Realize the delivery per element: its Document, its target map, its account.
 
     The backend is fed the run's own decisions (pre-render decision plan migration):

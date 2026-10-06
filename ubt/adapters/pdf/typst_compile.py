@@ -10,6 +10,7 @@ unhandled ``FileNotFoundError`` / ``TimeoutExpired``.
 
 from __future__ import annotations
 
+import importlib
 import shutil
 import subprocess
 from pathlib import Path
@@ -17,9 +18,8 @@ from pathlib import Path
 from ubt.core.env import subprocess_env
 
 try:
-    import typst  # type: ignore[import-untyped]
-
-    _HAS_TYPST_PY = hasattr(typst, "compile")
+    _typst_mod = importlib.import_module("typst")
+    _HAS_TYPST_PY = hasattr(_typst_mod, "compile")
 except Exception:
     _HAS_TYPST_PY = False
 
@@ -46,8 +46,7 @@ def typst_compile(
     """Compile one Typst file; return ``(ok, stderr_tail)``. Never raises."""
     if _HAS_TYPST_PY:
         try:
-            import typst  # type: ignore[import-untyped]
-
+            typst = importlib.import_module("typst")
             typst.compile(typ_path, output=pdf_path)
             return True, ""
         except Exception:
@@ -78,8 +77,7 @@ def typst_version(binary: str = "typst") -> str | None:
     """Return the installed Typst version string, or None if unavailable."""
     if _HAS_TYPST_PY:
         try:
-            import typst  # type: ignore[import-untyped]
-
+            typst = importlib.import_module("typst")
             v = getattr(typst, "__version__", None)
             if v:
                 return f"typst-py {v}"

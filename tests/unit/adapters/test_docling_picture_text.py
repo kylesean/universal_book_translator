@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -18,7 +19,9 @@ def _box(left: float, bottom: float, right: float, top: float) -> SimpleNamespac
     return SimpleNamespace(l=left, b=bottom, r=right, t=top)
 
 
-def _in_picture(box: SimpleNamespace, page: int = 9, pictures: list | None = None) -> bool:
+def _in_picture(
+    box: SimpleNamespace, page: int = 9, pictures: list[tuple[int, Any]] | None = None
+) -> bool:
     return is_inside_picture(page, box, pictures if pictures is not None else [(9, _PLOT)])
 
 
