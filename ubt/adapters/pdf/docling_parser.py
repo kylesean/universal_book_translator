@@ -10,6 +10,7 @@ in, so these are plain functions; the adapter injects the two import seams
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import gzip
 import hashlib
 import json
@@ -551,6 +552,19 @@ def _is_centered(box: BoundingBox, lines: list[Any]) -> bool:
     return False
 
 
+def _line_boxes(box: BoundingBox, lines: list[Any]) -> tuple[PhysicalBox, ...]:
+    """The block's own lines as a reading-order box chain (top to bottom)."""
+    inside = [line for line in lines if line.text.strip() and _line_in_box(line.rect, box)]
+    inside.sort(key=lambda line: -line.rect[3])
+    return tuple(
+        PhysicalBox.of(
+            int(box.page),
+            (float(line.rect[0]), float(line.rect[1]), float(line.rect[2]), float(line.rect[3])),
+        )
+        for line in inside
+    )
+
+
 def annotate_layout_metadata(blocks: list[IRBlock], pdf_path: Path | None) -> list[IRBlock]:
     """Record per-block layout facts the block box alone cannot carry.
 
@@ -601,9 +615,21 @@ def annotate_layout_metadata(blocks: list[IRBlock], pdf_path: Path | None) -> li
         elif block.block_type is BlockType.HEADING:
             if block.region not in (RegionKind.BODY, RegionKind.TITLE):
                 continue
-            if _is_centered(box, _page_lines(int(box.page))):
+            page_lines = _page_lines(int(box.page))
+            if _is_centered(box, page_lines):
                 block.style = (block.style or StyleMeta()).model_copy(
                     update={"alignment": "center"}
+                )
+            # A multi-line heading also records its own line boxes: the
+            # compositor flows the translation across the source's line
+            # structure, so the title breaks where the source title breaks
+            # (usually at the subtitle colon) instead of at an arbitrary
+            # width-fill point, which can strand a particle ("的") at a line
+            # head and mangle the phrasing.
+            line_boxes = _line_boxes(box, page_lines)
+            if len(line_boxes) >= 2:
+                block.element = dataclasses.replace(
+                    block.element, span=CompositeSpan(boxes=line_boxes)
                 )
     return blocks
 

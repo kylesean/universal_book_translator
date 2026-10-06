@@ -12,6 +12,7 @@ from ubt.adapters.pdf.docling_parser import (
 )
 from ubt.adapters.pdf.textgeom import LineBox
 from ubt.core.ir.models import BlockType, BoundingBox, FlowID, IRBlock, make_element
+from ubt.model.span import CompositeSpan
 
 
 def _para(
@@ -165,3 +166,60 @@ def test_a_flush_left_heading_is_not_marked_centered(monkeypatch: pytest.MonkeyP
     out = annotate_layout_metadata([heading], Path("/does/not/matter.pdf"))
 
     assert out[0].style is None or out[0].style.alignment is None
+
+
+def test_a_multi_line_heading_records_its_line_boxes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The title's own two line boxes become the overlay's flow chain.
+
+    The compositor flows the translation across the source's line structure,
+    so the title breaks where the source breaks (at the subtitle colon)
+    instead of at an arbitrary width-fill point.
+    """
+
+    def fake_extract_lines(_path: Path, _page: int) -> tuple[list[LineBox], tuple[float, float]]:
+        lines = [
+            LineBox("Short Title", (172.1, 710.0, 424.9, 738.0), font_size=17.0),
+            LineBox(
+                "the long full-width second title line",
+                (71.0, 690.0, 524.0, 705.0),
+                font_size=17.0,
+            ),
+        ]
+        return lines, (595.0, 842.0)
+
+    monkeypatch.setattr("ubt.adapters.pdf.textgeom.extract_lines", fake_extract_lines)
+
+    heading = _para(
+        "b1",
+        "Short Title the long full-width second title line",
+        y0=690.0,
+        y1=738.0,
+        x1=524.0,
+        block_type=BlockType.HEADING,
+    )
+    out = annotate_layout_metadata([heading], Path("/does/not/matter.pdf"))
+
+    span = out[0].element.span
+    assert isinstance(span, CompositeSpan)
+    assert len(span.boxes) == 2
+    # Reading order is top-down: the first box is the higher line (larger y).
+    assert span.boxes[0].bbox[1] > span.boxes[1].bbox[1]
+    # The narrow first line (172→425) is preserved, not normalized to the box.
+    assert span.boxes[0].bbox[0] == pytest.approx(172.1)
+    assert span.boxes[1].bbox[2] == pytest.approx(524.0)
+    assert out[0].style is not None and out[0].style.alignment == "center"
+
+
+def test_a_single_line_heading_keeps_its_simple_span(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_extract_lines(_path: Path, _page: int) -> tuple[list[LineBox], tuple[float, float]]:
+        lines = [
+            LineBox("Section header", (71.0, 710.0, 200.0, 725.0), font_size=12.0),
+        ]
+        return lines, (595.0, 842.0)
+
+    monkeypatch.setattr("ubt.adapters.pdf.textgeom.extract_lines", fake_extract_lines)
+
+    heading = _para("b1", "Section header", y0=710.0, y1=725.0, block_type=BlockType.HEADING)
+    out = annotate_layout_metadata([heading], Path("/does/not/matter.pdf"))
+
+    assert not isinstance(out[0].element.span, CompositeSpan)

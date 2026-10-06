@@ -1613,7 +1613,15 @@ class LayerCompositor:
                 indent_pt=overlay.indent_pt,
             )
 
-        width = boxes[0].bbox[2] - boxes[0].bbox[0]
+        # Size against the *widest* box: a continuation run repeats one column
+        # width (first == max, so this changes nothing there), while a
+        # heading's own line chain can mix a narrow first line with a
+        # full-width rest — measuring at the narrow first box would inflate
+        # the height and shrink the whole heading. The per-box cuts in
+        # ``solve_flow`` handle the narrower boxes; the final box receives its
+        # remainder at this width, so the widest box is the honest estimate of
+        # whether everything fits the capacity below.
+        width = max(box.bbox[2] - box.bbox[0] for box in boxes)
         # Match ``solve_flow``'s own capacity (the bare box height, without the
         # line slack the draw adds): sizing against the slack-inflated capacity
         # would let the flow overflow the last box, which then clips its text.
