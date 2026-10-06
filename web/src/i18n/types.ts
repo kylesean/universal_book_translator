@@ -243,5 +243,15 @@ export interface TranslationDictionary {
     cascadeDone: string
     diffBlend: string
     noSourcePage: string
+    inspectorTitle: string
+    inspectorQe: string
+    inspectorTmHit: string
+    inspectorGlossary: string
+    inspectorRepairs: string
+    inspectorSeverity: string
+    inspectorProvenance: string
+    inspectorNone: string
+    editHint: string
+    cancelEdit: string
   }
 }

@@ -61,6 +61,7 @@ export function ReviewWorkbench() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [drafts, setDrafts] = useState<Record<string, string>>({})
+  const [editing, setEditing] = useState<Record<string, boolean>>({})
   const [saving, setSaving] = useState<Record<string, boolean>>({})
   const [saved, setSaved] = useState<Record<string, boolean>>({})
   const [issueCursor, setIssueCursor] = useState(0)
@@ -68,6 +69,8 @@ export function ReviewWorkbench() {
   const [previewBust, setPreviewBust] = useState(0)
   const [termNotice, setTermNotice] = useState<Record<string, string>>({})
   const [diffBlend, setDiffBlend] = useState(false)
+  const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null)
+  const [inspectorOpen, setInspectorOpen] = useState(false)
 
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -126,6 +129,17 @@ export function ReviewWorkbench() {
     setIssueCursor(next)
     virtualizer.scrollToIndex(issueIndices[next], { align: 'center' })
   }
+
+  // F8 / Shift+F8 walk the fault list (PRD §5.1).
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'F8') return
+      e.preventDefault()
+      jumpToIssue(e.shiftKey ? -1 : 1)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  })
 
   const handleSave = async (segment: Segment) => {
     if (!jobId) return
@@ -187,6 +201,10 @@ export function ReviewWorkbench() {
     ? Object.entries(issues.counts).filter(([, value]) => value > 0)
     : []
 
+  const inspectorSegment = selectedBlockId
+    ? (segments.find((segment) => segment.block_id === selectedBlockId) ?? null)
+    : null
+
   const previewPages = Array.from(
     new Set(segments.map((segment) => segment.page).filter((page): page is number => page !== null))
   )
@@ -217,7 +235,8 @@ export function ReviewWorkbench() {
   )
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-[var(--paper-bg)] text-[var(--ink-primary)]">
+    <div className="flex-1 flex min-h-0 overflow-hidden bg-[var(--paper-bg)] text-[var(--ink-primary)]">
+      <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
       {/* Precision Ribbon */}
       <div className="min-h-11 px-6 py-2 border-b border-[var(--paper-border)] bg-[var(--paper-surface)] flex flex-wrap items-center justify-between gap-2 shrink-0 shadow-2xs">
         <div className="flex items-center gap-3 flex-wrap">
@@ -350,10 +369,16 @@ export function ReviewWorkbench() {
                   >
                     <div className="pb-4">
                       <div
-                        className={`rounded-lg border transition-colors shadow-2xs bg-[var(--paper-surface)] ${
-                          seg.issues.length > 0
-                            ? 'border-[#b45309]/50'
-                            : 'border-[var(--paper-border)]'
+                        onClick={() => {
+                          setSelectedBlockId(seg.block_id)
+                          setInspectorOpen(true)
+                        }}
+                        className={`rounded-lg border transition-colors shadow-2xs bg-[var(--paper-surface)] cursor-pointer ${
+                          selectedBlockId === seg.block_id
+                            ? 'border-[var(--ink-primary)]'
+                            : seg.issues.length > 0
+                              ? 'border-[#b45309]/50'
+                              : 'border-[var(--paper-border)]'
                         }`}
                       >
                         <div className="h-8 px-3.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] flex items-center justify-between text-xs font-mono text-[var(--ink-muted)]">
@@ -422,17 +447,45 @@ export function ReviewWorkbench() {
                                   </span>
                                 )}
                               </div>
-                              <textarea
-                                value={draft}
-                                onChange={(e) =>
-                                  setDrafts((prev) => ({
-                                    ...prev,
-                                    [seg.block_id]: e.target.value,
-                                  }))
-                                }
-                                rows={3}
-                                className="w-full bg-transparent text-[var(--ink-primary)] text-xs resize-none focus:outline-none font-mono leading-relaxed placeholder:text-[var(--ink-muted)]"
-                              />
+                              {editing[seg.block_id] ? (
+                                <textarea
+                                  autoFocus
+                                  value={draft}
+                                  onChange={(e) =>
+                                    setDrafts((prev) => ({
+                                      ...prev,
+                                      [seg.block_id]: e.target.value,
+                                    }))
+                                  }
+                                  onKeyDown={(e) => {
+                                    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                                      e.preventDefault()
+                                      void handleSave(seg)
+                                      setEditing((prev) => ({ ...prev, [seg.block_id]: false }))
+                                    } else if (e.key === 'Escape') {
+                                      e.preventDefault()
+                                      setDrafts((prev) => {
+                                        const next = { ...prev }
+                                        delete next[seg.block_id]
+                                        return next
+                                      })
+                                      setEditing((prev) => ({ ...prev, [seg.block_id]: false }))
+                                    }
+                                  }}
+                                  rows={3}
+                                  className="w-full bg-transparent text-[var(--ink-primary)] text-xs resize-none focus:outline-none font-mono leading-relaxed placeholder:text-[var(--ink-muted)]"
+                                />
+                              ) : (
+                                <div
+                                  onDoubleClick={() =>
+                                    setEditing((prev) => ({ ...prev, [seg.block_id]: true }))
+                                  }
+                                  title={t.review.editHint}
+                                  className="min-h-[3rem] text-[var(--ink-primary)] text-xs font-mono leading-relaxed whitespace-pre-wrap cursor-text"
+                                >
+                                  {seg.target_text || '—'}
+                                </div>
+                              )}
                               {seg.issues.includes('terminology') && (
                                 <TermPanel
                                   jobId={jobId}
@@ -450,11 +503,28 @@ export function ReviewWorkbench() {
                                   {termNotice[seg.block_id]}
                                 </span>
                               )}
+                              {editing[seg.block_id] && (
+                                <Button
+                                  onClick={() => {
+                                    setDrafts((prev) => {
+                                      const next = { ...prev }
+                                      delete next[seg.block_id]
+                                      return next
+                                    })
+                                    setEditing((prev) => ({ ...prev, [seg.block_id]: false }))
+                                  }}
+                                  variant="secondary"
+                                  size="sm"
+                                  className="text-[11px] h-6 px-2.5"
+                                >
+                                  {t.review.cancelEdit}
+                                </Button>
+                              )}
                               <Button
                                 onClick={() => handleSave(seg)}
                                 variant="primary"
                                 size="sm"
-                                disabled={!dirty || saving[seg.block_id]}
+                                disabled={!editing[seg.block_id] || !dirty || saving[seg.block_id]}
                                 className="text-[11px] h-6 px-2.5 font-bold"
                               >
                                 {saving[seg.block_id] ? (
@@ -566,6 +636,100 @@ export function ReviewWorkbench() {
             ))
           )}
         </div>
+      )}
+      </div>
+
+      {inspectorOpen && inspectorSegment && (
+        <aside className="w-80 border-l border-[var(--paper-border)] bg-[var(--paper-surface)] overflow-y-auto shrink-0 select-text">
+          <div className="h-11 px-4 border-b border-[var(--paper-border)] flex items-center justify-between">
+            <span className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
+              {t.review.inspectorTitle}
+            </span>
+            <button
+              onClick={() => setInspectorOpen(false)}
+              className="text-[11px] font-mono text-[var(--ink-muted)] hover:text-[var(--ink-primary)]"
+            >
+              ✕
+            </button>
+          </div>
+          <div className="p-4 space-y-3 text-xs">
+            <div>
+              <div className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
+                {inspectorSegment.block_id}
+              </div>
+              <div className="text-[11px] text-[var(--ink-secondary)] font-mono mt-0.5">
+                {inspectorSegment.block_type} · P{inspectorSegment.page ?? '—'}
+              </div>
+            </div>
+
+            <dl className="divide-y divide-[var(--paper-border)] text-[11px] font-mono">
+              <div className="py-1.5 flex justify-between">
+                <dt className="text-[var(--ink-muted)]">{t.review.inspectorQe}</dt>
+                <dd className="font-bold">
+                  {inspectorSegment.mtqe_score === null
+                    ? '—'
+                    : `${(inspectorSegment.mtqe_score * 100).toFixed(0)}%`}
+                </dd>
+              </div>
+              <div className="py-1.5 flex justify-between">
+                <dt className="text-[var(--ink-muted)]">{t.review.inspectorTmHit}</dt>
+                <dd>{inspectorSegment.tm_hit ? '✓' : '—'}</dd>
+              </div>
+              <div className="py-1.5 flex justify-between">
+                <dt className="text-[var(--ink-muted)]">{t.review.inspectorRepairs}</dt>
+                <dd>{inspectorSegment.repair_rounds}</dd>
+              </div>
+              <div className="py-1.5 flex justify-between">
+                <dt className="text-[var(--ink-muted)]">{t.review.inspectorSeverity}</dt>
+                <dd>{inspectorSegment.mqm_severity ?? '—'}</dd>
+              </div>
+            </dl>
+
+            {inspectorSegment.glossary_hits.length > 0 && (
+              <div>
+                <div className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold mb-1">
+                  {t.review.inspectorGlossary}
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {inspectorSegment.glossary_hits.map((term) => (
+                    <span
+                      key={term}
+                      className="px-1.5 py-0.5 rounded bg-[#15803d]/10 text-[#15803d] font-mono text-[10px]"
+                    >
+                      {term}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {inspectorSegment.error_flags.length > 0 && (
+              <div>
+                <div className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold mb-1">
+                  error_flags
+                </div>
+                <ul className="space-y-0.5">
+                  {inspectorSegment.error_flags.map((flag, index) => (
+                    <li key={index} className="text-[10px] font-mono text-[var(--ink-secondary)] break-all">
+                      {flag}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {Object.keys(inspectorSegment.provenance).length > 0 && (
+              <div>
+                <div className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold mb-1">
+                  {t.review.inspectorProvenance}
+                </div>
+                <pre className="text-[10px] font-mono text-[var(--ink-secondary)] whitespace-pre-wrap break-all bg-[var(--paper-subsurface)] rounded p-2">
+                  {JSON.stringify(inspectorSegment.provenance, null, 1)}
+                </pre>
+              </div>
+            )}
+          </div>
+        </aside>
       )}
     </div>
   )

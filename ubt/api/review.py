@@ -115,7 +115,12 @@ def segment_issue_kinds(block: IRBlock) -> list[str]:
 
 
 def serialize_segment(block: IRBlock) -> dict[str, Any]:
-    """Project a block into the workbench's segment shape."""
+    """Project a block into the workbench's segment shape.
+
+    Includes the execution detail the Inspector panel shows (repair rounds,
+    glossary hits, MQM severity/spans, provenance) so the workbench does not
+    need a second per-block request.
+    """
     bbox = block.bbox
     return {
         "block_id": block.id,
@@ -129,6 +134,12 @@ def serialize_segment(block: IRBlock) -> dict[str, Any]:
         "error_flags": list(block.error_flags or ()),
         "issues": segment_issue_kinds(block),
         "human_verified": FLAG_HUMAN_PE_IMPORTED in (block.error_flags or ()),
+        "tm_hit": bool(block.tm_hit),
+        "repair_rounds": block.repair_rounds or 0,
+        "glossary_hits": list(block.glossary_hits or ()),
+        "mqm_severity": block.mqm_severity,
+        "mqm_spans": list(block.mqm_spans or ()),
+        "provenance": dict(block.provenance or {}),
     }
 
 

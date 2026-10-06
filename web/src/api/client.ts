@@ -373,6 +373,12 @@ export interface Segment {
   error_flags: string[]
   issues: string[]
   human_verified: boolean
+  tm_hit: boolean
+  repair_rounds: number
+  glossary_hits: string[]
+  mqm_severity: string | null
+  mqm_spans: Array<Record<string, unknown>>
+  provenance: Record<string, unknown>
 }
 
 export interface IssuesReport {
