@@ -41,12 +41,14 @@ def update_bibliography_section_state(
     """Update the bibliography section state machine at block index ``idx``.
 
     - A bibliography heading (``References``, ``7. References``, ``Bibliography``, etc.)
-      opens ``in_bibliography=True`` when at least one of the next 4 blocks is a
-      standalone bibliography entry (preventing Table-of-Contents lines from firing).
+      opens ``in_bibliography=True`` when at least one of the next 6 blocks is a
+      standalone bibliography entry (preventing Table-of-Contents lines from
+      firing; deliberately widened from 4 by 49d7726 so a TOC-like heading whose
+      first entry sits further down is not misclassified as opening a section).
     - Once ``in_bibliography=True`` is active, an internal sub-heading (e.g.
       ``Primary papers and current implementation sources`` immediately under
       ``REFERENCES``) preserves ``in_bibliography=True`` as long as at least one of
-      the next 4 blocks after that sub-heading is still a bibliography entry.
+      the next 6 blocks after that sub-heading is still a bibliography entry.
     - A real post-bibliography section heading (e.g. ``Appendix A``) whose upcoming
       blocks are normal prose cleanly resets ``in_bibliography=False``.
     - A narrative block the per-block rules find translatable also closes the
