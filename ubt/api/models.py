@@ -1,7 +1,7 @@
 """Pydantic models for the UBT REST API."""
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -259,6 +259,147 @@ class JobAssessRequest(BaseModel):
     @classmethod
     def _validate_target_lang(cls, value: str) -> str:
         return _require_supported_target_lang(value)
+
+
+# --------------------------------------------------------------------------- #
+# Assessment report (mirrors ubt.core.assess.AssessmentReport so the OpenAPI
+# schema — and therefore the generated TS types — is real instead of a bare
+# ``additionalProperties: true`` object).
+# --------------------------------------------------------------------------- #
+
+
+class AssessDocumentFacts(BaseModel):
+    """Structural facts about the source document."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    file_name: str
+    file_size_bytes: int
+    format_ext: str
+    pages: int
+    chapters: int
+    source_chars: int
+    estimated_tokens: int
+    category: str
+    detected_domain: str
+    domain_confidence: float
+    math_density: str
+    is_scanned: bool
+    primary_engine: str | None = None
+    has_vector_diagrams: bool | None = None
+    has_multicolumn: bool | None = None
+    has_formulas: bool | None = None
+    text_layer_coverage: float | None = None
+    scan_page_share: float | None = None
+
+
+class AssessRoute(BaseModel):
+    """The engine's recommended routing for this document."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    mode: str
+    reason: str
+    recommended_preset: str
+    recommended_render_engine: str
+    recommended_dual_mode: str
+    recommended_profile: str
+    confidence: float
+    confidence_basis: str
+
+
+class AssessCost(BaseModel):
+    """The cost quote, split by component so the UI can show the drivers."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    draft_model: str
+    repair_model: str
+    prefix_tokens_per_call: int | None = None
+    billable_blocks: int
+    billable_blocks_is_exact: bool
+    prompt_tokens: int
+    completion_tokens: int
+    draft_cost_usd_cached: float | None = None
+    draft_cost_usd_uncached: float | None = None
+    repair_blocks: int
+    repair_cost_usd: float | None = None
+    qe_calls: int
+    qe_cost_usd: float | None = None
+    vlm_page_calls: int
+    ocr_page_calls: int
+    vision_cost_usd: float | None = None
+    rollup_calls: int
+    total_cost_usd: float | None = None
+
+
+class AssessRuntime(BaseModel):
+    """A heuristic wall-clock estimate (no per-stage history is persisted)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    heuristic: bool
+    est_seconds_low: float
+    est_seconds_high: float
+    basis: str
+
+
+class AssessWarning(BaseModel):
+    """One degraded probe: a stable machine code plus Chinese human copy."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    code: str
+    level: str
+    detail_zh: str
+
+
+class JobAssessResponse(BaseModel):
+    """The full pre-flight assessment report."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    schema_version: int
+    status: str
+    path: str
+    deep: bool
+    document: AssessDocumentFacts
+    route: AssessRoute
+    cost: AssessCost
+    runtime: AssessRuntime
+    quality_signals: list[str]
+    warnings: list[AssessWarning]
+    next_step_command: str
+    meta: dict[str, Any]
+
+
+class JobSummary(BaseModel):
+    """One row of the operator console's job queue."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    job_id: str
+    file_name: str
+    source_path: str
+    target_lang: str
+    status: str
+    total_blocks: int
+    completed_blocks: int
+    failed_blocks: int
+    needs_human_blocks: int
+    progress_percent: float
+    estimated_cost_usd: float | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+    has_output: bool
+
+
+class JobListResponse(BaseModel):
+    """The job queue, newest first."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    jobs: list[JobSummary]
 
 
 class SegmentEditRequest(BaseModel):

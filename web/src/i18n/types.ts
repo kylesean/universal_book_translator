@@ -74,6 +74,12 @@ export interface TranslationDictionary {
     pageCount: string
     recommendation: string
     scannedRatio: string
+    sourceChars: string
+    chapters: string
+    mathDensity: string
+    estTime: string
+    confidence: string
+    probeWarnings: string
   }
   mission: {
     title: string
@@ -90,6 +96,15 @@ export interface TranslationDictionary {
     executionState: string
     bufferedLines: string
     waitingStream: string
+    queueTitle: string
+    queueEmpty: string
+    colJob: string
+    colFile: string
+    colStatus: string
+    colProgress: string
+    colCost: string
+    colUpdated: string
+    selectJob: string
   }
   quality: {
     title: string
@@ -118,6 +133,28 @@ export interface TranslationDictionary {
     epub: string
     contractJson: string
     contractDesc: string
+    radarTitle: string
+    axisMath: string
+    axisTerminology: string
+    axisVisual: string
+    axisCompleteness: string
+    axisFidelity: string
+    termDriftTitle: string
+    colTerm: string
+    colExpected: string
+    colOccurrences: string
+    colDriftRate: string
+    noDrift: string
+    visualFindingsTitle: string
+    noVisualFindings: string
+    flaggedPages: string
+    auditTitle: string
+    auditDraftModel: string
+    auditRepairModel: string
+    auditQeEngine: string
+    auditRetries: string
+    auditCacheHit: string
+    auditTypst: string
   }
   assets: {
     title: string
@@ -183,5 +220,7 @@ export interface TranslationDictionary {
     cascadeFix: string
     cascadeApplying: string
     cascadeDone: string
+    diffBlend: string
+    noSourcePage: string
   }
 }

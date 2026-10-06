@@ -187,6 +187,21 @@ def test_page_preview_rejects_page_zero(tmp_path: Path) -> None:
     assert client.get(f"/jobs/{_JOB}/pages/0/preview", headers=_AUTH).status_code == 422
 
 
+def test_source_page_rejects_page_zero(tmp_path: Path) -> None:
+    client = TestClient(create_app(_seed(tmp_path)))
+    assert client.get(f"/jobs/{_JOB}/pages/0/source", headers=_AUTH).status_code == 422
+
+
+def test_source_page_unknown_job_is_404(tmp_path: Path) -> None:
+    config = UBTConfig(
+        db_dir=tmp_path / "db",
+        allowed_dirs=str(tmp_path),
+        service_api_key=SecretStr(_API_KEY),
+    )
+    client = TestClient(create_app(config))
+    assert client.get("/jobs/nosuchjob00/pages/1/source", headers=_AUTH).status_code == 404
+
+
 def test_segments_unknown_job_is_404(tmp_path: Path) -> None:
     config = UBTConfig(
         db_dir=tmp_path / "db",

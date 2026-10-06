@@ -100,9 +100,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Assess Job Jobs Assess Post"
+                  "$ref": "#/components/schemas/JobAssessResponse"
                 }
               }
             }
@@ -178,6 +176,82 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/JobSubmitResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs": {
+      "get": {
+        "tags": [
+          "Jobs"
+        ],
+        "summary": "List Jobs",
+        "description": "The job queue: every ledger in ``db_dir``, newest first.\n\nReads the durable store (one ``{job_id}.sqlite`` per job) so a restarted\nconsole still lists finished jobs, and overlays live jobs with the\nmanager's in-memory progress (fresher than the ``job_meta`` row a run\nonly finalizes at the end).",
+        "operationId": "list_jobs_jobs_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 200,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "x-ubt-tenant",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Ubt-Tenant"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobListResponse"
                 }
               }
             }
@@ -1344,6 +1418,98 @@
         }
       }
     },
+    "/jobs/{job_id}/pages/{page}/source": {
+      "get": {
+        "tags": [
+          "Jobs"
+        ],
+        "summary": "Source Page",
+        "description": "Rasterize the *source* PDF's page ``page`` as PNG.\n\nThe \"before\" half of the L3 pixel-witness view; pairs with\n``/pages/{page}/preview`` (the composed \"after\"). 503 when the source is\nmissing or the rasterizer is unavailable.",
+        "operationId": "source_page_jobs__job_id__pages__page__source_get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "page",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Page"
+            }
+          },
+          {
+            "name": "dpi",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 110,
+              "title": "Dpi"
+            }
+          },
+          {
+            "name": "x-ubt-tenant",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Ubt-Tenant"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/model-profiles": {
       "get": {
         "tags": [
@@ -1829,6 +1995,384 @@
   },
   "components": {
     "schemas": {
+      "AssessCost": {
+        "properties": {
+          "draft_model": {
+            "type": "string",
+            "title": "Draft Model"
+          },
+          "repair_model": {
+            "type": "string",
+            "title": "Repair Model"
+          },
+          "prefix_tokens_per_call": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prefix Tokens Per Call"
+          },
+          "billable_blocks": {
+            "type": "integer",
+            "title": "Billable Blocks"
+          },
+          "billable_blocks_is_exact": {
+            "type": "boolean",
+            "title": "Billable Blocks Is Exact"
+          },
+          "prompt_tokens": {
+            "type": "integer",
+            "title": "Prompt Tokens"
+          },
+          "completion_tokens": {
+            "type": "integer",
+            "title": "Completion Tokens"
+          },
+          "draft_cost_usd_cached": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft Cost Usd Cached"
+          },
+          "draft_cost_usd_uncached": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft Cost Usd Uncached"
+          },
+          "repair_blocks": {
+            "type": "integer",
+            "title": "Repair Blocks"
+          },
+          "repair_cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repair Cost Usd"
+          },
+          "qe_calls": {
+            "type": "integer",
+            "title": "Qe Calls"
+          },
+          "qe_cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qe Cost Usd"
+          },
+          "vlm_page_calls": {
+            "type": "integer",
+            "title": "Vlm Page Calls"
+          },
+          "ocr_page_calls": {
+            "type": "integer",
+            "title": "Ocr Page Calls"
+          },
+          "vision_cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vision Cost Usd"
+          },
+          "rollup_calls": {
+            "type": "integer",
+            "title": "Rollup Calls"
+          },
+          "total_cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Cost Usd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "draft_model",
+          "repair_model",
+          "billable_blocks",
+          "billable_blocks_is_exact",
+          "prompt_tokens",
+          "completion_tokens",
+          "repair_blocks",
+          "qe_calls",
+          "vlm_page_calls",
+          "ocr_page_calls",
+          "rollup_calls"
+        ],
+        "title": "AssessCost",
+        "description": "The cost quote, split by component so the UI can show the drivers."
+      },
+      "AssessDocumentFacts": {
+        "properties": {
+          "file_name": {
+            "type": "string",
+            "title": "File Name"
+          },
+          "file_size_bytes": {
+            "type": "integer",
+            "title": "File Size Bytes"
+          },
+          "format_ext": {
+            "type": "string",
+            "title": "Format Ext"
+          },
+          "pages": {
+            "type": "integer",
+            "title": "Pages"
+          },
+          "chapters": {
+            "type": "integer",
+            "title": "Chapters"
+          },
+          "source_chars": {
+            "type": "integer",
+            "title": "Source Chars"
+          },
+          "estimated_tokens": {
+            "type": "integer",
+            "title": "Estimated Tokens"
+          },
+          "category": {
+            "type": "string",
+            "title": "Category"
+          },
+          "detected_domain": {
+            "type": "string",
+            "title": "Detected Domain"
+          },
+          "domain_confidence": {
+            "type": "number",
+            "title": "Domain Confidence"
+          },
+          "math_density": {
+            "type": "string",
+            "title": "Math Density"
+          },
+          "is_scanned": {
+            "type": "boolean",
+            "title": "Is Scanned"
+          },
+          "primary_engine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primary Engine"
+          },
+          "has_vector_diagrams": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Has Vector Diagrams"
+          },
+          "has_multicolumn": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Has Multicolumn"
+          },
+          "has_formulas": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Has Formulas"
+          },
+          "text_layer_coverage": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text Layer Coverage"
+          },
+          "scan_page_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scan Page Share"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file_name",
+          "file_size_bytes",
+          "format_ext",
+          "pages",
+          "chapters",
+          "source_chars",
+          "estimated_tokens",
+          "category",
+          "detected_domain",
+          "domain_confidence",
+          "math_density",
+          "is_scanned"
+        ],
+        "title": "AssessDocumentFacts",
+        "description": "Structural facts about the source document."
+      },
+      "AssessRoute": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "title": "Mode"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "recommended_preset": {
+            "type": "string",
+            "title": "Recommended Preset"
+          },
+          "recommended_render_engine": {
+            "type": "string",
+            "title": "Recommended Render Engine"
+          },
+          "recommended_dual_mode": {
+            "type": "string",
+            "title": "Recommended Dual Mode"
+          },
+          "recommended_profile": {
+            "type": "string",
+            "title": "Recommended Profile"
+          },
+          "confidence": {
+            "type": "number",
+            "title": "Confidence"
+          },
+          "confidence_basis": {
+            "type": "string",
+            "title": "Confidence Basis"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mode",
+          "reason",
+          "recommended_preset",
+          "recommended_render_engine",
+          "recommended_dual_mode",
+          "recommended_profile",
+          "confidence",
+          "confidence_basis"
+        ],
+        "title": "AssessRoute",
+        "description": "The engine's recommended routing for this document."
+      },
+      "AssessRuntime": {
+        "properties": {
+          "heuristic": {
+            "type": "boolean",
+            "title": "Heuristic"
+          },
+          "est_seconds_low": {
+            "type": "number",
+            "title": "Est Seconds Low"
+          },
+          "est_seconds_high": {
+            "type": "number",
+            "title": "Est Seconds High"
+          },
+          "basis": {
+            "type": "string",
+            "title": "Basis"
+          }
+        },
+        "type": "object",
+        "required": [
+          "heuristic",
+          "est_seconds_low",
+          "est_seconds_high",
+          "basis"
+        ],
+        "title": "AssessRuntime",
+        "description": "A heuristic wall-clock estimate (no per-stage history is persisted)."
+      },
+      "AssessWarning": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "level": {
+            "type": "string",
+            "title": "Level"
+          },
+          "detail_zh": {
+            "type": "string",
+            "title": "Detail Zh"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "level",
+          "detail_zh"
+        ],
+        "title": "AssessWarning",
+        "description": "One degraded probe: a stable machine code plus Chinese human copy."
+      },
       "ExtractionStrategy": {
         "type": "string",
         "enum": [
@@ -1922,6 +2466,95 @@
         ],
         "title": "JobAssessRequest",
         "description": "Payload to assess a cold document without translating."
+      },
+      "JobAssessResponse": {
+        "properties": {
+          "schema_version": {
+            "type": "integer",
+            "title": "Schema Version"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "deep": {
+            "type": "boolean",
+            "title": "Deep"
+          },
+          "document": {
+            "$ref": "#/components/schemas/AssessDocumentFacts"
+          },
+          "route": {
+            "$ref": "#/components/schemas/AssessRoute"
+          },
+          "cost": {
+            "$ref": "#/components/schemas/AssessCost"
+          },
+          "runtime": {
+            "$ref": "#/components/schemas/AssessRuntime"
+          },
+          "quality_signals": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Quality Signals"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/AssessWarning"
+            },
+            "type": "array",
+            "title": "Warnings"
+          },
+          "next_step_command": {
+            "type": "string",
+            "title": "Next Step Command"
+          },
+          "meta": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Meta"
+          }
+        },
+        "type": "object",
+        "required": [
+          "schema_version",
+          "status",
+          "path",
+          "deep",
+          "document",
+          "route",
+          "cost",
+          "runtime",
+          "quality_signals",
+          "warnings",
+          "next_step_command",
+          "meta"
+        ],
+        "title": "JobAssessResponse",
+        "description": "The full pre-flight assessment report."
+      },
+      "JobListResponse": {
+        "properties": {
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/JobSummary"
+            },
+            "type": "array",
+            "title": "Jobs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "jobs"
+        ],
+        "title": "JobListResponse",
+        "description": "The job queue, newest first."
       },
       "JobStatusResponse": {
         "properties": {
@@ -2669,6 +3302,103 @@
         ],
         "title": "JobSubmitResponse",
         "description": "Response returned upon successful job enqueueing."
+      },
+      "JobSummary": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "title": "Job Id"
+          },
+          "file_name": {
+            "type": "string",
+            "title": "File Name"
+          },
+          "source_path": {
+            "type": "string",
+            "title": "Source Path"
+          },
+          "target_lang": {
+            "type": "string",
+            "title": "Target Lang"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "total_blocks": {
+            "type": "integer",
+            "title": "Total Blocks"
+          },
+          "completed_blocks": {
+            "type": "integer",
+            "title": "Completed Blocks"
+          },
+          "failed_blocks": {
+            "type": "integer",
+            "title": "Failed Blocks"
+          },
+          "needs_human_blocks": {
+            "type": "integer",
+            "title": "Needs Human Blocks"
+          },
+          "progress_percent": {
+            "type": "number",
+            "title": "Progress Percent"
+          },
+          "estimated_cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Cost Usd"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "has_output": {
+            "type": "boolean",
+            "title": "Has Output"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id",
+          "file_name",
+          "source_path",
+          "target_lang",
+          "status",
+          "total_blocks",
+          "completed_blocks",
+          "failed_blocks",
+          "needs_human_blocks",
+          "progress_percent",
+          "has_output"
+        ],
+        "title": "JobSummary",
+        "description": "One row of the operator console's job queue."
       },
       "ModelProfile": {
         "properties": {

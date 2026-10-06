@@ -27,10 +27,13 @@ from ubt.api.assets import (
     read_glossary_terms,
     remove_glossary_term,
 )
+from ubt.api.job_catalog import list_job_summaries
 from ubt.api.manager import JobManager, JobRecord
 from ubt.api.models import (
     GlossaryTermRequest,
     JobAssessRequest,
+    JobAssessResponse,
+    JobListResponse,
     JobStatusResponse,
     JobSubmitRequest,
     JobSubmitResponse,
@@ -91,7 +94,11 @@ from ubt.core.qe import BaseQERunner
 from ubt.core.router import ModelProfile, get_default_registry
 from ubt.core.router.rate_limiter import build_rate_limiter
 from ubt.core.router.router import ModelRouter
-from ubt.render.page_preview import PagePreviewUnavailable, render_page_preview
+from ubt.render.page_preview import (
+    PagePreviewUnavailable,
+    render_page_preview,
+    render_source_page_png,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -581,7 +588,7 @@ def create_app(
 
     @api_app.post(
         "/jobs/assess",
-        response_model=dict[str, Any],
+        response_model=JobAssessResponse,
         tags=["Jobs"],
         summary="Assess a document quote, risks and route without spend",
     )
@@ -835,6 +842,65 @@ def create_app(
             status_url=f"/jobs/{record.job_id}/status",
             rehearsal=safe_req.dry_run,
         )
+
+    @api_app.get("/jobs", response_model=JobListResponse, tags=["Jobs"])
+    async def list_jobs(
+        request: Request,
+        limit: int = 200,
+        x_ubt_tenant: str | None = Header(default=None),
+    ) -> Any:
+        """The job queue: every ledger in ``db_dir``, newest first.
+
+        Reads the durable store (one ``{job_id}.sqlite`` per job) so a restarted
+        console still lists finished jobs, and overlays live jobs with the
+        manager's in-memory progress (fresher than the ``job_meta`` row a run
+        only finalizes at the end).
+
+        ``GET /jobs`` is also the console's Mission Control URL, so a browser
+        navigation (``Accept: text/html``) is answered with the SPA shell and
+        the client router resolves the screen; API clients get the JSON queue.
+        """
+        if "text/html" in request.headers.get("accept", ""):
+            index = Path(__file__).resolve().parent / "static" / "index.html"
+            if index.exists():
+                return FileResponse(index, media_type="text/html")
+
+        def _live_overrides() -> dict[str, dict[str, Any]]:
+            overrides: dict[str, dict[str, Any]] = {}
+            for job_id, record in manager.jobs.items():
+                progress = record.progress
+                overrides[job_id] = {
+                    "status": record.status,
+                    "total_blocks": progress.total_blocks,
+                    "completed_blocks": progress.completed_blocks,
+                    "failed_blocks": progress.failed_blocks,
+                    "needs_human_blocks": progress.needs_human_blocks,
+                    "progress_percent": progress.progress_percent,
+                    "estimated_cost_usd": progress.estimated_cost_usd,
+                }
+            return overrides
+
+        def _catalog() -> list[dict[str, Any]]:
+            return list_job_summaries(
+                app_config.db_dir, live=_live_overrides(), limit=min(max(limit, 1), 1000)
+            )
+
+        summaries = await asyncio.to_thread(_catalog)
+        tenant = _tenant_from_header(x_ubt_tenant)
+        if tenant is not None and job_queue is not None:
+            # Match the per-job endpoints' rule exactly: a job still in the queue
+            # is visible only to its tenant; a job the queue no longer tracks
+            # (finished and pruned) is visible to any authenticated caller.
+            def _visible() -> list[dict[str, Any]]:
+                kept: list[dict[str, Any]] = []
+                for item in summaries:
+                    queued = job_queue.get(item["job_id"])
+                    if queued is None or queued.tenant_id == tenant:
+                        kept.append(item)
+                return kept
+
+            summaries = await asyncio.to_thread(_visible)
+        return {"jobs": summaries}
 
     @api_app.post(
         "/jobs/{job_id}/cancel",
@@ -1734,6 +1800,55 @@ def create_app(
                 ) from exc
         return Response(content=png, media_type="image/png")
 
+    @api_app.get("/jobs/{job_id}/pages/{page}/source", tags=["Jobs"])
+    async def source_page(
+        job_id: str,
+        page: int,
+        dpi: int = 110,
+        x_ubt_tenant: str | None = Header(default=None),
+    ) -> Response:
+        """Rasterize the *source* PDF's page ``page`` as PNG.
+
+        The "before" half of the L3 pixel-witness view; pairs with
+        ``/pages/{page}/preview`` (the composed "after"). 503 when the source is
+        missing or the rasterizer is unavailable.
+        """
+        valid_id = validate_job_id(job_id)
+        if not await _tenant_allows_async(valid_id, _tenant_from_header(x_ubt_tenant)):
+            raise _cross_tenant_404(valid_id)
+        if page < 1:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="page must be >= 1"
+            )
+        if not _job_db_path(valid_id).exists():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"Job not found: {valid_id}"
+            )
+
+        def _meta() -> str | None:
+            with SQLiteJobLedger(_job_db_path(valid_id), read_only=True) as ledger:
+                return ledger.get_job_source_path(valid_id)
+
+        source_path = await asyncio.to_thread(_meta)
+        if not source_path:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Job has no source document to preview against.",
+            )
+        resolved_source = resolve_secure_path(source_path, must_exist=True, config=app_config)
+        try:
+            png = await asyncio.to_thread(
+                render_source_page_png,
+                resolved_source,
+                page,
+                min(max(dpi, 40), 200),
+            )
+        except PagePreviewUnavailable as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
+            ) from exc
+        return Response(content=png, media_type="image/png")
+
     @api_app.get(
         "/api/v1/model-profiles",
         response_model=list[ModelProfile],
@@ -1884,7 +1999,34 @@ def create_app(
     if static_dir.exists() and (static_dir / "index.html").exists():
         from fastapi.staticfiles import StaticFiles
 
-        api_app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="console")
+        class _SPAStaticFiles(StaticFiles):
+            """StaticFiles that falls back to index.html for browser navigations.
+
+            The console is a single-page app with real URLs (``/wizard``,
+            ``/jobs/:id/quality``); a browser refresh or a pasted link must land
+            on ``index.html`` and let the client router resolve the path, not a
+            404. API routes are registered before this mount, so they still win.
+
+            The fallback is gated on ``Accept: text/html``: an API client probing
+            a closed surface (``/docs`` on a keyed server, a typo'd endpoint)
+            must still get a JSON 404 rather than the SPA shell.
+            """
+
+            async def get_response(self, path: str, scope: Any) -> Response:
+                from starlette.exceptions import HTTPException as StarletteHTTPException
+
+                try:
+                    return await super().get_response(path, scope)
+                except StarletteHTTPException as exc:
+                    accepts_html = any(
+                        key == b"accept" and b"text/html" in value.lower()
+                        for key, value in scope.get("headers", [])
+                    )
+                    if exc.status_code != 404 or not accepts_html:
+                        raise
+                    return await super().get_response("index.html", scope)
+
+        api_app.mount("/", _SPAStaticFiles(directory=str(static_dir), html=True), name="console")
 
     return api_app
 

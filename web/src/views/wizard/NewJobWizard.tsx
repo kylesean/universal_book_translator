@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   UploadCloud,
   FileText,
@@ -12,12 +13,16 @@ import { Badge } from '@/components/ui/Badge'
 import { assessJob, submitJob, type JobAssessResponse } from '@/api/client'
 import { useI18n } from '@/i18n/I18nContext'
 
-interface NewJobWizardProps {
-  onJobStarted: (jobId: string) => void
+/** Human-readable duration from a seconds estimate (e.g. "3m", "1.2h"). */
+function formatDuration(seconds: number): string {
+  if (seconds < 60) return `${Math.round(seconds)}s`
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m`
+  return `${(seconds / 3600).toFixed(1)}h`
 }
 
-export function NewJobWizard({ onJobStarted }: NewJobWizardProps) {
+export function NewJobWizard() {
   const { t } = useI18n()
+  const navigate = useNavigate()
   const [filePath, setFilePath] = useState('')
   const [fileName, setFileName] = useState('')
   const [fileSize, setFileSize] = useState<string>('')
@@ -100,9 +105,8 @@ export function NewJobWizard({ onJobStarted }: NewJobWizardProps) {
         dry_run: false,
         budget_usd: budgetUsd,
       })
-      onJobStarted(res.job_id)
-    } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : 'Submission failed')
+      navigate(`/jobs/${res.job_id}`)
+    } catch (err) {      setSubmitError(err instanceof Error ? err.message : 'Submission failed')
     } finally {
       setIsSubmitting(false)
     }
@@ -365,44 +369,105 @@ export function NewJobWizard({ onJobStarted }: NewJobWizardProps) {
                       </div>
                     </div>
                     <Badge variant="outline" className="uppercase shrink-0 text-[10px] font-mono">
-                      {fileName.split('.').pop() || 'PDF'}
+                      {assessment.document.format_ext.replace('.', '') || 'PDF'}
                     </Badge>
                   </div>
                 )}
 
-                {/* Metric Rows */}
+                {/* Metric Rows — real nested assess fields */}
                 <div className="divide-y divide-[var(--paper-border)] text-xs">
                   <div className="py-2.5 flex items-center justify-between">
                     <span className="text-[var(--ink-secondary)]">{t.wizard.pageCount}</span>
                     <span className="font-mono font-bold text-[var(--ink-primary)]">
-                      {(assessment as any).pages ?? (assessment as any).page_count ?? 'N/A'}
+                      {assessment.document.pages}
+                      <span className="text-[var(--ink-muted)] font-normal">
+                        {' '}
+                        · {assessment.document.chapters} {t.wizard.chapters}
+                      </span>
                     </span>
                   </div>
                   <div className="py-2.5 flex items-center justify-between">
-                    <span className="text-[var(--ink-secondary)]">{t.wizard.detectedMath}</span>
-                    <span className="font-mono font-bold text-[#15803d]">
-                      {(assessment as any).math_blocks_detected ?? (assessment as any).formula_count ?? '0'} (100% PRESERVED)
+                    <span className="text-[var(--ink-secondary)]">{t.wizard.sourceChars}</span>
+                    <span className="font-mono font-bold text-[var(--ink-primary)]">
+                      {assessment.document.source_chars.toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="py-2.5 flex items-center justify-between">
+                    <span className="text-[var(--ink-secondary)]">{t.wizard.mathDensity}</span>
+                    <span
+                      className={`font-mono font-bold ${
+                        assessment.document.has_formulas ? 'text-[#b45309]' : 'text-[#15803d]'
+                      }`}
+                    >
+                      {assessment.document.math_density}
+                    </span>
+                  </div>
+                  <div className="py-2.5 flex items-center justify-between">
+                    <span className="text-[var(--ink-secondary)]">{t.wizard.scannedRatio}</span>
+                    <span
+                      className={`font-mono font-bold ${
+                        (assessment.document.scan_page_share ?? 0) > 0.2
+                          ? 'text-[#b45309]'
+                          : 'text-[#15803d]'
+                      }`}
+                    >
+                      {assessment.document.scan_page_share !== null &&
+                      assessment.document.scan_page_share !== undefined
+                        ? `${(assessment.document.scan_page_share * 100).toFixed(0)}%`
+                        : assessment.document.is_scanned
+                          ? 'yes'
+                          : 'no'}
                     </span>
                   </div>
                   <div className="py-2.5 flex items-center justify-between">
                     <span className="text-[var(--ink-secondary)]">{t.wizard.estTokens}</span>
                     <span className="font-mono font-bold text-[var(--ink-primary)]">
-                      {(assessment as any).estimated_tokens?.toLocaleString() ?? '~120,000'}
+                      {assessment.document.estimated_tokens.toLocaleString()}
                     </span>
                   </div>
                   <div className="py-2.5 flex items-center justify-between">
                     <span className="text-[var(--ink-secondary)]">{t.wizard.estCost}</span>
                     <span className="font-mono font-bold text-[#b45309]">
-                      ${(assessment as any).estimated_cost_usd?.toFixed(2) ?? '1.20 - 2.50'}
+                      {assessment.cost.total_cost_usd === null ||
+                      assessment.cost.total_cost_usd === undefined
+                        ? 'not priced'
+                        : `$${assessment.cost.total_cost_usd.toFixed(2)}`}
                     </span>
                   </div>
                   <div className="py-2.5 flex items-center justify-between">
-                    <span className="text-[var(--ink-secondary)]">{t.wizard.recommendation}</span>
-                    <span className="font-mono text-[#15803d] text-[11px] font-semibold">
-                      {(assessment as any).recommended_mode ?? 'Rigid Dual (Typst 0.12)'}
+                    <span className="text-[var(--ink-secondary)]">{t.wizard.estTime}</span>
+                    <span className="font-mono font-bold text-[var(--ink-primary)]">
+                      {formatDuration(assessment.runtime.est_seconds_low)} –{' '}
+                      {formatDuration(assessment.runtime.est_seconds_high)}
+                    </span>
+                  </div>
+                  <div className="py-2.5 flex items-start justify-between gap-3">
+                    <span className="text-[var(--ink-secondary)] shrink-0">
+                      {t.wizard.recommendation}
+                    </span>
+                    <span className="font-mono text-[#15803d] text-[11px] font-semibold text-right">
+                      {assessment.route.recommended_render_engine} · {assessment.route.recommended_preset}
+                      <span className="text-[var(--ink-muted)] font-normal">
+                        {' '}
+                        ({t.wizard.confidence} {(assessment.route.confidence * 100).toFixed(0)}%)
+                      </span>
                     </span>
                   </div>
                 </div>
+
+                {assessment.warnings.length > 0 && (
+                  <div className="rounded-[5px] border border-[#b45309]/30 bg-[#b45309]/5 p-2.5 space-y-1">
+                    <div className="text-[10px] font-mono uppercase tracking-wider text-[#b45309] font-semibold">
+                      {t.wizard.probeWarnings} ({assessment.warnings.length})
+                    </div>
+                    {assessment.warnings.slice(0, 4).map((warning) => (
+                      <div key={warning.code} className="text-[11px] text-[var(--ink-secondary)]">
+                        <span className="font-mono text-[var(--ink-muted)]">{warning.code}</span> ·{' '}
+                        {warning.detail_zh}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             ) : (
               <div className="py-16 text-center text-[var(--ink-muted)] text-xs space-y-2">

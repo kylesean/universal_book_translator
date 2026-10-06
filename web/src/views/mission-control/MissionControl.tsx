@@ -1,4 +1,5 @@
-import React, { useEffect, useState, useRef } from 'react'
+import React, { useCallback, useEffect, useState, useRef } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
 import {
   Terminal,
   Square,
@@ -11,24 +12,21 @@ import { Badge } from '@/components/ui/Badge'
 import {
   getJobStatus,
   cancelJob,
+  listJobs,
   subscribeJobProgress,
+  type JobSummary,
   type ProgressStreamFrame,
 } from '@/api/client'
 import { useI18n } from '@/i18n/I18nContext'
 
-interface MissionControlProps {
-  currentJobId: string | null
-  onSelectJob: (jobId: string) => void
-  onInspectQuality: (jobId: string) => void
-  onOpenReview: (jobId: string) => void
-}
-
-export function MissionControl({
-  currentJobId,
-  onInspectQuality,
-  onOpenReview,
-}: MissionControlProps) {
+export function MissionControl() {
   const { t } = useI18n()
+  const navigate = useNavigate()
+  const { jobId } = useParams<{ jobId: string }>()
+  const currentJobId = jobId ?? null
+  const onSelectJob = (id: string) => navigate(`/jobs/${id}`)
+  const onInspectQuality = (id: string) => navigate(`/jobs/${id}/quality`)
+  const onOpenReview = (id: string) => navigate(`/jobs/${id}/review`)
   const [logs, setLogs] = useState<string[]>([])
   const [isLiveStreaming, setIsLiveStreaming] = useState(false)
   const [statusStr, setStatusStr] = useState<string>('running')
@@ -37,8 +35,25 @@ export function MissionControl({
   const [totalBlocks, setTotalBlocks] = useState<number>(0)
   const [costUsd, setCostUsd] = useState<number>(0)
   const [avgQe, setAvgQe] = useState<number>(0)
+  const [jobs, setJobs] = useState<JobSummary[]>([])
 
   const logContainerRef = useRef<HTMLDivElement>(null)
+
+  const refreshQueue = useCallback(async () => {
+    try {
+      setJobs(await listJobs(200))
+    } catch {
+      // A queue read failure must not blank the live dashboard.
+    }
+  }, [])
+
+  // The queue is polled independently of the selected job so a restarted
+  // console still lists finished runs (they live on disk, not in memory).
+  useEffect(() => {
+    void refreshQueue()
+    const timer = setInterval(() => void refreshQueue(), 5000)
+    return () => clearInterval(timer)
+  }, [refreshQueue])
 
   useEffect(() => {
     if (!currentJobId) return
@@ -124,18 +139,6 @@ export function MissionControl({
     { key: 'package', label: '8. Package' },
   ]
 
-  if (!currentJobId) {
-    return (
-      <div className="flex-1 flex items-center justify-center p-8 text-center text-[var(--ink-muted)]">
-        <div className="max-w-sm space-y-2">
-          <Activity className="h-8 w-8 mx-auto text-[var(--paper-border-hover)]" />
-          <h2 className="text-sm font-semibold text-[var(--ink-primary)]">{t.mission.noActiveJobTitle}</h2>
-          <p className="text-xs text-[var(--ink-secondary)] leading-relaxed">{t.mission.noActiveJobDesc}</p>
-        </div>
-      </div>
-    )
-  }
-
   const isCompleted = statusStr === 'completed'
   const isFailed = statusStr === 'failed' || statusStr === 'cancelled'
   // The backend stream carries no `stage` field, so the stepper highlight is
@@ -153,6 +156,15 @@ export function MissionControl({
     return 'extract'
   })()
 
+  const statusVariant = (status: string): 'success' | 'warning' | 'destructive' | 'info' =>
+    status === 'completed'
+      ? 'success'
+      : status === 'failed' || status === 'cancelled'
+        ? 'destructive'
+        : status === 'needs_human' || status === 'blocked_human'
+          ? 'warning'
+          : 'info'
+
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden px-8 py-6 space-y-5">
       {/* Header bar */}
@@ -162,13 +174,12 @@ export function MissionControl({
             <h1 className="text-lg font-bold tracking-tight text-[var(--ink-primary)]">
               {t.mission.title}
             </h1>
-            <Badge
-              variant={isCompleted ? 'success' : isFailed ? 'destructive' : 'info'}
-              dot
-            >
-              {statusStr.toUpperCase()}
-            </Badge>
-            {isLiveStreaming && (
+            {currentJobId && (
+              <Badge variant={isCompleted ? 'success' : isFailed ? 'destructive' : 'info'} dot>
+                {statusStr.toUpperCase()}
+              </Badge>
+            )}
+            {currentJobId && isLiveStreaming && (
               <span className="text-[11px] font-mono text-[#15803d] flex items-center gap-1.5 font-medium">
                 <span className="h-1.5 w-1.5 rounded-full bg-[#15803d] animate-pulse" />
                 SSE STREAM
@@ -176,13 +187,17 @@ export function MissionControl({
             )}
           </div>
           <div className="text-[11px] text-[var(--ink-secondary)] font-mono mt-0.5">
-            JOB: <span className="text-[var(--ink-primary)] font-semibold">{currentJobId}</span>
+            JOB:{' '}
+            <span className="text-[var(--ink-primary)] font-semibold">
+              {currentJobId ?? t.mission.noActiveJobTitle}
+            </span>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
           <Button
-            onClick={() => onInspectQuality(currentJobId)}
+            onClick={() => currentJobId && onInspectQuality(currentJobId)}
+            disabled={!currentJobId}
             variant="secondary"
             size="sm"
           >
@@ -191,7 +206,8 @@ export function MissionControl({
           </Button>
 
           <Button
-            onClick={() => onOpenReview(currentJobId)}
+            onClick={() => currentJobId && onOpenReview(currentJobId)}
+            disabled={!currentJobId}
             variant="secondary"
             size="sm"
           >
@@ -199,7 +215,7 @@ export function MissionControl({
             {t.mission.openWorkbench}
           </Button>
 
-          {!isCompleted && !isFailed && (
+          {currentJobId && !isCompleted && !isFailed && (
             <Button onClick={handleCancel} variant="danger" size="sm">
               <Square className="h-3 w-3 mr-1" />
               {t.mission.cancelCompile}
@@ -208,6 +224,101 @@ export function MissionControl({
         </div>
       </div>
 
+      {/* Global Job Queue (PRD §4.2.1) — read from the durable ledgers so a
+          restarted console still lists finished runs. */}
+      <div className="rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] overflow-hidden shrink-0 shadow-2xs">
+        <div className="h-8 px-3.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] flex items-center justify-between">
+          <span className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
+            {t.mission.queueTitle}
+          </span>
+          <Badge variant="outline">{jobs.length}</Badge>
+        </div>
+        <div className="max-h-56 overflow-y-auto">
+          {jobs.length === 0 ? (
+            <div className="py-6 text-center text-xs text-[var(--ink-muted)]">
+              {t.mission.queueEmpty}
+            </div>
+          ) : (
+            <table className="w-full text-xs text-left">
+              <thead className="bg-[var(--paper-subsurface)] text-[var(--ink-muted)] font-mono border-b border-[var(--paper-border)] sticky top-0">
+                <tr>
+                  {[t.mission.colJob, t.mission.colFile, t.mission.colStatus, t.mission.colProgress, t.mission.colCost, t.mission.colUpdated].map(
+                    (label) => (
+                      <th
+                        key={label}
+                        className="py-2 px-3 font-semibold uppercase text-[10px] tracking-wider"
+                      >
+                        {label}
+                      </th>
+                    )
+                  )}
+                  <th className="py-2 px-3" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[var(--paper-border)]">
+                {jobs.map((job) => (
+                  <tr
+                    key={job.job_id}
+                    className={`transition-colors ${
+                      job.job_id === currentJobId
+                        ? 'bg-[var(--paper-subsurface)]'
+                        : 'hover:bg-[var(--paper-subsurface)]/60'
+                    }`}
+                  >
+                    <td className="py-2 px-3 font-mono text-[var(--ink-primary)] truncate max-w-[9rem]">
+                      {job.job_id}
+                    </td>
+                    <td className="py-2 px-3 text-[var(--ink-secondary)] truncate max-w-[12rem]">
+                      {job.file_name}
+                    </td>
+                    <td className="py-2 px-3">
+                      <Badge variant={statusVariant(job.status)} dot className="text-[10px]">
+                        {job.status.toUpperCase()}
+                      </Badge>
+                    </td>
+                    <td className="py-2 px-3 font-mono text-[var(--ink-primary)]">
+                      {job.progress_percent.toFixed(1)}%
+                    </td>
+                    <td className="py-2 px-3 font-mono text-[#b45309]">
+                      {job.estimated_cost_usd === null || job.estimated_cost_usd === undefined
+                        ? '—'
+                        : `$${job.estimated_cost_usd.toFixed(3)}`}
+                    </td>
+                    <td className="py-2 px-3 font-mono text-[11px] text-[var(--ink-muted)]">
+                      {formatTimestamp(job.updated_at)}
+                    </td>
+                    <td className="py-2 px-3 text-right">
+                      <Button
+                        onClick={() => onSelectJob(job.job_id)}
+                        variant="secondary"
+                        size="sm"
+                        className="text-[11px] h-6 px-2"
+                      >
+                        {t.mission.selectJob}
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+
+      {!currentJobId ? (
+        <div className="flex-1 flex items-center justify-center text-center text-[var(--ink-muted)]">
+          <div className="max-w-sm space-y-2">
+            <Activity className="h-8 w-8 mx-auto text-[var(--paper-border-hover)]" />
+            <h2 className="text-sm font-semibold text-[var(--ink-primary)]">
+              {t.mission.noActiveJobTitle}
+            </h2>
+            <p className="text-xs text-[var(--ink-secondary)] leading-relaxed">
+              {t.mission.noActiveJobDesc}
+            </p>
+          </div>
+        </div>
+      ) : (
+        <>
       {/* Slim Pipeline Stepper */}
       <div className="p-3.5 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] shrink-0 shadow-2xs">
         <div className="flex items-center justify-between text-[10px] font-mono uppercase text-[var(--ink-muted)] mb-2 px-1 font-semibold">
@@ -327,6 +438,18 @@ export function MissionControl({
           )}
         </div>
       </div>
+        </>
+      )}
     </div>
   )
+}
+
+/** Short "MM-DD HH:MM" from a SQLite timestamp (or "—" when absent). */
+function formatTimestamp(value: string | null | undefined): string {
+  if (!value) return '—'
+  const normalized = value.includes('T') ? value : value.replace(' ', 'T')
+  const parsed = new Date(normalized.endsWith('Z') ? normalized : `${normalized}Z`)
+  if (Number.isNaN(parsed.getTime())) return value
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())} ${pad(parsed.getHours())}:${pad(parsed.getMinutes())}`
 }

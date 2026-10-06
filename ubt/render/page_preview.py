@@ -43,6 +43,25 @@ def _block_page(block: IRBlock) -> int | None:
     return bbox.page if bbox is not None else None
 
 
+def render_source_page_png(source_pdf: Path, page: int, dpi: int = 110) -> bytes:
+    """Rasterize the *source* PDF's page ``page`` (the "before" witness image).
+
+    The pixel-witness view pairs this with :func:`render_page_preview` (the
+    "after") so a reviewer can compare the original page against the composed
+    translation. Raises :class:`PagePreviewUnavailable` when the file is missing
+    or the rasterizer cannot run, so the caller answers 503 rather than serving a
+    broken image.
+    """
+    if not source_pdf.exists():
+        raise PagePreviewUnavailable(f"source PDF not found: {source_pdf}")
+    if page < 1:
+        raise PagePreviewUnavailable("page must be >= 1")
+    png = render_page_png(source_pdf, page, dpi)
+    if png is None:
+        raise PagePreviewUnavailable("source page rasterization failed (pdf_oxide unavailable)")
+    return png
+
+
 def render_page_preview(
     *,
     source_pdf: Path,

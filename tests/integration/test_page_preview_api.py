@@ -87,3 +87,27 @@ def test_page_preview_without_source_is_409(tmp_path: Path) -> None:
     client = TestClient(create_app(config))
     res = client.get(f"/jobs/{_JOB}/pages/1/preview", headers=_AUTH)
     assert res.status_code == 409
+
+
+def test_source_page_returns_png(tmp_path: Path) -> None:
+    # The "before" half of the pixel-witness view: the source PDF page, no
+    # composition. Needs only pdf_oxide (not typst).
+    source = write_text_pdf(tmp_path / "book.pdf", [["Source page one."], ["Source page two."]])
+
+    config = UBTConfig(
+        db_dir=tmp_path / "db",
+        allowed_dirs=str(tmp_path),
+        service_api_key=SecretStr(_API_KEY),
+    )
+    config.db_dir.mkdir(parents=True, exist_ok=True)
+    with SQLiteJobLedger(config.db_dir / f"{_JOB}.sqlite") as ledger:
+        ledger.init_job_from_manifest(
+            _JOB, BookManifest(doc_id=_JOB, title="t", source_path=str(source), target_lang="es")
+        )
+
+    client = TestClient(create_app(config))
+    res = client.get(f"/jobs/{_JOB}/pages/1/source?dpi=90", headers=_AUTH)
+    assert res.status_code == 200, res.text
+    assert res.headers["content-type"] == "image/png"
+    assert res.content[:8] == b"\x89PNG\r\n\x1a\n"
+    assert len(res.content) > 1000

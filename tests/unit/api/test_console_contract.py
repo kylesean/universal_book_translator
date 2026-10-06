@@ -208,3 +208,119 @@ def test_deliverables_endpoint_serves_only_existing_files(tmp_path: Path) -> Non
     assert downloaded.content == b"{}"
 
     assert client.get(f"/jobs/{job_id}/download/bogus", headers=_AUTH).status_code == 404
+
+
+def test_assess_response_is_typed_not_a_bare_object() -> None:
+    # The wizard's pre-flight panel reads nested fields (document.pages,
+    # cost.total_cost_usd, route.recommended_render_engine). While the schema was
+    # ``additionalProperties: true`` the generated TS type was an opaque object,
+    # so the panel silently read non-existent flat keys and showed fallbacks.
+    schema = create_app().openapi()
+    body = schema["paths"]["/jobs/assess"]["post"]["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"]
+    assert body["$ref"] == "#/components/schemas/JobAssessResponse"
+    components = schema["components"]["schemas"]
+    assert {"document", "route", "cost", "runtime"} <= set(
+        components["JobAssessResponse"]["properties"]
+    )
+    assert {"pages", "estimated_tokens", "math_density", "scan_page_share"} <= set(
+        components["AssessDocumentFacts"]["properties"]
+    )
+    assert "total_cost_usd" in components["AssessCost"]["properties"]
+    assert "recommended_render_engine" in components["AssessRoute"]["properties"]
+
+
+def test_jobs_endpoint_lists_ledgers_and_ignores_sidecars(tmp_path: Path) -> None:
+    from ubt.core.engine.ledger import SQLiteJobLedger
+    from ubt.core.ir.models import (
+        BlockStatus,
+        BlockType,
+        BookManifest,
+        ChapterIR,
+        IRBlock,
+        make_element,
+    )
+    from ubt.core.memory.tm import TranslationMemory
+
+    cfg = _config(tmp_path)
+    cfg.db_dir.mkdir(parents=True, exist_ok=True)
+
+    def _seed(job_id: str, name: str, statuses: list[BlockStatus]) -> None:
+        blocks = []
+        for index, status in enumerate(statuses):
+            element = make_element(
+                id=f"b{index:03d}",
+                spine_index=index,
+                block_type=BlockType.NARRATIVE,
+                source_text="s",
+            )
+            block = IRBlock(element=element)
+            block.target_text = "t"
+            block.status = status
+            blocks.append(block)
+        with SQLiteJobLedger(cfg.db_dir / f"{job_id}.sqlite") as ledger:
+            ledger.init_job_from_manifest(
+                job_id, BookManifest(doc_id=job_id, title="t", source_path=f"/books/{name}")
+            )
+            ledger.append_chapter(
+                job_id,
+                ChapterIR(doc_id=job_id, chapter_id="c1", title="C1", spine_index=0, blocks=blocks),
+            )
+            ledger.set_job_metadata_value(job_id, "estimated_cost_usd", 1.5)
+            ledger.finalize_job(job_id, "completed")
+
+    _seed("jobaaa00001", "book_a.pdf", [BlockStatus.MTQE_PASSED, BlockStatus.MTQE_PASSED])
+    _seed("jobbbb00002", "book_b.epub", [BlockStatus.MTQE_PASSED, BlockStatus.NEEDS_HUMAN])
+    # A shared TM database lives in the same directory and must not be listed.
+    TranslationMemory(cfg.db_dir / "tm.sqlite").close()
+
+    client = TestClient(create_app(cfg))
+    body = client.get("/jobs", headers=_AUTH).json()
+    ids = {item["job_id"] for item in body["jobs"]}
+    assert ids == {"jobaaa00001", "jobbbb00002"}
+
+    by_id = {item["job_id"]: item for item in body["jobs"]}
+    assert by_id["jobaaa00001"]["file_name"] == "book_a.pdf"
+    assert by_id["jobaaa00001"]["progress_percent"] == 100.0
+    assert by_id["jobaaa00001"]["estimated_cost_usd"] == 1.5
+    assert by_id["jobbbb00002"]["needs_human_blocks"] == 1
+    assert by_id["jobbbb00002"]["progress_percent"] == 100.0
+
+
+def test_spa_deep_links_fall_back_to_index_html(tmp_path: Path) -> None:
+    static_index = _REPO_ROOT / "ubt" / "api" / "static" / "index.html"
+    if not static_index.exists():
+        pytest.skip("the console's built assets are not present in this checkout")
+
+    client = TestClient(create_app(_config(tmp_path)))
+    # Client-side routes the server does not serve as API endpoints must land on
+    # the SPA shell so a refresh / pasted link resolves, not 404.
+    browser = {**_AUTH, "Accept": "text/html,application/xhtml+xml"}
+    for path in ("/wizard", "/jobs/abc123/quality", "/jobs/abc123/review", "/assets", "/system"):
+        res = client.get(path, headers=browser)
+        assert res.status_code == 200, path
+        assert res.headers["content-type"].startswith("text/html"), path
+
+    # An API path still answers JSON (the mount never shadows registered routes).
+    assert client.get("/health").headers["content-type"].startswith("application/json")
+    # A non-browser client probing a missing path gets a JSON 404, not the shell.
+    assert client.get("/wizard", headers=_AUTH).status_code == 404
+
+
+def test_jobs_endpoint_serves_html_to_a_browser_and_json_to_api_clients(tmp_path: Path) -> None:
+    # ``/jobs`` is both the API list and the Mission Control URL: a browser
+    # navigation (Accept: text/html) gets the SPA shell, an API client the JSON.
+    static_index = _REPO_ROOT / "ubt" / "api" / "static" / "index.html"
+    if not static_index.exists():
+        pytest.skip("the console's built assets are not present in this checkout")
+
+    client = TestClient(create_app(_config(tmp_path)))
+    browser = client.get("/jobs", headers={**_AUTH, "Accept": "text/html,application/xhtml+xml"})
+    assert browser.status_code == 200
+    assert browser.headers["content-type"].startswith("text/html")
+
+    api = client.get("/jobs", headers={**_AUTH, "Accept": "application/json"})
+    assert api.status_code == 200
+    assert api.headers["content-type"].startswith("application/json")
+    assert "jobs" in api.json()

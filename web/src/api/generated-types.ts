@@ -55,6 +55,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Jobs
+         * @description The job queue: every ledger in ``db_dir``, newest first.
+         *
+         *     Reads the durable store (one ``{job_id}.sqlite`` per job) so a restarted
+         *     console still lists finished jobs, and overlays live jobs with the
+         *     manager's in-memory progress (fresher than the ``job_meta`` row a run
+         *     only finalizes at the end).
+         */
+        get: operations["list_jobs_jobs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/jobs/{job_id}/cancel": {
         parameters: {
             query?: never;
@@ -351,6 +376,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/jobs/{job_id}/pages/{page}/source": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Source Page
+         * @description Rasterize the *source* PDF's page ``page`` as PNG.
+         *
+         *     The "before" half of the L3 pixel-witness view; pairs with
+         *     ``/pages/{page}/preview`` (the composed "after"). 503 when the source is
+         *     missing or the rasterizer is unavailable.
+         */
+        get: operations["source_page_jobs__job_id__pages__page__source_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/model-profiles": {
         parameters: {
             query?: never;
@@ -457,6 +506,138 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
+         * AssessCost
+         * @description The cost quote, split by component so the UI can show the drivers.
+         */
+        AssessCost: {
+            /** Draft Model */
+            draft_model: string;
+            /** Repair Model */
+            repair_model: string;
+            /** Prefix Tokens Per Call */
+            prefix_tokens_per_call?: number | null;
+            /** Billable Blocks */
+            billable_blocks: number;
+            /** Billable Blocks Is Exact */
+            billable_blocks_is_exact: boolean;
+            /** Prompt Tokens */
+            prompt_tokens: number;
+            /** Completion Tokens */
+            completion_tokens: number;
+            /** Draft Cost Usd Cached */
+            draft_cost_usd_cached?: number | null;
+            /** Draft Cost Usd Uncached */
+            draft_cost_usd_uncached?: number | null;
+            /** Repair Blocks */
+            repair_blocks: number;
+            /** Repair Cost Usd */
+            repair_cost_usd?: number | null;
+            /** Qe Calls */
+            qe_calls: number;
+            /** Qe Cost Usd */
+            qe_cost_usd?: number | null;
+            /** Vlm Page Calls */
+            vlm_page_calls: number;
+            /** Ocr Page Calls */
+            ocr_page_calls: number;
+            /** Vision Cost Usd */
+            vision_cost_usd?: number | null;
+            /** Rollup Calls */
+            rollup_calls: number;
+            /** Total Cost Usd */
+            total_cost_usd?: number | null;
+        };
+        /**
+         * AssessDocumentFacts
+         * @description Structural facts about the source document.
+         */
+        AssessDocumentFacts: {
+            /** File Name */
+            file_name: string;
+            /** File Size Bytes */
+            file_size_bytes: number;
+            /** Format Ext */
+            format_ext: string;
+            /** Pages */
+            pages: number;
+            /** Chapters */
+            chapters: number;
+            /** Source Chars */
+            source_chars: number;
+            /** Estimated Tokens */
+            estimated_tokens: number;
+            /** Category */
+            category: string;
+            /** Detected Domain */
+            detected_domain: string;
+            /** Domain Confidence */
+            domain_confidence: number;
+            /** Math Density */
+            math_density: string;
+            /** Is Scanned */
+            is_scanned: boolean;
+            /** Primary Engine */
+            primary_engine?: string | null;
+            /** Has Vector Diagrams */
+            has_vector_diagrams?: boolean | null;
+            /** Has Multicolumn */
+            has_multicolumn?: boolean | null;
+            /** Has Formulas */
+            has_formulas?: boolean | null;
+            /** Text Layer Coverage */
+            text_layer_coverage?: number | null;
+            /** Scan Page Share */
+            scan_page_share?: number | null;
+        };
+        /**
+         * AssessRoute
+         * @description The engine's recommended routing for this document.
+         */
+        AssessRoute: {
+            /** Mode */
+            mode: string;
+            /** Reason */
+            reason: string;
+            /** Recommended Preset */
+            recommended_preset: string;
+            /** Recommended Render Engine */
+            recommended_render_engine: string;
+            /** Recommended Dual Mode */
+            recommended_dual_mode: string;
+            /** Recommended Profile */
+            recommended_profile: string;
+            /** Confidence */
+            confidence: number;
+            /** Confidence Basis */
+            confidence_basis: string;
+        };
+        /**
+         * AssessRuntime
+         * @description A heuristic wall-clock estimate (no per-stage history is persisted).
+         */
+        AssessRuntime: {
+            /** Heuristic */
+            heuristic: boolean;
+            /** Est Seconds Low */
+            est_seconds_low: number;
+            /** Est Seconds High */
+            est_seconds_high: number;
+            /** Basis */
+            basis: string;
+        };
+        /**
+         * AssessWarning
+         * @description One degraded probe: a stable machine code plus Chinese human copy.
+         */
+        AssessWarning: {
+            /** Code */
+            code: string;
+            /** Level */
+            level: string;
+            /** Detail Zh */
+            detail_zh: string;
+        };
+        /**
          * ExtractionStrategy
          * @description Output extraction strategy.
          * @enum {string}
@@ -514,6 +695,42 @@ export interface components {
             source_lang: string;
             /** @description Quality preset (publication, standard, preview) */
             preset?: components["schemas"]["Preset"] | null;
+        };
+        /**
+         * JobAssessResponse
+         * @description The full pre-flight assessment report.
+         */
+        JobAssessResponse: {
+            /** Schema Version */
+            schema_version: number;
+            /** Status */
+            status: string;
+            /** Path */
+            path: string;
+            /** Deep */
+            deep: boolean;
+            document: components["schemas"]["AssessDocumentFacts"];
+            route: components["schemas"]["AssessRoute"];
+            cost: components["schemas"]["AssessCost"];
+            runtime: components["schemas"]["AssessRuntime"];
+            /** Quality Signals */
+            quality_signals: string[];
+            /** Warnings */
+            warnings: components["schemas"]["AssessWarning"][];
+            /** Next Step Command */
+            next_step_command: string;
+            /** Meta */
+            meta: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * JobListResponse
+         * @description The job queue, newest first.
+         */
+        JobListResponse: {
+            /** Jobs */
+            jobs: components["schemas"]["JobSummary"][];
         };
         /**
          * JobStatusResponse
@@ -843,6 +1060,40 @@ export interface components {
             rehearsal: boolean;
         };
         /**
+         * JobSummary
+         * @description One row of the operator console's job queue.
+         */
+        JobSummary: {
+            /** Job Id */
+            job_id: string;
+            /** File Name */
+            file_name: string;
+            /** Source Path */
+            source_path: string;
+            /** Target Lang */
+            target_lang: string;
+            /** Status */
+            status: string;
+            /** Total Blocks */
+            total_blocks: number;
+            /** Completed Blocks */
+            completed_blocks: number;
+            /** Failed Blocks */
+            failed_blocks: number;
+            /** Needs Human Blocks */
+            needs_human_blocks: number;
+            /** Progress Percent */
+            progress_percent: number;
+            /** Estimated Cost Usd */
+            estimated_cost_usd?: number | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+            /** Has Output */
+            has_output: boolean;
+        };
+        /**
          * ModelProfile
          * @description Declarative capability profile for a translation model.
          *
@@ -1040,9 +1291,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["JobAssessResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1079,6 +1328,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["JobSubmitResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_jobs_jobs_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: {
+                "x-ubt-tenant"?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobListResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1555,6 +1838,43 @@ export interface operations {
             query?: {
                 dpi?: number;
                 bilingual?: boolean;
+            };
+            header?: {
+                "x-ubt-tenant"?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path: {
+                job_id: string;
+                page: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    source_page_jobs__job_id__pages__page__source_get: {
+        parameters: {
+            query?: {
+                dpi?: number;
             };
             header?: {
                 "x-ubt-tenant"?: string | null;

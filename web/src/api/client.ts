@@ -10,6 +10,7 @@ export type JobAssessResponse = paths['/jobs/assess']['post']['responses']['200'
 export type JobSubmitRequest = paths['/jobs/submit']['post']['requestBody']['content']['application/json']
 export type JobSubmitResponse = paths['/jobs/submit']['post']['responses']['202']['content']['application/json']
 export type JobStatusResponse = paths['/jobs/{job_id}/status']['get']['responses']['200']['content']['application/json']
+export type JobSummary = paths['/jobs']['get']['responses']['200']['content']['application/json']['jobs'][number]
 export type ModelProfile = paths['/api/v1/model-profiles']['get']['responses']['200']['content']['application/json'][number]
 
 export interface DeliverableItem {
@@ -123,6 +124,14 @@ export async function cancelJob(jobId: string): Promise<void> {
     method: 'POST',
   })
   if (!res.ok) throw new Error(`Failed to cancel job: ${res.statusText}`)
+}
+
+/** The job queue: every ledger under db_dir, newest first. */
+export async function listJobs(limit = 200): Promise<JobSummary[]> {
+  const res = await fetch(`${BASE_URL}/jobs?limit=${limit}`)
+  if (!res.ok) throw new Error(`Failed to list jobs: ${res.statusText}`)
+  const data = await res.json()
+  return data.jobs ?? []
 }
 
 export async function getJobReport(jobId: string): Promise<Record<string, unknown>> {
@@ -320,6 +329,15 @@ export function pagePreviewUrl(jobId: string, page: number, opts: { dpi?: number
   if (opts.cacheBust !== undefined) query.set('t', String(opts.cacheBust))
   const suffix = query.toString()
   const base = `${BASE_URL}/jobs/${encodeURIComponent(jobId)}/pages/${page}/preview`
+  return suffix ? `${base}?${suffix}` : base
+}
+
+/** URL of the source page PNG (the "before" half of the pixel-witness view). */
+export function sourcePageUrl(jobId: string, page: number, opts: { dpi?: number } = {}): string {
+  const query = new URLSearchParams()
+  if (opts.dpi !== undefined) query.set('dpi', String(opts.dpi))
+  const suffix = query.toString()
+  const base = `${BASE_URL}/jobs/${encodeURIComponent(jobId)}/pages/${page}/source`
   return suffix ? `${base}?${suffix}` : base
 }
 

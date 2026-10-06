@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useParams } from 'react-router-dom'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import {
   SplitSquareVertical,
@@ -21,15 +22,12 @@ import {
   getBlockTerms,
   propagateTerm,
   pagePreviewUrl,
+  sourcePageUrl,
   type Segment,
   type IssuesReport,
   type TermViolation,
 } from '@/api/client'
 import { useI18n } from '@/i18n/I18nContext'
-
-interface ReviewWorkbenchProps {
-  jobId: string | null
-}
 
 type Filter = 'issues' | 'all' | 'needs_human'
 
@@ -50,8 +48,10 @@ const ISSUE_LABELS: Record<string, string> = {
 
 const PAGE_LIMIT = 500
 
-export function ReviewWorkbench({ jobId }: ReviewWorkbenchProps) {
+export function ReviewWorkbench() {
   const { t } = useI18n()
+  const { jobId: routeJobId } = useParams<{ jobId: string }>()
+  const jobId = routeJobId ?? null
   const [viewMode, setViewMode] = useState<'segments' | 'visual_witness'>('segments')
   const [filter, setFilter] = useState<Filter>('issues')
 
@@ -67,6 +67,7 @@ export function ReviewWorkbench({ jobId }: ReviewWorkbenchProps) {
   const [openPreviews, setOpenPreviews] = useState<Record<number, boolean>>({})
   const [previewBust, setPreviewBust] = useState(0)
   const [termNotice, setTermNotice] = useState<Record<string, string>>({})
+  const [diffBlend, setDiffBlend] = useState(false)
 
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -477,36 +478,90 @@ export function ReviewWorkbench({ jobId }: ReviewWorkbenchProps) {
           </div>
         )
       ) : (
-        /* Visual witness: the single-page re-render preview. */
-        <div className="flex-1 overflow-y-auto px-8 py-6 max-w-5xl mx-auto w-full space-y-4">
+        /* Visual witness: source page vs the composed translation (PRD §5.1 mode B). */
+        <div className="flex-1 overflow-y-auto px-8 py-6 max-w-6xl mx-auto w-full space-y-4">
+          <div className="flex items-center justify-end">
+            <label className="flex items-center gap-1.5 text-[11px] text-[var(--ink-secondary)] cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={diffBlend}
+                onChange={(e) => setDiffBlend(e.target.checked)}
+              />
+              {t.review.diffBlend}
+            </label>
+          </div>
           {previewPages.length === 0 ? (
             <div className="py-12 text-center text-xs text-[var(--ink-muted)]">
               {t.review.noSegments}
             </div>
           ) : (
             previewPages.map((page) => (
-              <div key={page} className="rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] shadow-2xs overflow-hidden">
+              <div
+                key={page}
+                className="rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] shadow-2xs overflow-hidden"
+              >
                 <div className="h-8 px-3.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] flex items-center justify-between text-xs font-mono text-[var(--ink-muted)]">
                   <span className="flex items-center gap-1.5">
                     <Eye className="h-3.5 w-3.5" /> Page {page}
                   </span>
                   <span>{t.review.previewPage}</span>
                 </div>
-                <img
-                  src={pagePreviewUrl(jobId, page, { dpi: 110, cacheBust: previewBust })}
-                  alt={`Page ${page}`}
-                  className="w-full max-h-[720px] object-contain bg-white"
-                  onError={(e) => {
-                    const target = e.currentTarget
-                    target.style.display = 'none'
-                    const sibling = target.nextElementSibling as HTMLElement | null
-                    if (sibling) sibling.style.display = 'flex'
-                  }}
-                />
-                <div className="hidden items-center gap-2 p-4 text-xs text-[var(--ink-secondary)]">
-                  <ImageOff className="h-4 w-4 shrink-0" />
-                  {t.review.previewFailed}
-                </div>
+                {diffBlend ? (
+                  <div className="relative bg-white">
+                    <img
+                      src={sourcePageUrl(jobId, page, { dpi: 110 })}
+                      alt={`Source page ${page}`}
+                      className="w-full max-h-[720px] object-contain"
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none'
+                      }}
+                    />
+                    <img
+                      src={pagePreviewUrl(jobId, page, { dpi: 110, cacheBust: previewBust })}
+                      alt={`Target page ${page}`}
+                      className="absolute inset-0 w-full h-full object-contain opacity-50 mix-blend-multiply"
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none'
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 divide-x divide-[var(--paper-border)]">
+                    <div className="bg-white">
+                      <div className="px-3 py-1.5 text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] border-b border-[var(--paper-border)]">
+                        {t.review.sourceCanvas}
+                      </div>
+                      <img
+                        src={sourcePageUrl(jobId, page, { dpi: 110 })}
+                        alt={`Source page ${page}`}
+                        className="w-full max-h-[640px] object-contain"
+                        onError={(e) => {
+                          e.currentTarget.style.display = 'none'
+                        }}
+                      />
+                    </div>
+                    <div className="bg-white">
+                      <div className="px-3 py-1.5 text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] border-b border-[var(--paper-border)]">
+                        {t.review.targetCanvas}
+                      </div>
+                      <img
+                        src={pagePreviewUrl(jobId, page, { dpi: 110, cacheBust: previewBust })}
+                        alt={`Target page ${page}`}
+                        className="w-full max-h-[640px] object-contain"
+                        onError={(e) => {
+                          const target = e.currentTarget
+                          target.style.display = 'none'
+                          const sibling = target.nextElementSibling as HTMLElement | null
+                          if (sibling) sibling.style.display = 'flex'
+                        }}
+                      />
+                      <div className="hidden items-center gap-2 p-4 text-xs text-[var(--ink-secondary)]">
+                        <ImageOff className="h-4 w-4 shrink-0" />
+                        {t.review.previewFailed}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             ))
           )}

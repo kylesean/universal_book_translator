@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { NavLink, useMatch } from 'react-router-dom'
 import {
   PlusCircle,
   Activity,
@@ -13,20 +14,30 @@ import {
 import { checkHealth, type HealthResponse } from '@/api/client'
 import { useI18n } from '@/i18n/I18nContext'
 
-export type ViewTab = 'wizard' | 'jobs' | 'quality' | 'assets' | 'system' | 'review'
-
 interface ConsoleLayoutProps {
-  currentTab: ViewTab
-  onSelectTab: (tab: ViewTab) => void
   children: React.ReactNode
 }
 
-export function ConsoleLayout({ currentTab, onSelectTab, children }: ConsoleLayoutProps) {
+interface NavItem {
+  to: string
+  label: string
+  icon: React.ComponentType<{ className?: string }>
+  accent?: boolean
+  disabled?: boolean
+}
+
+export function ConsoleLayout({ children }: ConsoleLayoutProps) {
   const { t, language, setLanguage } = useI18n()
   const [health, setHealth] = useState<HealthResponse | null>(null)
   const [paperTone, setPaperTone] = useState<'cotton' | 'dowling'>(() => {
     return (localStorage.getItem('ubt_paper_tone') as 'cotton' | 'dowling') || 'cotton'
   })
+
+  // The Quality / Review screens are job-scoped, so their sidebar links follow
+  // the job currently in the URL (parsed here because the layout sits outside
+  // the route elements).
+  const jobMatch = useMatch('/jobs/:jobId/*')
+  const currentJobId = jobMatch?.params.jobId ?? null
 
   useEffect(() => {
     if (paperTone === 'dowling') {
@@ -59,17 +70,78 @@ export function ConsoleLayout({ currentTab, onSelectTab, children }: ConsoleLayo
     }
   }, [])
 
-  const navItems = [
-    { id: 'wizard' as ViewTab, label: t.nav.newJob, sub: t.nav.newJobSub, icon: PlusCircle },
-    { id: 'jobs' as ViewTab, label: t.nav.missionControl, sub: t.nav.missionControlSub, icon: Activity },
-    { id: 'quality' as ViewTab, label: t.nav.qualityGate, sub: t.nav.qualityGateSub, icon: ShieldCheck },
-    { id: 'assets' as ViewTab, label: t.nav.languageAssets, sub: t.nav.languageAssetsSub, icon: BookOpen },
-    { id: 'system' as ViewTab, label: t.nav.systemDoctor, sub: t.nav.systemDoctorSub, icon: Stethoscope },
+  const navItems: NavItem[] = [
+    { to: '/wizard', label: t.nav.newJob, icon: PlusCircle },
+    { to: '/jobs', label: t.nav.missionControl, icon: Activity },
+    {
+      to: currentJobId ? `/jobs/${currentJobId}/quality` : '/jobs',
+      label: t.nav.qualityGate,
+      icon: ShieldCheck,
+      disabled: !currentJobId,
+    },
+    { to: '/assets', label: t.nav.languageAssets, icon: BookOpen },
+    { to: '/system', label: t.nav.systemDoctor, icon: Stethoscope },
   ]
 
-  const workbenchItems = [
-    { id: 'review' as ViewTab, label: t.nav.reviewWorkbench, sub: t.nav.reviewWorkbenchSub, icon: SplitSquareVertical },
+  const workbenchItems: NavItem[] = [
+    {
+      to: currentJobId ? `/jobs/${currentJobId}/review` : '/jobs',
+      label: t.nav.reviewWorkbench,
+      icon: SplitSquareVertical,
+      accent: true,
+      disabled: !currentJobId,
+    },
   ]
+
+  const renderNav = (items: NavItem[]) =>
+    items.map((item) => {
+      const Icon = item.icon
+      if (item.disabled) {
+        return (
+          <div
+            key={item.to}
+            title={t.mission.noActiveJobTitle}
+            className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-[5px] text-xs font-medium text-[var(--ink-muted)] opacity-60 cursor-not-allowed border border-transparent"
+          >
+            <Icon className="h-3.5 w-3.5 shrink-0 text-[var(--ink-muted)]" />
+            <div className="flex-1 truncate">
+              <div className="leading-tight">{item.label}</div>
+            </div>
+          </div>
+        )
+      }
+      return (
+        <NavLink
+          key={item.to}
+          to={item.to}
+          end={item.to === '/jobs' || item.to === '/wizard'}
+          className={({ isActive }) =>
+            `w-full flex items-center gap-2.5 px-2.5 py-2 rounded-[5px] text-xs font-medium transition-all text-left ${
+              isActive
+                ? 'bg-[var(--paper-subsurface)] text-[var(--ink-primary)] font-semibold border border-[var(--paper-border)] shadow-xs'
+                : 'text-[var(--ink-secondary)] hover:bg-[var(--paper-subsurface)] hover:text-[var(--ink-primary)] border border-transparent'
+            }`
+          }
+        >
+          {({ isActive }) => (
+            <>
+              <Icon
+                className={`h-3.5 w-3.5 shrink-0 ${
+                  isActive
+                    ? item.accent
+                      ? 'text-[#15803d]'
+                      : 'text-[var(--ink-primary)]'
+                    : 'text-[var(--ink-muted)]'
+                }`}
+              />
+              <div className="flex-1 truncate">
+                <div className="leading-tight">{item.label}</div>
+              </div>
+            </>
+          )}
+        </NavLink>
+      )
+    })
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[var(--paper-bg)] text-[var(--ink-primary)]">
@@ -122,56 +194,14 @@ export function ConsoleLayout({ currentTab, onSelectTab, children }: ConsoleLayo
               <div className="px-2.5 py-1 text-[10px] font-mono uppercase tracking-widest text-[var(--ink-muted)] font-semibold">
                 {t.nav.operatorControl}
               </div>
-              <nav className="mt-1 space-y-0.5">
-                {navItems.map((item) => {
-                  const Icon = item.icon
-                  const isActive = currentTab === item.id
-                  return (
-                    <button
-                      key={item.id}
-                      onClick={() => onSelectTab(item.id)}
-                      className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-[5px] text-xs font-medium transition-all text-left ${
-                        isActive
-                          ? 'bg-[var(--paper-subsurface)] text-[var(--ink-primary)] font-semibold border border-[var(--paper-border)] shadow-xs'
-                          : 'text-[var(--ink-secondary)] hover:bg-[var(--paper-subsurface)] hover:text-[var(--ink-primary)] border border-transparent'
-                      }`}
-                    >
-                      <Icon className={`h-3.5 w-3.5 shrink-0 ${isActive ? 'text-[var(--ink-primary)]' : 'text-[var(--ink-muted)]'}`} />
-                      <div className="flex-1 truncate">
-                        <div className="leading-tight">{item.label}</div>
-                      </div>
-                    </button>
-                  )
-                })}
-              </nav>
+              <nav className="mt-1 space-y-0.5">{renderNav(navItems)}</nav>
             </div>
 
             <div>
               <div className="px-2.5 py-1 text-[10px] font-mono uppercase tracking-widest text-[var(--ink-muted)] font-semibold">
                 {t.nav.workbenches}
               </div>
-              <nav className="mt-1 space-y-0.5">
-                {workbenchItems.map((item) => {
-                  const Icon = item.icon
-                  const isActive = currentTab === item.id
-                  return (
-                    <button
-                      key={item.id}
-                      onClick={() => onSelectTab(item.id)}
-                      className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-[5px] text-xs font-medium transition-all text-left ${
-                        isActive
-                          ? 'bg-[var(--paper-subsurface)] text-[var(--ink-primary)] font-semibold border border-[var(--paper-border)] shadow-xs'
-                          : 'text-[var(--ink-secondary)] hover:bg-[var(--paper-subsurface)] hover:text-[var(--ink-primary)] border border-transparent'
-                      }`}
-                    >
-                      <Icon className={`h-3.5 w-3.5 shrink-0 ${isActive ? 'text-[#15803d]' : 'text-[var(--ink-muted)]'}`} />
-                      <div className="flex-1 truncate">
-                        <div className="leading-tight">{item.label}</div>
-                      </div>
-                    </button>
-                  )
-                })}
-              </nav>
+              <nav className="mt-1 space-y-0.5">{renderNav(workbenchItems)}</nav>
             </div>
           </div>
         </div>
