@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from ubt import __version__
@@ -33,7 +33,18 @@ from ubt.api.models import (
     JobStatusResponse,
     JobSubmitRequest,
     JobSubmitResponse,
+    SegmentEditRequest,
     TMevictRequest,
+)
+from ubt.api.review import (
+    ISSUE_KINDS,
+    ReviewBlockNotFound,
+    ReviewEditConflict,
+    ReviewEditError,
+    apply_human_edit,
+    segment_issue_kinds,
+    segment_matches_filter,
+    serialize_segment,
 )
 from ubt.api.security import (
     SENSITIVE_FILENAME_PARTS,
@@ -59,6 +70,7 @@ from ubt.core.exceptions import (
     UBTError,
     UnsupportedDocumentFormatError,
 )
+from ubt.core.ir.models import IRBlock
 from ubt.core.job_options import (
     JOB_ID_RE,
     LANG_CODE_PATTERN,
@@ -476,6 +488,32 @@ def create_app(
         if not output_file:
             output_file = await _artifact_path_async(valid_id, "output_file")
         return output_file
+
+    def _job_db_path(valid_id: str) -> Path:
+        return app_config.db_dir / f"{valid_id}.sqlite"
+
+    async def _job_is_running(valid_id: str) -> bool:
+        """True when the job is actively running (an interactive edit must not race it)."""
+        record = manager.get_job(valid_id)
+        if record is not None and record.status == JobStatus.RUNNING:
+            return True
+        if job_queue is not None:
+            job = await asyncio.to_thread(job_queue.get, valid_id)
+            if job is not None and job.status == JobStatus.RUNNING:
+                return True
+        return False
+
+    async def _read_job_blocks(valid_id: str) -> list[IRBlock] | None:
+        """All blocks for a job, or ``None`` when the ledger does not exist."""
+        db_path = _job_db_path(valid_id)
+        if not db_path.exists():
+            return None
+
+        def _read() -> list[IRBlock]:
+            with SQLiteJobLedger(db_path, read_only=True) as ledger:
+                return ledger.get_all_blocks(valid_id)
+
+        return await asyncio.to_thread(_read)
 
     async def _verify_request_key(
         request: Request,
@@ -1422,6 +1460,136 @@ def create_app(
             filename=resolved.name,
             media_type=media_type,
         )
+
+    # -- L3 Review Workbench (segments + fault ribbon + human edit) -----------
+    @api_app.get("/jobs/{job_id}/segments", tags=["Jobs"])
+    async def list_segments(
+        job_id: str,
+        status_filter: str | None = Query(default=None, alias="status"),
+        block_type: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+        x_ubt_tenant: str | None = Header(default=None),
+    ) -> JSONResponse:
+        """A page of a job's finalized blocks for the workbench grid.
+
+        ``status=issues`` returns everything the fault ribbon counts plus the
+        PE-queue members; a concrete ``BlockStatus`` value filters by lifecycle
+        status. Blocks are projected with their source/target, QE score, flags
+        and grouped issue kinds.
+        """
+        valid_id = validate_job_id(job_id)
+        if not await _tenant_allows_async(valid_id, _tenant_from_header(x_ubt_tenant)):
+            raise _cross_tenant_404(valid_id)
+        blocks = await _read_job_blocks(valid_id)
+        if blocks is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"Job not found: {valid_id}"
+            )
+
+        filtered = [b for b in blocks if segment_matches_filter(b, status_filter)]
+        if block_type:
+            filtered = [b for b in filtered if b.block_type.value == block_type]
+        total = len(filtered)
+        start = max(offset, 0)
+        window = filtered[start : start + min(max(limit, 1), 500)]
+        return JSONResponse(
+            {
+                "job_id": valid_id,
+                "total": total,
+                "segments": [serialize_segment(b) for b in window],
+            }
+        )
+
+    @api_app.get("/jobs/{job_id}/issues", tags=["Jobs"])
+    async def list_issues(
+        job_id: str, x_ubt_tenant: str | None = Header(default=None)
+    ) -> JSONResponse:
+        """Fault-ribbon counts by issue kind, plus terminology drift detail."""
+        valid_id = validate_job_id(job_id)
+        if not await _tenant_allows_async(valid_id, _tenant_from_header(x_ubt_tenant)):
+            raise _cross_tenant_404(valid_id)
+        blocks = await _read_job_blocks(valid_id)
+        if blocks is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"Job not found: {valid_id}"
+            )
+
+        counts: dict[str, int] = dict.fromkeys(ISSUE_KINDS, 0)
+        status_counts = {"needs_human": 0, "blocked_human": 0, "failed": 0}
+        for block in blocks:
+            for kind in segment_issue_kinds(block):
+                counts[kind] += 1
+            if block.status.value in status_counts:
+                status_counts[block.status.value] += 1
+
+        term_drift: list[Any] = []
+        report_file = await _artifact_path_async(valid_id, "report_file")
+        if report_file:
+            try:
+                report_path = resolve_secure_path(report_file, must_exist=True, config=app_config)
+                report_data = json.loads(
+                    await asyncio.to_thread(report_path.read_text, encoding="utf-8")
+                )
+                term_drift = report_data.get("entity_consistency", {}).get("top_drifted", []) or []
+            except (HTTPException, ValueError, OSError):
+                term_drift = []
+
+        return JSONResponse(
+            {
+                "job_id": valid_id,
+                "counts": counts,
+                "status": status_counts,
+                "total_issues": sum(counts.values()),
+                "term_drift": term_drift,
+            }
+        )
+
+    @api_app.post("/jobs/{job_id}/segments/{block_id}", tags=["Jobs"])
+    async def edit_segment(
+        job_id: str,
+        block_id: str,
+        req: SegmentEditRequest,
+        x_ubt_tenant: str | None = Header(default=None),
+    ) -> JSONResponse:
+        """Apply one human revision (ledger + shared TM), the L3 feedback path."""
+        valid_id = validate_job_id(job_id)
+        if not await _tenant_allows_async(valid_id, _tenant_from_header(x_ubt_tenant)):
+            raise _cross_tenant_404(valid_id)
+        if not _job_db_path(valid_id).exists():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"Job not found: {valid_id}"
+            )
+        if await _job_is_running(valid_id):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Job is running; stop it before editing segments.",
+            )
+
+        try:
+            result = await asyncio.to_thread(
+                apply_human_edit,
+                _job_db_path(valid_id),
+                valid_id,
+                block_id,
+                req.target_text,
+                tm_path=app_config.db_dir / "tm.sqlite",
+            )
+        except ReviewBlockNotFound as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        except ReviewEditConflict as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        except ReviewEditError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+            ) from exc
+
+        updated = None
+        blocks = await _read_job_blocks(valid_id)
+        if blocks is not None:
+            match = next((b for b in blocks if b.id == block_id), None)
+            updated = serialize_segment(match) if match is not None else None
+        return JSONResponse({**result, "job_id": valid_id, "segment": updated})
 
     @api_app.get(
         "/api/v1/model-profiles",

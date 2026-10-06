@@ -163,5 +163,17 @@ export interface TranslationDictionary {
     sourceCanvas: string
     targetCanvas: string
     pixelDiff: string
+    faultRibbon: string
+    filterAll: string
+    filterIssues: string
+    filterNeedsHuman: string
+    noSegments: string
+    loadMore: string
+    saving: string
+    saved: string
+    humanVerified: string
+    visualPending: string
+    prevIssue: string
+    nextIssue: string
   }
 }

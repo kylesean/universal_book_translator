@@ -163,5 +163,18 @@ export const en: TranslationDictionary = {
     sourceCanvas: 'Original Manuscript Canvas (PDFium)',
     targetCanvas: 'Typst Re-typeset Canvas (0.12)',
     pixelDiff: 'Pixel Divergence Ratio',
+    faultRibbon: 'Fault ribbon',
+    filterAll: 'All segments',
+    filterIssues: 'Issues only',
+    filterNeedsHuman: 'Needs human',
+    noSegments: 'No segments for this filter.',
+    loadMore: 'Load more',
+    saving: 'Saving...',
+    saved: 'Saved & fed back to TM',
+    humanVerified: 'Human verified',
+    visualPending:
+      'Pixel-witness view pending: needs a PDF.js canvas and a single-page incremental re-render backend.',
+    prevIssue: 'Previous issue (Shift+F8)',
+    nextIssue: 'Next issue (F8)',
   },
 }

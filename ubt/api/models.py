@@ -260,6 +260,14 @@ class JobAssessRequest(BaseModel):
         return _require_supported_target_lang(value)
 
 
+class SegmentEditRequest(BaseModel):
+    """A human post-edit of one block's target text (L3 workbench)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    target_text: str = Field(..., min_length=1, description="Revised target text")
+
+
 class GlossaryTermRequest(BaseModel):
     """One glossary term to add to (or remove from) the configured glossary file."""
 

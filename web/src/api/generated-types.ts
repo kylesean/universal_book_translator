@@ -212,6 +212,71 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/jobs/{job_id}/segments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Segments
+         * @description A page of a job's finalized blocks for the workbench grid.
+         *
+         *     ``status=issues`` returns everything the fault ribbon counts plus the
+         *     PE-queue members; a concrete ``BlockStatus`` value filters by lifecycle
+         *     status. Blocks are projected with their source/target, QE score, flags
+         *     and grouped issue kinds.
+         */
+        get: operations["list_segments_jobs__job_id__segments_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/jobs/{job_id}/issues": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Issues
+         * @description Fault-ribbon counts by issue kind, plus terminology drift detail.
+         */
+        get: operations["list_issues_jobs__job_id__issues_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/jobs/{job_id}/segments/{block_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Edit Segment
+         * @description Apply one human revision (ledger + shared TM), the L3 feedback path.
+         */
+        post: operations["edit_segment_jobs__job_id__segments__block_id__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/model-profiles": {
         parameters: {
             query?: never;
@@ -776,6 +841,17 @@ export interface components {
          */
         PromptStrategy: "rich" | "minimal" | "hybrid";
         /**
+         * SegmentEditRequest
+         * @description A human post-edit of one block's target text (L3 workbench).
+         */
+        SegmentEditRequest: {
+            /**
+             * Target Text
+             * @description Revised target text
+             */
+            target_text: string;
+        };
+        /**
          * TMevictRequest
          * @description Translation-memory rows to evict, by id.
          */
@@ -1166,6 +1242,118 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_segments_jobs__job_id__segments_get: {
+        parameters: {
+            query?: {
+                status?: string | null;
+                block_type?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                "x-ubt-tenant"?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_issues_jobs__job_id__issues_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-ubt-tenant"?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    edit_segment_jobs__job_id__segments__block_id__post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-ubt-tenant"?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path: {
+                job_id: string;
+                block_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SegmentEditRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

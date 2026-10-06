@@ -263,6 +263,73 @@ export async function evictTm(ids: number[]): Promise<number> {
 }
 
 // --------------------------------------------------------------------------- //
+// L3 review workbench
+// --------------------------------------------------------------------------- //
+
+export interface Segment {
+  block_id: string
+  spine_index: number
+  page: number | null
+  block_type: string
+  status: string
+  source_text: string
+  target_text: string
+  mtqe_score: number | null
+  error_flags: string[]
+  issues: string[]
+  human_verified: boolean
+}
+
+export interface IssuesReport {
+  job_id: string
+  counts: Record<string, number>
+  status: { needs_human: number; blocked_human: number; failed: number }
+  total_issues: number
+  term_drift: Array<Record<string, unknown>>
+}
+
+export async function listSegments(
+  jobId: string,
+  params: { status?: string; block_type?: string; limit?: number; offset?: number } = {}
+): Promise<{ total: number; segments: Segment[] }> {
+  const query = new URLSearchParams()
+  if (params.status) query.set('status', params.status)
+  if (params.block_type) query.set('block_type', params.block_type)
+  if (params.limit !== undefined) query.set('limit', String(params.limit))
+  if (params.offset !== undefined) query.set('offset', String(params.offset))
+  const res = await fetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}/segments?${query.toString()}`)
+  if (!res.ok) throw new Error(`Failed to load segments: ${res.statusText}`)
+  const data = await res.json()
+  return { total: data.total ?? 0, segments: data.segments ?? [] }
+}
+
+export async function listIssues(jobId: string): Promise<IssuesReport> {
+  const res = await fetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}/issues`)
+  if (!res.ok) throw new Error(`Failed to load issues: ${res.statusText}`)
+  return res.json()
+}
+
+export async function editSegment(
+  jobId: string,
+  blockId: string,
+  targetText: string
+): Promise<{ changed: boolean; tm_written: number; segment: Segment | null }> {
+  const res = await fetch(
+    `${BASE_URL}/jobs/${encodeURIComponent(jobId)}/segments/${encodeURIComponent(blockId)}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target_text: targetText }),
+    }
+  )
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(body.detail || 'Failed to save revision')
+  }
+  return res.json()
+}
+
+// --------------------------------------------------------------------------- //
 // System
 // --------------------------------------------------------------------------- //
 
