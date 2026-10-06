@@ -184,9 +184,14 @@ class Overlay:
     toc_page: str = ""
     font_size: float | None = None
     is_bold: bool = False
-    #: First-line indent (pt) for a body paragraph, from the source's typography.
-    #: Emitted as Typst ``par.first-line-indent``; ``None``/0 disables it.
+    #: First-line indent (pt) for a body paragraph or a list item's marker
+    #: column, from the source's typography. Emitted as Typst
+    #: ``par.first-line-indent``; ``None``/0 disables it.
     indent_pt: float | None = None
+    #: The source block is a centered heading (symmetric line gaps): the
+    #: fragment centers each line within the box instead of hugging the left
+    #: edge, reproducing the title's original alignment.
+    align_center: bool = False
     #: The *original* source geometry to mask and relocate links against. A
     #: reflowed overlay draws at ``bbox``/``boxes`` but must still erase the
     #: source text where it was, so the mask follows this chain, not the draw box.
@@ -228,6 +233,7 @@ class FragmentTypesetter(Protocol):
         kind: str = "text",
         font_size: float | None = None,
         is_bold: bool = False,
+        align_center: bool = False,
         runs: tuple[StyledRun, ...] = (),
     ) -> Path | None: ...
 
@@ -471,6 +477,15 @@ def _indent_hspace(indent_pt: float | None) -> str:
     renders nothing (no glyph, no ink).
     """
     return f"#h({indent_pt}pt, weak: false)#[]" if indent_pt and indent_pt > 0 else ""
+
+
+def _align_line(center: bool) -> str:
+    """The centering setup line for a fragment source (empty = left-aligned).
+
+    Centering does not change wrapping or natural height, so the measure paths
+    omit it — only the drawn fragment carries the flag.
+    """
+    return "#set align(center)\n" if center else ""
 
 
 def _line_slack(font_size: float | None) -> float:
@@ -838,7 +853,14 @@ class TypstFragmentTypesetter:
         )
 
     def _bilingual_text_source(
-        self, target: str, source: str, width_pt: float, height_pt: float, size_pt: float
+        self,
+        target: str,
+        source: str,
+        width_pt: float,
+        height_pt: float,
+        size_pt: float,
+        *,
+        align_center: bool = False,
     ) -> str:
         font_line = self._font_line
         return (
@@ -846,6 +868,7 @@ class TypstFragmentTypesetter:
             f"#set par(leading: {self._par_leading_em}em)\n"
             f'#set text(size: {size_pt}pt{_WEIGHT_REGULAR}, top-edge: "ascender", bottom-edge: "descender"{font_line})\n'
             f"{self._dir_line}"
+            f"{_align_line(align_center)}"
             f"#box(width: {width_pt}pt, height: {height_pt}pt, clip: true)[\n"
             f"{self._body_markup(target)}\n"
             f"#v({_BILINGUAL_GAP_EM}em)\n"
@@ -931,6 +954,7 @@ class TypstFragmentTypesetter:
         kind: str = "text",
         is_bold: bool = False,
         indent_pt: float | None = None,
+        align_center: bool = False,
         runs: tuple[StyledRun, ...] = (),
     ) -> str:
         body = self._body_markup(text, runs)
@@ -941,6 +965,7 @@ class TypstFragmentTypesetter:
             f"{_par_line(self._par_leading_em)}\n"
             f'#set text(size: {size_pt}pt{weight_line}, top-edge: "ascender", bottom-edge: "descender"{font_line})\n'
             f"{self._dir_line}"
+            f"{_align_line(align_center)}"
             f"#box(width: {width_pt}pt, height: {height_pt}pt, clip: true)[{_indent_hspace(indent_pt)}{body}]\n"
         )
 
@@ -953,6 +978,7 @@ class TypstFragmentTypesetter:
         kind: str = "text",
         font_size: float | None = None,
         is_bold: bool = False,
+        align_center: bool = False,
         runs: tuple[StyledRun, ...] = (),
     ) -> Path | None:
         if width_pt <= 0 or height_pt <= 0 or not text.strip():
@@ -977,7 +1003,14 @@ class TypstFragmentTypesetter:
             return None
         return self._compile(
             self._text_source(
-                text, width_pt, height_pt, size_pt, kind=kind, is_bold=is_bold, runs=runs
+                text,
+                width_pt,
+                height_pt,
+                size_pt,
+                kind=kind,
+                is_bold=is_bold,
+                align_center=align_center,
+                runs=runs,
             )
         )
 
@@ -991,6 +1024,7 @@ class TypstFragmentTypesetter:
         kind: str = "text",
         is_bold: bool = False,
         indent_pt: float | None = None,
+        align_center: bool = False,
         runs: tuple[StyledRun, ...] = (),
     ) -> Path | None:
         """Typeset at an exact size into an exact box (a reflowed overlay).
@@ -1011,6 +1045,7 @@ class TypstFragmentTypesetter:
                 kind=kind,
                 is_bold=is_bold,
                 indent_pt=indent_pt,
+                align_center=align_center,
                 runs=runs,
             )
         )
@@ -1689,7 +1724,14 @@ class LayerCompositor:
                 part.text, overlay.toc_page, width, height, is_bold=overlay.is_bold
             )
         elif source.strip() and bilingual is not None:
-            fragment = bilingual(source, part.text, width, height)
+            try:
+                fragment = bilingual(
+                    source, part.text, width, height, align_center=overlay.align_center
+                )
+            except TypeError:
+                # A custom typesetter without the centering flag: fall back to
+                # the positional signature rather than lose the overlay.
+                fragment = bilingual(source, part.text, width, height)
         elif overlay.fixed_box or exact_size is not None:
             # Reflowed (fixed_box) or a continuation part (exact_size): the size is
             # already decided, so compile at exactly it -- no per-box fit shrink.
@@ -1709,18 +1751,31 @@ class LayerCompositor:
                         kind=overlay.kind,
                         is_bold=overlay.is_bold,
                         indent_pt=overlay.indent_pt,
+                        align_center=overlay.align_center,
                         runs=overlay.runs,
                     )
                 except TypeError:
-                    fragment = fixed_typeset(
-                        part.text,
-                        width,
-                        height,
-                        size_pt,
-                        kind=overlay.kind,
-                        is_bold=overlay.is_bold,
-                        indent_pt=overlay.indent_pt,
-                    )
+                    try:
+                        fragment = fixed_typeset(
+                            part.text,
+                            width,
+                            height,
+                            size_pt,
+                            kind=overlay.kind,
+                            is_bold=overlay.is_bold,
+                            indent_pt=overlay.indent_pt,
+                            runs=overlay.runs,
+                        )
+                    except TypeError:
+                        fragment = fixed_typeset(
+                            part.text,
+                            width,
+                            height,
+                            size_pt,
+                            kind=overlay.kind,
+                            is_bold=overlay.is_bold,
+                            indent_pt=overlay.indent_pt,
+                        )
             else:
                 fragment = typesetter.typeset(
                     part.text,
@@ -1739,6 +1794,7 @@ class LayerCompositor:
                     kind=overlay.kind,
                     font_size=overlay.font_size,
                     is_bold=overlay.is_bold,
+                    align_center=overlay.align_center,
                     runs=overlay.runs,
                 )
             except TypeError:
@@ -1750,6 +1806,7 @@ class LayerCompositor:
                         kind=overlay.kind,
                         font_size=overlay.font_size,
                         is_bold=overlay.is_bold,
+                        runs=overlay.runs,
                     )
                 except TypeError:
                     try:
@@ -2021,12 +2078,18 @@ def overlays_from_blocks(
             is_bold = bool(
                 block.provenance.get("is_bold") or (block.block_type == BlockType.HEADING)
             )
-            # A first-line indent is a body-paragraph attribute; headings and list
-            # items carry their own leading (level/marker), so they never indent.
-            indent_pt = (
-                getattr(block.style, "first_line_indent_pt", None)
-                if kind == "text" and block.block_type is BlockType.NARRATIVE
-                else None
+            # A first-line indent is a body-paragraph or list-marker attribute;
+            # a heading carries alignment instead — a centered title is
+            # re-centered within its box, not indented.
+            if kind == "text" and block.block_type in (
+                BlockType.NARRATIVE,
+                BlockType.LIST_ITEM,
+            ):
+                indent_pt = getattr(block.style, "first_line_indent_pt", None)
+            else:
+                indent_pt = None
+            align_center = kind == "heading" and (
+                getattr(block.style, "alignment", None) == "center"
             )
             overlay = Overlay(
                 block.id,
@@ -2040,6 +2103,7 @@ def overlays_from_blocks(
                 font_size=font_size,
                 is_bold=is_bold,
                 indent_pt=indent_pt,
+                align_center=align_center,
                 runs=_styled_runs(block),
             )
             overlays.append(overlay)

@@ -135,11 +135,16 @@ class StyleMeta(BaseModel):
     font_name: str | None = None
     font_size: float | None = None
     color_hex: str | None = None
+    #: Horizontal alignment measured from the source's own line boxes; the
+    #: compositor re-centers a heading recorded as ``"center"`` instead of
+    #: drawing its fragment left-aligned. ``None`` (the default) means
+    #: left-aligned, the layout every other block type uses.
     alignment: str | None = None
     line_height: float | None = None
-    #: First-line indent (pt) of a body paragraph, measured from the source's
-    #: own line boxes. Rendered as a leading ``#h`` on the first line; ``None``
-    #: for headings, list items, and paragraphs the source did not indent.
+    #: First-line indent (pt) of a body paragraph, or of a list item's marker
+    #: column, measured from the source's own line boxes. Rendered as a leading
+    #: ``#h`` on the first line; ``None`` for headings and blocks the source
+    #: did not indent.
     first_line_indent_pt: float | None = None
     #: Styled spans of the source text (colour, superscript, weight), applied to
     #: the target where the span survives verbatim. Empty for an unstyled block.

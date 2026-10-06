@@ -103,6 +103,7 @@ class _FragmentSpy:
         kind: str = "text",
         font_size: float | None = None,
         is_bold: bool = False,
+        align_center: bool = False,
         runs: tuple[Any, ...] = (),
     ) -> Path | None:
         self.calls.append((text, width_pt, height_pt))

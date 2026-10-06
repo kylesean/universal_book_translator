@@ -529,37 +529,82 @@ def _first_line_indent(box: BoundingBox, lines: list[Any]) -> float | None:
     return None
 
 
-def annotate_first_line_indents(blocks: list[IRBlock], pdf_path: Path | None) -> list[IRBlock]:
-    """Record a body paragraph's first-line indent from the page's own line boxes.
+def _is_centered(box: BoundingBox, lines: list[Any]) -> bool:
+    """Whether any line of the block hangs symmetrically inside its own box.
 
-    Docling gives one bounding box per paragraph (the margin), so the indent is
-    invisible in its output; the pdfium line rects carry it. A page whose lines
-    cannot be read (a scan with no text layer) simply gets no indent.
+    A centered title's short lines sit evenly between the margins; a
+    left-aligned heading's lines start at the box edge (zero left gap). One
+    qualifying line is enough — a multi-line centered title usually has its
+    widest line touching both margins, so the evidence lives in the others.
+    """
+    inside = [line for line in lines if line.text.strip() and _line_in_box(line.rect, box)]
+    width = box.x1 - box.x0
+    if width <= 0:
+        return False
+    gap_min = max(6.0, 0.02 * width)
+    tolerance = max(6.0, 0.05 * width)
+    for line in inside:
+        left = float(line.rect[0]) - box.x0
+        right = box.x1 - float(line.rect[2])
+        if left > gap_min and right > gap_min and abs(left - right) <= tolerance:
+            return True
+    return False
+
+
+def annotate_layout_metadata(blocks: list[IRBlock], pdf_path: Path | None) -> list[IRBlock]:
+    """Record per-block layout facts the block box alone cannot carry.
+
+    Docling gives one bounding box per block (the margin), so three facts are
+    invisible in its output and must come from the page's own line rects
+    (textgeom):
+
+    - a body paragraph's first-line indent (``first_line_indent_pt``);
+    - a list item's marker-column indent — the block box starts at the
+      *wrapped* lines' margin, so without the recorded indent the compositor
+      draws the marker flush with the body margin where the source hangs it
+      to the right;
+    - a heading's centering (``alignment="center"``) — a centered title's
+      short lines hang symmetrically inside the box; without the flag the
+      fragment is drawn left-aligned and the title hugs the margin.
+
+    A page whose lines cannot be read (a scan with no text layer) simply gets
+    no metadata.
     """
     if pdf_path is None:
         return blocks
     from ubt.adapters.pdf.textgeom import extract_lines
 
     lines_by_page: dict[int, list[Any]] = {}
-    for block in blocks:
-        if block.skip_translate or block.block_type is not BlockType.NARRATIVE:
-            continue
-        if block.region is not RegionKind.BODY:
-            continue
-        box = block.bbox
-        if box is None or box.page <= 0:
-            continue
-        page = int(box.page)
+
+    def _page_lines(page: int) -> list[Any]:
         if page not in lines_by_page:
             try:
                 lines_by_page[page] = list(extract_lines(pdf_path, page)[0])
             except Exception:
                 lines_by_page[page] = []
-        indent = _first_line_indent(box, lines_by_page[page])
-        if indent is not None:
-            block.style = (block.style or StyleMeta()).model_copy(
-                update={"first_line_indent_pt": indent}
-            )
+        return lines_by_page[page]
+
+    for block in blocks:
+        if block.skip_translate:
+            continue
+        box = block.bbox
+        if box is None or box.page <= 0:
+            continue
+        if block.block_type in (BlockType.NARRATIVE, BlockType.LIST_ITEM):
+            if block.region is not RegionKind.BODY:
+                continue
+            indent = _first_line_indent(box, _page_lines(int(box.page)))
+            if indent is not None:
+                block.style = (block.style or StyleMeta()).model_copy(
+                    update={"first_line_indent_pt": indent}
+                )
+        elif block.block_type is BlockType.HEADING:
+            if block.region not in (RegionKind.BODY, RegionKind.TITLE):
+                continue
+            if _is_centered(box, _page_lines(int(box.page))):
+                block.style = (block.style or StyleMeta()).model_copy(
+                    update={"alignment": "center"}
+                )
     return blocks
 
 
@@ -1177,7 +1222,7 @@ def map_iterated_items(
                 )
             )
 
-    return type_docling_blocks(annotate_first_line_indents(blocks, pdf_path))
+    return type_docling_blocks(annotate_layout_metadata(blocks, pdf_path))
 
 
 def map_export_dict(data: dict[str, Any]) -> list[IRBlock]:

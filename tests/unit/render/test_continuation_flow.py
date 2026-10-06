@@ -47,6 +47,7 @@ class _Measurer:
         kind: str = "text",
         font_size: float | None = None,
         is_bold: bool = False,
+        align_center: bool = False,
         runs: tuple[Any, ...] = (),
     ) -> Path | None:
         return None
