@@ -53,7 +53,14 @@ async def run_cost_preflight_stage(ctx: StageContext, blocks: BlockReader) -> No
             await blocks.current_blocks(),
             draft_model=ctx.config.draft_model,
             prefix_tokens=prefix_tokens,
+            # Direction fertility and chunked call counts are pair- and
+            # policy-specific: the defaults (ratio 1.5, one call per block)
+            # overstate the floor for en->zh and macro-chunked runs and could
+            # refuse a run whose true cheapest pass fits the budget.
+            macro_chunk_size=ctx.config.macro_chunk_size,
             base_url=ctx.config.base_url,
+            source_lang=ctx.source_lang,
+            target_lang=ctx.target_lang,
         )
     )
     if run_estimate is None or not run_estimate.billable_blocks:
