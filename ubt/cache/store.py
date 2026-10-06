@@ -18,6 +18,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Protocol
@@ -39,6 +40,12 @@ _PRUNE_INTERVAL_WRITES = 1024
 #: Prune down to this share of the cap, so pruning is not re-triggered on the
 #: very next write (a hysteresis band).
 _PRUNE_TARGET_RATIO = 0.9
+
+#: The only paths prune() may ever delete: this store's own layout
+#: (``root/<2-hex shard>/<sha256 key>.json``). Everything else under the
+#: operator-configurable root belongs to someone else.
+_SHARD_DIR_RE = re.compile(r"[0-9a-f]{2}")
+_ENTRY_FILE_RE = re.compile(r"[0-9a-f]{32,}\.json")
 
 
 def _max_entries_from_env() -> int:
@@ -98,6 +105,10 @@ class DiskCacheStore:
         self.root = Path(root)
         self.max_entries = max_entries if max_entries is not None else _max_entries_from_env()
         self._writes = 0
+        # Prune on open as well as on the write interval: a shared cache dir
+        # fed by many short-lived runs (each under the write interval) would
+        # otherwise never see a prune at all.
+        self.prune()
 
     def _path(self, key: str) -> Path:
         return self.root / key[:2] / f"{key}.json"
@@ -137,8 +148,15 @@ class DiskCacheStore:
         entries: list[tuple[float, Path]] = []
         try:
             for dirpath, _dirnames, filenames in os.walk(self.root):
+                # Only this store's own layout (root/<2 hex shard>/<sha256>.json)
+                # is prunable: cache_dir is operator-configurable, and an
+                # unrelated tool's .json files in a shared root must never be
+                # evicted by a UBT cap.
+                shard = Path(dirpath).name
+                if shard == self.root.name or not _SHARD_DIR_RE.fullmatch(shard):
+                    continue
                 for name in filenames:
-                    if not name.endswith(".json"):
+                    if not _ENTRY_FILE_RE.fullmatch(name):
                         continue
                     child = Path(dirpath) / name
                     try:
