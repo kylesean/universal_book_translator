@@ -48,6 +48,32 @@ def _text(path: Path) -> str:
     return _flat("\n".join(oxide_render.extract_page_texts(path)))
 
 
+def test_an_indented_fragment_typesets_at_its_marker_column(tmp_path: Path) -> None:
+    # Two regressions in one: the non-reflowed fit path used to drop the
+    # source's first-line indent entirely, and the inline indent prefix used to
+    # make a body opening with "(" (a list marker, "(1) Rollout ...") fail to
+    # compile -- so the item silently kept its source language.
+    typesetter = TypstFragmentTypesetter()
+    try:
+        fragment = typesetter.typeset(
+            "(1) 展开与评估任务以突发方式创建沙盒。",
+            300.0,
+            30.0,
+            kind="text",
+            font_size=10.0,
+            indent_pt=22.0,
+        )
+    finally:
+        typesetter.close()
+
+    assert fragment is not None
+    assert "(1)" in _flat(_text(fragment))
+    # The first line starts in the marker column; the wrapped lines would not.
+    boxes = artifact_text_boxes(fragment, [1])
+    first = max(boxes, key=lambda box: box.bbox.y1)
+    assert first.bbox.x0 > 15.0
+
+
 def test_an_over_long_fragment_is_shrunk_rather_than_occluded(tmp_path: Path) -> None:
     # Regression: target text taller than its box was clipped, leaving text in
     # the layer with no ink -- exactly the visual gate's ``text_occluded``. The

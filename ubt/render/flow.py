@@ -82,12 +82,22 @@ def _largest_fitting_cut(text: str, box: PhysicalBox, measure: Measure) -> int:
 
 
 def solve_flow(
-    text: str, boxes: Sequence[PhysicalBox], measure: Measure
+    text: str,
+    boxes: Sequence[PhysicalBox],
+    measure: Measure,
+    *,
+    fallback_measure: Measure | None = None,
 ) -> tuple[FlowPlacement, ...]:
     """Break ``text`` across ``boxes`` in reading order, punctuation-preferring.
 
     Every box gets a placement (possibly empty when nothing fits); the final box
     receives the remaining text in full.
+
+    ``fallback_measure`` is consulted for a box the primary measure cannot fit
+    even one break into (``None`` leaves the box empty). Its capacity is the
+    *draw* box's -- the ink box plus the compositor's line slack -- so a box that
+    can print a line is not left blank: the source line it replaces is masked
+    either way, and an empty box therefore loses that line from the page.
     """
     if not boxes:
         return ()
@@ -95,6 +105,8 @@ def solve_flow(
     placements: list[FlowPlacement] = []
     for box in boxes[:-1]:
         cut = _largest_fitting_cut(remaining, box, measure)
+        if cut <= 0 and fallback_measure is not None:
+            cut = _largest_fitting_cut(remaining, box, fallback_measure)
         if cut <= 0:
             placements.append(FlowPlacement(box, ""))
             continue

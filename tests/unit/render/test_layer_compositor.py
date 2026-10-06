@@ -87,6 +87,7 @@ class _FragmentSpy:
         self._fail = fail
         self._measure = measure
         self.calls: list[tuple[str, float, float]] = []
+        self.indents: list[float | None] = []
         self.math_calls: list[tuple[str, float, float]] = []
         self.bilingual_calls: list[tuple[str, str, float, float]] = []
         self.prefetched: list[tuple[Any, ...]] = []
@@ -108,6 +109,7 @@ class _FragmentSpy:
         runs: tuple[Any, ...] = (),
     ) -> Path | None:
         self.calls.append((text, width_pt, height_pt))
+        self.indents.append(indent_pt)
         if self._fail:
             return None
         fragment = self._tmp / f"fragment-{len(self.calls)}.pdf"
@@ -424,6 +426,37 @@ def _typesetter(tmp_path: Path) -> TypstFragmentTypesetter:
     return TypstFragmentTypesetter(
         font=("Noto Serif CJK SC",), size_pt=10.0, cache_dir=tmp_path, target_lang="zh"
     )
+
+
+def test_an_indented_overlay_reaches_the_typesetter_with_its_indent(tmp_path: Path) -> None:
+    # A paragraph the band reflow left alone (its target does not fit the source
+    # box, so it keeps the fitted path) must still draw with the source's
+    # first-line indent: dropping it dropped the indent of every body paragraph
+    # and of every list item's marker column.
+    source = write_text_pdf(tmp_path / "source.pdf", [_PAGE])
+    output = tmp_path / "out.pdf"
+    spy = _FragmentSpy(tmp_path)
+    overlay = Overlay(
+        "e1", 1, _REGION, "(1) TRANSLATED REGION TEXT", font_size=10.0, indent_pt=18.0
+    )
+
+    LayerCompositor(source, typesetter=spy).compose([overlay], output)
+
+    assert spy.indents == [18.0]
+    assert "TRANSLATED REGION TEXT" in _text(output)
+
+
+def test_an_indented_fragment_source_carries_its_first_line_indent(tmp_path: Path) -> None:
+    # The indent is an inline non-weak hspace, not ``par.first-line-indent``:
+    # inside a fixed-height box the paragraph rule makes the content a hair
+    # taller than the box, which spills to a second page (the compositor copies
+    # page 1 and draws nothing). The empty block after the hspace and the space
+    # that follows it are both load-bearing: without the space a body opening
+    # with "(" ("(1) Rollout ...") parses as a call and fails to compile.
+    ts = _typesetter(tmp_path)
+    src = ts._text_source("(1) 正文", 100.0, 20.0, 10.0, indent_pt=22.0)
+    assert "#h(22.0pt, weak: false)#[] " in src
+    assert "#h(22.0pt, weak: false)#[](1)" not in src
 
 
 def test_a_plain_fragment_source_names_weight_regular(tmp_path: Path) -> None:

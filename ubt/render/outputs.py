@@ -468,23 +468,28 @@ def _text_weight_line(bold: bool) -> str:
     return _WEIGHT_BOLD if bold else _WEIGHT_REGULAR
 
 
-def _par_line(leading_em: float, indent_pt: float | None = None) -> str:
-    """The shared ``#set par(...)`` rule for every typeset fragment.
+def _par_line(leading_em: float) -> str:
+    """The shared ``#set par(...)`` rule for every typeset fragment."""
+    return f"#set par(leading: {leading_em}em)"
 
-    ``indent_pt`` is the source's first-line indent, emitted as
-    ``par.first-line-indent`` -- a paragraph-aware rule, unlike the leading ``#h``
-    this used to prepend. The inline form broke on any body that opens with ``(``
-    or ``[``: ``#h(...)#[](1) ...`` is parsed as calling the empty content block,
-    so the fragment failed to compile and the source was kept. ``all: true`` is
-    required because a fragment *is* the block's first paragraph, which Typst
-    skips indenting by default.
+
+def _indent_hspace(indent_pt: float | None) -> str:
+    """A first-line indent as a non-weak horizontal space.
+
+    Typst's ``par.first-line-indent`` is the wrong tool inside a fixed-height
+    ``#box``: the indent makes the content a hair taller than the box, which then
+    spills to a *second* page, and the compositor -- which copies page 1 -- draws
+    nothing at all. A leading ``#h`` is not trimmed at line start when a non-space
+    token follows it, so an empty content block trails it; the space shifts the
+    first line while the wrapped lines stay at the margin, which is exactly an
+    indent. The empty block renders nothing (no glyph, no ink), and the trailing
+    space is required: without it a body that opens with ``(`` or ``[``
+    ("(1) Rollout ...") turns the empty block into a call (``#[](1)``) and the
+    fragment fails to compile, so the item kept its source language. The space
+    itself emits no glyph and no text-layer character, and the prefix leaves the
+    measured height unchanged, so a box that fits without it still fits with it.
     """
-    indent = (
-        f", first-line-indent: (amount: {indent_pt}pt, all: true)"
-        if indent_pt and indent_pt > 0
-        else ""
-    )
-    return f"#set par(leading: {leading_em}em{indent})"
+    return f"#h({indent_pt}pt, weak: false)#[] " if indent_pt and indent_pt > 0 else ""
 
 
 def _align_line(center: bool) -> str:
@@ -659,10 +664,10 @@ class TypstFragmentTypesetter:
         weight_line = _text_weight_line(kind == "heading" or is_bold)
         return (
             f"#set page(width: {width_pt}pt, height: auto, margin: 0pt)\n"
-            f"{_par_line(self._par_leading_em, indent_pt)}\n"
+            f"{_par_line(self._par_leading_em)}\n"
             f'#set text(size: {size_pt}pt{weight_line}, top-edge: "ascender", bottom-edge: "descender"{font_line})\n'
             f"{self._dir_line}"
-            f"{body}\n"
+            f"{_indent_hspace(indent_pt)}{body}\n"
         )
 
     def _measure_height(
@@ -994,11 +999,11 @@ class TypstFragmentTypesetter:
         weight_line = _text_weight_line(kind == "heading" or is_bold)
         return (
             f"#set page(width: {width_pt}pt, height: {height_pt}pt, margin: 0pt)\n"
-            f"{_par_line(self._par_leading_em, indent_pt)}\n"
+            f"{_par_line(self._par_leading_em)}\n"
             f'#set text(size: {size_pt}pt{weight_line}, top-edge: "ascender", bottom-edge: "descender"{font_line})\n'
             f"{self._dir_line}"
             f"{_align_line(align_center)}"
-            f"#box(width: {width_pt}pt, height: {height_pt}pt, clip: true)[{body}]\n"
+            f"#box(width: {width_pt}pt, height: {height_pt}pt, clip: true)[{_indent_hspace(indent_pt)}{body}]\n"
         )
 
     def typeset(
@@ -1694,15 +1699,24 @@ class LayerCompositor:
             return solve_flow(body, boxes, typesetter.measure), None
         base = cap(overlay.kind, overlay.font_size)
 
-        def _measure(size: float) -> Callable[[str, float], float]:
-            return lambda token, width: measure_fixed(
-                token,
-                width,
-                size,
-                kind=overlay.kind,
-                is_bold=overlay.is_bold,
-                indent_pt=overlay.indent_pt,
-            )
+        # The drawn fragment gets the extracted box *plus* this much height (see
+        # ``_LINE_SLACK_RATIO``: the ink box stops at the last line's descender and
+        # omits the leading).
+        slack = 0.0 if overlay.fixed_box else _line_slack(overlay.font_size)
+
+        def _make_measure(size: float, *, with_slack: bool) -> Callable[[str, float], float]:
+            def measure(token: str, width: float) -> float:
+                height: float = measure_fixed(
+                    token,
+                    width,
+                    size,
+                    kind=overlay.kind,
+                    is_bold=overlay.is_bold,
+                    indent_pt=overlay.indent_pt,
+                )
+                return max(0.0, height - slack) if with_slack else height
+
+            return measure
 
         # Size against the *widest* box: a continuation run repeats one column
         # width (first == max, so this changes nothing there), while a
@@ -1728,9 +1742,17 @@ class LayerCompositor:
         )
         if capacity > 0 and height > capacity:
             size = max(_MIN_FONT_PT, size * capacity / height)
-        parts = solve_flow(body, boxes, _measure(size))
+        # The bare ink box is the flow's capacity; a box that would otherwise come
+        # out blank falls back to the draw box's (see ``solve_flow``), so the
+        # source line it replaces is never erased with nothing drawn over it.
+        parts = solve_flow(
+            body,
+            boxes,
+            _make_measure(size, with_slack=False),
+            fallback_measure=_make_measure(size, with_slack=True),
+        )
         return self._shrink_until_the_flow_fits(
-            overlay, body, boxes, parts, size, measure_fixed, _measure
+            overlay, body, boxes, parts, size, measure_fixed, _make_measure
         )
 
     def _shrink_until_the_flow_fits(
@@ -1741,7 +1763,7 @@ class LayerCompositor:
         parts: tuple[FlowPlacement, ...],
         size: float,
         measure_fixed: Callable[..., float],
-        measure: Callable[[float], Callable[[str, float], float]],
+        measure_factory: Callable[..., Callable[[str, float], float]],
     ) -> tuple[tuple[FlowPlacement, ...], float]:
         """Shrink a continuation run until every box actually holds its share.
 
@@ -1779,13 +1801,21 @@ class LayerCompositor:
                 worst = max(worst, needed / available)
             return worst
 
-        parts = solve_flow(body, boxes, measure(size))
+        def _flow(current: float) -> tuple[FlowPlacement, ...]:
+            return solve_flow(
+                body,
+                boxes,
+                measure_factory(current, with_slack=False),
+                fallback_measure=measure_factory(current, with_slack=True),
+            )
+
+        parts = _flow(size)
         if _worst_overflow(size, parts) <= 1.0:
             return parts, size
         # The estimate overflowed, so bisect on the size: smaller text fits more
         # into every box, so "the flow fits" is monotone enough for a few rounds.
         low = _MIN_FONT_PT
-        low_parts = solve_flow(body, boxes, measure(low))
+        low_parts = _flow(low)
         if _worst_overflow(low, low_parts) > 1.0:
             return low_parts, low
         high = size
@@ -1793,7 +1823,7 @@ class LayerCompositor:
             mid = (low + high) / 2.0
             if mid - low <= 0.01:
                 break
-            mid_parts = solve_flow(body, boxes, measure(mid))
+            mid_parts = _flow(mid)
             if _worst_overflow(mid, mid_parts) <= 1.0:
                 low, low_parts = mid, mid_parts
             else:
@@ -1849,7 +1879,16 @@ class LayerCompositor:
                 continue
             x0, y0, x1, y1 = part.box.bbox
             form = self._compile_form(
-                composed, overlay, part, source, y1 - y0 + slack, exact_size=draw_size
+                composed,
+                overlay,
+                part,
+                source,
+                y1 - y0 + slack,
+                exact_size=draw_size,
+                # Only the paragraph's OWN first line is indented: a continuation
+                # box starts mid-paragraph, and indenting there hangs the page's
+                # first line as if a new paragraph began at the page break.
+                first_part=index == 0,
             )
             if form is not None:
                 draw_bbox = (x0, y0 - slack, x1, y1)
@@ -1867,19 +1906,23 @@ class LayerCompositor:
         height: float,
         *,
         exact_size: float | None = None,
+        first_part: bool = True,
     ) -> pikepdf.Object | None:
         """Typeset one flowed part and copy it into the artifact as a Form.
 
         ``height`` is the draw height: the extracted box plus the line slack, so
         the fragment can be fitted (and drawn) at the source size rather than
         shrunk to the ink box. ``exact_size`` (a continuation run's uniform size)
-        draws the part at that size instead of re-fitting it per box.
+        draws the part at that size instead of re-fitting it per box, and
+        ``first_part`` carries the paragraph's first-line indent to the box it
+        actually starts in (never to a continuation box).
         """
         typesetter = self._typesetter
         if typesetter is None:
             return None
         x0, _y0, x1, _y1 = part.box.bbox
         width = x1 - x0
+        indent_pt = overlay.indent_pt if first_part else None
         if width <= 0 or height <= 0:
             return None
         bilingual = getattr(typesetter, "typeset_bilingual", None)
@@ -1919,7 +1962,7 @@ class LayerCompositor:
                         size_pt,
                         kind=overlay.kind,
                         is_bold=overlay.is_bold,
-                        indent_pt=overlay.indent_pt,
+                        indent_pt=indent_pt,
                         align_center=overlay.align_center,
                         runs=overlay.runs,
                     )
@@ -1932,7 +1975,7 @@ class LayerCompositor:
                             size_pt,
                             kind=overlay.kind,
                             is_bold=overlay.is_bold,
-                            indent_pt=overlay.indent_pt,
+                            indent_pt=indent_pt,
                             runs=overlay.runs,
                         )
                     except TypeError:
@@ -1943,7 +1986,7 @@ class LayerCompositor:
                             size_pt,
                             kind=overlay.kind,
                             is_bold=overlay.is_bold,
-                            indent_pt=overlay.indent_pt,
+                            indent_pt=indent_pt,
                         )
             else:
                 fragment = typesetter.typeset(
@@ -1963,7 +2006,7 @@ class LayerCompositor:
                     kind=overlay.kind,
                     font_size=overlay.font_size,
                     is_bold=overlay.is_bold,
-                    indent_pt=overlay.indent_pt,
+                    indent_pt=indent_pt,
                     align_center=overlay.align_center,
                     runs=overlay.runs,
                 )
