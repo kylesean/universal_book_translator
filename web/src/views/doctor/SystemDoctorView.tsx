@@ -2,7 +2,14 @@ import React, { useCallback, useEffect, useState } from 'react'
 import { CheckCircle2, RefreshCw, AlertTriangle, XCircle, MinusCircle, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
-import { getDoctor, listModelProfiles, type DoctorCheck, type ModelProfile } from '@/api/client'
+import {
+  getDoctor,
+  getSystemInfo,
+  listModelProfiles,
+  type DoctorCheck,
+  type ModelProfile,
+  type SystemInfo,
+} from '@/api/client'
 import { useI18n } from '@/i18n/I18nContext'
 
 function CheckIcon({ status }: { status: string }) {
@@ -23,6 +30,7 @@ export function SystemDoctorView() {
   const { t } = useI18n()
   const [checks, setChecks] = useState<DoctorCheck[]>([])
   const [profiles, setProfiles] = useState<ModelProfile[]>([])
+  const [info, setInfo] = useState<SystemInfo | null>(null)
   const [isPinging, setIsPinging] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -30,12 +38,14 @@ export function SystemDoctorView() {
   const load = useCallback(async (probe: boolean) => {
     setLoading(true)
     try {
-      const [doctor, modelProfiles] = await Promise.all([
+      const [doctor, modelProfiles, systemInfo] = await Promise.all([
         getDoctor(probe),
         listModelProfiles().catch(() => [] as ModelProfile[]),
+        getSystemInfo().catch(() => null),
       ])
       setChecks(doctor.checks)
       setProfiles(modelProfiles)
+      setInfo(systemInfo)
       setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Doctor check failed')
@@ -171,8 +181,31 @@ export function SystemDoctorView() {
         <div className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] mb-2 font-semibold">
           {t.doctor.securityBoundary}
         </div>
-        <div>• {t.doctor.listenInterface}: 127.0.0.1:8000 (Loopback only)</div>
-        <div>• {t.doctor.forbiddenPaths}: /etc, /root, /var/run, ~/.ssh (Hard refusal)</div>
+        {info ? (
+          <>
+            <div className="flex items-center gap-2">
+              <span className={info.is_loopback ? 'text-[#15803d]' : 'text-[#b45309]'}>
+                • {t.doctor.listenInterface}: {info.host}
+              </span>
+              <Badge variant={info.is_loopback ? 'success' : 'warning'} className="text-[10px]">
+                {info.is_loopback ? t.doctor.loopbackOnly : 'EXPOSED'}
+              </Badge>
+            </div>
+            <div>• {t.doctor.authGate}: {info.auth_enabled ? t.doctor.enabled : t.doctor.disabled}</div>
+            <div>• {t.doctor.jobMode}: {info.job_mode}</div>
+            <div>• {t.doctor.dbDir}: {info.db_dir}</div>
+            <div>
+              • {t.doctor.allowedRoots}:{' '}
+              {info.allowed_bases.length === 0 ? '—' : info.allowed_bases.join(', ')}
+            </div>
+            <div>• {t.doctor.forbiddenPaths}: /etc, /root, /var/run, ~/.ssh (Hard refusal)</div>
+            {!info.is_loopback && (
+              <div className="text-[#b45309] pt-1">⚠ {t.doctor.exposedWarning}</div>
+            )}
+          </>
+        ) : (
+          <div className="text-[var(--ink-muted)]">—</div>
+        )}
       </div>
     </div>
   )

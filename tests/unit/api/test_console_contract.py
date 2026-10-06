@@ -176,6 +176,20 @@ def test_glossary_endpoint_reports_when_unconfigured(tmp_path: Path) -> None:
     assert client.get("/assets/glossary", headers=_AUTH).status_code == 409
 
 
+def test_system_info_reports_the_live_security_boundary(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    client = TestClient(create_app(config))
+    body = client.get("/system/info", headers=_AUTH).json()
+
+    # The panel must reflect the running config, not a hardcoded sample.
+    assert body["auth_enabled"] is True
+    assert body["allowed_bases"] == [str(tmp_path)]
+    assert body["db_dir"] == str(config.db_dir)
+    assert body["job_mode"] == "embedded"
+    assert body["host"]  # the host the request reached
+    assert isinstance(body["is_loopback"], bool)
+
+
 def test_deliverables_endpoint_serves_only_existing_files(tmp_path: Path) -> None:
     from ubt.core.engine.ledger import SQLiteJobLedger
     from ubt.core.ir.models import BookManifest

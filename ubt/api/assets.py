@@ -24,7 +24,13 @@ from pathlib import Path
 from typing import Any
 
 from ubt.core.memory.seed_glossary import load_external_glossary
-from ubt.core.memory.tm import TranslationMemory
+from ubt.core.memory.tm import (
+    PROVENANCE_HUMAN_PE,
+    PROVENANCE_MACHINE,
+    TMPendingEntry,
+    TranslationMemory,
+    normalize_for_tm,
+)
 
 #: Column names that identify the source and target columns in a CSV/TSV
 #: glossary header. Mirrors ``load_external_glossary`` so a file round-trips.
@@ -226,5 +232,192 @@ def evict_tm_entries(tm_path: Path, ids: list[int]) -> int:
     tm = TranslationMemory(tm_path)
     try:
         return tm.evict_ids(ids)
+    finally:
+        tm.close()
+
+
+# --------------------------------------------------------------------------- #
+# Glossary conflict detection (PRD §4.4.2)
+# --------------------------------------------------------------------------- #
+
+
+def detect_glossary_conflicts(terms: list[dict[str, str]]) -> list[dict[str, Any]]:
+    """Sources configured with more than one distinct target rendering.
+
+    The loader preserves duplicate rows, so a CSV/list glossary can carry the
+    same source twice with different translations — the exact ambiguity the
+    engine would resolve by file order. The console surfaces it instead of
+    silently picking one.
+    """
+    by_source: dict[str, list[str]] = {}
+    for term in terms:
+        source = term.get("source", "")
+        target = term.get("target", "")
+        if not source:
+            continue
+        targets = by_source.setdefault(source, [])
+        if target not in targets:
+            targets.append(target)
+    return [
+        {"source": source, "targets": targets}
+        for source, targets in by_source.items()
+        if len(targets) > 1
+    ]
+
+
+# --------------------------------------------------------------------------- #
+# Translation-memory import (TMX / JSON)
+# --------------------------------------------------------------------------- #
+
+
+class TMImportError(ValueError):
+    """The imported payload could not be parsed into TM pairs."""
+
+
+def _local_name(tag: str) -> str:
+    """Strip the XML namespace from an ElementTree tag."""
+    return tag.rsplit("}", 1)[-1]
+
+
+#: The XML namespace carrying ``xml:lang``.
+_XML_LANG = "{http://www.w3.org/XML/1998/namespace}lang"
+
+
+def parse_tmx(content: str) -> list[dict[str, str]]:
+    """Parse TMX into ``{src_lang, tgt_lang, source_text, target_text}`` rows.
+
+    For each ``<tu>`` the two ``<tuv>`` children are paired by language when the
+    caller's ``xml:lang`` matches, otherwise by document order (the TMX spec's
+    first/second convention). A ``<tu>`` without exactly two usable segments is
+    skipped rather than guessed at.
+    """
+    import xml.etree.ElementTree as ET
+
+    try:
+        root = ET.fromstring(content)
+    except ET.ParseError as exc:
+        raise TMImportError(f"invalid TMX: {exc}") from exc
+
+    rows: list[dict[str, str]] = []
+    for node in root.iter():
+        if _local_name(node.tag) != "tu":
+            continue
+        segments: list[tuple[str, str]] = []
+        for child in node:
+            if _local_name(child.tag) != "tuv":
+                continue
+            lang = child.get(_XML_LANG) or child.get("lang") or ""
+            text = ""
+            for seg in child:
+                if _local_name(seg.tag) == "seg":
+                    text = "".join(seg.itertext()).strip()
+                    break
+            if text:
+                segments.append((lang, text))
+        if len(segments) != 2:
+            continue
+        (src_lang, source_text), (tgt_lang, target_text) = segments
+        rows.append(
+            {
+                "src_lang": src_lang,
+                "tgt_lang": tgt_lang,
+                "source_text": source_text,
+                "target_text": target_text,
+            }
+        )
+    return rows
+
+
+def parse_tm_json(content: str) -> list[dict[str, str]]:
+    """Parse a JSON TM payload: a list of source/target pairs.
+
+    Accepts ``source_text``/``target_text`` or ``source``/``target`` keys, with
+    optional per-row ``src_lang``/``tgt_lang``.
+    """
+    try:
+        data = json.loads(content)
+    except ValueError as exc:
+        raise TMImportError(f"invalid JSON: {exc}") from exc
+    if not isinstance(data, list):
+        raise TMImportError("JSON TM payload must be a list of pairs")
+    rows: list[dict[str, str]] = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        source = item.get("source_text") or item.get("source")
+        target = item.get("target_text") or item.get("target")
+        if not source or not target:
+            continue
+        rows.append(
+            {
+                "src_lang": str(item.get("src_lang") or ""),
+                "tgt_lang": str(item.get("tgt_lang") or ""),
+                "source_text": str(source).strip(),
+                "target_text": str(target).strip(),
+            }
+        )
+    return rows
+
+
+def parse_tm_payload(content: str, fmt: str) -> list[dict[str, str]]:
+    """Dispatch to the TMX or JSON parser (``fmt`` is ``tmx`` or ``json``)."""
+    if fmt == "tmx":
+        return parse_tmx(content)
+    if fmt == "json":
+        return parse_tm_json(content)
+    raise TMImportError(f"unsupported TM format: {fmt}")
+
+
+def import_tm_entries(
+    tm_path: Path,
+    rows: list[dict[str, str]],
+    *,
+    default_src_lang: str,
+    default_tgt_lang: str,
+    provenance: str,
+) -> int:
+    """Write imported pairs into the shared TM; returns rows written.
+
+    A row's own languages win; otherwise the caller's defaults fill in. Rows
+    with an empty side are dropped. ``provenance`` is validated against the
+    store's two known values so an import cannot invent a third.
+
+    A ``machine`` import additionally *skips* any pair that already exists under
+    ``human_pe``: the store's writeback keeps the human label but still lets the
+    latest text win, so a bulk import would otherwise rewrite human-approved
+    text while the row kept claiming human provenance.
+    """
+    if provenance not in (PROVENANCE_MACHINE, PROVENANCE_HUMAN_PE):
+        raise TMImportError(f"unknown provenance: {provenance}")
+    entries = [
+        TMPendingEntry(
+            src_lang=row["src_lang"] or default_src_lang,
+            tgt_lang=row["tgt_lang"] or default_tgt_lang,
+            source_text=row["source_text"],
+            target_text=row["target_text"],
+            provenance=provenance,
+        )
+        for row in rows
+        if row.get("source_text") and row.get("target_text")
+    ]
+    if not entries:
+        return 0
+    tm = TranslationMemory(tm_path)
+    try:
+        if provenance == PROVENANCE_MACHINE:
+            protected = {
+                (entry.src_lang, entry.tgt_lang, normalize_for_tm(entry.source_text))
+                for entry in tm.scan()
+                if entry.provenance == PROVENANCE_HUMAN_PE
+            }
+            entries = [
+                entry
+                for entry in entries
+                if (entry.src_lang, entry.tgt_lang, normalize_for_tm(entry.source_text))
+                not in protected
+            ]
+        if not entries:
+            return 0
+        return tm.writeback(entries)
     finally:
         tm.close()

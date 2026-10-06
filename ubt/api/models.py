@@ -402,6 +402,21 @@ class JobListResponse(BaseModel):
     jobs: list[JobSummary]
 
 
+class SystemInfoResponse(BaseModel):
+    """The console's security-boundary panel: where this server is reachable and
+    what it is allowed to touch."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    version: str
+    host: str = Field(description="Host this request reached (client-visible)")
+    is_loopback: bool = Field(description="True when the request arrived on a loopback host")
+    auth_enabled: bool = Field(description="True when an API key gate is configured")
+    allowed_bases: list[str] = Field(description="Filesystem roots the server will read/write")
+    db_dir: str
+    job_mode: str = Field(description="embedded (in-process) or queue (worker-drained)")
+
+
 class SegmentEditRequest(BaseModel):
     """A human post-edit of one block's target text (L3 workbench)."""
 
@@ -442,6 +457,25 @@ class TMevictRequest(BaseModel):
     # deletes in batches, but the parsed list is held whole first).
     ids: list[int] = Field(
         default_factory=list, max_length=10_000, description="TM entry ids to delete"
+    )
+
+
+class TMImportRequest(BaseModel):
+    """Import translation-memory pairs from a TMX or JSON payload (L4 assets)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    format: Literal["tmx", "json"] = Field(..., description="Payload format")
+    content: str = Field(..., min_length=1, description="Raw TMX XML or JSON text")
+    src_lang: str = Field(
+        ..., min_length=1, description="Fallback source language for rows without one"
+    )
+    tgt_lang: str = Field(
+        ..., min_length=1, description="Fallback target language for rows without one"
+    )
+    provenance: Literal["machine", "human_pe"] = Field(
+        default="machine",
+        description="machine = unverified import (cannot downgrade existing human rows)",
     )
 
 

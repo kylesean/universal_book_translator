@@ -237,6 +237,62 @@ def test_status_reaches_a_terminal_state(authed: TestClient, tmp_path: Path) -> 
     assert status == "completed", f"rehearsal job ended as {status!r}"
 
 
+def _await_terminal(authed: TestClient, job_id: str) -> None:
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        status = authed.get(f"/jobs/{job_id}/status", headers=_AUTH).json()["status"]
+        if status in _TERMINAL_STATUSES:
+            return
+        time.sleep(0.2)
+    raise AssertionError(f"job {job_id} never reached a terminal state")
+
+
+def _ids(body: str) -> list[int]:
+    return [int(line.split(": ", 1)[1]) for line in body.splitlines() if line.startswith("id: ")]
+
+
+def test_stream_frames_carry_ids_and_replay_from_a_cursor(
+    authed: TestClient, tmp_path: Path
+) -> None:
+    # A finished rehearsal job gives a bounded, deterministic stream.
+    doc = _write_doc(tmp_path)
+    job_id = authed.post("/jobs/submit", json={"input_path": str(doc)}, headers=_AUTH).json()[
+        "job_id"
+    ]
+    _await_terminal(authed, job_id)
+
+    first = authed.get(f"/jobs/{job_id}/stream", headers=_AUTH)
+    assert first.status_code == 200
+    assert first.headers["content-type"].startswith("text/event-stream")
+    assert "event: progress" in first.text
+    ids = _ids(first.text)
+    assert ids, "the stream must stamp each frame with an id: cursor"
+
+    # Reconnecting with a cursor replays the missed frames before the snapshot.
+    replayed = authed.get(f"/jobs/{job_id}/stream?last_event_id=0", headers=_AUTH)
+    replay_ids = _ids(replayed.text)
+    assert replay_ids[: len(ids)] == ids
+    assert len(replay_ids) > len(ids)  # ...then a fresh snapshot follows
+
+
+def test_stream_rejects_an_unknown_job(authed: TestClient) -> None:
+    assert authed.get("/jobs/nosuchjob00/stream", headers=_AUTH).status_code == 404
+
+
+def test_resume_rejects_a_completed_job(authed: TestClient, tmp_path: Path) -> None:
+    doc = _write_doc(tmp_path)
+    job_id = authed.post("/jobs/submit", json={"input_path": str(doc)}, headers=_AUTH).json()[
+        "job_id"
+    ]
+    _await_terminal(authed, job_id)
+    # Only a failed/cancelled job resumes; a completed one is a 409.
+    assert authed.post(f"/jobs/{job_id}/resume", headers=_AUTH).status_code == 409
+
+
+def test_resume_unknown_job_is_404(authed: TestClient) -> None:
+    assert authed.post("/jobs/nosuchjob00/resume", headers=_AUTH).status_code == 404
+
+
 def test_status_of_unknown_job_is_404(authed: TestClient) -> None:
     response = authed.get("/jobs/does-not-exist/status", headers=_AUTH)
     assert response.status_code == 404

@@ -70,6 +70,10 @@ export interface paths {
          *     console still lists finished jobs, and overlays live jobs with the
          *     manager's in-memory progress (fresher than the ``job_meta`` row a run
          *     only finalizes at the end).
+         *
+         *     ``GET /jobs`` is also the console's Mission Control URL, so a browser
+         *     navigation (``Accept: text/html``) is answered with the SPA shell and
+         *     the client router resolves the screen; API clients get the JSON queue.
          */
         get: operations["list_jobs_jobs_get"];
         put?: never;
@@ -94,6 +98,34 @@ export interface paths {
          * @description Cancel an in-flight job (idempotent: terminal jobs return as-is).
          */
         post: operations["cancel_job_jobs__job_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/jobs/{job_id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resume Job
+         * @description Re-run a failed/cancelled job from its ledger checkpoints (PRD §4.2.4).
+         *
+         *     The pipeline resumes from the blocks still pending in the ledger, so no
+         *     finished segment is re-translated. Resume reuses the *original* request
+         *     (kept on the in-memory record), which keeps the run-identity guard happy
+         *     — a reconstructed request would silently drop knobs and could be refused
+         *     as a different profile/engine. That makes this a same-session recovery
+         *     (the network-drop case); a job whose record is gone after a restart must
+         *     be resubmitted instead.
+         */
+        post: operations["resume_job_jobs__job_id__resume_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -130,7 +162,9 @@ export interface paths {
          *
          *     Both deployment modes emit that one contract (see ``_progress_frame`` /
          *     ``_terminal_frame``); the payload never depends on how the server was
-         *     started.
+         *     started. Every frame carries an ``id:`` cursor, so a client reconnecting
+         *     with ``Last-Event-ID`` (header or ``?last_event_id=``) receives the
+         *     frames it missed before the live stream resumes (PRD §9.2).
          */
         get: operations["stream_progress_jobs__job_id__stream_get"];
         put?: never;
@@ -448,6 +482,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/system/info": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * System Info
+         * @description The console's security-boundary panel (real host + allowed roots).
+         *
+         *     Reports the host this request reached (loopback vs exposed), whether the
+         *     API-key gate is on, and the filesystem roots ``resolve_secure_path``
+         *     actually enforces — so the panel shows the live policy, not a hardcoded
+         *     sample.
+         */
+        get: operations["system_info_system_info_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/assets/glossary": {
         parameters: {
             query?: never;
@@ -462,6 +521,26 @@ export interface paths {
         post: operations["upsert_glossary_term_assets_glossary_post"];
         /** Delete Glossary Term */
         delete: operations["delete_glossary_term_assets_glossary_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/assets/glossary/conflicts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Glossary Conflicts
+         * @description Sources configured with more than one target rendering (PRD §4.4.2).
+         */
+        get: operations["get_glossary_conflicts_assets_glossary_conflicts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -495,6 +574,31 @@ export interface paths {
         put?: never;
         /** Evict Translation Memory */
         post: operations["evict_translation_memory_assets_tm_evict_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/assets/tm/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Translation Memory
+         * @description Import TMX/JSON pairs into the shared TM (machine provenance by default).
+         *
+         *     An import is unverified, so the default ``machine`` provenance cannot
+         *     downgrade an existing ``human_pe`` row (the store's writeback enforces
+         *     that). Parsing is strict: a malformed payload is a 422, not a silent
+         *     empty import.
+         */
+        post: operations["import_translation_memory_assets_tm_import_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1177,6 +1281,76 @@ export interface components {
             target_text: string;
         };
         /**
+         * SystemInfoResponse
+         * @description The console's security-boundary panel: where this server is reachable and
+         *     what it is allowed to touch.
+         */
+        SystemInfoResponse: {
+            /** Version */
+            version: string;
+            /**
+             * Host
+             * @description Host this request reached (client-visible)
+             */
+            host: string;
+            /**
+             * Is Loopback
+             * @description True when the request arrived on a loopback host
+             */
+            is_loopback: boolean;
+            /**
+             * Auth Enabled
+             * @description True when an API key gate is configured
+             */
+            auth_enabled: boolean;
+            /**
+             * Allowed Bases
+             * @description Filesystem roots the server will read/write
+             */
+            allowed_bases: string[];
+            /** Db Dir */
+            db_dir: string;
+            /**
+             * Job Mode
+             * @description embedded (in-process) or queue (worker-drained)
+             */
+            job_mode: string;
+        };
+        /**
+         * TMImportRequest
+         * @description Import translation-memory pairs from a TMX or JSON payload (L4 assets).
+         */
+        TMImportRequest: {
+            /**
+             * Format
+             * @description Payload format
+             * @enum {string}
+             */
+            format: "tmx" | "json";
+            /**
+             * Content
+             * @description Raw TMX XML or JSON text
+             */
+            content: string;
+            /**
+             * Src Lang
+             * @description Fallback source language for rows without one
+             */
+            src_lang: string;
+            /**
+             * Tgt Lang
+             * @description Fallback target language for rows without one
+             */
+            tgt_lang: string;
+            /**
+             * Provenance
+             * @description machine = unverified import (cannot downgrade existing human rows)
+             * @default machine
+             * @enum {string}
+             */
+            provenance: "machine" | "human_pe";
+        };
+        /**
          * TMevictRequest
          * @description Translation-memory rows to evict, by id.
          */
@@ -1398,6 +1572,40 @@ export interface operations {
                     "application/json": {
                         [key: string]: string;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resume_job_jobs__job_id__resume_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-ubt-tenant"?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
@@ -2007,6 +2215,37 @@ export interface operations {
             };
         };
     };
+    system_info_system_info_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemInfoResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_glossary_assets_glossary_get: {
         parameters: {
             query?: never;
@@ -2106,6 +2345,37 @@ export interface operations {
             };
         };
     };
+    get_glossary_conflicts_assets_glossary_conflicts_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_translation_memory_assets_tm_get: {
         parameters: {
             query?: {
@@ -2154,6 +2424,41 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["TMevictRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_translation_memory_assets_tm_import_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TMImportRequest"];
             };
         };
         responses: {

@@ -1,14 +1,17 @@
 import React, { useCallback, useEffect, useState } from 'react'
-import { Search, Plus, Trash2, Loader2, AlertTriangle } from 'lucide-react'
+import { Search, Plus, Trash2, Loader2, AlertTriangle, CheckCircle2, Upload } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import {
   getGlossary,
+  getGlossaryConflicts,
   upsertGlossaryTerm,
   deleteGlossaryTerm,
   listTm,
   evictTm,
+  importTm,
   type GlossaryTerm,
+  type GlossaryConflict,
   type TmEntry,
 } from '@/api/client'
 import { useI18n } from '@/i18n/I18nContext'
@@ -22,6 +25,7 @@ export function LanguageAssetsView() {
 
   // Glossary
   const [terms, setTerms] = useState<GlossaryTerm[]>([])
+  const [conflicts, setConflicts] = useState<GlossaryConflict[]>([])
   const [glossaryError, setGlossaryError] = useState<string | null>(null)
   const [glossaryLoading, setGlossaryLoading] = useState(false)
   const [newSource, setNewSource] = useState('')
@@ -33,12 +37,23 @@ export function LanguageAssetsView() {
   const [tmTotal, setTmTotal] = useState(0)
   const [tmLoading, setTmLoading] = useState(false)
   const [tmError, setTmError] = useState<string | null>(null)
+  const [importFormat, setImportFormat] = useState<'tmx' | 'json'>('tmx')
+  const [importContent, setImportContent] = useState('')
+  const [importSrcLang, setImportSrcLang] = useState('en')
+  const [importTgtLang, setImportTgtLang] = useState('zh')
+  const [importing, setImporting] = useState(false)
+  const [importNotice, setImportNotice] = useState<string | null>(null)
 
   const loadGlossary = useCallback(async () => {
     setGlossaryLoading(true)
     setGlossaryError(null)
     try {
-      setTerms(await getGlossary())
+      const [loadedTerms, loadedConflicts] = await Promise.all([
+        getGlossary(),
+        getGlossaryConflicts().catch(() => [] as GlossaryConflict[]),
+      ])
+      setTerms(loadedTerms)
+      setConflicts(loadedConflicts)
     } catch (err) {
       setGlossaryError(err instanceof Error ? err.message : 'Failed to load glossary')
     } finally {
@@ -96,6 +111,28 @@ export function LanguageAssetsView() {
       setTmTotal((prev) => Math.max(0, prev - 1))
     } catch (err) {
       setTmError(err instanceof Error ? err.message : 'Failed to evict entry')
+    }
+  }
+
+  const handleImport = async () => {
+    if (!importContent.trim() || importing) return
+    setImporting(true)
+    setTmError(null)
+    setImportNotice(null)
+    try {
+      const res = await importTm({
+        format: importFormat,
+        content: importContent,
+        src_lang: importSrcLang,
+        tgt_lang: importTgtLang,
+      })
+      setImportNotice(t.assets.importDone.replace('{n}', String(res.imported)))
+      setImportContent('')
+      await loadTm()
+    } catch (err) {
+      setTmError(err instanceof Error ? err.message : 'Failed to import translation memory')
+    } finally {
+      setImporting(false)
     }
   }
 
@@ -174,6 +211,36 @@ export function LanguageAssetsView() {
               {glossaryError}
             </div>
           )}
+
+          <div className="p-3.5 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] shadow-2xs space-y-2">
+            <div className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
+              {t.assets.conflictsTitle}
+            </div>
+            {conflicts.length === 0 ? (
+              <div className="text-xs text-[var(--ink-muted)] flex items-center gap-2">
+                <CheckCircle2 className="h-3.5 w-3.5 text-[#15803d]" />
+                {t.assets.noConflicts}
+              </div>
+            ) : (
+              <ul className="space-y-1">
+                {conflicts.map((conflict) => (
+                  <li
+                    key={conflict.source}
+                    className="text-xs flex items-center gap-2 text-[#b45309]"
+                  >
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                    <span className="font-mono font-bold text-[var(--ink-primary)]">
+                      {conflict.source}
+                    </span>
+                    <span className="text-[var(--ink-muted)]">
+                      {t.assets.conflictTargets}:
+                    </span>
+                    <span className="font-mono">{conflict.targets.join(' / ')}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
 
           <div className="rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] overflow-hidden shadow-2xs">
             <div className="h-10 px-3.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] flex items-center justify-between gap-3">
@@ -254,6 +321,70 @@ export function LanguageAssetsView() {
               {tmError}
             </div>
           )}
+          <div className="p-3.5 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] shadow-2xs space-y-2.5">
+            <div className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
+              {t.assets.importTitle}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex bg-[var(--paper-subsurface)] p-0.5 rounded-[4px] border border-[var(--paper-border)]">
+                {(['tmx', 'json'] as const).map((fmt) => (
+                  <button
+                    key={fmt}
+                    onClick={() => setImportFormat(fmt)}
+                    className={`px-2.5 py-1 text-xs rounded-[3px] font-medium transition-colors ${
+                      importFormat === fmt
+                        ? 'bg-[var(--paper-surface)] text-[var(--ink-primary)] font-bold shadow-2xs'
+                        : 'text-[var(--ink-muted)] hover:text-[var(--ink-primary)]'
+                    }`}
+                  >
+                    {fmt.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+              <span className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)]">
+                {t.assets.importLangs}
+              </span>
+              <input
+                type="text"
+                value={importSrcLang}
+                onChange={(e) => setImportSrcLang(e.target.value)}
+                className="h-7 w-16 rounded-[4px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2 text-xs font-mono text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none"
+              />
+              <span className="text-[var(--ink-muted)]">→</span>
+              <input
+                type="text"
+                value={importTgtLang}
+                onChange={(e) => setImportTgtLang(e.target.value)}
+                className="h-7 w-16 rounded-[4px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2 text-xs font-mono text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none"
+              />
+              {importNotice && (
+                <span className="text-[#15803d] text-[11px] font-medium">{importNotice}</span>
+              )}
+            </div>
+            <textarea
+              value={importContent}
+              onChange={(e) => setImportContent(e.target.value)}
+              placeholder={t.assets.importContent}
+              rows={4}
+              className="w-full rounded-[4px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 py-2 text-[11px] font-mono text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none resize-y placeholder:text-[var(--ink-muted)]"
+            />
+            <div className="flex justify-end">
+              <Button
+                onClick={handleImport}
+                variant="primary"
+                size="sm"
+                disabled={!importContent.trim() || importing}
+              >
+                {importing ? (
+                  <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                ) : (
+                  <Upload className="h-3.5 w-3.5 mr-1" />
+                )}
+                {importing ? t.assets.importing : t.assets.importBtn}
+              </Button>
+            </div>
+          </div>
+
           <div className="rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] overflow-hidden shadow-2xs">
             <div className="h-10 px-3.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] flex items-center justify-between">
               <span className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">

@@ -12,6 +12,7 @@ export type JobSubmitResponse = paths['/jobs/submit']['post']['responses']['202'
 export type JobStatusResponse = paths['/jobs/{job_id}/status']['get']['responses']['200']['content']['application/json']
 export type JobSummary = paths['/jobs']['get']['responses']['200']['content']['application/json']['jobs'][number]
 export type ModelProfile = paths['/api/v1/model-profiles']['get']['responses']['200']['content']['application/json'][number]
+export type SystemInfo = paths['/system/info']['get']['responses']['200']['content']['application/json']
 
 export interface DeliverableItem {
   key: string
@@ -126,6 +127,18 @@ export async function cancelJob(jobId: string): Promise<void> {
   if (!res.ok) throw new Error(`Failed to cancel job: ${res.statusText}`)
 }
 
+/** Re-run a failed/cancelled job from its ledger checkpoints (embedded mode). */
+export async function resumeJob(jobId: string): Promise<{ job_id: string; status: string }> {
+  const res = await fetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}/resume`, {
+    method: 'POST',
+  })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(body.detail || 'Failed to resume job')
+  }
+  return res.json()
+}
+
 /** The job queue: every ledger under db_dir, newest first. */
 export async function listJobs(limit = 200): Promise<JobSummary[]> {
   const res = await fetch(`${BASE_URL}/jobs?limit=${limit}`)
@@ -149,47 +162,87 @@ export async function getVisualReport(jobId: string): Promise<Record<string, unk
 //: Terminal SSE event names the backend emits (``event: <status>``).
 const TERMINAL_EVENTS = ['completed', 'failed', 'cancelled'] as const
 
+//: Reconnect backoff bounds (PRD §9.2): 1s, 2s, 4s … capped at 30s.
+const _RECONNECT_BASE_MS = 1000
+const _RECONNECT_MAX_MS = 30000
+
 export function subscribeJobProgress(
   jobId: string,
   onFrame: (frame: ProgressStreamFrame) => void,
-  onError?: (err: Event) => void
+  onError?: (err: Event) => void,
+  onConnectionChange?: (connected: boolean) => void
 ): () => void {
   // The backend serves the stream at /jobs/{id}/stream and frames it as named
   // SSE events ("event: progress" then one terminal "event: <status>"). An
   // EventSource `onmessage` only fires for the unnamed default event, so the
   // stream must be subscribed per event name.
-  const url = `${BASE_URL}/jobs/${encodeURIComponent(jobId)}/stream`
-  const es = new EventSource(url)
+  //
+  // Reconnection is manual so it can back off exponentially and carry the
+  // cursor: a native EventSource retries on a fixed cadence and cannot set
+  // Last-Event-ID on a fresh connection, so the missed frames are lost. We
+  // remember the last `id:` and pass it back as `?last_event_id=`.
   let done = false
+  let es: EventSource | null = null
+  let lastEventId = ''
+  let attempt = 0
+  let timer: ReturnType<typeof setTimeout> | null = null
 
-  const dispatch = (event: MessageEvent) => {
-    try {
-      onFrame({ job_id: jobId, ...JSON.parse(event.data) })
-    } catch {
-      onFrame({ job_id: jobId })
+  const open = () => {
+    if (done) return
+    const base = `${BASE_URL}/jobs/${encodeURIComponent(jobId)}/stream`
+    const url = lastEventId ? `${base}?last_event_id=${encodeURIComponent(lastEventId)}` : base
+    const source = new EventSource(url)
+    es = source
+
+    const remember = (event: MessageEvent) => {
+      if (event.lastEventId) lastEventId = event.lastEventId
+    }
+
+    const dispatch = (event: MessageEvent) => {
+      remember(event)
+      try {
+        onFrame({ job_id: jobId, ...JSON.parse(event.data) })
+      } catch {
+        onFrame({ job_id: jobId })
+      }
+    }
+
+    const onTerminal = (event: MessageEvent) => {
+      done = true
+      remember(event)
+      dispatch(event)
+      source.close()
+    }
+
+    source.addEventListener('progress', dispatch as EventListener)
+    for (const name of TERMINAL_EVENTS) {
+      source.addEventListener(name, onTerminal as EventListener)
+    }
+
+    source.onopen = () => {
+      attempt = 0
+      onConnectionChange?.(true)
+    }
+
+    source.onerror = (err) => {
+      // A close after a terminal frame also fires onerror; do not report that as
+      // a stream failure.
+      if (done) return
+      onConnectionChange?.(false)
+      if (onError) onError(err)
+      source.close()
+      attempt += 1
+      const delay = Math.min(_RECONNECT_MAX_MS, _RECONNECT_BASE_MS * 2 ** (attempt - 1))
+      timer = setTimeout(open, delay)
     }
   }
 
-  const onTerminal = (event: MessageEvent) => {
-    done = true
-    dispatch(event)
-    es.close()
-  }
-
-  es.addEventListener('progress', dispatch as EventListener)
-  for (const name of TERMINAL_EVENTS) {
-    es.addEventListener(name, onTerminal as EventListener)
-  }
-
-  es.onerror = (err) => {
-    // A close after a terminal frame also fires onerror; do not report that as
-    // a stream failure.
-    if (!done && onError) onError(err)
-  }
+  open()
 
   return () => {
     done = true
-    es.close()
+    if (timer) clearTimeout(timer)
+    es?.close()
   }
 }
 
@@ -269,6 +322,39 @@ export async function evictTm(ids: number[]): Promise<number> {
   if (!res.ok) throw new Error(`Failed to evict TM entries: ${res.statusText}`)
   const data = await res.json()
   return data.removed ?? 0
+}
+
+export interface GlossaryConflict {
+  source: string
+  targets: string[]
+}
+
+/** Sources configured with more than one target rendering. */
+export async function getGlossaryConflicts(): Promise<GlossaryConflict[]> {
+  const res = await fetch(`${BASE_URL}/assets/glossary/conflicts`)
+  if (!res.ok) throw new Error(`Failed to load glossary conflicts: ${res.statusText}`)
+  const data = await res.json()
+  return data.conflicts ?? []
+}
+
+/** Import TMX/JSON pairs into the shared translation memory. */
+export async function importTm(payload: {
+  format: 'tmx' | 'json'
+  content: string
+  src_lang: string
+  tgt_lang: string
+  provenance?: 'machine' | 'human_pe'
+}): Promise<{ parsed: number; imported: number }> {
+  const res = await fetch(`${BASE_URL}/assets/tm/import`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(body.detail || 'Failed to import translation memory')
+  }
+  return res.json()
 }
 
 // --------------------------------------------------------------------------- //
@@ -432,5 +518,12 @@ export async function getDoctor(probe = false): Promise<DoctorReport> {
 export async function listModelProfiles(): Promise<ModelProfile[]> {
   const res = await fetch(`${BASE_URL}/api/v1/model-profiles`)
   if (!res.ok) throw new Error(`Failed to load model profiles: ${res.statusText}`)
+  return res.json()
+}
+
+/** The live security boundary: reachable host, auth gate, and allowed roots. */
+export async function getSystemInfo(): Promise<SystemInfo> {
+  const res = await fetch(`${BASE_URL}/system/info`)
+  if (!res.ok) throw new Error(`Failed to load system info: ${res.statusText}`)
   return res.json()
 }

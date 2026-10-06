@@ -21,9 +21,13 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from ubt import __version__
 from ubt.api.assets import (
     GlossaryFormatError,
+    TMImportError,
     add_glossary_term,
+    detect_glossary_conflicts,
     evict_tm_entries,
+    import_tm_entries,
     list_tm_entries,
+    parse_tm_payload,
     read_glossary_terms,
     remove_glossary_term,
 )
@@ -38,8 +42,10 @@ from ubt.api.models import (
     JobSubmitRequest,
     JobSubmitResponse,
     SegmentEditRequest,
+    SystemInfoResponse,
     TermPropagationRequest,
     TMevictRequest,
+    TMImportRequest,
 )
 from ubt.api.review import (
     ISSUE_KINDS,
@@ -64,6 +70,7 @@ from ubt.api.security import (
     validate_job_id,
     verify_api_key,
 )
+from ubt.api.sse_replay import SseReplayBuffer
 from ubt.core.config import MOCK_API_KEY, UBTConfig
 from ubt.core.engine.events import TranslationProgressEvent
 from ubt.core.engine.job_queue import TERMINAL_JOB_STATUSES, JobQueue, JobStatus
@@ -977,6 +984,62 @@ def create_app(
         task.add_done_callback(_background_tasks.discard)
         return {"job_id": valid_id, "status": JobStatus.CANCELLED}
 
+    @api_app.post("/jobs/{job_id}/resume", tags=["Jobs"])
+    async def resume_job(
+        job_id: str, x_ubt_tenant: str | None = Header(default=None)
+    ) -> JSONResponse:
+        """Re-run a failed/cancelled job from its ledger checkpoints (PRD §4.2.4).
+
+        The pipeline resumes from the blocks still pending in the ledger, so no
+        finished segment is re-translated. Resume reuses the *original* request
+        (kept on the in-memory record), which keeps the run-identity guard happy
+        — a reconstructed request would silently drop knobs and could be refused
+        as a different profile/engine. That makes this a same-session recovery
+        (the network-drop case); a job whose record is gone after a restart must
+        be resubmitted instead.
+        """
+        valid_id = validate_job_id(job_id)
+        if not await _tenant_allows_async(valid_id, _tenant_from_header(x_ubt_tenant)):
+            raise _cross_tenant_404(valid_id)
+        if job_queue is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Resume is available in embedded mode; in queue mode resubmit "
+                    "the job to have a worker drain its pending blocks."
+                ),
+            )
+        record = manager.get_job(valid_id)
+        if record is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=(
+                    f"Job {valid_id} is not tracked by this server session; "
+                    "resubmit it to resume from its ledger."
+                ),
+            )
+        if record.status not in (JobStatus.FAILED, JobStatus.CANCELLED):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Job is {record.status}; only a failed or cancelled job can resume.",
+            )
+
+        # Never re-fresh (that would discard the checkpoints) and clear the
+        # previous failure so the record restarts clean.
+        record.request = record.request.model_copy(update={"fresh": False})
+        record.error = None
+        record.progress = ProgressSnapshot()
+        record.status = JobStatus.SUBMITTED
+        record.task = asyncio.create_task(manager.execute_job(record, app_config))
+        return JSONResponse(
+            {
+                "job_id": valid_id,
+                "status": record.status,
+                "stream_url": f"/jobs/{valid_id}/stream",
+                "status_url": f"/jobs/{valid_id}/status",
+            }
+        )
+
     @api_app.get(
         "/jobs/{job_id}/status",
         response_model=JobStatusResponse,
@@ -1094,6 +1157,24 @@ def create_app(
             ),
         )
 
+    # Bounded per-job frame history for Last-Event-ID replay (PRD §9.2).
+    sse_replay = SseReplayBuffer()
+    api_app.state.sse_replay = sse_replay
+
+    def _last_event_id(request: Request) -> int | None:
+        """The client's replay cursor, from the SSE header or a query fallback.
+
+        A fresh ``EventSource`` cannot set ``Last-Event-ID`` by hand, so a
+        manually-reconnecting client passes it as ``?last_event_id=``.
+        """
+        raw = request.headers.get("last-event-id") or request.query_params.get("last_event_id")
+        if not raw:
+            return None
+        try:
+            return int(raw)
+        except ValueError:
+            return None
+
     @api_app.get(
         "/jobs/{job_id}/stream",
         response_class=StreamingResponse,
@@ -1106,11 +1187,14 @@ def create_app(
 
         Both deployment modes emit that one contract (see ``_progress_frame`` /
         ``_terminal_frame``); the payload never depends on how the server was
-        started.
+        started. Every frame carries an ``id:`` cursor, so a client reconnecting
+        with ``Last-Event-ID`` (header or ``?last_event_id=``) receives the
+        frames it missed before the live stream resumes (PRD §9.2).
         """
         valid_id = validate_job_id(job_id)
         if not await _tenant_allows_async(valid_id, _tenant_from_header(x_ubt_tenant)):
             raise _cross_tenant_404(valid_id)
+        last_event_id = _last_event_id(request)
         if job_queue is not None:
             initial_job = await asyncio.get_running_loop().run_in_executor(
                 _get_sse_poll_executor(), job_queue.get, valid_id
@@ -1139,6 +1223,8 @@ def create_app(
             async def _queue_events() -> AsyncIterator[str]:
                 last: dict[str, Any] | None = None
                 try:
+                    for frame in sse_replay.replay(valid_id, last_event_id):
+                        yield frame
                     while True:
                         if await request.is_disconnected():
                             break
@@ -1150,13 +1236,18 @@ def create_app(
                         progress_payload = {**ProgressSnapshot().to_payload(), **job.progress}
                         snapshot = {**progress_payload, "status": job.status.value}
                         if snapshot != last:
-                            yield _progress_frame(progress_payload, job.status.value)
+                            yield sse_replay.emit(
+                                valid_id, _progress_frame(progress_payload, job.status.value)
+                            )
                             last = snapshot
                         if job.status in TERMINAL_JOB_STATUSES:
-                            yield _terminal_frame(
-                                job.status.value,
-                                _public_artifact(job.progress.get("output_file")),
-                                job.error,
+                            yield sse_replay.emit(
+                                valid_id,
+                                _terminal_frame(
+                                    job.status.value,
+                                    _public_artifact(job.progress.get("output_file")),
+                                    job.error,
+                                ),
                             )
                             break
                         await asyncio.sleep(1.0)
@@ -1205,15 +1296,24 @@ def create_app(
 
         async def event_generator() -> AsyncIterator[str]:
             try:
+                for frame in sse_replay.replay(valid_id, last_event_id):
+                    yield frame
                 # A late subscriber gets one current snapshot, not a replay of
                 # the raw event log: the queue-mode branch emits this exact
                 # shape, and one endpoint must not answer two schemas depending
                 # on the deployment mode.
-                yield _progress_frame(record.progress.model_dump(), record.status)
+                yield sse_replay.emit(
+                    valid_id, _progress_frame(record.progress.model_dump(), record.status)
+                )
 
                 if record.status in TERMINAL_JOB_STATUSES and queue.empty():
-                    yield _terminal_frame(
-                        record.status, _public_artifact(record.progress.output_file), record.error
+                    yield sse_replay.emit(
+                        valid_id,
+                        _terminal_frame(
+                            record.status,
+                            _public_artifact(record.progress.output_file),
+                            record.error,
+                        ),
                     )
                     return
 
@@ -1225,23 +1325,31 @@ def create_app(
                         event = await asyncio.wait_for(queue.get(), timeout=1.0)
                     except TimeoutError:
                         if record.status in TERMINAL_JOB_STATUSES:
-                            yield _terminal_frame(
-                                record.status,
-                                _public_artifact(record.progress.output_file),
-                                record.error,
+                            yield sse_replay.emit(
+                                valid_id,
+                                _terminal_frame(
+                                    record.status,
+                                    _public_artifact(record.progress.output_file),
+                                    record.error,
+                                ),
                             )
                             break
                         continue
 
                     if event is None:
-                        yield _terminal_frame(
-                            record.status,
-                            _public_artifact(record.progress.output_file),
-                            record.error,
+                        yield sse_replay.emit(
+                            valid_id,
+                            _terminal_frame(
+                                record.status,
+                                _public_artifact(record.progress.output_file),
+                                record.error,
+                            ),
                         )
                         break
 
-                    yield _progress_frame(record.progress.model_dump(), record.status)
+                    yield sse_replay.emit(
+                        valid_id, _progress_frame(record.progress.model_dump(), record.status)
+                    )
             finally:
                 _release_mem_stream_slots()
 
@@ -1919,6 +2027,28 @@ def create_app(
             }
         )
 
+    @api_app.get("/system/info", response_model=SystemInfoResponse, tags=["System"])
+    async def system_info(request: Request) -> dict[str, Any]:
+        """The console's security-boundary panel (real host + allowed roots).
+
+        Reports the host this request reached (loopback vs exposed), whether the
+        API-key gate is on, and the filesystem roots ``resolve_secure_path``
+        actually enforces — so the panel shows the live policy, not a hardcoded
+        sample.
+        """
+        from ubt import __version__
+
+        host = request.url.hostname or ""
+        return {
+            "version": __version__,
+            "host": host,
+            "is_loopback": host in _LOOPBACK_HOSTS,
+            "auth_enabled": bool(app_config.service_api_key.get_secret_value().strip()),
+            "allowed_bases": [str(path) for path in effective_allowed_bases(app_config)],
+            "db_dir": str(app_config.db_dir),
+            "job_mode": app_config.job_mode,
+        }
+
     # -- Language Assets (glossary file + shared translation memory) ----------
     # The glossary is the *operator-configured* external file; the console edits
     # that one file rather than inventing a second terminology store, and never
@@ -1973,6 +2103,16 @@ def create_app(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
         return JSONResponse({"path": path.name, "removed": removed, "terms": terms})
 
+    @api_app.get("/assets/glossary/conflicts", tags=["Assets"])
+    async def get_glossary_conflicts() -> JSONResponse:
+        """Sources configured with more than one target rendering (PRD §4.4.2)."""
+        path = _resolved_glossary_path()
+        try:
+            terms = await asyncio.to_thread(read_glossary_terms, path)
+        except GlossaryFormatError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        return JSONResponse({"conflicts": detect_glossary_conflicts(terms)})
+
     @api_app.get("/assets/tm", tags=["Assets"])
     async def get_translation_memory(
         limit: int = 200,
@@ -1994,6 +2134,31 @@ def create_app(
     async def evict_translation_memory(req: TMevictRequest) -> JSONResponse:
         removed = await asyncio.to_thread(evict_tm_entries, _tm_path(), req.ids)
         return JSONResponse({"removed": removed})
+
+    @api_app.post("/assets/tm/import", tags=["Assets"])
+    async def import_translation_memory(req: TMImportRequest) -> JSONResponse:
+        """Import TMX/JSON pairs into the shared TM (machine provenance by default).
+
+        An import is unverified, so the default ``machine`` provenance cannot
+        downgrade an existing ``human_pe`` row (the store's writeback enforces
+        that). Parsing is strict: a malformed payload is a 422, not a silent
+        empty import.
+        """
+        try:
+            rows = await asyncio.to_thread(parse_tm_payload, req.content, req.format)
+            imported = await asyncio.to_thread(
+                import_tm_entries,
+                _tm_path(),
+                rows,
+                default_src_lang=req.src_lang,
+                default_tgt_lang=req.tgt_lang,
+                provenance=req.provenance,
+            )
+        except TMImportError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+            ) from exc
+        return JSONResponse({"parsed": len(rows), "imported": imported})
 
     static_dir = Path(__file__).resolve().parent / "static"
     if static_dir.exists() and (static_dir / "index.html").exists():

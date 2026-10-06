@@ -199,7 +199,7 @@
           "Jobs"
         ],
         "summary": "List Jobs",
-        "description": "The job queue: every ledger in ``db_dir``, newest first.\n\nReads the durable store (one ``{job_id}.sqlite`` per job) so a restarted\nconsole still lists finished jobs, and overlays live jobs with the\nmanager's in-memory progress (fresher than the ``job_meta`` row a run\nonly finalizes at the end).",
+        "description": "The job queue: every ledger in ``db_dir``, newest first.\n\nReads the durable store (one ``{job_id}.sqlite`` per job) so a restarted\nconsole still lists finished jobs, and overlays live jobs with the\nmanager's in-memory progress (fresher than the ``job_meta`` row a run\nonly finalizes at the end).\n\n``GET /jobs`` is also the console's Mission Control URL, so a browser\nnavigation (``Accept: text/html``) is answered with the SPA shell and\nthe client router resolves the screen; API clients get the JSON queue.",
         "operationId": "list_jobs_jobs_get",
         "parameters": [
           {
@@ -348,6 +348,79 @@
         }
       }
     },
+    "/jobs/{job_id}/resume": {
+      "post": {
+        "tags": [
+          "Jobs"
+        ],
+        "summary": "Resume Job",
+        "description": "Re-run a failed/cancelled job from its ledger checkpoints (PRD \u00a74.2.4).\n\nThe pipeline resumes from the blocks still pending in the ledger, so no\nfinished segment is re-translated. Resume reuses the *original* request\n(kept on the in-memory record), which keeps the run-identity guard happy\n\u2014 a reconstructed request would silently drop knobs and could be refused\nas a different profile/engine. That makes this a same-session recovery\n(the network-drop case); a job whose record is gone after a restart must\nbe resubmitted instead.",
+        "operationId": "resume_job_jobs__job_id__resume_post",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "x-ubt-tenant",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Ubt-Tenant"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/jobs/{job_id}/status": {
       "get": {
         "tags": [
@@ -428,7 +501,7 @@
           "Jobs"
         ],
         "summary": "Stream Progress",
-        "description": "SSE: ``event: progress`` snapshots until one ``event: <status>`` terminal frame.\n\nBoth deployment modes emit that one contract (see ``_progress_frame`` /\n``_terminal_frame``); the payload never depends on how the server was\nstarted.",
+        "description": "SSE: ``event: progress`` snapshots until one ``event: <status>`` terminal frame.\n\nBoth deployment modes emit that one contract (see ``_progress_frame`` /\n``_terminal_frame``); the payload never depends on how the server was\nstarted. Every frame carries an ``id:`` cursor, so a client reconnecting\nwith ``Last-Event-ID`` (header or ``?last_event_id=``) receives the\nframes it missed before the live stream resumes (PRD \u00a79.2).",
         "operationId": "stream_progress_jobs__job_id__stream_get",
         "parameters": [
           {
@@ -1680,6 +1753,56 @@
         }
       }
     },
+    "/system/info": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "System Info",
+        "description": "The console's security-boundary panel (real host + allowed roots).\n\nReports the host this request reached (loopback vs exposed), whether the\nAPI-key gate is on, and the filesystem roots ``resolve_secure_path``\nactually enforces \u2014 so the panel shows the live policy, not a hardcoded\nsample.",
+        "operationId": "system_info_system_info_get",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemInfoResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/assets/glossary": {
       "get": {
         "tags": [
@@ -1797,6 +1920,54 @@
               "title": "Source"
             }
           },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/assets/glossary/conflicts": {
+      "get": {
+        "tags": [
+          "Assets"
+        ],
+        "summary": "Get Glossary Conflicts",
+        "description": "Sources configured with more than one target rendering (PRD \u00a74.4.2).",
+        "operationId": "get_glossary_conflicts_assets_glossary_conflicts_get",
+        "parameters": [
           {
             "name": "x-api-key",
             "in": "header",
@@ -1966,6 +2137,64 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/TMevictRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/assets/tm/import": {
+      "post": {
+        "tags": [
+          "Assets"
+        ],
+        "summary": "Import Translation Memory",
+        "description": "Import TMX/JSON pairs into the shared TM (machine provenance by default).\n\nAn import is unverified, so the default ``machine`` provenance cannot\ndowngrade an existing ``human_pe`` row (the store's writeback enforces\nthat). Parsing is strict: a malformed payload is a 422, not a silent\nempty import.",
+        "operationId": "import_translation_memory_assets_tm_import_post",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TMImportRequest"
               }
             }
           }
@@ -3498,6 +3727,109 @@
         ],
         "title": "SegmentEditRequest",
         "description": "A human post-edit of one block's target text (L3 workbench)."
+      },
+      "SystemInfoResponse": {
+        "properties": {
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "host": {
+            "type": "string",
+            "title": "Host",
+            "description": "Host this request reached (client-visible)"
+          },
+          "is_loopback": {
+            "type": "boolean",
+            "title": "Is Loopback",
+            "description": "True when the request arrived on a loopback host"
+          },
+          "auth_enabled": {
+            "type": "boolean",
+            "title": "Auth Enabled",
+            "description": "True when an API key gate is configured"
+          },
+          "allowed_bases": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Bases",
+            "description": "Filesystem roots the server will read/write"
+          },
+          "db_dir": {
+            "type": "string",
+            "title": "Db Dir"
+          },
+          "job_mode": {
+            "type": "string",
+            "title": "Job Mode",
+            "description": "embedded (in-process) or queue (worker-drained)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "version",
+          "host",
+          "is_loopback",
+          "auth_enabled",
+          "allowed_bases",
+          "db_dir",
+          "job_mode"
+        ],
+        "title": "SystemInfoResponse",
+        "description": "The console's security-boundary panel: where this server is reachable and\nwhat it is allowed to touch."
+      },
+      "TMImportRequest": {
+        "properties": {
+          "format": {
+            "type": "string",
+            "enum": [
+              "tmx",
+              "json"
+            ],
+            "title": "Format",
+            "description": "Payload format"
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Content",
+            "description": "Raw TMX XML or JSON text"
+          },
+          "src_lang": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Src Lang",
+            "description": "Fallback source language for rows without one"
+          },
+          "tgt_lang": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Tgt Lang",
+            "description": "Fallback target language for rows without one"
+          },
+          "provenance": {
+            "type": "string",
+            "enum": [
+              "machine",
+              "human_pe"
+            ],
+            "title": "Provenance",
+            "description": "machine = unverified import (cannot downgrade existing human rows)",
+            "default": "machine"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "format",
+          "content",
+          "src_lang",
+          "tgt_lang"
+        ],
+        "title": "TMImportRequest",
+        "description": "Import translation-memory pairs from a TMX or JSON payload (L4 assets)."
       },
       "TMevictRequest": {
         "properties": {

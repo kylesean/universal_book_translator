@@ -6,18 +6,27 @@ import {
   ShieldCheck,
   SplitSquareVertical,
   Activity,
+  RotateCcw,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import {
   getJobStatus,
   cancelJob,
+  resumeJob,
   listJobs,
   subscribeJobProgress,
   type JobSummary,
   type ProgressStreamFrame,
 } from '@/api/client'
 import { useI18n } from '@/i18n/I18nContext'
+
+type LogLevel = 'INFO' | 'WARN' | 'ERROR'
+
+interface LogEntry {
+  text: string
+  level: LogLevel
+}
 
 export function MissionControl() {
   const { t } = useI18n()
@@ -27,7 +36,10 @@ export function MissionControl() {
   const onSelectJob = (id: string) => navigate(`/jobs/${id}`)
   const onInspectQuality = (id: string) => navigate(`/jobs/${id}/quality`)
   const onOpenReview = (id: string) => navigate(`/jobs/${id}/review`)
-  const [logs, setLogs] = useState<string[]>([])
+  const [logs, setLogs] = useState<LogEntry[]>([])
+  const [logSearch, setLogSearch] = useState('')
+  const [logLevel, setLogLevel] = useState<'ALL' | LogLevel>('ALL')
+  const [autoScroll, setAutoScroll] = useState(true)
   const [isLiveStreaming, setIsLiveStreaming] = useState(false)
   const [statusStr, setStatusStr] = useState<string>('running')
   const [progressPct, setProgressPct] = useState<number>(0)
@@ -36,6 +48,7 @@ export function MissionControl() {
   const [costUsd, setCostUsd] = useState<number>(0)
   const [avgQe, setAvgQe] = useState<number>(0)
   const [jobs, setJobs] = useState<JobSummary[]>([])
+  const [resuming, setResuming] = useState(false)
 
   const logContainerRef = useRef<HTMLDivElement>(null)
 
@@ -82,7 +95,6 @@ export function MissionControl() {
     fetchStatus()
     const timer = setInterval(fetchStatus, 3000)
 
-    setIsLiveStreaming(true)
     const unsubscribe = subscribeJobProgress(
       currentJobId,
       (frame: ProgressStreamFrame) => {
@@ -94,14 +106,15 @@ export function MissionControl() {
         if (typeof frame.estimated_cost_usd === 'number') setCostUsd(frame.estimated_cost_usd)
         if (typeof frame.current_avg_qe === 'number') setAvgQe(frame.current_avg_qe)
 
-        const line =
-          frame.error
-            ? `ERROR ${frame.error}`
-            : `${frame.status ?? 'running'} · ${frame.completed_blocks ?? 0}/${frame.total_blocks ?? 0} blocks · QE ${(frame.current_avg_qe ?? 0).toFixed(3)}`
-        setLogs((prev) => [...prev.slice(-400), line])
+        const level: LogLevel = frame.error ? 'ERROR' : frame.status === 'failed' ? 'ERROR' : 'INFO'
+        const text = frame.error
+          ? `ERROR ${frame.error}`
+          : `${frame.status ?? 'running'} · ${frame.completed_blocks ?? 0}/${frame.total_blocks ?? 0} blocks · QE ${(frame.current_avg_qe ?? 0).toFixed(3)}`
+        setLogs((prev) => [...prev.slice(-400), { text, level }])
       },
-      () => {
-        if (isMounted) setIsLiveStreaming(false)
+      undefined,
+      (connected: boolean) => {
+        if (isMounted) setIsLiveStreaming(connected)
       }
     )
 
@@ -113,18 +126,38 @@ export function MissionControl() {
   }, [currentJobId])
 
   useEffect(() => {
-    if (logContainerRef.current) {
+    if (autoScroll && logContainerRef.current) {
       logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight
     }
-  }, [logs])
+  }, [logs, autoScroll])
 
   const handleCancel = async () => {
     if (!currentJobId) return
     try {
       await cancelJob(currentJobId)
-      setLogs((prev) => [...prev, `[USER_SIGNAL] Compilation aborted by operator.`])
+      setLogs((prev) => [
+        ...prev,
+        { text: '[USER_SIGNAL] Compilation aborted by operator.', level: 'WARN' },
+      ])
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Cancel failed')
+    }
+  }
+
+  const handleResume = async () => {
+    if (!currentJobId) return
+    setResuming(true)
+    try {
+      await resumeJob(currentJobId)
+      setLogs((prev) => [
+        ...prev,
+        { text: '[USER_SIGNAL] Resuming from the last ledger checkpoint.', level: 'INFO' },
+      ])
+      setStatusStr('submitted')
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Resume failed')
+    } finally {
+      setResuming(false)
     }
   }
 
@@ -164,6 +197,12 @@ export function MissionControl() {
         : status === 'needs_human' || status === 'blocked_human'
           ? 'warning'
           : 'info'
+
+  const filteredLogs = logs.filter((entry) => {
+    if (logLevel !== 'ALL' && entry.level !== logLevel) return false
+    if (logSearch && !entry.text.toLowerCase().includes(logSearch.toLowerCase())) return false
+    return true
+  })
 
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden px-8 py-6 space-y-5">
@@ -214,6 +253,13 @@ export function MissionControl() {
             <SplitSquareVertical className="h-3.5 w-3.5 mr-1 text-[var(--ink-secondary)]" />
             {t.mission.openWorkbench}
           </Button>
+
+          {currentJobId && isFailed && (
+            <Button onClick={handleResume} variant="secondary" size="sm" disabled={resuming}>
+              <RotateCcw className={`h-3 w-3 mr-1 ${resuming ? 'animate-spin' : ''}`} />
+              {resuming ? t.mission.resuming : t.mission.resumeCompile}
+            </Button>
+          )}
 
           {currentJobId && !isCompleted && !isFailed && (
             <Button onClick={handleCancel} variant="danger" size="sm">
@@ -394,13 +440,45 @@ export function MissionControl() {
 
       {/* Real-time Compiler Log Output */}
       <div className="flex-1 min-h-0 flex flex-col rounded-lg border border-[var(--paper-border)] bg-[#141517] overflow-hidden shadow-2xs">
-        <div className="h-8 px-3 border-b border-[#23252a] bg-[#1a1b1f] flex items-center justify-between shrink-0">
+        <div className="h-9 px-3 border-b border-[#23252a] bg-[#1a1b1f] flex items-center justify-between gap-3 shrink-0">
           <div className="flex items-center gap-2 text-xs font-mono text-[#a1a1aa]">
             <Terminal className="h-3.5 w-3.5 text-[#a1a1aa]" />
             <span>{t.mission.liveStream}</span>
           </div>
-          <div className="text-[11px] font-mono text-[#71717a]">
-            {logs.length} {t.mission.bufferedLines}
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={logSearch}
+              onChange={(e) => setLogSearch(e.target.value)}
+              placeholder={t.mission.logSearch}
+              className="h-6 w-40 px-2 rounded-[4px] bg-[#141517] border border-[#2a2c31] text-[11px] font-mono text-[#d4d4d8] placeholder:text-[#52525b] focus:outline-none focus:border-[#3f4147]"
+            />
+            <div className="flex bg-[#141517] border border-[#2a2c31] rounded-[4px] p-0.5">
+              {(['ALL', 'INFO', 'WARN', 'ERROR'] as const).map((level) => (
+                <button
+                  key={level}
+                  onClick={() => setLogLevel(level)}
+                  className={`px-1.5 py-0.5 text-[10px] font-mono rounded-[3px] transition-colors ${
+                    logLevel === level
+                      ? 'bg-[#2a2c31] text-[#e4e4e7]'
+                      : 'text-[#71717a] hover:text-[#a1a1aa]'
+                  }`}
+                >
+                  {level}
+                </button>
+              ))}
+            </div>
+            <label className="flex items-center gap-1 text-[10px] font-mono text-[#71717a] cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={autoScroll}
+                onChange={(e) => setAutoScroll(e.target.checked)}
+              />
+              {t.mission.autoScroll}
+            </label>
+            <div className="text-[11px] font-mono text-[#71717a]">
+              {filteredLogs.length}/{logs.length} {t.mission.bufferedLines}
+            </div>
           </div>
         </div>
 
@@ -410,27 +488,24 @@ export function MissionControl() {
         >
           {logs.length === 0 ? (
             <div className="text-[#71717a] italic">{t.mission.waitingStream}</div>
+          ) : filteredLogs.length === 0 ? (
+            <div className="text-[#71717a] italic">{t.mission.noMatch}</div>
           ) : (
-            logs.map((log, idx) => {
+            filteredLogs.map((log, idx) => {
               const lineNo = (idx + 1).toString().padStart(3, '0')
-              const isErr = log.includes('ERROR') || log.includes('fail')
-              const isWarn = log.includes('WARNING')
-              const isOk = log.includes('completed') || log.includes('success')
               return (
                 <div key={idx} className="flex gap-3 hover:bg-[#1c1d22] px-1 py-0.5 rounded">
                   <span className="text-[#52525b] select-none text-[11px]">{lineNo}</span>
                   <span
                     className={
-                      isErr
+                      log.level === 'ERROR'
                         ? 'text-[#f87171]'
-                        : isWarn
-                        ? 'text-[#fbbf24]'
-                        : isOk
-                        ? 'text-[#4ade80]'
-                        : 'text-[#e4e4e7]'
+                        : log.level === 'WARN'
+                          ? 'text-[#fbbf24]'
+                          : 'text-[#e4e4e7]'
                     }
                   >
-                    {log}
+                    {log.text}
                   </span>
                 </div>
               )

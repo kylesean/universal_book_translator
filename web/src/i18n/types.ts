@@ -105,6 +105,11 @@ export interface TranslationDictionary {
     colCost: string
     colUpdated: string
     selectJob: string
+    logSearch: string
+    autoScroll: string
+    noMatch: string
+    resumeCompile: string
+    resuming: string
   }
   quality: {
     title: string
@@ -175,6 +180,15 @@ export interface TranslationDictionary {
     exportTm: string
     bibleTitle: string
     bibleDesc: string
+    conflictsTitle: string
+    conflictTargets: string
+    noConflicts: string
+    importTitle: string
+    importContent: string
+    importLangs: string
+    importBtn: string
+    importing: string
+    importDone: string
   }
   doctor: {
     title: string
@@ -186,6 +200,13 @@ export interface TranslationDictionary {
     listenInterface: string
     allowedRoots: string
     forbiddenPaths: string
+    authGate: string
+    dbDir: string
+    jobMode: string
+    enabled: string
+    disabled: string
+    exposedWarning: string
+    loopbackOnly: string
   }
   review: {
     title: string
