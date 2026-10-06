@@ -805,7 +805,7 @@ def _attest_delivery(
     # Lazy: a module-level ubt.pipeline edge recreates the core.engine <-> pipeline cycle.
     from ubt.layout.theme import resolve_theme
     from ubt.pipeline.attest import attest_blocks
-    from ubt.pipeline.delivery import delivery_document, delivery_translations
+    from ubt.pipeline.delivery import delivery_translations
     from ubt.render.typst_backend import TypstBackend
     from ubt.verify.verifier import build_verifiers
 
@@ -818,8 +818,7 @@ def _attest_delivery(
         build_verifiers(services.fast_pass),
         doc_id=doc_id,
     )
-    document = delivery_document(blocks, doc_id=doc_id)
-    return document, translations, report
+    return translations, report
 
 
 def _resolve_render_engine(
@@ -1308,7 +1307,7 @@ async def run_export_stage(
     # same one). The contract below is then projected from this same plan -- one
     # realize() pass, not a second account.
     render_engine = _resolve_render_engine(ctx, adapter, final_blocks, render)
-    document, translations, attestations = await asyncio.to_thread(
+    translations, attestations = await asyncio.to_thread(
         _attest_delivery, ctx, services, final_blocks, render_engine
     )
     # Lazy: a module-level ubt.pipeline edge recreates the core.engine <-> pipeline cycle.
@@ -1359,20 +1358,25 @@ async def run_export_stage(
     # best-effort: it cannot affect the artifact, only add a file beside it.
     await asyncio.to_thread(_write_xliff_companion, ctx, rendered_path, final_blocks)
 
-    # HTML / EPUB views of the same realized delivery (semantic document delivery view).
-    # Read-only, best-effort companions; a view failure never sinks the PDF.
-    await asyncio.to_thread(
-        _write_html_view, ctx, rendered_path, document, translations, attestations
-    )
-    await asyncio.to_thread(
-        _write_epub_view, ctx, rendered_path, document, translations, attestations
-    )
+    # HTML / EPUB views and attestation shadow of the realized delivery.
+    # Read-only, best-effort companions; document is built lazily only when requested.
+    if (
+        ctx.config.emit_html_companion
+        or ctx.config.emit_epub_companion
+        or ctx.config.emit_attestation_shadow
+    ):
+        from ubt.pipeline.delivery import delivery_document
 
-    # Attestation account + artifact-level agreement, beside the artifact
-    # (pre-render decision plan). Read-only, best-effort.
-    await asyncio.to_thread(
-        _write_attestation_shadow, ctx, rendered_path, document, translations, attestations
-    )
+        document = await asyncio.to_thread(delivery_document, final_blocks, doc_id=actual_job_id)
+        await asyncio.to_thread(
+            _write_html_view, ctx, rendered_path, document, translations, attestations
+        )
+        await asyncio.to_thread(
+            _write_epub_view, ctx, rendered_path, document, translations, attestations
+        )
+        await asyncio.to_thread(
+            _write_attestation_shadow, ctx, rendered_path, document, translations, attestations
+        )
 
     # Post-render visual gate (self-healing loop): T0/T1 deterministic +
     # optional pixel confirmation + sampled T2 VLM + ReflowControlLoop.

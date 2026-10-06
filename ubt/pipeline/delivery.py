@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from ubt.analyze.bridge import document_from_blocks
 from ubt.core.config import INPLACE_ENGINES, canonical_render_engine
 from ubt.core.content.adapt import kept_in_source
 from ubt.core.ir.models import BlockType, IRBlock
@@ -28,7 +27,28 @@ _ASSET_TYPES = (BlockType.FORMULA, BlockType.TABLE, BlockType.IMAGE)
 
 def delivery_document(blocks: Sequence[IRBlock], *, doc_id: str = "") -> Document:
     """The typed :class:`Document` the delivery's blocks describe."""
-    return document_from_blocks(list(blocks), doc_id=doc_id)
+    from ubt.model.ast import ElementT, Region, RegionKind
+    from ubt.model.span import CanonicalSource
+
+    ordered = sorted(blocks, key=lambda block: block.spine_index)
+    regions: list[Region] = []
+    current_kind = RegionKind.BODY
+    current: list[ElementT] = []
+    for block in ordered:
+        element = block.element
+        kind = element.region
+        if current and kind is not current_kind:
+            regions.append(
+                Region(id=f"r{len(regions)}", kind=current_kind, elements=tuple(current))
+            )
+            current = []
+        current_kind = kind
+        current.append(element)
+    if current:
+        regions.append(Region(id=f"r{len(regions)}", kind=current_kind, elements=tuple(current)))
+    canonical_text = "\n".join(b.source_text for b in ordered)
+    source = CanonicalSource(doc_id=doc_id, text=canonical_text)
+    return Document(source=source, regions=tuple(regions))
 
 
 def delivery_translations(blocks: Sequence[IRBlock], *, engine: str) -> dict[str, str]:

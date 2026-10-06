@@ -2045,7 +2045,7 @@ class LayerCompositor:
         *,
         shared_forms: set[tuple[int, int]],
     ) -> bool:
-        """Mask and stamp every compiled fragment for one page; False descends them."""
+        apply_micro_mask = False
         if self._strip:
             stats = strip_page_text_pikepdf(
                 page,
@@ -2056,21 +2056,24 @@ class LayerCompositor:
             )
             # A strip that could not remove the source text (a page-shared
             # form left intact, or a form whose resources were unreadable or
-            # failed to recurse so its text survives) must not be covered by
-            # an overlay, or the text would double. Descend to the source.
+            # failed to recurse so its text survives): fall back to defensive
+            # micro-masking instead of dropping the page back to untranslated source.
             if stats.aborted or stats.shared_forms_skipped or stats.forms_survived:
-                return False
+                apply_micro_mask = True
         else:
+            apply_micro_mask = True
+
+        if apply_micro_mask:
             red, green, blue = self._background
+            rect_ops = []
             for item in items:
                 x0, y0, x1, y1 = item.mask_bbox or item.bbox
-                mask = pikepdf.Stream(
-                    composed,
-                    f"q {red} {green} {blue} rg {x0} {y0} {x1 - x0} {y1 - y0} re f Q".encode(
-                        "ascii"
-                    ),
+                rect_ops.append(f"{x0:.2f} {y0:.2f} {x1 - x0:.2f} {y1 - y0:.2f} re")
+            if rect_ops:
+                combined_mask = f"q {red} {green} {blue} rg {' '.join(rect_ops)} f Q".encode(
+                    "ascii"
                 )
-                page.contents_add(mask, prepend=False)
+                page.contents_add(pikepdf.Stream(composed, combined_mask), prepend=False)
         media = [float(v) for v in page.MediaBox]
         mb_x0, mb_y0, mb_x1, mb_y1 = media[0], media[1], media[2], media[3]
         valid_items = [item for item in items if item.form is not None]

@@ -521,3 +521,32 @@ def test_multiple_overlays_on_same_page_coalesce_into_single_page_form_xobject(
         page = pdf.pages[0]
         # The page's own Resources /XObject must contain exactly 1 top-level Form XObject
         assert len(page.Resources.XObject) == 1
+
+
+def test_multiple_overlays_coalesce_micro_masks_into_single_stream(
+    tmp_path: Path,
+) -> None:
+    # When multiple overlays are stamped without stripping, their bounding
+    # box masks are batched into a single graphics stream rather than O(N) streams.
+    import pikepdf
+
+    source = write_text_pdf(tmp_path / "source.pdf", [_PAGE])
+    output = tmp_path / "out.pdf"
+    spy = _FragmentSpy(tmp_path)
+    first = Overlay("e1", 1, (54.0, 640.0, 300.0, 700.0), "FRAGMENT ONE")
+    second = Overlay("e2", 1, (54.0, 560.0, 300.0, 620.0), "FRAGMENT TWO")
+
+    # Initial stream count of source page
+    with pikepdf.open(source) as pdf:
+        initial_contents_len = (
+            len(pdf.pages[0].Contents) if isinstance(pdf.pages[0].Contents, pikepdf.Array) else 1
+        )
+
+    LayerCompositor(source, typesetter=spy, strip=False).compose([first, second], output)
+
+    with pikepdf.open(output) as pdf:
+        page = pdf.pages[0]
+        final_contents_len = len(page.Contents) if isinstance(page.Contents, pikepdf.Array) else 1
+        # Exactly 1 consolidated mask stream was appended, plus overlay stamping
+        # Total streams increased by at most 2, never O(N) separate mask streams
+        assert final_contents_len <= initial_contents_len + 2

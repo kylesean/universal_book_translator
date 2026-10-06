@@ -66,8 +66,8 @@ def contract_from_ledger(
 
     # Lazy: ubt.pipeline.attest imports ubt.core.content, so a module-level
     # import here would be a circular import.
-    from ubt.pipeline.attest import attest_document
-    from ubt.pipeline.delivery import delivery_document, delivery_translations
+    from ubt.pipeline.attest import attest_blocks
+    from ubt.pipeline.delivery import delivery_translations
     from ubt.render.typst_backend import TypstBackend
     from ubt.verify.verifier import build_verifiers
 
@@ -78,13 +78,14 @@ def contract_from_ledger(
     blocks = ledger.get_all_blocks(job_id)
     source_lang = str(ledger.get_job_metadata_value(job_id, "source_lang") or "en")
     target_lang = str(ledger.get_job_target_lang(job_id) or "zh")
-    report = attest_document(
-        delivery_document(blocks, doc_id=job_id),
+    report = attest_blocks(
+        blocks,
         TypstBackend(
             delivery_translations(blocks, engine=engine),
             theme=resolve_theme(source_lang, target_lang),
         ),
         build_verifiers(FastPassFilter(source_lang=source_lang, target_lang=target_lang)),
+        doc_id=job_id,
     )
     return contract_from_attestations(report, blocks, engine=engine, doc_id=job_id)
 
