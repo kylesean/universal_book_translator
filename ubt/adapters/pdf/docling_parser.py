@@ -631,6 +631,16 @@ def annotate_layout_metadata(blocks: list[IRBlock], pdf_path: Path | None) -> li
                 block.element = dataclasses.replace(
                     block.element, span=CompositeSpan(boxes=line_boxes)
                 )
+                # Mirror the chain into the one provenance key the ledger can
+                # rebuild a CompositeSpan from (``ledger_base._row_to_block``).
+                # Without it the export stage -- which always reloads its blocks
+                # from the ledger -- reads the heading back as a single span
+                # holding the *first* line's box: only that line is masked and
+                # the whole translation is squeezed into it, while the rest of
+                # the source heading stays in the source language on the page.
+                block.provenance["physical_boxes"] = [
+                    {"page": physical.page, "bbox": list(physical.bbox)} for physical in line_boxes
+                ]
     return blocks
 
 

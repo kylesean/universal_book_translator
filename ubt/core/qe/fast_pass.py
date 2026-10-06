@@ -410,7 +410,7 @@ def _is_exempt_repetition(src_clean: str, tgt_clean: str, m: re.Match[str]) -> b
 _ECHO_MIN_LEN = 16
 _ECHO_FORMATTING_ONLY_RE = re.compile(r"^[`#*_\s0-9.|\-:=]+$")
 _ECHO_WORD_RE = re.compile(r"[^\W\d_]{4}")
-_ECHO_TOKEN_RE = re.compile(r"[^\W\d_][\w'\-]{2,}")
+_ECHO_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9'\-]{2,}")
 # Math, inline code, URLs and email addresses are contractually verbatim in any translation,
 # so they carry no translation signal: mask them before counting retained words.
 _ECHO_MASK_RE = re.compile(

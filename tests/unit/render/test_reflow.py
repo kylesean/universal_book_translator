@@ -40,6 +40,10 @@ def test_two_stacked_paragraphs_are_repacked_into_the_band() -> None:
     # Both moved to a fixed box, and each keeps its original box to mask.
     assert by_id["a"].fixed_box and by_id["b"].fixed_box
     assert by_id["a"].mask_boxes == (PhysicalBox.of(1, (10.0, 100.0, 200.0, 140.0)),)
+    # The size the box height was measured at travels with the overlay: the
+    # compositor must draw at exactly it, not at the block's own cap.
+    assert by_id["a"].draw_size_pt == pytest.approx(_cap("text", 11.0))
+    assert by_id["b"].draw_size_pt == pytest.approx(_cap("text", 11.0))
     # A sits at the band top (y1 == 140) and is 20 + eps tall.
     assert by_id["a"].bbox[3] == pytest.approx(140.0)
     assert by_id["a"].bbox[1] == pytest.approx(140.0 - 20.5)

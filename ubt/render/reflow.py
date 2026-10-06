@@ -280,6 +280,10 @@ def reflow_overlays(
     for overlay in reflowable:
         by_page.setdefault(overlay.page, []).append(overlay)
     new_by_id: dict[str, Overlay] = {}
+
+    def _class_size(overlay: Overlay) -> float:
+        return class_sizes[(overlay.kind, round(overlay.font_size) if overlay.font_size else 0)]
+
     for page, page_overlays in by_page.items():
         columns = _partition_columns(page_overlays)
         for col_overlays in columns:
@@ -301,6 +305,11 @@ def reflow_overlays(
                         boxes=(),
                         mask_boxes=(PhysicalBox.of(overlay.page, overlay.bbox),),
                         fixed_box=True,
+                        # The box height is this size's natural height, so the
+                        # compositor must draw at exactly it: re-deriving the size
+                        # from the block's own cap can wrap one more line past the
+                        # box, which ``clip`` hides as an ink-less line.
+                        draw_size_pt=_class_size(overlay),
                     )
     if not new_by_id:
         return tuple(overlays)

@@ -358,7 +358,10 @@ class DoclingPDFAdapter(BasePDFEngineAdapter):
         self, path: Path, page_range: tuple[int, int] | None = None
     ) -> list[IRBlock]:
         """Extract structured blocks using IBM Docling (delegates to docling_parser)."""
-        from ubt.adapters.pdf.docling_crosscheck import cross_check_blocks_with_pdfium
+        from ubt.adapters.pdf.docling_crosscheck import (
+            cross_check_blocks_with_pdfium,
+            repair_missing_spaces_with_lines,
+        )
         from ubt.core.ir.continuation import fuse_continuation_blocks
 
         blocks = extract_with_docling(
@@ -367,6 +370,9 @@ class DoclingPDFAdapter(BasePDFEngineAdapter):
             symbols=_docling_symbols,
             enrich=self._resolve_formula_enrichment(path),
         )
+        # Docling's line join drops inter-word spaces ("A Sandbox" -> "ASandbox");
+        # the page's own pdfium lines restore them before anything is translated.
+        blocks = repair_missing_spaces_with_lines(blocks, path)
         blocks = cross_check_blocks_with_pdfium(blocks, path)
         return fuse_continuation_blocks(blocks)
 

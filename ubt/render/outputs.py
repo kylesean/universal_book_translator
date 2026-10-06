@@ -201,6 +201,12 @@ class Overlay:
     #: height: the compositor must not add line slack or run the fit search, or
     #: the drawn text would be shorter than its box (a gap) or shrunk to fit it.
     fixed_box: bool = False
+    #: The draw size the reflow pass measured the box at. A reflowed box's height
+    #: *is* that size's natural height, so the compositor must draw at exactly it:
+    #: re-deriving the size from the block's own cap can be a hair larger, wrap
+    #: one more line past the box, and ``clip`` hides it -- an ink-less line the
+    #: text layer still reports (the visual gate's "text_occluded").
+    draw_size_pt: float | None = None
     #: Source-derived styled spans to re-apply to the target (a blue citation, a
     #: raised footnote dagger) where the span survives verbatim.
     runs: tuple[StyledRun, ...] = ()
@@ -233,6 +239,7 @@ class FragmentTypesetter(Protocol):
         kind: str = "text",
         font_size: float | None = None,
         is_bold: bool = False,
+        indent_pt: float | None = None,
         align_center: bool = False,
         runs: tuple[StyledRun, ...] = (),
     ) -> Path | None: ...
@@ -461,22 +468,23 @@ def _text_weight_line(bold: bool) -> str:
     return _WEIGHT_BOLD if bold else _WEIGHT_REGULAR
 
 
-def _par_line(leading_em: float) -> str:
-    """The shared ``#set par(...)`` rule for every typeset fragment."""
-    return f"#set par(leading: {leading_em}em)"
+def _par_line(leading_em: float, indent_pt: float | None = None) -> str:
+    """The shared ``#set par(...)`` rule for every typeset fragment.
 
-
-def _indent_hspace(indent_pt: float | None) -> str:
-    """A first-line indent as a non-weak horizontal space.
-
-    Typst's ``par.first-line-indent`` deliberately skips the *first* paragraph of
-    a block, and a fragment is one paragraph -- so it never indented. A leading
-    ``#h`` is not trimmed at line start only when a non-space token follows it, so
-    an empty content block trails it; the space shifts the first line while the
-    wrapped lines stay at the margin, which is exactly an indent. The empty block
-    renders nothing (no glyph, no ink).
+    ``indent_pt`` is the source's first-line indent, emitted as
+    ``par.first-line-indent`` -- a paragraph-aware rule, unlike the leading ``#h``
+    this used to prepend. The inline form broke on any body that opens with ``(``
+    or ``[``: ``#h(...)#[](1) ...`` is parsed as calling the empty content block,
+    so the fragment failed to compile and the source was kept. ``all: true`` is
+    required because a fragment *is* the block's first paragraph, which Typst
+    skips indenting by default.
     """
-    return f"#h({indent_pt}pt, weak: false)#[]" if indent_pt and indent_pt > 0 else ""
+    indent = (
+        f", first-line-indent: (amount: {indent_pt}pt, all: true)"
+        if indent_pt and indent_pt > 0
+        else ""
+    )
+    return f"#set par(leading: {leading_em}em{indent})"
 
 
 def _align_line(center: bool) -> str:
@@ -651,10 +659,10 @@ class TypstFragmentTypesetter:
         weight_line = _text_weight_line(kind == "heading" or is_bold)
         return (
             f"#set page(width: {width_pt}pt, height: auto, margin: 0pt)\n"
-            f"{_par_line(self._par_leading_em)}\n"
+            f"{_par_line(self._par_leading_em, indent_pt)}\n"
             f'#set text(size: {size_pt}pt{weight_line}, top-edge: "ascender", bottom-edge: "descender"{font_line})\n'
             f"{self._dir_line}"
-            f"{_indent_hspace(indent_pt)}{body}\n"
+            f"{body}\n"
         )
 
     def _measure_height(
@@ -760,6 +768,7 @@ class TypstFragmentTypesetter:
         kind: str = "text",
         max_size_pt: float | Sequence[float] | None = None,
         is_bold: bool = False,
+        indent_pt: float | None = None,
     ) -> list[float | None]:
         """Fit every box at once, one batched measure per correction round.
 
@@ -769,6 +778,12 @@ class TypstFragmentTypesetter:
         lines: a ``clip: true`` box leaves the overflow's text operators in the
         content stream while painting nothing, which the visual gate reads as an
         occluded line.
+
+        ``indent_pt`` is the first-line indent the fragment will be *drawn* with:
+        it shortens the first line, so a fit measured without it can wrap one line
+        past the box and clip. Indented measures live in their own cache keyed
+        with the indent, so an indented and a flush paragraph of the same text
+        never share a height.
         """
         results: list[float | None] = [None] * len(items)
         caps = self._caps_for(len(items), max_size_pt)
@@ -776,29 +791,44 @@ class TypstFragmentTypesetter:
             min(cap, height_pt * 0.85) if width_pt > 0 and height_pt > 0 and text.strip() else None
             for (text, width_pt, height_pt), cap in zip(items, caps, strict=True)
         ]
-        cache = self._heading_cache if (kind == "heading" or is_bold) else self._measure_cache
+        indented = bool(indent_pt and indent_pt > 0)
+        cache: dict[Any, float] = (
+            self._indent_cache
+            if indented
+            else (self._heading_cache if (kind == "heading" or is_bold) else self._measure_cache)
+        )
+
+        def _measured(text: str, width_pt: float, size_pt: float) -> tuple[Any, ...]:
+            return (text, width_pt, size_pt, indent_pt) if indented else (text, width_pt, size_pt)
+
+        def _build(*item: Any) -> str:
+            return self._measure_source(
+                item[0],
+                item[1],
+                item[2],
+                kind=kind,
+                is_bold=is_bold,
+                indent_pt=indent_pt if indented else None,
+            )
+
         active = [
             index for index, size in enumerate(sizes) if size is not None and size >= _MIN_FONT_PT
         ]
         for _ in range(6):
             if not active:
                 break
-            to_measure: list[tuple[str, float, float]] = []
+            to_measure: list[tuple[Any, ...]] = []
             for index in active:
                 size_pt = sizes[index]
                 assert size_pt is not None
-                to_measure.append((items[index][0], items[index][1], size_pt))
-            self._batch_measure(
-                to_measure,
-                build=lambda t, w, s: self._measure_source(t, w, s, kind=kind, is_bold=is_bold),
-                cache=cache,
-            )
+                to_measure.append(_measured(items[index][0], items[index][1], size_pt))
+            self._batch_measure(to_measure, build=_build, cache=cache)
             next_active: list[int] = []
             for index in active:
                 height_pt = items[index][2]
                 size_pt = sizes[index]
                 assert size_pt is not None
-                natural = cache[(items[index][0], items[index][1], size_pt)]
+                natural = cache[_measured(items[index][0], items[index][1], size_pt)]
                 if natural <= height_pt + _FIT_TOL:
                     results[index] = size_pt
                 elif size_pt <= _MIN_FONT_PT:
@@ -818,6 +848,7 @@ class TypstFragmentTypesetter:
         kind: str = "text",
         max_size_pt: float | None = None,
         is_bold: bool = False,
+        indent_pt: float | None = None,
     ) -> float | None:
         # Each box draws at the largest size that fits it, capped at its source
         # size (``max_size_pt``). A box that fits at the source size keeps it; only
@@ -830,6 +861,7 @@ class TypstFragmentTypesetter:
             kind=kind,
             max_size_pt=max_size_pt,
             is_bold=is_bold,
+            indent_pt=indent_pt,
         )[0]
 
     # -- In-place bilingual: target above a smaller, muted source -------------- #
@@ -962,11 +994,11 @@ class TypstFragmentTypesetter:
         weight_line = _text_weight_line(kind == "heading" or is_bold)
         return (
             f"#set page(width: {width_pt}pt, height: {height_pt}pt, margin: 0pt)\n"
-            f"{_par_line(self._par_leading_em)}\n"
+            f"{_par_line(self._par_leading_em, indent_pt)}\n"
             f'#set text(size: {size_pt}pt{weight_line}, top-edge: "ascender", bottom-edge: "descender"{font_line})\n'
             f"{self._dir_line}"
             f"{_align_line(align_center)}"
-            f"#box(width: {width_pt}pt, height: {height_pt}pt, clip: true)[{_indent_hspace(indent_pt)}{body}]\n"
+            f"#box(width: {width_pt}pt, height: {height_pt}pt, clip: true)[{body}]\n"
         )
 
     def typeset(
@@ -978,6 +1010,7 @@ class TypstFragmentTypesetter:
         kind: str = "text",
         font_size: float | None = None,
         is_bold: bool = False,
+        indent_pt: float | None = None,
         align_center: bool = False,
         runs: tuple[StyledRun, ...] = (),
     ) -> Path | None:
@@ -998,6 +1031,7 @@ class TypstFragmentTypesetter:
             kind=kind,
             max_size_pt=max_size,
             is_bold=is_bold,
+            indent_pt=indent_pt,
         )
         if size_pt is None:
             return None
@@ -1009,6 +1043,7 @@ class TypstFragmentTypesetter:
                 size_pt,
                 kind=kind,
                 is_bold=is_bold,
+                indent_pt=indent_pt,
                 align_center=align_center,
                 runs=runs,
             )
@@ -1255,9 +1290,10 @@ class TypstFragmentTypesetter:
         Content addressing keeps it idempotent: a later ``typeset`` for the same
         box finds the split file. Each request is ``(kind, text, width_pt,
         height_pt, font_size)``; ``kind == "math"`` selects the math source. A
-        reflowed overlay appends ``(indent_pt, fixed, is_bold)``: ``fixed`` means
-        the box already equals the fragment's natural height, so it is compiled
-        at ``cap_size`` instead of being fitted.
+        reflowed overlay appends ``(indent_pt, fixed, is_bold, draw_size_pt)``:
+        ``fixed`` means the box already equals the fragment's natural height, so it
+        is compiled at ``draw_size_pt`` (the size the reflow measured it at, which
+        is not necessarily this block's own cap) instead of being fitted.
 
         Each box draws at the largest size that fits it, capped at its source
         size, so a box the target does not overflow keeps the source size and only
@@ -1266,38 +1302,92 @@ class TypstFragmentTypesetter:
         unique = list(dict.fromkeys(requests))
         if not unique:
             return
-        parsed: list[tuple[str, str, float, float, float | None, float | None, bool, bool]] = []
+        parsed: list[
+            tuple[str, str, float, float, float | None, float | None, bool, bool, float | None]
+        ] = []
         for request in unique:
             request_kind, text, width_pt, height_pt, font_size, *rest = request
             indent = rest[0] if len(rest) > 0 else None
             fixed = bool(rest[1]) if len(rest) > 1 else False
             is_bold = bool(rest[2]) if len(rest) > 2 else False
+            draw_size = rest[3] if len(rest) > 3 else None
             parsed.append(
-                (request_kind, text, width_pt, height_pt, font_size, indent, fixed, is_bold)
+                (
+                    request_kind,
+                    text,
+                    width_pt,
+                    height_pt,
+                    font_size,
+                    indent,
+                    fixed,
+                    is_bold,
+                    draw_size,
+                )
             )
         # Resolve every inline-math body up front so fitting's measure calls hit
         # the probe cache instead of spawning a Typst process per formula.
         self._math_probe.check_many(self._math_bodies([text for _kind, text, *_rest in unique]))
         pages: list[tuple[str, str]] = []
-        groups: dict[str, list[tuple[str, float, float, float | None]]] = {}
-        for request_kind, text, width_pt, height_pt, font_size, _indent, fixed, _bold in parsed:
+        groups: dict[
+            tuple[str, float | None, bool], list[tuple[str, float, float, float | None]]
+        ] = {}
+        # Fitted boxes: one size per (kind, indent, weight) class so the warmed
+        # fragment is the one the draw asks for.
+        for (
+            request_kind,
+            text,
+            width_pt,
+            height_pt,
+            font_size,
+            indent,
+            fixed,
+            is_bold,
+            _draw,
+        ) in parsed:
             if fixed or request_kind not in ("text", "heading"):
                 continue
-            groups.setdefault(request_kind, []).append((text, width_pt, height_pt, font_size))
-        for kind, items in groups.items():
+            groups.setdefault((request_kind, indent, is_bold), []).append(
+                (text, width_pt, height_pt, font_size)
+            )
+        for (kind, indent, is_bold), items in groups.items():
             triples = [(text, width_pt, height_pt) for text, width_pt, height_pt, _ in items]
             caps = [self._cap_for(kind, font_size) for _, _, _, font_size in items]
-            sizes = self._fit_sizes(triples, kind=kind, max_size_pt=caps)
+            sizes = self._fit_sizes(
+                triples, kind=kind, max_size_pt=caps, is_bold=is_bold, indent_pt=indent
+            )
             for (text, width_pt, height_pt, _font_size), size_pt in zip(items, sizes, strict=True):
                 if size_pt is None:
                     continue
-                pages.append((self._text_source(text, width_pt, height_pt, size_pt, kind=kind), ""))
+                pages.append(
+                    (
+                        self._text_source(
+                            text,
+                            width_pt,
+                            height_pt,
+                            size_pt,
+                            kind=kind,
+                            is_bold=is_bold,
+                            indent_pt=indent,
+                        ),
+                        "",
+                    )
+                )
 
         # Reflowed boxes: exact size, exact height, no fit search.
-        for request_kind, text, width_pt, height_pt, font_size, indent, fixed, is_bold in parsed:
+        for (
+            request_kind,
+            text,
+            width_pt,
+            height_pt,
+            font_size,
+            indent,
+            fixed,
+            is_bold,
+            draw_size,
+        ) in parsed:
             if not fixed or request_kind not in ("text", "heading"):
                 continue
-            size_pt = self._cap_for(request_kind, font_size)
+            size_pt = draw_size if draw_size is not None else self._cap_for(request_kind, font_size)
             pages.append(
                 (
                     self._text_source(
@@ -1574,6 +1664,7 @@ class LayerCompositor:
                         overlay.font_size,
                         overlay.indent_pt,
                         overlay.fixed_box,
+                        overlay.draw_size_pt,
                     )
                 )
         prefetch(requests)
@@ -1637,7 +1728,77 @@ class LayerCompositor:
         )
         if capacity > 0 and height > capacity:
             size = max(_MIN_FONT_PT, size * capacity / height)
-        return solve_flow(body, boxes, _measure(size)), size
+        parts = solve_flow(body, boxes, _measure(size))
+        return self._shrink_until_the_flow_fits(
+            overlay, body, boxes, parts, size, measure_fixed, _measure
+        )
+
+    def _shrink_until_the_flow_fits(
+        self,
+        overlay: Overlay,
+        body: str,
+        boxes: tuple[PhysicalBox, ...],
+        parts: tuple[FlowPlacement, ...],
+        size: float,
+        measure_fixed: Callable[..., float],
+        measure: Callable[[float], Callable[[str, float], float]],
+    ) -> tuple[tuple[FlowPlacement, ...], float]:
+        """Shrink a continuation run until every box actually holds its share.
+
+        The proportional estimate above sizes the *whole* text against the widest
+        box and the chain's total height, which assumes the text can be packed
+        optimally. It cannot: ``solve_flow`` breaks at punctuation, and a
+        candidate that lands well short of a box's capacity pushes the surplus
+        into the next box, which then overflows and is clipped -- leaving an
+        ink-less line in the text layer (the visual gate's "text_occluded").
+        Measuring the flow that was actually produced and shrinking while any box
+        overflows keeps every line printed; a box's own line slack counts as its
+        capacity because that is what the draw box gets.
+        """
+        slack = 0.0 if overlay.fixed_box else _line_slack(overlay.font_size)
+
+        def _worst_overflow(current: float, placements: Sequence[FlowPlacement]) -> float:
+            worst = 1.0
+            for part in placements:
+                if not part.text.strip():
+                    continue
+                width = part.box.bbox[2] - part.box.bbox[0]
+                available = (part.box.bbox[3] - part.box.bbox[1]) + slack
+                if available <= 0:
+                    continue
+                needed = measure_fixed(
+                    part.text,
+                    width,
+                    current,
+                    kind=overlay.kind,
+                    is_bold=overlay.is_bold,
+                    indent_pt=overlay.indent_pt,
+                )
+                if needed <= available + _FIT_TOL:
+                    continue
+                worst = max(worst, needed / available)
+            return worst
+
+        parts = solve_flow(body, boxes, measure(size))
+        if _worst_overflow(size, parts) <= 1.0:
+            return parts, size
+        # The estimate overflowed, so bisect on the size: smaller text fits more
+        # into every box, so "the flow fits" is monotone enough for a few rounds.
+        low = _MIN_FONT_PT
+        low_parts = solve_flow(body, boxes, measure(low))
+        if _worst_overflow(low, low_parts) > 1.0:
+            return low_parts, low
+        high = size
+        for _ in range(6):
+            mid = (low + high) / 2.0
+            if mid - low <= 0.01:
+                break
+            mid_parts = solve_flow(body, boxes, measure(mid))
+            if _worst_overflow(mid, mid_parts) <= 1.0:
+                low, low_parts = mid, mid_parts
+            else:
+                high = mid
+        return low_parts, low
 
     def _compile_overlay(
         self, composed: pikepdf.Pdf, overlay: Overlay, boxes: tuple[PhysicalBox, ...]
@@ -1744,7 +1905,7 @@ class LayerCompositor:
             # Reflowed (fixed_box) or a continuation part (exact_size): the size is
             # already decided, so compile at exactly it -- no per-box fit shrink.
             cap = getattr(typesetter, "cap_size", None)
-            size_pt = exact_size
+            size_pt = exact_size if exact_size is not None else overlay.draw_size_pt
             if size_pt is None and cap is not None:
                 size_pt = cap(overlay.kind, overlay.font_size)
             if size_pt is None:
@@ -1802,6 +1963,7 @@ class LayerCompositor:
                     kind=overlay.kind,
                     font_size=overlay.font_size,
                     is_bold=overlay.is_bold,
+                    indent_pt=overlay.indent_pt,
                     align_center=overlay.align_center,
                     runs=overlay.runs,
                 )

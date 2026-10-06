@@ -208,6 +208,61 @@ def test_a_multi_line_heading_records_its_line_boxes(monkeypatch: pytest.MonkeyP
     assert span.boxes[0].bbox[0] == pytest.approx(172.1)
     assert span.boxes[1].bbox[2] == pytest.approx(524.0)
     assert out[0].style is not None and out[0].style.alignment == "center"
+    # The chain is mirrored into the one provenance key the ledger rebuilds it
+    # from; without it the export stage sees a single first-line span.
+    assert [box["bbox"][1] for box in out[0].provenance["physical_boxes"]] == [
+        pytest.approx(710.0),
+        pytest.approx(690.0),
+    ]
+
+
+def test_a_multi_line_heading_chain_survives_the_ledger_round_trip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The export stage reloads blocks from the ledger; the chain must come back.
+
+    A heading read back as a single first-line box renders its translation
+    squeezed into that one line and leaves the rest of the source title in the
+    source language, so the round trip is part of the contract.
+    """
+    import tempfile
+
+    from ubt.core.engine.ledger import SQLiteJobLedger
+    from ubt.core.engine.ledger_base import _upsert_blocks_batch
+
+    def fake_extract_lines(_path: Path, _page: int) -> tuple[list[LineBox], tuple[float, float]]:
+        return [
+            LineBox("Short Title", (172.1, 710.0, 424.9, 738.0), font_size=17.0),
+            LineBox(
+                "a long full-width second title line", (71.0, 690.0, 524.0, 705.0), font_size=17.0
+            ),
+        ], (595.0, 842.0)
+
+    monkeypatch.setattr("ubt.adapters.pdf.textgeom.extract_lines", fake_extract_lines)
+
+    heading = _para(
+        "b1",
+        "Short Title a long full-width second title line",
+        y0=690.0,
+        y1=738.0,
+        x1=524.0,
+        block_type=BlockType.HEADING,
+    )
+    out = annotate_layout_metadata([heading], Path("/does/not/matter.pdf"))
+
+    ledger = SQLiteJobLedger(Path(tempfile.mkdtemp()) / "l.sqlite")
+    with ledger._get_conn() as conn:
+        conn.execute(
+            "INSERT INTO job_meta(job_id,doc_id,source_path,target_lang,total_blocks,status)"
+            " VALUES(?,?,?,?,?,?)",
+            ("job_x", "doc", "/x.pdf", "zh", 1, "running"),
+        )
+        _upsert_blocks_batch(conn.cursor(), "job_x", out)
+    (reloaded,) = ledger.get_all_blocks("job_x")
+
+    span = reloaded.element.span
+    assert isinstance(span, CompositeSpan)
+    assert [box.bbox[1] for box in span.boxes] == [pytest.approx(710.0), pytest.approx(690.0)]
 
 
 def test_a_single_line_heading_keeps_its_simple_span(monkeypatch: pytest.MonkeyPatch) -> None:

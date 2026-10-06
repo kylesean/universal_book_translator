@@ -9,7 +9,7 @@ from typing import Any, ClassVar
 import pytest
 
 from ubt.model.span import PhysicalBox
-from ubt.render.outputs import LayerCompositor, Overlay
+from ubt.render.outputs import LayerCompositor, Overlay, _line_slack
 
 pytestmark = pytest.mark.fast
 
@@ -47,6 +47,7 @@ class _Measurer:
         kind: str = "text",
         font_size: float | None = None,
         is_bold: bool = False,
+        indent_pt: float | None = None,
         align_center: bool = False,
         runs: tuple[Any, ...] = (),
     ) -> Path | None:
@@ -83,3 +84,26 @@ def test_an_overlong_continuation_shrinks_the_whole_run_uniformly() -> None:
 
     assert size is not None
     assert size < 11.0 * 1.05
+
+
+def test_a_punctuation_break_that_wastes_a_box_shrinks_until_every_box_fits() -> None:
+    # The proportional estimate packs the text optimally, but ``solve_flow``
+    # breaks at punctuation: here the only break candidate lands after 10 chars,
+    # so the first box's remaining line is wasted and the surplus overflows the
+    # second box -- which ``clip`` would hide as an ink-less line.
+    boxes = (
+        PhysicalBox.of(1, (0.0, 100.0, 300.0, 120.0)),
+        PhysicalBox.of(2, (0.0, 700.0, 300.0, 720.0)),
+    )
+    compositor = LayerCompositor("unused.pdf", typesetter=_Measurer())
+    parts, size = compositor._flow_plan(_overlay("aaaa bbbb." + "c" * 40, boxes), boxes)
+
+    assert size is not None
+    assert size < 11.0 * 1.05
+    slack = _line_slack(11.0)
+    measurer = _Measurer()
+    for part in parts:
+        if not part.text.strip():
+            continue
+        needed = measurer.measure_fixed(part.text, part.box.available_width, size)
+        assert needed <= part.box.available_height + slack + 0.5

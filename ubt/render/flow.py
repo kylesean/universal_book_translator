@@ -27,7 +27,10 @@ from ubt.model.span import PhysicalBox
 Measure = Callable[[str, float], float]
 
 #: A break is preferred *after* one of these (sentence/clause enders, closers).
-_BREAK_AFTER = "。！？；…!?;.、，,）)]】》」』\"'”’»"
+#: The colons are here because a subtitle break belongs *after* the colon -- the
+#: source title's own break -- and a CJK target that broke before it would lead
+#: the second line with "：".
+_BREAK_AFTER = "。！？；：…!?;:.、，,）)]】》」』\"'”’»"
 #: ...and *before* one of these (openers), so the bracket travels to the next box.
 _BREAK_BEFORE = "（([{【《「『“‘«"
 

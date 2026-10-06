@@ -40,6 +40,16 @@ def test_text_breaks_at_the_largest_fitting_punctuation_boundary() -> None:
     assert second.text == "Delta epsilon zeta. Eta theta."
 
 
+def test_a_cjk_subtitle_break_keeps_the_colon_on_the_first_line() -> None:
+    # A CJK title has no spaces, so its only break candidates are punctuation.
+    # Breaking after the closing bracket instead of after the colon would lead
+    # the second line with "：".
+    text = "弹性计算（DSec）：用于大规模训练的沙箱基础设施"
+    first, second = solve_flow(text, (_box(11.0), _box(1000.0)), _measure)
+    assert first.text == "弹性计算（DSec）："
+    assert second.text == "用于大规模训练的沙箱基础设施"
+
+
 def test_a_box_too_small_for_any_candidate_is_left_empty() -> None:
     first, second = solve_flow("Alpha beta gamma.", (_box(3.0), _box(1000.0)), _measure)
     assert first.text == ""

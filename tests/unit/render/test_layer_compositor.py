@@ -103,6 +103,7 @@ class _FragmentSpy:
         kind: str = "text",
         font_size: float | None = None,
         is_bold: bool = False,
+        indent_pt: float | None = None,
         align_center: bool = False,
         runs: tuple[Any, ...] = (),
     ) -> Path | None:
