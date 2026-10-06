@@ -35,6 +35,7 @@ from ubt.api.models import (
     JobSubmitRequest,
     JobSubmitResponse,
     SegmentEditRequest,
+    TermPropagationRequest,
     TMevictRequest,
 )
 from ubt.api.review import (
@@ -43,9 +44,11 @@ from ubt.api.review import (
     ReviewEditConflict,
     ReviewEditError,
     apply_human_edit,
+    apply_term_propagation,
     segment_issue_kinds,
     segment_matches_filter,
     serialize_segment,
+    term_cascade_report,
 )
 from ubt.api.security import (
     SENSITIVE_FILENAME_PARTS,
@@ -1592,6 +1595,84 @@ def create_app(
             match = next((b for b in blocks if b.id == block_id), None)
             updated = serialize_segment(match) if match is not None else None
         return JSONResponse({**result, "job_id": valid_id, "segment": updated})
+
+    @api_app.get("/jobs/{job_id}/segments/{block_id}/terms", tags=["Jobs"])
+    async def segment_terms(
+        job_id: str,
+        block_id: str,
+        x_ubt_tenant: str | None = Header(default=None),
+    ) -> JSONResponse:
+        """Terminology findings for one block, with the cascade size each implies.
+
+        Each finding carries the offending ``surface``, the ``expected``
+        rendering, and how many *other* blocks in the job carry the same
+        error — ``cascade_all`` for the whole book, ``cascade_subsequent`` for
+        blocks at or after this one. This is what the "fix all N" checkbox
+        counts.
+        """
+        valid_id = validate_job_id(job_id)
+        if not await _tenant_allows_async(valid_id, _tenant_from_header(x_ubt_tenant)):
+            raise _cross_tenant_404(valid_id)
+        if not _job_db_path(valid_id).exists():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"Job not found: {valid_id}"
+            )
+
+        report = await asyncio.to_thread(
+            term_cascade_report, _job_db_path(valid_id), valid_id, block_id
+        )
+        if report is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown block: {block_id}"
+            )
+        return JSONResponse({"job_id": valid_id, **report})
+
+    @api_app.post("/jobs/{job_id}/term-propagation", tags=["Jobs"])
+    async def propagate_term(
+        job_id: str,
+        req: TermPropagationRequest,
+        x_ubt_tenant: str | None = Header(default=None),
+    ) -> JSONResponse:
+        """Replace one offending term surface across the job (PRD §5.2.2).
+
+        Rewrites the selected block and, per ``scope``, every matching block;
+        each rewritten block is promoted to a human revision and its pair fed
+        back to the shared TM, exactly like a manual edit.
+        """
+        valid_id = validate_job_id(job_id)
+        if not await _tenant_allows_async(valid_id, _tenant_from_header(x_ubt_tenant)):
+            raise _cross_tenant_404(valid_id)
+        if not _job_db_path(valid_id).exists():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"Job not found: {valid_id}"
+            )
+        if await _job_is_running(valid_id):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Job is running; stop it before editing segments.",
+            )
+
+        try:
+            result = await asyncio.to_thread(
+                apply_term_propagation,
+                _job_db_path(valid_id),
+                valid_id,
+                req.block_id,
+                req.surface,
+                req.expected,
+                scope=req.scope,
+                tm_path=app_config.db_dir / "tm.sqlite",
+            )
+        except ReviewBlockNotFound as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        except ReviewEditConflict as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        except ReviewEditError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+            ) from exc
+
+        return JSONResponse({"job_id": valid_id, **result})
 
     @api_app.get("/jobs/{job_id}/pages/{page}/preview", tags=["Jobs"])
     async def preview_page(

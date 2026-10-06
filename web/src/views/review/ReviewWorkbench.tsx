@@ -10,6 +10,7 @@ import {
   ChevronDown,
   CheckCircle2,
   ImageOff,
+  Wand2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
@@ -17,9 +18,12 @@ import {
   listSegments,
   listIssues,
   editSegment,
+  getBlockTerms,
+  propagateTerm,
   pagePreviewUrl,
   type Segment,
   type IssuesReport,
+  type TermViolation,
 } from '@/api/client'
 import { useI18n } from '@/i18n/I18nContext'
 
@@ -62,6 +66,7 @@ export function ReviewWorkbench({ jobId }: ReviewWorkbenchProps) {
   const [issueCursor, setIssueCursor] = useState(0)
   const [openPreviews, setOpenPreviews] = useState<Record<number, boolean>>({})
   const [previewBust, setPreviewBust] = useState(0)
+  const [termNotice, setTermNotice] = useState<Record<string, string>>({})
 
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -152,6 +157,17 @@ export function ReviewWorkbench({ jobId }: ReviewWorkbenchProps) {
   const togglePreview = (page: number | null) => {
     if (page === null) return
     setOpenPreviews((prev) => ({ ...prev, [page]: !prev[page] }))
+  }
+
+  const handleTermReplaced = (blockId: string, page: number | null, replacements: number) => {
+    setTermNotice((prev) => ({
+      ...prev,
+      [blockId]: t.review.cascadeDone.replace('{n}', String(replacements)),
+    }))
+    if (page !== null && openPreviews[page]) {
+      setPreviewBust(Date.now())
+    }
+    void load()
   }
 
   if (!jobId) {
@@ -416,9 +432,23 @@ export function ReviewWorkbench({ jobId }: ReviewWorkbenchProps) {
                                 rows={3}
                                 className="w-full bg-transparent text-[var(--ink-primary)] text-xs resize-none focus:outline-none font-mono leading-relaxed placeholder:text-[var(--ink-muted)]"
                               />
+                              {seg.issues.includes('terminology') && (
+                                <TermPanel
+                                  jobId={jobId}
+                                  segment={seg}
+                                  onReplaced={(replacements) =>
+                                    handleTermReplaced(seg.block_id, seg.page, replacements)
+                                  }
+                                />
+                              )}
                             </div>
 
                             <div className="flex items-center justify-end gap-2 pt-2.5 border-t border-[var(--paper-border)] mt-3">
+                              {termNotice[seg.block_id] && (
+                                <span className="text-[#15803d] text-[11px] font-medium mr-auto">
+                                  {termNotice[seg.block_id]}
+                                </span>
+                              )}
                               <Button
                                 onClick={() => handleSave(seg)}
                                 variant="primary"
@@ -482,6 +512,100 @@ export function ReviewWorkbench({ jobId }: ReviewWorkbenchProps) {
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+interface TermPanelProps {
+  jobId: string
+  segment: Segment
+  onReplaced: (replacements: number) => void
+}
+
+/**
+ * Terminology recommendations for one segment (PRD §5.2.2). Fetches lazily on
+ * mount so only the virtualizer's visible window hits the backend, and shows the
+ * "fix all N" cascade checkbox with the book-wide count.
+ */
+function TermPanel({ jobId, segment, onReplaced }: TermPanelProps) {
+  const { t } = useI18n()
+  const [violations, setViolations] = useState<TermViolation[] | null>(null)
+  const [cascade, setCascade] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    getBlockTerms(jobId, segment.block_id)
+      .then((report) => {
+        if (alive) setViolations(report.violations)
+      })
+      .catch(() => {
+        if (alive) setViolations([])
+      })
+    return () => {
+      alive = false
+    }
+  }, [jobId, segment.block_id, segment.target_text])
+
+  const replace = async (violation: TermViolation) => {
+    setBusy(true)
+    setError(null)
+    try {
+      const res = await propagateTerm(jobId, {
+        block_id: segment.block_id,
+        surface: violation.surface,
+        expected: violation.expected,
+        scope: cascade ? 'all' : 'block',
+      })
+      onReplaced(res.replacements)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to propagate term')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (violations === null || violations.length === 0) return null
+
+  return (
+    <div className="mt-3 rounded-[6px] border border-[#b45309]/40 bg-[#b45309]/5 divide-y divide-[#b45309]/20">
+      {violations.map((violation) => (
+        <div
+          key={`${violation.surface}:${violation.expected}`}
+          className="px-2.5 py-2 flex flex-wrap items-center gap-2 text-[11px]"
+        >
+          <span className="font-mono text-[var(--ink-muted)]">{t.review.recommendedTerm}</span>
+          <span className="line-through text-[#b45309] font-mono">{violation.surface}</span>
+          <span className="text-[var(--ink-muted)]">→</span>
+          <span className="font-semibold text-[#15803d] font-mono">{violation.expected}</span>
+          {violation.cascade_all > 0 && (
+            <label className="flex items-center gap-1 text-[var(--ink-secondary)] cursor-pointer ml-auto select-none">
+              <input
+                type="checkbox"
+                checked={cascade}
+                onChange={(e) => setCascade(e.target.checked)}
+              />
+              {t.review.cascadeFix.replace('{n}', String(violation.cascade_all))}
+            </label>
+          )}
+          <Button
+            onClick={() => replace(violation)}
+            variant="primary"
+            size="sm"
+            disabled={busy}
+            className="text-[11px] h-6 px-2.5 font-bold"
+          >
+            {busy ? (
+              <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+            ) : (
+              <Wand2 className="h-3 w-3 mr-1" />
+            )}
+            {busy ? t.review.cascadeApplying : t.review.replaceTerm}
+          </Button>
+        </div>
+      ))}
+      {error && <div className="px-2.5 py-1.5 text-[11px] text-[#b45309]">{error}</div>}
     </div>
   )
 }

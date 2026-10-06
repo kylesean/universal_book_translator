@@ -298,3 +298,60 @@ def test_acronym_alias_matches_case_sensitively() -> None:
     )
     assert findings_be[0].occurs_in_source
     assert findings_be[0].drifted
+
+
+# --------------------------------------------------------------------------- #
+# replace_term_surface — the workbench's "replace with recommended term" action
+# --------------------------------------------------------------------------- #
+
+
+def test_replace_term_surface_rewrites_every_alias_occurrence() -> None:
+    from ubt.core.qe.term_drift import replace_term_surface
+
+    glossary = [{"source": "FinFET", "translation": "鳍式场效应晶体管", "aliases": ["finfet"]}]
+    rewritten, count = replace_term_surface(
+        "a finfet and another finfet", glossary, surface="finfet", expected="鳍式场效应晶体管"
+    )
+    assert count == 2
+    assert rewritten == "a 鳍式场效应晶体管 and another 鳍式场效应晶体管"
+
+
+def test_replace_term_surface_rewrites_a_leaked_source_term() -> None:
+    from ubt.core.qe.term_drift import replace_term_surface
+
+    glossary = [{"source": "FinFET", "translation": "鳍式场效应晶体管"}]
+    rewritten, count = replace_term_surface(
+        "the FinFET device", glossary, surface="FinFET", expected="鳍式场效应晶体管"
+    )
+    assert count == 1
+    assert rewritten == "the 鳍式场效应晶体管 device"
+
+
+def test_replace_term_surface_leaves_protected_spans_alone() -> None:
+    from ubt.core.qe.term_drift import replace_term_surface
+
+    glossary = [{"source": "FinFET", "translation": "鳍式场效应晶体管"}]
+    # The detector skips inline code, so the rewriter must too — otherwise a
+    # human "fix" would corrupt a code span the exporter deliberately left.
+    rewritten, count = replace_term_surface(
+        "`FinFET` and FinFET", glossary, surface="FinFET", expected="鳍式场效应晶体管"
+    )
+    assert count == 1
+    assert rewritten == "`FinFET` and 鳍式场效应晶体管"
+
+
+def test_replace_term_surface_is_a_noop_without_the_surface() -> None:
+    from ubt.core.qe.term_drift import replace_term_surface
+
+    glossary = [{"source": "FinFET", "translation": "鳍式场效应晶体管"}]
+    assert replace_term_surface(
+        "clean text", glossary, surface="FinFET", expected="鳍式场效应晶体管"
+    ) == (
+        "clean text",
+        0,
+    )
+    # surface == expected is not a rewrite.
+    assert replace_term_surface("FinFET", glossary, surface="FinFET", expected="FinFET") == (
+        "FinFET",
+        0,
+    )

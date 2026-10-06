@@ -343,6 +343,63 @@ export async function editSegment(
   return res.json()
 }
 
+export interface TermViolation {
+  source: string
+  expected: string
+  surface: string
+  kind: string
+  occurrences: number
+  cascade_all: number
+  cascade_subsequent: number
+}
+
+export interface BlockTermsReport {
+  job_id: string
+  block_id: string
+  glossary_size: number
+  violations: TermViolation[]
+}
+
+/** Terminology findings for one block, with the cascade size each implies. */
+export async function getBlockTerms(jobId: string, blockId: string): Promise<BlockTermsReport> {
+  const res = await fetch(
+    `${BASE_URL}/jobs/${encodeURIComponent(jobId)}/segments/${encodeURIComponent(blockId)}/terms`
+  )
+  if (!res.ok) throw new Error(`Failed to load terminology: ${res.statusText}`)
+  return res.json()
+}
+
+export interface TermPropagationResult {
+  job_id: string
+  block_id: string
+  surface: string
+  expected: string
+  scope: string
+  blocks_updated: number
+  blocks_planned: number
+  replacements: number
+  capped: boolean
+  block_ids: string[]
+  tm_written: number
+}
+
+/** Replace one offending term surface with its canonical rendering (optionally book-wide). */
+export async function propagateTerm(
+  jobId: string,
+  payload: { block_id: string; surface: string; expected: string; scope: 'block' | 'subsequent' | 'all' }
+): Promise<TermPropagationResult> {
+  const res = await fetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}/term-propagation`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(body.detail || 'Failed to propagate term')
+  }
+  return res.json()
+}
+
 // --------------------------------------------------------------------------- //
 // System
 // --------------------------------------------------------------------------- //

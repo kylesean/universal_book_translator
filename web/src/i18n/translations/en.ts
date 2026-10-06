@@ -179,5 +179,10 @@ export const en: TranslationDictionary = {
     previewPage: 'Preview this page',
     previewLoading: 'Re-rendering this page...',
     previewFailed: 'Page preview unavailable (needs typst and a source PDF).',
+    recommendedTerm: 'Recommended term',
+    replaceTerm: 'Replace with recommended term',
+    cascadeFix: 'Also fix {n} matching errors later in the book',
+    cascadeApplying: 'Propagating…',
+    cascadeDone: 'Fixed {n} occurrences',
   },
 }

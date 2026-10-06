@@ -195,3 +195,172 @@ def test_segments_unknown_job_is_404(tmp_path: Path) -> None:
     )
     client = TestClient(create_app(config))
     assert client.get("/jobs/nosuchjob00/segments", headers=_AUTH).status_code == 404
+
+
+# --------------------------------------------------------------------------- #
+# Global term propagation (PRD §5.2.2)
+# --------------------------------------------------------------------------- #
+
+_TERM_JOB = "termjob00001"
+_TERM_GLOSSARY = [{"source": "Backpropagation", "translation": "反向传播", "aliases": ["反向传递"]}]
+
+
+def _seed_terms(tmp_path: Path) -> UBTConfig:
+    config = UBTConfig(
+        db_dir=tmp_path / "db",
+        allowed_dirs=str(tmp_path),
+        service_api_key=SecretStr(_API_KEY),
+    )
+    config.db_dir.mkdir(parents=True, exist_ok=True)
+    blocks = [
+        _block(
+            1,
+            "Backpropagation is key",
+            "反向传递很关键",
+            ["Glossary term violation: ..."],
+            BlockStatus.NEEDS_HUMAN,
+        ),
+        _block(2, "Backpropagation again", "反向传递再次出现", [], BlockStatus.MTQE_PASSED),
+        _block(3, "Backpropagation later", "这里也用了反向传递", [], BlockStatus.MTQE_PASSED),
+        _block(4, "No term here", "无关内容", [], BlockStatus.MTQE_PASSED),
+    ]
+    with SQLiteJobLedger(config.db_dir / f"{_TERM_JOB}.sqlite") as ledger:
+        ledger.init_job_from_manifest(
+            _TERM_JOB,
+            BookManifest(doc_id=_TERM_JOB, title="t", source_path=str(tmp_path / "in.md")),
+        )
+        ledger.set_job_metadata_value(_TERM_JOB, "source_lang", "en")
+        ledger.set_job_metadata_value(
+            _TERM_JOB,
+            "bible_cache",
+            {"glossary_dicts": _TERM_GLOSSARY, "abbreviation_entries": []},
+        )
+        ledger.append_chapter(
+            _TERM_JOB,
+            ChapterIR(doc_id=_TERM_JOB, chapter_id="c1", title="C1", spine_index=0, blocks=blocks),
+        )
+    return config
+
+
+def test_block_terms_reports_cascade_counts(tmp_path: Path) -> None:
+    client = TestClient(create_app(_seed_terms(tmp_path)))
+    body = client.get(f"/jobs/{_TERM_JOB}/segments/b001/terms", headers=_AUTH).json()
+    assert body["glossary_size"] == 1
+    (violation,) = body["violations"]
+    assert violation["surface"] == "反向传递"
+    assert violation["expected"] == "反向传播"
+    assert violation["kind"] == "alias"
+    assert violation["occurrences"] == 1
+    # b002 and b003 carry the same error; b001 itself is excluded.
+    assert violation["cascade_all"] == 2
+    assert violation["cascade_subsequent"] == 2
+
+
+def test_block_terms_is_empty_for_an_unknown_block(tmp_path: Path) -> None:
+    client = TestClient(create_app(_seed_terms(tmp_path)))
+    assert client.get(f"/jobs/{_TERM_JOB}/segments/nope/terms", headers=_AUTH).status_code == 404
+
+
+def test_term_propagation_scope_block_touches_only_the_pivot(tmp_path: Path) -> None:
+    config = _seed_terms(tmp_path)
+    client = TestClient(create_app(config))
+    res = client.post(
+        f"/jobs/{_TERM_JOB}/term-propagation",
+        json={
+            "block_id": "b001",
+            "surface": "反向传递",
+            "expected": "反向传播",
+            "scope": "block",
+        },
+        headers=_AUTH,
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["block_ids"] == ["b001"]
+    assert body["replacements"] == 1
+    assert body["tm_written"] == 1
+
+    segments = {
+        s["block_id"]: s
+        for s in client.get(
+            f"/jobs/{_TERM_JOB}/segments", params={"status": "all"}, headers=_AUTH
+        ).json()["segments"]
+    }
+    assert segments["b001"]["target_text"] == "反向传播很关键"
+    assert segments["b001"]["human_verified"] is True
+    assert segments["b002"]["target_text"] == "反向传递再次出现"  # untouched
+    assert segments["b003"]["target_text"] == "这里也用了反向传递"
+
+
+def test_term_propagation_scope_all_rewrites_every_match_and_feeds_tm(tmp_path: Path) -> None:
+    config = _seed_terms(tmp_path)
+    client = TestClient(create_app(config))
+    res = client.post(
+        f"/jobs/{_TERM_JOB}/term-propagation",
+        json={"block_id": "b001", "surface": "反向传递", "expected": "反向传播", "scope": "all"},
+        headers=_AUTH,
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["block_ids"] == ["b001", "b002", "b003"]
+    assert body["replacements"] == 3
+    assert body["tm_written"] == 3
+
+    tm = TranslationMemory(config.db_dir / "tm.sqlite")
+    try:
+        entries = tm.scan()
+    finally:
+        tm.close()
+    assert {(e.source_text, e.target_text, e.provenance) for e in entries} == {
+        ("Backpropagation is key", "反向传播很关键", "human_pe"),
+        ("Backpropagation again", "反向传播再次出现", "human_pe"),
+        ("Backpropagation later", "这里也用了反向传播", "human_pe"),
+    }
+
+
+def test_term_propagation_scope_subsequent_skips_earlier_blocks(tmp_path: Path) -> None:
+    client = TestClient(create_app(_seed_terms(tmp_path)))
+    res = client.post(
+        f"/jobs/{_TERM_JOB}/term-propagation",
+        json={
+            "block_id": "b002",
+            "surface": "反向传递",
+            "expected": "反向传播",
+            "scope": "subsequent",
+        },
+        headers=_AUTH,
+    )
+    assert res.status_code == 200
+    # b001 is before the pivot and untouched; b002 (pivot) and b003 are rewritten.
+    assert res.json()["block_ids"] == ["b002", "b003"]
+
+
+def test_term_propagation_unknown_term_is_422(tmp_path: Path) -> None:
+    client = TestClient(create_app(_seed_terms(tmp_path)))
+    res = client.post(
+        f"/jobs/{_TERM_JOB}/term-propagation",
+        json={"block_id": "b001", "surface": "不存在", "expected": "x", "scope": "all"},
+        headers=_AUTH,
+    )
+    assert res.status_code == 422
+
+
+def test_term_propagation_unknown_block_is_404(tmp_path: Path) -> None:
+    client = TestClient(create_app(_seed_terms(tmp_path)))
+    res = client.post(
+        f"/jobs/{_TERM_JOB}/term-propagation",
+        json={"block_id": "nope", "surface": "反向传递", "expected": "反向传播", "scope": "all"},
+        headers=_AUTH,
+    )
+    assert res.status_code == 404
+
+
+def test_term_propagation_without_a_glossary_is_422(tmp_path: Path) -> None:
+    # The plain seed has no bible_cache, so there is nothing to propagate from.
+    client = TestClient(create_app(_seed(tmp_path)))
+    res = client.post(
+        f"/jobs/{_JOB}/term-propagation",
+        json={"block_id": "b002", "surface": "反向传递", "expected": "反向传播", "scope": "all"},
+        headers=_AUTH,
+    )
+    assert res.status_code == 422

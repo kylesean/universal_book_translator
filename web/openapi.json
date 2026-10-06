@@ -1077,6 +1077,171 @@
         }
       }
     },
+    "/jobs/{job_id}/segments/{block_id}/terms": {
+      "get": {
+        "tags": [
+          "Jobs"
+        ],
+        "summary": "Segment Terms",
+        "description": "Terminology findings for one block, with the cascade size each implies.\n\nEach finding carries the offending ``surface``, the ``expected``\nrendering, and how many *other* blocks in the job carry the same\nerror \u2014 ``cascade_all`` for the whole book, ``cascade_subsequent`` for\nblocks at or after this one. This is what the \"fix all N\" checkbox\ncounts.",
+        "operationId": "segment_terms_jobs__job_id__segments__block_id__terms_get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "block_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Block Id"
+            }
+          },
+          {
+            "name": "x-ubt-tenant",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Ubt-Tenant"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{job_id}/term-propagation": {
+      "post": {
+        "tags": [
+          "Jobs"
+        ],
+        "summary": "Propagate Term",
+        "description": "Replace one offending term surface across the job (PRD \u00a75.2.2).\n\nRewrites the selected block and, per ``scope``, every matching block;\neach rewritten block is promoted to a human revision and its pair fed\nback to the shared TM, exactly like a manual edit.",
+        "operationId": "propagate_term_jobs__job_id__term_propagation_post",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "x-ubt-tenant",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Ubt-Tenant"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TermPropagationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/jobs/{job_id}/pages/{page}/preview": {
       "get": {
         "tags": [
@@ -2620,6 +2785,48 @@
         "type": "object",
         "title": "TMevictRequest",
         "description": "Translation-memory rows to evict, by id."
+      },
+      "TermPropagationRequest": {
+        "properties": {
+          "block_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Block Id",
+            "description": "Block the action was invoked from"
+          },
+          "surface": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Surface",
+            "description": "Offending surface to replace"
+          },
+          "expected": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Expected",
+            "description": "Canonical rendering to write"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "block",
+              "subsequent",
+              "all"
+            ],
+            "title": "Scope",
+            "description": "block = only this block, subsequent = this and later blocks, all = whole book",
+            "default": "all"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "block_id",
+          "surface",
+          "expected"
+        ],
+        "title": "TermPropagationRequest",
+        "description": "Replace one offending term surface with its canonical rendering (L3)."
       },
       "ValidationError": {
         "properties": {

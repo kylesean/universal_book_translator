@@ -277,6 +277,56 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/jobs/{job_id}/segments/{block_id}/terms": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Segment Terms
+         * @description Terminology findings for one block, with the cascade size each implies.
+         *
+         *     Each finding carries the offending ``surface``, the ``expected``
+         *     rendering, and how many *other* blocks in the job carry the same
+         *     error — ``cascade_all`` for the whole book, ``cascade_subsequent`` for
+         *     blocks at or after this one. This is what the "fix all N" checkbox
+         *     counts.
+         */
+        get: operations["segment_terms_jobs__job_id__segments__block_id__terms_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/jobs/{job_id}/term-propagation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Propagate Term
+         * @description Replace one offending term surface across the job (PRD §5.2.2).
+         *
+         *     Rewrites the selected block and, per ``scope``, every matching block;
+         *     each rewritten block is promoted to a human revision and its pair fed
+         *     back to the shared TM, exactly like a manual edit.
+         */
+        post: operations["propagate_term_jobs__job_id__term_propagation_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/jobs/{job_id}/pages/{page}/preview": {
         parameters: {
             query?: never;
@@ -886,6 +936,34 @@ export interface components {
              */
             ids?: number[];
         };
+        /**
+         * TermPropagationRequest
+         * @description Replace one offending term surface with its canonical rendering (L3).
+         */
+        TermPropagationRequest: {
+            /**
+             * Block Id
+             * @description Block the action was invoked from
+             */
+            block_id: string;
+            /**
+             * Surface
+             * @description Offending surface to replace
+             */
+            surface: string;
+            /**
+             * Expected
+             * @description Canonical rendering to write
+             */
+            expected: string;
+            /**
+             * Scope
+             * @description block = only this block, subsequent = this and later blocks, all = whole book
+             * @default all
+             * @enum {string}
+             */
+            scope: "block" | "subsequent" | "all";
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -1376,6 +1454,79 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["SegmentEditRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    segment_terms_jobs__job_id__segments__block_id__terms_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-ubt-tenant"?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path: {
+                job_id: string;
+                block_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    propagate_term_jobs__job_id__term_propagation_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-ubt-tenant"?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TermPropagationRequest"];
             };
         };
         responses: {

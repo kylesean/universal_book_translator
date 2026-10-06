@@ -178,5 +178,10 @@ export const zh: TranslationDictionary = {
     previewPage: '预览本页排版',
     previewLoading: '正在重渲染本页...',
     previewFailed: '本页预览不可用（需要 typst 与源 PDF）。',
+    recommendedTerm: '推荐术语',
+    replaceTerm: '替换为推荐术语',
+    cascadeFix: '同时修复全书后续 {n} 处相同错误',
+    cascadeApplying: '正在级联修复…',
+    cascadeDone: '已修复 {n} 处',
   },
 }

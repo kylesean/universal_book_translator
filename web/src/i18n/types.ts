@@ -178,5 +178,10 @@ export interface TranslationDictionary {
     previewPage: string
     previewLoading: string
     previewFailed: string
+    recommendedTerm: string
+    replaceTerm: string
+    cascadeFix: string
+    cascadeApplying: string
+    cascadeDone: string
   }
 }

@@ -326,3 +326,44 @@ def detect_target_term_violations(
                     )
                 )
     return tuple(violations)
+
+
+def replace_term_surface(
+    target_text: str,
+    glossary: GlossaryInput,
+    *,
+    surface: str,
+    expected: str,
+) -> tuple[str, int]:
+    """Rewrite one offending surface to its canonical rendering in ``target_text``.
+
+    The workbench's "replace with the recommended term" action (and its cascade)
+    splices exactly the spans :func:`detect_target_term_violations` reports, so a
+    human fix can only touch a surface the exporter would have rewritten — never
+    a term the gate already accepts, and never inside a protected span
+    (math/URL/masker regions are skipped by the same scanner).
+
+    Returns the new text and the number of replacements; ``0`` (and the text
+    unchanged) when the surface does not occur. Splices right-to-left so the
+    earlier offsets the detector reported stay valid as later ones shrink.
+    """
+    if not target_text or not surface or not expected or surface == expected:
+        return target_text, 0
+    hits: list[tuple[int, int]] = []
+    for violation in detect_target_term_violations(target_text, glossary):
+        if violation.surface == surface and violation.expected == expected:
+            hits.extend(violation.hits)
+    if not hits:
+        return target_text, 0
+    # Two entries can share a surface; drop overlapping spans (the annotator
+    # does the same) so the right-to-left splice never cuts into a span it
+    # already rewrote.
+    kept: list[tuple[int, int]] = []
+    for start, end in sorted(set(hits)):
+        if kept and start < kept[-1][1]:
+            continue
+        kept.append((start, end))
+    rewritten = target_text
+    for start, end in reversed(kept):
+        rewritten = rewritten[:start] + expected + rewritten[end:]
+    return rewritten, len(kept)

@@ -1,6 +1,7 @@
 """Pydantic models for the UBT REST API."""
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -275,6 +276,20 @@ class GlossaryTermRequest(BaseModel):
 
     source: str = Field(..., min_length=1, description="Source term")
     target: str = Field(default="", description="Target translation (required when adding)")
+
+
+class TermPropagationRequest(BaseModel):
+    """Replace one offending term surface with its canonical rendering (L3)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    block_id: str = Field(..., min_length=1, description="Block the action was invoked from")
+    surface: str = Field(..., min_length=1, description="Offending surface to replace")
+    expected: str = Field(..., min_length=1, description="Canonical rendering to write")
+    scope: Literal["block", "subsequent", "all"] = Field(
+        default="all",
+        description="block = only this block, subsequent = this and later blocks, all = whole book",
+    )
 
 
 class TMevictRequest(BaseModel):
