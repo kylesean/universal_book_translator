@@ -11,6 +11,16 @@ Cost is one page's worth of Typst fragment compiles, not the whole document:
 ``overlays_from_blocks`` is pure Python (no compiles), and the page filter runs
 before ``reflow_overlays``/``compose``, which are the parts that shell out to
 Typst.
+
+Two deliberate differences from a full delivery render, both fine for a preview
+and both worth stating:
+
+* ``realization_plan`` is not threaded through, so the default fidelity floor
+  applies. A block the real run held below its floor may appear here.
+* the composition is always in-place on the source page (target over source).
+  For the page-zipper bilingual modes (``alternating``/``facing``) the delivered
+  artifact interleaves source and target pages, so page *N* of the preview is the
+  source page *N* composed with its translation — not the delivered page *N*.
 """
 
 from __future__ import annotations
