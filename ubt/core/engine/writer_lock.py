@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from ubt.core.exceptions import LedgerWriterLockConflictError
+from ubt.core.fs_perms import ensure_private_dir
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +89,12 @@ class LedgerWriterLock:
     def acquire(self) -> None:
         if self._fd is not None:
             return
-        self.lock_path.parent.mkdir(parents=True, exist_ok=True)
+        # ensure_private_dir, not a bare mkdir: on a fresh run the lock is
+        # created BEFORE the ledger, so a plain mkdir left db_dir at umask
+        # permissions and ensure_private_dir then saw it as "pre-existing"
+        # and skipped the 0700 — the job-ledger directory shipped world-
+        # browsable. A directory someone else created keeps its mode.
+        ensure_private_dir(self.lock_path.parent)
         fd = os.open(self.lock_path, os.O_RDWR | os.O_CREAT, 0o600)
         try:
             _try_exclusive_lock(fd)
