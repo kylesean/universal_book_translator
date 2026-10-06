@@ -2,7 +2,6 @@
 # =============================================================================
 # UBT Real-Model & End-to-End Evaluation Runner
 # Drives real LLM API, the local llama-swap MT backend, and CometKiwi QE benchmarks
-# Reference: docs/guides/evaluation-and-comparison-guide.md
 # =============================================================================
 
 set -eo pipefail

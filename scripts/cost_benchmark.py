@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Real-LLM end-to-end cost benchmark for the UBT pipeline.
 
-Runs the full 6-stage pipeline on a real book against any OpenAI-compatible
+Runs the full staged pipeline (``ubt.core.engine.plan.run_stages``) on a real
+book against any OpenAI-compatible
 API (default: DeepSeek) and reports per-stage call counts, latency, token
 usage, and estimated cost — plus the 0-token defense net's actual savings.
 

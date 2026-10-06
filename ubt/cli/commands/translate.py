@@ -516,7 +516,7 @@ def translate(
         typer.Option(
             "--mode",
             "--exec-mode",
-            help="Execution router: 'auto' (≤short-max born-digital pages → short chain, else long 6-stage), or force 'short'/'long'",
+            help="Execution router: 'auto' (≤short-max born-digital pages → short chain, else the staged long chain), or force 'short'/'long'",
             show_default=False,
         ),
     ] = None,
@@ -548,7 +548,7 @@ def translate(
         MathBackend | None,
         typer.Option(
             "--math-backend",
-            help="Display-formula renderer: 'mathjax' (default; typeset the OCR LaTeX with MathJax into an SVG vector, verify it against the source and fall back to the source graphic; degrades to 'typst' when Node is absent), 'image' (source crop for every display formula), 'typst' (legacy PDF-formula fidelity modes)",
+            help="Retired knob, accepted and recorded but no longer acted on: display formulas are always typeset by the LaTeX->Typst converter. Use --formula-render ('witness' verifies against the source graphic, 'image' keeps the source crop) to control formula fidelity.",
             show_default=False,
         ),
     ] = None,

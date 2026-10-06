@@ -104,6 +104,11 @@ def resolve_adaptive_policy(
         )
 
     is_short = route_decision.mode == "short"
+    # ``deterministic_glossary`` is the export-time literal term enforcement
+    # layer, and it is short-route only: on a whole book an Aho-Corasick
+    # substring swap can splice across word boundaries, so the book route leans
+    # on the bible + QE defenses instead. There is no config switch to force it
+    # on for books.
     return AdaptivePolicy(
         granularity=Granularity.MICRO,
         render_engine=norm_engine

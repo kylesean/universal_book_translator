@@ -2,7 +2,7 @@
 
 This is the pipeline's own smoke gate (P2 of ``docs/guides/TESTING_STRATEGY.md``):
 ``create_dry_run_orchestrator`` assembles the *real* orchestrator -- the echo
-provider, mock QE, and the real MarkdownAdapter -- and the whole six-stage plan
+provider, mock QE, and the real MarkdownAdapter -- and the whole staged plan
 runs against a synthetic two-chapter book on disk. Nothing is stubbed inside the
 pipeline itself; only the LLM/QE hop is a double.
 

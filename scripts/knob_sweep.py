@@ -2,14 +2,13 @@
 """Measure each sweepable knob's tolerance band against the test corpus.
 
 The registry says what a knob is *worth*; nothing said what it is *sensitive to*.
-The hardcode audit (folded into ``docs/design/knob-calibration-protocol.md``
-附录 B) named the gap: the only defence against a knob change is an end-to-end
-golden baseline, so when a baseline goes
+The hardcode audit named the gap: the only defence against a knob change is an
+end-to-end golden baseline, so when a baseline goes
 red there is no mapping from the failure back to the number that moved — and a
 knob no test can see is unmeasured no matter what its rationale claims.
 
-This is the mapping. For every knob that has a ``_env_*`` override point (see
-``docs/design/knob-calibration-protocol.md`` §4 for why that set is small), run the
+This is the mapping. For every knob that has a ``_env_*`` override point (that
+set is small), run the
 corpus at the centre and at ``×factor`` / ``÷factor``, and report which tests
 moved. A cell with no red means the corpus cannot measure that knob at that
 distance — which is a result to record in the registry, not a passing grade.

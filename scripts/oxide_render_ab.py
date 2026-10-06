@@ -7,7 +7,7 @@ perceptually close (different rasterization stacks hint/antialias differently,
 so a ratio threshold — not pixel equality — is the criterion).
 
 Thresholds below were frozen from the first measured run on this corpus
-(docs/design/knob-calibration-protocol.md convention: calibrate once, then pin).
+(calibrate once, then pin).
 
 Usage:  uv run python scripts/oxide_render_ab.py [pdf ...]
 Exit 0 when every pair passes, 1 on any breach.
@@ -36,8 +36,8 @@ DEFAULT_PDFS = [
 PAGES = (1, 3, 5)
 DPIS = (72, 300)
 
-# Frozen from the first calibration run on this corpus (see
-# docs/design/knob-calibration-protocol.md): sizes matched exactly at every pair;
+# Frozen from the first calibration run on this corpus: sizes matched exactly at
+# every pair;
 # mismatch ratios measured 0.008-0.077 @72dpi and 0.003-0.054 @300dpi. The
 # heatmap showed the diff is glyph-edge hinting only (a ~1px subpixel shift
 # between raster stacks; interiors and background clean) — thresholds carry

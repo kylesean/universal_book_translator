@@ -35,7 +35,7 @@ def _is_secret_env_name(name: str) -> bool:
 def subprocess_env() -> dict[str, str]:
     """``os.environ`` minus credential-shaped variables.
 
-    The external binaries this project drives (typst, node/MathJax, pandoc,
+    The external binaries this project drives (typst, pandoc,
     pdftocairo, the COMET scorer) inherit the full environment today, keys
     included, so a poisoned dependency or toolchain plugin can read the LLM
     credentials the parent holds, preventing credential leakage to

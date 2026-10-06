@@ -1,5 +1,41 @@
 # Universal Book Translator (UBT)
 
-Industrial-grade universal bilingual book translation engine with decoupled IR and 4-layer consistency defense.
+Pre-1.0 self-hosted document/book translation compiler: ingest PDF/EPUB/DOCX/
+HTML/Markdown into one IR, translate it through a ledger-backed multi-stage LLM
+pipeline, and re-typeset the result onto the source PDF page layout.
 
-See the User Guide and Architecture & Routing Guide under `docs/` for full documentation. (Docs are maintained locally and intentionally not versioned.)
+Consistency defenses: a mined book bible (terms and names) and a structural +
+quality gate run on every job. Hierarchical chapter memory runs only on the
+multi-chapter long route — a single-chapter document (which is how every PDF is
+ingested), any document over 40 chapters, and academic profiles get no rolling
+summary. Deterministic glossary enforcement is short-document only.
+
+The render path shrinks type inside each source box and reflows within a
+column; it does not grow boxes or repaginate, so it is reading-grade, not
+DTP-grade. See "Known limits" below.
+
+## Known limits
+
+Measured against the current implementation, not aspirational:
+
+- **Best-supported input**: born-digital, white-background, single- or
+  double-column text PDFs. The pdfium fast lane does not emit tables or
+  figures, and the Docling path maps merged cells to the top-left value only.
+- **Not supported**: vertical CJK, encrypted PDFs (rejected at assessment, not
+  translated), colour/watermarked backgrounds (no background-colour probe, so
+  light text on dark pages is invisible), and text drawn inside figures.
+- **Text expansion**: a translation longer than its source box is shrunk to
+  2pt; there is no box growth or page re-flow.
+- **Per format**: DOCX footnotes/endnotes, column settings and TOC fields are
+  not read; a whole PDF is ingested as one chapter, so per-chapter resume and
+  billing do not apply to it.
+- **Bilingual output**: in-place bilingual re-typesets the source in grey
+  rather than preserving its original layout; headings and formulas come out
+  monolingual. Page-facing and alternating modes are the reliable bilingual
+  routes.
+- **Exchange formats**: XLIFF 2.1 and TMX import exist but are not
+  standards-complete (no TBX/SRX), so hand-off to external CAT tooling is
+  limited.
+
+See the guides under `docs/` for design detail. `docs/` is intentionally
+unversioned (gitignored), so a clone has the code and tests only.

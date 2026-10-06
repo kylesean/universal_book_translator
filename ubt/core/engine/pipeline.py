@@ -150,8 +150,8 @@ def engine_signature(config: Any) -> str:
 async def _close_adapter_off_loop(adapter: Any, job_id: str) -> None:
     """Close the adapter off the event loop.
 
-    Adapter close may wait on subprocess termination (the MathJax node
-    renderer's ``proc.wait(timeout=5)``); running it inline in run()'s finally
+    Adapter close may wait on subprocess termination (``proc.wait(timeout=...)``);
+    running it inline in run()'s finally
     stalls the loop shared with SSE fan-out for every connected client.
     """
     close_adapter = getattr(adapter, "close", None)
@@ -207,7 +207,11 @@ class _RunPreparation:
 
 
 class PipelineOrchestrator:
-    """Orchestrates the 6-stage universal book translation lifecycle."""
+    """Orchestrates the multi-stage book translation lifecycle.
+
+    ``ubt.core.engine.plan.run_stages`` is the authoritative, gate-dependent
+    stage list; do not duplicate the stage count here — it has gone stale twice.
+    """
 
     def __init__(
         self,
@@ -816,7 +820,7 @@ class PipelineOrchestrator:
         source_lang: str = "",
         cancel_token: asyncio.Event | None = None,
     ) -> AsyncIterator[TranslationProgressEvent]:
-        """Execute the modular six-stage translation pipeline yielding real-time progress events."""
+        """Execute the staged translation pipeline, yielding real-time progress events."""
         if not input_path.exists():
             raise DocumentParseError(f"Input document does not exist: {input_path}")
         prep = await self._prepare_run(
@@ -1077,7 +1081,7 @@ class PipelineOrchestrator:
                     tm.close()
                 except Exception as tm_exc:
                     logger.debug("Error closing TM for job %s: %s", actual_job_id, tm_exc)
-            # Adapters may own subprocesses (the MathJax node renderer); close
+            # Adapters may own subprocesses; close
             # them per run so a long-lived server does not accumulate children.
             if adapter is not None and self.custom_adapter is None:
                 await _close_adapter_off_loop(adapter, actual_job_id)

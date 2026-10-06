@@ -749,8 +749,9 @@ class UBTConfig(BaseSettings):
     # -- Execution-mode router (unified entry, adaptive execution) --------------
     # 'auto' (default): decide() probes the PDF (pages/chars/scan) and routes
     #   <= short_max_pages born-digital pages to the short chain (whole-chapter
-    #   rewrite + reflow + full visual gate), everything else to the 6-stage
-    #   long chain. 'short' / 'long' force one chain (short on a 300-page book
+    #   rewrite + reflow + full visual gate), everything else to the long
+    #   block pipeline (``ubt.core.engine.plan.run_stages`` is the authoritative
+    #   stage list). 'short' / 'long' force one chain (short on a 300-page book
     #   raises a clear error instead of burning context).
     exec_mode: ExecMode = "auto"
     short_max_pages: int = Field(default=30, gt=0)
@@ -767,13 +768,13 @@ class UBTConfig(BaseSettings):
     # mismatch. 'image': render every display formula from its source graphic
     # (zero conversion risk). 'native': keep the converted math as-is.
     formula_render: FormulaRender = "witness"
-    # Display-formula rendering backend. 'mathjax' (default):
-    # the OCR LaTeX is typeset by MathJax into an SVG vector and embedded,
-    # with the formula witness verifying it against the source crop and the
-    # source graphic as fallback; degrades to the 'typst' behaviour when
-    # Node or the pinned scripts/mathjax packages are absent. 'image':
-    # every display formula is the source crop (zero rendering risk).
-    # 'typst': home-grown LaTeX->Typst converter with formula_render.
+    # Retired knob, kept only so the engine signature (and therefore every
+    # persisted job id) stays stable. ``AdapterRuntimeConfig`` still carries it,
+    # but ``DoclingPDFAdapter.apply_config`` deliberately does not read it and
+    # no renderer consumes it: display formulas are typeset by the home-grown
+    # LaTeX->Typst converter and governed by ``formula_render``.
+    # The MathJax/SVG backend this once described no longer exists, and
+    # ``scripts/mathjax/`` has no caller.
     math_backend: MathBackend = "mathjax"
 
     # -- Page range filter -----------------------------------------------------

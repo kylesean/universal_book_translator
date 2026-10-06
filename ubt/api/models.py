@@ -193,7 +193,9 @@ class JobSubmitRequest(BaseModel):
         default=None, description="Formula rendering (native, image, witness)"
     )
     math_backend: MathBackend | None = Field(
-        default=None, description="Math typesetting backend (typst, mathjax, image)"
+        default=None,
+        description="Retired knob: recorded in the engine signature but no renderer "
+        "consumes it; formula fidelity is controlled by formula_render.",
     )
     # OCR engine selection. ``ocr_endpoint`` / ``ocr_api_key`` stay operator-only.
     ocr_mode: OcrMode | None = Field(

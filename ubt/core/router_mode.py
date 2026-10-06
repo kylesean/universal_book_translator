@@ -6,7 +6,8 @@ the execution path is adaptive:
 
 - SHORT (<= ``UBTConfig.short_max_pages`` born-digital pages or token budget):
   whole-chapter rewrite + reflow + full visual gate (Codex-style, 可读优先).
-- LONG (everything else, always for scans and multi-chapter books): existing 6-stage block pipeline.
+- LONG (everything else, always for scans and multi-chapter books): the staged
+  block pipeline (``ubt.core.engine.plan.run_stages``).
 
 Only permissive libraries here (pdf_oxide via short_doc probe, page_profiler);
 this module never imports adapters or the LLM router.

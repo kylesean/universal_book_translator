@@ -303,7 +303,7 @@ QA_LONG_BOOK_SAMPLE = 10
 # Short-chain router (router_mode.py — unified entry, adaptive execution)
 # ---------------------------------------------------------------------------
 # <= this many born-digital pages: whole-chapter short chain (rewrite +
-# reflow + full visual gate). Above: 6-stage long chain. Distinct from
+# reflow + full visual gate). Above: the staged long chain. Distinct from
 # QA_FULL_GATE_MAX_PAGES (visual-inspection scope), this gates execution.
 # Default 30 covers a 26-page textbook chapter (chapter-3实战).
 # Display/registry default only: ``router_mode.decide`` resolves the live

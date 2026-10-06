@@ -39,7 +39,7 @@ exclude = [
 [project]
 name = "universal-book-translator"
 version = "0.1.0"
-description = "Industrial-grade universal bilingual book translation engine with decoupled IR and 4-layer consistency defense."
+description = "Pre-1.0 self-hosted book translation engine: single IR, ledger-backed multi-stage LLM pipeline, in-place PDF re-typesetting."
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
