@@ -1,10 +1,10 @@
-"""Rolling cross-chapter continuity summaries.
+"""Summary primitives for the hierarchical (L2/L3) memory manager.
 
-Feeds a compact summary of each completed chapter into the draft prompts of
-the next chapter, so character names, established renderings, and narrative
-state carry across chapter boundaries. One bulk draft-tier call per chapter
-transition; failures degrade to a deterministic excerpt so the pipeline never
-blocks on summarization.
+``collect_chapter_text`` / ``llm_summary`` / ``deterministic_summary`` are the
+one assembly + call + fallback policy for a summary of drafted blocks. The
+hierarchical manager calls them on step / chapter transitions; there is no
+separate chapter-boundary summarizer anymore -- that second path wrote the
+same ``macro_ctx`` slot through its own LLM call and was merged away.
 """
 
 import logging
@@ -118,21 +118,3 @@ async def llm_summary(
     except Exception as exc:
         logger.warning("%s: %s", context, exc)
     return None
-
-
-async def summarize_chapter(
-    blocks: list[Any],
-    complete: Any,  # Callable[[str, str], Awaitable[str]]
-    target_lang: str = "zh",
-) -> str:
-    """Summarize one completed chapter; degrade to a deterministic excerpt."""
-    chapter_text = collect_chapter_text(blocks)
-    if not chapter_text:
-        return ""
-    summary = await llm_summary(
-        chapter_text,
-        complete,
-        target_lang,
-        context="Rolling summary LLM call failed",
-    )
-    return summary or deterministic_summary(chapter_text)

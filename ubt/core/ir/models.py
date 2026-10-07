@@ -140,7 +140,6 @@ class StyleMeta(BaseModel):
     #: drawing its fragment left-aligned. ``None`` (the default) means
     #: left-aligned, the layout every other block type uses.
     alignment: str | None = None
-    line_height: float | None = None
     #: First-line indent (pt) of a body paragraph, or of a list item's marker
     #: column, measured from the source's own line boxes. Rendered as a leading
     #: ``#h`` on the first line; ``None`` for headings and blocks the source

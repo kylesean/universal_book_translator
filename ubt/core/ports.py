@@ -138,20 +138,6 @@ class DocumentAdapter(Protocol):
 
 VisualGateRunnerFn = Callable[..., Any]
 
-_visual_gate_runner: VisualGateRunnerFn | None = None
-
-
-def set_visual_gate_runner(fn: VisualGateRunnerFn | None) -> None:
-    """Override the post-render visual gate runner (None restores default)."""
-    global _visual_gate_runner
-    _visual_gate_runner = fn
-
-
-def reset_ports() -> None:
-    """Restore all production defaults (test teardown helper)."""
-    global _visual_gate_runner
-    _visual_gate_runner = None
-
 
 def resolve_adapter(input_path: Path, pdf_engine: str = "auto") -> DocumentAdapter:
     """Return the document adapter for ``input_path`` without a core import edge."""
@@ -170,8 +156,6 @@ def detect_figure_pages(input_path: Path, blocks: list[Any]) -> set[int]:
 
 def get_visual_gate_runner() -> VisualGateRunnerFn:
     """Return the post-render visual gate entry point."""
-    if _visual_gate_runner is not None:
-        return _visual_gate_runner
     from ubt.adapters.pdf.visual_gate import run_visual_gate
 
     return run_visual_gate
@@ -343,17 +327,14 @@ def classify_pdf_structure(input_path: Path) -> PdfStructureFacts:
     """
     try:
         from ubt.adapters.pdf.page_profiler import (
-            PageKind,
             classify_page,
             collect_page_facts,
+            majority_flags,
             structural_page_shares,
         )
 
         facts = collect_page_facts(input_path)
-        kinds = [classify_page(f) for f in facts]
-        n = len(kinds)
-        has_scan = n > 0 and sum(1 for k in kinds if k == PageKind.SCAN_IMAGE) * 2 >= n
-        formula_heavy = n > 0 and sum(1 for k in kinds if k == PageKind.MIXED_COMPLEX) * 2 >= n
+        has_scan, formula_heavy = majority_flags([classify_page(f) for f in facts])
         multicolumn_share, structural_share = structural_page_shares(facts)
         return PdfStructureFacts(
             has_scan=has_scan,
@@ -371,33 +352,18 @@ def classify_pdf_structure(input_path: Path) -> PdfStructureFacts:
 
 
 def classify_pdf_content(input_path: Path) -> tuple[bool, bool]:
-    """Return (has_scan, formula_heavy) via page_profiler.
+    """Return (has_scan, formula_heavy) via page_profiler.content_flags."""
+    from ubt.adapters.pdf.page_profiler import content_flags
 
-    Both flags aggregate with a >=50% page share, matching the sampled-page
-    majority the engine selector applies to the same signals: a lone blank
-    page in a born-digital book must not route the whole title down the
-    long-chain/VLM path.
-    """
-    facts = classify_pdf_structure(input_path)
-    return facts.has_scan, facts.formula_heavy
-
-
-def extract_pdf_figures(
-    pdf_path: Path | str,
-    output_assets_dir: Path | str,
-    dpi: int = 300,
-) -> dict[str, Any]:
-    """Extract figures from PDF via pypdfium2."""
-    from ubt.adapters.pdf.asset_extractor import extract_pdf_figures as _extract
-
-    return _extract(pdf_path, output_assets_dir, dpi=dpi)
-
-
-def is_typst_math_well_formed(expr: str) -> bool:
-    """Check if Typst math delimiters and quotes are well-formed."""
-    from ubt.adapters.pdf.typst_math import is_typst_math_well_formed as _check
-
-    return _check(expr)
+    try:
+        return content_flags(input_path)
+    except Exception as exc:
+        logging.getLogger(__name__).warning(
+            "PDF content classification failed for %s (routing probe degraded): %s",
+            input_path,
+            exc,
+        )
+        return False, False
 
 
 # ---------------------------------------------------------------------------

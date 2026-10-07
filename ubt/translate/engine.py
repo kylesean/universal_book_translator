@@ -28,7 +28,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ubt.core.cleaners.mask_tokens import UnmaskReport
-from ubt.model.ast import Document, TextElement
 from ubt.model.segment import QA, Provenance, Segment, SegmentState
 from ubt.segment.placeholders import MaskedSource, PlaceholderEngine
 from ubt.segment.xliff import xml_safe
@@ -166,6 +165,12 @@ class TranslationEngine:
         Fail-open: any cache problem (an unavailable store, a corrupt entry)
         falls back to the provider, because a cache must never break a
         translation.
+
+        This half only *reads* the cache. It must not write: a draft is not
+        cacheable until the caller has judged it (``resolve`` /
+        ``finalize_draft``), and writing here cached a defective draft that then
+        replayed on every later run -- a stale loss only the repair stage could
+        recover. Callers record a judged-clean draft via :meth:`remember_draft`.
         """
         if self.cache is None:
             return await translate(masked_source)
@@ -173,9 +178,7 @@ class TranslationEngine:
         cached = self._cached_draft(key)
         if cached is not None:
             return cached
-        raw = await translate(masked_source)
-        self.remember_draft(masked_source, raw, context=context)
-        return raw
+        return await translate(masked_source)
 
     def _cached_draft(self, key: str) -> str | None:
         """The cached draft for ``key``, or ``None`` on any miss/corruption."""
@@ -208,6 +211,10 @@ class TranslationEngine:
         masked = self.mask(xml_safe(text))
         raw = await self.draft(masked.text, translate, context=context)
         result = self.resolve(raw, masked)
+        # Cache only a judged-clean draft: a defective one would replay as a hit
+        # on every later run, and only repair could recover the block.
+        if result.clean:
+            self.remember_draft(masked.text, raw, context=context)
         return Segment(
             id=element_id,
             source=masked.text,
@@ -217,15 +224,6 @@ class TranslationEngine:
             provenance=self._provenance(),
             qa=QA(flags=tuple(label for label, _ in result.dirty)),
         )
-
-    async def translate_document(self, document: Document, translate: TranslateFn) -> list[Segment]:
-        """Translate every translatable element of a document, in reading order."""
-        results: list[Segment] = []
-        for element in document.elements:
-            if not isinstance(element, TextElement) or not element.text.strip():
-                continue
-            results.append(await self.translate_text(element.id, element.text, translate))
-        return results
 
 
 __all__ = ["RestoreResult", "TranslateFn", "TranslationEngine"]

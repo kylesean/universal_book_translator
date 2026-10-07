@@ -2,10 +2,10 @@
 
 Facade module assembling the ledger subsystem:
 - :mod:`ubt.core.engine.ledger_base`: connection, transaction, and schema migrations.
-- :mod:`ubt.core.engine.ledger_mixins`: job lifecycle, block operations, and batch-API mixins.
+- :mod:`ubt.core.engine.ledger_mixins`: job lifecycle, block operations, and batch-API partitions.
 
-:class:`SQLiteJobLedger` composes them via multiple inheritance and re-exports
-public module-level symbols for seamless imports.
+:class:`SQLiteJobLedger` is the one class that inherits ``LedgerBase``; the
+partitions are pure mixins (no base of their own).
 """
 
 from ubt.core.engine.ledger_base import (

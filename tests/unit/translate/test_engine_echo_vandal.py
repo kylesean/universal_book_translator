@@ -1,6 +1,6 @@
 """The translation engine is lossless when honest and fail-closed when not.
 
-The engine runs twice over the same document, once per provider:
+The engine runs twice over the same units, once per provider:
 
 - **echo** (a faithful provider returning the masked source unchanged): every
   segment comes back ``TRANSLATED`` with an empty flag set and a target equal
@@ -24,7 +24,6 @@ from ubt.core.cleaners.code_masker import CodeMasker
 from ubt.core.cleaners.email_masker import EmailMasker
 from ubt.core.cleaners.math_masker import MathMasker
 from ubt.core.cleaners.soup_math import SoupMathMasker
-from ubt.model.ast import Document, ElementT, Paragraph, Region, RegionKind
 from ubt.model.segment import Segment, SegmentState
 from ubt.segment.placeholders import PlaceholderEngine
 from ubt.segment.xliff import xml_safe
@@ -43,15 +42,6 @@ _ORIGINALS: tuple[tuple[str, str, bool], ...] = (
 )
 
 TranslateFn = Callable[[str], Awaitable[str]]
-
-
-def _document() -> Document:
-    elements: tuple[ElementT, ...] = tuple(
-        Paragraph(id=element_id, spine_index=index, span=None, text=text)  # type: ignore[arg-type]
-        for index, (element_id, text, _) in enumerate(_ORIGINALS)
-    )
-    region = Region(id="r", kind=RegionKind.BODY, elements=elements)
-    return Document(source=None, regions=(region,))  # type: ignore[arg-type]
 
 
 def _engine() -> TranslationEngine:
@@ -73,16 +63,20 @@ async def _vandal(text: str) -> str:
     return _TOKEN_RE.sub("", text)
 
 
-def _original_by_id(segment_id: str) -> str:
-    return {element_id: text for element_id, text, _ in _ORIGINALS}[segment_id]
-
-
 def _by_id(segments: list[Segment]) -> dict[str, Segment]:
     return {segment.id: segment for segment in segments}
 
 
+async def _translate_all(engine: TranslationEngine, translate: TranslateFn) -> dict[str, Segment]:
+    segments = [
+        await engine.translate_text(element_id, text, translate)
+        for element_id, text, _ in _ORIGINALS
+    ]
+    return _by_id(segments)
+
+
 async def test_an_honest_provider_is_lossless_end_to_end() -> None:
-    segments = _by_id(await _engine().translate_document(_document(), _echo))
+    segments = await _translate_all(_engine(), _echo)
 
     assert set(segments) == {element_id for element_id, _, _ in _ORIGINALS}
     for element_id, text, has_protection in _ORIGINALS:
@@ -95,7 +89,7 @@ async def test_an_honest_provider_is_lossless_end_to_end() -> None:
 
 
 async def test_a_vandal_provider_is_fail_closed() -> None:
-    segments = _by_id(await _engine().translate_document(_document(), _vandal))
+    segments = await _translate_all(_engine(), _vandal)
 
     for element_id, _, has_protection in _ORIGINALS:
         segment = segments[element_id]

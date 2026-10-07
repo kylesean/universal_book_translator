@@ -1,8 +1,6 @@
-"""Contract tests for rolling cross-chapter continuity summaries."""
+"""Contract tests for the summary primitives the hierarchical manager uses."""
 
 from __future__ import annotations
-
-import asyncio
 
 import pytest
 
@@ -11,7 +9,6 @@ from ubt.core.memory.rolling_summary import (
     collect_chapter_text,
     deterministic_summary,
     extract_chapter_id,
-    summarize_chapter,
 )
 
 pytestmark = pytest.mark.fast
@@ -113,86 +110,3 @@ def test_build_summary_prompt_embeds_language_and_content() -> None:
     assert "Output ONLY the summary text." in system_prompt
     assert "content here" in user_prompt
     assert "zh" in user_prompt
-
-
-# --------------------------------------------------------------------------- #
-# summarize_chapter
-# --------------------------------------------------------------------------- #
-
-
-def _blocks() -> list[_Block]:
-    return [_Block("x", "translated chapter text here")]
-
-
-def test_summarize_returns_a_valid_llm_summary() -> None:
-    async def complete(_system: str, _user: str) -> str:
-        return "A fine summary of the chapter."
-
-    assert asyncio.run(summarize_chapter(_blocks(), complete)) == "A fine summary of the chapter."
-
-
-def test_summarize_strips_wrapping_quotes_and_whitespace() -> None:
-    async def complete(_system: str, _user: str) -> str:
-        return '  "Hello summary."  '
-
-    assert asyncio.run(summarize_chapter(_blocks(), complete)) == "Hello summary."
-
-
-def test_summarize_accepts_a_summary_at_the_minimum_length() -> None:
-    async def complete(_system: str, _user: str) -> str:
-        return "abcdefghij"  # exactly 10 chars == _MIN_SUMMARY_CHARS
-
-    assert asyncio.run(summarize_chapter(_blocks(), complete)) == "abcdefghij"
-
-
-def test_summarize_normalizes_internal_whitespace() -> None:
-    async def complete(_system: str, _user: str) -> str:
-        return "aa   bb   cc   dd"
-
-    assert asyncio.run(summarize_chapter(_blocks(), complete)) == "aa bb cc dd"
-
-
-def test_summarize_degrades_a_too_short_summary_to_the_excerpt() -> None:
-    async def complete(_system: str, _user: str) -> str:
-        return "hi"
-
-    assert asyncio.run(summarize_chapter(_blocks(), complete)) == "translated chapter text here"
-
-
-def test_summarize_truncates_the_fallback_excerpt_of_a_long_chapter() -> None:
-    chapter = "Chapter body sentence. " * 30  # 690 chars > the 400-char cap
-
-    async def complete(_system: str, _user: str) -> str:
-        return "hi"  # too short -> fall back to the chapter excerpt
-
-    result = asyncio.run(summarize_chapter([_Block("x", chapter)], complete))
-    assert result.endswith(".")
-    assert len(result) <= 400  # the deterministic excerpt cap
-    assert len(result) < len(chapter)
-
-
-def test_summarize_degrades_on_a_provider_error() -> None:
-    async def complete(_system: str, _user: str) -> str:
-        raise RuntimeError("boom")
-
-    assert asyncio.run(summarize_chapter(_blocks(), complete)) == "translated chapter text here"
-
-
-def test_summarize_truncates_an_over_long_summary_at_a_boundary() -> None:
-    long = ("Sentence one is here. " * 60).strip()
-    assert len(long) > 800
-
-    async def complete(_system: str, _user: str) -> str:
-        return long
-
-    result = asyncio.run(summarize_chapter(_blocks(), complete))
-    assert 400 < len(result) <= 800
-    assert result.endswith(".")
-    assert long.startswith(result)
-
-
-def test_summarize_of_no_text_is_empty() -> None:
-    async def complete(_system: str, _user: str) -> str:
-        return "A valid summary here."
-
-    assert asyncio.run(summarize_chapter([], complete)) == ""

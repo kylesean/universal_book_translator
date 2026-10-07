@@ -219,6 +219,26 @@ def structural_page_shares(facts: Sequence[PageFacts]) -> tuple[float, float]:
     return multicolumn / n, structural / n
 
 
+def majority_flags(kinds: Sequence[PageKind]) -> tuple[bool, bool]:
+    """``(has_scan, formula_heavy)`` by >=50% page share of the given kinds."""
+    n = len(kinds)
+    has_scan = n > 0 and sum(1 for k in kinds if k == PageKind.SCAN_IMAGE) * 2 >= n
+    formula_heavy = n > 0 and sum(1 for k in kinds if k == PageKind.MIXED_COMPLEX) * 2 >= n
+    return has_scan, formula_heavy
+
+
+def content_flags(pdf_path: Path) -> tuple[bool, bool]:
+    """Return ``(has_scan, formula_heavy)`` from a full page census.
+
+    Both flags aggregate with a >=50% page share, matching the sampled-page
+    majority the engine selector applies to the same signals: a lone blank
+    page in a born-digital book must not route the whole title down the
+    long-chain/VLM path.
+    """
+    kinds = [classify_page(f) for f in collect_page_facts(pdf_path)]
+    return majority_flags(kinds)
+
+
 @dataclass(frozen=True, slots=True)
 class PageProbe:
     """One pdfium page's text-layer read, shared by the profiler and the sampler."""

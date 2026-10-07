@@ -19,7 +19,6 @@ module. Statuses are promoted by evidence, never by feel.
 
 from __future__ import annotations
 
-import os
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -81,8 +80,9 @@ PROSE_BLOCK_TYPES = frozenset({BlockType.HEADING, BlockType.NARRATIVE, BlockType
 # translated -- keeping them here meant no
 # run ever sent one to the model, and the verdict's keep stamped them
 # MTQE_PASSED/1.0 so a whole book of source-language tables reported a perfect
-# pass rate. The rigid engine still leaves them alone (it paints
-# ``PROSE_BLOCK_TYPES`` only), which is that engine's stated contract.
+# pass rate. The PDF compositor still leaves them on Layer 0 (``_overlayable``
+# paints text prose only -- it cannot rebuild a grid), which is that path's
+# stated contract; see README "Tables".
 NON_TEXT_BLOCK_TYPES = frozenset({BlockType.FORMULA, BlockType.CODE, BlockType.IMAGE})
 NON_PROSE_FLOWS = frozenset({FlowID.FOOTNOTE, FlowID.CAPTION, FlowID.TABLE_GRID})
 CAPTION_RE = re.compile(r"^(FIG\.|Fig\.|Figure|Table|TAB\.|图|表)\s*[A-Za-z0-9]", re.IGNORECASE)
@@ -96,26 +96,6 @@ BAND_TEXT_MAX_LEN = 30
 # Pairing punctuation (docling_adapter prose tails)
 # ---------------------------------------------------------------------------
 PAIR_TERMINAL_PUNCT = frozenset({".", "。", "!", "！", "?", "？", ":", "：", ";", "；"})
-
-
-def _env_float(name: str, default: float) -> float:
-    """Calibration override: env wins, otherwise the frozen default.
-
-    Lets a calibration sweep try values without touching source defaults — the
-    default stays the object under test. Invalid values fall back silently so a
-    typo never breaks a run.
-    """
-    try:
-        return float(os.environ[name])
-    except (KeyError, ValueError):
-        return default
-
-
-def _env_int(name: str, default: int) -> int:
-    try:
-        return int(os.environ[name])
-    except (KeyError, ValueError):
-        return default
 
 
 CJK_PUNCT_CHARS = frozenset("，。、；：？！「」『』（）【】《》〈〉…—·")
@@ -214,24 +194,23 @@ CN_MEASURE_WORDS = (
     "万",
     "亿",
 )
-# Kinsoku sets (JIS X 4051 class): a line must not END with an opener nor
-# START with a closer. "…—·" are neutral (no adjustment either way).
-CJK_OPEN_PUNCT = frozenset("「『（《〈【")
-CJK_CLOSE_PUNCT = frozenset("，。、；：？！」』）》〉】")
 # The fitter/rigid min-font knobs (PUNCT_SQUEEZE_*, FIT_*, RIGID_*,
 # rigid_min_font_pt_for) belonged to the retired rigid typesetter and its
-# FlowFitter; both are gone, so the constants went with them.
+# FlowFitter; both are gone, so the constants went with them. The JIS X 4051
+# kinsoku opener/closer sets went the same way: the real CJK break behaviour
+# lives in Typst's paragraph settings and the pangu-spacing pass, and the sets
+# had no remaining consumer.
 
 
 # Complex-page nets: row-fragment glue. Thresholds measured on chapter-1
 # (good: coverage 0.77-1.0) vs book2 p31 (bad: pairs down to 0.2); gap cap
 # sits between word gaps (<10pt) and column gutters.
-ROW_MERGE_GAP_PT = _env_float("UBT_ROW_MERGE_GAP_PT", 24.0)
-ROW_MERGE_Y_TOL = _env_float("UBT_ROW_MERGE_Y_TOL", 0.5)
+ROW_MERGE_GAP_PT = 24.0
+ROW_MERGE_Y_TOL = 0.5
 # A fragment this many times the median row height is not a row (vertical
 # sidebar text, rotated watermarks); it must never seed a band that normal
 # rows join, or the whole span collapses into one glued line.
-ROW_MERGE_TALL_FACTOR = _env_float("UBT_ROW_MERGE_TALL_FACTOR", 3.0)
+ROW_MERGE_TALL_FACTOR = 3.0
 
 # ---------------------------------------------------------------------------
 # PDF operator inventory (page profiler / engine selector)
@@ -309,7 +288,7 @@ QA_LONG_BOOK_SAMPLE = 10
 # Display/registry default only: ``router_mode.decide`` resolves the live
 # ``UBTConfig.short_max_pages`` at call time, because this constant is frozen at
 # import and its ``_env_int`` parse accepts 0/garbage the config field rejects.
-SHORT_CHAIN_MAX_PAGES = _env_int("UBT_SHORT_MAX_PAGES", 30)
+SHORT_CHAIN_MAX_PAGES = 30
 
 # ---------------------------------------------------------------------------
 # Fast lane (pipeline.py — short-doc parity)
@@ -449,8 +428,6 @@ CALIBRATION: dict[str, KnobMeta] = {
     "BAND_TEXT_MAX_LEN": KnobMeta(S, "30-char cut separates chrome from body"),
     "PAIR_TERMINAL_PUNCT": KnobMeta(P, "terminal set, behaviour-tested"),
     "CJK_PUNCT_CHARS": KnobMeta(P, "punctuation inventory, behaviour-tested"),
-    "CJK_OPEN_PUNCT": KnobMeta(P, "kinsoku opener set, behaviour-tested"),
-    "CJK_CLOSE_PUNCT": KnobMeta(P, "kinsoku closer set, behaviour-tested"),
     "ROW_MERGE_GAP_PT": KnobMeta(
         H,
         "24pt row-glue cap, set between word gaps and gutters; sensitivity sweep: 16–36pt "

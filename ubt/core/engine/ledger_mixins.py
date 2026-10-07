@@ -1,19 +1,22 @@
-"""Domain mixins for the SQLite job ledger: job lifecycle/metadata/usage,
+"""Domain partitions for the SQLite job ledger: job lifecycle/metadata/usage,
 block reads/writes, and Batch API task persistence.
 
-Each mixin extends :class:`~ubt.core.engine.ledger_base.LedgerBase`;
-``SQLiteJobLedger`` in the facade composes them via multiple inheritance.
+These are *mixins*, not subclasses: they add methods to the host and expect
+:class:`~ubt.core.engine.ledger_base.LedgerBase` to supply the connection and
+scope. ``SQLiteJobLedger`` is the only class that inherits
+``LedgerBase`` -- the previous shape had every mixin extend ``LedgerBase`` and
+then re-combine, which was a God Object cut into three files wearing a mixin
+costume (the diamond was linear, but the type said "is-a base" four times).
 """
 
 import json
 import sqlite3
 from collections.abc import Iterable
 from contextlib import suppress
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from ubt.core.engine.ledger_base import (
     NON_TERMINAL_STATUSES,
-    LedgerBase,
     _upsert_blocks_batch,
     logger,
 )
@@ -35,6 +38,14 @@ from ubt.core.qe.defect_taxonomy import (
     is_transient_failure,
 )
 from ubt.core.qe.score_policy import QE_SCORED_SQL
+
+if TYPE_CHECKING:
+    # Methods reach into the host's connection/scope; at runtime the host is
+    # ``SQLiteJobLedger`` (LedgerBase + these mixins), at type-check time the
+    # mixin methods type against LedgerBase's API.
+    from ubt.core.engine.ledger_base import LedgerBase as _LedgerHost
+else:
+    _LedgerHost = object
 
 #: Terminal ``job_meta.status`` values. A ``completed`` finalize must not
 #: overwrite any of these (the string mirror of the queue's terminal set).
@@ -108,7 +119,7 @@ def merge_usage_totals(
     return merged
 
 
-class LedgerJobsMixin(LedgerBase):
+class LedgerJobsMixin(_LedgerHost):
     """Job lifecycle, metadata, usage accounting and reporting reads."""
 
     def init_job_from_manifest(self, job_id: str, manifest: BookManifest) -> None:
@@ -640,7 +651,7 @@ class LedgerJobsMixin(LedgerBase):
             return None
 
 
-class LedgerBlocksMixin(LedgerBase):
+class LedgerBlocksMixin(_LedgerHost):
     """Block writes, checkpoints and status/type/chapter reads."""
 
     def append_chapter(self, job_id: str, chapter: ChapterIR) -> None:
@@ -1417,7 +1428,7 @@ class LedgerBlocksMixin(LedgerBase):
             return [self._row_to_block(r) for r in rows]
 
 
-class LedgerBatchMixin(LedgerBase):
+class LedgerBatchMixin(_LedgerHost):
     """Batch API job persistence and create-reservation."""
 
     # ------------------------------------------------------------------

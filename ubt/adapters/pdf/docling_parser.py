@@ -112,9 +112,13 @@ def resolve_formula_enrichment(
 
     if path is not None and path.suffix.lower() == ".pdf" and path.exists():
         try:
-            from ubt.core.ports import classify_pdf_content
+            # Same-layer call: the profiler is an adapters/pdf peer, not a core
+            # port. Going through ubt.core.ports here made the bridge a global
+            # service locator that adapters had to route through to reach a
+            # sibling module.
+            from ubt.adapters.pdf.page_profiler import content_flags
 
-            _, formula_heavy = classify_pdf_content(path)
+            _, formula_heavy = content_flags(path)
             if formula_heavy:
                 logger.info(
                     "Docling formula enrichment set to False (auto: the overlay canvas preserves the "

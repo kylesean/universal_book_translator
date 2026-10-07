@@ -17,8 +17,6 @@ from ubt.core.policy.layout_policy import (
     PROSE_BLOCK_TYPES,
     Calibration,
     KnobMeta,
-    _env_float,
-    _env_int,
     calibration_summary,
     formula_debris_share,
     is_non_prose_degradable,
@@ -57,7 +55,7 @@ def test_every_calibration_key_resolves_to_a_module_attribute() -> None:
 
 def test_calibration_summary_matches_registry() -> None:
     summary = calibration_summary()
-    assert summary == {"proven": 30, "single_doc": 30, "hypothesis": 16}
+    assert summary == {"proven": 28, "single_doc": 30, "hypothesis": 16}
     assert sum(summary.values()) == len(CALIBRATION)
 
 
@@ -148,12 +146,6 @@ def test_conjunctions_cover_english_and_cjk() -> None:
 def test_pdf_operator_inventories_are_pinned() -> None:
     assert {"m", "l", "c", "v", "y", "h", "re"} == PDF_PATH_OPS
     assert {"Tj", "TJ", "'", '"'} == PDF_TEXT_OPS
-
-
-def test_kinsoku_sets_are_disjoint_and_neutral_chars_absent() -> None:
-    assert lp.CJK_OPEN_PUNCT.isdisjoint(lp.CJK_CLOSE_PUNCT)
-    assert "…" not in lp.CJK_OPEN_PUNCT
-    assert "…" not in lp.CJK_CLOSE_PUNCT
 
 
 def test_pair_terminal_punct_membership() -> None:
@@ -361,29 +353,3 @@ def test_cont_upper_start_re() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Environment overrides
-# --------------------------------------------------------------------------- #
-
-
-def test_env_float_reads_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("UBT_TEST_FLOAT", "1.25")
-    assert _env_float("UBT_TEST_FLOAT", 9.0) == 1.25
-
-
-def test_env_float_falls_back_on_missing_or_invalid(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("UBT_TEST_FLOAT", raising=False)
-    assert _env_float("UBT_TEST_FLOAT", 9.0) == 9.0
-    monkeypatch.setenv("UBT_TEST_FLOAT", "not-a-number")
-    assert _env_float("UBT_TEST_FLOAT", 9.0) == 9.0
-
-
-def test_env_int_reads_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("UBT_TEST_INT", "42")
-    assert _env_int("UBT_TEST_INT", 7) == 42
-
-
-def test_env_int_falls_back_on_missing_or_invalid(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("UBT_TEST_INT", raising=False)
-    assert _env_int("UBT_TEST_INT", 7) == 7
-    monkeypatch.setenv("UBT_TEST_INT", "3.5")
-    assert _env_int("UBT_TEST_INT", 7) == 7

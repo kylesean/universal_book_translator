@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -371,48 +371,6 @@ class PipelineOrchestrator:
         self._billing_sessions: dict[str, _RunBillingSession] = {}
         self._completed_sessions: dict[str, _RunBillingSession] = {}
         self._default_session = _RunBillingSession()
-
-    @property
-    def _run_usage_sink(self) -> dict[str, dict[str, int]] | None:
-        if self._billing_sessions:
-            return next(reversed(self._billing_sessions.values())).sink
-        return self._default_session.sink
-
-    @_run_usage_sink.setter
-    def _run_usage_sink(self, val: dict[str, dict[str, int]] | None) -> None:
-        if self._billing_sessions:
-            next(reversed(self._billing_sessions.values())).sink = val
-        self._default_session.sink = val
-
-    @property
-    def _run_usage_baseline(self) -> dict[str, dict[str, int]]:
-        if self._billing_sessions:
-            return next(reversed(self._billing_sessions.values())).baseline
-        return self._default_session.baseline
-
-    @_run_usage_baseline.setter
-    def _run_usage_baseline(self, val: dict[str, dict[str, int]]) -> None:
-        if self._billing_sessions:
-            next(reversed(self._billing_sessions.values())).baseline = val
-        self._default_session.baseline = val
-
-    @property
-    def _billed_run_usage(self) -> dict[str, dict[str, int]]:
-        if self._billing_sessions:
-            return next(reversed(self._billing_sessions.values())).billed_usage
-        return self._default_session.billed_usage
-
-    @_billed_run_usage.setter
-    def _billed_run_usage(self, val: dict[str, dict[str, int]]) -> None:
-        if self._billing_sessions:
-            next(reversed(self._billing_sessions.values())).billed_usage = val
-        self._default_session.billed_usage = val
-
-    @property
-    def _billing_lock(self) -> asyncio.Lock:
-        if self._billing_sessions:
-            return next(reversed(self._billing_sessions.values())).lock
-        return self._default_session.lock
 
     def _get_billing_session(self, job_id: str | None = None) -> _RunBillingSession:
         if job_id:
@@ -819,7 +777,7 @@ class PipelineOrchestrator:
         max_chapters: int | None = None,
         source_lang: str = "",
         cancel_token: asyncio.Event | None = None,
-    ) -> AsyncIterator[TranslationProgressEvent]:
+    ) -> AsyncGenerator[TranslationProgressEvent, None]:
         """Execute the staged translation pipeline, yielding real-time progress events."""
         if not input_path.exists():
             raise DocumentParseError(f"Input document does not exist: {input_path}")
@@ -903,7 +861,6 @@ class PipelineOrchestrator:
                 manifest=manifest,
                 route_decision=route_decision,
                 config=self.config,
-                forced_granularity=getattr(self.config, "granularity", None),
             )
             manifest.run.adaptive_policy = adaptive_policy.to_dict()
 
@@ -957,9 +914,8 @@ class PipelineOrchestrator:
                 cancel_token=cancel_token,
             )
             logger.info(
-                "Adaptive execution policy for %s: granularity=%s (%s)",
+                "Adaptive execution policy for %s: %s",
                 actual_job_id,
-                adaptive_policy.granularity,
                 adaptive_policy.reason,
             )
 
@@ -1046,11 +1002,19 @@ class PipelineOrchestrator:
             await asyncio.shield(
                 _mark_failed_unless_completed(ledger, actual_job_id, status="failed")
             )
+            # Report the job's real progress on the failure event: a run that
+            # paid for 900/1000 blocks must not read as 0% on /status, SSE, or
+            # the queue row just because it ended in failure.
+            failure_stats = (
+                await asyncio.to_thread(ledger.get_job_stats, actual_job_id)
+                if ledger is not None
+                else None
+            )
             failure_event = TranslationProgressEvent(
                 event_type=EventType.PIPELINE_FAILED,
                 job_id=actual_job_id,
-                total_blocks=0,
-                completed_blocks=0,
+                total_blocks=int((failure_stats or {}).get("total", 0) or 0),
+                completed_blocks=int((failure_stats or {}).get("completed", 0) or 0),
                 message=f"Pipeline failed: {type(exc).__name__}: {exc}",
             )
             try:
