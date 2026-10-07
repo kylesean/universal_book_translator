@@ -411,12 +411,26 @@ _ECHO_MIN_LEN = 16
 _ECHO_FORMATTING_ONLY_RE = re.compile(r"^[`#*_\s0-9.|\-:=]+$")
 _ECHO_WORD_RE = re.compile(r"[^\W\d_]{4}")
 _ECHO_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9'\-]{2,}")
-# Math, inline code, URLs and email addresses are contractually verbatim in any translation,
-# so they carry no translation signal: mask them before counting retained words.
+# Math, inline code, URLs, email addresses and quoted spans are contractually
+# verbatim in any translation (the echo repair hint itself tells the model to
+# keep "quoted strings verbatim"), so they carry no translation signal: mask
+# them before counting retained words. Without the quoted-span alternative a
+# faithful translation that preserves a long quotation keeps the quote's words,
+# which then dominate the target's Latin tokens and read as a near-echo.
+_ECHO_QUOTED_SPAN = (
+    r"\"[^\"]*\""
+    r"|“[^”]*”"
+    r"|„[^“]*“"
+    r"|‘[^’]*’"
+    r"|«[^»]*»"
+    r"|「[^」]*」"
+    r"|『[^』]*』"
+)
 _ECHO_MASK_RE = re.compile(
     r"\$[^$]*\$|\\\[.+?\\\]|\\\(.+?\\\)|`[^`]*`"
     r"|https?://\S+"
-    r"|\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b",
+    r"|\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"
+    rf"|{_ECHO_QUOTED_SPAN}",
     re.S,
 )
 _NEAR_ECHO_MIN_TOKENS = 8
@@ -552,15 +566,16 @@ def is_near_verbatim_echo(
 def grid_columns(line: str) -> int | None:
     """Column count of a markdown grid row, or None when the line is not one.
 
-    Leading/trailing pipes are ignored: ``| a | b |`` and ``| a | b`` are the
-    same two columns, and a model that normalizes that style must not be
-    rejected for it.
+    A grid row must *open* with a pipe. Inline pipes in prose (``A | B | C``)
+    are not cell separators, so a sentence carrying two of them must not read
+    as a one-row table. Once the row is anchored, leading/trailing pipes are
+    ignored: ``| a | b |`` and ``| a | b`` are the same two columns, and a
+    model that normalizes that style must not be rejected for it.
     """
     stripped = line.strip()
-    if stripped.count("|") < 2:
+    if not stripped.startswith("|") or stripped.count("|") < 2:
         return None
-    if stripped.startswith("|"):
-        stripped = stripped[1:]
+    stripped = stripped[1:]
     if stripped.endswith("|") and not stripped.endswith(r"\|"):
         stripped = stripped[:-1]
     cells = re.split(r"(?<!\\)\|", stripped)
@@ -568,9 +583,18 @@ def grid_columns(line: str) -> int | None:
 
 
 def markdown_grid_shape(text: str) -> list[int]:
-    """Per-row column counts of a markdown grid, or [] when it is not one."""
+    """Per-row column counts of a markdown grid, or [] when it is not one.
+
+    A real grid is uniform: the extractor pads every row to the same column
+    count (``docling_blocks.table_to_markdown``), so a pipe-bearing prose block
+    or a ragged run of pipe lines is not a table and returns ``[]``. Otherwise
+    prose that merely contains pipes reads as a grid and a faithful translation
+    without pipes is rejected as a dropped table.
+    """
     shape = [cols for cols in (grid_columns(ln) for ln in text.splitlines()) if cols]
-    return shape if len(shape) >= 2 else []
+    if len(shape) < 2 or len(set(shape)) != 1:
+        return []
+    return shape
 
 
 @dataclass(frozen=True, slots=True)

@@ -125,6 +125,21 @@ def test_a_same_script_cjk_translation_is_not_a_near_echo() -> None:
     )
 
 
+def test_a_preserved_quotation_does_not_read_as_a_near_echo() -> None:
+    # A translation legitimately keeps a quoted string verbatim (the echo repair
+    # hint tells the model to), so the quote's words must be masked before the
+    # retention test: otherwise the quote dominates the target's Latin tokens and
+    # a faithful translation reads as an untranslated echo.
+    quote = (
+        '"Please keep your hands and arms inside the vehicle '
+        'at all times while the ride is in motion"'
+    )
+    assert (
+        is_near_verbatim_echo(f"The sign reads {quote}", f"Es steht {quote}", target_is_cjk=False)
+        is False
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Markdown grid shape.
 # --------------------------------------------------------------------------- #
@@ -140,10 +155,31 @@ def test_a_line_with_fewer_than_two_pipes_is_not_a_grid() -> None:
     assert grid_columns("| only one") is None
 
 
+def test_a_line_without_a_leading_pipe_is_not_a_grid_row() -> None:
+    # Inline pipes in prose are not cell separators.
+    assert grid_columns("The x | y | z") is None
+
+
 def test_markdown_grid_shape_needs_at_least_two_rows() -> None:
     assert markdown_grid_shape("| a | b |\n| c | d |") == [2, 2]
     assert markdown_grid_shape("| a | b |") == []
     assert markdown_grid_shape("plain text") == []
+
+
+def test_prose_with_inline_pipes_is_not_a_grid() -> None:
+    # Two prose lines that each happen to carry two pipes are not a table; else a
+    # faithful translation without pipes is rejected as a dropped table.
+    assert markdown_grid_shape("The options are A | B | C\nand D | E | F are also valid") == []
+
+
+def test_a_ragged_run_of_pipe_lines_is_not_a_grid() -> None:
+    # A real grid pads every row to the same column count; a ragged run does not.
+    assert markdown_grid_shape("| a | b |\n| c |") == []
+
+
+def test_a_grid_without_a_trailing_pipe_is_still_a_grid() -> None:
+    # Only the opening pipe anchors a row; the trailing one is optional.
+    assert markdown_grid_shape("| a | b\n| c | d") == [2, 2]
 
 
 # --------------------------------------------------------------------------- #
