@@ -21,11 +21,16 @@ Measured against the current implementation, not aspirational:
 - **Best-supported input**: born-digital, white-background, single- or
   double-column text PDFs. The pdfium fast lane does not emit tables or
   figures, and the Docling path maps merged cells to the top-left value only.
+- **Tables**: table cells are translated in the IR (and scored by QE), but the
+  PDF re-typeset leaves tables on the source layer — the compositor cannot
+  rebuild a grid, so a delivered PDF shows source-language tables. EPUB/DOCX/
+  HTML/Markdown outputs carry the translated cells.
 - **Not supported**: vertical CJK, encrypted PDFs (rejected at assessment, not
   translated), colour/watermarked backgrounds (no background-colour probe, so
   light text on dark pages is invisible), and text drawn inside figures.
-- **Text expansion**: a translation longer than its source box is shrunk to
-  2pt; there is no box growth or page re-flow.
+- **Text expansion**: a translation that will not fit its source box at a
+  readable 6pt floor keeps the source text (descends); there is no box growth
+  or page re-flow.
 - **Per format**: DOCX footnotes/endnotes, column settings and TOC fields are
   not read; a whole PDF is ingested as one chapter, so per-chapter resume and
   billing do not apply to it.
