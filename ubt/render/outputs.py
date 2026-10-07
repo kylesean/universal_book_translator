@@ -1456,8 +1456,8 @@ class TypstFragmentTypesetter:
 
 
 #: Historical name for the typesetter surface. ``TypstFragmentTypesetter`` is
-#: the only implementation; the former Protocol is replaced by this alias.
-FragmentTypesetter = TypstFragmentTypesetter
+#: the production implementation; tests provide duck-typed spies.
+FragmentTypesetter = Any
 
 
 def _dedup_identical_streams(pdf: pikepdf.Pdf) -> None:

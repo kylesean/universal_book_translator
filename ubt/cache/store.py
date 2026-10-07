@@ -21,6 +21,7 @@ import os
 import re
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 from ubt.core.fs_perms import restrict_dir_to_owner, restrict_file_to_owner
@@ -178,8 +179,8 @@ class DiskCacheStore:
         return value
 
 
-#: Historical name for the cache-store surface. ``DiskCacheStore`` is the only
-#: implementation; the former Protocol is replaced by this alias.
-CacheStore = DiskCacheStore
+#: Historical name for the cache-store surface. ``DiskCacheStore`` is the
+#: production implementation; tests provide duck-typed stores.
+CacheStore = Any
 
 __all__ = ["CacheStore", "DiskCacheStore", "step_key"]

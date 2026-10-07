@@ -39,7 +39,6 @@ from pathlib import Path
 
 from ubt.core.config import UBTConfig
 from ubt.core.engine.events import (
-    EventType,
     TranslationProgressEvent,
 )
 from ubt.core.engine.ledger import SQLiteJobLedger
@@ -55,10 +54,7 @@ async def _noop_bill() -> None:
 
 
 #: The orchestrator's progress-event builder, bound to the live job.
-EventFactory = Callable[
-    [EventType, str, SQLiteJobLedger, str, str | None, str | None],
-    Awaitable[TranslationProgressEvent],
-]
+EventFactory = Callable[..., Awaitable[TranslationProgressEvent]]
 
 
 @dataclass(frozen=True)

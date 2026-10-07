@@ -177,16 +177,15 @@ async def run_bible_stage(
             len(abbreviation_entries),
         )
         event = None
-        if create_event_fn:
-            event = await create_event_fn(
-                EventType.BIBLE_EXTRACTED,
-                actual_job_id,
-                ledger,
-                message=(
-                    f"Translation Bible reused from previous run: {len(merged_entries)} entries "
-                    f"({len(glossary_dicts)} translated, {len(abbreviation_entries)} pending)"
-                ),
-            )
+        event = await create_event_fn(
+            EventType.BIBLE_EXTRACTED,
+            actual_job_id,
+            ledger,
+            message=(
+                f"Translation Bible reused from previous run: {len(merged_entries)} entries "
+                f"({len(glossary_dicts)} translated, {len(abbreviation_entries)} pending)"
+            ),
+        )
         terminology.glossary_dicts = glossary_dicts
         terminology.abbreviation_entries = abbreviation_entries
         if event is not None:
@@ -280,17 +279,16 @@ async def run_bible_stage(
     )
 
     event = None
-    if create_event_fn:
-        event = await create_event_fn(
-            EventType.BIBLE_EXTRACTED,
-            actual_job_id,
-            ledger,
-            message=(
-                f"Translation Bible established with {len(merged_entries)} entries "
-                f"(incl. {len(mined_abbreviations)} mined abbreviations, "
-                f"{len(mined_characters)} mined characters, {backfilled_count} backfilled)"
-            ),
-        )
+    event = await create_event_fn(
+        EventType.BIBLE_EXTRACTED,
+        actual_job_id,
+        ledger,
+        message=(
+            f"Translation Bible established with {len(merged_entries)} entries "
+            f"(incl. {len(mined_abbreviations)} mined abbreviations, "
+            f"{len(mined_characters)} mined characters, {backfilled_count} backfilled)"
+        ),
+    )
 
     terminology.glossary_dicts = glossary_dicts
     terminology.abbreviation_entries = abbreviation_entries

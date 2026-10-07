@@ -310,13 +310,12 @@ async def run_ingest_stage(
             _record_run_identity, ledger, actual_job_id, profile_name, engine_sig, mock_run
         )
 
-    if create_event_fn:
-        yield await create_event_fn(
-            EventType.JOB_STARTED,
-            actual_job_id,
-            ledger,
-            message=f"Started job {actual_job_id}",
-        )
+    yield await create_event_fn(
+        EventType.JOB_STARTED,
+        actual_job_id,
+        ledger,
+        message=f"Started job {actual_job_id}",
+    )
 
     lnds_cleaner = LNDSPageCleaner(source_lang=source_lang)
     stats = await asyncio.to_thread(ledger.get_job_stats, actual_job_id)
@@ -483,10 +482,9 @@ async def run_ingest_stage(
         actual_job_id,
         current_fingerprint or _FINGERPRINT_UNAVAILABLE,
     )
-    if create_event_fn:
-        yield await create_event_fn(
-            EventType.PREPROCESSING_DONE,
-            actual_job_id,
-            ledger,
-            message="Document chapters partitioned and loaded into ledger",
-        )
+    yield await create_event_fn(
+        EventType.PREPROCESSING_DONE,
+        actual_job_id,
+        ledger,
+        message="Document chapters partitioned and loaded into ledger",
+    )
