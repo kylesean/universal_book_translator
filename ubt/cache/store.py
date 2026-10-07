@@ -21,7 +21,6 @@ import os
 import re
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Protocol
 from uuid import uuid4
 
 from ubt.core.fs_perms import restrict_dir_to_owner, restrict_file_to_owner
@@ -73,22 +72,6 @@ def step_key(kind: str, inputs: Sequence[str], params: Mapping[str, object]) -> 
         ensure_ascii=False,
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
-class CacheStore(Protocol):
-    """A content-addressed store of text values."""
-
-    def get(self, key: str) -> str | None:
-        """The stored value for ``key``, or ``None`` on a miss."""
-        ...
-
-    def put(self, key: str, value: str) -> None:
-        """Store ``value`` under ``key`` (fail-open)."""
-        ...
-
-    def get_or_compute(self, key: str, compute: Callable[[], str]) -> str:
-        """The stored value for ``key``, or ``compute()`` once and store it."""
-        ...
 
 
 class DiskCacheStore:
@@ -194,5 +177,9 @@ class DiskCacheStore:
         self.put(key, value)
         return value
 
+
+#: Historical name for the cache-store surface. ``DiskCacheStore`` is the only
+#: implementation; the former Protocol is replaced by this alias.
+CacheStore = DiskCacheStore
 
 __all__ = ["CacheStore", "DiskCacheStore", "step_key"]

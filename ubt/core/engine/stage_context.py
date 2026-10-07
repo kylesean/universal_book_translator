@@ -36,7 +36,6 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
 
 from ubt.core.config import UBTConfig
 from ubt.core.engine.events import (
@@ -55,22 +54,11 @@ async def _noop_bill() -> None:
     return None
 
 
-class EventFactory(Protocol):
-    """The orchestrator's progress-event builder, bound to the live job.
-
-    Every stage yields events through this instead of reaching back into the
-    orchestrator, which is what kept ``run()`` and the stages mutually coupled.
-    """
-
-    async def __call__(
-        self,
-        event_type: EventType,
-        job_id: str,
-        ledger: SQLiteJobLedger,
-        message: str = "",
-        active_block_id: str | None = None,
-        artifact_path: str | None = None,
-    ) -> TranslationProgressEvent: ...
+#: The orchestrator's progress-event builder, bound to the live job.
+EventFactory = Callable[
+    [EventType, str, SQLiteJobLedger, str, str | None, str | None],
+    Awaitable[TranslationProgressEvent],
+]
 
 
 @dataclass(frozen=True)

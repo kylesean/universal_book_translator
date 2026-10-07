@@ -81,7 +81,83 @@ def _docling_symbols() -> tuple[Any, Any, Any, Any]:
     return InputFormat, PdfPipelineOptions, DocumentConverter, PdfFormatOption
 
 
-class DoclingPDFAdapter(BasePDFEngineAdapter):
+class _PDFRenderStackMixin:
+    """Shared PDF render infrastructure (DoclingRenderStrategy delegation).
+
+    Both Docling and PDFium adapters compose onto the source canvas through
+    the same ``DoclingRenderStrategy`` — only extraction differs. This mixin
+    owns the render-stack wiring so the two adapters are siblings under
+    ``BasePDFEngineAdapter`` rather than PDFium inheriting Docling.
+    """
+
+    alternator: BilingualAlternator
+    diagram_localizer: DiagramLocalizer
+    last_render_skips: list[tuple[str, str]]
+    last_render_outcome: RenderOutcome | None
+    _renderer: DoclingRenderStrategy
+    _font_family: str | None
+
+    def _init_render_stack(
+        self,
+        alternator: BilingualAlternator | None = None,
+        diagram_localizer: DiagramLocalizer | None = None,
+        font_family: str | None = None,
+    ) -> None:
+        self.alternator = alternator or BilingualAlternator()
+        self.diagram_localizer = diagram_localizer or DiagramLocalizer()
+        self.allow_page_upload = False
+        self._font_family = None
+        self.last_render_skips = []
+        self.last_render_outcome = None
+        self._renderer = DoclingRenderStrategy(
+            alternator=self.alternator,
+            diagram_localizer=self.diagram_localizer,
+            font_family=None,
+        )
+        self.font_family = font_family
+
+    @property
+    def font_family(self) -> str | None:
+        return self._font_family
+
+    @font_family.setter
+    def font_family(self, value: str | None) -> None:
+        clean = sanitize_font_family(value)
+        self._font_family = clean
+        self._renderer.font_family = clean
+
+    async def render_blocks(
+        self,
+        manifest: BookManifest,
+        blocks: list[IRBlock],
+        target_lang: str,
+        output_path: Path,
+        bilingual_mode: str | None = None,
+        render_plan: RenderPlan | None = None,
+        realization_plan: Mapping[str, Fidelity] | None = None,
+        **kwargs: Any,
+    ) -> Path:
+        out_path = await self._renderer.render_blocks(
+            manifest,
+            blocks,
+            target_lang,
+            output_path,
+            bilingual_mode,
+            render_plan=render_plan,
+            realization_plan=realization_plan,
+        )
+        self.last_render_skips = list(self._renderer.last_render_skips)
+        self.last_render_outcome = self._renderer.last_outcome
+        return out_path
+
+    def _extract_with_oxide(self, path: Path) -> list[IRBlock]:
+        from ubt.core.ir.continuation import fuse_continuation_blocks
+
+        blocks = extract_with_oxide(path)
+        return fuse_continuation_blocks(blocks)
+
+
+class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
     """PDF engine adapter: IBM Docling semantic ingestion with Typst/oxide delivery."""
 
     #: Content-addressed analyze cache (content-addressed cache layer), set in apply_config.
@@ -101,57 +177,14 @@ class DoclingPDFAdapter(BasePDFEngineAdapter):
         font_family: str | None = None,
         allow_page_upload: bool = False,
     ) -> None:
-        self.alternator = alternator or BilingualAlternator()
-        self.diagram_localizer = diagram_localizer or DiagramLocalizer()
+        self._init_render_stack(alternator, diagram_localizer, font_family)
         self.ocr_mode = ocr_mode
         self.ocr_endpoint = ocr_endpoint
         self.ocr_api_key = ocr_api_key
         self.ocr_model = ocr_model
         self.formula_enrichment = formula_enrichment
         self.formula_render = formula_render
-        # Page-image egress gate. Overwritten by ``apply_config`` from the
-        # resolved run config; the constructor default keeps a directly built
-        # adapter closed.
         self.allow_page_upload = allow_page_upload
-        self._font_family: str | None = None
-        # Render skip side channel: plain ``(block_id, reason)`` pairs from
-        # the most recent ``render_blocks`` call. The core reads them
-        # duck-typed through ``ubt.core.ports.get_last_render_skips`` (DIP:
-        # no core -> adapter import edge). Reset on every render so stale
-        # skips can never leak across jobs.
-        self.last_render_skips: list[tuple[str, str]] = []
-        # Render outcome side channel (compiler render plan protocol): what the
-        # renderer actually used (post rigid downgrade), read by export and the
-        # visual gate. ``None`` until the first render. Reset on every render.
-        self.last_render_outcome: RenderOutcome | None = None
-        self._renderer = DoclingRenderStrategy(
-            alternator=self.alternator,
-            diagram_localizer=self.diagram_localizer,
-            font_family=None,
-        )
-        # The setter is the only writer: it sanitizes once and mirrors onto
-        # both engines, so any assignment (including the one below) routes
-        # through it.
-        self.font_family = font_family
-
-    @property
-    def font_family(self) -> str | None:
-        """Publication font family, mirrored onto the render strategy.
-
-        The pipeline pushes the configured value in through duck-typing
-        (``hasattr(adapter, "font_family")``), so this must be a property: a
-        plain attribute would stop at the adapter while the render strategy
-        kept its own construction-time copy. Markup
-        characters are dropped because the name is interpolated into
-        ``#set text(font: "...")``.
-        """
-        return self._font_family
-
-    @font_family.setter
-    def font_family(self, value: str | None) -> None:
-        clean = sanitize_font_family(value)
-        self._font_family = clean
-        self._renderer.font_family = clean
 
     def apply_config(self, runtime_config: AdapterRuntimeConfig) -> None:
         """Take the OCR / formula / render knobs the pipeline resolved for this run.
@@ -375,35 +408,3 @@ class DoclingPDFAdapter(BasePDFEngineAdapter):
         blocks = repair_missing_spaces_with_lines(blocks, path)
         blocks = cross_check_blocks_with_pdfium(blocks, path)
         return fuse_continuation_blocks(blocks)
-
-    def _extract_with_oxide(self, path: Path) -> list[IRBlock]:
-        """Fallback lightweight text extractor using pdf_oxide."""
-        from ubt.core.ir.continuation import fuse_continuation_blocks
-
-        blocks = extract_with_oxide(path)
-        return fuse_continuation_blocks(blocks)
-
-    async def render_blocks(
-        self,
-        manifest: BookManifest,
-        blocks: list[IRBlock],
-        target_lang: str,
-        output_path: Path,
-        bilingual_mode: str | None = None,
-        render_plan: RenderPlan | None = None,
-        realization_plan: Mapping[str, Fidelity] | None = None,
-        **kwargs: Any,
-    ) -> Path:
-        """Render publication-grade output (delegates to DoclingRenderStrategy)."""
-        out_path = await self._renderer.render_blocks(
-            manifest,
-            blocks,
-            target_lang,
-            output_path,
-            bilingual_mode,
-            render_plan=render_plan,
-            realization_plan=realization_plan,
-        )
-        self.last_render_skips = list(self._renderer.last_render_skips)
-        self.last_render_outcome = self._renderer.last_outcome
-        return out_path

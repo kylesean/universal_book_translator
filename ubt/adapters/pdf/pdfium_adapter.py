@@ -22,13 +22,16 @@ fast path explicitly.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ubt.adapters.pdf.docling_adapter import DoclingPDFAdapter
+from ubt.adapters.base import BasePDFEngineAdapter
+from ubt.adapters.pdf.docling_adapter import _PDFRenderStackMixin
 from ubt.adapters.pdf.pdfium_gate import pdfium_serialized
-from ubt.core.ir.models import BookManifest, IRBlock
+from ubt.core.ir.models import BookManifest, ChapterIR, IRBlock
 
 if TYPE_CHECKING:
     from ubt.cache.store import CacheStore
@@ -96,13 +99,19 @@ def extract_blocks_with_pdfium(
     return cached_blocks(store, path=path, page_range=page_range, compute=_read)
 
 
-class PDFiumAdapter(DoclingPDFAdapter):
+class PDFiumAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
     """Born-digital PDF fast path: CPU-cheap pypdfium2 extraction, zero model downloads.
 
-    Inherits the full Docling-mainline render stack (publication Typst,
-    rigid typesetting, alternating bilingual interleaving) — only extraction
-    is replaced with geometric text harvesting.
+    Shares the Docling-mainline render stack (publication Typst, rigid
+    typesetting, alternating bilingual interleaving) via the render mixin —
+    only extraction is replaced with geometric text harvesting.
     """
+
+    #: Content-addressed analyze cache (set in apply_config).
+    analysis_cache: CacheStore | None = None
+
+    def __init__(self, font_family: str | None = None) -> None:
+        self._init_render_stack(font_family=font_family)
 
     @property
     def engine_name(self) -> str:
@@ -110,9 +119,35 @@ class PDFiumAdapter(DoclingPDFAdapter):
 
     async def extract_manifest(self, input_path: Path) -> BookManifest:
         """Manifest identical to the Docling mainline except the engine tag."""
-        manifest = await super().extract_manifest(input_path)
+        from ubt.adapters.pdf.docling_parser import extract_manifest as parser_extract_manifest
+
+        manifest = await asyncio.to_thread(
+            parser_extract_manifest, input_path, is_docling_installed=False
+        )
         return manifest.model_copy(
             update={"metadata": {**manifest.metadata, "pdf_parser_engine": "pdfium"}}
+        )
+
+    async def parse_stream(
+        self, input_path: Path, pages: set[int] | None = None
+    ) -> AsyncIterator[ChapterIR]:
+        """Stream PDF contents as a single ChapterIR partition."""
+        path = Path(input_path)
+        manifest = await self.extract_manifest(path)
+        chapter_meta = manifest.chapters[0]
+
+        loop = asyncio.get_running_loop()
+        blocks = await loop.run_in_executor(None, self._extract_blocks_sync, path, None)
+
+        if pages:
+            blocks = [b for b in blocks if _block_page_in_range(b, min(pages), max(pages))]
+
+        yield ChapterIR(
+            doc_id=manifest.doc_id,
+            chapter_id=chapter_meta.chapter_id,
+            title=chapter_meta.title,
+            spine_index=0,
+            blocks=blocks,
         )
 
     def _extract_blocks_sync(

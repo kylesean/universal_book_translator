@@ -74,6 +74,7 @@ from ubt.api.review import (
     serialize_segment,
     term_cascade_report,
 )
+from ubt.api.scope import ApiScope
 from ubt.api.security import (
     SENSITIVE_FILENAME_PARTS,
     SYSTEM_DISALLOWED_PREFIXES,
@@ -94,13 +95,13 @@ from ubt.core.engine.progress import ARTIFACT_KEYS, ProgressSnapshot
 from ubt.core.exceptions import (
     BudgetExceededError,
     DocumentParseError,
+    OutputPathConflictError,
     QueueDepthExceededError,
     ServerCapacityError,
     UBTError,
     UnsupportedDocumentFormatError,
 )
 from ubt.core.fs_perms import ensure_private_dir
-from ubt.core.ir.models import IRBlock
 from ubt.core.job_options import (
     JOB_ID_RE,
     LANG_CODE_PATTERN,
@@ -462,101 +463,18 @@ def create_app(
     # process. It shares the job ceiling.
     assess_semaphore = asyncio.Semaphore(manager.max_running_jobs)
 
-    def _tenant_allows(job_id: str, tenant: str) -> bool:
-        """False when a queued job exists but belongs to another tenant.
-
-        Tenant is a starvation/isolation boundary, not authentication — the API
-        key still grants whole-service access. Scoping reads and cancels stops
-        one tenant from reading or cancelling another tenant's job. Embedded
-        (non-queue) mode has no tenant dimension, so it always allows.
-        """
-        if job_queue is None:
-            return True
-        job = job_queue.get(job_id)
-        return job is None or job.tenant_id == tenant
-
-    async def _tenant_allows_async(job_id: str, tenant: str) -> bool:
-        if job_queue is None:
-            return True
-        job = await asyncio.to_thread(job_queue.get, job_id)
-        return job is None or job.tenant_id == tenant
-
-    def _cross_tenant_404(job_id: str) -> HTTPException:
-        # Same body as "not found": a cross-tenant probe must not learn that the
-        # job exists.
-        return HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=f"Job not found: {job_id}"
-        )
+    scope = ApiScope(
+        config=app_config,
+        manager=manager,
+        job_queue=job_queue,
+        assess_semaphore=assess_semaphore,
+    )
 
     @asynccontextmanager
     async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         _require_api_key_gate(app_config)
         _log_startup_auth_warning(app_config)
         yield
-
-    def _artifact_path(valid_id: str, key: str) -> str | None:
-        """Disk fallback for an artifact path a completed job persisted.
-
-        The in-memory ``JobRecord`` is pruned/evicted across restarts, so the
-        path is read back from whichever durable store actually holds it:
-        ``output_file``/``report_file``/``visual_report_file`` live in the job
-        ledger for an embedded run and in the queue row's payload for
-        ``job_mode="queue"`` (the worker never writes ledger metadata). Before
-        both were consulted a queued job 404'd its own download forever.
-        """
-        db_path = app_config.db_dir / f"{valid_id}.sqlite"
-        if db_path.exists():
-            try:
-                with SQLiteJobLedger(db_path, read_only=True) as ledger:
-                    value = ledger.get_job_metadata_value(valid_id, key)
-            except Exception:
-                value = None
-            if value:
-                return str(value)
-        if job_queue is not None:
-            job = job_queue.get(valid_id)
-            if job is not None:
-                queued = (job.progress or {}).get(key)
-                if queued:
-                    return str(queued)
-        return None
-
-    async def _artifact_path_async(valid_id: str, key: str) -> str | None:
-        return await asyncio.to_thread(_artifact_path, valid_id, key)
-
-    async def _primary_output_file(valid_id: str) -> str | None:
-        """The primary artifact path for a job, from memory then durable stores."""
-        record = manager.get_job(valid_id)
-        output_file = record.progress.output_file if record else None
-        if not output_file:
-            output_file = await _artifact_path_async(valid_id, "output_file")
-        return output_file
-
-    def _job_db_path(valid_id: str) -> Path:
-        return app_config.db_dir / f"{valid_id}.sqlite"
-
-    async def _job_is_running(valid_id: str) -> bool:
-        """True when the job is actively running (an interactive edit must not race it)."""
-        record = manager.get_job(valid_id)
-        if record is not None and record.status == JobStatus.RUNNING:
-            return True
-        if job_queue is not None:
-            job = await asyncio.to_thread(job_queue.get, valid_id)
-            if job is not None and job.status == JobStatus.RUNNING:
-                return True
-        return False
-
-    async def _read_job_blocks(valid_id: str) -> list[IRBlock] | None:
-        """All blocks for a job, or ``None`` when the ledger does not exist."""
-        db_path = _job_db_path(valid_id)
-        if not db_path.exists():
-            return None
-
-        def _read() -> list[IRBlock]:
-            with SQLiteJobLedger(db_path, read_only=True) as ledger:
-                return ledger.get_all_blocks(valid_id)
-
-        return await asyncio.to_thread(_read)
 
     async def _verify_request_key(
         request: Request,
@@ -609,6 +527,69 @@ def create_app(
                 )
         return await call_next(request)
 
+    _register_system_routes(api_app, scope)
+    _register_job_routes(api_app, scope, router)
+    _register_stream_routes(api_app, scope)
+    _register_artifact_routes(api_app, scope)
+    _register_review_routes(api_app, scope)
+    _register_asset_routes(api_app, scope)
+    static_dir = Path(__file__).resolve().parent / "static"
+    if static_dir.exists() and (static_dir / "index.html").exists():
+        from fastapi.staticfiles import StaticFiles
+
+        class _SPAStaticFiles(StaticFiles):
+            """StaticFiles that falls back to index.html for browser navigations.
+
+            The console is a single-page app with real URLs (``/wizard``,
+            ``/jobs/:id/quality``); a browser refresh or a pasted link must land
+            on ``index.html`` and let the client router resolve the path, not a
+            404. API routes are registered before this mount, so they still win.
+
+            The fallback is gated on ``Accept: text/html``: an API client probing
+            a closed surface (``/docs`` on a keyed server, a typo'd endpoint)
+            must still get a JSON 404 rather than the SPA shell.
+            """
+
+            async def get_response(self, path: str, scope: Any) -> Response:
+                from starlette.exceptions import HTTPException as StarletteHTTPException
+
+                try:
+                    return await super().get_response(path, scope)
+                except StarletteHTTPException as exc:
+                    accepts_html = any(
+                        key == b"accept" and b"text/html" in value.lower()
+                        for key, value in scope.get("headers", [])
+                    )
+                    if exc.status_code != 404 or not accepts_html:
+                        raise
+                    return await super().get_response("index.html", scope)
+
+        api_app.mount("/", _SPAStaticFiles(directory=str(static_dir), html=True), name="console")
+
+    return api_app
+
+
+def _register_system_routes(api_app: FastAPI, scope: ApiScope) -> None:
+    """Routes for the system surface."""
+    app_config = scope.config
+    _tenant_allows = scope.tenant_allows
+    _tenant_allows_async = scope.tenant_allows_async
+    _artifact_path = scope.artifact_path
+    _artifact_path_async = scope.artifact_path_async
+    _primary_output_file = scope.primary_output_file
+    _job_db_path = scope.job_db_path
+    _job_is_running = scope.job_is_running
+    _read_job_blocks = scope.read_job_blocks
+    _managed_dir = scope.managed_dir
+    _uploads_dir = scope.uploads_dir
+
+    def _cross_tenant_404(job_id: str) -> HTTPException:
+        # Same body as "not found": a cross-tenant probe must not learn that the
+        # job exists.
+        return HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Job not found: {job_id}"
+        )
+
     @api_app.get("/health", tags=["System"])
     async def health() -> dict[str, str]:
         return {
@@ -616,6 +597,93 @@ def create_app(
             "service": "universal-book-translator",
             "version": __version__,
         }
+
+    @api_app.get("/system/doctor", tags=["System"])
+    async def system_doctor(probe: bool = False) -> JSONResponse:
+        """Engine Doctor self-check (the ``ubt doctor`` checklist as JSON).
+
+        Reuses the CLI's ``collect_checks`` so the console and the command line
+        report the same verdicts. ``probe=true`` additionally contacts the
+        provider endpoint (a live network call), so it is off by default.
+        """
+        from ubt.cli.commands.doctor import _overall_status, _summary, collect_checks
+
+        checks = await asyncio.to_thread(collect_checks, app_config, probe=probe)
+        summary = _summary(checks)
+        return JSONResponse(
+            {
+                "status": _overall_status(summary),
+                "summary": summary,
+                "checks": [
+                    {
+                        "group": check.group,
+                        "name": check.name,
+                        "status": check.status,
+                        "detail": check.detail,
+                        "fix": check.fix,
+                    }
+                    for check in checks
+                ],
+            }
+        )
+
+    @api_app.get("/system/info", response_model=SystemInfoResponse, tags=["System"])
+    async def system_info(request: Request) -> dict[str, Any]:
+        """The console's security-boundary panel (real host + allowed roots).
+
+        Reports the host this request reached (loopback vs exposed), whether the
+        API-key gate is on, and the filesystem roots ``resolve_secure_path``
+        actually enforces — so the panel shows the live policy, not a hardcoded
+        sample.
+        """
+        from ubt import __version__
+
+        host = request.url.hostname or ""
+        disk_free_gb: float | None = None
+        try:
+            usage = shutil.disk_usage(app_config.db_dir)
+            disk_free_gb = round(usage.free / (1024**3), 1)
+        except OSError:
+            pass
+
+        return {
+            "version": __version__,
+            "host": host,
+            "is_loopback": host in _LOOPBACK_HOSTS,
+            "auth_enabled": bool(app_config.service_api_key.get_secret_value().strip()),
+            "allowed_bases": [str(path) for path in effective_allowed_bases(app_config)],
+            "db_dir": str(app_config.db_dir),
+            "job_mode": app_config.job_mode,
+            "disk_free_gb": disk_free_gb,
+            "wal_status": "ONLINE (WAL Mode Active)",
+        }
+
+
+def _register_job_routes(
+    api_app: FastAPI, scope: ApiScope, router: ModelRouter | None = None
+) -> None:
+    """Routes for the job surface."""
+    app_config = scope.config
+    manager = scope.manager
+    job_queue = scope.job_queue
+    assess_semaphore = scope.assess_semaphore
+    _tenant_allows = scope.tenant_allows
+    _tenant_allows_async = scope.tenant_allows_async
+    _artifact_path = scope.artifact_path
+    _artifact_path_async = scope.artifact_path_async
+    _primary_output_file = scope.primary_output_file
+    _job_db_path = scope.job_db_path
+    _job_is_running = scope.job_is_running
+    _read_job_blocks = scope.read_job_blocks
+    _managed_dir = scope.managed_dir
+    _uploads_dir = scope.uploads_dir
+
+    def _cross_tenant_404(job_id: str) -> HTTPException:
+        # Same body as "not found": a cross-tenant probe must not learn that the
+        # job exists.
+        return HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Job not found: {job_id}"
+        )
 
     @api_app.post(
         "/jobs/assess",
@@ -668,27 +736,6 @@ def create_app(
             async with assess_semaphore:
                 return await _assess()
         return await _assess()
-
-    def _managed_dir(name: str) -> Path:
-        """A UBT-managed subtree under ``db_dir`` (or the operator allowlist).
-
-        ``db_dir`` is an implicit sandbox base, so managed trees (uploaded
-        sources, derived deliverables) pass :func:`resolve_secure_path` with no
-        operator configuration. When an operator allowlist excludes ``db_dir``,
-        placing files there would 403 on the very next request — fall back to
-        the first allowlisted base instead.
-        """
-        db_sub = (app_config.db_dir / name).resolve()
-        bases = effective_allowed_bases(app_config)
-        if any(db_sub == b or b in db_sub.parents for b in bases):
-            return db_sub
-        if bases:
-            return (bases[0] / name).resolve()
-        return db_sub
-
-    def _uploads_dir() -> Path:
-        """Staging area for documents uploaded through the web console."""
-        return _managed_dir("uploads")
 
     @api_app.post(
         "/jobs/upload",
@@ -903,6 +950,13 @@ def create_app(
             except QueueDepthExceededError as exc:
                 raise HTTPException(
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail=str(exc),
+                ) from exc
+            except OutputPathConflictError as exc:
+                # A live job already owns this output path; the filesystem
+                # exists() check above cannot see it until export writes it.
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
                     detail=str(exc),
                 ) from exc
             except UBTError as exc:
@@ -1128,6 +1182,16 @@ def create_app(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"Job is {record.status}; only a failed or cancelled job can resume.",
             )
+        # The resume path obeys the same concurrency cap as a fresh submit: a
+        # batch of failed jobs restarted together would otherwise open N
+        # pipelines on a server configured for one. Checked before the record
+        # flips to SUBMITTED, so a refusal leaves it resumable.
+        try:
+            manager.ensure_capacity()
+        except ServerCapacityError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(exc)
+            ) from exc
 
         # Never re-fresh (that would discard the checkpoints) and clear the
         # previous failure so the record restarts clean.
@@ -1297,6 +1361,29 @@ def create_app(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Job not found: {valid_id}",
+        )
+
+
+def _register_stream_routes(api_app: FastAPI, scope: ApiScope) -> None:
+    """Routes for the stream surface."""
+    manager = scope.manager
+    job_queue = scope.job_queue
+    _tenant_allows = scope.tenant_allows
+    _tenant_allows_async = scope.tenant_allows_async
+    _artifact_path = scope.artifact_path
+    _artifact_path_async = scope.artifact_path_async
+    _primary_output_file = scope.primary_output_file
+    _job_db_path = scope.job_db_path
+    _job_is_running = scope.job_is_running
+    _read_job_blocks = scope.read_job_blocks
+    _managed_dir = scope.managed_dir
+    _uploads_dir = scope.uploads_dir
+
+    def _cross_tenant_404(job_id: str) -> HTTPException:
+        # Same body as "not found": a cross-tenant probe must not learn that the
+        # job exists.
+        return HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Job not found: {job_id}"
         )
 
     # Queue mode has no in-memory ``JobRecord`` to count subscribers on, but it
@@ -1534,6 +1621,30 @@ def create_app(
                 "X-Accel-Buffering": "no",
             },
             background=BackgroundTask(_release_mem_stream_slots),
+        )
+
+
+def _register_artifact_routes(api_app: FastAPI, scope: ApiScope) -> None:
+    """Routes for the artifact surface."""
+    app_config = scope.config
+    manager = scope.manager
+    job_queue = scope.job_queue
+    _tenant_allows = scope.tenant_allows
+    _tenant_allows_async = scope.tenant_allows_async
+    _artifact_path = scope.artifact_path
+    _artifact_path_async = scope.artifact_path_async
+    _primary_output_file = scope.primary_output_file
+    _job_db_path = scope.job_db_path
+    _job_is_running = scope.job_is_running
+    _read_job_blocks = scope.read_job_blocks
+    _managed_dir = scope.managed_dir
+    _uploads_dir = scope.uploads_dir
+
+    def _cross_tenant_404(job_id: str) -> HTTPException:
+        # Same body as "not found": a cross-tenant probe must not learn that the
+        # job exists.
+        return HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Job not found: {job_id}"
         )
 
     @api_app.get(
@@ -1808,6 +1919,28 @@ def create_app(
             path=resolved,
             filename=resolved.name,
             media_type=media_type,
+        )
+
+
+def _register_review_routes(api_app: FastAPI, scope: ApiScope) -> None:
+    """Routes for the review surface."""
+    app_config = scope.config
+    _tenant_allows = scope.tenant_allows
+    _tenant_allows_async = scope.tenant_allows_async
+    _artifact_path = scope.artifact_path
+    _artifact_path_async = scope.artifact_path_async
+    _primary_output_file = scope.primary_output_file
+    _job_db_path = scope.job_db_path
+    _job_is_running = scope.job_is_running
+    _read_job_blocks = scope.read_job_blocks
+    _managed_dir = scope.managed_dir
+    _uploads_dir = scope.uploads_dir
+
+    def _cross_tenant_404(job_id: str) -> HTTPException:
+        # Same body as "not found": a cross-tenant probe must not learn that the
+        # job exists.
+        return HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Job not found: {job_id}"
         )
 
     # -- L3 Review Workbench (segments + fault ribbon + human edit) -----------
@@ -2127,6 +2260,43 @@ def create_app(
             ) from exc
         return Response(content=png, media_type="image/png")
 
+
+def _register_asset_routes(api_app: FastAPI, scope: ApiScope) -> None:
+    """Routes for the asset surface."""
+    app_config = scope.config
+    _tenant_allows = scope.tenant_allows
+    _tenant_allows_async = scope.tenant_allows_async
+    _artifact_path = scope.artifact_path
+    _artifact_path_async = scope.artifact_path_async
+    _primary_output_file = scope.primary_output_file
+    _job_db_path = scope.job_db_path
+    _job_is_running = scope.job_is_running
+    _read_job_blocks = scope.read_job_blocks
+    _managed_dir = scope.managed_dir
+    _uploads_dir = scope.uploads_dir
+
+    def _cross_tenant_404(job_id: str) -> HTTPException:
+        # Same body as "not found": a cross-tenant probe must not learn that the
+        # job exists.
+        return HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Job not found: {job_id}"
+        )
+
+    def _resolved_glossary_path() -> Path:
+        configured = app_config.glossary_path
+        if configured is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "No glossary file is configured. Set glossary_path in ubt.toml "
+                    "or pass --glossary."
+                ),
+            )
+        return resolve_secure_path(configured, must_exist=True, config=app_config)
+
+    def _tm_path() -> Path:
+        return app_config.db_dir / "tm.sqlite"
+
     @api_app.get(
         "/api/v1/model-profiles",
         response_model=list[ModelProfile],
@@ -2167,86 +2337,6 @@ def create_app(
                 detail=str(exc),
             ) from exc
         return profile
-
-    @api_app.get("/system/doctor", tags=["System"])
-    async def system_doctor(probe: bool = False) -> JSONResponse:
-        """Engine Doctor self-check (the ``ubt doctor`` checklist as JSON).
-
-        Reuses the CLI's ``collect_checks`` so the console and the command line
-        report the same verdicts. ``probe=true`` additionally contacts the
-        provider endpoint (a live network call), so it is off by default.
-        """
-        from ubt.cli.commands.doctor import _overall_status, _summary, collect_checks
-
-        checks = await asyncio.to_thread(collect_checks, app_config, probe=probe)
-        summary = _summary(checks)
-        return JSONResponse(
-            {
-                "status": _overall_status(summary),
-                "summary": summary,
-                "checks": [
-                    {
-                        "group": check.group,
-                        "name": check.name,
-                        "status": check.status,
-                        "detail": check.detail,
-                        "fix": check.fix,
-                    }
-                    for check in checks
-                ],
-            }
-        )
-
-    @api_app.get("/system/info", response_model=SystemInfoResponse, tags=["System"])
-    async def system_info(request: Request) -> dict[str, Any]:
-        """The console's security-boundary panel (real host + allowed roots).
-
-        Reports the host this request reached (loopback vs exposed), whether the
-        API-key gate is on, and the filesystem roots ``resolve_secure_path``
-        actually enforces — so the panel shows the live policy, not a hardcoded
-        sample.
-        """
-        from ubt import __version__
-
-        host = request.url.hostname or ""
-        disk_free_gb: float | None = None
-        try:
-            usage = shutil.disk_usage(app_config.db_dir)
-            disk_free_gb = round(usage.free / (1024**3), 1)
-        except OSError:
-            pass
-
-        return {
-            "version": __version__,
-            "host": host,
-            "is_loopback": host in _LOOPBACK_HOSTS,
-            "auth_enabled": bool(app_config.service_api_key.get_secret_value().strip()),
-            "allowed_bases": [str(path) for path in effective_allowed_bases(app_config)],
-            "db_dir": str(app_config.db_dir),
-            "job_mode": app_config.job_mode,
-            "disk_free_gb": disk_free_gb,
-            "wal_status": "ONLINE (WAL Mode Active)",
-        }
-
-    # -- Language Assets (glossary file + shared translation memory) ----------
-    # The glossary is the *operator-configured* external file; the console edits
-    # that one file rather than inventing a second terminology store, and never
-    # accepts a caller-supplied path (the write surface stays bounded to what the
-    # operator already pointed the engine at).
-    def _resolved_glossary_path() -> Path:
-        configured = app_config.glossary_path
-        if configured is None:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=(
-                    "No glossary file is configured. Set glossary_path in ubt.toml "
-                    "or pass --glossary."
-                ),
-            )
-        return resolve_secure_path(configured, must_exist=True, config=app_config)
-
-    def _tm_path() -> Path:
-        return app_config.db_dir / "tm.sqlite"
 
     @api_app.get("/assets/glossary", tags=["Assets"])
     async def get_glossary() -> JSONResponse:
@@ -2338,41 +2428,6 @@ def create_app(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
             ) from exc
         return JSONResponse({"parsed": len(rows), "imported": imported})
-
-    static_dir = Path(__file__).resolve().parent / "static"
-    if static_dir.exists() and (static_dir / "index.html").exists():
-        from fastapi.staticfiles import StaticFiles
-
-        class _SPAStaticFiles(StaticFiles):
-            """StaticFiles that falls back to index.html for browser navigations.
-
-            The console is a single-page app with real URLs (``/wizard``,
-            ``/jobs/:id/quality``); a browser refresh or a pasted link must land
-            on ``index.html`` and let the client router resolve the path, not a
-            404. API routes are registered before this mount, so they still win.
-
-            The fallback is gated on ``Accept: text/html``: an API client probing
-            a closed surface (``/docs`` on a keyed server, a typo'd endpoint)
-            must still get a JSON 404 rather than the SPA shell.
-            """
-
-            async def get_response(self, path: str, scope: Any) -> Response:
-                from starlette.exceptions import HTTPException as StarletteHTTPException
-
-                try:
-                    return await super().get_response(path, scope)
-                except StarletteHTTPException as exc:
-                    accepts_html = any(
-                        key == b"accept" and b"text/html" in value.lower()
-                        for key, value in scope.get("headers", [])
-                    )
-                    if exc.status_code != 404 or not accepts_html:
-                        raise
-                    return await super().get_response("index.html", scope)
-
-        api_app.mount("/", _SPAStaticFiles(directory=str(static_dir), html=True), name="console")
-
-    return api_app
 
 
 def _bootstrap_asgi_app() -> FastAPI:

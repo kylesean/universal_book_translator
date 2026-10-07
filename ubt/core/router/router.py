@@ -4,6 +4,8 @@ Prompt text lives in :mod:`ubt.core.router.prompts`; this file resolves a model
 name to a capability profile and executes against the provider.
 """
 
+from __future__ import annotations
+
 import asyncio
 import hashlib
 import json
@@ -15,7 +17,10 @@ import time
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol, overload
+from typing import TYPE_CHECKING, Any, Literal, overload
+
+if TYPE_CHECKING:
+    from ubt.core.engine.ledger import SQLiteJobLedger
 
 from ubt.core.exceptions import BudgetExceededError, JobInterruptedError, ModelProviderError
 from ubt.core.ir.models import IRBlock
@@ -334,32 +339,6 @@ class BatchDraftResult:
     custom_id: str
     text: str | None = None
     error: str | None = None
-
-
-class BatchJobStore(Protocol):
-    """Duck-typed ledger surface for Batch API persistence.
-
-    Satisfied by :class:`ubt.core.engine.ledger.SQLiteJobLedger`; declared
-    structurally so the router does not import the engine layer.
-    """
-
-    def register_batch_job(
-        self, batch_id: str, job_id: str, idempotency_key: str, status: str = ...
-    ) -> None: ...
-
-    def find_live_batch_by_idempotency_key(self, idempotency_key: str) -> str | None: ...
-
-    def find_live_batch_for_job(self, job_id: str, *, exclude_key: str) -> str | None: ...
-
-    def reserve_batch_job(self, idempotency_key: str, job_id: str) -> tuple[str, str | None]: ...
-
-    def finalize_batch_job(
-        self, idempotency_key: str, batch_id: str, status: str = ...
-    ) -> None: ...
-
-    def update_batch_job_status(self, batch_id: str, status: str) -> None: ...
-
-    def is_batch_live(self, batch_id: str) -> bool: ...
 
 
 class ModelRouter:
@@ -1417,7 +1396,7 @@ class ModelRouter:
         *,
         poll_interval: float = 30.0,
         poll_timeout: float = 3600.0,
-        ledger: BatchJobStore | None = None,
+        ledger: SQLiteJobLedger | None = None,
         job_id: str | None = None,
         cleanup_files: bool = True,
         status_callback: Callable[[str, dict[str, Any]], Any] | None = None,
@@ -1659,7 +1638,7 @@ class ModelRouter:
         return results
 
     async def abandon_batch(
-        self, batch_id: str, ledger: BatchJobStore | None = None, job_id: str | None = None
+        self, batch_id: str, ledger: SQLiteJobLedger | None = None, job_id: str | None = None
     ) -> None:
         """Cancel a still-running batch we are about to abandon to interactive.
 
