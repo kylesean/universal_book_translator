@@ -9,7 +9,7 @@ implements the *cheap* level first -- structure, not pixels:
   the source crop. Its verdicts are honoured in
   :func:`ubt.core.content.adapt.graph_from_blocks`.)
 - **table:** the reconstruction did not shatter into single-character cells or
-  inconsistent column counts -- the exact failure the rigid engine exists to
+  inconsistent column counts -- the exact failure the overlay canvas exists to
   prevent.
 
 A FAIL is corruption (Axiom A), never a silent pass. ``reconcile`` records it;

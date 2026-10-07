@@ -305,7 +305,6 @@ def _public_report(value: Any) -> Any:
 #: than a path guess.
 DELIVERABLE_LABELS: dict[str, tuple[str, str]] = {
     "primary": ("Translated document", "application/octet-stream"),
-    "rigid": ("Rigid companion PDF", "application/pdf"),
     "secondary": ("Complementary mono/dual document", "application/octet-stream"),
     "epub": ("Reflowable EPUB", "application/epub+zip"),
     "contract": ("Delivery contract (JSON)", "application/json"),
@@ -319,7 +318,7 @@ def _deliverable_paths(output_file: str | Path) -> dict[str, Path]:
     """Every deliverable that hangs off a job's primary artifact.
 
     Uses the export stage's own naming helpers (``sidecar_path`` /
-    ``companion_path`` plus the ``_rigid`` / ``_mono`` / ``_dual`` siblings)
+    ``companion_path`` plus the ``_mono`` / ``_dual`` siblings)
     rather than a second copy of the rule, so the API and the writer cannot
     drift. Missing files are still returned as candidate paths; the caller
     filters by existence.
@@ -328,7 +327,6 @@ def _deliverable_paths(output_file: str | Path) -> dict[str, Path]:
     stem, suffix = out.stem, out.suffix
     paths: dict[str, Path] = {
         "primary": out,
-        "rigid": out.with_name(f"{stem}_rigid{suffix}"),
         "epub": companion_path(out, ".epub"),
         "contract": sidecar_path(out, "contract.json"),
         "quality_report": sidecar_path(out, "quality_report.json"),
@@ -1711,9 +1709,9 @@ def create_app(
     ) -> JSONResponse:
         """List the deliverables a finished job actually left on disk.
 
-        A run may emit a rigid companion, a complementary dual/mono render, an
-        EPUB and the JSON sidecars depending on its flags; the UI must render
-        only what exists rather than offer four fixed buttons. Keys match
+        A run may emit a complementary dual/mono render, an EPUB and the JSON
+        sidecars depending on its flags; the UI must render only what exists
+        rather than offer four fixed buttons. Keys match
         :data:`DELIVERABLE_LABELS`.
         """
         valid_id = validate_job_id(job_id)

@@ -919,7 +919,7 @@
           "Jobs"
         ],
         "summary": "List Deliverables",
-        "description": "List the deliverables a finished job actually left on disk.\n\nA run may emit a rigid companion, a complementary dual/mono render, an\nEPUB and the JSON sidecars depending on its flags; the UI must render\nonly what exists rather than offer four fixed buttons. Keys match\n:data:`DELIVERABLE_LABELS`.",
+        "description": "List the deliverables a finished job actually left on disk.\n\nA run may emit a complementary dual/mono render, an EPUB and the JSON\nsidecars depending on its flags; the UI must render only what exists\nrather than offer four fixed buttons. Keys match\n:data:`DELIVERABLE_LABELS`.",
         "operationId": "list_deliverables_jobs__job_id__deliverables_get",
         "parameters": [
           {
@@ -3484,19 +3484,7 @@
               }
             ],
             "title": "Emit Both",
-            "description": "Emit both the reflow and the rigid deliverable"
-          },
-          "emit_companion_rigid": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Emit Companion Rigid",
-            "description": "Emit a zero-cost '*_rigid.pdf' source-fidelity companion alongside the reflow output"
+            "description": "Emit both the primary and complementary dual_mode deliverables (e.g. mono and bilingual)"
           },
           "cover_mode": {
             "anyOf": [

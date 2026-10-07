@@ -447,7 +447,7 @@ def render_fidelity_stats(
     *,
     dpi: int = 300,
 ) -> dict[str, Any]:
-    """Measure rigid-render fidelity (non-text residual + painted coverage).
+    """Measure overlay-render fidelity (non-text residual + painted coverage).
 
     Advisory bridge to the adapter's pdfium+Pillow diff so ``ubt/core`` stays
     free of the heavy raster import edge. Returns a plain stats dict.

@@ -627,18 +627,6 @@ class UBTConfig(BaseSettings):
     # Also render the complementary artifact (mono when primary is dual and
     # vice versa), BabelDOC no-dual/no-mono style.
     emit_both: bool = False
-    # Explicitly deliver a zero-cost '*_rigid.pdf' companion alongside reflow.
-    emit_companion_rigid: bool = False
-    # Deliver a zero-cost bilingual '*_reflow.pdf' companion when an auto-routed
-    # document takes the monolingual rigid engine, so a borderline auto decision
-    # never silently costs the reader their bilingual delivery. Explicit
-    # --render-engine rigid is the user's own choice and is exempt.
-    emit_companion_bilingual: bool = True
-    # Auto-emit a zero-cost '*_rigid.pdf' companion whenever a reflow-primary PDF
-    # still carries page-level structure (figures/columns/mixed pages), so a
-    # threshold miss can never silently lose figures or tables. Toggle off to
-    # skip the extra (CPU-only, no-LLM) render on large figure-bearing books.
-    emit_companion_auto: bool = True
     # Emit a translation-ready XLIFF 2.1 companion ('*_<tag>.xliff') beside the
     # deliverable: the native reader turns the source PDF into a typed Document,
     # protected spans are masked, and one segment per element is written. It is

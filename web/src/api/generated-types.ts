@@ -280,9 +280,9 @@ export interface paths {
          * List Deliverables
          * @description List the deliverables a finished job actually left on disk.
          *
-         *     A run may emit a rigid companion, a complementary dual/mono render, an
-         *     EPUB and the JSON sidecars depending on its flags; the UI must render
-         *     only what exists rather than offer four fixed buttons. Keys match
+         *     A run may emit a complementary dual/mono render, an EPUB and the JSON
+         *     sidecars depending on its flags; the UI must render only what exists
+         *     rather than offer four fixed buttons. Keys match
          *     :data:`DELIVERABLE_LABELS`.
          */
         get: operations["list_deliverables_jobs__job_id__deliverables_get"];
@@ -1139,14 +1139,9 @@ export interface components {
             facing_spread?: boolean | null;
             /**
              * Emit Both
-             * @description Emit both the reflow and the rigid deliverable
+             * @description Emit both the primary and complementary dual_mode deliverables (e.g. mono and bilingual)
              */
             emit_both?: boolean | null;
-            /**
-             * Emit Companion Rigid
-             * @description Emit a zero-cost '*_rigid.pdf' source-fidelity companion alongside the reflow output
-             */
-            emit_companion_rigid?: boolean | null;
             /**
              * Cover Mode
              * @description Cover handling (auto, always, never)

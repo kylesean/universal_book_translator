@@ -749,7 +749,7 @@ def _synthesize_warnings(
             AssessmentWarning(
                 "SCANNED_PAGES_DOMINANT",
                 "warn",
-                "文档以扫描/图像页为主，译文依赖视觉转写，成本与时延显著上升；建议先做 OCR 预检或选 rigid 路线。",
+                "文档以扫描/图像页为主，译文依赖视觉转写，成本与时延显著上升；建议先做 OCR 预检（将采用原位覆盖 overlay 路线）。",
             )
         )
     wit = pdf.get("witness")
@@ -801,7 +801,9 @@ def _synthesize_warnings(
     if pdf.get("text_layer_coverage") is not None:
         quality_signals.append(f"文本层覆盖率 {pdf['text_layer_coverage']:.0%}")
     if pdf.get("poster_pages"):
-        quality_signals.append(f"海报/固定版式页 {pdf['poster_pages']} 页（建议 rigid）")
+        quality_signals.append(
+            f"海报/固定版式页 {pdf['poster_pages']} 页（将采用原位覆盖 overlay）"
+        )
     if arch.detected_domain != "general":
         quality_signals.append(
             f"领域判定 {arch.detected_domain}（置信度 {arch.domain_confidence}），可挂载领域术语表"

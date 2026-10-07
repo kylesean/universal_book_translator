@@ -6,13 +6,9 @@ delivery still gets a graph built here, so the reconciliation gate applies to
 *all* render paths from day one.
 
 Asset policy (Axiom A): a non-text block is only RECONSTRUCTED alongside the
-round-trip check that verifies it. Every canonical PDF engine (``rigid`` /
-``composite`` / ``publication``) composes onto the source page through the
-unified LayerCompositor, so its non-text nodes are PRESERVED_OPAQUE by
-construction; only a non-source-canvas engine name falls back to RECONSTRUCTED
-and runs the structural verifier in :func:`graph_from_blocks` -- anything left
-unverified is recorded as a *warning* by
-:func:`ubt.core.content.contract.reconcile`.
+round-trip check that verifies it. The unified LayerCompositor (overlay engine)
+composes onto the source page, so non-text nodes are PRESERVED_OPAQUE by
+construction.
 """
 
 from __future__ import annotations

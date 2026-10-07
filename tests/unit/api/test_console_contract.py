@@ -95,7 +95,6 @@ def test_deliverable_paths_match_the_export_stage_naming(tmp_path: Path) -> None
     output = tmp_path / "book_bilingual.pdf"
     paths = _deliverable_paths(output)
     assert paths["primary"] == output
-    assert paths["rigid"] == output.with_name("book_bilingual_rigid.pdf")
     assert paths["epub"] == companion_path(output, ".epub")
     assert paths["contract"] == sidecar_path(output, "contract.json")
     assert paths["quality_report"] == sidecar_path(output, "quality_report.json")

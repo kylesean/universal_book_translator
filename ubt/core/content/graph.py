@@ -11,9 +11,9 @@ class ContentGraph(BaseModel):
     """Every content node of one document, in reading order.
 
     The graph is the *contract*: a delivery is judged by how it accounts for
-    these nodes, never by the renderer that produced it. Two renderers (rigid,
-    reflow) over the same graph must each return a disposition covering every
-    node; a node missing from that disposition is a violation.
+    these nodes, never by the renderer that produced it. Any delivery over the
+    graph must return a disposition covering every node; a node missing from
+    that disposition is a violation.
     """
 
     model_config = ConfigDict(frozen=True)

@@ -97,7 +97,7 @@ def test_witness_warnings_contextual_remedy_on_confirmed_damage() -> None:
     assert len(font_warns) == 1
     # For digital PDF, should not ask user to re-scan
     assert "重新扫描" not in font_warns[0].detail_zh
-    assert "OCR" in font_warns[0].detail_zh or "rigid" in font_warns[0].detail_zh
+    assert "OCR" in font_warns[0].detail_zh
 
     # For scanned PDF, re-scan advice is appropriate
     arch_scanned = Archetype(

@@ -108,12 +108,11 @@ class ReportRenderCoverage(BaseModel):
     """How much of the pipeline completed, and how much of that was delivered.
 
     ``render_coverage`` is the *translation-completion* ratio
-    (``completed / total``), not a pixel/placement measure: for reflow engines
-    (publication/Typst) nothing is left in place so it is also the delivery
-    ratio, while the overlay engine (rigid) can keep source text on the page.
-    Those delivery gaps are carried by ``fail_closed_blocks`` / ``skip_families``
-    (and, for rigid, by the separate per-page render-visibility report) — never
-    folded into this ratio, so a caller that wants "was every translation
+    (``completed / total``), not a pixel/placement measure: while the overlay
+    engine keeps the source page as canvas, translatable prose is typeset into
+    the page. Those delivery gaps are carried by ``fail_closed_blocks`` /
+    ``skip_families`` (and by the separate per-page render-visibility report) —
+    never folded into this ratio, so a caller that wants "was every translation
     placed" must read ``fail_closed_blocks`` too.
     """
 
@@ -128,15 +127,15 @@ class ReportRenderCoverage(BaseModel):
 
 
 class ReportFidelity(BaseModel):
-    """Pixel-level fidelity of a ``rigid`` render (advisory, never blocking).
+    """Pixel-level fidelity of an ``overlay`` render (advisory, never blocking).
 
     ``non_text_residual`` is the fraction of pixels *outside* the painted text
-    boxes that differ from the source — it should be ~0 because the rigid route
+    boxes that differ from the source — it should be ~0 because the overlay route
     keeps every non-text element untouched. ``painted_coverage`` is the fraction
     of page area that was actually painted prose (the inverse of the "most of
     the page still shows source text" failure). ``pages_measured`` is 0 when the
-    probe could not run (no rigid render, rasterizer unavailable), in which case
-    both ratios are meaningless defaults.
+    probe could not run (rasterizer unavailable), in which case both ratios are
+    meaningless defaults.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -239,7 +238,7 @@ class QualityReport(BaseModel):
             render_coverage=1.0,
         )
     )
-    # Rigid-render pixel fidelity (advisory; 0 pages when not a rigid render).
+    # Overlay-render pixel fidelity (advisory; 0 pages when not measured).
     fidelity: ReportFidelity = Field(default_factory=ReportFidelity)
     # Unified-entry routing decision (router_mode.decide), when the pipeline
     # recorded one. None for pre-router jobs and non-PDF inputs.

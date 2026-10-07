@@ -87,10 +87,6 @@ class AdvisoryReport:
     conflict_warnings: list[str] = field(default_factory=list)
     assessment: AssessmentReport | None = None
 
-    def check_conflict(self, chosen_render_engine: str, chosen_dual_mode: str) -> list[str]:
-        """No engine conflict exists: every PDF renders through the overlay engine."""
-        return []
-
 
 class DocumentAdvisor:
     """Probes documents and environment to generate optimal translation strategies."""

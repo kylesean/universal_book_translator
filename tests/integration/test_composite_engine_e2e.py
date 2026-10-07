@@ -28,7 +28,7 @@ pytestmark = [
     pytest.mark.slow,
     pytest.mark.skipif(
         shutil.which("typst") is None,
-        reason="the composite engine needs the typst fragment typesetter",
+        reason="the overlay engine needs the typst fragment typesetter",
     ),
 ]
 

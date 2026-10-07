@@ -171,11 +171,8 @@ class JobSubmitRequest(BaseModel):
         default=None, description="Lay the bilingual output out as facing pages"
     )
     emit_both: bool | None = Field(
-        default=None, description="Emit both the reflow and the rigid deliverable"
-    )
-    emit_companion_rigid: bool | None = Field(
         default=None,
-        description="Emit a zero-cost '*_rigid.pdf' source-fidelity companion alongside the reflow output",
+        description="Emit both the primary and complementary dual_mode deliverables (e.g. mono and bilingual)",
     )
     cover_mode: CoverMode | None = Field(
         default=None, description="Cover handling (auto, always, never)"

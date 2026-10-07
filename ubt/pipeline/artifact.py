@@ -216,7 +216,7 @@ class DeliveredArtifact:
         return companion_path(self.rendered_path, suffix)
 
     def sibling(self, suffix: str) -> Path:
-        """A second artifact beside the *requested* target (e.g. ``_rigid.pdf``)."""
+        """A second artifact beside the *requested* target (e.g. ``_mono.pdf``)."""
         out = self.target_output
         return out.with_name(f"{out.stem}{suffix}{out.suffix}")
 

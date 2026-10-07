@@ -486,11 +486,8 @@ def test_submit_budget_exceeded_is_402(
     assert response.status_code == 402
 
 
-def test_job_submit_request_carries_emit_companion_rigid() -> None:
-    # The CLI sets emit_companion_rigid; without it on the request model
-    # (extra="forbid") the REST client got a 422 and the companion-rigid
-    # delivery was unreachable from the API.
+def test_job_submit_request_carries_emit_both() -> None:
     from ubt.api.models import JobSubmitRequest
 
-    req = JobSubmitRequest(input_path="/tmp/x.pdf", emit_companion_rigid=True)
-    assert req.emit_companion_rigid is True
+    req = JobSubmitRequest(input_path="/tmp/x.pdf", emit_both=True)
+    assert req.emit_both is True

@@ -60,7 +60,7 @@ def test_sidecars_and_companions_key_on_the_returned_file() -> None:
 def test_siblings_key_on_the_requested_target() -> None:
     # A companion *render* is named beside the requested target.
     artifact = delivered_artifact("/out/book_bilingual_mono.pdf", "/out/book_bilingual.pdf")
-    assert artifact.sibling("_rigid") == Path("/out/book_bilingual_rigid.pdf")
+    assert artifact.sibling("_mono") == Path("/out/book_bilingual_mono.pdf")
     assert artifact.sibling("_secondary") == Path("/out/book_bilingual_secondary.pdf")
 
 

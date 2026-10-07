@@ -81,7 +81,11 @@ def _clean_stale_companions(output: Path | None, *, input_path: Path | None = No
     stem = output.stem
     names = [f"{stem}_rigid.pdf", f"{stem}_reflow.pdf"]
     if stem.endswith("_mono"):
-        names.append(f"{stem[: -len('_mono')]}_bilingual{output.suffix}")
+        base = stem[: -len("_mono")]
+        names.extend([f"{base}_bilingual{output.suffix}", f"{base}_dual{output.suffix}"])
+    elif stem.endswith(("_dual", "_bilingual")):
+        base = stem.rsplit("_", 1)[0]
+        names.append(f"{base}_mono{output.suffix}")
     for n in names:
         p = output.with_name(n)
         if not p.exists() or p == output:
@@ -161,8 +165,6 @@ def _report_degrades_bilingual_delivery(report_data: dict[str, Any]) -> bool:
         rendered_modes == ["monolingual"]
         or effective == "monolingual"
         or "dual_mode_downgraded" in report_data
-        or "overlay engine" in (report_data.get("delivery_status") or "")
-        or "overlay engine" in (report_data.get("delivery_warning") or "")
     )
 
 
@@ -171,21 +173,29 @@ def _find_companion_paths(
 ) -> list[Path]:
     """Existing complementary artifacts the pipeline wrote beside the primary.
 
-    The pipeline may emit a fidelity rigid companion (``_rigid``) and/or a
-    bilingual reflow companion (``_reflow``, or ``_bilingual`` when the primary
-    took the auto-named ``_mono`` delivery).
+    When --emit-both is on, the pipeline emits a complementary mono/dual render
+    (e.g. ``_bilingual`` or ``_dual`` when the primary is ``_mono``, or ``_mono``
+    when the primary is bilingual).
     """
     stem = result_path.stem
     names: list[str] = []
-    is_rigid = False
-    if report_data:
-        is_rigid = "overlay engine" in (
-            report_data.get("delivery_status") or ""
-        ) or "overlay engine" in (report_data.get("delivery_warning") or "")
-    if not is_rigid and not stem.endswith("_rigid"):
-        names.append(f"{stem}_rigid.pdf")
     if stem.endswith("_mono"):
-        names.append(f"{stem[: -len('_mono')]}_bilingual{result_path.suffix}")
+        base = stem[: -len("_mono")]
+        names.extend([f"{base}_bilingual{result_path.suffix}", f"{base}_dual{result_path.suffix}"])
+    elif stem.endswith("_bilingual"):
+        base = stem[: -len("_bilingual")]
+        names.append(f"{base}_mono{result_path.suffix}")
+    elif stem.endswith("_dual"):
+        base = stem[: -len("_dual")]
+        names.append(f"{base}_mono{result_path.suffix}")
+    else:
+        names.extend(
+            [
+                f"{stem}_mono{result_path.suffix}",
+                f"{stem}_dual{result_path.suffix}",
+                f"{stem}_bilingual{result_path.suffix}",
+            ]
+        )
 
     res_mtime = result_path.stat().st_mtime if result_path.exists() else 0.0
     companions: list[Path] = []

@@ -639,14 +639,14 @@ def collect_checks(config: UBTConfig, *, probe: bool = False) -> list[_Check]:
     except ImportError:
         has_typst = False
     if has_typst:
-        record("Typst", "OK", "PDF reflow / rigid rendering available")
+        record("Typst", "OK", "PDF overlay rendering available")
     else:
         record(
             "Typst",
             "WARN",
             "not found on PATH \u2014 a PDF render fails at stage 6",
-            fix="install it (brew install typst / cargo install typst-cli), or use "
-            "--render-engine with a text output format",
+            fix="install it (brew install typst / cargo install typst-cli), or choose "
+            "a text output format (.md / .docx / .epub)",
         )
 
     if has_typst:

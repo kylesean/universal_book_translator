@@ -1,11 +1,9 @@
 """Backend capability declaration (render backend lowering layer).
 
-``rigid`` vs ``reflow`` was a whole-document choice forced by two implementations;
-the real question is per element -- can *this* backend reproduce *this* element
+The pipeline operates per element -- can *this* backend reproduce *this* element
 losslessly at *this* fidelity? A backend answers with a :class:`Capabilities`
 value and :func:`ubt.pipeline.steps.realize` walks the fidelity descent asking
-that question one element at a time, so the two engines stop being a dichotomy
-and become two backends.
+that question one element at a time.
 
 Capabilities are *data* (declarative capability invariant): a backend declares what it can
 produce, and an unsupported rung is simply skipped. There is no plugin registry
