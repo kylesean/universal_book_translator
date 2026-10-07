@@ -30,11 +30,14 @@ from pathlib import Path
 from typing import Any
 
 from ubt.core.engine.ledger import SQLiteJobLedger
-from ubt.core.engine.pe_queue import PE_QUEUE_STATUSES
 from ubt.core.ir.models import BlockStatus
 from ubt.core.memory.tm import PROVENANCE_HUMAN_PE, TMPendingEntry, TranslationMemory
 
 logger = logging.getLogger(__name__)
+
+PE_QUEUE_STATUSES: frozenset[BlockStatus] = frozenset(
+    {BlockStatus.NEEDS_HUMAN, BlockStatus.BLOCKED_HUMAN}
+)
 
 _XLIFF_NS = "urn:oasis:names:tc:xliff:document:2.1"
 

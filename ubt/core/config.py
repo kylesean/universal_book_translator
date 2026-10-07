@@ -61,7 +61,6 @@ PdfEngine = str
 # ("comet"/"subprocess") or the tiered mix.
 QeEngine = Literal["heuristic", "comet", "cometkiwi", "neural", "subprocess", "tiered"]
 DualMode = Literal["inline", "alternating", "monolingual", "facing", "auto"]
-PeExportFormat = Literal["csv", "xliff", "none"]
 #: The PDF render engine. There is exactly one: the unified source-canvas
 #: compositor (Layer 0 keeps the source page, Layer 1 strips the replaced text,
 #: Layer 2 overlays the translated fragments back into the source geometry). It
@@ -98,7 +97,7 @@ FormulaMode = Literal["strict", "readable"]
 FormulaEnrichment = Literal["auto", "on", "off"]
 FormulaRender = Literal["native", "image", "witness"]
 MathBackend = Literal["typst", "mathjax", "image"]
-GranularityMode = Literal["micro", "macro"]
+
 
 #: Default endpoint when no provider is selected and no UBT_BASE_URL is set.
 #: The provider registry (``ubt/core/providers.py``) carries the vendor-specific
@@ -349,12 +348,6 @@ class UBTConfig(BaseSettings):
     # disables it (nothing is read or written).
     cache_enabled: bool = True
     cache_dir: Path = Path(".ubt/cache")
-    # Opt-in KDP / human-review Markdown companion beside *_quality_report.json.
-    # Off by default: it is a review artifact, not part of the machine contract,
-    # and no stale-report sweep knows about the extra file. Set
-    # UBT_KDP_AUDIT_MARKDOWN=1 to emit it.
-    kdp_audit_markdown: bool = False
-
     # -- Service job queue ----------------------------------------------------
     # 'embedded' (default): the REST API runs each job as an in-process task —
     # zero setup, single host. 'queue': the API only enqueues into a durable
@@ -461,18 +454,12 @@ class UBTConfig(BaseSettings):
     # and the docs-completeness gate can see them. There is no dotenv source
     # (see ``model_config``), so the process environment is the one external
     # source: reading ``os.environ`` there and reading this field resolve the
-    # same value. The only difference is programmatic construction —
-    # ``UBTConfig(bill_local_endpoint=True)`` in code does NOT change pricing:
-    # set the variable.
+    # same value.
     #
     # Extra hosts declared self-hosted (a LAN inference box), comma/`os.pathsep`
     # separated. Loopback and the container-host aliases need no declaration.
     local_endpoints: str = ""
-    # Treat self-hosted endpoints as billable: for a PAID gateway behind
-    # 127.0.0.1 (LiteLLM, an OpenCode/Qoder proxy). Default false = local
-    # endpoints are free, which is what makes --budget-usd usable with
-    # Ollama/llama.cpp, whose model names are absent from the price table.
-    bill_local_endpoint: bool = False
+
     # Path to external prices.toml (UBT_PRICES_FILE). When configured or present
     # in standard search locations, its pricing definitions override shipped rates.
     prices_file: Path | None = None
@@ -516,13 +503,6 @@ class UBTConfig(BaseSettings):
     vlm_trust_remote_code: bool = False
     visual_sample_pages: int = Field(default=6, ge=0, le=50)
     visual_max_vlm_pages: int = Field(default=3, ge=0, le=10)
-    # Render-fidelity probe (source-vs-artifact non-text residual + painted
-    # coverage). The rigid route measures it on every run — that is where the
-    # pixel-preservation promise lives — and contributes advisory ``info``
-    # findings plus the ``fidelity_*`` KPIs (so it never blocks delivery). This
-    # flag is the explicit opt-in for any other engine, whose reflowed masks
-    # would be meaningless, so it is normally left off.
-    render_fidelity_enabled: bool = False
     # -- visual blocking gate (opt-in for long docs; short docs fail closed) ---
     # Short docs (<= QA_FULL_GATE_MAX_PAGES) enforce visual blocking fail-closed
     # by default. For longer docs, setting this to true refuses export when
@@ -764,21 +744,6 @@ class UBTConfig(BaseSettings):
     # bootstraps under a lock that a UBTConfig built there must not re-enter.
 
     # -- Human PE (HITL) queue: MQM severity triage + post-editing ---------------
-    # MQM severity triage (Critical -> escalated repair / BLOCKED_HUMAN;
-    # Major -> NEEDS_HUMAN) ALWAYS runs in the pipeline so the
-    # "Critical escape rate 0" guarantee holds regardless of this flag. This
-    # flag gates ONLY the human post-editing export (CSV default / XLIFF
-    # 2.1); re-imported revisions flow back into the TM as ``human_pe``.
-    pe_queue_enabled: bool = False
-    pe_export_format: PeExportFormat = "csv"
-
-    # -- Chunking granularity --------------------------------------------------
-    # 'micro' (default): atomic blocks / paragraphs with frozen-math protection.
-    # 'macro' (whole-section / chapter synthesis) is unsupported and rejected by
-    # the validator below rather than accepted-and-ignored:
-    # resolve_adaptive_policy always returns MICRO.
-    granularity: GranularityMode = "micro"
-
     # -- Normalization ------------------------------------------------------------
     # Canonical QE engines are heuristic | subprocess | tiered.
     # Alias names comet / cometkiwi / neural all map to "external subprocess scorer"
@@ -795,7 +760,6 @@ class UBTConfig(BaseSettings):
         "ocr_mode",
         "qe_engine",
         "dual_mode",
-        "pe_export_format",
         "cover_mode",
         "prompt_strategy",
         "exec_mode",
@@ -803,7 +767,6 @@ class UBTConfig(BaseSettings):
         "formula_enrichment",
         "formula_render",
         "math_backend",
-        "granularity",
         "env",
         mode="before",
     )
@@ -812,24 +775,6 @@ class UBTConfig(BaseSettings):
         if isinstance(value, str):
             lowered = value.strip().lower()
             return lowered
-        return value
-
-    @field_validator("granularity", mode="after")
-    @classmethod
-    def _reject_retired_macro(cls, value: str) -> str:
-        """Reject the unsupported 'macro' granularity instead of silently ignoring it.
-
-        ``resolve_adaptive_policy`` always returns MICRO, so accepting 'macro'
-        would let a user believe whole-section synthesis is running when it is
-        not. Failing fast with the reason is the honest option — reviving macro
-        would mean reimplementing it.
-        """
-        if value == "macro":
-            raise ValueError(
-                "granularity='macro' (legacy whole-section synthesis) has been retired in "
-                "favour of the canonical frozen-math micro-block architecture, so the setting "
-                "had no effect. Use 'micro' (the default) or remove the setting entirely."
-            )
         return value
 
     @field_validator("qe_engine", mode="before")

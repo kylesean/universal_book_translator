@@ -546,10 +546,6 @@ def collect_checks(config: UBTConfig, *, probe: bool = False) -> list[_Check]:
         )
     else:
         record("Batch API", "SKIP", "disabled")
-    if config.pe_queue_enabled:
-        record("PE queue", "OK", f"export format: {config.pe_export_format}")
-    else:
-        record("PE queue", "SKIP", "disabled")
 
     # -- rendering ------------------------------------------------------------
     group = _GROUPS[3]

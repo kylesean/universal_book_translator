@@ -55,7 +55,6 @@ class ReflowControlLoop:
         max_vlm_pages: int = 3,
         visual_judge_enabled: bool = False,
         visual_judge_model: str | None = None,
-        render_fidelity_enabled: bool = False,
         cancel_token: asyncio.Event | None = None,
     ) -> None:
         self.adapter = adapter
@@ -72,7 +71,6 @@ class ReflowControlLoop:
         self.max_vlm_pages = max(0, max_vlm_pages)
         self.visual_judge_enabled = visual_judge_enabled
         self.visual_judge_model = visual_judge_model
-        self.render_fidelity_enabled = render_fidelity_enabled
         self.cancel_token = cancel_token
 
     def _build_vlm_judge(self) -> Any | None:
@@ -263,9 +261,7 @@ class ReflowControlLoop:
         # are measurable on every run; the flag is an explicit opt-in for any
         # non-source-canvas engine. ``gate.passed`` is untouched, so delivery is
         # never blocked by it.
-        if source_pdf.exists() and (
-            self._output_keeps_source_geometry() or self.render_fidelity_enabled
-        ):
+        if source_pdf.exists():
             try:
                 from ubt.core.ports import render_fidelity_findings, render_fidelity_stats
 

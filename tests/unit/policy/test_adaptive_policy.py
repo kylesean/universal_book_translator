@@ -1,13 +1,10 @@
-"""Contract tests for the (single) execution-granularity policy resolver.
+"""Contract tests for the execution-policy resolver.
 
-The render-route axis is gone: every PDF renders through the single
-source-canvas ``overlay`` engine (``ubt.core.config.RENDER_ENGINE``), so there
-are no engine resolvers, threshold constants or legacy aliases left to test.
+The Granularity axis is gone: the pipeline is always the frozen-math
+micro-block architecture. The render engine is a single constant, not a choice.
 """
 
 from __future__ import annotations
-
-import logging
 
 import pytest
 
@@ -17,7 +14,6 @@ from ubt.core.ir.models import BookManifest
 from ubt.core.ir.run_metadata import RunMetadata
 from ubt.core.policy.adaptive_policy import (
     AdaptivePolicy,
-    Granularity,
     resolve_adaptive_policy,
 )
 from ubt.core.router_mode import RouteDecision, RouteMode
@@ -56,7 +52,6 @@ def test_config_has_no_render_engine_knob() -> None:
 
 def test_adaptive_policy_has_no_render_engine_field() -> None:
     policy = AdaptivePolicy(
-        granularity=Granularity.MICRO,
         fast_lane_bible=True,
         visual_blocking=False,
         deterministic_glossary=True,
@@ -65,14 +60,8 @@ def test_adaptive_policy_has_no_render_engine_field() -> None:
     assert "render_engine" not in policy.to_dict()
 
 
-def test_granularity_only_exposes_micro() -> None:
-    assert list(Granularity) == [Granularity.MICRO]
-    assert Granularity.MICRO.value == "micro"
-
-
 def test_to_dict_round_trips_every_field() -> None:
     policy = AdaptivePolicy(
-        granularity=Granularity.MICRO,
         fast_lane_bible=True,
         visual_blocking=False,
         deterministic_glossary=True,
@@ -94,7 +83,6 @@ def test_to_dict_round_trips_every_field() -> None:
 
 def test_short_document_keeps_fast_lane_and_glossary() -> None:
     policy = resolve_adaptive_policy(_manifest(), _route("short", 5), UBTConfig())
-    assert policy.granularity is Granularity.MICRO
     assert policy.fast_lane_bible is True
     assert policy.visual_blocking is True
     assert policy.deterministic_glossary is True
@@ -116,23 +104,3 @@ def test_long_document_honours_visual_blocking_gate_flag() -> None:
     policy = resolve_adaptive_policy(_manifest(), _route("long", 300), config)
     assert policy.visual_blocking is True
     assert policy.fast_lane_bible is False
-
-
-def test_forced_macro_granularity_still_runs_micro_and_warns(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    with caplog.at_level(logging.WARNING, logger="ubt.core.policy.adaptive_policy"):
-        policy = resolve_adaptive_policy(
-            _manifest(), _route("short", 5), UBTConfig(), forced_granularity="macro"
-        )
-    assert policy.granularity is Granularity.MICRO
-    assert any("retired" in record.message for record in caplog.records)
-
-
-def test_forced_micro_granularity_is_silent(caplog: pytest.LogCaptureFixture) -> None:
-    with caplog.at_level(logging.WARNING, logger="ubt.core.policy.adaptive_policy"):
-        policy = resolve_adaptive_policy(
-            _manifest(), _route("short", 5), UBTConfig(), forced_granularity="micro"
-        )
-    assert policy.granularity is Granularity.MICRO
-    assert caplog.records == []

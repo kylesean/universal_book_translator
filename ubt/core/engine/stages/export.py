@@ -15,7 +15,6 @@ from ubt.core.cleaners.cjk_spacing import normalize_publishing_cjk
 from ubt.core.config import DualMode
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.ledger import SQLiteJobLedger
-from ubt.core.engine.pe_queue import PEQueueResult, export_pe_queue
 from ubt.core.engine.reporter import (
     QualityReport,
     ReportEntityConsistency,
@@ -535,7 +534,6 @@ async def _run_visual_gate(
             max_vlm_pages=max(0, ctx.config.visual_max_vlm_pages),
             visual_judge_enabled=ctx.config.visual_judge_enabled,
             visual_judge_model=ctx.config.visual_judge_model,
-            render_fidelity_enabled=ctx.config.render_fidelity_enabled,
             cancel_token=ctx.cancel_token,
         )
         rendered_path, visual_report_path, gate = await reflow_loop.run(
@@ -1090,9 +1088,7 @@ async def _build_reports(
             rendered_path,
         )
     report_path = sidecar_path(rendered_path, "quality_report.json")
-    await asyncio.to_thread(
-        save_quality_report, report, report_path, write_markdown=ctx.config.kdp_audit_markdown
-    )
+    await asyncio.to_thread(save_quality_report, report, report_path)
 
     # Versioned KPI artifact: a pure derivation from the quality report plus
     # the optional visual report (no LLM, no text re-scan). Checked-in golden
@@ -1138,8 +1134,6 @@ async def run_export_stage(
     glossary_dicts = terminology.glossary_dicts
     html_validator = services.html_validator
     create_event_fn = ctx.create_event
-    pe_queue_enabled = ctx.config.pe_queue_enabled
-    pe_export_format = ctx.config.pe_export_format
     # Read the short-chain-derived policy from its single owner (AdaptivePolicy,
     # also what manifest.run.adaptive_policy reports) instead of re-deriving
     # from ctx.short_chain here — a second derivation could silently drift from
@@ -1288,33 +1282,6 @@ async def run_export_stage(
         ctx, adapter, final_blocks, rendered_path, render
     )
 
-    # Human PE (HITL) queue export: NEEDS_HUMAN /
-    # BLOCKED_HUMAN segments go to CSV / XLIFF 2.1 for human post-editing.
-    # BLOCKED_HUMAN drafts were already quarantined by the triage stage (the
-    # rendered target holds a source-only placeholder), so the machine output
-    # of Critical blocks never ships in the document itself.
-    # Runs after the render/visual-gate/reflow section so blocks quarantined
-    # as NEEDS_HUMAN in this run reach the human queue.
-    pe_result: PEQueueResult | None = None
-    if pe_queue_enabled:
-        pe_result = await asyncio.to_thread(
-            export_pe_queue,
-            final_blocks,
-            target_output,
-            pe_export_format,
-            source_lang,
-            target_lang,
-            actual_job_id,
-        )
-        if pe_result is not None:
-            logger.info(
-                "PE queue exported for job %s: %s (%d segment(s), %s)",
-                actual_job_id,
-                pe_result.path,
-                pe_result.segment_count,
-                pe_result.fmt,
-            )
-
     # Dual output (BabelDOC no-dual/no-mono style): when the pipeline asked
     # for a complementary artifact, render it from the same translated
     # blocks (no extra LLM cost). PDF only — other adapters have no
@@ -1361,11 +1328,6 @@ async def run_export_stage(
 
     await asyncio.to_thread(ledger.finalize_job, actual_job_id, status="completed")
 
-    pe_suffix = (
-        f" | PE queue: {pe_result.path} ({pe_result.segment_count} segment(s))"
-        if pe_result is not None
-        else ""
-    )
     dual_suffix = f" | Complementary artifact: {secondary_path}" if secondary_path else ""
     # What the artifact actually is: the renderer's outcome when it rendered,
     # else the plan (a non-PDF target never downgrades).
@@ -1382,7 +1344,7 @@ async def run_export_stage(
         EventType.EXPORT_COMPLETED,
         actual_job_id,
         ledger,
-        message=f"{doc_label} rendered: {rendered_path}{pe_suffix}{dual_suffix}",
+        message=f"{doc_label} rendered: {rendered_path}{dual_suffix}",
         artifact_path=str(rendered_path),
     )
 
