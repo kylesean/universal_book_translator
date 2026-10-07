@@ -426,7 +426,7 @@ def _recommend_route(
             profile="paper" if arch.category == DocCategory.ACADEMIC_PAPER else None,
             category=arch.category,
         )
-        render_engine = "rigid" if canonical == "rigid" else "reflow"
+        render_engine = "rigid" if canonical in ("rigid", "composite") else "reflow"
     else:
         render_engine = "reflow"
 

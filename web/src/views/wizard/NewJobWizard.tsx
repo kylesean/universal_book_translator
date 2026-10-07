@@ -542,7 +542,11 @@ export function NewJobWizard() {
                         onChange={(e) => setRenderEngine(e.target.value as any)}
                         className="w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs font-medium"
                       >
-                        <option value="auto">{t.wizard.renderEngineAuto}</option>
+                        <option value="auto">
+                          {assessment?.route?.recommended_render_engine
+                            ? `${t.wizard.renderEngineAuto} (推荐: ${assessment.route.recommended_render_engine})`
+                            : t.wizard.renderEngineAuto}
+                        </option>
                         <option value="reflow">{t.wizard.renderEngineReflow}</option>
                         <option value="rigid">{t.wizard.renderEngineRigid}</option>
                       </select>

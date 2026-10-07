@@ -444,6 +444,69 @@ def _wrap_prose_styled_unicode(text: str) -> str:
     return "".join(out)
 
 
+def _extract_braced_chunk(text: str, start: int) -> tuple[str, int] | None:
+    """Extract a balanced `{...}` chunk starting at text[start]."""
+    if start >= len(text) or text[start] != "{":
+        return None
+    depth = 0
+    for i in range(start, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start + 1 : i], i + 1
+    return None
+
+
+def _convert_fractions(text: str) -> str:
+    """Convert LaTeX \\frac{num}{den} to Typst frac(num, den) with balanced brace support."""
+    out: list[str] = []
+    i = 0
+    while i < len(text):
+        if text.startswith(r"\frac", i) and (i + 5 == len(text) or not text[i + 5].isalpha()):
+            pos = i + 5
+            while pos < len(text) and text[pos].isspace():
+                pos += 1
+            num_res = _extract_braced_chunk(text, pos)
+            if num_res is not None:
+                num_content, after_num = num_res
+                while after_num < len(text) and text[after_num].isspace():
+                    after_num += 1
+                den_res = _extract_braced_chunk(text, after_num)
+                if den_res is not None:
+                    den_content, after_den = den_res
+                    rec_num = _convert_fractions(num_content)
+                    rec_den = _convert_fractions(den_content)
+                    out.append(f"frac({rec_num}, {rec_den})")
+                    i = after_den
+                    continue
+        out.append(text[i])
+        i += 1
+    return "".join(out)
+
+
+def _convert_sqrts(text: str) -> str:
+    """Convert LaTeX \\sqrt{arg} to Typst sqrt(arg) with balanced brace support."""
+    out: list[str] = []
+    i = 0
+    while i < len(text):
+        if text.startswith(r"\sqrt", i) and (i + 5 == len(text) or not text[i + 5].isalpha()):
+            pos = i + 5
+            while pos < len(text) and text[pos].isspace():
+                pos += 1
+            arg_res = _extract_braced_chunk(text, pos)
+            if arg_res is not None:
+                arg_content, after_arg = arg_res
+                rec_arg = _convert_sqrts(arg_content)
+                out.append(f"sqrt({rec_arg})")
+                i = after_arg
+                continue
+        out.append(text[i])
+        i += 1
+    return "".join(out)
+
+
 def typstify_math(body: str) -> str | None:
     """Translate a LaTeX inline-math body to compilable Typst math."""
     if not body:
@@ -473,13 +536,9 @@ def typstify_math(body: str) -> str | None:
     _font_fn = {"mathbb": "bb", "mathfrak": "frak", "mathcal": "cal"}
     body = _FONT_STYLE_CMD_RE.sub(lambda m: f"{_font_fn[m.group(1)]}({m.group(2)})", body)
 
-    # Convert \frac{a}{b} -> frac(a, b) and \sqrt{a} -> sqrt(a)
-    for _ in range(3):
-        t1 = _FRAC_RE.sub(r"frac(\1, \2)", body)
-        t2 = _SQRT_RE.sub(r"sqrt(\1)", t1)
-        if t2 == body:
-            break
-        body = t2
+    # Convert \frac{a}{b} -> frac(a, b) and \sqrt{a} -> sqrt(a) with balanced brace support
+    body = _convert_fractions(body)
+    body = _convert_sqrts(body)
 
     # Convert math accents \hat{a} -> hat(a), \hat a -> hat(a), etc.
     for _ in range(3):
@@ -493,7 +552,14 @@ def typstify_math(body: str) -> str | None:
             break
         body = t2
 
-    marked = _TEXTLIKE_CMD_RE.sub(lambda m: "\0" + m.group(1) + "\0", body)
+    marked = _TEXTLIKE_CMD_RE.sub(
+        lambda m: (
+            f'#"{m.group(1)}"'
+            if any(ord(c) > 127 for c in m.group(1))
+            else "\0" + m.group(1) + "\0"
+        ),
+        body,
+    )
 
     def _cmd(match: re.Match[str]) -> str:
         name = match.group(1)
@@ -556,6 +622,156 @@ def _collapse_label_group(match: re.Match[str]) -> str:
 
 class _UnknownCommand(Exception):
     pass
+
+
+_LATEX_TO_UNICODE_FALLBACK: dict[str, str] = {
+    # Greek lowercase
+    "alpha": "α",
+    "beta": "β",
+    "gamma": "γ",
+    "delta": "δ",
+    "epsilon": "ε",
+    "zeta": "ζ",
+    "eta": "η",
+    "theta": "θ",
+    "iota": "ι",
+    "kappa": "κ",
+    "lambda": "λ",
+    "mu": "μ",
+    "nu": "ν",
+    "xi": "ξ",
+    "pi": "π",
+    "rho": "ρ",
+    "sigma": "σ",
+    "tau": "τ",
+    "upsilon": "υ",
+    "phi": "ϕ",
+    "chi": "χ",
+    "psi": "ψ",
+    "omega": "ω",
+    # Greek uppercase
+    "Gamma": "Γ",
+    "Delta": "Δ",
+    "Theta": "Θ",
+    "Lambda": "Λ",
+    "Xi": "Ξ",
+    "Pi": "Π",
+    "Sigma": "Σ",
+    "Upsilon": "Υ",
+    "Phi": "Φ",
+    "Psi": "Ψ",
+    "Omega": "Ω",
+    # Operators & relations
+    "le": "≤",
+    "leq": "≤",
+    "ge": "≥",
+    "geq": "≥",
+    "neq": "≠",
+    "ne": "≠",
+    "approx": "≈",
+    "equiv": "≡",
+    "pm": "±",
+    "mp": "∓",
+    "times": "×",
+    "cdot": "·",
+    "div": "÷",
+    "sum": "∑",
+    "prod": "∏",
+    "int": "∫",
+    "partial": "∂",
+    "nabla": "∇",
+    "infty": "∞",
+    "emptyset": "∅",
+    "in": "∈",
+    "notin": "∉",
+    "subset": "⊂",
+    "subseteq": "⊆",
+    "cup": "∪",
+    "cap": "∩",
+    "lor": "∨",
+    "land": "∧",
+    "lnot": "¬",
+    "to": "→",
+    "rightarrow": "→",
+    "leftarrow": "←",
+    "iff": "⇔",
+    "forall": "∀",
+    "exists": "∃",
+}
+
+
+def _convert_fractions_to_slash(text: str) -> str:
+    """Convert LaTeX \\frac{num}{den} to (num)/(den) with balanced brace support."""
+    out: list[str] = []
+    i = 0
+    while i < len(text):
+        if text.startswith(r"\frac", i) and (i + 5 == len(text) or not text[i + 5].isalpha()):
+            pos = i + 5
+            while pos < len(text) and text[pos].isspace():
+                pos += 1
+            num_res = _extract_braced_chunk(text, pos)
+            if num_res is not None:
+                num_content, after_num = num_res
+                while after_num < len(text) and text[after_num].isspace():
+                    after_num += 1
+                den_res = _extract_braced_chunk(text, after_num)
+                if den_res is not None:
+                    den_content, after_den = den_res
+                    rec_num = _convert_fractions_to_slash(num_content)
+                    rec_den = _convert_fractions_to_slash(den_content)
+                    num_str = (
+                        rec_num
+                        if (
+                            rec_num.isalnum() or (rec_num.startswith("(") and rec_num.endswith(")"))
+                        )
+                        else f"({rec_num})"
+                    )
+                    den_str = (
+                        rec_den
+                        if (
+                            rec_den.isalnum() or (rec_den.startswith("(") and rec_den.endswith(")"))
+                        )
+                        else f"({rec_den})"
+                    )
+                    out.append(f"{num_str}/{den_str}")
+                    i = after_den
+                    continue
+        out.append(text[i])
+        i += 1
+    return "".join(out)
+
+
+def clean_math_fallback_text(content: str) -> str:
+    """Degrade an uncompilable LaTeX math span to clean readable Unicode text.
+
+    Guarantees that raw LaTeX command names (e.g. \\frac, \\phi, \\gamma, \\sum)
+    and backslashes NEVER leak into rendered deliverables when Typst math
+    compilation fails.
+    """
+    text = content.strip()
+    for opener, closer in (("$$", "$$"), (r"\[", r"\]"), (r"\(", r"\)")):
+        if (
+            text.startswith(opener)
+            and text.endswith(closer)
+            and len(text) >= len(opener) + len(closer)
+        ):
+            text = text[len(opener) : -len(closer)].strip()
+            break
+    else:
+        if text.startswith("$") and text.endswith("$") and len(text) >= 2:
+            text = text[1:-1].strip()
+
+    text = _convert_fractions_to_slash(text)
+    text = re.sub(r"\\(?:text|mathrm|mathbf|mathit|textbf|textit)\{([^{}]*)\}", r"\1", text)
+    text = re.sub(r"\\sqrt\{([^{}]*)\}", r"√(\1)", text)
+
+    def _sub_sym(m: re.Match[str]) -> str:
+        name = m.group(1)
+        return _LATEX_TO_UNICODE_FALLBACK.get(name, name)
+
+    text = re.sub(r"\\([a-zA-Z]+)", _sub_sym, text)
+    text = text.replace(r"\{", "{").replace(r"\}", "}").replace("\\", "")
+    return re.sub(r"\s+", " ", text).strip()
 
 
 _UNICODE_SUPER_RUN_RE = re.compile(r"[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾˒]+")
@@ -685,12 +901,12 @@ def render_overlay_line(
             if typst is not None and math_probe is not None and math_probe(typst):
                 out.append(f"${typst}$")
             else:
-                fallback = content.replace("$", "")
+                fallback = clean_math_fallback_text(content)
                 escaped = typst_escape(strip_cjk_latin_spaces(fallback, target_lang=target_lang))
                 out.append(_emit_typst_superscripts(escaped))
             continue
         if content.count("$") % 2 and _MATHY_RE.search(content):
-            content = content.replace("$", "")
+            content = clean_math_fallback_text(content)
         escaped = typst_escape(strip_cjk_latin_spaces(content, target_lang=target_lang))
         rendered = _emit_typst_superscripts(escaped)
         style = next((s for s in run_spans if s[0] <= start and end <= s[1]), None)

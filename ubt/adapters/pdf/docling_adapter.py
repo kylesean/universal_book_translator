@@ -360,6 +360,7 @@ class DoclingPDFAdapter(BasePDFEngineAdapter):
         """Extract structured blocks using IBM Docling (delegates to docling_parser)."""
         from ubt.adapters.pdf.docling_crosscheck import (
             cross_check_blocks_with_pdfium,
+            repair_math_symbols_with_lines,
             repair_missing_spaces_with_lines,
         )
         from ubt.core.ir.continuation import fuse_continuation_blocks
@@ -370,6 +371,9 @@ class DoclingPDFAdapter(BasePDFEngineAdapter):
             symbols=_docling_symbols,
             enrich=self._resolve_formula_enrichment(path),
         )
+        # Docling mis-maps TeX math symbols (e.g. '=' -> '∅', '+' -> '⊕', '−' -> 'ϒ');
+        # the page's own pdfium lines restore ground-truth math glyphs first.
+        blocks = repair_math_symbols_with_lines(blocks, path)
         # Docling's line join drops inter-word spaces ("A Sandbox" -> "ASandbox");
         # the page's own pdfium lines restore them before anything is translated.
         blocks = repair_missing_spaces_with_lines(blocks, path)

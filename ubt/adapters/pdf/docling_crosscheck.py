@@ -24,6 +24,7 @@ as a single token and mistranslates.
 from __future__ import annotations
 
 import dataclasses
+import difflib
 import logging
 import re
 from collections.abc import Sequence
@@ -226,6 +227,156 @@ def reinsert_missing_spaces(text: str, witness: str) -> str | None:
         out.append(char)
         previous = char
     return "".join(out)
+
+
+#: Known character corruption mappings where IBM Docling mistranscribes math/TeX glyphs
+#: to visually-similar but semantically-corrupt Unicode points, and PDFium physical glyph stream
+#: holds the true ASCII / math character.
+MATH_SYMBOL_CONFUSIONS: dict[str, set[str]] = {
+    "∅": {"=", "≠", "<", ">", "≤", "≥"},  # Docling U+2205 EMPTY SET -> PDFium '='
+    "⊕": {"+", "±"},  # Docling U+2295 CIRCLED PLUS -> PDFium '+'
+    "ϒ": {"−", "-", "–", "—"},  # Docling U+03D2 GREEK UPSILON WITH HOOK -> PDFium '−' / '-'
+    "′": {"·", "*", "×", "•"},  # Docling U+2032 PRIME -> PDFium '·' (middle dot)
+    "∩": {"<", "≤"},  # Docling U+2229 INTERSECTION -> PDFium '<'
+    "∪": {">", "≥"},  # Docling U+222A UNION -> PDFium '>'
+    "ϕ": {"|", "l", "1", "/", "!"},  # Docling U+03D5 GREEK PHI -> PDFium '|'
+    "≤": {"×", "*", "·"},  # Docling \le -> PDFium \times
+}
+
+
+def repair_math_symbol_corruptions(text: str, witness: str) -> str:
+    """Repair Docling math glyph corruptions using the PDFium physical line witness.
+
+    Aligns the non-whitespace character stream of ``text`` against ``witness``.
+    When an alignment difference maps a known Docling corrupted symbol (e.g. '∅', '⊕', 'ϒ')
+    to its PDFium ground-truth counterpart (e.g. '=', '+', '−'), the corrupted character
+    in ``text`` is replaced in-place, preserving all original whitespace and surrounding layout.
+    """
+    if not any(c in MATH_SYMBOL_CONFUSIONS for c in text):
+        return text
+
+    doc_chars: list[tuple[int, str]] = [(i, c) for i, c in enumerate(text) if not c.isspace()]
+    wit_chars: list[str] = [c for c in witness if not c.isspace()]
+    if not doc_chars or not wit_chars:
+        return text
+
+    sm = difflib.SequenceMatcher(None, [c for _, c in doc_chars], wit_chars, autojunk=False)
+    replacements: list[tuple[int, str]] = []
+
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag == "replace":
+            d_slice = doc_chars[i1:i2]
+            w_slice = wit_chars[j1:j2]
+            if len(d_slice) == 1 and len(w_slice) == 1:
+                orig_idx, d_char = d_slice[0]
+                w_char = w_slice[0]
+                if d_char in MATH_SYMBOL_CONFUSIONS and w_char in MATH_SYMBOL_CONFUSIONS[d_char]:
+                    replacements.append((orig_idx, w_char))
+            else:
+                # Sub-align multi-char differences (e.g. adjacent formulas or superscript shifts)
+                sub_sm = difflib.SequenceMatcher(
+                    None, [c for _, c in d_slice], w_slice, autojunk=False
+                )
+                for s_tag, si1, si2, sj1, sj2 in sub_sm.get_opcodes():
+                    if s_tag == "replace" and si2 - si1 == 1 and sj2 - sj1 == 1:
+                        orig_idx, d_char = d_slice[si1]
+                        w_char = w_slice[sj1]
+                        if (
+                            d_char in MATH_SYMBOL_CONFUSIONS
+                            and w_char in MATH_SYMBOL_CONFUSIONS[d_char]
+                        ):
+                            replacements.append((orig_idx, w_char))
+
+    if not replacements:
+        return text
+
+    chars = list(text)
+    for orig_idx, w_char in replacements:
+        chars[orig_idx] = w_char
+    return "".join(chars)
+
+
+#: Block types subject to math symbol witness repair
+_MATH_REPAIR_TYPES = frozenset(
+    {
+        BlockType.NARRATIVE,
+        BlockType.DIALOGUE,
+        BlockType.HEADING,
+        BlockType.LIST_ITEM,
+        BlockType.CODE,
+        BlockType.TABLE,
+        BlockType.FORMULA,
+    }
+)
+
+
+def repair_math_symbols_with_lines(blocks: Sequence[IRBlock], pdf_path: Path) -> list[IRBlock]:
+    """Repair Docling math glyph corruptions using the page's PDFium line witness.
+
+    IBM Docling's PDF parser occasionally maps TeX math font glyphs to look-alike
+    Unicode characters (e.g. '=' to '∅', '+' to '⊕', '−' to 'ϒ', '·' to '′').
+    PDFium's built-in TeX glyph heuristics preserve the correct character stream.
+    This function aligns each block against intersecting PDFium lines and replaces
+    the corrupted characters with their ground-truth equivalents.
+    """
+    path = Path(pdf_path)
+    lines_by_page: dict[int, list[LineBox]] = {}
+
+    def _page_lines(page: int) -> list[LineBox]:
+        if page not in lines_by_page:
+            try:
+                lines_by_page[page] = list(extract_lines(path, page)[0])
+            except Exception as exc:
+                logger.debug(
+                    "Math symbol repair: pdfium line extraction failed on p%d: %s", page, exc
+                )
+                lines_by_page[page] = []
+        return lines_by_page[page]
+
+    for block in blocks:
+        if block.block_type not in _MATH_REPAIR_TYPES:
+            continue
+        text = block.source_text
+        if not text or not any(c in MATH_SYMBOL_CONFUSIONS for c in text):
+            continue
+
+        seen: set[tuple[float, float, float, float, str]] = set()
+        witness_lines: list[LineBox] = []
+        for pbox in _span_boxes(block):
+            for line in _page_lines(pbox.page):
+                if not line.text.strip() or not _line_centered_in_box(line.rect, pbox.bbox):
+                    continue
+                key = (
+                    round(line.rect[0], 1),
+                    round(line.rect[1], 1),
+                    round(line.rect[2], 1),
+                    round(line.rect[3], 1),
+                    line.text,
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                witness_lines.append(line)
+
+        if not witness_lines:
+            continue
+
+        witness = join_witness_lines(witness_lines)
+        if not witness:
+            continue
+
+        repaired = repair_math_symbol_corruptions(text, witness)
+        if repaired != text:
+            logger.info(
+                "Repaired math symbols in block %s from pdfium lines: %r -> %r",
+                block.id,
+                text[:40],
+                repaired[:40],
+            )
+            block.set_source_text(repaired)
+            block.provenance["math_symbol_repair"] = "pdfium-line-witness"
+
+    return list(blocks)
 
 
 def _span_boxes(block: IRBlock) -> tuple[PhysicalBox, ...]:
@@ -467,9 +618,12 @@ def cross_check_blocks_with_pdfium(
 
 __all__ = [
     "DEFAULT_MIN_IOU",
+    "MATH_SYMBOL_CONFUSIONS",
     "cross_check_blocks_with_pdfium",
     "join_witness_lines",
     "reinsert_missing_spaces",
+    "repair_math_symbol_corruptions",
+    "repair_math_symbols_with_lines",
     "repair_missing_spaces_with_lines",
     "witness_line_text",
 ]
