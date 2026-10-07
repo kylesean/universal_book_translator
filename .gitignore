@@ -24,6 +24,7 @@ tmp/
 scratch/
 scripts/mathjax/node_modules/
 web/node_modules/
+node_modules/
 web/dist/
 
 # Docs are intentionally unversioned: they change too often to track. The

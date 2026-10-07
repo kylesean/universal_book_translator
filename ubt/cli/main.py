@@ -110,9 +110,10 @@ def resolve_cli_adaptive_dual_mode(
     When --dual-mode is explicitly passed by the user, that choice is preserved.
     When unset (None), derives the smart default:
     - Academic papers ('paper') default to 'monolingual' (standard academic publication format);
+    - Textbooks ('textbook') default to 'monolingual' (dense educational layout);
     - Novels / fiction ('fiction', 'novel') default to 'monolingual' (continuous prose reading);
-    - Other combinations (e.g. 'general', 'textbook', 'humanities') leave it
-      unset to follow config / UBT_DUAL_MODE / 'inline'.
+    - Other combinations (e.g. 'general', 'humanities') leave it
+      unset to follow config / UBT_DUAL_MODE / 'auto'.
     """
     # Single-sourced in ``ubt.core.job_options`` so API/MCP resolve the same
     # default (see ``overrides_from_request``).

@@ -621,8 +621,9 @@ class UBTConfig(BaseSettings):
 
     # -- Bilingual render-mode advisory -----------------------------------------
     # 'auto' lets the advisor decide; explicit modes only warn.
-    # Default 'inline' produces standard single-document interleaved output.
-    dual_mode: DualMode = "inline"
+    # Default 'auto' allows the advisory layout stage to inspect document signals
+    # and automatically adopt monolingual when layout is heavily structured/discouraged.
+    dual_mode: DualMode = "auto"
     facing_spread: bool = False
     # Also render the complementary artifact (mono when primary is dual and
     # vice versa), BabelDOC no-dual/no-mono style.

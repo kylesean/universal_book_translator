@@ -39,18 +39,32 @@ _BARE_HANDLE_RE = re.compile(r"^@[\w.\-]+$")
 _TOC_LEADER_LINE_RE = re.compile(
     r"^(?P<title>.+?)\s*(?:(?:\.\s*){3,}|[·…⋯]{2,})\s*(?P<page>[0-9ivxlcdmIVXLCDM]+)\s*$"
 )
+_TOC_SPACE_LINE_RE = re.compile(r"^(?P<title>.+?)\s+(?P<page>[0-9ivxlcdmIVXLCDM]+)\s*$")
 
 
-def parse_toc_entry_line(line_text: str) -> tuple[str, str] | None:
-    """Parse a Table of Contents line with dot leaders into (title, page_number)."""
-    m = _TOC_LEADER_LINE_RE.match((line_text or "").strip())
-    if not m:
+def parse_toc_entry_line(line_text: str) -> tuple[str, str, bool] | None:
+    """Parse a Table of Contents line into (title, page_number, has_leaders).
+
+    Matches both traditional leader-separated entries ("1.1 Title ... 3") and
+    unleaded chapter/part headings with terminal page numbers ("1 Introduction 3",
+    "Preface ix", "I Basic techniques 1").
+    """
+    text = (line_text or "").strip()
+    if not text:
         return None
-    title = m.group("title").strip()
-    page = m.group("page").strip()
-    if not title or not page:
-        return None
-    return title, page
+    m = _TOC_LEADER_LINE_RE.match(text)
+    if m:
+        title = m.group("title").strip()
+        page = m.group("page").strip()
+        if title and page:
+            return title, page, True
+    m_sp = _TOC_SPACE_LINE_RE.match(text)
+    if m_sp:
+        title = m_sp.group("title").strip()
+        page = m_sp.group("page").strip()
+        if title and page:
+            return title, page, False
+    return None
 
 
 def chrome_key(text: str) -> str:

@@ -896,7 +896,7 @@ def _extract_document_index_blocks(
             parsed = parse_toc_entry_line(ln.text)
             if parsed is None:
                 continue
-            title, toc_page = parsed
+            title, toc_page, has_leaders = parsed
             idx = start_index + len(out)
             out.append(
                 IRBlock(
@@ -918,6 +918,8 @@ def _extract_document_index_blocks(
                         "source_page": page_no,
                         "toc_entry": True,
                         "toc_page": toc_page,
+                        "toc_leaders": has_leaders,
+                        "is_bold": ln.bold,
                     },
                 )
             )

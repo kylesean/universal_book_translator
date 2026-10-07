@@ -58,6 +58,7 @@ export function NewJobWizard() {
   const lastAssessedFileRef = useRef<string>('')
   const hasUserSelectedPresetRef = useRef<boolean>(false)
   const hasUserSelectedDomainRef = useRef<boolean>(false)
+  const hasUserSelectedDualModeRef = useRef<boolean>(false)
 
   const runAssess = async (
     path: string,
@@ -110,6 +111,12 @@ export function NewJobWizard() {
             setDomainProfile(recDom)
           }
         }
+        if (!hasUserSelectedDualModeRef.current && res.route?.recommended_dual_mode) {
+          const recDual = res.route.recommended_dual_mode.toLowerCase() as any
+          if (['auto', 'inline', 'facing', 'alternating', 'monolingual'].includes(recDual)) {
+            setDualMode(recDual)
+          }
+        }
       }
     } catch (err) {
       if (!isSilent) {
@@ -151,6 +158,7 @@ export function NewJobWizard() {
     lastAssessedFileRef.current = ''
     hasUserSelectedPresetRef.current = false
     hasUserSelectedDomainRef.current = false
+    hasUserSelectedDualModeRef.current = false
     try {
       const staged = await uploadSourceDocument(file)
       setFilePath(staged.file_path)
@@ -517,7 +525,10 @@ export function NewJobWizard() {
                       </label>
                       <select
                         value={dualMode}
-                        onChange={(e) => setDualMode(e.target.value as any)}
+                        onChange={(e) => {
+                          hasUserSelectedDualModeRef.current = true
+                          setDualMode(e.target.value as any)
+                        }}
                         className="w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs font-medium"
                       >
                         <option value="auto">{t.wizard.dualModeAuto}</option>

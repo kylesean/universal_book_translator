@@ -212,14 +212,14 @@ def adaptive_dual_mode(
 ) -> str | None:
     """Profile-aware ``dual_mode`` default, shared by CLI, API and MCP.
 
-    An explicit ``dual_mode`` always wins. Otherwise academic papers and
-    fiction/novels read better monolingual; everything else stays unset to
-    follow config / ``UBT_DUAL_MODE``.
+    An explicit ``dual_mode`` always wins. Otherwise academic papers,
+    textbooks, and fiction/novels read better monolingual; everything else
+    stays unset to follow config / ``UBT_DUAL_MODE``.
     """
     if explicit_dual_mode is not None:
         return explicit_dual_mode
     norm_profile = (profile or "").strip().lower()
-    if norm_profile in ("paper", "fiction", "novel"):
+    if norm_profile in ("paper", "fiction", "novel", "textbook"):
         return "monolingual"
     return None
 

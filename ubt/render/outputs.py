@@ -182,6 +182,8 @@ class Overlay:
     source: str = ""
     #: For a ``"toc"`` overlay, the page number its dot leaders point at.
     toc_page: str = ""
+    #: Whether a ``"toc"`` overlay renders dot leaders (False uses flush-right space).
+    toc_leaders: bool = True
     font_size: float | None = None
     is_bold: bool = False
     #: First-line indent (pt) for a body paragraph or a list item's marker
@@ -1146,18 +1148,23 @@ class TypstFragmentTypesetter:
         size_pt: float,
         *,
         is_bold: bool = False,
+        has_leaders: bool = True,
     ) -> str:
         from ubt.adapters.pdf.overlay_text import typst_escape
 
         body = self._body_markup(title)
         weight_line = _text_weight_line(is_bold)
+        leader_markup = (
+            f"#h(4pt)#box(width: 1fr, repeat(gap: 3.5pt)[.])#h(4pt){typst_escape(page.strip())}"
+            if has_leaders
+            else f"#h(1fr){typst_escape(page.strip())}"
+        )
         return (
             f"#set page(width: {width_pt}pt, height: {height_pt}pt, margin: 0pt)\n"
             f"#set par(leading: {self._par_leading_em}em)\n"
             f'#set text(size: {size_pt}pt{weight_line}, top-edge: "ascender", bottom-edge: "descender"{self._font_line})\n'
             f"#box(width: {width_pt}pt, height: {height_pt}pt, clip: true)["
-            f"#box(width: 100%)[{body}#h(4pt)"
-            f"#box(width: 1fr, repeat(gap: 3.5pt)[.])#h(4pt){typst_escape(page.strip())}]"
+            f"#box(width: 100%)[{body}{leader_markup}]"
             f"]\n"
         )
 
@@ -1169,6 +1176,7 @@ class TypstFragmentTypesetter:
         height_pt: float,
         *,
         is_bold: bool = False,
+        has_leaders: bool = True,
     ) -> Path | None:
         """Typeset one translated TOC row: title, dot leaders, page number.
 
@@ -1185,7 +1193,9 @@ class TypstFragmentTypesetter:
         if size_pt is None:
             return None
         return self._compile(
-            self._toc_source(title, page, width_pt, height_pt, size_pt, is_bold=is_bold),
+            self._toc_source(
+                title, page, width_pt, height_pt, size_pt, is_bold=is_bold, has_leaders=has_leaders
+            ),
             tag="toc:",
         )
 
@@ -1970,7 +1980,12 @@ class LayerCompositor:
             fragment = typesetter.typeset_math(part.text, width, height)
         elif overlay.kind == "toc" and toc_typeset is not None:
             fragment = toc_typeset(
-                part.text, overlay.toc_page, width, height, is_bold=overlay.is_bold
+                part.text,
+                overlay.toc_page,
+                width,
+                height,
+                is_bold=overlay.is_bold,
+                has_leaders=overlay.toc_leaders,
             )
         elif source.strip() and bilingual is not None:
             try:
@@ -2378,6 +2393,7 @@ def overlays_from_blocks(
                 kind=kind,
                 source=source,
                 toc_page=str(block.provenance.get("toc_page", "")),
+                toc_leaders=bool(block.provenance.get("toc_leaders", True)),
                 font_size=font_size,
                 is_bold=is_bold,
                 indent_pt=indent_pt,
