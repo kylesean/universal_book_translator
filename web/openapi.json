@@ -2614,6 +2614,17 @@
               }
             ],
             "title": "Scan Page Share"
+          },
+          "selected_pages": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Pages"
           }
         },
         "type": "object",
@@ -2834,6 +2845,18 @@
               }
             ],
             "description": "Quality preset (publication, standard, preview)"
+          },
+          "pages": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pages",
+            "description": "Page range filter (e.g. 1-10)"
           }
         },
         "additionalProperties": false,
@@ -3565,7 +3588,7 @@
               }
             ],
             "title": "Math Backend",
-            "description": "Math typesetting backend (typst, mathjax, image)"
+            "description": "Retired knob: recorded in the engine signature but no renderer consumes it; formula fidelity is controlled by formula_render."
           },
           "ocr_mode": {
             "anyOf": [
@@ -3967,6 +3990,30 @@
             "type": "string",
             "title": "Job Mode",
             "description": "embedded (in-process) or queue (worker-drained)"
+          },
+          "disk_free_gb": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disk Free Gb",
+            "description": "Free disk space in GB on the db_dir volume"
+          },
+          "wal_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wal Status",
+            "description": "SQLite WAL health status string"
           }
         },
         "type": "object",

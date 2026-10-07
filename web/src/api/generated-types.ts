@@ -735,6 +735,8 @@ export interface components {
             text_layer_coverage?: number | null;
             /** Scan Page Share */
             scan_page_share?: number | null;
+            /** Selected Pages */
+            selected_pages?: number | null;
         };
         /**
          * AssessRoute
@@ -847,6 +849,11 @@ export interface components {
             source_lang: string;
             /** @description Quality preset (publication, standard, preview) */
             preset?: components["schemas"]["Preset"] | null;
+            /**
+             * Pages
+             * @description Page range filter (e.g. 1-10)
+             */
+            pages?: string | null;
         };
         /**
          * JobAssessResponse
@@ -1164,7 +1171,7 @@ export interface components {
             formula_render?: ("native" | "image" | "witness") | null;
             /**
              * Math Backend
-             * @description Math typesetting backend (typst, mathjax, image)
+             * @description Retired knob: recorded in the engine signature but no renderer consumes it; formula fidelity is controlled by formula_render.
              */
             math_backend?: ("typst" | "mathjax" | "image") | null;
             /**

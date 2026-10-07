@@ -639,6 +639,7 @@ def create_app(
                     deep=req.deep,
                     target_lang=req.target_lang,
                     source_lang=req.source_lang,
+                    pages=req.pages,
                 )
                 return report.to_dict()
             except AssessmentError as exc:

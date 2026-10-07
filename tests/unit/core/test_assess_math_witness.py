@@ -1,8 +1,12 @@
-from __future__ import annotations
+from pathlib import Path
+
+import pytest
+from pydantic import ValidationError
 
 from ubt.adapters.pdf.plain_text_extractor import sample_page_indices
+from ubt.api.models import AssessDocumentFacts, JobAssessRequest
 from ubt.core.archetype import Archetype, DocCategory, MathDensity
-from ubt.core.assess import RouteRecommendation, _synthesize_warnings
+from ubt.core.assess import RouteRecommendation, _synthesize_warnings, assess_document_async
 from ubt.core.config import UBTConfig
 
 
@@ -115,3 +119,54 @@ def test_witness_warnings_contextual_remedy_on_confirmed_damage() -> None:
     scanned_warns = [w for w in warnings_scanned if w.code == "FONT_RESIDUE_RISK"]
     assert len(scanned_warns) == 1
     assert "重新扫描" in scanned_warns[0].detail_zh
+
+
+def test_job_assess_request_pages_validation() -> None:
+    req = JobAssessRequest(input_path="sample.pdf", pages="1-5")
+    assert req.pages == "1-5"
+
+    with pytest.raises(ValidationError):
+        JobAssessRequest(input_path="sample.pdf", pages="invalid-range-format")
+
+    facts = AssessDocumentFacts(
+        file_name="test.pdf",
+        file_size_bytes=100,
+        format_ext="pdf",
+        pages=100,
+        chapters=5,
+        source_chars=20000,
+        estimated_tokens=5000,
+        category="technical_book",
+        detected_domain="textbook",
+        domain_confidence=0.9,
+        math_density="high",
+        is_scanned=False,
+        selected_pages=5,
+    )
+    assert facts.selected_pages == 5
+
+
+@pytest.mark.asyncio
+async def test_assess_document_async_page_slice(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    doc_path = tmp_path / "test.pdf"
+    doc_path.write_bytes(b"%PDF-1.4 mock")
+
+    monkeypatch.setattr(
+        "ubt.core.assess._pdf_facts",
+        lambda *args, **kwargs: {
+            "page_count": 100,
+            "probed_pages": 100,
+            "probed_chars": 50000,
+            "scan_page_share": 0.0,
+            "has_formulas": False,
+        },
+    )
+
+    config = UBTConfig()
+    rep = await assess_document_async(doc_path, config, pages="1-10")
+    assert rep.document.pages == 100
+    assert rep.document.selected_pages == 10
+    assert rep.document.source_chars == 5000
+    assert any(w.code == "PAGE_RANGE_FILTERED" for w in rep.warnings)

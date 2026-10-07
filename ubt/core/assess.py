@@ -127,6 +127,7 @@ class DocumentFacts:
     has_formulas: bool | None = None
     text_layer_coverage: float | None = None
     scan_page_share: float | None = None
+    selected_pages: int | None = None
 
 
 @dataclass(frozen=True)
@@ -851,6 +852,7 @@ async def assess_document_async(
     deep: bool = False,
     target_lang: str = "zh",
     source_lang: str = "en",
+    pages: str | None = None,
 ) -> AssessmentReport:
     """Profile a cold document into a quote — async-native, safe for FastAPI / MCP event loops.
 
@@ -903,7 +905,7 @@ async def assess_document_async(
         known_dims = (route.pages, route.chars) if route is not None else None
         pdf = await asyncio.to_thread(_pdf_facts, p, warnings, known_dims)
 
-    pages = (
+    total_pages = (
         int(pdf.get("probed_pages") or pdf.get("page_count") or (route.pages if route else 0))
         or arch.page_or_ch_count
     )
@@ -928,11 +930,11 @@ async def assess_document_async(
     )
     if (
         is_scanned_dominant
-        and pages > 0
-        and source_chars < pages * 100
+        and total_pages > 0
+        and source_chars < total_pages * 100
         and config.ocr_mode != "off"
     ):
-        estimated_ocr_chars = pages * EXPECTED_SCANNED_PAGE_CHARS
+        estimated_ocr_chars = total_pages * EXPECTED_SCANNED_PAGE_CHARS
         source_chars = max(source_chars, estimated_ocr_chars)
         warnings.append(
             AssessmentWarning(
@@ -948,6 +950,29 @@ async def assess_document_async(
         if (route is not None and not is_scanned_dominant)
         else source_chars // 4
     )
+
+    selected_pages_count: int | None = None
+    if pages and ext == "pdf":
+        from ubt.core.config import parse_page_ranges
+
+        try:
+            page_set = parse_page_ranges(pages)
+            if page_set:
+                valid_pages = [pn for pn in page_set if 1 <= pn <= total_pages]
+                if valid_pages:
+                    selected_pages_count = len(valid_pages)
+                    slice_ratio = selected_pages_count / max(total_pages, 1)
+                    source_chars = max(1, int(source_chars * slice_ratio))
+                    estimated_tokens = max(1, int(estimated_tokens * slice_ratio))
+                    warnings.append(
+                        AssessmentWarning(
+                            "PAGE_RANGE_FILTERED",
+                            "info",
+                            f"已按页码切片 ({pages}，有效切片 {selected_pages_count}/{total_pages} 页) 预估规模、Token 与耗时。",
+                        )
+                    )
+        except Exception as exc:
+            logger.debug("assess: page range parsing failed (%s)", exc)
 
     if deep:
         try:
@@ -971,18 +996,22 @@ async def assess_document_async(
         billable_blocks = max(chapters, math.ceil(source_chars / APPROX_BLOCK_CHARS))
         is_exact = False
 
+    effective_pages = selected_pages_count if selected_pages_count is not None else total_pages
+    if selected_pages_count is not None and total_pages > 0:
+        billable_blocks = max(1, int(billable_blocks * (selected_pages_count / total_pages)))
+
     prefix = _measure_prefix_tokens_or_warn(
         config, warnings, target_lang=target_lang, source_lang=source_lang
     )
     rec = _recommend_route(arch, route, pdf, config)
-    scan_pages = math.ceil((pdf.get("scan_page_share") or 0.0) * pages)
+    scan_pages = math.ceil((pdf.get("scan_page_share") or 0.0) * effective_pages)
     cost = _build_cost(
         config,
         billable_blocks=billable_blocks,
         source_chars=source_chars,
         prefix=prefix,
         is_exact=is_exact,
-        pages=pages,
+        pages=effective_pages,
         scan_pages=scan_pages,
         chapters=chapters,
         route_mode=rec.mode,
@@ -1014,7 +1043,7 @@ async def assess_document_async(
         file_name=p.name,
         file_size_bytes=p.stat().st_size,
         format_ext=ext,
-        pages=pages,
+        pages=total_pages,
         chapters=chapters,
         source_chars=source_chars,
         estimated_tokens=estimated_tokens,
@@ -1033,6 +1062,7 @@ async def assess_document_async(
         has_formulas=pdf.get("has_formulas"),
         text_layer_coverage=pdf.get("text_layer_coverage"),
         scan_page_share=pdf.get("scan_page_share"),
+        selected_pages=selected_pages_count,
     )
     report = AssessmentReport(
         schema_version=SCHEMA_VERSION,
@@ -1065,6 +1095,7 @@ def assess_document(
     deep: bool = False,
     target_lang: str = "zh",
     source_lang: str = "en",
+    pages: str | None = None,
 ) -> AssessmentReport:
     """Profile a cold document into a quote — sync convenience wrapper.
 
@@ -1077,7 +1108,12 @@ def assess_document(
         loop = None
 
     coro = assess_document_async(
-        path, config, deep=deep, target_lang=target_lang, source_lang=source_lang
+        path,
+        config,
+        deep=deep,
+        target_lang=target_lang,
+        source_lang=source_lang,
+        pages=pages,
     )
     if loop and loop.is_running():
         import concurrent.futures

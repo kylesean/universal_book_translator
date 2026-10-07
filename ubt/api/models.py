@@ -256,6 +256,18 @@ class JobAssessRequest(BaseModel):
     preset: Preset | None = Field(
         default=None, description="Quality preset (publication, standard, preview)"
     )
+    pages: str | None = Field(default=None, description="Page range filter (e.g. 1-10)")
+
+    @field_validator("pages")
+    @classmethod
+    def _validate_pages(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        try:
+            parse_page_ranges(value)
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
+        return value
 
     @field_validator("target_lang")
     @classmethod
@@ -293,6 +305,7 @@ class AssessDocumentFacts(BaseModel):
     has_formulas: bool | None = None
     text_layer_coverage: float | None = None
     scan_page_share: float | None = None
+    selected_pages: int | None = None
 
 
 class AssessRoute(BaseModel):

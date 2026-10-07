@@ -45,9 +45,10 @@ export function NewJobWizard() {
   const [pageRange, setPageRange] = useState('')
   const [glossaryPath, setGlossaryPath] = useState('')
   const [execMode, setExecMode] = useState<'auto' | 'short' | 'long'>('auto')
-  const [formulaMode, setFormulaMode] = useState<'readable' | 'strict'>('readable')
+  const [formulaMode, setFormulaMode] = useState<'readable' | 'strict'>('strict')
 
   const [isAssessing, setIsAssessing] = useState(false)
+  const [isReassessing, setIsReassessing] = useState(false)
   const [assessment, setAssessment] = useState<JobAssessResponse | null>(null)
   const [assessError, setAssessError] = useState<string | null>(null)
   const [isUploading, setIsUploading] = useState(false)
@@ -55,26 +56,88 @@ export function NewJobWizard() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
 
-  const runAssess = async (path: string) => {
+  const lastAssessedFileRef = useRef<string>('')
+  const hasUserSelectedPresetRef = useRef<boolean>(false)
+  const hasUserSelectedDomainRef = useRef<boolean>(false)
+
+  const runAssess = async (
+    path: string,
+    opts?: {
+      overridePreset?: 'publication' | 'standard' | 'preview' | 'fast'
+      overridePages?: string
+      overrideTarget?: string
+      overrideSource?: string
+      silent?: boolean
+    }
+  ) => {
     if (!path.trim()) return
-    setIsAssessing(true)
+    const isSilent = opts?.silent ?? false
+    if (!isSilent) {
+      setIsAssessing(true)
+      setAssessment(null)
+    } else {
+      setIsReassessing(true)
+    }
     setAssessError(null)
-    setAssessment(null)
+
+    const activePreset = opts?.overridePreset ?? preset
+    const activePages = opts?.overridePages !== undefined ? opts.overridePages : pageRange
+    const activeTarget = opts?.overrideTarget ?? targetLang
+    const activeSource = opts?.overrideSource ?? sourceLang
+
     try {
       const res = await assessJob({
         input_path: path.trim(),
-        target_lang: targetLang,
-        source_lang: sourceLang,
-        preset: preset,
+        target_lang: activeTarget,
+        source_lang: activeSource,
+        preset: activePreset,
+        pages: activePages.trim() ? activePages.trim() : null,
         deep: true,
       })
       setAssessment(res)
+
+      // Auto-feed recommendations when a new document is assessed
+      if (lastAssessedFileRef.current !== path.trim()) {
+        lastAssessedFileRef.current = path.trim()
+        if (!hasUserSelectedPresetRef.current && res.route?.recommended_preset) {
+          const recP = res.route.recommended_preset.toLowerCase() as any
+          if (['publication', 'standard', 'preview', 'fast'].includes(recP)) {
+            setPreset(recP)
+          }
+        }
+        if (!hasUserSelectedDomainRef.current && res.route?.recommended_profile) {
+          const recDom = res.route.recommended_profile.toLowerCase()
+          if (['general', 'textbook', 'paper', 'fiction', 'humanities', 'semiconductor'].includes(recDom)) {
+            setDomainProfile(recDom)
+          }
+        }
+      }
     } catch (err) {
-      setAssessError(err instanceof Error ? err.message : 'Assessment failed')
+      if (!isSilent) {
+        setAssessError(err instanceof Error ? err.message : 'Assessment failed')
+      }
     } finally {
       setIsAssessing(false)
+      setIsReassessing(false)
     }
   }
+
+  // Reactive re-assessment on preset / page slice / lang tweaks
+  useEffect(() => {
+    if (!filePath.trim()) return
+    if (lastAssessedFileRef.current === filePath.trim()) {
+      const timer = setTimeout(() => {
+        void runAssess(filePath, {
+          overridePreset: preset,
+          overridePages: pageRange,
+          overrideTarget: targetLang,
+          overrideSource: sourceLang,
+          silent: true,
+        })
+      }, 350)
+      return () => clearTimeout(timer)
+    }
+  }, [filePath, preset, pageRange, targetLang, sourceLang])
 
   // Browsers do not expose a real filesystem path (`File.path` exists only in
   // Electron), so the picked file is uploaded to the server and the staged
@@ -86,10 +149,13 @@ export function NewJobWizard() {
     setIsUploading(true)
     setAssessError(null)
     setAssessment(null)
+    lastAssessedFileRef.current = ''
+    hasUserSelectedPresetRef.current = false
+    hasUserSelectedDomainRef.current = false
     try {
       const staged = await uploadSourceDocument(file)
       setFilePath(staged.file_path)
-      runAssess(staged.file_path)
+      void runAssess(staged.file_path, { silent: false })
     } catch (err) {
       setAssessError(err instanceof Error ? err.message : 'Upload failed')
     } finally {
@@ -168,6 +234,12 @@ export function NewJobWizard() {
       name: t.wizard.presetStandard,
       desc: t.wizard.presetStandardDesc,
       gate: 'FAST PASS + DEEP PROOF',
+    },
+    {
+      id: 'preview' as const,
+      name: t.wizard.presetPreview,
+      desc: t.wizard.presetPreviewDesc,
+      gate: 'STRUCTURE & LAYOUT PROOF',
     },
     {
       id: 'fast' as const,
@@ -255,7 +327,12 @@ export function NewJobWizard() {
                 className="flex-1 h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-3 text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none font-mono placeholder:text-[var(--ink-muted)] shadow-2xs"
               />
               <Button
-                onClick={() => runAssess(filePath)}
+                onClick={() => {
+                  lastAssessedFileRef.current = ''
+                  hasUserSelectedPresetRef.current = false
+                  hasUserSelectedDomainRef.current = false
+                  void runAssess(filePath, { silent: false })
+                }}
                 disabled={!filePath.trim() || isAssessing}
                 variant="secondary"
                 size="sm"
@@ -321,10 +398,15 @@ export function NewJobWizard() {
               <div className="space-y-2">
                 {presetOptions.map((p) => {
                   const isSelected = preset === p.id
+                  const isRecommended =
+                    assessment?.route?.recommended_preset?.toLowerCase() === p.id
                   return (
                     <div
                       key={p.id}
-                      onClick={() => setPreset(p.id)}
+                      onClick={() => {
+                        hasUserSelectedPresetRef.current = true
+                        setPreset(p.id)
+                      }}
                       className={`p-3 rounded-[6px] border cursor-pointer transition-all ${
                         isSelected
                           ? 'border-[var(--ink-primary)] bg-[var(--paper-surface)] shadow-xs'
@@ -332,9 +414,22 @@ export function NewJobWizard() {
                       }`}
                     >
                       <div className="flex items-center justify-between">
-                        <span className={`text-xs ${isSelected ? 'font-bold text-[var(--ink-primary)]' : 'font-medium text-[var(--ink-primary)]'}`}>
-                          {p.name}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`text-xs ${
+                              isSelected
+                                ? 'font-bold text-[var(--ink-primary)]'
+                                : 'font-medium text-[var(--ink-primary)]'
+                            }`}
+                          >
+                            {p.name}
+                          </span>
+                          {isRecommended && (
+                            <span className="inline-flex items-center text-[10px] font-mono font-medium text-[#15803d] bg-[#15803d]/10 px-1.5 py-0.5 rounded border border-[#15803d]/20">
+                              {t.wizard.engineRecommended}
+                            </span>
+                          )}
+                        </div>
                         <span className="font-mono text-[10px] text-[var(--ink-muted)] uppercase tracking-wider">
                           {p.gate}
                         </span>
@@ -403,7 +498,10 @@ export function NewJobWizard() {
                       </label>
                       <select
                         value={domainProfile}
-                        onChange={(e) => setDomainProfile(e.target.value)}
+                        onChange={(e) => {
+                          hasUserSelectedDomainRef.current = true
+                          setDomainProfile(e.target.value)
+                        }}
                         className="w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs font-medium"
                       >
                         <option value="general">{t.wizard.domainGeneral}</option>
@@ -468,9 +566,18 @@ export function NewJobWizard() {
                   {/* Row 3: Pages Range Filter & Execution Mode */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                     <div>
-                      <label className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] block mb-1 font-semibold">
-                        {t.wizard.pageFilter}
-                      </label>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
+                          {t.wizard.pageFilter}
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setPageRange('1-5')}
+                          className="text-[10px] font-mono text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] underline cursor-pointer"
+                        >
+                          {t.wizard.sliceSampleQuickBtn}
+                        </button>
+                      </div>
                       <input
                         type="text"
                         value={pageRange}
@@ -533,7 +640,12 @@ export function NewJobWizard() {
                   {t.wizard.preflightSubtitle}
                 </p>
               </div>
-              {assessment ? (
+              {isReassessing ? (
+                <Badge variant="outline" className="animate-pulse text-[10px] font-mono">
+                  <Loader2 className="h-3 w-3 animate-spin mr-1 inline" />
+                  UPDATING...
+                </Badge>
+              ) : assessment ? (
                 <Badge variant="success" dot>
                   {t.common.ready}
                 </Badge>
@@ -567,7 +679,17 @@ export function NewJobWizard() {
                   <div className="py-2.5 flex items-center justify-between">
                     <span className="text-[var(--ink-secondary)]">{t.wizard.pageCount}</span>
                     <span className="font-mono font-bold text-[var(--ink-primary)]">
-                      {assessment.document.pages}
+                      {assessment.document.selected_pages != null ? (
+                        <>
+                          {assessment.document.selected_pages}
+                          <span className="text-[var(--ink-muted)] font-normal">
+                            {' '}
+                            / {assessment.document.pages} ({t.wizard.sliceTestingTag})
+                          </span>
+                        </>
+                      ) : (
+                        assessment.document.pages
+                      )}
                       <span className="text-[var(--ink-muted)] font-normal">
                         {' '}
                         · {assessment.document.chapters} {t.wizard.chapters}
@@ -615,11 +737,22 @@ export function NewJobWizard() {
                   </div>
                   <div className="py-2.5 flex items-center justify-between">
                     <span className="text-[var(--ink-secondary)]">{t.wizard.estCost}</span>
-                    <span className="font-mono font-bold text-[#b45309]">
+                    <span className="font-mono font-bold">
                       {assessment.cost.total_cost_usd === null ||
-                      assessment.cost.total_cost_usd === undefined
-                        ? 'not priced'
-                        : `$${assessment.cost.total_cost_usd.toFixed(2)}`}
+                      assessment.cost.total_cost_usd === undefined ? (
+                        <span className="text-[var(--ink-muted)]">not priced</span>
+                      ) : assessment.cost.total_cost_usd === 0 ? (
+                        <span className="text-[#15803d]">
+                          $0.00{' '}
+                          <span className="text-[10px] font-normal text-[var(--ink-secondary)]">
+                            ({t.wizard.localFreeLabel})
+                          </span>
+                        </span>
+                      ) : (
+                        <span className="text-[#b45309]">
+                          ${assessment.cost.total_cost_usd.toFixed(2)}
+                        </span>
+                      )}
                     </span>
                   </div>
                   <div className="py-2.5 flex items-center justify-between">

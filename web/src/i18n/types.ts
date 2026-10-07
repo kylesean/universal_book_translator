@@ -61,6 +61,8 @@ export interface TranslationDictionary {
     presetStandardDesc: string
     presetFast: string
     presetFastDesc: string
+    presetPreview: string
+    presetPreviewDesc: string
     budgetCeiling: string
     preflightTitle: string
     preflightSubtitle: string
@@ -114,6 +116,10 @@ export interface TranslationDictionary {
     formulaMode: string
     formulaModeReadable: string
     formulaModeStrict: string
+    engineRecommended: string
+    sliceSampleQuickBtn: string
+    localFreeLabel: string
+    sliceTestingTag: string
   }
   mission: {
     title: string
