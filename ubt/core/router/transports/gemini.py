@@ -225,8 +225,11 @@ class GeminiTransport(BaseTransport):
             )
 
         data = response.json()
-        self._raise_for_error(data)
+        # Record usage before judging the response: a safety block arrives as a
+        # 200 that still consumed prompt tokens, and skipping the write on the
+        # raise let the budget cap undercount real spend.
         self._record_gemini_usage(target_model, data)
+        self._raise_for_error(data)
         return self._finalize_output(self._extract_text(data).strip(), target_model), (
             self._finish_reason(data)
         )
@@ -249,6 +252,9 @@ class GeminiTransport(BaseTransport):
         client = self._get_client()
         response = await self._post_json(client, self._generate_url(target_model), payload)
         data = response.json()
-        self._raise_for_error(data)
+        # Record usage before judging the response: a safety block arrives as a
+        # 200 that still consumed prompt tokens, and skipping the write on the
+        # raise let the budget cap undercount real spend.
         self._record_gemini_usage(target_model, data)
+        self._raise_for_error(data)
         return self._extract_text(data).strip()

@@ -413,22 +413,30 @@ class OpenAIChatTransport(BaseTransport):
                         msg = choices[0].get("message") or {}
                         raw = msg.get("content")
                         if raw is None:
-                            raw = msg.get("reasoning_content") or ""
-                        content = str(raw)
-                        content = (
-                            self._finalize_output(
-                                content, str(body.get("model") or self._default_model or "unknown")
-                            )
-                            if self._sanitize_output
-                            else content.strip()
-                        )
-                        # A length-capped answer is a truncation, not a
-                        # translation: surface it as an error so the caller
-                        # retries/falls back instead of shipping half a sentence.
-                        if str(choices[0].get("finish_reason") or "") == "length":
+                            # A null ``content`` is a content-filter refusal or a
+                            # malformed completion, never the translation: falling
+                            # back to ``reasoning_content`` shipped the model's
+                            # chain-of-thought as the draft.
                             line_error = line_error or (
-                                "Batch response truncated at max_tokens (finish_reason=length)"
+                                "Batch response has no message content (content is null)"
                             )
+                        else:
+                            content = str(raw)
+                            content = (
+                                self._finalize_output(
+                                    content,
+                                    str(body.get("model") or self._default_model or "unknown"),
+                                )
+                                if self._sanitize_output
+                                else content.strip()
+                            )
+                            # A length-capped answer is a truncation, not a
+                            # translation: surface it as an error so the caller
+                            # retries/falls back instead of shipping half a sentence.
+                            if str(choices[0].get("finish_reason") or "") == "length":
+                                line_error = line_error or (
+                                    "Batch response truncated at max_tokens (finish_reason=length)"
+                                )
                     else:
                         line_error = line_error or "Batch response body has no choices"
                 results[custom_id] = {"content": content, "error": line_error}

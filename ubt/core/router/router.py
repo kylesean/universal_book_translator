@@ -1488,6 +1488,7 @@ class ModelRouter:
                 }
             )
 
+        batch_id: str | None = None
         try:
             # Idempotency over the exact submitted payload (model +
             # custom_ids + fully built prompts), not just model+custom_id: a
@@ -1497,7 +1498,6 @@ class ModelRouter:
                 json.dumps(jsonl_requests, sort_keys=True, ensure_ascii=False).encode()
             ).hexdigest()
 
-            batch_id: str | None = None
             if ledger is not None and job_id is not None:
                 # Synchronous SQLite: off the loop -- a WAL lock under
                 # ``busy_timeout`` would stall every concurrent job and SSE
@@ -1535,6 +1535,13 @@ class ModelRouter:
                             "Abandoning superseded live batch %s for job %s", superseded, job_id
                         )
                         await self.abandon_batch(superseded, ledger=ledger, job_id=job_id)
+                if status_callback is not None:
+                    # The caller's cooperative interrupt (cancel check, budget
+                    # cap) must run *before* the book is submitted, not only
+                    # inside the poll loop after every block is already billed.
+                    res = status_callback("submitting", {"request_count": len(jsonl_requests)})
+                    if asyncio.iscoroutine(res):
+                        await res
                 batch_id = await self.provider.create_batch_job(jsonl_requests)
                 if ledger is not None and job_id is not None:
                     await asyncio.to_thread(ledger.finalize_batch_job, idempotency_key, batch_id)
@@ -1594,12 +1601,26 @@ class ModelRouter:
                 interval=_BATCH_RESULT_FETCH_BACKOFF_SECONDS,
                 what="result fetch",
             )
+        except (BudgetExceededError, JobInterruptedError, asyncio.CancelledError):
+            # The caller's own control-flow signals: re-raise untouched so it can
+            # cancel/abort instead of falling back to interactive drafting.
+            raise
         except ModelProviderError as exc:
             # Carry batch_id through the rewrap so the caller can still
             # abandon_batch a job that was already created (otherwise it keeps
             # billing while interactive drafting re-translates the same blocks).
             raise BatchTranslationError(
                 f"Batch transport failure: {exc}",
+                batch_id=batch_id,
+            ) from exc
+        except Exception as exc:
+            # Any other post-submission failure must still carry the live batch
+            # id: without it the interactive fallback cannot cancel the batch and
+            # re-translates (and re-bills) the same blocks.
+            if batch_id is None:
+                raise
+            raise BatchTranslationError(
+                f"Batch job {batch_id} failed: {exc}",
                 batch_id=batch_id,
             ) from exc
 
