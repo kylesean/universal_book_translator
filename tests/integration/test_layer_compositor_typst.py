@@ -165,8 +165,11 @@ def test_an_in_place_bilingual_fragment_carries_both_languages(tmp_path: Path) -
 def test_a_box_below_the_font_floor_descends(tmp_path: Path) -> None:
     typesetter = TypstFragmentTypesetter()
     try:
-        # A box shorter than the 2pt floor (cap = height*0.82) cannot hold text.
+        # A box shorter than the readable floor cannot hold text at a
+        # reading-grade size, so typeset declines and the element descends.
         assert typesetter.typeset("hello", 100.0, 2.0) is None
+        # The old 2pt floor would have drawn this at ~2pt; 6pt is the floor.
+        assert typesetter.typeset("hello world this line will not fit", 40.0, 5.0) is None
     finally:
         typesetter.close()
 

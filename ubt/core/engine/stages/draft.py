@@ -9,7 +9,7 @@ import logging
 import random
 import re
 from collections.abc import AsyncIterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from ubt.core import ports
@@ -29,7 +29,7 @@ from ubt.core.memory.glossary_table import (
     build_global_glossary_table,
 )
 from ubt.core.memory.hierarchical_memory import HierarchicalMemoryManager
-from ubt.core.memory.rolling_summary import extract_chapter_id, summarize_chapter
+from ubt.core.memory.rolling_summary import extract_chapter_id
 from ubt.core.memory.tm import (
     PROMPT_VERSION,
     TranslationMemory,
@@ -208,9 +208,6 @@ class DraftRuntime:
     counters: dict[str, int]
     flusher: CheckpointBatchFlusher
     batch_active: bool
-    chapter_summaries: dict[str, str] = field(default_factory=dict)
-    latest_chapter_summary: str = ""
-    current_chapter: str | None = None
     # Job-level fail-fast circuit. A non-retryable provider error
     # (401/402/400 — bad credential, no credit, malformed) recurs on every
     # block, so without a breaker a whole book's worth of blocks each burns the
@@ -353,7 +350,6 @@ class _DraftProcessor:
         self,
         block: IRBlock,
         current_batch: list[IRBlock],
-        rolling_prev_summary: str = "",
     ) -> _DraftInputs | None:
         """Shared preparation for one block's draft.
 
@@ -510,10 +506,11 @@ class _DraftProcessor:
 
         macro_ctx = ""
         if self.policy.rolling_enabled:
+            # One summary channel: the hierarchical L2 snapshot (see
+            # HierarchicalMemoryManager). The chapter-boundary summarizer that
+            # used to feed this slot as a fallback wrote the same ``macro_ctx``
+            # through a second code path and a second LLM call per chapter.
             macro_ctx = self.runtime.memory_mgr.get_macro_context_for_block(block)
-            if not macro_ctx:
-                block_ch = extract_chapter_id(block.id)
-                macro_ctx = self.runtime.chapter_summaries.get(block_ch, "") or rolling_prev_summary
         # Compressed L3 epoch history rides the static prompt prefix.
         epoch_ctx = self.runtime.memory_mgr.get_l3_summary()
 
@@ -617,7 +614,6 @@ class _DraftProcessor:
         self,
         block: IRBlock,
         current_batch: list[IRBlock],
-        rolling_prev_summary: str = "",
         inputs: _DraftInputs | None = None,
     ) -> None:
         if is_already_final(block):
@@ -635,7 +631,7 @@ class _DraftProcessor:
 
         async with self.runtime.concurrency_sem:
             if inputs is None:
-                inputs = await self.prepare_draft_inputs(block, current_batch, rolling_prev_summary)
+                inputs = await self.prepare_draft_inputs(block, current_batch)
                 if inputs is None:
                     return
 
@@ -705,7 +701,16 @@ class _DraftProcessor:
                 draft_raw = await self.runtime.engine.draft(
                     inputs.masked_source, generate, context=context
                 )
-                await self.finalize_draft(block, draft_raw, inputs)
+                clean = await self.finalize_draft(block, draft_raw, inputs)
+                # Cache only a judged-clean draft: a cached defective draft
+                # replays on every later run, and only repair could recover it.
+                if clean and self.runtime.engine.cache is not None:
+                    await asyncio.to_thread(
+                        self.runtime.engine.remember_draft,
+                        inputs.masked_source,
+                        draft_raw,
+                        context=context,
+                    )
             except (asyncio.CancelledError, JobInterruptedError, BudgetExceededError):
                 raise
             except Exception as exc:
@@ -765,7 +770,6 @@ class _DraftProcessor:
         self,
         blocks: list[IRBlock],
         current_batch: list[IRBlock],
-        rolling_prev_summary: str = "",
     ) -> bool:
         """Translate the whole claim batch through one Batch API job."""
         prepared: list[tuple[IRBlock, _DraftInputs]] = []
@@ -773,9 +777,9 @@ class _DraftProcessor:
             if is_already_final(b):
                 continue
             if is_static_skip(b):
-                await self.draft_single_block(b, current_batch, rolling_prev_summary)
+                await self.draft_single_block(b, current_batch)
                 continue
-            inputs = await self.prepare_draft_inputs(b, current_batch, rolling_prev_summary)
+            inputs = await self.prepare_draft_inputs(b, current_batch)
             if inputs is not None:
                 prepared.append((b, inputs))
         if not prepared:
@@ -878,10 +882,7 @@ class _DraftProcessor:
                 len(retriable),
             )
             results = await asyncio.gather(
-                *[
-                    self.draft_single_block(b, current_batch, rolling_prev_summary, inp)
-                    for b, inp in retriable
-                ],
+                *[self.draft_single_block(b, current_batch, inp) for b, inp in retriable],
                 return_exceptions=True,
             )
             for res in results:
@@ -913,9 +914,9 @@ class _DraftProcessor:
                 if is_already_final(b):
                     continue
                 if is_static_skip(b):
-                    await self.draft_single_block(b, segment, "")
+                    await self.draft_single_block(b, segment)
                     continue
-                inputs = await self.prepare_draft_inputs(b, segment, "")
+                inputs = await self.prepare_draft_inputs(b, segment)
                 if inputs is not None:
                     prepared.append((b, inputs))
 
@@ -1035,7 +1036,7 @@ class _DraftProcessor:
             )
             if self.policy.macro_chunk_size <= 1:
                 results = await asyncio.gather(
-                    *[self.draft_single_block(b, [b], "", inp) for b, inp in retriable],
+                    *[self.draft_single_block(b, [b], inp) for b, inp in retriable],
                     return_exceptions=True,
                 )
             else:
@@ -1045,7 +1046,7 @@ class _DraftProcessor:
                 ]
                 results = await asyncio.gather(
                     *[
-                        self.draft_macro_chunk_group(chunk, [b for b, _ in chunk], "")
+                        self.draft_macro_chunk_group(chunk, [b for b, _ in chunk])
                         for chunk in chunks
                     ],
                     return_exceptions=True,
@@ -1065,14 +1066,13 @@ class _DraftProcessor:
         self,
         chunk: list[tuple[IRBlock, _DraftInputs]],
         current_batch: list[IRBlock],
-        rolling_prev_summary: str = "",
     ) -> None:
         """Draft a group of consecutive blocks in a single structured XML LLM call."""
         if not chunk:
             return
         if len(chunk) == 1:
             block, inp = chunk[0]
-            await self.draft_single_block(block, current_batch, rolling_prev_summary, inp)
+            await self.draft_single_block(block, current_batch, inp)
             return
 
         # Chunk-level prompt inputs, computed once so the cache key and the call
@@ -1174,17 +1174,16 @@ class _DraftProcessor:
                 len(chunk),
             )
             for b, inp in missing:
-                await self.draft_single_block(b, current_batch, rolling_prev_summary, inp)
+                await self.draft_single_block(b, current_batch, inp)
 
     async def run_draft_batch(
         self,
         blocks: list[IRBlock],
         current_batch: list[IRBlock],
-        rolling_prev_summary: str = "",
     ) -> None:
         if self.runtime.batch_active and len(blocks) >= self.policy.batch_min_blocks:
             try:
-                handled = await self.try_batch_draft(blocks, current_batch, rolling_prev_summary)
+                handled = await self.try_batch_draft(blocks, current_batch)
             except (BudgetExceededError, JobInterruptedError, asyncio.CancelledError):
                 raise
             except Exception as exc:  # defensive: batch must never kill the stage
@@ -1198,9 +1197,9 @@ class _DraftProcessor:
             if is_already_final(b):
                 continue
             if is_static_skip(b):
-                await self.draft_single_block(b, current_batch, rolling_prev_summary)
+                await self.draft_single_block(b, current_batch)
                 continue
-            inputs = await self.prepare_draft_inputs(b, current_batch, rolling_prev_summary)
+            inputs = await self.prepare_draft_inputs(b, current_batch)
             if inputs is not None:
                 prepared.append((b, inputs))
 
@@ -1210,10 +1209,7 @@ class _DraftProcessor:
         if self.policy.macro_chunk_size <= 1:
             groups: list[list[IRBlock]] = [[b] for b, _ in prepared]
             results = await asyncio.gather(
-                *[
-                    self.draft_single_block(b, current_batch, rolling_prev_summary, inp)
-                    for b, inp in prepared
-                ],
+                *[self.draft_single_block(b, current_batch, inp) for b, inp in prepared],
                 return_exceptions=True,
             )
         else:
@@ -1223,10 +1219,7 @@ class _DraftProcessor:
             ]
             groups = [[b for b, _ in chunk] for chunk in chunks]
             results = await asyncio.gather(
-                *[
-                    self.draft_macro_chunk_group(chunk, current_batch, rolling_prev_summary)
-                    for chunk in chunks
-                ],
+                *[self.draft_macro_chunk_group(chunk, current_batch) for chunk in chunks],
                 return_exceptions=True,
             )
 
@@ -1258,62 +1251,14 @@ class _DraftProcessor:
         if critical_exc is not None:
             raise critical_exc
 
-    async def maybe_roll_chapter(self, segment: list[IRBlock]) -> str:
-        """Summarize the previous chapter on segment transition (rolling L3).
-
-        Returns the updated ``latest_chapter_summary`` for the caller to pass
-        as ``rolling_prev_summary``.
-        """
-        seg_chapter = extract_chapter_id(segment[0].id)
-        if seg_chapter == self.runtime.current_chapter:
-            return self.runtime.latest_chapter_summary
-        needs_drafting = any(
-            b.status == BlockStatus.PENDING
-            and not b.skip_translate
-            and b.block_type not in (BlockType.IMAGE, BlockType.FORMULA, BlockType.CODE)
-            for b in segment
-        )
-        if (
-            self.runtime.current_chapter is not None
-            and seg_chapter
-            and needs_drafting
-            and self.runtime.current_chapter not in self.runtime.chapter_summaries
-        ):
-            prev_blocks = await asyncio.to_thread(
-                self.runtime.ledger.get_blocks_by_chapter,
-                self.runtime.actual_job_id,
-                self.runtime.current_chapter,
-            )
-            if len(prev_blocks) >= 2 or sum(len(b.source_text) for b in prev_blocks) >= 300:
-                try:
-                    summary_res = await summarize_chapter(
-                        prev_blocks, self.runtime.router.complete_raw, self.policy.target_lang
-                    )
-                    self.runtime.chapter_summaries[self.runtime.current_chapter] = summary_res
-                    if summary_res:
-                        self.runtime.latest_chapter_summary = summary_res
-                except Exception as exc:
-                    logger.warning(
-                        "Chapter summary generation failed for %s: %s",
-                        self.runtime.current_chapter,
-                        exc,
-                    )
-                    self.runtime.chapter_summaries[self.runtime.current_chapter] = ""
-        self.runtime.current_chapter = seg_chapter
-        return self.runtime.latest_chapter_summary
-
 
 def _persist_memory_state(
     ledger: SQLiteJobLedger,
     actual_job_id: str,
     memory_mgr: HierarchicalMemoryManager,
-    processor: _DraftProcessor,
 ) -> None:
-    """Persist rolling memory to job_meta so a resumed run keeps the context."""
+    """Persist hierarchical L2/L3 memory to job_meta so a resumed run keeps the context."""
     state = memory_mgr.export_state()
-    state["chapter_summaries"] = processor.runtime.chapter_summaries
-    state["latest_chapter_summary"] = processor.runtime.latest_chapter_summary
-    state["current_chapter"] = processor.runtime.current_chapter
     try:
         ledger.set_job_metadata_value(actual_job_id, "memory_state", state)
     except Exception as exc:
@@ -1324,9 +1269,8 @@ def _restore_memory_state(
     ledger: SQLiteJobLedger,
     actual_job_id: str,
     memory_mgr: HierarchicalMemoryManager,
-    processor: _DraftProcessor,
 ) -> None:
-    """Restore rolling memory persisted by a previous run of this job."""
+    """Restore hierarchical L2/L3 memory persisted by a previous run of this job."""
     raw = ledger.get_job_metadata_value(actual_job_id, "memory_state")
     if not isinstance(raw, dict):
         return
@@ -1335,22 +1279,11 @@ def _restore_memory_state(
     except Exception as exc:
         logger.warning("Failed to restore rolling memory state for %s: %s", actual_job_id, exc)
         return
-    chapter_summaries = raw.get("chapter_summaries")
-    if isinstance(chapter_summaries, dict):
-        processor.runtime.chapter_summaries.update(
-            {str(k): str(v) for k, v in chapter_summaries.items()}
-        )
-    latest = raw.get("latest_chapter_summary")
-    if isinstance(latest, str) and latest:
-        processor.runtime.latest_chapter_summary = latest
-    current = raw.get("current_chapter")
-    if isinstance(current, str) and current:
-        processor.runtime.current_chapter = current
     logger.info(
-        "Restored rolling memory state for %s (%d snapshots, %d chapter summaries)",
+        "Restored hierarchical memory state for %s (%d L2 snapshots, %d L3 epochs)",
         actual_job_id,
         len(memory_mgr.snapshots),
-        len(processor.runtime.chapter_summaries),
+        len(memory_mgr.epochs),
     )
 
 
@@ -1420,7 +1353,14 @@ async def _build_draft_runtime(
         ctx.manifest, profile_name, config, all_blocks_count
     )
 
-    memory_mgr = HierarchicalMemoryManager(step_chars=int(config.step_chars))
+    memory_mgr = HierarchicalMemoryManager(
+        step_chars=int(config.step_chars),
+        # Hierarchical L2/L3 is the multi-chapter long route only (see
+        # resolve_draft_policy / README). Gating it here -- not just the macro_ctx
+        # slot -- is what stops a single-chapter PDF from paying L2 llm_summary
+        # calls for summaries the policy then refuses to inject.
+        enabled=rolling_enabled,
+    )
     global_glossary_table = build_global_glossary_table(
         glossary_dicts or [], config.glossary_max_global_entries
     )
@@ -1465,6 +1405,7 @@ async def _build_draft_runtime(
         source_lang,
         target_lang,
         format_abbreviations_markdown_table(abbreviation_entries),
+        model=router.draft_model,
     )
 
     flusher = CheckpointBatchFlusher(
@@ -1557,7 +1498,7 @@ async def run_draft_stage(
     # Resume-stable rolling memory: continue with the same L2/L3
     # summaries the interrupted run used, keeping prompt context compatible.
     if rolling_enabled:
-        await asyncio.to_thread(_restore_memory_state, ledger, actual_job_id, memory_mgr, processor)
+        await asyncio.to_thread(_restore_memory_state, ledger, actual_job_id, memory_mgr)
 
     try:
         # Whole-book offline Batch API mode.
@@ -1654,7 +1595,6 @@ async def run_draft_stage(
                                     ledger,
                                     actual_job_id,
                                     memory_mgr,
-                                    processor,
                                 )
                         event = await create_event_fn(
                             EventType.DRAFT_BATCH_COMPLETED,
@@ -1684,15 +1624,11 @@ async def run_draft_stage(
             cursor_spine = batch[-1].spine_index
             cursor_block_id = batch[-1].id
 
-            segments = segment_by_chapter(batch)
-
-            is_fragmented = all(len(s) == 1 for s in segments) and len(segments) > 2
-            if not rolling_enabled or is_fragmented:
-                await processor.run_draft_batch(batch, batch)
-            else:
-                for segment in segments:
-                    rolling_prev = await processor.maybe_roll_chapter(segment)
-                    await processor.run_draft_batch(segment, segment, rolling_prev)
+            # Chapter segmentation fed the chapter-boundary summarizer that
+            # used to run here; the hierarchical L2 manager snapshots on step
+            # threshold and chapter transition itself, so the batch is drafted
+            # as one claim.
+            await processor.run_draft_batch(batch, batch)
 
             if processor.runtime.fail_fast_consecutive >= processor.policy.fail_fast_threshold:
                 # The same unrecoverable provider error has now killed
@@ -1715,7 +1651,7 @@ async def run_draft_stage(
                     logger.warning("Hierarchical step snapshot generation failed: %s", exc)
                 if rolling_enabled:
                     await asyncio.to_thread(
-                        _persist_memory_state, ledger, actual_job_id, memory_mgr, processor
+                        _persist_memory_state, ledger, actual_job_id, memory_mgr
                     )
 
             await flusher.flush_all()
@@ -1730,9 +1666,7 @@ async def run_draft_stage(
     finally:
         await flusher.close()
         if rolling_enabled:
-            await asyncio.to_thread(
-                _persist_memory_state, ledger, actual_job_id, memory_mgr, processor
-            )
+            await asyncio.to_thread(_persist_memory_state, ledger, actual_job_id, memory_mgr)
         memory_mgr.discard_pending_blocks()
         if (
             counters["tm_exact_hits"]

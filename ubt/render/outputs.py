@@ -36,7 +36,7 @@ import threading
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, ClassVar, Protocol
+from typing import Any, ClassVar
 
 import pikepdf
 
@@ -222,34 +222,6 @@ class Overlay:
         """The chain to mask/link against: the source geometry when reflowed."""
         return self.mask_boxes or self.flow_boxes
 
-
-class FragmentTypesetter(Protocol):
-    """Typeset a text fragment into a PDF page exactly ``width`` x ``height`` pt.
-
-        ``None`` means the fragment could not be typeset (no compiler, a compile
-    error), and the caller must keep the source for that region rather than mask it.
-    """
-
-    name: ClassVar[str]
-
-    def typeset(
-        self,
-        text: str,
-        width_pt: float,
-        height_pt: float,
-        *,
-        kind: str = "text",
-        font_size: float | None = None,
-        is_bold: bool = False,
-        indent_pt: float | None = None,
-        align_center: bool = False,
-        runs: tuple[StyledRun, ...] = (),
-    ) -> Path | None: ...
-
-    def measure(self, text: str, width_pt: float) -> float:
-        """Height the text would occupy at ``width_pt``; "does not fit" when huge."""
-        ...
-
     def typeset_math(self, latex: str, width_pt: float, height_pt: float) -> Path | None:
         """Typeset a formula into a PDF page exactly ``width`` x ``height`` pt."""
         ...
@@ -420,12 +392,13 @@ def _with_list_marker(block: IRBlock, text: str) -> str:
     return f"{marker} {text}"
 
 
-#: Font-size floor (pt) for a fragment, and the slack (pt) a fit search allows.
-#: The floor is low so a text block whose extracted box is tiny still typesets
-#: (at a proportionally tiny size) instead of descending to source -- a source
-#: kept block fails the delivery contract, which a small-but-present glyph does
-#: not. Only a box that cannot hold even this many points descends.
-_MIN_FONT_PT = 2.0
+#: Readable font-size floor (pt) for a typeset fragment. Below this the text is
+#: not reading-grade, so the fragment is *not* drawn and the element descends to
+#: its source slice instead. The previous 2pt floor traded readability for
+#: "delivery contract: something is drawn"; a 2pt glyph satisfies no reader, so
+#: the honest reading-grade answer is keep-source. `_FIT_TOL` is the slack (pt)
+#: a fit search allows around the measured height.
+_MIN_FONT_PT = 6.0
 _FIT_TOL = 0.5
 #: Paragraph leading (extra inter-line space, in em) for every typeset fragment.
 #: Typst adds it on top of the font's own line height; the source's own pitch is
@@ -1482,6 +1455,11 @@ class TypstFragmentTypesetter:
         self.close()
 
 
+#: Historical name for the typesetter surface. ``TypstFragmentTypesetter`` is
+#: the only implementation; the former Protocol is replaced by this alias.
+FragmentTypesetter = TypstFragmentTypesetter
+
+
 def _dedup_identical_streams(pdf: pikepdf.Pdf) -> None:
     """Point every reference at one copy of a byte-identical stream.
 
@@ -1864,7 +1842,10 @@ class LayerCompositor:
         low = _MIN_FONT_PT
         low_parts = _flow(low)
         if _worst_overflow(low, low_parts) > 1.0:
-            return low_parts, low
+            # Even the readable floor overflows: drawing it would clip lines
+            # into an ink-less text layer (the visual gate's "text_occluded").
+            # Empty parts leave the source unmasked -- the element descends.
+            return (), low
         high = size
         for _ in range(6):
             mid = (low + high) / 2.0

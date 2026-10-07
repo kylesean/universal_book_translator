@@ -62,9 +62,31 @@ def test_defaults() -> None:
     manager = HierarchicalMemoryManager()
     assert manager.step_chars == DEFAULT_STEP_CHARS == 3500
     assert manager.l3_epoch_steps == DEFAULT_L3_EPOCH_STEPS == 4
+    assert manager.enabled is True
     assert manager.snapshots == []
     assert manager.epochs == []
     assert manager.get_latest_macro_summary() == ""
+    assert manager.get_l3_summary() == ""
+
+
+def test_disabled_manager_buffers_nothing_and_triggers_no_snapshot() -> None:
+    # resolve_draft_policy turns hierarchical L2/L3 off for a single-chapter
+    # document. Before the flag, that route still paid the L2 llm_summary calls
+    # while refusing to inject the L2 macro slot -- L3 alone rode the prompt,
+    # at L2's price.
+    manager = HierarchicalMemoryManager(enabled=False, step_chars=1)
+    manager.record_drafted_block(_block("c1#b1", 0, target="x" * 50))
+    assert manager.should_trigger_snapshot() is False
+    assert manager.get_l3_summary() == ""
+    assert manager.snapshots == []
+
+
+async def test_disabled_manager_generate_step_snapshot_is_a_no_op() -> None:
+    manager = HierarchicalMemoryManager(enabled=False, step_chars=1)
+    manager.record_drafted_block(_block("c1#b1", 0, target="x" * 50))
+    complete = await _fixed_complete("should never be called")
+    assert await manager.generate_step_snapshot(complete) == ""
+    assert manager.snapshots == []
     assert manager.get_l3_summary() == ""
 
 

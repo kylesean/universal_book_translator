@@ -146,8 +146,15 @@ def compute_tm_context(
     src_lang: str,
     tgt_lang: str,
     abbreviation_table: str = "",
+    model: str = "",
 ) -> str:
     """Fingerprint the translation context an exact TM hit is valid under.
+
+    ``model`` is the draft-tier model that produced the stored draft. It is an
+    identity axis on purpose: without it, a rerun under a different draft model
+    would short-circuit on the old model's exact hit and never call the new one.
+    The content-addressed draft cache already keys on ``model``; this is the
+    same axis, deliberately kept in lockstep.
 
     ``glossary_table`` and ``abbreviation_table`` are the two prompt-visible
     terminology channels (the rendered global term table and abbreviation
@@ -157,6 +164,7 @@ def compute_tm_context(
     h = hashlib.sha256()
     for part in (
         prompt_version,
+        model,
         profile_name,
         glossary_table,
         src_lang,

@@ -59,17 +59,27 @@ class EpochSnapshot:
 
 
 class HierarchicalMemoryManager:
-    """Two-tier memory manager maintaining L1 neighbor context and L2 macro step snapshots."""
+    """Two-tier memory manager maintaining L1 neighbor context and L2 macro step snapshots.
+
+    ``enabled`` is the draft policy's ``rolling_enabled`` decision (see
+    :func:`ubt.core.engine.stages.draft.resolve_draft_policy`): a single-chapter
+    document, an over-long book, an academic profile, or a page-slice ingest
+    gets no hierarchical memory at all. Before this flag, those routes still
+    buffered blocks and paid the L2 ``llm_summary`` calls while discarding the
+    L2 ``macro_ctx`` slot -- L3 alone rode the prompt, at L2's price.
+    """
 
     def __init__(
         self,
         step_chars: int = DEFAULT_STEP_CHARS,
         neighbor_chars: int = DEFAULT_NEIGHBOR_CHARS,
         l3_epoch_steps: int = DEFAULT_L3_EPOCH_STEPS,
+        enabled: bool = True,
     ) -> None:
         self.step_chars = step_chars
         self.neighbor_builder = NeighborContextBuilder(neighbor_chars=neighbor_chars)
         self.l3_epoch_steps = max(1, l3_epoch_steps)
+        self.enabled = enabled
 
         self._snapshots: list[StepSnapshot] = []
         self._epochs: list[EpochSnapshot] = []
@@ -104,6 +114,8 @@ class HierarchicalMemoryManager:
 
     def record_drafted_block(self, block: IRBlock) -> None:
         """Buffer a newly drafted or finalized block for macro snapshot tracking."""
+        if not self.enabled:
+            return
         self._unsummarized_blocks.append(block)
         text = block.target_text or block.draft_text or block.source_text or ""
         self._current_buffer_chars += len(text)
@@ -119,7 +131,7 @@ class HierarchicalMemoryManager:
 
     def should_trigger_snapshot(self, next_block: IRBlock | None = None) -> bool:
         """Check if buffer has accumulated enough content or crossed a chapter boundary."""
-        if not self._unsummarized_blocks:
+        if not self.enabled or not self._unsummarized_blocks:
             return False
 
         # 1. Step characters threshold reached
@@ -235,6 +247,8 @@ class HierarchicalMemoryManager:
         exists for. Epochs are kept whole; only a single over-budget first epoch
         is truncated.
         """
+        if not self.enabled:
+            return ""
         parts = [e.summary_text.strip() for e in self._epochs if e.summary_text.strip()]
         if not parts:
             return ""

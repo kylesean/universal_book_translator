@@ -107,3 +107,19 @@ def test_a_punctuation_break_that_wastes_a_box_shrinks_until_every_box_fits() ->
             continue
         needed = measurer.measure_fixed(part.text, part.box.available_width, size)
         assert needed <= part.box.available_height + slack + 0.5
+
+
+def test_a_continuation_that_cannot_fit_the_readable_floor_descends() -> None:
+    # Even the readable floor overflows: drawing it would clip lines into an
+    # ink-less text layer. Empty parts leave the source unmasked (descend).
+    boxes = (
+        PhysicalBox.of(1, (0.0, 100.0, 300.0, 110.0)),
+        PhysicalBox.of(2, (0.0, 700.0, 300.0, 710.0)),
+    )
+    compositor = LayerCompositor("unused.pdf", typesetter=_Measurer())
+
+    parts, size = compositor._flow_plan(_overlay("长" * 400, boxes), boxes)
+
+    assert parts == ()
+    assert size is not None
+    assert size >= 6.0

@@ -152,6 +152,9 @@ async def run_tm_writeback_stage(
             ctx.target_lang,
             # Same abbreviation channel the draft stage hashed.
             format_abbreviations_markdown_table(terminology.abbreviation_entries),
+            # Same draft-tier identity axis as the draft-stage lookup: a
+            # different model must not inherit the previous model's hits.
+            model=ctx.router.draft_model,
         )
         written = await asyncio.to_thread(
             writeback_tm_from_ledger,

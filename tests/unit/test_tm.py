@@ -184,6 +184,7 @@ def _context(**overrides: str) -> str:
         "src_lang": "en",
         "tgt_lang": "zh",
         "abbreviation_table": "",
+        "model": "draft-model-a",
     }
     parts.update(overrides)
     return compute_tm_context(**parts)
@@ -205,12 +206,19 @@ def test_context_is_deterministic_and_32_hex_chars() -> None:
         "src_lang",
         "tgt_lang",
         "abbreviation_table",
+        "model",
     ],
 )
 def test_every_prompt_visible_part_changes_the_context(field: str) -> None:
     # A prompt-visible change that did not move the fingerprint would let a
     # stale exact hit survive it.
     assert _context(**{field: "changed"}) != _context()
+
+
+def test_a_different_draft_model_does_not_share_identity() -> None:
+    # The content-addressed draft cache keys on model; TM must too, or a rerun
+    # under a new draft model short-circuits on the old model's exact hit.
+    assert _context(model="draft-model-b") != _context(model="draft-model-a")
 
 
 # --------------------------------------------------------------------------- #
