@@ -7,6 +7,9 @@ import {
   ArrowRight,
   AlertTriangle,
   Loader2,
+  Sliders,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
@@ -33,6 +36,16 @@ export function NewJobWizard() {
   const [sourceLang, setSourceLang] = useState('en')
   const [preset, setPreset] = useState<'publication' | 'standard' | 'preview' | 'fast'>('publication')
   const [budgetUsd, setBudgetUsd] = useState<number>(10.0)
+
+  // Advanced compiler & layout options
+  const [isAdvancedOpen, setIsAdvancedOpen] = useState(false)
+  const [domainProfile, setDomainProfile] = useState('general')
+  const [dualMode, setDualMode] = useState<'auto' | 'inline' | 'facing' | 'alternating' | 'monolingual'>('auto')
+  const [renderEngine, setRenderEngine] = useState<'auto' | 'reflow' | 'rigid'>('auto')
+  const [pageRange, setPageRange] = useState('')
+  const [glossaryPath, setGlossaryPath] = useState('')
+  const [execMode, setExecMode] = useState<'auto' | 'short' | 'long'>('auto')
+  const [formulaMode, setFormulaMode] = useState<'readable' | 'strict'>('readable')
 
   const [isAssessing, setIsAssessing] = useState(false)
   const [assessment, setAssessment] = useState<JobAssessResponse | null>(null)
@@ -109,18 +122,21 @@ export function NewJobWizard() {
         input_path: filePath.trim(),
         target_lang: targetLang,
         source_lang: sourceLang,
-        // `preset` is the quality preset; `profile` is the domain profile
-        // (general/textbook/paper). Sending the preset value as `profile` was a
-        // semantic mismatch; the wizard has no domain selector yet, so the
-        // server default is used.
-        profile: 'general',
+        profile: domainProfile,
         preset: preset,
+        dual_mode: dualMode === 'auto' ? null : dualMode,
+        render_engine: renderEngine === 'auto' ? null : renderEngine,
+        pages: pageRange.trim() ? pageRange.trim() : null,
+        glossary: glossaryPath.trim() ? glossaryPath.trim() : null,
+        exec_mode: execMode === 'auto' ? null : execMode,
+        formula_mode: formulaMode,
         priority: 0,
         dry_run: false,
         budget_usd: budgetUsd,
       })
       navigate(`/jobs/${res.job_id}`)
-    } catch (err) {      setSubmitError(err instanceof Error ? err.message : 'Submission failed')
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : 'Submission failed')
     } finally {
       setIsSubmitting(false)
     }
@@ -351,6 +367,156 @@ export function NewJobWizard() {
                 onChange={(e) => setBudgetUsd(parseFloat(e.target.value))}
                 className="w-full h-1.5 bg-[var(--paper-border)] rounded-lg appearance-none cursor-pointer accent-[var(--ink-primary)]"
               />
+            </div>
+
+            {/* Advanced Compiler & Layout Options Drawer */}
+            <div className="pt-3 border-t border-[var(--paper-border)]">
+              <button
+                type="button"
+                onClick={() => setIsAdvancedOpen(!isAdvancedOpen)}
+                className="w-full flex items-center justify-between py-1 text-left text-xs font-semibold text-[var(--ink-primary)] hover:text-black transition-colors focus:outline-none group cursor-pointer"
+              >
+                <div className="flex items-center gap-2">
+                  <Sliders className="h-3.5 w-3.5 text-[var(--ink-secondary)] group-hover:text-[var(--ink-primary)]" />
+                  <span>{t.wizard.advancedOptionsTitle}</span>
+                  <Badge variant="outline" className="text-[9px] font-mono font-normal uppercase tracking-wider py-0 px-1.5">
+                    {t.wizard.advancedOptionsTag}
+                  </Badge>
+                </div>
+                {isAdvancedOpen ? (
+                  <ChevronDown className="h-4 w-4 text-[var(--ink-muted)] group-hover:text-[var(--ink-primary)] transition-transform" />
+                ) : (
+                  <ChevronRight className="h-4 w-4 text-[var(--ink-muted)] group-hover:text-[var(--ink-primary)] transition-transform" />
+                )}
+              </button>
+              <p className="text-[11px] text-[var(--ink-muted)] mt-0.5 mb-2 leading-relaxed">
+                {t.wizard.advancedOptionsSubtitle}
+              </p>
+
+              {isAdvancedOpen && (
+                <div className="space-y-4 pt-3 pb-1 border-t border-dashed border-[var(--paper-border)] mt-2">
+                  {/* Row 1: Profile & Dual Mode */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                    <div>
+                      <label className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] block mb-1 font-semibold">
+                        {t.wizard.domainProfile}
+                      </label>
+                      <select
+                        value={domainProfile}
+                        onChange={(e) => setDomainProfile(e.target.value)}
+                        className="w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs font-medium"
+                      >
+                        <option value="general">{t.wizard.domainGeneral}</option>
+                        <option value="textbook">{t.wizard.domainTextbook}</option>
+                        <option value="paper">{t.wizard.domainPaper}</option>
+                        <option value="fiction">{t.wizard.domainFiction}</option>
+                        <option value="humanities">{t.wizard.domainHumanities}</option>
+                        <option value="semiconductor">{t.wizard.domainSemiconductor}</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] block mb-1 font-semibold">
+                        {t.wizard.dualMode}
+                      </label>
+                      <select
+                        value={dualMode}
+                        onChange={(e) => setDualMode(e.target.value as any)}
+                        className="w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs font-medium"
+                      >
+                        <option value="auto">{t.wizard.dualModeAuto}</option>
+                        <option value="inline">{t.wizard.dualModeInline}</option>
+                        <option value="facing">{t.wizard.dualModeFacing}</option>
+                        <option value="alternating">{t.wizard.dualModeAlternating}</option>
+                        <option value="monolingual">{t.wizard.dualModeMonolingual}</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Row 2: Render Engine & Formula Mode */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                    <div>
+                      <label className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] block mb-1 font-semibold">
+                        {t.wizard.renderEngine}
+                      </label>
+                      <select
+                        value={renderEngine}
+                        onChange={(e) => setRenderEngine(e.target.value as any)}
+                        className="w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs font-medium"
+                      >
+                        <option value="auto">{t.wizard.renderEngineAuto}</option>
+                        <option value="reflow">{t.wizard.renderEngineReflow}</option>
+                        <option value="rigid">{t.wizard.renderEngineRigid}</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] block mb-1 font-semibold">
+                        {t.wizard.formulaMode}
+                      </label>
+                      <select
+                        value={formulaMode}
+                        onChange={(e) => setFormulaMode(e.target.value as any)}
+                        className="w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs font-medium"
+                      >
+                        <option value="readable">{t.wizard.formulaModeReadable}</option>
+                        <option value="strict">{t.wizard.formulaModeStrict}</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Row 3: Pages Range Filter & Execution Mode */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                    <div>
+                      <label className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] block mb-1 font-semibold">
+                        {t.wizard.pageFilter}
+                      </label>
+                      <input
+                        type="text"
+                        value={pageRange}
+                        onChange={(e) => setPageRange(e.target.value)}
+                        placeholder={t.wizard.pageFilterPlaceholder}
+                        className="w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs font-mono placeholder:text-[var(--ink-muted)]"
+                      />
+                      <p className="text-[10px] text-[var(--ink-muted)] mt-1">
+                        {t.wizard.pageFilterHelp}
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] block mb-1 font-semibold">
+                        {t.wizard.execMode}
+                      </label>
+                      <select
+                        value={execMode}
+                        onChange={(e) => setExecMode(e.target.value as any)}
+                        className="w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs font-medium"
+                      >
+                        <option value="auto">{t.wizard.execModeAuto}</option>
+                        <option value="short">{t.wizard.execModeShort}</option>
+                        <option value="long">{t.wizard.execModeLong}</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Row 4: External Glossary Path */}
+                  <div>
+                    <label className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] block mb-1 font-semibold">
+                      {t.wizard.glossaryPath}
+                    </label>
+                    <input
+                      type="text"
+                      value={glossaryPath}
+                      onChange={(e) => setGlossaryPath(e.target.value)}
+                      placeholder={t.wizard.glossaryPathPlaceholder}
+                      className="w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs font-mono placeholder:text-[var(--ink-muted)]"
+                    />
+                    <p className="text-[10px] text-[var(--ink-muted)] mt-1">
+                      {t.wizard.glossaryPathHelp}
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>

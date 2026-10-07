@@ -81,6 +81,39 @@ export interface TranslationDictionary {
     estTime: string
     confidence: string
     probeWarnings: string
+    advancedOptionsTitle: string
+    advancedOptionsSubtitle: string
+    advancedOptionsTag: string
+    domainProfile: string
+    domainGeneral: string
+    domainTextbook: string
+    domainPaper: string
+    domainFiction: string
+    domainHumanities: string
+    domainSemiconductor: string
+    dualMode: string
+    dualModeAuto: string
+    dualModeInline: string
+    dualModeFacing: string
+    dualModeAlternating: string
+    dualModeMonolingual: string
+    renderEngine: string
+    renderEngineAuto: string
+    renderEngineReflow: string
+    renderEngineRigid: string
+    pageFilter: string
+    pageFilterPlaceholder: string
+    pageFilterHelp: string
+    glossaryPath: string
+    glossaryPathPlaceholder: string
+    glossaryPathHelp: string
+    execMode: string
+    execModeAuto: string
+    execModeShort: string
+    execModeLong: string
+    formulaMode: string
+    formulaModeReadable: string
+    formulaModeStrict: string
   }
   mission: {
     title: string
