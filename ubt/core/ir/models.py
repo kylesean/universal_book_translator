@@ -36,6 +36,7 @@ from ubt.model.ast import (
     Table,
     TextElement,
 )
+from ubt.model.fidelity import Attestation
 from ubt.model.span import CompositeSpan, Span
 
 
@@ -330,7 +331,7 @@ class IRBlock(BaseModel):
     policy_reason: str | None = None  # Required when policy_translate is False
     provenance: dict[str, Any] = Field(default_factory=dict)
     #: Optional lowering attestation (single source of truth: per-element realization)
-    attestation: Any = None
+    attestation: Attestation | None = None
 
     # ------------------------------------------------------------------ #
     # Structural projections of ``element`` (read-only; one source)

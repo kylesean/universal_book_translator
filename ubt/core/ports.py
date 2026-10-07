@@ -351,21 +351,6 @@ def classify_pdf_structure(input_path: Path) -> PdfStructureFacts:
         return PdfStructureFacts(False, False, 0.0, 0.0)
 
 
-def classify_pdf_content(input_path: Path) -> tuple[bool, bool]:
-    """Return (has_scan, formula_heavy) via page_profiler.content_flags."""
-    from ubt.adapters.pdf.page_profiler import content_flags
-
-    try:
-        return content_flags(input_path)
-    except Exception as exc:
-        logging.getLogger(__name__).warning(
-            "PDF content classification failed for %s (routing probe degraded): %s",
-            input_path,
-            exc,
-        )
-        return False, False
-
-
 # ---------------------------------------------------------------------------
 # PDF route-assessment bridges: thin lazy helpers that keep ``ubt/core`` from
 # naming adapter modules (ubt.adapters.pdf.*) or heavy PDF dependencies
@@ -441,28 +426,6 @@ def sample_pdf_pages(input_path: Path) -> tuple[int, bool, str]:
     from ubt.adapters.pdf.plain_text_extractor import sample_pdf_pages as _sample
 
     return _sample(input_path)
-
-
-async def interleave_bilingual_pdf(
-    source_pdf: Path,
-    translated_pdf: Path,
-    output_pdf: Path,
-    facing_spread: bool,
-) -> str:
-    """Interleave source pages with rendered target pages (bilingual companion).
-
-    Thin bridge over the adapter's alternator so the export stage never names
-    an adapter module; returns the companion PDF's output path.
-    """
-    from ubt.adapters.pdf.alternator import BilingualAlternator
-
-    result = await BilingualAlternator().interleave_pages_async(
-        source_pdf=source_pdf,
-        translated_pdf=translated_pdf,
-        output_pdf=output_pdf,
-        facing_spread=facing_spread,
-    )
-    return str(result.output_path)
 
 
 # --------------------------------------------------------------------------- #

@@ -133,7 +133,6 @@ def _layout_band(
     class_sizes: dict[tuple[str, int], float],
     measure_many: MeasureMany,
     *,
-    gap_em: float,
     gap_max_em: float,
 ) -> list[tuple[Overlay, tuple[float, float, float, float]]] | None:
     """New geometry for one band, or ``None`` to leave it on the source boxes."""
@@ -246,7 +245,6 @@ def reflow_overlays(
     *,
     measure_many: MeasureMany,
     cap_size: CapSize,
-    gap_em: float = 0.7,
     gap_max_em: float = 2.0,
 ) -> tuple[Overlay, ...]:
     """Repack single-box prose paragraphs into their page's bands.
@@ -293,7 +291,6 @@ def reflow_overlays(
                     band,
                     class_sizes,
                     measure_many,
-                    gap_em=gap_em,
                     gap_max_em=gap_max_em,
                 )
                 if placed is None:
