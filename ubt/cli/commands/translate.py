@@ -7,7 +7,7 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, NoReturn
 
 import typer
 from rich.console import Console
@@ -27,6 +27,7 @@ from ubt.core.config import (
     PdfEngine,
     PromptStrategyName,
     QeEngine,
+    parse_page_ranges,
 )
 from ubt.core.job_options import (
     default_output_path,
@@ -44,6 +45,19 @@ def _ui_msg(en: str, zh: str) -> str:
 
 
 console = Console()
+
+
+def _usage_error(message: str, json_output: bool) -> NoReturn:
+    """Report a usage error the way this command already does, then exit 2.
+
+    Usage errors exit 2 (typer's own convention for bad usage); runtime
+    failures keep exit 1.
+    """
+    if json_output:
+        print(json.dumps({"status": "failed", "error": message}))
+    else:
+        console.print(f"[bold red]Error:[/] {escape(message)}")
+    raise typer.Exit(code=2)
 
 
 def _get_run_translation() -> Any:
@@ -691,6 +705,21 @@ def translate(
                 f"(examples: {_PROFILE_EXAMPLES})."
             )
         raise typer.Exit(code=2)
+
+    # Chapter-window and page-range guards. A non-positive window used to be
+    # clamped downstream, so the run could deliver a single-chapter book under a
+    # "success" banner; a malformed --pages only failed deep inside the reader,
+    # after ingestion had already begun. Both are usage errors: exit 2 before
+    # any work starts.
+    if start_chapter < 1:
+        _usage_error(f"--start-chapter must be >= 1 (got {start_chapter})", json_output)
+    if max_chapters is not None and max_chapters < 1:
+        _usage_error(f"--max-chapters must be >= 1 (got {max_chapters})", json_output)
+    if pages is not None:
+        try:
+            parse_page_ranges(pages)
+        except ValueError as exc:
+            _usage_error(f"invalid --pages: {exc}", json_output)
 
     # ``verbose`` is this command's own flag, but the global ``-v`` (main
     # callback) also enables DEBUG; re-calling setup_logging here with

@@ -76,10 +76,12 @@ class JobManager:
         # request rate (and the bill) against the same API key.
         self.rate_limiter = rate_limiter
 
-    def create_job(self, request: JobSubmitRequest, job_id: str | None = None) -> JobRecord:
-        # Cap concurrent running jobs — each job is a full pipeline with
-        # provider connections; an unbounded intake would exhaust memory and
-        # hammer the translation provider's rate limits.
+    def ensure_capacity(self) -> None:
+        """Raise ServerCapacityError when another job can no longer start.
+
+        Shared by create and resume: a batch of failed jobs restarted together
+        would otherwise open N pipelines on a server configured for one.
+        """
         running = sum(
             1
             for rec in self.jobs.values()
@@ -90,6 +92,12 @@ class JobManager:
                 f"Server at capacity: {running} jobs active (max {self.max_running_jobs})",
                 details={"running": running, "max": self.max_running_jobs},
             )
+
+    def create_job(self, request: JobSubmitRequest, job_id: str | None = None) -> JobRecord:
+        # Cap concurrent running jobs — each job is a full pipeline with
+        # provider connections; an unbounded intake would exhaust memory and
+        # hammer the translation provider's rate limits.
+        self.ensure_capacity()
         self._prune_old_jobs()
         record = JobRecord(job_id=job_id or f"job_{uuid.uuid4().hex[:12]}", request=request)
         self.jobs[record.job_id] = record

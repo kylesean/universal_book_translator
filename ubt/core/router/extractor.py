@@ -1,9 +1,12 @@
 """Robust semantic output extractor for modern (2026) LLM translation pipelines."""
 
 import html
+import logging
 import re
 
 from ubt.core.router.capabilities import ExtractionStrategy
+
+logger = logging.getLogger(__name__)
 
 
 class TranslationOutputExtractor:
@@ -219,6 +222,17 @@ class TranslationOutputExtractor:
         for match in cls._MACRO_BLOCK_PATTERN.finditer(cleaned):
             bid = html.unescape(match.group(1).strip())
             content = html.unescape(match.group(2).strip())
-            if bid and content:
-                results[bid] = content
+            if not bid or not content:
+                continue
+            if bid in results:
+                # The model emits one block per id, in document order; a later
+                # duplicate (chunk overlap, a leaked reasoning draft, echoed
+                # format documentation) must not overwrite the genuine first
+                # emission.
+                logger.warning(
+                    "Ignoring duplicate block id %r in macro output; keeping the first emission",
+                    bid,
+                )
+                continue
+            results[bid] = content
         return results
