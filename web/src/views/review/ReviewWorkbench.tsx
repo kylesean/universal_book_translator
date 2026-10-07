@@ -12,6 +12,7 @@ import {
   CheckCircle2,
   ImageOff,
   Wand2,
+  RefreshCw,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
@@ -215,6 +216,15 @@ export function ReviewWorkbench() {
         <span>
           {t.review.previewPage} · P{page}
         </span>
+        <button
+          type="button"
+          onClick={() => setPreviewBust(Date.now())}
+          title={t.review.rerenderHint}
+          className="flex items-center gap-1 text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] font-mono transition-colors cursor-pointer"
+        >
+          <RefreshCw className="h-3 w-3" />
+          <span>{t.review.rerenderPage}</span>
+        </button>
       </div>
       <img
         src={pagePreviewUrl(jobId, page, { dpi: 110, cacheBust: previewBust })}
@@ -574,7 +584,15 @@ export function ReviewWorkbench() {
                   <span className="flex items-center gap-1.5">
                     <Eye className="h-3.5 w-3.5" /> Page {page}
                   </span>
-                  <span>{t.review.previewPage}</span>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewBust(Date.now())}
+                    title={t.review.rerenderHint}
+                    className="flex items-center gap-1 text-[11px] text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] font-mono transition-colors cursor-pointer"
+                  >
+                    <RefreshCw className="h-3 w-3" />
+                    <span>{t.review.rerenderPage}</span>
+                  </button>
                 </div>
                 {diffBlend ? (
                   <div className="relative bg-white">
@@ -750,6 +768,7 @@ function TermPanel({ jobId, segment, onReplaced }: TermPanelProps) {
   const { t } = useI18n()
   const [violations, setViolations] = useState<TermViolation[] | null>(null)
   const [cascade, setCascade] = useState(false)
+  const [confirmViolation, setConfirmViolation] = useState<TermViolation | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -767,9 +786,18 @@ function TermPanel({ jobId, segment, onReplaced }: TermPanelProps) {
     }
   }, [jobId, segment.block_id, segment.target_text])
 
-  const replace = async (violation: TermViolation) => {
+  const handleTriggerReplace = (violation: TermViolation) => {
+    if (cascade && violation.cascade_all > 0) {
+      setConfirmViolation(violation)
+    } else {
+      void executeReplace(violation)
+    }
+  }
+
+  const executeReplace = async (violation: TermViolation) => {
     setBusy(true)
     setError(null)
+    setConfirmViolation(null)
     try {
       const res = await propagateTerm(jobId, {
         block_id: segment.block_id,
@@ -789,41 +817,84 @@ function TermPanel({ jobId, segment, onReplaced }: TermPanelProps) {
 
   return (
     <div className="mt-3 rounded-[6px] border border-[#b45309]/40 bg-[#b45309]/5 divide-y divide-[#b45309]/20">
-      {violations.map((violation) => (
-        <div
-          key={`${violation.surface}:${violation.expected}`}
-          className="px-2.5 py-2 flex flex-wrap items-center gap-2 text-[11px]"
-        >
-          <span className="font-mono text-[var(--ink-muted)]">{t.review.recommendedTerm}</span>
-          <span className="line-through text-[#b45309] font-mono">{violation.surface}</span>
-          <span className="text-[var(--ink-muted)]">→</span>
-          <span className="font-semibold text-[#15803d] font-mono">{violation.expected}</span>
-          {violation.cascade_all > 0 && (
-            <label className="flex items-center gap-1 text-[var(--ink-secondary)] cursor-pointer ml-auto select-none">
-              <input
-                type="checkbox"
-                checked={cascade}
-                onChange={(e) => setCascade(e.target.checked)}
-              />
-              {t.review.cascadeFix.replace('{n}', String(violation.cascade_all))}
-            </label>
-          )}
-          <Button
-            onClick={() => replace(violation)}
-            variant="primary"
-            size="sm"
-            disabled={busy}
-            className="text-[11px] h-6 px-2.5 font-bold"
+      {violations.map((violation) => {
+        const isConfirming = confirmViolation === violation
+        return (
+          <div
+            key={`${violation.surface}:${violation.expected}`}
+            className="px-2.5 py-2 flex flex-col gap-2 text-[11px]"
           >
-            {busy ? (
-              <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-            ) : (
-              <Wand2 className="h-3 w-3 mr-1" />
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-mono text-[var(--ink-muted)]">{t.review.recommendedTerm}</span>
+              <span className="line-through text-[#b45309] font-mono">{violation.surface}</span>
+              <span className="text-[var(--ink-muted)]">→</span>
+              <span className="font-semibold text-[#15803d] font-mono">{violation.expected}</span>
+              {violation.cascade_all > 0 && (
+                <label className="flex items-center gap-1 text-[var(--ink-secondary)] cursor-pointer ml-auto select-none">
+                  <input
+                    type="checkbox"
+                    checked={cascade}
+                    onChange={(e) => {
+                      setCascade(e.target.checked)
+                      if (!e.target.checked) setConfirmViolation(null)
+                    }}
+                  />
+                  {t.review.cascadeFix.replace('{n}', String(violation.cascade_all))}
+                </label>
+              )}
+              <Button
+                onClick={() => handleTriggerReplace(violation)}
+                variant="primary"
+                size="sm"
+                disabled={busy}
+                className="text-[11px] h-6 px-2.5 font-bold"
+              >
+                {busy ? (
+                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                ) : (
+                  <Wand2 className="h-3 w-3 mr-1" />
+                )}
+                {busy ? t.review.cascadeApplying : t.review.replaceTerm}
+              </Button>
+            </div>
+
+            {isConfirming && (
+              <div className="w-full mt-1 p-2 rounded-[4px] bg-[#b45309]/10 border border-[#b45309]/30 space-y-1.5 animate-in fade-in duration-150">
+                <div className="font-semibold text-[var(--ink-primary)]">
+                  {t.review.cascadeConfirmTitle}
+                </div>
+                <div className="text-[var(--ink-secondary)] text-[10.5px] leading-relaxed">
+                  {t.review.cascadeConfirmDesc
+                    .replace('{n}', String(violation.cascade_all))
+                    .replace('{surface}', violation.surface)
+                    .replace('{expected}', violation.expected)}
+                </div>
+                <div className="flex items-center gap-2 pt-0.5">
+                  <Button
+                    onClick={() => executeReplace(violation)}
+                    variant="primary"
+                    size="sm"
+                    disabled={busy}
+                    className="text-[10px] h-5 px-2 bg-[#b45309] hover:bg-[#92400e] text-white font-bold"
+                  >
+                    {busy ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
+                    {t.review.cascadeConfirmProceed}
+                  </Button>
+                  <Button
+                    onClick={() => setConfirmViolation(null)}
+                    variant="secondary"
+                    size="sm"
+                    disabled={busy}
+                    className="text-[10px] h-5 px-2"
+                  >
+                    {t.review.cascadeConfirmCancel}
+                  </Button>
+                </div>
+              </div>
             )}
-            {busy ? t.review.cascadeApplying : t.review.replaceTerm}
-          </Button>
-        </div>
-      ))}
+          </div>
+        )
+      })}
       {error && <div className="px-2.5 py-1.5 text-[11px] text-[#b45309]">{error}</div>}
     </div>
   )

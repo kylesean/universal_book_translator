@@ -1,5 +1,16 @@
 import React, { useCallback, useEffect, useState } from 'react'
-import { Search, Plus, Trash2, Loader2, AlertTriangle, CheckCircle2, Upload } from 'lucide-react'
+import {
+  Search,
+  Plus,
+  Trash2,
+  Loader2,
+  AlertTriangle,
+  CheckCircle2,
+  Upload,
+  Sliders,
+  BookOpen,
+  Layers,
+} from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import {
@@ -43,6 +54,8 @@ export function LanguageAssetsView() {
   const [importTgtLang, setImportTgtLang] = useState('zh')
   const [importing, setImporting] = useState(false)
   const [importNotice, setImportNotice] = useState<string | null>(null)
+  const [tmFuzzyThreshold, setTmFuzzyThreshold] = useState<number>(85)
+  const [tmSearchQuery, setTmSearchQuery] = useState('')
 
   const loadGlossary = useCallback(async () => {
     setGlossaryLoading(true)
@@ -140,6 +153,14 @@ export function LanguageAssetsView() {
     (term) =>
       term.source.toLowerCase().includes(searchQuery.toLowerCase()) ||
       term.target.includes(searchQuery)
+  )
+
+  const filteredTmEntries = tmEntries.filter(
+    (entry) =>
+      !tmSearchQuery ||
+      entry.source_text.toLowerCase().includes(tmSearchQuery.toLowerCase()) ||
+      entry.target_text.toLowerCase().includes(tmSearchQuery.toLowerCase()) ||
+      (entry.domain && entry.domain.toLowerCase().includes(tmSearchQuery.toLowerCase()))
   )
 
   const tabs: { id: Tab; label: string }[] = [
@@ -321,6 +342,34 @@ export function LanguageAssetsView() {
               {tmError}
             </div>
           )}
+
+          {/* TM Fuzzy Threshold Knobs */}
+          <div className="p-3.5 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] shadow-2xs space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <div>
+                <span className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold flex items-center gap-1.5">
+                  <Sliders className="h-3.5 w-3.5" />
+                  {t.assets.fuzzyThreshold}
+                </span>
+                <p className="text-[11px] text-[var(--ink-secondary)] mt-0.5">
+                  {t.assets.fuzzyThresholdHelp}
+                </p>
+              </div>
+              <span className="font-mono text-xs font-bold text-[#15803d]">
+                {tmFuzzyThreshold}%
+              </span>
+            </div>
+            <input
+              type="range"
+              min="50"
+              max="100"
+              step="5"
+              value={tmFuzzyThreshold}
+              onChange={(e) => setTmFuzzyThreshold(parseInt(e.target.value, 10))}
+              className="w-full h-1.5 bg-[var(--paper-border)] rounded-lg appearance-none cursor-pointer accent-[var(--ink-primary)]"
+            />
+          </div>
+
           <div className="p-3.5 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] shadow-2xs space-y-2.5">
             <div className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
               {t.assets.importTitle}
@@ -386,11 +435,25 @@ export function LanguageAssetsView() {
           </div>
 
           <div className="rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] overflow-hidden shadow-2xs">
-            <div className="h-10 px-3.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] flex items-center justify-between">
-              <span className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
+            <div className="h-10 px-3.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] flex items-center justify-between gap-3">
+              <span className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold shrink-0">
                 {t.assets.tmTitle}
               </span>
-              <Badge variant="outline">{tmTotal} entries</Badge>
+              <div className="flex items-center gap-2 max-w-xs w-full">
+                <div className="relative flex-1">
+                  <Search className="h-3 w-3 absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--ink-muted)]" />
+                  <input
+                    type="text"
+                    placeholder={t.common.search}
+                    value={tmSearchQuery}
+                    onChange={(e) => setTmSearchQuery(e.target.value)}
+                    className="w-full h-7 pl-7 pr-2.5 rounded-[4px] border border-[var(--paper-border)] bg-[var(--paper-surface)] text-[11px] text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none placeholder:text-[var(--ink-muted)]"
+                  />
+                </div>
+                <Badge variant="outline" className="shrink-0 text-[10px] font-mono">
+                  {filteredTmEntries.length} / {tmTotal}
+                </Badge>
+              </div>
             </div>
             <table className="w-full text-xs text-left">
               <thead className="bg-[var(--paper-subsurface)] text-[var(--ink-muted)] font-mono border-b border-[var(--paper-border)]">
@@ -416,14 +479,14 @@ export function LanguageAssetsView() {
                       <Loader2 className="h-4 w-4 animate-spin mx-auto" />
                     </td>
                   </tr>
-                ) : tmEntries.length === 0 ? (
+                ) : filteredTmEntries.length === 0 ? (
                   <tr>
                     <td colSpan={4} className="py-6 text-center text-[var(--ink-muted)]">
                       {t.assets.tmDesc}
                     </td>
                   </tr>
                 ) : (
-                  tmEntries.map((entry) => (
+                  filteredTmEntries.map((entry) => (
                     <tr
                       key={entry.id}
                       className="hover:bg-[var(--paper-subsurface)]/60 transition-colors"
@@ -455,11 +518,60 @@ export function LanguageAssetsView() {
       )}
 
       {activeTab === 'bible' && (
-        <div className="p-12 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] text-center text-[var(--ink-muted)] space-y-2 shadow-2xs">
-          <h2 className="text-xs font-bold text-[var(--ink-primary)]">{t.assets.bibleTitle}</h2>
-          <p className="text-xs text-[var(--ink-secondary)] max-w-md mx-auto leading-relaxed">
-            {t.assets.bibleDesc}
-          </p>
+        <div className="space-y-5 animate-in fade-in duration-150">
+          <div className="p-5 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] shadow-2xs space-y-2">
+            <div className="flex items-center gap-2 text-xs font-bold text-[var(--ink-primary)]">
+              <BookOpen className="h-4 w-4 text-[var(--ink-secondary)]" />
+              <span>{t.assets.bibleOverviewTitle}</span>
+            </div>
+            <p className="text-xs text-[var(--ink-secondary)] leading-relaxed">
+              {t.assets.bibleOverviewDesc}
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="p-4 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] shadow-2xs space-y-2">
+              <div className="flex items-center gap-2 text-xs font-semibold text-[var(--ink-primary)]">
+                <Layers className="h-3.5 w-3.5 text-[var(--ink-muted)]" />
+                <span>{t.assets.bibleStructureTitle}</span>
+              </div>
+              <p className="text-[11px] text-[var(--ink-secondary)] leading-relaxed">
+                {t.assets.bibleStructureDesc}
+              </p>
+              <div className="p-2.5 rounded bg-[var(--paper-subsurface)] border border-[var(--paper-border)] font-mono text-[10px] text-[var(--ink-muted)] space-y-1">
+                <div>📁 bibles/</div>
+                <div className="pl-3">📁 textbook/</div>
+                <div className="pl-6 text-[var(--ink-primary)]">📄 chapter_01_bilingual.md</div>
+                <div className="pl-6 text-[var(--ink-primary)]">📄 chapter_02_bilingual.md</div>
+                <div className="pl-3">📁 semiconductor/</div>
+                <div className="pl-6 text-[var(--ink-primary)]">📄 glossary_core.json</div>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] shadow-2xs space-y-2">
+              <div className="flex items-center gap-2 text-xs font-semibold text-[var(--ink-primary)]">
+                <CheckCircle2 className="h-3.5 w-3.5 text-[#15803d]" />
+                <span>{t.assets.bibleWorkflowTitle}</span>
+              </div>
+              <p className="text-[11px] text-[var(--ink-secondary)] leading-relaxed">
+                {t.assets.bibleWorkflowDesc}
+              </p>
+              <div className="p-2.5 rounded bg-[var(--paper-subsurface)] border border-[var(--paper-border)] text-[11px] text-[var(--ink-secondary)] space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="text-[9px] font-mono">STEP 1</Badge>
+                  <span>在审校工作台完成关键章节人工精修</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="text-[9px] font-mono">STEP 2</Badge>
+                  <span>将高置信度句对沉淀至全局 SQLite 记忆库 (TM)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="text-[9px] font-mono">STEP 3</Badge>
+                  <span>以样章形式放置于项目底本目录供新书自动挂载</span>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

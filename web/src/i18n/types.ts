@@ -227,6 +227,14 @@ export interface TranslationDictionary {
     importBtn: string
     importing: string
     importDone: string
+    fuzzyThreshold: string
+    fuzzyThresholdHelp: string
+    bibleOverviewTitle: string
+    bibleOverviewDesc: string
+    bibleStructureTitle: string
+    bibleStructureDesc: string
+    bibleWorkflowTitle: string
+    bibleWorkflowDesc: string
   }
   doctor: {
     title: string
@@ -274,11 +282,17 @@ export interface TranslationDictionary {
     previewPage: string
     previewLoading: string
     previewFailed: string
+    rerenderPage: string
+    rerenderHint: string
     recommendedTerm: string
     replaceTerm: string
     cascadeFix: string
     cascadeApplying: string
     cascadeDone: string
+    cascadeConfirmTitle: string
+    cascadeConfirmDesc: string
+    cascadeConfirmProceed: string
+    cascadeConfirmCancel: string
     diffBlend: string
     noSourcePage: string
     inspectorTitle: string
