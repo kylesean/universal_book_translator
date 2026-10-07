@@ -418,11 +418,10 @@ def test_default_output_lands_in_per_job_outputs_dir(
     job_id = captured["job_id"]
     assert isinstance(job_id, str) and job_id.startswith("job_")
     out = Path(captured["request"].output_path)
-    assert out.parent == (tmp_path / "db" / "outputs" / job_id).resolve()
-    assert out.name == "input_bilingual.md"
+    assert out == (tmp_path / "db" / "outputs" / job_id).resolve()
     # The directory exists before the worker starts, and the source staging
     # area stays free of deliverables.
-    assert out.parent.is_dir()
+    assert out.is_dir()
     assert "uploads" not in out.parts
 
 
@@ -447,7 +446,7 @@ def test_default_output_dir_honors_requested_job_id(
     assert response.status_code == 400
     assert captured["job_id"] == "myjob123"
     assert (
-        Path(captured["request"].output_path).parent
+        Path(captured["request"].output_path)
         == (tmp_path / "db" / "outputs" / "myjob123").resolve()
     )
 

@@ -105,6 +105,7 @@ from ubt.core.job_options import (
     JOB_ID_RE,
     LANG_CODE_PATTERN,
     apply_config_overrides,
+    clean_source_stem,
     companion_path,
     default_output_path,
     overrides_from_request,
@@ -153,6 +154,7 @@ __all__ = [
     "JOB_ID_RE",
     "LANG_CODE_PATTERN",
     "default_output_path",
+    "clean_source_stem",
     "overrides_from_request",
     "apply_config_overrides",
     "run_kwargs_from_request",
@@ -396,7 +398,10 @@ def _is_own_prior_output(
     if not prior_out or not prior_in:
         return False
     try:
-        prior_target = resolve_target_output(Path(prior_out), prior_in)
+        prior_out_path = Path(prior_out)
+        if prior_out_path.is_dir():
+            return target_candidate.resolve().parent == prior_out_path.resolve()
+        prior_target = resolve_target_output(prior_out_path, prior_in)
         return prior_target.resolve() == target_candidate.resolve()
     except (OSError, ValueError):
         return False
@@ -828,29 +833,25 @@ def create_app(
         else:
             # Server-derived default: deliverables live in their own per-job
             # directory under the managed ``outputs`` tree — never beside the
-            # staged upload, which would mix sources with translations. The
-            # directory is sandbox-valid by construction (_managed_dir), so the
-            # old "shoe-horn ~/Documents/UBT into the bases" dance is gone.
-            # The CLI keeps its ``~/Documents/UBT`` default; this only shapes
-            # what the API derives on the operator's behalf.
-            default_out = ensure_private_dir(_managed_dir("outputs") / submit_id) / (
-                default_output_path(resolved_in).name
-            )
-            resolved_out = resolve_secure_path(default_out, must_exist=False, config=app_config)
-            target_candidate = (
-                resolve_target_output(resolved_out, resolved_in)
-                if resolved_out is not None
-                else None
-            )
-            if (
-                target_candidate is not None
-                and target_candidate.exists()
-                and not _is_own_prior_output(requested_id, target_candidate, job_queue, manager)
+            # staged upload, which would mix sources with translations. Passing
+            # the directory allows the export stage to derive the honest
+            # deliverable name (_mono or _bilingual) dynamically based on the
+            # resolved profile and bilingual_mode, rather than pre-allocating
+            # a hardcoded filename.
+            default_out_dir = ensure_private_dir(_managed_dir("outputs") / submit_id)
+            resolved_out = resolve_secure_path(default_out_dir, must_exist=False, config=app_config)
+            stem = clean_source_stem(resolved_in)
+            for candidate in (
+                default_out_dir / f"{stem}_mono{resolved_in.suffix}",
+                default_out_dir / f"{stem}_bilingual{resolved_in.suffix}",
             ):
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="output_path already exists; refusing to overwrite it",
-                )
+                if candidate.exists() and not _is_own_prior_output(
+                    requested_id, candidate, job_queue, manager
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="output_path already exists; refusing to overwrite it",
+                    )
 
         resolved_glossary: str | None = None
         if req.glossary:

@@ -318,6 +318,16 @@ def default_output_dir_for_scan() -> Path:
     return default_output_dir()
 
 
+_UPLOAD_PREFIX_RE = re.compile(r"^\d{8}-\d{6}-[0-9a-fA-F]{8}-")
+
+
+def clean_source_stem(path: Path | str) -> str:
+    """Strip server-side upload deduplication prefixes (e.g. 20261007-055316-84614c7e-)
+    so deliverable filenames match the user's original document name."""
+    stem = Path(path).stem
+    return _UPLOAD_PREFIX_RE.sub("", stem)
+
+
 def default_output_path(input_path: Path | str, *, monolingual: bool = False) -> Path:
     """Where a run with no ``-o`` writes its deliverable.
 
@@ -327,7 +337,8 @@ def default_output_path(input_path: Path | str, *, monolingual: bool = False) ->
     """
     source = Path(input_path)
     label = "mono" if monolingual else "bilingual"
-    return default_output_dir() / f"{source.stem}_{label}{source.suffix}"
+    stem = clean_source_stem(source)
+    return default_output_dir() / f"{stem}_{label}{source.suffix}"
 
 
 def resolve_target_output(
@@ -350,7 +361,8 @@ def resolve_target_output(
     out = Path(output_path)
     if out.is_dir() or str(output_path).endswith(("/", "\\")):
         label = "mono" if monolingual else "bilingual"
-        return out / f"{inp.stem}_{label}{inp.suffix}"
+        stem = clean_source_stem(inp)
+        return out / f"{stem}_{label}{inp.suffix}"
     if not out.suffix and inp.suffix:
         return out.with_suffix(inp.suffix)
     return out

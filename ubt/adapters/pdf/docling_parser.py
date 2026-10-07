@@ -49,6 +49,7 @@ from ubt.core.ir.models import (
     make_element,
 )
 from ubt.core.ir.serializer import compute_file_sha256_cached
+from ubt.core.job_options import clean_source_stem
 from ubt.core.policy.layout_policy import (
     CAPTION_RE,
     PROSE_BLOCK_TYPES,
@@ -72,16 +73,17 @@ def extract_manifest(path: Path, *, is_docling_installed: bool) -> BookManifest:
         raise DocumentParseError(f"PDF file not found: {path}")
 
     doc_id = compute_file_sha256_cached(path)
+    clean_title = clean_source_stem(path)
     chapter = ChapterMeta(
         chapter_id="pdf_main",
-        title=path.stem,
+        title=clean_title,
         spine_index=1,
         source_file=path.name,
     )
     parser_engine = "docling" if is_docling_installed else "oxide_fallback"
     return BookManifest(
         doc_id=doc_id,
-        title=path.stem,
+        title=clean_title,
         source_path=str(path),
         chapters=[chapter],
         metadata={"pdf_parser_engine": parser_engine},

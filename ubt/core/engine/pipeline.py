@@ -714,7 +714,8 @@ class PipelineOrchestrator:
         # Runs off-loop: the recursive scan would otherwise stall heartbeats.
         scan_dirs = [Path(".ubt/docling_cache"), default_output_dir_for_scan()]
         if output_path is not None:
-            scan_dirs.append(Path(output_path).parent)
+            out_p = Path(output_path)
+            scan_dirs.append(out_p if out_p.is_dir() else out_p.parent)
         await asyncio.to_thread(warn_world_readable, self.config.db_dir, scan_dirs)
         # Bill this run alone: take a provider-side sink when the provider can
         # attribute per run, otherwise a snapshot to diff the shared counters in.
