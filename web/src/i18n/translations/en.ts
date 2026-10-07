@@ -249,6 +249,8 @@ export const en: TranslationDictionary = {
     authGate: 'API auth gate',
     dbDir: 'Ledger dir',
     jobMode: 'Run mode',
+    diskFree: 'Ledger Disk Free Space',
+    walStatus: 'SQLite WAL Lock Status',
     enabled: 'enabled',
     disabled: 'disabled',
     exposedWarning:

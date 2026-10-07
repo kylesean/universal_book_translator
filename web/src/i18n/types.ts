@@ -249,6 +249,8 @@ export interface TranslationDictionary {
     authGate: string
     dbDir: string
     jobMode: string
+    diskFree: string
+    walStatus: string
     enabled: string
     disabled: string
     exposedWarning: string

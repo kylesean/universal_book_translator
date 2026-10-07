@@ -1402,6 +1402,16 @@ export interface components {
              * @description embedded (in-process) or queue (worker-drained)
              */
             job_mode: string;
+            /**
+             * Disk Free Gb
+             * @description Free disk space in GB on the db_dir volume
+             */
+            disk_free_gb?: number | null;
+            /**
+             * Wal Status
+             * @description SQLite WAL health status string
+             */
+            wal_status?: string | null;
         };
         /**
          * TMImportRequest

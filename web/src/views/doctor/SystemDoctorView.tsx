@@ -194,6 +194,12 @@ export function SystemDoctorView() {
             <div>• {t.doctor.authGate}: {info.auth_enabled ? t.doctor.enabled : t.doctor.disabled}</div>
             <div>• {t.doctor.jobMode}: {info.job_mode}</div>
             <div>• {t.doctor.dbDir}: {info.db_dir}</div>
+            {info.disk_free_gb != null && (
+              <div>• {t.doctor.diskFree}: {info.disk_free_gb} GB</div>
+            )}
+            {info.wal_status && (
+              <div>• {t.doctor.walStatus}: {info.wal_status}</div>
+            )}
             <div>
               • {t.doctor.allowedRoots}:{' '}
               {info.allowed_bases.length === 0 ? '—' : info.allowed_bases.join(', ')}

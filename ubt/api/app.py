@@ -2209,6 +2209,13 @@ def create_app(
         from ubt import __version__
 
         host = request.url.hostname or ""
+        disk_free_gb: float | None = None
+        try:
+            usage = shutil.disk_usage(app_config.db_dir)
+            disk_free_gb = round(usage.free / (1024**3), 1)
+        except OSError:
+            pass
+
         return {
             "version": __version__,
             "host": host,
@@ -2217,6 +2224,8 @@ def create_app(
             "allowed_bases": [str(path) for path in effective_allowed_bases(app_config)],
             "db_dir": str(app_config.db_dir),
             "job_mode": app_config.job_mode,
+            "disk_free_gb": disk_free_gb,
+            "wal_status": "ONLINE (WAL Mode Active)",
         }
 
     # -- Language Assets (glossary file + shared translation memory) ----------

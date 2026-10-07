@@ -249,6 +249,8 @@ export const zh: TranslationDictionary = {
     authGate: 'API 鉴权门禁',
     dbDir: '账本目录',
     jobMode: '运行模式',
+    diskFree: '存储剩余可用空间',
+    walStatus: 'SQLite WAL 写入锁状态',
     enabled: '已启用',
     disabled: '未启用',
     exposedWarning: '警告：服务在非回环地址上可达，请确认已启用鉴权与隔离。',

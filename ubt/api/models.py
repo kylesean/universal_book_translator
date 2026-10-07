@@ -417,6 +417,10 @@ class SystemInfoResponse(BaseModel):
     allowed_bases: list[str] = Field(description="Filesystem roots the server will read/write")
     db_dir: str
     job_mode: str = Field(description="embedded (in-process) or queue (worker-drained)")
+    disk_free_gb: float | None = Field(
+        default=None, description="Free disk space in GB on the db_dir volume"
+    )
+    wal_status: str | None = Field(default=None, description="SQLite WAL health status string")
 
 
 class SegmentEditRequest(BaseModel):

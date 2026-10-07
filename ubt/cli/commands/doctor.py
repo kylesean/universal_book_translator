@@ -426,6 +426,65 @@ def collect_checks(config: UBTConfig, *, probe: bool = False) -> list[_Check]:
     else:
         record("Translation memory", "SKIP", "disabled")
 
+    try:
+        usage = shutil.disk_usage(config.db_dir)
+        free_gb = usage.free / (1024**3)
+        total_gb = usage.total / (1024**3)
+        if free_gb < 1.0:
+            record(
+                "Disk space",
+                "FAIL",
+                f"only {free_gb:.2f} GB free of {total_gb:.1f} GB on {config.db_dir} — temporary render artifacts will fail",
+                fix="free up disk space on the volume containing UBT_DB_DIR",
+            )
+        elif free_gb < 5.0:
+            record(
+                "Disk space",
+                "WARN",
+                f"{free_gb:.1f} GB free of {total_gb:.1f} GB on {config.db_dir} — low disk space for large PDF compilations",
+                fix="ensure at least 5 GB free disk space for high-volume compiles",
+            )
+        else:
+            record(
+                "Disk space",
+                "OK",
+                f"{free_gb:.1f} GB free of {total_gb:.1f} GB on {config.db_dir}",
+            )
+    except OSError as exc:
+        record("Disk space", "WARN", f"unable to query disk usage on {config.db_dir}: {exc}")
+
+    try:
+        import sqlite3
+
+        probe_db = config.db_dir / ".ubt_doctor_wal_probe.db"
+        config.db_dir.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(probe_db, timeout=2.0) as conn:
+            cur = conn.cursor()
+            cur.execute("PRAGMA journal_mode=WAL;")
+            wal_mode = cur.fetchone()
+            mode_str = str(wal_mode[0]).upper() if wal_mode else "UNKNOWN"
+            cur.execute("CREATE TABLE IF NOT EXISTS _probe (id INTEGER PRIMARY KEY, ts REAL);")
+            cur.execute("INSERT OR REPLACE INTO _probe VALUES (1, 1.0);")
+            conn.commit()
+        for p in (
+            probe_db,
+            probe_db.with_name(probe_db.name + "-wal"),
+            probe_db.with_name(probe_db.name + "-shm"),
+        ):
+            p.unlink(missing_ok=True)
+        record(
+            "SQLite WAL Ledger",
+            "OK",
+            f"journal_mode={mode_str}, write lock acquired and released cleanly",
+        )
+    except Exception as exc:
+        record(
+            "SQLite WAL Ledger",
+            "WARN",
+            f"WAL lock probe failed on {config.db_dir}: {exc}",
+            fix="check filesystem lock support (NFS/network mounts may fail SQLite WAL locks; use a local disk)",
+        )
+
     # -- privacy: page-image egress disclosure -----------------------------
     if not config.allow_page_upload:
         record(
