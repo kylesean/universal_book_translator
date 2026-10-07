@@ -1178,6 +1178,13 @@ def _register_job_routes(
         # batch of failed jobs restarted together would otherwise open N
         # pipelines on a server configured for one. Checked before the record
         # flips to SUBMITTED, so a refusal leaves it resumable.
+        try:
+            manager.ensure_capacity()
+        except ServerCapacityError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=str(exc),
+            ) from exc
 
         # Never re-fresh (that would discard the checkpoints) and clear the
         # previous failure so the record restarts clean.

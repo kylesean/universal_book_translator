@@ -87,7 +87,6 @@ export function ReviewWorkbench() {
       setSegments(segmentData.segments)
       setTotal(segmentData.total)
       setIssues(issueData)
-      setDrafts({})
       setSaved({})
       setIssueCursor(0)
     } catch (err) {

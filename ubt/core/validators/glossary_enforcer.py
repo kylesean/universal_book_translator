@@ -174,6 +174,23 @@ class DeterministicGlossaryEnforcer:
 
         self._compile_glossary(glossary)
         self._build_automaton()
+        self._seed_jieba()
+
+    def _seed_jieba(self) -> None:
+        """Seed jieba's global dictionary once with multi-char CJK glossary patterns.
+
+        Called at construction: seeding per-block (as ``enforce_audited`` did)
+        polluted the process-wide dictionary, inflated ``jieba.dt.total``
+        unboundedly, and made boundary checks non-deterministic across resumes.
+        """
+        try:
+            import jieba  # type: ignore[import-untyped]
+
+            for pat in self._rules:
+                if len(pat) >= 2 and all(is_cjk_char(ch) for ch in pat):
+                    jieba.add_word(pat, freq=1000000)
+        except Exception:
+            pass
 
     def _compile_glossary(self, glossary: list[dict[str, Any]]) -> None:
         # Two passes on purpose: the alias guard below compares against every
@@ -320,12 +337,8 @@ class DeterministicGlossaryEnforcer:
         )
         if has_cjk_matches:
             try:
-                import jieba  # type: ignore[import-untyped]
+                import jieba
 
-                # Seed tokenization with known multi-character glossary patterns
-                for pat in self._rules:
-                    if len(pat) >= 2 and all(is_cjk_char(ch) for ch in pat):
-                        jieba.add_word(pat, freq=1000000)
                 tokens = list(jieba.tokenize(target_text))
                 token_boundaries = ({s for _, s, _ in tokens}, {e for _, _, e in tokens})
             except Exception:

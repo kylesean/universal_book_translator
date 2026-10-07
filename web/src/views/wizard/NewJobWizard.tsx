@@ -215,12 +215,14 @@ export function NewJobWizard() {
   }
 
   // Keyboard shortcut: ⌘⏎ or Ctrl+Enter to compile
+  const handleSubmitRef = useRef(handleSubmit)
+  handleSubmitRef.current = handleSubmit
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
         if (filePath.trim() && !isSubmitting) {
           e.preventDefault()
-          handleSubmit()
+          handleSubmitRef.current()
         }
       }
     }
