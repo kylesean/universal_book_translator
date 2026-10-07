@@ -76,6 +76,27 @@ def select_preflight_sample(
     return sorted(picked, key=lambda b: b.spine_index)
 
 
+def _placeholder_text(block: IRBlock) -> str:
+    """The rehearsal body for one sample block: its source, or a stand-in.
+
+    A formula's source is only typesettable when ``typeset_math`` can convert
+    it; the extractor represents a formula it could not read with a bare ``$$``
+    (see ``docling_parser``), and ``typstify_math`` rejects that empty body, so
+    ``typeset_math`` returns ``None`` for reasons that have nothing to do with
+    the toolchain. The real render never draws those placeholders either (they
+    are static skips), so substituting a synthetic math body keeps the gate on
+    the math path instead of failing the whole book on markup nobody renders.
+    """
+    text = (block.source_text or "").strip()
+    if block.block_type == BlockType.FORMULA:
+        from ubt.adapters.pdf.overlay_text import typstify_math  # noqa: PLC0415
+        from ubt.render.outputs import _strip_math_delimiters  # noqa: PLC0415
+
+        if typstify_math(_strip_math_delimiters(text)) is None:
+            return "preflight"
+    return text or "preflight"
+
+
 def _placeholder_blocks(sample: list[IRBlock]) -> list[IRBlock]:
     """The sample carrying each source text as its placeholder translation.
 
@@ -93,7 +114,7 @@ def _placeholder_blocks(sample: list[IRBlock]) -> list[IRBlock]:
     return [
         block.model_copy(
             update={
-                "target_text": (block.source_text or "").strip() or "preflight",
+                "target_text": _placeholder_text(block),
                 "skip_translate": False,
             }
         )

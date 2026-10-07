@@ -137,3 +137,60 @@ def test_preflight_sample_reaches_the_typesetter_for_a_formula_heavy_book(
     sample = select_preflight_sample(blocks)
     assert sample  # the sample is not empty
     assert len(overlays_from_blocks(_placeholder_blocks(sample), None)) >= 1
+
+
+def test_placeholder_text_replaces_an_empty_formula_body() -> None:
+    # ``docling_parser`` writes a bare ``$$`` for a formula it could not read.
+    # ``typeset_math`` rejects that empty body, so the rehearsal must substitute
+    # a synthetic one or the gate mistakes the placeholder for a dead toolchain.
+    from ubt.core.engine.render_preflight import _placeholder_text
+
+    def formula(text: str) -> IRBlock:
+        return IRBlock(
+            element=make_element(
+                id="f",
+                spine_index=0,
+                block_type=BlockType.FORMULA,
+                flow_id=FlowID.MAIN_STORY,
+                source_text=text,
+                bbox=BoundingBox(page=1, x0=54.0, y0=700.0, x1=200.0, y1=712.0),
+                skip_translate=True,
+            )
+        )
+
+    assert _placeholder_text(formula("$$")) == "preflight"
+    assert _placeholder_text(formula("")) == "preflight"
+    assert _placeholder_text(formula("x_{i} = y_{i} + 1")) == "x_{i} = y_{i} + 1"
+
+
+def test_preflight_survives_a_book_of_empty_formula_placeholders(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Regression: a formula-dense book whose formulas all extracted as bare
+    # ``$$`` placeholders used to abort before translation, because the sample
+    # is deliberately formula-first and every placeholder failed to typeset.
+    fake = _FakeTypst(ok=True)
+    _patch(monkeypatch, tmp_path, fake)
+    source = write_text_pdf(tmp_path / "src.pdf", [("Title", "The body of the page.")])
+    adapter = get_adapter_for_path(source, pdf_engine="pdfium")
+    manifest = BookManifest(doc_id="d", title="t", source_path=str(source))
+    blocks = [
+        IRBlock(
+            element=make_element(
+                id=f"f{i}",
+                spine_index=i,
+                block_type=BlockType.FORMULA,
+                flow_id=FlowID.MAIN_STORY,
+                source_text="$$",
+                bbox=BoundingBox(page=1, x0=54.0, y0=700.0 - i * 20, x1=200.0, y1=712.0 - i * 20),
+                skip_translate=True,
+            )
+        )
+        for i in range(5)
+    ]
+
+    asyncio.run(
+        run_render_preflight(adapter=adapter, manifest=manifest, blocks=blocks, target_lang="zh")
+    )
+
+    assert fake.calls >= 1, "the preflight passed without ever compiling a fragment"
