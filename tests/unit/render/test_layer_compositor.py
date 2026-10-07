@@ -30,6 +30,7 @@ from ubt.model.span import PhysicalBox
 from ubt.render.outputs import (
     LayerCompositor,
     Overlay,
+    StyledRun,
     TypstFragmentTypesetter,
     _dedup_identical_streams,
     _line_slack,
@@ -350,6 +351,28 @@ def test_the_compositor_prefetches_single_box_fragments(tmp_path: Path) -> None:
     ]
     width, height = spy.prefetched[0][2], spy.prefetched[0][3]
     assert (width, height) == (_REGION[2] - _REGION[0], _REGION[3] - _REGION[1] + _SLACK)
+
+
+def test_a_prefetch_request_carries_the_draw_time_style(tmp_path: Path) -> None:
+    # Regression: the request omitted is_bold/align_center/runs -- is_bold even
+    # received draw_size_pt -- so every styled-run or centred fragment missed the
+    # warmed cache and spawned one Typst process per box at draw time.
+    source = write_text_pdf(tmp_path / "source.pdf", [_PAGE])
+    spy = _FragmentSpy(tmp_path)
+    runs = (StyledRun("first"),)
+    overlay = Overlay("a", 1, _REGION, "first", is_bold=True, align_center=True, runs=runs)
+
+    LayerCompositor(source, typesetter=spy).compose([overlay], tmp_path / "out.pdf")
+
+    (request,) = spy.prefetched
+    kind, text, _w, _h, _fs, indent, fixed, is_bold, draw_size, align_center, got_runs = request
+    assert (kind, text) == ("text", "first")
+    assert indent is None
+    assert fixed is False
+    assert is_bold is True
+    assert draw_size is None
+    assert align_center is True
+    assert got_runs == runs
 
 
 def test_an_in_place_bilingual_overlay_stamps_both_languages(tmp_path: Path) -> None:

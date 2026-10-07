@@ -42,7 +42,7 @@ import pikepdf
 
 from ubt.adapters.pdf import pdf_struct
 from ubt.adapters.pdf.stream_strip import shared_form_objgens, strip_page_text_pikepdf
-from ubt.adapters.pdf.typst_compile import typst_compile
+from ubt.adapters.pdf.typst_compile import typst_compile as typst_compile
 from ubt.adapters.pdf.typst_math_probe import TypstMathProbe
 from ubt.cache.dirs import cache_root
 from ubt.core.ir.bifurcation import bifurcate_blocks
@@ -1293,22 +1293,38 @@ class TypstFragmentTypesetter:
         This fits every box with batched measure rounds, then renders every
         fragment as a page of one document and splits the pages back out.
         Content addressing keeps it idempotent: a later ``typeset`` for the same
-        box finds the split file. Each request is ``(kind, text, width_pt,
+        box finds the split file. A request is ``(kind, text, width_pt,
         height_pt, font_size)``; ``kind == "math"`` selects the math source. A
-        reflowed overlay appends ``(indent_pt, fixed, is_bold, draw_size_pt)``:
-        ``fixed`` means the box already equals the fragment's natural height, so it
-        is compiled at ``draw_size_pt`` (the size the reflow measured it at, which
-        is not necessarily this block's own cap) instead of being fitted.
+        non-bilingual text request extends it to ``(..., indent_pt, fixed, is_bold,
+        draw_size_pt, align_center, runs)``: ``fixed`` means the box already equals
+        the fragment's natural height, so it is compiled at ``draw_size_pt`` (the
+        size the reflow measured it at, which is not necessarily this block's own
+        cap) instead of being fitted.
 
         Each box draws at the largest size that fits it, capped at its source
         size, so a box the target does not overflow keeps the source size and only
-        a cramped one shrinks.
+        a cramped one shrinks. The fitted/``draw_size_pt`` path ignores ``runs``
+        and ``align_center`` when *measuring* (they change the drawn markup, not
+        the wrap), but the warmed source must still carry them or the draw-time
+        content hash differs and the fragment is recompiled one process at a time.
         """
         unique = list(dict.fromkeys(requests))
         if not unique:
             return
         parsed: list[
-            tuple[str, str, float, float, float | None, float | None, bool, bool, float | None]
+            tuple[
+                str,
+                str,
+                float,
+                float,
+                float | None,
+                float | None,
+                bool,
+                bool,
+                float | None,
+                bool,
+                tuple[StyledRun, ...],
+            ]
         ] = []
         for request in unique:
             request_kind, text, width_pt, height_pt, font_size, *rest = request
@@ -1316,6 +1332,8 @@ class TypstFragmentTypesetter:
             fixed = bool(rest[1]) if len(rest) > 1 else False
             is_bold = bool(rest[2]) if len(rest) > 2 else False
             draw_size = rest[3] if len(rest) > 3 else None
+            align_center = bool(rest[4]) if len(rest) > 4 else False
+            runs: tuple[StyledRun, ...] = rest[5] if len(rest) > 5 else ()
             parsed.append(
                 (
                     request_kind,
@@ -1327,6 +1345,8 @@ class TypstFragmentTypesetter:
                     fixed,
                     is_bold,
                     draw_size,
+                    align_center,
+                    runs,
                 )
             )
         # Resolve every inline-math body up front so fitting's measure calls hit
@@ -1334,7 +1354,8 @@ class TypstFragmentTypesetter:
         self._math_probe.check_many(self._math_bodies([text for _kind, text, *_rest in unique]))
         pages: list[tuple[str, str]] = []
         groups: dict[
-            tuple[str, float | None, bool], list[tuple[str, float, float, float | None]]
+            tuple[str, float | None, bool],
+            list[tuple[str, float, float, float | None, bool, tuple[StyledRun, ...]]],
         ] = {}
         # Fitted boxes: one size per (kind, indent, weight) class so the warmed
         # fragment is the one the draw asks for.
@@ -1348,19 +1369,23 @@ class TypstFragmentTypesetter:
             fixed,
             is_bold,
             _draw,
+            align_center,
+            runs,
         ) in parsed:
             if fixed or request_kind not in ("text", "heading"):
                 continue
             groups.setdefault((request_kind, indent, is_bold), []).append(
-                (text, width_pt, height_pt, font_size)
+                (text, width_pt, height_pt, font_size, align_center, runs)
             )
         for (kind, indent, is_bold), items in groups.items():
-            triples = [(text, width_pt, height_pt) for text, width_pt, height_pt, _ in items]
-            caps = [self._cap_for(kind, font_size) for _, _, _, font_size in items]
+            triples = [(text, width_pt, height_pt) for text, width_pt, height_pt, *_rest in items]
+            caps = [self._cap_for(kind, font_size) for _, _, _, font_size, *_rest in items]
             sizes = self._fit_sizes(
                 triples, kind=kind, max_size_pt=caps, is_bold=is_bold, indent_pt=indent
             )
-            for (text, width_pt, height_pt, _font_size), size_pt in zip(items, sizes, strict=True):
+            for (text, width_pt, height_pt, _font_size, align_center, runs), size_pt in zip(
+                items, sizes, strict=True
+            ):
                 if size_pt is None:
                     continue
                 pages.append(
@@ -1373,6 +1398,8 @@ class TypstFragmentTypesetter:
                             kind=kind,
                             is_bold=is_bold,
                             indent_pt=indent,
+                            align_center=align_center,
+                            runs=runs,
                         ),
                         "",
                     )
@@ -1389,6 +1416,8 @@ class TypstFragmentTypesetter:
             fixed,
             is_bold,
             draw_size,
+            align_center,
+            runs,
         ) in parsed:
             if not fixed or request_kind not in ("text", "heading"):
                 continue
@@ -1403,6 +1432,8 @@ class TypstFragmentTypesetter:
                         kind=request_kind,
                         is_bold=is_bold,
                         indent_pt=indent,
+                        align_center=align_center,
+                        runs=runs,
                     ),
                     "",
                 )
@@ -1669,7 +1700,13 @@ class LayerCompositor:
                         overlay.font_size,
                         overlay.indent_pt,
                         overlay.fixed_box,
+                        overlay.is_bold,
                         overlay.draw_size_pt,
+                        # The draw-time source carries these too; omitting them made
+                        # every styled-run (or centered) fragment miss the cache and
+                        # spawn its own Typst process at draw time.
+                        overlay.align_center,
+                        overlay.runs,
                     )
                 )
         prefetch(requests)

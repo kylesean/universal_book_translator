@@ -20,6 +20,28 @@ from ubt.analyze.structure import (
 from ubt.core.ir.models import BlockType, BoundingBox, FlowID, IRBlock, make_element
 
 
+def sample_page_indices(page_count: int, max_samples: int = 10) -> list[int]:
+    """Return a representative sample of page indices across a document.
+
+    Avoids front-matter sampling bias (where pages 0..9 are almost always cover,
+    blank, TOC, and preface) by sampling page 0 plus evenly distributed fractions
+    across 10% to 90% of the document.
+    """
+    if page_count <= 0:
+        return []
+    if page_count <= max_samples:
+        return list(range(page_count))
+    fractions = [i / max_samples for i in range(1, max_samples)]
+    indices = [0] + [min(int(f * page_count), page_count - 1) for f in fractions]
+    seen: set[int] = set()
+    result: list[int] = []
+    for idx in indices:
+        if idx not in seen:
+            seen.add(idx)
+            result.append(idx)
+    return result
+
+
 def sample_pdf_pages(path: Path) -> tuple[int, bool, str]:
     """Sample a PDF into ``(page_count, is_scanned, text_preview)``.
 
@@ -33,22 +55,7 @@ def sample_pdf_pages(path: Path) -> tuple[int, bool, str]:
 
         with open_document(path) as doc:
             page_count = len(doc)
-            candidate_indices = [
-                0,
-                1,
-                2,
-                3,
-                4,
-                6,
-                8,
-                9,
-                page_count // 4,
-                page_count // 2,
-            ]
-            sample_indices: list[int] = []
-            for idx in candidate_indices:
-                if 0 <= idx < page_count and idx not in sample_indices:
-                    sample_indices.append(idx)
+            sample_indices = sample_page_indices(page_count)
             text_samples: list[str] = []
             for i in sample_indices:
                 page = doc[i]
@@ -72,11 +79,7 @@ def sample_pdf_pages(path: Path) -> tuple[int, bool, str]:
     if not texts:
         return 1, False, ""
     page_count = len(texts)
-    candidate_indices = [0, 1, 2, 3, 4, 6, 8, 9, page_count // 4, page_count // 2]
-    sample_indices = []
-    for idx in candidate_indices:
-        if 0 <= idx < page_count and idx not in sample_indices:
-            sample_indices.append(idx)
+    sample_indices = sample_page_indices(page_count)
     full_sample = "\n".join(texts[i] for i in sample_indices)
     is_scanned = len(full_sample.strip()) < 100 * max(1, min(5, page_count))
     return page_count, is_scanned, full_sample

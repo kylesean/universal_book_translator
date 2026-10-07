@@ -377,8 +377,7 @@ async def _deep_blocks(path: Path, config: UBTConfig) -> tuple[int, int]:
 def _recommend_route(
     arch: Any, route: Any, pdf: dict[str, Any], config: UBTConfig
 ) -> RouteRecommendation:
-    """Correctness-dimension synthesis (aligned with adaptive_policy density dispatch)."""
-    math_heavy = arch.math_density == MathDensity.HIGH
+    math_heavy = arch.math_density == MathDensity.HIGH or bool(pdf.get("has_formulas"))
     academic = arch.category in (DocCategory.ACADEMIC_PAPER, DocCategory.TECHNICAL_BOOK)
     pdf_format = arch.format_ext == "pdf"
     has_formula_signal = bool(pdf.get("has_formulas")) or math_heavy
@@ -789,19 +788,35 @@ def _synthesize_warnings(
             )
         )
     wit = pdf.get("witness")
-    if wit and (wit["confirmed_pages"] or wit["at_risk_pages"]):
-        warnings.append(
-            AssessmentWarning(
-                "FONT_RESIDUE_RISK",
-                "warn",
-                f"字体编码损伤：{wit['confirmed_pages']} 页确认残留、{wit['at_risk_pages']} 页高危"
-                f"（共 {wit['residue_chars']} 个残字符），部分文字可能不可恢复，建议 rigid 或重新扫描。",
+    if wit:
+        confirmed = int(wit.get("confirmed_pages", 0))
+        residue_chars = int(wit.get("residue_chars", 0))
+        at_risk = int(wit.get("at_risk_pages", 0))
+        is_scanned = bool(
+            arch.is_scanned
+            or (pdf.get("scan_page_share") is not None and pdf["scan_page_share"] > 0.5)
+        )
+        if confirmed > 0:
+            remedy = (
+                "建议使用 rigid 路线或重新扫描高分原件"
+                if is_scanned
+                else f"建议开启 OCR 预检增强或选用 {('rigid' if route.recommended_render_engine == 'rigid' else 'rigid 兜底')}"
             )
-        )
-        quality_signals.append(
-            f"字体 witness：confirmed {wit['confirmed_pages']} 页 / at-risk {wit['at_risk_pages']} 页"
-        )
-    if arch.math_density == MathDensity.HIGH and config.formula_enrichment == "off":
+            warnings.append(
+                AssessmentWarning(
+                    "FONT_RESIDUE_RISK",
+                    "warn",
+                    f"字体编码损伤：{confirmed} 页确认存在字符乱码（共 {residue_chars} 个残字符），"
+                    f"部分文字可能不可恢复，{remedy}。",
+                )
+            )
+            quality_signals.append(f"字体 witness：confirmed {confirmed} 页 / at-risk {at_risk} 页")
+        elif at_risk > 0:
+            quality_signals.append(
+                f"字体编码：{at_risk} 页内嵌字体缺少 /ToUnicode 映射（未检出乱码，文本层健康）"
+            )
+    has_math = arch.math_density == MathDensity.HIGH or bool(pdf.get("has_formulas"))
+    if has_math and config.formula_enrichment == "off":
         warnings.append(
             AssessmentWarning(
                 "FORMULA_HEAVY_NEEDS_ENRICHMENT",
@@ -1006,7 +1021,11 @@ async def assess_document_async(
         category=arch.category.value,
         detected_domain=arch.detected_domain,
         domain_confidence=arch.domain_confidence,
-        math_density=arch.math_density.value,
+        math_density=(
+            arch.math_density.value
+            if arch.math_density != MathDensity.NONE or not pdf.get("has_formulas")
+            else MathDensity.LOW.value
+        ),
         is_scanned=arch.is_scanned,
         primary_engine=pdf.get("primary_engine"),
         has_vector_diagrams=pdf.get("has_vector_diagrams"),

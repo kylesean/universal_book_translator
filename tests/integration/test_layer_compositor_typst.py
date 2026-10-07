@@ -24,6 +24,7 @@ from ubt.model.fidelity import Fidelity
 from ubt.render.outputs import (
     LayerCompositor,
     Overlay,
+    StyledRun,
     TypstFragmentTypesetter,
     _line_slack,
 )
@@ -110,6 +111,37 @@ def test_prefetch_compiles_many_fragments_in_batches(tmp_path: Path) -> None:
         for _kind, text, width_pt, height_pt, _font_size in requests:
             fragment = typesetter.typeset(text, width_pt, height_pt)
             assert fragment is not None and fragment.exists()
+    finally:
+        typesetter.close()
+
+
+def test_a_styled_run_fragment_is_warmed_so_the_draw_does_not_recompile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Regression: the prefetch request used to omit runs/align_center/is_bold, so
+    # the warmed source differed from the draw-time one and every styled fragment
+    # was recompiled, one Typst process at a time, during the draw loop.
+    from ubt.render import outputs as outputs_mod
+
+    real_compile = outputs_mod.typst_compile
+    calls = {"n": 0}
+
+    def counting(typ_path: str, pdf_path: str, binary: str) -> tuple[bool, str]:
+        calls["n"] += 1
+        return real_compile(typ_path, pdf_path, binary)
+
+    monkeypatch.setattr(outputs_mod, "typst_compile", counting)
+    runs = (StyledRun("attention"),)
+    text = "The machine relies on attention and runs a forward pass."
+    typesetter = TypstFragmentTypesetter(cache_dir=tmp_path / "fragments")
+    try:
+        typesetter.prefetch(
+            [("text", text, 240.0, 20.0, None, None, False, False, None, False, runs)]
+        )
+        warmed_calls = calls["n"]
+        fragment = typesetter.typeset(text, 240.0, 20.0, runs=runs)
+        assert fragment is not None and fragment.exists()
+        assert calls["n"] == warmed_calls, "the draw recompiled a warmed fragment"
     finally:
         typesetter.close()
 
