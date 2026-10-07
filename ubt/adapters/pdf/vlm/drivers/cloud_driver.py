@@ -173,15 +173,31 @@ class CloudOcrDriver:
             "temperature": 0.0,
         }
 
+        finish_reason: str | None = None
         try:
             with httpx.Client(timeout=self.timeout) as client:
                 resp = client.post(chat_url, json=payload, headers=headers)
                 resp.raise_for_status()
                 data = resp.json()
                 _record_ocr_usage(self.model, data.get("usage"))
-                content = data["choices"][0]["message"]["content"] or ""
+                choice = data["choices"][0]
+                content = choice["message"]["content"] or ""
+                finish_reason = choice.get("finish_reason")
         except Exception as exc:
             raise RuntimeError(f"Vision LLM OCR request failed at {chat_url}: {exc}") from exc
+
+        # A length-capped answer is a truncated page, not a full transcription:
+        # without this the driver returned half a page as if it were complete.
+        # OCR has no continuation seam, so surface it (and flag the transcript)
+        # instead of silently shipping missing lines.
+        truncated = str(finish_reason or "") == "length"
+        if truncated:
+            logger.warning(
+                "Vision LLM OCR (%s) hit the output token limit "
+                "(finish_reason=length); the transcription is truncated and its "
+                "tail is missing.",
+                self.model,
+            )
 
         raw_lines = [ln.strip() for ln in content.split("\n") if ln.strip()]
         vlm_lines = [
@@ -198,6 +214,7 @@ class CloudOcrDriver:
             lines=tuple(vlm_lines),
             engine=f"vlm:{self.model}",
             measured_boxes=False,
+            truncated=truncated,
         )
 
     def _recognize_via_cloud_rest(

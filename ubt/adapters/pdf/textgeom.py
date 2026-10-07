@@ -770,10 +770,15 @@ def column_order(lines: Sequence[LineBox], page_width: float) -> list[LineBox]:
 
     left_cands = [i for i in candidates if center(i) < best_split]
     right_cands = [i for i in candidates if center(i) >= best_split]
-    top_ceiling = min(
+    # A banner must clear the TOP of BOTH columns (y grows upward, so the
+    # higher column's max top); a footer must sit below the BOTTOM of both (the
+    # lower column's min bottom). The old min/max were inverted, so when the two
+    # columns had unequal extents the longer column's lower lines were misread as
+    # footers and pushed to the end of the page.
+    top_ceiling = max(
         max(work[i].rect[3] for i in left_cands), max(work[i].rect[3] for i in right_cands)
     )
-    bottom_floor = max(
+    bottom_floor = min(
         min(work[i].rect[1] for i in left_cands), min(work[i].rect[1] for i in right_cands)
     )
 

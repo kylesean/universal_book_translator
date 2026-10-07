@@ -1687,12 +1687,22 @@ def vlm_fallback_missing_pages(
                     path.name,
                     len(fresh),
                 )
-                out.extend(fresh)
                 replaced_pages.add(page_no)
                 # The upgrade page is excluded from the not-replaced retention
                 # loop below, so the originals the transcription cannot re-create
-                # must be re-attached here (tables, images, formulas, code).
-                out.extend(b for b in page_originals if b.block_type not in _VLM_TEXTUAL_TYPES)
+                # (tables, images, formulas, code) must be re-attached here.
+                # Splice the transcribed prose in at the first textual block's
+                # slot and keep every non-textual original in place: the final
+                # sort is stable per page, so appending the fresh text first
+                # shoved a table/figure that sat above the prose to the page tail.
+                inserted = False
+                for orig in page_originals:
+                    if orig.block_type in _VLM_TEXTUAL_TYPES:
+                        if not inserted:
+                            out.extend(fresh)
+                            inserted = True
+                    else:
+                        out.append(orig)
 
         # Retain original blocks that weren't replaced
         for b in blocks:

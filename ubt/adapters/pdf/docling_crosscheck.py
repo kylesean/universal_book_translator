@@ -488,6 +488,7 @@ def cross_check_blocks_with_pdfium(
     output: list[IRBlock] = []
     lines_by_page: dict[int, list[LineBox]] = {}
     chars_by_page: dict[int, list[CharStyle]] = {}
+    cache_page = 0
 
     for block in blocks:
         if block.block_type not in _VERIFIABLE_TYPES or block.skip_translate:
@@ -497,6 +498,17 @@ def cross_check_blocks_with_pdfium(
         if bbox is None or bbox.page <= 0:
             output.append(block)
             continue
+
+        # Bound the per-page caches to the page in flight. Without this they
+        # held every page's lines and char styles for the whole book (hundreds
+        # of MB on a long scan). Blocks arrive in reading order, so a forward
+        # page step drops what is behind; an out-of-order block simply
+        # re-extracts its page.
+        if bbox.page > cache_page:
+            cache_page = bbox.page
+            for cache in (lines_by_page, chars_by_page):
+                for stale in [p for p in cache if p < cache_page]:
+                    del cache[stale]
 
         span = block.element.span
         eval_boxes = (

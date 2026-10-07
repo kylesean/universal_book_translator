@@ -140,3 +140,30 @@ def test_non_prose_blocks_are_not_checked() -> None:
     assert len(result) == 2
     assert result[0].id == "t1"
     assert result[1].id == "i1"
+
+
+def test_page_caches_are_evicted_as_the_page_advances() -> None:
+    # Blocks arrive in reading order (page 1, page 2, then page 1 again). The
+    # per-page caches must be dropped when the page advances: without eviction
+    # they held every page's lines and char styles for the whole book. The third
+    # block therefore re-extracts page 1 instead of reusing a book-wide cache.
+    pages_seen: list[int] = []
+
+    def fake_extract_lines(_path: object, page: int) -> tuple[list[LineBox], tuple[float, float]]:
+        pages_seen.append(page)
+        return [LineBox(text="body", rect=(50.0, 600.0, 300.0, 700.0))], (600.0, 800.0)
+
+    b1 = _block("b1", "page one text", page=1)
+    b2 = _block("b2", "page two text", page=2)
+    b3 = _block("b3", "page one again", page=1)
+
+    with (
+        patch(
+            "ubt.adapters.pdf.docling_crosscheck.extract_lines",
+            side_effect=fake_extract_lines,
+        ),
+        patch("ubt.adapters.pdf.docling_crosscheck.extract_char_styles", return_value=[]),
+    ):
+        cross_check_blocks_with_pdfium([b1, b2, b3], Path("dummy.pdf"))
+
+    assert pages_seen == [1, 2, 1]

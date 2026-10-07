@@ -224,6 +224,10 @@ def transcribe_page_to_blocks(
                     "parser": f"vlm:{transcript.engine}",
                     "anchor_provenance": "+".join(provenances),
                     "needs_review": any(m.needs_review for m in members),
+                    # A truncated driver transcript loses the page tail; carry
+                    # the flag so the ledger/report can show it rather than
+                    # trusting a half-page as complete.
+                    "ocr_truncated": transcript.truncated,
                     "anchor_stats": {
                         "matched": stats.matched,
                         "vlm_only": stats.vlm_only,

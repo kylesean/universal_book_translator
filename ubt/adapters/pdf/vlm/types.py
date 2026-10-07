@@ -29,6 +29,10 @@ class PageTranscript:
     lines: tuple[VlmLine, ...] = ()
     engine: str = ""
     measured_boxes: bool = False
+    #: A vision-LLM driver that hit its output token limit (``finish_reason ==
+    #: "length"``) sets this so the truncated page tail is not silently
+    #: accepted as a complete transcription.
+    truncated: bool = False
 
 
 class VlmDriver(Protocol):

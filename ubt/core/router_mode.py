@@ -24,7 +24,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Literal
 
-from ubt.core.ports import classify_pdf_structure, probe_pdf_pages
+from ubt.core.ports import classify_pdf_structure, probe_pdf_pages, sample_pdf_pages
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +140,30 @@ def _script_aware_tokens(text: str | None, chars: int) -> int:
 
         return count_text_tokens(text)
     return chars // 4
+
+
+def _pdf_script_aware_tokens(path: Path, chars: int) -> int:
+    """Script-aware token estimate for a PDF from a text sample.
+
+    ``probe_pdf_pages`` returns only the total char count and a PDF has no
+    single in-memory string to count, so extrapolate the sample's tokens-per-char
+    ratio to the whole document. The flat ``chars // 4`` rule under-counts CJK
+    ~3.4x (CJK ~0.85 tok/char vs ASCII ~0.25), which misroutes a large Chinese
+    or Japanese book onto the short chain. Falls back to ``chars // 4`` when no
+    text sample is available.
+    """
+    if chars <= 0:
+        return 0
+    try:
+        _, _, preview = sample_pdf_pages(path)
+    except Exception:
+        preview = ""
+    if not preview:
+        return chars // 4
+    from ubt.core.engine.cost_estimate import count_text_tokens
+
+    ratio = count_text_tokens(preview) / max(len(preview), 1)
+    return max(1, round(chars * ratio))
 
 
 def _probe_non_pdf(path: Path) -> tuple[int, int, int, int]:
@@ -343,7 +367,7 @@ def decide(
 
     # 2. PDF documents
     pages, chars = probe_pdf_pages(path)
-    est_tokens = chars // 4
+    est_tokens = _pdf_script_aware_tokens(path, chars)
     token_budget = short_max_pages * 800
     pdf_chapters = 1 if pages <= short_max_pages else max(1, pages // 20)
 

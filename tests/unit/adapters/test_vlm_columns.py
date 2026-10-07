@@ -37,6 +37,22 @@ def test_single_column_page_keeps_its_order() -> None:
     assert [lines[i][0] for i in order] == ["a", "b"]
 
 
+def test_unequal_columns_do_not_sink_the_longer_column_to_the_footer() -> None:
+    # The left column runs lower than the right. Its lower lines belong to the
+    # column, not to a footer bucket: the inverted min/max threshold used to
+    # misread them as footers and emit them after both columns.
+    lines = [
+        ("L top", (70.0, 700.0, 280.0, 712.0)),
+        ("R top", (320.0, 700.0, 530.0, 712.0)),
+        ("L mid", (70.0, 400.0, 280.0, 412.0)),
+        ("R bottom", (320.0, 680.0, 530.0, 692.0)),
+        ("L bottom", (70.0, 120.0, 280.0, 132.0)),
+    ]
+    order = order_lines_by_column([box for _t, box in lines], page_width=595.0)
+    ordered = [lines[i][0] for i in order]
+    assert ordered == ["L top", "L mid", "L bottom", "R top", "R bottom"]
+
+
 def test_grouping_preserves_the_given_order() -> None:
     lines = [("a", (70.0, 700.0, 280.0, 712.0)), ("b", (320.0, 700.0, 530.0, 712.0))]
     # Different columns -> separate groups, in the order given.
