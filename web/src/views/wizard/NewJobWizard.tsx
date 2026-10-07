@@ -346,6 +346,7 @@ export function NewJobWizard() {
                   lastAssessedFileRef.current = ''
                   hasUserSelectedPresetRef.current = false
                   hasUserSelectedDomainRef.current = false
+                  hasUserSelectedDualModeRef.current = false
                   void runAssess(filePath, { silent: false })
                 }}
                 disabled={!filePath.trim() || isAssessing}

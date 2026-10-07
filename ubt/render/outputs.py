@@ -730,14 +730,15 @@ class TypstFragmentTypesetter:
             store[item] = height
 
     def _caps_for(self, count: int, max_size_pt: float | Sequence[float] | None) -> list[float]:
-        """The per-box starting size cap (the source size, never below the floor)."""
+        """The per-box starting size cap (the source size, never below the floor).
+
+        A source size below ``_MIN_FONT_PT`` (5pt footnotes) is kept as-is:
+        the floor prevents *shrinking* during fit, not inflating small text.
+        """
         if isinstance(max_size_pt, (list, tuple)):
-            return [
-                float(cap) if cap is not None and cap >= _MIN_FONT_PT else self._size_pt
-                for cap in max_size_pt
-            ]
+            return [float(cap) if cap is not None else self._size_pt for cap in max_size_pt]
         single = max_size_pt if isinstance(max_size_pt, (int, float)) else None
-        if single is None or single < _MIN_FONT_PT:
+        if single is None:
             return [self._size_pt] * count
         return [float(single)] * count
 
@@ -771,6 +772,7 @@ class TypstFragmentTypesetter:
             min(cap, height_pt * 0.85) if width_pt > 0 and height_pt > 0 and text.strip() else None
             for (text, width_pt, height_pt), cap in zip(items, caps, strict=True)
         ]
+        initial_sizes: list[float] = [s if s is not None else _MIN_FONT_PT for s in sizes]
         indented = bool(indent_pt and indent_pt > 0)
         cache: dict[Any, float] = (
             self._indent_cache
@@ -791,9 +793,7 @@ class TypstFragmentTypesetter:
                 indent_pt=indent_pt if indented else None,
             )
 
-        active = [
-            index for index, size in enumerate(sizes) if size is not None and size >= _MIN_FONT_PT
-        ]
+        active = [index for index, size in enumerate(sizes) if size is not None and size > 0]
         for _ in range(6):
             if not active:
                 break
@@ -811,10 +811,13 @@ class TypstFragmentTypesetter:
                 natural = cache[_measured(items[index][0], items[index][1], size_pt)]
                 if natural <= height_pt + _FIT_TOL:
                     results[index] = size_pt
-                elif size_pt <= _MIN_FONT_PT:
+                elif size_pt <= _MIN_FONT_PT and size_pt <= initial_sizes[index]:
                     results[index] = None
                 else:
-                    sizes[index] = max(_MIN_FONT_PT, size_pt * (height_pt / natural) * 0.97)
+                    sizes[index] = max(
+                        min(_MIN_FONT_PT, initial_sizes[index]),
+                        size_pt * (height_pt / natural) * 0.97,
+                    )
                     next_active.append(index)
             active = next_active
         return results
@@ -907,9 +910,8 @@ class TypstFragmentTypesetter:
             else None
             for target, source, width_pt, height_pt in items
         ]
-        active = [
-            index for index, size in enumerate(sizes) if size is not None and size >= _MIN_FONT_PT
-        ]
+        initial_sizes: list[float] = [s if s is not None else _MIN_FONT_PT for s in sizes]
+        active = [index for index, size in enumerate(sizes) if size is not None and size > 0]
         for _ in range(6):
             if not active:
                 break
@@ -929,10 +931,13 @@ class TypstFragmentTypesetter:
                 natural = self._bilingual_cache[(keys[index], items[index][2], size_pt)]
                 if natural <= height_pt + _FIT_TOL:
                     results[index] = size_pt
-                elif size_pt <= _MIN_FONT_PT:
+                elif size_pt <= _MIN_FONT_PT and size_pt <= initial_sizes[index]:
                     results[index] = None
                 else:
-                    sizes[index] = max(_MIN_FONT_PT, size_pt * (height_pt / natural) * 0.97)
+                    sizes[index] = max(
+                        min(_MIN_FONT_PT, initial_sizes[index]),
+                        size_pt * (height_pt / natural) * 0.97,
+                    )
                     next_active.append(index)
             active = next_active
         return results
@@ -1766,7 +1771,7 @@ class LayerCompositor:
             indent_pt=overlay.indent_pt,
         )
         if capacity > 0 and height > capacity:
-            size = max(_MIN_FONT_PT, size * capacity / height)
+            size = max(min(_MIN_FONT_PT, base), size * capacity / height)
         # The bare ink box is the flow's capacity; a box that would otherwise come
         # out blank falls back to the draw box's (see ``solve_flow``), so the
         # source line it replaces is never erased with nothing drawn over it.
@@ -1839,7 +1844,7 @@ class LayerCompositor:
             return parts, size
         # The estimate overflowed, so bisect on the size: smaller text fits more
         # into every box, so "the flow fits" is monotone enough for a few rounds.
-        low = _MIN_FONT_PT
+        low = min(_MIN_FONT_PT, size)
         low_parts = _flow(low)
         if _worst_overflow(low, low_parts) > 1.0:
             # Even the readable floor overflows: drawing it would clip lines
