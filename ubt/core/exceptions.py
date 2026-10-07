@@ -100,6 +100,14 @@ class ServerCapacityError(UBTError):
     """Raised when the server has reached maximum concurrent running jobs."""
 
 
+class OutputPathConflictError(UBTError):
+    """A live job already owns this output path.
+
+    The filesystem ``exists()`` check at submit cannot see the path until the
+    owner's export writes it, so the queue/ledger rejects the second claim.
+    """
+
+
 class RenderBlocksNotImplementedError(NotImplementedError):
     """The base ``render_blocks`` stub signaling fallback to ``render_output``.
 
