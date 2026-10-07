@@ -899,6 +899,26 @@ def _register_job_routes(
                         detail="output_path already exists; refusing to overwrite it",
                     )
 
+        # Reject when another live job already claimed this output path. The
+        # filesystem exists() check above cannot see an un-written target, so
+        # the in-memory job map is the only guard against two concurrent
+        # pipelines last-writer-wins-ing the same deliverable.
+        if resolved_out is not None:
+            for rec in manager.jobs.values():
+                if rec.job_id == submit_id or rec.status in (
+                    JobStatus.FAILED,
+                    JobStatus.CANCELLED,
+                ):
+                    continue
+                if (
+                    rec.request.output_path
+                    and Path(rec.request.output_path).resolve() == Path(resolved_out).resolve()
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=f"output_path already claimed by live job {rec.job_id}",
+                    )
+
         resolved_glossary: str | None = None
         if req.glossary:
             # Same sandbox as input_path: a glossary is a filesystem path, so it

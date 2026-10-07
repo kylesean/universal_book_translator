@@ -59,6 +59,7 @@ export function NewJobWizard() {
   const hasUserSelectedPresetRef = useRef<boolean>(false)
   const hasUserSelectedDomainRef = useRef<boolean>(false)
   const hasUserSelectedDualModeRef = useRef<boolean>(false)
+  const assessSeqRef = useRef(0)
 
   const runAssess = async (
     path: string,
@@ -85,6 +86,7 @@ export function NewJobWizard() {
     const activeTarget = opts?.overrideTarget ?? targetLang
     const activeSource = opts?.overrideSource ?? sourceLang
 
+    const seq = ++assessSeqRef.current
     try {
       const res = await assessJob({
         input_path: path.trim(),
@@ -92,8 +94,9 @@ export function NewJobWizard() {
         source_lang: activeSource,
         preset: activePreset,
         pages: activePages.trim() ? activePages.trim() : null,
-        deep: true,
+        deep: !isSilent,
       })
+      if (seq !== assessSeqRef.current) return // stale response
       setAssessment(res)
 
       // Auto-feed recommendations when a new document is assessed
@@ -119,12 +122,16 @@ export function NewJobWizard() {
         }
       }
     } catch (err) {
+      if (seq !== assessSeqRef.current) return // stale response
       if (!isSilent) {
         setAssessError(err instanceof Error ? err.message : 'Assessment failed')
       }
+      setAssessment(null) // don't leave a stale quote on error
     } finally {
-      setIsAssessing(false)
-      setIsReassessing(false)
+      if (seq === assessSeqRef.current) {
+        setIsAssessing(false)
+        setIsReassessing(false)
+      }
     }
   }
 
