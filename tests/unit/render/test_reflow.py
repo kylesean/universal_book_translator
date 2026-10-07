@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from typing import Any
 
 import pytest
 
@@ -10,7 +11,7 @@ from ubt.model.span import PhysicalBox
 from ubt.render.outputs import Overlay
 from ubt.render.reflow import reflow_overlays
 
-_Item = tuple[str, float, float, float | None, str, bool]
+_Item = tuple[str, float, float, float | None, str, bool, tuple[Any, ...]]
 
 
 def _ov(eid: str, page: int, bbox: tuple[float, float, float, float], text: str = "x") -> Overlay:
@@ -132,7 +133,7 @@ def test_the_class_size_is_the_document_minimum_cap() -> None:
     seen: list[float] = []
 
     def measure(
-        items: Sequence[tuple[str, float, float, float | None, str, bool]],
+        items: Sequence[tuple[str, float, float, float | None, str, bool, tuple[Any, ...]]],
     ) -> list[float]:
         seen.extend(item[2] for item in items)
         return [20.0 for _ in items]

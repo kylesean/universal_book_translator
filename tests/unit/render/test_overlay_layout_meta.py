@@ -135,6 +135,7 @@ class _SizeSpy:
         kind: str = "text",
         is_bold: bool = False,
         indent_pt: float | None = None,
+        runs: tuple[Any, ...] = (),
     ) -> float:
         self.measured_widths.append(width)
         chars_per_line = max(1, int(width / size))

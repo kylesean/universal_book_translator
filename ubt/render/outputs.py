@@ -633,8 +633,9 @@ class TypstFragmentTypesetter:
         kind: str = "text",
         is_bold: bool = False,
         indent_pt: float | None = None,
+        runs: tuple[StyledRun, ...] = (),
     ) -> str:
-        body = self._body_markup(text)
+        body = self._body_markup(text, runs)
         font_line = self._font_line
         weight_line = _text_weight_line(kind == "heading" or is_bold)
         return (
@@ -654,13 +655,17 @@ class TypstFragmentTypesetter:
         kind: str = "text",
         is_bold: bool = False,
         indent_pt: float | None = None,
+        runs: tuple[StyledRun, ...] = (),
     ) -> float:
         # A first-line indent changes wrapping (and so height) only for the
         # indented overlay; it gets its own cache so the shared fit cache keeps
         # its 3-tuple key (and the fit path never passes an indent).
         if indent_pt and indent_pt > 0:
-            key: tuple[Any, ...] = (text, width_pt, size_pt, indent_pt)
+            key: tuple[Any, ...] = (text, width_pt, size_pt, indent_pt, runs)
             cache: dict[Any, float] = self._indent_cache
+        elif runs:
+            key = (text, width_pt, size_pt, runs)
+            cache = self._heading_cache if (kind == "heading" or is_bold) else self._measure_cache
         else:
             key = (text, width_pt, size_pt)
             cache = self._heading_cache if (kind == "heading" or is_bold) else self._measure_cache
@@ -669,7 +674,7 @@ class TypstFragmentTypesetter:
             return cached
         height = self._measure_one(
             self._measure_source(
-                text, width_pt, size_pt, kind=kind, is_bold=is_bold, indent_pt=indent_pt
+                text, width_pt, size_pt, kind=kind, is_bold=is_bold, indent_pt=indent_pt, runs=runs
             )
         )
         cache[key] = height
@@ -750,6 +755,7 @@ class TypstFragmentTypesetter:
         max_size_pt: float | Sequence[float] | None = None,
         is_bold: bool = False,
         indent_pt: float | None = None,
+        runs: tuple[StyledRun, ...] = (),
     ) -> list[float | None]:
         """Fit every box at once, one batched measure per correction round.
 
@@ -781,6 +787,8 @@ class TypstFragmentTypesetter:
         )
 
         def _measured(text: str, width_pt: float, size_pt: float) -> tuple[Any, ...]:
+            if runs:
+                return (text, width_pt, size_pt, indent_pt, runs)
             return (text, width_pt, size_pt, indent_pt) if indented else (text, width_pt, size_pt)
 
         def _build(*item: Any) -> str:
@@ -791,6 +799,7 @@ class TypstFragmentTypesetter:
                 kind=kind,
                 is_bold=is_bold,
                 indent_pt=indent_pt if indented else None,
+                runs=runs,
             )
 
         active = [index for index, size in enumerate(sizes) if size is not None and size > 0]
@@ -832,6 +841,7 @@ class TypstFragmentTypesetter:
         max_size_pt: float | None = None,
         is_bold: bool = False,
         indent_pt: float | None = None,
+        runs: tuple[StyledRun, ...] = (),
     ) -> float | None:
         # Each box draws at the largest size that fits it, capped at its source
         # size (``max_size_pt``). A box that fits at the source size keeps it; only
@@ -845,6 +855,7 @@ class TypstFragmentTypesetter:
             max_size_pt=max_size_pt,
             is_bold=is_bold,
             indent_pt=indent_pt,
+            runs=runs,
         )[0]
 
     # -- In-place bilingual: target above a smaller, muted source -------------- #
@@ -1017,6 +1028,7 @@ class TypstFragmentTypesetter:
             max_size_pt=max_size,
             is_bold=is_bold,
             indent_pt=indent_pt,
+            runs=runs,
         )
         if size_pt is None:
             return None
@@ -1079,29 +1091,30 @@ class TypstFragmentTypesetter:
         kind: str = "text",
         is_bold: bool = False,
         indent_pt: float | None = None,
+        runs: tuple[StyledRun, ...] = (),
     ) -> float:
         """Natural height of ``text`` at an explicit size and indent."""
         if width_pt <= 0 or not text.strip():
             return 0.0
         return self._measure_height(
-            text, width_pt, size_pt, kind=kind, is_bold=is_bold, indent_pt=indent_pt
+            text, width_pt, size_pt, kind=kind, is_bold=is_bold, indent_pt=indent_pt, runs=runs
         )
 
     def measure_many_fixed(
         self,
-        items: Sequence[tuple[str, float, float, float | None, str, bool]],
+        items: Sequence[tuple[str, float, float, float | None, str, bool, tuple[StyledRun, ...]]],
     ) -> list[float]:
         """Natural heights of many reflow items in one batched Typst invocation.
 
-        Items are ``(text, width_pt, size_pt, indent_pt, kind, is_bold)``. One
-        auto-height page per item keeps the reflow fit to a single compiler call,
-        which is what makes a whole-document reflow affordable.
+        Items are ``(text, width_pt, size_pt, indent_pt, kind, is_bold, runs)``.
+        One auto-height page per item keeps the reflow fit to a single compiler
+        call, which is what makes a whole-document reflow affordable.
         """
         keys = [tuple(item) for item in items]
         self._batch_measure(
             keys,
-            build=lambda t, w, s, ind, kind, bold: self._measure_source(
-                t, w, s, kind=kind, is_bold=bold, indent_pt=ind
+            build=lambda t, w, s, ind, kind, bold, runs: self._measure_source(
+                t, w, s, kind=kind, is_bold=bold, indent_pt=ind, runs=runs
             ),
             cache=self._fixed_measure_cache,
         )
@@ -1722,6 +1735,9 @@ class LayerCompositor:
         """
         typesetter = self._typesetter
         body = overlay.text if text is None else text
+        # Styled runs describe the *target* text; the source echo has its own
+        # shaping, so measuring it with the target's runs would mis-attribute.
+        runs = overlay.runs if text is None else ()
         assert typesetter is not None
         cap = getattr(typesetter, "cap_size", None)
         measure_fixed = getattr(typesetter, "measure_fixed", None)
@@ -1743,6 +1759,7 @@ class LayerCompositor:
                     kind=overlay.kind,
                     is_bold=overlay.is_bold,
                     indent_pt=overlay.indent_pt,
+                    runs=runs,
                 )
                 return max(0.0, height - slack) if with_slack else height
 
@@ -1769,6 +1786,7 @@ class LayerCompositor:
             kind=overlay.kind,
             is_bold=overlay.is_bold,
             indent_pt=overlay.indent_pt,
+            runs=runs,
         )
         if capacity > 0 and height > capacity:
             size = max(min(_MIN_FONT_PT, base), size * capacity / height)
@@ -1886,6 +1904,14 @@ class LayerCompositor:
                 if len(boxes) == 1
                 else self._flow_plan(overlay, boxes, text=overlay.source)[0]
             )
+            if not source_parts and len(boxes) > 1:
+                # The source echo (target is shorter, source overflowed at the
+                # floor). ``_flow_plan`` returned empty to signal "descend", but
+                # the target IS drawn, so dropping the echo silently would break
+                # the bilingual pair. Fall back to a greedy fill so the source
+                # still appears (the last box clips its tail).
+                assert self._typesetter is not None
+                source_parts = tuple(solve_flow(overlay.source, boxes, self._typesetter.measure))
             source_by_box = {(part.box.page, part.box.bbox): part.text for part in source_parts}
         stamped: list[_StampedPart] = []
         multi_box = len(boxes) > 1

@@ -31,6 +31,7 @@ class _Measurer:
         kind: str = "text",
         is_bold: bool = False,
         indent_pt: float | None = None,
+        runs: tuple[Any, ...] = (),
     ) -> float:
         per_line = max(1.0, width / size)
         return max(1, math.ceil(len(text) / per_line)) * size * 1.2
@@ -123,3 +124,64 @@ def test_a_continuation_that_cannot_fit_the_readable_floor_descends() -> None:
     assert parts == ()
     assert size is not None
     assert size >= 6.0
+
+
+class _RecordingMeasurer(_Measurer):
+    """Records the ``runs`` each measurement was called with."""
+
+    def __init__(self) -> None:
+        self.seen_runs: list[tuple[Any, ...]] = []
+
+    def measure_fixed(
+        self,
+        text: str,
+        width: float,
+        size: float,
+        *,
+        kind: str = "text",
+        is_bold: bool = False,
+        indent_pt: float | None = None,
+        runs: tuple[Any, ...] = (),
+    ) -> float:
+        self.seen_runs.append(runs)
+        return super().measure_fixed(
+            text, width, size, kind=kind, is_bold=is_bold, indent_pt=indent_pt, runs=runs
+        )
+
+
+def test_flow_measurement_carries_the_overlay_runs() -> None:
+    # N7: bold/superscript runs change wrapping, so the fit must measure WITH
+    # them; measuring run-less overflowed the clip box as an ink-less line.
+    from ubt.render.outputs import StyledRun
+
+    boxes = (
+        PhysicalBox.of(1, (0.0, 100.0, 300.0, 140.0)),
+        PhysicalBox.of(2, (0.0, 700.0, 300.0, 760.0)),
+    )
+    runs = (StyledRun(text="短句", bold=True),)
+    overlay = Overlay("e", 1, boxes[0].bbox, "短句。" * 5, boxes=boxes, font_size=11.0, runs=runs)
+    measurer = _RecordingMeasurer()
+    compositor = LayerCompositor("unused.pdf", typesetter=measurer)
+
+    compositor._flow_plan(overlay, boxes)
+
+    assert runs in measurer.seen_runs
+
+
+def test_flow_measurement_of_the_source_echo_drops_target_runs() -> None:
+    # The source echo has its own shaping; measuring it with the target's runs
+    # would mis-attribute a span the translation rewrote.
+    from ubt.render.outputs import StyledRun
+
+    boxes = (
+        PhysicalBox.of(1, (0.0, 100.0, 300.0, 140.0)),
+        PhysicalBox.of(2, (0.0, 700.0, 300.0, 760.0)),
+    )
+    runs = (StyledRun(text="短句", bold=True),)
+    overlay = Overlay("e", 1, boxes[0].bbox, "短句。" * 5, boxes=boxes, font_size=11.0, runs=runs)
+    measurer = _RecordingMeasurer()
+    compositor = LayerCompositor("unused.pdf", typesetter=measurer)
+
+    compositor._flow_plan(overlay, boxes, text="source text")
+
+    assert runs not in measurer.seen_runs

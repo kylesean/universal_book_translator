@@ -30,12 +30,13 @@ from collections.abc import Callable, Sequence
 from dataclasses import replace
 
 from ubt.model.span import PhysicalBox
-from ubt.render.outputs import Overlay
+from ubt.render.outputs import Overlay, StyledRun
 
 #: ``measure_many(items) -> heights``; items are
-#: ``(text, width_pt, size_pt, indent_pt, kind, is_bold)``.
+#: ``(text, width_pt, size_pt, indent_pt, kind, is_bold, runs)``.
 MeasureMany = Callable[
-    [Sequence[tuple[str, float, float, float | None, str, bool]]], Sequence[float]
+    [Sequence[tuple[str, float, float, float | None, str, bool, tuple[StyledRun, ...]]]],
+    Sequence[float],
 ]
 #: ``cap_size(kind, source_font_size) -> draw size`` (the compositor's own cap).
 CapSize = Callable[[str, float | None], float]
@@ -143,7 +144,7 @@ def _layout_band(
     if any(width <= 0 for width in widths):
         return None
     items = [
-        (ov.text, width, size, ov.indent_pt, ov.kind, ov.is_bold)
+        (ov.text, width, size, ov.indent_pt, ov.kind, ov.is_bold, ov.runs)
         for ov, width, size in zip(band, widths, sizes, strict=True)
     ]
     naturals = list(measure_many(items))
