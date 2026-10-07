@@ -43,7 +43,6 @@ if TYPE_CHECKING:
     from ubt.adapters.pdf.extraction_witness import PageVerdict
     from ubt.adapters.pdf.page_profiler import PageKind
     from ubt.adapters.pdf.visual_gate import VisualGateResult
-    from ubt.core.engine.ledger import SQLiteJobLedger
     from ubt.segment.placeholders import MaskedSource, PlaceholderEngine
     from ubt.translate.engine import TranslationEngine
 
@@ -118,17 +117,6 @@ class DocumentAdapter(Protocol):
         blocks: list[IRBlock],
         target_lang: str,
         output_path: Path,
-        bilingual_mode: str | None = None,
-        **kwargs: Any,
-    ) -> Path: ...
-
-    async def render_output(
-        self,
-        manifest: BookManifest,
-        ledger: SQLiteJobLedger,
-        target_lang: str,
-        output_path: Path,
-        job_id: str | None = None,
         bilingual_mode: str | None = None,
         **kwargs: Any,
     ) -> Path: ...

@@ -14,7 +14,6 @@ from ubt.core.exceptions import RenderBlocksNotImplementedError
 from ubt.core.ir.models import BookManifest, ChapterIR, IRBlock
 
 if TYPE_CHECKING:
-    from ubt.core.engine.ledger import SQLiteJobLedger
     from ubt.core.ports import AdapterRuntimeConfig
 
 #: CSS class every adapter puts on an injected bilingual target node. One name
@@ -103,8 +102,7 @@ class BaseDocumentAdapter(ABC):
     """Unified SPI abstraction for all document format adapters.
 
     Primary render contract is :meth:`render_blocks` (pure: manifest +
-    already-fetched blocks, no storage dependency); :meth:`render_output` is a
-    compatibility shim that fetches from the ledger and delegates.
+    already-fetched blocks, no storage dependency).
     """
 
     #: Suffixes this adapter's ``render_blocks`` actually writes; empty means
@@ -173,32 +171,6 @@ class BaseDocumentAdapter(ABC):
         """
         raise RenderBlocksNotImplementedError(
             f"{type(self).__name__} must implement render_blocks()"
-        )
-
-    async def render_output(
-        self,
-        manifest: BookManifest,
-        ledger: SQLiteJobLedger,
-        target_lang: str,
-        output_path: Path,
-        job_id: str | None = None,
-        bilingual_mode: str | None = None,
-        **kwargs: Any,
-    ) -> Path:
-        """Compatibility adapter: fetch blocks from ledger, then delegate to render_blocks.
-
-        ``**kwargs`` forwards engine-specific options so the PDF family need not
-        duplicate this method.
-        """
-        actual_job_id = job_id or manifest.doc_id
-        blocks = ledger.get_all_blocks(actual_job_id)
-        return await self.render_blocks(
-            manifest=manifest,
-            blocks=blocks,
-            target_lang=target_lang,
-            output_path=output_path,
-            bilingual_mode=bilingual_mode,
-            **kwargs,
         )
 
 

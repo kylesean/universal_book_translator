@@ -101,7 +101,7 @@ class ServerCapacityError(UBTError):
 
 
 class RenderBlocksNotImplementedError(NotImplementedError):
-    """The base ``render_blocks`` stub signaling fallback to ``render_output``.
+    """The base ``render_blocks`` stub signaling the adapter does not render.
 
     Deliberately a distinct type so that export stage fallback logic does
     not accidentally swallow unrelated ``NotImplementedError`` exceptions
