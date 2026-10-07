@@ -43,9 +43,7 @@ def load_contract(artifact: Path | str) -> ReconciliationReport:
     return load_contract_file(contract_path_for_artifact(artifact))
 
 
-def contract_from_ledger(
-    ledger: SQLiteJobLedger, job_id: str, *, engine: str | None = None
-) -> ReconciliationReport:
+def contract_from_ledger(ledger: SQLiteJobLedger, job_id: str) -> ReconciliationReport:
     """Re-derive the contract from a finished job's ledger blocks.
 
     It does not trust the ``*_contract.json`` sidecar: the blocks come from the
@@ -55,10 +53,6 @@ def contract_from_ledger(
 
     The account is the *attestation projection* the export uses (pre-render
     decision plan), not a second, independent balance: one account, one mechanism.
-    ``engine`` selects the asset-preservation policy (see
-    :func:`ubt.core.content.adapt.graph_from_blocks`); if not explicitly provided,
-    it falls back to the job's persisted ``render_engine_effective`` metadata,
-    defaulting to ``publication`` (reflow) when unset.
     """
     from ubt.core.content.project import contract_from_attestations
     from ubt.core.qe.fast_pass import FastPassFilter
@@ -71,23 +65,19 @@ def contract_from_ledger(
     from ubt.render.typst_backend import TypstBackend
     from ubt.verify.verifier import build_verifiers
 
-    if engine is None:
-        persisted = ledger.get_job_metadata_value(job_id, "render_engine_effective")
-        engine = str(persisted) if persisted else "publication"
-
     blocks = ledger.get_all_blocks(job_id)
     source_lang = str(ledger.get_job_metadata_value(job_id, "source_lang") or "en")
     target_lang = str(ledger.get_job_target_lang(job_id) or "zh")
     report = attest_blocks(
         blocks,
         TypstBackend(
-            delivery_translations(blocks, engine=engine),
+            delivery_translations(blocks),
             theme=resolve_theme(source_lang, target_lang),
         ),
         build_verifiers(FastPassFilter(source_lang=source_lang, target_lang=target_lang)),
         doc_id=job_id,
     )
-    return contract_from_attestations(report, blocks, engine=engine, doc_id=job_id)
+    return contract_from_attestations(report, blocks, doc_id=job_id)
 
 
 class CorpusCase(BaseModel):

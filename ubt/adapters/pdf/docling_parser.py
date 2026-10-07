@@ -36,7 +36,6 @@ from ubt.adapters.pdf.pdfium_gate import PDFIUM_LOCK, unify_docling_pdfium_lock
 from ubt.adapters.pdf.plain_text_extractor import pages_to_blocks
 from ubt.analyze.structure import looks_like_debris, looks_like_listing, pdf_list_marker
 from ubt.core.cleaners.lnds_pruner import normalize_academic_pdf_math
-from ubt.core.config import INPLACE_ENGINES, canonical_render_engine
 from ubt.core.exceptions import DocumentParseError
 from ubt.core.fs_perms import restrict_dir_to_owner, restrict_file_to_owner
 from ubt.core.ir.models import (
@@ -91,7 +90,6 @@ def extract_manifest(path: Path, *, is_docling_installed: bool) -> BookManifest:
 
 def resolve_formula_enrichment(
     formula_enrichment: str,
-    render_engine: str,
     formula_render: str,
     has_accelerator: Callable[[], bool],
     path: Path | None = None,
@@ -104,37 +102,21 @@ def resolve_formula_enrichment(
         return True
 
     # Mode == "auto":
-    # Check engine & formula render strategy:
-    # 1. If render_engine is 'rigid' (or 'auto' routing to 'rigid' on formula-dense documents),
-    #    the source PDF page is preserved as the vector canvas and original vector math is untouched.
-    #    VLM formula OCR is redundant and causes massive latency on long documents.
-    # 2. If formula_render is 'image', formulas are always replaced with source crops,
+    # 1. If formula_render is 'image', formulas are always replaced with source crops,
     #    so VLM LaTeX OCR is redundant.
-    render_engine = str(render_engine).lower().strip()
+    # 2. Otherwise a formula-dense document keeps its original vector formulas on
+    #    the overlay canvas, so VLM math OCR is likewise redundant.
     formula_render = str(formula_render).lower().strip()
 
-    if canonical_render_engine(render_engine) in INPLACE_ENGINES:
-        logger.info(
-            "Docling formula enrichment set to False (auto: render_engine='%s' preserves "
-            "original vector formulas on canvas; skipping redundant VLM math OCR)",
-            render_engine,
-        )
-        return False
-
-    if (
-        render_engine == "auto"
-        and path is not None
-        and path.suffix.lower() == ".pdf"
-        and path.exists()
-    ):
+    if path is not None and path.suffix.lower() == ".pdf" and path.exists():
         try:
             from ubt.core.ports import classify_pdf_content
 
             _, formula_heavy = classify_pdf_content(path)
             if formula_heavy:
                 logger.info(
-                    "Docling formula enrichment set to False (auto: auto-dispatch routes formula-dense document "
-                    "'%s' to 'rigid' overlay, preserving original vector formulas on canvas; skipping redundant VLM math OCR)",
+                    "Docling formula enrichment set to False (auto: the overlay canvas preserves the "
+                    "formula-dense document '%s' original vector formulas; skipping redundant VLM math OCR)",
                     path.name,
                 )
                 return False

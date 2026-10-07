@@ -26,7 +26,6 @@ from typing import Any
 from ubt.core.exceptions import DocumentParseError
 from ubt.core.ir.models import BlockType, IRBlock
 from ubt.core.ir.render_plan import RenderPlan
-from ubt.core.policy.adaptive_policy import resolve_pdf_engine
 from ubt.core.ports import DocumentAdapter, get_last_render_skips
 
 logger = logging.getLogger(__name__)
@@ -158,19 +157,6 @@ async def run_render_preflight(
     sample = select_preflight_sample(blocks)
     scratch_blocks = _placeholder_blocks(sample)
     metadata = getattr(manifest, "metadata", None) or {}
-    # The render decision is the plan's (compiler render plan protocol); the
-    # manifest metadata copy is a fallback for callers that pass no plan.
-    # Resolve the engine against ALL blocks, then force that engine onto the
-    # sample. ``select_preflight_sample`` is deliberately structure-biased
-    # (TABLE/FORMULA first), so resolving on the sample alone could route rigid
-    # while the full document reflows: the scratch render would exercise a path
-    # that never runs, and log a monolingual-downgrade warning for it.
-    requested_engine = (
-        (render_plan.render_engine if render_plan is not None else None)
-        or metadata.get("render_engine")
-        or "publication"
-    )
-    render_engine = resolve_pdf_engine(str(requested_engine), blocks, manifest=manifest)
     if render_plan is not None:
         bilingual_mode = (
             render_plan.effective_dual_mode or render_plan.bilingual_mode
@@ -180,11 +166,6 @@ async def run_render_preflight(
     # Render into an isolated copy: the scratch compile must not write its
     # route/downgrade facts back onto the live run manifest.
     scratch_manifest = _isolated_manifest(manifest)
-    if hasattr(scratch_manifest, "metadata"):
-        if isinstance(scratch_manifest.metadata, dict):
-            scratch_manifest.metadata["suppress_render_engine_warning"] = True
-        elif scratch_manifest.metadata is None:
-            scratch_manifest.metadata = {"suppress_render_engine_warning": True}
 
     tmp_dir = Path(tempfile.mkdtemp(prefix="ubt-preflight-"))
     preflight_path = tmp_dir / "preflight.pdf"
@@ -195,7 +176,6 @@ async def run_render_preflight(
             target_lang=target_lang,
             output_path=preflight_path,
             bilingual_mode=bilingual_mode,
-            render_engine=render_engine,
             render_plan=render_plan,
         )
         # LayerCompositor records a failed fragment as a skip and keeps the

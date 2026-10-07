@@ -1,6 +1,6 @@
-"""The ``composite`` render engine end to end (opt-in LayerCompositor path).
+"""The overlay engine end to end (LayerCompositor path).
 
-Drives the real dry-run pipeline with ``render_engine="composite"`` over a
+Drives the real dry-run pipeline over a
 synthetic PDF and pins the delivery: the three-layer composition keeps source
 page geometry, strips+replaces the reconstructed regions, passes the visual gate
 (no occluded/overlapped text, so no block is quarantined), and reconciles a clean
@@ -45,7 +45,6 @@ def _config(tmp_path: Path) -> UBTConfig:
             "ocr_mode": "off",
             "allow_page_upload": False,
             "visual_judge_enabled": False,
-            "render_engine": "composite",
             # These tests pin the monolingual composition; the bilingual tests
             # below opt back in with an explicit dual_mode.
             "dual_mode": "monolingual",

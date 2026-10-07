@@ -164,14 +164,12 @@ class BaseDocumentAdapter(ABC):
         target_lang: str,
         output_path: Path,
         bilingual_mode: str | None = None,
-        render_engine: str | None = None,
         **kwargs: Any,
     ) -> Path:
         """Render bilingual output from pre-fetched blocks (no ledger access).
 
-        ``bilingual_mode`` and ``render_engine`` are accepted uniformly so
-        engine-agnostic call sites typecheck; non-PDF adapters render their
-        single canonical bilingual layout and ignore engine-specific options.
+        ``bilingual_mode`` is accepted uniformly so engine-agnostic call sites
+        typecheck; non-PDF adapters render their single canonical bilingual layout.
         """
         raise RenderBlocksNotImplementedError(
             f"{type(self).__name__} must implement render_blocks()"
@@ -189,8 +187,8 @@ class BaseDocumentAdapter(ABC):
     ) -> Path:
         """Compatibility adapter: fetch blocks from ledger, then delegate to render_blocks.
 
-        ``**kwargs`` forwards engine-specific options (e.g. PDF's
-        ``render_engine``) so the PDF family need not duplicate this method.
+        ``**kwargs`` forwards engine-specific options so the PDF family need not
+        duplicate this method.
         """
         actual_job_id = job_id or manifest.doc_id
         blocks = ledger.get_all_blocks(actual_job_id)
@@ -223,7 +221,6 @@ class BasePDFEngineAdapter(BaseDocumentAdapter):
         target_lang: str,
         output_path: Path,
         bilingual_mode: str | None = None,
-        render_engine: str | None = None,
         **kwargs: Any,
     ) -> Path:
         """Render PDF output from pre-fetched blocks (no ledger access)."""

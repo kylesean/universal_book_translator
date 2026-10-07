@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from ubt.core.config import INPLACE_ENGINES, canonical_render_engine
 from ubt.core.content.adapt import kept_in_source
 from ubt.core.ir.models import BlockType, IRBlock
 from ubt.model.ast import Document
@@ -51,26 +50,21 @@ def delivery_document(blocks: Sequence[IRBlock], *, doc_id: str = "") -> Documen
     return Document(source=source, regions=tuple(regions))
 
 
-def delivery_translations(blocks: Sequence[IRBlock], *, engine: str) -> dict[str, str]:
+def delivery_translations(blocks: Sequence[IRBlock]) -> dict[str, str]:
     """The ``element id -> placed target`` map the run's backend is built with.
 
     Only a translation the renderer actually *placed* is in the map: a block kept
     in the source (:func:`ubt.core.content.adapt.kept_in_source`) has none, so the
-    backend places it opaque and the attestation matches the artifact. A rigid run
-    places every asset opaque rather than reconstructing it, so an asset's markup
-    is not a realization either -- the engine is the whole-document choice the
-    per-element backends replace, and it is exactly what this map carries.
+    backend places it opaque and the attestation matches the artifact. The
+    overlay engine places every asset opaque rather than reconstructing it, so an
+    asset's markup is not a realization either.
     """
-    inplace = canonical_render_engine(engine) in INPLACE_ENGINES
     placed: dict[str, str] = {}
     for block in blocks:
         target = block.target_text or ""
         if not target.strip():
             continue
-        if block.block_type in _ASSET_TYPES:
-            if inplace:
-                continue
-        elif kept_in_source(block):
+        if block.block_type in _ASSET_TYPES or kept_in_source(block):
             continue
         placed[block.id] = target
     return placed

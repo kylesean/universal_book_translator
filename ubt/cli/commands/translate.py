@@ -7,7 +7,7 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 import typer
 from rich.console import Console
@@ -27,7 +27,6 @@ from ubt.core.config import (
     PdfEngine,
     PromptStrategyName,
     QeEngine,
-    canonical_render_engine,
 )
 from ubt.core.job_options import (
     default_output_path,
@@ -43,8 +42,6 @@ def _ui_msg(en: str, zh: str) -> str:
     """Return English CLI copy by default, or Chinese when UBT_UI_LANG=zh."""
     return zh if os.environ.get("UBT_UI_LANG", "en").strip().lower().startswith("zh") else en
 
-
-UserRenderEngine = Literal["rigid", "reflow", "auto"]
 
 console = Console()
 
@@ -182,12 +179,9 @@ def _find_companion_paths(
     names: list[str] = []
     is_rigid = False
     if report_data:
-        is_rigid = (
-            report_data.get("render_engine") == "rigid"
-            or report_data.get("effective_engine") == "rigid"
-            or "overlay engine" in (report_data.get("delivery_status") or "")
-            or "overlay engine" in (report_data.get("delivery_warning") or "")
-        )
+        is_rigid = "overlay engine" in (
+            report_data.get("delivery_status") or ""
+        ) or "overlay engine" in (report_data.get("delivery_warning") or "")
     if not is_rigid and not stem.endswith("_rigid"):
         names.append(f"{stem}_rigid.pdf")
     if stem.endswith("_mono"):
@@ -417,14 +411,6 @@ def translate(
             help="Quality Estimation engine: 'heuristic' (default fast) or 'comet' (neural CometKiwi)",
         ),
     ] = None,
-    render_engine: Annotated[
-        UserRenderEngine | None,
-        typer.Option(
-            "--render-engine",
-            help="PDF 渲染引擎：'auto'（默认，智能路由：公式/表格密集→rigid 保真，纯正文→reflow 重排）、'rigid'（原位覆盖底板，单语输出，图形表格零丢失）、'reflow'（Typst 从零重排，支持双语，适合结构抽取可靠的正文文档）",
-            show_default=False,
-        ),
-    ] = None,
     pdf_engine: Annotated[
         PdfEngine | None,
         typer.Option(
@@ -637,7 +623,6 @@ def translate(
         "translate_chrome": translate_chrome,
         "preset": preset,
         "facing_spread": facing_spread,
-        "render_engine": render_engine,
         "pdf_engine": pdf_engine,
         "emit_both": emit_both,
         "cover_mode": cover_mode,
@@ -723,129 +708,6 @@ def translate(
                 border_style="yellow" if dry_run else "cyan",
             )
         )
-        if input_path.suffix.lower() == ".pdf" and render_engine in ("reflow", "publication"):
-            pre_adv = None
-            try:
-                from ubt.core.advisor import DocumentAdvisor
-
-                pre_adv = DocumentAdvisor.analyze(input_path)
-            except Exception:
-                pre_adv = None
-
-            if pre_adv is not None and (
-                getattr(pre_adv, "recommended_render_engine", None) == "rigid"
-                or str(getattr(pre_adv, "math_density", "")).lower() == "high"
-            ):
-                from ubt.cli.main import resolve_cli_adaptive_dual_mode
-
-                math_level = str(getattr(pre_adv, "math_density", "high"))
-                adaptive_mode = (
-                    resolve_cli_adaptive_dual_mode(dual_mode, profile, render_engine)
-                    or "monolingual"
-                )
-                if dual_mode is not None:
-                    requested_desc_en = (
-                        f"--render-engine {render_engine} --dual-mode {dual_mode} (explicit)"
-                    )
-                    requested_desc_zh = (
-                        f"--render-engine {render_engine} --dual-mode {dual_mode} (显式指定)"
-                    )
-                else:
-                    requested_desc_en = (
-                        f"--render-engine {render_engine} (adaptive dual-mode: {adaptive_mode})"
-                    )
-                    requested_desc_zh = (
-                        f"--render-engine {render_engine} (自适应双语模式: {adaptive_mode})"
-                    )
-
-                panel_title = _ui_msg(
-                    "[bold yellow]⚠ Pre-Flight Layout Tradeoff[/]",
-                    "[bold yellow]⚠ 排版与双语模式风险预警 (Pre-Flight Layout Tradeoff)[/]",
-                )
-                panel_body = _ui_msg(
-                    f"Detected dense math/2D structure ([cyan]math_density={math_level}[/], [cyan]profile={profile}[/]).\n"
-                    f"• [dim]Recommended :[/] [bold green]--render-engine rigid[/]  [dim](preserves 2D equations/diagrams)[/]\n"
-                    f"• [dim]Requested   :[/] [bold yellow]{requested_desc_en}[/]\n"
-                    "  [dim]Note: reflow disassembles 2D page geometry and may fragment dense math.[/]\n\n"
-                    "  [bold green][1][/] Switch to [bold green]'rigid'[/] (Recommended — 100% faithful 2D layout, mono)\n"
-                    "  [bold yellow][2][/] Keep [bold yellow]'reflow'[/] + auto-emit [bold green]'*_rigid.pdf'[/] companion (0 extra tokens)\n"
-                    "  [bold red][3][/] Abort",
-                    f"检测到当前 PDF 为高密度公式/二维结构文档 ([cyan]math_density={math_level}[/], [cyan]profile={profile}[/])：\n"
-                    f"• [dim]系统推荐 :[/] [bold green]--render-engine rigid[/]  [dim](100% 原位保留交换图与公式几何坐标)[/]\n"
-                    f"• [dim]当前指定 :[/] [bold yellow]{requested_desc_zh}[/]\n"
-                    "  [dim]注意：流式重排 (reflow) 会拆解二维页面坐标，可能触发复杂公式截图回退或正文穿插顿挫。[/]\n\n"
-                    "  [bold green][1][/] 切换为推荐的 [bold green]'rigid'[/] 原位引擎 (100% 保真二维几何版式，单语输出)\n"
-                    "  [bold yellow][2][/] 继续 [bold yellow]'reflow'[/] 重排 + 零 Token 成本自动附赠 [bold green]'*_rigid.pdf'[/] 保真对照版\n"
-                    "  [bold red][3][/] 取消并退出 (Abort)",
-                )
-                console.print(
-                    Panel.fit(
-                        panel_body, title=panel_title, title_align="left", border_style="yellow"
-                    )
-                )
-                if _is_interactive() and not yes:
-                    try:
-                        console.print(
-                            _ui_msg(
-                                "[bold yellow]Select action [1=rigid / 2=reflow+companion (default) / 3=abort]: [/]",
-                                "[bold yellow]请选择执行策略 [1=切换rigid / 2=继续reflow+双交付(默认) / 3=中断退出]: [/]",
-                            ),
-                            end="",
-                        )
-                        user_choice = input().strip().lower()
-                    except (EOFError, KeyboardInterrupt) as exc:
-                        console.print(
-                            _ui_msg(
-                                "\n[bold red]✕ Aborted by user.[/]",
-                                "\n[bold red]✕ 用户已中断执行。[/]",
-                            )
-                        )
-                        raise typer.Exit(code=130) from exc
-                    if user_choice in ("3", "n", "no", "q", "quit", "abort"):
-                        console.print(
-                            _ui_msg(
-                                "[bold red]✕ Execution aborted by user.[/]",
-                                "[bold red]✕ 已根据您的选择中止任务。[/]",
-                            )
-                        )
-                        raise typer.Exit(code=130)
-                    if user_choice in ("1", "rigid"):
-                        render_engine = "rigid"
-                        dual_mode = "monolingual"
-                        request["render_engine"] = "rigid"
-                        request["dual_mode"] = "monolingual"
-                        if output is not None:
-                            orig_name = output.name
-                            new_name = (
-                                orig_name.replace("_reflow_bilingual", "_rigid_zh")
-                                .replace("_reflow", "_rigid")
-                                .replace("_bilingual", "_mono")
-                            )
-                            if new_name != orig_name:
-                                output = output.with_name(new_name)
-                                console.print(
-                                    _ui_msg(
-                                        f"[dim]Output target updated to '{output.name}' to match rigid monolingual delivery.[/]\n",
-                                        f"[dim]输出目标文件名已自愈调整为 '{output.name}'（以匹配 rigid 单语保真交付）。[/]\n",
-                                    )
-                                )
-                        console.print(
-                            _ui_msg(
-                                "[bold green]✓ Switched to '--render-engine rigid --dual-mode monolingual'.[/]\n",
-                                "[bold green]✓ 已切换为推荐的 rigid 原位引擎 (--render-engine rigid --dual-mode monolingual)。[/]\n",
-                            )
-                        )
-                    else:
-                        request["emit_companion_rigid"] = True
-                        console.print(
-                            _ui_msg(
-                                "[bold yellow]⚡ Proceeding with 'reflow' + zero-cost '*_rigid.pdf' companion delivery.[/]\n",
-                                "[bold yellow]⚡ 已确认继续 reflow 重排，并在导出阶段自动零成本额外生成 *_rigid.pdf 保真对照文档。[/]\n",
-                            )
-                        )
-                else:
-                    request["emit_companion_rigid"] = True
-
     output = _refuse_existing_output(output, fresh=fresh, input_path=input_path)
     try:
         run_fn = _get_run_translation()
@@ -937,7 +799,7 @@ def translate(
         if report_data:
             if _report_degrades_bilingual_delivery(report_data):
                 is_bilingual = False
-        elif dual_mode == "monolingual" or canonical_render_engine(render_engine) == "rigid":
+        elif dual_mode == "monolingual":
             is_bilingual = False
 
         doc_label = (

@@ -20,7 +20,6 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Sequence
 
-from ubt.core.config import INPLACE_ENGINES, canonical_render_engine
 from ubt.core.content.graph import ContentGraph
 from ubt.core.content.nodes import (
     AssetDescriptor,
@@ -138,64 +137,23 @@ def _asset_node(
     block: IRBlock,
     order: int,
     region: SourceRegion | None,
-    engine: str,
-    substituted_ids: frozenset[str],
 ) -> AssetNode:
     asset_kind = _ASSET_KIND[block.block_type]
     flags = _skip_flags(block)
     reasons = {_skip_reason(f) for f in flags}
-    verified = False
-    corrupt = False
-    # Every canonical PDF engine (``rigid``/``composite``/``publication``) keeps
-    # the source page as the canvas, so its non-text nodes survive whole rather
-    # than being reconstructed.
-    inplace = canonical_render_engine(engine) in INPLACE_ENGINES
+    # The overlay engine keeps the source page as the canvas, so every non-text
+    # node survives whole: no asset is ever reconstructed or re-verified.
     if reasons & _DECORATIVE_SKIP_REASONS:
         integrity = AssetIntegrity.DROPPED
         detail = "intentional:" + ",".join(sorted(reasons & _DECORATIVE_SKIP_REASONS))
     elif flags and not _all_intentional(flags):
         integrity = AssetIntegrity.MISSING
         detail = f"render:{_skip_reason(flags[0])}"
-    elif not inplace and block.id in substituted_ids:
-        # The formula witness failed and the renderer swapped in the source
-        # graphic: lossless by construction, so the asset is preserved opaque.
-        integrity = AssetIntegrity.PRESERVED_OPAQUE
-        detail = "witness_substituted"
-        verified = True
-    elif inplace:
-        # The source canvas is kept, so every non-text node survives whole.
+    else:
         integrity = AssetIntegrity.PRESERVED_OPAQUE
         detail = ""
-    else:
-        # Reflow reconstruction: level-1 structural verification.
-        # A PASS is verified; a FAIL is corruption (Axiom A) and awaits the
-        # opaque source-crop fallback; a SKIP stays unverified.
-        if asset_kind is AssetKind.FIGURE:
-            # A figure is placed as its original graphic, not rebuilt.
-            integrity = AssetIntegrity.PRESERVED_OPAQUE
-            verified = True
-            detail = "placed"
-        else:
-            # Structural verification now goes through the unified verifier
-            # seam (document compiler architecture). The import is function-local because
-            # ``ubt.verify`` imports this package's ``asset_verify`` submodule:
-            # a module-level edge here would close a cycle when ``ubt.verify``
-            # is the first package imported. The behaviour is unchanged -- the
-            # seam wraps the very same check, pinned by tests/unit/test_shadow.py.
-            from ubt.verify.verifier import StructuralAsset, StructuralAssetVerifier
-
-            proof = StructuralAssetVerifier().verify(
-                StructuralAsset(asset_kind, block.target_text or block.source_text or "")
-            )
-            integrity = AssetIntegrity.RECONSTRUCTED
-            if proof.verified:
-                verified = True
-                detail = proof.detail
-            elif proof.failed:
-                corrupt = True
-                detail = f"structural:{proof.detail}"
-            else:
-                detail = proof.detail
+    verified = False
+    corrupt = False
     return AssetNode(
         id=block.id,
         order=order,
@@ -217,31 +175,20 @@ def _asset_node(
 def graph_from_blocks(
     blocks: Sequence[IRBlock],
     *,
-    engine: str = "publication",
     doc_id: str = "",
     title: str = "",
     source_path: str = "",
-    witness_findings: Sequence[str] = (),
-    table_fallbacks: Sequence[str] = (),
 ) -> ContentGraph:
     """Build the delivery contract's content graph from the delivered blocks.
 
-    ``engine`` selects the asset-preservation policy. Every canonical PDF engine
-    (``rigid``/``composite``/``publication``) composes onto the source page, so
-    its non-text nodes are preserved whole; the reconstruction path is a fallback
-    for non-source-canvas engine names only. ``witness_findings`` /
-    ``table_fallbacks`` are the ``"<block_id>: <detail>"`` lines for assets the
-    renderer swapped for their source graphic; those are honoured as
-    preserved-opaque, not reconstructions.
+    The overlay engine keeps the source page as the canvas, so non-text nodes are
+    always preserved whole.
     """
-    substituted_ids = frozenset(
-        f.split(":", 1)[0].strip() for f in (*witness_findings, *table_fallbacks) if f and ":" in f
-    )
     nodes: list[ContentNode] = []
     for order, block in enumerate(blocks):
         region = _region(block)
         if block.block_type in _ASSET_KIND:
-            nodes.append(_asset_node(block, order, region, engine, substituted_ids))
+            nodes.append(_asset_node(block, order, region))
         else:
             nodes.append(_text_node(block, order, region))
     return ContentGraph(doc_id=doc_id, title=title, source_path=source_path, nodes=tuple(nodes))

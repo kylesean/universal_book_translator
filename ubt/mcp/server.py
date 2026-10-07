@@ -299,7 +299,6 @@ async def ubt_translate_book(
     # UBT_EXEC_MODE / UBT_FORMULA_MODE environment (same convention as the CLI).
     exec_mode: str | None = None,
     formula_mode: str | None = None,
-    render_engine: str | None = None,
     pdf_engine: str | None = None,
     dual_mode: str | None = None,
     db_dir: str | None = None,
@@ -411,7 +410,6 @@ async def ubt_translate_book(
         "repair_model": repair_model,
         "exec_mode": exec_mode,
         "formula_mode": formula_mode,
-        "render_engine": render_engine,
         "pdf_engine": pdf_engine,
         "dual_mode": dual_mode,
         "preset": preset,

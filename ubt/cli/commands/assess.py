@@ -196,8 +196,6 @@ def assess_cmd(
             engine_signature=f"preset{effective_preset.value}",
         ),
     ]
-    if report.route.recommended_render_engine != "auto":
-        command_parts += ["--render-engine", report.route.recommended_render_engine]
     if report.route.recommended_dual_mode != "inline":
         command_parts += ["--dual-mode", report.route.recommended_dual_mode]
     # The profile decides prompt assembly, glossary seeding and whether
@@ -241,9 +239,7 @@ def assess_cmd(
         else f"{rec.recommended_preset}（本次报价基于默认配置 standard；如需按推荐预设报价请加 --preset {rec.recommended_preset}）"
     )
     route_table.add_row("预设", preset_note)
-    route_table.add_row(
-        "渲染引擎/版式", f"{rec.recommended_render_engine} / {rec.recommended_dual_mode}"
-    )
+    route_table.add_row("版式", rec.recommended_dual_mode)
     route_table.add_row("领域档案", rec.recommended_profile)
     route_table.add_row(
         "路由置信度", f"{rec.confidence:.2f} — {escape(rec.confidence_basis)}（非质量分数）"

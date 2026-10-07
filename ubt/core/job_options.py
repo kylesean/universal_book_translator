@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import Any, Literal, get_args
 
 from ubt.core.config import (
-    INPLACE_ENGINES,
     CoverMode,
     DualMode,
     ExecMode,
@@ -30,9 +29,7 @@ from ubt.core.config import (
     OcrMode,
     PromptStrategyName,
     QeEngine,
-    RenderEngine,
     UBTConfig,
-    canonical_render_engine,
     env_var_names,
 )
 from ubt.core.exceptions import UBTError
@@ -44,7 +41,6 @@ from ubt.core.presets import PRESET_ENGINE_FIELDS, Preset, resolve_engine_params
 #: the entry point instead of letting ``validate_assignment`` reject the value
 #: inside the background task (job accepted, then fails).
 _ENUM_REQUEST_FIELDS: dict[str, tuple[str, ...]] = {
-    "render_engine": get_args(RenderEngine),
     "dual_mode": get_args(DualMode),
     "exec_mode": get_args(ExecMode),
     "formula_mode": get_args(FormulaMode),
@@ -204,7 +200,7 @@ def overrides_from_request(
         # The adaptive default is a *default*: writing it into the overrides
         # layer would outrank UBT_DUAL_MODE, which the CLI help documents as
         # "unset follows config / UBT_DUAL_MODE".
-        adaptive = adaptive_dual_mode(None, request.get("profile"), overrides.get("render_engine"))
+        adaptive = adaptive_dual_mode(None, request.get("profile"))
         if adaptive is not None:
             overrides["dual_mode"] = adaptive
     return overrides
@@ -213,23 +209,16 @@ def overrides_from_request(
 def adaptive_dual_mode(
     explicit_dual_mode: str | None,
     profile: str | None,
-    render_engine: str | None,
 ) -> str | None:
-    """Profile/engine-aware ``dual_mode`` default, shared by CLI, API and MCP.
+    """Profile-aware ``dual_mode`` default, shared by CLI, API and MCP.
 
-    An explicit ``dual_mode`` always wins. Otherwise:
-    - a source-canvas engine defaults to ``monolingual`` (an explicit mode opts in);
-    - academic papers and fiction/novels read better monolingual;
-    - everything else stays unset to follow config / ``UBT_DUAL_MODE``.
+    An explicit ``dual_mode`` always wins. Otherwise academic papers and
+    fiction/novels read better monolingual; everything else stays unset to
+    follow config / ``UBT_DUAL_MODE``.
     """
     if explicit_dual_mode is not None:
         return explicit_dual_mode
     norm_profile = (profile or "").strip().lower()
-    norm_engine = (render_engine or "").strip().lower()
-    # A source-canvas engine defaults to monolingual; a bilingual artifact needs
-    # an explicit mode, which the caller above already wins with.
-    if canonical_render_engine(norm_engine) in INPLACE_ENGINES:
-        return "monolingual"
     if norm_profile in ("paper", "fiction", "novel"):
         return "monolingual"
     return None

@@ -21,7 +21,7 @@ from ubt.core.policy.layout_policy import (
     _env_int,
     calibration_summary,
     formula_debris_share,
-    is_rigid_non_prose_degradable,
+    is_non_prose_degradable,
 )
 
 pytestmark = pytest.mark.fast
@@ -91,53 +91,38 @@ def test_formula_debris_ignores_non_ascii_tokens() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# is_rigid_non_prose_degradable
+# is_non_prose_degradable
 # --------------------------------------------------------------------------- #
 
 
 @pytest.mark.parametrize(
     "block_type", [BlockType.TABLE, BlockType.CODE, BlockType.FORMULA, BlockType.IMAGE]
 )
-def test_non_prose_blocks_degrade_under_rigid(block_type: BlockType) -> None:
-    assert is_rigid_non_prose_degradable(block_type, [], render_engine="rigid") is True
+def test_non_prose_blocks_degrade(block_type: BlockType) -> None:
+    assert is_non_prose_degradable(block_type, []) is True
 
 
 @pytest.mark.parametrize(
     "block_type", [BlockType.NARRATIVE, BlockType.HEADING, BlockType.LIST_ITEM]
 )
 def test_prose_blocks_never_degrade(block_type: BlockType) -> None:
-    assert is_rigid_non_prose_degradable(block_type, ["x"], render_engine="rigid") is False
-
-
-def test_non_prose_without_rigid_engine_does_not_degrade() -> None:
-    assert is_rigid_non_prose_degradable(BlockType.TABLE, [], render_engine=None) is False
-    assert is_rigid_non_prose_degradable(BlockType.TABLE, [], render_engine="publication") is False
-
-
-@pytest.mark.parametrize("engine", ["rigid", "inplace", "hybrid", " RIGID "])
-def test_rigid_engine_aliases_enable_degradation(engine: str) -> None:
-    assert is_rigid_non_prose_degradable(BlockType.TABLE, [], render_engine=engine) is True
-
-
-def test_render_skip_flag_enables_degradation_without_engine() -> None:
-    flags = ["render_skip:non_prose"]
-    assert is_rigid_non_prose_degradable(BlockType.TABLE, flags) is True
+    assert is_non_prose_degradable(block_type, ["x"]) is False
 
 
 @pytest.mark.parametrize("marker", ["Prompt template XML artifacts", "Prompt scaffold"])
 def test_fatal_leak_markers_block_degradation(marker: str) -> None:
     flags = ["render_skip:non_prose", marker]
-    assert is_rigid_non_prose_degradable(BlockType.TABLE, flags, render_engine="rigid") is False
+    assert is_non_prose_degradable(BlockType.TABLE, flags) is False
 
 
 def test_unknown_block_type_is_treated_as_non_prose() -> None:
-    assert is_rigid_non_prose_degradable("mystery", [], render_engine="rigid") is True
-    assert is_rigid_non_prose_degradable(None, [], render_engine="rigid") is True
+    assert is_non_prose_degradable("mystery", []) is True
+    assert is_non_prose_degradable(None, []) is True
 
 
 def test_block_type_accepts_bare_strings() -> None:
-    assert is_rigid_non_prose_degradable("table", [], render_engine="rigid") is True
-    assert is_rigid_non_prose_degradable("narrative", [], render_engine="rigid") is False
+    assert is_non_prose_degradable("table", []) is True
+    assert is_non_prose_degradable("narrative", []) is False
 
 
 # --------------------------------------------------------------------------- #

@@ -226,7 +226,7 @@ def test_deliverables_endpoint_serves_only_existing_files(tmp_path: Path) -> Non
 
 def test_assess_response_is_typed_not_a_bare_object() -> None:
     # The wizard's pre-flight panel reads nested fields (document.pages,
-    # cost.total_cost_usd, route.recommended_render_engine). While the schema was
+    # cost.total_cost_usd, route.recommended_dual_mode). While the schema was
     # ``additionalProperties: true`` the generated TS type was an opaque object,
     # so the panel silently read non-existent flat keys and showed fallbacks.
     schema = create_app().openapi()
@@ -242,7 +242,7 @@ def test_assess_response_is_typed_not_a_bare_object() -> None:
         components["AssessDocumentFacts"]["properties"]
     )
     assert "total_cost_usd" in components["AssessCost"]["properties"]
-    assert "recommended_render_engine" in components["AssessRoute"]["properties"]
+    assert "recommended_render_engine" not in components["AssessRoute"]["properties"]
 
 
 def test_jobs_endpoint_lists_ledgers_and_ignores_sidecars(tmp_path: Path) -> None:

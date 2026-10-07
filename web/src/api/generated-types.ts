@@ -749,8 +749,6 @@ export interface components {
             reason: string;
             /** Recommended Preset */
             recommended_preset: string;
-            /** Recommended Render Engine */
-            recommended_render_engine: string;
             /** Recommended Dual Mode */
             recommended_dual_mode: string;
             /** Recommended Profile */
@@ -1039,11 +1037,6 @@ export interface components {
             repair_model?: string | null;
             /** @description Quality preset (publication, standard, preview) */
             preset?: components["schemas"]["Preset"] | null;
-            /**
-             * Render Engine
-             * @description PDF render engine (rigid, reflow, publication, auto)
-             */
-            render_engine?: ("rigid" | "reflow" | "auto" | "publication" | "composite") | null;
             /**
              * Pdf Engine
              * @description PDF extraction/parser engine (docling, pdfium, auto)

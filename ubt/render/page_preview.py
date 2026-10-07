@@ -1,7 +1,7 @@
 """Single-page preview: re-compose one source page with the current ledger text.
 
-The delivery render composes every PDF route onto the source page as its canvas
-(``LayerCompositor``; see ``INPLACE_ENGINES``). This module reuses that exact
+The delivery render composes every PDF onto the source page as its canvas
+(``LayerCompositor``; the single ``overlay`` engine). This module reuses that exact
 pipeline for a *single* page, so the L3 workbench can show the effect of a human
 edit without re-rendering the book: overlays are built from the current blocks,
 restricted to the requested page, reflowed, composed onto the source PDF, and

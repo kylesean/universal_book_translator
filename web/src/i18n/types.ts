@@ -99,10 +99,6 @@ export interface TranslationDictionary {
     dualModeFacing: string
     dualModeAlternating: string
     dualModeMonolingual: string
-    renderEngine: string
-    renderEngineAuto: string
-    renderEngineReflow: string
-    renderEngineRigid: string
     pageFilter: string
     pageFilterPlaceholder: string
     pageFilterHelp: string

@@ -628,7 +628,7 @@ def collect_checks(config: UBTConfig, *, probe: bool = False) -> list[_Check]:
     record(
         "Render",
         "OK",
-        f"dual_mode={config.dual_mode}, pdf={config.render_engine}",
+        f"dual_mode={config.dual_mode}, pdf=overlay",
     )
 
     # -- local render toolchain -----------------------------------------------

@@ -1,10 +1,7 @@
-"""Regression: the content-graph asset policy matches the unified render route.
+"""Regression: the content-graph asset policy for the single overlay engine.
 
-Every canonical PDF engine (``rigid`` / ``composite`` / ``publication``, and the
-``reflow`` alias) composes onto the source page through the unified
-LayerCompositor, so a non-text block must be reported PRESERVED_OPAQUE rather
-than RECONSTRUCTED. This pins the contract ``graph_from_blocks`` documents: only
-a non-source-canvas engine name falls back to the reconstruction path.
+Every PDF composes onto the source page through the unified LayerCompositor, so
+a non-text block must be reported PRESERVED_OPAQUE rather than RECONSTRUCTED.
 """
 
 from __future__ import annotations
@@ -30,19 +27,8 @@ def _formula_block(block_id: str = "f1") -> IRBlock:
     return IRBlock(element=element)
 
 
-@pytest.mark.parametrize("engine", ["rigid", "composite", "publication", "reflow"])
-def test_source_canvas_engines_preserve_assets_opaque(engine: str) -> None:
-    graph = graph_from_blocks([_formula_block()], engine=engine)
+def test_non_text_assets_are_preserved_opaque() -> None:
+    graph = graph_from_blocks([_formula_block()])
     (node,) = graph.nodes
     assert isinstance(node, AssetNode)
     assert node.descriptor.integrity is AssetIntegrity.PRESERVED_OPAQUE
-
-
-def test_publication_is_not_reconstructed() -> None:
-    """The pre-unified docstring claimed publication reconstructs; the contract
-    must not regress to that, since the runtime composes every PDF route onto the
-    source canvas."""
-    graph = graph_from_blocks([_formula_block()], engine="publication")
-    (node,) = graph.nodes
-    assert isinstance(node, AssetNode)
-    assert node.descriptor.integrity is not AssetIntegrity.RECONSTRUCTED

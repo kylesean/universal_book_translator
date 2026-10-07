@@ -26,30 +26,18 @@ def contract_from_attestations(
     report: AttestationReport,
     blocks: Sequence[IRBlock],
     *,
-    engine: str,
     doc_id: str = "",
     title: str = "",
     source_path: str = "",
-    witness_findings: Sequence[str] = (),
-    table_fallbacks: Sequence[str] = (),
 ) -> ReconciliationReport:
-    """The delivery contract: the attestation projection over the block graph.
-
-    ``engine`` selects the asset-preservation policy (see
-    :func:`ubt.core.content.adapt.graph_from_blocks`); ``witness_findings`` /
-    ``table_fallbacks`` are the ``"<block_id>: <detail>"`` lines for assets the
-    renderer swapped for their source graphic, honoured as preserved-opaque.
-    """
+    """The delivery contract: the attestation projection over the block graph."""
     from ubt.pipeline.attest import project_contract
 
     graph = graph_from_blocks(
         blocks,
-        engine=engine,
         doc_id=doc_id,
         title=title,
         source_path=source_path,
-        witness_findings=witness_findings,
-        table_fallbacks=table_fallbacks,
     )
     return project_contract(report, graph)
 

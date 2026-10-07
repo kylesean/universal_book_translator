@@ -41,7 +41,6 @@ export function NewJobWizard() {
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false)
   const [domainProfile, setDomainProfile] = useState('general')
   const [dualMode, setDualMode] = useState<'auto' | 'inline' | 'facing' | 'alternating' | 'monolingual'>('auto')
-  const [renderEngine, setRenderEngine] = useState<'auto' | 'reflow' | 'rigid'>('auto')
   const [pageRange, setPageRange] = useState('')
   const [glossaryPath, setGlossaryPath] = useState('')
   const [execMode, setExecMode] = useState<'auto' | 'short' | 'long'>('auto')
@@ -191,7 +190,6 @@ export function NewJobWizard() {
         profile: domainProfile,
         preset: preset,
         dual_mode: dualMode === 'auto' ? null : dualMode,
-        render_engine: renderEngine === 'auto' ? null : renderEngine,
         pages: pageRange.trim() ? pageRange.trim() : null,
         glossary: glossaryPath.trim() ? glossaryPath.trim() : null,
         exec_mode: execMode === 'auto' ? null : execMode,
@@ -531,27 +529,8 @@ export function NewJobWizard() {
                     </div>
                   </div>
 
-                  {/* Row 2: Render Engine & Formula Mode */}
+                  {/* Row 2: Formula Mode */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                    <div>
-                      <label className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] block mb-1 font-semibold">
-                        {t.wizard.renderEngine}
-                      </label>
-                      <select
-                        value={renderEngine}
-                        onChange={(e) => setRenderEngine(e.target.value as any)}
-                        className="w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs font-medium"
-                      >
-                        <option value="auto">
-                          {assessment?.route?.recommended_render_engine
-                            ? `${t.wizard.renderEngineAuto} (推荐: ${assessment.route.recommended_render_engine})`
-                            : t.wizard.renderEngineAuto}
-                        </option>
-                        <option value="reflow">{t.wizard.renderEngineReflow}</option>
-                        <option value="rigid">{t.wizard.renderEngineRigid}</option>
-                      </select>
-                    </div>
-
                     <div>
                       <label className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] block mb-1 font-semibold">
                         {t.wizard.formulaMode}
@@ -771,7 +750,7 @@ export function NewJobWizard() {
                       {t.wizard.recommendation}
                     </span>
                     <span className="font-mono text-[#15803d] text-[11px] font-semibold text-right">
-                      {assessment.route.recommended_render_engine} · {assessment.route.recommended_preset}
+                      {assessment.route.recommended_dual_mode} · {assessment.route.recommended_preset}
                       <span className="text-[var(--ink-muted)] font-normal">
                         {' '}
                         ({t.wizard.confidence} {(assessment.route.confidence * 100).toFixed(0)}%)

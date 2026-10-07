@@ -30,12 +30,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ubt.core.archetype import DocCategory, MathDensity, analyze_archetype
-from ubt.core.config import INPLACE_ENGINES, canonical_render_engine
 from ubt.core.engine.cost_estimate import (
     estimate_draft_cost_from_totals,
     measure_prefix_tokens,
 )
-from ubt.core.policy.adaptive_policy import resolve_render_engine_from_signals
 from ubt.core.policy.layout_policy import PROBE_MIN_CHARS
 from ubt.core.ports import (
     inspect_font_encoding_damage,
@@ -135,7 +133,6 @@ class RouteRecommendation:
     mode: str  # short | long | auto (probe unavailable)
     reason: str
     recommended_preset: str
-    recommended_render_engine: str
     recommended_dual_mode: str
     recommended_profile: str
     confidence: float
@@ -380,14 +377,6 @@ def _recommend_route(
 ) -> RouteRecommendation:
     math_heavy = arch.math_density == MathDensity.HIGH or bool(pdf.get("has_formulas"))
     academic = arch.category in (DocCategory.ACADEMIC_PAPER, DocCategory.TECHNICAL_BOOK)
-    pdf_format = arch.format_ext == "pdf"
-    has_formula_signal = bool(pdf.get("has_formulas")) or math_heavy
-    has_vector_signal = bool(pdf.get("has_vector_diagrams"))
-    # A multi-column body is the layout a reflow re-typeset mangles most; the
-    # probe already computes it (``inspect_pdf_route_plan``), but the
-    # recommendation used to ignore it, so a two-column paper was quoted
-    # reflow while the runtime ``auto`` dispatch would pick rigid.
-    has_multicolumn_signal = bool(pdf.get("has_multicolumn"))
 
     # Scanned-page truth: prefer the per-page census over the 5-page heuristic.
     if pdf.get("scan_page_share") is not None:
@@ -406,33 +395,9 @@ def _recommend_route(
         scanned = arch.is_scanned
         confidence, basis = 0.5, "仅前5页采样启发式"
 
-    # Route render_engine recommendation: predict the runtime ``auto`` dispatch
-    # through the same canonical resolver the renderer uses
-    # (``adaptive_policy.resolve_render_engine_from_signals``), so the route a
-    # user is quoted is the route that runs. The probe cannot see the block mix,
-    # so it estimates the structure signal from its diagram/scan facts: a
-    # document that carries vector figures or scanned pages yields IMAGE blocks
-    # and is structure-dense enough for rigid. A purely academic classification
-    # is NOT a routing signal on its own — academic prose with no math or
-    # figures reflows better and the runtime dispatcher would say so.
-    if pdf_format:
-        canonical = resolve_render_engine_from_signals(
-            "auto",
-            has_math=has_formula_signal,
-            struct_share=1.0 if (has_vector_signal or scanned) else 0.0,
-            has_geometry=True,
-            multicolumn_share=1.0 if has_multicolumn_signal else 0.0,
-            structural_page_share=float(pdf.get("structural_page_share") or 0.0),
-            profile="paper" if arch.category == DocCategory.ACADEMIC_PAPER else None,
-            category=arch.category,
-        )
-        render_engine = "rigid" if canonical in ("rigid", "composite") else "reflow"
-    else:
-        render_engine = "reflow"
-
-    dual_mode = (
-        "monolingual" if canonical_render_engine(render_engine) in INPLACE_ENGINES else "inline"
-    )
+    # There is no render-engine recommendation: every PDF renders through the
+    # single source-canvas overlay engine, so the engine is not a user choice.
+    dual_mode = "monolingual" if academic or math_heavy else "inline"
     preset = "publication" if (math_heavy or academic) else "standard"
     profile = (
         "paper"
@@ -448,7 +413,6 @@ def _recommend_route(
         mode=mode,
         reason=reason,
         recommended_preset=preset,
-        recommended_render_engine=render_engine,
         recommended_dual_mode=dual_mode,
         recommended_profile=profile,
         confidence=confidence,
@@ -799,9 +763,9 @@ def _synthesize_warnings(
         )
         if confirmed > 0:
             remedy = (
-                "建议使用 rigid 路线或重新扫描高分原件"
+                "建议重新扫描高分原件"
                 if is_scanned
-                else f"建议开启 OCR 预检增强或选用 {('rigid' if route.recommended_render_engine == 'rigid' else 'rigid 兜底')}"
+                else "建议开启 OCR 预检增强或人工校对确认受损页"
             )
             warnings.append(
                 AssessmentWarning(

@@ -17,7 +17,6 @@ from ubt.core.config import (
     PdfEngine,
     PromptStrategyName,
     QeEngine,
-    RenderEngine,
     parse_page_ranges,
 )
 from ubt.core.engine.progress import ProgressSnapshot
@@ -72,10 +71,6 @@ class JobSubmitRequest(BaseModel):
     repair_model: str | None = Field(default=None, description="Override repair model tier")
     preset: Preset | None = Field(
         default=None, description="Quality preset (publication, standard, preview)"
-    )
-    render_engine: RenderEngine | None = Field(
-        default=None,
-        description="PDF render engine (rigid, reflow, publication, auto)",
     )
     pdf_engine: PdfEngine | None = Field(
         default=None,
@@ -316,7 +311,6 @@ class AssessRoute(BaseModel):
     mode: str
     reason: str
     recommended_preset: str
-    recommended_render_engine: str
     recommended_dual_mode: str
     recommended_profile: str
     confidence: float

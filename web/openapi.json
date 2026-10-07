@@ -2659,10 +2659,6 @@
             "type": "string",
             "title": "Recommended Preset"
           },
-          "recommended_render_engine": {
-            "type": "string",
-            "title": "Recommended Render Engine"
-          },
           "recommended_dual_mode": {
             "type": "string",
             "title": "Recommended Dual Mode"
@@ -2685,7 +2681,6 @@
           "mode",
           "reason",
           "recommended_preset",
-          "recommended_render_engine",
           "recommended_dual_mode",
           "recommended_profile",
           "confidence",
@@ -3202,25 +3197,6 @@
               }
             ],
             "description": "Quality preset (publication, standard, preview)"
-          },
-          "render_engine": {
-            "anyOf": [
-              {
-                "type": "string",
-                "enum": [
-                  "rigid",
-                  "reflow",
-                  "auto",
-                  "publication",
-                  "composite"
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Render Engine",
-            "description": "PDF render engine (rigid, reflow, publication, auto)"
           },
           "pdf_engine": {
             "anyOf": [

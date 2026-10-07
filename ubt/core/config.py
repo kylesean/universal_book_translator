@@ -34,7 +34,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Any, ClassVar, Literal
+from typing import Any, ClassVar, Final, Literal
 from urllib.parse import urlsplit
 
 from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
@@ -62,49 +62,17 @@ PdfEngine = str
 QeEngine = Literal["heuristic", "comet", "cometkiwi", "neural", "subprocess", "tiered"]
 DualMode = Literal["inline", "alternating", "monolingual", "facing", "auto"]
 PeExportFormat = Literal["csv", "xliff", "none"]
-RenderEngine = Literal["rigid", "reflow", "auto", "publication", "composite"]
-# One canonical name per render route: `rigid` keeps each block on its source
-# page geometry and paints the translated text back into the original bounding
-# boxes, so every non-text element stays pixel-intact; `reflow` (a.k.a.
-# `publication`) re-typesets a fresh document from the extracted IR. 'auto'
-# selects per document.
-RIGID_ENGINES: frozenset[str] = frozenset({"rigid"})
-PUBLICATION_ENGINES: frozenset[str] = frozenset({"publication", "reflow"})
-#: ``composite`` — the three-layer absolute composition route.
-COMPOSITE_ENGINES: frozenset[str] = frozenset({"composite"})
-#: Engines whose delivery keeps the source page as the canvas. The unified
-#: LayerCompositor composes every PDF route onto the source page, so this set
-#: spans ``rigid`` (per-region), ``composite`` and ``publication``/``reflow``
-#: alike.
-INPLACE_ENGINES: frozenset[str] = RIGID_ENGINES | COMPOSITE_ENGINES | PUBLICATION_ENGINES
+#: The PDF render engine. There is exactly one: the unified source-canvas
+#: compositor (Layer 0 keeps the source page, Layer 1 strips the replaced text,
+#: Layer 2 overlays the translated fragments back into the source geometry). It
+#: is a constant, not a user choice: the ``render_engine`` config/env/API knob
+#: and its legacy aliases were removed when every PDF route converged onto it.
+RENDER_ENGINE: Final[str] = "overlay"
 
 #: Bilingual modes that pair whole source and target pages (a page zipper), as
 #: opposed to interleaving source and target within a page. A source-canvas
 #: engine is page-aligned with the source, so it can serve exactly these.
 PAGE_BILINGUAL_MODES: frozenset[str] = frozenset({"alternating", "facing", "facing_spread"})
-# Engine alias mapping to fold input variants onto canonical engine names.
-# Shared by ``canonical_render_engine`` and the ``render_engine`` field validator.
-RENDER_ENGINE_LEGACY_ALIASES: dict[str, str] = {
-    "inplace": "rigid",
-    "hybrid": "auto",
-}
-
-
-def canonical_render_engine(value: str | None) -> str:
-    """Fold a render-engine alias onto its canonical name.
-
-    Folds aliases like ``inplace``/``hybrid`` to prevent unvalidated metadata
-    from defaulting incorrectly. 'auto' passes through.
-    """
-    engine = (value or "").strip().lower()
-    engine = RENDER_ENGINE_LEGACY_ALIASES.get(engine, engine)
-    if engine in RIGID_ENGINES:
-        return "rigid"
-    if engine in COMPOSITE_ENGINES:
-        return "composite"
-    if engine in PUBLICATION_ENGINES or not engine:
-        return "publication"
-    return engine
 
 
 def resolve_repair_model(
@@ -703,20 +671,10 @@ class UBTConfig(BaseSettings):
     strict_contract: bool = False
 
     # -- PDF render engine --------------------------------------------------------
-    # Every PDF route now composes through the unified LayerCompositor onto the
-    # source page canvas, so these names differ in the policy they imply
-    # (bilingual capability, companion routing), not in a second typesetting
-    # stack:
-    # 'auto' (default): resolves to ``composite`` for every document profile —
-    #   the density dispatch converges here.
-    # 'reflow' (alias 'publication'): the canonical name for source-canvas
-    #   composition with academic typography and bilingual modes.
-    # 'rigid' (alias 'inplace'; 'hybrid' folds to 'auto'): region-locked
-    #   composition — each block owns a rectangle on the original page, source
-    #   text inside is replaced by the translation typeset to fit; figures and
-    #   equations stay untouched. Monolingual output only.
-    # Honored by PDF adapters via manifest.metadata; other formats ignore it.
-    render_engine: RenderEngine = "auto"
+    # There is no engine knob: every PDF route composes through the unified
+    # source-canvas LayerCompositor (see ``RENDER_ENGINE``). The former
+    # ``render_engine`` field and its ``rigid``/``reflow``/``publication``/
+    # ``composite``/``auto`` aliases were deleted in the overlay convergence.
     font_family: str | None = Field(
         default=None,
         description="Override body font family for typesetter (e.g. 'Noto Serif CJK SC').",
@@ -849,7 +807,6 @@ class UBTConfig(BaseSettings):
         "qe_engine",
         "dual_mode",
         "pe_export_format",
-        "render_engine",
         "cover_mode",
         "prompt_strategy",
         "exec_mode",
@@ -898,25 +855,6 @@ class UBTConfig(BaseSettings):
                     value,
                 )
                 return cls._QE_LEGACY_ALIASES[lowered]
-            return lowered
-        return value
-
-    _RENDER_ENGINE_LEGACY_ALIASES: ClassVar[dict[str, str]] = RENDER_ENGINE_LEGACY_ALIASES
-
-    @field_validator("render_engine", mode="before")
-    @classmethod
-    def _normalize_render_engine(cls, value: object) -> object:
-        if isinstance(value, str):
-            lowered = value.strip().lower()
-            alias = cls._RENDER_ENGINE_LEGACY_ALIASES.get(lowered)
-            if alias is not None:
-                logger.warning(
-                    "render_engine=%r is retired; normalized to %r "
-                    "(inplace/hybrid were removed in the rigid convergence)",
-                    value,
-                    alias,
-                )
-                return alias
             return lowered
         return value
 

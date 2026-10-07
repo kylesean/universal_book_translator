@@ -4,11 +4,9 @@ A preset is a deterministic bundle over *quality* parameters — prompt depth,
 formula handling, exec mode. It never disables a correctness gate, and it
 never picks the render route: "how much care to spend translating" and "how
 to typeset the result" are orthogonal decisions, and bundling them made
-``--preset publication`` a silent footgun on figure/table-heavy documents,
-where the reflow route it forced shattered multi-row headers and dropped
-vector figures (arXiv 2609.20519). The render engine stays with
-``--render-engine`` and the ``auto`` dispatch in
-:func:`ubt.core.policy.adaptive_policy.resolve_pdf_engine`.
+``--preset publication`` a silent footgun on figure/table-heavy documents.
+The render engine is not settable at all: every PDF composes through the single
+source-canvas ``overlay`` engine (``ubt.core.config.RENDER_ENGINE``).
 
 Shared by the advisor and the CLI ``--preset`` layer: the CLI
 resolves explicit flags over the preset bundle over the engine defaults.

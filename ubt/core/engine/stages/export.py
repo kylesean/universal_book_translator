@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from ubt.core.cleaners.cjk_spacing import normalize_publishing_cjk
-from ubt.core.config import INPLACE_ENGINES, DualMode, canonical_render_engine
+from ubt.core.config import DualMode
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.pe_queue import PEQueueResult, export_pe_queue
@@ -72,20 +72,17 @@ async def _render_adapter_output(
     output_path: Path,
     job_id: str | None = None,
     bilingual_mode: str | None = None,
-    render_engine: str | None = None,
     render_plan: RenderPlan | None = None,
     realization_plan: Mapping[str, Any] | None = None,
 ) -> Path:
     """Render via ``render_blocks``.
 
     ``render_plan`` is the render decision the advisories made (compiler
-    render plan protocol); ``bilingual_mode``/``render_engine`` are read from it
-    when not passed explicitly.
+    render plan protocol); ``bilingual_mode`` is read from it when not passed
+    explicitly.
     """
     if bilingual_mode is None and render_plan is not None:
         bilingual_mode = render_plan.bilingual_mode
-    if render_engine is None and render_plan is not None:
-        render_engine = render_plan.render_engine
 
     if adapter.engine_name is not None:
         return await adapter.render_blocks(
@@ -94,7 +91,6 @@ async def _render_adapter_output(
             target_lang=target_lang,
             output_path=output_path,
             bilingual_mode=bilingual_mode,
-            render_engine=render_engine,
             render_plan=render_plan,
             realization_plan=realization_plan,
         )
@@ -699,24 +695,9 @@ async def _render_complementary_artifact(
     """
     manifest = ctx.manifest
     secondary_render = str(render.emit_secondary_mode or "")
-    secondary_engine = str(render.emit_secondary_engine or "")
-    # The engine the primary render actually used: render telemetry, written by
-    # the renderer into manifest.metadata (its home), not a run decision.
-    effective_engine = str(manifest.metadata.get("render_engine_effective") or "")
     secondary_path: Path | None = None
-    # Companion renders are intentional second passes; the forced-engine
-    # warning ("...auto dispatch would route...") is for a user-forced *primary*
-    # render, so suppress it while a companion is produced.
-    if isinstance(getattr(manifest, "metadata", None), dict):
-        manifest.metadata["suppress_render_engine_warning"] = True
-    if secondary_render and effective_engine == "rigid":
-        # The rigid engine is monolingual: a complementary mode would
-        # produce a byte-identical mono artifact. Record the skip instead.
-        logger.info("Complementary dual render skipped: 'rigid' is monolingual")
-        secondary_render = ""
     if secondary_render:
-        # The mode the primary *actually* shipped (the renderer's outcome), so a
-        # rigid downgrade names the companion from the real artifact.
+        # The mode the primary *actually* shipped (the renderer's outcome).
         primary_outcome = getattr(adapter, "last_render_outcome", None)
         primary_mode = str(
             (primary_outcome.effective_dual_mode if primary_outcome else None)
@@ -741,49 +722,6 @@ async def _render_complementary_artifact(
         except Exception as exc:
             logger.warning("Complementary dual render failed (non-fatal): %s", exc)
             secondary_path = None
-    elif (
-        secondary_engine == "rigid"
-        and canonical_render_engine(effective_engine) not in INPLACE_ENGINES
-        and adapter.engine_name is not None
-        and artifact.target_output.suffix.lower() == ".pdf"
-    ):
-        candidate = artifact.sibling("_rigid")
-        saved_meta_effective = manifest.metadata.get("render_engine_effective")
-        saved_skips = list(getattr(adapter, "last_render_skips", ()))
-        saved_outcome = getattr(adapter, "last_render_outcome", None)
-        try:
-            secondary_path = await _render_adapter_output(
-                adapter=adapter,
-                manifest=manifest,
-                ledger=ctx.ledger,
-                blocks=final_blocks,
-                target_lang=ctx.target_lang,
-                output_path=candidate,
-                job_id=ctx.job_id,
-                bilingual_mode="monolingual",
-                render_engine="rigid",
-                render_plan=render,
-            )
-            logger.info(
-                "Zero-cost companion rigid PDF rendered alongside forced reflow artifact: %s",
-                secondary_path,
-            )
-        except Exception as exc:
-            logger.warning("Companion rigid render failed (non-fatal): %s", exc)
-            secondary_path = None
-        finally:
-            # The companion render overwrote the primary's engine telemetry and
-            # outcome; restore them so the visual gate scores the delivered
-            # artifact, not the companion.
-            if saved_meta_effective is not None:
-                manifest.metadata["render_engine_effective"] = saved_meta_effective
-            elif "render_engine_effective" in manifest.metadata:
-                del manifest.metadata["render_engine_effective"]
-            if hasattr(adapter, "last_render_skips"):
-                adapter.last_render_skips = saved_skips
-            if hasattr(adapter, "last_render_outcome"):
-                adapter.last_render_outcome = saved_outcome
-    manifest.metadata.pop("suppress_render_engine_warning", None)
     return secondary_path
 
 
@@ -791,16 +729,13 @@ def _attest_delivery(
     ctx: StageContext,
     services: RunServices,
     blocks: list[IRBlock],
-    engine: str,
 ) -> tuple[dict[str, str], AttestationReport]:
     """Realize the delivery per element: its Document, its target map, its account.
 
     The backend is fed the run's own decisions (pre-render decision plan migration):
-    which engine ran and which elements the delivery kept in the source.
+    which elements the delivery kept in the source.
     ``realize()`` then reproduces and *verifies* each element -- the
-    construction-time core the delivery contract is projected from. ``engine`` is
-    resolved by the caller *before* the render, so the plan exists before the
-    renderer reads it.
+    construction-time core the delivery contract is projected from.
     """
     # Lazy: a module-level ubt.pipeline edge recreates the core.engine <-> pipeline cycle.
     from ubt.layout.theme import resolve_theme
@@ -810,7 +745,7 @@ def _attest_delivery(
     from ubt.verify.verifier import build_verifiers
 
     doc_id = str(getattr(ctx.manifest, "doc_id", "") or "")
-    translations = delivery_translations(blocks, engine=engine)
+    translations = delivery_translations(blocks)
     theme = resolve_theme(ctx.source_lang or "en", ctx.target_lang or "zh")
     report = attest_blocks(
         blocks,
@@ -821,30 +756,11 @@ def _attest_delivery(
     return translations, report
 
 
-def _resolve_render_engine(
-    ctx: StageContext, adapter: DocumentAdapter, blocks: list[IRBlock], render: RenderPlan
-) -> str:
-    """The engine this render will use, resolved *before* the render.
-
-    The decision plan is built before the renderer runs (pre-render decision plan), so
-    the engine its asset policy depends on cannot be read back from the
-    renderer's telemetry afterwards. Resolving here with the same
-    ``resolve_pdf_engine`` the renderer uses keeps the two in agreement.
-    """
-    from ubt.core.policy.adaptive_policy import resolve_pdf_engine
-
-    if adapter.engine_name is None or not blocks:
-        return "publication"
-    requested = str(render.render_engine or ctx.config.render_engine or "publication")
-    return resolve_pdf_engine(requested, blocks, manifest=ctx.manifest)
-
-
 def _deliver_contract(
     ctx: StageContext,
     blocks: list[IRBlock],
     rendered_path: Path,
     report: AttestationReport,
-    engine: str,
 ) -> ReconciliationReport:
     """Build the content graph, project the attestations onto it, persist the contract.
 
@@ -862,16 +778,9 @@ def _deliver_contract(
     contract = contract_from_attestations(
         report,
         blocks,
-        engine=engine,
         doc_id=str(getattr(manifest, "doc_id", "") or ""),
         title=str(getattr(manifest, "title", "") or ""),
         source_path=str(getattr(manifest, "source_path", "") or ""),
-        witness_findings=[
-            str(item) for item in (manifest.metadata.get("formula_witness_findings") or []) if item
-        ],
-        table_fallbacks=[
-            str(item) for item in (manifest.metadata.get("table_fallback_findings") or []) if item
-        ],
     )
     payload = contract.model_dump(mode="json")
     contract_path = sidecar_path(rendered_path, "contract.json")
@@ -1302,13 +1211,11 @@ async def run_export_stage(
     ctx.check_cancelled()
     effective_bilingual_mode = render.bilingual_mode
     # pre-render decision plan inversion: build the decision plan *before* the render and
-    # hand it to the renderer as its per-element decision source. The engine the
-    # plan's asset policy depends on is resolved here (the renderer resolves the
-    # same one). The contract below is then projected from this same plan -- one
-    # realize() pass, not a second account.
-    render_engine = _resolve_render_engine(ctx, adapter, final_blocks, render)
+    # hand it to the renderer as its per-element decision source. The contract
+    # below is then projected from this same plan -- one realize() pass, not a
+    # second account.
     translations, attestations = await asyncio.to_thread(
-        _attest_delivery, ctx, services, final_blocks, render_engine
+        _attest_delivery, ctx, services, final_blocks
     )
     # Lazy: a module-level ubt.pipeline edge recreates the core.engine <-> pipeline cycle.
     from ubt.pipeline.decisions import plan_fidelities
@@ -1327,11 +1234,6 @@ async def run_export_stage(
         realization_plan=realization_plan,
     )
 
-    effective_engine = str(manifest.metadata.get("render_engine_effective") or render_engine)
-    await asyncio.to_thread(
-        ledger.set_job_metadata_value, actual_job_id, "render_engine_effective", effective_engine
-    )
-
     # Render skip pass-through + length conservation, before the report is
     # built (see _apply_render_skip_ledger_pass).
     await _apply_render_skip_ledger_pass(ctx, adapter, manifest, final_blocks)
@@ -1344,7 +1246,7 @@ async def run_export_stage(
     # Delivery contract: the attestation projection, written beside the artifact
     # and embedded in the quality report; an opt-in hard gate
     # (UBT_STRICT_CONTRACT) aborts a knowingly-broken delivery.
-    contract = _deliver_contract(ctx, final_blocks, rendered_path, attestations, render_engine)
+    contract = _deliver_contract(ctx, final_blocks, rendered_path, attestations)
     if ctx.config.strict_contract and not contract.passed:
         raise IntegrityViolationError(
             f"Export blocked for job {ctx.job_id}: delivery contract failed with "

@@ -67,7 +67,6 @@ class AdapterRuntimeConfig:
     #: environment-only setting quote one model and pay for another.
     ocr_model: str
     formula_enrichment: str
-    render_engine: str
     formula_render: str
     font_family: str | None
     math_backend: str
@@ -98,7 +97,7 @@ class DocumentAdapter(Protocol):
     """Protocol for document format adapters accessed through the ports bridge.
 
     Signatures mirror the real SPI (:class:`ubt.adapters.base.BaseDocumentAdapter`),
-    including ``render_engine`` and adapter-specific ``**kwargs``, so a call site
+    including adapter-specific ``**kwargs``, so a call site
     typed against this protocol can name the engine knobs without a ``cast(Any)``.
     ``engine_name`` is the PDF-engine capability: a non-``None`` name marks a
     ``BasePDFEngineAdapter``.
@@ -120,7 +119,6 @@ class DocumentAdapter(Protocol):
         target_lang: str,
         output_path: Path,
         bilingual_mode: str | None = None,
-        render_engine: str | None = None,
         **kwargs: Any,
     ) -> Path: ...
 

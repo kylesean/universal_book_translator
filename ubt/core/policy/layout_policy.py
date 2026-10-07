@@ -564,18 +564,16 @@ _FATAL_LEAK_MARKERS: tuple[str, ...] = (
 )
 
 
-def is_rigid_non_prose_degradable(
+def is_non_prose_degradable(
     block_type: Any,
     error_flags: Iterable[str],
-    *,
-    render_engine: str | None = None,
 ) -> bool:
-    """True when a non-prose block (e.g. table) under rigid mode should degrade
-    to NEEDS_HUMAN rather than BLOCKED_HUMAN on non-fatal defects.
+    """True when a non-prose block (e.g. table) should degrade to NEEDS_HUMAN
+    rather than BLOCKED_HUMAN on non-fatal defects.
 
-    In rigid mode, non-prose blocks (tables, code, formulas) are preserved
-    verbatim in the rendered PDF via render_skip:non_prose. Unless a defect is
-    truly fatal (e.g. prompt template leak), quarantining the block as
+    The overlay engine preserves non-prose blocks (tables, code, formulas,
+    figures) verbatim in the rendered PDF via render_skip:non_prose. Unless a
+    defect is truly fatal (e.g. prompt template leak), quarantining the block as
     BLOCKED_HUMAN would abort export catastrophically.
     """
     bt = getattr(block_type, "value", block_type or "")
@@ -585,15 +583,8 @@ def is_rigid_non_prose_degradable(
     if not is_non_prose:
         return False
 
-    flags_list = list(error_flags)
-    has_render_skip = any("render_skip:non_prose" in f for f in flags_list)
-    engine = (render_engine or "").strip().lower()
-    is_rigid = engine in ("rigid", "inplace", "hybrid", "composite") or has_render_skip
-    if not is_rigid:
-        return False
-
     # Truly fatal prompt template leak or security injection must still be quarantined
-    return not any(m in flag for flag in flags_list for m in _FATAL_LEAK_MARKERS)
+    return not any(m in flag for flag in error_flags for m in _FATAL_LEAK_MARKERS)
 
 
 __all__ = [
@@ -632,7 +623,7 @@ __all__ = [
     "INDEX_MIN_LINES",
     "INDEX_MIN_SINGLE_SHARE",
     "ISBN_DIGITS_RE",
-    "is_rigid_non_prose_degradable",
+    "is_non_prose_degradable",
     "JOIN_CROSS_NO_TERMINAL",
     "JOIN_HYPHEN_TAIL",
     "JOIN_LOWER_START",

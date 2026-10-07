@@ -232,7 +232,6 @@ class MarkdownAdapter(BaseDocumentAdapter):
         target_lang: str,
         output_path: Path,
         bilingual_mode: str | None = None,
-        render_engine: str | None = None,
         **kwargs: Any,
     ) -> Path:
         """Render bilingual Markdown document interleaving source and translated paragraphs.
@@ -247,7 +246,6 @@ class MarkdownAdapter(BaseDocumentAdapter):
             target_lang,
             output_path,
             bilingual_mode,
-            render_engine,
             **kwargs,
         )
 
@@ -258,7 +256,6 @@ class MarkdownAdapter(BaseDocumentAdapter):
         target_lang: str,
         output_path: Path,
         bilingual_mode: str | None = None,
-        render_engine: str | None = None,
         **kwargs: Any,
     ) -> Path:
         """Render bilingual Markdown document interleaving source and translated paragraphs."""

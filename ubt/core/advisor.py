@@ -28,11 +28,9 @@ from ubt.core.config import (
     ExecMode,
     FormulaEnrichment,
     FormulaMode,
-    RenderEngine,
     UBTConfig,
 )
 from ubt.core.env import has_accelerator as _has_accelerator
-from ubt.core.policy.adaptive_policy import resolve_render_engine_from_signals
 from ubt.core.presets import Preset
 from ubt.core.router_mode import decide as decide_route
 
@@ -72,7 +70,6 @@ class AdvisoryReport:
     api_ready: bool
 
     # Recommended execution parameters
-    recommended_render_engine: RenderEngine
     recommended_dual_mode: DualMode
     recommended_formula_enrichment: FormulaEnrichment
     recommended_formula_mode: FormulaMode
@@ -91,19 +88,8 @@ class AdvisoryReport:
     assessment: AssessmentReport | None = None
 
     def check_conflict(self, chosen_render_engine: str, chosen_dual_mode: str) -> list[str]:
-        """Check for physical layout or architectural conflicts if user overrides recommendations."""
-        warnings: list[str] = []
-        if (
-            self.format_ext == "pdf"
-            and self.recommended_render_engine == "rigid"
-            and chosen_render_engine in ("reflow", "publication")
-        ):
-            warnings.append(
-                f"【高密度学术排版风险】当前文档包含密集数学公式或二维结构 (math_density={self.math_density})，"
-                f"系统推荐 'rigid' 原位引擎以 100% 保持交换图、公式与多栏坐标；强制使用 '{chosen_render_engine}' + "
-                f"'{chosen_dual_mode}' 可能改变原页面几何布局并在公式密集段产生中英穿插顿挫。"
-            )
-        return warnings
+        """No engine conflict exists: every PDF renders through the overlay engine."""
+        return []
 
 
 class DocumentAdvisor:
@@ -150,12 +136,10 @@ class DocumentAdvisor:
         reasons: list[str] = []
         conflict_warnings: list[str] = []
 
-        # Route probe (also feeds the engine signal). Runs before the engine
-        # recommendation so the page-level multi-column share can steer it.
+        # Route probe. The probe decides the short vs long route (and the fast
+        # lane); it no longer steers a render engine because there is only one.
         route_mode = "auto"
         route_reason = "结构化文档，无需 PDF 路由探测"
-        route_multicolumn_share = 0.0
-        route_structural_page_share = 0.0
         if format_ext == "pdf":
             try:
                 route = decide_route(
@@ -165,59 +149,36 @@ class DocumentAdvisor:
                 )
                 route_mode = route.mode
                 route_reason = route.reason
-                route_multicolumn_share = float(
-                    getattr(route, "multicolumn_page_share", 0.0) or 0.0
-                )
-                route_structural_page_share = float(
-                    getattr(route, "structural_page_share", 0.0) or 0.0
-                )
             except Exception:  # probing must never block the wizard
                 route_mode = "auto"
                 route_reason = "路由探测不可用，按默认策略执行"
 
-        # 1. Render engine recommendation — predicted through the same canonical
-        # resolver the runtime ``auto`` dispatch uses
-        # (``adaptive_policy.resolve_render_engine_from_signals``), so the advice
-        # matches the route that actually runs.
-        if format_ext == "pdf":
-            canonical = resolve_render_engine_from_signals(
-                "auto",
-                has_math=math_density == MathDensity.HIGH,
-                struct_share=1.0 if is_scanned else 0.0,
-                has_geometry=True,
-                multicolumn_share=route_multicolumn_share,
-                structural_page_share=route_structural_page_share,
-                profile="paper" if category == DocCategory.ACADEMIC_PAPER else detected_domain,
-                category=category,
+        # 1. Layout-profile reasons. There is no render-engine recommendation:
+        # every PDF renders through the single source-canvas overlay engine.
+        if format_ext == "pdf" and not has_typst:
+            conflict_warnings.append(
+                "系统未检测到 typst 编译器，导出阶段将无法排版；建议安装 `curl -fsSL https://typst.community | sh`。"
             )
-            if canonical == "rigid":
-                recommended_render_engine: RenderEngine = "rigid"
-                if is_scanned and math_density != MathDensity.HIGH:
-                    reasons.append(
-                        "检测到扫描版/无矢量文本 PDF：推荐原版位高保真引擎 (rigid)——保留原始页面扫描底图与图像题注位置。"
-                    )
-                else:
-                    reasons.append(
-                        "检测到密集数学公式/科技学术专著：推荐原版位高保真引擎 (rigid)——以原页面为底版，"
-                        "公式与矢量图保持原位物理保真，彻底避免流式抽取导致的图表丢失与公式碎裂 (对标 arXiv 2609.20519 保真策略)。"
-                    )
-            else:
-                recommended_render_engine = "reflow"
-                reasons.append("推荐出版级流式重排引擎 (reflow)，输出高保真排版文档。")
-                if not has_typst:
-                    conflict_warnings.append(
-                        "系统未检测到 typst 编译器，流水线将在导出阶段自动回退或建议安装 `curl -fsSL https://typst.community | sh`。"
-                    )
+        if format_ext == "pdf" and is_scanned:
+            reasons.append(
+                "检测到扫描版/无矢量文本 PDF：以原页面为底版，扫描底图与图像题注位置保持不变。"
+            )
+        elif format_ext == "pdf" and math_density == MathDensity.HIGH:
+            reasons.append(
+                "检测到密集数学公式/科技学术专著：以原页面为底版，公式与矢量图保持原位物理保真，"
+                "避免流式抽取导致的图表丢失与公式碎裂。"
+            )
         else:
-            # Markdown / EPUB / DOCX
-            recommended_render_engine = "reflow"
-            reasons.append(f"对于 .{format_ext} 文档，采用原生结构化流式排版与重构。")
+            reasons.append(f"对于 .{format_ext} 文档，采用原生结构化排版与重构。")
 
         # 2. Dual mode recommendation
-        if format_ext == "pdf" and recommended_render_engine == "rigid":
+        if format_ext == "pdf" and (
+            math_density == MathDensity.HIGH
+            or category in (DocCategory.ACADEMIC_PAPER, DocCategory.TECHNICAL_BOOK)
+        ):
             recommended_dual_mode: DualMode = "monolingual"
             reasons.append(
-                "rigid（原位覆盖）引擎只产出纯目标语言译文（不做双语流式重排）；需要中英对照请改用 reflow 引擎。"
+                "学术/技术排版推荐单语（monolingual）输出；需要中英对照可显式指定双语模式。"
             )
         else:
             recommended_dual_mode = "inline"
@@ -298,7 +259,6 @@ class DocumentAdvisor:
             has_typst=has_typst,
             has_docling=has_docling,
             api_ready=api_ready,
-            recommended_render_engine=recommended_render_engine,
             recommended_dual_mode=recommended_dual_mode,
             recommended_formula_enrichment=recommended_formula_enrichment,
             recommended_formula_mode=recommended_formula_mode,

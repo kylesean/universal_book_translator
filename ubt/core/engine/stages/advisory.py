@@ -21,19 +21,15 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import AsyncIterator
-from typing import Any, Literal
+from typing import Literal
 
-from ubt.core.config import INPLACE_ENGINES, DualMode
+from ubt.core.config import DualMode
 from ubt.core.engine.blocks import BlockReader
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.facts import LayoutAdvisory, RenderPlan
 from ubt.core.engine.services import RunServices
 from ubt.core.engine.stage_context import StageContext
 from ubt.core.ir.models import BookManifest
-from ubt.core.policy.adaptive_policy import (
-    resolve_pdf_engine,
-    resolve_render_engine_from_signals,
-)
 from ubt.core.policy.bilingual_advisor import (
     RENDER_MODE_VALUE,
     Advisory,
@@ -50,24 +46,6 @@ from ubt.core.ports import (
 )
 
 logger = logging.getLogger(__name__)
-
-#: Page-level structural share above which a publication-primary render still
-#: earns a zero-token rigid fidelity companion. Deliberately low: the companion
-#: carries no LLM cost, and a missed one silently loses figures/tables.
-COMPANION_STRUCTURAL_SHARE = 0.15
-
-
-def _run_route(manifest: BookManifest) -> dict[str, Any]:
-    """The route decision dict the renderer also reads (empty when absent)."""
-    rd = getattr(manifest.run, "route_decision", None)
-    return rd if isinstance(rd, dict) else {}
-
-
-def _structural_page_share(manifest: BookManifest) -> float:
-    try:
-        return float(_run_route(manifest).get("structural_page_share") or 0.0)
-    except (TypeError, ValueError):
-        return 0.0
 
 
 async def run_extraction_witness_stage(ctx: StageContext, blocks: BlockReader) -> None:
@@ -126,7 +104,6 @@ async def run_mode_advisory_stage(
 ) -> AsyncIterator[TranslationProgressEvent]:
     """Publish the run policy and advise on the requested bilingual mode."""
     config = ctx.config
-    manifest = ctx.manifest
     requested_mode: DualMode = (
         config.dual_mode if config.dual_mode in RENDER_MODE_VALUE else "inline"
     )
@@ -138,7 +115,6 @@ async def run_mode_advisory_stage(
 
     # Run-policy keys: the renderer reads these off the plan (compiler
     # render plan protocol). They are no longer posted on manifest.run.
-    render.render_engine = config.render_engine
     render.translate_chrome = config.translate_chrome
     render.cover_mode = config.cover_mode
 
@@ -164,38 +140,6 @@ async def run_mode_advisory_stage(
     effective_mode: DualMode = (
         advisory.recommended if auto_mode and advisory.tier == "discourage" else tier_basis
     )
-    # A source-canvas engine serves every mode (monolingual, in-place bilingual,
-    # or a source/target page zip), so no requested mode is downgraded here.
-    engine_advisory_msg: str | None = None
-    effective_engine: str
-    if config.render_engine in INPLACE_ENGINES:
-        effective_engine = config.render_engine
-    else:
-        effective_engine = (
-            getattr(services.adaptive_policy, "render_engine", None)
-            or getattr(getattr(ctx, "adapter", None), "render_engine", None)
-            or config.render_engine
-        )
-        if effective_engine == "auto":
-            effective_engine = resolve_pdf_engine("auto", current_blocks, manifest=manifest)
-    if (
-        ctx.source_pdf_path is not None
-        and effective_engine not in INPLACE_ENGINES
-        and (
-            config.emit_companion_rigid
-            or (
-                config.emit_companion_auto
-                and _structural_page_share(manifest) >= COMPANION_STRUCTURAL_SHARE
-            )
-        )
-    ):
-        render.emit_secondary_engine = "rigid"
-        engine_advisory_msg = (
-            "Layout tradeoff advisory: this structure-bearing PDF is rendered with "
-            "the requested engine; a zero-cost companion '*_rigid.pdf' artifact "
-            "was scheduled for layout-faithful verification."
-        )
-        logger.warning("Job %s: %s", ctx.job_id, engine_advisory_msg)
     adv_dict = dict(advisory.to_dict())
     adv_dict["effective"] = effective_mode
     adv_dict["rendered_modes"] = [effective_mode]
@@ -221,8 +165,6 @@ async def run_mode_advisory_stage(
         f"Render-mode advisory: requested '{tier_basis}' is '{advisory.tier}'; "
         f"effective '{effective_mode}' (recommended '{advisory.recommended}')"
     )
-    if engine_advisory_msg:
-        advise_msg += f" | {engine_advisory_msg}"
     event = await ctx.create_event(
         EventType.MODE_ADVISED, ctx.job_id, ctx.ledger, message=advise_msg
     )
@@ -243,7 +185,6 @@ async def run_difficulty_advisory_stage(
     phase 1, so difficulty is recorded for the report but cannot downgrade.
     """
     config = ctx.config
-    manifest = ctx.manifest
     advisory = layout.advisory
     if advisory is None:  # pragma: no cover - phase 1 always runs first
         return
@@ -261,18 +202,6 @@ async def run_difficulty_advisory_stage(
         )
     else:
         effective_mode = pre_downgrade  # type: ignore[assignment]
-    effective_engine: str
-    if config.render_engine in INPLACE_ENGINES:
-        effective_engine = config.render_engine
-    else:
-        effective_engine = (
-            getattr(services.adaptive_policy, "render_engine", None)
-            or getattr(getattr(ctx, "adapter", None), "render_engine", None)
-            or config.render_engine
-        )
-        if effective_engine == "auto":
-            current_blocks = await blocks.current_blocks()
-            effective_engine = resolve_pdf_engine("auto", current_blocks, manifest=manifest)
     # A source-canvas engine serves every mode, so no requested mode downgrades.
     if effective_mode != pre_downgrade:
         logger.warning(
@@ -311,49 +240,22 @@ def apply_layout_tradeoff_advisory(
     *,
     input_name: str,
     formula_heavy: bool,
-    requested_engine: str,
 ) -> None:
-    """Surface the rigid-on-formula-dense tradeoff in the delivered report.
+    """Surface the overlay-on-formula-dense tradeoff in the delivered report.
 
     The source-canvas composition keeps figures and multi-row tables exactly
-    where they are, at the cost of imperfect inline-math typography. When the
-    user forces ``rigid`` on such a document, this advisory lets the reader
-    weigh the tradeoff; it is never an UNSUITABLE stop.
-
-    The criterion resolves the engine the run will actually use, so only an
-    explicit ``rigid`` request reaches the advisory.
+    where they are, at the cost of imperfect inline-math typography. When a
+    formula-dense document is rendered, this advisory lets the reader weigh the
+    tradeoff; it is never an UNSUITABLE stop.
     """
-    rd = getattr(getattr(manifest, "run", None), "route_decision", None)
-    structural_page_share = 0.0
-    if isinstance(rd, dict):
-        try:
-            structural_page_share = float(rd.get("structural_page_share") or 0.0)
-        except (TypeError, ValueError):
-            structural_page_share = 0.0
-
-    profile = getattr(manifest, "profile", None) or getattr(manifest, "profile_name", None)
-    metadata = getattr(manifest, "metadata", None)
-    category = metadata.get("category") if isinstance(metadata, dict) else None
-
-    active = resolve_render_engine_from_signals(
-        requested_engine,
-        has_math=formula_heavy,
-        struct_share=0.0,
-        has_geometry=True,
-        structural_page_share=structural_page_share,
-        profile=profile,
-        category=category,
-    )
-    if not (formula_heavy and active == "rigid"):
+    if not formula_heavy:
         return
     advisory_msg = (
         f"Document '{input_name}' is formula-dense and is being "
-        "rendered with the overlay (rigid) engine. This preserves the "
+        "rendered with the overlay engine. This preserves the "
         "source page geometry — figures and complex tables stay intact — "
         "but inline math is typeset into the source's text boxes, so "
-        "dense equations may render with imperfect spacing or sizing. "
-        "For native math typography at the cost of figure/table fidelity, "
-        "re-run with --render-engine reflow."
+        "dense equations may render with imperfect spacing or sizing."
     )
     logger.info("Pre-flight Layout Advisory: %s", advisory_msg)
     manifest.run.delivery_status = (

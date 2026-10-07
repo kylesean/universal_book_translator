@@ -97,7 +97,6 @@ class DoclingPDFAdapter(BasePDFEngineAdapter):
         ocr_api_key: str | None = None,
         ocr_model: str | None = None,
         formula_enrichment: str = "auto",
-        render_engine: str = "auto",
         formula_render: str = "witness",
         font_family: str | None = None,
         allow_page_upload: bool = False,
@@ -109,7 +108,6 @@ class DoclingPDFAdapter(BasePDFEngineAdapter):
         self.ocr_api_key = ocr_api_key
         self.ocr_model = ocr_model
         self.formula_enrichment = formula_enrichment
-        self.render_engine = render_engine
         self.formula_render = formula_render
         # Page-image egress gate. Overwritten by ``apply_config`` from the
         # resolved run config; the constructor default keeps a directly built
@@ -171,7 +169,6 @@ class DoclingPDFAdapter(BasePDFEngineAdapter):
         if runtime_config.ocr_model:
             self.ocr_model = runtime_config.ocr_model
         self.formula_enrichment = runtime_config.formula_enrichment
-        self.render_engine = runtime_config.render_engine
         self.formula_render = runtime_config.formula_render
         # The page-image egress gate comes from the resolved config, not a
         # second ``os.environ`` read in the parser.
@@ -348,7 +345,6 @@ class DoclingPDFAdapter(BasePDFEngineAdapter):
         """Resolve effective formula enrichment policy (delegates to docling_parser)."""
         return resolve_formula_enrichment(
             self.formula_enrichment,
-            self.render_engine,
             self.formula_render,
             _has_accelerator,
             path=path,
@@ -394,7 +390,6 @@ class DoclingPDFAdapter(BasePDFEngineAdapter):
         target_lang: str,
         output_path: Path,
         bilingual_mode: str | None = None,
-        render_engine: str | None = None,
         render_plan: RenderPlan | None = None,
         realization_plan: Mapping[str, Fidelity] | None = None,
         **kwargs: Any,
@@ -406,7 +401,6 @@ class DoclingPDFAdapter(BasePDFEngineAdapter):
             target_lang,
             output_path,
             bilingual_mode,
-            render_engine,
             render_plan=render_plan,
             realization_plan=realization_plan,
         )

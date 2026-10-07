@@ -177,7 +177,7 @@ def _verify_job(
         raise typer.Exit(code=2)
     ledger = SQLiteJobLedger(db_path, read_only=True)
     try:
-        report = contract_from_ledger(ledger, job, engine=engine)
+        report = contract_from_ledger(ledger, job)
     finally:
         ledger.close()
     if json_output:

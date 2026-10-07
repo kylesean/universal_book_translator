@@ -761,7 +761,6 @@ class PipelineOrchestrator:
                 ocr_api_key=self.config.ocr_api_key.get_secret_value(),
                 ocr_model=self.config.ocr_model,
                 formula_enrichment=self.config.formula_enrichment,
-                render_engine=self.config.render_engine,
                 formula_render=self.config.formula_render,
                 font_family=self.config.font_family,
                 math_backend=self.config.math_backend,
@@ -906,11 +905,6 @@ class PipelineOrchestrator:
                 forced_granularity=getattr(self.config, "granularity", None),
             )
             manifest.run.adaptive_policy = adaptive_policy.to_dict()
-            if (
-                hasattr(adapter, "render_engine")
-                and getattr(adapter, "render_engine", None) == "auto"
-            ):
-                adapter.render_engine = adaptive_policy.render_engine
 
             # One object carries the run's shared state into each stage, so a
             # stage's signature says what is *its own* (the visual-gate knobs,
@@ -962,10 +956,9 @@ class PipelineOrchestrator:
                 cancel_token=cancel_token,
             )
             logger.info(
-                "Adaptive execution policy for %s: granularity=%s, render_engine=%s (%s)",
+                "Adaptive execution policy for %s: granularity=%s (%s)",
                 actual_job_id,
                 adaptive_policy.granularity,
-                adaptive_policy.render_engine,
                 adaptive_policy.reason,
             )
 
@@ -975,7 +968,6 @@ class PipelineOrchestrator:
                 manifest,
                 input_name=input_path.name,
                 formula_heavy=bool(getattr(route_decision, "formula_heavy", False)),
-                requested_engine=adaptive_policy.render_engine,
             )
 
             # -----------------------------------------------------------------

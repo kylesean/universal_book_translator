@@ -4,7 +4,7 @@ import json
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 import typer
 from rich.console import Console
@@ -47,8 +47,6 @@ from ubt.core.metrics import (
     compare_kpi_sets,
     load_kpis,
 )
-
-UserRenderEngine = Literal["rigid", "reflow", "auto"]
 
 app = typer.Typer(
     name="ubt",
@@ -106,24 +104,21 @@ def _resolve_db_dir(db_dir: Path | None) -> Path:
 def resolve_cli_adaptive_dual_mode(
     explicit_dual_mode: str | None,
     profile: str | None,
-    render_engine: str | None,
 ) -> str | None:
-    """Resolve smart profile-aware and engine-aware dual_mode default at the CLI layer.
+    """Resolve the smart profile-aware dual_mode default at the CLI layer.
 
     When --dual-mode is explicitly passed by the user, that choice is preserved.
     When unset (None), derives the smart default:
     - Academic papers ('paper') default to 'monolingual' (standard academic publication format);
     - Novels / fiction ('fiction', 'novel') default to 'monolingual' (continuous prose reading);
-    - Rigid engine ('rigid', 'inplace') defaults to 'monolingual' (a source-canvas
-      page is crispest monolingual; pass --dual-mode explicitly for a bilingual artifact);
-    - Other combinations (e.g. 'general', 'textbook', 'humanities' on reflow) leave it
+    - Other combinations (e.g. 'general', 'textbook', 'humanities') leave it
       unset to follow config / UBT_DUAL_MODE / 'inline'.
     """
     # Single-sourced in ``ubt.core.job_options`` so API/MCP resolve the same
     # default (see ``overrides_from_request``).
     from ubt.core.job_options import adaptive_dual_mode
 
-    return adaptive_dual_mode(explicit_dual_mode, profile, render_engine)
+    return adaptive_dual_mode(explicit_dual_mode, profile)
 
 
 async def _run_translation(

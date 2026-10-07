@@ -1,4 +1,9 @@
-"""Contract tests for the render-route / granularity policy resolvers."""
+"""Contract tests for the (single) execution-granularity policy resolver.
+
+The render-route axis is gone: every PDF renders through the single
+source-canvas ``overlay`` engine (``ubt.core.config.RENDER_ENGINE``), so there
+are no engine resolvers, threshold constants or legacy aliases left to test.
+"""
 
 from __future__ import annotations
 
@@ -6,17 +11,14 @@ import logging
 
 import pytest
 
+from ubt.core import config as config_mod
 from ubt.core.config import UBTConfig
-from ubt.core.ir.models import BlockType, BookManifest, BoundingBox, IRBlock, make_element
+from ubt.core.ir.models import BookManifest
 from ubt.core.ir.run_metadata import RunMetadata
 from ubt.core.policy.adaptive_policy import (
-    MULTICOLUMN_SHARE_AUTO,
-    STRUCT_SHARE_AUTO,
     AdaptivePolicy,
     Granularity,
     resolve_adaptive_policy,
-    resolve_pdf_engine,
-    resolve_render_engine_from_signals,
 )
 from ubt.core.router_mode import RouteDecision, RouteMode
 
@@ -38,36 +40,29 @@ def _manifest(run: RunMetadata | None = None) -> BookManifest:
     return BookManifest(doc_id="doc", title="t", source_path="s.pdf", run=run or RunMetadata())
 
 
-def _block(
-    block_id: str = "b",
-    block_type: BlockType = BlockType.NARRATIVE,
-    *,
-    bbox: BoundingBox | None = None,
-    spine_index: int = 0,
-) -> IRBlock:
-    element = make_element(
-        id=block_id,
-        spine_index=spine_index,
-        block_type=block_type,
-        source_text="x",
-        bbox=bbox,
-        skip_translate=False,
+# --------------------------------------------------------------------------- #
+# The engine is a constant, not a choice
+# --------------------------------------------------------------------------- #
+
+
+def test_the_render_engine_is_a_single_constant() -> None:
+    assert config_mod.RENDER_ENGINE == "overlay"
+
+
+def test_config_has_no_render_engine_knob() -> None:
+    assert not hasattr(UBTConfig(), "render_engine")
+    assert not hasattr(AdaptivePolicy, "render_engine")
+
+
+def test_adaptive_policy_has_no_render_engine_field() -> None:
+    policy = AdaptivePolicy(
+        granularity=Granularity.MICRO,
+        fast_lane_bible=True,
+        visual_blocking=False,
+        deterministic_glossary=True,
+        reason="because",
     )
-    return IRBlock(element=element)
-
-
-def _box(x0: float = 0.0, y0: float = 0.0, x1: float = 10.0, y1: float = 10.0) -> BoundingBox:
-    return BoundingBox(page=1, x0=x0, y0=y0, x1=x1, y1=y1)
-
-
-# --------------------------------------------------------------------------- #
-# Constants / enum / dataclass surface
-# --------------------------------------------------------------------------- #
-
-
-def test_auto_dispatch_thresholds_are_pinned() -> None:
-    assert STRUCT_SHARE_AUTO == 0.20
-    assert MULTICOLUMN_SHARE_AUTO == 0.25
+    assert "render_engine" not in policy.to_dict()
 
 
 def test_granularity_only_exposes_micro() -> None:
@@ -78,7 +73,6 @@ def test_granularity_only_exposes_micro() -> None:
 def test_to_dict_round_trips_every_field() -> None:
     policy = AdaptivePolicy(
         granularity=Granularity.MICRO,
-        render_engine="rigid",
         fast_lane_bible=True,
         visual_blocking=False,
         deterministic_glossary=True,
@@ -86,7 +80,6 @@ def test_to_dict_round_trips_every_field() -> None:
     )
     assert policy.to_dict() == {
         "granularity": "micro",
-        "render_engine": "rigid",
         "fast_lane_bible": True,
         "visual_blocking": False,
         "deterministic_glossary": True,
@@ -102,7 +95,6 @@ def test_to_dict_round_trips_every_field() -> None:
 def test_short_document_keeps_fast_lane_and_glossary() -> None:
     policy = resolve_adaptive_policy(_manifest(), _route("short", 5), UBTConfig())
     assert policy.granularity is Granularity.MICRO
-    assert policy.render_engine == "auto"
     assert policy.fast_lane_bible is True
     assert policy.visual_blocking is True
     assert policy.deterministic_glossary is True
@@ -144,218 +136,3 @@ def test_forced_micro_granularity_is_silent(caplog: pytest.LogCaptureFixture) ->
         )
     assert policy.granularity is Granularity.MICRO
     assert caplog.records == []
-
-
-@pytest.mark.parametrize(
-    ("configured", "expected"),
-    [
-        ("auto", "auto"),
-        ("rigid", "rigid"),
-        ("reflow", "publication"),
-        ("publication", "publication"),
-    ],
-)
-def test_render_engine_is_canonicalized_from_config(configured: str, expected: str) -> None:
-    config = UBTConfig(render_engine=configured)  # type: ignore[arg-type]
-    policy = resolve_adaptive_policy(_manifest(), _route("short", 5), config)
-    assert policy.render_engine == expected
-
-
-def test_retired_inplace_alias_folds_to_rigid() -> None:
-    config = UBTConfig(render_engine="inplace")  # type: ignore[arg-type]
-    policy = resolve_adaptive_policy(_manifest(), _route("long", 300), config)
-    assert policy.render_engine == "rigid"
-
-
-# --------------------------------------------------------------------------- #
-# resolve_render_engine_from_signals
-# --------------------------------------------------------------------------- #
-
-
-@pytest.mark.parametrize("requested", ["publication", "reflow"])
-def test_publication_request_passes_through(requested: str) -> None:
-    assert (
-        resolve_render_engine_from_signals(
-            requested, has_math=True, struct_share=0.9, multicolumn_share=0.9
-        )
-        == "publication"
-    )
-
-
-def test_rigid_request_passes_through_without_geometry() -> None:
-    assert (
-        resolve_render_engine_from_signals(
-            "rigid", has_math=False, struct_share=0.0, has_geometry=False
-        )
-        == "rigid"
-    )
-
-
-def test_composite_request_passes_through() -> None:
-    assert (
-        resolve_render_engine_from_signals("composite", has_math=True, struct_share=0.5)
-        == "composite"
-    )
-
-
-def test_inplace_alias_resolves_to_rigid() -> None:
-    assert (
-        resolve_render_engine_from_signals("inplace", has_math=False, struct_share=0.0) == "rigid"
-    )
-
-
-def test_hybrid_alias_falls_into_auto_dispatch() -> None:
-    assert (
-        resolve_render_engine_from_signals("hybrid", has_math=True, struct_share=0.0) == "composite"
-    )
-
-
-def test_unknown_engine_warns_and_falls_back_to_composite(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    with caplog.at_level(logging.WARNING, logger="ubt.core.policy.adaptive_policy"):
-        engine = resolve_render_engine_from_signals("weird", has_math=True, struct_share=0.9)
-    assert engine == "composite"
-    assert any("Unknown render_engine" in record.message for record in caplog.records)
-
-
-def test_auto_with_math_takes_composite() -> None:
-    assert (
-        resolve_render_engine_from_signals("auto", has_math=True, struct_share=0.0) == "composite"
-    )
-
-
-@pytest.mark.parametrize("share", [0.0, 0.199, 0.20, 0.5])
-def test_auto_structure_share_converges_to_composite(share: float) -> None:
-    assert (
-        resolve_render_engine_from_signals("auto", has_math=False, struct_share=share)
-        == "composite"
-    )
-
-
-@pytest.mark.parametrize("share", [0.0, 0.249, 0.25, 0.4])
-def test_auto_multicolumn_share_converges_to_composite(share: float) -> None:
-    assert (
-        resolve_render_engine_from_signals(
-            "auto", has_math=False, struct_share=0.0, multicolumn_share=share
-        )
-        == "composite"
-    )
-
-
-def test_auto_without_geometry_warns_and_falls_back_to_composite(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    with caplog.at_level(logging.WARNING, logger="ubt.core.policy.adaptive_policy"):
-        engine = resolve_render_engine_from_signals(
-            "auto", has_math=True, struct_share=0.9, has_geometry=False
-        )
-    assert engine == "composite"
-    assert any("no usable geometry" in record.message for record in caplog.records)
-
-
-def test_empty_request_is_treated_as_auto() -> None:
-    assert resolve_render_engine_from_signals("", has_math=True, struct_share=0.0) == "composite"
-
-
-def test_plain_prose_auto_takes_composite() -> None:
-    assert (
-        resolve_render_engine_from_signals("auto", has_math=False, struct_share=0.0) == "composite"
-    )
-
-
-def test_request_is_case_and_whitespace_insensitive() -> None:
-    assert (
-        resolve_render_engine_from_signals("  RIGID ", has_math=False, struct_share=0.0) == "rigid"
-    )
-    assert (
-        resolve_render_engine_from_signals("  COMPOSITE ", has_math=False, struct_share=0.0)
-        == "composite"
-    )
-
-
-# --------------------------------------------------------------------------- #
-# resolve_pdf_engine
-# --------------------------------------------------------------------------- #
-
-
-def test_pdf_engine_derives_geometry_from_blocks() -> None:
-    blocks = [_block("a", BlockType.NARRATIVE, bbox=_box())]
-    assert resolve_pdf_engine("auto", blocks) == "composite"
-
-
-def test_pdf_engine_zero_area_bbox_converges_to_composite() -> None:
-    blocks = [_block("f", BlockType.FORMULA, bbox=_box(x1=0.0, y1=0.0))]
-    assert resolve_pdf_engine("auto", blocks) == "composite"
-
-
-def test_pdf_engine_formula_block_routes_composite() -> None:
-    blocks = [_block(f"p{i}", BlockType.NARRATIVE, bbox=_box()) for i in range(5)]
-    blocks.append(_block("f", BlockType.FORMULA, bbox=_box()))
-    assert resolve_pdf_engine("auto", blocks) == "composite"
-
-
-def test_pdf_engine_structural_share_reaches_threshold() -> None:
-    blocks = [
-        _block("p1", BlockType.NARRATIVE, bbox=_box()),
-        _block("p2", BlockType.NARRATIVE, bbox=_box()),
-        _block("p3", BlockType.NARRATIVE, bbox=_box()),
-        _block("p4", BlockType.NARRATIVE, bbox=_box()),
-        _block("t", BlockType.TABLE, bbox=_box()),
-    ]
-    assert resolve_pdf_engine("auto", blocks) == "composite"
-
-
-def test_pdf_engine_no_blocks_routes_composite() -> None:
-    assert resolve_pdf_engine("auto", []) == "composite"
-
-
-def test_pdf_engine_requested_rigid_short_circuits() -> None:
-    assert resolve_pdf_engine("rigid", [_block("p", BlockType.NARRATIVE)]) == "rigid"
-
-
-def test_pdf_engine_requested_composite_short_circuits() -> None:
-    assert resolve_pdf_engine("composite", [_block("p", BlockType.NARRATIVE)]) == "composite"
-
-
-def test_pdf_engine_manifest_formula_heavy_routes_composite() -> None:
-    blocks = [_block("p", BlockType.NARRATIVE, bbox=_box())]
-    run = RunMetadata(route_decision={"formula_heavy": True})
-    assert resolve_pdf_engine("auto", blocks, _manifest(run)) == "composite"
-
-
-def test_pdf_engine_manifest_multicolumn_share_routes_composite() -> None:
-    blocks = [_block("p", BlockType.NARRATIVE, bbox=_box())]
-    run = RunMetadata(route_decision={"multicolumn_page_share": 0.3})
-    assert resolve_pdf_engine("auto", blocks, _manifest(run)) == "composite"
-
-
-def test_pdf_engine_no_manifest_routes_composite() -> None:
-    blocks = [
-        _block("p", BlockType.NARRATIVE, bbox=_box()),
-        _block("t", BlockType.TABLE, bbox=_box()),
-    ]
-    assert resolve_pdf_engine("auto", blocks, None) == "composite"
-
-
-def test_pdf_engine_unknown_request_falls_back_to_composite() -> None:
-    blocks = [_block("p", BlockType.NARRATIVE, bbox=_box())]
-    assert resolve_pdf_engine("weird", blocks) == "composite"
-
-
-def test_pdf_engine_paper_profile_routes_composite() -> None:
-    assert (
-        resolve_render_engine_from_signals(
-            "auto", has_math=False, struct_share=0.0, profile="paper"
-        )
-        == "composite"
-    )
-
-
-def test_pdf_engine_academic_paper_category_routes_composite() -> None:
-    assert (
-        resolve_render_engine_from_signals(
-            "auto", has_math=False, struct_share=0.0, category="DocCategory.ACADEMIC_PAPER"
-        )
-        == "composite"
-    )

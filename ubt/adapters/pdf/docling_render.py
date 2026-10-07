@@ -17,11 +17,10 @@ from typing import TYPE_CHECKING
 from ubt.adapters.pdf.alternator import BilingualAlternator
 from ubt.adapters.pdf.diagram_localizer import DiagramLocalizer
 from ubt.adapters.pdf.typst_compile import typst_version
-from ubt.core.config import PAGE_BILINGUAL_MODES, canonical_render_engine
+from ubt.core.config import PAGE_BILINGUAL_MODES
 from ubt.core.exceptions import DocumentParseError
 from ubt.core.ir.models import BlockType, BookManifest, IRBlock
 from ubt.core.ir.render_plan import RenderOutcome, RenderPlan
-from ubt.core.policy.adaptive_policy import resolve_pdf_engine
 from ubt.model.fidelity import Fidelity
 from ubt.model.span import PhysicalBox
 
@@ -66,39 +65,6 @@ def _reflow_obstacles(blocks: Sequence[IRBlock]) -> list[PhysicalBox]:
         ):
             obstacles.append(PhysicalBox.of(box.page, (box.x0, box.y0, box.x1, box.y1)))
     return obstacles
-
-
-def _warn_forced_engine(
-    requested_engine: str,
-    active_engine: str,
-    blocks: list[IRBlock],
-    manifest: BookManifest | None = None,
-) -> None:
-    """Warn when a forced render engine disagrees with what auto dispatch
-    would have chosen for this document's density profile.
-
-    A forced choice is legitimate (the user knows their fallback), but it
-    silently bypasses the structure-density routing that protects figure/
-    table-heavy documents; the disagreement is worth one WARNING at the
-    moment the choice is made rather than a post-mortem.
-    """
-    if canonical_render_engine(requested_engine) == "auto":
-        return
-    metadata = getattr(manifest, "metadata", None)
-    if isinstance(metadata, dict) and metadata.get("suppress_render_engine_warning"):
-        # Companion second pass: the primary already took the auto route, so a
-        # forced-engine warning here would contradict the delivered artifact.
-        return
-    auto_choice = resolve_pdf_engine("auto", blocks, manifest=manifest)
-    if auto_choice != active_engine:
-        logger.warning(
-            "render_engine=%r was forced, but auto dispatch would route this "
-            "document to %r (formula/structure density). If the output loses "
-            "figures/tables/equations, re-run with --render-engine %s.",
-            requested_engine,
-            auto_choice,
-            auto_choice,
-        )
 
 
 class DoclingRenderStrategy:
@@ -276,14 +242,13 @@ class DoclingRenderStrategy:
         target_lang: str,
         output_path: Path,
         bilingual_mode: str | None = None,
-        render_engine: str | None = None,
         render_plan: RenderPlan | None = None,
         realization_plan: Mapping[str, Fidelity] | None = None,
     ) -> Path:
         """Render publication-grade translated output from pre-fetched blocks.
 
-        All PDF targets are rendered through LayerCompositor (the unified
-        composition engine). Supports automatic facing-page bilingual
+        All PDF targets are rendered through LayerCompositor (the single
+        source-canvas overlay engine). Supports automatic facing-page bilingual
         interleaving and in-place bilingual fragments. Non-PDF targets
         (.md / .txt) export clean Markdown.
         """
@@ -293,18 +258,8 @@ class DoclingRenderStrategy:
         out_path.parent.mkdir(parents=True, exist_ok=True)
 
         plan_mode = render_plan.bilingual_mode if render_plan is not None else None
-        plan_engine = render_plan.render_engine if render_plan is not None else None
         active_mode = bilingual_mode or str(plan_mode or "bilingual")
-        requested_engine = render_engine or str(plan_engine or "publication")
         is_pdf_target = out_path.suffix.lower() == ".pdf"
-        active_engine = (
-            resolve_pdf_engine(requested_engine, blocks, manifest=manifest)
-            if is_pdf_target
-            else "publication"
-        )
-
-        if is_pdf_target and blocks:
-            _warn_forced_engine(requested_engine, active_engine, blocks, manifest=manifest)
 
         prior_downgrade = render_plan.dual_mode_downgraded if render_plan is not None else None
         outcome = RenderOutcome(
@@ -315,8 +270,6 @@ class DoclingRenderStrategy:
             dual_mode_downgraded=prior_downgrade,
         )
         self.last_outcome = outcome
-        if isinstance(getattr(manifest, "metadata", None), dict):
-            manifest.metadata["render_engine_effective"] = active_engine
 
         facing_spread_plan = render_plan.facing_spread if render_plan is not None else False
 

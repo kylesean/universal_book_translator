@@ -30,7 +30,6 @@ _MODE_CLUSTER = (
     "effective_dual_mode",
     "dual_mode_downgraded",
     "facing_spread",
-    "render_engine",
     "translate_chrome",
     "cover_mode",
 )
@@ -39,7 +38,6 @@ _MODE_CLUSTER = (
 _ADVISORY_OUTPUTS = (
     "bilingual_advisory",
     "emit_secondary_mode",
-    "emit_secondary_engine",
 )
 
 #: The renderer's result channel: the mode it actually used.
