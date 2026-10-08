@@ -4,7 +4,6 @@ Bridges diverse coordinate systems into standard PDF bottom-left points:
 1. Normalized [0, 1] or [0, 1000] coordinates (LayoutLM, PaddleOCR, MinerU, DocLayNet).
 2. Image pixel space (top-left origin, Y downward).
 3. PDF top-left vs bottom-left orientation and page rotation (90°, 180°, 270°).
-4. Synthetic line-box generation for textless scanned pages lacking embedded text streams.
 
 Zero-AGPL: 100% permissive (MIT/BSD/Apache-2.0). Never imports fitz or pymupdf.
 """
@@ -14,9 +13,6 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
-
-from ubt.adapters.pdf.textgeom import LineBox
-from ubt.core.ir.models import IRBlock
 
 logger = logging.getLogger(__name__)
 
@@ -237,82 +233,7 @@ class PageBBoxResolver:
         )
 
 
-def synthesize_line_boxes_for_blocks(
-    blocks: Sequence[IRBlock],
-    page_size: tuple[float, float],
-    image_size: tuple[float, float] | None = None,
-) -> list[LineBox]:
-    """Synthesize LineBox objects for blocks on scanned pages lacking text streams.
-
-    If block has provenance.vlm_lines, uses them.
-    Otherwise, segments block.bbox into proportional horizontal line bands.
-    """
-    pw, ph = page_size
-    img_w, img_h = image_size if image_size else (None, None)
-    resolver = PageBBoxResolver(
-        page_width=pw,
-        page_height=ph,
-        image_width=img_w,
-        image_height=img_h,
-    )
-
-    lines: list[LineBox] = []
-
-    for block in blocks:
-        # Check if vlm_lines are already present in provenance
-        vlm_members = (getattr(block, "provenance", None) or {}).get("vlm_lines") or []
-        if vlm_members:
-            for member in vlm_members:
-                try:
-                    text = str(member.get("text", "")).strip()
-                    raw_box = member.get("box", ())
-                    box = resolver.resolve_bbox(raw_box)
-                    if text and box is not None:
-                        lines.append(LineBox(text, box))
-                except Exception:
-                    continue
-            continue
-
-        # Otherwise, synthesize from block.bbox and source_text
-        if block.bbox is None:
-            continue
-
-        resolved_bbox = resolver.resolve_bbox(
-            [block.bbox.x0, block.bbox.y0, block.bbox.x1, block.bbox.y1],
-            coord_system="pdf_points",
-            origin="bottom-left",
-        )
-        if resolved_bbox is None:
-            continue
-
-        bx0, by0, bx1, by1 = resolved_bbox
-        bh = max(by1 - by0, 1.0)
-
-        raw_text = (block.source_text or "").strip()
-        if not raw_text:
-            continue
-
-        text_lines = [ln.strip() for ln in raw_text.split("\n") if ln.strip()]
-        if not text_lines:
-            text_lines = [raw_text]
-
-        n_lines = len(text_lines)
-        if n_lines == 1:
-            lines.append(LineBox(text_lines[0], (bx0, by0, bx1, by1)))
-        else:
-            # Segment block bbox into n_lines horizontal slices from top to bottom
-            line_h = bh / n_lines
-            for i, line_text in enumerate(text_lines):
-                # i=0 is top line (highest y in PDF points)
-                ly1 = by1 - i * line_h
-                ly0 = max(by0, ly1 - line_h)
-                lines.append(LineBox(line_text, (bx0, ly0, bx1, ly1)))
-
-    return lines
-
-
 __all__ = [
     "PageBBoxResolver",
     "Rect",
-    "synthesize_line_boxes_for_blocks",
 ]
