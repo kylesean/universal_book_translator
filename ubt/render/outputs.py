@@ -953,24 +953,58 @@ class TypstFragmentTypesetter:
             active = next_active
         return results
 
+    def fit_bilingual(
+        self, target: str, source: str, width_pt: float, height_pt: float
+    ) -> float | None:
+        """The size ``typeset_bilingual`` would fit this pair at, or None.
+
+        Public so the compositor can size a multi-box run: one paragraph owns
+        one size, and it is the smallest fit among the boxes that carry the pair
+        (see ``_compile_overlay``).
+        """
+        return self._fit_bilingual_sizes([(target, source, width_pt, height_pt)])[0]
+
     def typeset_bilingual(
-        self, source: str, target: str, width_pt: float, height_pt: float
+        self,
+        source: str,
+        target: str,
+        width_pt: float,
+        height_pt: float,
+        *,
+        size_pt: float | None = None,
     ) -> Path | None:
         """Typeset an in-place bilingual fragment: target over a smaller source.
 
         Both texts share the box; the target is the primary (fitted) size and the
         source a muted fraction of it, so a bilingual page reads top-down target
-        then source without one crowding the other out.
+        then source without one crowding the other out. ``size_pt`` draws the
+        pair at exactly that size instead of re-fitting this box, so a
+        continuation run's parts share one size (the compositor fits it across
+        every box); a per-box re-fit would let one part draw small and its
+        neighbour large.
         """
         if width_pt <= 0 or height_pt <= 0 or not (target.strip() or source.strip()):
             return None
+        if size_pt is not None:
+            return self._compile(
+                self._bilingual_text_source(target, source, width_pt, height_pt, size_pt),
+                tag="bilingual:",
+            )
         size_pt = self._fit_bilingual_sizes([(target, source, width_pt, height_pt)])[0]
-        if size_pt is None:
+        if size_pt is not None:
+            return self._compile(
+                self._bilingual_text_source(target, source, width_pt, height_pt, size_pt),
+                tag="bilingual:",
+            )
+        # Target+source will not both fit the box at the readable floor (a short
+        # single-line box: a heading, a narrow paragraph). The target is the
+        # deliverable and the source echo is best-effort, so drop the echo and
+        # typeset the target alone rather than descend to source -- which is why
+        # an in-place bilingual page shows headings monolingually. Only when the
+        # target alone also misses the floor does the caller keep the source.
+        if not target.strip():
             return None
-        return self._compile(
-            self._bilingual_text_source(target, source, width_pt, height_pt, size_pt),
-            tag="bilingual:",
-        )
+        return self.typeset(target, width_pt, height_pt)
 
     def _text_source(
         self,
@@ -1915,14 +1949,61 @@ class LayerCompositor:
             source_by_box = {(part.box.page, part.box.bbox): part.text for part in source_parts}
         stamped: list[_StampedPart] = []
         multi_box = len(boxes) > 1
+        # A bilingual run draws at ONE size across its boxes. The pair (target +
+        # muted source echo) needs ~1.8x the height of the target alone, so a
+        # per-box re-fit drew box 1 at 6.0pt and box 2 at 8.2pt for the same
+        # paragraph -- the "one box tiny and its neighbour normal" split
+        # ``_flow_plan`` exists to prevent. The run size is the smallest pair
+        # fit among the boxes that carry an echo (never above ``draw_size``, the
+        # size the target parts were cut at), and every part draws its target at
+        # exactly it. A target-carrying box whose pair still misses the readable
+        # floor drops its echo and draws the target alone -- the same echo-drop
+        # the single-box path documents. A stub typesetter without
+        # ``fit_bilingual`` keeps the legacy per-box behavior rather than lose
+        # every echo it cannot measure.
+        run_bilingual = False
+        run_size = draw_size
+        pair_fits: dict[tuple[int, BBox], float | None] = {}
+        fit_bilingual = getattr(typesetter, "fit_bilingual", None)
+        if (
+            multi_box
+            and overlay.source.strip()
+            and draw_size is not None
+            and fit_bilingual is not None
+        ):
+            run_bilingual = True
+            for part in parts:
+                part_source = source_by_box.get((part.box.page, part.box.bbox), "")
+                if not part_source.strip():
+                    # No echo here: the target draws alone at the run size, and
+                    # a target-alone fit would only over-constrain the run.
+                    continue
+                x0, y0, x1, y1 = part.box.bbox
+                pair_fits[(part.box.page, part.box.bbox)] = fit_bilingual(
+                    part.text, part_source, x1 - x0, y1 - y0 + slack
+                )
+            feasible = [size for size in pair_fits.values() if size is not None]
+            if feasible:
+                run_size = min(min(feasible), draw_size)
         for index, part in enumerate(parts):
-            source = source_by_box.get((part.box.page, part.box.bbox), "")
+            key = (part.box.page, part.box.bbox)
+            source = source_by_box.get(key, "")
             # Mask the *source* geometry: a reflowed overlay draws at its own box
             # but the source text still sits where the block was, so the mask
             # follows ``mask_boxes`` rather than the draw box.
             mask_bbox = (
                 overlay.mask_boxes[index].bbox if index < len(overlay.mask_boxes) else part.box.bbox
             )
+            if run_bilingual and source.strip() and pair_fits.get(key) is None:
+                if not part.text.strip():
+                    # An echo-only box (the target flow ended) whose echo cannot
+                    # fit even at the floor. The old per-box fit returned None
+                    # here and left the source untouched; keep that descend --
+                    # never a mask without a drawn replacement.
+                    continue
+                # Drop the echo (best-effort) and draw the target alone, still
+                # at the run size so the paragraph stays one size.
+                source = ""
             if not part.text.strip() and not source.strip():
                 # A continuation box the (shorter) target did not reach. Its
                 # source still sits there -- the tail of the very paragraph we
@@ -1943,7 +2024,8 @@ class LayerCompositor:
                 part,
                 source,
                 y1 - y0 + slack,
-                exact_size=draw_size,
+                exact_size=run_size,
+                bilingual_size=run_size if run_bilingual and source.strip() else None,
                 # Only the paragraph's OWN first line is indented: a continuation
                 # box starts mid-paragraph, and indenting there hangs the page's
                 # first line as if a new paragraph began at the page break.
@@ -1965,6 +2047,7 @@ class LayerCompositor:
         height: float,
         *,
         exact_size: float | None = None,
+        bilingual_size: float | None = None,
         first_part: bool = True,
     ) -> pikepdf.Object | None:
         """Typeset one flowed part and copy it into the artifact as a Form.
@@ -1973,8 +2056,12 @@ class LayerCompositor:
         the fragment can be fitted (and drawn) at the source size rather than
         shrunk to the ink box. ``exact_size`` (a continuation run's uniform size)
         draws the part at that size instead of re-fitting it per box, and
-        ``first_part`` carries the paragraph's first-line indent to the box it
-        actually starts in (never to a continuation box).
+        ``bilingual_size`` (a bilingual run's uniform pair size, possibly below
+        ``exact_size``) draws the target+source pair at exactly it -- the pair
+        branch runs before ``exact_size``, so a per-box re-fit there would
+        override the run's one size. ``first_part`` carries the paragraph's
+        first-line indent to the box it actually starts in (never to a
+        continuation box).
         """
         typesetter = self._typesetter
         if typesetter is None:
@@ -2002,12 +2089,20 @@ class LayerCompositor:
         elif source.strip() and bilingual is not None:
             try:
                 fragment = bilingual(
-                    source, part.text, width, height, align_center=overlay.align_center
+                    source,
+                    part.text,
+                    width,
+                    height,
+                    align_center=overlay.align_center,
+                    size_pt=bilingual_size,
                 )
             except TypeError:
-                # A custom typesetter without the centering flag: fall back to
-                # the positional signature rather than lose the overlay.
-                fragment = bilingual(source, part.text, width, height)
+                try:
+                    # A custom typesetter without the centering flag: fall back
+                    # to the positional signature rather than lose the overlay.
+                    fragment = bilingual(source, part.text, width, height, size_pt=bilingual_size)
+                except TypeError:
+                    fragment = bilingual(source, part.text, width, height)
         elif overlay.fixed_box or exact_size is not None:
             # Reflowed (fixed_box) or a continuation part (exact_size): the size is
             # already decided, so compile at exactly it -- no per-box fit shrink.

@@ -35,8 +35,8 @@ repos:
 
       # Whole-tree checks: pass_filenames off so a push cannot pass just because
       # the changed files happen to be clean. mypy resolves the whole program
-      # anyway, and the fast tier is ~6s, so pre-push
-      # stays well inside the inner-loop budget.
+      # anyway; the fast tier is ~2.5 minutes, so pre-push is a deliberate
+      # gate, not a per-commit cost (lint/format stay on commit).
       - id: mypy
         name: mypy --strict (ubt, tests)
         entry: uv run mypy --strict ubt tests

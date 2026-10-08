@@ -21,6 +21,7 @@ from ubt.adapters.pdf.visual_gate import (
     text_occlusion_findings,
 )
 from ubt.model.fidelity import Fidelity
+from ubt.model.span import PhysicalBox
 from ubt.render.outputs import (
     LayerCompositor,
     Overlay,
@@ -172,6 +173,94 @@ def test_a_box_below_the_font_floor_descends(tmp_path: Path) -> None:
         assert typesetter.typeset("hello world this line will not fit", 40.0, 5.0) is None
     finally:
         typesetter.close()
+
+
+def test_a_bilingual_box_too_short_for_the_echo_keeps_the_target_alone(
+    tmp_path: Path,
+) -> None:
+    # A one-line-tall box cannot stack a readable target *and* its source echo
+    # (the pair needs ~1.8x the box). The target is the deliverable and the echo
+    # is best-effort, so the source is dropped and the target drawn alone -- a
+    # heading comes out monolingual rather than descending to source. This is
+    # the bug the 6pt floor surfaced: the old 2pt floor fit the pair by shrinking
+    # below readability, and dropping the echo silently broke the delivery ratio.
+    typesetter = TypstFragmentTypesetter()
+    try:
+        fragment = typesetter.typeset_bilingual(
+            "La machine repose sur l'attention et la passe avant.",
+            "The machine relies on attention.",
+            380.0,
+            14.2,
+        )
+        assert fragment is not None, "a target-only fallback should still draw the target"
+        text = _text(fragment)
+        assert "machine" in text.lower(), "the target must be drawn"
+        assert "repose" not in text.lower(), "the source echo must be dropped, not shrunk"
+    finally:
+        typesetter.close()
+
+
+def test_a_bilingual_paragraph_across_two_boxes_draws_at_one_size(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The pair (target + muted echo) needs ~1.8x the height of the target alone,
+    # so a per-box re-fit drew one box at ~6pt and its neighbour at ~8pt for the
+    # same paragraph. The compositor now sizes the run at the smallest pair fit
+    # and hands every box that one size; the real typesetter must honor it.
+    source = write_text_pdf(
+        tmp_path / "source.pdf",
+        [["The machine relies on attention and runs a forward pass.", "It stays accurate."]],
+    )
+    output = tmp_path / "out.pdf"
+    first = (54.0, 690.0, 354.0, 750.0)
+    second = (54.0, 620.0, 230.0, 680.0)  # narrower: its pair fits smaller
+    target = (
+        "The machine relies on attention and runs a forward pass over the batch "
+        "of tokens that arrive from the encoder stack, and it stays accurate on "
+        "every benchmark we have tested so far."
+    )
+    echo = (
+        "La machine repose sur l'attention et effectue une passe avant sur le "
+        "lot de jetons qui arrivent de la pile d'encodeurs, et elle reste "
+        "precise sur chaque banc d'essai."
+    )
+    overlay = Overlay(
+        "e1",
+        1,
+        first,
+        target,
+        source=echo,
+        boxes=(PhysicalBox.of(1, first), PhysicalBox.of(1, second)),
+        font_size=11.0,
+    )
+    typesetter = TypstFragmentTypesetter()
+    sizes: list[float | None] = []
+    real = typesetter.typeset_bilingual
+
+    def record(
+        source: str,
+        target: str,
+        width_pt: float,
+        height_pt: float,
+        *,
+        size_pt: float | None = None,
+    ) -> Path | None:
+        sizes.append(size_pt)
+        return real(source, target, width_pt, height_pt, size_pt=size_pt)
+
+    monkeypatch.setattr(typesetter, "typeset_bilingual", record)
+    try:
+        LayerCompositor(source, typesetter=typesetter).compose([overlay], output)
+    finally:
+        typesetter.close()
+
+    # Every pair-drawing box got the run's one size, below the target-alone cap.
+    assert sizes, "no bilingual fragment was drawn"
+    drawn = set(sizes)
+    assert None not in drawn, "a box re-fit instead of taking the run size"
+    assert len(drawn) == 1, f"one paragraph drew at two sizes: {sizes}"
+    (run_size,) = drawn
+    assert run_size is not None and 6.0 <= run_size < 11.0 * 1.05
 
 
 def test_the_typst_fragment_typesetter_renders_literal_text(tmp_path: Path) -> None:

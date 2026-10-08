@@ -124,7 +124,18 @@ async def test_the_composite_engine_draws_in_place_bilingual(tmp_path: Path) -> 
     # The default bilingual mode is in-place: target over source in the same box,
     # so a one-page source stays one page (unlike the doubling page zip). Both
     # languages reach the artifact, and the source is redrawn, not masked away.
-    source = write_text_pdf(tmp_path / "book.pdf", [_PAGE])
+    #
+    # The body paragraph is authored as a multi-line box (three physical lines)
+    # so it is tall enough to hold the target *and* its source echo at the 6pt
+    # readable floor. A one-line-tall box cannot stack both, so its source echo
+    # is dropped and the target drawn alone (a heading comes out monolingual) --
+    # that descent-free behaviour is pinned by the synthetic render e2e instead.
+    page = (
+        "The Attention Machine",
+        "The machine relies on attention and runs a forward pass over the batch.",
+        "It stays accurate on every benchmark we have tested so far in the lab.",
+    )
+    source = write_text_pdf(tmp_path / "book.pdf", [page])
     output = tmp_path / "book_es.pdf"
     config = _config(tmp_path).model_copy(update={"dual_mode": "inline"})
     orchestrator = create_dry_run_orchestrator(config)

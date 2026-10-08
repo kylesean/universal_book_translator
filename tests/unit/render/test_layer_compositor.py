@@ -13,6 +13,7 @@ Pins the invariants the composition design rests on, without a Typst toolchain
 from __future__ import annotations
 
 import asyncio
+import math
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, ClassVar
@@ -438,6 +439,145 @@ def test_text_flows_across_a_chain_of_boxes(tmp_path: Path) -> None:
     delivered = _text(output)
     assert "Alpha beta gamma." in delivered
     assert "Delta epsilon zeta. Eta theta." in delivered
+
+
+class _BilingualRunSpy(_FragmentSpy):
+    """A spy exposing the fit surface the multi-box bilingual sizing reads.
+
+    ``fit_bilingual`` mimics the real typesetter's pair fit (a longer pair or a
+    narrower box fits at a smaller size), and both draw methods record the size
+    they were handed -- re-fitting per box when handed none, exactly like the
+    real typesetter, so a run drawn without a uniform size shows up as
+    differing records.
+    """
+
+    def __init__(self, tmp: Path) -> None:
+        super().__init__(tmp)
+        self.bilingual_sizes: list[float | None] = []
+        self.fixed_sizes: list[float] = []
+
+    def cap_size(self, kind: str, font_size: float | None) -> float:
+        return font_size or 10.0
+
+    def measure_fixed(
+        self,
+        text: str,
+        width: float,
+        size: float,
+        *,
+        kind: str = "text",
+        is_bold: bool = False,
+        indent_pt: float | None = None,
+        runs: tuple[Any, ...] = (),
+    ) -> float:
+        per_line = max(1.0, width / size)
+        return max(1, math.ceil(len(text) / per_line)) * size * 1.2
+
+    def fit_bilingual(
+        self, target: str, source: str, width_pt: float, height_pt: float
+    ) -> float | None:
+        chars = len(target) + len(source)
+        if not chars:
+            return None
+        return 0.03 * math.sqrt(1000.0 * width_pt * height_pt / chars)
+
+    def typeset_bilingual(
+        self,
+        source: str,
+        target: str,
+        width_pt: float,
+        height_pt: float,
+        *,
+        align_center: bool = False,
+        size_pt: float | None = None,
+    ) -> Path | None:
+        if size_pt is None:
+            size_pt = self.fit_bilingual(target, source, width_pt, height_pt)
+        self.bilingual_sizes.append(size_pt)
+        return super().typeset_bilingual(source, target, width_pt, height_pt)
+
+    def typeset_fixed(
+        self,
+        text: str,
+        width_pt: float,
+        height_pt: float,
+        size_pt: float,
+        **_kw: Any,
+    ) -> Path | None:
+        self.fixed_sizes.append(size_pt)
+        return super().typeset(text, width_pt, height_pt)
+
+
+def test_a_bilingual_run_draws_every_box_at_one_size(tmp_path: Path) -> None:
+    # A paragraph crossing boxes draws at ONE size. The pair (target + source
+    # echo) needs more height than the target alone, and the boxes differ (the
+    # continuation narrower) -- so a per-box re-fit drew one box small and its
+    # neighbour large for the same paragraph. The run must instead size at the
+    # smallest pair fit and pass it to every box.
+    source = write_text_pdf(tmp_path / "source.pdf", [_PAGE])
+    output = tmp_path / "out.pdf"
+    first = (54.0, 690.0, 354.0, 750.0)
+    second = (54.0, 620.0, 204.0, 680.0)  # narrower: pairs fit smaller
+    target = "Alpha beta gamma delta epsilon zeta eta theta iota kappa. " * 2
+    echo = "alpha source echo words here for the pair split across two boxes now. " * 2
+    spy = _BilingualRunSpy(tmp_path)
+    overlay = Overlay(
+        "e1",
+        1,
+        first,
+        target,
+        source=echo,
+        boxes=(PhysicalBox.of(1, first), PhysicalBox.of(1, second)),
+        font_size=11.0,
+    )
+
+    LayerCompositor(source, typesetter=spy).compose([overlay], output)
+
+    # Both boxes carried a target+echo pair, and both drew at the same size.
+    assert len(spy.bilingual_sizes) == 2
+    drawn = set(spy.bilingual_sizes)
+    assert None not in drawn
+    assert len(drawn) == 1, f"one paragraph drew at two sizes: {spy.bilingual_sizes}"
+    (run_size,) = drawn
+    assert run_size is not None
+    # The run size is the smallest pair fit -- below the target-alone size a
+    # per-box re-fit would have reached for the narrower continuation.
+    assert run_size < 11.0
+
+
+def test_a_bilingual_run_box_without_an_echo_draws_its_target_at_the_run_size(
+    tmp_path: Path,
+) -> None:
+    # The echo flow can end early (the source is shorter than its target): a box
+    # then has target text but no echo. It must still draw at the run's one size
+    # rather than re-fit the target alone to a larger one.
+    source = write_text_pdf(tmp_path / "source.pdf", [_PAGE])
+    output = tmp_path / "out.pdf"
+    first = (54.0, 690.0, 354.0, 750.0)
+    second = (54.0, 620.0, 354.0, 680.0)
+    target = "Alpha beta gamma delta epsilon zeta eta theta iota kappa. " * 2
+    # Long enough that the pair cannot share the first box at the target-alone
+    # size (forcing the run below it), short enough to fit that box alone.
+    echo = "Alpha beta gamma delta echo words right here in the box."
+    spy = _BilingualRunSpy(tmp_path)
+    overlay = Overlay(
+        "e1",
+        1,
+        first,
+        target,
+        source=echo,
+        boxes=(PhysicalBox.of(1, first), PhysicalBox.of(1, second)),
+        font_size=11.0,
+    )
+
+    LayerCompositor(source, typesetter=spy).compose([overlay], output)
+
+    # The echo box drew at the run size; the no-echo box drew its target at the
+    # same size (legacy behavior compiled it at the target-alone draw size).
+    (run_size,) = spy.bilingual_sizes
+    assert run_size is not None and run_size < 11.0
+    assert spy.fixed_sizes, "the no-echo box should draw its target only"
+    assert spy.fixed_sizes[0] == run_size
 
 
 # --------------------------------------------------------------------------- #
