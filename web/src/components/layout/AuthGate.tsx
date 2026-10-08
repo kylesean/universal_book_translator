@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { KeyRound, Loader2, ShieldAlert } from 'lucide-react'
 import { checkHealth, getStoredApiKey, signIn } from '@/api/client'
-import { useI18n } from '@/i18n/I18nContext'
+import { useI18n } from '@/i18n/useI18n'
 
 interface AuthGateProps {
   children: React.ReactNode
@@ -54,6 +54,9 @@ export function AuthGate({ children }: AuthGateProps) {
   }, [])
 
   useEffect(() => {
+    // Mount-time probe: every setState inside `verify` runs after its `await`,
+    // so there is no synchronous cascade for the rule to be about.
+    // oxlint-disable-next-line react/set-state-in-effect
     void verify()
   }, [verify])
 

@@ -25,7 +25,7 @@ import {
   type GlossaryConflict,
   type TmEntry,
 } from '@/api/client'
-import { useI18n } from '@/i18n/I18nContext'
+import { useI18n } from '@/i18n/useI18n'
 
 type Tab = 'glossary' | 'tm' | 'bible'
 
@@ -89,7 +89,10 @@ export function LanguageAssetsView() {
   }, [])
 
   useEffect(() => {
+    // Tab-switch load; both loaders' setStates run after their awaited fetches.
+    // oxlint-disable-next-line react/set-state-in-effect
     if (activeTab === 'glossary') void loadGlossary()
+    // oxlint-disable-next-line react/set-state-in-effect
     if (activeTab === 'tm') void loadTm()
   }, [activeTab, loadGlossary, loadTm])
 

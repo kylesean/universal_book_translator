@@ -28,7 +28,7 @@ import {
   type IssuesReport,
   type TermViolation,
 } from '@/api/client'
-import { useI18n } from '@/i18n/I18nContext'
+import { useI18n } from '@/i18n/useI18n'
 
 type Filter = 'issues' | 'all' | 'needs_human'
 
@@ -57,7 +57,6 @@ export function ReviewWorkbench() {
   const [filter, setFilter] = useState<Filter>('issues')
 
   const [segments, setSegments] = useState<Segment[]>([])
-  const [total, setTotal] = useState(0)
   const [issues, setIssues] = useState<IssuesReport | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -85,7 +84,6 @@ export function ReviewWorkbench() {
         listIssues(jobId),
       ])
       setSegments(segmentData.segments)
-      setTotal(segmentData.total)
       setIssues(issueData)
       setSaved({})
       setIssueCursor(0)
@@ -102,6 +100,9 @@ export function ReviewWorkbench() {
 
   // Virtualize the segment list: a 10k-segment book keeps a constant DOM node
   // count (PRD §9 risk 1) instead of one card per segment.
+  // @tanstack/react-virtual returns non-memoizable values by design; the compiler
+  // skipping this hook's output is its documented behaviour, not a defect here.
+  // oxlint-disable-next-line react/incompatible-library
   const virtualizer = useVirtualizer({
     count: segments.length,
     getScrollElement: () => scrollRef.current,

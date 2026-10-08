@@ -10,7 +10,7 @@ import {
   type ModelProfile,
   type SystemInfo,
 } from '@/api/client'
-import { useI18n } from '@/i18n/I18nContext'
+import { useI18n } from '@/i18n/useI18n'
 
 function CheckIcon({ status }: { status: string }) {
   if (status === 'FAIL') return <XCircle className="h-4 w-4 text-[#b91c1c] shrink-0 mt-0.5" />
@@ -56,6 +56,9 @@ export function SystemDoctorView() {
   }, [])
 
   useEffect(() => {
+    // Mount-time load; `load`'s setStates are the loading flag and the results,
+    // and every one of them runs after the awaited fetches.
+    // oxlint-disable-next-line react/set-state-in-effect
     void load(false)
   }, [load])
 

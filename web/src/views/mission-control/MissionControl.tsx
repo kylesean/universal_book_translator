@@ -24,7 +24,7 @@ import {
   type JobSummary,
   type ProgressStreamFrame,
 } from '@/api/client'
-import { useI18n } from '@/i18n/I18nContext'
+import { useI18n } from '@/i18n/useI18n'
 
 type LogLevel = 'INFO' | 'WARN' | 'ERROR'
 
@@ -69,6 +69,9 @@ export function MissionControl() {
   // The queue is polled independently of the selected job so a restarted
   // console still lists finished runs (they live on disk, not in memory).
   useEffect(() => {
+    // Mount-time queue read plus its poll; `refreshQueue`'s setState runs after
+    // the awaited fetch, not during the effect.
+    // oxlint-disable-next-line react/set-state-in-effect
     void refreshQueue()
     const timer = setInterval(() => void refreshQueue(), 5000)
     return () => clearInterval(timer)

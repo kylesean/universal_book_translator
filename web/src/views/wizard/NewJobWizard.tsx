@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   UploadCloud,
@@ -14,7 +14,7 @@ import {
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { assessJob, submitJob, uploadSourceDocument, type JobAssessResponse } from '@/api/client'
-import { useI18n } from '@/i18n/I18nContext'
+import { useI18n } from '@/i18n/useI18n'
 
 /** Human-readable duration from a seconds estimate (e.g. "3m", "1.2h"). */
 function formatDuration(seconds: number): string {
@@ -61,79 +61,82 @@ export function NewJobWizard() {
   const hasUserSelectedDualModeRef = useRef<boolean>(false)
   const assessSeqRef = useRef(0)
 
-  const runAssess = async (
-    path: string,
-    opts?: {
-      overridePreset?: 'publication' | 'standard' | 'preview' | 'fast'
-      overridePages?: string
-      overrideTarget?: string
-      overrideSource?: string
-      silent?: boolean
-    }
-  ) => {
-    if (!path.trim()) return
-    const isSilent = opts?.silent ?? false
-    if (!isSilent) {
-      setIsAssessing(true)
-      setAssessment(null)
-    } else {
-      setIsReassessing(true)
-    }
-    setAssessError(null)
-
-    const activePreset = opts?.overridePreset ?? preset
-    const activePages = opts?.overridePages !== undefined ? opts.overridePages : pageRange
-    const activeTarget = opts?.overrideTarget ?? targetLang
-    const activeSource = opts?.overrideSource ?? sourceLang
-
-    const seq = ++assessSeqRef.current
-    try {
-      const res = await assessJob({
-        input_path: path.trim(),
-        target_lang: activeTarget,
-        source_lang: activeSource,
-        preset: activePreset,
-        pages: activePages.trim() ? activePages.trim() : null,
-        deep: !isSilent,
-      })
-      if (seq !== assessSeqRef.current) return // stale response
-      setAssessment(res)
-
-      // Auto-feed recommendations when a new document is assessed
-      if (lastAssessedFileRef.current !== path.trim()) {
-        lastAssessedFileRef.current = path.trim()
-        if (!hasUserSelectedPresetRef.current && res.route?.recommended_preset) {
-          const recP = res.route.recommended_preset.toLowerCase() as any
-          if (['publication', 'standard', 'preview', 'fast'].includes(recP)) {
-            setPreset(recP)
-          }
-        }
-        if (!hasUserSelectedDomainRef.current && res.route?.recommended_profile) {
-          const recDom = res.route.recommended_profile.toLowerCase()
-          if (['general', 'textbook', 'paper', 'fiction', 'humanities', 'semiconductor'].includes(recDom)) {
-            setDomainProfile(recDom)
-          }
-        }
-        if (!hasUserSelectedDualModeRef.current && res.route?.recommended_dual_mode) {
-          const recDual = res.route.recommended_dual_mode.toLowerCase() as any
-          if (['auto', 'inline', 'facing', 'alternating', 'monolingual'].includes(recDual)) {
-            setDualMode(recDual)
-          }
-        }
+  const runAssess = useCallback(
+    async (
+      path: string,
+      opts?: {
+        overridePreset?: 'publication' | 'standard' | 'preview' | 'fast'
+        overridePages?: string
+        overrideTarget?: string
+        overrideSource?: string
+        silent?: boolean
       }
-    } catch (err) {
-      if (seq !== assessSeqRef.current) return // stale response
+    ) => {
+      if (!path.trim()) return
+      const isSilent = opts?.silent ?? false
       if (!isSilent) {
-        setAssessError(err instanceof Error ? err.message : 'Assessment failed')
+        setIsAssessing(true)
+        setAssessment(null)
+      } else {
+        setIsReassessing(true)
       }
-      setAssessment(null) // don't leave a stale quote on error
-    } finally {
-      if (seq === assessSeqRef.current) {
-        setIsAssessing(false)
-        setIsReassessing(false)
+      setAssessError(null)
+
+      const activePreset = opts?.overridePreset ?? preset
+      const activePages = opts?.overridePages !== undefined ? opts.overridePages : pageRange
+      const activeTarget = opts?.overrideTarget ?? targetLang
+      const activeSource = opts?.overrideSource ?? sourceLang
+
+      const seq = ++assessSeqRef.current
+      try {
+        const res = await assessJob({
+          input_path: path.trim(),
+          target_lang: activeTarget,
+          source_lang: activeSource,
+          preset: activePreset,
+          pages: activePages.trim() ? activePages.trim() : null,
+          deep: !isSilent,
+        })
+        if (seq !== assessSeqRef.current) return // stale response
+        setAssessment(res)
+
+        // Auto-feed recommendations when a new document is assessed
+        if (lastAssessedFileRef.current !== path.trim()) {
+          lastAssessedFileRef.current = path.trim()
+          if (!hasUserSelectedPresetRef.current && res.route?.recommended_preset) {
+            const recP = res.route.recommended_preset.toLowerCase() as any
+            if (['publication', 'standard', 'preview', 'fast'].includes(recP)) {
+              setPreset(recP)
+            }
+          }
+          if (!hasUserSelectedDomainRef.current && res.route?.recommended_profile) {
+            const recDom = res.route.recommended_profile.toLowerCase()
+            if (['general', 'textbook', 'paper', 'fiction', 'humanities', 'semiconductor'].includes(recDom)) {
+              setDomainProfile(recDom)
+            }
+          }
+          if (!hasUserSelectedDualModeRef.current && res.route?.recommended_dual_mode) {
+            const recDual = res.route.recommended_dual_mode.toLowerCase() as any
+            if (['auto', 'inline', 'facing', 'alternating', 'monolingual'].includes(recDual)) {
+              setDualMode(recDual)
+            }
+          }
+        }
+      } catch (err) {
+        if (seq !== assessSeqRef.current) return // stale response
+        if (!isSilent) {
+          setAssessError(err instanceof Error ? err.message : 'Assessment failed')
+        }
+        setAssessment(null) // don't leave a stale quote on error
+      } finally {
+        if (seq === assessSeqRef.current) {
+          setIsAssessing(false)
+          setIsReassessing(false)
+        }
       }
-    }
-  }
+    },
+    [preset, pageRange, targetLang, sourceLang]
+  )
 
   // Reactive re-assessment on preset / page slice / lang tweaks
   useEffect(() => {
@@ -150,7 +153,7 @@ export function NewJobWizard() {
       }, 350)
       return () => clearTimeout(timer)
     }
-  }, [filePath, preset, pageRange, targetLang, sourceLang])
+  }, [filePath, preset, pageRange, targetLang, sourceLang, runAssess])
 
   // Browsers do not expose a real filesystem path (`File.path` exists only in
   // Electron), so the picked file is uploaded to the server and the staged
@@ -223,7 +226,12 @@ export function NewJobWizard() {
 
   // Keyboard shortcut: ⌘⏎ or Ctrl+Enter to compile
   const handleSubmitRef = useRef(handleSubmit)
-  handleSubmitRef.current = handleSubmit
+  useEffect(() => {
+    // Latest-ref pattern: the listener below is bound once and must call the
+    // current `handleSubmit`, so the ref is refreshed after each commit rather
+    // than written during render (which React forbids).
+    handleSubmitRef.current = handleSubmit
+  })
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {

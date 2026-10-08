@@ -12,7 +12,7 @@ import {
   FileSpreadsheet,
 } from 'lucide-react'
 import { checkHealth, type HealthResponse } from '@/api/client'
-import { useI18n } from '@/i18n/I18nContext'
+import { useI18n } from '@/i18n/useI18n'
 
 interface ConsoleLayoutProps {
   children: React.ReactNode
