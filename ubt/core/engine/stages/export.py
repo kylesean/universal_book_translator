@@ -571,7 +571,7 @@ async def _run_visual_gate(
     rendered_path: Path,
     render: RenderPlan,
 ) -> tuple[Path, Path | None, Any]:
-    """Post-render visual self-healing gate; never fatal except on cancel.
+    """Post-render visual gate; never fatal except on cancel.
 
     T0/T1 deterministic checks + optional pixel confirmation + sampled T2
     VLM + ReflowControlLoop, all driven by the config bound on ``ctx``.
@@ -622,16 +622,14 @@ async def _run_visual_gate(
         # then renders, writes the report and stamps the job "completed".
         raise
     except Exception as exc:
-        logger.warning(
-            "Visual gate self-healing failed (non-fatal) for job %s: %s", ctx.job_id, exc
-        )
+        logger.warning("Visual gate failed (non-fatal) for job %s: %s", ctx.job_id, exc)
         # A crashed gate must read as failed, not absent: blocking enforcement
         # and the KPI collector both key off this object, and None silently
         # skipped every rejection layer while metrics recorded a perfect pass.
         gate = crashed_visual_gate_result(
             f"visual gate did not complete: {type(exc).__name__}: {exc}"[:300]
         )
-        visual_report_path = await _persist_crashed_gate_report(ctx, rendered_path, gate, exc)
+        visual_report_path = await _persist_crashed_gate_report(ctx, rendered_path, gate)
     return rendered_path, visual_report_path, gate
 
 
@@ -639,21 +637,19 @@ async def _persist_crashed_gate_report(
     ctx: StageContext,
     rendered_path: Path,
     gate: VisualGateResult,
-    exc: Exception,
 ) -> Path | None:
     """Write the crash gate where a live run would have written its report.
 
-    The sidecar, the ledger record and the KPI collector all read this state;
-    best-effort only, the caller is already inside the failure path.
+    The crash reason rides in the gate's ``visual_gate_crashed`` finding, so the
+    report needs no separate field for it. The sidecar, the ledger record and
+    the KPI collector all read this state; best-effort only, the caller is
+    already inside the failure path.
     """
     try:
         from ubt.core.log_aggregate import noise_report
 
         payload: dict[str, Any] = {
             **gate.report_payload(),
-            "self_healed": False,
-            "healing_strategy": "none",
-            "healing_skipped_reason": f"visual gate crashed: {type(exc).__name__}: {exc}"[:300],
             "parse_noise": noise_report(),
         }
         visual_report_path = sidecar_path(rendered_path, "visual_report.json")
@@ -1338,7 +1334,7 @@ async def run_export_stage(
             _write_attestation_shadow, ctx, rendered_path, document, translations, attestations
         )
 
-    # Post-render visual gate (self-healing loop): T0/T1 deterministic +
+    # Post-render visual gate: T0/T1 deterministic +
     # optional pixel confirmation + sampled T2 VLM + ReflowControlLoop.
     # Enforcement is deferred until after _build_reports (below): a refusal
     # must still leave the quality/metrics reports on disk for audit.

@@ -36,7 +36,7 @@ RenderFn = Callable[..., Awaitable[Path]]
 
 
 class ReflowControlLoop:
-    """Visual gate reflow control loop and self-healing orchestration.
+    """Visual gate reflow control loop: verify the render, quarantine on defect.
 
     See the module docstring for the coordination flow this class implements.
     """
@@ -135,13 +135,10 @@ class ReflowControlLoop:
         rendered_path: Path,
         blocks: list[IRBlock],
     ) -> tuple[Path, Path, Any]:
-        """Run post-render visual verification with automated self-healing."""
+        """Run post-render visual verification and quarantine defective pages."""
         if self.cancel_token is not None and self.cancel_token.is_set():
             raise JobInterruptedError(f"Job {self.job_id} cancelled before visual gate evaluation")
         gate = await self._evaluate_gate(rendered_path, blocks)
-        self_healed = False
-        healing_strategy: str | None = None
-        healing_skipped_reason: str | None = None
 
         # All PDF targets render through LayerCompositor onto the source canvas,
         # so geometry is preserved. If gate has major or critical findings,
@@ -260,9 +257,6 @@ class ReflowControlLoop:
 
         report_dict: dict[str, Any] = {
             **gate.report_payload(),
-            "self_healed": self_healed,
-            "healing_strategy": healing_strategy,
-            "healing_skipped_reason": healing_skipped_reason,
             # Parse-stage third-party warnings the log aggregated instead of
             # printing per cell (see ubt.core.log_aggregate). Empty when the
             # parse emitted none. This is the durable record of *why* a table

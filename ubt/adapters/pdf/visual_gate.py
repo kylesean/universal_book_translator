@@ -129,7 +129,7 @@ class VisualGateResult:
     def report_payload(self) -> dict[str, Any]:
         """Gate-owned half of the visual_report.json schema.
 
-        The reflow loop adds its healing/parse-noise keys on top; a gate that
+        The reflow loop adds its parse-noise key on top; a gate that
         crashed before the loop could write anything still produces this half,
         so the sidecar file, the ledger record and the KPI collector agree on
         the outage instead of the crash vanishing from all three.
