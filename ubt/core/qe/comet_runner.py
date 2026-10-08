@@ -20,7 +20,6 @@ import asyncio
 import json
 import logging
 import os
-from collections.abc import Sequence
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -729,22 +728,6 @@ class HeuristicQERunner(BaseQERunner):
         if "truncated" in r or "inflated" in r:
             return QE_SCORE_LENGTH
         return QE_SCORE_STRUCTURAL_OTHER
-
-    @classmethod
-    def score_from_flags(cls, flags: Sequence[str]) -> float:
-        """Defect class for a block's error flags, terminology included.
-
-        A glossary violation caps the class at ``QE_SCORE_GLOSSARY_VIOLATION``
-        so it can never reach the auto-pass band; an already-lower structural
-        class (leak 0.10, fabrication 0.15, repetition 0.20) keeps its existing
-        value, so every non-terminology condition is unchanged.
-        """
-        if not flags:
-            return cls.score_from_decision_reason("")
-        scores = [cls.score_from_decision_reason(flag) for flag in flags]
-        if any(GLOSSARY_VIOLATION_MARKER in flag for flag in flags):
-            scores.append(QE_SCORE_GLOSSARY_VIOLATION)
-        return min(scores)
 
     async def score_pairs(self, pairs: list[dict[str, str]]) -> list[float]:
         scores: list[float] = []

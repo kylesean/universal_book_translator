@@ -191,18 +191,6 @@ def artifact_parity_findings(
     )
 
 
-def asset_skip_findings(blocks: list[Any], skips: list[tuple[str, str]]) -> list[Any]:
-    """Classify render asset skips into visual-gate findings.
-
-    Duck-typed findings: (severity, code, message). A content figure/table that
-    could not be embedded is ``major``/``content_asset_missing``; a decorative
-    or cover asset is ``info``. Empty list when there were no skips.
-    """
-    from ubt.adapters.pdf.artifact_parity import asset_skip_findings as _classify
-
-    return list(_classify(blocks, skips))
-
-
 def inspect_font_encoding_damage(pdf_path: Path) -> list[PageVerdict]:
     """Run the extraction witness; returns per-page verdicts."""
     from ubt.adapters.pdf.extraction_witness import inspect_pdf

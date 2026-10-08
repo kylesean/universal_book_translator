@@ -499,12 +499,6 @@ class PipelineOrchestrator:
         return delta
 
     def _session_usage(self, session: _RunBillingSession) -> dict[str, dict[str, int]]:
-        if session.sink is not None:
-            # Copy: the provider keeps accumulating into this dict concurrently.
-            return {model: dict(totals) for model, totals in list(session.sink.items())}
-        return self._usage_delta(session.baseline, self.router.usage_totals_by_model())
-
-    def _run_usage(self, job_id: str | None = None) -> dict[str, dict[str, int]]:
         """Tokens this run spent, per model.
 
         Prefer the provider's per-run sink: it is exact even when several jobs
@@ -512,11 +506,10 @@ class PipelineOrchestrator:
         to diffing the process-wide counters against the start-of-run snapshot
         (correct for a solo CLI run, blended for a shared one).
         """
-        try:
-            session = self._get_billing_session(job_id)
-        except KeyError:
-            return {}
-        return self._session_usage(session)
+        if session.sink is not None:
+            # Copy: the provider keeps accumulating into this dict concurrently.
+            return {model: dict(totals) for model, totals in list(session.sink.items())}
+        return self._usage_delta(session.baseline, self.router.usage_totals_by_model())
 
     async def _bill_session(
         self,

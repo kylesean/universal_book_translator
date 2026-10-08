@@ -85,14 +85,6 @@ class ReflowControlLoop:
 
         return _judge
 
-    def _output_keeps_source_geometry(self) -> bool:
-        """Whether the rendered page still is the source page.
-
-        All PDF render routes use LayerCompositor and keep the source page as
-        the base canvas, so the IR bboxes faithfully describe the artifact.
-        """
-        return True
-
     async def _evaluate_gate(
         self,
         pdf_path: Path,
@@ -125,7 +117,7 @@ class ReflowControlLoop:
         # bboxes, which describe the artifact: every PDF route composes onto the
         # source page canvas, so a block's source rectangle is where its text
         # lands.
-        gate_blocks = blocks if self._output_keeps_source_geometry() else ()
+        gate_blocks = blocks
         vlm_judge = self._build_vlm_judge()
         return await runner(
             pdf_path,
@@ -216,7 +208,7 @@ class ReflowControlLoop:
                     source_pdf=source_pdf,
                     artifact_pdf=rendered_path,
                     target_lang=self.target_lang,
-                    keeps_source_geometry=self._output_keeps_source_geometry(),
+                    keeps_source_geometry=True,
                     selected_pages=sel_pages,
                 )
             except Exception as exc:  # pragma: no cover - probe must never break export
@@ -232,29 +224,6 @@ class ReflowControlLoop:
                     "parity_findings": len(parity_findings),
                 },
             )
-
-        # T0.55 asset-inclusion parity. Guarded on a non-source-canvas engine:
-        # every PDF route currently composes onto the source page
-        # (LayerCompositor), so ``_output_keeps_source_geometry()`` is True and
-        # this gate is a no-op today. It stays as the guard for any engine whose
-        # output is re-typeset away from the source geometry, where a dropped
-        # content figure would otherwise go unreported.
-        if not self._output_keeps_source_geometry():
-            try:
-                from ubt.core.ports import asset_skip_findings, get_last_render_skips
-
-                skip_findings = asset_skip_findings(blocks, get_last_render_skips(self.adapter))
-            except Exception as exc:  # pragma: no cover - probe must never break export
-                skip_findings = []
-                logger.debug("asset-skip gate skipped for job %s: %s", self.job_id, exc)
-            if skip_findings:
-                gate = dataclasses.replace(
-                    gate,
-                    findings=(*gate.findings, *skip_findings),
-                    passed=gate.passed
-                    and not any(f.severity in ("major", "critical") for f in skip_findings),
-                    stats={**gate.stats, "asset_skip_findings": len(skip_findings)},
-                )
 
         # T0.6 render fidelity (advisory ruler, never a gate). Every PDF route
         # composes onto the source canvas, so the residual and painted coverage

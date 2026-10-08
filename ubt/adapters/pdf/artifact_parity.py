@@ -34,14 +34,6 @@ logger = logging.getLogger(__name__)
 
 _PROBE_TIMEOUT_S = 30.0
 
-# Render-skip reasons that name a decorative asset, not a content figure. They
-# win over the block type, so a decorative banner typed as an IMAGE block is
-# not escalated to a delivery defect.
-_DECORATIVE_SKIP_REASONS = frozenset({"decorative_banner", "cover_asset_missing"})
-
-# IR block types whose absence from the artifact is a content defect.
-_CONTENT_ASSET_BLOCK_TYPES = frozenset({"image", "table"})
-
 # CJK/latin target-script coverage below which the artifact is suspect even
 # though it contains *some* target glyphs. Comfortably below what any
 # correctly translated monolingual or bilingual book reaches: even the
@@ -301,59 +293,8 @@ def check_artifact_parity(
     return findings
 
 
-def asset_skip_findings(
-    blocks: Sequence[object], skips: Sequence[tuple[str, str]]
-) -> list[ParityFinding]:
-    """Classify the renderer's asset skips into visual-gate findings.
-
-    A render that fails to stage a content figure drops it from the delivered
-    PDF while still reporting full render coverage. Classify each skip by the
-    IR block it names: a content image/table that could not be embedded is a
-    delivery defect (``major``, code ``content_asset_missing``), while a
-    decorative banner or a missing cover is cosmetic (``info``). A decorative
-    reason wins over the block type, so a decorative banner typed as an IMAGE
-    block is not escalated. The caller decides which render route this applies
-    to — it is meaningful only where the renderer re-stages assets, and not
-    where skip reasons are text-placement rather than asset loss.
-    """
-    by_id = {str(getattr(b, "id", "")): b for b in blocks}
-    findings: list[ParityFinding] = []
-    for block_id, reason in skips:
-        block = by_id.get(str(block_id))
-        block_type = getattr(block, "block_type", None)
-        block_type_value = str(getattr(block_type, "value", block_type) or "").lower()
-        if reason in _DECORATIVE_SKIP_REASONS:
-            findings.append(
-                ParityFinding(
-                    "info",
-                    "asset_skip_decorative",
-                    f"Decorative asset skipped during render (block {block_id}): {reason}",
-                )
-            )
-        elif reason == "missing_asset" or block_type_value in _CONTENT_ASSET_BLOCK_TYPES:
-            findings.append(
-                ParityFinding(
-                    "major",
-                    "content_asset_missing",
-                    f"Content figure/table could not be embedded in the rendered PDF "
-                    f"(block {block_id}, reason: {reason}); the delivered artifact is "
-                    "missing an asset the source carried",
-                )
-            )
-        else:
-            findings.append(
-                ParityFinding(
-                    "info",
-                    "asset_skip_other",
-                    f"Asset skipped during render (block {block_id}): {reason}",
-                )
-            )
-    return findings
-
-
 __all__ = [
     "ParityFinding",
-    "asset_skip_findings",
     "check_artifact_parity",
     "parse_image_objects",
     "read_page_sizes",

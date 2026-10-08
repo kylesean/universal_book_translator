@@ -36,23 +36,41 @@ def extract_chapter_id(block_id: str) -> str:
 
 
 def collect_chapter_text(blocks: list[Any], max_chars: int = _MAX_INPUT_CHARS) -> str:
-    """Assemble the chapter's text for summarization.
+    """Assemble the text for summarization, biased to its most recent end.
 
     Prefers the translated ``target_text`` (reinforces established renderings),
-    falls back to ``draft_text`` then ``source_text``. Truncated to the head
-    ``max_chars`` to bound the summary call cost.
+    falls back to ``draft_text`` then ``source_text``.
+
+    Selection is *tail-first*: the summary this feeds is the continuation
+    context ("what just happened, so the next block stays coherent"), and the
+    L1 neighbour window only reaches ~300 chars back. Taking the head of a
+    step buffer dropped precisely the newest blocks every time — measured: a
+    just-crossed 3,500-char step (the snapshot trigger) collected 3,000 chars
+    ending at block 15 of 20, whose established renderings the summary was
+    supposed to capture. Blocks are walked newest-first and re-ordered to
+    chronological before joining, so the *content* is recency-biased while the
+    text itself still reads in narrative order.
     """
     parts: list[str] = []
     total = 0
-    for b in blocks:
+    for b in reversed(blocks):
         text = getattr(b, "target_text", None) or getattr(b, "draft_text", None) or b.source_text
         if not text or not text.strip():
             continue
-        parts.append(text.strip())
-        total += len(text.strip()) + 1
+        stripped = text.strip()
+        parts.append(stripped)
+        total += len(stripped) + 1
         if total >= max_chars:
             break
-    return "\n".join(parts)[:max_chars].strip()
+    parts.reverse()
+    joined = "\n".join(parts)
+    if len(joined) <= max_chars:
+        return joined
+    # The over-budget block is the *oldest* one (newest-first selection), so
+    # the trim keeps its tail — the part nearest the recap's subject — and the
+    # newest blocks survive whole. A head slice here cut the newest block
+    # mid-sentence.
+    return joined[-max_chars:].strip()
 
 
 def deterministic_summary(chapter_text: str, max_chars: int = _DETERMINISTIC_CHARS) -> str:

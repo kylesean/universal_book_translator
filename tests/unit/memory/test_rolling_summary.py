@@ -63,9 +63,28 @@ def test_collect_skips_blank_blocks() -> None:
     assert collect_chapter_text([_Block("  "), _Block("real")]) == "real"
 
 
-def test_collect_caps_at_max_chars() -> None:
+def test_collect_caps_at_max_chars_from_the_recent_end() -> None:
+    # The summary this feeds is *continuation* context, so the cap must keep
+    # the newest blocks whole. A buffer that just crossed the step trigger used
+    # to collect only its head (a 3,500-char step yielded 3,000 chars ending 5
+    # blocks early), so the recap described everything except what the next
+    # block continues from.
     blocks = [_Block("a" * 10), _Block("b" * 10), _Block("c" * 10)]
-    assert collect_chapter_text(blocks, max_chars=25) == "a" * 10 + "\n" + "b" * 10 + "\nccc"
+    # Oldest block trimmed to its tail; the newest two stay whole.
+    assert collect_chapter_text(blocks, max_chars=25) == "aaa" + "\n" + "b" * 10 + "\n" + "c" * 10
+
+
+def test_collect_keeps_the_newest_block_whole() -> None:
+    blocks = [_Block("old" * 40), _Block("newest content here")]
+    collected = collect_chapter_text(blocks, max_chars=40)
+    assert collected.endswith("newest content here")
+
+
+def test_collect_stays_in_chronological_order() -> None:
+    # Recency selects which blocks survive; the surviving text still reads in
+    # narrative order (the prompt presents it as a story-so-far recap).
+    blocks = [_Block("first"), _Block("second"), _Block("third")]
+    assert collect_chapter_text(blocks) == "first\nsecond\nthird"
 
 
 def test_collect_of_no_blocks_is_empty() -> None:

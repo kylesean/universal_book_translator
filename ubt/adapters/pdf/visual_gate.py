@@ -77,9 +77,6 @@ _ALWAYS_FAIL_CLOSED_MAJORS = frozenset(
         "page_count_changed",
         "image_count_changed",
         "target_language_sparse",
-        # A content figure/table the reflow render could not stage is gone from
-        # the delivered artifact while the render still reports full coverage.
-        "content_asset_missing",
     }
 )
 BLANK_TEXT_THRESHOLD_CHARS = 20

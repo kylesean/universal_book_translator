@@ -8,8 +8,7 @@ become an immutable run descriptor (the third orchestration cut).
 
 The snapshot is reused only while the ledger reports no block write, so a stage
 cannot be handed an outdated pre-write view of the book by forgetting to refresh;
-``force_refresh`` and :meth:`invalidate` remain for callers that changed the
-blocks in memory without a ledger write to report.
+``force_refresh`` remains for a stage that *knows* it just wrote the blocks.
 """
 
 from __future__ import annotations
@@ -28,10 +27,6 @@ class BlockReader:
         self._job_id = job_id
         # The snapshot plus the ledger block revision it was read at.
         self._snapshot: tuple[list[IRBlock], int] | None = None
-
-    def invalidate(self) -> None:
-        """Drop the cached snapshot so the next read comes from the ledger."""
-        self._snapshot = None
 
     async def current_blocks(self, force_refresh: bool = False) -> list[IRBlock]:
         """This job's blocks, from SQLite unless the revision is unchanged."""

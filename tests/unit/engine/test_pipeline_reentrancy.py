@@ -37,8 +37,8 @@ def test_billing_session_isolation() -> None:
     orchestrator._billing_sessions["job-1"] = session1
     orchestrator._billing_sessions["job-2"] = session2
 
-    usage1 = orchestrator._run_usage("job-1")
-    usage2 = orchestrator._run_usage("job-2")
+    usage1 = orchestrator._session_usage(orchestrator._get_billing_session("job-1"))
+    usage2 = orchestrator._session_usage(orchestrator._get_billing_session("job-2"))
 
     assert usage1["model-a"]["prompt_tokens"] == 10
     assert usage2["model-a"]["prompt_tokens"] == 40
