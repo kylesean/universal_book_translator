@@ -93,6 +93,7 @@ class _PDFRenderStackMixin:
     alternator: BilingualAlternator
     diagram_localizer: DiagramLocalizer
     last_render_skips: list[tuple[str, str]]
+    last_render_flags: list[tuple[str, str]]
     last_render_outcome: RenderOutcome | None
     _renderer: DoclingRenderStrategy
     _font_family: str | None
@@ -108,6 +109,7 @@ class _PDFRenderStackMixin:
         self.allow_page_upload = False
         self._font_family = None
         self.last_render_skips = []
+        self.last_render_flags = []
         self.last_render_outcome = None
         self._renderer = DoclingRenderStrategy(
             alternator=self.alternator,
@@ -147,6 +149,7 @@ class _PDFRenderStackMixin:
             realization_plan=realization_plan,
         )
         self.last_render_skips = list(self._renderer.last_render_skips)
+        self.last_render_flags = list(self._renderer.last_render_flags)
         self.last_render_outcome = self._renderer.last_outcome
         return out_path
 

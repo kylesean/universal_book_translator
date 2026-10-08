@@ -67,6 +67,11 @@ class Placement:
     fidelity: Fidelity  # what realize() attested
     placed_as: Fidelity  # what the lowering actually drew
     detail: str = ""
+    #: The size (pt) the target was drawn at, when the lowering chose it by
+    #: fitting (``None`` for a mask-only part, a math/TOC fragment, or a
+    #: source-kept element). Below ``_MIN_FONT_PT`` the drawn fragment is no
+    #: longer reading-grade and is reported as a ``low_legibility_font`` defect.
+    drawn_pt: float | None = None
 
     @property
     def descended(self) -> bool:
@@ -93,6 +98,23 @@ class Composition:
     def descended_ids(self) -> tuple[str, ...]:
         """Elements the lowering had to keep as source (no drawing for their rung)."""
         return tuple(placement.element_id for placement in self.placements if placement.descended)
+
+    @property
+    def low_legibility_fonts(self) -> tuple[tuple[str, float], ...]:
+        """Drawn elements whose fragment had to drop below the readable floor.
+
+        ``(element_id, size_pt)`` pairs for every placement that was drawn at
+        less than ``_MIN_FONT_PT`` -- a translation delivered at a size no reader
+        can comfortably read. Recorded rather than silent: the adapter turns each
+        into a ``low_legibility_font`` defect flag on the block.
+        """
+        return tuple(
+            (placement.element_id, placement.drawn_pt)
+            for placement in self.placements
+            if not placement.descended
+            and placement.drawn_pt is not None
+            and placement.drawn_pt < _MIN_FONT_PT
+        )
 
 
 def _place(element_id: str, page: int, attestation: Attestation) -> Placement:
@@ -393,12 +415,23 @@ def _with_list_marker(block: IRBlock, text: str) -> str:
 
 
 #: Readable font-size floor (pt) for a typeset fragment. Below this the text is
-#: not reading-grade, so the fragment is *not* drawn and the element descends to
-#: its source slice instead. The previous 2pt floor traded readability for
-#: "delivery contract: something is drawn"; a 2pt glyph satisfies no reader, so
-#: the honest reading-grade answer is keep-source. `_FIT_TOL` is the slack (pt)
-#: a fit search allows around the measured height.
+#: not reading-grade: the fragment is still drawn when the box cannot hold the
+#: target at this size at all, but the drawn size is recorded as a defect (see
+#: `_MIN_DRAW_PT`). The previous 2pt floor traded readability for "delivery
+#: contract: something is drawn"; a 2pt glyph satisfies no reader. `_FIT_TOL` is
+#: the slack (pt) a fit search allows around the measured height.
 _MIN_FONT_PT = 6.0
+#: Hard floor (pt) a *monolingual* target's fit search may shrink to before it
+#: gives up and keeps the source. A box shorter than the target's line at
+#: `_MIN_FONT_PT` -- a source line the extractor split into fragments, a code or
+#: formula stub -- can only be replaced by dropping below the readable floor or
+#: not at all; between a 4pt glyph and the source text, the glyph still delivers
+#: the translation, so it is drawn and flagged (``low_legibility_font``) rather
+#: than silently kept. A bilingual pair and a multi-box continuation flow do
+#: *not* descend this far: the pair would draw its echo at a fraction of an
+#: already-cramped size, and a clipped flow line is an ink-less text layer the
+#: visual gate rejects.
+_MIN_DRAW_PT = 4.0
 _FIT_TOL = 0.5
 #: Paragraph leading (extra inter-line space, in em) for every typeset fragment.
 #: Typst adds it on top of the font's own line height; the source's own pitch is
@@ -553,6 +586,13 @@ class TypstFragmentTypesetter:
         self._indent_cache: dict[Any, float] = {}
         #: Measure cache for the reflow fit, keyed by the full 6-tuple item.
         self._fixed_measure_cache: dict[Any, float] = {}
+        #: Side channel for the compositor: the size (pt) the most recent
+        #: fragment compile *drew* at, or ``None`` when it drew nothing or the
+        #: kind has no fitted size (math, TOC). ``_compile_form`` resets it and
+        #: reads it back to record a ``low_legibility_font`` defect; compiles run
+        #: one at a time inside ``LayerCompositor.compose``, so a plain attribute
+        #: cannot race.
+        self.last_drawn_pt: float | None = None
 
     @property
     def _font_line(self) -> str:
@@ -771,6 +811,23 @@ class TypstFragmentTypesetter:
         past the box and clip. Indented measures live in their own cache keyed
         with the indent, so an indented and a flush paragraph of the same text
         never share a height.
+
+        The search runs in two stages. The first is the proportional shrink down
+        to ``_MIN_FONT_PT`` -- the readable floor, and the size every box that
+        *can* read well is drawn at. Only the boxes that still overflow there go
+        to the second stage, a bisection in ``[_MIN_DRAW_PT, _MIN_FONT_PT]`` for
+        the largest size that fits at all: a source line the extractor split, a
+        code stub, a box the translation is a third longer than. Those are drawn
+        below the readable floor (the caller flags them ``low_legibility_font``)
+        rather than left as source.
+
+        The bisection is what keeps stage two honest. The proportional step is
+        not usable below the floor: it scales by ``height / natural``, so a box
+        that wraps at 6pt and does not wrap at 5.9pt overshoots straight past the
+        answer (6pt -> 4.4pt where 5.9pt would do). Above the floor that overshoot
+        was invisible -- the step was clamped at ``_MIN_FONT_PT`` and the next
+        round re-measured -- and it must stay invisible, or lowering the floor
+        would quietly shrink the boxes that were never a problem.
         """
         results: list[float | None] = [None] * len(items)
         caps = self._caps_for(len(items), max_size_pt)
@@ -802,6 +859,20 @@ class TypstFragmentTypesetter:
                 runs=runs,
             )
 
+        def _fits(index: int, size_pt: float) -> bool:
+            natural = cache[_measured(items[index][0], items[index][1], size_pt)]
+            return natural <= items[index][2] + _FIT_TOL
+
+        def _measure_all(pending: Sequence[tuple[int, float]]) -> None:
+            self._batch_measure(
+                [
+                    _measured(items[index][0], items[index][1], size_pt)
+                    for index, size_pt in pending
+                ],
+                build=_build,
+                cache=cache,
+            )
+
         active = [index for index, size in enumerate(sizes) if size is not None and size > 0]
         for _ in range(6):
             if not active:
@@ -829,6 +900,44 @@ class TypstFragmentTypesetter:
                     )
                     next_active.append(index)
             active = next_active
+
+        retry = [index for index, size_pt in enumerate(results) if size_pt is None]
+        if not retry:
+            return results
+        # The first stage may have run out of rounds without reaching the floor;
+        # measure it outright so a box that does fit at the readable floor keeps
+        # it (and its place above the flag).
+        _measure_all([(index, _MIN_FONT_PT) for index in retry])
+        lo: list[int] = []
+        for index in retry:
+            if _fits(index, _MIN_FONT_PT):
+                results[index] = _MIN_FONT_PT
+            else:
+                lo.append(index)
+        if not lo:
+            return results
+        # Prove the hard floor out before bisecting between it and the readable
+        # one: a box it cannot hold has no drawn size at all and stays source.
+        _measure_all([(index, _MIN_DRAW_PT) for index in lo])
+        bounds: dict[int, tuple[float, float]] = {}
+        for index in lo:
+            if _fits(index, _MIN_DRAW_PT):
+                results[index] = _MIN_DRAW_PT
+                bounds[index] = (_MIN_DRAW_PT, _MIN_FONT_PT)
+            else:
+                results[index] = None
+        for _ in range(5):  # narrows [4, 6] to within 0.0625pt
+            if not bounds:
+                break
+            probes = [(index, (low + high) / 2.0) for index, (low, high) in bounds.items()]
+            _measure_all(probes)
+            for index, mid in probes:
+                low, high = bounds[index]
+                if _fits(index, mid):
+                    results[index] = mid
+                    bounds[index] = (mid, high)
+                else:
+                    bounds[index] = (low, mid)
         return results
 
     def _fit_size(
@@ -986,12 +1095,14 @@ class TypstFragmentTypesetter:
         if width_pt <= 0 or height_pt <= 0 or not (target.strip() or source.strip()):
             return None
         if size_pt is not None:
+            self.last_drawn_pt = size_pt
             return self._compile(
                 self._bilingual_text_source(target, source, width_pt, height_pt, size_pt),
                 tag="bilingual:",
             )
         size_pt = self._fit_bilingual_sizes([(target, source, width_pt, height_pt)])[0]
         if size_pt is not None:
+            self.last_drawn_pt = size_pt
             return self._compile(
                 self._bilingual_text_source(target, source, width_pt, height_pt, size_pt),
                 tag="bilingual:",
@@ -1066,6 +1177,7 @@ class TypstFragmentTypesetter:
         )
         if size_pt is None:
             return None
+        self.last_drawn_pt = size_pt
         return self._compile(
             self._text_source(
                 text,
@@ -1614,6 +1726,10 @@ class _StampedPart:
     #: fragment fits at the source size, but the mask must not grow into the next
     #: line, so it stays at the extracted box.
     mask_bbox: BBox | None = None
+    #: The size (pt) the target in ``form`` was drawn at, when the compile fitted
+    #: it (``None`` for a mask-only part or a non-fitted kind). Carried up to the
+    #: placement so a below-floor draw becomes a ``low_legibility_font`` defect.
+    drawn_pt: float | None = None
 
 
 class LayerCompositor:
@@ -1686,8 +1802,23 @@ class LayerCompositor:
                     composed, page, page_no, stamped[page_no], shared_forms=shared_forms
                 ):
                     drawn_ids.update(id(item.overlay) for item in stamped[page_no])
+            # A multi-box overlay draws one fragment per box; the smallest fitted
+            # size is the one that decides whether the element is reading-grade,
+            # so the placement carries the minimum across its drawn parts.
+            drawn_pt_by_id: dict[int, float] = {}
+            for items in stamped.values():
+                for item in items:
+                    if item.form is None or item.drawn_pt is None:
+                        continue
+                    key = id(item.overlay)
+                    drawn_pt_by_id[key] = min(drawn_pt_by_id.get(key, item.drawn_pt), item.drawn_pt)
             placements = tuple(
-                self._placement(overlay, boxes, drawn=id(overlay) in drawn_ids)
+                self._placement(
+                    overlay,
+                    boxes,
+                    drawn=id(overlay) in drawn_ids,
+                    drawn_pt=drawn_pt_by_id.get(id(overlay)),
+                )
                 for overlay, boxes in resolved
             )
             # Each fragment carries its own copy of the shared font/CMap; collapse
@@ -2018,7 +2149,7 @@ class LayerCompositor:
                     )
                 continue
             x0, y0, x1, y1 = part.box.bbox
-            form = self._compile_form(
+            compiled = self._compile_form(
                 composed,
                 overlay,
                 part,
@@ -2031,10 +2162,18 @@ class LayerCompositor:
                 # first line as if a new paragraph began at the page break.
                 first_part=index == 0,
             )
-            if form is not None:
+            if compiled is not None:
+                form, drawn_pt = compiled
                 draw_bbox = (x0, y0 - slack, x1, y1)
                 stamped.append(
-                    _StampedPart(overlay, part.box.page, draw_bbox, form, mask_bbox=mask_bbox)
+                    _StampedPart(
+                        overlay,
+                        part.box.page,
+                        draw_bbox,
+                        form,
+                        mask_bbox=mask_bbox,
+                        drawn_pt=drawn_pt,
+                    )
                 )
         return stamped
 
@@ -2049,8 +2188,14 @@ class LayerCompositor:
         exact_size: float | None = None,
         bilingual_size: float | None = None,
         first_part: bool = True,
-    ) -> pikepdf.Object | None:
+    ) -> tuple[pikepdf.Object, float | None] | None:
         """Typeset one flowed part and copy it into the artifact as a Form.
+
+        Returns ``(form, drawn_pt)``: the copied Form and the size (pt) the
+        fragment was fitted to, or ``None`` for ``drawn_pt`` when the branch
+        drew at an already-decided size (reflowed, continuation, bilingual run)
+        or a non-fitted kind (math, TOC). ``drawn_pt`` below ``_MIN_FONT_PT`` is
+        what the caller turns into a ``low_legibility_font`` defect.
 
         ``height`` is the draw height: the extracted box plus the line slack, so
         the fragment can be fitted (and drawn) at the source size rather than
@@ -2066,6 +2211,10 @@ class LayerCompositor:
         typesetter = self._typesetter
         if typesetter is None:
             return None
+        # A fitted compile publishes its size on this side channel; clear it so a
+        # branch that draws without fitting cannot report the previous part's.
+        if hasattr(typesetter, "last_drawn_pt"):
+            typesetter.last_drawn_pt = None
         x0, _y0, x1, _y1 = part.box.bbox
         width = x1 - x0
         indent_pt = overlay.indent_pt if first_part else None
@@ -2191,9 +2340,10 @@ class LayerCompositor:
             with pikepdf.open(fragment) as frag:
                 if not frag.pages:
                     return None
-                return composed.copy_foreign(frag.pages[0].as_form_xobject())
+                form = composed.copy_foreign(frag.pages[0].as_form_xobject())
         except Exception:  # a bad fragment must fall back to source, never crash the run
             return None
+        return form, getattr(typesetter, "last_drawn_pt", None)
 
     def _stamp_page(
         self,
@@ -2279,7 +2429,11 @@ class LayerCompositor:
 
     @staticmethod
     def _placement(
-        overlay: Overlay, boxes: tuple[PhysicalBox, ...] | None, *, drawn: bool
+        overlay: Overlay,
+        boxes: tuple[PhysicalBox, ...] | None,
+        *,
+        drawn: bool,
+        drawn_pt: float | None = None,
     ) -> Placement:
         if not boxes:
             return Placement(
@@ -2295,6 +2449,7 @@ class LayerCompositor:
             Fidelity.RECONSTRUCTED_ADAPTED,
             Fidelity.RECONSTRUCTED_ADAPTED if drawn else Fidelity.PRESERVED_OPAQUE,
             "layer-compositor" if drawn else "no fragment; source kept",
+            drawn_pt=drawn_pt if drawn else None,
         )
 
 

@@ -83,6 +83,11 @@ class DoclingRenderStrategy:
         # Render skip side channel: plain (block_id, reason) pairs
         # from the most recent render_blocks call. Reset every render.
         self.last_render_skips: list[tuple[str, str]] = []
+        # Render *quality* side channel: (block_id, flag) pairs for blocks that
+        # were drawn but below the readable floor (``low_legibility_font``).
+        # Kept apart from the skips: these blocks DID deliver a translation, so
+        # the flag must not make the contract read them as source-kept.
+        self.last_render_flags: list[tuple[str, str]] = []
         # Render outcome side channel (compiler render plan protocol): the mode the
         # renderer actually used.
         self.last_outcome: RenderOutcome | None = None
@@ -149,6 +154,13 @@ class DoclingRenderStrategy:
             (placement.element_id, placement.detail)
             for placement in composition.placements
             if placement.descended
+        ]
+        # A drawn fragment that had to drop below the readable floor delivers the
+        # translation but is not reading-grade; record it as a defect so the
+        # shrink is visible in the quality report instead of silent.
+        self.last_render_flags = [
+            (element_id, "low_legibility_font")
+            for element_id, _size_pt in composition.low_legibility_fonts
         ]
         self._relocate_link_annotations(source_pdf, composition.output_path, overlays, target_lang)
         record_toolchain_versions(manifest)
@@ -253,6 +265,7 @@ class DoclingRenderStrategy:
         (.md / .txt) export clean Markdown.
         """
         self.last_render_skips = []
+        self.last_render_flags = []
         self.last_outcome = None
         out_path = Path(output_path)
         out_path.parent.mkdir(parents=True, exist_ok=True)

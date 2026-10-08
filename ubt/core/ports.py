@@ -273,6 +273,32 @@ def get_last_render_skips(adapter: Any) -> list[tuple[str, str]]:
     return skips
 
 
+def get_last_render_flags(adapter: Any) -> list[tuple[str, str]]:
+    """Return the adapter's last-render per-block *quality* flag ledger.
+
+    The sibling of :func:`get_last_render_skips` for defects that did **not**
+    keep the source: the compositor drew the block but at a size below the
+    readable floor, and records ``(block_id, "low_legibility_font")`` so the
+    shrink is auditable. These are plain error flags, never ``render_skip:``
+    ones -- a ``render_skip:`` flag would make the delivery contract count the
+    block as source-kept, which is exactly what drawing it avoided. Same
+    duck-typing and malformed-entry tolerance as the skip channel.
+    """
+    raw = getattr(adapter, "last_render_flags", None)
+    if not isinstance(raw, list):
+        return []
+    flags: list[tuple[str, str]] = []
+    for entry in raw:
+        if (
+            isinstance(entry, tuple)
+            and len(entry) == 2
+            and isinstance(entry[0], str)
+            and isinstance(entry[1], str)
+        ):
+            flags.append((entry[0], entry[1]))
+    return flags
+
+
 def probe_pdf_pages(input_path: Path) -> tuple[int, int]:
     """Return (page_count, char_count) via short_doc probe."""
     from ubt.adapters.pdf.short_doc import probe_pdf_pages as _probe

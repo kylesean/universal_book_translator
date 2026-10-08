@@ -70,6 +70,19 @@ When a real engine change moves a case, re-derive its floor and keep a margin
 larger than the run-to-run noise rather than tightening the floor onto the
 observed value.
 
+`max_source_kept` is not zero on the two maths-heavy cases, and the reason is
+worth stating so it is not mistaken for slack. The dry-run (echo) provider
+returns `"[模拟翻译] " + source`, ~35% wider than the source line, and the
+extractor cuts a line that runs into a display formula into narrow fragments
+(`Proof.` in a 25pt box, `of` in a 12pt box). A fragment box that size cannot
+hold its own echoed translation at any size the compositor will draw (the floor
+is 4pt; below it the element keeps its source). Most such fragments are drawn
+below 6pt and flagged `low_legibility_font`; the rest stay source. Baselines:
+`paper-2608` 8, `twocol-paper-2609` 1, the other two 0. A real translation of
+those fragments is shorter than the echo, so this ceiling is an artifact of the
+mock, not of the delivered document -- do not read a nonzero value here as lost
+text. Re-derive after a renderer change, as with the ratio floors.
+
 Two deliberate exclusions from the automated CI gate:
 
 - **CI does not run this gate.** The GitHub `gate` job runs `pytest -m fast`;

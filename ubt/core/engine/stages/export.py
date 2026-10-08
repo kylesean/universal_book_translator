@@ -37,6 +37,7 @@ from ubt.core.ports import (
     DocumentAdapter,
     blocking_gate_tripped,
     crashed_visual_gate_result,
+    get_last_render_flags,
     get_last_render_skips,
 )
 
@@ -147,6 +148,52 @@ def apply_render_skip_flags(
             }
         )
     return checkpoints
+
+
+#: Quality flags this stage owns: a *drawn* fragment whose fitted size fell
+#: below the readable floor. Plain error flags, deliberately never
+#: ``render_skip:`` -- a skip flag would make the contract read the block as
+#: source-kept, and the whole point of drawing it is that the translation ships.
+RENDER_QUALITY_FLAGS: tuple[str, ...] = ("low_legibility_font",)
+
+
+def apply_render_quality_flags(
+    blocks: list[IRBlock],
+    flags: list[tuple[str, str]],
+) -> set[str]:
+    """Sync render-quality error flags with this render's flags.
+
+    Pure helper (unit-testable). Stale flags from a previous render are dropped
+    first, mirroring ``apply_render_skip_flags``: a render-only rerun at a larger
+    size must clear a ``low_legibility_font`` that no longer describes the
+    artifact. Unknown block ids are ignored and present flags are not
+    duplicated.
+
+    Returns the ids of the blocks whose flag set changed. The caller must
+    persist them: unlike a skip, a quality flag never changes which blocks the
+    reflow gate reports, so nothing else in this stage writes them -- and the
+    quality report re-reads the ledger, not these in-memory blocks.
+    """
+    by_id = {b.id: b for b in blocks}
+    wanted_by_block: dict[str, set[str]] = {}
+    for block_id, flag in flags:
+        if flag in RENDER_QUALITY_FLAGS:
+            wanted_by_block.setdefault(block_id, set()).add(flag)
+    changed: set[str] = set()
+    for block in blocks:
+        keep = wanted_by_block.get(block.id, set())
+        before = list(block.error_flags)
+        after = [flag for flag in before if flag not in RENDER_QUALITY_FLAGS or flag in keep]
+        for flag in sorted(keep):
+            if flag not in after:
+                after.append(flag)
+        if after != before:
+            block.error_flags = after
+            changed.add(block.id)
+    for block_id in wanted_by_block:
+        if block_id not in by_id:
+            logger.debug("render quality flag for unknown block %s ignored", block_id)
+    return changed
 
 
 def apply_length_policy_flags(
@@ -447,6 +494,9 @@ async def _apply_render_skip_ledger_pass(
         for b in final_blocks
     }
     render_skip_checkpoints = apply_render_skip_flags(final_blocks, get_last_render_skips(adapter))
+    # A drawn-but-below-floor fragment is a defect, not a skip: the translation
+    # ships, so the block must stay deliverable while the shrink is recorded.
+    quality_changed_ids = apply_render_quality_flags(final_blocks, get_last_render_flags(adapter))
     # Persist a block whose skip set *changed*, partial removals included: the
     # old filter only wrote when every skip flag was gone, so a block that kept
     # one current reason while losing a stale one stayed wrong in the ledger the
@@ -476,7 +526,7 @@ async def _apply_render_skip_ledger_pass(
             actual_job_id,
             length_human,
         )
-    if render_skip_checkpoints or cleared_skips:
+    if render_skip_checkpoints or cleared_skips or quality_changed_ids:
         if render_skip_checkpoints:
             fail_closed_count, preserved_count = _partition_render_skip_counts(
                 render_skip_checkpoints
@@ -495,9 +545,23 @@ async def _apply_render_skip_ledger_pass(
                     actual_job_id,
                     preserved_count,
                 )
-        await asyncio.to_thread(
-            ledger.save_checkpoints_batch, render_skip_checkpoints + cleared_skips
-        )
+        by_block_id = {b.id: b for b in final_blocks}
+        # One entry per block, snapshotted last: a block can be in both a skip
+        # checkpoint (whose status the length-policy pass may have flipped) and
+        # the quality set, and a later entry in the batch would else overwrite
+        # the earlier with a stale status.
+        batch: dict[str, dict[str, Any]] = {}
+        for checkpoint in (*render_skip_checkpoints, *cleared_skips):
+            batch[checkpoint["block_id"]] = checkpoint
+        for block_id in sorted(quality_changed_ids):
+            block = by_block_id.get(block_id)
+            if block is not None:
+                batch[block_id] = {
+                    "block_id": block.id,
+                    "status": block.status,
+                    "error_flags": block.error_flags,
+                }
+        await asyncio.to_thread(ledger.save_checkpoints_batch, list(batch.values()))
 
 
 async def _run_visual_gate(
