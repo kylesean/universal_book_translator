@@ -9,6 +9,7 @@ sampling, no ledger policy — safe to unit-test with synthetic rects.
 from __future__ import annotations
 
 import dataclasses
+import logging
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -27,6 +28,8 @@ from ubt.core.policy.layout_policy import (
     WS_RE,
 )
 from ubt.model.span import BBox
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -287,6 +290,62 @@ def synthetic_vlm_lines(blocks: Sequence[IRBlock]) -> list[LineBox]:
 
 _EXTRACT_LINES_CACHE: dict[tuple[str, int, int], tuple[list[LineBox], tuple[float, float]]] = {}
 
+# --- Vector-figure micro-glyph cleanup -------------------------------------
+# A matplotlib/tikz scatter cloud emits thousands of sub-5pt marker glyphs on
+# one page. They are not text lines, but they cost like them: every rect is
+# laid against every row band in ``merge_row_fragments`` and inside
+# ``_glue_run``'s duplicate check, so K≈10^4 is an O(K^2) multi-minute hang on
+# a single page. The cleanup below bounds K by dropping rects that cannot be a
+# text line run -- and *reports* what it dropped, because a real page can carry
+# a footnote marker or a superscript the same size as the debris.
+#: A page needs at least this many rects before the cleanup is considered. A
+#: page of ordinary prose has tens to a few hundred runs; this keeps the
+#: rectangle sweep and the (O(K^2)) glue off every ordinary page.
+_CLOUD_MIN_RECTS = 600
+#: A run is at least this tall/narrow: a 10pt body line is ~9pt tall, and a
+#: glyph run narrower than 3pt is a lone mark, never a line of text.
+_DEBRIS_MIN_HEIGHT_PT = 5.0
+_DEBRIS_MIN_WIDTH_PT = 3.0
+#: A text line is never this tall (that is a ~6-line box); only rules, sidebars
+#: and watermarks are.
+_DEBRIS_MAX_HEIGHT_PT = 60.0
+#: ...and the debris must be this numerous. A page that is merely *dense* -- a
+#: CJK page pdfium splits per character, a wide table -- is above the rect
+#: count with almost no debris rects and now keeps every one of them; before,
+#: any page over the count had its sub-5pt rects dropped (its superscripts and
+#: footnote marks) with nothing said about it.
+_DEBRIS_MIN_COUNT = 300
+
+
+def _is_debris_rect(rect: tuple[float, float, float, float]) -> bool:
+    """True for a rect the micro-glyph cleanup would drop."""
+    height = rect[3] - rect[1]
+    width = rect[2] - rect[0]
+    return (
+        height < _DEBRIS_MIN_HEIGHT_PT
+        or width < _DEBRIS_MIN_WIDTH_PT
+        or height > _DEBRIS_MAX_HEIGHT_PT
+    )
+
+
+def _drop_scatter_debris(
+    rects: list[tuple[float, float, float, float]],
+) -> tuple[list[tuple[float, float, float, float]], int]:
+    """Drop a vector figure's micro-glyph debris; ``(kept, dropped_count)``.
+
+    ``dropped_count`` is zero unless the page is a genuine marker cloud (many
+    rects, hundreds of them debris-sized). A caller that sees a nonzero count
+    must report it: those rects, and whatever text the extractor placed under
+    them, are gone from the line list.
+    """
+    if len(rects) <= _CLOUD_MIN_RECTS:
+        return rects, 0
+    debris = sum(1 for rect in rects if _is_debris_rect(rect))
+    if debris < _DEBRIS_MIN_COUNT:
+        return rects, 0
+    kept = [rect for rect in rects if not _is_debris_rect(rect)]
+    return kept, len(rects) - len(kept)
+
 
 @pdfium_serialized
 def extract_text_rects(pdf_path: Path, page_no: int) -> list[tuple[float, float, float, float]]:
@@ -352,23 +411,18 @@ def extract_lines(pdf_path: Path, page_no: int) -> tuple[list[LineBox], tuple[fl
         try:
             n_rects = textpage.count_rects(0, -1)
             rects = [textpage.get_rect(i) for i in range(n_rects)]
-            if n_rects > 600:
-                # Embedded vector scatter plots (e.g. matplotlib/tikz marker clouds)
-                # can emit thousands of sub-5pt micro-glyphs on a single page,
-                # triggering O(K^2) row-fragment merging and 5-minute hangs.
-                rects = [
-                    r
-                    for r in rects
-                    if (r[3] - r[1]) >= 5.0 and (r[2] - r[0]) >= 3.0 and (r[3] - r[1]) <= 60.0
-                ]
+            rects, dropped_rects = _drop_scatter_debris(rects)
             rects.sort(key=lambda r: (-r[3], r[0]))
             lines = []
+            skipped_long = 0
             for left, bottom, right, top in rects:
                 text = (textpage.get_text_bounded(left, bottom, right, top) or "").strip()
                 if text:
-                    if n_rects > 600 and len(text) > max(240, int((right - left) * 1.5)):
-                        # Skip stacked scatter-plot marker clouds where hundreds of
-                        # overlapping point labels fall inside one bounding box.
+                    if dropped_rects and len(text) > max(240, int((right - left) * 1.5)):
+                        # Stacked scatter-plot marker clouds put hundreds of
+                        # overlapping point labels inside one bounding box, so
+                        # the joined text is a duplication, not a line.
+                        skipped_long += 1
                         continue
                     fsz, is_bold, is_italic = _probe_rect_font_style(
                         textpage, left, bottom, right, top
@@ -382,6 +436,24 @@ def extract_lines(pdf_path: Path, page_no: int) -> tuple[list[LineBox], tuple[fl
                             italic=is_italic,
                         )
                     )
+            if dropped_rects or skipped_long:
+                # Never silent: a sub-5pt rect on a figure page can equally be a
+                # superscript or a footnote mark, and this drop is unrecoverable
+                # downstream. One line per page, not per rect.
+                logger.warning(
+                    "textgeom: %s page %s has %d text rects and looks like a "
+                    "vector/marker cloud; dropped %d debris rects (<%gpt, <%gpt "
+                    "wide, >%gpt tall) and %d over-long labels — text under those "
+                    "rects is not extracted",
+                    pdf_path.name,
+                    page_no,
+                    n_rects,
+                    dropped_rects,
+                    _DEBRIS_MIN_HEIGHT_PT,
+                    _DEBRIS_MIN_WIDTH_PT,
+                    _DEBRIS_MAX_HEIGHT_PT,
+                    skipped_long,
+                )
             merged = merge_row_fragments(lines)
             result = (column_order(merged, size[0]), size)
             if cache_key is not None:

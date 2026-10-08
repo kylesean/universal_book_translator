@@ -18,6 +18,7 @@ nothing else in the engine.
 
 from __future__ import annotations
 
+import random
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -30,6 +31,8 @@ PAGE_HEIGHT = 792.0
 _MARGIN = 54.0
 _FONT_SIZE = 12.0
 _LEADING = 16.0
+#: A marker glyph small enough that pdfium reports a sub-5pt rect for it.
+_MARKER_FONT_SIZE = 2.0
 
 
 def _escape(text: str) -> str:
@@ -168,9 +171,55 @@ def write_toc_pdf(
     return path
 
 
+def write_marker_cloud_pdf(
+    path: Path,
+    markers: int = 700,
+    *,
+    body: Sequence[str] = (),
+    width: float = PAGE_WIDTH,
+    height: float = PAGE_HEIGHT,
+    margin: float = _MARGIN,
+) -> Path:
+    """A page whose text layer is dominated by sub-5pt marker glyphs.
+
+    Stands in for the text layer of a matplotlib/tikz scatter figure: hundreds
+    of tiny glyphs at scattered positions, each its own pdfium rect, plus (when
+    ``body`` is given) normal lines the caller can assert survive the cleanup.
+    Positions come from a fixed seed so the fixture -- and any test that counts
+    its rects -- is deterministic.
+    """
+    rng = random.Random(0x5CA7)
+    ops: list[str] = []
+    for _ in range(markers):
+        x = margin + rng.random() * (width - 2 * margin)
+        y = margin + rng.random() * (height - 2 * margin)
+        ops.append("BT")
+        ops.append(f"/F1 {_MARKER_FONT_SIZE} Tf")
+        ops.append(f"1 0 0 1 {x:.2f} {y:.2f} Tm")
+        ops.append("(a) Tj")
+        ops.append("ET")
+    if body:
+        ops.append("BT")
+        ops.append(f"/F1 {_FONT_SIZE} Tf")
+        ops.append(f"1 0 0 1 {margin} {height - margin} Tm")
+        ops.append(f"{_LEADING} TL")
+        ops.extend(f"({_escape(line)}) Tj T*" for line in body)
+        ops.append("ET")
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=width, height=height)
+    contents = DecodedStreamObject()
+    contents.set_data("\n".join(ops).encode("latin-1"))
+    page[NameObject("/Contents")] = writer._add_object(contents)  # noqa: SLF001
+    _attach_font(writer, page)
+    with path.open("wb") as handle:
+        writer.write(handle)
+    return path
+
+
 __all__ = [
     "PAGE_HEIGHT",
     "PAGE_WIDTH",
+    "write_marker_cloud_pdf",
     "write_text_pdf",
     "write_toc_pdf",
     "write_two_column_pdf",
