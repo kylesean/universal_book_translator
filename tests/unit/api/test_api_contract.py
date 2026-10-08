@@ -26,8 +26,11 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from ubt.api.app import create_app
-from ubt.api.security import _require_api_key_gate, resolve_secure_path
+from ubt.api.manager import JobManager
+from ubt.api.models import JobSubmitRequest
+from ubt.api.security import _require_api_key_gate, resolve_secure_path, session_cookie_value
 from ubt.core.config import UBTConfig
+from ubt.core.engine.job_queue import JobStatus
 from ubt.core.job_options import resolve_target_output
 
 _API_KEY = "test-key-contract"
@@ -181,6 +184,67 @@ def test_boot_strict_mode_with_no_key_fails_fast(tmp_path: Path) -> None:
         _require_api_key_gate(config)
 
 
+def test_boot_strict_mode_wins_over_the_no_auth_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Strict mode is a deployment promise; UBT_ALLOW_NO_AUTH is a process
+    # convenience that tools set implicitly (``ubt console`` exports it). The
+    # override winning let a strict production server boot open whenever
+    # anything set the variable.
+    monkeypatch.setenv("UBT_ALLOW_NO_AUTH", "1")
+    config = UBTConfig(db_dir=tmp_path / "db", strict_auth=True)
+    with pytest.raises(SystemExit):
+        _require_api_key_gate(config)
+
+
+def test_the_session_cookie_is_a_digest_never_the_key(tmp_path: Path) -> None:
+    # The cookie rides requests a browser cannot attach headers to (SSE,
+    # previews, downloads). It must not be a replayable copy of the key.
+    key = "the-service-key"
+    value = session_cookie_value(key)
+    assert value != key and key not in value
+    assert len(value) == 64  # sha256 hexdigest
+
+
+def test_session_round_trip_authenticates_headerless_requests(tmp_path: Path) -> None:
+    # Sign in with the header, then drop it: the cookie alone must carry an
+    # SSE-stream request (the exact case EventSource cannot header-authenticate)
+    # and a normal API call, and clearing it must close the gate again.
+    client = TestClient(create_app(_config(tmp_path)))
+    assert client.get("/jobs", headers=_AUTH).status_code == 200
+
+    signed = client.post("/system/session", headers=_AUTH)
+    assert signed.status_code == 200
+    assert signed.json() == {"authenticated": True}
+    cookie = client.cookies.get("ubt_session")
+    assert cookie and cookie != _API_KEY
+
+    client.cookies.clear()
+    client.cookies.set("ubt_session", cookie)
+    assert client.get("/jobs").status_code == 200
+    assert client.get("/jobs/nosuchjob00/stream").status_code == 404  # past the gate
+
+    # Logout is a client-side clear: the response must expire the cookie on the
+    # browser. (The value is a deterministic digest of the key, so the server
+    # cannot invalidate a copied cookie -- rotating the key is the revocation
+    # path, exactly as it is for the header itself.)
+    dropped = client.delete("/system/session")
+    assert dropped.status_code == 200
+    expired = dropped.headers["set-cookie"]
+    assert "ubt_session=" in expired and "Max-Age=0" in expired
+
+
+def test_session_sign_in_requires_a_valid_key(authed: TestClient) -> None:
+    assert authed.post("/system/session").status_code == 401
+    assert authed.post("/system/session", headers={"X-API-Key": "wrong"}).status_code == 401
+    assert "ubt_session" not in authed.cookies
+
+
+def test_a_forged_session_cookie_is_rejected(authed: TestClient) -> None:
+    authed.cookies.set("ubt_session", "0" * 64)
+    assert authed.get("/jobs").status_code == 401
+
+
 # --------------------------------------------------------------------------- #
 # Job intake contract.
 # --------------------------------------------------------------------------- #
@@ -287,6 +351,63 @@ def test_resume_rejects_a_completed_job(authed: TestClient, tmp_path: Path) -> N
     _await_terminal(authed, job_id)
     # Only a failed/cancelled job resumes; a completed one is a 409.
     assert authed.post(f"/jobs/{job_id}/resume", headers=_AUTH).status_code == 409
+
+
+def test_resume_keeps_the_output_path_claim_that_submit_guards(
+    authed: TestClient, tmp_path: Path
+) -> None:
+    # While a job sits failed/cancelled its output path is up for grabs, so a
+    # fresh submit may already own it. Resuming anyway would run two pipelines
+    # into one deliverable (last writer wins) — the same collision submit
+    # refuses. The claim is re-checked at resume.
+    doc = _write_doc(tmp_path)
+    out = tmp_path / "shared_deliverable.md"
+    submitted = authed.post(
+        "/jobs/submit",
+        json={"input_path": str(doc), "output_path": str(out), "job_id": "sharedpath01"},
+        headers=_AUTH,
+    )
+    assert submitted.status_code == 202
+    manager: JobManager = authed.app.state.job_manager  # type: ignore[attr-defined]
+    stale = manager.create_job(
+        JobSubmitRequest(input_path=str(doc), output_path=str(out)), job_id="sharedpath02"
+    )
+    stale.status = JobStatus.FAILED
+
+    response = authed.post("/jobs/sharedpath02/resume", headers=_AUTH)
+
+    assert response.status_code == 409
+    assert "output_path already claimed by live job sharedpath01" in response.json()["detail"]
+    # The refusal left the record resumable, like the capacity check.
+    refused = manager.get_job("sharedpath02")
+    assert refused is not None and refused.status == JobStatus.FAILED
+
+
+def test_resume_ignores_terminal_holders_of_the_output_path(
+    authed: TestClient, tmp_path: Path
+) -> None:
+    # The mirror of the guard: a failed/cancelled holder does not block, else
+    # re-running a failed job would be impossible once any earlier job failed.
+    doc = _write_doc(tmp_path)
+    out = tmp_path / "serial_deliverable.md"
+    manager: JobManager = authed.app.state.job_manager  # type: ignore[attr-defined]
+    # dry_run mirrors what the keyed app itself would set for a keyless submit
+    # (zero-token rehearsal), so the resumed run completes without a provider.
+    first = manager.create_job(
+        JobSubmitRequest(input_path=str(doc), output_path=str(out), dry_run=True),
+        job_id="serialpath1",
+    )
+    first.status = JobStatus.FAILED
+    second = manager.create_job(
+        JobSubmitRequest(input_path=str(doc), output_path=str(out), dry_run=True),
+        job_id="serialpath2",
+    )
+    second.status = JobStatus.CANCELLED
+
+    response = authed.post("/jobs/serialpath2/resume", headers=_AUTH)
+
+    assert response.status_code == 200
+    _await_terminal(authed, "serialpath2")
 
 
 def test_resume_unknown_job_is_404(authed: TestClient) -> None:

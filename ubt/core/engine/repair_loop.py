@@ -180,6 +180,18 @@ class RepairLoop:
                 block.status = BlockStatus.FAILED
             return block
 
+        # Consume the round *before* the model call, not after it returns: a
+        # repair that raises (provider outage, malformed output) still spent an
+        # attempt, and the failure path records ``repair_rounds`` unchanged. With
+        # the increment after the call, a persistently-failing repair stayed at
+        # round 0 forever -- ``reset_transient_failures`` requeued it to
+        # REPAIR_PENDING on every resume and ``fetch_repair_eligible_blocks``
+        # (gated on ``repair_rounds < max_rounds``) kept returning it, so each
+        # resume re-called the paid repair model and the circuit breaker never
+        # fired. ``block`` is mutated in place, so the caller's ``_record_failure``
+        # persists this incremented count.
+        block.repair_rounds += 1
+
         draft_text = block.target_text or block.draft_text or ""
 
         # Dynamic Test-Time Compute Allocation (2026 EACL):
@@ -247,7 +259,7 @@ class RepairLoop:
         else:
             raw_candidates = [await _repair_call()]
 
-        block.repair_rounds += 1
+        # (The round was already consumed above, before the call -- see there.)
         active_fast_pass = fast_pass or self.fast_pass
 
         # Closed-loop invariant check: 0-Token structural validation when a

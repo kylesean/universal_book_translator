@@ -84,3 +84,28 @@ async def test_repair_loop_uncalibrated_runner_fails_after_max_rounds_when_struc
     assert repaired.status == BlockStatus.FAILED
     assert len(repaired.error_flags) > 0
     assert repaired.mtqe_score is None
+
+
+@pytest.mark.asyncio
+async def test_a_raising_repair_still_consumes_a_round() -> None:
+    # A repair call that raises (provider outage) must still advance the round
+    # counter: the round is consumed before the call. Otherwise a persistently
+    # failing repair stays at round 0, the transient-failure reset requeues it to
+    # REPAIR_PENDING on every resume, and the circuit breaker (gated on
+    # repair_rounds < max_rounds) never fires -- re-billing the model forever.
+    runner = HeuristicQERunner()
+    router = MagicMock()
+    router.repair = AsyncMock(side_effect=RuntimeError("provider outage"))
+
+    loop = RepairLoop(qe_runner=runner, router=router, qe_threshold=0.85)
+
+    block = _make_block(
+        "b3", "This is source text.", "这是草稿文本。", flags=["html_attr_mismatch"]
+    )
+    block.status = BlockStatus.REPAIR_PENDING
+    assert block.repair_rounds == 0
+
+    with pytest.raises(RuntimeError):
+        await loop.repair_single_block(block)
+
+    assert block.repair_rounds == 1, "a failed repair attempt must consume a round"

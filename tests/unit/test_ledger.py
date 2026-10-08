@@ -19,6 +19,7 @@ row, never by sleeping.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -627,7 +628,9 @@ def test_reserve_batch_job_create_then_pending_then_resume(ledger: SQLiteJobLedg
     assert ledger.reserve_batch_job("key-1", "job") == ("resume", "batch-real")
 
 
-def test_reserve_batch_job_reclaims_a_stale_sentinel(ledger: SQLiteJobLedger) -> None:
+def test_reserve_batch_job_reclaims_a_stale_sentinel(
+    ledger: SQLiteJobLedger, caplog: pytest.LogCaptureFixture
+) -> None:
     ledger.reserve_batch_job("key-1", "job")
     with ledger._get_conn() as conn:
         conn.execute(
@@ -635,4 +638,27 @@ def test_reserve_batch_job_reclaims_a_stale_sentinel(ledger: SQLiteJobLedger) ->
             ("creating:key-1",),
         )
     # The worker that held the reservation died mid-create; a new caller owns it.
-    assert ledger.reserve_batch_job("key-1", "job") == ("create", None)
+    # The takeover may be a second charge for a batch whose id died with that
+    # worker, and only a successful ``finalize_batch_job`` -- which overwrites
+    # this row -- could record it, so the warning must fire here.
+    with caplog.at_level(logging.WARNING):
+        assert ledger.reserve_batch_job("key-1", "job") == ("create", None)
+    assert "died mid-create" in caplog.text
+    assert "may remain" in caplog.text
+
+
+def test_finalize_batch_job_records_a_paid_batch_whose_sentinel_was_reclaimed(
+    ledger: SQLiteJobLedger,
+) -> None:
+    # A slow worker's reservation was reclaimed and promoted by a second worker;
+    # the first worker's DELETE of the sentinel then makes its ``batch_id`` the
+    # only evidence of a paid submission. Dropping it would leave the batch
+    # uncancellable and invisible to find_live_batch_for_job.
+    ledger.register_batch_job("batch-a", "job", "key-1", status="submitted")
+    ledger.finalize_batch_job("key-1", "batch-b", status="submitted")
+    with ledger._get_conn() as conn:
+        rows = {
+            str(row["batch_id"]): str(row["status"])
+            for row in conn.execute("SELECT batch_id, status FROM batch_jobs").fetchall()
+        }
+    assert rows == {"batch-a": "submitted", "batch-b": "submitted"}

@@ -1611,7 +1611,25 @@ class LedgerBatchMixin(_LedgerHost):
                     (job_id, sentinel, f"{-horizon} seconds"),
                 )
                 conn.execute("COMMIT;")
-                return ("create", None) if stale.rowcount == 1 else ("pending", None)
+                if stale.rowcount == 1:
+                    # The dead owner may have paid for a batch whose id never
+                    # reached the ledger (crash between the provider call and
+                    # ``finalize_batch_job``). The id is unknowable now, so the
+                    # only honest record is a loud one: this submission may be
+                    # a second charge for the same payload. Warning here, not
+                    # at the call site: the sentinel is consumed by this
+                    # handover, and a successful ``finalize_batch_job`` would
+                    # overwrite the adopted row -- this is the one point where
+                    # the takeover is observable.
+                    logger.warning(
+                        "Adopted stale batch reservation %s (job %s): the previous "
+                        "owner died mid-create and a batch it submitted may remain "
+                        "unrecorded (paid but uncancellable)",
+                        sentinel,
+                        job_id,
+                    )
+                    return ("create", None)
+                return ("pending", None)
             except BaseException:
                 self._safe_rollback()
                 raise
@@ -1624,12 +1642,18 @@ class LedgerBatchMixin(_LedgerHost):
         Run immediately after ``create_batch_job`` returns; a single atomic
         UPDATE means a crash either leaves the reclaimable sentinel or a fully
         registered live batch — never a paid-for batch with no recorded id.
+
+        If the sentinel is gone (a slow worker's reservation was reclaimed by a
+        second worker that already promoted its own batch), the UPDATE matches
+        no row. Dropping the id here would leave a **paid** batch unrecorded and
+        therefore uncancellable and invisible to ``find_live_batch_for_job``, so
+        the batch is registered as its own row instead.
         """
         sentinel = f"creating:{idempotency_key}"
         with self._get_conn() as conn:
             conn.execute("BEGIN IMMEDIATE;")
             try:
-                conn.execute(
+                promoted = conn.execute(
                     """
                     UPDATE batch_jobs
                     SET batch_id = ?, status = ?, updated_at = CURRENT_TIMESTAMP
@@ -1637,6 +1661,20 @@ class LedgerBatchMixin(_LedgerHost):
                     """,
                     (batch_id, status, sentinel),
                 )
+                if promoted.rowcount == 0:
+                    # Record the already-paid batch anyway (job_id from the
+                    # sentinel's original claim if it survived, else empty).
+                    owner = conn.execute(
+                        "SELECT job_id FROM batch_jobs WHERE batch_id = ?", (sentinel,)
+                    ).fetchone()
+                    conn.execute(
+                        """
+                        INSERT INTO batch_jobs (batch_id, job_id, idempotency_key, status)
+                        VALUES (?, ?, ?, ?)
+                        ON CONFLICT(batch_id) DO NOTHING
+                        """,
+                        (batch_id, str(owner["job_id"]) if owner else "", idempotency_key, status),
+                    )
                 conn.execute("COMMIT;")
             except BaseException:
                 self._safe_rollback()

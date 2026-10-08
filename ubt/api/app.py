@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import (
+    Cookie,
     Depends,
     FastAPI,
     File,
@@ -77,12 +78,14 @@ from ubt.api.review import (
 from ubt.api.scope import ApiScope
 from ubt.api.security import (
     SENSITIVE_FILENAME_PARTS,
+    SESSION_COOKIE_NAME,
     SYSTEM_DISALLOWED_PREFIXES,
     _log_startup_auth_warning,
     _require_api_key_gate,
     _tenant_from_header,
     effective_allowed_bases,
     resolve_secure_path,
+    session_cookie_value,
     validate_job_id,
     verify_api_key,
 )
@@ -478,10 +481,11 @@ def create_app(
     async def _verify_request_key(
         request: Request,
         x_api_key: str | None = Header(default=None),
+        ubt_session: str | None = Cookie(default=None),
     ) -> None:
         if request.url.path.rstrip("/") == "/health":
             return
-        verify_api_key(x_api_key, _config=app_config)
+        verify_api_key(x_api_key, ubt_session=ubt_session, _config=app_config)
 
     auth_enabled = bool(app_config.service_api_key.get_secret_value().strip())
     api_app = FastAPI(
@@ -596,6 +600,41 @@ def _register_system_routes(api_app: FastAPI, scope: ApiScope) -> None:
             "service": "universal-book-translator",
             "version": __version__,
         }
+
+    @api_app.post("/system/session", tags=["System"])
+    async def create_session(
+        response: Response,
+        x_api_key: str | None = Header(default=None),
+    ) -> dict[str, bool]:
+        """Exchange the API key for a same-origin session cookie.
+
+        The console's ``EventSource`` stream, page-preview ``<img>`` elements
+        and download links cannot attach an ``X-API-Key`` header, so on a keyed
+        server the UI would 401 on every one of them even though its fetches
+        pass. The cookie carries a keyed *digest* of the service key (never the
+        key itself), is HttpOnly + SameSite=Lax so it rides only same-origin
+        browser requests, and is re-minted on every login. An open (keyless)
+        server has nothing to exchange and returns ``authenticated: true``
+        without setting a cookie.
+        """
+        verify_api_key(x_api_key, ubt_session=None, _config=app_config)
+        expected = app_config.service_api_key.get_secret_value().strip()
+        if not expected:
+            return {"authenticated": True}
+        response.set_cookie(
+            key=SESSION_COOKIE_NAME,
+            value=session_cookie_value(expected),
+            httponly=True,
+            samesite="lax",
+            secure=False,
+        )
+        return {"authenticated": True}
+
+    @api_app.delete("/system/session", tags=["System"])
+    async def delete_session(response: Response) -> dict[str, bool]:
+        """Log the console out (clears the session cookie)."""
+        response.delete_cookie(SESSION_COOKIE_NAME)
+        return {"authenticated": False}
 
     @api_app.get("/system/doctor", tags=["System"])
     async def system_doctor(probe: bool = False) -> JSONResponse:
@@ -1205,6 +1244,28 @@ def _register_job_routes(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail=str(exc),
             ) from exc
+
+        # Re-check the output-path claim that submit enforces: while this job
+        # sat FAILED/CANCELLED its path is up for grabs, so a job submitted in
+        # the meantime may already own it. Resuming anyway would run two
+        # pipelines into one deliverable and the last writer wins. Reject
+        # before the flip, like the capacity check above.
+        if record.request.output_path:
+            claimed = Path(record.request.output_path).resolve()
+            for other in manager.jobs.values():
+                if other.job_id == valid_id or other.status in (
+                    JobStatus.FAILED,
+                    JobStatus.CANCELLED,
+                ):
+                    continue
+                if (
+                    other.request.output_path
+                    and Path(other.request.output_path).resolve() == claimed
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=f"output_path already claimed by live job {other.job_id}",
+                    )
 
         # Never re-fresh (that would discard the checkpoints) and clear the
         # previous failure so the record restarts clean.
