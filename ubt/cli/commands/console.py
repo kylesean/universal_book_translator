@@ -41,12 +41,18 @@ def console_command(
     """Launch the UBT Operator Console & Review Workbench."""
     from ubt import __version__
     from ubt.api.app import run_server
+    from ubt.api.security import _no_auth_allowed, _strict_auth_from_env
 
-    # For local desktop console on loopback, allow local open authentication by default
+    # For local desktop console on loopback, allow local open authentication by
+    # default -- but never override a deployment that promised authentication.
+    # ``_require_api_key_gate`` checks strict mode before this override, so
+    # setting it in a strict deployment would only produce a confusing refusal
+    # after the console has printed its banner; leave it unset there.
     if (
         host in ("127.0.0.1", "localhost", "::1")
         and not os.getenv("UBT_API_KEY")
-        and not os.getenv("UBT_ALLOW_NO_AUTH")
+        and not _no_auth_allowed()
+        and not _strict_auth_from_env()
     ):
         os.environ["UBT_ALLOW_NO_AUTH"] = "1"
 

@@ -1,11 +1,13 @@
 """Security guards, API-key verification, and path isolation for the UBT REST API."""
 
+import hashlib
+import hmac
 import logging
 import os
 import secrets
 from pathlib import Path
 
-from fastapi import Header, HTTPException, status
+from fastapi import Cookie, Header, HTTPException, status
 
 from ubt.core.config import UBTConfig
 from ubt.core.fs_perms import SENSITIVE_FILENAME_PARTS as SENSITIVE_FILENAME_PARTS
@@ -45,6 +47,19 @@ def _no_auth_allowed() -> bool:
     return os.getenv(_NO_AUTH_OVERRIDE_ENV, "").strip().lower() in ("1", "true", "yes")
 
 
+def _strict_auth_from_env() -> bool:
+    """Strict-auth posture from the environment alone (no config file layer).
+
+    The console's implicit override is decided before the server builds its
+    config, so the value that will gate the boot is the one in the process
+    environment — the layer ``UBTConfig.from_env`` reads last.
+    """
+    return (
+        os.getenv("UBT_STRICT_AUTH", "").strip().lower() in ("1", "true", "yes")
+        or os.getenv("UBT_ENV", "").strip().lower() == "production"
+    )
+
+
 def _require_api_key_gate(config: UBTConfig | None = None) -> None:
     """Refuse to boot the API without an auth gate unless explicitly overridden.
 
@@ -57,19 +72,30 @@ def _require_api_key_gate(config: UBTConfig | None = None) -> None:
     has_service_key = bool(cfg.service_api_key.get_secret_value().strip())
     if has_service_key:
         return
+    if cfg.is_strict_auth():
+        # Strict mode is checked before the override: it is a *deployment*
+        # promise ("this server authenticates"), and the override is a
+        # *process* convenience that tools set implicitly (``ubt console``
+        # exports it for loopback). Letting the override win meant a strict
+        # production server booted open whenever anything set the variable —
+        # and with no key the server would 500 every request while exposing
+        # /docs. Fail fast instead; the message says how to do it deliberately.
+        if _no_auth_allowed():
+            logger.warning(
+                "%s is set but strict auth is on: ignoring the override and "
+                "refusing to boot without an API key.",
+                _NO_AUTH_OVERRIDE_ENV,
+            )
+        raise SystemExit(
+            "UBT_STRICT_AUTH is set but UBT_API_KEY is empty: set a key, or "
+            "run a non-strict local server for a throwaway deployment."
+        )
     if _no_auth_allowed():
         logger.warning(
             "%s is set: booting the UBT API WITHOUT an API key (local/development only).",
             _NO_AUTH_OVERRIDE_ENV,
         )
         return
-    if cfg.is_strict_auth():
-        # Strict mode with no key would boot a server that 500s every request
-        # (and exposes /docs): fail fast instead of starting unusable.
-        raise SystemExit(
-            "UBT_STRICT_AUTH is set but UBT_API_KEY is empty: set a key, or "
-            "UBT_ALLOW_NO_AUTH=1 for a local, throwaway server."
-        )
     raise SystemExit(
         "refusing to start the UBT API without authentication: set UBT_API_KEY to "
         "enable the X-API-Key gate, or set UBT_ALLOW_NO_AUTH=1 to run open on "
@@ -77,8 +103,33 @@ def _require_api_key_gate(config: UBTConfig | None = None) -> None:
     )
 
 
+#: Cookie the console sets so same-origin browser requests that *cannot* carry
+#: the ``X-API-Key`` header — an ``EventSource`` stream, an ``<img>`` preview,
+#: a download link — still authenticate. The value is a keyed digest of the
+#: service key, never the key itself: a leaked cookie must not hand out the
+#: credential for other services (and the digest cannot be replayed as the
+#: ``X-API-Key`` header).
+SESSION_COOKIE_NAME = "ubt_session"
+
+
+def session_cookie_value(expected_key: str) -> str:
+    """The session cookie value for a non-empty service key."""
+    return hmac.new(expected_key.encode("utf-8"), b"ubt-session-v1", hashlib.sha256).hexdigest()
+
+
+def _session_cookie_matches(cookie: str | None, expected: str) -> bool:
+    if not cookie:
+        return False
+    # Constant-time over bytes, like the header comparison: a str compare_digest
+    # raises TypeError on non-ASCII cookie bytes.
+    return secrets.compare_digest(
+        cookie.encode("utf-8"), session_cookie_value(expected).encode("utf-8")
+    )
+
+
 def verify_api_key(
     x_api_key: str | None = Header(default=None),
+    ubt_session: str | None = Cookie(default=None),
     _config: UBTConfig | None = None,
 ) -> None:
     """Lightweight API-key gate for the service.
@@ -87,7 +138,10 @@ def verify_api_key(
     When unset the server runs open (development mode). In strict mode
     (``UBT_STRICT_AUTH=1`` or ``UBT_ENV=production``), a configured
     ``UBT_API_KEY`` is mandatory. Pass the key via the ``X-API-Key`` header
-    (never query string).
+    (never query string), or via the ``ubt_session`` cookie the console sets —
+    a browser cannot attach the header to its SSE stream, image previews or
+    download links, so without the cookie path a keyed server's own UI is
+    unusable.
     """
     cfg = _config or UBTConfig()
     strict = cfg.is_strict_auth()
@@ -109,11 +163,12 @@ def verify_api_key(
                 detail="UBT_API_KEY must be configured when running in strict/production mode.",
             )
         return
-    provided = x_api_key or ""
     # Compare over bytes — str.compare_digest raises TypeError on
     # non-ASCII (Latin-1 header bytes like "café"), turning a should-be 401
     # into an unhandled 500.
-    if not secrets.compare_digest(provided.encode("utf-8"), expected.encode("utf-8")):
+    if not secrets.compare_digest((x_api_key or "").encode("utf-8"), expected.encode("utf-8")) and (
+        not _session_cookie_matches(ubt_session, expected)
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or missing API key",

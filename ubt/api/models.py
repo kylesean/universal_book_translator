@@ -386,7 +386,6 @@ class JobSummary(BaseModel):
 
     job_id: str
     file_name: str
-    source_path: str
     target_lang: str
     status: str
     total_blocks: int

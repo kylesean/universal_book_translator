@@ -60,10 +60,14 @@ def summarize_job(db_path: Path) -> dict[str, Any] | None:
     needs_human = int(snapshot.get("needs_human", 0) or 0)
     blocked_human = int(snapshot.get("blocked_human", 0) or 0)
     processed = completed + failed + needs_human + blocked_human
+    # No ``source_path`` in the summary: the queue table only ever shows the
+    # basename, and this route is unauthenticated by default. Echoing the
+    # absolute path (home directory included) is the same leak ``_public_report``
+    # and ``_public_artifact`` close on the other doors; here it never leaves
+    # the database at all.
     return {
         "job_id": str(snapshot["job_id"]),
         "file_name": Path(str(snapshot["source_path"])).name,
-        "source_path": str(snapshot["source_path"]),
         "target_lang": str(snapshot["target_lang"]),
         "status": str(snapshot["status"]),
         "total_blocks": total,
