@@ -367,6 +367,48 @@ def _terminal_frame(status: str, output_file: str | None, error: str | None) -> 
     )
 
 
+def _output_path_claimant(
+    manager: Any,
+    job_queue: Any,
+    submit_id: str,
+    resolved_out: Path,
+) -> str | None:
+    """The live job id that already owns ``resolved_out``, or ``None``.
+
+    Covers both homes of a live job: the in-memory map (embedded mode, and the
+    job this process is running in queue mode) and the durable queue rows. The
+    latter matters because ``manager.jobs`` only knows jobs *this* process
+    started -- a job still waiting in the queue was invisible, so two
+    submissions naming one output path both passed and the two workers wrote
+    one deliverable, last writer winning.
+    """
+    target = Path(resolved_out).resolve()
+
+    def _claims(candidate: Any) -> bool:
+        if not candidate:
+            return False
+        try:
+            return Path(str(candidate)).resolve() == target
+        except (OSError, ValueError):
+            return False
+
+    for rec in manager.jobs.values():
+        if rec.job_id == submit_id or rec.status in (
+            JobStatus.FAILED,
+            JobStatus.CANCELLED,
+        ):
+            continue
+        if _claims(getattr(rec.request, "output_path", None)):
+            return str(rec.job_id)
+    if job_queue is not None:
+        for queued in job_queue.list_jobs(limit=1000):
+            if queued.job_id == submit_id or queued.status in TERMINAL_JOB_STATUSES:
+                continue
+            if _claims((queued.payload or {}).get("output_path")):
+                return str(queued.job_id)
+    return None
+
+
 def _is_own_prior_output(
     requested_id: str | None,
     target_candidate: Path,
@@ -940,23 +982,15 @@ def _register_job_routes(
 
         # Reject when another live job already claimed this output path. The
         # filesystem exists() check above cannot see an un-written target, so
-        # the in-memory job map is the only guard against two concurrent
-        # pipelines last-writer-wins-ing the same deliverable.
+        # the job maps are the only guard against two concurrent pipelines
+        # last-writer-wins-ing the same deliverable.
         if resolved_out is not None:
-            for rec in manager.jobs.values():
-                if rec.job_id == submit_id or rec.status in (
-                    JobStatus.FAILED,
-                    JobStatus.CANCELLED,
-                ):
-                    continue
-                if (
-                    rec.request.output_path
-                    and Path(rec.request.output_path).resolve() == Path(resolved_out).resolve()
-                ):
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail=f"output_path already claimed by live job {rec.job_id}",
-                    )
+            claimant = _output_path_claimant(manager, job_queue, submit_id, resolved_out)
+            if claimant is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"output_path already claimed by live job {claimant}",
+                )
 
         resolved_glossary: str | None = None
         if req.glossary:

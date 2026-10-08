@@ -611,3 +611,75 @@ def test_job_submit_request_carries_emit_both() -> None:
 
     req = JobSubmitRequest(input_path="/tmp/x.pdf", emit_both=True)
     assert req.emit_both is True
+
+
+def test_output_path_claimant_sees_a_job_still_sitting_in_the_queue(tmp_path: Path) -> None:
+    # ``manager.jobs`` only knows what this process started; in queue mode the
+    # rival claimant is usually still QUEUED, and the in-memory scan alone let
+    # both submissions through.
+    from ubt.api.app import _output_path_claimant
+    from ubt.core.engine.job_queue import JobStatus as QueueStatus
+
+    class _Record:
+        def __init__(self, job_id: str, output_path: str | None) -> None:
+            self.job_id = job_id
+            self.status = QueueStatus.RUNNING
+            self.request = JobSubmitRequest(input_path="x.md", output_path=output_path)
+
+    class _Manager:
+        def __init__(self, records: list[_Record]) -> None:
+            self.jobs = {record.job_id: record for record in records}
+
+    class _Queued:
+        def __init__(self, job_id: str, status: QueueStatus, output_path: str | None) -> None:
+            self.job_id = job_id
+            self.status = status
+            self.payload = {"output_path": output_path}
+
+    class _Queue:
+        def __init__(self, rows: list[_Queued]) -> None:
+            self._rows = rows
+
+        def list_jobs(self, *, limit: int = 100) -> list[_Queued]:
+            return self._rows
+
+    target = tmp_path / "book_mono.pdf"
+    queued = _Queue([_Queued("queued0001", QueueStatus.QUEUED, str(target))])
+    assert _output_path_claimant(_Manager([]), queued, "newjob0001", target) == "queued0001"
+
+    # A retired row's claim is up for grabs, and the submitter's own id is not a
+    # rival to itself.
+    done = _Queue([_Queued("donejob001", QueueStatus.COMPLETED, str(target))])
+    assert _output_path_claimant(_Manager([]), done, "newjob0001", target) is None
+    assert _output_path_claimant(_Manager([]), queued, "queued0001", target) is None
+
+    # The in-memory map still wins its own case.
+    live = _Manager([_Record("livejob001", str(target))])
+    assert _output_path_claimant(live, _Queue([]), "newjob0001", target) == "livejob001"
+
+
+def test_submit_in_queue_mode_refuses_a_path_a_queued_job_already_claims(tmp_path: Path) -> None:
+    from ubt.core.engine.job_queue import JobQueue
+
+    queue = JobQueue(tmp_path / "db" / "job_queue.sqlite")
+    try:
+        with TestClient(create_app(config=_config(tmp_path), queue=queue)) as client:
+            doc = _write_doc(tmp_path)
+            out = tmp_path / "shared_mono.md"
+            first = client.post(
+                "/jobs/submit",
+                json={"input_path": str(doc), "output_path": str(out), "job_id": "queuejob001"},
+                headers=_AUTH,
+            )
+            assert first.status_code == 202
+            assert first.json()["status"] == "queued"
+
+            second = client.post(
+                "/jobs/submit",
+                json={"input_path": str(doc), "output_path": str(out), "job_id": "queuejob002"},
+                headers=_AUTH,
+            )
+            assert second.status_code == 409
+            assert "already claimed by live job queuejob001" in second.json()["detail"]
+    finally:
+        queue.close()
