@@ -80,7 +80,7 @@ def test_the_single_pair_helper_forwards_the_block_type() -> None:
 
 def test_batch_callers_send_the_block_type(monkeypatch: pytest.MonkeyPatch) -> None:
     element = Table(id="b1", spine_index=0, span=Span(page=1), markup="| a | b |")
-    block = IRBlock(element=element, block_type=BlockType.TABLE, target_text="| 甲 | 乙 |")
+    block = IRBlock(element=element, target_text="| 甲 | 乙 |")
     runner = _CapturingRunner()
     monkeypatch.setattr(runner, "pass_sample", 0.25, raising=False)
 
