@@ -6,6 +6,13 @@ resolve. A CID /W array whose range entries use the *flat* spelling
 example uses) registered nothing, so every CID it covered fell back to /DW:
 at the default 1000 em the measured line drifts well past the erase rect and a
 trailing colored citation survives the strip.
+
+The show operand reaches those widths as *bytes*, never as decoded text: the
+bytes are the glyph codes the /Widths table is indexed by. Decoding them through
+PDFDocEncoding and re-encoding to latin-1 replaced every byte the round trip
+could not represent — the whole 0x80-0x9F range, where an Identity-H font's CJK
+codes live — with ``?``, so the measured advance was wrong by every CJK glyph on
+the line.
 """
 
 from __future__ import annotations
@@ -13,7 +20,13 @@ from __future__ import annotations
 import pikepdf
 import pytest
 
-from ubt.adapters.pdf.stream_strip import FontAdvance, _advance_from_widths, _parse_cid_widths
+from ubt.adapters.pdf.stream_strip import (
+    FontAdvance,
+    _advance_from_widths,
+    _as_bytes,
+    _parse_cid_widths,
+    _show_glyph_bytes,
+)
 
 pytestmark = pytest.mark.fast
 
@@ -56,3 +69,25 @@ def test_a_flat_range_measures_the_run_it_covers() -> None:
     # Without the flat parse the same bytes read as 2.0 em (fallback to /DW).
     fallback = FontAdvance(code_bytes=2, widths={}, default=1000.0)
     assert _advance_from_widths(b"\x00\x09\x00\x0a", fallback) == pytest.approx(2.0)
+
+
+def test_a_pdf_string_operand_keeps_its_bytes() -> None:
+    # Every one of these bytes decoded to a distinct latin-1/PDFDocEncoding
+    # character, which ``str()`` then could not re-encode to latin-1: the old
+    # ``str(val).encode("latin-1", "replace")`` returned 32 ``?`` bytes here.
+    raw = bytes(range(0x80, 0xA0))
+    assert _as_bytes(pikepdf.String(raw)) == raw
+    assert _as_bytes(pikepdf.String(b"\x00\x41\x80")) == b"\x00\x41\x80"
+    # A plain Python str has no raw bytes to preserve; the latin-1 round trip is
+    # still the best available and stays for that case.
+    assert _as_bytes("ab") == b"ab"
+
+
+def test_the_measured_advance_uses_the_cid_codes_not_question_marks() -> None:
+    # The regression in one assertion: a CJK line whose widths are only known
+    # for the real codes. Decoded-and-replaced, every code became 0x3F and the
+    # whole line fell back to /DW.
+    fa = FontAdvance(code_bytes=2, widths={0x8140: 500.0, 0x8141: 500.0}, default=1000.0)
+    show = pikepdf.Array([pikepdf.String(b"\x81\x40\x81\x41")])
+    assert _show_glyph_bytes([show]) == b"\x81\x40\x81\x41"
+    assert _advance_from_widths(_show_glyph_bytes([show]), fa) == pytest.approx(1.0)

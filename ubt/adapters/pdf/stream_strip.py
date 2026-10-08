@@ -334,8 +334,28 @@ def _show_glyph_bytes(operands: Sequence[Any]) -> bytes:
 
 
 def _as_bytes(val: Any) -> bytes:
+    """The raw bytes of a PDF string operand.
+
+    A PDF string is bytes, not text: the bytes are the font's glyph codes, the
+    index into its /Widths, and the units the advance is measured in. So ask for
+    the bytes, never the decoded text -- ``str()`` decodes them through
+    PDFDocEncoding or UTF-16 and re-encoding that back to latin-1 turns every
+    byte the round trip cannot represent into ``?`` (0x3F). The whole 0x80-0x9F
+    range is such a byte (it decodes to the C1/latin-1 punctuation block), and
+    that range is exactly where an Identity-H/CJK font's glyph codes live, so
+    the corruption shifted the advance of every CJK glyph and left the strip
+    rect over the wrong span -- a source glyph surviving the erase, or a
+    neighbouring one erased in its place.
+    """
     if isinstance(val, bytes):
         return val
+    if isinstance(val, pikepdf.Object):
+        # ``read_bytes`` is a stream operation and raises on a string; ``bytes``
+        # yields the raw string bytes for both.
+        try:
+            return bytes(val)
+        except Exception:  # pragma: no cover - a future type with neither
+            pass
     raw = getattr(val, "read_bytes", None)
     if callable(raw):
         try:
