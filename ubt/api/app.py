@@ -90,6 +90,7 @@ from ubt.api.security import (
     verify_api_key,
 )
 from ubt.api.sse_replay import SseReplayBuffer
+from ubt.api.uploads import reap_stale_uploads
 from ubt.core.config import MOCK_API_KEY, UBTConfig
 from ubt.core.engine.events import TranslationProgressEvent
 from ubt.core.engine.job_queue import TERMINAL_JOB_STATUSES, JobQueue, JobStatus
@@ -518,6 +519,22 @@ def create_app(
     async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         _require_api_key_gate(app_config)
         _log_startup_auth_warning(app_config)
+        # Startup is the one moment the staging area can be swept without
+        # racing the uploads of this process: no request has been served yet.
+        # (A file a still-unfinished queue job lists as its input survives --
+        # see ubt.api.uploads.)
+        removed = await asyncio.to_thread(
+            reap_stale_uploads,
+            scope.uploads_dir(),
+            max_age_days=app_config.upload_retention_days,
+            job_queue=job_queue,
+        )
+        if removed:
+            logger.info(
+                "Removed %d staged upload(s) older than %g days",
+                removed,
+                app_config.upload_retention_days,
+            )
         yield
 
     async def _verify_request_key(

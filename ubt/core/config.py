@@ -363,6 +363,12 @@ class UBTConfig(BaseSettings):
     # many pile up; refusing at submit is the only place queue growth can be
     # stopped, since workers drain at LLM speed.
     job_max_queued: int = Field(default=1000, gt=0)
+    # Staged uploads (the wizard POSTs bytes, the API stores a copy under
+    # <db_dir>/uploads and returns its path) are never removed by any other
+    # path, so the API sweeps the staging directory at startup and deletes
+    # files older than this. An upload a non-terminal queue job still lists as
+    # its input_path is always spared. 0 disables the sweep.
+    upload_retention_days: float = Field(default=7.0, ge=0.0)
 
     # -- Rate limiting -------------------------------------------------------
     rate_limit_rpm: int = Field(default=60, gt=0)
