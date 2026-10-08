@@ -405,7 +405,14 @@ class RepairLoop:
         if valid_tier1:
             if self._rerank_enabled() and len(valid_tier1) >= 2:
                 scores = await self.qe_runner.score_pairs(
-                    [{"src": block.source_text, "mt": entry[0]} for entry in valid_tier1]
+                    [
+                        {
+                            "src": block.source_text,
+                            "mt": entry[0],
+                            "block_type": str(block.block_type),
+                        }
+                        for entry in valid_tier1
+                    ]
                 )
                 if len(scores) != len(valid_tier1):
                     raise MTQEEvaluationError(
@@ -418,7 +425,9 @@ class RepairLoop:
                 t1_score: float | None = scores[best_t1_idx]
             else:
                 t1_chosen_text, _, t1_chosen_flags = valid_tier1[0]
-                t1_score = await self.qe_runner.score(block.source_text, t1_chosen_text)
+                t1_score = await self.qe_runner.score(
+                    block.source_text, t1_chosen_text, block_type=block.block_type
+                )
 
             t1_passed = (t1_score is not None) and self._adoptable(t1_score, old_score)
 
@@ -428,14 +437,23 @@ class RepairLoop:
                 # Spliced repair degraded quality; evaluate wholesale fallback
                 if self._rerank_enabled() and len(valid_tier2) >= 2:
                     scores_t2 = await self.qe_runner.score_pairs(
-                        [{"src": block.source_text, "mt": entry[0]} for entry in valid_tier2]
+                        [
+                            {
+                                "src": block.source_text,
+                                "mt": entry[0],
+                                "block_type": str(block.block_type),
+                            }
+                            for entry in valid_tier2
+                        ]
                     )
                     best_t2_idx = max(range(len(valid_tier2)), key=lambda i: scores_t2[i])
                     t2_chosen_text, _, t2_chosen_flags = valid_tier2[best_t2_idx]
                     t2_score: float | None = scores_t2[best_t2_idx]
                 else:
                     t2_chosen_text, _, t2_chosen_flags = valid_tier2[0]
-                    t2_score = await self.qe_runner.score(block.source_text, t2_chosen_text)
+                    t2_score = await self.qe_runner.score(
+                        block.source_text, t2_chosen_text, block_type=block.block_type
+                    )
 
                 if (
                     t2_score is not None
@@ -457,7 +475,14 @@ class RepairLoop:
         elif valid_tier2:
             if self._rerank_enabled() and len(valid_tier2) >= 2:
                 scores_t2 = await self.qe_runner.score_pairs(
-                    [{"src": block.source_text, "mt": entry[0]} for entry in valid_tier2]
+                    [
+                        {
+                            "src": block.source_text,
+                            "mt": entry[0],
+                            "block_type": str(block.block_type),
+                        }
+                        for entry in valid_tier2
+                    ]
                 )
                 if len(scores_t2) != len(valid_tier2):
                     raise MTQEEvaluationError(
@@ -470,7 +495,9 @@ class RepairLoop:
                 t2_score = scores_t2[best_t2_idx]
             else:
                 t2_chosen_text, _, t2_chosen_flags = valid_tier2[0]
-                t2_score = await self.qe_runner.score(block.source_text, t2_chosen_text)
+                t2_score = await self.qe_runner.score(
+                    block.source_text, t2_chosen_text, block_type=block.block_type
+                )
 
             if t2_score is not None and self._adoptable(t2_score, old_score):
                 chosen_text, _chosen_flags, new_score = t2_chosen_text, t2_chosen_flags, t2_score

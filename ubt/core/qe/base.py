@@ -17,12 +17,23 @@ class BaseQERunner(ABC):
 
     @abstractmethod
     async def score_pairs(self, pairs: list[dict[str, str]]) -> list[float]:
-        """Score a list of {'src': ..., 'mt': ...} pairs returning float scores (0.0~1.0)."""
+        """Score a list of ``{'src': ..., 'mt': ...}`` pairs → floats (0.0~1.0).
+
+        A pair may carry an optional ``'block_type'`` (the IR block type's
+        string value). The heuristic runner gates its prose-only invariants on
+        it — the omission and script-density checks weigh a ``table`` or
+        ``code`` block differently — so a caller that drops the key scores a
+        table as prose and rejects repairs the prose rules should not touch.
+        Neural runners ignore the key.
+        """
         pass
 
-    async def score(self, src: str, mt: str) -> float:
+    async def score(self, src: str, mt: str, block_type: object | None = None) -> float:
         """Score a single (src, mt) pair returning a float score (0.0~1.0)."""
-        scores = await self.score_pairs([{"src": src, "mt": mt}])
+        pair = {"src": src, "mt": mt}
+        if block_type is not None:
+            pair["block_type"] = str(getattr(block_type, "value", block_type))
+        scores = await self.score_pairs([pair])
         return scores[0] if scores else 0.0
 
     def with_languages(self, source_lang: str, target_lang: str) -> BaseQERunner:

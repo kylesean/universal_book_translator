@@ -102,7 +102,10 @@ async def _audit_pass_sample(
     """
     if getattr(qe_runner, "pass_sample", 0.0) <= 0.0 or not blocks:
         return []
-    pairs = [{"src": b.source_text, "mt": b.target_text or ""} for b in blocks]
+    pairs = [
+        {"src": b.source_text, "mt": b.target_text or "", "block_type": str(b.block_type)}
+        for b in blocks
+    ]
     scores = await qe_runner.score_pairs(pairs)
     if len(scores) != len(blocks):
         raise MTQEEvaluationError(
@@ -191,7 +194,10 @@ async def run_quality_gate_stage(
     if suspicious_blocks:
         calibrated = getattr(qe_runner, "is_calibrated", lambda: False)()
         if calibrated:
-            pairs = [{"src": b.source_text, "mt": b.target_text or ""} for b in suspicious_blocks]
+            pairs = [
+                {"src": b.source_text, "mt": b.target_text or "", "block_type": str(b.block_type)}
+                for b in suspicious_blocks
+            ]
             scores: list[float | None] = [float(s) for s in await qe_runner.score_pairs(pairs)]
             if len(scores) != len(suspicious_blocks):
                 raise MTQEEvaluationError(

@@ -746,7 +746,7 @@ class HeuristicQERunner(BaseQERunner):
             # Untranslated identical prose is decided in one place:
             # ``FastPassFilter.evaluate`` below rejects the echo and
             # ``score_from_decision_reason`` maps it to the fabricated band.
-            decision = self.fast_pass.evaluate(src, mt)
+            decision = self.fast_pass.evaluate(src, mt, block_type=p.get("block_type"))
             if not decision.passed:
                 scores.append(self.score_from_decision_reason(decision.reason))
                 continue
