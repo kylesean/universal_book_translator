@@ -309,3 +309,61 @@ def test_standalone_cjk_term_is_safely_replaced() -> None:
     assert out == "态势：正常。"
     assert len(applied) == 1
     assert quarantined == []
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        'the "Data Loader" step',
+        "the “Data Loader” step",
+        "the ‘Data Loader’ step",
+        "the 「Data Loader」 step",
+        "the 『Data Loader』 step",
+        "the «Data Loader» step",
+    ],
+)
+def test_a_quoted_span_is_protected(text: str) -> None:
+    assert extract_protected_spans(text) != []
+
+
+def test_an_inch_mark_does_not_open_a_span() -> None:
+    # A quote that follows a digit is an inch mark, not an opening delimiter: a
+    # naive "..." pair would have swallowed everything up to the next real quote
+    # and shielded the text in between from enforcement.
+    spans = extract_protected_spans('a 10" ruler and the 5" one')
+    assert spans == []
+
+
+def test_an_apostrophe_does_not_open_a_span() -> None:
+    # The straight single quote is an apostrophe far more often than it is a
+    # delimiter; pairing any two of them shielded contractions from enforcement.
+    assert extract_protected_spans("it's the user's Data Loader here") == []
+
+
+def test_an_inch_mark_does_not_shadow_the_next_real_quote() -> None:
+    text = 'a 10" ruler, the "Data Loader" step'
+    assert extract_protected_spans(text) == [(17, 30)]
+    # The protected region is the quoted span including its delimiters.
+    assert text[18:29] == "Data Loader"
+
+
+def test_an_unbalanced_quote_protects_nothing() -> None:
+    # Fails toward enforcement: half a quoted span is not a citation.
+    assert extract_protected_spans('he said "Data Loader yesterday') == []
+
+
+def test_a_quoted_source_term_is_a_citation_not_a_leak() -> None:
+    # 该组件名为 "Data Loader" 的核心: the quoted name is what the source called
+    # it, so rewriting it produces Chinglish. The bare occurrence is still a
+    # leak and is still canonicalized.
+    glossary = [{"source": "Data Loader", "translation": "数据加载器"}]
+    out, records = _enforce(glossary, 'the "Data Loader" step uses Data Loader')
+    assert out == 'the "Data Loader" step uses 数据加载器'
+    assert [record.original_span for record in records] == ["Data Loader"]
+
+
+def test_a_quoted_alias_is_left_alone() -> None:
+    glossary = [{"source": "attention", "translation": "注意力", "aliases": ["attn"]}]
+    out, records = _enforce(glossary, 'the "attn" block and the attn block')
+    assert out == 'the "attn" block and the 注意力 block'
+    assert len(records) == 1

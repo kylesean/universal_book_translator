@@ -60,16 +60,40 @@ _PROTECTED_SPAN_PATTERNS = (
     re.compile(r"\\begin\{[a-zA-Z*]+\}[\s\S]*?\\end\{[a-zA-Z*]+\}"),  # LaTeX environments
     re.compile(r"\]\([^\)\n]+\)"),  # Markdown link targets ](url)
     re.compile(r"⟦[^⟧]*⟧"),  # Masker tokens (checksum is lowercase hex + hyphen)
+    # Paired quotation. A quoted span is a citation of the original wording -- a
+    # product name, an identifier, a title -- so rewriting it is the Chinglish
+    # the enforcer exists to prevent, not the drift it exists to fix
+    # (该组件名为 "Data Loader" must keep the name it names). Delimiters are
+    # matched as explicit pairs, never as one character class, so a closing
+    # quote can never open a span. The straight double quote opens a span only
+    # when no Latin letter or digit precedes it: 10" is an inch mark, and
+    # treating it as an opener swallowed the text up to the next real quote.
+    # Spans are single-line and length-capped; an over-long or unbalanced quote
+    # protects nothing, which fails toward enforcement. The straight single
+    # quote is absent on purpose: ' is overwhelmingly an apostrophe in the
+    # contractions and possessives that fill English prose, and a pattern that
+    # pairs any two of them would shield spans that no one wrote as quotes.
+    re.compile(r"“[^“”\n]{1,200}”"),  # “typographic double”
+    re.compile(r"‘[^‘’\n]{1,200}’"),  # ‘typographic single’
+    re.compile(r"「[^「」\n]{1,200}」"),  # 「CJK corner」
+    re.compile(r"『[^『』\n]{1,200}』"),  # 『CJK white corner』
+    re.compile(r"«[^«»\n]{1,200}»"),  # «guillemets»
+    re.compile(r'(?<![A-Za-z0-9])"[^"\n]{1,200}"'),  # "straight double"
 )
 
 
 def extract_protected_spans(text: str) -> list[tuple[int, int]]:
-    """Find intervals in text (HTML tags, LaTeX math, Markdown URLs) to shield from glossary substitutions.
+    """Find intervals in text (HTML tags, code, LaTeX math, URLs, quotes) to shield from glossary substitutions.
 
     Inline ``$...$`` is matched through the shared, currency-aware
     :func:`~ubt.core.cleaners.inline_math.inline_math_spans`: a naive
     ``\\$[^\\$\\n]+\\$`` paired ``"$5 and $10"`` into one "math" span and
     shielded every term between the two dollars from enforcement.
+
+    Paired quotation is protected for the same reason code is: a quoted span
+    points at the original wording, so substituting a term inside it corrupts a
+    deliberate citation rather than fixing drift. See
+    :data:`_PROTECTED_SPAN_PATTERNS` for the delimiter rules.
     """
     spans: list[tuple[int, int]] = []
     for patt in _PROTECTED_SPAN_PATTERNS:
@@ -116,7 +140,7 @@ def find_term_occurrences(
     count a term that the enforcer itself would refuse to touch.
 
     ``protected`` lets a caller match many terms against one text without paying
-    the nine structural patterns per term; pass ``extract_protected_spans(text)``
+    the structural patterns per term; pass ``extract_protected_spans(text)``
     when doing so.
 
     ``case_insensitive`` folds case through ``re.IGNORECASE`` instead of
@@ -310,7 +334,8 @@ class DeterministicGlossaryEnforcer:
             return target_text, [], []
 
         # Protected structure guard: prevent substitutions inside HTML tags,
-        # LaTeX math environments, markdown URLs, or deterministic maskers.
+        # LaTeX math environments, markdown URLs, deterministic maskers, or
+        # paired quotes (a quoted span cites the original wording).
         protected_spans = extract_protected_spans(target_text)
         if protected_spans:
             filtered_by_protection: list[tuple[int, int, str, str, str]] = []
