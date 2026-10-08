@@ -364,23 +364,36 @@ def _parse_cid_widths(w_array: Any, widths: dict[int, float]) -> None:
     """Fold a CIDFont /W array into ``widths`` (cid → 1000-em advance).
 
     /W entries alternate between ``cid`` followed by ``[w w ...]`` (a run of
-    consecutive cids) and ``[first last w]`` (a range sharing one width)."""
+    consecutive cids) and ``[first last w]`` (a range sharing one width). The
+    range form may appear either as a nested array or — the spelling the spec's
+    own example uses — as three flat consecutive numbers; the flat form used to
+    register nothing, so every CID it covered silently fell back to /DW (a
+    missing /DW defaults to 1000 em, mis-measuring the run the erase rect is
+    sized against)."""
     items = list(w_array)
     i = 0
     while i < len(items):
         entry = items[i]
         if isinstance(entry, (list, pikepdf.Array)):
-            first, last, w = (int(entry[0]), int(entry[1]), float(entry[2]))
+            if len(entry) >= 3:
+                first, last, w = (int(entry[0]), int(entry[1]), float(entry[2]))
+                for cid in range(first, last + 1):
+                    widths[cid] = w
+            i += 1
+            continue
+        start = int(entry)
+        i += 1
+        if i < len(items) and isinstance(items[i], (list, pikepdf.Array)):
+            for off, w in enumerate(items[i]):
+                widths[start + off] = float(w)
+            i += 1
+        elif i + 1 < len(items):
+            # Flat ``first last w``: two more scalars. (The run form's leading
+            # number is always followed by an array, so this cannot misfire.)
+            first, last, w = start, int(items[i]), float(items[i + 1])
             for cid in range(first, last + 1):
                 widths[cid] = w
-            i += 1
-        else:
-            start = int(entry)
-            i += 1
-            if i < len(items) and isinstance(items[i], (list, pikepdf.Array)):
-                for off, w in enumerate(items[i]):
-                    widths[start + off] = float(w)
-                i += 1
+            i += 2
 
 
 def _font_advance(font_obj: Any) -> FontAdvance | None:

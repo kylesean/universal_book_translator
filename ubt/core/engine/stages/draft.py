@@ -385,6 +385,11 @@ class _DraftProcessor:
                     self.runtime.active_fast_pass.evaluate,
                     block.source_text,
                     exact_hit.target_text,
+                    # Without the type every check is judged as prose: a cached
+                    # table echo would be exempt from the grid checks that would
+                    # have caught it, and a cached heading would face the prose
+                    # script-density bar it was never meant to clear.
+                    block_type=block.block_type,
                 )
                 if not fp_decision.passed:
                     logger.warning(

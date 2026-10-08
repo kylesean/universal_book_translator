@@ -433,6 +433,7 @@ _ECHO_MASK_RE = re.compile(
     rf"|{_ECHO_QUOTED_SPAN}",
     re.S,
 )
+_ECHO_QUOTED_SPAN_RE = re.compile(_ECHO_QUOTED_SPAN, re.S)
 _NEAR_ECHO_MIN_TOKENS = 8
 _NEAR_ECHO_RETENTION = 0.9
 # A CJK target legitimately carries its Latin proper nouns across verbatim
@@ -554,8 +555,25 @@ def is_near_verbatim_echo(
         # untranslated book: its QE is mocked precisely so the plumbing can be
         # exercised end to end.
         return False
-    src_words = _ECHO_TOKEN_RE.findall(_ECHO_MASK_RE.sub(" ", source_text).lower())
-    tgt_words = _ECHO_TOKEN_RE.findall(_ECHO_MASK_RE.sub(" ", target_text).lower())
+    src_masked = _ECHO_MASK_RE.sub(" ", source_text)
+    tgt_masked = _ECHO_MASK_RE.sub(" ", target_text)
+    # The quoted-span mask exists so a faithfully preserved quotation does not
+    # dominate a real translation's tokens. But when the target is *entirely* a
+    # quoted span, masking leaves nothing to judge and the retention test would
+    # abstain — so ``"<source sentence>"`` sailed through as Flawless while the
+    # bare copy was caught. A target that is only a quoted run (no translation
+    # words outside it) is the evasion, not a preserved citation: judge the
+    # unwrapped content. The exact-echo check cannot catch it — the added
+    # quoting characters make the strings unequal. A quote embedded in real
+    # prose keeps the mask: there the outside words are the translation.
+    if not _ECHO_TOKEN_RE.findall(tgt_masked):
+        # Each quoted-span alternative is one opening delimiter + content + one
+        # closing delimiter, so the slice peels exactly the pair.
+        unwrapped = _ECHO_QUOTED_SPAN_RE.sub(lambda m: f" {m.group(0)[1:-1]} ", target_text)
+        if unwrapped != target_text:
+            tgt_masked = _ECHO_MASK_RE.sub(" ", unwrapped)
+    src_words = _ECHO_TOKEN_RE.findall(src_masked.lower())
+    tgt_words = _ECHO_TOKEN_RE.findall(tgt_masked.lower())
     if len(tgt_words) < _NEAR_ECHO_MIN_TOKENS or len(src_words) < _NEAR_ECHO_MIN_TOKENS:
         return False
     src_set = set(src_words)

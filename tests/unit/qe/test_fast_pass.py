@@ -125,6 +125,37 @@ def test_a_same_script_cjk_translation_is_not_a_near_echo() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "target",
+    [
+        '"The machine relies on attention and runs a forward pass."',
+        "“The machine relies on attention and runs a forward pass.”",
+        "'The machine relies on attention and runs a forward pass.'",
+        "«The machine relies on attention and runs a forward pass.»",
+        "「The machine relies on attention and runs a forward pass.」",
+        "„The machine relies on attention and runs a forward pass.“",
+    ],
+)
+def test_a_source_wrapped_in_quotes_is_still_a_near_echo(target: str) -> None:
+    # The quoted-span mask exists so a preserved citation does not dominate a
+    # real translation's tokens. When the quote *is* the whole target, masking
+    # left nothing to judge and the retention test abstained: the same sentence
+    # bare was caught but quote-wrapped ("<source>") shipped as Flawless. The
+    # exact-echo check cannot see it either -- the quote characters make the
+    # strings unequal -- so the near-echo check must unwrap a fully-quoted
+    # target. Every delimiter style the mask knows is an evasion vector.
+    src = "The machine relies on attention and runs a forward pass."
+    assert is_near_verbatim_echo(src, target, target_is_cjk=False) is True
+
+
+def test_a_quote_inside_real_prose_keeps_the_mask() -> None:
+    # The mirror of the rule above: a target with translation words outside the
+    # quote is judged on those words, not on the quotation it faithfully kept.
+    src = "The machine relies on attention and runs a forward pass."
+    target = 'Cette machine repose sur "the machine relies on attention".'
+    assert is_near_verbatim_echo(src, target, target_is_cjk=False) is False
+
+
 def test_a_preserved_quotation_does_not_read_as_a_near_echo() -> None:
     # A translation legitimately keeps a quoted string verbatim (the echo repair
     # hint tells the model to), so the quote's words must be masked before the
