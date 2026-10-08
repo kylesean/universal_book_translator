@@ -241,6 +241,16 @@ export interface TranslationDictionary {
   doctor: {
     title: string
     subtitle: string
+    auth: {
+      title: string
+      subtitle: string
+      keyLabel: string
+      keyPlaceholder: string
+      signIn: string
+      checking: string
+      signOut: string
+      failed: string
+    }
     pingAll: string
     engineDiagnostics: string
     providerMatrix: string

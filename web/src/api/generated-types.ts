@@ -21,6 +21,88 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/system/session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Session
+         * @description Exchange the API key for a same-origin session cookie.
+         *
+         *     The console's ``EventSource`` stream, page-preview ``<img>`` elements
+         *     and download links cannot attach an ``X-API-Key`` header, so on a keyed
+         *     server the UI would 401 on every one of them even though its fetches
+         *     pass. The cookie carries a keyed *digest* of the service key (never the
+         *     key itself), is HttpOnly + SameSite=Lax so it rides only same-origin
+         *     browser requests, and is re-minted on every login. An open (keyless)
+         *     server has nothing to exchange and returns ``authenticated: true``
+         *     without setting a cookie.
+         */
+        post: operations["create_session_system_session_post"];
+        /**
+         * Delete Session
+         * @description Log the console out (clears the session cookie).
+         */
+        delete: operations["delete_session_system_session_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/doctor": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * System Doctor
+         * @description Engine Doctor self-check (the ``ubt doctor`` checklist as JSON).
+         *
+         *     Reuses the CLI's ``collect_checks`` so the console and the command line
+         *     report the same verdicts. ``probe=true`` additionally contacts the
+         *     provider endpoint (a live network call), so it is off by default.
+         */
+        get: operations["system_doctor_system_doctor_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/info": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * System Info
+         * @description The console's security-boundary panel (real host + allowed roots).
+         *
+         *     Reports the host this request reached (loopback vs exposed), whether the
+         *     API-key gate is on, and the filesystem roots ``resolve_secure_path``
+         *     actually enforces — so the panel shows the live policy, not a hardcoded
+         *     sample.
+         */
+        get: operations["system_info_system_info_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/jobs/assess": {
         parameters: {
             query?: never;
@@ -495,55 +577,6 @@ export interface paths {
          * @description Register a custom model capability profile (built-in profiles cannot be overridden).
          */
         post: operations["register_model_profile_api_v1_model_profiles_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/system/doctor": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * System Doctor
-         * @description Engine Doctor self-check (the ``ubt doctor`` checklist as JSON).
-         *
-         *     Reuses the CLI's ``collect_checks`` so the console and the command line
-         *     report the same verdicts. ``probe=true`` additionally contacts the
-         *     provider endpoint (a live network call), so it is off by default.
-         */
-        get: operations["system_doctor_system_doctor_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/system/info": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * System Info
-         * @description The console's security-boundary panel (real host + allowed roots).
-         *
-         *     Reports the host this request reached (loopback vs exposed), whether the
-         *     API-key gate is on, and the filesystem roots ``resolve_secure_path``
-         *     actually enforces — so the panel shows the live policy, not a hardcoded
-         *     sample.
-         */
-        get: operations["system_info_system_info_get"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1233,8 +1266,6 @@ export interface components {
             job_id: string;
             /** File Name */
             file_name: string;
-            /** Source Path */
-            source_path: string;
             /** Target Lang */
             target_lang: string;
             /** Status */
@@ -1510,7 +1541,9 @@ export interface operations {
                 "x-api-key"?: string | null;
             };
             path?: never;
-            cookie?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -1536,6 +1569,144 @@ export interface operations {
             };
         };
     };
+    create_session_system_session_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_session_system_session_delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    system_doctor_system_doctor_get: {
+        parameters: {
+            query?: {
+                probe?: boolean;
+            };
+            header?: {
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    system_info_system_info_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemInfoResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     assess_job_jobs_assess_post: {
         parameters: {
             query?: never;
@@ -1543,7 +1714,9 @@ export interface operations {
                 "x-api-key"?: string | null;
             };
             path?: never;
-            cookie?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
         };
         requestBody: {
             content: {
@@ -1578,7 +1751,9 @@ export interface operations {
                 "x-api-key"?: string | null;
             };
             path?: never;
-            cookie?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
         };
         requestBody: {
             content: {
@@ -1614,7 +1789,9 @@ export interface operations {
                 "x-api-key"?: string | null;
             };
             path?: never;
-            cookie?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
         };
         requestBody: {
             content: {
@@ -1652,7 +1829,9 @@ export interface operations {
                 "x-api-key"?: string | null;
             };
             path?: never;
-            cookie?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -1686,7 +1865,9 @@ export interface operations {
             path: {
                 job_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -1722,7 +1903,9 @@ export interface operations {
             path: {
                 job_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -1756,7 +1939,9 @@ export interface operations {
             path: {
                 job_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -1790,7 +1975,9 @@ export interface operations {
             path: {
                 job_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -1824,7 +2011,9 @@ export interface operations {
             path: {
                 job_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -1856,7 +2045,9 @@ export interface operations {
             path: {
                 job_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -1890,7 +2081,9 @@ export interface operations {
             path: {
                 job_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -1924,7 +2117,9 @@ export interface operations {
             path: {
                 job_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -1958,7 +2153,9 @@ export interface operations {
             path: {
                 job_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -1993,7 +2190,9 @@ export interface operations {
                 job_id: string;
                 key: string;
             };
-            cookie?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -2032,7 +2231,9 @@ export interface operations {
             path: {
                 job_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -2066,7 +2267,9 @@ export interface operations {
             path: {
                 job_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -2101,7 +2304,9 @@ export interface operations {
                 job_id: string;
                 block_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
         };
         requestBody: {
             content: {
@@ -2140,7 +2345,9 @@ export interface operations {
                 job_id: string;
                 block_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -2174,7 +2381,9 @@ export interface operations {
             path: {
                 job_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
         };
         requestBody: {
             content: {
@@ -2216,7 +2425,9 @@ export interface operations {
                 job_id: string;
                 page: number;
             };
-            cookie?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -2253,7 +2464,9 @@ export interface operations {
                 job_id: string;
                 page: number;
             };
-            cookie?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -2284,7 +2497,9 @@ export interface operations {
                 "x-api-key"?: string | null;
             };
             path?: never;
-            cookie?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -2315,7 +2530,9 @@ export interface operations {
                 "x-api-key"?: string | null;
             };
             path?: never;
-            cookie?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
         };
         requestBody: {
             content: {
@@ -2343,70 +2560,6 @@ export interface operations {
             };
         };
     };
-    system_doctor_system_doctor_get: {
-        parameters: {
-            query?: {
-                probe?: boolean;
-            };
-            header?: {
-                "x-api-key"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    system_info_system_info_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                "x-api-key"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SystemInfoResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     get_glossary_assets_glossary_get: {
         parameters: {
             query?: never;
@@ -2414,7 +2567,9 @@ export interface operations {
                 "x-api-key"?: string | null;
             };
             path?: never;
-            cookie?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -2445,7 +2600,9 @@ export interface operations {
                 "x-api-key"?: string | null;
             };
             path?: never;
-            cookie?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
         };
         requestBody: {
             content: {
@@ -2482,7 +2639,9 @@ export interface operations {
                 "x-api-key"?: string | null;
             };
             path?: never;
-            cookie?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -2513,7 +2672,9 @@ export interface operations {
                 "x-api-key"?: string | null;
             };
             path?: never;
-            cookie?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -2549,7 +2710,9 @@ export interface operations {
                 "x-api-key"?: string | null;
             };
             path?: never;
-            cookie?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -2580,7 +2743,9 @@ export interface operations {
                 "x-api-key"?: string | null;
             };
             path?: never;
-            cookie?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
         };
         requestBody: {
             content: {
@@ -2615,7 +2780,9 @@ export interface operations {
                 "x-api-key"?: string | null;
             };
             path?: never;
-            cookie?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
         };
         requestBody: {
             content: {

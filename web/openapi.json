@@ -29,6 +29,22 @@
               ],
               "title": "X-Api-Key"
             }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
+            }
           }
         ],
         "responses": {
@@ -42,6 +58,284 @@
                     "type": "string"
                   },
                   "title": "Response Health Health Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/system/session": {
+      "post": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Create Session",
+        "description": "Exchange the API key for a same-origin session cookie.\n\nThe console's ``EventSource`` stream, page-preview ``<img>`` elements\nand download links cannot attach an ``X-API-Key`` header, so on a keyed\nserver the UI would 401 on every one of them even though its fetches\npass. The cookie carries a keyed *digest* of the service key (never the\nkey itself), is HttpOnly + SameSite=Lax so it rides only same-origin\nbrowser requests, and is re-minted on every login. An open (keyless)\nserver has nothing to exchange and returns ``authenticated: true``\nwithout setting a cookie.",
+        "operationId": "create_session_system_session_post",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Create Session System Session Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Delete Session",
+        "description": "Log the console out (clears the session cookie).",
+        "operationId": "delete_session_system_session_delete",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Delete Session System Session Delete"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/system/doctor": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "System Doctor",
+        "description": "Engine Doctor self-check (the ``ubt doctor`` checklist as JSON).\n\nReuses the CLI's ``collect_checks`` so the console and the command line\nreport the same verdicts. ``probe=true`` additionally contacts the\nprovider endpoint (a live network call), so it is off by default.",
+        "operationId": "system_doctor_system_doctor_get",
+        "parameters": [
+          {
+            "name": "probe",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Probe"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/system/info": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "System Info",
+        "description": "The console's security-boundary panel (real host + allowed roots).\n\nReports the host this request reached (loopback vs exposed), whether the\nAPI-key gate is on, and the filesystem roots ``resolve_secure_path``\nactually enforces \u2014 so the panel shows the live policy, not a hardcoded\nsample.",
+        "operationId": "system_info_system_info_get",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemInfoResponse"
                 }
               }
             }
@@ -81,6 +375,22 @@
                 }
               ],
               "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
             }
           }
         ],
@@ -140,6 +450,22 @@
                 }
               ],
               "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
             }
           }
         ],
@@ -215,6 +541,22 @@
                 }
               ],
               "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
             }
           }
         ],
@@ -302,6 +644,22 @@
               ],
               "title": "X-Api-Key"
             }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
+            }
           }
         ],
         "responses": {
@@ -376,6 +734,22 @@
                 }
               ],
               "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
             }
           }
         ],
@@ -456,6 +830,22 @@
               ],
               "title": "X-Api-Key"
             }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
+            }
           }
         ],
         "responses": {
@@ -528,6 +918,22 @@
                 }
               ],
               "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
             }
           }
         ],
@@ -602,6 +1008,22 @@
                 }
               ],
               "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
             }
           }
         ],
@@ -678,6 +1100,22 @@
               ],
               "title": "X-Api-Key"
             }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
+            }
           }
         ],
         "responses": {
@@ -744,6 +1182,22 @@
                 }
               ],
               "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
             }
           }
         ],
@@ -817,6 +1271,22 @@
               ],
               "title": "X-Api-Key"
             }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
+            }
           }
         ],
         "responses": {
@@ -888,6 +1358,22 @@
                 }
               ],
               "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
             }
           }
         ],
@@ -961,6 +1447,22 @@
                 }
               ],
               "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
             }
           }
         ],
@@ -1043,6 +1545,22 @@
                 }
               ],
               "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
             }
           }
         ],
@@ -1169,6 +1687,22 @@
               ],
               "title": "X-Api-Key"
             }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
+            }
           }
         ],
         "responses": {
@@ -1241,6 +1775,22 @@
                 }
               ],
               "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
             }
           }
         ],
@@ -1323,6 +1873,22 @@
                 }
               ],
               "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
             }
           }
         ],
@@ -1416,6 +1982,22 @@
               ],
               "title": "X-Api-Key"
             }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
+            }
           }
         ],
         "responses": {
@@ -1488,6 +2070,22 @@
                 }
               ],
               "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
             }
           }
         ],
@@ -1601,6 +2199,22 @@
               ],
               "title": "X-Api-Key"
             }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
+            }
           }
         ],
         "responses": {
@@ -1693,6 +2307,22 @@
               ],
               "title": "X-Api-Key"
             }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
+            }
           }
         ],
         "responses": {
@@ -1740,6 +2370,22 @@
                 }
               ],
               "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
             }
           }
         ],
@@ -1793,6 +2439,22 @@
               ],
               "title": "X-Api-Key"
             }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
+            }
           }
         ],
         "requestBody": {
@@ -1812,114 +2474,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ModelProfile"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/system/doctor": {
-      "get": {
-        "tags": [
-          "System"
-        ],
-        "summary": "System Doctor",
-        "description": "Engine Doctor self-check (the ``ubt doctor`` checklist as JSON).\n\nReuses the CLI's ``collect_checks`` so the console and the command line\nreport the same verdicts. ``probe=true`` additionally contacts the\nprovider endpoint (a live network call), so it is off by default.",
-        "operationId": "system_doctor_system_doctor_get",
-        "parameters": [
-          {
-            "name": "probe",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "boolean",
-              "default": false,
-              "title": "Probe"
-            }
-          },
-          {
-            "name": "x-api-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/system/info": {
-      "get": {
-        "tags": [
-          "System"
-        ],
-        "summary": "System Info",
-        "description": "The console's security-boundary panel (real host + allowed roots).\n\nReports the host this request reached (loopback vs exposed), whether the\nAPI-key gate is on, and the filesystem roots ``resolve_secure_path``\nactually enforces \u2014 so the panel shows the live policy, not a hardcoded\nsample.",
-        "operationId": "system_info_system_info_get",
-        "parameters": [
-          {
-            "name": "x-api-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SystemInfoResponse"
                 }
               }
             }
@@ -1959,6 +2513,22 @@
                 }
               ],
               "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
             }
           }
         ],
@@ -2004,6 +2574,22 @@
                 }
               ],
               "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
             }
           }
         ],
@@ -2069,6 +2655,22 @@
               ],
               "title": "X-Api-Key"
             }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
+            }
           }
         ],
         "responses": {
@@ -2116,6 +2718,22 @@
                 }
               ],
               "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
             }
           }
         ],
@@ -2216,6 +2834,22 @@
               ],
               "title": "X-Api-Key"
             }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
+            }
           }
         ],
         "responses": {
@@ -2262,6 +2896,22 @@
                 }
               ],
               "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
             }
           }
         ],
@@ -2320,6 +2970,22 @@
                 }
               ],
               "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
             }
           }
         ],
@@ -3703,10 +4369,6 @@
             "type": "string",
             "title": "File Name"
           },
-          "source_path": {
-            "type": "string",
-            "title": "Source Path"
-          },
           "target_lang": {
             "type": "string",
             "title": "Target Lang"
@@ -3777,7 +4439,6 @@
         "required": [
           "job_id",
           "file_name",
-          "source_path",
           "target_lang",
           "status",
           "total_blocks",

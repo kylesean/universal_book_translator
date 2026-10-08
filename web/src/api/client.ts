@@ -83,6 +83,65 @@ export interface ProgressStreamFrame {
 
 const BASE_URL = '' // Empty means same-origin or proxied via Vite dev server
 
+/**
+ * The API key the operator entered, kept in sessionStorage.
+ *
+ * ``sessionStorage``, not ``localStorage``: the key dies with the tab rather
+ * than persisting on a shared machine. The server also sets an HttpOnly
+ * session cookie at sign-in, which is what actually authenticates the SSE
+ * stream, page previews and downloads — ``EventSource`` and ``<img>`` cannot
+ * send a header, so the header path alone would leave those 401ing.
+ */
+const _KEY_STORAGE = 'ubt_api_key'
+
+export function getStoredApiKey(): string {
+  try {
+    return sessionStorage.getItem(_KEY_STORAGE) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+export function setStoredApiKey(key: string): void {
+  try {
+    if (key) sessionStorage.setItem(_KEY_STORAGE, key)
+    else sessionStorage.removeItem(_KEY_STORAGE)
+  } catch {
+    // Private-mode browsers can refuse storage; the cookie still authenticates.
+  }
+}
+
+/** ``fetch`` with the stored API key attached (when one is set). */
+function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
+  const key = getStoredApiKey()
+  if (!key) return fetch(input, init)
+  const headers = new Headers(init.headers)
+  headers.set('X-API-Key', key)
+  return fetch(input, { ...init, headers })
+}
+
+/**
+ * Exchange the entered key for the session cookie (and remember the key for
+ * header-authenticated fetches). Returns false when the key is rejected.
+ */
+export async function signIn(apiKey: string): Promise<boolean> {
+  setStoredApiKey(apiKey)
+  const res = await fetch(`${BASE_URL}/system/session`, {
+    method: 'POST',
+    headers: { 'X-API-Key': apiKey },
+  })
+  if (!res.ok) {
+    setStoredApiKey('')
+    return false
+  }
+  return true
+}
+
+export async function signOut(): Promise<void> {
+  setStoredApiKey('')
+  await fetch(`${BASE_URL}/system/session`, { method: 'DELETE' }).catch(() => undefined)
+}
+
 export async function checkHealth(): Promise<HealthResponse> {
   const res = await fetch(`${BASE_URL}/health`)
   if (!res.ok) throw new Error(`Health check failed: ${res.statusText}`)
@@ -90,7 +149,7 @@ export async function checkHealth(): Promise<HealthResponse> {
 }
 
 export async function assessJob(req: JobAssessRequest): Promise<JobAssessResponse> {
-  const res = await fetch(`${BASE_URL}/jobs/assess`, {
+  const res = await apiFetch(`${BASE_URL}/jobs/assess`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req),
@@ -103,7 +162,7 @@ export async function assessJob(req: JobAssessRequest): Promise<JobAssessRespons
 }
 
 export async function submitJob(req: JobSubmitRequest): Promise<JobSubmitResponse> {
-  const res = await fetch(`${BASE_URL}/jobs/submit`, {
+  const res = await apiFetch(`${BASE_URL}/jobs/submit`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req),
@@ -125,7 +184,7 @@ export async function submitJob(req: JobSubmitRequest): Promise<JobSubmitRespons
 export async function uploadSourceDocument(file: File): Promise<JobUploadResponse> {
   const form = new FormData()
   form.append('file', file)
-  const res = await fetch(`${BASE_URL}/jobs/upload`, { method: 'POST', body: form })
+  const res = await apiFetch(`${BASE_URL}/jobs/upload`, { method: 'POST', body: form })
   if (!res.ok) {
     const body = await res.json().catch(() => ({ detail: res.statusText }))
     throw new Error(typeof body.detail === 'string' ? body.detail : 'Upload failed')
@@ -134,13 +193,13 @@ export async function uploadSourceDocument(file: File): Promise<JobUploadRespons
 }
 
 export async function getJobStatus(jobId: string): Promise<JobStatusResponse> {
-  const res = await fetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}/status`)
+  const res = await apiFetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}/status`)
   if (!res.ok) throw new Error(`Failed to fetch job status: ${res.statusText}`)
   return res.json()
 }
 
 export async function cancelJob(jobId: string): Promise<void> {
-  const res = await fetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}/cancel`, {
+  const res = await apiFetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}/cancel`, {
     method: 'POST',
   })
   if (!res.ok) throw new Error(`Failed to cancel job: ${res.statusText}`)
@@ -148,7 +207,7 @@ export async function cancelJob(jobId: string): Promise<void> {
 
 /** Re-run a failed/cancelled job from its ledger checkpoints (embedded mode). */
 export async function resumeJob(jobId: string): Promise<{ job_id: string; status: string }> {
-  const res = await fetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}/resume`, {
+  const res = await apiFetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}/resume`, {
     method: 'POST',
   })
   if (!res.ok) {
@@ -160,7 +219,7 @@ export async function resumeJob(jobId: string): Promise<{ job_id: string; status
 
 /** Remove a finished job's ledger and deliverables from the console. */
 export async function deleteJob(jobId: string): Promise<{ job_id: string }> {
-  const res = await fetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' })
+  const res = await apiFetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' })
   if (!res.ok) {
     const body = await res.json().catch(() => ({ detail: res.statusText }))
     throw new Error(body.detail || 'Failed to delete job')
@@ -170,20 +229,20 @@ export async function deleteJob(jobId: string): Promise<{ job_id: string }> {
 
 /** The job queue: every ledger under db_dir, newest first. */
 export async function listJobs(limit = 200): Promise<JobSummary[]> {
-  const res = await fetch(`${BASE_URL}/jobs?limit=${limit}`)
+  const res = await apiFetch(`${BASE_URL}/jobs?limit=${limit}`)
   if (!res.ok) throw new Error(`Failed to list jobs: ${res.statusText}`)
   const data = await res.json()
   return data.jobs ?? []
 }
 
 export async function getJobReport(jobId: string): Promise<Record<string, unknown>> {
-  const res = await fetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}/report`)
+  const res = await apiFetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}/report`)
   if (!res.ok) throw new Error(`Failed to fetch report: ${res.statusText}`)
   return res.json()
 }
 
 export async function getVisualReport(jobId: string): Promise<Record<string, unknown>> {
-  const res = await fetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}/visual-report`)
+  const res = await apiFetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}/visual-report`)
   if (!res.ok) throw new Error(`Failed to fetch visual report: ${res.statusText}`)
   return res.json()
 }
@@ -280,7 +339,7 @@ export function subscribeJobProgress(
 // --------------------------------------------------------------------------- //
 
 export async function listDeliverables(jobId: string): Promise<DeliverableItem[]> {
-  const res = await fetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}/deliverables`)
+  const res = await apiFetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}/deliverables`)
   if (!res.ok) throw new Error(`Failed to list deliverables: ${res.statusText}`)
   const data = await res.json()
   return data.deliverables ?? []
@@ -295,7 +354,7 @@ export function deliverableDownloadUrl(jobId: string, key: string): string {
 // --------------------------------------------------------------------------- //
 
 export async function getGlossary(): Promise<GlossaryTerm[]> {
-  const res = await fetch(`${BASE_URL}/assets/glossary`)
+  const res = await apiFetch(`${BASE_URL}/assets/glossary`)
   if (res.status === 409) return []
   if (!res.ok) throw new Error(`Failed to load glossary: ${res.statusText}`)
   const data = await res.json()
@@ -303,7 +362,7 @@ export async function getGlossary(): Promise<GlossaryTerm[]> {
 }
 
 export async function upsertGlossaryTerm(source: string, target: string): Promise<GlossaryTerm[]> {
-  const res = await fetch(`${BASE_URL}/assets/glossary`, {
+  const res = await apiFetch(`${BASE_URL}/assets/glossary`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ source, target }),
@@ -317,7 +376,7 @@ export async function upsertGlossaryTerm(source: string, target: string): Promis
 }
 
 export async function deleteGlossaryTerm(source: string): Promise<GlossaryTerm[]> {
-  const res = await fetch(`${BASE_URL}/assets/glossary?source=${encodeURIComponent(source)}`, {
+  const res = await apiFetch(`${BASE_URL}/assets/glossary?source=${encodeURIComponent(source)}`, {
     method: 'DELETE',
   })
   if (!res.ok) throw new Error(`Failed to delete term: ${res.statusText}`)
@@ -336,14 +395,14 @@ export async function listTm(params: {
   if (params.offset !== undefined) query.set('offset', String(params.offset))
   if (params.src_lang) query.set('src_lang', params.src_lang)
   if (params.tgt_lang) query.set('tgt_lang', params.tgt_lang)
-  const res = await fetch(`${BASE_URL}/assets/tm?${query.toString()}`)
+  const res = await apiFetch(`${BASE_URL}/assets/tm?${query.toString()}`)
   if (!res.ok) throw new Error(`Failed to load translation memory: ${res.statusText}`)
   const data = await res.json()
   return { total: data.total ?? 0, entries: data.entries ?? [] }
 }
 
 export async function evictTm(ids: number[]): Promise<number> {
-  const res = await fetch(`${BASE_URL}/assets/tm/evict`, {
+  const res = await apiFetch(`${BASE_URL}/assets/tm/evict`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ids }),
@@ -360,7 +419,7 @@ export interface GlossaryConflict {
 
 /** Sources configured with more than one target rendering. */
 export async function getGlossaryConflicts(): Promise<GlossaryConflict[]> {
-  const res = await fetch(`${BASE_URL}/assets/glossary/conflicts`)
+  const res = await apiFetch(`${BASE_URL}/assets/glossary/conflicts`)
   if (!res.ok) throw new Error(`Failed to load glossary conflicts: ${res.statusText}`)
   const data = await res.json()
   return data.conflicts ?? []
@@ -374,7 +433,7 @@ export async function importTm(payload: {
   tgt_lang: string
   provenance?: 'machine' | 'human_pe'
 }): Promise<{ parsed: number; imported: number }> {
-  const res = await fetch(`${BASE_URL}/assets/tm/import`, {
+  const res = await apiFetch(`${BASE_URL}/assets/tm/import`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -427,14 +486,14 @@ export async function listSegments(
   if (params.block_type) query.set('block_type', params.block_type)
   if (params.limit !== undefined) query.set('limit', String(params.limit))
   if (params.offset !== undefined) query.set('offset', String(params.offset))
-  const res = await fetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}/segments?${query.toString()}`)
+  const res = await apiFetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}/segments?${query.toString()}`)
   if (!res.ok) throw new Error(`Failed to load segments: ${res.statusText}`)
   const data = await res.json()
   return { total: data.total ?? 0, segments: data.segments ?? [] }
 }
 
 export async function listIssues(jobId: string): Promise<IssuesReport> {
-  const res = await fetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}/issues`)
+  const res = await apiFetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}/issues`)
   if (!res.ok) throw new Error(`Failed to load issues: ${res.statusText}`)
   return res.json()
 }
@@ -467,7 +526,7 @@ export async function editSegment(
   blockId: string,
   targetText: string
 ): Promise<{ changed: boolean; tm_written: number; segment: Segment | null }> {
-  const res = await fetch(
+  const res = await apiFetch(
     `${BASE_URL}/jobs/${encodeURIComponent(jobId)}/segments/${encodeURIComponent(blockId)}`,
     {
       method: 'POST',
@@ -501,7 +560,7 @@ export interface BlockTermsReport {
 
 /** Terminology findings for one block, with the cascade size each implies. */
 export async function getBlockTerms(jobId: string, blockId: string): Promise<BlockTermsReport> {
-  const res = await fetch(
+  const res = await apiFetch(
     `${BASE_URL}/jobs/${encodeURIComponent(jobId)}/segments/${encodeURIComponent(blockId)}/terms`
   )
   if (!res.ok) throw new Error(`Failed to load terminology: ${res.statusText}`)
@@ -527,7 +586,7 @@ export async function propagateTerm(
   jobId: string,
   payload: { block_id: string; surface: string; expected: string; scope: 'block' | 'subsequent' | 'all' }
 ): Promise<TermPropagationResult> {
-  const res = await fetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}/term-propagation`, {
+  const res = await apiFetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}/term-propagation`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -545,20 +604,20 @@ export async function propagateTerm(
 
 export async function getDoctor(probe = false): Promise<DoctorReport> {
   const url = `${BASE_URL}/system/doctor` + (probe ? '?probe=true' : '')
-  const res = await fetch(url)
+  const res = await apiFetch(url)
   if (!res.ok) throw new Error(`Doctor check failed: ${res.statusText}`)
   return res.json()
 }
 
 export async function listModelProfiles(): Promise<ModelProfile[]> {
-  const res = await fetch(`${BASE_URL}/api/v1/model-profiles`)
+  const res = await apiFetch(`${BASE_URL}/api/v1/model-profiles`)
   if (!res.ok) throw new Error(`Failed to load model profiles: ${res.statusText}`)
   return res.json()
 }
 
 /** The live security boundary: reachable host, auth gate, and allowed roots. */
 export async function getSystemInfo(): Promise<SystemInfo> {
-  const res = await fetch(`${BASE_URL}/system/info`)
+  const res = await apiFetch(`${BASE_URL}/system/info`)
   if (!res.ok) throw new Error(`Failed to load system info: ${res.statusText}`)
   return res.json()
 }

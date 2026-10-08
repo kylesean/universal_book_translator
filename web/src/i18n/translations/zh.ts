@@ -160,7 +160,8 @@ export const zh: TranslationDictionary = {
     decisionBlocked: '门禁阻断 (GATE BLOCKED)',
     allPassedDesc: '已通过全部形式化防线验证。公式丢失率为 0%，术语一致性在出版容差范围内。',
     blockedDesc: '触发质检阻断：需在 L3 审校台人工后编排查确认后方可交付出版。',
-    fidelityScore: '综合保真度评分',
+    // 展示值实为 summary.pass_rate（已完成块 / 总块数），并非像素/版面保真度测量。
+    fidelityScore: '块完成率',
     pillar1Title: '1. 数学公式与符号防线',
     pillar1Desc: '公式零丢失率校验、LaTeX 语法有效性与变量下标一致性。',
     pillar2Title: '2. 术语一致性与漂移率',
@@ -241,6 +242,16 @@ export const zh: TranslationDictionary = {
   doctor: {
     title: '编译器自检与系统探针',
     subtitle: '运行时依赖环境探查、模型 Provider 连通性矩阵及安全本地隔离白名单。',
+    auth: {
+      title: '需要服务器鉴权',
+      subtitle: '该服务已启用 X-API-Key 门禁，请输入密钥以打开控制台。',
+      keyLabel: 'API 密钥',
+      keyPlaceholder: 'UBT_API_KEY 的值…',
+      signIn: '登录',
+      checking: '登录中…',
+      signOut: '退出登录',
+      failed: 'API 密钥无效',
+    },
     pingAll: '探测所有模型延迟',
     engineDiagnostics: '编译器基座诊断',
     providerMatrix: '模型路由与延迟矩阵',

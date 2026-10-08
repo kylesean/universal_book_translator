@@ -160,7 +160,10 @@ export const en: TranslationDictionary = {
     decisionBlocked: 'GATE BLOCKED',
     allPassedDesc: 'All formal checks passed. Formula dropout is 0%, terminology drift within tolerances.',
     blockedDesc: 'Gate blocked: manual post-editing review required before publication release.',
-    fidelityScore: 'Overall Fidelity Score',
+    // The number shown is ``summary.pass_rate`` = completed / total blocks.
+    // Calling it a "fidelity score" claimed a pixel/layout measurement the
+    // value never made.
+    fidelityScore: 'Block Completion Rate',
     pillar1Title: '1. Mathematical & Symbolic Defense',
     pillar1Desc: 'Zero dropout rate, LaTeX syntax integrity, subscript preservation.',
     pillar2Title: '2. Terminology & Drift Gate',
@@ -241,6 +244,17 @@ export const en: TranslationDictionary = {
   doctor: {
     title: 'Engine Doctor & Diagnostics',
     subtitle: 'Runtime environment verification, provider connectivity matrix, and security isolation boundaries.',
+    auth: {
+      title: 'Server authentication required',
+      subtitle:
+        'This server runs with the X-API-Key gate enabled. Enter the key to open the console.',
+      keyLabel: 'API key',
+      keyPlaceholder: 'UBT_API_KEY value...',
+      signIn: 'Sign in',
+      checking: 'Signing in...',
+      signOut: 'Sign out',
+      failed: 'Invalid API key',
+    },
     pingAll: 'Ping All Providers',
     engineDiagnostics: 'Engine Diagnostics',
     providerMatrix: 'Model Routing & Latency Matrix',
