@@ -168,7 +168,16 @@ def transcribe_page_to_blocks(
                 raise IndexError(f"Page number {page_no} out of bounds (1..{len(pdf)})")
             page = pdf[page_no - 1]
             try:
+                # ``get_width``/``get_height`` are the DISPLAYED size (the
+                # page's /Rotate already applied), matching what
+                # ``render`` produces: the driver gets a bitmap that looks like
+                # the page as a reader sees it. The text layer, by contrast,
+                # reports unrotated user-space rects -- pdfium's text rects
+                # ignore /Rotate, as do the render compositor's boxes. The
+                # driver is told the rotation so it can bring its boxes into
+                # that frame instead of handing back a sideways page.
                 width, height = float(page.get_width()), float(page.get_height())
+                rotation = int(page.get_rotation())
                 image = page.render(scale=scale).to_pil().convert("RGB")
                 textpage = page.get_textpage()
                 try:
@@ -182,8 +191,8 @@ def transcribe_page_to_blocks(
 
     if driver is None:
         driver = get_driver(driver_name)
-    transcript = driver.recognize(image, (width, height), scale)
-    anchored, stats = anchor_transcript(pdfium_lines, transcript, (width, height))
+    transcript = driver.recognize(image, (width, height), scale, rotation)
+    anchored, stats = anchor_transcript(pdfium_lines, transcript, (width, height), rotation)
     logger.info(
         "vlm p%d via %s: %d lines matched=%d vlm_only=%d pdfium_only=%d",
         page_no,

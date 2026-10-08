@@ -68,8 +68,14 @@ class RapidOcrDriver:
         image: object,
         page_size_pt: tuple[float, float],
         scale: float,
+        rotation: int = 0,
     ) -> PageTranscript:
         import numpy as np
+
+        from ubt.adapters.pdf.coordinate_resolver import (
+            rotate_rect_clockwise,
+            undo_page_rotation,
+        )
 
         img = np.asarray(image)
         # rapidocr's LoadImage receives an ndarray unchanged (no channel
@@ -80,6 +86,12 @@ class RapidOcrDriver:
             img = np.ascontiguousarray(img[:, :, ::-1])
         raw: Any = self._get_engine()(img)
         lines: list[VlmLine] = []
+        # The pixel->point step below lands in the DISPLAY frame (the bitmap is
+        # the displayed page), and only the last line of this method is allowed
+        # to leave it: every box goes through the same display->user rotation,
+        # so a /Rotate page is not handed to anchoring sideways.
+        to_user_space = undo_page_rotation(rotation)
+        page_width_pt, height_pt = page_size_pt
         for box, text, conf in _iter_predictions(raw):
             if not (text or "").strip():
                 continue
@@ -92,15 +104,20 @@ class RapidOcrDriver:
             if not xs or not ys:
                 continue
             # Pixel top-left origin -> PDF bottom-left points.
-            _, height_pt = page_size_pt
             x0, x1 = min(xs), max(xs)
             top, bottom = min(ys), max(ys)
+            measured = rotate_rect_clockwise(
+                (x0, height_pt - bottom, x1, height_pt - top),
+                to_user_space,
+                page_width_pt,
+                height_pt,
+            )
             lines.append(
                 VlmLine(
                     text=str(text).strip(),
                     reading_index=len(lines),
                     confidence=confidence,
-                    measured_box=(x0, height_pt - bottom, x1, height_pt - top),
+                    measured_box=measured,
                 )
             )
         return PageTranscript(lines=tuple(lines), engine=self.name, measured_boxes=True)

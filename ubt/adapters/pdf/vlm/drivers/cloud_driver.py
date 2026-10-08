@@ -20,7 +20,7 @@ from typing import Any
 
 import httpx
 
-from ubt.adapters.pdf.coordinate_resolver import PageBBoxResolver
+from ubt.adapters.pdf.coordinate_resolver import PageBBoxResolver, undo_page_rotation
 from ubt.adapters.pdf.vlm.types import PageTranscript, VlmLine
 
 logger = logging.getLogger(__name__)
@@ -115,6 +115,7 @@ class CloudOcrDriver:
         image: Any,
         page_size_pt: tuple[float, float],
         scale: float,
+        rotation: int = 0,
     ) -> PageTranscript:
         """Route to Vision LLM or Cloud REST API based on provider."""
         # Convert PIL image to JPEG bytes
@@ -130,7 +131,7 @@ class CloudOcrDriver:
 
         if self._vision_llm:
             return self._recognize_via_vision_llm(img_bytes)
-        return self._recognize_via_cloud_rest(img_bytes, image, page_size_pt, scale)
+        return self._recognize_via_cloud_rest(img_bytes, image, page_size_pt, scale, rotation)
 
     def _recognize_via_vision_llm(self, img_bytes: bytes) -> PageTranscript:
         """Transcribe text using OpenAI-compatible multimodal vision endpoint."""
@@ -223,6 +224,7 @@ class CloudOcrDriver:
         image: Any,
         page_size_pt: tuple[float, float],
         scale: float,
+        rotation: int = 0,
     ) -> PageTranscript:
         """Call standard cloud OCR endpoint and parse returned lines + bounding boxes."""
         headers: dict[str, str] = {}
@@ -249,6 +251,10 @@ class CloudOcrDriver:
             page_height=page_size_pt[1],
             image_width=img_w,
             image_height=img_h,
+            # The endpoint read the rendered (displayed) page, so its boxes are
+            # in the display frame; undo the page's /Rotate to land in the
+            # unrotated user-space frame block geometry and masks live in.
+            rotation=undo_page_rotation(rotation),
         )
 
         vlm_lines: list[VlmLine] = []

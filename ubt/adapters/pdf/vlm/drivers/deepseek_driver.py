@@ -353,7 +353,12 @@ class DeepSeekOcrDriver:
         image: Any,
         page_size_pt: tuple[float, float],
         scale: float,
+        rotation: int = 0,
     ) -> PageTranscript:
+        # ``page_size_pt``, ``scale`` and ``rotation`` are geometry inputs, and
+        # this driver measures no geometry: it emits text with no boxes, and
+        # anchoring refuses it in recognition mode rather than guessing a page
+        # of boxes out of a language model.
         buf = io.BytesIO()
         image.save(buf, format="PNG")
         reply = self._request({"image_b64": base64.b64encode(buf.getvalue()).decode("ascii")})

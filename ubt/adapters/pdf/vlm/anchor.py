@@ -16,6 +16,7 @@ import re
 import unicodedata
 from dataclasses import dataclass
 
+from ubt.adapters.pdf.coordinate_resolver import rotate_rect_clockwise, undo_page_rotation
 from ubt.adapters.pdf.vlm.types import PageTranscript
 
 _WS_RE = re.compile(r"\s+")
@@ -57,8 +58,16 @@ def anchor_transcript(
     pdfium_lines: list[tuple[str, tuple[float, float, float, float]]],
     transcript: PageTranscript,
     page_size_pt: tuple[float, float],
+    rotation: int = 0,
 ) -> tuple[list[AnchoredLine], AnchorStats]:
-    """Settle per-line text+geometry. Pure function (unit-testable)."""
+    """Settle per-line text+geometry. Pure function (unit-testable).
+
+    ``page_size_pt`` is the displayed page's size and ``rotation`` its
+    ``/Rotate``; the driver has already mapped the boxes it measured back to
+    unrotated user space. ``rotation`` is needed here only for the fallback box
+    of a line the driver could not place -- that box is the whole page, and
+    "the whole page" is display-shaped on a rotated page.
+    """
     usable_pdfium = [(t, b) for t, b in pdfium_lines if _norm(t)]
     pnorms = [_norm(t) for t, _ in usable_pdfium]
 
@@ -70,10 +79,16 @@ def anchor_transcript(
                 "refusing to guess page geometry (fail closed)"
             )
         width, height = page_size_pt
+        # Rotation lives in ONE place -- the driver's box conversion -- and the
+        # caller passes the same value here, so this is the same frame mapping
+        # applied to the one box the driver never produced.
+        whole_page = rotate_rect_clockwise(
+            (0.0, 0.0, width, height), undo_page_rotation(rotation), width, height
+        )
         out = [
             AnchoredLine(
                 text=ln.text.strip(),
-                box=ln.measured_box or (0.0, 0.0, width, height),
+                box=ln.measured_box or whole_page,
                 provenance="vlm-measured",
                 needs_review=ln.measured_box is None,
             )

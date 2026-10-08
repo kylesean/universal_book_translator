@@ -20,7 +20,7 @@ from typing import Any
 
 import httpx
 
-from ubt.adapters.pdf.coordinate_resolver import PageBBoxResolver
+from ubt.adapters.pdf.coordinate_resolver import PageBBoxResolver, undo_page_rotation
 from ubt.adapters.pdf.vlm.types import PageTranscript, VlmLine
 
 logger = logging.getLogger(__name__)
@@ -74,6 +74,7 @@ class SidecarOcrDriver:
         image: Any,
         page_size_pt: tuple[float, float],
         scale: float,
+        rotation: int = 0,
     ) -> PageTranscript:
         """Send page image to OCR sidecar and return measured VlmLine items."""
         # Convert PIL image to JPEG bytes
@@ -120,6 +121,10 @@ class SidecarOcrDriver:
             page_height=page_size_pt[1],
             image_width=img_w,
             image_height=img_h,
+            # The sidecar read the rendered (displayed) page, so its boxes are
+            # in the display frame; undo the page's /Rotate to land in the
+            # unrotated user-space frame block geometry and masks live in.
+            rotation=undo_page_rotation(rotation),
         )
         coord_system = payload.get("coord_system")
         if not coord_system:

@@ -23,7 +23,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from pypdf import PdfWriter
-from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
+from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject, NumberObject
 
 #: US Letter, matching the page geometry the corpus papers use.
 PAGE_WIDTH = 612.0
@@ -95,6 +95,7 @@ def write_text_pdf(
     height: float = PAGE_HEIGHT,
     margin: float = _MARGIN,
     background: tuple[float, float, float] | None = None,
+    rotation: int = 0,
 ) -> Path:
     """Write a PDF with one text line per string, one page per inner sequence.
 
@@ -102,7 +103,9 @@ def write_text_pdf(
     multi-column-shaped fixture); ``margin=0`` authors a fragment at an exact
     box size (a fake fragment typesetter for the LayerCompositor tests).
     ``background`` fills every page with a colour before its text -- a page
-    printed on something other than white.
+    printed on something other than white. ``rotation`` sets the page's
+    ``/Rotate``: the page is *displayed* turned, while its content -- and its
+    ``/MediaBox`` -- stay as written, which is the whole point of the fixture.
     """
     writer = PdfWriter()
     for lines in pages:
@@ -111,6 +114,8 @@ def write_text_pdf(
             _content_stream(lines, height=height, margin=margin, width=width, background=background)
         )
         page[NameObject("/Contents")] = contents
+        if rotation:
+            page[NameObject("/Rotate")] = NumberObject(rotation)
         _attach_font(writer, page)
     with path.open("wb") as handle:
         writer.write(handle)

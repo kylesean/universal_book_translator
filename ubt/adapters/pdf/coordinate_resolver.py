@@ -23,6 +23,40 @@ logger = logging.getLogger(__name__)
 Rect = tuple[float, float, float, float]
 
 
+def rotate_rect_clockwise(rect: Rect, rotation: int, page_width: float, page_height: float) -> Rect:
+    """Rotate ``rect`` clockwise by ``rotation`` within a ``page_width`` x
+    ``page_height`` frame.
+
+    The frame's dimensions are the ones *the input rect is measured in* — for
+    the display-to-user conversion below that is the displayed page's size,
+    which is why the two axes swap on a 90/270 page.
+    """
+    x0, y0, x1, y1 = rect
+    rot = int(rotation) % 360
+    if rot == 0:
+        return (x0, y0, x1, y1)
+    if rot == 90:
+        return (y0, page_width - x1, y1, page_width - x0)
+    if rot == 180:
+        return (page_width - x1, page_height - y1, page_width - x0, page_height - y0)
+    if rot == 270:
+        return (page_height - y1, x0, page_height - y0, x1)
+    logger.warning("ignoring unsupported page rotation %r", rotation)
+    return (x0, y0, x1, y1)
+
+
+def undo_page_rotation(page_rotation: int) -> int:
+    """The :class:`PageBBoxResolver` rotation that undoes a page's ``/Rotate``.
+
+    A driver measures its boxes on the *rendered* image, and a renderer applies
+    ``/Rotate``: the bitmap is the displayed page, so a box read off it is in
+    the display frame, while every consumer of ``measured_box`` (anchoring,
+    block geometry, the render compositor's masks) works in the unrotated
+    user-space frame. Undoing a rotation of N is a rotation of 360 - N.
+    """
+    return (360 - int(page_rotation)) % 360
+
+
 @dataclass(frozen=True)
 class PageBBoxResolver:
     """Resolves arbitrary OCR/VLM bounding boxes to canonical PDF bottom-left points."""
@@ -31,7 +65,12 @@ class PageBBoxResolver:
     page_height: float
     image_width: float | None = None
     image_height: float | None = None
-    rotation: int = 0  # 0, 90, 180, 270
+    #: Clockwise rotation applied to every box this resolver produces (0, 90,
+    #: 180, 270). A driver that measured its boxes on a *rendered* page -- and a
+    #: renderer applies ``/Rotate``, so the bitmap is the displayed page --
+    #: passes :func:`undo_page_rotation` of that page's ``/Rotate``, which lands
+    #: the box in the unrotated user-space frame every consumer reads.
+    rotation: int = 0
 
     def resolve_bbox(
         self,
@@ -193,22 +232,9 @@ class PageBBoxResolver:
 
     def _apply_rotation(self, x0: float, y0: float, x1: float, y1: float) -> Rect:
         """Apply page rotation if needed (PDF coordinate rotation)."""
-        rot = self.rotation % 360
-        if rot == 0:
-            return (x0, y0, x1, y1)
-
-        pw, ph = self.page_width, self.page_height
-        if rot == 90:
-            # 90 deg clockwise
-            return (y0, pw - x1, y1, pw - x0)
-        elif rot == 180:
-            # 180 deg
-            return (pw - x1, ph - y1, pw - x0, ph - y0)
-        elif rot == 270:
-            # 270 deg clockwise
-            return (ph - y1, x0, ph - y0, x1)
-
-        return (x0, y0, x1, y1)
+        return rotate_rect_clockwise(
+            (x0, y0, x1, y1), self.rotation, self.page_width, self.page_height
+        )
 
 
 def synthesize_line_boxes_for_blocks(
