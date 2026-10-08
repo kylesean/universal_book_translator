@@ -19,8 +19,9 @@ packages = ["ubt"]
 # them.
 #
 # ``docs/`` is intentionally unversioned (gitignored) and changes too often to
-# track, so it is excluded from the sdist too. ``README.md`` no longer links
-# into it, so the archive stays self-consistent without it. Test-generated
+# track, so it is excluded from the sdist too. ``README.md`` only says that
+# ``docs/`` is unversioned rather than linking into it, so the archive stays
+# self-consistent without it. Test-generated
 # fixtures are written under ``tests/`` at run time (gitignored, e.g. the
 # ``pypdf`` builders in ``tests/pdf_builders.py``) and are covered by the
 # ``tests/`` exclude below, so none can reach the archive.

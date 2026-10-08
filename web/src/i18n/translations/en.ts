@@ -186,7 +186,10 @@ export const en: TranslationDictionary = {
     axisTerminology: 'Terminology',
     axisVisual: 'Layout',
     axisCompleteness: 'Completeness',
-    axisFidelity: 'Fidelity',
+    // Same value as ``fidelityScore`` (``summary.pass_rate``), so it carries the
+    // same honesty problem: "Fidelity" named a layout measurement this axis
+    // never reads. The real pixel witness is the Layout pillar.
+    axisDelivered: 'Delivered',
     termDriftTitle: 'Terminology drift detail',
     colTerm: 'Term',
     colExpected: 'Expected',

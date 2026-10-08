@@ -184,7 +184,9 @@ export const zh: TranslationDictionary = {
     axisTerminology: '术语',
     axisVisual: '版面',
     axisCompleteness: '完整性',
-    axisFidelity: '保真度',
+    // 与 fidelityScore 同一个值（summary.pass_rate），故沿用同一个诚实的名字；
+    // 真正的像素保真度是「版面」那一根轴。
+    axisDelivered: '已交付',
     termDriftTitle: '术语漂移明细',
     colTerm: '术语',
     colExpected: '应译',

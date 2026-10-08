@@ -411,7 +411,7 @@ export function QualityGateView() {
     { label: t.quality.axisTerminology, value: pillars[1].score },
     { label: t.quality.axisVisual, value: pillars[2].score },
     { label: t.quality.axisCompleteness, value: pillars[3].score },
-    { label: t.quality.axisFidelity, value: clampScore(summary.pass_rate) },
+    { label: t.quality.axisDelivered, value: clampScore(summary.pass_rate) },
   ]
 
   const handleDownload = (key: string) => {

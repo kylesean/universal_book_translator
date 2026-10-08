@@ -183,7 +183,7 @@ export interface TranslationDictionary {
     axisTerminology: string
     axisVisual: string
     axisCompleteness: string
-    axisFidelity: string
+    axisDelivered: string
     termDriftTitle: string
     colTerm: string
     colExpected: string

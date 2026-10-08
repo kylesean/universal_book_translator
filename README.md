@@ -42,5 +42,6 @@ Measured against the current implementation, not aspirational:
   standards-complete (no TBX/SRX), so hand-off to external CAT tooling is
   limited.
 
-See the guides under `docs/` for design detail. `docs/` is intentionally
-unversioned (gitignored), so a clone has the code and tests only.
+Design notes and guides are maintained in the working tree under `docs/`, which
+is intentionally unversioned (gitignored) — a clone carries the code and tests
+only, not those notes.
