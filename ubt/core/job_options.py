@@ -412,6 +412,22 @@ def companion_path(artifact: str | Path, suffix: str) -> Path:
     return output.with_name(f"{output.stem}_{tag}{suffix}")
 
 
+#: Every derived report that hangs off one deliverable, as
+#: :func:`sidecar_path` kinds. One list, deliberately: the export stage drops
+#: the previous run's copies for the artifact it is about to write, and the
+#: CLI's ``--fresh`` sweep drops those of a companion it deletes. Two lists is
+#: how one of the two starts leaving orphan reports behind -- a report that
+#: describes a document nobody has, which the next reader picks up as the
+#: current one's.
+RUN_REPORT_KINDS: tuple[SidecarKind, ...] = (
+    "quality_report.json",
+    "quality_report.md",
+    "metrics.json",
+    "visual_report.json",
+    "contract.json",
+)
+
+
 def artifact_and_report_paths(
     artifact: str | Path,
 ) -> tuple[Path, Path | None, Path | None]:

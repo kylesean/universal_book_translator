@@ -30,6 +30,7 @@ from ubt.core.config import (
     parse_page_ranges,
 )
 from ubt.core.job_options import (
+    RUN_REPORT_KINDS,
     default_output_path,
     profile_name_is_valid,
     resolve_target_output,
@@ -89,17 +90,30 @@ def _is_interactive() -> bool:
 _PROFILE_EXAMPLES = "general, textbook, paper, fiction, humanities, semiconductor"
 
 
-def _clean_stale_companions(output: Path | None, *, input_path: Path | None = None) -> None:
+def _clean_stale_companions(output: Path | None, *, input_path: Path | None = None) -> list[Path]:
+    """Delete the sibling deliverables a ``--fresh`` run is about to regenerate.
+
+    Only the names this pipeline actually writes for the mono/dual/bilingual
+    family are considered (the ``_rigid``/``_reflow`` patterns this used to
+    sweep had no producer anywhere in the tree, so they deleted whatever
+    happened to be named that way). A deleted sibling takes its derived reports
+    with it: leaving ``x_bilingual_md_quality_report.json`` behind describes a
+    document that no longer exists, and the next run reads that report as the
+    current one's.
+
+    Returns what was deleted, so the caller can say so.
+    """
     if output is None:
-        return
+        return []
     stem = output.stem
-    names = [f"{stem}_rigid.pdf", f"{stem}_reflow.pdf"]
+    names: list[str] = []
     if stem.endswith("_mono"):
         base = stem[: -len("_mono")]
         names.extend([f"{base}_bilingual{output.suffix}", f"{base}_dual{output.suffix}"])
     elif stem.endswith(("_dual", "_bilingual")):
         base = stem.rsplit("_", 1)[0]
         names.append(f"{base}_mono{output.suffix}")
+    deleted: list[Path] = []
     for n in names:
         p = output.with_name(n)
         if not p.exists() or p == output:
@@ -108,8 +122,15 @@ def _clean_stale_companions(output: Path | None, *, input_path: Path | None = No
             # A name-pattern match on the input document itself: -o X_mono.md
             # beside an input named X_bilingual.md must not delete the source.
             continue
-        with contextlib.suppress(OSError):
+        try:
             p.unlink()
+        except OSError:
+            continue
+        deleted.append(p)
+        for kind in RUN_REPORT_KINDS:
+            with contextlib.suppress(OSError):
+                sidecar_path(p, kind).unlink(missing_ok=True)
+    return deleted
 
 
 def _same_file(left: Path, right: Path) -> bool:
@@ -148,7 +169,14 @@ def _refuse_existing_output(
                     )
         return None
     if fresh:
-        _clean_stale_companions(output, input_path=input_path)
+        removed = _clean_stale_companions(output, input_path=input_path)
+        if removed:
+            # Say it, don't just do it: these are files this run did not write
+            # and will not rewrite unless the run emits the same companion.
+            console.print(
+                "[dim]--fresh removed the previously delivered companion(s):[/] "
+                + ", ".join(escape(p.name) for p in removed)
+            )
         return output
     candidate = output
     if output.is_dir() or str(output).endswith(("/", "\\")):

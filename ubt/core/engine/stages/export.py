@@ -29,7 +29,7 @@ from ubt.core.exceptions import (
     UBTError,
 )
 from ubt.core.ir.models import BlockStatus, BookManifest, IRBlock
-from ubt.core.job_options import resolve_target_output, sidecar_path
+from ubt.core.job_options import RUN_REPORT_KINDS, resolve_target_output, sidecar_path
 from ubt.core.metrics.collect import collect_kpis, save_metrics_report
 from ubt.core.policy.bilingual_advisor import SECONDARY_SUFFIX
 from ubt.core.policy.layout_policy import LENGTH_OVERFLOW_TO_HUMAN, LENGTH_POLICY_PAGE_KINDS
@@ -680,7 +680,7 @@ def _drop_stale_run_reports(rendered_path: Path) -> None:
     back. The deliverable itself is never touched, and a missing file is not an
     error.
     """
-    for kind in ("quality_report.json", "quality_report.md", "metrics.json", "visual_report.json"):
+    for kind in RUN_REPORT_KINDS:
         with contextlib.suppress(OSError):
             sidecar_path(rendered_path, kind).unlink(missing_ok=True)
 
