@@ -21,6 +21,7 @@ from PIL import Image
 
 from ubt.adapters.pdf.vlm.drivers.cloud_driver import CloudOcrDriver
 from ubt.adapters.pdf.vlm.drivers.sidecar_driver import SidecarOcrDriver
+from ubt.adapters.pdf.vlm.types import VlmDriver
 
 pytestmark = pytest.mark.fast
 
@@ -45,7 +46,7 @@ def _http_client(payload: dict[str, object]) -> MagicMock:
 
 def test_the_cloud_rest_driver_undoes_the_page_rotation() -> None:
     driver = CloudOcrDriver(endpoint="https://ocr.example.com/api", api_key="k", provider="paddle")
-    payload = {
+    payload: dict[str, object] = {
         "lines": [{"text": "hello", "box": _INK_PX, "confidence": 0.9}],
         "coord_system": "image_pixel",
     }
@@ -62,7 +63,7 @@ def test_the_cloud_rest_driver_undoes_the_page_rotation() -> None:
 
 def test_the_sidecar_driver_undoes_the_page_rotation() -> None:
     driver = SidecarOcrDriver(endpoint="http://localhost:8765")
-    payload = {
+    payload: dict[str, object] = {
         "lines": [{"text": "hello", "box": _INK_PX, "confidence": 0.9}],
         "coord_system": "image_pixel",
     }
@@ -100,10 +101,11 @@ def test_an_unrotated_page_keeps_the_drivers_old_boxes(driver_kind: str) -> None
     # The regression guard for every document that was never turned: the same
     # payload with rotation=0 must come back as the display-frame box, exactly
     # as it did before the rotation was threaded through.
-    payload = {
+    payload: dict[str, object] = {
         "lines": [{"text": "hello", "box": _INK_PX, "confidence": 0.9}],
         "coord_system": "image_pixel",
     }
+    driver: VlmDriver
     if driver_kind == "cloud":
         driver = CloudOcrDriver(
             endpoint="https://ocr.example.com/api", api_key="k", provider="paddle"
