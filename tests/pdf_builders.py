@@ -41,15 +41,30 @@ def _escape(text: str) -> str:
 
 
 def _content_stream(
-    lines: Sequence[str], *, height: float, margin: float = _MARGIN
+    lines: Sequence[str],
+    *,
+    height: float,
+    margin: float = _MARGIN,
+    width: float = PAGE_WIDTH,
+    background: tuple[float, float, float] | None = None,
 ) -> DecodedStreamObject:
-    """A text-showing content stream: one Helvetica line per input line."""
-    ops = [
-        "BT",
-        f"/F1 {_FONT_SIZE} Tf",
-        f"1 0 0 1 {margin} {height - margin} Tm",
-        f"{_LEADING} TL",
-    ]
+    """A text-showing content stream: one Helvetica line per input line.
+
+    ``background`` paints a full-page fill under the text (a tinted page), the
+    shape a mask that must not be white has to blend into.
+    """
+    ops: list[str] = []
+    if background is not None:
+        red, green, blue = background
+        ops.append(f"q {red} {green} {blue} rg 0 0 {width} {height} re f Q")
+    ops.extend(
+        [
+            "BT",
+            f"/F1 {_FONT_SIZE} Tf",
+            f"1 0 0 1 {margin} {height - margin} Tm",
+            f"{_LEADING} TL",
+        ]
+    )
     ops.extend(f"({_escape(line)}) Tj T*" for line in lines)
     ops.append("ET")
     stream = DecodedStreamObject()
@@ -79,18 +94,21 @@ def write_text_pdf(
     width: float = PAGE_WIDTH,
     height: float = PAGE_HEIGHT,
     margin: float = _MARGIN,
+    background: tuple[float, float, float] | None = None,
 ) -> Path:
     """Write a PDF with one text line per string, one page per inner sequence.
 
     ``width``/``height`` let a caller build a deliberately narrow page (a
     multi-column-shaped fixture); ``margin=0`` authors a fragment at an exact
     box size (a fake fragment typesetter for the LayerCompositor tests).
+    ``background`` fills every page with a colour before its text -- a page
+    printed on something other than white.
     """
     writer = PdfWriter()
     for lines in pages:
         page = writer.add_blank_page(width=width, height=height)
         contents = writer._add_object(  # noqa: SLF001 - see _attach_font
-            _content_stream(lines, height=height, margin=margin)
+            _content_stream(lines, height=height, margin=margin, width=width, background=background)
         )
         page[NameObject("/Contents")] = contents
         _attach_font(writer, page)

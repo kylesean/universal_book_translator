@@ -1749,9 +1749,13 @@ class LayerCompositor:
         source_pdf: str | Path,
         *,
         typesetter: FragmentTypesetter | None = None,
-        background: tuple[float, float, float] = (1.0, 1.0, 1.0),
+        background: tuple[float, float, float] | None = None,
         strip: bool = True,
     ) -> None:
+        # ``background`` pins the fill for every micro-mask; ``None`` (the
+        # default) samples each masked region from the page instead. A flat
+        # white default left a bright scar on every document not printed on
+        # white -- cream stock, a tinted band, a shaded row.
         self._source = Path(source_pdf)
         self._typesetter = typesetter
         self._background = background
@@ -2345,6 +2349,31 @@ class LayerCompositor:
             return None
         return form, getattr(typesetter, "last_drawn_pt", None)
 
+    def _mask_colours(
+        self, page_no: int, rects: Sequence[BBox]
+    ) -> list[tuple[float, float, float]]:
+        """The fill for each micro-mask rect.
+
+        A caller-pinned ``background`` wins; with none, each rect is sampled
+        from the source page (see :mod:`ubt.render.page_background`), and a
+        region that cannot be sampled falls back to white -- an approximation
+        of the page is always better than source text left legible under the
+        translation.
+        """
+        if self._background is not None:
+            return [self._background] * len(rects)
+        if not rects:
+            return []
+        from ubt.render.page_background import (  # noqa: PLC0415
+            DEFAULT_MASK_BACKGROUND,
+            sample_backgrounds,
+        )
+
+        return [
+            DEFAULT_MASK_BACKGROUND if sample is None else sample
+            for sample in sample_backgrounds(self._source, page_no, rects)
+        ]
+
     def _stamp_page(
         self,
         composed: pikepdf.Pdf,
@@ -2373,15 +2402,23 @@ class LayerCompositor:
             apply_micro_mask = True
 
         if apply_micro_mask:
-            red, green, blue = self._background
+            mask_rects = [item.mask_bbox or item.bbox for item in items]
             rect_ops = []
-            for item in items:
-                x0, y0, x1, y1 = item.mask_bbox or item.bbox
-                rect_ops.append(f"{x0:.2f} {y0:.2f} {x1 - x0:.2f} {y1 - y0:.2f} re")
-            if rect_ops:
-                combined_mask = f"q {red} {green} {blue} rg {' '.join(rect_ops)} f Q".encode(
-                    "ascii"
+            colours = self._mask_colours(page_no, mask_rects)
+            for mask_rect, colour in zip(mask_rects, colours, strict=True):
+                x0, y0, x1, y1 = mask_rect
+                red, green, blue = colour
+                rect_ops.append(
+                    f"{red} {green} {blue} rg {x0:.2f} {y0:.2f} {x1 - x0:.2f} {y1 - y0:.2f} re f"
                 )
+            if rect_ops:
+                # One stream, one colour operator per rect: the masks still
+                # coalesce into a single graphics stream, but a page whose
+                # regions sit on different backgrounds keeps each region's.
+                # The comment is a marker, not decoration: a reader of the
+                # artifact (forensics, a test) can tell a fallback mask from
+                # the page's own fill, which can look identical.
+                combined_mask = f"q % ubt-micro-mask\n{' '.join(rect_ops)} Q".encode("ascii")
                 page.contents_add(pikepdf.Stream(composed, combined_mask), prepend=False)
         media = [float(v) for v in page.MediaBox]
         mb_x0, mb_y0, mb_x1, mb_y1 = media[0], media[1], media[2], media[3]

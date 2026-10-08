@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import re
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, ClassVar
@@ -713,3 +714,104 @@ def test_multiple_overlays_coalesce_micro_masks_into_single_stream(
         # Exactly 1 consolidated mask stream was appended, plus overlay stamping
         # Total streams increased by at most 2, never O(N) separate mask streams
         assert final_contents_len <= initial_contents_len + 2
+
+
+# --------------------------------------------------------------------------- #
+# The micro-mask's colour
+# --------------------------------------------------------------------------- #
+
+#: A fill followed by a rectangle: the whole of one mask op in the appended
+#: stream. Parsed rather than string-matched because the sampled colour is a
+#: 0-1 float whose decimal spelling is the rasterizer's, not the caller's.
+_MASK_OP = re.compile(r"(-?[\d.]+ -?[\d.]+ -?[\d.]+) rg (-?[\d.]+ -?[\d.]+ -?[\d.]+ -?[\d.]+) re f")
+
+#: Not grey and not symmetric, so a channel swap or a collapsed colour shows.
+_TINT = (0.8, 0.9, 0.7)
+
+#: Written by the compositor at the head of a micro-mask block.
+_MASK_MARKER = "% ubt-micro-mask"
+
+
+def _mask_ops(path: Path) -> list[tuple[float, float, float]]:
+    """Every mask fill page 1 carries, in stream order.
+
+    Located by the ``% ubt-micro-mask`` marker rather than by shape: the
+    fixture's own page tint is a fill op of exactly the mask's shape, and
+    pikepdf coalesces the appended stream back into the page's one.
+    """
+    import pikepdf
+
+    with pikepdf.open(path) as pdf:
+        contents = pdf.pages[0].Contents
+        streams = list(contents) if isinstance(contents, pikepdf.Array) else [contents]
+        bodies = [stream.read_bytes().decode("latin-1") for stream in streams]
+    ops: list[tuple[float, float, float]] = []
+    for body in bodies:
+        _, marker, block = body.partition(_MASK_MARKER)
+        if not marker:
+            continue
+        for colour, _rect in _MASK_OP.findall(block):
+            red, green, blue = colour.split()
+            ops.append((float(red), float(green), float(blue)))
+    return ops
+
+
+def _compose_masked(tmp_path: Path, source: Path, **kwargs: Any) -> Path:
+    """Compose one overlay with the mask forced (``strip=False``)."""
+    output = tmp_path / "out.pdf"
+    overlay = Overlay("e1", 1, _REGION, "TRANSLATED REGION TEXT")
+    LayerCompositor(source, typesetter=_FragmentSpy(tmp_path), strip=False, **kwargs).compose(
+        [overlay], output
+    )
+    return output
+
+
+def test_a_micro_mask_takes_the_colour_of_the_page(tmp_path: Path) -> None:
+    # The mask is the fallback path -- region painted over, target drawn on
+    # top. It used to be pure white, which on a page that is not printed on
+    # white is a bright block across every replaced line.
+    source = write_text_pdf(tmp_path / "source.pdf", [_PAGE], background=_TINT)
+
+    (colour,) = _mask_ops(_compose_masked(tmp_path, source))
+
+    assert colour == pytest.approx(_TINT, abs=0.02)
+
+
+def test_a_white_page_still_gets_a_white_mask(tmp_path: Path) -> None:
+    # The common case is unchanged: sampling white paper returns white, and the
+    # emitted op is exactly the one it always was.
+    source = write_text_pdf(tmp_path / "source.pdf", [_PAGE])
+
+    assert _mask_ops(_compose_masked(tmp_path, source)) == [(1.0, 1.0, 1.0)]
+
+
+def test_a_pinned_background_wins_over_sampling(tmp_path: Path) -> None:
+    # The escape hatch for a caller that knows the page (or wants a probe to be
+    # deterministic): an explicit colour is used as given, nothing sampled.
+    source = write_text_pdf(tmp_path / "source.pdf", [_PAGE], background=_TINT)
+
+    masked = _compose_masked(tmp_path, source, background=(0.5, 0.5, 0.5))
+
+    assert _mask_ops(masked) == [(0.5, 0.5, 0.5)]
+
+
+def test_each_masked_region_carries_its_own_fill(tmp_path: Path) -> None:
+    # One fill op per region, not one per page: regions on the same page can
+    # sit on different backgrounds (a shaded row above a plain one), so the
+    # colour has to be resolved per region even though the ops coalesce into a
+    # single stream.
+    source = write_text_pdf(tmp_path / "source.pdf", [_PAGE], background=_TINT)
+    output = tmp_path / "out.pdf"
+    overlays = [
+        Overlay("e1", 1, _REGION, "ONE"),
+        Overlay("e2", 1, (54.0, 560.0, 300.0, 620.0), "TWO"),
+    ]
+
+    LayerCompositor(source, typesetter=_FragmentSpy(tmp_path), strip=False).compose(
+        overlays, output
+    )
+
+    ops = _mask_ops(output)
+    assert len(ops) == 2, "one fill per masked region"
+    for colour in ops:
+        assert colour == pytest.approx(_TINT, abs=0.02)
