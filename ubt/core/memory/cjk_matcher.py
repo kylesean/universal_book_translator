@@ -5,7 +5,18 @@ from typing import Any
 # ``is_cjk_char`` and the canonical CJK ranges are centralized in
 # ``ubt.core.cjk_ranges``; the boundary class below is generated from the same
 # tuples, so the regex and the predicate can never disagree about a block.
-from ubt.core.cjk_ranges import CJK_FULL_CLASS, is_cjk_char
+# ``contains_cjk`` is re-exported from there too: it was defined here as a
+# second copy, and callers split between the two, so a change to either would
+# have silently diverged.
+from ubt.core.cjk_ranges import CJK_FULL_CLASS, contains_cjk, is_cjk_char
+
+__all__ = [
+    "contains_cjk",
+    "count_term_in_text",
+    "format_terms_markdown_table",
+    "select_terms_for_chunk",
+    "term_appears_in_text",
+]
 
 try:
     import ahocorasick  # type: ignore[import-not-found]
@@ -30,11 +41,6 @@ def _compile_boundary_pattern(source: str) -> re.Pattern[str]:
     return re.compile(
         rf"(?<![^\W_{_CJK_CHARS_REGEX}]){escaped}(?![^\W_{_CJK_CHARS_REGEX}])", re.IGNORECASE
     )
-
-
-def contains_cjk(s: str) -> bool:
-    """True if s contains any CJK character."""
-    return any(is_cjk_char(c) for c in s)
 
 
 def _cjk_has_free_boundary(source: str, text: str) -> bool:

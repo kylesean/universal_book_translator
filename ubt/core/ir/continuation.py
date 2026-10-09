@@ -28,6 +28,7 @@ from ubt.core.ir.models import (
     IRBlock,
     _with_element_source,
 )
+from ubt.core.narrowing import narrow
 from ubt.model.ast import RegionKind
 from ubt.model.span import CompositeSpan, PhysicalBox
 
@@ -173,7 +174,10 @@ def _continues(previous: IRBlock, following: IRBlock) -> bool:
         return False
     prev_box = previous.bbox
     next_box = following.bbox
-    assert prev_box is not None and next_box is not None  # _candidate guarantees geometry
+    # ``_candidate`` guarantees geometry; ``narrow`` states that for the type
+    # checker without being stripped under ``python -O``.
+    prev_box = narrow(prev_box, what="continuation previous block bbox")
+    next_box = narrow(next_box, what="continuation following block bbox")
     if not _lowercase_start(following.source_text):
         return False
     if next_box.page == prev_box.page + 1:
@@ -206,8 +210,7 @@ def find_continuation_runs(blocks: Sequence[IRBlock]) -> tuple[ContinuationRun, 
             flush()
             run_ids, run_boxes, previous = [], [], None
             continue
-        bbox = block.bbox
-        assert bbox is not None  # _candidate guarantees geometry
+        bbox = narrow(block.bbox, what=f"candidate block {block.id!r} bbox")
         box = PhysicalBox.of(bbox.page, (bbox.x0, bbox.y0, bbox.x1, bbox.y1))
         if previous is not None and _continues(previous, block):
             run_ids.append(block.id)

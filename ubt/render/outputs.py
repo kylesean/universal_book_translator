@@ -30,6 +30,7 @@ from ubt.cache.dirs import cache_root
 from ubt.core.ir.bifurcation import bifurcate_blocks
 from ubt.core.ir.continuation import find_continuation_runs, join_continuous_text
 from ubt.core.ir.models import BlockType, IRBlock
+from ubt.core.narrowing import narrow
 from ubt.model.span import BBox, CompositeSpan, PhysicalBox
 from ubt.render.flow import FlowPlacement, solve_flow
 
@@ -809,15 +810,13 @@ class TypstFragmentTypesetter:
                 break
             to_measure: list[tuple[Any, ...]] = []
             for index in active:
-                size_pt = sizes[index]
-                assert size_pt is not None
+                size_pt = narrow(sizes[index], what="fitted font size")
                 to_measure.append(_measured(items[index][0], items[index][1], size_pt))
             self._batch_measure(to_measure, build=_build, cache=cache)
             next_active: list[int] = []
             for index in active:
                 height_pt = items[index][2]
-                size_pt = sizes[index]
-                assert size_pt is not None
+                size_pt = narrow(sizes[index], what="fitted font size")
                 natural = cache[_measured(items[index][0], items[index][1], size_pt)]
                 if natural <= height_pt + _FIT_TOL:
                     results[index] = size_pt
@@ -967,8 +966,7 @@ class TypstFragmentTypesetter:
                 break
             to_measure: list[tuple[str, float, float]] = []
             for index in active:
-                size_pt = sizes[index]
-                assert size_pt is not None
+                size_pt = narrow(sizes[index], what="fitted bilingual font size")
                 to_measure.append((keys[index], items[index][2], size_pt))
             self._batch_measure(
                 to_measure, build=self._bilingual_measure_source, cache=self._bilingual_cache
@@ -976,8 +974,7 @@ class TypstFragmentTypesetter:
             next_active: list[int] = []
             for index in active:
                 height_pt = items[index][3]
-                size_pt = sizes[index]
-                assert size_pt is not None
+                size_pt = narrow(sizes[index], what="fitted bilingual font size")
                 natural = self._bilingual_cache[(keys[index], items[index][2], size_pt)]
                 if natural <= height_pt + _FIT_TOL:
                     results[index] = size_pt
@@ -1832,12 +1829,11 @@ class LayerCompositor:
         normal. The chosen size is returned so every part draws at exactly it,
         instead of each box re-fitting (and re-shrinking) on its own.
         """
-        typesetter = self._typesetter
+        typesetter = narrow(self._typesetter, what="typesetter for measure")
         body = overlay.text if text is None else text
         # Styled runs describe the *target* text; the source echo has its own
         # shaping, so measuring it with the target's runs would mis-attribute.
         runs = overlay.runs if text is None else ()
-        assert typesetter is not None
         cap = getattr(typesetter, "cap_size", None)
         measure_fixed = getattr(typesetter, "measure_fixed", None)
         if cap is None or measure_fixed is None:
@@ -2009,8 +2005,10 @@ class LayerCompositor:
                 # the target IS drawn, so dropping the echo silently would break
                 # the bilingual pair. Fall back to a greedy fill so the source
                 # still appears (the last box clips its tail).
-                assert self._typesetter is not None
-                source_parts = tuple(solve_flow(overlay.source, boxes, self._typesetter.measure))
+                echo_typesetter = narrow(
+                    self._typesetter, what="typesetter for source-echo fallback"
+                )
+                source_parts = tuple(solve_flow(overlay.source, boxes, echo_typesetter.measure))
             source_by_box = {(part.box.page, part.box.bbox): part.text for part in source_parts}
         stamped: list[_StampedPart] = []
         multi_box = len(boxes) > 1
@@ -2356,10 +2354,10 @@ class LayerCompositor:
             return True
         if len(valid_items) == 1:
             item = valid_items[0]
-            assert item.form is not None
+            form = narrow(item.form, what="fragment form")
             x0, y0, x1, y1 = item.bbox
             page.add_overlay(
-                item.form,
+                form,
                 pikepdf.Rectangle(max(x0, mb_x0), max(y0, mb_y0), min(x1, mb_x1), min(y1, mb_y1)),
             )
         else:
@@ -2369,15 +2367,15 @@ class LayerCompositor:
             xobjects = pikepdf.Dictionary()
             cs_parts: list[bytes] = []
             for idx, item in enumerate(valid_items):
-                assert item.form is not None
+                form = narrow(item.form, what="fragment form")
                 x0, y0, x1, y1 = item.bbox
                 rect = pikepdf.Rectangle(
                     max(x0, mb_x0), max(y0, mb_y0), min(x1, mb_x1), min(y1, mb_y1)
                 )
                 name = pikepdf.Name(f"/Fm{idx}")
-                xobjects[name] = item.form
+                xobjects[name] = form
                 cs = page.calc_form_xobject_placement(
-                    item.form,
+                    form,
                     name,
                     rect,
                     invert_transformations=True,
@@ -2502,8 +2500,7 @@ def overlays_from_blocks(
             consumed.update(run.block_ids)
             continue
         if _overlayable(block):
-            box = block.bbox
-            assert box is not None  # narrowed by _overlayable's guard
+            box = narrow(block.bbox, what=f"overlayable block {block.id!r} bbox")
             if block.provenance.get("toc_entry"):
                 # A translated table-of-contents row: the compositor redraws the
                 # leaders and the page number the reader stripped.
