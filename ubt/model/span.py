@@ -12,7 +12,9 @@ is pure data so it can be reasoned about (and serialized) without a document.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any
 
 #: Axis-aligned source rectangle in page points: ``(x0, y0, x1, y1)``.
 BBox = tuple[float, float, float, float]
@@ -90,6 +92,48 @@ class CompositeSpan:
         return self.on_page and bool(self.boxes)
 
 
+def boxes_to_provenance(boxes: Sequence[PhysicalBox]) -> list[dict[str, Any]]:
+    """Serialize a box chain to the ``physical_boxes`` ledger form.
+
+    The ledger round-trips an element's box chain through ``block.provenance``
+    as an untyped list of ``{"page", "bbox"}`` dicts (it cannot store the typed
+    ``CompositeSpan`` directly). Centralizing the shape here is what keeps the
+    writer and the reader in agreement: a typo in a hand-rolled dict silently
+    collapsed a multi-box element to its first box on reload, squeezing a whole
+    translation into one line.
+    """
+    return [{"page": box.page, "bbox": list(box.bbox)} for box in boxes]
+
+
+def boxes_from_provenance(raw: object) -> tuple[PhysicalBox, ...]:
+    """Rebuild a box chain from ``provenance["physical_boxes"]`` (empty if absent).
+
+    Returns an empty tuple for a missing, malformed or single-box value, so the
+    caller falls back to the element's own span rather than trusting a partial
+    chain. Only a well-formed chain of two or more boxes is usable -- a single
+    box adds nothing over the element's ``Span``.
+    """
+    if not isinstance(raw, list):
+        return ()
+    boxes: list[PhysicalBox] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            return ()
+        try:
+            page = int(item["page"])
+            bbox = item["bbox"]
+            if not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
+                return ()
+            boxes.append(
+                PhysicalBox.of(
+                    page, (float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3]))
+                )
+            )
+        except (KeyError, TypeError, ValueError):
+            return ()
+    return tuple(boxes) if len(boxes) > 1 else ()
+
+
 @dataclass(frozen=True, slots=True)
 class PageGeometry:
     """Physical size of one source page, in points."""
@@ -122,4 +166,13 @@ class CanonicalSource:
         return None
 
 
-__all__ = ["BBox", "CanonicalSource", "CompositeSpan", "PageGeometry", "PhysicalBox", "Span"]
+__all__ = [
+    "BBox",
+    "CanonicalSource",
+    "CompositeSpan",
+    "PageGeometry",
+    "PhysicalBox",
+    "Span",
+    "boxes_from_provenance",
+    "boxes_to_provenance",
+]

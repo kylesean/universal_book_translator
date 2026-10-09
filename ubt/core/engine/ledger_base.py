@@ -28,7 +28,7 @@ from ubt.core.ir.models import (
     make_element,
 )
 from ubt.model.ast import Confidence, RegionKind
-from ubt.model.span import CompositeSpan, PhysicalBox
+from ubt.model.span import CompositeSpan, boxes_from_provenance
 
 TARGET_SCHEMA_VERSION = 13
 
@@ -709,26 +709,9 @@ class LedgerBase:
         marker = row["marker"] or ""
         decorative = bool(row["decorative"])
         span: CompositeSpan | None = None
-        phys_boxes = provenance.get("physical_boxes")
-        if isinstance(phys_boxes, list) and len(phys_boxes) > 1:
-            try:
-                boxes = tuple(
-                    PhysicalBox.of(
-                        int(b["page"]),
-                        (
-                            float(b["bbox"][0]),
-                            float(b["bbox"][1]),
-                            float(b["bbox"][2]),
-                            float(b["bbox"][3]),
-                        ),
-                    )
-                    for b in phys_boxes
-                    if isinstance(b, dict) and "page" in b and "bbox" in b and len(b["bbox"]) == 4
-                )
-                if len(boxes) > 1:
-                    span = CompositeSpan(boxes=boxes)
-            except (ValueError, KeyError, TypeError):
-                span = None
+        boxes = boxes_from_provenance(provenance.get("physical_boxes"))
+        if boxes:
+            span = CompositeSpan(boxes=boxes)
 
         return IRBlock(
             element=make_element(

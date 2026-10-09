@@ -30,7 +30,7 @@ from ubt.core.ir.models import (
 )
 from ubt.core.narrowing import narrow
 from ubt.model.ast import RegionKind
-from ubt.model.span import CompositeSpan, PhysicalBox
+from ubt.model.span import CompositeSpan, PhysicalBox, boxes_to_provenance
 
 #: Block types that carry flowing prose (the ones a paragraph can continue into).
 _PROSE_TYPES: frozenset[BlockType] = frozenset(
@@ -125,6 +125,15 @@ def _candidate(block: IRBlock) -> bool:
     # the decision that the layout parser glued separate passages together.
     # Re-fusing here would undo the bifurcation before the compositor sees it.
     if SEMANTIC_BREAK_FLAG in block.error_flags or "bifurcated_from" in block.provenance:
+        return False
+    # A block that already carries a box *chain* is a complete element (fused at
+    # ingest, or rebuilt from ``physical_boxes`` on ledger reload). Re-deriving a
+    # run through it would re-fuse the *next* paragraph and discard this block's
+    # own chain -- the render then flows two paragraphs' text into the first
+    # block's narrow head box, which cannot hold it, and the whole element
+    # descends to source. Only a single-box block seeds or extends a fresh run.
+    span = block.element.span
+    if isinstance(span, CompositeSpan) and len(span.boxes) > 1:
         return False
     text = block.source_text.strip()
     if not text or _BARE_NUMBER_RE.match(text):
@@ -272,7 +281,7 @@ def fuse_continuation_blocks(blocks: Sequence[IRBlock]) -> list[IRBlock]:
             # rebuilds the CompositeSpan from ``physical_boxes`` alone, so without
             # this the fused paragraph comes back as a single first-box overlay and
             # its whole target is squeezed into one line (a jarring shrink).
-            "physical_boxes": [{"page": box.page, "bbox": list(box.bbox)} for box in run.boxes],
+            "physical_boxes": boxes_to_provenance(run.boxes),
         }
         if joined_target:
             fused.target_text = joined_target

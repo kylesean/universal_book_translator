@@ -34,17 +34,27 @@ def _compute_crop_coords(
     page_height_pt: float,
     scale: float,
     bleed_pt: float = DEFAULT_BLEED_PT,
+    *,
+    origin_x: float = 0.0,
+    origin_y: float = 0.0,
 ) -> tuple[int, int, int, int]:
-    """Convert PDF coordinates (origin bottom-left) to raster image coordinates (origin top-left)."""
+    """Convert PDF coordinates (origin bottom-left) to raster image coordinates (origin top-left).
+
+    ``origin_x``/``origin_y`` are the MediaBox's lower-left corner. The raster
+    covers only the MediaBox, so a user-space point maps to pixel
+    ``(point - origin) * scale``; a box whose MediaBox origin is not (0, 0)
+    (a cropped or imposed page) would otherwise be cropped shifted by that
+    offset — the wrong region, and the further from the origin, the further off.
+    """
     if isinstance(bbox, BoundingBox):
         bx0, by0, bx1, by1 = bbox.x0, bbox.y0, bbox.x1, bbox.y1
     else:
         bx0, by0, bx1, by1 = bbox
 
-    min_x = min(bx0, bx1)
-    max_x = max(bx0, bx1)
-    min_y = min(by0, by1)
-    max_y = max(by0, by1)
+    min_x = min(bx0, bx1) - origin_x
+    max_x = max(bx0, bx1) - origin_x
+    min_y = min(by0, by1) - origin_y
+    max_y = max(by0, by1) - origin_y
 
     # Invert Y axis: PDF y=0 is bottom; raster y=0 is top.
     x0 = int(max(0.0, (min_x - bleed_pt) * scale))
@@ -75,7 +85,11 @@ def _compute_crop_coords(
 # Exactly one page is kept: an A4 raster at 300 dpi is
 # ~26 MB and a wide two-column spread ~50 MB, so a longer cache would trade the
 # time back for memory. Read/write happens under PDFIUM_LOCK (@pdfium_serialized).
-_PAGE_CACHE: tuple[tuple[str, int, int, int, int], PILImage.Image, float, float] | None = None
+#: ``(key, raster, width_pt, height_pt, origin_x, origin_y)`` — the last two are
+#: the MediaBox lower-left, needed to map user-space rects onto the raster.
+_PAGE_CACHE: (
+    tuple[tuple[str, int, int, int, int], PILImage.Image, float, float, float, float] | None
+) = None
 
 
 # The file identity behind a raster: a self-healing Typst render rewrites the
@@ -106,7 +120,7 @@ def crop_block_pil(
     scale = dpi / 72.0
     key = _page_cache_key(path, page_num, dpi)
     if _PAGE_CACHE is not None and _PAGE_CACHE[0] == key:
-        _, full_img, page_width_pt, page_height_pt = _PAGE_CACHE
+        _, full_img, page_width_pt, page_height_pt, origin_x, origin_y = _PAGE_CACHE
     else:
         pdf = pdfium.PdfDocument(str(path))
         try:
@@ -121,8 +135,10 @@ def crop_block_pil(
                 # with the default render crops the wrong region on a /Rotate
                 # page.
                 mediabox = page.get_mediabox()
-                page_width_pt = float(mediabox[2]) - float(mediabox[0])
-                page_height_pt = float(mediabox[3]) - float(mediabox[1])
+                origin_x = float(mediabox[0])
+                origin_y = float(mediabox[1])
+                page_width_pt = float(mediabox[2]) - origin_x
+                page_height_pt = float(mediabox[3]) - origin_y
                 rotation = (360 - int(page.get_rotation())) % 360
                 bitmap = page.render(scale=scale, rotation=rotation)
                 full_img = bitmap.to_pil().convert("RGB")
@@ -130,9 +146,17 @@ def crop_block_pil(
                 page.close()
         finally:
             pdf.close()
-        _PAGE_CACHE = (key, full_img, page_width_pt, page_height_pt)
+        _PAGE_CACHE = (key, full_img, page_width_pt, page_height_pt, origin_x, origin_y)
 
-    x0, y0, x1, y1 = _compute_crop_coords(bbox, page_width_pt, page_height_pt, scale, bleed_pt)
+    x0, y0, x1, y1 = _compute_crop_coords(
+        bbox,
+        page_width_pt,
+        page_height_pt,
+        scale,
+        bleed_pt,
+        origin_x=origin_x,
+        origin_y=origin_y,
+    )
     return full_img.crop((x0, y0, x1, y1))
 
 

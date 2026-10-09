@@ -264,6 +264,36 @@ def test_a_failed_fragment_descends_and_leaves_the_source_untouched(tmp_path: Pa
     assert "TRANSLATED REGION TEXT" not in _text(output)
 
 
+def test_a_kept_source_names_a_space_failure_only_when_it_is_one() -> None:
+    """The source-kept reason must reach the contract's severity switch.
+
+    A generic "no fragment" (a typesetter defect) must NOT read as a space
+    failure -- it stays a WARNING. The provable Axiom-B case -- the flow solver
+    could not place the translation at the readable floor -- must carry a
+    ``_SPACE_FAILURE_MARKERS`` token so ``_is_space_failure`` escalates it to
+    ERROR. Before this, every kept source carried the one generic string and the
+    space failure was silently downgraded.
+    """
+    from ubt.core.content.contract import _is_space_failure
+
+    overlay = Overlay("e1", 1, _REGION, "text")
+
+    # No box at all: not a space failure.
+    no_box = LayerCompositor._placement(overlay, None, drawn=False)
+    assert not _is_space_failure(no_box.detail)
+
+    # A fragment that failed to compile: a defect, still not a space failure.
+    failed = LayerCompositor._placement(overlay, (PhysicalBox.of(1, _REGION),), drawn=False)
+    assert not _is_space_failure(failed.detail)
+
+    # The flow descent: the translation exists but does not fit.
+    descent = LayerCompositor._placement(
+        overlay, (PhysicalBox.of(1, _REGION),), drawn=False, space_failed=True
+    )
+    assert _is_space_failure(descent.detail)
+    assert descent.kept_source
+
+
 def test_overlays_select_only_placed_text_with_geometry(tmp_path: Path) -> None:
     source = write_text_pdf(tmp_path / "source.pdf", [_PAGE])
     document = _document(source)

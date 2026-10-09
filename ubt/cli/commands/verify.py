@@ -210,8 +210,18 @@ def _verify_corpus(
             results.append(entry)
             continue
         failures = evaluate_expectations(report, case.expect)
-        ok = report.passed and not failures
+        # ``evaluate_expectations`` already applies ``max_errors`` (default 0),
+        # so it alone decides the case: ``report.passed`` is just "no errors",
+        # and ANDing it in made a case's raised ``max_errors`` unreachable --
+        # the documented "errors allowed" floor could never be non-zero.
+        ok = not failures
         entry.update({"status": "pass" if ok else "fail", **_dump(report)})
+        # The contract's own summary reads ``[FAIL]`` whenever it has any error,
+        # even one the case's ``max_errors`` allows. Say so in the table, so a
+        # green status beside a ``[FAIL]`` contract is not read as a contradiction.
+        allowed = int(case.expect.get("max_errors", 0))
+        if ok and report.errors and allowed:
+            entry["summary"] = f"{entry['summary']} (errors within allowed {allowed})"
         if failures:
             entry["expectation_failures"] = failures
         if not ok:

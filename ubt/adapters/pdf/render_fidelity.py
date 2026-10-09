@@ -224,8 +224,10 @@ def compute_render_fidelity(
                     src_page = src_doc[idx]
                     try:
                         mediabox = src_page.get_mediabox()
-                        page_w_pt = float(mediabox[2]) - float(mediabox[0])
-                        page_h_pt = float(mediabox[3]) - float(mediabox[1])
+                        origin_x = float(mediabox[0])
+                        origin_y = float(mediabox[1])
+                        page_w_pt = float(mediabox[2]) - origin_x
+                        page_h_pt = float(mediabox[3]) - origin_y
                         src_rot = (360 - int(src_page.get_rotation())) % 360
                     finally:
                         src_page.close()
@@ -251,6 +253,8 @@ def compute_render_fidelity(
                                     page_h_pt,
                                     scale,
                                     bleed_pt=_MASK_BLEED_PT,
+                                    origin_x=origin_x,
+                                    origin_y=origin_y,
                                 )
                             )
                         except ValueError:

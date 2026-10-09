@@ -1723,8 +1723,12 @@ class LayerCompositor:
             # of overlays drawn earlier on the same page and erased them whenever
             # their boxes overlapped.
             stamped: dict[int, list[_StampedPart]] = {}
+            space_failed_ids: set[int] = set()
             for overlay, boxes in prepared:
-                for item in self._compile_overlay(composed, overlay, boxes):
+                parts, space_failed = self._compile_overlay(composed, overlay, boxes)
+                if space_failed:
+                    space_failed_ids.add(id(overlay))
+                for item in parts:
                     stamped.setdefault(item.page_no, []).append(item)
             drawn_ids: set[int] = set()
             for page_no in sorted(stamped):
@@ -1749,6 +1753,7 @@ class LayerCompositor:
                     boxes,
                     drawn=id(overlay) in drawn_ids,
                     drawn_pt=drawn_pt_by_id.get(id(overlay)),
+                    space_failed=id(overlay) in space_failed_ids,
                 )
                 for overlay, boxes in resolved
             )
@@ -1978,17 +1983,31 @@ class LayerCompositor:
 
     def _compile_overlay(
         self, composed: pikepdf.Pdf, overlay: Overlay, boxes: tuple[PhysicalBox, ...]
-    ) -> list[_StampedPart]:
-        """Compile every box's fragment for one overlay, returning the drawable ones."""
+    ) -> tuple[list[_StampedPart], bool]:
+        """Compile every box's fragment for one overlay.
+
+        Returns ``(drawable parts, space_failed)``. ``space_failed`` is True only
+        for the one provable Axiom-B failure: the flow solver could not place the
+        translation in a multi-box run even at the readable floor, so the source
+        ships because the target does not *fit*. A fragment that merely fails to
+        compile is a different case (a typesetter defect), so it stays False and
+        the contract keeps its default WARNING severity.
+        """
         typesetter = self._typesetter
         if typesetter is None or not (overlay.text.strip() or overlay.source.strip()):
-            return []
+            return [], False
         slack = 0.0 if overlay.fixed_box else _line_slack(overlay.font_size)
         draw_size: float | None = None
+        space_failed = False
         if len(boxes) == 1:
             parts: tuple[FlowPlacement, ...] = (FlowPlacement(boxes[0], overlay.text),)
         else:
             parts, draw_size = self._flow_plan(overlay, boxes)
+            # ``_flow_plan`` returns an empty plan exactly when the readable
+            # floor still overflows every box: the translation existed and could
+            # not be placed. That is the space failure the delivery contract must
+            # read as an error, not the silent WARNING it was.
+            space_failed = not parts
         # In-place bilingual: flow the source through the same boxes and pair it
         # with the target part sharing each box, so a multi-box paragraph keeps
         # both languages rather than repeating one in every box.
@@ -2106,7 +2125,7 @@ class LayerCompositor:
                         drawn_pt=drawn_pt,
                     )
                 )
-        return stamped
+        return stamped, space_failed
 
     def _compile_form(
         self,
@@ -2398,14 +2417,28 @@ class LayerCompositor:
         *,
         drawn: bool,
         drawn_pt: float | None = None,
+        space_failed: bool = False,
     ) -> Placement:
         if not boxes:
             return Placement(overlay.element_id, overlay.page, False, "no usable box; source kept")
+        if drawn:
+            detail = "layer-compositor"
+        elif space_failed:
+            # The one source-kept reason the delivery contract must read as an
+            # Axiom-B error: the translation existed but does not *fit* the
+            # boxes even at the readable floor. ``no_fit`` is a
+            # ``_SPACE_FAILURE_MARKERS`` token, so the reason reaches
+            # ``_is_space_failure`` and the violation escalates from WARNING to
+            # ERROR. A generic "no fragment" (a typesetter defect) deliberately
+            # does NOT carry a marker and stays a warning.
+            detail = "no_fit: source kept (translation does not fit)"
+        else:
+            detail = "no fragment; source kept"
         return Placement(
             overlay.element_id,
             overlay.page,
             drawn,
-            "layer-compositor" if drawn else "no fragment; source kept",
+            detail,
             drawn_pt=drawn_pt if drawn else None,
         )
 

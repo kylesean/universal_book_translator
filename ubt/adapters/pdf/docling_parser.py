@@ -57,7 +57,7 @@ from ubt.core.policy.layout_policy import (
     VLM_CIRCUIT_MIN_TRIES,
 )
 from ubt.model.ast import RegionKind
-from ubt.model.span import CompositeSpan, PhysicalBox
+from ubt.model.span import CompositeSpan, PhysicalBox, boxes_to_provenance
 
 if TYPE_CHECKING:
     from docling.datamodel.pipeline_options import PdfPipelineOptions
@@ -296,7 +296,11 @@ def read_docling_document(key: str, *, cache_dir: Path | None = None) -> Any | N
     """Return the cached DoclingDocument for ``key``, or None on any miss."""
     target = (cache_dir or DOCLING_CACHE_DIR) / f"{key}.json.gz"
     try:
-        payload = json.loads(gzip.decompress(target.read_bytes()))
+        # Stream the decompression into the parser: ``read_bytes`` +
+        # ``gzip.decompress`` held the compressed file and its full
+        # decompressed form in memory before ``json.loads`` even built the dict.
+        with gzip.open(target, "rt", encoding="utf-8") as fh:
+            payload = json.load(fh)
         from docling_core.types.doc.document import DoclingDocument
 
         return DoclingDocument.model_validate(payload)
@@ -322,16 +326,20 @@ def write_docling_document(key: str, document: Any, *, cache_dir: Path | None = 
         cache.mkdir(parents=True, exist_ok=True)
         # The cache holds the extracted full manuscript text: restrict to owner.
         restrict_dir_to_owner(cache)
-        blob = gzip.compress(
-            json.dumps(
-                _strip_picture_payloads(document.model_dump(mode="json")), ensure_ascii=False
-            ).encode()
-        )
+        # Stream the dump straight into the gzip file. Building the JSON as a
+        # string (``json.dumps``), then its UTF-8 bytes, then a compressed blob
+        # held three full copies of the manuscript in memory at once, on top of
+        # the model dict -- the peak this cache exists to keep down.
         staging = target.with_name(f"{target.name}.{os.getpid()}.tmp")
-        staging.write_bytes(blob)
+        with gzip.open(staging, "wt", encoding="utf-8") as fh:
+            json.dump(
+                _strip_picture_payloads(document.model_dump(mode="json")),
+                fh,
+                ensure_ascii=False,
+            )
         staging.replace(target)
         restrict_file_to_owner(target)
-        logger.info("Cached Docling conversion for reuse: %s (%.0f KB)", target, len(blob) / 1024)
+        logger.info("Cached Docling conversion for reuse: %s", target)
     except (OSError, ValueError, TypeError) as exc:
         logger.warning("Docling cache write failed for %s: %s", target, exc)
 
@@ -626,9 +634,7 @@ def annotate_layout_metadata(blocks: list[IRBlock], pdf_path: Path | None) -> li
                 # holding the *first* line's box: only that line is masked and
                 # the whole translation is squeezed into it, while the rest of
                 # the source heading stays in the source language on the page.
-                block.provenance["physical_boxes"] = [
-                    {"page": physical.page, "bbox": list(physical.bbox)} for physical in line_boxes
-                ]
+                block.provenance["physical_boxes"] = boxes_to_provenance(line_boxes)
     return blocks
 
 

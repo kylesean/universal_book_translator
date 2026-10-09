@@ -21,7 +21,7 @@ import dataclasses
 
 from ubt.core.ir.models import IRBlock
 from ubt.model.ast import Document, ElementT, Region, RegionKind
-from ubt.model.span import CanonicalSource, CompositeSpan, PageGeometry
+from ubt.model.span import CanonicalSource, CompositeSpan, PageGeometry, boxes_to_provenance
 
 
 def element_from_block(block: IRBlock) -> ElementT:
@@ -66,9 +66,7 @@ def block_from_element(element: ElementT, *, region_kind: RegionKind) -> IRBlock
         # Mirror the element's box chain into the one provenance key the ledger
         # can rebuild a CompositeSpan from (ledger_base._row_to_block); without
         # it the chain collapses to the first box across the round-trip.
-        block.provenance = {
-            "physical_boxes": [{"page": box.page, "bbox": list(box.bbox)} for box in span.boxes]
-        }
+        block.provenance = {"physical_boxes": boxes_to_provenance(span.boxes)}
     return block
 
 

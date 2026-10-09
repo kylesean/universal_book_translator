@@ -202,6 +202,23 @@ def test_intervening_page_furniture_does_not_break_continuation() -> None:
     assert [box.page for box in run.boxes] == [1, 2]
 
 
+def test_an_already_fused_block_does_not_extend_a_run() -> None:
+    # The render re-derives runs on blocks that ingest already fused. A fused
+    # paragraph carries its own box *chain* (a CompositeSpan); re-running the
+    # detector through it would fuse the *next* paragraph onto it and discard
+    # the chain, flowing two paragraphs' text into the first block's narrow head
+    # box -- which cannot hold it, so the whole element descends to source.
+    from ubt.core.ir.continuation import fuse_continuation_blocks
+
+    first = _block("b1", "The machine relies on attention", page=1, spine=1)
+    second = _block("b2", "and runs a forward pass.", page=2, spine=2)
+    fused = fuse_continuation_blocks([first, second])[0]
+    # A third paragraph that reads as a continuation of the fused one.
+    third = _block("b3", "then it updates its weights.", page=3, spine=3)
+
+    assert find_continuation_runs([fused, third]) == ()
+
+
 def test_join_continuous_text_cjk_and_latin() -> None:
     from ubt.core.ir.continuation import join_continuous_text
 

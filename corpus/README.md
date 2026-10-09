@@ -83,6 +83,16 @@ those fragments is shorter than the echo, so this ceiling is an artifact of the
 mock, not of the delivered document -- do not read a nonzero value here as lost
 text. Re-derive after a renderer change, as with the ratio floors.
 
+`max_errors` follows the same fragment: a *space* failure -- source kept though
+the translation fits nowhere, ``render:no_fit`` -- is an ERROR (Axiom B), so a
+fragment the mock echo cannot fit contributes to **both** `max_source_kept` and
+`max_errors`. `twocol-paper-2609` therefore allows 1 error (its one such
+fragment); elsewhere the fragment stays a warning (``render:no fragment``, a
+typesetter defect, not a space failure) and `max_errors` stays ``0``. The
+allowance is scoped to the same mock artifact as `max_source_kept`: it is not
+slack for lost content, and a real space failure anywhere else still trips the
+gate at 0.
+
 Two deliberate exclusions from the automated CI gate:
 
 - **CI does not run this gate.** The GitHub `gate` job runs `pytest -m fast`;
