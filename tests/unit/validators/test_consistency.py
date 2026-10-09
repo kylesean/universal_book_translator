@@ -506,6 +506,12 @@ def test_a_real_number_after_a_list_marker_is_still_required() -> None:
         # A source with no digits cannot license any target digit.
         ("No figures here.", "其实有 42 个。", ["42"]),
         ("The dose was small.", "剂量为 500mg。", ["500"]),
+        # A measure-word suffix must not launder a fabricated number: an ordinal
+        # shape ("42章", "第42页") is not evidence the source stated it.
+        ("No figures here.", "共 42 章。", ["42"]),
+        ("No figures here.", "第42页。", ["42"]),
+        ("No figures here.", "其实有 42 项。", ["42"]),
+        ("No figures here.", "80年代。", ["80"]),
         # A digit the source never stated, alongside one it did.
         ("The dose is 50mg.", "剂量为 500mg。", None),  # 50 lost, caught as lost not invented
     ],
@@ -531,10 +537,18 @@ def test_invented_number_absent_from_source_is_the_new_gate() -> None:
     [
         # A spelled-out source quantity may legitimately become a digit.
         ("Chapter Seven covers this.", "第7章涵盖了这一点。"),
+        # ...including an ordinal past the tenth and a decade plural, which the
+        # source now authorizes value-wise (no shape-based exemption).
+        ("the eighteenth item", "第18项。"),
+        ("the nineties revival", "90年代的复兴。"),
         ("It sold two million copies.", "售出200万册。"),
         ("It sold two million copies.", "售出2000000册。"),
         ("one hundred fifty people came", "来了150人"),
         ("a dozen eggs", "12个鸡蛋"),
+        # A Chinese source writes its numbers as characters; the target's digit
+        # is authorized by the source's own numeral, not by the target's shape.
+        ("第七章论述。", "第7章论述。"),
+        ("三次实验失败。", "3次实验失败。"),
         # A date written out is not three invented numbers.
         ("The meeting is on 2020-01-01.", "会议在2020年1月1日。"),
         # A glued page range restored as a range states values the source token

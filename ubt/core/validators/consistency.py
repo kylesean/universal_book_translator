@@ -604,7 +604,8 @@ def _has_negative_token(target: str, num_str: str) -> bool:
 #: ("two" -> "2", "a dozen" -> "12", "Chapter Seven" -> "第7章"). The
 #: invented-number gate reads digit tokens only, so without folding these it
 #: would read the digit the translator wrote for a spelled-out source quantity
-#: as fabricated. Cardinal + small ordinal + the magnitude words.
+#: as fabricated. Cardinal, ordinal (through the ordinal tens) and decade
+#: plurals, plus the magnitude words.
 _EN_NUMBER_WORDS: dict[str, str] = {
     "one": "1",
     "two": "2",
@@ -633,6 +634,16 @@ _EN_NUMBER_WORDS: dict[str, str] = {
     "seventy": "70",
     "eighty": "80",
     "ninety": "90",
+    # Decade plurals ("the eighties" -> "80年代"): the translator renders the
+    # decade as the leading two digits, so the word authorizes that value.
+    "twenties": "20",
+    "thirties": "30",
+    "forties": "40",
+    "fifties": "50",
+    "sixties": "60",
+    "seventies": "70",
+    "eighties": "80",
+    "nineties": "90",
     "first": "1",
     "second": "2",
     "third": "3",
@@ -643,6 +654,29 @@ _EN_NUMBER_WORDS: dict[str, str] = {
     "eighth": "8",
     "ninth": "9",
     "tenth": "10",
+    # Ordinals past the tenth and the ordinal tens ("the eighteenth item" ->
+    # "第18项", "the ninetieth..." -> "第90...") so an ordinal source is
+    # authorized exactly like its cardinal, without a blanket target exemption.
+    "eleventh": "11",
+    "twelfth": "12",
+    "thirteenth": "13",
+    "fourteenth": "14",
+    "fifteenth": "15",
+    "sixteenth": "16",
+    "seventeenth": "17",
+    "eighteenth": "18",
+    "nineteenth": "19",
+    "twentieth": "20",
+    "thirtieth": "30",
+    "fortieth": "40",
+    "fiftieth": "50",
+    "sixtieth": "60",
+    "seventieth": "70",
+    "eightieth": "80",
+    "ninetieth": "90",
+    "hundredth": "100",
+    "thousandth": "1000",
+    "millionth": "1000000",
     "dozen": "12",
     "hundred": "100",
     "thousand": "1000",
@@ -714,27 +748,23 @@ def _en_number_phrase_value(phrase: str) -> set[int]:
     return {v for v in values if v > 0}
 
 
-#: CJK suffixes that mark a target digit as an ordinal ("7章", "第7页"): the
-#: source may spell the number out ("Chapter Seven") or the renderer restores
-#: the marker, so the digit is structural, not a new fact.
-_TARGET_ORDINAL_SUFFIXES = "章节页条款项版次届名位课卷篇回讲幕部"
-
-
 def _is_structural_target_number(token: str, target: str) -> bool:
     """Whether a target digit is editorial structure, not a numeric fact.
 
-    An ordinal ("第7章", "7章"), a decade ("80年代" from "the eighties"), or a
-    leading list marker ("1. ", "(1) ") is restored by the renderer or written
-    by the translator for a source that spelled the number out, so the
-    invented-number gate must not read it as fabricated.
+    The only unconditional exemption is a *leading list marker* ("1. ", "(1) "):
+    the translator drops it and the renderer restores it, so the digit is never
+    a fact the translation stated.
+
+    An ordinal ("第7章", "7章", "80年代") is NOT exempted here. It is
+    indistinguishable from a fabricated quantity by shape alone -- "第42页"
+    from a source with no "42" is the same shape as "第7章" from "第七章" -- so
+    authorizing it by shape let any invented number ride a measure-word suffix
+    (the audit's escape). The genuine cases are authorized value-wise instead,
+    by folding the source's own number words and Chinese numerals into the
+    authorized set (see ``_invented_target_numbers``), so the ordinal branch is
+    no longer needed.
     """
     escaped = re.escape(token)
-    if re.search(rf"第\s*{escaped}", target):
-        return True
-    if re.search(rf"{escaped}\s*[{_TARGET_ORDINAL_SUFFIXES}]", target):
-        return True
-    if re.search(rf"{escaped}\s*年代", target):
-        return True
     return bool(re.search(rf"(?:^|\n)\s*(?:\(\s*{escaped}\s*\)|{escaped}\s*[.)、）])", target))
 
 
@@ -778,9 +808,13 @@ def _invented_target_numbers(
     the source never stated invents a fact, and no other gate sees it (the
     added-content gate reads references and headings, not bare quantities). The
     authorization set is deliberately generous — scale/compound/ambiguous
-    readings, source number *words*, target ordinals/decades/list markers, a
-    restored page range — so a faithful translation is never flagged and only a
-    genuinely new value survives.
+    readings, source number *words* and source Chinese numerals, a restored page
+    range — so a faithful translation is never flagged and only a genuinely new
+    value survives. Authorization is always *value-wise from the source*: a
+    target digit is exempt only when the source itself states that value (as a
+    word, a Chinese numeral, or a digit), never by the target's own shape. The
+    sole shape-based exemption left is a leading list marker, which is editorial
+    structure the renderer restores, not a fact the translation stated.
     """
     authorized: set[str] = set(src_nums)
     for values in src_scales.values():
@@ -802,9 +836,10 @@ def _invented_target_numbers(
                 for part in _RANGE_DELIMITERS.split(token)
                 if part.strip()
             }
-    # A source number *word* ("two", "a dozen", "Chapter Seven") may be written
-    # as a digit in the target. Spelled-out phrases ("two million") authorize
-    # their whole value, not just the two words separately.
+    # A source number *word* ("two", "a dozen", "Chapter Seven", "the
+    # eighteenth item") may be written as a digit in the target. Spelled-out
+    # phrases ("two million") authorize their whole value, not just the two
+    # words separately.
     for match in _EN_NUMBER_WORD_RE.finditer(source_view):
         authorized.add(_EN_NUMBER_WORDS[match.group(1).lower()])
     for match in _EN_NUMBER_PHRASE_RE.finditer(source_view):
@@ -815,6 +850,19 @@ def _invented_target_numbers(
     for match in _GLUED_PAGE_RANGE_SOURCE_RE.finditer(source_view):
         digits = match.group("digits")
         authorized.update({digits[:2], digits[2:]})
+    # A Chinese source writes its numbers as characters ("第七章", "三次"), which
+    # the ASCII ``_NUM`` extraction never reads -- so without folding them here a
+    # correct translation ("第七章" -> "第7章") would be read as an invented "7".
+    # Fold the source's own numerals through the context-aware normalizer (the
+    # same one the target uses), value-wise: the lone numeral of "数量为三。" is
+    # deliberately NOT folded by the normalizer, so it stays unauthorized and a
+    # target digit for it is still caught -- the conservative side.
+    cjk_source = normalize_for_numeric_matching(source_view, lang="zh")
+    for match in _NUM.finditer(cjk_source):
+        token = canonicalize_numeric_token(match.group(0))
+        if token:
+            authorized.add(token)
+            authorized.add(_zero_fold(token))
 
     tgt_scale_map = scale_equivalent_values(normalized_target)
     invented: list[str] = []
