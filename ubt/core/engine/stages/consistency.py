@@ -58,6 +58,7 @@ async def run_consistency_stage(
     actual_job_id = ctx.job_id
     repair_loop = scoring.repair_loop or services.repair_loop
     glossary_dicts = terminology.glossary_dicts
+    abbreviation_entries = terminology.abbreviation_entries
     target_lang = ctx.target_lang
     source_lang = ctx.source_lang
     fast_pass = services.fast_pass
@@ -119,7 +120,9 @@ async def run_consistency_stage(
                 "status": BlockStatus.REPAIR_PENDING,
             }
         )
-        glossary_table = build_chunk_glossary_table(glossary_dicts, [], block.source_text)
+        glossary_table = build_chunk_glossary_table(
+            glossary_dicts, abbreviation_entries, block.source_text
+        )
         async with concurrency_sem:
             repaired = await repair_loop.repair_single_block(
                 block=flagged,
