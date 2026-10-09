@@ -104,7 +104,7 @@ from ubt.core.exceptions import (
     UBTError,
     UnsupportedDocumentFormatError,
 )
-from ubt.core.fs_perms import ensure_private_dir
+from ubt.core.fs_perms import ensure_private_dir, sanitize_display_path
 from ubt.core.job_options import (
     JOB_ID_RE,
     LANG_CODE_PATTERN,
@@ -755,8 +755,10 @@ def _register_system_routes(api_app: FastAPI, scope: ApiScope) -> None:
             "port": request.url.port,
             "is_loopback": host in _LOOPBACK_HOSTS,
             "auth_enabled": bool(app_config.service_api_key.get_secret_value().strip()),
-            "allowed_bases": [str(path) for path in effective_allowed_bases(app_config)],
-            "db_dir": str(app_config.db_dir),
+            "allowed_bases": [
+                sanitize_display_path(path) for path in effective_allowed_bases(app_config)
+            ],
+            "db_dir": sanitize_display_path(app_config.db_dir),
             "job_mode": app_config.job_mode,
             "disk_free_gb": disk_free_gb,
             "wal_status": "ONLINE (WAL Mode Active)",

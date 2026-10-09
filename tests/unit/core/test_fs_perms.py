@@ -38,3 +38,13 @@ def test_restrict_dir_to_owner_always_chmods(tmp_path: Path) -> None:
     shared.chmod(0o755)
     restrict_dir_to_owner(shared)
     assert stat.S_IMODE(shared.stat().st_mode) == BOOK_TEXT_DIR_MODE
+
+
+def test_sanitize_display_path() -> None:
+    from ubt.core.fs_perms import sanitize_display_path
+
+    assert sanitize_display_path(None) is None
+    home = Path.home().resolve()
+    assert sanitize_display_path(home) == "~"
+    assert sanitize_display_path(home / "books" / "sample.pdf") == "~/books/sample.pdf"
+    assert sanitize_display_path("/tmp/outside.txt") == "/tmp/outside.txt"

@@ -77,6 +77,7 @@ from ubt.core.exceptions import LedgerWriterLockConflictError, UBTError
 from ubt.core.fs_perms import (
     SYSTEM_DISALLOWED_PREFIXES,
     is_sensitive_path_part,
+    sanitize_display_path,
 )
 from ubt.core.job_options import (
     JOB_ID_MAX_LEN,
@@ -484,9 +485,9 @@ async def ubt_job_status(job_id: str, db_dir: str | None = None) -> dict[str, An
             "repaired": rec.progress.repaired_blocks,
             "failed": rec.progress.failed_blocks,
             "avg_qe_score": rec.progress.current_avg_qe,
-            "output_file": rec.progress.output_file,
-            "report_file": rec.progress.report_file,
-            "visual_report_file": rec.progress.visual_report_file,
+            "output_file": sanitize_display_path(rec.progress.output_file),
+            "report_file": sanitize_display_path(rec.progress.report_file),
+            "visual_report_file": sanitize_display_path(rec.progress.visual_report_file),
             "rehearsal": rec.request.dry_run,
         }
         if rec.error:
@@ -545,9 +546,9 @@ async def ubt_job_status(job_id: str, db_dir: str | None = None) -> dict[str, An
             "repaired": progress.repaired_blocks,
             "failed": progress.failed_blocks,
             "avg_qe_score": progress.current_avg_qe,
-            "output_file": progress.output_file,
-            "report_file": progress.report_file,
-            "visual_report_file": progress.visual_report_file,
+            "output_file": sanitize_display_path(progress.output_file),
+            "report_file": sanitize_display_path(progress.report_file),
+            "visual_report_file": sanitize_display_path(progress.visual_report_file),
         }
         if status == JobStatus.FAILED:
             disk["error"] = (

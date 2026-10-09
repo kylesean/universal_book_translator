@@ -223,3 +223,23 @@ def warn_world_readable(directory: Path, extra_dirs: Iterable[Path] = ()) -> Non
         exposed[0],
         target,
     )
+
+
+def sanitize_display_path(path: Path | str | None) -> str | None:
+    """Mask user home directory with '~' for external status/info endpoints.
+
+    Avoids leaking host user names and absolute home directory trees while
+    preserving the recognizable relative path structure.
+    """
+    if path is None:
+        return None
+    try:
+        p = Path(path).expanduser().resolve()
+        home = Path.home().resolve()
+        if p == home:
+            return "~"
+        if p.is_relative_to(home):
+            return f"~/{p.relative_to(home)}"
+        return str(p)
+    except (ValueError, RuntimeError):
+        return str(path)
