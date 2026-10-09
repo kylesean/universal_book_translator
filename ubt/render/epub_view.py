@@ -14,6 +14,7 @@ import zipfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from ubt.core.atomic import atomic_write_path
 from ubt.core.ir.models import IRBlock
 from ubt.render.html_view import render_fragment
 from ubt.render.outputs import Composition
@@ -91,7 +92,7 @@ def compose_epub(
     output.parent.mkdir(parents=True, exist_ok=True)
     identifier = f"urn:ubt:{doc_id or 'document'}"
 
-    with zipfile.ZipFile(output, "w") as archive:
+    with atomic_write_path(output) as tmp_path, zipfile.ZipFile(tmp_path, "w") as archive:
         # The OCF spec requires ``mimetype`` first and uncompressed.
         info = zipfile.ZipInfo("mimetype")
         info.compress_type = zipfile.ZIP_STORED

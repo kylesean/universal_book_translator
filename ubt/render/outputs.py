@@ -27,6 +27,7 @@ from ubt.adapters.pdf.stream_strip import shared_form_objgens, strip_page_text_p
 from ubt.adapters.pdf.typst_compile import typst_compile as typst_compile
 from ubt.adapters.pdf.typst_math_probe import TypstMathProbe
 from ubt.cache.dirs import cache_root
+from ubt.core.atomic import atomic_write_path
 from ubt.core.ir.bifurcation import bifurcate_blocks
 from ubt.core.ir.continuation import find_continuation_runs, join_continuous_text
 from ubt.core.ir.models import BlockType, IRBlock
@@ -1760,8 +1761,8 @@ class LayerCompositor:
             # Each fragment carries its own copy of the shared font/CMap; collapse
             # the duplicates before writing so the artifact is not tens of MB.
             _dedup_identical_streams(composed)
-            output.parent.mkdir(parents=True, exist_ok=True)
-            composed.save(str(output))
+            with atomic_write_path(output) as tmp_path:
+                composed.save(str(tmp_path))
         return Composition(output_path=output, placements=placements)
 
     def _prefetch(self, prepared: Sequence[tuple[Overlay, tuple[PhysicalBox, ...]]]) -> None:

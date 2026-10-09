@@ -11,6 +11,7 @@ from collections.abc import AsyncIterator, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from ubt.core.atomic import atomic_write_text
 from ubt.core.cleaners.cjk_spacing import normalize_publishing_cjk
 from ubt.core.config import DualMode
 from ubt.core.engine.events import EventType, TranslationProgressEvent
@@ -834,8 +835,8 @@ def _deliver_contract(
     payload = contract.model_dump(mode="json")
     contract_path = sidecar_path(rendered_path, "contract.json")
     try:
-        contract_path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        atomic_write_text(
+            contract_path, json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
         )
     except OSError as exc:  # a missing audit file must not sink the artifact
         logger.warning("Could not write delivery contract for %s: %s", ctx.job_id, exc)
@@ -902,12 +903,13 @@ def _write_spill_appendix(
             )
 
         json_path = companion_path(rendered_path, ".spill_appendix.json")
-        json_path.write_text(
+        atomic_write_text(
+            json_path,
             json.dumps({"job_id": ctx.job_id, "spills": items}, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
         md_path = companion_path(rendered_path, ".spill_appendix.md")
-        md_path.write_text("\n".join(md_lines), encoding="utf-8")
+        atomic_write_text(md_path, "\n".join(md_lines), encoding="utf-8")
         logger.info("Spill appendix generated: %s (%d items)", md_path.name, len(items))
         return md_path
     except Exception as exc:
@@ -949,7 +951,7 @@ def _write_xliff_companion(
             job_id=ctx.job_id,
         )
         path = companion_path(rendered_path, ".xliff")
-        path.write_text(xml, encoding="utf-8")
+        atomic_write_text(path, xml, encoding="utf-8")
         logger.info(
             "XLIFF companion for job %s: %s (%d segment(s))",
             ctx.job_id,
@@ -1063,7 +1065,7 @@ def _write_artifact_check(
                 ", ".join(check.element_id for check in artifact.missing[:5]),
             )
         path = companion_path(rendered_path, "_attestations.json")
-        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        atomic_write_text(path, json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         return path
     except Exception as exc:  # an audit companion must never sink the delivery
         logger.warning("Artifact check skipped for job %s: %s", ctx.job_id, exc)

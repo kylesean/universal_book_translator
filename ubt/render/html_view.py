@@ -13,6 +13,7 @@ import html
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from ubt.core.atomic import atomic_write_text
 from ubt.core.ir.models import IRBlock
 from ubt.model.ast import (
     Caption,
@@ -139,8 +140,9 @@ def compose_html(
     """
     fragment, placements = render_fragment(blocks, translations)
     output = Path(output_path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(f"{document_head(lang, direction)}{fragment}\n{_TAIL}", encoding="utf-8")
+    atomic_write_text(
+        output, f"{document_head(lang, direction)}{fragment}\n{_TAIL}", encoding="utf-8"
+    )
     return Composition(output_path=output, placements=placements)
 
 
