@@ -93,6 +93,7 @@ class Element:
     region: RegionKind = RegionKind.BODY
     #: Discriminator for the closed union; each concrete class narrows it.
     kind: ElementKind = ElementKind.PARAGRAPH
+    font_size: float = 0.0
 
     @property
     def is_text(self) -> bool:

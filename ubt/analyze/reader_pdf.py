@@ -331,6 +331,7 @@ def _classify(
                 toc_page=group.toc_page,
                 span=span,
                 confidence=confidence,
+                font_size=group.max_size,
             ),
             RegionKind.BODY,
         )
@@ -343,6 +344,7 @@ def _classify(
                 skip_translate=True,
                 span=span,
                 confidence=confidence,
+                font_size=group.max_size,
             ),
             RegionKind.PAGE_NUMBER,
         )
@@ -359,6 +361,7 @@ def _classify(
                 level=level,
                 span=span,
                 confidence=confidence,
+                font_size=group.max_size,
             ),
             RegionKind.BODY,
         )
@@ -373,6 +376,7 @@ def _classify(
                 marker=marker,
                 span=span,
                 confidence=confidence,
+                font_size=group.max_size,
             ),
             RegionKind.BODY,
         )
@@ -385,6 +389,7 @@ def _classify(
                 skip_translate=True,
                 span=span,
                 confidence=confidence,
+                font_size=group.max_size,
             ),
             RegionKind.BODY,
         )
@@ -397,6 +402,7 @@ def _classify(
                 skip_translate=True,
                 span=span,
                 confidence=confidence,
+                font_size=group.max_size,
             ),
             RegionKind.BODY,
         )
@@ -407,6 +413,7 @@ def _classify(
             text=group.text,
             span=span,
             confidence=confidence,
+            font_size=group.max_size,
         ),
         RegionKind.BODY,
     )

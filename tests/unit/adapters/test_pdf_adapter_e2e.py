@@ -160,3 +160,19 @@ def test_every_element_carries_its_source_slice(tmp_path: Path) -> None:
     assert document.elements, "the extracted document has no elements to lower"
     for element in document.elements:
         assert source_slice(element, document.source), element.id
+
+
+def test_pdfium_populates_font_size_and_page_kind(tmp_path: Path) -> None:
+    """PDFium blocks carry font_size and page_kind on provenance."""
+    pdf = write_text_pdf(tmp_path / "book.pdf", [_PAGE_ONE, _PAGE_TWO])
+    blocks = _blocks(pdf, pdf_engine="pdfium")
+
+    assert blocks
+    # At least some blocks must carry positive font_size
+    font_sizes = [b.provenance.font_size for b in blocks if b.provenance.font_size is not None]
+    assert len(font_sizes) > 0
+    assert all(fs >= 4.5 for fs in font_sizes)
+
+    # Page kinds annotated on provenance
+    page_kinds = [b.provenance.page_kind for b in blocks if b.provenance.page_kind is not None]
+    assert len(page_kinds) > 0

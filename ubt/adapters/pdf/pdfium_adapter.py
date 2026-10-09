@@ -27,13 +27,13 @@ import gc
 import logging
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ubt.adapters.base import BasePDFEngineAdapter
 from ubt.adapters.pdf.docling_adapter import _PDFRenderStackMixin
 from ubt.adapters.pdf.page_chunking import compute_pdf_page_chunks, get_pdf_page_chunk_size
 from ubt.adapters.pdf.pdfium_gate import pdfium_serialized
-from ubt.core.ir.models import BookManifest, ChapterIR, ChapterMeta, IRBlock
+from ubt.core.ir.models import BookManifest, ChapterIR, ChapterMeta, IRBlock, StyleMeta
 
 if TYPE_CHECKING:
     from ubt.cache.store import CacheStore
@@ -96,6 +96,11 @@ def extract_blocks_with_pdfium(
             if toc_page:
                 block.provenance.toc_entry = True
                 block.provenance.toc_page = toc_page
+            fsz = getattr(block.element, "font_size", 0.0)
+            if fsz >= 4.5:
+                fsz = round(fsz, 2)
+                block.provenance.font_size = fsz
+                block.style = (block.style or StyleMeta()).model_copy(update={"font_size": fsz})
         return blocks
 
     return cached_blocks(store, path=path, page_range=page_range, compute=_read)
@@ -186,18 +191,34 @@ class PDFiumAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
             else:
                 global_block_idx += len(blocks)
 
+            # Per-page profile kinds ride into block provenance (render routing)
+            page_kinds = await loop.run_in_executor(None, self._annotate_page_kinds, path, blocks)
+
+            metadata: dict[str, Any] = {}
+            if page_kinds:
+                metadata["page_kinds"] = page_kinds
+            if chunk_range:
+                metadata["page_range"] = list(chunk_range)
+
             chapter_ir = ChapterIR(
                 doc_id=manifest.doc_id,
                 chapter_id=chapter_meta.chapter_id,
                 title=chapter_meta.title,
                 spine_index=chapter_meta.spine_index,
                 blocks=blocks,
+                metadata=metadata,
             )
             yield chapter_ir
 
             del blocks
             del chapter_ir
             gc.collect()
+
+    @staticmethod
+    def _annotate_page_kinds(path: Path, blocks: list[IRBlock]) -> dict[int, str]:
+        from ubt.adapters.pdf.docling_parser import annotate_page_kinds
+
+        return annotate_page_kinds(path, blocks)
 
     def _extract_blocks_sync(
         self, path: Path, page_range: tuple[int, int] | None = None
