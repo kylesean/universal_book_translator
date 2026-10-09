@@ -216,6 +216,41 @@ _COMMON_CAPS_WORDS = frozenset(
     }
 )
 
+_COMMON_HEADING_WORDS = frozenset(
+    {
+        "ABSTRACT",
+        "ACKNOWLEDGEMENTS",
+        "ACKNOWLEDGMENTS",
+        "APPENDIX",
+        "APPENDICES",
+        "BACKGROUND",
+        "BIBLIOGRAPHY",
+        "CHAPTER",
+        "CHAPTERS",
+        "CONCLUSION",
+        "CONCLUSIONS",
+        "CONTENTS",
+        "DISCUSSION",
+        "FOREWORD",
+        "INDEX",
+        "INTRODUCTION",
+        "METHOD",
+        "METHODS",
+        "METHODOLOGY",
+        "NOTES",
+        "OVERVIEW",
+        "PREFACE",
+        "REFERENCES",
+        "RESULTS",
+        "SECTION",
+        "SECTIONS",
+        "SUMMARY",
+    }
+)
+
+_COMMON_CAPS_WORDS = _COMMON_CAPS_WORDS | _COMMON_HEADING_WORDS
+_COMMON_CAPS_ACRONYMS = frozenset({"IT", "US", "EU", "AI", "UK"})
+
 
 _OCR_GLUED_PROSE_PREFIX_RE = re.compile(
     r"^(?:We|In|This|The|That|There|These|Those|Our|It|As|If|When|While|For|With|By|To|From)"
@@ -260,20 +295,23 @@ def is_verbatim_carryover(term: str) -> bool:
     """Whether a Latin term may legitimately survive translation verbatim.
 
     Superset of :func:`is_identifier_shaped`, used by the *target-language
-    density* check: any camelCase, all-caps (even 2 letters) or digit-bearing
-    token a translation keeps verbatim must be stripped from the script-density
-    residue, or a correct translation carrying ``IT``/``US``/``MHA`` would read
-    as untranslated. The omission gate uses the narrower
-    :func:`is_identifier_shaped` so it does not *demand* those survive.
+    density* check: any camelCase, all-caps (even 2 letters like IT/US/AI) or
+    digit-bearing token a translation keeps verbatim must be stripped from the
+    script-density residue. Common English prose and heading words (e.g. THE, AND,
+    INTRODUCTION, SUMMARY) are translatable prose and must not be treated as
+    verbatim carryover.
     """
     if term.lower() in _STRUCTURAL_DOCUMENT_LABELS:
         return False
     m = _STRUCTURAL_LABEL_WITH_NUM_RE.match(term)
     if m and m.group(1).lower() in _STRUCTURAL_DOCUMENT_LABELS:
         return False
-    return bool(
-        _CAMEL_HUMP_RE.search(term) or _ALL_CAPS_RE.match(term) or _HAS_DIGIT_RE.search(term)
-    )
+    if _CAMEL_HUMP_RE.search(term) or _HAS_DIGIT_RE.search(term):
+        return True
+    if _ALL_CAPS_RE.match(term):
+        core = term.strip("_")
+        return core not in _COMMON_CAPS_WORDS or core in _COMMON_CAPS_ACRONYMS
+    return False
 
 
 _SPACED_DECIMAL_RE = re.compile(r"(?<=\d)\s*\.\s*(?=\d)")

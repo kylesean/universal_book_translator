@@ -396,3 +396,12 @@ def test_a_short_blank_separated_refrain_is_not_a_loop() -> None:
     tgt = "同一行\n\n同一行\n\n同一行\n\n同一行"
     decision = _filter().evaluate(src, tgt)
     assert "loop hallucination" not in decision.reason
+
+
+def test_half_translated_all_caps_heading_is_rejected_for_insufficient_script_density() -> None:
+    src = "THE SUMMARY AND OVERVIEW"
+    # THE and SUMMARY are left untranslated; only OVERVIEW is translated
+    tgt = "THE SUMMARY AND 概述"
+    decision = _filter().evaluate(src, tgt)
+    assert not decision.passed
+    assert "Insufficient zh script density" in decision.reason

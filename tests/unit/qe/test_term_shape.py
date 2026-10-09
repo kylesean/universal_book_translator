@@ -96,10 +96,15 @@ def test_carryover_accepts_identifiers(term: str) -> None:
     assert is_verbatim_carryover(term) is True
 
 
-@pytest.mark.parametrize("term", ["IT", "OR", "US", "AI", "THE", "AND"])
+@pytest.mark.parametrize("term", ["IT", "US", "AI"])
 def test_carryover_accepts_short_all_caps_unlike_identifier_shaped(term: str) -> None:
     assert is_verbatim_carryover(term) is True
     assert is_identifier_shaped(term) is False
+
+
+@pytest.mark.parametrize("term", ["THE", "AND", "OR", "SUMMARY", "CONCLUSION"])
+def test_carryover_rejects_common_all_caps_words(term: str) -> None:
+    assert is_verbatim_carryover(term) is False
 
 
 @pytest.mark.parametrize("term", ["foo_bar", "a.b", "e.g."])
