@@ -34,20 +34,20 @@ def _block(block_type: BlockType, *, source: str, target: str, marker: str = "")
 
 def test_a_markerless_list_item_gets_its_bullet_back() -> None:
     block = _block(BlockType.LIST_ITEM, source="first item", target="第一项", marker="•")
-    (overlay,) = overlays_from_blocks([block], None)
+    (overlay,) = overlays_from_blocks([block])
     assert overlay.text == "• 第一项"
 
 
 def test_an_item_that_reproduced_its_marker_is_not_doubled() -> None:
     block = _block(BlockType.LIST_ITEM, source="first item", target="• 第一项", marker="•")
-    (overlay,) = overlays_from_blocks([block], None)
+    (overlay,) = overlays_from_blocks([block])
     assert overlay.text == "• 第一项"
 
 
 @pytest.mark.parametrize("marker", ["", None])
 def test_an_item_with_no_extracted_marker_falls_back_to_a_bullet(marker: str | None) -> None:
     block = _block(BlockType.LIST_ITEM, source="first item", target="第一项", marker=marker or "")
-    (overlay,) = overlays_from_blocks([block], None)
+    (overlay,) = overlays_from_blocks([block])
     assert overlay.text == "• 第一项"
 
 
@@ -57,13 +57,13 @@ def test_an_item_with_no_extracted_marker_falls_back_to_a_bullet(marker: str | N
 def test_a_full_width_ordered_marker_is_not_doubled(target: str) -> None:
     # A model that switches to CJK punctuation must not get a second marker.
     block = _block(BlockType.LIST_ITEM, source="first item", target=target, marker="1.")
-    (overlay,) = overlays_from_blocks([block], None)
+    (overlay,) = overlays_from_blocks([block])
     assert overlay.text == target
 
 
 def test_a_non_list_block_is_left_untouched() -> None:
     block = _block(BlockType.NARRATIVE, source="A paragraph.", target="一段。")
-    (overlay,) = overlays_from_blocks([block], None)
+    (overlay,) = overlays_from_blocks([block])
     assert overlay.text == "一段。"
 
 
@@ -73,7 +73,7 @@ def test_a_toc_row_becomes_a_toc_overlay_carrying_its_page_number() -> None:
     # title + leaders + number instead of a plain text overlay.
     block = _block(BlockType.NARRATIVE, source="3. Effects", target="3. 效应")
     block.provenance = {"toc_entry": True, "toc_page": "9"}
-    (overlay,) = overlays_from_blocks([block], None)
+    (overlay,) = overlays_from_blocks([block])
     assert overlay.kind == "toc"
     assert overlay.toc_page == "9"
     assert overlay.text == "3. 效应"

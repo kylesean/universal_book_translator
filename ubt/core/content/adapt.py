@@ -1,9 +1,8 @@
 """Boundary adapter: ``IRBlock`` (pipeline working form) -> content graph.
 
 This is the only place the contract layer knows about the pipeline's internal
-representation. Consumers migrate to the graph piecemeal; until they do, every
-delivery still gets a graph built here, so the reconciliation gate applies to
-*all* render paths from day one.
+representation. Every delivery gets a graph built here, so the reconciliation
+gate applies to *all* render paths.
 
 Asset policy (Axiom A): a non-text block is only RECONSTRUCTED alongside the
 round-trip check that verifies it. The unified LayerCompositor (overlay engine)

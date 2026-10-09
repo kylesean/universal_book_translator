@@ -1,9 +1,8 @@
 """Short/long execution policy derived from the route decision.
 
 Three booleans and a reason string, all functions of ``route_decision.mode``
-plus one config flag. The former ``Granularity`` axis is gone: the pipeline is
-always the frozen-math micro-block architecture (the whole-section ``macro``
-mode is retired and ``UBTConfig`` no longer carries the knob).
+plus one config flag. There is no granularity axis: the pipeline is always the
+frozen-math micro-block architecture, and ``UBTConfig`` carries no knob for it.
 """
 
 from __future__ import annotations

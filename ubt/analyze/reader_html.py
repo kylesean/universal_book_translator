@@ -24,6 +24,7 @@ from bs4.element import NavigableString
 
 from ubt.analyze._identity import file_digest
 from ubt.analyze.assemble import assemble, number
+from ubt.analyze.normalize import collapse_whitespace as _clean
 from ubt.model.ast import (
     Caption,
     CodeBlock,
@@ -76,10 +77,6 @@ def decode_bytes(raw: bytes) -> str:
     from ubt.adapters.base import decode_markup
 
     return decode_markup(raw)
-
-
-def _clean(text: str) -> str:
-    return " ".join(text.split())
 
 
 def pipe_table(rows: list[list[str]]) -> str:

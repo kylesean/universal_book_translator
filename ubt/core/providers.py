@@ -5,7 +5,7 @@ endpoint, the wire protocol, and the default models. Credential configuration
 is specified directly via ``api_key`` (supporting ``${VAR}`` expansion), or via
 the generic ``UBT_LLM_API_KEY`` environment variable or CLI flags.
 
-Search order for the config file (unchanged from the old profile loader):
+Search order for the config file:
 1. explicit path passed by the caller
 2. ``./ubt.toml``
 3. ``~/.config/ubt/config.toml``
@@ -128,7 +128,7 @@ def _read_toml(custom_path: Path | str | None = None) -> dict[str, Any]:
     """Read the user config TOML, or ``{}`` when no file exists.
 
     A *malformed* user config fails loudly, matching
-    :func:`_read_shipped_providers`. Returning ``{}`` here (the old fail-open)
+    :func:`_read_shipped_providers`. Returning ``{}`` here (a silent fail-open)
     dropped every declared provider and fell back to the shipped defaults on a
     single typo, so a run silently used the wrong endpoint/model.
 

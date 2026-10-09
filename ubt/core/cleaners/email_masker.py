@@ -15,9 +15,13 @@ most literal spans, so this family runs first in the engine's mask order.
 
 import re
 
-from ubt.core.cleaners.mask_tokens import RestoreStyle, UnmaskReport, restore_masked, token_patterns
+from ubt.core.cleaners.mask_tokens import (
+    BaseMasker,
+    RestoreStyle,
+    TokenFactory,
+    token_patterns,
+)
 from ubt.core.cleaners.mask_tokens import order_by_position as _order_by_position
-from ubt.core.cleaners.mask_tokens import token_checksum as _token_checksum
 
 _MASK_PREFIX = "⟦EMAIL_MASK_"
 
@@ -31,11 +35,10 @@ _URL_PATTERN = re.compile(r"(?:https?://|ftp://|mailto:)[^\s<>()\[\]{}\"']+")
 _URL_TRAILING = ".,;:!?。，；：！？"
 
 
-class EmailMasker:
+class EmailMasker(BaseMasker):
     """Masks email addresses and URLs before translation, unmasks afterwards."""
 
-    def __init__(self, mask_prefix: str = _MASK_PREFIX) -> None:
-        self.mask_prefix = mask_prefix
+    default_prefix = _MASK_PREFIX
 
     def mask(self, text: str) -> tuple[str, dict[str, str]]:
         """Replace addresses/URLs with protective tokens; returns (masked, mapping).
@@ -44,15 +47,7 @@ class EmailMasker:
         index to the masked original; see
         :func:`~ubt.core.cleaners.mask_tokens.token_checksum`.
         """
-        mapping: dict[str, str] = {}
-        counter = 1
-
-        def _token(original: str) -> str:
-            nonlocal counter
-            token = f"{self.mask_prefix}{counter:04d}-{_token_checksum(counter, original)}⟧"
-            mapping[token] = original
-            counter += 1
-            return token
+        factory = TokenFactory(self.mask_prefix)
 
         def _replace_url(match: re.Match[str]) -> str:
             original = match.group(0)
@@ -61,22 +56,14 @@ class EmailMasker:
             core = original.rstrip(_URL_TRAILING)
             if not core:
                 return original
-            return _token(core) + original[len(core) :]
+            return factory.next(core) + original[len(core) :]
 
         def _replace_email(match: re.Match[str]) -> str:
-            return _token(match.group(0))
+            return factory.next(match.group(0))
 
         masked = _URL_PATTERN.sub(_replace_url, text)
         masked = _EMAIL_PATTERN.sub(_replace_email, masked)
-        return masked, _order_by_position(masked, mapping)
-
-    def unmask(self, text: str, mapping: dict[str, str]) -> str:
-        """Restore address/URL tokens; only checksum-verified tokens."""
-        return restore_masked(text, mapping, self._restore_style()).text
-
-    def unmask_checked(self, text: str, mapping: dict[str, str]) -> UnmaskReport:
-        """Restore plus integrity verification; see :class:`UnmaskReport`."""
-        return restore_masked(text, mapping, self._restore_style())
+        return masked, _order_by_position(masked, factory.mapping)
 
     def _restore_style(self) -> RestoreStyle:
         fuzzy, scan = token_patterns(self.mask_prefix, "EMAIL")

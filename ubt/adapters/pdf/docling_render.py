@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -21,7 +21,6 @@ from ubt.core.config import PAGE_BILINGUAL_MODES
 from ubt.core.exceptions import DocumentParseError
 from ubt.core.ir.models import BlockType, BookManifest, IRBlock
 from ubt.core.ir.render_plan import RenderOutcome, RenderPlan
-from ubt.model.fidelity import Fidelity
 from ubt.model.span import PhysicalBox
 
 if TYPE_CHECKING:
@@ -98,15 +97,14 @@ class DoclingRenderStrategy:
         blocks: list[IRBlock],
         target_lang: str,
         output_path: Path,
-        realization_plan: Mapping[str, Fidelity] | None,
         bilingual: bool = False,
     ) -> Path:
         """Compose the source page with translated fragments (LayerCompositor).
 
-        Text above the fidelity floor is overlaid; an element whose fragment
-        cannot be typeset keeps its source (recorded as a render skip), so the
-        mask is never painted over content it cannot replace. The source PDF is
-        the canvas, so non-text elements stay pixel-intact. ``bilingual`` carries
+        A block with a placed target is overlaid; a block whose fragment cannot
+        be typeset keeps its source (recorded as a render skip), so the mask is
+        never painted over content it cannot replace. The source PDF is the
+        canvas, so non-text elements stay pixel-intact. ``bilingual`` carries
         each overlay's source so the fragment renders target over source.
         """
         from ubt.render.outputs import (
@@ -124,7 +122,7 @@ class DoclingRenderStrategy:
                 f"(manifest.source_path={source_pdf!r})"
             )
 
-        overlays = overlays_from_blocks(list(blocks), realization_plan, bilingual=bilingual)
+        overlays = overlays_from_blocks(list(blocks), bilingual=bilingual)
 
         font = getattr(self, "font_family", None)
         from ubt.layout.theme import resolve_theme
@@ -153,7 +151,7 @@ class DoclingRenderStrategy:
         self.last_render_skips = [
             (placement.element_id, placement.detail)
             for placement in composition.placements
-            if placement.descended
+            if placement.kept_source
         ]
         # A drawn fragment that had to drop below the readable floor delivers the
         # translation but is not reading-grade; record it as a defect so the
@@ -255,7 +253,6 @@ class DoclingRenderStrategy:
         output_path: Path,
         bilingual_mode: str | None = None,
         render_plan: RenderPlan | None = None,
-        realization_plan: Mapping[str, Fidelity] | None = None,
     ) -> Path:
         """Render publication-grade translated output from pre-fetched blocks.
 
@@ -295,7 +292,6 @@ class DoclingRenderStrategy:
                         list(blocks),
                         target_lang,
                         staged,
-                        realization_plan,
                         bilingual=False,
                     )
                     return await self._interleave_source_and_target(
@@ -308,7 +304,6 @@ class DoclingRenderStrategy:
                 list(blocks),
                 target_lang,
                 out_path,
-                realization_plan,
                 bilingual=active_mode == "bilingual",
             )
 

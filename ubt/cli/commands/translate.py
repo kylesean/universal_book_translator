@@ -85,8 +85,8 @@ def _is_interactive() -> bool:
 #: the packaged glossary directories key on names like ``semiconductor`` /
 #: ``semiconductor_paper``, and operators may add their own resource dirs. The
 #: only invariant is the shared safe-name pattern, so the CLI validates with
-#: ``profile_name_is_valid`` exactly like the API and MCP — the old hardcoded
-#: allowlist rejected every profile that actually had glossary seeds.
+#: ``profile_name_is_valid`` exactly like the API and MCP; a hardcoded allowlist
+#: would reject any profile that carries glossary seeds.
 _PROFILE_EXAMPLES = "general, textbook, paper, fiction, humanities, semiconductor"
 
 
@@ -94,12 +94,11 @@ def _clean_stale_companions(output: Path | None, *, input_path: Path | None = No
     """Delete the sibling deliverables a ``--fresh`` run is about to regenerate.
 
     Only the names this pipeline actually writes for the mono/dual/bilingual
-    family are considered (the ``_rigid``/``_reflow`` patterns this used to
-    sweep had no producer anywhere in the tree, so they deleted whatever
-    happened to be named that way). A deleted sibling takes its derived reports
-    with it: leaving ``x_bilingual_md_quality_report.json`` behind describes a
-    document that no longer exists, and the next run reads that report as the
-    current one's.
+    family are considered; a name nothing produces is never swept, so no file
+    is deleted for merely resembling a retired pattern. A deleted sibling takes
+    its derived reports with it: leaving ``x_bilingual_md_quality_report.json``
+    behind describes a document that does not exist, and the next run reads that
+    report as the current one's.
 
     Returns what was deleted, so the caller can say so.
     """
@@ -146,8 +145,8 @@ def _refuse_existing_output(
     """Mirror the API 409 / MCP ToolError overwrite guard on the CLI surface.
 
     The other two entry points refuse to overwrite an existing deliverable
-    unless the caller asks for a fresh run; the CLI used to overwrite silently,
-    and even its default output name collides on a second run.
+    unless the caller asks for a fresh run; the CLI holds the same line, and
+    its default output name collides on a second run.
     """
     if output is not None and _same_file(output, input_path):
         raise typer.BadParameter(
@@ -586,7 +585,7 @@ def translate(
         MathBackend | None,
         typer.Option(
             "--math-backend",
-            help="Retired knob, accepted and recorded but no longer acted on: display formulas are always typeset by the LaTeX->Typst converter. Use --formula-render ('witness' verifies against the source graphic, 'image' keeps the source crop) to control formula fidelity.",
+            help="Retired knob, accepted and recorded but not acted on: display formulas are always typeset by the LaTeX->Typst converter. Use --formula-render ('witness' verifies against the source graphic, 'image' keeps the source crop) to control formula fidelity.",
             show_default=False,
         ),
     ] = None,
@@ -704,9 +703,8 @@ def translate(
     from ubt.core.job_options import lang_pair_validation_error
 
     # Usage errors exit 2 (typer's own convention for bad usage); runtime
-    # failures keep exit 1. The language gate is the shared one — this
-    # command's hand-rolled copy used to word it differently from the API/MCP
-    # surfaces, and the wordings drifted.
+    # failures keep exit 1. The language gate is the shared one, so the CLI,
+    # the API and MCP word it identically.
     lang_error = lang_pair_validation_error(request.get("source_lang"), request.get("target_lang"))
     if lang_error is not None:
         if json_output:
@@ -734,10 +732,10 @@ def translate(
             )
         raise typer.Exit(code=2)
 
-    # Chapter-window and page-range guards. A non-positive window used to be
-    # clamped downstream, so the run could deliver a single-chapter book under a
-    # "success" banner; a malformed --pages only failed deep inside the reader,
-    # after ingestion had already begun. Both are usage errors: exit 2 before
+    # Chapter-window and page-range guards. A non-positive window is refused
+    # here so a run cannot deliver a single-chapter book under a "success"
+    # banner; a malformed --pages is refused before ingestion begins. Both are
+    # usage errors: exit 2.
     # any work starts.
     if start_chapter < 1:
         _usage_error(f"--start-chapter must be >= 1 (got {start_chapter})", json_output)
@@ -751,7 +749,7 @@ def translate(
 
     # ``verbose`` is this command's own flag, but the global ``-v`` (main
     # callback) also enables DEBUG; re-calling setup_logging here with
-    # verbose=False used to reset the level to INFO, silently discarding it.
+    # verbose=False would reset the level to INFO and discard it.
     if verbose or logging.getLogger().isEnabledFor(logging.DEBUG):
         setup_logging(verbose=True, console=None if json_output else console)
     elif json_output:

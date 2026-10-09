@@ -15,9 +15,9 @@ metric measures **rendering fidelity**, not glossary coverage.
 
 Because this scan feeds the consistency stage's repair planner, its source-side
 caliber must equal the quality gate's (``GlossaryConsistencyValidator``): both
-now ask ``detect_term_drift``. It used to look only for ``source``, so a block
-whose source carried a term solely as an alias was never planned for repair
-while the gate already flagged it as drift.
+ask ``detect_term_drift``. Searching for ``source`` alone would leave a block
+whose source carried a term solely as an alias unplanned for repair while the
+gate already flagged it as drift.
 """
 
 from __future__ import annotations

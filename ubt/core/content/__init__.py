@@ -1,15 +1,14 @@
 """Canonical content graph: the classifier behind the delivery contract.
 
-The delivery contract's primary source is the run's per-element attestations
-(:func:`ubt.core.content.project.contract_from_attestations`); this graph only
-classifies the delivered blocks into the contract's vocabulary and supplies the
-detail the AST does not model -- it is the projection's *input*, not a second
-verdict.
+The delivery contract is the content-graph reconciliation
+(:func:`ubt.core.content.contract.reconcile`): this graph classifies the
+delivered blocks into the contract's vocabulary and supplies the detail the AST
+does not model.
 
 This package is deliberately independent of the pipeline's working
 representation (:mod:`ubt.core.ir.models`). The pipeline keeps ``IRBlock``
-internally; :mod:`ubt.core.content.adapt` bridges the two at the boundary so
-consumers migrate incrementally. The graph answers one question only:
+internally; :mod:`ubt.core.content.adapt` bridges the two at the boundary. The
+graph answers one question only:
 
     What content must a delivery account for, no matter how it is rendered?
 
@@ -39,7 +38,6 @@ from ubt.core.content.nodes import (
     TextDisposition,
     TextNode,
 )
-from ubt.core.content.project import contract_from_attestations
 
 __all__ = [
     "AssetDescriptor",
@@ -58,6 +56,5 @@ __all__ = [
     "Violation",
     "ViolationKind",
     "build_ledgers",
-    "contract_from_attestations",
     "graph_from_blocks",
 ]

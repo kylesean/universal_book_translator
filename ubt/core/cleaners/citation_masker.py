@@ -18,9 +18,13 @@ like ``(DSH)``, ``(RL)`` or ``(see note)`` stays prose and is still translated.
 
 import re
 
-from ubt.core.cleaners.mask_tokens import RestoreStyle, UnmaskReport, restore_masked, token_patterns
+from ubt.core.cleaners.mask_tokens import (
+    BaseMasker,
+    RestoreStyle,
+    TokenFactory,
+    token_patterns,
+)
 from ubt.core.cleaners.mask_tokens import order_by_position as _order_by_position
-from ubt.core.cleaners.mask_tokens import token_checksum as _token_checksum
 
 _MASK_PREFIX = "⟦CITE_MASK_"
 
@@ -52,11 +56,10 @@ _PAREN_CITATION_PATTERN = re.compile(
 )
 
 
-class CitationMasker:
+class CitationMasker(BaseMasker):
     """Masks inline citations before translation and unmasks afterwards."""
 
-    def __init__(self, mask_prefix: str = _MASK_PREFIX) -> None:
-        self.mask_prefix = mask_prefix
+    default_prefix = _MASK_PREFIX
 
     def mask(self, text: str) -> tuple[str, dict[str, str]]:
         """Replace citations with protective tokens; returns (masked_text, mapping).
@@ -65,28 +68,11 @@ class CitationMasker:
         index to the masked citation; see
         :func:`~ubt.core.cleaners.mask_tokens.token_checksum`.
         """
-        mapping: dict[str, str] = {}
-        counter = 1
+        factory = TokenFactory(self.mask_prefix)
 
-        def _replace(match: re.Match[str]) -> str:
-            nonlocal counter
-            original = match.group(0)
-            token = f"{self.mask_prefix}{counter:04d}-{_token_checksum(counter, original)}⟧"
-            mapping[token] = original
-            counter += 1
-            return token
-
-        masked = _CITATION_PATTERN.sub(_replace, text)
-        masked = _PAREN_CITATION_PATTERN.sub(_replace, masked)
-        return masked, _order_by_position(masked, mapping)
-
-    def unmask(self, text: str, mapping: dict[str, str]) -> str:
-        """Restore citations; only checksum-verified tokens (see restore_masked)."""
-        return restore_masked(text, mapping, self._restore_style()).text
-
-    def unmask_checked(self, text: str, mapping: dict[str, str]) -> UnmaskReport:
-        """Restore plus integrity verification; see :class:`UnmaskReport`."""
-        return restore_masked(text, mapping, self._restore_style())
+        masked = _CITATION_PATTERN.sub(lambda m: factory.next(m.group(0)), text)
+        masked = _PAREN_CITATION_PATTERN.sub(lambda m: factory.next(m.group(0)), masked)
+        return masked, _order_by_position(masked, factory.mapping)
 
     def _restore_style(self) -> RestoreStyle:
         fuzzy, scan = token_patterns(self.mask_prefix, "CITE")

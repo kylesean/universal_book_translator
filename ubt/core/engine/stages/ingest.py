@@ -124,8 +124,8 @@ def _guard_selected_pages(
 
     Mirrors :func:`_guard_chapter_window` for the ``--pages`` dimension: a
     resumed run skips parsing whenever the ledger already holds
-    blocks, so changing the selection would silently export the OLD selection
-    while ``finalize_job`` still reports "completed". A whole-document run is
+    blocks, so changing the selection would silently export the earlier
+    selection while ``finalize_job`` still reports "completed". A whole-document run is
     recorded as the EMPTY LIST, never ``None``: ``None`` is what
     ``get_job_metadata_value`` returns while the key is absent, so using it as
     the recorded value would make a recorded whole-book run indistinguishable

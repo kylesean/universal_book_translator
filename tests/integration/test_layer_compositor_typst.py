@@ -20,7 +20,6 @@ from ubt.adapters.pdf.visual_gate import (
     render_pages_to_png,
     text_occlusion_findings,
 )
-from ubt.model.fidelity import Fidelity
 from ubt.model.span import PhysicalBox
 from ubt.render.outputs import (
     LayerCompositor,
@@ -310,7 +309,7 @@ def test_the_compositor_stamps_a_real_typst_fragment(tmp_path: Path) -> None:
         typesetter.close()
 
     (placement,) = composition.placements
-    assert placement.placed_as is Fidelity.RECONSTRUCTED_ADAPTED
+    assert placement.drawn
     assert pdf_struct.page_sizes(output) == pdf_struct.page_sizes(source)
     assert "TRANSLATED REGION TEXT" in _text(output)
 
@@ -381,7 +380,7 @@ def test_the_compositor_draws_an_inline_math_target_onto_the_region(tmp_path: Pa
         typesetter.close()
 
     (placement,) = composition.placements
-    assert placement.placed_as is Fidelity.RECONSTRUCTED_ADAPTED
+    assert placement.drawn
     text = _text(output)
     assert "\\Gamma" not in text, text
     assert "Γ" in text, text

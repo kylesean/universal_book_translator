@@ -274,7 +274,7 @@ def _pdf_facts(
     # Guard against password-protected encrypted PDFs. An encrypted file is a
     # hard refusal, not a probe that may degrade the report, so the
     # ``AssessmentError`` is raised from *inside* a handler: a sibling
-    # ``except Exception`` cannot swallow it the way the old nested form's
+    # ``except Exception`` cannot swallow it the way a nested form's
     # outer ``except (ImportError, Exception)`` did (it caught the very
     # exception the inner handler raised, making the guard a no-op).
     try:

@@ -47,6 +47,29 @@ def _is_latin_word_char(ch: str) -> bool:
     return False
 
 
+def _make_tokenizer(rules: dict[str, tuple[str, str, bool, bool]]) -> Any | None:
+    """A private jieba tokenizer seeded with this glossary's CJK patterns.
+
+    Returns ``None`` when jieba is unavailable. A per-instance
+    :class:`jieba.Tokenizer` is used deliberately: the module-level
+    ``jieba.dt`` is process-global, so seeding it made one job's glossary
+    change another concurrent job's token boundaries (``worker --concurrency``)
+    and made enforcement non-deterministic across resumes. ``add_word`` also
+    grows ``Tokenizer.total`` without bound, so a shared instance leaked memory
+    per job. A private instance keeps both problems local to the glossary that
+    owns them.
+    """
+    try:
+        import jieba  # type: ignore[import-untyped]
+    except Exception:  # pragma: no cover - jieba is a hard dependency
+        return None
+    tokenizer = jieba.Tokenizer()
+    for pat in rules:
+        if len(pat) >= 2 and all(is_cjk_char(ch) for ch in pat):
+            tokenizer.add_word(pat, freq=1000000)
+    return tokenizer
+
+
 _PROTECTED_SPAN_PATTERNS = (
     re.compile(r"<[^>]+>"),  # HTML/XML tags
     re.compile(r"```[\s\S]*?```"),  # Fenced code blocks ```...```
@@ -178,6 +201,8 @@ class DeterministicGlossaryEnforcer:
     3. Longest-match-first disambiguation for overlapping term matches.
     4. Single-pass non-destructive string slicing (immune to cyclic re-substitutions).
     5. Morphological inflection awareness: allows approved target inflected variants.
+    6. A private CJK tokenizer so a compound-word guard never depends on (or
+       mutates) another job's process-global tokenizer state.
     """
 
     def __init__(
@@ -198,23 +223,7 @@ class DeterministicGlossaryEnforcer:
 
         self._compile_glossary(glossary)
         self._build_automaton()
-        self._seed_jieba()
-
-    def _seed_jieba(self) -> None:
-        """Seed jieba's global dictionary once with multi-char CJK glossary patterns.
-
-        Called at construction: seeding per-block (as ``enforce_audited`` did)
-        polluted the process-wide dictionary, inflated ``jieba.dt.total``
-        unboundedly, and made boundary checks non-deterministic across resumes.
-        """
-        try:
-            import jieba  # type: ignore[import-untyped]
-
-            for pat in self._rules:
-                if len(pat) >= 2 and all(is_cjk_char(ch) for ch in pat):
-                    jieba.add_word(pat, freq=1000000)
-        except Exception:
-            pass
+        self._tokenizer = _make_tokenizer(self._rules)
 
     def _compile_glossary(self, glossary: list[dict[str, Any]]) -> None:
         # Two passes on purpose: the alias guard below compares against every
@@ -356,18 +365,18 @@ class DeterministicGlossaryEnforcer:
         # 2. Longer replacement flanked by CJK characters is unsafe (prevents expanding fragments).
         # 3. Tokenizer-aware boundary check (jieba): match MUST align with token boundaries.
         # Unsafe matches are quarantined into audit records rather than violently applied.
+        #
+        # The guard fails CLOSED: if a CJK term is present but the tokenizer is
+        # unavailable, every CJK match is quarantined rather than applied, because
+        # a missing tokenizer must not silently downgrade to the mechanical
+        # substitution the guard exists to prevent (``初始状态`` -> ``初始态势``).
         token_boundaries: tuple[set[int], set[int]] | None = None
         has_cjk_matches = any(
             bool(p) and all(is_cjk_char(ch) for ch in p) for _, _, p, _, _ in raw_matches
         )
-        if has_cjk_matches:
-            try:
-                import jieba
-
-                tokens = list(jieba.tokenize(target_text))
-                token_boundaries = ({s for _, s, _ in tokens}, {e for _, _, e in tokens})
-            except Exception:
-                token_boundaries = None
+        if has_cjk_matches and self._tokenizer is not None:
+            tokens = list(self._tokenizer.tokenize(target_text))
+            token_boundaries = ({s for _, s, _ in tokens}, {e for _, _, e in tokens})
 
         filtered_by_compound: list[tuple[int, int, str, str, str]] = []
         quarantined_matches: list[tuple[int, int, str, str, str]] = []
@@ -381,10 +390,19 @@ class DeterministicGlossaryEnforcer:
                 )
                 if (len(pattern) == 1 or len(repl) > len(pattern)) and flanked:
                     is_unsafe = True
-                elif token_boundaries is not None and flanked:
-                    t_starts, t_ends = token_boundaries
-                    if start not in t_starts or end not in t_ends:
+                elif flanked:
+                    # A flanked CJK term needs a tokenizer to prove the match
+                    # aligns with a word boundary. Without one, quarantine
+                    # rather than apply: a missing tokenizer must not silently
+                    # downgrade to the mechanical compound substitution the
+                    # guard exists to prevent (``初始状态`` -> ``初始态势``).
+                    # A standalone (unflanked) term is unambiguous and applied.
+                    if token_boundaries is None:
                         is_unsafe = True
+                    else:
+                        t_starts, t_ends = token_boundaries
+                        if start not in t_starts or end not in t_ends:
+                            is_unsafe = True
 
             if is_unsafe:
                 quarantined_matches.append((start, end, pattern, repl, rule))

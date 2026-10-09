@@ -135,9 +135,8 @@ async def _run_translation(
     (:func:`ubt.core.job_options.overrides_from_request`) that API and
     MCP already submit through: request keys are UBTConfig field names
     (plus ``glossary`` -> ``glossary_path``), unset flags arrive as ``None``
-    and are skipped so ``UBT_*`` env keeps precedence. A hand-mirrored
-    48-parameter copy used to live here; the request keys drifted exactly
-    once per entry point per quarter, so no more lists to keep in sync.
+    and are skipped so ``UBT_*`` env keeps precedence. One mapping drives every
+    entry point, so there is no hand-mirrored parameter list to keep in sync.
     """
     job_id = request.get("job_id")
     if job_id is not None and not job_id_is_valid(job_id):
@@ -147,15 +146,15 @@ async def _run_translation(
             "ubt.core.job_options, same as API/MCP)"
         )
     # Language codes reach the ledger file name (derive_job_id) and, after
-    # sanitizing, Typst markup. One shared gate — the CLI's hand-rolled copy
-    # used to word it differently from the API/MCP surfaces.
+    # sanitizing, Typst markup. One shared gate keeps the CLI, API and MCP
+    # wordings identical.
     lang_error = lang_pair_validation_error(request.get("source_lang"), request.get("target_lang"))
     if lang_error is not None:
         raise UBTError(lang_error)
     overrides: dict[str, Any] = overrides_from_request(request)
 
     # ``overrides_from_request`` already applied the shared adaptive default, so
-    # the CLI no longer derives dual_mode here (that was the only place it did).
+    # the CLI does not derive dual_mode here.
     explicit_dual = request.get("dual_mode")
     effective_dual = overrides.get("dual_mode") or explicit_dual
     # Do NOT mirror draft_model→repair_model here. UBTConfig already syncs

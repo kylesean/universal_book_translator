@@ -52,4 +52,14 @@ def normalize_text(text: str) -> str:
     return text.translate(_TRANSLATION).replace("\u00a0", " ")
 
 
-__all__ = ["normalize_text"]
+def collapse_whitespace(text: str) -> str:
+    """Collapse every whitespace run to a single space and strip the ends.
+
+    The one shared form of the idiom every reader uses on a text node before it
+    becomes an element's carried text: a reflowed source line break must not
+    survive into the canonical string.
+    """
+    return " ".join(text.split())
+
+
+__all__ = ["collapse_whitespace", "normalize_text"]

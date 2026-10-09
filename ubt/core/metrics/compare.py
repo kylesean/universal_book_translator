@@ -133,7 +133,6 @@ _STRUCTURAL_DETAIL_KEYS: tuple[str, ...] = (
     "preserved_blocks",
     "terms_audited",
     "formula_blocks",
-    "formula_substitutions",
 )
 
 

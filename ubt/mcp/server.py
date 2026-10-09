@@ -120,9 +120,9 @@ _MAX_RETAINED = 100
 
 #: The shared in-process job lifecycle: concurrency cap, retention pruning, the
 #: orchestrator build + one-owner progress fold, and the cancel/abort handling.
-#: MCP used to reimplement all of it; one implementation also means the
-#: REST and agent surfaces cannot drift. ``ubt.api`` is a lazy package and
-#: ``JobManager`` imports no FastAPI, so the MCP extra stays light.
+#: One implementation serves the REST and agent surfaces, so the two cannot
+#: drift. ``ubt.api`` is a lazy package and ``JobManager`` imports no FastAPI,
+#: so the MCP extra stays light.
 _MANAGER = JobManager(
     max_running_jobs=MCP_MAX_RUNNING_JOBS,
     max_retained_jobs=_MAX_RETAINED,
@@ -206,10 +206,10 @@ def _check_profile(profile: str) -> str:
 def _sandbox_path(raw: str, *, must_exist: bool) -> Path:
     """Resolve a caller-supplied path inside the shared UBT path sandbox.
 
-    The tools used to reject only a literal ``..``, so any writable path an
-    agent named was accepted — and ``ubt_job_status(db_dir=...)`` would then
-    create and open ``<job_id>.sqlite`` there read-write, schema init included
-    without sandbox restriction.
+    Rejecting only a literal ``..`` would accept any writable path an agent
+    names — and ``ubt_job_status(db_dir=...)`` would then create and open
+    ``<job_id>.sqlite`` there read-write, schema init included, with no sandbox
+    restriction.
 
     The allowlist is the REST ``resolve_secure_path`` default, re-implemented
     here instead of imported on purpose: ``ubt.api.security`` imports
@@ -580,7 +580,7 @@ async def ubt_cancel_job(job_id: str, db_dir: str | None = None) -> dict[str, An
 
     # Everything below (mkdir/chmod, WAL pragmas, schema migration, reads and
     # the finalize write) is blocking AND the migration must not race a
-    # pipeline that holds the writer lock on a legacy (pre-v13) database:
+    # pipeline that holds the writer lock on an older (pre-v13) database:
     # mirror the REST cancel surface — acquire the lock first, then construct
     # the ledger under it, all in one worker thread off the event loop.
     def _cancel_locked() -> dict[str, Any]:

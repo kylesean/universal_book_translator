@@ -128,7 +128,7 @@ def normalize_cjk_spacing(text: str, target_lang: str = "zh") -> str:
     if not (target_lang or "").lower().startswith(_SPACELESS_SCRIPT_LANGS):
         return out
     # Same protection contract as the sibling functions below: running the
-    # de-spacing rules on the whole string used to swallow the space inside a
+    # de-spacing rules on the whole string would swallow the space inside a
     # CJK-bearing code span ("中文 中文" in `...` lost its word gap).
     parts = _split_protected(out)
     for i in range(0, len(parts), 2):

@@ -15,7 +15,6 @@ into ``tests/unit`` tests; what remains here needs the real documents.
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -30,15 +29,7 @@ _REPO = Path(__file__).resolve().parents[2]
 #: 0.98 character-coverage floor; the scanned-heavy book chapter tops out at
 #: 0.973 while still round-tripping losslessly, so the floor is the documented
 #: knob (a fraction), not a skipped contract.
-_CASES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("shadow_reader", ("--min-coverage", "0.97")),
-    ("shadow_typst", ()),
-    ("shadow_rtl", ()),
-    ("shadow_overlay", ()),
-    ("shadow_outputs", ()),
-    ("shadow_delivered_pixel", ()),
-    ("shadow_compositor", ()),
-)
+_CASES: tuple[tuple[str, tuple[str, ...]], ...] = (("shadow_reader", ("--min-coverage", "0.97")),)
 
 
 def _skip_without_corpus() -> None:
@@ -50,8 +41,6 @@ def _skip_without_corpus() -> None:
 @pytest.mark.parametrize(("script", "extra"), _CASES, ids=[c[0] for c in _CASES])
 def test_the_corpus_acceptance_harness_passes(script: str, extra: tuple[str, ...]) -> None:
     _skip_without_corpus()
-    if script in ("shadow_typst", "shadow_compositor") and shutil.which("typst") is None:
-        pytest.skip("typst is not installed")
     proc = subprocess.run(  # noqa: S603
         [sys.executable, str(_REPO / "scripts" / f"{script}.py"), "--corpus", "corpus", *extra],
         cwd=_REPO,

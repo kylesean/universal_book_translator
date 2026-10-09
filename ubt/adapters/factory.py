@@ -64,8 +64,8 @@ def register_pdf_engine(
 def is_pdf_engine_registered(name: str) -> bool:
     """Whether ``name`` resolves to a registered PDF engine.
 
-    Replaces what the old ``PdfEngine`` Literal checked statically, now that
-    the set is open to in-process :func:`register_pdf_engine` calls.
+    A membership check against the registry, which is open to in-process
+    :func:`register_pdf_engine` calls and so cannot be a static ``Literal``.
     """
     return name.lower() in _PDF_ENGINE_REGISTRY
 
@@ -112,9 +112,8 @@ def _resolve_pdf_adapter(pdf_engine: str, path: Path | None = None) -> BasePDFEn
 
 # Standard built-in engine & adapter bindings. Only the canonical names live
 # here: ``docling`` (the Typst-reflow mainline) and ``pdfium`` (the born-digital
-# fast path), plus the ``auto`` probe handled above. The old ``typst`` /
-# ``modern`` aliases all pointed at ``DoclingPDFAdapter`` and made one engine
-# look like three; pass ``docling`` (or ``auto``) instead.
+# fast path), plus the ``auto`` probe handled above. Each engine has exactly one
+# name; pass ``docling`` (or ``auto``) rather than an alias.
 _PDF_ENGINE_REGISTRY.update(
     {
         "docling": DoclingPDFAdapter,

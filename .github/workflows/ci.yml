@@ -61,9 +61,12 @@ jobs:
       - name: Fast test tier (pytest)
         # UTF-8 I/O: the product writes CJK to stdout and Windows consoles are
         # cp1252, so pin the encoding even on this Linux job's local runs.
+        # The coverage floor is a regression guard (see .pre-commit-config.yaml):
+        # it catches a large deletion-without-tests or an orphaned module, the
+        # class of rot that lint/types/tests alone let through.
         env:
           PYTHONIOENCODING: "utf-8"
-        run: uv run pytest -m fast -q
+        run: uv run pytest -m fast -q --cov=ubt --cov-report=term:skip-covered --cov-fail-under=58
 
       # The wheel force-includes the *prebuilt* SPA bundle at ubt/api/static
       # (pyproject.toml), so a `pip install`ed release serves whatever was

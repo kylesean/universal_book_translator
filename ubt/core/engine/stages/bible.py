@@ -33,7 +33,7 @@ def _glossary_fingerprint(glossary_path: Path | str | None) -> str:
 
     The cache key must carry the glossary *content*, never just its path:
     keyed on path, editing the CSV in place and re-running the same document
-    would reuse the old renderings. Hashing the file bytes makes any content
+    would reuse the prior renderings. Hashing the file bytes makes any content
     change a MISS (re-mine + re-backfill) while an untouched file still hits.
     """
     if not glossary_path:
@@ -115,7 +115,7 @@ async def run_bible_stage(
         "fast_lane": fast_lane,
         # The profile selects the mining policy (is_fiction -> allow_bare_tokens
         # below), so resuming the same job under a different profile must not
-        # reuse terminology mined under the old one.
+        # reuse terminology mined under the prior one.
         "profile_name": profile_name,
         "glossary_fingerprint": _glossary_fingerprint(glossary_path),
     }

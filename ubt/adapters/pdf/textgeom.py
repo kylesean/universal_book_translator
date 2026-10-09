@@ -45,6 +45,22 @@ class LineBox:
     italic: bool = False
 
 
+def box_area(x0: float, y0: float, x1: float, y1: float) -> float:
+    """Area of an axis-aligned box, clamped to zero for an inverted span."""
+    return max(0.0, x1 - x0) * max(0.0, y1 - y0)
+
+
+def box_iou(a: tuple[float, float, float, float], b: tuple[float, float, float, float]) -> float:
+    """Intersection-over-union of two boxes, 0.0 when they do not overlap."""
+    ix0, iy0 = max(a[0], b[0]), max(a[1], b[1])
+    ix1, iy1 = min(a[2], b[2]), min(a[3], b[3])
+    inter = box_area(ix0, iy0, ix1, iy1)
+    if inter <= 0:
+        return 0.0
+    union = box_area(*a) + box_area(*b) - inter
+    return inter / union if union > 0 else 0.0
+
+
 def _aggregate_line_styles(items: Sequence[LineBox]) -> tuple[float, bool, bool]:
     """Compute character-weighted ground-truth font_size, bold, and italic across fragments."""
     valid = [
@@ -815,10 +831,11 @@ def column_order(lines: Sequence[LineBox], page_width: float) -> list[LineBox]:
 
     # The gutter is the x crossed by the fewest candidate lines. A single-column
     # page has no low-crossing cut (any mid-column split severs many lines); a
-    # two-column page dips sharply at the real gutter. The old connected-component
-    # clustering merged every overlapping interval, so a single gutter-spanning
-    # line (a centered caption, a hanging-indented equation line) chained the two
-    # columns into one component and collapsed the page to top-down reading order.
+    # two-column page dips sharply at the real gutter. Naive connected-component
+    # clustering would merge every overlapping interval, so a single
+    # gutter-spanning line (a centered caption, a hanging-indented equation line)
+    # would chain the two columns into one component and collapse the page to
+    # top-down reading order.
     split_points = sorted(
         {work[idx].rect[0] for idx in candidates} | {work[idx].rect[2] for idx in candidates}
     )
@@ -844,9 +861,9 @@ def column_order(lines: Sequence[LineBox], page_width: float) -> list[LineBox]:
     right_cands = [i for i in candidates if center(i) >= best_split]
     # A banner must clear the TOP of BOTH columns (y grows upward, so the
     # higher column's max top); a footer must sit below the BOTTOM of both (the
-    # lower column's min bottom). The old min/max were inverted, so when the two
-    # columns had unequal extents the longer column's lower lines were misread as
-    # footers and pushed to the end of the page.
+    # lower column's min bottom). Inverting these would misread the longer
+    # column's lower lines as footers when the two columns have unequal extents,
+    # pushing them to the end of the page.
     top_ceiling = max(
         max(work[i].rect[3] for i in left_cands), max(work[i].rect[3] for i in right_cands)
     )
@@ -871,6 +888,8 @@ def column_order(lines: Sequence[LineBox], page_width: float) -> list[LineBox]:
 
 __all__ = [
     "LineBox",
+    "box_area",
+    "box_iou",
     "column_order",
     "dehyph",
     "extract_lines",

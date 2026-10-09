@@ -20,8 +20,8 @@ from ubt.core.qe.score_policy import qe_scored_values
 
 # The placeholder mask order has exactly one owner (``PlaceholderEngine``); the
 # report re-masks through it rather than restating the order, so a change to the
-# order cannot leave the report measuring a pipeline that no longer exists. The
-# engine is named in ``ubt.segment``, so core reaches it only through the port.
+# order cannot leave the report measuring a pipeline other than the one that ran.
+# The engine is named in ``ubt.segment``, so core reaches it only through the port.
 _PLACEHOLDER_ENGINE = placeholder_engine()
 
 #: Bump when QualityReport's serialized shape changes so downstream consumers
@@ -249,13 +249,8 @@ class QualityReport(BaseModel):
     mode_advisory: dict[str, Any] | None = None
     # Pipeline runtime configuration snapshot (draft_model, repair_model, etc.)
     config_snapshot: dict[str, Any] = Field(default_factory=dict)
-    # Display formulas whose converted Typst differed structurally
-    # from the source equation and were replaced by the source graphic
-    # (lossless substitution, must stay visible in the audit).
-    formula_witness_fallbacks: list[str] = Field(default_factory=list)
-    # Display-formula blocks delivered: the denominator of the
-    # metrics-layer ``formula_fidelity`` KPI. Inline math is not counted;
-    # 0 means this job carried no display formula.
+    # Display-formula blocks delivered. Inline math is not counted; 0 means
+    # this job carried no display formula.
     formula_blocks: int = 0
     # Exact Typst compiler version that built the artifact
     # (None = unmeasured, e.g. compiler-absent Markdown-companion jobs).
@@ -283,8 +278,8 @@ class QualityReport(BaseModel):
     def avg_qe(self) -> float:
         """Top-level alias of ``score_metrics.avg_qe``.
 
-        Read-only convenience: consumers used to have to know the nested path
-        just to read the book's average score. It mirrors the authoritative
+        Read-only convenience: a consumer need not know the nested path to read
+        the book's average score. It mirrors the authoritative
         nested field on every serialization, so the alias and the value can
         never drift; it is not accepted as constructor input.
         """
@@ -340,8 +335,7 @@ def build_quality_report(
     blocked_human = int(stats.get("blocked_human", 0))
     pass_rate = round(completed / total, 4) if total > 0 else 1.0
     estimated_cost = round(token_cost_usd, 5) if token_cost_usd is not None else None
-    # Display-formula blocks, the denominator of the metrics-layer
-    # formula_fidelity KPI (see ubt/core/metrics/schema.py).
+    # Display-formula blocks delivered (inline math is not counted).
     formula_blocks = sum(1 for b in all_blocks if b.block_type == BlockType.FORMULA)
 
     # MTQE scores analysis: only blocks that actually met the QE gate; the
@@ -376,7 +370,7 @@ def build_quality_report(
             # A block that spent repair rounds but still ended FAILED (e.g. it
             # hit a rounds_cap of 1) is an exhaustion, not a round-1/2 success.
             # A triage quarantine (NEEDS_HUMAN/BLOCKED_HUMAN) is not a success
-            # either — it used to be counted as one.
+            # either.
             if b.status == BlockStatus.FAILED:
                 exhausted += 1
             elif b.status not in (BlockStatus.NEEDS_HUMAN, BlockStatus.BLOCKED_HUMAN):
@@ -520,9 +514,6 @@ def build_quality_report(
         route=route_info,
         mode_advisory=mode_advisory,
         config_snapshot=cfg_snapshot,
-        formula_witness_fallbacks=[
-            str(item) for item in (manifest.metadata.get("formula_witness_findings") or []) if item
-        ],
         formula_blocks=formula_blocks,
         typst_version=typst_version,
         qe_score_source=qe_score_source,

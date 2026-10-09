@@ -287,7 +287,7 @@ class JobWorker:
             # ``aclosing`` guarantees the orchestrator's ``finally`` (ledger/
             # router teardown) runs the moment we leave the loop early on a lost
             # lease or cancel — not later, when the generator is GC'd — so no
-            # further blocks get drafted (and billed) against a job we no longer
+            # further blocks get drafted (and billed) against a job we do not
             # own.
             async with aclosing(self._event_source(job, job_config, **kwargs)) as events:
                 async for event in events:

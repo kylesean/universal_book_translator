@@ -50,9 +50,16 @@ repos:
       # (pass_filenames off) so a clean changed-file set cannot hide a break in
       # an untouched test. `-m fast` overrides the `-m 'not slow and not
       # legacy_drift'` in addopts.
+      #
+      # Coverage floor: a regression guard, not a quality target. The 2026-10
+      # audit found ~2,500 lines of dead modules that every gate passed; the
+      # floor plus tests/unit/test_no_orphaned_modules.py make that class of
+      # rot fail a push. 58% sits ~3pt under the fast-tier baseline so ordinary
+      # work never trips it, but a large deletion-without-tests or an orphaned
+      # module does.
       - id: pytest-fast
-        name: pytest -m fast
-        entry: uv run pytest -m fast -q
+        name: pytest -m fast (with coverage floor)
+        entry: uv run pytest -m fast -q --cov=ubt --cov-report=term:skip-covered --cov-fail-under=58
         language: system
         pass_filenames: false
         always_run: true

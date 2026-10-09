@@ -20,10 +20,8 @@ from pathlib import Path
 
 import pytest
 
-from ubt.core.ir.models import BlockType, make_element
+from ubt.core.ir.models import BlockType, IRBlock, make_element
 from ubt.core.qe.fast_pass import REHEARSAL_MARKER, strip_rehearsal_marker
-from ubt.model.fidelity import Fidelity
-from ubt.model.span import CanonicalSource
 from ubt.pipeline.artifact import (
     ArtifactReport,
     DeliveredArtifact,
@@ -139,7 +137,7 @@ def test_cjk_realization_is_probed_per_glyph() -> None:
 
 
 def _check(element_id: str, present: bool) -> ElementCheck:
-    return ElementCheck(element_id, Fidelity.RECONSTRUCTED_ADAPTED, 1, present)
+    return ElementCheck(element_id, 1, present)
 
 
 def test_missing_lists_only_elements_the_artifact_did_not_carry() -> None:
@@ -186,9 +184,9 @@ def test_a_rehearsal_heading_is_found_in_an_artifact_without_the_marker() -> Non
         block_type=BlockType.HEADING,
         source_text="The Attention Machine",
     )
-    source = CanonicalSource(doc_id="d", text="The Attention Machine")
-    delivered = {"e1": f"{REHEARSAL_MARKER} The Attention Machine"}
+    block = IRBlock(element=element, target_text=f"{REHEARSAL_MARKER} The Attention Machine")
+    translations = {"e1": f"{REHEARSAL_MARKER} The Attention Machine"}
 
-    expected = _expected(element, Fidelity.RECONSTRUCTED_ADAPTED, source, delivered)
+    expected = _expected(block, translations)
     assert expected == "The Attention Machine"
     assert _present(expected, frozenset(_tokenize("The Attention Machine"))) is True

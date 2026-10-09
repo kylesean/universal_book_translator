@@ -2,9 +2,9 @@
 
 ``RenderPlan`` is what the advisories decide about *this run's* render: the mode,
 the chrome/cover treatment, and whether a companion artifact was requested. It
-used to be written onto ``manifest.run`` -- the run manifest used as an
-inter-stage bus -- and read back by the renderer, the export stage and the
-visual gate. It is a value the plan owns and hands to the stage that acts on it.
+is a value the plan owns and hands to the stage that acts on it; the renderer,
+the export stage and the visual gate read it as an argument rather than from the
+run manifest.
 
 There is no render-engine field: every PDF composes through the single
 source-canvas ``overlay`` engine (``ubt.core.config.RENDER_ENGINE``).
@@ -15,8 +15,8 @@ only the effective bilingual mode it shipped. The adapter records it after
 manifest.
 
 This module lives in ``ubt.core.ir`` because both the adapters (which read the
-plan and produce the outcome) and ``ubt.pipeline`` (which owns the plan) depend on
-it, and (per ``ubt.core.ports``) neither layer may depend on the other.
+plan and produce the outcome) and the export stage (which owns the plan) depend
+on it, and (per ``ubt.core.ports``) neither layer may depend on the other.
 """
 
 from __future__ import annotations

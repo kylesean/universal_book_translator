@@ -1,29 +1,11 @@
-"""Lowering a realized document to an artifact (render backend lowering layer).
+"""Lowering translated blocks onto the source page (render compositor).
 
-The lowering has exactly one capability today: place an element as its opaque
-source slice. Every element therefore descends to that slice, every page is
-carried over whole, and the artifact *is* the source -- the lattice floor made
-concrete, and the strongest fidelity claim available.
-
-A realization above the floor has no drawing yet, so it descends to the slice and
-is **recorded** as descended (:class:`Placement`), never silently approximated:
-keeping the source is the lattice's guaranteed lower bound, and the record is
-what makes the descent explicit rather than a quiet loss. When a backend can
-actually draw a reconstructed fragment, this is where a real per-element
-composition grows; until then the placements are the seam it will fill.
-
-An element with no attestation is not a realization at all but a coverage gap,
-and is refused.
-
-Beyond that floor, :class:`LayerCompositor` is the prototype of the unified
-composition the fidelity lattice has been building toward: it composes each page
-from three absolute layers -- Layer 0 the source page's own vectors/rasters
-untouched, Layer 1 a background rectangle masking the regions that are being
-reconstructed, Layer 2 a typeset fragment (Typst micro-typeset) placed into each
-such region. This is the seed of the replacement for the two whole-document
-typesetters; it is **opt-in and not the default engine**, and it only composes
-text fragments today. Failing to typeset a fragment descends that element to the
-source (no mask is painted), so it can never lose content.
+:class:`LayerCompositor` composes each page from three absolute layers: Layer 0
+the source page's own vectors/rasters untouched, Layer 1 a background rectangle
+masking the regions being replaced, Layer 2 a typeset fragment (Typst
+micro-typeset) placed into each such region. A fragment that will not typeset is
+recorded as kept-in-source (no mask is painted), so composition can never lose
+content.
 """
 
 from __future__ import annotations
@@ -48,24 +30,17 @@ from ubt.cache.dirs import cache_root
 from ubt.core.ir.bifurcation import bifurcate_blocks
 from ubt.core.ir.continuation import find_continuation_runs, join_continuous_text
 from ubt.core.ir.models import BlockType, IRBlock
-from ubt.model.ast import Document
-from ubt.model.fidelity import Attestation, Fidelity
 from ubt.model.span import BBox, CompositeSpan, PhysicalBox
 from ubt.render.flow import FlowPlacement, solve_flow
 
 
-class LoweringUnsupported(Exception):
-    """The document cannot be lowered: an element was never judged."""
-
-
 @dataclass(frozen=True, slots=True)
 class Placement:
-    """One element's position in the artifact: what it was attested at, what was drawn."""
+    """One element's position in the artifact: whether it was drawn or kept."""
 
     element_id: str
     page: int
-    fidelity: Fidelity  # what realize() attested
-    placed_as: Fidelity  # what the lowering actually drew
+    drawn: bool
     detail: str = ""
     #: The size (pt) the target was drawn at, when the lowering chose it by
     #: fitting (``None`` for a mask-only part, a math/TOC fragment, or a
@@ -74,9 +49,9 @@ class Placement:
     drawn_pt: float | None = None
 
     @property
-    def descended(self) -> bool:
-        """True when the lowering kept the source because it cannot draw the realization."""
-        return self.placed_as < self.fidelity
+    def kept_source(self) -> bool:
+        """True when the lowering kept the source because it cannot draw the target."""
+        return not self.drawn
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,9 +70,9 @@ class Composition:
         return {page: tuple(items) for page, items in grouped.items()}
 
     @property
-    def descended_ids(self) -> tuple[str, ...]:
-        """Elements the lowering had to keep as source (no drawing for their rung)."""
-        return tuple(placement.element_id for placement in self.placements if placement.descended)
+    def kept_source_ids(self) -> tuple[str, ...]:
+        """Elements the lowering had to keep as source (no drawing for their target)."""
+        return tuple(placement.element_id for placement in self.placements if placement.kept_source)
 
     @property
     def low_legibility_fonts(self) -> tuple[tuple[str, float], ...]:
@@ -111,59 +86,14 @@ class Composition:
         return tuple(
             (placement.element_id, placement.drawn_pt)
             for placement in self.placements
-            if not placement.descended
+            if placement.drawn
             and placement.drawn_pt is not None
             and placement.drawn_pt < _MIN_FONT_PT
         )
 
 
-def _place(element_id: str, page: int, attestation: Attestation) -> Placement:
-    """The lowering's verdict for one element: the opaque slice is all it can draw."""
-    placed_as = Fidelity.PRESERVED_OPAQUE
-    detail = (
-        f"{attestation.fidelity.name} has no lowering yet; source kept"
-        if attestation.fidelity > placed_as
-        else "opaque source slice"
-    )
-    return Placement(element_id, page, attestation.fidelity, placed_as, detail)
-
-
-def compose(
-    document: Document,
-    attestations: Sequence[Attestation],
-    source_pdf: str | Path,
-    output_path: str | Path,
-) -> Composition:
-    """Lower a realized document to a PDF, recording how each element was placed.
-
-    Every element must carry an attestation; a missing one is a coverage gap, not
-    a realization, and raises. Every attested element is placed as its opaque
-    source slice -- the only lowering wired -- and a realization above the floor
-    is recorded as descended rather than approximated.
-    """
-    by_id = {attestation.element_id: attestation for attestation in attestations}
-    unjudged = [element.id for element in document.elements if element.id not in by_id]
-    if unjudged:
-        raise LoweringUnsupported(
-            f"{len(unjudged)} element(s) have no attestation: {', '.join(unjudged[:5])}"
-        )
-    placements = tuple(
-        _place(element.id, element.span.page, by_id[element.id]) for element in document.elements
-    )
-
-    source = Path(source_pdf)
-    output = Path(output_path)
-    # Open the source as the working document (rather than a blank PDF we copy
-    # pages into) so the catalog survives: named destinations, outlines and
-    # metadata are what the source's GoTo citation links resolve against.
-    with pdf_struct.open_pdf(source) as composed:
-        output.parent.mkdir(parents=True, exist_ok=True)
-        composed.save(str(output))
-    return Composition(output_path=output, placements=placements)
-
-
 # --------------------------------------------------------------------------- #
-# LayerCompositor (prototype): three-layer absolute page composition.
+# LayerCompositor: three-layer absolute page composition.
 # --------------------------------------------------------------------------- #
 
 
@@ -1772,8 +1702,8 @@ class LayerCompositor:
         # document -- instead of a blank PDF we copy pages into -- keeps the
         # catalog (named destinations, outlines, metadata, AcroForm) that the
         # source's internal GoTo links resolve against; a blank shell left every
-        # relocated citation link pointing at a destination that no longer
-        # existed. The pages are the canvas, so the non-text layers stay intact.
+        # relocated citation link pointing at a destination that does not
+        # exist. The pages are the canvas, so the non-text layers stay intact.
         with pdf_struct.open_pdf(self._source) as composed:
             page_bounds = {
                 index: pdf_struct.page_box(page)
@@ -2132,9 +2062,8 @@ class LayerCompositor:
             if run_bilingual and source.strip() and pair_fits.get(key) is None:
                 if not part.text.strip():
                     # An echo-only box (the target flow ended) whose echo cannot
-                    # fit even at the floor. The old per-box fit returned None
-                    # here and left the source untouched; keep that descend --
-                    # never a mask without a drawn replacement.
+                    # fit even at the floor: leave the source untouched rather
+                    # than painting a mask with no drawn replacement.
                     continue
                 # Drop the echo (best-effort) and draw the target alone, still
                 # at the run size so the paragraph stays one size.
@@ -2473,61 +2402,17 @@ class LayerCompositor:
         drawn_pt: float | None = None,
     ) -> Placement:
         if not boxes:
-            return Placement(
-                overlay.element_id,
-                overlay.page,
-                Fidelity.RECONSTRUCTED_ADAPTED,
-                Fidelity.PRESERVED_OPAQUE,
-                "no usable box; source kept",
-            )
+            return Placement(overlay.element_id, overlay.page, False, "no usable box; source kept")
         return Placement(
             overlay.element_id,
             overlay.page,
-            Fidelity.RECONSTRUCTED_ADAPTED,
-            Fidelity.RECONSTRUCTED_ADAPTED if drawn else Fidelity.PRESERVED_OPAQUE,
+            drawn,
             "layer-compositor" if drawn else "no fragment; source kept",
             drawn_pt=drawn_pt if drawn else None,
         )
 
 
-def overlays_from_document(
-    document: Document,
-    attestations: Sequence[Attestation],
-    delivered: Mapping[str, str],
-) -> tuple[Overlay, ...]:
-    """The regions an overlay pass would draw: text above the floor, placed, with text.
-
-    An element kept at the floor (source), without a box, or with no delivered
-    text is not an overlay -- the compositor leaves it to Layer 0.
-    """
-    by_id = {attestation.element_id: attestation for attestation in attestations}
-    overlays: list[Overlay] = []
-    for element in document.elements:
-        if not element.is_text:
-            continue
-        attestation = by_id.get(element.id)
-        if attestation is None or attestation.fidelity <= Fidelity.PRESERVED_OPAQUE:
-            continue
-        span = element.span
-        if not span.placed or span.bbox is None:
-            continue
-        text = delivered.get(element.id, "")
-        if not text.strip():
-            continue
-        boxes = span.boxes if isinstance(span, CompositeSpan) else ()
-        overlays.append(
-            Overlay(
-                element_id=element.id,
-                page=span.page,
-                bbox=span.bbox,
-                text=text,
-                boxes=boxes,
-            )
-        )
-    return tuple(overlays)
-
-
-def _overlayable(block: IRBlock, realization_plan: Mapping[str, Fidelity] | None) -> bool:
+def _overlayable(block: IRBlock) -> bool:
     """Whether this block should be drawn above the source (not kept opaque)."""
     box = block.bbox
     if block.skip_translate or box is None or box.page <= 0:
@@ -2536,15 +2421,11 @@ def _overlayable(block: IRBlock, realization_plan: Mapping[str, Fidelity] | None
     # cannot reconstruct a grid or a graphic, so they always stay on Layer 0.
     if block.block_type in (BlockType.TABLE, BlockType.IMAGE):
         return False
-    fidelity = realization_plan.get(block.id) if realization_plan is not None else None
-    if fidelity is not None and fidelity <= Fidelity.PRESERVED_OPAQUE:
-        return False
     return bool((block.target_text or "").strip())
 
 
 def overlays_from_blocks(
     blocks: Sequence[IRBlock],
-    realization_plan: Mapping[str, Fidelity] | None = None,
     *,
     bilingual: bool = False,
 ) -> tuple[Overlay, ...]:
@@ -2570,9 +2451,7 @@ def overlays_from_blocks(
         if block.id in consumed:
             continue
         run = runs.get(block.id)
-        if run is not None and all(
-            _overlayable(by_id[block_id], realization_plan) for block_id in run.block_ids
-        ):
+        if run is not None and all(_overlayable(by_id[block_id]) for block_id in run.block_ids):
             run_blocks = [by_id[block_id] for block_id in run.block_ids]
             # A run reads as one element, so only its first block can carry a
             # list marker (a wrapped list item continues without a second bullet).
@@ -2622,7 +2501,7 @@ def overlays_from_blocks(
             )
             consumed.update(run.block_ids)
             continue
-        if _overlayable(block, realization_plan):
+        if _overlayable(block):
             box = block.bbox
             assert box is not None  # narrowed by _overlayable's guard
             if block.provenance.get("toc_entry"):
@@ -2706,35 +2585,12 @@ def overlays_from_blocks(
     return tuple(overlays)
 
 
-def compose_layered(
-    document: Document,
-    attestations: Sequence[Attestation],
-    delivered: Mapping[str, str],
-    source_pdf: str | Path,
-    output_path: str | Path,
-    *,
-    typesetter: FragmentTypesetter | None = None,
-) -> Composition:
-    """Compose a realized document with :class:`LayerCompositor` (opt-in).
-
-    A thin driver over :func:`overlays_from_document` + :class:`LayerCompositor`,
-    so a caller can try the layered lowering without changing the default render
-    engine.
-    """
-    overlays = overlays_from_document(document, attestations, delivered)
-    return LayerCompositor(source_pdf, typesetter=typesetter).compose(overlays, output_path)
-
-
 __all__ = [
     "Composition",
     "FragmentTypesetter",
     "LayerCompositor",
-    "LoweringUnsupported",
     "Overlay",
     "Placement",
     "TypstFragmentTypesetter",
-    "compose",
-    "compose_layered",
     "overlays_from_blocks",
-    "overlays_from_document",
 ]

@@ -23,6 +23,7 @@ from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
 
+from ubt.cli.commands import resolve_db_dir
 from ubt.core.content.contract import ReconciliationReport
 from ubt.core.content.verify import (
     contract_from_ledger,
@@ -34,13 +35,6 @@ from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.job_options import job_id_is_valid
 
 console = Console()
-
-
-def _get_resolve_db_dir() -> Any:
-    # Single owner: main._resolve_db_dir (same seam the status command uses).
-    from ubt.cli.main import _resolve_db_dir
-
-    return _resolve_db_dir
 
 
 def _render(report: ReconciliationReport, *, title: str) -> None:
@@ -157,7 +151,7 @@ def _verify_job(job: str, *, db_dir: Any, json_output: bool) -> ReconciliationRe
         else:
             console.print(f"[bold red]Invalid job id:[/] {escape(job)}")
         raise typer.Exit(code=2)
-    resolve_fn = _get_resolve_db_dir()
+    resolve_fn = resolve_db_dir()
     resolved = resolve_fn(db_dir)
     db_path = Path(resolved) / f"{job}.sqlite"
     if not db_path.exists():
@@ -322,7 +316,7 @@ def _resolve_case(case: Any, *, corpus_dir: Path, db_dir: Any, run: bool) -> Rec
             raise _CaseSkipped(f"artifact missing: {artifact}")
         return load_contract(artifact)
     if case.job:
-        resolve_fn = _get_resolve_db_dir()
+        resolve_fn = resolve_db_dir()
         resolved = resolve_fn(db_dir)
         db_path = Path(resolved) / f"{case.job}.sqlite"
         if not db_path.exists():

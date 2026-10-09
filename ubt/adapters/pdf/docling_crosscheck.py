@@ -33,6 +33,8 @@ from pathlib import Path
 from ubt.adapters.pdf.textgeom import (
     CharStyle,
     LineBox,
+    box_area,
+    box_iou,
     extract_char_styles,
     extract_lines,
     styled_runs_in_box,
@@ -51,20 +53,6 @@ _VERIFIABLE_TYPES = frozenset(
 
 #: Default IoU threshold below which a Docling box is considered ungrounded or displaced.
 DEFAULT_MIN_IOU = 0.60
-
-
-def _box_area(x0: float, y0: float, x1: float, y1: float) -> float:
-    return max(0.0, x1 - x0) * max(0.0, y1 - y0)
-
-
-def _box_iou(a: tuple[float, float, float, float], b: tuple[float, float, float, float]) -> float:
-    ix0, iy0 = max(a[0], b[0]), max(a[1], b[1])
-    ix1, iy1 = min(a[2], b[2]), min(a[3], b[3])
-    inter = _box_area(ix0, iy0, ix1, iy1)
-    if inter <= 0:
-        return 0.0
-    union = _box_area(*a) + _box_area(*b) - inter
-    return inter / union if union > 0 else 0.0
 
 
 def _boxes_intersect(
@@ -541,7 +529,7 @@ def cross_check_blocks_with_pdfium(
                 continue
 
             doc_box = pbox.bbox
-            if _box_area(*doc_box) <= 0:
+            if box_area(*doc_box) <= 0:
                 continue
 
             inter_lines = [line for line in page_lines if _boxes_intersect(doc_box, line.rect)]
@@ -556,7 +544,7 @@ def cross_check_blocks_with_pdfium(
             uy0 = min(line.rect[1] for line in inter_lines)
             ux1 = max(line.rect[2] for line in inter_lines)
             uy1 = max(line.rect[3] for line in inter_lines)
-            iou = _box_iou(doc_box, (ux0, uy0, ux1, uy1))
+            iou = box_iou(doc_box, (ux0, uy0, ux1, uy1))
 
             effective_min_iou = 0.40 if text_len <= 5 else min_iou
             if iou < effective_min_iou:

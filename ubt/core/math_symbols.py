@@ -1,25 +1,24 @@
 """Shared LaTeX-command → Typst-symbol vocabulary (the render single source).
 
-Two converters own a symbol table:
+The one remaining converter is ``overlay_text`` (inline, in-place math), which
+renders through :data:`INLINE_SYMBOLS`. The historical display-block reflow
+converter (``typst_math``) was retired with the unified ``LayerCompositor``, so
+its ``DISPLAY_SYMBOLS`` table is gone too.
 
-- ``typst_math`` (display-block reflow math) → :data:`DISPLAY_SYMBOLS`
-- ``overlay_text`` (inline, in-place math)   → :data:`INLINE_SYMBOLS`
+The inline table is assembled from layers so a value fix lands once:
 
-They serve different output contexts, so this module keeps them deliberately
-separate while single-sourcing the vocabulary:
-
-- :data:`_SHARED`       — commands both recognise, with the display spelling.
-- :data:`_DISPLAY_ONLY` — commands the display converter owns; the inline
-  table admits them too (see the note on ``INLINE_SYMBOLS``) because
-  paragraph-level context math shares the display vocabulary.
-- :data:`_INLINE_ONLY`  — commands only the inline converter recognises
+- :data:`_SHARED`             — the common command vocabulary.
+- :data:`_DISPLAY_ONLY`       — the wider general/display command set; the
+  inline table admits it because paragraph-level context math shares that
+  vocabulary.
+- :data:`_INLINE_ONLY`        — commands only the inline converter recognises
   (Greek letters, the frac/sqrt/det branch, and the operator symbols the
   inline converter gained for real papers).
-- :data:`DISPLAY_VALUE_OVERRIDES` / :data:`INLINE_VALUE_OVERRIDES` — the seven
-  shared commands each side intentionally spells differently (both valid Typst).
+- :data:`INLINE_VALUE_OVERRIDES` — the seven shared commands the inline
+  converter spells differently from the general vocabulary (all valid Typst).
 
-A value fix (e.g. ``\\cap`` → ``inter``) therefore lands once and reaches both
-tables, so the two maps cannot silently drift apart again.
+A value fix (e.g. ``\\cap`` → ``inter``) therefore lands once and reaches the
+table.
 
 :data:`INLINE_RENDERABLE_COMMANDS` is the set the inline converter can actually
 emit: the symbol-table keys plus the commands handled by dedicated pre-passes
@@ -71,7 +70,9 @@ _SHARED: dict[str, str] = {
     "vartheta": "theta.alt",
 }
 
-# Commands only the display converter (typst_math) maps.
+# General/display command vocabulary. The retired display converter owned it;
+# the inline table still admits it (see INLINE_SYMBOLS) because paragraph-level
+# context math uses the same commands.
 _DISPLAY_ONLY: dict[str, str] = {
     "Leftarrow": "<=",
     "Leftrightarrow": "<=>",
@@ -136,13 +137,6 @@ _DISPLAY_ONLY: dict[str, str] = {
     "models": "models",
     "emptyset": "emptyset",
     "vdots": "dots.v",
-}
-
-#: Display-only commands whose value is not safe for the inline converter's
-#: word-run quoter (it would quote the string literal's contents). They are in
-#: :data:`DISPLAY_SYMBOLS` but deliberately not in :data:`INLINE_SYMBOLS`.
-_DISPLAY_TEXT_ONLY: dict[str, str] = {
-    "ReLU": 'upright("ReLU")',
 }
 
 # Commands only the inline converter (overlay_text) maps.
@@ -257,16 +251,8 @@ _INLINE_ONLY: dict[str, str] = {
     "Longleftarrow": "arrow.l.double.long",
 }
 
-# The seven shared commands each context spells differently (both valid Typst).
-DISPLAY_VALUE_OVERRIDES: dict[str, str] = {
-    "cdot": "dot.c",
-    "geq": ">=",
-    "leq": "<=",
-    "neq": "!=",
-    "varepsilon": "epsilon.alt",
-    "varphi": "phi.alt",
-    "vartheta": "theta.alt",
-}
+# The seven shared commands the inline converter spells differently from the
+# general vocabulary (all valid Typst).
 INLINE_VALUE_OVERRIDES: dict[str, str] = {
     "cdot": "dot",
     "geq": "gt.eq",
@@ -323,15 +309,12 @@ def _merged(*layers: dict[str, str]) -> dict[str, str]:
     return merged
 
 
-DISPLAY_SYMBOLS: dict[str, str] = _merged(
-    _SHARED, DISPLAY_VALUE_OVERRIDES, _DISPLAY_ONLY, _DISPLAY_TEXT_ONLY
-)
-# Paragraph-level context math uses the same command vocabulary as display
-# math (``\to``, ``\mapsto``, ``\simeq``, set operators, ...). Restricting the
-# inline table to _INLINE_ONLY made valid LaTeX fail closed and the rigid
-# renderer painted the escaped command bytes. Keep the value overrides, then
-# admit the general/display vocabulary; TypstMathProbe remains the final
-# compile gate for syntax this lightweight converter cannot represent.
+# Paragraph-level context math uses the general/display command vocabulary
+# (``\to``, ``\mapsto``, ``\simeq``, set operators, ...). Restricting the inline
+# table to _INLINE_ONLY made valid LaTeX fail closed and the renderer painted
+# the escaped command bytes. Keep the value overrides, then admit the
+# general/display vocabulary; TypstMathProbe remains the final compile gate for
+# syntax this lightweight converter cannot represent.
 INLINE_SYMBOLS: dict[str, str] = _merged(
     _SHARED, INLINE_VALUE_OVERRIDES, _DISPLAY_ONLY, _INLINE_ONLY
 )

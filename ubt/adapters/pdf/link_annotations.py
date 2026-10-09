@@ -8,7 +8,7 @@ dictionaries with static bounding boxes (`/Rect`).
 
 Because translated words occupy different horizontal and vertical positions,
 leaving `/Rect` unchanged renders the links non-clickable ("dead text") at their
-new positions, while creating confusing "ghost click" zones at the old coordinates.
+new positions, while creating confusing "ghost click" zones at the original coordinates.
 
 This module inspects the source page and the compiled overlay PDF, locates the
 new character/glyph bounding boxes of corresponding citations and links, and
@@ -78,7 +78,7 @@ def _extract_candidates_from_annot(
 
     ``figure_prefix``/``table_prefix`` are the target language's caption labels
     (e.g. "图"/"表" for Chinese), used to rebuild a cross-reference whose label
-    the translation replaced.
+    the translation changed.
     """
     candidates: list[str] = []
     raw = src_text.strip()
@@ -171,7 +171,7 @@ def relocate_page_annotations(
     selects which page of it holds the translation for ``page_no``. A per-page
     overlay passes 0 (its only page); a whole composed document passes
     ``page_no - 1``. ``figure_prefix``/``table_prefix`` are the target language's
-    caption labels, used to rebuild a translated cross-reference.
+    caption labels, used to rebuild a translated cross-reference in the target.
 
     Returns the count of modified annotations (relocated + pruned).
     """

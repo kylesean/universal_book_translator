@@ -93,11 +93,11 @@ async def _audit_pass_sample(
 ) -> list[IRBlock]:
     """FastPass-passing blocks whose sampled QE score falls below ``threshold``.
 
-    FastPass-passing blocks used to be written straight to ``MTQE_PASSED``, so
-    the ``pass_sample`` mechanism meant to audit a fraction of clean passes
-    (``TieredQERunner``) could never see them — the knob was inert. When the
-    runner samples passes, score them here and route any below-threshold block
-    back into repair. A plain heuristic/COMET runner has no ``pass_sample``, so
+    A FastPass-passing block written straight to ``MTQE_PASSED`` would be
+    invisible to the ``pass_sample`` mechanism meant to audit a fraction of clean
+    passes (``TieredQERunner``), leaving that knob inert. When the runner samples
+    passes, they are scored here and any below-threshold block is routed back
+    into repair. A plain heuristic/COMET runner has no ``pass_sample``, so
     the default configuration is unchanged.
     """
     if getattr(qe_runner, "pass_sample", 0.0) <= 0.0 or not blocks:

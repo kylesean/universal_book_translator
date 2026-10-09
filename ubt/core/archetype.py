@@ -1,8 +1,9 @@
-"""Pure document-archetype detection, shared by the advisor and the assess quote.
+"""Pure document-archetype detection, shared by the assess quote and the
+pipeline's routing policy.
 
 Lives in ``core`` because neither consumer may reach into the other's layer:
-:mod:`ubt.core.advisor` turns this data into recommendations and
-``ubt.core.assess`` consumes it machine-readably.
+``ubt.core.assess`` consumes it machine-readably and the pipeline's policy
+reads it for routing.
 Detection is zero-token and, for PDF, only ever touches pdfium through the
 serialized gate reached via ``ubt.core.ports`` (this module names no adapter
 module and no heavy PDF dependency directly).

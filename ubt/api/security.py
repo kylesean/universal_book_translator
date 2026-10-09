@@ -38,8 +38,8 @@ def _log_startup_auth_warning(config: UBTConfig | None = None) -> None:
     )
 
 
-#: Explicit opt-out for a throwaway local server. The old "open by default"
-#: behaviour is now a deliberate, named decision rather than a silent default.
+#: Explicit opt-out for a throwaway local server: a deliberate, named decision
+#: rather than a silent open-by-default.
 _NO_AUTH_OVERRIDE_ENV = "UBT_ALLOW_NO_AUTH"
 
 

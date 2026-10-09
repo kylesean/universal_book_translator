@@ -1,16 +1,10 @@
-"""Semantic HTML lowering: the Document as a web view (semantic document lowering layer).
+"""Semantic HTML lowering: the delivered blocks as a web view.
 
-The first non-PDF view, and deliberately a *view*, not a reader: it lowers the
-same typed :class:`~ubt.model.ast.Document` the kernel already realizes to
-semantic HTML, using each element's :class:`~ubt.model.fidelity.Attestation` to
-pick its text -- the delivered translation where the element was reconstructed,
-the opaque source slice where it was preserved. It is the HTML twin of
-:func:`ubt.render.outputs.compose`: same coverage rule (a missing attestation is
-a refusal, not a silent gap), same ``Placement`` record.
-
-It is a *plain* view: the AST deliberately does not model inline structure
-(links, emphasis) yet, so paragraphs become text-only ``<p>``. That is the honest
-first step; a richer view arrives when the AST can carry what it needs.
+It lowers the run's blocks to semantic HTML, using each block's delivered text:
+the translation where one was placed, the source slice where the block was kept.
+A block's HTML tag follows its typed element, so a heading becomes ``<h2>``, a
+list item ``<li>``, and so on. It is a *plain* view -- the AST does not model
+inline structure (links, emphasis), so paragraphs become text-only ``<p>``.
 """
 
 from __future__ import annotations
@@ -19,11 +13,11 @@ import html
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from ubt.core.ir.models import IRBlock
 from ubt.model.ast import (
     Caption,
     CodeBlock,
     Dialogue,
-    Document,
     Element,
     Figure,
     Formula,
@@ -32,10 +26,7 @@ from ubt.model.ast import (
     Paragraph,
     Table,
 )
-from ubt.model.fidelity import Attestation, Fidelity
-from ubt.model.span import CanonicalSource
-from ubt.render.outputs import Composition, LoweringUnsupported, Placement
-from ubt.render.overlay_backend import source_slice
+from ubt.render.outputs import Composition, Placement
 
 _TAIL = "</body>\n</html>\n"
 
@@ -54,18 +45,23 @@ def document_head(lang: str = "en", direction: str = "ltr") -> str:
     )
 
 
-def _element_text(
-    element: Element,
-    fidelity: Fidelity,
-    source: CanonicalSource,
-    delivered: Mapping[str, str],
-) -> str:
-    """The text this element was attested to carry (translation or source slice)."""
-    if fidelity > Fidelity.PRESERVED_OPAQUE:
-        target = delivered.get(element.id, "")
-        if target:
-            return target
-    return source_slice(element, source)
+def element_text(block: IRBlock, translations: Mapping[str, str]) -> str:
+    """The text this block delivers: its placed translation, else its source."""
+    target = (translations.get(block.id) or block.target_text or "").strip()
+    if target and not _kept_in_source(block):
+        return target
+    return block.source_text or ""
+
+
+def _kept_in_source(block: IRBlock) -> bool:
+    """Whether the delivery keeps this block in the source (deliberate or fail-closed)."""
+    if block.skip_translate:
+        return True
+    flags = block.error_flags or []
+    return any(
+        isinstance(flag, str) and flag.startswith(("render_skip:", "inplace_skip:"))
+        for flag in flags
+    )
 
 
 def _render_element(element: Element, body: str) -> str:
@@ -91,28 +87,19 @@ def _render_element(element: Element, body: str) -> str:
 
 
 def render_fragment(
-    document: Document,
-    attestations: Sequence[Attestation],
-    delivered: Mapping[str, str],
+    blocks: Sequence[IRBlock],
+    translations: Mapping[str, str],
 ) -> tuple[str, tuple[Placement, ...]]:
     """The element HTML and every placement, without the document wrapper.
 
-    Shared by the HTML view and the EPUB view, so both lower elements the same
-    way and neither re-derives the attestation-to-text rule.
+    Shared by the HTML view and the EPUB view, so both lower blocks the same way.
     """
-    by_id = {attestation.element_id: attestation for attestation in attestations}
-    unjudged = [element.id for element in document.elements if element.id not in by_id]
-    if unjudged:
-        raise LoweringUnsupported(
-            f"{len(unjudged)} element(s) have no attestation: {', '.join(unjudged[:5])}"
-        )
-
     parts: list[str] = []
     placements: list[Placement] = []
     list_open = False
-    for element in document.elements:
-        attestation = by_id[element.id]
-        body = html.escape(_element_text(element, attestation.fidelity, document.source, delivered))
+    for block in sorted(blocks, key=lambda b: b.spine_index):
+        element = block.element
+        body = html.escape(element_text(block, translations))
         if isinstance(element, ListItem):
             if not list_open:
                 parts.append("<ul>")
@@ -125,11 +112,10 @@ def render_fragment(
             parts.append(_render_element(element, body))
         placements.append(
             Placement(
-                element.id,
+                block.id,
                 element.span.page,
-                attestation.fidelity,
-                attestation.fidelity,
-                f"html:{element.kind}",
+                drawn=not _kept_in_source(block),
+                detail=f"html:{element.kind}",
             )
         )
     if list_open:
@@ -138,25 +124,24 @@ def render_fragment(
 
 
 def compose_html(
-    document: Document,
-    attestations: Sequence[Attestation],
-    delivered: Mapping[str, str],
+    blocks: Sequence[IRBlock],
+    translations: Mapping[str, str],
     output_path: str | Path,
     *,
     lang: str = "en",
     direction: str = "ltr",
 ) -> Composition:
-    """Lower a realized document to semantic HTML, recording every placement.
+    """Lower the delivered blocks to semantic HTML, recording every placement.
 
     ``lang``/``direction`` describe the *target* language; a right-to-left target
     gets ``dir="rtl"`` on the root element so a browser lays the document out
     right-to-left (the text stays in logical order).
     """
-    fragment, placements = render_fragment(document, attestations, delivered)
+    fragment, placements = render_fragment(blocks, translations)
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(f"{document_head(lang, direction)}{fragment}\n{_TAIL}", encoding="utf-8")
     return Composition(output_path=output, placements=placements)
 
 
-__all__ = ["compose_html", "render_fragment"]
+__all__ = ["compose_html", "element_text", "render_fragment"]

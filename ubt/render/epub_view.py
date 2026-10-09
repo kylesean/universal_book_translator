@@ -1,12 +1,10 @@
-"""EPUB lowering: the Document as an EPUB 3 package (semantic document lowering layer).
+"""EPUB lowering: the delivered blocks as an EPUB 3 package.
 
-The second non-PDF view. It reuses :func:`ubt.render.html_view.render_fragment`
-for the XHTML body, so the HTML and EPUB views lower elements identically, and
-wraps it in a minimal, valid EPUB 3 container (``mimetype`` stored first, OPF
-metadata, a nav document, one content document). As with the HTML view it is a
-*plain* view: the AST does not model inline structure yet, so paragraphs are
-text-only. Same coverage rule as every lowering -- a missing attestation is a
-refusal, not a silent gap.
+It reuses :func:`ubt.render.html_view.render_fragment` for the XHTML body, so the
+HTML and EPUB views lower blocks identically, and wraps it in a minimal, valid
+EPUB 3 container (``mimetype`` stored first, OPF metadata, a nav document, one
+content document). As with the HTML view it is a *plain* view: the AST does not
+model inline structure, so paragraphs are text-only.
 """
 
 from __future__ import annotations
@@ -16,8 +14,7 @@ import zipfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from ubt.model.ast import Document
-from ubt.model.fidelity import Attestation
+from ubt.core.ir.models import IRBlock
 from ubt.render.html_view import render_fragment
 from ubt.render.outputs import Composition
 
@@ -74,25 +71,25 @@ def _nav(title: str, lang: str, direction: str = "ltr") -> str:
 
 
 def compose_epub(
-    document: Document,
-    attestations: Sequence[Attestation],
-    delivered: Mapping[str, str],
+    blocks: Sequence[IRBlock],
+    translations: Mapping[str, str],
     output_path: str | Path,
     *,
     title: str = "UBT translation",
     lang: str = "en",
     direction: str = "ltr",
+    doc_id: str = "",
 ) -> Composition:
-    """Lower a realized document to an EPUB 3 package, recording every placement.
+    """Lower the delivered blocks to an EPUB 3 package, recording every placement.
 
     ``lang``/``direction`` describe the target language; an RTL target sets
     ``dir="rtl"`` on the content documents and ``page-progression-direction`` on
     the spine, so a reading system turns pages right-to-left.
     """
-    fragment, placements = render_fragment(document, attestations, delivered)
+    fragment, placements = render_fragment(blocks, translations)
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
-    identifier = f"urn:ubt:{document.source.doc_id or 'document'}"
+    identifier = f"urn:ubt:{doc_id or 'document'}"
 
     with zipfile.ZipFile(output, "w") as archive:
         # The OCF spec requires ``mimetype`` first and uncompressed.

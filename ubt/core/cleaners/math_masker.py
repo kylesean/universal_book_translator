@@ -24,9 +24,13 @@ import re
 from ubt.core.cleaners.inline_math import (
     is_math_content,
 )
-from ubt.core.cleaners.mask_tokens import RestoreStyle, UnmaskReport, restore_masked, token_patterns
+from ubt.core.cleaners.mask_tokens import (
+    BaseMasker,
+    RestoreStyle,
+    TokenFactory,
+    token_patterns,
+)
 from ubt.core.cleaners.mask_tokens import order_by_position as _order_by_position
-from ubt.core.cleaners.mask_tokens import token_checksum as _token_checksum
 
 _MASK_PREFIX = "⟦MATH_MASK_"
 
@@ -65,28 +69,21 @@ _PAREN_MATH_PATTERN = re.compile(r"\\\((.+?)\\\)")
 _BRACKET_MATH_PATTERN = re.compile(r"\\\[(.+?)\\\]", re.DOTALL)
 
 
-class MathMasker:
+class MathMasker(BaseMasker):
     """Masks inline math spans before translation and unmasks afterwards."""
 
-    def __init__(self, mask_prefix: str = _MASK_PREFIX) -> None:
-        self.mask_prefix = mask_prefix
+    default_prefix = _MASK_PREFIX
 
     def mask(self, text: str) -> tuple[str, dict[str, str]]:
         """Replace math spans with protective tokens; returns (masked, mapping).
 
         Tokens carry a checksum suffix (``⟦MATH_MASK_0001-a3f⟧``) binding the
-        index to the masked original; see :func:`_token_checksum`.
+        index to the masked original; see :func:`~ubt.core.cleaners.mask_tokens.token_checksum`.
         """
-        mapping: dict[str, str] = {}
-        counter = 1
+        factory = TokenFactory(self.mask_prefix)
 
         def _replace(match: re.Match[str]) -> str:
-            nonlocal counter
-            original = match.group(0)
-            token = f"{self.mask_prefix}{counter:04d}-{_token_checksum(counter, original)}⟧"
-            mapping[token] = original
-            counter += 1
-            return token
+            return factory.next(match.group(0))
 
         def _replace_guarded(match: re.Match[str]) -> str:
             if not is_math_content(match.group(1)):
@@ -109,15 +106,7 @@ class MathMasker:
                 last_end = m.end()
             pieces.append(masked[last_end:])
             masked = "".join(pieces)
-        return masked, _order_by_position(masked, mapping)
-
-    def unmask(self, text: str, mapping: dict[str, str]) -> str:
-        """Restore math tokens (mutations included); see :func:`restore_masked`."""
-        return restore_masked(text, mapping, self._restore_style()).text
-
-    def unmask_checked(self, text: str, mapping: dict[str, str]) -> UnmaskReport:
-        """Restore plus integrity verification; see :class:`UnmaskReport`."""
-        return restore_masked(text, mapping, self._restore_style())
+        return masked, _order_by_position(masked, factory.mapping)
 
     def _restore_style(self) -> RestoreStyle:
         fuzzy, scan = token_patterns(self.mask_prefix, "MATH")

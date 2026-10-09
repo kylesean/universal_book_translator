@@ -1,20 +1,14 @@
-"""Artifact-level attestation check (artifact-level attestation check).
+"""Artifact-level delivery check.
 
-The attestation layer says, per element, what was realized -- a verified
-translation, a reconstructed asset, or the source kept whole. This closes the
-loop on the *delivered artifact*: does the file a reader gets actually carry the
-realization the attestation claims?
+Closes the loop on the *delivered artifact*: does the file a reader gets
+actually carry the translation the run placed? It is deliberately narrow. Only
+*text* blocks are checked, and only by their delivered text: an asset's
+realization is markup (a formula's LaTeX, a table's grid), which is drawn rather
+than spelled out. A text block with a placed target must show that target in the
+artifact; one kept in the source must show its source.
 
-It is deliberately narrow. Only *text* elements are checked, and only by their
-delivered text: an asset's realization is markup (a formula's LaTeX, a table's
-grid), which is drawn rather than spelled out, so its fidelity is a pixel claim
-the witnesses make -- not something a text probe can confirm. A text element
-attested above the floor must show its translation in the artifact; one kept at
-the floor must show its source.
-
-During the migration this measures the "output fidelity ≥ legacy baseline" criterion on every real
-delivery instead of only in a corpus run. It is a *report*: a missing element is
-surfaced, never silently tolerated, and never allowed to sink the artifact.
+It is a *report*: a missing block is surfaced, never silently tolerated, and
+never allowed to sink the artifact.
 """
 
 from __future__ import annotations
@@ -25,12 +19,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ubt.core.cjk_ranges import CJK_BMP_CLASS
+from ubt.core.ir.models import BlockType, IRBlock
 from ubt.core.job_options import SidecarKind, companion_path, sidecar_path
 from ubt.core.qe.fast_pass import strip_rehearsal_marker
-from ubt.model.ast import Document, Element
-from ubt.model.fidelity import Attestation, Fidelity
-from ubt.model.span import CanonicalSource
-from ubt.render.overlay_backend import source_slice
 
 #: Shortest delivered text worth probing for. Below this a match is noise -- a
 #: bullet, a lone glyph -- and the check says nothing either way.
@@ -52,17 +43,16 @@ def _tokenize(text: str) -> list[str]:
 
 @dataclass(frozen=True, slots=True)
 class ElementCheck:
-    """One text element's claim, and whether the artifact carries it."""
+    """One text block's claim, and whether the artifact carries it."""
 
     element_id: str
-    fidelity: Fidelity
     page: int
     present: bool
 
 
 @dataclass(frozen=True, slots=True)
 class ArtifactReport:
-    """The artifact's agreement with the attestations, element by element."""
+    """The artifact's agreement with the delivered text, block by block."""
 
     total: int
     checks: tuple[ElementCheck, ...]
@@ -140,51 +130,40 @@ def _present(expected: str, tokens: frozenset[str]) -> bool:
     return hits / len(wanted) >= _MIN_OVERLAP
 
 
-def _expected(
-    element: Element,
-    fidelity: Fidelity,
-    source: CanonicalSource,
-    delivered: Mapping[str, str],
-) -> str:
-    """The text the attestation says the artifact carries for this element.
+def _expected(block: IRBlock, translations: Mapping[str, str]) -> str:
+    """The text the artifact should carry for this block.
 
     A leading rehearsal prefix is stripped to match the renderer, which never
     places it (see :func:`ubt.core.qe.fast_pass.strip_rehearsal_marker`); without
     this the audit demanded a marker the artifact is right not to contain.
     """
-    if fidelity > Fidelity.PRESERVED_OPAQUE:
-        return strip_rehearsal_marker(delivered.get(element.id, ""))
-    return strip_rehearsal_marker(source_slice(element, source))
+    target = (translations.get(block.id) or "").strip()
+    if target:
+        return strip_rehearsal_marker(target)
+    return strip_rehearsal_marker(block.source_text or "")
 
 
 def check_artifact(
-    document: Document,
-    attestations: Sequence[Attestation],
-    delivered: Mapping[str, str],
+    blocks: Sequence[IRBlock],
+    translations: Mapping[str, str],
     artifact_pdf: str | Path,
 ) -> ArtifactReport:
-    """Check every attested *text* element against the delivered artifact.
+    """Check every delivered *text* block against the artifact.
 
-    ``delivered`` is the run's ``element id -> target`` map (the same one the
-    backend is built with); a text element attested above the floor is expected to
-    show its target, one at the floor its source. Assets are not text claims and
-    are skipped.
+    ``translations`` is the run's ``element id -> placed target`` map; a text
+    block with a placed target is expected to show it, one kept in the source its
+    source. Assets are not text claims and are skipped.
     """
     text = _artifact_tokens(Path(artifact_pdf))
-    by_id = {attestation.element_id: attestation for attestation in attestations}
     checks: list[ElementCheck] = []
-    for element in document.elements:
-        if not element.is_text:
+    for block in blocks:
+        if block.block_type in (BlockType.FORMULA, BlockType.TABLE, BlockType.IMAGE):
             continue
-        attestation = by_id.get(element.id)
-        if attestation is None:
-            continue
-        expected = _normalize(_expected(element, attestation.fidelity, document.source, delivered))
+        expected = _normalize(_expected(block, translations))
         checks.append(
             ElementCheck(
-                element.id,
-                attestation.fidelity,
-                element.span.page,
+                block.id,
+                block.bbox.page if block.bbox is not None else 0,
                 _present(expected, text),
             )
         )

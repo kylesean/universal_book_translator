@@ -114,7 +114,7 @@ async def run_mode_advisory_stage(
     layout.enforcement = enforcement
 
     # Run-policy keys: the renderer reads these off the plan (compiler
-    # render plan protocol). They are no longer posted on manifest.run.
+    # render plan protocol). They are passed as arguments, not posted on manifest.run.
     render.translate_chrome = config.translate_chrome
     render.cover_mode = config.cover_mode
 

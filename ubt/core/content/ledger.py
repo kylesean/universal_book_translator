@@ -5,7 +5,7 @@ node it saw, what it did with it; the ledgers record that, and
 :func:`ubt.core.content.contract.reconcile` checks the books balance. Because
 the ledgers are built from the *graph* (not the renderer), a node the renderer
 forgot to mention shows up as a missing book entry -- which is exactly the
-failure mode that used to slip through as "no error reported".
+failure mode that would otherwise slip through as "no error reported".
 """
 
 from __future__ import annotations

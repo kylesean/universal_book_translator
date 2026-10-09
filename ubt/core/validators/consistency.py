@@ -827,7 +827,7 @@ class GlossaryConsistencyValidator(ContentValidator):
         # Detection (source-side [source] + aliases, boundary-aware, folding
         # case on both sides) is single-sourced in term_drift — the same scan
         # evaluate_terms and the span annotator consume — so the quality gate
-        # and the consistency planner can no longer disagree about which
+        # and the consistency planner cannot disagree about which
         # blocks drifted. detect_term_drift derives the structural spans of
         # each side once and reuses them for every term of the block.
         findings = detect_term_drift(original or "", translated or "", self.glossary)

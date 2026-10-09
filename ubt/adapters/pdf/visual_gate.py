@@ -268,26 +268,14 @@ def blank_page_candidates(pdf_path: Path, min_chars: int = BLANK_TEXT_THRESHOLD_
     return [idx for idx, text in enumerate(texts, start=1) if len(text.strip()) < min_chars]
 
 
-def _box_area(x0: float, y0: float, x1: float, y1: float) -> float:
-    return max(0.0, x1 - x0) * max(0.0, y1 - y0)
-
-
-def _box_iou(a: tuple[float, float, float, float], b: tuple[float, float, float, float]) -> float:
-    ix0, iy0 = max(a[0], b[0]), max(a[1], b[1])
-    ix1, iy1 = min(a[2], b[2]), min(a[3], b[3])
-    inter = _box_area(ix0, iy0, ix1, iy1)
-    if inter <= 0:
-        return 0.0
-    union = _box_area(*a) + _box_area(*b) - inter
-    return inter / union if union > 0 else 0.0
-
-
 def block_overlap_findings(blocks: Sequence[object]) -> list[VisualFinding]:
     """T1: flag heavily overlapping text blocks on the same page.
 
     Accepts IRBlock-like objects (duck-typed ``bbox``) to avoid importing IR
     models here; anything without a usable bbox is skipped.
     """
+    from ubt.adapters.pdf.textgeom import box_area, box_iou
+
     findings: list[VisualFinding] = []
     by_page: dict[int, list[tuple[str, tuple[float, float, float, float]]]] = {}
     for block in blocks:
@@ -299,7 +287,7 @@ def block_overlap_findings(blocks: Sequence[object]) -> list[VisualFinding]:
             rect = (float(bbox.x0), float(bbox.y0), float(bbox.x1), float(bbox.y1))
         except (AttributeError, TypeError, ValueError):
             continue
-        if _box_area(*rect) < MIN_OVERLAP_AREA_PT2:
+        if box_area(*rect) < MIN_OVERLAP_AREA_PT2:
             continue
         block_id = str(getattr(block, "id", "?"))
         by_page.setdefault(page, []).append((block_id, rect))
@@ -307,7 +295,7 @@ def block_overlap_findings(blocks: Sequence[object]) -> list[VisualFinding]:
         capped = items[:200]  # bound O(n^2) on pathological pages
         for i in range(len(capped)):
             for j in range(i + 1, len(capped)):
-                if _box_iou(capped[i][1], capped[j][1]) >= OVERLAP_IOU_THRESHOLD:
+                if box_iou(capped[i][1], capped[j][1]) >= OVERLAP_IOU_THRESHOLD:
                     findings.append(
                         VisualFinding(
                             severity="major",

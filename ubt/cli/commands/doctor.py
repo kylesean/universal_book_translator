@@ -46,8 +46,8 @@ class _Check:
 
     ``detail`` is the diagnosis (what is true right now); ``fix`` is the action
     the operator must take. Keeping them apart is the point of the checklist —
-    the remediation used to be buried mid-sentence in the detail, where it read
-    as one more wrapped line of prose.
+    a remediation buried mid-sentence in the detail reads as one more wrapped
+    line of prose.
     """
 
     group: str
@@ -96,8 +96,8 @@ def _emit_human(checks: list[_Check]) -> None:
     """Render the checks as a grouped, borderless checklist.
 
     A borderless table (not a boxed one) gives the wrapped detail a hanging
-    indent under its check, so a long remediation path no longer stretches one
-    row across eight terminal lines and destroys the table's rhythm.
+    indent under its check, so a long remediation path does not stretch one row
+    across eight terminal lines and destroy the table's rhythm.
     """
     summary = _summary(checks)
     header = (

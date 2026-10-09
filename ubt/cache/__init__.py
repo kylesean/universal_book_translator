@@ -2,8 +2,8 @@
 
 :func:`ubt.cache.store.step_key` names a step invocation by its content, and a
 :class:`~ubt.cache.store.CacheStore` returns the stored value or computes it
-once. Only expensive pure steps are wrapped (see
-:mod:`ubt.adapters.pdf.witness_cache` for the render path's pixel witnesses).
+once. Only expensive pure steps are wrapped (see the draft-stage translation
+cache and the PDF page profiler).
 """
 
 from __future__ import annotations

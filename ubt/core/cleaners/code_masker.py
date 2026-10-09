@@ -2,19 +2,22 @@
 
 import re
 
-from ubt.core.cleaners.mask_tokens import RestoreStyle, UnmaskReport, restore_masked, token_patterns
+from ubt.core.cleaners.mask_tokens import (
+    BaseMasker,
+    RestoreStyle,
+    TokenFactory,
+    token_patterns,
+)
 from ubt.core.cleaners.mask_tokens import order_by_position as _order_by_position
-from ubt.core.cleaners.mask_tokens import token_checksum as _token_checksum
 
 _FENCED_CODE_PATTERN = re.compile(r"```[\w]*\n[\s\S]*?\n```|```[\s\S]*?```")
 _INLINE_CODE_PATTERN = re.compile(r"`[^`\n]+`")
 
 
-class CodeMasker:
+class CodeMasker(BaseMasker):
     """Masks code blocks and inline code spans before translation, and unmasks them afterward."""
 
-    def __init__(self, mask_prefix: str = "⟦CODE_MASK_") -> None:
-        self.mask_prefix = mask_prefix
+    default_prefix = "⟦CODE_MASK_"
 
     def mask(self, text: str) -> tuple[str, dict[str, str]]:
         """Replace code blocks and inline code with deterministic protective tokens.
@@ -23,30 +26,13 @@ class CodeMasker:
         index to the masked original; see
         :func:`~ubt.core.cleaners.mask_tokens.token_checksum`.
         """
-        mapping: dict[str, str] = {}
-        counter = 1
-
-        def _replace(match: re.Match[str]) -> str:
-            nonlocal counter
-            original = match.group(0)
-            token = f"{self.mask_prefix}{counter:04d}-{_token_checksum(counter, original)}⟧"
-            mapping[token] = original
-            counter += 1
-            return token
+        factory = TokenFactory(self.mask_prefix)
 
         # 1. Mask fenced multi-line code blocks first
-        masked_text = _FENCED_CODE_PATTERN.sub(_replace, text)
+        masked_text = _FENCED_CODE_PATTERN.sub(lambda m: factory.next(m.group(0)), text)
         # 2. Mask remaining inline code spans
-        masked_text = _INLINE_CODE_PATTERN.sub(_replace, masked_text)
-        return masked_text, _order_by_position(masked_text, mapping)
-
-    def unmask(self, text: str, mapping: dict[str, str]) -> str:
-        """Restore code tokens (mutations included); see :func:`restore_masked`."""
-        return restore_masked(text, mapping, self._restore_style()).text
-
-    def unmask_checked(self, text: str, mapping: dict[str, str]) -> UnmaskReport:
-        """Restore plus integrity verification; see :class:`UnmaskReport`."""
-        return restore_masked(text, mapping, self._restore_style())
+        masked_text = _INLINE_CODE_PATTERN.sub(lambda m: factory.next(m.group(0)), masked_text)
+        return masked_text, _order_by_position(masked_text, factory.mapping)
 
     def _restore_style(self) -> RestoreStyle:
         fuzzy, scan = token_patterns(self.mask_prefix, "CODE")

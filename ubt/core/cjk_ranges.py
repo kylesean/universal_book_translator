@@ -1,6 +1,6 @@
 """Single source for the CJK codepoint ranges every layer matches against.
 
-These literals used to be copied per module and the copies had drifted: a
+These literals must live in one place: per-module copies drift, and a
 "canonical" tuple nobody else imported, regexes silently missing blocks,
 per-language tables with their own block ends. Every range now lives here and
 consumers compose the *tiered* sets below instead of restating numbers, so

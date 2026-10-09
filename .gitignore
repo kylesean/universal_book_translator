@@ -46,3 +46,6 @@ tests/fixtures/*.pdf
 .codex/
 .claude/
 .codegraph/
+# Agent-tooling state (mimo/cron task runner). Untracked, and not useful to a
+# clone; without this it shows up as untracked noise in every `git status`.
+.mimocode/

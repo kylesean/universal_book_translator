@@ -54,7 +54,7 @@ def _block(block_type: BlockType, *, style: StyleMeta | None = None) -> IRBlock:
 def test_a_list_items_marker_indent_reaches_the_overlay() -> None:
     style = StyleMeta(first_line_indent_pt=22.2)
     block = _block(BlockType.LIST_ITEM, style=style)
-    (overlay,) = overlays_from_blocks([block], None)
+    (overlay,) = overlays_from_blocks([block])
     assert overlay.indent_pt == pytest.approx(22.2)
     assert overlay.align_center is False
 
@@ -62,21 +62,21 @@ def test_a_list_items_marker_indent_reaches_the_overlay() -> None:
 def test_a_narrative_paragraph_keeps_its_own_indent_rule() -> None:
     style = StyleMeta(first_line_indent_pt=17.4)
     block = _block(BlockType.NARRATIVE, style=style)
-    (overlay,) = overlays_from_blocks([block], None)
+    (overlay,) = overlays_from_blocks([block])
     assert overlay.indent_pt == pytest.approx(17.4)
 
 
 def test_a_centered_heading_reaches_the_overlay() -> None:
     style = StyleMeta(alignment="center")
     block = _block(BlockType.HEADING, style=style)
-    (overlay,) = overlays_from_blocks([block], None)
+    (overlay,) = overlays_from_blocks([block])
     assert overlay.align_center is True
     assert overlay.indent_pt is None
 
 
 def test_a_left_aligned_heading_is_not_marked_centered() -> None:
     block = _block(BlockType.HEADING, style=StyleMeta())
-    (overlay,) = overlays_from_blocks([block], None)
+    (overlay,) = overlays_from_blocks([block])
     assert overlay.align_center is False
 
 
@@ -85,7 +85,7 @@ def test_centering_is_heading_only() -> None:
     # flag is a heading fact, not a general indent substitute.
     style = StyleMeta(alignment="center")
     block = _block(BlockType.NARRATIVE, style=style)
-    (overlay,) = overlays_from_blocks([block], None)
+    (overlay,) = overlays_from_blocks([block])
     assert overlay.align_center is False
 
 
@@ -110,7 +110,7 @@ def test_a_heading_with_line_boxes_builds_a_box_chain() -> None:
         PhysicalBox.of(1, (71.0, 690.0, 524.0, 705.0)),
     )
     block.element = replace(block.element, span=CompositeSpan(boxes=chain))
-    (overlay,) = overlays_from_blocks([block], None)
+    (overlay,) = overlays_from_blocks([block])
     assert overlay.boxes == chain
     assert overlay.align_center is True
 

@@ -70,7 +70,7 @@ _PAGE_SEQUENCE_MIN_RATIO = 0.5
 _ASCII_DIGITS_RE = re.compile(r"\d+", re.ASCII)
 
 # int()-from-string is capped at this many digits (4300 by default; 0 when the
-# limit is disabled). A longer all-ASCII-digit line passed the old gate and then
+# limit is disabled). A longer all-ASCII-digit line passes a naive gate and then
 # raised ``ValueError: Exceeds the limit ...`` inside the LNDS scan, crashing
 # the cleaner and the whole chapter's ingestion. Page numbers are tiny; rejecting
 # over-long lines also keeps the docstring's "int()-safe" contract literally true.
@@ -330,7 +330,7 @@ def strip_textbook_ocr_artifacts(content: str, source_lang: str = "en") -> str:
     # '/C2' -> '×' / '/C0' -> '-' rewrites would corrupt code fences
     # ('/C2/data') and inline math ('$x /C2 y$'). Only the CMap step is skipped
     # for such content — the boilerplate / page-marker / running-header stripping
-    # below must still run (a stray backtick used to disable all of it).
+    # below must still run (a stray backtick must not disable all of it).
     protect_math = (
         _has_dollar_math(content)
         or "\\begin" in content

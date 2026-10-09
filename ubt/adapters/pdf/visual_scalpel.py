@@ -117,8 +117,8 @@ def crop_block_pil(
                 # ``bbox`` comes from ``textgeom`` in the UNROTATED frame
                 # (``get_rect`` / ``get_mediabox``), so rasterize unrotated too.
                 # ``render``'s ``rotation`` is additive to the page's /Rotate, so
-                # pass its complement; the old ``get_width/height`` (display
-                # frame) + default render cropped the wrong region on a /Rotate
+                # pass its complement; using ``get_width/height`` (display frame)
+                # with the default render crops the wrong region on a /Rotate
                 # page.
                 mediabox = page.get_mediabox()
                 page_width_pt = float(mediabox[2]) - float(mediabox[0])

@@ -4,9 +4,9 @@ These are the Docling adapter's raw item helpers: read a Docling item's own
 provenance (page spans, geometry) and render its grid to markup. They never
 classify or repair -- the analyzer types directly from Docling's labels in
 :func:`ubt.adapters.pdf.docling_parser.extract_with_docling` (native analyzer AST type production).
-The caption fuse/decouple/latch heuristics that used to live here are deleted:
-Docling labels captions (``CAPTION``, ``PICTURE``, a ``FIG. N`` title), and the
-analyzer trusts those labels rather than re-guessing the boundaries afterwards.
+No caption fuse/decouple/latch heuristics live here: Docling labels captions
+(``CAPTION``, ``PICTURE``, a ``FIG. N`` title), and the analyzer trusts those
+labels rather than re-guessing the boundaries afterwards.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from ubt.core.ir.models import BlockType, BoundingBox, IRBlock
 logger = logging.getLogger(__name__)
 
 #: Unambiguous tabular/code punctuation for absorbing a table's stray bottom
-#: fragments. A bare ":" was removed: it matched ordinary prose.
+#: fragments. A bare ":" is excluded: it matches ordinary prose.
 _TABULAR_MARKERS = ("->", "←→", "| None", "tuple[", "()", "|")
 
 #: A single code-shaped token: CamelCase (``ScheduleSource``), snake_case
@@ -376,8 +376,8 @@ def merge_table_continuation_fragments(blocks: list[IRBlock]) -> list[IRBlock]:
                 break
 
             # Fragment characteristics: formula, code, or a tabular/code-shaped
-            # phrase. The old gate also accepted any block under 120 chars or
-            # one containing a bare ":", so a short body sentence directly below
+            # phrase. Accepting any block under 120 chars or one containing a
+            # bare ":" would swallow a short body sentence directly below
             # a table ("The results are shown below:") was swallowed into the
             # table block and shipped as grid markup instead of translated
             # prose. Only unambiguous structural markers qualify now.

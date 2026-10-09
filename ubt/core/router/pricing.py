@@ -205,8 +205,8 @@ def _current_prices_table() -> dict[str, PriceEntry]:
 # Fallback table, NOT the primary source: ``ubt/resources/prices.toml`` is read
 # first (step 4 of ``resolve_model_prices``) and shadows any same-key entry
 # here (step 5 uses ``len(key) > len(best_key)``, which a same-length key can
-# never satisfy). A key that also exists in the TOML is therefore unreachable
-# and has been removed. What remains are the models the TOML does not carry,
+# never satisfy). A key that also exists in the TOML is therefore unreachable,
+# so only the models the TOML does not carry belong here,
 # kept so a missing/partial resource file degrades to a *priced* run instead
 # of an unpriced one. Add new rates to ``ubt/resources/prices.toml``, not here.
 MODEL_PRICES_USD_PER_MTOK: dict[str, tuple[float, float]] = {
@@ -376,8 +376,8 @@ def price_is_known(
 # one. Absent an entry, the full input price applies (no discount assumed).
 #
 # Same fallback rule as MODEL_PRICES_USD_PER_MTOK: a key that also exists in
-# ``ubt/resources/prices.toml`` is shadowed by the TOML (step 4 precedes step 5)
-# and was removed; what remains are the models the TOML does not carry.
+# ``ubt/resources/prices.toml`` is shadowed by the TOML (step 4 precedes step 5),
+# so only the models the TOML does not carry belong here.
 CACHED_INPUT_PRICES_USD_PER_MTOK: dict[str, float] = {
     # Gemini prompt caching
     "gemini-3-flash": 0.025,

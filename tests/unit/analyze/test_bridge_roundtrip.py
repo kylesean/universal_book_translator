@@ -5,8 +5,7 @@ into the typed :class:`~ubt.model.ast.Document` and back, and the
 document-defining fields must be identical -- id, spine_index, block_type,
 flow_id, region, source_text, skip_translate, bbox. Pipeline state (status,
 ``target_text``, scores) is deliberately *not* carried: execution belongs to
-the pipeline, not to understanding. And the rebuilt document is a well-formed
-model citizen: every element gets a verifier verdict, no fall-through.
+the pipeline, not to understanding.
 """
 
 from __future__ import annotations
@@ -15,7 +14,6 @@ import pytest
 
 from ubt.analyze.bridge import blocks_from_document, document_from_blocks
 from ubt.core.ir.models import BlockStatus, BlockType, FlowID, IRBlock
-from ubt.core.qe.fast_pass import FastPassFilter
 from ubt.model.ast import (
     Caption,
     CodeBlock,
@@ -27,7 +25,6 @@ from ubt.model.ast import (
     RegionKind,
 )
 from ubt.model.span import Span
-from ubt.verify import build_verifiers, verify_element
 
 pytestmark = pytest.mark.fast
 
@@ -152,13 +149,3 @@ def test_block_type_and_flow_projection_matches_the_ir_vocabulary() -> None:
     assert by_id["c1"].skip_translate is True
     assert by_id["cap1"].flow_id is FlowID.MAIN_STORY  # region, not flow, carries it
     assert by_id["fn1"].flow_id is FlowID.FOOTNOTE
-
-
-def test_every_rebuilt_element_receives_a_verifier_verdict() -> None:
-    # A fall-through (an exception from verify_element) is the failure this
-    # gate exists to catch: the typed model must be a well-formed citizen.
-    document = document_from_blocks(_blocks(), doc_id="doc", path="book.md")
-    verifiers = build_verifiers(FastPassFilter(source_lang="en", target_lang="zh"))
-    for element in document.elements:
-        proof = verify_element(element, verifiers)
-        assert proof is not None, element.id

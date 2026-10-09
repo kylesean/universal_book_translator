@@ -17,9 +17,9 @@ one home: a run decision never goes back to the dict, and the dict never carries
 a key that is not declared there.
 
 Field defaults are ``None`` and serialization goes through
-:meth:`RunMetadata.to_metadata_dict`, which drops unset fields. That keeps the
-persisted job JSON byte-identical to what the old dict wrote: a key the run
-never set stays absent instead of appearing as an explicit ``null``.
+:meth:`RunMetadata.to_metadata_dict`, which drops unset fields: a key the run
+never set stays absent instead of appearing as an explicit ``null``, so the
+persisted job JSON carries only what the run decided.
 """
 
 from __future__ import annotations
@@ -42,7 +42,6 @@ ARTIFACT_METADATA_KEYS: Final[frozenset[str]] = frozenset(
         "is_page_slice_epub",
         "page_kinds",
         # Render telemetry, consumed by the quality report and the visual gate.
-        "formula_witness_findings",
         "render_engine_effective",
         "render_padding_pages",
         "typst_version",

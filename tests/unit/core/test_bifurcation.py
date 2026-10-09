@@ -9,7 +9,6 @@ from ubt.core.ir.bifurcation import (
 )
 from ubt.core.ir.models import BlockStatus, IRBlock
 from ubt.model.ast import Paragraph
-from ubt.model.fidelity import Fidelity
 from ubt.model.span import CompositeSpan, PhysicalBox, Span
 from ubt.render.outputs import overlays_from_blocks
 
@@ -134,7 +133,7 @@ def test_overlays_from_blocks_merges_in_box_bifurcated_siblings() -> None:
     target = f"第一句。{SEMANTIC_BREAK_TOKEN}第二句。"
     block = _make_block("b_shared", 1, (50, 50, 200, 150), source, target)
 
-    overlays = overlays_from_blocks([block], {block.id: Fidelity.RECONSTRUCTED_ADAPTED})
+    overlays = overlays_from_blocks([block])
     assert len(overlays) == 1
     overlay = overlays[0]
     assert overlay.page == 1
@@ -158,12 +157,7 @@ def test_overlays_from_blocks_multi_box_bifurcation_emits_separate_overlays() ->
     }
     block.target_text = f"第一页。{SEMANTIC_BREAK_TOKEN}第二页。"
 
-    plan = {
-        "fused_p": Fidelity.RECONSTRUCTED_ADAPTED,
-        "p1_b": Fidelity.RECONSTRUCTED_ADAPTED,
-        "p2_b": Fidelity.RECONSTRUCTED_ADAPTED,
-    }
-    overlays = overlays_from_blocks([block], plan)
+    overlays = overlays_from_blocks([block])
     assert len(overlays) == 2
     assert overlays[0].page == 1
     assert overlays[0].text == "第一页。"
@@ -193,11 +187,6 @@ def test_overlays_from_blocks_multi_box_bifurcation_with_lowercase_continuation(
     }
     block.target_text = f"第一部分。{SEMANTIC_BREAK_TOKEN}第二部分。"
 
-    plan = {
-        "fused_p": Fidelity.RECONSTRUCTED_ADAPTED,
-        "p1_b": Fidelity.RECONSTRUCTED_ADAPTED,
-        "p2_b": Fidelity.RECONSTRUCTED_ADAPTED,
-    }
-    overlays = overlays_from_blocks([block], plan)
+    overlays = overlays_from_blocks([block])
     assert len(overlays) == 2
     assert [overlay.text for overlay in overlays] == ["第一部分。", "第二部分。"]

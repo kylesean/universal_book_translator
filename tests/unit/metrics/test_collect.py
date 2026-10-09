@@ -50,7 +50,6 @@ def _report(
     preserved_blocks: int = 0,
     skipped_blocks: int = 0,
     formula_blocks: int = 0,
-    formula_fallbacks: list[str] | None = None,
     defect_flags: dict[str, int] | None = None,
     retention_rate: float = 1.0,
     non_text_residual: float = 0.0,
@@ -113,7 +112,6 @@ def _report(
             non_text_residual=non_text_residual, painted_coverage=painted_coverage, pages_measured=0
         ),
         defect_flags=defect_flags or {},
-        formula_witness_fallbacks=formula_fallbacks or [],
         formula_blocks=formula_blocks,
         route=ReportRouteInfo(mode="short", pages=pages, chars=chars),
     )
@@ -217,20 +215,6 @@ def test_collect_kpis_counts_untranslated_flags() -> None:
     )
     # Only the 'untranslated' family counts; 'unknown' must not leak in.
     assert kpis.kpis["untranslated_leak_rate"] == pytest.approx(0.2)
-
-
-def test_collect_kpis_formula_fidelity_without_a_denominator_is_zero_when_substituted() -> None:
-    # A substitution with no formula blocks recorded is a full loss, not a pass.
-    kpis = collect_kpis(_report(formula_blocks=0, formula_fallbacks=["a", "b"]))
-    assert kpis.kpis["formula_fidelity"] == 0.0
-    assert kpis.kpis["formula_substitutions"] == 2.0
-
-
-def test_collect_kpis_formula_fidelity_with_a_denominator() -> None:
-    kpis = collect_kpis(_report(formula_blocks=4, formula_fallbacks=["a"]))
-    assert kpis.kpis["formula_fidelity"] == pytest.approx(0.75)
-    # No substitutions and no formula blocks is vacuously faithful.
-    assert collect_kpis(_report(formula_blocks=0)).kpis["formula_fidelity"] == 1.0
 
 
 def test_collect_kpis_visual_rates_use_the_page_denominator() -> None:

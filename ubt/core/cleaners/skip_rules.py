@@ -136,7 +136,7 @@ _BYLINE_SEGMENT_RE = re.compile(
     r"(?:[A-Z][A-Za-z'’\-]+|(?:[A-Z]\.)+)"  # first name token or initial(s)
     r"(?:[\s,]+(?:[A-Z][A-Za-z'’\-]+|Jr\.?|Sr\.?|(?:[A-Z]\.)+))*"  # more name tokens / initials
     # Affiliation markers / superscripts. Written as ONE character class, not
-    # ``(?:[\s,]*+(?:\d+|¹|ⁿ|…)+)*``: the old nested quantifiers made
+    # ``(?:[\s,]*+(?:\d+|¹|ⁿ|…)+)*``: nested quantifiers would make
     # ``"Aa Aa, Bb " + "1"*n + "!"`` backtrack exponentially (11.7 s at n=18,
     # far worse above) and ``classify_skip`` runs on every ingested block, so a
     # crafted/malformed line could stall the ingest worker. The accepted set is

@@ -9,11 +9,10 @@ when the driver dies the pipes close, so this process is never orphaned.
 
 Why a subprocess at all: DeepSeek-OCR runs model-supplied code (gated by
 UBT_VLM_TRUST_REMOTE_CODE in the driver before launch), its compat-shimmed
-generate path has historically segfaulted through CUDA/native failures, and
-the 6.7 GB weights must be releasable by killing one process instead of
-taking the whole translation run down with them. stderr is inherited by the
-parent so HF download progress and the actionable load-error guidance stay
-visible.
+generate path can segfault through CUDA/native failures, and the 6.7 GB
+weights must be releasable by killing one process instead of taking the whole
+translation run down with them. stderr is inherited by the parent so HF
+download progress and the actionable load-error guidance stay visible.
 """
 
 from __future__ import annotations

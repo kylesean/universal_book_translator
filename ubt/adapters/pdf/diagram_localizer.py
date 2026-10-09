@@ -210,9 +210,9 @@ class DiagramLocalizer:
     def get_page_height(self, pdf_path: Path | str, page_no: int) -> float:
         """Dynamically detect page height from PDF mediabox with a bounded LRU cache.
 
-        The cache key carries the file's mtime/size: a same-path PDF replaced by
-        a re-render or a batch overwrite otherwise kept serving the old height,
-        mis-cropping every diagram on the page.
+        The cache key carries the file's mtime/size: without it, a same-path PDF
+        replaced by a re-render or a batch overwrite would keep serving the prior
+        height, mis-cropping every diagram on the page.
         """
         path = Path(pdf_path).resolve()
         pdf_str = str(path)

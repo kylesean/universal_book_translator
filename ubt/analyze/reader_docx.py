@@ -26,6 +26,7 @@ from docx.text.paragraph import Paragraph as DocxParagraph
 
 from ubt.analyze._identity import file_digest
 from ubt.analyze.assemble import assemble, number
+from ubt.analyze.normalize import collapse_whitespace as _clean
 from ubt.analyze.reader_html import pipe_table
 from ubt.model.ast import (
     Confidence,
@@ -43,10 +44,6 @@ if TYPE_CHECKING:
 
 #: Style-name prefixes that mark a heading (English and Chinese Word styles).
 _HEADING_PREFIXES = ("heading", "标题")
-
-
-def _clean(text: str) -> str:
-    return " ".join(text.split())
 
 
 def _heading_level(paragraph: DocxParagraph) -> int | None:

@@ -16,7 +16,6 @@ import pytest
 from pdf_builders import write_text_pdf
 
 from ubt.adapters.pdf import pdf_struct
-from ubt.model.fidelity import Fidelity
 from ubt.render.outputs import (
     _DEFAULT_SLACK_FONT_PT,
     _FIT_TOL,
@@ -104,7 +103,7 @@ def test_the_compositor_records_a_below_floor_draw_on_the_placement(tmp_path: Pa
         typesetter.close()
 
     (placement,) = composition.placements
-    assert placement.placed_as is Fidelity.RECONSTRUCTED_ADAPTED
+    assert placement.drawn
     assert placement.drawn_pt is not None and placement.drawn_pt < _MIN_FONT_PT
     assert composition.low_legibility_fonts == (("e1", placement.drawn_pt),)
     assert pdf_struct.page_sizes(output) == pdf_struct.page_sizes(source)

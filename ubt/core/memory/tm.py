@@ -152,9 +152,9 @@ def compute_tm_context(
 
     ``model`` is the draft-tier model that produced the stored draft. It is an
     identity axis on purpose: without it, a rerun under a different draft model
-    would short-circuit on the old model's exact hit and never call the new one.
-    The content-addressed draft cache already keys on ``model``; this is the
-    same axis, deliberately kept in lockstep.
+    would short-circuit on a same-content hit from another model and never call
+    the new one. The content-addressed draft cache already keys on ``model``;
+    this is the same axis, deliberately kept in lockstep.
 
     ``glossary_table`` and ``abbreviation_table`` are the two prompt-visible
     terminology channels (the rendered global term table and abbreviation
@@ -393,9 +393,10 @@ class TranslationMemory:
                 )
                 """
             )
-            # Context-gated exact identity. Gated on column existence so existing
-            # databases migrate idempotently; rows without a context keep context_hash=''
-            # and match default lookups or the human_pe fallback below.
+            # Context-gated exact identity. Gated on column existence so a
+            # pre-existing database gains the column idempotently; rows without a
+            # context keep context_hash='' and match default lookups or the
+            # human_pe fallback below.
             cols = {row[1] for row in conn.execute("PRAGMA table_info(tm_entries)").fetchall()}
             if "context_hash" not in cols:
                 try:
@@ -415,7 +416,7 @@ class TranslationMemory:
                 )
             # Target-side emphasis runs, so an exact hit can restore the bold the
             # marker mechanism preserved instead of serving a plain translation.
-            # Gated on column existence so existing databases migrate idempotently.
+            # Gated on column existence so a pre-existing database gains it idempotently.
             if "runs_json" not in cols:
                 try:
                     conn.execute(
@@ -579,8 +580,8 @@ class TranslationMemory:
 
             def _candidate_rank(r: tuple[Any, ...]) -> tuple[int, int, int, int]:
                 # human_pe outranks context. A PE import carries no context
-                # hash, so ranking context first let an exact-context machine
-                # row shadow the reviewed rendering — contradicting the
+                # hash, so ranking context first would let an exact-context
+                # machine row outrank the reviewed rendering, contradicting the
                 # writeback contract that human review is the highest-trust
                 # signal in the pipeline.
                 r_id = int(r[0])

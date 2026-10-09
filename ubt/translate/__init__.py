@@ -3,7 +3,7 @@
 :class:`~ubt.translate.engine.TranslationEngine` masks a unit's protected spans,
 sends the masked source to a provider-agnostic ``translate`` coroutine, restores
 under checksum verification, and marks the segment only when the restore was
-clean. It is the seam the draft stage will migrate onto.
+clean. The draft stage drives it.
 """
 
 from __future__ import annotations

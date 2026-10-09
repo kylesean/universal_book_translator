@@ -27,7 +27,6 @@ from ubt.adapters.pdf import oxide_render, pdf_struct
 from ubt.analyze.bridge import document_from_blocks
 from ubt.core.ir.models import IRBlock
 from ubt.model.ast import Document
-from ubt.model.fidelity import Attestation, Fidelity, Proof, ProofKind
 from ubt.model.span import PhysicalBox
 from ubt.render.outputs import (
     LayerCompositor,
@@ -37,7 +36,7 @@ from ubt.render.outputs import (
     _dedup_identical_streams,
     _line_slack,
     bilingual_request_text,
-    overlays_from_document,
+    overlays_from_blocks,
 )
 
 pytestmark = pytest.mark.fast
@@ -166,8 +165,8 @@ def test_a_region_is_masked_and_its_fragment_stamped(tmp_path: Path) -> None:
     composition = LayerCompositor(source, typesetter=spy).compose([overlay], output)
 
     (placement,) = composition.placements
-    assert placement.placed_as is Fidelity.RECONSTRUCTED_ADAPTED
-    assert not placement.descended
+    assert placement.drawn
+    assert not placement.kept_source
     # Layer 0 geometry is preserved; Layer 2 text is present in the artifact.
     assert pdf_struct.page_sizes(output) == pdf_struct.page_sizes(source)
     assert "TRANSLATED REGION TEXT" in _text(output)
@@ -242,7 +241,7 @@ def test_overlapping_overlays_do_not_erase_each_other(tmp_path: Path) -> None:
 
     composition = LayerCompositor(source, typesetter=spy).compose([first, second], output)
 
-    assert all(p.placed_as is Fidelity.RECONSTRUCTED_ADAPTED for p in composition.placements)
+    assert all(p.drawn for p in composition.placements)
     text = _text(output)
     assert "TRANSLATED ONE" in text
     assert "TRANSLATED TWO" in text
@@ -258,35 +257,29 @@ def test_a_failed_fragment_descends_and_leaves_the_source_untouched(tmp_path: Pa
     )
 
     (placement,) = composition.placements
-    assert placement.placed_as is Fidelity.PRESERVED_OPAQUE
-    assert placement.descended
+    assert not placement.drawn
+    assert placement.kept_source
     # No fragment -> no mask: the source text must be exactly what it was.
     assert _text(output) == _text(source)
     assert "TRANSLATED REGION TEXT" not in _text(output)
 
 
-def test_overlays_select_only_above_floor_placed_delivered_text(tmp_path: Path) -> None:
+def test_overlays_select_only_placed_text_with_geometry(tmp_path: Path) -> None:
     source = write_text_pdf(tmp_path / "source.pdf", [_PAGE])
     document = _document(source)
     text_elements = [element for element in document.elements if element.is_text]
     assert text_elements
-    delivered = {element.id: "target" for element in text_elements}
-
-    above_floor = [
-        Attestation(element.id, Fidelity.RECONSTRUCTED_ADAPTED, Proof.ok(ProofKind.STRUCTURAL))
+    blocks = [
+        IRBlock(element=element, target_text="target")
         for element in text_elements
+        if element.span.bbox is not None
     ]
-    overlays = overlays_from_document(document, above_floor, delivered)
-    assert {overlay.element_id for overlay in overlays} == {element.id for element in text_elements}
+    assert blocks
+    overlays = overlays_from_blocks(blocks)
+    assert {overlay.element_id for overlay in overlays} == {block.id for block in blocks}
 
-    at_floor = [
-        Attestation(element.id, Fidelity.PRESERVED_OPAQUE, Proof.preserved())
-        for element in text_elements
-    ]
-    assert overlays_from_document(document, at_floor, delivered) == ()
-
-    # No delivered text -> not an overlay either.
-    assert overlays_from_document(document, above_floor, {}) == ()
+    # No placed target -> not an overlay.
+    assert overlays_from_blocks([IRBlock(element=blocks[0].element)]) == ()
 
 
 def test_a_math_overlay_uses_the_math_typesetter(tmp_path: Path) -> None:
@@ -388,7 +381,7 @@ def test_an_in_place_bilingual_overlay_stamps_both_languages(tmp_path: Path) -> 
     composition = LayerCompositor(source, typesetter=spy).compose([overlay], output)
 
     (placement,) = composition.placements
-    assert placement.placed_as is Fidelity.RECONSTRUCTED_ADAPTED
+    assert placement.drawn
     assert spy.bilingual_calls == [
         (
             "SOURCE TEXT",
@@ -432,7 +425,7 @@ def test_text_flows_across_a_chain_of_boxes(tmp_path: Path) -> None:
     composition = LayerCompositor(source, typesetter=spy).compose([overlay], output)
 
     (placement,) = composition.placements
-    assert placement.placed_as is Fidelity.RECONSTRUCTED_ADAPTED
+    assert placement.drawn
     # One fragment per box, with the first broken at the punctuation boundary.
     assert len(spy.calls) == 2
     assert spy.calls[0][0] == "Alpha beta gamma."
@@ -680,7 +673,7 @@ def test_multiple_overlays_on_same_page_coalesce_into_single_page_form_xobject(
 
     composition = LayerCompositor(source, typesetter=spy).compose([first, second, third], output)
 
-    assert all(p.placed_as is Fidelity.RECONSTRUCTED_ADAPTED for p in composition.placements)
+    assert all(p.drawn for p in composition.placements)
     with pikepdf.open(output) as pdf:
         page = pdf.pages[0]
         # The page's own Resources /XObject must contain exactly 1 top-level Form XObject

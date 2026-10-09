@@ -42,20 +42,6 @@ class OpenAIResponsesTransport(BaseTransport):
         self._reasoning_dialect = reasoning_dialect
         self._model_reasoning_mode: dict[str, str] = {}
 
-    async def generate(
-        self,
-        prompt: str,
-        system_prompt: str | None = None,
-        model: str | None = None,
-        temperature: float | None = 0.3,
-        max_tokens: int | None = None,
-        reasoning_effort: str | None = None,
-    ) -> str:
-        text, _ = await self.generate_with_finish_reason(
-            prompt, system_prompt, model, temperature, max_tokens, reasoning_effort
-        )
-        return text
-
     async def generate_with_finish_reason(
         self,
         prompt: str,

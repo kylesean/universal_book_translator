@@ -32,8 +32,9 @@ def _processed_blocks(completed: int, failed: int, needs_human: int, blocked_hum
 
     The quality report's ``summary.completed_blocks`` (mtqe_passed + repaired)
     alone is too narrow for a progress bar: a successful run whose blocks were
-    all routed to the human queue or quarantined reports 0 completed, and the
-    bar used to fall from 100% at draft time back to 0% at export. Counting
+    all routed to the human queue or quarantined reports 0 completed, and a bar
+    reading only completed blocks would fall from 100% at draft time back to 0%
+    at export. Counting
     every terminal status keeps the numerator honest *and* non-decreasing:
     within one run the pipeline only moves blocks into terminal states (repair
     selection skips finalized blocks) or between them (triage/render flips),

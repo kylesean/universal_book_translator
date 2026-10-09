@@ -2,10 +2,10 @@
 
 The micro-mask is the fallback path: when the source text under a region cannot
 be stripped (a page-shared form, an unreadable resource, a strip that aborted),
-the region is painted over and the target drawn on top. That paint used to be a
-hardcoded pure white. Most books are not printed on white -- cream stock, a
-tinted band, a shaded table row, a scanned page's off-white -- and there a white
-rectangle is a visible scar across every replaced line.
+the region is painted over and the target drawn on top. The paint samples the
+page rather than assuming pure white. Most books are not printed on white --
+cream stock, a tinted band, a shaded table row, a scanned page's off-white --
+and there a white rectangle is a visible scar across every replaced line.
 
 The colour is sampled from the page instead: rasterize the page once at a low
 dpi and read the median pixel of each region. The median, not the mean: the

@@ -48,8 +48,8 @@ Two defenses, matching the production pdfium paradigm:
    the scan, and no host-font leakage. If pypdfium2 was already imported
    without this gate we log a warning and rely on defense 1 alone.
 
-``open_document`` is the canonical entry point for new code; existing
-call sites are individually locked and may migrate to it incrementally.
+``open_document`` is the canonical entry point for new code; existing call
+sites are individually locked and converge on it as they are touched.
 
 Longer term (crash isolation): move rasterization behind a subprocess
 boundary like ``vlm/drivers/sidecar_driver.py`` — a pdfium segfault then

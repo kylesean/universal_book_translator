@@ -135,7 +135,6 @@ def test_a_schema_version_mismatch_is_a_violation() -> None:
 
 def test_structural_detail_keys_are_the_documented_set() -> None:
     assert "total_blocks" in _STRUCTURAL_DETAIL_KEYS
-    assert "formula_substitutions" in _STRUCTURAL_DETAIL_KEYS
 
 
 def test_non_structural_details_are_ignored() -> None:

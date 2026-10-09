@@ -14,7 +14,7 @@ toolchain, over a synthetic PDF built by an independent writer
 
 - the adapter extracts the source text without loss and keeps the page number;
 - the IR <-> AST bridge round-trips the extraction unchanged;
-- the source preservation floor (``OverlayBackend``) lowers every element
+- every element carries a lossless source slice
   losslessly, the Axiom-A/Axiom-B construction-time guarantee.
 
 It is deliberately *not* a translation-quality or renderer test -- those stay
@@ -34,11 +34,7 @@ from ubt.adapters.factory import get_adapter_for_path
 from ubt.adapters.pdf.pdfium_adapter import PDFiumAdapter
 from ubt.analyze.bridge import blocks_from_document, document_from_blocks
 from ubt.core.ir.models import IRBlock
-from ubt.core.qe.fast_pass import FastPassFilter
-from ubt.model.fidelity import Fidelity, ProofKind
-from ubt.pipeline.steps import realize
-from ubt.render.overlay_backend import OverlayBackend, source_slice
-from ubt.verify.verifier import build_verifiers
+from ubt.model.ast import source_slice
 
 pytestmark = pytest.mark.fast
 
@@ -156,17 +152,11 @@ def test_a_cross_column_sentence_becomes_one_continuation_run(tmp_path: Path) ->
     )
 
 
-def test_the_source_preservation_floor_lowers_every_element_losslessly(tmp_path: Path) -> None:
-    """Overlay lowering is lossless by construction: preserved, delivered, carrying text."""
+def test_every_element_carries_its_source_slice(tmp_path: Path) -> None:
+    """The source-preservation floor is lossless: every element carries source text."""
     pdf = write_text_pdf(tmp_path / "book.pdf", [_PAGE_ONE, _PAGE_TWO])
     document = document_from_blocks(_blocks(pdf, pdf_engine="pdfium"), doc_id="synth")
-    backend = OverlayBackend()
-    verifiers = build_verifiers(FastPassFilter(source_lang="en", target_lang="zh"))
 
     assert document.elements, "the extracted document has no elements to lower"
     for element in document.elements:
-        attestation = realize(element, backend, verifiers, document.source)
-        assert attestation.fidelity is Fidelity.PRESERVED_OPAQUE, element.id
-        assert attestation.delivered, element.id
-        assert attestation.proof.kind is ProofKind.PRESERVED, element.id
         assert source_slice(element, document.source), element.id

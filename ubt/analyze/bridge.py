@@ -1,15 +1,10 @@
 """Bridge: ``IRBlock`` <-> the typed Document AST.
 
-.. deprecated::
-    Direct ``IRBlock`` entities and `attest_blocks` are now the single source
-    of truth across pipeline execution and lowering. This bridge is preserved
-    for backward compatibility and legacy tooling.
-
 ``IRBlock`` carries its structure as the typed :class:`~ubt.model.ast.Element`
 it holds (single source of truth: one attribute, one origin); the pipeline's mutable fields are
 execution state plus typography. This module projects a flat block list into a
-:class:`~ubt.model.ast.Document` and back -- the shape legacy lowering backends and
-the delivery contract consume.
+:class:`~ubt.model.ast.Document` and back -- the shape the HTML/EPUB views and
+the content graph consume.
 
 The round-trip preserves everything that defines the document: the element
 (class, flow, region, span, text, ``skip_translate``) and the block id /

@@ -20,7 +20,7 @@ import asyncio
 import importlib
 import importlib.util
 import logging
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -42,7 +42,6 @@ from ubt.adapters.pdf.font_metrics import sanitize_font_family
 from ubt.core.env import has_accelerator as _has_accelerator
 from ubt.core.ir.models import BookManifest, ChapterIR, IRBlock
 from ubt.core.ir.render_plan import RenderOutcome, RenderPlan
-from ubt.model.fidelity import Fidelity
 
 if TYPE_CHECKING:
     from ubt.cache.store import CacheStore
@@ -136,7 +135,6 @@ class _PDFRenderStackMixin:
         output_path: Path,
         bilingual_mode: str | None = None,
         render_plan: RenderPlan | None = None,
-        realization_plan: Mapping[str, Fidelity] | None = None,
         **kwargs: Any,
     ) -> Path:
         out_path = await self._renderer.render_blocks(
@@ -146,7 +144,6 @@ class _PDFRenderStackMixin:
             output_path,
             bilingual_mode,
             render_plan=render_plan,
-            realization_plan=realization_plan,
         )
         self.last_render_skips = list(self._renderer.last_render_skips)
         self.last_render_flags = list(self._renderer.last_render_flags)

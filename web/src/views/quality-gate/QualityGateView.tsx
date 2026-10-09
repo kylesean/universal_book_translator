@@ -238,10 +238,6 @@ export function QualityGateView() {
             <dd>{placeholder.corrupt_blocks ?? 0}</dd>
           </div>
           <div className="flex justify-between">
-            <dt className="text-[var(--ink-muted)]">formula_witness_fallbacks</dt>
-            <dd>{report?.formula_witness_fallbacks?.length ?? 0}</dd>
-          </div>
-          <div className="flex justify-between">
             <dt className="text-[var(--ink-muted)]">formula_blocks</dt>
             <dd>{report?.formula_blocks ?? 0}</dd>
           </div>

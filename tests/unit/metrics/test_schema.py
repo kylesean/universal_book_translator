@@ -17,7 +17,7 @@ pytestmark = pytest.mark.fast
 
 
 def test_schema_version_is_pinned() -> None:
-    assert SCHEMA_VERSION == 2
+    assert SCHEMA_VERSION == 3
 
 
 def test_definition_names_are_unique_and_indexed() -> None:
@@ -53,7 +53,6 @@ def test_ceiling_applies_only_to_lower_is_better() -> None:
 
 def test_the_defect_bounds_are_the_expected_ones() -> None:
     assert KPI_BY_NAME["placeholder_retention"].floor == 1.0
-    assert KPI_BY_NAME["formula_fidelity"].floor == 1.0
     assert KPI_BY_NAME["render_skip_rate"].ceiling == 0.0
     assert KPI_BY_NAME["untranslated_leak_rate"].ceiling == 0.0
     assert KPI_BY_NAME["term_consistency"].tolerance == 0.02

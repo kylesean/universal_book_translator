@@ -50,6 +50,28 @@ def order_by_position(masked_text: str, mapping: dict[str, str]) -> dict[str, st
     return {token: mapping[token] for token in ordered}
 
 
+@dataclass
+class TokenFactory:
+    """Hands out checksum-tagged protective tokens and records their originals.
+
+    Every masker (math / code / citation / email) does the same three things per
+    protected span: take the next index, build ``<prefix><index:04d>-<checksum>⟧``,
+    and record ``token -> original``. One owner keeps the token shape (and thus
+    the checksum binding) identical across the families.
+    """
+
+    mask_prefix: str
+    mapping: dict[str, str] = field(default_factory=dict)
+    _counter: int = 1
+
+    def next(self, original: str) -> str:
+        """The token for ``original``, recorded for restore."""
+        token = f"{self.mask_prefix}{self._counter:04d}-{token_checksum(self._counter, original)}⟧"
+        self.mapping[token] = original
+        self._counter += 1
+        return token
+
+
 def find_reordered(expected: list[int], observed: list[int]) -> list[int]:
     """Spans whose draft position violates the expected (masked-source) order.
 
@@ -169,6 +191,37 @@ class RestoreStyle:
     #: Re-run restore to a fixed point so a token revealed by restoring an
     #: enclosing token (a math environment nested inside inline math) expands.
     nested: bool = False
+
+
+class BaseMasker:
+    """The shared masker surface: a prefix, a restore style, and restore.
+
+    Every masking family (math / code / citation / email) differs only in how it
+    *finds* spans and in its :class:`RestoreStyle`; ``unmask`` and
+    ``unmask_checked`` are identical across all four. A subclass supplies
+    ``mask``, :meth:`_restore_style`, and its default prefix.
+    """
+
+    #: Default token prefix; a subclass narrows it to its own family.
+    default_prefix: str = "⟦MASK_"
+
+    def __init__(self, mask_prefix: str | None = None) -> None:
+        self.mask_prefix = mask_prefix or self.default_prefix
+
+    def mask(self, text: str) -> tuple[str, dict[str, str]]:
+        """Replace protected spans with checksum-tagged tokens."""
+        raise NotImplementedError
+
+    def unmask(self, text: str, mapping: dict[str, str]) -> str:
+        """Restore tokens (mutations included); see :func:`restore_masked`."""
+        return restore_masked(text, mapping, self._restore_style()).text
+
+    def unmask_checked(self, text: str, mapping: dict[str, str]) -> UnmaskReport:
+        """Restore plus integrity verification; see :class:`UnmaskReport`."""
+        return restore_masked(text, mapping, self._restore_style())
+
+    def _restore_style(self) -> RestoreStyle:
+        raise NotImplementedError
 
 
 def _index_table(mapping: dict[str, str]) -> dict[int, tuple[str, str, str]]:
@@ -327,7 +380,9 @@ def restore_masked(text: str, mapping: dict[str, str], style: RestoreStyle) -> U
 
 
 __all__ = [
+    "BaseMasker",
     "RestoreStyle",
+    "TokenFactory",
     "UnmaskReport",
     "find_reordered",
     "order_by_position",

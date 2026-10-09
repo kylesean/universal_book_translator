@@ -5,8 +5,8 @@ Two ways to obtain the contract:
 - :func:`load_contract` reads the ``*_contract.json`` written beside a delivered
   artifact -- the artifact of record.
 - :func:`contract_from_ledger` re-derives it from a finished job's ledger blocks
-  -- it does not trust the sidecar -- through the same attestation projection the
-  export used, so both paths read one account.
+  -- it does not trust the sidecar -- through the same reconciliation the export
+  used, so both paths read one account.
 
 :func:`evaluate_expectations` turns a corpus case's thresholds into failures, so
 a regression on any render path shows up as an unbalanced book.
@@ -51,33 +51,15 @@ def contract_from_ledger(ledger: SQLiteJobLedger, job_id: str) -> Reconciliation
     column and the source_lang the ingest recorded), so the translation
     predicate scores with the same profile the run used.
 
-    The account is the *attestation projection* the export uses (pre-render
-    decision plan), not a second, independent balance: one account, one mechanism.
+    The account is the content-graph reconciliation the export uses -- one
+    account, one mechanism.
     """
-    from ubt.core.content.project import contract_from_attestations
-    from ubt.core.qe.fast_pass import FastPassFilter
-    from ubt.layout.theme import resolve_theme
-
-    # Lazy: ubt.pipeline.attest imports ubt.core.content, so a module-level
-    # import here would be a circular import.
-    from ubt.pipeline.attest import attest_blocks
-    from ubt.pipeline.delivery import delivery_translations
-    from ubt.render.typst_backend import TypstBackend
-    from ubt.verify.verifier import build_verifiers
+    from ubt.core.content.adapt import graph_from_blocks
+    from ubt.core.content.contract import reconcile
 
     blocks = ledger.get_all_blocks(job_id)
-    source_lang = str(ledger.get_job_metadata_value(job_id, "source_lang") or "en")
-    target_lang = str(ledger.get_job_target_lang(job_id) or "zh")
-    report = attest_blocks(
-        blocks,
-        TypstBackend(
-            delivery_translations(blocks),
-            theme=resolve_theme(source_lang, target_lang),
-        ),
-        build_verifiers(FastPassFilter(source_lang=source_lang, target_lang=target_lang)),
-        doc_id=job_id,
-    )
-    return contract_from_attestations(report, blocks, doc_id=job_id)
+    graph = graph_from_blocks(blocks, doc_id=job_id)
+    return reconcile(graph)
 
 
 class CorpusCase(BaseModel):

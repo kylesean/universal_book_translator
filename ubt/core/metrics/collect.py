@@ -86,7 +86,6 @@ def collect_kpis(report: QualityReport, visual_report: Mapping[str, Any] | None 
     entity = report.entity_consistency
     terminology = report.terminology
     coverage = report.render_coverage
-    substitutions = len(report.formula_witness_fallbacks)
     formula_blocks = report.formula_blocks
     severities = _severity_counts(visual_report)
     visual_pages = _visual_page_count(visual_report, route_pages)
@@ -105,12 +104,6 @@ def collect_kpis(report: QualityReport, visual_report: Mapping[str, Any] | None 
         "repair_rate": _div(report.summary.repaired_blocks, total_blocks),
         "needs_human_rate": _div(report.summary.needs_human_blocks, total_blocks),
         "blocked_human_rate": _div(report.summary.blocked_human_blocks, total_blocks),
-        "formula_fidelity": (
-            0.0
-            if (formula_blocks == 0 and substitutions > 0)
-            else max(0.0, 1.0 - _div(substitutions, formula_blocks))
-        ),
-        "formula_substitutions": float(substitutions),
         "visual_critical_rate": _div(severities["critical"], visual_pages),
         "visual_major_rate": _div(severities["major"], visual_pages),
         "fidelity_non_text_residual": fidelity.non_text_residual,
@@ -136,7 +129,6 @@ def collect_kpis(report: QualityReport, visual_report: Mapping[str, Any] | None 
         "preserved_blocks": coverage.preserved_blocks,
         "skip_families": dict(coverage.skip_families),
         "formula_blocks": formula_blocks,
-        "formula_substitutions": substitutions,
         "visual_report": visual_report is not None,
         "visual_pages": visual_pages,
         "visual_findings": severities,

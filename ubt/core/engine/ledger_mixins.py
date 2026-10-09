@@ -418,8 +418,8 @@ class LedgerJobsMixin(_LedgerHost):
                 (actual_id,),
             )
             # Fresh re-ingest invalidates derived per-job caches: block texts may
-            # change, so a cached bible / memory state can no longer be assumed
-            # to describe them. The artifact paths belong in the same list --
+            # change, so a cached bible / memory state must not be assumed to
+            # describe them. The artifact paths belong in the same list --
             # they are metadata written by the previous run, and the API's
             # ``_artifact_path`` fallback serves any ``output_file`` it finds on
             # disk, so leaving them would let ``--fresh`` hand out the PDF whose
@@ -1084,7 +1084,7 @@ class LedgerBlocksMixin(_LedgerHost):
         :meth:`save_checkpoint` deliberately treats ``None`` as "leave alone so
         the value can never be cleared. Re-queueing is the only way to make such
         a block re-derivable; the next run re-drafts it (and, because the TM
-        writeback guard rejects the same content, cannot restore the old text).
+        writeback guard rejects the same content, cannot restore the previous text).
 
         ``tm_hit`` is cleared as well: leaving it set would record the *next*
         draft as a memory hit even though the poisoned entry is gone. The MQM
@@ -1497,7 +1497,7 @@ class LedgerBatchMixin(_LedgerHost):
 
         A restart whose payload changed (a glossary edit, a new block set) gets a
         fresh idempotency key, so ``reserve_batch_job`` creates a *new* provider
-        batch while the old one keeps billing and is never cancelled.
+        batch while the superseded one keeps billing until it is cancelled.
         The router uses this to abandon the superseded batch first.
         """
         placeholders = ",".join("?" * len(self.RESUMABLE_BATCH_STATUSES))

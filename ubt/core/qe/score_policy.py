@@ -23,8 +23,8 @@ from collections.abc import Iterable
 from typing import Any
 
 #: Pass stamp written on blocks that never met the QE gate: verbatim ships
-#: (``skip_translate``) and TM exact hits (``tm_hit``). Kept as the stamped
-#: value for continuity, but it is no longer how those blocks are recognised —
+#: (``skip_translate``) and TM exact hits (``tm_hit``). It is kept as the stamped
+#: value for continuity, but it is not how those blocks are recognised —
 #: exclusion is provenance-based (see :func:`is_qe_scored`), so a real 1.0 from
 #: a neural/LLM engine is counted rather than mistaken for this placeholder.
 PLACEHOLDER_MTQE_SCORE = 1.0

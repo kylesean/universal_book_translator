@@ -1,8 +1,8 @@
 """What a job has spent, and the cap that stops it.
 
 Every progress event folds the run's token usage into the job's bill before it
-reports, so a run killed mid-book still leaves its spend on disk. That arithmetic
-used to sit inside the progress-event builder, decoupling usage tracking from event generation.
+reports, so a run killed mid-book still leaves its spend on disk. The arithmetic
+lives beside the bill, decoupled from event generation.
 """
 
 from __future__ import annotations

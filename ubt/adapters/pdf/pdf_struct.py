@@ -9,7 +9,7 @@ feeds correctness gates (artifact parity, out-of-bounds), so it stays on the
 engine with correct inheritance semantics. Raw content-stream operator counts
 (`:func:`count_ops``) reproduce pypdf's ``get_contents().operations`` counts
 exactly (147/147 pages on the test corpus), which keeps the calibrated
-``PROFILE_VECTOR_PATH_OPS`` knob valid across this migration.
+``PROFILE_VECTOR_PATH_OPS`` knob calibrated.
 
 This module replaces every runtime ``pypdf`` use; pypdf survives only as a
 dev-extra fixture writer for tests.

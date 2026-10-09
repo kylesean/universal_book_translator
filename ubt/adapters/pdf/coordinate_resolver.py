@@ -214,7 +214,7 @@ class PageBBoxResolver:
         # the image-pixel branch and be scaled by page/image instead of
         # page/1000. A true image-pixel page with max > 1005 still lands here
         # correctly; only a tiny (≤1005px) scan is ambiguous, and it resolves
-        # to normalized_1000 exactly as the per-box auto used to.
+        # to normalized_1000, the same choice the per-box auto makes.
         if m <= 1005.0 and m > page_max:
             return "normalized_1000"
         if (

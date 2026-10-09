@@ -2,7 +2,7 @@
 
 A naive ``\\$[^\\$\\n]+\\$`` pairs the first ``$`` with the next one on the line,
 so ``"$5 and $10"`` becomes the "math" span ``"$5 and $"`` and every term inside
-it is shielded from glossary enforcement / CJK spacing. Three passes used to
+it is shielded from glossary enforcement / CJK spacing. Three passes would
 carry their own copy of that rule and drifted; this module is the single home.
 
 The rule has two parts:

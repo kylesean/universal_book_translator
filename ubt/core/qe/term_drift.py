@@ -1,7 +1,7 @@
 """Single detection primitive for glossary terminology drift.
 
-Five implementations used to decide independently whether one glossary term
-is drifted in one block:
+One primitive answers "is this glossary term drifted in this block?" for every
+consumer:
 
 * :class:`ubt.core.validators.consistency.GlossaryConsistencyValidator` — the
   export / quality-gate verdict;
@@ -21,10 +21,10 @@ every hit in this module comes from the rewriter's own
 detection and enforcement can never disagree about where a term occurs.
 
 Source-side caliber: ``[source] + aliases`` — the stricter rule, taken from
-``consistency.py``. ``evaluate_terms`` used to look only for ``source``, so a
-block whose source carried a term *solely as an alias* was invisible to the
-consistency-stage planner while the quality gate (via the validator) already
-reported that very block as drifted.
+``consistency.py``. Looking for ``source`` alone would leave a block whose
+source carried a term *solely as an alias* invisible to the consistency-stage
+planner while the quality gate (via the validator) already reported that very
+block as drifted.
 
 Target-side, "the term is rendered" means the canonical rendering occurs
 under the same boundary-aware matcher, outside protected spans, folding case
@@ -132,8 +132,8 @@ def normalize_glossary(glossary: Iterable[Mapping[str, Any]]) -> tuple[GlossaryT
     """Normalize raw glossary dicts into auditable entries.
 
     Requires a non-empty source **and** a non-empty canonical rendering (an
-    entry without one is not checkable — every consumer used to re-implement
-    that filter), strips both, and strips/deduplicates the aliases.
+    entry without one is not checkable — every consumer relies on this single
+    filter), strips both, and strips/deduplicates the aliases.
     """
     terms: list[GlossaryTerm] = []
     for entry in glossary:

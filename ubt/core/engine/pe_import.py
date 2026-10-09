@@ -6,9 +6,10 @@ promoted to ``REPAIRED``), and feeds accepted pairs back into the shared
 translation memory with ``provenance='human_pe'`` — the asset that later powers
 TM exact-skip and fuzzy few-shot for future jobs (self-evolution groundwork).
 
-CSV convention: humans fill the ``revised_translation`` column exported by
-:mod:`ubt.core.engine.pe_queue`; empty cells and rows equal to the exported
-target are skipped.
+CSV convention: humans fill the ``revised_translation`` column of a CSV
+round-trip table (``block_id`` / ``source_text`` / ``target_text`` /
+``revised_translation``); empty cells and rows equal to the exported target are
+skipped.
 
 XLIFF convention: any ``<unit>`` whose ``<segment><target>`` text is non-empty
 and differs from the ledger's current target counts as a revision.

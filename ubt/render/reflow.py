@@ -19,8 +19,8 @@ The transform is pure: it takes the compositor's :class:`Overlay` list and the
 obstacle boxes, calls the injected measure, and returns overlays carrying the
 new geometry plus the original source boxes to mask (see ``Overlay.mask_boxes``).
 A band whose target does not fit its source envelope is left untouched, so a
-long translation keeps the old (correct, if gappy) layout rather than overlapping
-its neighbours.
+long translation keeps its (correct, if gappy) source layout rather than
+overlapping its neighbours.
 """
 
 from __future__ import annotations

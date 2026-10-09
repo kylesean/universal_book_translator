@@ -47,9 +47,9 @@ def retry_after_seconds(headers: httpx.Headers) -> str | None:
 def hostname_of(url: str) -> str:
     """Lowercased hostname of a URL, tolerating a missing scheme.
 
-    Used to tell a self-hosted endpoint from a remote one — never to pick a
-    wire protocol: a bare ``"zen" in base_url`` substring check once matched
-    ``api.frozen.example.com`` and sent it another family's payload.
+    Tells a self-hosted endpoint from a remote one — never picks a wire
+    protocol: a bare ``"zen" in base_url`` substring check would match
+    ``api.frozen.example.com`` and send it another family's payload.
     """
     from urllib.parse import urlsplit
 
@@ -474,7 +474,6 @@ class BaseTransport(ABC):
             )
         return response
 
-    @abstractmethod
     async def generate(
         self,
         prompt: str,
@@ -483,8 +482,14 @@ class BaseTransport(ABC):
         temperature: float | None = 0.3,
         max_tokens: int | None = None,
         reasoning_effort: str | None = None,
-    ) -> str: ...
+    ) -> str:
+        """Text only; the finish reason is dropped (see the sibling method)."""
+        text, _ = await self.generate_with_finish_reason(
+            prompt, system_prompt, model, temperature, max_tokens, reasoning_effort
+        )
+        return text
 
+    @abstractmethod
     async def generate_with_finish_reason(
         self,
         prompt: str,

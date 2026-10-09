@@ -622,18 +622,15 @@ class UBTConfig(BaseSettings):
     # the source on large books.
     emit_xliff_companion: bool = True
 
-    # Emit the realize()-based attestation shadow ('*_<tag>_attestations.json')
-    # beside the deliverable. A *migration* shadow (pre-render decision plan): the
-    # content-graph contract still decides delivery, and this records the
-    # per-element attestations the unified attestation model replaces it with, so the two can be
-    # compared on real deliveries. Read-only, CPU-only, best-effort; removed
-    # when realize() goes live.
+    # Emit an artifact check ('*_<tag>_attestations.json') beside the
+    # deliverable: whether the delivered file actually carries each text block's
+    # placed translation. Read-only, CPU-only, best-effort.
     emit_attestation_shadow: bool = True
 
     # Emit a semantic HTML view of the delivery ('*_<tag>.html') beside the
-    # artifact, and an EPUB 3 package ('*_<tag>.epub'). These are the semantic document delivery view
-    # "later views": the same realized Document lowered to another format by the
-    # same "missing Attestation is refused" rule as the PDF. Read-only, best-effort
+    # artifact, and an EPUB 3 package ('*_<tag>.epub'). These are the delivered
+    # blocks lowered to another format: a text block with a placed target shows
+    # its translation, one kept in the source its source. Read-only, best-effort
     # companions -- a view failure never sinks the PDF delivery.
     emit_html_companion: bool = True
     emit_epub_companion: bool = True
@@ -705,8 +702,8 @@ class UBTConfig(BaseSettings):
     # persisted job id) stays stable. ``AdapterRuntimeConfig`` still carries it,
     # but ``DoclingPDFAdapter.apply_config`` deliberately does not read it and
     # no renderer consumes it: display formulas are typeset by the home-grown
-    # LaTeX->Typst converter and governed by ``formula_render``.
-    # The MathJax/SVG backend this once described no longer exists, and
+    # LaTeX->Typst converter and governed by ``formula_render``. Nothing reads
+    # ``math_backend``: the MathJax/SVG backend it names is gone, and
     # ``scripts/mathjax/`` has no caller.
     math_backend: MathBackend = "mathjax"
 

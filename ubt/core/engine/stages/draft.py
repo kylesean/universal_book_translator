@@ -370,7 +370,7 @@ class _DraftProcessor:
                 self.policy.tm_context,
                 # domain must stay None in production: passing profile_name
                 # lets the same-domain pass override context_hash, so a
-                # glossary/prompt change would no longer invalidate exact hits.
+                # glossary/prompt change would not invalidate exact hits.
                 None,
             )
             if exact_hit is not None and needs_emphasis and not exact_hit.runs_json:
@@ -512,9 +512,9 @@ class _DraftProcessor:
         macro_ctx = ""
         if self.policy.rolling_enabled:
             # One summary channel: the hierarchical L2 snapshot (see
-            # HierarchicalMemoryManager). The chapter-boundary summarizer that
-            # used to feed this slot as a fallback wrote the same ``macro_ctx``
-            # through a second code path and a second LLM call per chapter.
+            # HierarchicalMemoryManager). A chapter-boundary summarizer would be
+            # a second code path writing the same ``macro_ctx`` and a second LLM
+            # call per chapter.
             macro_ctx = self.runtime.memory_mgr.get_macro_context_for_block(block)
         # Compressed L3 epoch history rides the static prompt prefix.
         epoch_ctx = self.runtime.memory_mgr.get_l3_summary()
@@ -1629,10 +1629,9 @@ async def run_draft_stage(
             cursor_spine = batch[-1].spine_index
             cursor_block_id = batch[-1].id
 
-            # Chapter segmentation fed the chapter-boundary summarizer that
-            # used to run here; the hierarchical L2 manager snapshots on step
-            # threshold and chapter transition itself, so the batch is drafted
-            # as one claim.
+            # No summarizer runs here: the hierarchical L2 manager snapshots on
+            # step threshold and chapter transition itself, so the batch is
+            # drafted as one claim.
             await processor.run_draft_batch(batch, batch)
 
             if processor.runtime.fail_fast_consecutive >= processor.policy.fail_fast_threshold:

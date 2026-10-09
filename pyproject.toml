@@ -96,6 +96,10 @@ dev = [
     # Anyone running the live tiers should pass `-o addopts=""`, which clears
     # the timeout along with the marker filter (it replaces addopts wholesale).
     "pytest-timeout>=2.3,<3.0",
+    # Coverage floor for the fast tier (see .pre-commit-config.yaml). A
+    # regression guard against dead code and untested bulk deletions, not a
+    # quality target.
+    "pytest-cov>=7.0.0",
     "mypy>=1.10.0",
     "ruff>=0.4.8",
     # CI parity: ubt/mcp/server.py imports mcp at module scope, so the `dev`
@@ -295,7 +299,16 @@ markers = [
 filterwarnings = [
     "ignore::DeprecationWarning:pydantic.*",
     "ignore::DeprecationWarning:docling.*",
-    "ignore::DeprecationWarning:starlette.*",
-    "ignore::DeprecationWarning:anyio.*",
+    # Third-party internals only. Narrowed from a blanket ``starlette.*`` /
+    # ``anyio.*`` ignore: the 2026-10 audit found six of *our own* uses of the
+    # deprecated ``status.HTTP_422_UNPROCESSABLE_ENTITY`` hidden by the blanket
+    # filter. These two modules are the only remaining sources, and both are
+    # inside the third-party test client / async runtime we do not control.
+    "ignore::DeprecationWarning:starlette.testclient.*",
+    "ignore::DeprecationWarning:anyio._lazyimport.*",
     "ignore::starlette.exceptions.StarletteDeprecationWarning",
+    # jieba 0.42.1 imports ``pkg_resources`` at module load; the warning is in
+    # its vendored ``_compat``, not our code. Narrow to that module so a
+    # deprecation anywhere in our own tokenizer usage still surfaces.
+    "ignore:pkg_resources is deprecated as an API:UserWarning:jieba.*",
 ]

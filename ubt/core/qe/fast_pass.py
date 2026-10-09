@@ -214,10 +214,10 @@ def _detect_line_repetition_loop(text: str) -> str | None:
 def _max_repeated_line_run(text: str) -> int:
     """Length of the longest repeated-line run in ``text`` (0 when none).
 
-    Used to align a target's line repetition against the source's: a target run
-    no longer than the source's own run is a faithfully preserved refrain, but a
-    runaway loop that repeats far more lines than the source did is a
-    hallucination even when the source repeats something unrelated.
+    The run is compared against the source's: a target run no longer than the
+    source's own run is a faithfully preserved refrain, but a runaway loop that
+    repeats far more lines than the source did is a hallucination even when the
+    source repeats something unrelated.
     """
     return max((run_len for _, run_len in _repeated_line_runs(text)), default=0)
 

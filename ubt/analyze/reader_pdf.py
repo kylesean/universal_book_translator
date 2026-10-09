@@ -23,8 +23,7 @@ old flow lived with:
    verbatim), never prose.
 
 A heading is decided by *typography* (font size relative to the page's body
-size, or bold + short + no terminal punctuation), never by length alone -- the
-rule that made the old plain-text path mislabel every fragment.
+size, or bold + short + no terminal punctuation), never by length alone.
 
 The reader never drops text for being unsure: an element it cannot classify is
 emitted as prose with :attr:`Confidence.INFERRED`. Text loss would only come from
@@ -314,7 +313,7 @@ def _classify(
     Never drops a group: an element it cannot classify is prose at
     :attr:`Confidence.INFERRED`. The region kind is the reader's own layout
     judgement (body vs page furniture), which is exactly what the AST's
-    :class:`RegionKind` models -- the pipeline no longer re-derives it.
+    :class:`RegionKind` models, so the pipeline does not re-derive it.
     """
     confidence = Confidence.INFERRED
     span = Span(page=group.page, bbox=group.bbox)

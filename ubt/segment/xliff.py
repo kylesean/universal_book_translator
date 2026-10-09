@@ -115,7 +115,7 @@ def _read_inline(element: ET.Element, placeholders: dict[str, Placeholder]) -> s
     """Rebuild the text, replacing every ``<ph>`` with its ``dataRef`` token.
 
     Only ``<ph>`` maps to a placeholder. CAT tools also emit paired inline
-    markup (``<pc>``); treating every child as a placeholder used to append an
+    markup (``<pc>``); treating every child as a placeholder would append an
     empty token and silently drop the wrapped text, breaking the roundtrip.
 
     A ``<ph>`` without ``dataRef``/``data-ref`` carries no token to restore, so

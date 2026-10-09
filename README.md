@@ -29,8 +29,9 @@ Measured against the current implementation, not aspirational:
   translated), colour/watermarked backgrounds (no background-colour probe, so
   light text on dark pages is invisible), and text drawn inside figures.
 - **Text expansion**: a translation that will not fit its source box at a
-  readable 6pt floor keeps the source text (descends); there is no box growth
-  or page re-flow.
+  readable 6pt floor is drawn smaller (down to a 4pt hard floor) and flagged
+  `low_legibility_font`; below 4pt the source text is kept (descends). There is
+  no box growth or page re-flow.
 - **Per format**: DOCX footnotes/endnotes, column settings and TOC fields are
   not read; a whole PDF is ingested as one chapter, so per-chapter resume and
   billing do not apply to it.

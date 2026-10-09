@@ -5,7 +5,7 @@ The KPIs are *derived* from artifacts the pipeline already persists
 costs nothing and never re-scans the text. Definitions live here — the single
 source of truth — and are versioned by :data:`SCHEMA_VERSION`; the on-disk
 artifact carries only values, so a definition change forces a version bump
-instead of silently comparing numbers that no longer mean the same thing.
+instead of silently comparing numbers that mean different things.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 #: Bump when a KPI is added/removed or its formula/source changes. Golden files
 #: and CI comparisons reject mismatched versions rather than comparing
 #: incomparable numbers.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 KpiUnit = Literal["ratio", "score", "count", "usd_per_1k_chars"]
 
@@ -158,16 +158,6 @@ KPI_DEFINITIONS: tuple[KpiDefinition, ...] = (
         ceiling=0.0,
     ),
     KpiDefinition(
-        "formula_fidelity",
-        "ratio",
-        Direction.HIGHER_IS_BETTER,
-        "1 - formula witness substitutions / display-formula blocks "
-        "(inline math is not counted; see details.formula_blocks)",
-        "quality_report.formula_witness_fallbacks / formula_blocks",
-        0.02,
-        floor=1.0,
-    ),
-    KpiDefinition(
         "fidelity_non_text_residual",
         "ratio",
         Direction.LOWER_IS_BETTER,
@@ -184,14 +174,6 @@ KPI_DEFINITIONS: tuple[KpiDefinition, ...] = (
         "render (the overlay-coverage metric; low = most page still source text)",
         "quality_report.fidelity.painted_coverage",
         0.03,
-    ),
-    KpiDefinition(
-        "formula_substitutions",
-        "count",
-        Direction.LOWER_IS_BETTER,
-        "display formulas replaced by the source graphic after a witness mismatch",
-        "quality_report.formula_witness_fallbacks",
-        0.0,
     ),
     KpiDefinition(
         "visual_critical_rate",

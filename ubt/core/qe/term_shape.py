@@ -232,9 +232,9 @@ def is_identifier_shaped(term: str) -> bool:
     LSTM) and terms carrying digits (GQA-8) are identifiers, not translatable
     prose. Translatable structural document labels (FIG, TABLE, EQ, etc.) and
     common all-caps *words* (IT, OR, IF, US, THE in a heading …) are excluded:
-    the omission gate used to demand those survive translation verbatim, so a
-    correct Chinese rendering of "the IT department uses OR logic" was flagged
-    "Omission suspected" and quarantined as BLOCKED_HUMAN.
+    demanding those survive translation verbatim would flag a correct Chinese
+    rendering of "the IT department uses OR logic" as "Omission suspected" and
+    quarantine it as BLOCKED_HUMAN.
     """
     if term.lower() in _STRUCTURAL_DOCUMENT_LABELS:
         return False

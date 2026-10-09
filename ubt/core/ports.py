@@ -5,7 +5,7 @@ scope. Two families matter: the adapters (``ubt.adapters`` -- they already
 depend on core's IR models and exceptions, so the reverse edge is a
 package-level cycle that also drags adapter-weight dependencies such as
 docling and typst tooling into the core import graph) and the compiler
-packages (``ubt.pipeline`` / ``ubt.segment`` / ``ubt.translate`` -- a
+packages (``ubt.segment`` / ``ubt.translate`` -- a
 module-level edge from core closes the ``core.engine <-> pipeline`` cycle).
 
 This module is the single sanctioned bridge. Implementations resolve through

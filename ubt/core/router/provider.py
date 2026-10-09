@@ -1,7 +1,7 @@
 """Model provider interfaces and standard implementations.
 
-Modularized via the ubt.core.router.transports package while maintaining
-full backward compatibility for existing callers and test doubles.
+The transports live in the ubt.core.router.transports package; this module
+keeps the provider surface callers and test doubles depend on.
 """
 
 from __future__ import annotations

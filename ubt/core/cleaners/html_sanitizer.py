@@ -491,10 +491,10 @@ def _scan_tag_end(text: str, start: int) -> int:
     return -1
 
 
-# Existence queries inside ``_neutralize_pseudo_tags`` used to re-scan the whole
-# fragment (``text[:i]`` / ``text[start:]``) once per tag, which made the pass
-# O(n^2) on adversarial input. These scan the fragment once so every query is
-# O(1); the patterns mirror the old per-name forms exactly.
+# Existence queries inside ``_neutralize_pseudo_tags`` must not re-scan the whole
+# fragment (``text[:i]`` / ``text[start:]``) once per tag, which would make the
+# pass O(n^2) on adversarial input. These scan the fragment once so every query
+# is O(1).
 _OPENER_SCAN_RE = re.compile(r"<([a-zA-Z][a-zA-Z0-9]*)[\s/>]", re.IGNORECASE)
 _CLOSER_SCAN_RE = re.compile(r"</\s*([a-zA-Z][a-zA-Z0-9]*)\b", re.IGNORECASE)
 
@@ -516,8 +516,8 @@ def _neutralize_pseudo_tags(text: str) -> str:
 
     Everything else — unknown names like ``T``/``stdio.h``, and unpaired
     allowlisted tags — has its ``<`` escaped to literal text. This only ever
-    *preserves* content relative to the old behaviour and cannot widen the XSS
-    surface: neutralised runs render as inert text.
+    *preserves* content and cannot widen the XSS surface: neutralised runs
+    render as inert text.
     """
     out: list[str] = []
     n = len(text)
@@ -668,9 +668,8 @@ def _neutralize_pseudo_tags(text: str) -> str:
 
 # A well-formed inline tag for the tag-preserving pass below. ``/`` is accepted
 # as an attribute separator because HTML treats ``<img/src=x>`` as a tag; the
-# shared ``_TAG_STRUCT_RE`` only accepts whitespace, so a slash-delimited tag
-# used to be escaped whole. Possessive quantifiers keep the scan linear on
-# adversarial input.
+# shared ``_TAG_STRUCT_RE`` only accepts whitespace, so a slash-delimited tag is
+# escaped whole. Possessive quantifiers keep the scan linear on adversarial input.
 _INLINE_TAG_RE = re.compile(
     r"<(/?)([a-zA-Z][a-zA-Z0-9]*)"
     r"((?:[\s/]++[a-zA-Z_:][-a-zA-Z0-9_:.]*+"
@@ -876,9 +875,9 @@ def _closing_tag_re(name: str) -> re.Pattern[str]:
     """Closing-tag pattern for one tag name, compiled once instead of per occurrence.
 
     Shared by the drop-with-content probe, ``_copy_raw_text`` and
-    ``_skip_element``; a many-``<script>`` document used to recompile the
-    pattern (and, in the probe, slice-copy the whole remaining markup) for
-    every occurrence.
+    ``_skip_element``, so a many-``<script>`` document does not recompile the
+    pattern (or, in the probe, slice-copy the whole remaining markup) for every
+    occurrence.
     """
     pattern = _CLOSING_TAG_RES.get(name)
     if pattern is None:

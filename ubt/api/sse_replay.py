@@ -1,7 +1,7 @@
 """Bounded per-job SSE frame history for ``Last-Event-ID`` replay.
 
 The console's progress stream is long-lived; a dropped connection (sleep,
-proxy timeout) used to lose whatever frames were emitted while the client was
+proxy timeout) would lose whatever frames were emitted while the client was
 away. Each frame is stamped with a monotonic ``id:`` and kept in a small ring
 buffer per job, so a reconnecting client that sends ``Last-Event-ID`` gets the
 missed frames before the live stream resumes (PRD §9.2).

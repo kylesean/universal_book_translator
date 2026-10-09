@@ -3,9 +3,9 @@
 A block whose draft never passed the quality gates must stay *visible and
 labelled* in every deliverable. Markdown and HTML carry the export stage's
 ``<mark class="ubt-failed-draft">`` wrapper through; DOCX (which cannot store
-the HTML mark) used to strip that wrapper and ship the raw machine draft as if
+the HTML mark) must not strip that wrapper and ship the raw machine draft as if
 it were a finished translation. The status set and the human-readable notes
-live here so the formats cannot drift apart again.
+live here so the formats cannot drift apart.
 """
 
 from __future__ import annotations
@@ -36,6 +36,6 @@ def failure_note(status: BlockStatus) -> str:
 
 
 def failure_note_markdown(status: BlockStatus) -> str:
-    """Markdown-formatted unresolved note (kept identical to the old literal)."""
+    """Markdown-formatted unresolved note."""
     note = FAILURE_NOTES.get(status, "Translation unresolved — manual review required:")
     return f"> ⚠️ **[UBT] {note}**"

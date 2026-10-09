@@ -26,7 +26,7 @@ rendered in Typst math mode. This module is the render half:
   spans are validated by a Typst math compile probe and emitted raw in
   ``$...$``. Anything failing validation (or split across fitter line
   breaks, i.e. unbalanced ``$`` in one line) falls back to stripped
-  escaped text — never worse than the old literal output.
+  escaped text — never worse than literal output.
 
 All functions are pure except the injected probe (defaults to
 escape-everything, i.e. the historical behavior, when no probe is given).

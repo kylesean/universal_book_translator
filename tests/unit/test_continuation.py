@@ -14,7 +14,6 @@ import pytest
 from ubt.core.ir.continuation import find_continuation_runs
 from ubt.core.ir.models import BlockType, BoundingBox, IRBlock, make_element
 from ubt.model.ast import RegionKind
-from ubt.model.fidelity import Fidelity
 from ubt.render.outputs import overlays_from_blocks
 
 pytestmark = pytest.mark.fast
@@ -143,7 +142,7 @@ def test_the_overlay_builder_merges_a_run_into_one_box_chain() -> None:
     first = _block("b1", "The machine relies on attention", page=1, spine=1, target="T-one")
     second = _block("b2", "and runs a forward pass.", page=2, spine=2, target="T-two")
 
-    (overlay,) = overlays_from_blocks([first, second], None)
+    (overlay,) = overlays_from_blocks([first, second])
     assert overlay.element_id == "b1"
     assert [box.page for box in overlay.flow_boxes] == [1, 2]
     assert overlay.text == "T-one T-two"
@@ -154,7 +153,7 @@ def test_the_overlay_builder_marks_a_formula_as_math() -> None:
     formula = _block(
         "f1", "$e^{i\\pi}+1=0$", block_type=BlockType.FORMULA, spine=1, target="e^{i\\pi}+1=0"
     )
-    (overlay,) = overlays_from_blocks([formula], None)
+    (overlay,) = overlays_from_blocks([formula])
     assert overlay.kind == "math"
     assert overlay.text == "e^{i\\pi}+1=0"
 
@@ -162,13 +161,13 @@ def test_the_overlay_builder_marks_a_formula_as_math() -> None:
 def test_the_overlay_builder_keeps_tables_and_figures_on_the_canvas() -> None:
     table = _block("t1", "a b c", block_type=BlockType.TABLE, spine=1, target="X Y Z")
     figure = _block("i1", "", block_type=BlockType.IMAGE, spine=2, target="caption")
-    assert overlays_from_blocks([table, figure], None) == ()
+    assert overlays_from_blocks([table, figure]) == ()
 
 
-def test_the_overlay_builder_skips_blocks_kept_at_the_floor() -> None:
+def test_the_overlay_builder_skips_blocks_kept_in_the_source() -> None:
     block = _block("b1", "Source kept", spine=1, target="T")
-    plan = {"b1": Fidelity.PRESERVED_OPAQUE}
-    assert overlays_from_blocks([block], plan) == ()
+    block.skip_translate = True
+    assert overlays_from_blocks([block]) == ()
 
 
 def test_bare_numbers_and_page_numbers_are_not_continuation_candidates() -> None:
@@ -277,7 +276,7 @@ def test_fused_block_flows_through_overlay_builder() -> None:
     fused = fused_list[0]
     fused.target_text = "机器依赖注意力并运行前向传播。"
 
-    (overlay,) = overlays_from_blocks([fused], None)
+    (overlay,) = overlays_from_blocks([fused])
     assert overlay.element_id == "b1"
     assert overlay.text == "机器依赖注意力并运行前向传播。"
     assert len(overlay.flow_boxes) == 2

@@ -310,8 +310,9 @@ def get_profile(code: str) -> LanguageProfile:
     """Resolve a profile by BCP-47-ish code; raises on unknown codes (no silent fallback).
 
     Region/script subtags resolve to their base language (``zh-CN`` -> ``zh``),
-    so an entry point that accepts such a tag no longer ingests a whole book and
-    only then fails with ``Unknown language profile: 'zh-cn'``.
+    so an entry point that accepts such a tag resolves it up front instead of
+    ingesting a whole book and only then failing with
+    ``Unknown language profile: 'zh-cn'``.
     """
     profile = PROFILES.get(normalize_lang_code(code))
     if profile is None:

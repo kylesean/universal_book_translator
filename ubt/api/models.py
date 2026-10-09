@@ -28,15 +28,32 @@ from ubt.core.presets import Preset
 def _require_supported_target_lang(value: str) -> str:
     """Reject a target language the engine has no profile for, at parse time.
 
-    ``LANG_CODE_PATTERN`` only checks the *shape*, so ``pt-BR`` used to pass the
-    API and then die inside the pipeline after a full ingest. Region/script tags
-    of a supported base language (``zh-CN``) stay accepted.
+    ``LANG_CODE_PATTERN`` only checks the *shape*, so a shape-valid but
+    unsupported code (``pt-BR``) would otherwise pass the API and die inside the
+    pipeline after a full ingest. Region/script tags of a supported base
+    language (``zh-CN``) stay accepted.
     """
     if not is_supported_lang(value):
         raise ValueError(
             f"Unsupported target language {value!r}. Supported base languages: "
             f"{', '.join(supported_lang_codes())} (region tags such as 'zh-CN' are accepted)."
         )
+    return value
+
+
+def _require_valid_page_ranges(value: str | None) -> str | None:
+    """Reject a malformed page range at parse time.
+
+    Failing here (422) beats failing the job asynchronously after a 202, and it
+    bounds the raw string before it is split (a multi-MB ``pages`` field would
+    otherwise be a body-size DoS).
+    """
+    if value is None:
+        return value
+    try:
+        parse_page_ranges(value)
+    except ValueError as exc:
+        raise ValueError(str(exc)) from exc
     return value
 
 
@@ -85,16 +102,7 @@ class JobSubmitRequest(BaseModel):
     @field_validator("pages")
     @classmethod
     def _validate_pages(cls, value: str | None) -> str | None:
-        # Reject a malformed range at parse time (422) instead of failing the
-        # job asynchronously after a 202, and bound the raw string before it is
-        # split (a multi-MB ``pages`` field was a body-size DoS).
-        if value is None:
-            return value
-        try:
-            parse_page_ranges(value)
-        except ValueError as exc:
-            raise ValueError(str(exc)) from exc
-        return value
+        return _require_valid_page_ranges(value)
 
     glossary: str | None = Field(
         default=None,
@@ -253,13 +261,7 @@ class JobAssessRequest(BaseModel):
     @field_validator("pages")
     @classmethod
     def _validate_pages(cls, value: str | None) -> str | None:
-        if value is None:
-            return value
-        try:
-            parse_page_ranges(value)
-        except ValueError as exc:
-            raise ValueError(str(exc)) from exc
-        return value
+        return _require_valid_page_ranges(value)
 
     @field_validator("target_lang")
     @classmethod

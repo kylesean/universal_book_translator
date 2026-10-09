@@ -184,7 +184,7 @@ async def run_render_preflight(
         # Typst only surfaces after the whole book has been billed.
         from ubt.render.outputs import overlays_from_blocks
 
-        expected = overlays_from_blocks(scratch_blocks, None)
+        expected = overlays_from_blocks(scratch_blocks)
         skips = get_last_render_skips(adapter)
         if expected and len(skips) >= len(expected):
             raise DocumentParseError(

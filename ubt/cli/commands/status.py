@@ -11,6 +11,7 @@ from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 
+from ubt.cli.commands import resolve_db_dir
 from ubt.core.config import UBTConfig
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.pe_import import PEImportError, import_pe_revisions
@@ -50,7 +51,7 @@ def recheck_gates(job_id: str, *, db_dir: Any = None) -> dict[str, Any]:
         report["error"] = f"invalid job id {job_id!r}"
         return report
     try:
-        db_dir = _get_resolve_db_dir()(db_dir)
+        db_dir = resolve_db_dir()(db_dir)
         db_path = Path(db_dir) / f"{job_id}.sqlite"
         if not db_path.exists():
             # SQLite would silently create an empty store here, making a typo'd
@@ -163,15 +164,6 @@ def recheck_gates_cmd(
         )
 
 
-def _get_resolve_db_dir() -> Any:
-    # Single owner: main._resolve_db_dir. The old sys.modules fallback here
-    # returned a different `.resolve()`-ing lambda, so an import-order edge case
-    # silently changed how db_dir was resolved.
-    from ubt.cli.main import _resolve_db_dir
-
-    return _resolve_db_dir
-
-
 def inspect_book(
     input_path: Annotated[
         Path, typer.Argument(help="Path to input document (.epub, .md, .pdf) or job ID")
@@ -193,7 +185,7 @@ def inspect_book(
     ] = False,
 ) -> None:
     """Inspect book metadata, TOC structure, or query job status."""
-    resolve_fn = _get_resolve_db_dir()
+    resolve_fn = resolve_db_dir()
     db_dir = resolve_fn(db_dir)
     raw_str = str(input_path)
     if not input_path.exists():
@@ -273,7 +265,7 @@ def job_status(
     ] = False,
 ) -> None:
     """Display real-time checkpoint statistics from SQLite ledger."""
-    resolve_fn = _get_resolve_db_dir()
+    resolve_fn = resolve_db_dir()
     db_dir = resolve_fn(db_dir)
     # Validate job_id before building ledger path to prevent directory traversal.
     if not job_id_is_valid(job_id):
@@ -422,7 +414,7 @@ def pe_import(
     only applied to that job's ledger. The TM language pair always comes from
     the ledger, never from CLI flags.
     """
-    resolve_fn = _get_resolve_db_dir()
+    resolve_fn = resolve_db_dir()
     db_dir = resolve_fn(db_dir)
     if not file.exists():
         console.print(f"[bold red]Error:[/] PE queue file not found: {file}")

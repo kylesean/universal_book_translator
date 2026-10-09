@@ -1,10 +1,10 @@
 """``ubt.analyze`` -- turning sources into the typed Document AST.
 
-A *bootstrap* bridge seeded this layer: the pipeline already knows
-how to get ``IRBlock``s out of every format, so the bridge projects those into a
-:class:`~ubt.model.ast.Document` and back. That lets the rest of the kernel
-migrate to the typed model before a native per-format reader exists, and the
-round-trip is the proof that the model loses no document structure.
+A bridge seeds this layer: the pipeline already knows how to get ``IRBlock``s
+out of every format, so the bridge projects those into a
+:class:`~ubt.model.ast.Document` and back. Native readers build the typed model
+directly, and the round-trip is the proof that the model loses no document
+structure.
 
 Native readers land beside the bridge one at a time (incremental native reader dispatch): ``read_pdf`` for
 born-digital PDF geometry, ``read_md`` for Markdown/plain text, and now

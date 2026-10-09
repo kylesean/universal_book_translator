@@ -206,6 +206,29 @@ ELEMENT_CLASSES: tuple[type[Element], ...] = (
 )
 
 
+def source_slice(element: Element, source: CanonicalSource) -> str:
+    """The exact source text one element carries, from its character span.
+
+    Falls back to the element's own carried source when the document has no
+    canonical stream or the span does not index it -- the slice is then coarser,
+    but still the source bytes rather than a reconstruction.
+    """
+    chars = element.span.chars
+    if chars is not None:
+        start, end = chars
+        if 0 <= start <= end <= len(source.text):
+            return source.text[start:end]
+    if isinstance(element, TextElement):
+        return element.text
+    if isinstance(element, Formula):
+        return element.source
+    if isinstance(element, Table):
+        return element.markup
+    if isinstance(element, Figure):
+        return element.asset_id
+    return ""
+
+
 @dataclass(frozen=True, slots=True)
 class Region:
     """A contiguous run of elements sharing one page-furniture role."""
@@ -255,4 +278,5 @@ __all__ = [
     "TextElement",
     "CanonicalSource",
     "Span",
+    "source_slice",
 ]

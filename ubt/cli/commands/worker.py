@@ -3,18 +3,14 @@
 import asyncio
 import os
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated
 
 import typer
 from rich.console import Console
 
+from ubt.cli.commands import resolve_db_dir
+
 console = Console()
-
-
-def _get_resolve_db_dir() -> Any:
-    from ubt.cli.main import _resolve_db_dir
-
-    return _resolve_db_dir
 
 
 def worker_command(
@@ -59,7 +55,7 @@ def worker_command(
     from ubt.core.log_config import setup_logging
     from ubt.core.router.rate_limiter import build_rate_limiter
 
-    resolve_fn = _get_resolve_db_dir()
+    resolve_fn = resolve_db_dir()
     db_dir = resolve_fn(db_dir)
     worker_config = apply_config_overrides(UBTConfig.from_env(), {"db_dir": db_dir})
 

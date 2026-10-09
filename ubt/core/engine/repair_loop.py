@@ -138,11 +138,12 @@ class RepairLoop:
             score = b.mtqe_score or 0.0
             # A block is repaired when it carries a defect flag (the quality gate
             # only flags what FastPass could not auto-pass) or its score is
-            # clearly below the pass line. The old bottom-percentile cap was dead
-            # was dead: every REPAIR_PENDING block already carries a flag, so
-            # ``has_defects`` was always true and ``lowest_ids`` never changed the
-            # selected set. ``bottom_percentile`` stays a constructor knob (the
-            # assess fan-out reads the config) but no longer selects here.
+            # clearly below the pass line. The bottom-percentile cap is not a
+            # selector: every REPAIR_PENDING block already carries a flag, so a
+            # ``has_defects`` guard is always true and a lowest-ids set would
+            # never change the selection. ``bottom_percentile`` stays a
+            # constructor knob (the assess fan-out reads the config) but does not
+            # select here.
             if b.error_flags or score < self.qe_threshold * 0.8:
                 b.status = BlockStatus.REPAIR_PENDING
                 candidates.append(b)
@@ -521,9 +522,9 @@ class RepairLoop:
             # evidence the scorer actually produced: either a better class than
             # the draft, or a candidate at/above the pass line. Every structural
             # flag caps its band at 0.70 (``score_from_flags``), so a candidate
-            # that ties the draft at 0.70 had neither -- and the old ``>=`` did
-            # both: it adopted the text (right: the consistency stage fixes
-            # terminology drift no QE band measures) *and* wiped the evidence,
+            # that ties the draft at 0.70 has neither. Adopting on ``>=`` would
+            # do both: adopt the text (right: the consistency stage fixes
+            # terminology drift no QE band measures) *and* wipe the evidence,
             # leaving a block whose defect was never re-checked to read as clean
             # and be re-accepted by the next resume's FastPass.
             cleaned = new_score > old_score or new_score >= self.qe_threshold

@@ -1,10 +1,9 @@
 """The per-run services a stage reads (unified pipeline orchestration).
 
-The shared :class:`~ubt.core.engine.stage_context.StageContext` used to carry
-these as fields, which mixed "what the run *was configured with*" together with
-"the collaborators the run *built for itself*". They are now one named value the
-plan constructs once and hands to the stages that use them -- the same move as
-:mod:`ubt.core.engine.facts` for inter-stage values and
+These keep "what the run *was configured with*" apart from "the collaborators
+the run *built for itself*": one named value the plan constructs once and hands
+to the stages that use them -- the same shape as :mod:`ubt.core.engine.facts`
+for inter-stage values and
 :class:`~ubt.core.engine.blocks.BlockReader` for the run's mutable state.
 
 A service is per-run and language-bound: a QE runner scored against the run's

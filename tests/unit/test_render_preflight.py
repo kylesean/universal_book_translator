@@ -136,7 +136,7 @@ def test_preflight_sample_reaches_the_typesetter_for_a_formula_heavy_book(
 
     sample = select_preflight_sample(blocks)
     assert sample  # the sample is not empty
-    assert len(overlays_from_blocks(_placeholder_blocks(sample), None)) >= 1
+    assert len(overlays_from_blocks(_placeholder_blocks(sample))) >= 1
 
 
 def test_placeholder_text_replaces_an_empty_formula_body() -> None:

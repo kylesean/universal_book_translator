@@ -159,10 +159,10 @@ class SubprocessQERunner(BaseQERunner):
         # rest of the run falls back to per-call invocation (also manual
         # rollback: UBT_COMET_RESIDENT=0 disables residency from the start).
         self._resident_broken = False
-        # In-process heuristic used to re-score whenever the scorer reports a
+        # In-process heuristic re-scoring whenever the scorer reports a
         # non-neural engine. The scorer's own fallback is a length-ratio number
         # (0.1-0.85) on a different scale than the pipeline's 12-band
-        # HeuristicQERunner, so leaving it in place drifted the quality gate's
+        # HeuristicQERunner, so adopting it would drift the quality gate's
         # threshold and could pass a structurally-broken block at ~0.85.
         self._heuristic: HeuristicQERunner | None = None
         self._source_lang = "en"

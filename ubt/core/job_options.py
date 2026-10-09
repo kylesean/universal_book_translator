@@ -86,8 +86,8 @@ def lang_pair_validation_error(source_lang: str | None, target_lang: str | None)
     """The single language-code gate shared by every entry point.
 
     Returns a human-readable error for the first violation, or None. One
-    wording on purpose: the CLI, the API and MCP each used to word this check
-    differently and the messages drifted apart.
+    wording on purpose: the CLI, the API and MCP share this check so their
+    messages cannot drift apart.
     """
     from ubt.core.language_profile import is_supported_lang, supported_lang_codes
 
@@ -191,9 +191,8 @@ def overrides_from_request(
         if field in valid_fields:
             overrides[field] = value
     # A request that leaves dual_mode unset gets the same profile/engine-aware
-    # default on every surface. Previously only the CLI applied it, so the same
-    # job (e.g. an academic paper) rendered bilingual inline through the API/MCP
-    # and monolingual through the CLI.
+    # default on every surface; applying it on only one surface would render the
+    # same job (e.g. an academic paper) differently per entry point.
     if "dual_mode" not in overrides and not any(
         var in os.environ for var in env_var_names("dual_mode")
     ):

@@ -15,8 +15,9 @@ Typst.
 Two deliberate differences from a full delivery render, both fine for a preview
 and both worth stating:
 
-* ``realization_plan`` is not threaded through, so the default fidelity floor
-  applies. A block the real run held below its floor may appear here.
+* a block the real run held as source (a fail-closed render skip) may appear
+  here as a placed target, because the preview re-composes from the current
+  ledger text rather than the recorded render decisions.
 * the composition is always in-place on the source page (target over source).
   For the page-zipper bilingual modes (``alternating``/``facing``) the delivered
   artifact interleaves source and target pages, so page *N* of the preview is the
@@ -95,7 +96,7 @@ def render_page_preview(
     # reflow/compose steps to this page only.
     overlays = [
         overlay
-        for overlay in overlays_from_blocks(list(blocks), None, bilingual=bilingual)
+        for overlay in overlays_from_blocks(list(blocks), bilingual=bilingual)
         if overlay.page == page
     ]
     if not overlays:

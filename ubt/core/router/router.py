@@ -988,9 +988,9 @@ class ModelRouter:
                         max_tokens,
                     )
                 # Rate-limiter bookkeeping must never be misread as a provider
-                # failure: an exception here used to fall into the broad handler
-                # below, re-run the already-billed request, and relabel the cause
-                # as "Unexpected provider error". Log and continue.
+                # failure: letting an exception here reach the broad handler
+                # below would re-run the already-billed request and relabel the
+                # cause as "Unexpected provider error". Log and continue.
                 try:
                     if hasattr(self.rate_limiter, "report_success_async"):
                         await self.rate_limiter.report_success_async()
@@ -1493,7 +1493,7 @@ class ModelRouter:
             # Idempotency over the exact submitted payload (model +
             # custom_ids + fully built prompts), not just model+custom_id: a
             # glossary/context change on restart must submit a fresh batch
-            # instead of resuming one built with the old terminology.
+            # instead of resuming one built with superseded terminology.
             idempotency_key = hashlib.sha1(
                 json.dumps(jsonl_requests, sort_keys=True, ensure_ascii=False).encode()
             ).hexdigest()

@@ -2,8 +2,8 @@
 
 Every collaborator that needs "a QE runner" (the pipeline, the repair loop, the
 stage context, the API and worker entry points) depends on this interface, not on
-a realization of it. It used to live in ``comet_runner``, so importers of the
-abstraction had to import the COMET/subprocess implementation module — and along
+a realization of it. Keeping the interface here means an importer of the
+abstraction does not drag in the COMET/subprocess implementation module — and
 with it the subprocess runner's licensing warning and its IPC assumptions.
 """
 

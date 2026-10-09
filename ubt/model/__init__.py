@@ -7,13 +7,11 @@ imported, reasoned about, and serialized without a document in hand.
   :class:`CanonicalSource`: where an element came from.
 - :mod:`ubt.model.ast` -- the typed Document AST (:class:`Document`,
   :class:`Region`, and the closed element union).
-- :mod:`ubt.model.fidelity` -- the :class:`Fidelity` lattice, :class:`Proof`,
-  and :class:`Attestation`.
+- :mod:`ubt.model.segment` -- the translation-unit types (:class:`Segment`,
+  :class:`Placeholder`).
 
-This layer is the kernel's centre of gravity: the pipeline's ``IRBlock`` is
-bridged into a :class:`Document` (see :mod:`ubt.analyze.bridge`) so the rest of
-the kernel can reason over typed structure instead of a bag of optional role
-enums.
+The AST is the one place that answers "what is this piece of the document?".
+An element's *type* is its structure; the region it sits in is its layout.
 """
 
 from __future__ import annotations
@@ -39,23 +37,14 @@ from ubt.model.ast import (
     RegionKind,
     Table,
     TextElement,
-)
-from ubt.model.fidelity import (
-    FIDELITY_DESCENT,
-    Attestation,
-    Fidelity,
-    Proof,
-    ProofKind,
-    ProofOutcome,
+    source_slice,
 )
 from ubt.model.segment import QA, Placeholder, Provenance, Segment, SegmentState
 from ubt.model.span import BBox, CanonicalSource, PageGeometry, Span
 
 __all__ = [
     "ASSET_ELEMENTS",
-    "FIDELITY_DESCENT",
     "TEXT_ELEMENTS",
-    "Attestation",
     "BBox",
     "CanonicalSource",
     "Caption",
@@ -66,7 +55,6 @@ __all__ = [
     "Element",
     "ElementKind",
     "ElementT",
-    "Fidelity",
     "Figure",
     "FlowKind",
     "Formula",
@@ -75,9 +63,6 @@ __all__ = [
     "PageGeometry",
     "Paragraph",
     "Placeholder",
-    "Proof",
-    "ProofKind",
-    "ProofOutcome",
     "Provenance",
     "QA",
     "Region",
@@ -87,4 +72,5 @@ __all__ = [
     "Span",
     "Table",
     "TextElement",
+    "source_slice",
 ]

@@ -61,20 +61,6 @@ class AnthropicMessagesTransport(BaseTransport):
             else f"{self._base_url}/v1/messages"
         )
 
-    async def generate(
-        self,
-        prompt: str,
-        system_prompt: str | None = None,
-        model: str | None = None,
-        temperature: float | None = 0.3,
-        max_tokens: int | None = None,
-        reasoning_effort: str | None = None,
-    ) -> str:
-        text, _ = await self.generate_with_finish_reason(
-            prompt, system_prompt, model, temperature, max_tokens, reasoning_effort
-        )
-        return text
-
     async def generate_with_finish_reason(
         self,
         prompt: str,
@@ -107,8 +93,8 @@ class AnthropicMessagesTransport(BaseTransport):
             budget = _REASONING_EFFORT_BUDGETS.get(reasoning_effort.lower())
             if budget is not None:
                 # Anthropic expresses reasoning as an extended-thinking token
-                # budget, not an "effort" enum, so the parameter used to be
-                # silently dropped. Anthropic requires
+                # budget, not an "effort" enum, so the parameter is translated
+                # rather than dropped. Anthropic requires
                 # ``max_tokens > budget_tokens`` and forbids a custom temperature
                 # alongside thinking; the response parser reads only ``text``
                 # blocks, so the extra thinking block is ignored.

@@ -238,8 +238,8 @@ class CheckpointBatchFlusher:
                 saved = await asyncio.shield(save_task)
             except asyncio.CancelledError:
                 # ``shield`` keeps the save running when the awaiter is
-                # cancelled, so the durability verdict used to be dropped and a
-                # failed final flush vanished behind the cancellation. Observe
+                # cancelled, so an unobserved verdict would drop a failed final
+                # flush behind the cancellation. Observe
                 # the shielded task, surface a failed flush, then re-raise the
                 # cancellation only when the flush actually succeeded.
                 try:

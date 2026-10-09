@@ -165,9 +165,9 @@ def _select_probe_pages(
     With prose blocks, sample the pages they name (up to ``max_pages``). With
     none — the offline fidelity harness has no IR blocks to pass — an empty mask
     set means "*compare the whole page*", so sample the first ``max_pages``
-    common pages instead of measuring nothing. (``blocks=[]`` used to select no
-    pages at all and return a residual of 0.0: a perfect score for a
-    measurement that never ran.)
+    common pages instead of measuring nothing. (A ``blocks=[]`` mask set must not
+    be read as "no pages to compare": that returns a residual of 0.0, a perfect
+    score for a measurement that never ran.)
     """
     if pages_by_no:
         return sorted(pno for pno in pages_by_no if 1 <= pno <= common)[: max(1, max_pages)]

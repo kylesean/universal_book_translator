@@ -15,7 +15,7 @@ except ImportError:
     _HAS_AHOCORASICK = False
 
 # Below this many glossary terms the automaton build costs more than a
-# direct scan; small books keep the old loop (identical semantics).
+# direct scan; small books take the direct-scan path (identical semantics).
 _AHO_MIN_TERMS = 8
 
 # CJK ranges (ideographs, kana, hangul) that constitute word boundaries for

@@ -4,7 +4,7 @@
 typed :class:`~ubt.model.ast.Element` it carries (single source of truth: one attribute, one
 origin); everything structural -- ``block_type``, ``flow_id``, ``region``,
 ``source_text``, ``bbox``, ``spine_index`` -- is derived from that element, so
-the two can no longer disagree. What is left on the block is execution state
+the two cannot disagree. What is left on the block is execution state
 (status, translation, scores) plus the adapter's typography.
 """
 
@@ -36,7 +36,6 @@ from ubt.model.ast import (
     Table,
     TextElement,
 )
-from ubt.model.fidelity import Attestation
 from ubt.model.span import CompositeSpan, Span
 
 
@@ -330,8 +329,6 @@ class IRBlock(BaseModel):
     policy_translate: bool | None = None  # None = undecided, fall back to skip_translate
     policy_reason: str | None = None  # Required when policy_translate is False
     provenance: dict[str, Any] = Field(default_factory=dict)
-    #: Optional lowering attestation (single source of truth: per-element realization)
-    attestation: Attestation | None = None
 
     # ------------------------------------------------------------------ #
     # Structural projections of ``element`` (read-only; one source)
@@ -442,24 +439,6 @@ class IRBlock(BaseModel):
     def from_elements(cls, elements: Iterable[ElementT]) -> list[IRBlock]:
         """Wrap an iterable of document AST elements into pipeline execution blocks."""
         return [cls(element=el) for el in elements]
-
-    def attest(
-        self,
-        backend: Any,
-        verifiers: Any,
-        source: Any = None,
-    ) -> Any:
-        """Lower this block's wrapped element and record its attestation directly."""
-        from ubt.model.span import CanonicalSource
-        from ubt.pipeline.steps import realize
-
-        src = source or CanonicalSource(
-            doc_id=getattr(self.element, "id", ""),
-            text=self.source_text,
-        )
-        att = realize(self.element, backend, verifiers, src)
-        self.attestation = att
-        return att
 
     def with_source_text(self, text: str) -> IRBlock:
         """A copy whose carried source text is replaced (rebuilds the element)."""

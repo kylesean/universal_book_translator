@@ -80,7 +80,7 @@ class DiskCacheStore:
 
     The two-character shard directory keeps a large cache from putting thousands
     of entries in one directory; the temp-file + rename write makes a concurrent
-    reader see either the old value or the new one, never a partial file. Cache
+    reader see either the prior value or the new one, never a partial file. Cache
     values are derived from (possibly sensitive) book text, so the shard
     directory and every file are limited to their owner.
     """

@@ -2,12 +2,9 @@
 
 The orchestrator owns the run's resources -- the writer lock, ledger, adapter,
 router, and the per-run collaborators -- and this module owns *what runs in what
-order*. Keeping the two apart is the first slice of the orchestration
-convergence: the plan becomes one readable sequence with named gates instead of a
-stretch of the resource lifecycle, so a step's position and its gate are visible
-without the ``try/finally`` around them. It is also where the pure steps of
-:mod:`ubt.pipeline.steps` land as the shared
-:class:`~ubt.core.engine.stage_context.StageContext` is retired.
+order*. Keeping the two apart keeps the plan one readable sequence with named
+gates instead of a stretch of the resource lifecycle, so a step's position and
+its gate are visible without the ``try/finally`` around them.
 
 The plan is deliberately a function, not a table of callables: the
 chapter-streaming branch and the export terminal hook are real control flow, and

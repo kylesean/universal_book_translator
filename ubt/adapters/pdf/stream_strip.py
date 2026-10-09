@@ -386,8 +386,8 @@ def _parse_cid_widths(w_array: Any, widths: dict[int, float]) -> None:
     /W entries alternate between ``cid`` followed by ``[w w ...]`` (a run of
     consecutive cids) and ``[first last w]`` (a range sharing one width). The
     range form may appear either as a nested array or — the spelling the spec's
-    own example uses — as three flat consecutive numbers; the flat form used to
-    register nothing, so every CID it covered silently fell back to /DW (a
+    own example uses — as three flat consecutive numbers; missing the flat form
+    registers nothing, so every CID it covers silently falls back to /DW (a
     missing /DW defaults to 1000 em, mis-measuring the run the erase rect is
     sized against)."""
     items = list(w_array)

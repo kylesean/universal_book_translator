@@ -214,9 +214,9 @@ def is_leaf_block(tag: Tag, block_names: set[str]) -> bool:
 
 
 #: Inline children a monolingual rewrite must not lose. Replacing a leaf's text
-#: with the translation used to ``clear()`` the element, silently deleting inline
-#: images, footnote/cross-reference anchors, ``<br>`` breaks and embedded math;
-#: the delivered book then lost every figure and broke every footnote link.
+#: with the translation must not ``clear()`` the element, which would silently
+#: delete inline images, footnote/cross-reference anchors, ``<br>`` breaks and
+#: embedded math, losing every figure and breaking every footnote link.
 #: DOCX already preserves graphic runs and hyperlinks; these are the HTML/EPUB
 #: counterparts.
 _PRESERVED_INLINE_TAGS = frozenset(
@@ -687,8 +687,8 @@ class EPUBAdapter(BaseDocumentAdapter):
             b.id: b.target_text for b in all_blocks if b.target_text and not b.skip_translate
         }
         # Blocks whose draft never passed the quality gates stay labelled on the
-        # page (ubt.adapters.unresolved); EPUB used to inject the bare machine
-        # draft indistinguishably from an approved translation.
+        # page (ubt.adapters.unresolved), so a bare machine draft is never
+        # injected indistinguishably from an approved translation.
         unresolved_notes = {
             b.id: failure_note(b.status)
             for b in all_blocks

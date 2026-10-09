@@ -173,6 +173,12 @@ _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "::ffff:127.0.0.1"
 #: a rogue multipart body from filling the disk the ledger lives on.
 UPLOAD_MAX_BYTES = 512 * 1024 * 1024  # 512 MB
 
+#: 422 Unprocessable Entity. Starlette renamed the constant (the new name is
+#: absent on the ``fastapi>=0.111`` floor, which bundles an older Starlette),
+#: so resolve it by name instead of pinning to whichever spelling this
+#: environment happens to ship. The literal is stable across both.
+_UNPROCESSABLE_ENTITY = getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", 422)
+
 
 def _bind_isolation_gaps(cfg: UBTConfig) -> list[str]:
     """Isolation guards missing for a non-loopback bind (empty when complete)."""
@@ -2187,9 +2193,7 @@ def _register_review_routes(api_app: FastAPI, scope: ApiScope) -> None:
         except ReviewEditConflict as exc:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
         except ReviewEditError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
-            ) from exc
+            raise HTTPException(status_code=_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
         updated = None
         blocks = await _read_job_blocks(valid_id)
@@ -2270,9 +2274,7 @@ def _register_review_routes(api_app: FastAPI, scope: ApiScope) -> None:
         except ReviewEditConflict as exc:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
         except ReviewEditError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
-            ) from exc
+            raise HTTPException(status_code=_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
         return JSONResponse({"job_id": valid_id, **result})
 
@@ -2294,9 +2296,7 @@ def _register_review_routes(api_app: FastAPI, scope: ApiScope) -> None:
         if not await _tenant_allows_async(valid_id, _tenant_from_header(x_ubt_tenant)):
             raise _cross_tenant_404(valid_id)
         if page < 1:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="page must be >= 1"
-            )
+            raise HTTPException(status_code=_UNPROCESSABLE_ENTITY, detail="page must be >= 1")
         blocks = await _read_job_blocks(valid_id)
         if blocks is None:
             raise HTTPException(
@@ -2353,9 +2353,7 @@ def _register_review_routes(api_app: FastAPI, scope: ApiScope) -> None:
         if not await _tenant_allows_async(valid_id, _tenant_from_header(x_ubt_tenant)):
             raise _cross_tenant_404(valid_id)
         if page < 1:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="page must be >= 1"
-            )
+            raise HTTPException(status_code=_UNPROCESSABLE_ENTITY, detail="page must be >= 1")
         if not _job_db_path(valid_id).exists():
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail=f"Job not found: {valid_id}"
@@ -2476,7 +2474,7 @@ def _register_asset_routes(api_app: FastAPI, scope: ApiScope) -> None:
     async def upsert_glossary_term(req: GlossaryTermRequest) -> JSONResponse:
         if not req.target.strip():
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=_UNPROCESSABLE_ENTITY,
                 detail="target is required when adding a term",
             )
         path = _resolved_glossary_path()
@@ -2549,9 +2547,7 @@ def _register_asset_routes(api_app: FastAPI, scope: ApiScope) -> None:
                 provenance=req.provenance,
             )
         except TMImportError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
-            ) from exc
+            raise HTTPException(status_code=_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
         return JSONResponse({"parsed": len(rows), "imported": imported})
 
 
@@ -2617,7 +2613,7 @@ def run_server(host: str | None = None, port: int | None = None) -> None:
     Defaults to binding localhost only. The service now refuses to start without
     an API key gate: set ``UBT_API_KEY`` (``UBT_STRICT_AUTH=1`` makes the
     refusal fatal instead of a warning-and-continue). For a local,
-    throwaway server, ``UBT_ALLOW_NO_AUTH=1`` restores the old open behaviour.
+    throwaway server, ``UBT_ALLOW_NO_AUTH=1`` opts into running open.
     """
     host, port = _resolve_bind(host, port)
     setup_logging()

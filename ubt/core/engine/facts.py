@@ -1,9 +1,8 @@
 """Values one stage produces and a later one consumes (explicit stage execution context).
 
-The shared :class:`~ubt.core.engine.stage_context.StageContext` used to carry
-these as mutable fields, which made "what flows between stages" indistinguishable
-from "what the run was configured with". The plan now owns the value and hands it
-to the stage that reads it, so the flow is a named, typed parameter.
+The plan owns these values and hands each to the stage that reads it, so "what
+flows between stages" is a named, typed parameter rather than a mutable field
+shared with "what the run was configured with".
 
 A producer cannot *return* its value: every stage is an async generator yielding
 progress events (``async for event in ...``), and an async generator has no return

@@ -7,7 +7,7 @@ import contextlib
 import html
 import json
 import logging
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -28,7 +28,7 @@ from ubt.core.exceptions import (
     JobInterruptedError,
     UBTError,
 )
-from ubt.core.ir.models import BlockStatus, BookManifest, IRBlock
+from ubt.core.ir.models import BlockStatus, BlockType, BookManifest, IRBlock
 from ubt.core.job_options import RUN_REPORT_KINDS, resolve_target_output, sidecar_path
 from ubt.core.metrics.collect import collect_kpis, save_metrics_report
 from ubt.core.policy.bilingual_advisor import SECONDARY_SUFFIX
@@ -44,9 +44,7 @@ from ubt.core.ports import (
 if TYPE_CHECKING:
     from ubt.adapters.pdf.visual_gate import VisualGateResult
     from ubt.core.content.contract import ReconciliationReport
-    from ubt.model.ast import Document
     from ubt.pipeline.artifact import ArtifactReport, DeliveredArtifact
-    from ubt.pipeline.attest import AttestationReport
 from ubt.core.engine.facts import RenderPlan, Terminology
 from ubt.core.engine.services import RunServices
 from ubt.core.qe.defect_taxonomy import (
@@ -73,7 +71,6 @@ async def _render_adapter_output(
     job_id: str | None = None,
     bilingual_mode: str | None = None,
     render_plan: RenderPlan | None = None,
-    realization_plan: Mapping[str, Any] | None = None,
 ) -> Path:
     """Render via ``render_blocks``.
 
@@ -92,7 +89,6 @@ async def _render_adapter_output(
             output_path=output_path,
             bilingual_mode=bilingual_mode,
             render_plan=render_plan,
-            realization_plan=realization_plan,
         )
     return await adapter.render_blocks(
         manifest=manifest,
@@ -114,9 +110,9 @@ def apply_render_skip_flags(
     and flags already present are not duplicated. Stale flags from a
     previous render of the same job are dropped first: a render-only rerun
     (same ledger, different engine result) can render a block that an older
-    artifact skipped, and the kept flag would make the quality report
-    describe an artifact that no longer exists. Legacy ledgers may carry the
-    ``inplace_skip:`` spelling, so both prefixes are dropped. The
+    artifact skipped, and a kept flag would make the quality report describe an
+    artifact that does not exist. A ledger may carry the ``inplace_skip:``
+    spelling, so both prefixes are dropped. The
     quality report picks the flags up via ``defect_flags`` with no further
     wiring.
     """
@@ -165,7 +161,7 @@ def apply_render_quality_flags(
 
     Pure helper (unit-testable). Stale flags from a previous render are dropped
     first, mirroring ``apply_render_skip_flags``: a render-only rerun at a larger
-    size must clear a ``low_legibility_font`` that no longer describes the
+    size must clear a ``low_legibility_font`` that does not describe the current
     artifact. Unknown block ids are ignored and present flags are not
     duplicated.
 
@@ -485,7 +481,7 @@ async def _apply_render_skip_ledger_pass(
     artifact. Flag removal must reach the ledger too: the report re-reads
     blocks from it, and a render-only rerun can render what an older
     artifact skipped — a kept stale flag would make the report describe a
-    file that no longer exists.
+    file that does not exist.
     """
     actual_job_id = ctx.job_id
     ledger = ctx.ledger
@@ -783,63 +779,50 @@ async def _render_complementary_artifact(
     return secondary_path
 
 
-def _attest_delivery(
-    ctx: StageContext,
-    services: RunServices,
-    blocks: list[IRBlock],
-) -> tuple[dict[str, str], AttestationReport]:
-    """Realize the delivery per element: its Document, its target map, its account.
+def _delivery_translations(blocks: Sequence[IRBlock]) -> dict[str, str]:
+    """The ``element id -> placed target`` map the delivered blocks describe.
 
-    The backend is fed the run's own decisions (pre-render decision plan migration):
-    which elements the delivery kept in the source.
-    ``realize()`` then reproduces and *verifies* each element -- the
-    construction-time core the delivery contract is projected from.
+    Only a translation the renderer actually placed is in the map: a block kept
+    in the source has none, so the views show its source text instead.
     """
-    # Lazy: a module-level ubt.pipeline edge recreates the core.engine <-> pipeline cycle.
-    from ubt.layout.theme import resolve_theme
-    from ubt.pipeline.attest import attest_blocks
-    from ubt.pipeline.delivery import delivery_translations
-    from ubt.render.typst_backend import TypstBackend
-    from ubt.verify.verifier import build_verifiers
+    from ubt.core.content.adapt import kept_in_source
 
-    doc_id = str(getattr(ctx.manifest, "doc_id", "") or "")
-    translations = delivery_translations(blocks)
-    theme = resolve_theme(ctx.source_lang or "en", ctx.target_lang or "zh")
-    report = attest_blocks(
-        blocks,
-        TypstBackend(translations, theme=theme),
-        build_verifiers(services.fast_pass),
-        doc_id=doc_id,
-    )
-    return translations, report
+    placed: dict[str, str] = {}
+    for block in blocks:
+        target = block.target_text or ""
+        if not target.strip():
+            continue
+        if block.block_type in (BlockType.FORMULA, BlockType.TABLE, BlockType.IMAGE):
+            continue
+        if kept_in_source(block):
+            continue
+        placed[block.id] = target
+    return placed
 
 
 def _deliver_contract(
     ctx: StageContext,
     blocks: list[IRBlock],
     rendered_path: Path,
-    report: AttestationReport,
 ) -> ReconciliationReport:
-    """Build the content graph, project the attestations onto it, persist the contract.
+    """Build the content graph, reconcile it, and persist the contract.
 
-    The contract is a *projection* of the per-element attestations (pre-render
-    decision plan): ``realize()`` is the construction-time core, and the graph supplies
-    only the detail the AST deliberately does not model. Always writes the
-    standalone ``*_contract.json`` and returns the report. The report is advisory
-    unless ``config.strict_contract`` is set, in which case the caller aborts on
-    an ERROR-severity violation; ``ubt verify`` applies the same contract to a
-    delivered artifact or a finished job's ledger.
+    Always writes the standalone ``*_contract.json`` and returns the report. The
+    report is advisory unless ``config.strict_contract`` is set, in which case
+    the caller aborts on an ERROR-severity violation; ``ubt verify`` applies the
+    same reconciliation to a delivered artifact or a finished job's ledger.
     """
-    from ubt.core.content.project import contract_from_attestations
+    from ubt.core.content.adapt import graph_from_blocks
+    from ubt.core.content.contract import reconcile
 
     manifest = ctx.manifest
-    contract = contract_from_attestations(
-        report,
+    graph = graph_from_blocks(
         blocks,
         doc_id=str(getattr(manifest, "doc_id", "") or ""),
         title=str(getattr(manifest, "title", "") or ""),
         source_path=str(getattr(manifest, "source_path", "") or ""),
     )
+    contract = reconcile(graph)
     payload = contract.model_dump(mode="json")
     contract_path = sidecar_path(rendered_path, "contract.json")
     try:
@@ -911,16 +894,13 @@ def _write_xliff_companion(
 def _write_html_view(
     ctx: StageContext,
     rendered_path: Path,
-    document: Document,
     translations: dict[str, str],
-    attestations: AttestationReport,
+    blocks: list[IRBlock],
 ) -> Path | None:
-    """Write a semantic HTML view of the delivery beside the artifact (semantic document delivery view).
+    """Write a semantic HTML view of the delivery beside the artifact.
 
-    The same realized ``Document`` the contract is projected from, lowered to
-    HTML by the same rule as the PDF (a missing Attestation is refused). A
-    *view*, so it is read-only and best-effort: a failure is logged and skipped,
-    never allowed to sink the delivery.
+    A *view*, so it is read-only and best-effort: a failure is logged and
+    skipped, never allowed to sink the delivery.
     """
     if not ctx.config.emit_html_companion:
         return None
@@ -931,8 +911,7 @@ def _write_html_view(
 
         path = companion_path(rendered_path, ".html")
         compose_html(
-            document,
-            attestations.attestations,
+            blocks,
             translations,
             path,
             lang=ctx.target_lang or "en",
@@ -948,11 +927,10 @@ def _write_html_view(
 def _write_epub_view(
     ctx: StageContext,
     rendered_path: Path,
-    document: Document,
     translations: dict[str, str],
-    attestations: AttestationReport,
+    blocks: list[IRBlock],
 ) -> Path | None:
-    """Write an EPUB 3 view of the delivery beside the artifact (semantic document delivery view)."""
+    """Write an EPUB 3 view of the delivery beside the artifact."""
     if not ctx.config.emit_epub_companion:
         return None
     try:
@@ -962,30 +940,19 @@ def _write_epub_view(
 
         path = companion_path(rendered_path, ".epub")
         compose_epub(
-            document,
-            attestations.attestations,
+            blocks,
             translations,
             path,
             title=str(getattr(ctx.manifest, "title", "") or "UBT translation"),
             lang=ctx.target_lang or "en",
             direction=direction_for(ctx.target_lang or "en").value,
+            doc_id=str(getattr(ctx.manifest, "doc_id", "") or ""),
         )
         logger.info("EPUB view for job %s: %s", ctx.job_id, path.name)
         return path
     except Exception as exc:  # a view must never sink the delivery
         logger.warning("EPUB view skipped for job %s: %s", ctx.job_id, exc)
         return None
-
-
-def _attestation_payload(report: AttestationReport) -> dict[str, Any]:
-    """Serialize an :class:`~ubt.pipeline.attest.AttestationReport` for the sidecar."""
-    return {
-        "total": report.total,
-        "text": dict(report.text),
-        "assets": dict(report.assets),
-        "violations": list(report.violations),
-        "summary": report.summary_line(),
-    }
 
 
 def _artifact_payload(report: ArtifactReport) -> dict[str, Any]:
@@ -997,48 +964,38 @@ def _artifact_payload(report: ArtifactReport) -> dict[str, Any]:
     }
 
 
-def _write_attestation_shadow(
+def _write_artifact_check(
     ctx: StageContext,
     rendered_path: Path,
-    document: Document,
     translations: Mapping[str, str],
-    report: AttestationReport,
+    blocks: list[IRBlock],
 ) -> Path | None:
-    """Write the attestation account -- and the artifact check -- beside the artifact.
+    """Write the artifact check beside the artifact.
 
-    Pre-render decision plan: the attestations *are* the delivery's account, and this
-    records them, plus whether the delivered artifact actually carries each text
-    realization ("产物保真度 ≥ 现路径"). Read-only and off-loop; a failure is logged
-    and skipped and can never sink the delivery.
+    Records whether the delivered artifact actually carries each text block's
+    realization. Read-only and off-loop; a failure is logged and skipped and can
+    never sink the delivery.
     """
     if not ctx.config.emit_attestation_shadow:
         return None
     try:
         from ubt.core.job_options import companion_path
-
-        # Lazy: a module-level ubt.pipeline edge recreates the core.engine <-> pipeline cycle.
         from ubt.pipeline.artifact import check_artifact
 
-        payload = _attestation_payload(report)
-        try:
-            artifact = check_artifact(document, report.attestations, translations, rendered_path)
-        except Exception as exc:  # the probe is best-effort; the account still stands
-            logger.warning("Artifact check skipped for job %s: %s", ctx.job_id, exc)
-        else:
-            payload["artifact"] = _artifact_payload(artifact)
-            if not artifact.passed:
-                logger.warning(
-                    "Attestation artifact check for job %s: %s (missing: %s)",
-                    ctx.job_id,
-                    artifact.summary_line(),
-                    ", ".join(check.element_id for check in artifact.missing[:5]),
-                )
+        artifact = check_artifact(blocks, translations, rendered_path)
+        payload: dict[str, Any] = {"artifact": _artifact_payload(artifact)}
+        if not artifact.passed:
+            logger.warning(
+                "Artifact check for job %s: %s (missing: %s)",
+                ctx.job_id,
+                artifact.summary_line(),
+                ", ".join(check.element_id for check in artifact.missing[:5]),
+            )
         path = companion_path(rendered_path, "_attestations.json")
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        logger.info("Attestation account for job %s: %s", ctx.job_id, report.summary_line())
         return path
     except Exception as exc:  # an audit companion must never sink the delivery
-        logger.warning("Attestation account skipped for job %s: %s", ctx.job_id, exc)
+        logger.warning("Artifact check skipped for job %s: %s", ctx.job_id, exc)
         return None
 
 
@@ -1264,17 +1221,7 @@ async def run_export_stage(
 
     ctx.check_cancelled()
     effective_bilingual_mode = render.bilingual_mode
-    # pre-render decision plan inversion: build the decision plan *before* the render and
-    # hand it to the renderer as its per-element decision source. The contract
-    # below is then projected from this same plan -- one realize() pass, not a
-    # second account.
-    translations, attestations = await asyncio.to_thread(
-        _attest_delivery, ctx, services, final_blocks
-    )
-    # Lazy: a module-level ubt.pipeline edge recreates the core.engine <-> pipeline cycle.
-    from ubt.pipeline.decisions import plan_fidelities
-
-    realization_plan = plan_fidelities(attestations)
+    translations = await asyncio.to_thread(_delivery_translations, final_blocks)
     rendered_path = await _render_adapter_output(
         adapter=adapter,
         manifest=manifest,
@@ -1285,7 +1232,6 @@ async def run_export_stage(
         job_id=actual_job_id,
         bilingual_mode=effective_bilingual_mode,
         render_plan=render,
-        realization_plan=realization_plan,
     )
 
     # Render skip pass-through + length conservation, before the report is
@@ -1297,10 +1243,10 @@ async def run_export_stage(
     # the persisted report files always reflect the current render.
     _drop_stale_run_reports(rendered_path)
 
-    # Delivery contract: the attestation projection, written beside the artifact
-    # and embedded in the quality report; an opt-in hard gate
+    # Delivery contract: the content-graph reconciliation, written beside the
+    # artifact and embedded in the quality report; an opt-in hard gate
     # (UBT_STRICT_CONTRACT) aborts a knowingly-broken delivery.
-    contract = _deliver_contract(ctx, final_blocks, rendered_path, attestations)
+    contract = _deliver_contract(ctx, final_blocks, rendered_path)
     if ctx.config.strict_contract and not contract.passed:
         raise IntegrityViolationError(
             f"Export blocked for job {ctx.job_id}: delivery contract failed with "
@@ -1314,25 +1260,11 @@ async def run_export_stage(
     # best-effort: it cannot affect the artifact, only add a file beside it.
     await asyncio.to_thread(_write_xliff_companion, ctx, rendered_path, final_blocks)
 
-    # HTML / EPUB views and attestation shadow of the realized delivery.
-    # Read-only, best-effort companions; document is built lazily only when requested.
-    if (
-        ctx.config.emit_html_companion
-        or ctx.config.emit_epub_companion
-        or ctx.config.emit_attestation_shadow
-    ):
-        from ubt.pipeline.delivery import delivery_document
-
-        document = await asyncio.to_thread(delivery_document, final_blocks, doc_id=actual_job_id)
-        await asyncio.to_thread(
-            _write_html_view, ctx, rendered_path, document, translations, attestations
-        )
-        await asyncio.to_thread(
-            _write_epub_view, ctx, rendered_path, document, translations, attestations
-        )
-        await asyncio.to_thread(
-            _write_attestation_shadow, ctx, rendered_path, document, translations, attestations
-        )
+    # HTML / EPUB views and the artifact check of the delivered blocks.
+    # Read-only, best-effort companions.
+    await asyncio.to_thread(_write_html_view, ctx, rendered_path, translations, final_blocks)
+    await asyncio.to_thread(_write_epub_view, ctx, rendered_path, translations, final_blocks)
+    await asyncio.to_thread(_write_artifact_check, ctx, rendered_path, translations, final_blocks)
 
     # Post-render visual gate: T0/T1 deterministic +
     # optional pixel confirmation + sampled T2 VLM + ReflowControlLoop.
@@ -1348,7 +1280,6 @@ async def run_export_stage(
     # render-mode override plumbing.
     # The two artifact identities (requested target vs returned file, which the
     # visual gate may have rewritten) named once, where the render returns.
-    # Lazy: a module-level ubt.pipeline edge recreates the core.engine <-> pipeline cycle.
     from ubt.pipeline.artifact import delivered_artifact
 
     artifact = delivered_artifact(rendered_path, target_output)
