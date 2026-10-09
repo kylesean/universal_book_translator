@@ -198,13 +198,18 @@ def sample_document(path: Path, ext: str) -> tuple[int, bool, str]:
 
             from bs4 import BeautifulSoup
 
+            from ubt.core.zip_safety import ZipReadBudget, read_member
+
             epub_parts: list[str] = []
             with zipfile.ZipFile(str(path), "r") as z:
+                budget = ZipReadBudget()
                 html_files = [
                     n for n in z.namelist() if n.lower().endswith((".html", ".xhtml", ".htm"))
                 ]
                 for name in html_files[:5]:
-                    data = z.read(name)
+                    data = read_member(z, name, budget)
+                    if data is None:
+                        continue
                     soup = BeautifulSoup(data, "html.parser")
                     epub_parts.append(soup.get_text())
             sample = "\n".join(epub_parts)

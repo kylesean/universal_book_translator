@@ -155,6 +155,27 @@ async def test_epub_adapter_parses_and_renders(tmp_path: Path, epub_book: Path) 
             assert not zf.testzip(), f"{mode} output is not a valid zip"
 
 
+async def test_docx_manifest_reads_the_title_without_loading_the_body(
+    docx_book: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``extract_manifest`` must not load the whole document for one metadata field.
+
+    ``parse_stream`` loads the document again for the body, so the old manifest
+    path parsed every paragraph twice (a second full DOM). The title lives in
+    the small ``docProps/core.xml`` member; reading it directly is enough. This
+    fails loudly if the manifest ever re-introduces the full-package load.
+    """
+    import docx
+
+    def _boom(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("extract_manifest loaded the whole DOCX package")
+
+    monkeypatch.setattr(docx, "Document", _boom)
+    manifest = await DOCXAdapter().extract_manifest(docx_book)
+    assert manifest.title  # falls back to the filename stem, still non-empty
+    assert manifest.chapters[0].source_file == docx_book.name
+
+
 async def test_docx_adapter_parses_and_renders(tmp_path: Path, docx_book: Path) -> None:
     from docx import Document as OpenDocx
 

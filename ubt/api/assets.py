@@ -291,11 +291,14 @@ def parse_tmx(content: str) -> list[dict[str, str]]:
     first/second convention). A ``<tu>`` without exactly two usable segments is
     skipped rather than guessed at.
     """
-    import xml.etree.ElementTree as ET
+    from ubt.core.xml_safety import UnsafeXMLError, parse_xml
 
     try:
-        root = ET.fromstring(content)
-    except ET.ParseError as exc:
+        # Hardened parse: a TMX import is untrusted input, so a DTD, entity
+        # definition or external reference is refused rather than expanded
+        # (billion-laughs / XXE). The TMX DTD *declaration* itself is fine.
+        root = parse_xml(content)
+    except UnsafeXMLError as exc:
         raise TMImportError(f"invalid TMX: {exc}") from exc
 
     rows: list[dict[str, str]] = []

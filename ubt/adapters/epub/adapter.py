@@ -46,6 +46,7 @@ from ubt.core.ir.models import (
     IRBlock,
 )
 from ubt.core.ir.serializer import compute_file_sha256_cached
+from ubt.core.zip_safety import ZipReadBudget, read_member
 from ubt.model.ast import ListItem, Table, TextElement
 
 logger = logging.getLogger(__name__)
@@ -80,28 +81,17 @@ def _natural_sort_key(name: str) -> list[object]:
     return [int(part) if part.isdigit() else part for part in re.split(r"(\d+)", name)]
 
 
-#: Refuse to materialise a single member beyond this. A "zip bomb" member
-#: declares an enormous uncompressed size; ``zipfile`` stops at the declared
-#: size, so capping it before ``read`` is what keeps one crafted member from
-#: exhausting memory (a lying declaration is stopped and CRC-failed inside
-#: ``zipfile`` anyway).
-_MAX_EPUB_MEMBER_BYTES = 300 * 1024 * 1024
+def _read_epub_member(
+    zf: zipfile.ZipFile, name: str, budget: ZipReadBudget | None = None
+) -> bytes | None:
+    """Read one member unless it is missing or bomb-scale (see ``zip_safety``).
 
-
-def _read_epub_member(zf: zipfile.ZipFile, name: str) -> bytes | None:
-    """Read one member unless its declared size is bomb-scale.
-
-    Returns ``None`` (after logging) for a missing or oversized member instead
+    Returns ``None`` (after logging) for a missing or over-budget member instead
     of raising, so the caller can skip it and still deliver the rest of the book.
+    The guard caps both a single member (a crafted enormous declaration) and the
+    archive total (a book made of many just-under-cap members).
     """
-    try:
-        info = zf.getinfo(name)
-    except KeyError:
-        return None
-    if info.file_size > _MAX_EPUB_MEMBER_BYTES:
-        logger.warning("EPUB: skipping oversized member %r (%d bytes)", name, info.file_size)
-        return None
-    return zf.read(name)
+    return read_member(zf, name, budget)
 
 
 _XML_DECL_ENCODING_RE = re.compile(
@@ -358,6 +348,7 @@ def _parse_chapter_blocks(
     fp: BoilerplateFingerprint,
     is_page_slice: bool,
     global_spine: int,
+    budget: ZipReadBudget | None = None,
 ) -> list[IRBlock]:
     """Parse one EPUB spine item into IR blocks (synchronous).
 
@@ -374,7 +365,7 @@ def _parse_chapter_blocks(
         # ``python -O`` strips asserts, which would turn a None into a later
         # ``AttributeError`` on ``None`` instead of this actionable message.
         raise DocumentParseError(f"EPUB chapter {chapter.chapter_id!r} has no source file to parse")
-    raw_bytes = _read_epub_member(zf, source_file)
+    raw_bytes = _read_epub_member(zf, source_file, budget)
     if raw_bytes is None:
         # Missing or zip-bomb-sized member: yield no blocks rather than read it.
         return []
@@ -436,8 +427,12 @@ class EPUBAdapter(BaseDocumentAdapter):
 
         try:
             with zipfile.ZipFile(input_path) as zf:
-                opf_path = self._locate_opf(zf)
-                opf_bytes = _read_epub_member(zf, opf_path)
+                # One read budget for this archive: the OPF, the container and
+                # the boilerplate samples share it, so a book of many
+                # just-under-cap members cannot add up to an exhaustion.
+                budget = ZipReadBudget()
+                opf_path = self._locate_opf(zf, budget)
+                opf_bytes = _read_epub_member(zf, opf_path, budget)
                 if opf_bytes is None:
                     raise DocumentParseError(
                         f"Invalid EPUB: OPF package manifest {opf_path!r} could not be read "
@@ -561,7 +556,7 @@ class EPUBAdapter(BaseDocumentAdapter):
                     sample_range = chapters[min(5, len(chapters) - 1) : min(35, len(chapters))]
                     for c in sample_range:
                         if c.source_file and c.source_file in sample_names:
-                            sample_raw = _read_epub_member(zf, c.source_file)
+                            sample_raw = _read_epub_member(zf, c.source_file, budget)
                             if sample_raw is None:
                                 continue
                             raw = decode_markup(sample_raw)
@@ -610,6 +605,10 @@ class EPUBAdapter(BaseDocumentAdapter):
             # One central-directory read for the whole stream: per-chapter
             # namelist() calls rebuilt the full member list every iteration.
             member_names = set(zf.namelist())
+            # One read budget for the whole stream, so the chapters together
+            # cannot exceed the archive cap even if each stays under the member
+            # cap.
+            budget = ZipReadBudget()
             for chapter in manifest.chapters:
                 if not chapter.source_file or chapter.source_file not in member_names:
                     continue
@@ -625,6 +624,7 @@ class EPUBAdapter(BaseDocumentAdapter):
                     fp,
                     is_page_slice,
                     global_spine,
+                    budget,
                 )
                 global_spine += len(chapter_blocks)
 
@@ -704,13 +704,17 @@ class EPUBAdapter(BaseDocumentAdapter):
                 zipfile.ZipFile(input_path) as zin,
                 zipfile.ZipFile(temp_epub, "w") as zout,
             ):
+                # One read budget for the repack: the source was already
+                # accepted, so this only stops a crafted archive from expanding
+                # past the work cap while being copied.
+                budget = ZipReadBudget()
                 # Resolve the package file and its TOC documents so
                 # they can be rewritten (language, CSS item, bilingual labels).
                 opf_path = str(manifest.metadata.get("opf_path") or "")
                 opf_dir = posixpath.dirname(opf_path)
                 toc_paths: set[str] = set()
                 opf_bytes = (
-                    _read_epub_member(zin, opf_path)
+                    _read_epub_member(zin, opf_path, budget)
                     if opf_path and opf_path in zin.namelist()
                     else None
                 )
@@ -740,7 +744,7 @@ class EPUBAdapter(BaseDocumentAdapter):
                         # Existing bilingual stylesheet will be re-written once at the end
                         continue
 
-                    data = _read_epub_member(zin, info.filename)
+                    data = _read_epub_member(zin, info.filename, budget)
                     if data is None:
                         # Missing or zip-bomb-sized member: skip it rather than
                         # materialise it.
@@ -841,9 +845,9 @@ class EPUBAdapter(BaseDocumentAdapter):
 
         return output_path
 
-    def _locate_opf(self, zf: zipfile.ZipFile) -> str:
+    def _locate_opf(self, zf: zipfile.ZipFile, budget: ZipReadBudget | None = None) -> str:
         """Locate the root OPF file path via META-INF/container.xml."""
-        container_bytes = _read_epub_member(zf, "META-INF/container.xml")
+        container_bytes = _read_epub_member(zf, "META-INF/container.xml", budget)
         if container_bytes is not None:
             container_xml = decode_markup(container_bytes)
             m = re.search(r'full-path=["\']([^"\']+)["\']', container_xml)

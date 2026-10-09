@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import csv
 import logging
-import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -33,6 +32,7 @@ from typing import Any
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.ir.models import BlockStatus
 from ubt.core.memory.tm import PROVENANCE_HUMAN_PE, TMPendingEntry, TranslationMemory
+from ubt.core.xml_safety import UnsafeXMLError, parse_xml_file
 
 logger = logging.getLogger(__name__)
 
@@ -94,8 +94,8 @@ def parse_csv_revisions(file_path: Path) -> ParsedRevisions:
 def parse_xliff_revisions(file_path: Path) -> ParsedRevisions:
     """Extract ``unit id -> target`` and ``ubt-job-id`` notes from an XLIFF 2.1 document."""
     try:
-        root = ET.parse(file_path).getroot()
-    except ET.ParseError as exc:
+        root = parse_xml_file(file_path)
+    except UnsafeXMLError as exc:
         raise PEImportError(f"Invalid XLIFF XML: {exc}") from exc
     if root.tag != f"{{{_XLIFF_NS}}}xliff":
         raise PEImportError(

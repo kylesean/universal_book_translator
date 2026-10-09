@@ -4246,6 +4246,7 @@ source = { editable = "." }
 dependencies = [
     { name = "beautifulsoup4" },
     { name = "charset-normalizer" },
+    { name = "defusedxml" },
     { name = "fastapi" },
     { name = "fonttools" },
     { name = "httpx" },
@@ -4309,6 +4310,7 @@ dev = [
 requires-dist = [
     { name = "beautifulsoup4", specifier = ">=4.12.0" },
     { name = "charset-normalizer", specifier = ">=3.3.0" },
+    { name = "defusedxml", specifier = ">=0.7.1" },
     { name = "docling", marker = "extra == 'academic'", specifier = ">=2.0.0" },
     { name = "docling", marker = "extra == 'pdf'", specifier = ">=2.0.0" },
     { name = "fastapi", specifier = ">=0.111.0" },

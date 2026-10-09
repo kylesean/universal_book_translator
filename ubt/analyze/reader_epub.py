@@ -20,30 +20,37 @@ from pathlib import Path
 from urllib.parse import unquote
 
 from bs4 import BeautifulSoup
-from lxml import etree
 
 from ubt.analyze._identity import file_digest
 from ubt.analyze.assemble import assemble, number
 from ubt.analyze.reader_html import decode_bytes, elements_from_markup
+from ubt.core.xml_safety import parse_xml
+from ubt.core.zip_safety import ZipReadBudget, read_member
 from ubt.model.ast import Document
 
 _CONTAINER_NS = "urn:oasis:names:tc:opendocument:xmlns:container"
 _OPF_NS = "http://www.idpf.org/2007/opf"
 
 
-def _opf_path(zf: zipfile.ZipFile) -> str:
+def _opf_path(zf: zipfile.ZipFile, budget: ZipReadBudget | None = None) -> str:
     """The OPF package path from ``META-INF/container.xml``."""
-    root = etree.fromstring(zf.read("META-INF/container.xml"))
+    container = read_member(zf, "META-INF/container.xml", budget)
+    if container is None:
+        raise ValueError("EPUB container.xml is missing or oversized")
+    root = parse_xml(container)
     rootfile = root.find(f".//{{{_CONTAINER_NS}}}rootfile")
     if rootfile is None:
         raise ValueError("EPUB container.xml has no rootfile")
     return str(rootfile.get("full-path"))
 
 
-def _spine(zf: zipfile.ZipFile, opf_path: str) -> list[str]:
+def _spine(zf: zipfile.ZipFile, opf_path: str, budget: ZipReadBudget | None = None) -> list[str]:
     """The XHTML member paths of the spine, in reading order."""
     base = posixpath.dirname(opf_path)
-    root = etree.fromstring(zf.read(opf_path))
+    opf = read_member(zf, opf_path, budget)
+    if opf is None:
+        raise ValueError(f"EPUB package {opf_path!r} is missing or oversized")
+    root = parse_xml(opf)
     manifest: dict[str, str] = {}
     for item in root.findall(f".//{{{_OPF_NS}}}manifest/{{{_OPF_NS}}}item"):
         item_id, href = item.get("id"), item.get("href")
@@ -76,11 +83,11 @@ def read_epub(path: str | Path, *, doc_id: str | None = None) -> Document:
     epub_path = Path(path)
     out = []
     with zipfile.ZipFile(epub_path) as zf:
-        spine = _spine(zf, _opf_path(zf))
+        budget = ZipReadBudget()
+        spine = _spine(zf, _opf_path(zf, budget), budget)
         for index, item_path in enumerate(spine):
-            try:
-                raw = zf.read(item_path)
-            except KeyError:
+            raw = read_member(zf, item_path, budget)
+            if raw is None:
                 continue
             soup = BeautifulSoup(decode_bytes(raw), "html.parser")
             out.extend(

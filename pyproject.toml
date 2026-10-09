@@ -75,6 +75,13 @@ dependencies = [
     # can look at them.
     "charset-normalizer>=3.3.0",
     "jieba>=0.42.1",
+    # Hardened XML parsing for every untrusted document we read (TMX imports,
+    # EPUB/DOCX/XLIFF): stdlib ``xml.etree`` on CPython 3.12 already refuses
+    # external entities and caps entity amplification, but that is a *default*
+    # we do not control — defusedxml makes the refusal explicit and survives a
+    # future interpreter or a caller passing its own parser. Pure Python, zero
+    # transitive deps, PSF/BSD.
+    "defusedxml>=0.7.1",
 ]
 
 [project.scripts]
@@ -230,6 +237,12 @@ ignore_missing_imports = true
 # lxml ships no inline types / py.typed marker; the DOCX footnote/endnote raw
 # blob handling parses via lxml.etree directly.
 module = "lxml.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# defusedxml ships no py.typed marker; it is a thin hardening wrapper over
+# xml.etree, so its parse results are already typed by stdlib stubs.
+module = "defusedxml.*"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

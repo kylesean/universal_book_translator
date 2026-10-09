@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import logging
 import re
-import xml.etree.ElementTree as ET
 import zipfile
 from dataclasses import dataclass
 from html.parser import HTMLParser
@@ -25,6 +24,8 @@ from pathlib import Path
 from typing import Literal
 
 from ubt.core.ports import classify_pdf_structure, probe_pdf_pages, sample_pdf_pages
+from ubt.core.xml_safety import parse_xml
+from ubt.core.zip_safety import ZipReadBudget, read_member
 
 logger = logging.getLogger(__name__)
 
@@ -205,14 +206,16 @@ def _probe_non_pdf(path: Path) -> tuple[int, int, int, int]:
     if ext == ".epub":
         try:
             with zipfile.ZipFile(path, "r") as zf:
+                budget = ZipReadBudget()
                 spine_count = 0
                 total_chars = 0
                 total_tokens = 0
                 opf_names = [n for n in zf.namelist() if n.endswith(".opf")]
                 if opf_names:
                     try:
-                        tree = ET.fromstring(zf.read(opf_names[0]))
-                        spine_count = len(tree.findall(".//{*}itemref"))
+                        opf_bytes = read_member(zf, opf_names[0], budget)
+                        tree = parse_xml(opf_bytes) if opf_bytes is not None else None
+                        spine_count = len(tree.findall(".//{*}itemref")) if tree is not None else 0
                     except Exception:
                         spine_count = 0
                 html_files = [
@@ -221,7 +224,10 @@ def _probe_non_pdf(path: Path) -> tuple[int, int, int, int]:
                 if spine_count <= 0:
                     spine_count = len(html_files)
                 for hf in html_files:
-                    stripped = _strip_markup(zf.read(hf).decode("utf-8", errors="ignore"))
+                    member = read_member(zf, hf, budget)
+                    if member is None:
+                        continue
+                    stripped = _strip_markup(member.decode("utf-8", errors="ignore"))
                     total_chars += len(stripped)
                     total_tokens += _script_aware_tokens(stripped, len(stripped))
                 chapters = max(1, spine_count)
@@ -234,8 +240,10 @@ def _probe_non_pdf(path: Path) -> tuple[int, int, int, int]:
         try:
             with zipfile.ZipFile(path, "r") as zf:
                 if "word/document.xml" in zf.namelist():
-                    xml_content = zf.read("word/document.xml")
-                    tree = ET.fromstring(xml_content)
+                    xml_content = read_member(zf, "word/document.xml", ZipReadBudget())
+                    if xml_content is None:
+                        return 1, 0, 1, 0
+                    tree = parse_xml(xml_content)
                     text_parts = [
                         elem.text for elem in tree.iter() if elem.tag.endswith("}t") and elem.text
                     ]

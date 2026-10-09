@@ -58,6 +58,41 @@ def _resolve_east_asia_font(target_lang: str | None) -> str | None:
     return _EAST_ASIA_FONT_MAP.get(primary)
 
 
+#: Dublin Core namespace on the ``docProps/core.xml`` title element.
+_DC_TITLE = "{http://purl.org/dc/elements/1.1/}title"
+
+
+def _core_title(path: Path) -> str:
+    """The document's core title, or ``""`` when absent/unreadable.
+
+    Reads only the small ``docProps/core.xml`` member rather than loading the
+    whole package with ``python-docx``: ``extract_manifest`` needs the title
+    alone, and ``parse_stream`` immediately loads the document again for the
+    body, so the old path parsed every paragraph of the book twice (a second
+    full DOM) just to read one metadata field.
+    """
+    import zipfile
+
+    from ubt.core.xml_safety import UnsafeXMLError, parse_xml
+    from ubt.core.zip_safety import ZipReadBudget, read_member
+
+    try:
+        with zipfile.ZipFile(path) as zf:
+            raw = read_member(zf, "docProps/core.xml", ZipReadBudget())
+    except (OSError, zipfile.BadZipFile) as err:
+        raise DocumentParseError(f"Failed to open DOCX document {path}: {err}") from err
+    if raw is None:
+        return ""
+    try:
+        root = parse_xml(raw)
+    except UnsafeXMLError:
+        # A malformed core.xml is metadata trouble, not a document that cannot
+        # be translated: fall back to the filename-derived title.
+        return ""
+    node = root.find(_DC_TITLE)
+    return (node.text or "").strip() if node is not None else ""
+
+
 class DOCXAdapter(BaseDocumentAdapter):
     """Adapter for Word documents (.docx) with in-place bilingual injection."""
 
@@ -69,14 +104,7 @@ class DOCXAdapter(BaseDocumentAdapter):
             raise DocumentParseError(f"DOCX file not found: {input_path}")
 
         doc_id = await asyncio.to_thread(compute_file_sha256_cached, input_path)
-        title = input_path.stem
-        try:
-            doc = Document(str(input_path))
-            core_title = doc.core_properties.title
-            if core_title and core_title.strip():
-                title = core_title.strip()
-        except Exception as err:
-            raise DocumentParseError(f"Failed to open DOCX document {input_path}: {err}") from err
+        title = await asyncio.to_thread(_core_title, input_path) or input_path.stem
 
         chapter = ChapterMeta(
             chapter_id="docx_main",

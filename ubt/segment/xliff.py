@@ -27,6 +27,7 @@ import re
 from dataclasses import dataclass
 from xml.etree import ElementTree as ET
 
+from ubt.core.xml_safety import parse_xml
 from ubt.model.segment import Placeholder, Segment, SegmentState
 
 NS = "urn:oasis:names:tc:xliff:document:2.1"
@@ -173,7 +174,10 @@ def to_xliff(
 
 def from_xliff(text: str) -> XliffDocument:
     """Parse an XLIFF 2.1 document back into segments (namespace-tolerant)."""
-    root = ET.fromstring(text)
+    # Hardened parse: an XLIFF handed to a review import is untrusted input, so
+    # a DTD, entity definition or external reference is refused rather than
+    # expanded (billion-laughs / XXE).
+    root = parse_xml(text)
     src_lang = root.get("srcLang") or ""
     trg_lang = root.get("trgLang") or ""
     file_el = next((el for el in root.iter() if _local(el.tag) == "file"), None)
