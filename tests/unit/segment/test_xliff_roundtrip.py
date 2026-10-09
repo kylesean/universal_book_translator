@@ -11,6 +11,7 @@ placeholder -- plus the document header (languages, original file name).
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
+from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
@@ -175,3 +176,25 @@ def test_block_state_fails_loud_on_unmapped_status() -> None:
     bogus = cast("BlockStatus", SimpleNamespace(value="not_a_real_status"))
     with pytest.raises(ValueError, match="unmapped BlockStatus"):
         _block_state(bogus)
+
+
+def test_to_xliff_emits_job_id_note_and_pe_import_reads_it(tmp_path: Path) -> None:
+    from ubt.core.engine.pe_import import parse_xliff_revisions
+
+    seg = Segment(
+        id="block_001",
+        source="Run code first",
+        placeholders=(Placeholder(token="⟦CODE_MASK_0001-abc⟧", kind="code", original="make"),),
+        target="运行 ⟦CODE_MASK_0001-abc⟧ 之前。",
+        state=SegmentState.TRANSLATED,
+    )
+    xml = to_xliff([seg], src_lang="en", trg_lang="zh", original="test.md", job_id="job_xyz_123")
+    assert 'category="ubt-job-id"' in xml
+    assert "job_xyz_123" in xml
+
+    xliff_file = tmp_path / "test.xliff"
+    xliff_file.write_text(xml, encoding="utf-8")
+
+    revisions = parse_xliff_revisions(xliff_file)
+    assert revisions.job_ids == {"job_xyz_123"}
+    assert revisions.revisions["block_001"] == "运行 ⟦CODE_MASK_0001-abc⟧ 之前。"

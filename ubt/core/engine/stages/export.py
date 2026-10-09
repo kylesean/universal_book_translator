@@ -942,6 +942,7 @@ def _write_xliff_companion(
             src_lang=ctx.source_lang or "en",
             trg_lang=ctx.target_lang,
             original=Path(ctx.input_path).name,
+            job_id=ctx.job_id,
         )
         path = companion_path(rendered_path, ".xliff")
         path.write_text(xml, encoding="utf-8")

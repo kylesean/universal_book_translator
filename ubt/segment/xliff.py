@@ -148,6 +148,7 @@ def to_xliff(
     src_lang: str,
     trg_lang: str,
     original: str = "",
+    job_id: str = "",
 ) -> str:
     """Serialize segments to an XLIFF 2.1 document (one ``unit`` per segment)."""
     root = ET.Element(
@@ -155,8 +156,17 @@ def to_xliff(
         {"xmlns": NS, "version": "2.1", "srcLang": src_lang, "trgLang": trg_lang},
     )
     file_el = ET.SubElement(root, "file", {"id": "f1", "original": xml_safe(original)})
+    if job_id:
+        file_notes = ET.SubElement(file_el, "notes")
+        file_note = ET.SubElement(file_notes, "note", {"category": "ubt-job-id"})
+        file_note.text = xml_safe(job_id)
     for segment in segments:
         unit = ET.SubElement(file_el, "unit", {"id": xml_safe(segment.id)})
+        seg_job = getattr(segment, "job_id", "") or job_id
+        if seg_job:
+            notes_el = ET.SubElement(unit, "notes")
+            note_el = ET.SubElement(notes_el, "note", {"category": "ubt-job-id"})
+            note_el.text = xml_safe(seg_job)
         seg_el = ET.SubElement(unit, "segment", {"id": "s1", "state": _STATE_OUT[segment.state]})
         _emit_inline(ET.SubElement(seg_el, "source"), segment.source, segment.placeholders)
         if segment.target is not None:

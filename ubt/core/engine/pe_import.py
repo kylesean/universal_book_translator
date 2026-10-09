@@ -91,32 +91,68 @@ def parse_csv_revisions(file_path: Path) -> ParsedRevisions:
     return ParsedRevisions(revisions=revisions, job_ids=job_ids)
 
 
+def _extract_target_text(target_el: Any) -> str:
+    """Extract full text from target element, restoring <ph> tokens without truncation."""
+    parts: list[str] = [target_el.text or ""]
+    for child in target_el:
+        tag = child.tag.split("}")[-1] if "}" in child.tag else child.tag
+        if tag == "ph":
+            token = child.get("dataRef") or child.get("data-ref") or ""
+            if token:
+                parts.append(token)
+            else:
+                parts.append("".join(child.itertext()))
+        else:
+            parts.append("".join(child.itertext()))
+        parts.append(child.tail or "")
+    return "".join(parts).strip()
+
+
 def parse_xliff_revisions(file_path: Path) -> ParsedRevisions:
     """Extract ``unit id -> target`` and ``ubt-job-id`` notes from an XLIFF 2.1 document."""
     try:
         root = parse_xml_file(file_path)
     except UnsafeXMLError as exc:
         raise PEImportError(f"Invalid XLIFF XML: {exc}") from exc
-    if root.tag != f"{{{_XLIFF_NS}}}xliff":
+    root_tag = root.tag.split("}")[-1] if "}" in root.tag else root.tag
+    if root_tag != "xliff":
         raise PEImportError(
             f"Not an XLIFF 2.1 document (expected namespace {_XLIFF_NS}, got root <{root.tag}>)"
         )
     revisions: dict[str, str] = {}
     job_ids: set[str] = set()
-    for unit in root.iter(f"{{{_XLIFF_NS}}}unit"):
+    for el in root.iter():
+        tag = el.tag.split("}")[-1] if "}" in el.tag else el.tag
+        if tag == "note" and el.get("category") == "ubt-job-id":
+            bound_job = (el.text or "").strip()
+            if bound_job:
+                job_ids.add(bound_job)
+    for unit in root.iter():
+        tag = unit.tag.split("}")[-1] if "}" in unit.tag else unit.tag
+        if tag != "unit":
+            continue
         unit_id = (unit.get("id") or "").strip()
         if not unit_id:
             continue
-        for note in unit.iter(f"{{{_XLIFF_NS}}}note"):
-            if note.get("category") == "ubt-job-id":
-                bound_job = (note.text or "").strip()
-                if bound_job:
-                    job_ids.add(bound_job)
-        for segment in unit.iter(f"{{{_XLIFF_NS}}}segment"):
-            target_el = segment.find(f"{{{_XLIFF_NS}}}target")
-            text = (target_el.text or "").strip() if target_el is not None else ""
-            if text:
-                revisions[unit_id] = text
+        unit_targets: list[str] = []
+        for segment in unit:
+            stag = segment.tag.split("}")[-1] if "}" in segment.tag else segment.tag
+            if stag != "segment":
+                continue
+            target_el = next(
+                (
+                    c
+                    for c in segment
+                    if (c.tag.split("}")[-1] if "}" in c.tag else c.tag) == "target"
+                ),
+                None,
+            )
+            if target_el is not None:
+                text = _extract_target_text(target_el)
+                if text:
+                    unit_targets.append(text)
+        if unit_targets:
+            revisions[unit_id] = " ".join(unit_targets)
     return ParsedRevisions(revisions=revisions, job_ids=job_ids)
 
 
