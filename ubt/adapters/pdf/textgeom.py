@@ -18,7 +18,6 @@ from typing import Any
 
 from ubt.adapters.pdf.pdfium_gate import pdfium_serialized
 from ubt.core.exceptions import DocumentParseError
-from ubt.core.ir.models import IRBlock
 from ubt.core.policy.layout_policy import (
     CONTROL_RE,
     FOLD_MAP,
@@ -295,13 +294,6 @@ def styled_runs_in_box(
         buffer.append(char.text)
     _flush()
     return runs
-
-
-def synthetic_vlm_lines(blocks: Sequence[IRBlock]) -> list[LineBox]:
-    """4: LineBoxes from VLM-measured member lines (textless pages)."""
-    from ubt.adapters.pdf.vlm.transcribe import synthetic_vlm_lines as _vlm_lines
-
-    return [LineBox(e.text, e.box) for e in _vlm_lines(blocks)]
 
 
 _EXTRACT_LINES_CACHE: dict[tuple[str, int, int], tuple[list[LineBox], tuple[float, float]]] = {}
@@ -894,5 +886,4 @@ __all__ = [
     "dehyph",
     "extract_lines",
     "merge_row_fragments",
-    "synthetic_vlm_lines",
 ]

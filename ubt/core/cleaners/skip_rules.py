@@ -22,7 +22,6 @@ through the LLM and are protected by the QE calibration instead.
 from __future__ import annotations
 
 import re
-import threading
 
 from ubt.core.memory.cjk_matcher import contains_cjk
 
@@ -176,10 +175,6 @@ _INSTITUTION_RE = re.compile(
 #: contributions) and must stay translatable.
 _IDENTITY_MAX_WORDS = 40
 
-_EXTRA_BIB_VENUE_PATTERNS: list[re.Pattern[str]] = []
-_EXTRA_BIB_BOOK_PATTERNS: list[re.Pattern[str]] = []
-_PATTERNS_LOCK = threading.Lock()
-
 
 _NARRATIVE_PROSE_RE = re.compile(
     r"\b(?:according to|we (?:extend|propose|show|evaluate|present|describe|find|observe|use|introduce)|"
@@ -215,10 +210,6 @@ def _is_bib_entry(text: str) -> bool:
     ):
         return True
 
-    with _PATTERNS_LOCK:
-        extra_venues = tuple(_EXTRA_BIB_VENUE_PATTERNS)
-        extra_books = tuple(_EXTRA_BIB_BOOK_PATTERNS)
-
     # In-text parenthetical citations like "(Wang et al., 2023)" are not
     # bibliography author declarations. Filter parenthetical spans when
     # counting et-al occurrences.
@@ -235,7 +226,7 @@ def _is_bib_entry(text: str) -> bool:
     if not _YEAR_RE.search(text):
         return False
     full_name_start = _NAME_LIST_START_RE.match(text) is not None
-    venue_hit = bool(_BIB_VENUE_RE.search(text)) or any(p.search(text) for p in extra_venues)
+    venue_hit = bool(_BIB_VENUE_RE.search(text))
     # Author-independent structural tiers: full-name references clear none of
     # the ``authors >= N`` gates, so these fire on the citation shape alone.
     if _IN_VENUE_RE.search(text) and (_PAGES_RE.search(text) or _VOLUME_RE.search(text)):
@@ -268,7 +259,7 @@ def _is_bib_entry(text: str) -> bool:
         return True
     if authors >= 1 and venue_hit and _PAGE_RANGE_TAIL_RE.search(text):
         return True
-    book_hit = bool(_BIB_BOOK_RE.search(text)) or any(p.search(text) for p in extra_books)
+    book_hit = bool(_BIB_BOOK_RE.search(text))
     return authors >= 1 and book_hit
 
 

@@ -443,9 +443,7 @@ class _DraftProcessor:
                         # retried and finally raised at the next enqueue /
                         # close, so the count may not precede the ledger.
                         await self.runtime.flusher.enqueue(update)
-                        saved = True
-                        if saved:
-                            self.runtime.counters["tm_exact_hits"] += 1
+                        self.runtime.counters["tm_exact_hits"] += 1
                         return None
 
         few_shot_reference = ""

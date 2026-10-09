@@ -635,26 +635,15 @@ def create_app(
     return api_app
 
 
+def _cross_tenant_404(job_id: str) -> HTTPException:
+    # Same body as "not found": a cross-tenant probe must not learn that the
+    # job exists.
+    return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Job not found: {job_id}")
+
+
 def _register_system_routes(api_app: FastAPI, scope: ApiScope) -> None:
     """Routes for the system surface."""
     app_config = scope.config
-    _tenant_allows = scope.tenant_allows
-    _tenant_allows_async = scope.tenant_allows_async
-    _artifact_path = scope.artifact_path
-    _artifact_path_async = scope.artifact_path_async
-    _primary_output_file = scope.primary_output_file
-    _job_db_path = scope.job_db_path
-    _job_is_running = scope.job_is_running
-    _read_job_blocks = scope.read_job_blocks
-    _managed_dir = scope.managed_dir
-    _uploads_dir = scope.uploads_dir
-
-    def _cross_tenant_404(job_id: str) -> HTTPException:
-        # Same body as "not found": a cross-tenant probe must not learn that the
-        # job exists.
-        return HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=f"Job not found: {job_id}"
-        )
 
     @api_app.get("/health", tags=["System"])
     async def health() -> dict[str, str]:
@@ -783,13 +772,6 @@ def _register_job_routes(
     _read_job_blocks = scope.read_job_blocks
     _managed_dir = scope.managed_dir
     _uploads_dir = scope.uploads_dir
-
-    def _cross_tenant_404(job_id: str) -> HTTPException:
-        # Same body as "not found": a cross-tenant probe must not learn that the
-        # job exists.
-        return HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=f"Job not found: {job_id}"
-        )
 
     @api_app.post(
         "/jobs/assess",
@@ -1512,14 +1494,6 @@ def _register_stream_routes(api_app: FastAPI, scope: ApiScope) -> None:
     _job_is_running = scope.job_is_running
     _read_job_blocks = scope.read_job_blocks
     _managed_dir = scope.managed_dir
-    _uploads_dir = scope.uploads_dir
-
-    def _cross_tenant_404(job_id: str) -> HTTPException:
-        # Same body as "not found": a cross-tenant probe must not learn that the
-        # job exists.
-        return HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=f"Job not found: {job_id}"
-        )
 
     # Queue mode has no in-memory ``JobRecord`` to count subscribers on, but it
     # needs the same ceiling (see QueueSubscriberCounter).
@@ -1792,14 +1766,6 @@ def _register_artifact_routes(api_app: FastAPI, scope: ApiScope) -> None:
     _job_is_running = scope.job_is_running
     _read_job_blocks = scope.read_job_blocks
     _managed_dir = scope.managed_dir
-    _uploads_dir = scope.uploads_dir
-
-    def _cross_tenant_404(job_id: str) -> HTTPException:
-        # Same body as "not found": a cross-tenant probe must not learn that the
-        # job exists.
-        return HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=f"Job not found: {job_id}"
-        )
 
     @api_app.get(
         "/jobs/{job_id}/report",
@@ -2088,14 +2054,6 @@ def _register_review_routes(api_app: FastAPI, scope: ApiScope) -> None:
     _job_is_running = scope.job_is_running
     _read_job_blocks = scope.read_job_blocks
     _managed_dir = scope.managed_dir
-    _uploads_dir = scope.uploads_dir
-
-    def _cross_tenant_404(job_id: str) -> HTTPException:
-        # Same body as "not found": a cross-tenant probe must not learn that the
-        # job exists.
-        return HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=f"Job not found: {job_id}"
-        )
 
     # -- L3 Review Workbench (segments + fault ribbon + human edit) -----------
     @api_app.get("/jobs/{job_id}/segments", tags=["Jobs"])
@@ -2419,14 +2377,6 @@ def _register_asset_routes(api_app: FastAPI, scope: ApiScope) -> None:
     _job_is_running = scope.job_is_running
     _read_job_blocks = scope.read_job_blocks
     _managed_dir = scope.managed_dir
-    _uploads_dir = scope.uploads_dir
-
-    def _cross_tenant_404(job_id: str) -> HTTPException:
-        # Same body as "not found": a cross-tenant probe must not learn that the
-        # job exists.
-        return HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=f"Job not found: {job_id}"
-        )
 
     def _resolved_glossary_path() -> Path:
         configured = app_config.glossary_path
