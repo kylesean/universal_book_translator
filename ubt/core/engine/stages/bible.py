@@ -10,6 +10,7 @@ from typing import Any
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.facts import Terminology
 from ubt.core.engine.stage_context import StageContext
+from ubt.core.ir.models import IRBlock
 from ubt.core.memory.abbreviation_backfill import backfill_abbreviation_translations
 from ubt.core.memory.abbreviation_miner import mine_abbreviations_stream
 from ubt.core.memory.bible import BibleEntry, BookBible, clean_bible_entry, merge_bible_entries
@@ -196,13 +197,22 @@ async def run_bible_stage(
     mined_characters: list[dict[str, Any]] = []
     block_texts: list[str] = []
     if not fast_lane:
-        block_texts = await asyncio.to_thread(ledger.fetch_source_texts, actual_job_id)
+        blocks: list[IRBlock] = []
+        if hasattr(ledger, "get_all_blocks"):
+            blocks = await asyncio.to_thread(ledger.get_all_blocks, actual_job_id)
+
+        if blocks:
+            block_texts = [b.source_text for b in blocks if b.source_text]
+        elif hasattr(ledger, "fetch_source_texts"):
+            block_texts = await asyncio.to_thread(ledger.fetch_source_texts, actual_job_id)
+
         # Tier-2: Language-agnostic LLM Document-Skeleton Terminology Extraction
-        if complete_raw_fn is not None and block_texts:
+        skeleton_input = blocks if blocks else block_texts
+        if complete_raw_fn is not None and skeleton_input:
             from ubt.core.memory.skeleton_extractor import extract_skeleton_terms_llm
 
             skeleton_entries = await extract_skeleton_terms_llm(
-                block_texts,
+                skeleton_input,
                 complete_raw_fn=complete_raw_fn,
                 source_lang=source_lang,
                 target_lang=target_lang,

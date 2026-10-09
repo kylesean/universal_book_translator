@@ -205,3 +205,68 @@ def test_extraction_degrades_on_a_provider_error() -> None:
         )
         == []
     )
+
+
+@pytest.mark.asyncio
+async def test_run_bible_stage_feeds_ir_blocks_to_skeleton_extractor() -> None:
+    from pathlib import Path
+    from types import SimpleNamespace
+    from typing import Any, cast
+
+    from ubt.core.engine.facts import Terminology
+    from ubt.core.engine.stages.bible import run_bible_stage
+
+    received_input: str | None = None
+
+    async def mock_complete(_system: str, user: str) -> str:
+        nonlocal received_input
+        received_input = user
+        return json.dumps({"domain": "AI", "terms": []})
+
+    blocks = [
+        _block("h1", "Quantum Computing", block_type=BlockType.HEADING),
+        _block("p1", "Ignored intro prose", block_type=BlockType.NARRATIVE, skip_translate=True),
+        _block("p2", "Valid intro prose", block_type=BlockType.NARRATIVE),
+    ]
+
+    class FakeLedger:
+        def get_job_metadata_value(self, *a: Any) -> None:
+            return None
+
+        def set_job_metadata_value(self, *a: Any) -> None:
+            pass
+
+        def get_all_blocks(self, job_id: str) -> list[IRBlock]:
+            return blocks
+
+        def fetch_source_texts(self, job_id: str) -> list[str]:
+            return [b.source_text for b in blocks if b.source_text]
+
+    async def mock_create_event(*a: Any, **k: Any) -> None:
+        return None
+
+    ctx = SimpleNamespace(
+        job_id="test-job",
+        ledger=FakeLedger(),
+        manifest=SimpleNamespace(doc_id="d1", metadata={}, chapters=[]),
+        profile_name="general",
+        target_lang="zh",
+        source_lang="en",
+        fast_lane=False,
+        raw_completion=mock_complete,
+        create_event=mock_create_event,
+        config=SimpleNamespace(glossary_path=None, fresh=True),
+        source_pdf_path=None,
+        input_path=Path("doc.pdf"),
+    )
+
+    term = Terminology()
+    async for _ in run_bible_stage(cast("Any", ctx), term):
+        pass
+
+    assert received_input is not None
+    # Because IRBlocks were fed, the heading "[H] Quantum Computing" is present,
+    # and skip_translate block "Ignored intro prose" was excluded!
+    assert "[H] Quantum Computing" in received_input
+    assert "Ignored intro prose" not in received_input
+    assert "Valid intro prose" in received_input
