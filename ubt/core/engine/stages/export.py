@@ -492,15 +492,6 @@ async def _apply_render_skip_ledger_pass(
     # A drawn-but-below-floor fragment is a defect, not a skip: the translation
     # ships, so the block must stay deliverable while the shrink is recorded.
     quality_changed_ids = apply_render_quality_flags(final_blocks, get_last_render_flags(adapter))
-    # Persist a block whose skip set *changed*, partial removals included: the
-    # old filter only wrote when every skip flag was gone, so a block that kept
-    # one current reason while losing a stale one stayed wrong in the ledger the
-    # quality report re-reads.
-    cleared_skips = [
-        {"block_id": b.id, "status": b.status, "error_flags": b.error_flags}
-        for b in final_blocks
-        if any(f not in b.error_flags for f in stale_skips[b.id])
-    ]
     # Length conservation: overflow skips on length-policy pages
     # (resume_dense/poster_fixed — fit-to-page, never repaginate) flip to
     # NEEDS_HUMAN so they reach the PE queue instead of shipping
@@ -521,6 +512,18 @@ async def _apply_render_skip_ledger_pass(
             actual_job_id,
             length_human,
         )
+
+    # Persist a block whose skip set *changed*, partial removals included: the
+    # old filter only wrote when every skip flag was gone, so a block that kept
+    # one current reason while losing a stale one stayed wrong in the ledger the
+    # quality report re-reads. Snapshot AFTER the length policy pass so flipped
+    # statuses are never overwritten by an un-flipped snapshot.
+    cleared_skips = [
+        {"block_id": b.id, "status": b.status, "error_flags": b.error_flags}
+        for b in final_blocks
+        if any(f not in b.error_flags for f in stale_skips[b.id])
+    ]
+
     if render_skip_checkpoints or cleared_skips or quality_changed_ids:
         if render_skip_checkpoints:
             fail_closed_count, preserved_count = _partition_render_skip_counts(
@@ -541,14 +544,15 @@ async def _apply_render_skip_ledger_pass(
                     preserved_count,
                 )
         by_block_id = {b.id: b for b in final_blocks}
-        # One entry per block, snapshotted last: a block can be in both a skip
-        # checkpoint (whose status the length-policy pass may have flipped) and
-        # the quality set, and a later entry in the batch would else overwrite
-        # the earlier with a stale status.
+        # One entry per block, constructed directly from authoritative final_blocks:
+        # a block can be in a skip checkpoint (whose status the length-policy pass
+        # may have flipped), cleared_skips, and the quality set. Building directly
+        # from final_blocks ensures no order-dependent overwriting occurs.
+        affected_block_ids = {
+            c["block_id"] for c in (*render_skip_checkpoints, *cleared_skips)
+        } | set(quality_changed_ids)
         batch: dict[str, dict[str, Any]] = {}
-        for checkpoint in (*render_skip_checkpoints, *cleared_skips):
-            batch[checkpoint["block_id"]] = checkpoint
-        for block_id in sorted(quality_changed_ids):
+        for block_id in sorted(affected_block_ids):
             block = by_block_id.get(block_id)
             if block is not None:
                 batch[block_id] = {
