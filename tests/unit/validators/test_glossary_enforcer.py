@@ -367,3 +367,42 @@ def test_a_quoted_alias_is_left_alone() -> None:
     out, records = _enforce(glossary, 'the "attn" block and the attn block')
     assert out == 'the "attn" block and the 注意力 block'
     assert len(records) == 1
+
+
+# --------------------------------------------------------------------------- #
+# Approved-compound guard: a short alias must not rewrite a longer approved form
+# --------------------------------------------------------------------------- #
+
+
+def test_an_alias_inside_an_approved_cjk_compound_is_not_rewritten() -> None:
+    # 深度学习 (deep learning) contains the alias 学习 (learning). Boosting the
+    # alias into the tokenizer is exactly what made jieba split the approved
+    # form, and the alias then corrupted it into 深度训练. The compound guard
+    # shields the span.
+    glossary: list[dict[str, Any]] = [
+        {"source": "deep learning", "translation": "深度学习", "aliases": ["学习"]},
+        {"source": "learning", "translation": "训练"},
+    ]
+    out, records = _enforce(glossary, "本文探讨深度学习的最新进展。")
+    assert out == "本文探讨深度学习的最新进展。"
+    assert records == []
+
+
+def test_an_alias_inside_an_approved_latin_compound_is_not_rewritten() -> None:
+    # Same structural guard, no CJK: "machine learning" contains "learning".
+    glossary: list[dict[str, Any]] = [
+        {"source": "ML", "translation": "机器学习", "aliases": ["learning"]},
+        {"source": "machine learning", "translation": "machine learning"},
+    ]
+    out, records = _enforce(glossary, "We study machine learning and learning theory.")
+    assert out == "We study machine learning and 机器学习 theory."
+    assert [record.original_span for record in records] == ["learning"]
+
+
+def test_a_drifted_alias_outside_any_compound_is_still_enforced() -> None:
+    # The guard must not disable enforcement: a standalone drifted alias is
+    # corrected exactly as before.
+    glossary = [{"source": "deep learning", "translation": "深度学习", "aliases": ["深度学习法"]}]
+    out, records = _enforce(glossary, "我们使用深度学习法来建模。")
+    assert out == "我们使用深度学习来建模。"
+    assert [record.original_span for record in records] == ["深度学习法"]

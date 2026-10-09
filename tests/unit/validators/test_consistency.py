@@ -18,6 +18,7 @@ from ubt.core.validators.consistency import (
     _cn_compound_runs,
     _cn_numeral_value,
     _cn_or_ascii_value,
+    _en_number_phrase_value,
     _expand_scientific_not,
     _glued_page_range_is_preserved,
     _has_negative_token,
@@ -492,3 +493,101 @@ def test_a_real_number_after_a_list_marker_is_still_required() -> None:
     res = _check("(1) The limit is 42 units.", "（1）上限为个单元。")
     assert not res.is_valid
     assert "42" in res.details["lost_numbers"]
+
+
+# --------------------------------------------------------------------------- #
+# Invented (unauthorized) target numbers — the reverse of the loss check.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    ("original", "translated", "invented"),
+    [
+        # A source with no digits cannot license any target digit.
+        ("No figures here.", "其实有 42 个。", ["42"]),
+        ("The dose was small.", "剂量为 500mg。", ["500"]),
+        # A digit the source never stated, alongside one it did.
+        ("The dose is 50mg.", "剂量为 500mg。", None),  # 50 lost, caught as lost not invented
+    ],
+)
+def test_invented_number_is_rejected(
+    original: str, translated: str, invented: list[str] | None
+) -> None:
+    res = _check(original, translated)
+    assert not res.is_valid
+    if invented is not None:
+        assert res.details["invented_numbers"] == invented
+
+
+def test_invented_number_absent_from_source_is_the_new_gate() -> None:
+    # The pure case the old validator could not see: source has no number at all.
+    res = _check("The results were conclusive.", "结果有 95% 的确信度。")
+    assert not res.is_valid
+    assert res.details["invented_numbers"] == ["95"]
+
+
+@pytest.mark.parametrize(
+    ("original", "translated"),
+    [
+        # A spelled-out source quantity may legitimately become a digit.
+        ("Chapter Seven covers this.", "第7章涵盖了这一点。"),
+        ("It sold two million copies.", "售出200万册。"),
+        ("It sold two million copies.", "售出2000000册。"),
+        ("one hundred fifty people came", "来了150人"),
+        ("a dozen eggs", "12个鸡蛋"),
+        # A date written out is not three invented numbers.
+        ("The meeting is on 2020-01-01.", "会议在2020年1月1日。"),
+        # A glued page range restored as a range states values the source token
+        # does not, and is already covered by the loss check's own acceptance.
+        ("See pp. 4046 for details.", "见 40-46 页。"),
+    ],
+)
+def test_a_faithful_expansion_is_not_an_invented_number(original: str, translated: str) -> None:
+    res = _check(original, translated)
+    assert res.is_valid, res.message
+
+
+def test_en_number_phrase_value_reads_magnitudes() -> None:
+    assert 2_000_000 in _en_number_phrase_value("two million")
+    assert 150 in _en_number_phrase_value("one hundred and fifty")
+    # A phrase the parser cannot value yields nothing — the gate stays
+    # conservative rather than guessing.
+    assert _en_number_phrase_value("the quick brown fox") == set()
+
+
+# --------------------------------------------------------------------------- #
+# Numeric advisories (order inversion / elided restatement) — never blocking.
+# --------------------------------------------------------------------------- #
+
+
+def test_a_numeric_order_inversion_is_advisory_not_a_failure() -> None:
+    # A clinical dose swap is the motivating case, but an order change is also
+    # how a legitimate translation restates a comparison, so the gate must not
+    # block: it reports instead.
+    res = _check(
+        "Patient took 50mg of Drug A and 5mg of Drug B.",
+        "患者服用了 5mg 的 Drug A 和 50mg 的 Drug B.",
+    )
+    assert res.is_valid
+    assert any("numeric_order_differs" in a for a in res.details["numeric_advisories"])
+
+
+def test_a_legitimate_reorder_is_only_advised() -> None:
+    res = _check("A 50% increase over 30 days.", "30天内增长50%。")
+    assert res.is_valid
+    assert any("numeric_order_differs" in a for a in res.details["numeric_advisories"])
+
+
+def test_a_repeated_source_number_elided_in_target_is_advised() -> None:
+    res = _check(
+        "In 2019 sales rose. In 2019 profits fell.",
+        "2019年销售额上升，当年利润下降。",
+    )
+    assert res.is_valid
+    assert any("numeric_repeat_shortfall" in a for a in res.details["numeric_advisories"])
+
+
+def test_a_clean_translation_carries_no_advisory() -> None:
+    res = _check("The year 1984 was cold.", "1984 年很冷。")
+    assert res.is_valid
+    assert res.details == {}

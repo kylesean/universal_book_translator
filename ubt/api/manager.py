@@ -13,6 +13,7 @@ from ubt.core.config import UBTConfig
 from ubt.core.engine.dry_run import create_dry_run_orchestrator
 from ubt.core.engine.events import TranslationProgressEvent
 from ubt.core.engine.job_queue import TERMINAL_JOB_STATUSES, JobStatus
+from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.pipeline import PipelineOrchestrator
 from ubt.core.engine.progress import ProgressSnapshot, persist_progress_metadata
 from ubt.core.exceptions import (
@@ -76,17 +77,34 @@ class JobManager:
         # request rate (and the bill) against the same API key.
         self.rate_limiter = rate_limiter
 
+    @staticmethod
+    def _occupies_slot(record: JobRecord) -> bool:
+        """Whether a job still counts against ``max_running_jobs``.
+
+        A job occupies a slot while it is submitted or running, and also after
+        it is *cancelled* until its task actually settles: the cancel handler
+        flips the status to CANCELLED and cancels the task, but the coroutine
+        may still be unwinding (releasing the writer lock, closing provider
+        connections) for a while afterwards. Counting by status alone would
+        free the slot the instant the flag flipped, so a submission arriving in
+        that window would start a new pipeline while the cancelled one is still
+        tearing down -- breaching the cap the whole check exists to enforce.
+        """
+        if record.status in (JobStatus.SUBMITTED, JobStatus.RUNNING):
+            return True
+        return (
+            record.status == JobStatus.CANCELLED
+            and record.task is not None
+            and not record.task.done()
+        )
+
     def ensure_capacity(self) -> None:
         """Raise ServerCapacityError when another job can no longer start.
 
         Shared by create and resume: a batch of failed jobs restarted together
         would otherwise open N pipelines on a server configured for one.
         """
-        running = sum(
-            1
-            for rec in self.jobs.values()
-            if rec.status in (JobStatus.SUBMITTED, JobStatus.RUNNING)
-        )
+        running = sum(1 for rec in self.jobs.values() if self._occupies_slot(rec))
         if running >= self.max_running_jobs:
             raise ServerCapacityError(
                 f"Server at capacity: {running} jobs active (max {self.max_running_jobs})",
@@ -227,7 +245,7 @@ class JobManager:
     @staticmethod
     def _persist_final_metadata(
         job_config: UBTConfig, record: JobRecord
-    ) -> Callable[[TranslationProgressEvent], None]:
+    ) -> Callable[[TranslationProgressEvent, SQLiteJobLedger], None]:
         """Build the orchestrator's in-lock completion hook.
 
         ``PipelineOrchestrator.run`` invokes the returned callable *inside* its
@@ -235,11 +253,14 @@ class JobManager:
         every stage write. ``ProgressSnapshot.from_event`` is the same fold the
         SSE record uses, so the persisted artifact triple cannot drift from what
         subscribers were told.
+
+        The orchestrator hands over its live ``ledger``: the hook writes through
+        that connection rather than reopening the file by path, which opened a
+        second connection outside the lock and could surface ``database is
+        locked`` under contention.
         """
 
-        def _persist(event: TranslationProgressEvent) -> None:
-            persist_progress_metadata(
-                event, Path(job_config.db_dir) / f"{record.job_id}.sqlite", record.job_id
-            )
+        def _persist(event: TranslationProgressEvent, ledger: SQLiteJobLedger) -> None:
+            persist_progress_metadata(event, ledger, record.job_id)
 
         return _persist

@@ -25,7 +25,7 @@ import logging
 import sqlite3
 import threading
 import time
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from enum import StrEnum
@@ -723,6 +723,23 @@ class JobQueue:
         with self._get_conn() as conn:
             row = conn.execute("SELECT * FROM job_queue WHERE job_id = ?", (job_id,)).fetchone()
         return self._to_job(row) if row is not None else None
+
+    def get_many(self, job_ids: Sequence[str]) -> dict[str, QueuedJob]:
+        """The rows for *job_ids* in one query, keyed by job id (missing omitted).
+
+        One query for many ids: a poller watching every subscribed job would
+        otherwise open a connection per job per tick, which is the SQLite
+        contention the batched read exists to avoid.
+        """
+        unique = list(dict.fromkeys(job_ids))
+        if not unique:
+            return {}
+        placeholders = ",".join("?" for _ in unique)
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM job_queue WHERE job_id IN ({placeholders})", unique
+            ).fetchall()
+        return {row["job_id"]: self._to_job(row) for row in rows}
 
     def queue_position(self, job_id: str) -> int | None:
         """1-based position among queued jobs, or ``None`` if not queued."""

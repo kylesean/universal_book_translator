@@ -511,6 +511,37 @@ def test_submit_capacity_exceeded_is_429(
     assert "Server at capacity" in response.json()["detail"]
 
 
+def test_a_cancelled_job_holds_its_slot_until_its_task_settles(tmp_path: Path) -> None:
+    """The cancel window must not free a capacity slot.
+
+    ``cancel_job`` flips the status to CANCELLED and cancels the task, but the
+    coroutine unwinds asynchronously (releasing the writer lock, closing
+    provider connections). ``ensure_capacity`` counted by status alone, so a
+    submit landing in that window saw a free slot and could start a pipeline
+    while the cancelled one was still tearing down — breaching the cap.
+    """
+    from ubt.core.exceptions import ServerCapacityError
+
+    class _Unwinding:
+        def done(self) -> bool:
+            return False
+
+    class _Settled:
+        def done(self) -> bool:
+            return True
+
+    manager = JobManager(max_running_jobs=1)
+    record = manager.create_job(JobSubmitRequest(input_path=str(_write_doc(tmp_path))))
+    record.status = JobStatus.CANCELLED
+    record.task = _Unwinding()  # type: ignore[assignment]
+    with pytest.raises(ServerCapacityError):
+        manager.ensure_capacity()
+
+    # Once the cancelled task has actually settled, the slot is genuinely free.
+    record.task = _Settled()  # type: ignore[assignment]
+    manager.ensure_capacity()
+
+
 def test_default_output_lands_in_per_job_outputs_dir(
     authed: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -681,5 +712,33 @@ def test_submit_in_queue_mode_refuses_a_path_a_queued_job_already_claims(tmp_pat
             )
             assert second.status_code == 409
             assert "already claimed by live job queuejob001" in second.json()["detail"]
+    finally:
+        queue.close()
+
+
+def test_queue_mode_stream_serves_a_terminal_job_without_polling_threads(tmp_path: Path) -> None:
+    """The queue-mode stream routes through the shared broadcaster, not a poll pool.
+
+    A terminal job must answer immediately with its terminal frame: the
+    broadcaster fans the row out from its own poll loop and the subscriber's
+    first frame is the snapshot the route already read. This pins the route's
+    wiring to ``QueueSseBroadcaster`` (the per-stream ``job_queue.get`` polling
+    and the 4-thread pool are gone).
+    """
+    from ubt.core.engine.job_queue import JobQueue, JobStatus
+
+    queue = JobQueue(tmp_path / "db" / "job_queue.sqlite")
+    try:
+        app = create_app(config=_config(tmp_path), queue=queue)
+        with TestClient(app) as client:
+            queue.enqueue("donejob0001", {"input_path": str(_write_doc(tmp_path))}, now=1.0)
+            claimed = queue.claim("worker01", now=2.0)
+            assert claimed is not None
+            queue.complete("donejob0001", "worker01", status=JobStatus.COMPLETED, now=3.0)
+
+            assert app.state.sse_broadcaster is not None
+            response = client.get("/jobs/donejob0001/stream", headers=_AUTH)
+            assert response.status_code == 200
+            assert "event: completed" in response.text
     finally:
         queue.close()

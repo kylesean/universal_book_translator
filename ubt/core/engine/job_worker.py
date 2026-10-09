@@ -40,6 +40,7 @@ from ubt.core.job_options import (
 )
 
 if TYPE_CHECKING:
+    from ubt.core.engine.ledger import SQLiteJobLedger
     from ubt.core.qe.base import BaseQERunner
     from ubt.core.router.rate_limiter import AdaptiveTokenBucket
     from ubt.core.router.router import ModelRouter
@@ -109,10 +110,8 @@ class JobWorker:
         input_path = Path(str(payload["input_path"]))
         output_path = Path(str(payload["output_path"])) if payload.get("output_path") else None
 
-        def _persist_metadata(event: TranslationProgressEvent) -> None:
-            persist_progress_metadata(
-                event, Path(job_config.db_dir) / f"{job.job_id}.sqlite", job.job_id
-            )
+        def _persist_metadata(event: TranslationProgressEvent, ledger: SQLiteJobLedger) -> None:
+            persist_progress_metadata(event, ledger, job.job_id)
 
         # Rehearsal is decided from THIS process's key (see the helper).
         if _should_rehearse(payload, job_config):

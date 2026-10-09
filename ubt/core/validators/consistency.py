@@ -1,6 +1,7 @@
 """0-Token consistency validators for numbers and glossary terms."""
 
 import re
+from collections import Counter
 from decimal import Decimal
 from typing import Any
 
@@ -599,6 +600,290 @@ def _has_negative_token(target: str, num_str: str) -> bool:
     )
 
 
+#: English number *words* a translation may legitimately render as digits
+#: ("two" -> "2", "a dozen" -> "12", "Chapter Seven" -> "第7章"). The
+#: invented-number gate reads digit tokens only, so without folding these it
+#: would read the digit the translator wrote for a spelled-out source quantity
+#: as fabricated. Cardinal + small ordinal + the magnitude words.
+_EN_NUMBER_WORDS: dict[str, str] = {
+    "one": "1",
+    "two": "2",
+    "three": "3",
+    "four": "4",
+    "five": "5",
+    "six": "6",
+    "seven": "7",
+    "eight": "8",
+    "nine": "9",
+    "ten": "10",
+    "eleven": "11",
+    "twelve": "12",
+    "thirteen": "13",
+    "fourteen": "14",
+    "fifteen": "15",
+    "sixteen": "16",
+    "seventeen": "17",
+    "eighteen": "18",
+    "nineteen": "19",
+    "twenty": "20",
+    "thirty": "30",
+    "forty": "40",
+    "fifty": "50",
+    "sixty": "60",
+    "seventy": "70",
+    "eighty": "80",
+    "ninety": "90",
+    "first": "1",
+    "second": "2",
+    "third": "3",
+    "fourth": "4",
+    "fifth": "5",
+    "sixth": "6",
+    "seventh": "7",
+    "eighth": "8",
+    "ninth": "9",
+    "tenth": "10",
+    "dozen": "12",
+    "hundred": "100",
+    "thousand": "1000",
+    "million": "1000000",
+    "billion": "1000000000",
+    "trillion": "1000000000000",
+}
+#: Additive number words (one..ninety). ``_EN_NUMBER_WORDS`` also carries the
+#: magnitudes; the two tables are split so the phrase parser can tell a scale
+#: word from a digit word.
+_EN_SMALL_NUMBERS: dict[str, int] = {
+    word: int(value) for word, value in _EN_NUMBER_WORDS.items() if int(value) < 100
+}
+_EN_MAGNITUDES: dict[str, int] = {
+    "hundred": 100,
+    "thousand": 1000,
+    "million": 1_000_000,
+    "billion": 1_000_000_000,
+    "trillion": 1_000_000_000_000,
+}
+#: Any single number word, longest-first so the alternation is not shadowed.
+_EN_NUMBER_WORD_RE = re.compile(
+    r"\b(" + "|".join(sorted(_EN_NUMBER_WORDS, key=len, reverse=True)) + r")\b",
+    re.IGNORECASE,
+)
+#: A run of number words (plus the "and"/hyphen connectors that join them), the
+#: span the phrase parser reads to value a spelled-out quantity.
+_EN_NUMBER_PHRASE_RE = re.compile(
+    r"\b(?:"
+    + "|".join(sorted(_EN_NUMBER_WORDS, key=len, reverse=True))
+    + r"|and)\b(?:[\s-]+(?:"
+    + "|".join(sorted(_EN_NUMBER_WORDS, key=len, reverse=True))
+    + r"|and)\b)*",
+    re.IGNORECASE,
+)
+
+
+def _en_number_phrase_value(phrase: str) -> set[int]:
+    """Values a spelled-out English quantity may denote ('two million' -> 2e6).
+
+    Returns the running total plus every prefix total, so "one hundred fifty"
+    authorizes 100 (the "one hundred" prefix), 150 (the whole phrase) and 50
+    (the trailing "fifty") — any of which a target may write. Best-effort: a
+    phrase it cannot value yields nothing and the gate stays conservative.
+    """
+    words = [w.lower() for w in re.findall(r"[a-z]+", phrase)]
+    values: set[int] = set()
+    total = 0
+    current = 0
+    seen = False
+    for word in words:
+        if word == "and":
+            continue
+        if word in _EN_SMALL_NUMBERS:
+            current += _EN_SMALL_NUMBERS[word]
+            seen = True
+        elif word in _EN_MAGNITUDES:
+            factor = _EN_MAGNITUDES[word]
+            current = (current or 1) * factor
+            if factor >= 1000:
+                total += current
+                current = 0
+            seen = True
+        else:
+            continue
+        values.add(total + current)
+    if seen:
+        values.add(total + current)
+    return {v for v in values if v > 0}
+
+
+#: CJK suffixes that mark a target digit as an ordinal ("7章", "第7页"): the
+#: source may spell the number out ("Chapter Seven") or the renderer restores
+#: the marker, so the digit is structural, not a new fact.
+_TARGET_ORDINAL_SUFFIXES = "章节页条款项版次届名位课卷篇回讲幕部"
+
+
+def _is_structural_target_number(token: str, target: str) -> bool:
+    """Whether a target digit is editorial structure, not a numeric fact.
+
+    An ordinal ("第7章", "7章"), a decade ("80年代" from "the eighties"), or a
+    leading list marker ("1. ", "(1) ") is restored by the renderer or written
+    by the translator for a source that spelled the number out, so the
+    invented-number gate must not read it as fabricated.
+    """
+    escaped = re.escape(token)
+    if re.search(rf"第\s*{escaped}", target):
+        return True
+    if re.search(rf"{escaped}\s*[{_TARGET_ORDINAL_SUFFIXES}]", target):
+        return True
+    if re.search(rf"{escaped}\s*年代", target):
+        return True
+    return bool(re.search(rf"(?:^|\n)\s*(?:\(\s*{escaped}\s*\)|{escaped}\s*[.)、）])", target))
+
+
+def _dedup_in_order(items: list[str]) -> list[str]:
+    """First-occurrence-preserving dedup (a plain set iterates in hash order)."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in items:
+        if item not in seen:
+            seen.add(item)
+            out.append(item)
+    return out
+
+
+def _zero_fold(token: str) -> str:
+    """Fold a two-digit all-digit token's leading zero ('01' -> '1').
+
+    A date split out of a range token ('2020-01-01' -> '2020','01','01') must
+    match the target's written form ('2020年1月1日' -> '2020','1','1'). Only a
+    two-digit token folds, exactly like ``_has_numeric_token``: a three-digit
+    identifier ('007') stays distinct from '7', so folding cannot wave a changed
+    code through.
+    """
+    if len(token) == 2 and token.isdigit() and token[0] == "0":
+        return token.lstrip("0") or "0"
+    return token
+
+
+def _invented_target_numbers(
+    source_view: str,
+    normalized_target: str,
+    *,
+    src_nums: set[str],
+    src_scales: dict[str, set[str]],
+    ambiguous_readings: dict[str, set[str]],
+    source_compounds: list[tuple[list[str], str]],
+) -> list[str]:
+    """Target digit tokens the source cannot account for — fabricated facts.
+
+    The complement of the lost-number check. A translation that *adds* a number
+    the source never stated invents a fact, and no other gate sees it (the
+    added-content gate reads references and headings, not bare quantities). The
+    authorization set is deliberately generous — scale/compound/ambiguous
+    readings, source number *words*, target ordinals/decades/list markers, a
+    restored page range — so a faithful translation is never flagged and only a
+    genuinely new value survives.
+    """
+    authorized: set[str] = set(src_nums)
+    for values in src_scales.values():
+        authorized |= values
+    authorized |= set(src_scales)
+    for _tokens, total in source_compounds:
+        authorized.add(total)
+    for values in ambiguous_readings.values():
+        authorized |= values
+    # Fold a two-digit leading zero on both sides so a date written out
+    # ('2020-01-01' -> '2020年1月1日') is not read as three invented numbers.
+    authorized |= {_zero_fold(token) for token in list(authorized)}
+    for token in list(src_nums):
+        # A range token ("10/20", "2020-01-01") authorizes its own sub-parts,
+        # which the target may write out ("10 比 20", "2020年1月1日").
+        if _RANGE_DELIMITERS.search(token):
+            authorized |= {
+                _zero_fold(canonicalize_numeric_token(part))
+                for part in _RANGE_DELIMITERS.split(token)
+                if part.strip()
+            }
+    # A source number *word* ("two", "a dozen", "Chapter Seven") may be written
+    # as a digit in the target. Spelled-out phrases ("two million") authorize
+    # their whole value, not just the two words separately.
+    for match in _EN_NUMBER_WORD_RE.finditer(source_view):
+        authorized.add(_EN_NUMBER_WORDS[match.group(1).lower()])
+    for match in _EN_NUMBER_PHRASE_RE.finditer(source_view):
+        for value in _en_number_phrase_value(match.group(0)):
+            authorized.add(str(value))
+    # A broken PDF glues a page range ("pp. 40–46" -> "4046"); the target that
+    # restores "40-46" states values the glued source token does not.
+    for match in _GLUED_PAGE_RANGE_SOURCE_RE.finditer(source_view):
+        digits = match.group("digits")
+        authorized.update({digits[:2], digits[2:]})
+
+    tgt_scale_map = scale_equivalent_values(normalized_target)
+    invented: list[str] = []
+    for raw in _NUM.findall(normalized_target):
+        token = canonicalize_numeric_token(raw)
+        if not token or token in authorized or _zero_fold(token) in authorized:
+            continue
+        if _RANGE_DELIMITERS.search(token):
+            parts = [
+                _zero_fold(canonicalize_numeric_token(part))
+                for part in _RANGE_DELIMITERS.split(token)
+                if part.strip()
+            ]
+            if parts and all(part in authorized for part in parts):
+                continue
+        scaled = tgt_scale_map.get(token)
+        if scaled and (scaled & authorized):
+            continue
+        if _is_structural_target_number(token, normalized_target):
+            continue
+        invented.append(token)
+    return sorted(set(invented))
+
+
+def _numeric_advisories(
+    source_view: str,
+    normalized_target: str,
+    *,
+    exempt_numbers: set[str],
+    src_nums: set[str],
+) -> list[str]:
+    """Non-blocking numeric findings: a possible order inversion or a shortfall.
+
+    Neither is a hard failure. A translation may legitimately restate numbers in
+    a different order ("a 50% rise over 30 days" -> "30天内上涨50%") or elide a
+    repeated one ("In 2019 … In 2019 …" -> "2019年…当年…"), so blocking on
+    either would quarantine correct work. Surfacing them still turns a silent
+    pass into an operator-visible flag — the failure mode the audit named.
+    """
+    src_order = [
+        canonicalize_numeric_token(m)
+        for m in _NUM.findall(source_view)
+        if canonicalize_numeric_token(m) not in exempt_numbers
+    ]
+    tgt_order = [canonicalize_numeric_token(m) for m in _NUM.findall(normalized_target)]
+    src_order = [t for t in src_order if t]
+    tgt_order = [t for t in tgt_order if t]
+
+    advisories: list[str] = []
+    common = set(src_order) & set(tgt_order)
+    if len(common) >= 2:
+        src_seq = _dedup_in_order([t for t in src_order if t in common])
+        tgt_seq = _dedup_in_order([t for t in tgt_order if t in common])
+        if src_seq != tgt_seq:
+            advisories.append(f"numeric_order_differs: source {src_seq} vs target {tgt_seq}")
+
+    # A number stated N times in the source but fewer in the target is a possible
+    # elided restatement (or a dropped one); reported, never blocked.
+    src_counts = Counter(t for t in src_order if t in src_nums)
+    tgt_counts = Counter(t for t in tgt_order if t in src_nums)
+    for token, count in src_counts.items():
+        if count > 1 and tgt_counts.get(token, 0) < count:
+            advisories.append(
+                f"numeric_repeat_shortfall: {token} stated {count}x in source, "
+                f"{tgt_counts.get(token, 0)}x in target"
+            )
+    return advisories
+
+
 class NumericConsistencyValidator(ContentValidator):
     """Ensures standalone numbers and years (e.g. 1984, percentages, stats) are preserved."""
 
@@ -652,9 +937,11 @@ class NumericConsistencyValidator(ContentValidator):
                 if canon:
                     negative_tokens.add(canon)
 
-        if not src_nums:
-            return ValidationResult.success()
-
+        # No early return when the source has no digits: a translation that
+        # *invents* a number is exactly as much a fidelity failure as one that
+        # drops it, and only the source-empty case can prove invention cleanly
+        # (every target digit is unauthorized). ``lost_numbers`` stays empty
+        # because the loop below has nothing to iterate.
         target_code = self.profile.code if self.profile is not None else "zh"
         normalized_tgt = normalize_for_numeric_matching(translated, lang=target_code)
 
@@ -804,6 +1091,37 @@ class NumericConsistencyValidator(ContentValidator):
                 suggested_action="RETRY",
                 details={"lost_numbers": lost_numbers, "original_numbers": sorted(src_nums)},
             )
+
+        # A translation that states a number the source never did invents a
+        # fact. The lost-number loop above only walks source tokens, so this is
+        # the reverse direction and the only gate that can see it.
+        invented_numbers = _invented_target_numbers(
+            src_view,
+            normalized_tgt,
+            src_nums=src_nums,
+            src_scales=src_scales,
+            ambiguous_readings=ambiguous_readings,
+            source_compounds=source_compounds,
+        )
+        if invented_numbers:
+            return ValidationResult.failure(
+                error_code="NUMERIC_INCONSISTENCY",
+                message=f"Unauthorized numeric tokens in translation: {invented_numbers}",
+                suggested_action="RETRY",
+                details={
+                    "invented_numbers": invented_numbers,
+                    "original_numbers": sorted(src_nums),
+                },
+            )
+
+        # Non-blocking findings ride on the success result's ``details``; the
+        # quality gate forwards them as advisory flags (like the HTML delta
+        # validator's formatting warnings) rather than routing to repair.
+        advisories = _numeric_advisories(
+            src_view, normalized_tgt, exempt_numbers=exempt_numbers, src_nums=src_nums
+        )
+        if advisories:
+            return ValidationResult(is_valid=True, details={"numeric_advisories": advisories})
 
         return ValidationResult.success()
 

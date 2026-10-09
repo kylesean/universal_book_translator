@@ -1152,7 +1152,34 @@ class _DraftProcessor:
         for b, inp in chunk:
             text = extracted_by_id.get(b.id)
             if text and text.strip():
-                clean_by_id[b.id] = await self.finalize_draft(b, text.strip(), inp)
+                # Per-block fault isolation. ``finalize_draft`` checkpoints a
+                # block the moment it succeeds, so a later block's finalize
+                # raising must mark ONLY that block. Letting the exception escape
+                # to ``run_draft_batch``'s gather marked the whole group FAILED —
+                # including blocks already drafted and paid for — and the resume
+                # path then cleared their target text and re-billed them.
+                try:
+                    clean_by_id[b.id] = await self.finalize_draft(b, text.strip(), inp)
+                except (asyncio.CancelledError, JobInterruptedError, BudgetExceededError):
+                    raise
+                except Exception as exc:
+                    logger.warning(
+                        "Finalizing macro-chunk block %s failed (%s); marking only it",
+                        b.id,
+                        exc,
+                    )
+                    prefix = (
+                        DRAFTING_ERROR_PREFIX
+                        if classify_provider_error(exc).retryable
+                        else NON_RETRYABLE_DRAFT_PREFIX
+                    )
+                    await self.runtime.flusher.enqueue(
+                        {
+                            "block_id": b.id,
+                            "status": BlockStatus.FAILED,
+                            "error_flags": [f"{prefix} {exc}"],
+                        }
+                    )
             else:
                 missing.append((b, inp))
 
@@ -1165,12 +1192,17 @@ class _DraftProcessor:
             and clean_by_id
             and all(clean_by_id.get(b.id, False) for b, _ in chunk)
         ):
-            await asyncio.to_thread(
-                self.runtime.engine.remember_value,
-                cached_context,
-                _encode_chunk(extracted_by_id),
-                kind="translate_chunk",
-            )
+            try:
+                await asyncio.to_thread(
+                    self.runtime.engine.remember_value,
+                    cached_context,
+                    _encode_chunk(extracted_by_id),
+                    kind="translate_chunk",
+                )
+            except Exception as exc:
+                # The drafts are already checkpointed; a cache-write failure must
+                # not escape and mark the whole group FAILED.
+                logger.warning("Caching macro-chunk draft failed for %s: %s", cached_context, exc)
 
         if missing:
             logger.info(

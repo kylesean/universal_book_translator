@@ -63,15 +63,28 @@ def _fast_pass_screen(
         # fatal even when the text happens to clear FastPass: the restoration
         # mismatch means the target is wrong, not merely awkward.
         if decision.passed and not has_structural_defect(b.error_flags):
+            # Non-blocking findings on a passing draft (a numeric order
+            # inversion, say) become review flags, never a rejection: they are
+            # the same advisory tier as the HTML delta validator's formatting
+            # drift. Recorded before the checkpoint so the flag is persisted.
+            advisory_flags = [
+                f"numeric_advisory: {advisory}"
+                for advisory in decision.advisories
+                if f"numeric_advisory: {advisory}" not in b.error_flags
+            ]
+            b.error_flags.extend(advisory_flags)
             b.status = BlockStatus.MTQE_PASSED
-            passed_updates.append(
-                {
-                    "block_id": b.id,
-                    "target_text": b.target_text or "",
-                    "status": BlockStatus.MTQE_PASSED,
-                    "glossary_hits": b.glossary_hits,
-                }
-            )
+            update: dict[str, Any] = {
+                "block_id": b.id,
+                "target_text": b.target_text or "",
+                "status": BlockStatus.MTQE_PASSED,
+                "glossary_hits": b.glossary_hits,
+            }
+            # Only widen the checkpoint's columns when an advisory actually
+            # landed, so a plain pass keeps the shape it always had.
+            if advisory_flags:
+                update["error_flags"] = b.error_flags
+            passed_updates.append(update)
         else:
             b.status = BlockStatus.REPAIR_PENDING
             if not decision.passed:

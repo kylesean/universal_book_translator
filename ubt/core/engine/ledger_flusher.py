@@ -103,8 +103,55 @@ class CheckpointBatchFlusher:
             await asyncio.to_thread(self.ledger.save_checkpoints_batch, [update])
             return
         self.start()
-        await self._queue.put(update)
+        await self._put(update)
         self._wake.set()
+
+    async def _put(self, update: dict[str, Any]) -> None:
+        """Hand *update* to the worker without hanging if the worker dies first.
+
+        ``Queue.put`` blocks while the queue is full, waiting for the worker to
+        free a slot. If the worker dies of its retry budget in that window,
+        nobody will ever drain the queue and the producer hangs for the rest of
+        the job — a silent deadlock where the class promises a loud failure.
+        The liveness check at the top of ``enqueue`` ran *before* the put, so it
+        cannot see a worker that dies while we are parked.
+
+        Fast path: a non-blocking put. Only when the queue is full do we race
+        the blocking put against the worker task, so a dead worker surfaces its
+        error (or, for a clean exit, is restarted) instead of parking us.
+        """
+        try:
+            self._queue.put_nowait(update)
+            return
+        except asyncio.QueueFull:
+            pass
+        task = self._flusher_task
+        if task is None:
+            # Closed concurrently between the check above and here: the queue
+            # is being drained by ``close``; write straight to the ledger.
+            await asyncio.to_thread(self.ledger.save_checkpoints_batch, [update])
+            return
+        put_task = asyncio.ensure_future(self._queue.put(update))
+        try:
+            done, _ = await asyncio.wait({put_task, task}, return_when=asyncio.FIRST_COMPLETED)
+        except asyncio.CancelledError:
+            put_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await put_task
+            raise
+        if put_task in done:
+            return
+        # The worker finished before a slot opened up: re-surface its error (or
+        # restart a cleanly-exited one) and retry, rather than block forever.
+        put_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await put_task
+        self._raise_if_task_died()
+        if self._closed:
+            await asyncio.to_thread(self.ledger.save_checkpoints_batch, [update])
+            return
+        self.start()
+        await self._put(update)
 
     async def _save(self, batch: list[dict[str, Any]]) -> bool:
         """Persist *batch* under the save lock (see :meth:`_save_locked`)."""

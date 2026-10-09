@@ -626,6 +626,11 @@ class FastPassDecision:
     # Omission-gate signals (None when the gate did not run, i.e.
     # early structural failures before the omission check).
     omission: OmissionMetrics | None = None
+    #: Non-blocking findings on an otherwise-passing draft (e.g. a numeric order
+    #: inversion the translation is entitled to make). Surfaced as review flags,
+    #: never as a rejection — the same contract as the HTML delta validator's
+    #: formatting warnings.
+    advisories: tuple[str, ...] = ()
 
 
 def _normalize_math_body(span: str) -> str:
@@ -1026,6 +1031,11 @@ class FastPassFilter:
                 target_ratio=0.0,
                 length_ratio=0.0,
             )
+        # A numeric order inversion or elided restatement is not a failure — a
+        # translation may legitimately restate quantities in another order — but
+        # it is carried forward as a review flag rather than dropped, so the
+        # audit's "silent pass" becomes an operator-visible one.
+        num_advisories = tuple(num_res.details.get("numeric_advisories", ()))
 
         # 5. Length ratio check (thresholds are per-language-pair policy)
         length_ratio = len(tgt_clean) / max(1, len(src_clean))
@@ -1146,4 +1156,5 @@ class FastPassFilter:
             target_ratio=target_ratio,
             length_ratio=length_ratio,
             omission=omission.metrics,
+            advisories=num_advisories,
         )

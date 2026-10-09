@@ -11,7 +11,6 @@ import shutil
 import tempfile
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
-from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -89,6 +88,7 @@ from ubt.api.security import (
     validate_job_id,
     verify_api_key,
 )
+from ubt.api.sse_broadcaster import QueueSseBroadcaster, subscriber_frames
 from ubt.api.sse_replay import SseReplayBuffer
 from ubt.api.uploads import reap_stale_uploads
 from ubt.core.config import MOCK_API_KEY, UBTConfig
@@ -215,10 +215,10 @@ class QueueSubscriberCounter:
     """Per-job SSE subscriber accounting for queue mode.
 
     Embedded mode counts subscribers on the in-memory ``JobRecord``; queue mode
-    has no such record but needs the same ceiling. Every open stream polls the
-    queue from a worker thread once a second, so N subscribers occupy N threads
-    of the shared default executor and stall every other endpoint — including
-    this job's own status reads. Counting is per job id, not global.
+    has no such record but needs the same ceiling. Each open stream is a slot in
+    the fan-out (see :class:`~ubt.api.sse_broadcaster.QueueSseBroadcaster`), so
+    the ceiling bounds memory per subscriber as well as the read surface.
+    Counting is per job id, not global.
     """
 
     def __init__(self, limit: int) -> None:
@@ -267,17 +267,6 @@ def _public_artifact(value: Any) -> Any:
     fallback) still resolve the stored absolute path server-side.
     """
     return Path(value).name if isinstance(value, str) and value else value
-
-
-_SSE_POLL_EXECUTOR: ThreadPoolExecutor | None = None
-
-
-def _get_sse_poll_executor() -> ThreadPoolExecutor:
-    """Isolated, bounded thread pool for SSE queue polling to prevent default thread pool exhaustion."""
-    global _SSE_POLL_EXECUTOR
-    if _SSE_POLL_EXECUTOR is None:
-        _SSE_POLL_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="ubt-sse-poll")
-    return _SSE_POLL_EXECUTOR
 
 
 def _public_progress(progress: dict[str, Any]) -> dict[str, Any]:
@@ -514,11 +503,17 @@ def create_app(
     # process. It shares the job ceiling.
     assess_semaphore = asyncio.Semaphore(manager.max_running_jobs)
 
+    # Queue mode: one background poller fans snapshots out to every subscriber,
+    # so N open streams no longer occupy N polling threads. None in embedded
+    # mode, where the manager pushes events directly.
+    sse_broadcaster = QueueSseBroadcaster(job_queue) if job_queue is not None else None
+
     scope = ApiScope(
         config=app_config,
         manager=manager,
         job_queue=job_queue,
         assess_semaphore=assess_semaphore,
+        sse_broadcaster=sse_broadcaster,
     )
 
     @asynccontextmanager
@@ -542,6 +537,9 @@ def create_app(
                 app_config.upload_retention_days,
             )
         yield
+        # Stop the SSE fan-out poller so it does not outlive the app.
+        if sse_broadcaster is not None:
+            await sse_broadcaster.close()
 
     async def _verify_request_key(
         request: Request,
@@ -825,23 +823,23 @@ def _register_job_routes(
                     detail={"code": exc.code, "message": str(exc)},
                 ) from exc
 
-        if req.deep:
-            if assess_semaphore.locked():
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="Server at capacity: too many deep assessments in flight",
-                )
-            async with assess_semaphore:
-                return await _assess()
-        if resolved_in.suffix.lower() == ".pdf":
-            # A "shallow" assess is not a cheap manifest read: it still runs the
-            # full pdfium page census + font-encoding witness (assess._pdf_facts).
-            # Queue it on the same slots so a burst cannot pile unbounded
-            # per-page work onto the process (the 503 guard above stays
-            # deep-only; shallow requests wait rather than reject).
-            async with assess_semaphore:
-                return await _assess()
-        return await _assess()
+        # Every assess — deep or not — runs under the same slots. A "shallow"
+        # assess is not a cheap manifest read: a PDF still runs the full pdfium
+        # page census + font-encoding witness (assess._pdf_facts), and every
+        # other format opens its container and probes its archetype
+        # (analyze_archetype → zip member reads for EPUB/DOCX) before
+        # decide_route. The old code gated only deep and PDF requests and let a
+        # non-PDF shallow request run completely unbounded, so a burst of them
+        # piled concurrent container work onto the process with no ceiling.
+        # Only the deep path fast-fails when saturated (it is minutes long);
+        # a shallow request waits rather than reject.
+        if req.deep and assess_semaphore.locked():
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Server at capacity: too many deep assessments in flight",
+            )
+        async with assess_semaphore:
+            return await _assess()
 
     @api_app.post(
         "/jobs/upload",
@@ -1502,6 +1500,7 @@ def _register_stream_routes(api_app: FastAPI, scope: ApiScope) -> None:
     """Routes for the stream surface."""
     manager = scope.manager
     job_queue = scope.job_queue
+    sse_broadcaster = scope.sse_broadcaster
     _tenant_allows = scope.tenant_allows
     _tenant_allows_async = scope.tenant_allows_async
     _artifact_path = scope.artifact_path
@@ -1551,6 +1550,7 @@ def _register_stream_routes(api_app: FastAPI, scope: ApiScope) -> None:
     # Bounded per-job frame history for Last-Event-ID replay (PRD §9.2).
     sse_replay = SseReplayBuffer()
     api_app.state.sse_replay = sse_replay
+    api_app.state.sse_broadcaster = sse_broadcaster
 
     def _last_event_id(request: Request) -> int | None:
         """The client's replay cursor, from the SSE header or a query fallback.
@@ -1587,9 +1587,7 @@ def _register_stream_routes(api_app: FastAPI, scope: ApiScope) -> None:
             raise _cross_tenant_404(valid_id)
         last_event_id = _last_event_id(request)
         if job_queue is not None:
-            initial_job = await asyncio.get_running_loop().run_in_executor(
-                _get_sse_poll_executor(), job_queue.get, valid_id
-            )
+            initial_job = await asyncio.to_thread(job_queue.get, valid_id)
             if initial_job is None:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
@@ -1602,6 +1600,24 @@ def _register_stream_routes(api_app: FastAPI, scope: ApiScope) -> None:
                 )
             _acquire_global_stream_slot(per_job_key=valid_id)
             queue_slot_released = False
+            # One shared poller fans snapshots out to every subscriber's queue;
+            # this stream never touches SQLite itself (see QueueSseBroadcaster).
+            # A queue implies a broadcaster (both built together in create_app);
+            # checked explicitly, not with ``assert``, so ``python -O`` cannot
+            # strip it into an AttributeError on None.
+            if sse_broadcaster is None:  # pragma: no cover - construction invariant
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="SSE broadcaster is not configured for queue mode",
+                )
+            sub = await sse_broadcaster.subscribe(valid_id)
+            if sub is None:
+                queue_subscribers.release(valid_id)
+                global_subscribers.release(_GLOBAL_SUBSCRIBER_KEY)
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Job not found: {valid_id}",
+                )
 
             def _release_queue_stream_slots() -> None:
                 nonlocal queue_slot_released
@@ -1610,19 +1626,22 @@ def _register_stream_routes(api_app: FastAPI, scope: ApiScope) -> None:
                 queue_slot_released = True
                 queue_subscribers.release(valid_id)
                 global_subscribers.release(_GLOBAL_SUBSCRIBER_KEY)
+                unsub = asyncio.ensure_future(sse_broadcaster.unsubscribe(sub))
+                _background_tasks.add(unsub)
+                unsub.add_done_callback(_background_tasks.discard)
 
             async def _queue_events() -> AsyncIterator[str]:
                 last: dict[str, Any] | None = None
                 try:
                     for frame in sse_replay.replay(valid_id, last_event_id):
                         yield frame
-                    while True:
+                    async for job in subscriber_frames(sub, initial=initial_job):
                         if await request.is_disconnected():
                             break
-                        job = await asyncio.get_running_loop().run_in_executor(
-                            _get_sse_poll_executor(), job_queue.get, valid_id
-                        )
                         if job is None:
+                            # Terminal: emit the final frame from the last row we
+                            # saw. ``subscriber_frames`` only yields None after a
+                            # terminal row, so ``last`` holds that row's payload.
                             break
                         progress_payload = {**ProgressSnapshot().to_payload(), **job.progress}
                         snapshot = {**progress_payload, "status": job.status.value}
@@ -1641,7 +1660,6 @@ def _register_stream_routes(api_app: FastAPI, scope: ApiScope) -> None:
                                 ),
                             )
                             break
-                        await asyncio.sleep(1.0)
                 finally:
                     _release_queue_stream_slots()
 

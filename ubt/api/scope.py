@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ubt.api.app import JobManager
+    from ubt.api.sse_broadcaster import QueueSseBroadcaster
     from ubt.core.config import UBTConfig
     from ubt.core.engine.job_queue import JobQueue
     from ubt.core.ir.models import IRBlock
@@ -29,11 +30,14 @@ class ApiScope:
         manager: JobManager,
         job_queue: JobQueue | None,
         assess_semaphore: asyncio.Semaphore,
+        sse_broadcaster: QueueSseBroadcaster | None = None,
     ) -> None:
         self.config = config
         self.manager = manager
         self.job_queue = job_queue
         self.assess_semaphore = assess_semaphore
+        #: Queue-mode SSE fan-out poller (None in embedded mode).
+        self.sse_broadcaster = sse_broadcaster
 
     def tenant_allows(self, job_id: str, tenant: str) -> bool:
         """False when a queued job exists but belongs to another tenant.

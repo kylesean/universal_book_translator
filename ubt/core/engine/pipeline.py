@@ -221,7 +221,7 @@ class PipelineOrchestrator:
         repair_loop: RepairLoop | None = None,
         adapter: DocumentAdapter | None = None,
         rate_limiter: AdaptiveTokenBucket | None = None,
-        finalize_job: Callable[[TranslationProgressEvent], None] | None = None,
+        finalize_job: Callable[[TranslationProgressEvent, SQLiteJobLedger], None] | None = None,
     ) -> None:
         self.config = config or UBTConfig.from_env()
         self.config.bootstrap_runtime_environment()
@@ -614,19 +614,28 @@ class PipelineOrchestrator:
             artifact_path=artifact_path,
         )
 
-    async def _run_finalize_hook(self, event: TranslationProgressEvent) -> None:
+    async def _run_finalize_hook(
+        self, event: TranslationProgressEvent, ledger: SQLiteJobLedger
+    ) -> None:
         """Best-effort post-finalize hook; a failure is logged, never fatal.
 
         The hook persists the artifact/report pointers callers download through,
         so a silent failure would strand delivered artifacts with no signal —
         unlike the abort-finalize path this is the only terminal hook that had
         no log at all.
+
+        The run's own ``ledger`` is handed over rather than a path: the hook used
+        to reopen the file by path, which opened a *second* connection to the
+        same database outside the writer lock. Under contention that surfaced as
+        ``database is locked``, and it defeated the connection's WAL/busy-timeout
+        configuration by building a fresh one. The caller passes the live ledger
+        so the write shares the run's single connection.
         """
         if self.finalize_job is None:
             return
         try:
-            # Off-loop: the hook opens a SQLite ledger and writes metadata.
-            await asyncio.to_thread(self.finalize_job, event)
+            # Off-loop: the hook writes metadata to SQLite.
+            await asyncio.to_thread(self.finalize_job, event, ledger)
         except Exception as exc:
             logger.warning("finalize_job hook failed for job %s: %s", event.job_id, exc)
 
@@ -940,7 +949,7 @@ class PipelineOrchestrator:
 
             async def _on_export_completed(event: TranslationProgressEvent) -> None:
                 await run_tm_writeback_stage(ctx, services, facts.terminology)
-                await self._run_finalize_hook(event)
+                await self._run_finalize_hook(event, ledger)
 
             gates = RunGates(
                 chapter_streaming=self.config.chapter_streaming_enabled

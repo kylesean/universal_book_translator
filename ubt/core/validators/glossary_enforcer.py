@@ -47,7 +47,10 @@ def _is_latin_word_char(ch: str) -> bool:
     return False
 
 
-def _make_tokenizer(rules: dict[str, tuple[str, str, bool, bool]]) -> Any | None:
+def _make_tokenizer(
+    rules: dict[str, tuple[str, str, bool, bool]],
+    guard_forms: set[str] | None = None,
+) -> Any | None:
     """A private jieba tokenizer seeded with this glossary's CJK patterns.
 
     Returns ``None`` when jieba is unavailable. A per-instance
@@ -58,6 +61,11 @@ def _make_tokenizer(rules: dict[str, tuple[str, str, bool, bool]]) -> Any | None
     grows ``Tokenizer.total`` without bound, so a shared instance leaked memory
     per job. A private instance keeps both problems local to the glossary that
     owns them.
+
+    ``guard_forms`` are the approved target forms that contain a rule pattern
+    (see ``_approved_compound_spans``). Seeding them keeps a legitimate long
+    form whole — without it, boosting the alias ``学习`` is exactly what makes
+    jieba split the approved ``深度学习`` at that boundary.
     """
     try:
         import jieba  # type: ignore[import-untyped]
@@ -67,6 +75,9 @@ def _make_tokenizer(rules: dict[str, tuple[str, str, bool, bool]]) -> Any | None
     for pat in rules:
         if len(pat) >= 2 and all(is_cjk_char(ch) for ch in pat):
             tokenizer.add_word(pat, freq=1000000)
+    for form in guard_forms or ():
+        if len(form) >= 2 and all(is_cjk_char(ch) for ch in form):
+            tokenizer.add_word(form, freq=1000000)
     return tokenizer
 
 
@@ -192,6 +203,27 @@ def find_term_occurrences(
     return found
 
 
+def _compound_occurrence_spans(text: str, compounds: set[str]) -> list[tuple[int, int]]:
+    """Occurrence spans of every approved compound form in ``text``.
+
+    Plain substring scan, not ``find_term_occurrences``: the approved form is
+    already an exact target string, and the point is precisely to shield a span
+    the boundary-aware matcher *would* accept a shorter alias inside. A
+    longest-first scan avoids emitting a span nested in a longer one.
+    """
+    spans: list[tuple[int, int]] = []
+    for form in sorted(compounds, key=len, reverse=True):
+        if not form:
+            continue
+        start = text.find(form)
+        while start != -1:
+            end = start + len(form)
+            if not any(start >= s and end <= e for s, e in spans):
+                spans.append((start, end))
+            start = text.find(form, start + 1)
+    return spans
+
+
 class DeterministicGlossaryEnforcer:
     """Enforces 100% deterministic terminology consistency using an Aho-Corasick automaton.
 
@@ -222,8 +254,31 @@ class DeterministicGlossaryEnforcer:
         self._approved_target_forms: set[str] = set()
 
         self._compile_glossary(glossary)
+        #: Approved target forms that *contain* a rule pattern as a proper
+        #: substring (``深度学习`` contains the alias ``学习``). A rule match
+        #: inside one of these is left alone: the longer approved form is the
+        #: correct rendering, and rewriting the substring corrupts it.
+        self._protected_compounds = self._compute_protected_compounds()
         self._build_automaton()
-        self._tokenizer = _make_tokenizer(self._rules)
+        self._tokenizer = _make_tokenizer(self._rules, self._protected_compounds)
+
+    def _compute_protected_compounds(self) -> set[str]:
+        """Approved target forms containing a rule pattern as a proper substring.
+
+        ``深度学习`` (deep learning) and ``机器学习`` (machine learning) both
+        contain the alias ``学习`` (learning). The alias exists to fix a
+        *drifted* rendering, but inside the approved long form it is correct, so
+        the compound guard must leave it whole. The containment is computed
+        structurally, so the same guard protects ``machine learning`` from a
+        ``learning`` alias without any language-specific list.
+        """
+        compounds: set[str] = set()
+        for form in self._approved_target_forms:
+            if len(form) < 2:
+                continue
+            if any(pat != form and pat in form for pat in self._rules):
+                compounds.add(form)
+        return compounds
 
     def _compile_glossary(self, glossary: list[dict[str, Any]]) -> None:
         # Two passes on purpose: the alias guard below compares against every
@@ -353,6 +408,25 @@ class DeterministicGlossaryEnforcer:
                     continue
                 filtered_by_protection.append((start, end, pattern, repl, rule))
             raw_matches = filtered_by_protection
+
+        if not raw_matches:
+            return target_text, [], []
+
+        # Approved-compound guard. A rule pattern that sits *inside* an approved
+        # target form is the correct rendering of a longer term, not drift: the
+        # alias 学习 (learning) must not rewrite the approved 深度学习 (deep
+        # learning) into 深度训练. The containment is structural — the same pass
+        # protects "machine learning" from a "learning" alias — so it holds for
+        # any glossary. Matches inside such a span are quarantined, not applied.
+        if self._protected_compounds:
+            compound_spans = _compound_occurrence_spans(target_text, self._protected_compounds)
+            if compound_spans:
+                kept: list[tuple[int, int, str, str, str]] = []
+                for start, end, pattern, repl, rule in raw_matches:
+                    if any(start >= c_start and end <= c_end for c_start, c_end in compound_spans):
+                        continue
+                    kept.append((start, end, pattern, repl, rule))
+                raw_matches = kept
 
         if not raw_matches:
             return target_text, [], []
