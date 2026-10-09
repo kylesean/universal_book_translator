@@ -20,6 +20,7 @@ row, never by sleeping.
 from __future__ import annotations
 
 import logging
+import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -662,3 +663,93 @@ def test_finalize_batch_job_records_a_paid_batch_whose_sentinel_was_reclaimed(
             for row in conn.execute("SELECT batch_id, status FROM batch_jobs").fetchall()
         }
     assert rows == {"batch-a": "submitted", "batch-b": "submitted"}
+
+
+def test_migration_v2_crash_recovery(tmp_path: Path) -> None:
+    db_file = tmp_path / "v1_interrupted.db"
+    conn = sqlite3.connect(db_file)
+    conn.executescript("""
+        CREATE TABLE job_meta (job_id TEXT PRIMARY KEY);
+        CREATE TABLE blocks (
+            block_id TEXT PRIMARY KEY,
+            job_id TEXT NOT NULL,
+            flow_id TEXT NOT NULL DEFAULT 'main_story',
+            spine_index INTEGER NOT NULL DEFAULT 0,
+            block_type TEXT NOT NULL DEFAULT 'narrative',
+            bbox_json TEXT,
+            style_json TEXT,
+            source_text TEXT NOT NULL,
+            draft_text TEXT,
+            target_text TEXT,
+            status TEXT NOT NULL,
+            skip_translate INTEGER DEFAULT 0,
+            glossary_hits_json TEXT,
+            mtqe_score REAL,
+            repair_rounds INTEGER DEFAULT 0,
+            error_flags_json TEXT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        PRAGMA user_version = 1;
+    """)
+    # Simulate crash after owner_id added in v2
+    conn.execute("ALTER TABLE blocks ADD COLUMN owner_id TEXT DEFAULT NULL;")
+    conn.commit()
+    conn.close()
+
+    # Re-open with SQLiteJobLedger; it must finish migration without error
+    ledger = SQLiteJobLedger(db_file)
+    ledger.close()
+
+    conn = sqlite3.connect(db_file)
+    assert conn.execute("PRAGMA user_version;").fetchone()[0] == TARGET_SCHEMA_VERSION
+    conn.close()
+
+
+def test_migration_v11_crash_recovery(tmp_path: Path) -> None:
+    db_file = tmp_path / "v10_interrupted.db"
+    conn = sqlite3.connect(db_file)
+    conn.executescript("""
+        CREATE TABLE job_meta (job_id TEXT PRIMARY KEY);
+        CREATE TABLE blocks (
+            block_id TEXT PRIMARY KEY,
+            job_id TEXT NOT NULL,
+            flow_id TEXT NOT NULL DEFAULT 'main_story',
+            spine_index INTEGER NOT NULL DEFAULT 0,
+            block_type TEXT NOT NULL DEFAULT 'narrative',
+            bbox_json TEXT,
+            style_json TEXT,
+            source_text TEXT NOT NULL,
+            draft_text TEXT,
+            target_text TEXT,
+            status TEXT NOT NULL,
+            skip_translate INTEGER DEFAULT 0,
+            glossary_hits_json TEXT,
+            mtqe_score REAL,
+            repair_rounds INTEGER DEFAULT 0,
+            error_flags_json TEXT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            tm_hit INTEGER DEFAULT 0,
+            mqm_severity TEXT,
+            mqm_spans_json TEXT,
+            layout_role TEXT,
+            semantic_role TEXT,
+            structure_role TEXT,
+            policy_translate INTEGER,
+            policy_reason TEXT,
+            provenance_json TEXT
+        );
+        CREATE TABLE batch_jobs (batch_id TEXT PRIMARY KEY);
+        PRAGMA user_version = 10;
+    """)
+    # Simulate crash after rename to blocks_v10
+    conn.execute("ALTER TABLE blocks RENAME TO blocks_v10;")
+    conn.commit()
+    conn.close()
+
+    # Re-open with SQLiteJobLedger; it must finish migration without error
+    ledger = SQLiteJobLedger(db_file)
+    ledger.close()
+
+    conn = sqlite3.connect(db_file)
+    assert conn.execute("PRAGMA user_version;").fetchone()[0] == TARGET_SCHEMA_VERSION
+    conn.close()

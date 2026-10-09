@@ -396,46 +396,70 @@ class LedgerBase:
                 """)
                 current_version = TARGET_SCHEMA_VERSION
 
+            def _block_cols() -> set[str]:
+                return {
+                    str(row["name"])
+                    for row in conn.execute("PRAGMA table_info(blocks);").fetchall()
+                }
+
+            def _table_exists(name: str) -> bool:
+                return (
+                    conn.execute(
+                        "SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?;", (name,)
+                    ).fetchone()
+                    is not None
+                )
+
             # Migration to Version 2: Add worker lease columns and claim index
             if current_version < 2:
-                conn.executescript("""
-                    ALTER TABLE blocks ADD COLUMN owner_id TEXT DEFAULT NULL;
-                    ALTER TABLE blocks ADD COLUMN lease_expires_at REAL DEFAULT NULL;
-                    CREATE INDEX IF NOT EXISTS idx_block_claim ON blocks(job_id, status, lease_expires_at, spine_index);
-                    PRAGMA user_version = 2;
-                """)
+                cols = _block_cols()
+                if "owner_id" not in cols:
+                    conn.execute("ALTER TABLE blocks ADD COLUMN owner_id TEXT DEFAULT NULL;")
+                if "lease_expires_at" not in cols:
+                    conn.execute(
+                        "ALTER TABLE blocks ADD COLUMN lease_expires_at REAL DEFAULT NULL;"
+                    )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_block_claim "
+                    "ON blocks(job_id, status, lease_expires_at, spine_index);"
+                )
+                conn.execute("PRAGMA user_version = 2;")
 
             # Migration to Version 3: Translation Memory provenance column
             # (exact TM hits skip the LLM and are auditable)
             if current_version < 3:
-                conn.executescript("""
-                    ALTER TABLE blocks ADD COLUMN tm_hit INTEGER DEFAULT 0;
-                    PRAGMA user_version = 3;
-                """)
+                cols = _block_cols()
+                if "tm_hit" not in cols:
+                    conn.execute("ALTER TABLE blocks ADD COLUMN tm_hit INTEGER DEFAULT 0;")
+                conn.execute("PRAGMA user_version = 3;")
 
             # Migration to Version 4: MQM severity triage columns
             # (severity tier + serialized spans survive restarts and feed
             # the human PE queue exporters)
             if current_version < 4:
-                conn.executescript("""
-                    ALTER TABLE blocks ADD COLUMN mqm_severity TEXT DEFAULT NULL;
-                    ALTER TABLE blocks ADD COLUMN mqm_spans_json TEXT DEFAULT NULL;
-                    PRAGMA user_version = 4;
-                """)
+                cols = _block_cols()
+                if "mqm_severity" not in cols:
+                    conn.execute("ALTER TABLE blocks ADD COLUMN mqm_severity TEXT DEFAULT NULL;")
+                if "mqm_spans_json" not in cols:
+                    conn.execute("ALTER TABLE blocks ADD COLUMN mqm_spans_json TEXT DEFAULT NULL;")
+                conn.execute("PRAGMA user_version = 4;")
 
             # Migration to Version 5: document-v1 contract columns
             # role layers + policy verdict + provenance survive restarts so
             # render routing and verdict audits work post-resume)
             if current_version < 5:
-                conn.executescript("""
-                    ALTER TABLE blocks ADD COLUMN layout_role TEXT DEFAULT NULL;
-                    ALTER TABLE blocks ADD COLUMN semantic_role TEXT DEFAULT NULL;
-                    ALTER TABLE blocks ADD COLUMN structure_role TEXT DEFAULT NULL;
-                    ALTER TABLE blocks ADD COLUMN policy_translate INTEGER DEFAULT NULL;
-                    ALTER TABLE blocks ADD COLUMN policy_reason TEXT DEFAULT NULL;
-                    ALTER TABLE blocks ADD COLUMN provenance_json TEXT DEFAULT NULL;
-                    PRAGMA user_version = 5;
-                """)
+                cols = _block_cols()
+                for name, decl in (
+                    ("layout_role", "TEXT DEFAULT NULL"),
+                    ("semantic_role", "TEXT DEFAULT NULL"),
+                    ("structure_role", "TEXT DEFAULT NULL"),
+                    ("policy_translate", "INTEGER DEFAULT NULL"),
+                    ("policy_reason", "TEXT DEFAULT NULL"),
+                    ("provenance_json", "TEXT DEFAULT NULL"),
+                ):
+                    if name not in cols:
+                        conn.execute(f"ALTER TABLE blocks ADD COLUMN {name} {decl};")
+                conn.execute("PRAGMA user_version = 5;")
 
             # Migration to Version 6: Batch API job persistence (
             # batch_id survives restarts, idempotency key = sha1 over the
@@ -520,8 +544,13 @@ class LedgerBase:
             # alter a primary key, so the table is rebuilt (create-copy-drop-
             # rename); every block_id-keyed write is now scoped by job_id.
             if current_version < 11:
+                has_v10 = _table_exists("blocks_v10")
+                has_blocks = _table_exists("blocks")
+                if not has_v10 and has_blocks:
+                    conn.execute("ALTER TABLE blocks RENAME TO blocks_v10;")
+                elif has_v10 and has_blocks:
+                    conn.execute("DROP TABLE blocks;")
                 conn.executescript("""
-                    ALTER TABLE blocks RENAME TO blocks_v10;
                     CREATE TABLE blocks (
                         block_id TEXT NOT NULL,
                         job_id TEXT NOT NULL,
