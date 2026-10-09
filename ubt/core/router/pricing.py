@@ -23,6 +23,7 @@ from __future__ import annotations
 import ipaddress
 import logging
 import os
+import re
 import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -397,6 +398,37 @@ CACHED_INPUT_PRICES_USD_PER_MTOK: dict[str, float] = {
 }
 
 
+_BARE_FAMILY_KEYS: frozenset[str] = frozenset(
+    {"gemini", "claude", "deepseek", "qwen", "gpt", "openai"}
+)
+_TIER_KEYWORDS: frozenset[str] = frozenset(
+    {"pro", "max", "ultra", "opus", "plus", "32k", "64k", "128k"}
+)
+
+
+def _is_safe_prefix_match(cand: str, key: str) -> bool:
+    """Whether cand safely matches key as a version/date snapshot rather than a distinct tier.
+
+    Prevents:
+    - Bare family names ('gemini', 'claude') from matching arbitrary unpriced variants;
+    - Base models ('o1', 'gpt-4') from matching premium tiers ('o1-pro', 'gpt-4-32k').
+    """
+    if cand == key:
+        return True
+    if not cand.startswith(key):
+        return False
+    if key in _BARE_FAMILY_KEYS:
+        # Bare family keys must only match verbatim
+        return False
+    suffix = cand[len(key) :]
+    if not suffix.startswith(("-", ":", "@", "/")):
+        return False
+    suffix_parts = set(re.split(r"[-:_@/.]+", suffix.lower()))
+    key_parts = set(re.split(r"[-:_@/.]+", key.lower()))
+    new_tiers = (suffix_parts & _TIER_KEYWORDS) - key_parts
+    return not new_tiers
+
+
 def resolve_model_prices(model: str) -> tuple[float, float]:
     """Resolve ``(input, output)`` USD price per 1M tokens.
 
@@ -429,21 +461,21 @@ def resolve_model_prices(model: str) -> tuple[float, float]:
     best_prices = (0.0, 0.0)
     for cand in candidates:
         for key, prices in _CUSTOM_PRICES.items():
-            if cand.startswith(key) and len(key) > len(best_key):
+            if _is_safe_prefix_match(cand, key) and len(key) > len(best_key):
                 best_key = key
                 best_prices = prices
 
     # 4. Longest-prefix match in table:
     for cand in candidates:
         for key, entry in table.items():
-            if cand.startswith(key) and len(key) > len(best_key):
+            if _is_safe_prefix_match(cand, key) and len(key) > len(best_key):
                 best_key = key
                 best_prices = (entry.input, entry.output)
 
     # 5. Longest-prefix fallback in legacy MODEL_PRICES_USD_PER_MTOK:
     for cand in candidates:
         for key, prices in MODEL_PRICES_USD_PER_MTOK.items():
-            if cand.startswith(key) and len(key) > len(best_key):
+            if _is_safe_prefix_match(cand, key) and len(key) > len(best_key):
                 best_key = key
                 best_prices = prices
 
@@ -487,21 +519,21 @@ def resolve_cached_input_price(model: str) -> float:
     best_cached = -1.0
     for cand in candidates:
         for key, cached_price in _CUSTOM_CACHED_PRICES.items():
-            if cand.startswith(key) and len(key) > len(best_key):
+            if _is_safe_prefix_match(cand, key) and len(key) > len(best_key):
                 best_key = key
                 best_cached = cached_price
 
     # 4. Longest-prefix match in table:
     for cand in candidates:
         for key, entry in table.items():
-            if cand.startswith(key) and len(key) > len(best_key):
+            if _is_safe_prefix_match(cand, key) and len(key) > len(best_key):
                 best_key = key
                 best_cached = entry.cached_input
 
     # 5. Longest-prefix fallback in legacy CACHED_INPUT_PRICES_USD_PER_MTOK:
     for cand in candidates:
         for key, cached_price in CACHED_INPUT_PRICES_USD_PER_MTOK.items():
-            if cand.startswith(key) and len(key) > len(best_key):
+            if _is_safe_prefix_match(cand, key) and len(key) > len(best_key):
                 best_key = key
                 best_cached = cached_price
 
@@ -538,7 +570,7 @@ def resolve_batch_discount(model: str) -> float:
     best_discount = BATCH_API_DISCOUNT
     for cand in candidates:
         for key, entry in table.items():
-            if cand.startswith(key) and len(key) > len(best_key):
+            if _is_safe_prefix_match(cand, key) and len(key) > len(best_key):
                 best_key = key
                 best_discount = entry.batch_discount
 
@@ -563,7 +595,7 @@ def has_price_entry(model: str) -> bool:
             candidates.append(last_segment)
     table = _current_prices_table()
     merged_keys = set(table) | set(MODEL_PRICES_USD_PER_MTOK) | set(_CUSTOM_PRICES)
-    return any(cand.startswith(key) for cand in candidates for key in merged_keys)
+    return any(_is_safe_prefix_match(cand, key) for cand in candidates for key in merged_keys)
 
 
 def estimate_cost_usd(
