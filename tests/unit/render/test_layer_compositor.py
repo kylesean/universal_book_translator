@@ -93,6 +93,27 @@ class _FragmentSpy:
         self.math_calls: list[tuple[str, float, float]] = []
         self.bilingual_calls: list[tuple[str, str, float, float]] = []
         self.prefetched: list[tuple[Any, ...]] = []
+        self.last_drawn_pt: float | None = None
+
+    def typeset_fixed(
+        self,
+        text: str,
+        width_pt: float,
+        height_pt: float,
+        size_pt: float,
+        *,
+        kind: str = "text",
+        is_bold: bool = False,
+        indent_pt: float | None = None,
+        align_center: bool = False,
+        runs: tuple[Any, ...] = (),
+    ) -> Path | None:
+        self.calls.append((text, width_pt, height_pt))
+        self.last_drawn_pt = size_pt
+        if self._fail:
+            return None
+        fragment = self._tmp / f"fixed-{len(self.calls)}.pdf"
+        return write_text_pdf(fragment, [[text]], width=width_pt, height=height_pt, margin=10.0)
 
     def prefetch(self, requests: Sequence[tuple[Any, ...]]) -> None:
         self.prefetched.extend(requests)
@@ -838,3 +859,17 @@ def test_each_masked_region_carries_its_own_fill(tmp_path: Path) -> None:
     assert len(ops) == 2, "one fill per masked region"
     for colour in ops:
         assert colour == pytest.approx(_TINT, abs=0.02)
+
+
+def test_fixed_typeset_records_last_drawn_pt(tmp_path: Path) -> None:
+    source = write_text_pdf(tmp_path / "source.pdf", [_PAGE])
+    output = tmp_path / "out.pdf"
+    spy = _FragmentSpy(tmp_path)
+    overlay = Overlay(
+        "e1", 1, (50.0, 50.0, 200.0, 100.0), "Fixed text", fixed_box=True, draw_size_pt=5.0
+    )
+    composition = LayerCompositor(source, typesetter=spy, strip=False).compose([overlay], output)
+    (placement,) = composition.placements
+    assert placement.drawn
+    assert placement.drawn_pt == 5.0
+    assert composition.low_legibility_fonts == (("e1", 5.0),)

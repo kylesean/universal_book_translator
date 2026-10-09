@@ -1142,7 +1142,7 @@ class TypstFragmentTypesetter:
         """
         if width_pt <= 0 or height_pt <= 0 or not text.strip() or size_pt <= 0:
             return None
-        return self._compile(
+        res = self._compile(
             self._text_source(
                 text,
                 width_pt,
@@ -1155,6 +1155,9 @@ class TypstFragmentTypesetter:
                 runs=runs,
             )
         )
+        if res is not None:
+            self.last_drawn_pt = size_pt
+        return res
 
     def measure_fixed(
         self,
@@ -2247,6 +2250,8 @@ class LayerCompositor:
                             is_bold=overlay.is_bold,
                             indent_pt=indent_pt,
                         )
+                if fragment is not None and hasattr(typesetter, "last_drawn_pt"):
+                    typesetter.last_drawn_pt = size_pt
             else:
                 fragment = typesetter.typeset(
                     part.text,
