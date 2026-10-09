@@ -34,6 +34,8 @@ __all__ = [
     "page_box",
     "page_boxes",
     "page_count",
+    "page_rotation",
+    "page_rotations",
     "page_size",
     "page_sizes",
     "resource_font_count",
@@ -83,6 +85,26 @@ def page_boxes(path: Path | str) -> dict[int, tuple[float, float, float, float]]
     """1-indexed ``{page_no: (x0, y0, x1, y1)}`` MediaBoxes for every page."""
     with pikepdf.open(str(path)) as pdf:
         return {idx: page_box(page) for idx, page in enumerate(pdf.pages, start=1)}
+
+
+def page_rotation(page: Page) -> int:
+    """Clockwise rotation degrees of one page (0, 90, 180, 270), inheritance-resolved."""
+    cur: Any = page
+    while cur is not None:
+        rot = cur.get("/Rotate")
+        if rot is not None:
+            try:
+                return int(rot) % 360
+            except (ValueError, TypeError):
+                return 0
+        cur = cur.get("/Parent")
+    return 0
+
+
+def page_rotations(path: Path | str) -> dict[int, int]:
+    """1-indexed ``{page_no: rotation_deg}`` for every page."""
+    with pikepdf.open(str(path)) as pdf:
+        return {idx: page_rotation(page) for idx, page in enumerate(pdf.pages, start=1)}
 
 
 def count_ops(page: Page, opnames: Iterable[str]) -> int:

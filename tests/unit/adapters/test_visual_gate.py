@@ -91,3 +91,48 @@ def test_visual_gate_tmpdir_tracking_and_cleanup(tmp_path: Path) -> None:
     # Cleanup function should clear any tracked tmpdirs safely
     cleanup_visual_gate_tmpdirs()
     assert len(_OWNED_TMP_DIRS) == 0
+
+
+def test_rotated_page_occlusion_findings(tmp_path: Path) -> None:
+    # 200x100 PDF page rotated 90 deg rasterizes to a 100x200 image.
+    # _BOX in unrotated PDF is (10, 10, 110, 30).
+    # Under 90 deg clockwise rotation, it maps to x=[10, 30], y=[10, 110].
+    img_90 = Image.new("L", (100, 200), 255)
+    draw_90 = ImageDraw.Draw(img_90)
+    # Fill ink in the rotated bounding box (placed in y=[15, 55], which is
+    # inside the rotated crop y=[10, 110] but misses the unrotated crop y=[70, 90])
+    draw_90.rectangle((12, 15, 28, 55), fill=0)
+    p90 = tmp_path / "p90.png"
+    img_90.save(p90)
+
+    # With rotation 90 declared, the crop correctly lands on the ink:
+    findings_with_rot = text_occlusion_findings(
+        {1: p90}, [_BOX], {1: _MEDIA}, dpi=_DPI, rotations={1: 90}
+    )
+    assert findings_with_rot == []
+
+    # Without rotation (0 deg assumption), crop misses the ink and flags occlusion:
+    findings_without_rot = text_occlusion_findings(
+        {1: p90}, [_BOX], {1: _MEDIA}, dpi=_DPI, rotations={1: 0}
+    )
+    assert [f.code for f in findings_without_rot] == ["text_occluded"]
+
+
+def test_pdf_struct_page_rotation(tmp_path: Path) -> None:
+    import pikepdf
+
+    from ubt.adapters.pdf.pdf_struct import page_rotation, page_rotations
+
+    pdf = pikepdf.new()
+    _ = pdf.add_blank_page(page_size=(200, 100))
+    p2 = pdf.add_blank_page(page_size=(200, 100))
+    p2.Rotate = 90
+    out = tmp_path / "test_rot.pdf"
+    pdf.save(out)
+
+    with pikepdf.open(out) as opened:
+        assert page_rotation(opened.pages[0]) == 0
+        assert page_rotation(opened.pages[1]) == 90
+
+    rots = page_rotations(out)
+    assert rots == {1: 0, 2: 90}

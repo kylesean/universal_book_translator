@@ -193,6 +193,15 @@ def page_bounds(pdf_path: Path) -> dict[int, tuple[float, float, float, float]]:
         return {}
 
 
+def page_rotations(pdf_path: Path) -> dict[int, int]:
+    """Return 1-indexed {page_no: rotation_deg} via pikepdf."""
+    try:
+        return pdf_struct.page_rotations(pdf_path)
+    except Exception as exc:
+        logger.debug("Visual gate: cannot read rotations of %s: %s", pdf_path, exc)
+        return {}
+
+
 #: Bound on pages whose *artifact* text boxes feed the deterministic geometry
 #: checks; a longer book is sampled evenly. pdfium extraction is cheap per page,
 #: but the gate runs on every export, so it is not unbounded.
@@ -648,6 +657,7 @@ def text_occlusion_findings(
     text_boxes: Sequence[_ArtifactBox],
     bounds: Mapping[int, tuple[float, float, float, float]],
     dpi: int = DEFAULT_DPI,
+    rotations: Mapping[int, int] | None = None,
 ) -> list[VisualFinding]:
     """Text the text layer reports but the raster does not show.
 
@@ -670,19 +680,36 @@ def text_occlusion_findings(
         media = bounds.get(page)
         if not boxes or media is None:
             continue
+        page_rot = (rotations.get(page, 0) if rotations else 0) % 360
         try:
             with Image.open(png_path) as img:
                 grey = img.convert("L")
                 width_px, height_px = grey.size
-                media_x0, _media_y0, _media_x1, media_y1 = media
+                media_x0, media_y0, media_x1, media_y1 = media
                 occluded = 0
                 sample = ""
                 for box in boxes:
                     bbox = box.bbox
-                    left = max(0, int((bbox.x0 - media_x0) * scale))
-                    right = min(width_px, int((bbox.x1 - media_x0) * scale))
-                    top = max(0, int((media_y1 - bbox.y1) * scale))
-                    bottom = min(height_px, int((media_y1 - bbox.y0) * scale))
+                    if page_rot == 90:
+                        left = max(0, int((bbox.y0 - media_y0) * scale))
+                        right = min(width_px, int((bbox.y1 - media_y0) * scale))
+                        top = max(0, int((bbox.x0 - media_x0) * scale))
+                        bottom = min(height_px, int((bbox.x1 - media_x0) * scale))
+                    elif page_rot == 180:
+                        left = max(0, int((media_x1 - bbox.x1) * scale))
+                        right = min(width_px, int((media_x1 - bbox.x0) * scale))
+                        top = max(0, int((bbox.y0 - media_y0) * scale))
+                        bottom = min(height_px, int((bbox.y1 - media_y0) * scale))
+                    elif page_rot == 270:
+                        left = max(0, int((media_y1 - bbox.y1) * scale))
+                        right = min(width_px, int((media_y1 - bbox.y0) * scale))
+                        top = max(0, int((media_x1 - bbox.x1) * scale))
+                        bottom = min(height_px, int((media_x1 - bbox.x0) * scale))
+                    else:
+                        left = max(0, int((bbox.x0 - media_x0) * scale))
+                        right = min(width_px, int((bbox.x1 - media_x0) * scale))
+                        top = max(0, int((media_y1 - bbox.y1) * scale))
+                        bottom = min(height_px, int((media_y1 - bbox.y0) * scale))
                     w_px = right - left
                     h_px = bottom - top
                     if w_px < OCCLUSION_MIN_BOX_PX or h_px < 6 or w_px * h_px < 150:
@@ -794,6 +821,7 @@ async def run_visual_gate(
     geometry_pages = _geometry_pages(total)
     artifact_boxes = await asyncio.to_thread(artifact_text_boxes, pdf_path, geometry_pages)
     bounds = await asyncio.to_thread(page_bounds, pdf_path)
+    rotations = await asyncio.to_thread(page_rotations, pdf_path)
     if artifact_boxes:
         findings.extend(block_overlap_findings(artifact_boxes))
         findings.extend(blocks_out_of_bounds_findings(artifact_boxes, bounds))
@@ -837,7 +865,14 @@ async def run_visual_gate(
             skip_notes.append("page render failed (pdf_oxide); pixel checks skipped")
         else:
             findings.extend(
-                await asyncio.to_thread(text_occlusion_findings, pngs, artifact_boxes, bounds, dpi)
+                await asyncio.to_thread(
+                    text_occlusion_findings,
+                    pngs,
+                    artifact_boxes,
+                    bounds,
+                    dpi,
+                    rotations,
+                )
             )
             for page, png in sorted(pngs.items()):
                 # pixel_findings decodes the PNG with PIL (CPU-bound) — keep it off the loop too.
