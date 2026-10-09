@@ -159,6 +159,7 @@ class SubprocessQERunner(BaseQERunner):
         # rest of the run falls back to per-call invocation (also manual
         # rollback: UBT_COMET_RESIDENT=0 disables residency from the start).
         self._resident_broken = False
+        self._neural_unavailable = False
         # In-process heuristic re-scoring whenever the scorer reports a
         # non-neural engine. The scorer's own fallback is a length-ratio number
         # (0.1-0.85) on a different scale than the pipeline's 12-band
@@ -199,6 +200,7 @@ class SubprocessQERunner(BaseQERunner):
     def reset_residency(self) -> None:
         """Re-enable the resident scorer for a new run (see BaseQERunner)."""
         self._resident_broken = False
+        self._neural_unavailable = False
 
     def with_languages(self, source_lang: str, target_lang: str) -> "SubprocessQERunner":
         """Bind the language pair for the in-process fallback heuristic."""
@@ -473,8 +475,11 @@ class SubprocessQERunner(BaseQERunner):
         """
         if not pairs:
             return []
+        if self._neural_unavailable:
+            return await self._heuristic_runner().score_pairs(pairs)
         scores = await self._score_via_backend(pairs)
         if self._last_engine != "neural":
+            self._neural_unavailable = True
             return await self._heuristic_runner().score_pairs(pairs)
         return scores
 

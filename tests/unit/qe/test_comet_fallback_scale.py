@@ -54,3 +54,34 @@ def test_neural_scores_pass_through_unchanged(monkeypatch: pytest.MonkeyPatch) -
     scores = asyncio.run(runner.score_pairs([{"src": "a", "mt": "b"}]))
     assert scores == [0.9]
     assert runner.is_calibrated() is True
+
+
+def test_fallback_short_circuits_subsequent_batches(monkeypatch: pytest.MonkeyPatch) -> None:
+    runner = _runner()
+    backend_calls = 0
+
+    async def fake_backend(pairs: list[dict[str, str]]) -> list[float]:
+        nonlocal backend_calls
+        backend_calls += 1
+        runner._last_engine = "heuristic_fallback"
+        return [0.85 for _ in pairs]
+
+    monkeypatch.setattr(runner, "_score_via_backend", fake_backend)
+
+    # First batch detects non-neural and falls back
+    scores1 = asyncio.run(runner.score_pairs([{"src": "Hello world", "mt": "Hello world"}]))
+    assert backend_calls == 1
+    assert scores1[0] < 0.5
+    assert runner._neural_unavailable is True
+
+    # Second batch short-circuits directly to heuristic without invoking backend
+    scores2 = asyncio.run(runner.score_pairs([{"src": "Hello world", "mt": "Hello world"}]))
+    assert backend_calls == 1
+    assert scores2[0] < 0.5
+
+    # Resetting residency resets neural unavailability
+    runner.reset_residency()
+    assert runner._neural_unavailable is False
+    scores3 = asyncio.run(runner.score_pairs([{"src": "Hello world", "mt": "Hello world"}]))
+    assert backend_calls == 2
+    assert scores3[0] < 0.5
