@@ -75,3 +75,19 @@ def test_stray_dark_pixels_suppress_a_near_white_reading(tmp_path: Path) -> None
     sparse = _page(tmp_path, ink=_stray_pixels(6), name="sparse.png")
     findings = text_occlusion_findings({1: sparse}, [_BOX], {1: _MEDIA}, dpi=_DPI)
     assert [f.code for f in findings] == ["text_occluded"]
+
+
+def test_visual_gate_tmpdir_tracking_and_cleanup(tmp_path: Path) -> None:
+    from ubt.adapters.pdf.visual_gate import (
+        _OWNED_TMP_DIRS,
+        cleanup_visual_gate_tmpdirs,
+        render_pages_to_png,
+    )
+
+    # Empty pages should return empty dict and not leak
+    res = render_pages_to_png(tmp_path / "nonexistent.pdf", [])
+    assert res == {}
+
+    # Cleanup function should clear any tracked tmpdirs safely
+    cleanup_visual_gate_tmpdirs()
+    assert len(_OWNED_TMP_DIRS) == 0

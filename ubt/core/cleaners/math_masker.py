@@ -121,8 +121,10 @@ class MathMasker(BaseMasker):
 def extract_math_spans(text: str) -> list[str]:
     """Inline-math span contents in order (for preservation comparison)."""
     _, mapping = MathMasker().mask(text)
-    ordered = sorted(
-        mapping.items(),
-        key=lambda kv: int(re.search(r"(\d+)", kv[0]).group(1)),  # type: ignore[union-attr]
-    )
+
+    def _key_index(item: tuple[str, str]) -> int:
+        match = re.search(r"(\d+)", item[0])
+        return int(match.group(1)) if match is not None else 0
+
+    ordered = sorted(mapping.items(), key=_key_index)
     return [original for _, original in ordered]

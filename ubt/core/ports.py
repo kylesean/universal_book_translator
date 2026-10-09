@@ -122,6 +122,10 @@ class DocumentAdapter(Protocol):
     ) -> Path: ...
 
     def apply_config(self, runtime_config: AdapterRuntimeConfig) -> None: ...
+    @property
+    def last_render_skips(self) -> list[tuple[str, str]]: ...
+    @property
+    def last_render_flags(self) -> list[tuple[str, str]]: ...
 
 
 VisualGateRunnerFn = Callable[..., Any]
@@ -264,12 +268,9 @@ def is_visual_scalpel_applicable(
 def get_last_render_skips(adapter: Any) -> list[tuple[str, str]]:
     """Return the adapter's last-render per-block skip ledger.
 
-    Duck-typed side channel: adapters that track fail-closed render skips
-    (the PDF compositor's unstageable blocks) expose
-    them as plain ``(block_id, reason)`` string tuples via
-    ``last_render_skips``.
-    Adapters without the attribute yield []. Never raises: malformed
-    entries are dropped so a reporting bug can never fail a render.
+    Adapters declare ``last_render_skips`` as part of :class:`DocumentAdapter`.
+    This helper provides safe access, dropping malformed entries so an
+    inspection issue cannot disrupt the render pipeline.
     """
     raw = getattr(adapter, "last_render_skips", None)
     if not isinstance(raw, list):
@@ -289,13 +290,9 @@ def get_last_render_skips(adapter: Any) -> list[tuple[str, str]]:
 def get_last_render_flags(adapter: Any) -> list[tuple[str, str]]:
     """Return the adapter's last-render per-block *quality* flag ledger.
 
-    The sibling of :func:`get_last_render_skips` for defects that did **not**
-    keep the source: the compositor drew the block but at a size below the
-    readable floor, and records ``(block_id, "low_legibility_font")`` so the
-    shrink is auditable. These are plain error flags, never ``render_skip:``
-    ones -- a ``render_skip:`` flag would make the delivery contract count the
-    block as source-kept, which is exactly what drawing it avoided. Same
-    duck-typing and malformed-entry tolerance as the skip channel.
+    Adapters declare ``last_render_flags`` as part of :class:`DocumentAdapter`.
+    This helper provides safe access, dropping malformed entries so an
+    inspection issue cannot disrupt the render pipeline.
     """
     raw = getattr(adapter, "last_render_flags", None)
     if not isinstance(raw, list):

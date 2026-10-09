@@ -273,6 +273,7 @@ def _run_document(document: Path, case_id: str) -> ReconciliationReport:
     reads the contract it wrote. Any nonzero exit is a hard failure.
     """
     import os
+    import shutil
     import subprocess
     import sys
     import tempfile
@@ -280,34 +281,37 @@ def _run_document(document: Path, case_id: str) -> ReconciliationReport:
     from ubt.core.content.verify import contract_path_for_artifact, load_contract_file
 
     out_dir = Path(tempfile.mkdtemp(prefix=f"ubt-corpus-{case_id}-"))
-    out_path = out_dir / f"{case_id}_mono.pdf"
-    env = dict(os.environ)
-    env["UBT_OUTPUT_DIR"] = str(out_dir)
-    cmd = [
-        sys.executable,
-        "-m",
-        "ubt",
-        "translate",
-        str(document),
-        "--fresh",
-        "--dry-run",
-        "--yes",
-        "-o",
-        str(out_path),
-    ]
     try:
-        proc = subprocess.run(
-            cmd, capture_output=True, text=True, env=env, timeout=3600, check=False
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise _CaseFailed(f"could not run translation: {exc}") from exc
-    if proc.returncode != 0:
-        tail = (proc.stderr or proc.stdout or "").strip().splitlines()[-6:]
-        raise _CaseFailed(f"translation failed (exit {proc.returncode}): {' / '.join(tail)}")
-    contract = contract_path_for_artifact(out_path)
-    if not contract.exists():
-        raise _CaseFailed(f"translation wrote no contract at {contract}")
-    return load_contract_file(contract)
+        out_path = out_dir / f"{case_id}_mono.pdf"
+        env = dict(os.environ)
+        env["UBT_OUTPUT_DIR"] = str(out_dir)
+        cmd = [
+            sys.executable,
+            "-m",
+            "ubt",
+            "translate",
+            str(document),
+            "--fresh",
+            "--dry-run",
+            "--yes",
+            "-o",
+            str(out_path),
+        ]
+        try:
+            proc = subprocess.run(
+                cmd, capture_output=True, text=True, env=env, timeout=3600, check=False
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise _CaseFailed(f"could not run translation: {exc}") from exc
+        if proc.returncode != 0:
+            tail = (proc.stderr or proc.stdout or "").strip().splitlines()[-6:]
+            raise _CaseFailed(f"translation failed (exit {proc.returncode}): {' / '.join(tail)}")
+        contract = contract_path_for_artifact(out_path)
+        if not contract.exists():
+            raise _CaseFailed(f"translation wrote no contract at {contract}")
+        return load_contract_file(contract)
+    finally:
+        shutil.rmtree(out_dir, ignore_errors=True)
 
 
 def _resolve_case(case: Any, *, corpus_dir: Path, db_dir: Any, run: bool) -> ReconciliationReport:

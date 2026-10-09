@@ -10,6 +10,9 @@ calling agent is the orchestrator):
 - ``ubt_cancel_job`` — cancel an in-flight translation job (memory record + SQLite
   fallback, idempotent: terminal jobs return as-is).
 - ``ubt_inspect_book`` — manifest JSON (title/doc_id/chapters), no Rich text.
+- ``ubt_assess_book`` — profile a cold document into a quote (route, expected cost, risks).
+- ``ubt_list_issues`` — list translation issues/defects for HITL review.
+- ``ubt_edit_segment`` — apply human/agent post-edit revision to a segment.
 - ``ubt_doctor`` — preflight checks (API key, writable ledger dir, deps).
 
 Transport: stdio (local-trust: same user, no X-API-Key gate — path inputs
@@ -667,6 +670,130 @@ async def ubt_assess_book(
         async with _deep_assess_semaphore:
             return await _assess()
     return await _assess()
+
+
+@mcp.tool()
+@_mcp_error_boundary
+async def ubt_list_issues(
+    job_id: str,
+    issue_kind: str | None = None,
+    limit: int = 50,
+    db_dir: str | None = None,
+) -> dict[str, Any]:
+    """List translation issues/defects for human-in-the-loop (HITL) review.
+
+    Scans the finalized blocks in the job's ledger, classifies defect flags
+    into workbench issue kinds (e.g. terminology, numeric, formula, omission,
+    fabrication, repetition, structure, echo, review, critical, render), and
+    returns defect counts and matching segment details.
+    """
+    jid = _check_job_id(job_id)
+    base = _safe_output_path(str(db_dir)) if db_dir else UBTConfig.from_env().db_dir
+    db_path = base / f"{jid}.sqlite"
+    if not db_path.exists():
+        raise ToolError(f"no such job ledger: {jid}")
+
+    def _query() -> dict[str, Any]:
+        from ubt.api.review import ISSUE_KINDS, segment_issue_kinds, serialize_segment
+
+        ledger = SQLiteJobLedger(db_path, read_only=True)
+        try:
+            blocks = ledger.get_all_blocks(jid)
+        finally:
+            ledger.close()
+
+        counts: dict[str, int] = dict.fromkeys(ISSUE_KINDS, 0)
+        matching_segments: list[dict[str, Any]] = []
+
+        max_limit = max(1, min(limit, 500))
+        for block in blocks:
+            kinds = segment_issue_kinds(block)
+            for k in kinds:
+                counts[k] = counts.get(k, 0) + 1
+            if issue_kind:
+                if issue_kind in kinds and len(matching_segments) < max_limit:
+                    matching_segments.append(serialize_segment(block))
+            elif kinds and len(matching_segments) < max_limit:
+                matching_segments.append(serialize_segment(block))
+
+        return {
+            "job_id": jid,
+            "total_issues": sum(counts.values()),
+            "counts": counts,
+            "segments_count": len(matching_segments),
+            "segments": matching_segments,
+        }
+
+    return await asyncio.to_thread(_query)
+
+
+@mcp.tool()
+@_mcp_error_boundary
+async def ubt_edit_segment(
+    job_id: str,
+    block_id: str,
+    target_text: str,
+    db_dir: str | None = None,
+) -> dict[str, Any]:
+    """Apply a human/agent post-edit revision to a segment.
+
+    Updates the ledger block status to REPAIRED, stamps the human_pe_imported
+    flag, clears obsolete machine quality verdicts, and feeds the accepted
+    bilingual pair back into the shared Translation Memory (TM) with human_pe
+    provenance.
+    """
+    jid = _check_job_id(job_id)
+    if not block_id or not block_id.strip():
+        raise ToolError("block_id must be non-empty")
+    if not target_text or not target_text.strip():
+        raise ToolError("target_text must be non-empty")
+
+    base = _safe_output_path(str(db_dir)) if db_dir else UBTConfig.from_env().db_dir
+    db_path = base / f"{jid}.sqlite"
+    if not db_path.exists():
+        raise ToolError(f"no such job ledger: {jid}")
+
+    def _edit() -> dict[str, Any]:
+        from ubt.api.review import (
+            ReviewBlockNotFound,
+            ReviewEditConflict,
+            ReviewEditError,
+            apply_human_edit,
+            serialize_segment,
+        )
+
+        tm_path = base / "tm.sqlite"
+        try:
+            result = apply_human_edit(
+                db_path,
+                jid,
+                block_id.strip(),
+                target_text,
+                tm_path=tm_path if tm_path.parent.exists() else None,
+            )
+        except ReviewBlockNotFound as exc:
+            raise ToolError(f"Block not found: {exc}") from exc
+        except ReviewEditConflict as exc:
+            raise ToolError(f"Job is locked by another writer: {exc}") from exc
+        except ReviewEditError as exc:
+            raise ToolError(f"Invalid edit: {exc}") from exc
+
+        ledger = SQLiteJobLedger(db_path, read_only=True)
+        try:
+            updated_block = ledger.get_block(block_id.strip(), job_id=jid)
+            updated_segment = serialize_segment(updated_block) if updated_block else None
+        finally:
+            ledger.close()
+
+        return {
+            "job_id": jid,
+            "block_id": block_id.strip(),
+            "changed": result.get("changed", True),
+            "tm_written": result.get("tm_written", 0),
+            "segment": updated_segment,
+        }
+
+    return await asyncio.to_thread(_edit)
 
 
 @mcp.tool()

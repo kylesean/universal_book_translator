@@ -409,6 +409,23 @@ def select_sample_pages(
     return sorted(chosen)
 
 
+_OWNED_TMP_DIRS: set[Path] = set()
+
+
+def _cleanup_owned_tmp_dirs() -> None:
+    for tmp in list(_OWNED_TMP_DIRS):
+        shutil.rmtree(tmp, ignore_errors=True)
+    _OWNED_TMP_DIRS.clear()
+
+
+atexit.register(_cleanup_owned_tmp_dirs)
+
+
+def cleanup_visual_gate_tmpdirs() -> None:
+    """Manually purge any self-owned temporary directories created by render_pages_to_png."""
+    _cleanup_owned_tmp_dirs()
+
+
 def render_pages_to_png(
     pdf_path: Path, pages: Sequence[int], dpi: int = DEFAULT_DPI, work_dir: Path | None = None
 ) -> dict[int, Path]:
@@ -431,7 +448,7 @@ def render_pages_to_png(
             shutil.rmtree(tmp, ignore_errors=True)
         return {}
     if owns_tmp:
-        atexit.register(shutil.rmtree, tmp, ignore_errors=True)
+        _OWNED_TMP_DIRS.add(tmp)
     for page in pages:
         png = oxide_render.write_page_png(pdf_path, page, dpi, tmp)
         if png is not None:
@@ -439,6 +456,7 @@ def render_pages_to_png(
     # When the caller supplies work_dir it owns cleanup; clean up
     # self-created temporary directory if nothing was produced.
     if owns_tmp and not out:
+        _OWNED_TMP_DIRS.discard(tmp)
         shutil.rmtree(tmp, ignore_errors=True)
     return out
 

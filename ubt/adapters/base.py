@@ -129,6 +129,28 @@ class BaseDocumentAdapter(ABC):
         """
         return None
 
+    @property
+    def last_render_skips(self) -> list[tuple[str, str]]:
+        """Per-block skip ledger recorded by the last render pass."""
+        if not hasattr(self, "_last_render_skips"):
+            self._last_render_skips: list[tuple[str, str]] = []
+        return self._last_render_skips
+
+    @last_render_skips.setter
+    def last_render_skips(self, value: list[tuple[str, str]]) -> None:
+        self._last_render_skips = value
+
+    @property
+    def last_render_flags(self) -> list[tuple[str, str]]:
+        """Per-block quality defect flags recorded by the last render pass."""
+        if not hasattr(self, "_last_render_flags"):
+            self._last_render_flags: list[tuple[str, str]] = []
+        return self._last_render_flags
+
+    @last_render_flags.setter
+    def last_render_flags(self, value: list[tuple[str, str]]) -> None:
+        self._last_render_flags = value
+
     def apply_config(self, runtime_config: AdapterRuntimeConfig) -> None:
         """Accept engine-level runtime knobs from the pipeline.
 
