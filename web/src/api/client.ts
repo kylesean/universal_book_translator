@@ -53,17 +53,30 @@ export interface DoctorReport {
   checks: DoctorCheck[]
 }
 
+/** The console's pipeline stepper position, as reported by the engine. */
+export type PipelineStage =
+  | 'extract'
+  | 'segment'
+  | 'tm'
+  | 'translate'
+  | 'qe'
+  | 'repair'
+  | 'render'
+  | 'verify'
+  | 'package'
+
 /**
  * One frame of `/jobs/{id}/stream`.
  *
  * The backend emits the shared `ProgressSnapshot` (block counters, live QE,
- * priced cost, artifact pointers) plus a `status`; there is no `stage` or
- * `pages` field on the wire, so the UI derives stage from `status` +
- * `progress_percent` rather than reading fields the server never sends.
+ * priced cost, artifact pointers, the engine's own `stage`, and its last
+ * human-readable `message`) plus a `status`.
  */
 export interface ProgressStreamFrame {
   job_id?: string
   status?: string
+  stage?: PipelineStage | null
+  message?: string | null
   progress_percent?: number
   total_blocks?: number
   completed_blocks?: number

@@ -10,8 +10,16 @@ import {
   Globe,
   Terminal,
   FileSpreadsheet,
+  LogOut,
 } from 'lucide-react'
-import { checkHealth, type HealthResponse } from '@/api/client'
+import {
+  checkHealth,
+  getSystemInfo,
+  getStoredApiKey,
+  signOut,
+  type HealthResponse,
+  type SystemInfo,
+} from '@/api/client'
 import { useI18n } from '@/i18n/useI18n'
 
 interface ConsoleLayoutProps {
@@ -29,6 +37,7 @@ interface NavItem {
 export function ConsoleLayout({ children }: ConsoleLayoutProps) {
   const { t, language, setLanguage } = useI18n()
   const [health, setHealth] = useState<HealthResponse | null>(null)
+  const [info, setInfo] = useState<SystemInfo | null>(null)
   const [paperTone, setPaperTone] = useState<'cotton' | 'dowling'>(() => {
     return (localStorage.getItem('ubt_paper_tone') as 'cotton' | 'dowling') || 'cotton'
   })
@@ -63,12 +72,30 @@ export function ConsoleLayout({ children }: ConsoleLayoutProps) {
       }
     }
     probe()
+    // The security boundary is read once (it does not change while the server
+    // runs) so the status line can show the real port and gate state.
+    getSystemInfo()
+      .then((res) => {
+        if (isMounted) setInfo(res)
+      })
+      .catch(() => {
+        if (isMounted) setInfo(null)
+      })
     const timer = setInterval(probe, 10000)
     return () => {
       isMounted = false
       clearInterval(timer)
     }
   }, [])
+
+  const handleSignOut = async () => {
+    await signOut()
+    // A full reload drops every cached panel and lands back on the gate.
+    window.location.reload()
+  }
+
+  // Signing out only means something when the server actually gates on a key.
+  const canSignOut = Boolean(info?.auth_enabled) && Boolean(getStoredApiKey())
 
   const navItems: NavItem[] = [
     { to: '/wizard', label: t.nav.newJob, icon: PlusCircle },
@@ -158,7 +185,7 @@ export function ConsoleLayout({ children }: ConsoleLayoutProps) {
                 <span className="font-bold text-xs tracking-tight text-[var(--ink-primary)] block leading-none">
                   {t.common.compilerConsole}
                 </span>
-                <span className="text-[10px] text-[var(--ink-muted)] font-mono leading-tight block mt-0.5 uppercase tracking-wider">
+                <span className="text-xs text-[var(--ink-muted)] font-mono leading-tight block mt-0.5 uppercase tracking-wider">
                   ENGINE 0.4
                 </span>
               </div>
@@ -169,18 +196,23 @@ export function ConsoleLayout({ children }: ConsoleLayoutProps) {
               <button
                 id="btn-paper-toggle"
                 onClick={() => setPaperTone(paperTone === 'cotton' ? 'dowling' : 'cotton')}
-                className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] bg-[var(--paper-subsurface)] border border-[var(--paper-border)] hover:border-[var(--paper-border-hover)] transition-colors"
-                title={paperTone === 'cotton' ? '切换至道林暖纸 / Switch to Dowling' : '切换至纯质棉白 / Switch to Cotton'}
+                className="flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-mono text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] bg-[var(--paper-subsurface)] border border-[var(--paper-border)] hover:border-[var(--paper-border-hover)] transition-colors"
+                title={t.common.paperToneSwitchTo.replace(
+                  '{tone}',
+                  paperTone === 'cotton' ? t.common.paperToneDowling : t.common.paperToneCotton,
+                )}
               >
                 <FileSpreadsheet className="h-3 w-3 text-[var(--ink-muted)]" />
-                <span>{paperTone === 'cotton' ? '棉白' : '道林'}</span>
+                <span>
+                  {paperTone === 'cotton' ? t.common.paperToneCotton : t.common.paperToneDowling}
+                </span>
               </button>
 
               <button
                 id="btn-lang-toggle"
                 onClick={() => setLanguage(language === 'zh' ? 'en' : 'zh')}
-                className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] bg-[var(--paper-subsurface)] border border-[var(--paper-border)] hover:border-[var(--paper-border-hover)] transition-colors font-medium"
-                title="Switch language / 切换语言"
+                className="flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-mono text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] bg-[var(--paper-subsurface)] border border-[var(--paper-border)] hover:border-[var(--paper-border-hover)] transition-colors font-medium"
+                title={t.common.switchLanguage}
               >
                 <Globe className="h-3 w-3 text-[var(--ink-muted)]" />
                 <span>{language === 'zh' ? '中' : 'EN'}</span>
@@ -191,14 +223,14 @@ export function ConsoleLayout({ children }: ConsoleLayoutProps) {
           {/* Navigation Sections */}
           <div className="p-2.5 space-y-5">
             <div>
-              <div className="px-2.5 py-1 text-[10px] font-mono uppercase tracking-widest text-[var(--ink-muted)] font-semibold">
+              <div className="px-2.5 py-1 text-xs font-mono uppercase tracking-widest text-[var(--ink-muted)] font-semibold">
                 {t.nav.operatorControl}
               </div>
               <nav className="mt-1 space-y-0.5">{renderNav(navItems)}</nav>
             </div>
 
             <div>
-              <div className="px-2.5 py-1 text-[10px] font-mono uppercase tracking-widest text-[var(--ink-muted)] font-semibold">
+              <div className="px-2.5 py-1 text-xs font-mono uppercase tracking-widest text-[var(--ink-muted)] font-semibold">
                 {t.nav.workbenches}
               </div>
               <nav className="mt-1 space-y-0.5">{renderNav(workbenchItems)}</nav>
@@ -212,13 +244,26 @@ export function ConsoleLayout({ children }: ConsoleLayoutProps) {
             <span
               className={`h-2 w-2 rounded-full ${health ? 'bg-[#15803d]' : 'bg-[#b91c1c]'}`}
             />
-            <span className="text-[11px] text-[var(--ink-secondary)] font-medium">
+            <span className="text-xs text-[var(--ink-secondary)] font-medium">
               {health ? `Core ${health.version}` : t.common.disconnected}
             </span>
           </div>
-          <div className="flex items-center gap-1 text-[11px] text-[var(--ink-muted)]">
-            <Terminal className="h-3 w-3" />
-            <span>:8000</span>
+          <div className="flex items-center gap-2 text-xs text-[var(--ink-muted)]">
+            <span className="flex items-center gap-1">
+              <Terminal className="h-3 w-3" />
+              <span>{info?.port ? `:${info.port}` : ''}</span>
+            </span>
+            {canSignOut && (
+              <button
+                type="button"
+                onClick={() => void handleSignOut()}
+                title={t.doctor.auth.signOut}
+                aria-label={t.doctor.auth.signOut}
+                className="flex items-center hover:text-[var(--ink-primary)] transition-colors cursor-pointer"
+              >
+                <LogOut className="h-3 w-3" />
+              </button>
+            )}
           </div>
         </div>
       </aside>

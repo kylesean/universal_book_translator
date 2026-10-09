@@ -237,7 +237,7 @@ export function LanguageAssetsView() {
           )}
 
           <div className="p-3.5 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] shadow-2xs space-y-2">
-            <div className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
+            <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
               {t.assets.conflictsTitle}
             </div>
             {conflicts.length === 0 ? (
@@ -286,13 +286,13 @@ export function LanguageAssetsView() {
             <table className="w-full text-xs text-left">
               <thead className="bg-[var(--paper-subsurface)] text-[var(--ink-muted)] font-mono border-b border-[var(--paper-border)]">
                 <tr>
-                  <th className="py-2.5 px-4 font-semibold uppercase text-[10px] tracking-wider">
+                  <th className="py-2.5 px-4 font-semibold uppercase text-xs tracking-wider">
                     SOURCE
                   </th>
-                  <th className="py-2.5 px-4 font-semibold uppercase text-[10px] tracking-wider">
+                  <th className="py-2.5 px-4 font-semibold uppercase text-xs tracking-wider">
                     TARGET
                   </th>
-                  <th className="py-2.5 px-4 font-semibold uppercase text-[10px] tracking-wider text-right">
+                  <th className="py-2.5 px-4 font-semibold uppercase text-xs tracking-wider text-right">
                     ACTION
                   </th>
                 </tr>
@@ -314,7 +314,7 @@ export function LanguageAssetsView() {
                   filteredTerms.map((term) => (
                     <tr
                       key={term.source}
-                      className="hover:bg-[var(--paper-subsurface)]/60 transition-colors"
+                      className="hover:bg-[var(--paper-subsurface)] transition-colors"
                     >
                       <td className="py-2 px-4 font-mono font-bold text-[var(--ink-primary)]">
                         {term.source}
@@ -350,11 +350,11 @@ export function LanguageAssetsView() {
           <div className="p-3.5 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] shadow-2xs space-y-2">
             <div className="flex items-center justify-between text-xs">
               <div>
-                <span className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold flex items-center gap-1.5">
+                <span className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold flex items-center gap-1.5">
                   <Sliders className="h-3.5 w-3.5" />
                   {t.assets.fuzzyThreshold}
                 </span>
-                <p className="text-[11px] text-[var(--ink-secondary)] mt-0.5">
+                <p className="text-xs text-[var(--ink-secondary)] mt-0.5">
                   {t.assets.fuzzyThresholdHelp}
                 </p>
               </div>
@@ -374,7 +374,7 @@ export function LanguageAssetsView() {
           </div>
 
           <div className="p-3.5 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] shadow-2xs space-y-2.5">
-            <div className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
+            <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
               {t.assets.importTitle}
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -393,7 +393,7 @@ export function LanguageAssetsView() {
                   </button>
                 ))}
               </div>
-              <span className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)]">
+              <span className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)]">
                 {t.assets.importLangs}
               </span>
               <input
@@ -410,7 +410,7 @@ export function LanguageAssetsView() {
                 className="h-7 w-16 rounded-[4px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2 text-xs font-mono text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none"
               />
               {importNotice && (
-                <span className="text-[#15803d] text-[11px] font-medium">{importNotice}</span>
+                <span className="text-[#15803d] text-xs font-medium">{importNotice}</span>
               )}
             </div>
             <textarea
@@ -418,7 +418,7 @@ export function LanguageAssetsView() {
               onChange={(e) => setImportContent(e.target.value)}
               placeholder={t.assets.importContent}
               rows={4}
-              className="w-full rounded-[4px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 py-2 text-[11px] font-mono text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none resize-y placeholder:text-[var(--ink-muted)]"
+              className="w-full rounded-[4px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 py-2 text-xs font-mono text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none resize-y placeholder:text-[var(--ink-muted)]"
             />
             <div className="flex justify-end">
               <Button
@@ -439,7 +439,7 @@ export function LanguageAssetsView() {
 
           <div className="rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] overflow-hidden shadow-2xs">
             <div className="h-10 px-3.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] flex items-center justify-between gap-3">
-              <span className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold shrink-0">
+              <span className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold shrink-0">
                 {t.assets.tmTitle}
               </span>
               <div className="flex items-center gap-2 max-w-xs w-full">
@@ -450,10 +450,10 @@ export function LanguageAssetsView() {
                     placeholder={t.common.search}
                     value={tmSearchQuery}
                     onChange={(e) => setTmSearchQuery(e.target.value)}
-                    className="w-full h-7 pl-7 pr-2.5 rounded-[4px] border border-[var(--paper-border)] bg-[var(--paper-surface)] text-[11px] text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none placeholder:text-[var(--ink-muted)]"
+                    className="w-full h-7 pl-7 pr-2.5 rounded-[4px] border border-[var(--paper-border)] bg-[var(--paper-surface)] text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none placeholder:text-[var(--ink-muted)]"
                   />
                 </div>
-                <Badge variant="outline" className="shrink-0 text-[10px] font-mono">
+                <Badge variant="outline" className="shrink-0 text-xs font-mono">
                   {filteredTmEntries.length} / {tmTotal}
                 </Badge>
               </div>
@@ -461,16 +461,16 @@ export function LanguageAssetsView() {
             <table className="w-full text-xs text-left">
               <thead className="bg-[var(--paper-subsurface)] text-[var(--ink-muted)] font-mono border-b border-[var(--paper-border)]">
                 <tr>
-                  <th className="py-2.5 px-4 font-semibold uppercase text-[10px] tracking-wider">
+                  <th className="py-2.5 px-4 font-semibold uppercase text-xs tracking-wider">
                     SOURCE
                   </th>
-                  <th className="py-2.5 px-4 font-semibold uppercase text-[10px] tracking-wider">
+                  <th className="py-2.5 px-4 font-semibold uppercase text-xs tracking-wider">
                     TARGET
                   </th>
-                  <th className="py-2.5 px-4 font-semibold uppercase text-[10px] tracking-wider">
+                  <th className="py-2.5 px-4 font-semibold uppercase text-xs tracking-wider">
                     PROVENANCE
                   </th>
-                  <th className="py-2.5 px-4 font-semibold uppercase text-[10px] tracking-wider text-right">
+                  <th className="py-2.5 px-4 font-semibold uppercase text-xs tracking-wider text-right">
                     ACTION
                   </th>
                 </tr>
@@ -492,7 +492,7 @@ export function LanguageAssetsView() {
                   filteredTmEntries.map((entry) => (
                     <tr
                       key={entry.id}
-                      className="hover:bg-[var(--paper-subsurface)]/60 transition-colors"
+                      className="hover:bg-[var(--paper-subsurface)] transition-colors"
                     >
                       <td className="py-2 px-4 font-mono text-[var(--ink-primary)] max-w-xs truncate">
                         {entry.source_text}
@@ -500,7 +500,7 @@ export function LanguageAssetsView() {
                       <td className="py-2 px-4 text-[#15803d] max-w-xs truncate">
                         {entry.target_text}
                       </td>
-                      <td className="py-2 px-4 font-mono text-[11px] text-[var(--ink-muted)]">
+                      <td className="py-2 px-4 font-mono text-xs text-[var(--ink-muted)]">
                         {entry.provenance}
                       </td>
                       <td className="py-2 px-4 text-right">
@@ -538,17 +538,24 @@ export function LanguageAssetsView() {
                 <Layers className="h-3.5 w-3.5 text-[var(--ink-muted)]" />
                 <span>{t.assets.bibleStructureTitle}</span>
               </div>
-              <p className="text-[11px] text-[var(--ink-secondary)] leading-relaxed">
+              <p className="text-xs text-[var(--ink-secondary)] leading-relaxed">
                 {t.assets.bibleStructureDesc}
               </p>
-              <div className="p-2.5 rounded bg-[var(--paper-subsurface)] border border-[var(--paper-border)] font-mono text-[10px] text-[var(--ink-muted)] space-y-1">
-                <div>📁 bibles/</div>
-                <div className="pl-3">📁 textbook/</div>
-                <div className="pl-6 text-[var(--ink-primary)]">📄 chapter_01_bilingual.md</div>
-                <div className="pl-6 text-[var(--ink-primary)]">📄 chapter_02_bilingual.md</div>
-                <div className="pl-3">📁 semiconductor/</div>
-                <div className="pl-6 text-[var(--ink-primary)]">📄 glossary_core.json</div>
-              </div>
+              <ol className="p-2.5 rounded bg-[var(--paper-subsurface)] border border-[var(--paper-border)] text-xs text-[var(--ink-secondary)] space-y-1.5 list-none">
+                {[
+                  t.assets.bibleSourceSeeds,
+                  t.assets.bibleSourceGlossary,
+                  t.assets.bibleSourceChapters,
+                  t.assets.bibleSourceMined,
+                ].map((source, index) => (
+                  <li key={source} className="flex items-center gap-2">
+                    <span className="shrink-0 text-xs font-mono px-1.5 py-0.5 rounded border border-[var(--paper-border)] text-[var(--ink-muted)]">
+                      {index + 1}
+                    </span>
+                    <span>{source}</span>
+                  </li>
+                ))}
+              </ol>
             </div>
 
             <div className="p-4 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] shadow-2xs space-y-2">
@@ -556,21 +563,21 @@ export function LanguageAssetsView() {
                 <CheckCircle2 className="h-3.5 w-3.5 text-[#15803d]" />
                 <span>{t.assets.bibleWorkflowTitle}</span>
               </div>
-              <p className="text-[11px] text-[var(--ink-secondary)] leading-relaxed">
+              <p className="text-xs text-[var(--ink-secondary)] leading-relaxed">
                 {t.assets.bibleWorkflowDesc}
               </p>
-              <div className="p-2.5 rounded bg-[var(--paper-subsurface)] border border-[var(--paper-border)] text-[11px] text-[var(--ink-secondary)] space-y-1.5">
+              <div className="p-2.5 rounded bg-[var(--paper-subsurface)] border border-[var(--paper-border)] text-xs text-[var(--ink-secondary)] space-y-1.5">
                 <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="text-[9px] font-mono">STEP 1</Badge>
-                  <span>在审校工作台完成关键章节人工精修</span>
+                  <Badge variant="outline" className="text-xs font-mono">STEP 1</Badge>
+                  <span>{t.assets.bibleStep1}</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="text-[9px] font-mono">STEP 2</Badge>
-                  <span>将高置信度句对沉淀至全局 SQLite 记忆库 (TM)</span>
+                  <Badge variant="outline" className="text-xs font-mono">STEP 2</Badge>
+                  <span>{t.assets.bibleStep2}</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="text-[9px] font-mono">STEP 3</Badge>
-                  <span>以样章形式放置于项目底本目录供新书自动挂载</span>
+                  <Badge variant="outline" className="text-xs font-mono">STEP 3</Badge>
+                  <span>{t.assets.bibleStep3}</span>
                 </div>
               </div>
             </div>

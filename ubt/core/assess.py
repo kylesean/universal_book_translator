@@ -97,11 +97,19 @@ class AssessmentError(Exception):
 
 @dataclass(frozen=True)
 class AssessmentWarning:
-    """A stable machine code plus Chinese human copy — consumers switch on code."""
+    """A stable machine code, structured params, and Chinese human copy.
+
+    ``detail_zh`` stays the engine's authoritative rendering (the CLI prints it
+    verbatim). ``params`` carries the values that were interpolated into it so
+    a non-Chinese consumer can render the same warning from its own catalogue
+    instead of showing Chinese copy in an English console; consumers switch on
+    ``code`` and fall back to ``detail_zh`` for a code they do not know.
+    """
 
     code: str
     level: str  # "warn" | "info"
     detail_zh: str
+    params: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -669,6 +677,7 @@ def _build_cost(
                 "warn",
                 f"模型 {'、'.join(sorted(set(unpriced)))} 无价格表条目、且不在自托管端点上，"
                 "费用呈现为「未知」而非 $0；如需对外报价请在 ubt/core/router/pricing.py 增补单价。",
+                {"models": sorted(set(unpriced))},
             )
         )
 
@@ -773,6 +782,11 @@ def _synthesize_warnings(
                     "warn",
                     f"字体编码损伤：{confirmed} 页确认存在字符乱码（共 {residue_chars} 个残字符），"
                     f"部分文字可能不可恢复，{remedy}。",
+                    {
+                        "confirmed_pages": confirmed,
+                        "residue_chars": residue_chars,
+                        "is_scanned": is_scanned,
+                    },
                 )
             )
             quality_signals.append(f"字体 witness：confirmed {confirmed} 页 / at-risk {at_risk} 页")
@@ -796,6 +810,7 @@ def _synthesize_warnings(
                 "warn",
                 f"存在矩形行数达 {pdf['max_rect_rows']} 的异常页面，几何分析可能极慢（已知 O(n²) 缺陷），"
                 "--deep 或完整翻译会明显耗时。",
+                {"max_rect_rows": int(pdf["max_rect_rows"])},
             )
         )
     if pdf.get("text_layer_coverage") is not None:
@@ -908,6 +923,7 @@ async def assess_document_async(
                 "info",
                 f"检测到文档无有效文本层（纯扫描件或图像化排版），已按预估 OCR 转写规模 (~{EXPECTED_SCANNED_PAGE_CHARS}字/页，共 ~{source_chars} 字)"
                 "估算草稿翻译成本；实际费用将取决于 OCR 识别出的文本量。",
+                {"chars_per_page": EXPECTED_SCANNED_PAGE_CHARS, "source_chars": source_chars},
             )
         )
 
@@ -935,6 +951,11 @@ async def assess_document_async(
                             "PAGE_RANGE_FILTERED",
                             "info",
                             f"已按页码切片 ({pages}，有效切片 {selected_pages_count}/{total_pages} 页) 预估规模、Token 与耗时。",
+                            {
+                                "pages": pages,
+                                "selected_pages_count": selected_pages_count,
+                                "total_pages": total_pages,
+                            },
                         )
                     )
         except Exception as exc:
@@ -952,6 +973,7 @@ async def assess_document_async(
                     "DEEP_INGEST_FAILED",
                     "info",
                     f"深度解析失败（{exc.__class__.__name__}），已回退快速估算分块数。",
+                    {"exception": exc.__class__.__name__},
                 )
             )
             billable_blocks, is_exact = (

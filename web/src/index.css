@@ -12,16 +12,20 @@
 
   --ink-primary: #18181b;
   --ink-secondary: #52525b;
-  --ink-muted: #8c877d;
+  /* Muted ink still has to clear WCAG AA 4.5:1 — it carries most of the
+     10-11px labels. The old #8c877d measured 2.87:1 on the darkest surface
+     (dowling --paper-subsurface) and 3.37:1 on cotton paper. #68635b measures
+     5.62:1 on cotton paper / 5.96:1 on the white surface / 4.78:1 worst case
+     on dowling's subsurface. */
+  --ink-muted: #68635b;
   --ink-highlight: #15803d;
   --ink-amber: #b45309;
   --ink-rose: #b91c1c;
+  --ink-info: #0369a1;
 
   --btn-bg: #18181b;
   --btn-fg: #faf8f5;
   --btn-hover: #27272a;
-  --btn-badge-bg: #3f3f46;
-  --btn-badge-fg: #f4f4f5;
 
   color-scheme: light;
 }
@@ -36,10 +40,12 @@
 
   --ink-primary: #1c1917;
   --ink-secondary: #57534e;
-  --ink-muted: #8c8577;
+  /* See the cotton block: #8c8577 measured 2.87:1 on this tone's subsurface. */
+  --ink-muted: #68635b;
   --ink-highlight: #15803d;
   --ink-amber: #c2410c;
   --ink-rose: #b91c1c;
+  --ink-info: #0369a1;
 
   --btn-bg: #1c1917;
   --btn-fg: #fcfbf7;

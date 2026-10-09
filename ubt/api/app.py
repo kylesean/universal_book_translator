@@ -752,6 +752,9 @@ def _register_system_routes(api_app: FastAPI, scope: ApiScope) -> None:
         return {
             "version": __version__,
             "host": host,
+            # The client-visible port, so the sidebar can show where the console
+            # is actually reachable instead of a hardcoded ``:8000``.
+            "port": request.url.port,
             "is_loopback": host in _LOOPBACK_HOSTS,
             "auth_enabled": bool(app_config.service_api_key.get_secret_value().strip()),
             "allowed_bases": [str(path) for path in effective_allowed_bases(app_config)],

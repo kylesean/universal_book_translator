@@ -97,7 +97,7 @@ export function SystemDoctorView() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Left: Diagnostics */}
         <div className="rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] overflow-hidden shadow-2xs">
-          <div className="px-4 py-2.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
+          <div className="px-4 py-2.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
             {t.doctor.engineDiagnostics}
           </div>
           <div className="divide-y divide-[var(--paper-border)]">
@@ -108,7 +108,7 @@ export function SystemDoctorView() {
             ) : (
               groups.map((group) => (
                 <div key={group}>
-                  <div className="px-3.5 pt-3 pb-1 text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)]">
+                  <div className="px-3.5 pt-3 pb-1 text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)]">
                     {group}
                   </div>
                   {checks
@@ -124,18 +124,18 @@ export function SystemDoctorView() {
                             <div className="font-semibold text-[var(--ink-primary)]">
                               {check.name}
                             </div>
-                            <div className="text-[11px] text-[var(--ink-secondary)] font-mono mt-0.5">
+                            <div className="text-xs text-[var(--ink-secondary)] font-mono mt-0.5">
                               {check.detail}
                             </div>
                             {check.fix && (
-                              <div className="text-[11px] text-[#b45309] mt-0.5">fix: {check.fix}</div>
+                              <div className="text-xs text-[#b45309] mt-0.5">fix: {check.fix}</div>
                             )}
                           </div>
                         </div>
                         <Badge
                           variant={statusBadgeVariant(check.status)}
                           dot
-                          className="text-[10px] shrink-0"
+                          className="text-xs shrink-0"
                         >
                           {check.status}
                         </Badge>
@@ -149,7 +149,7 @@ export function SystemDoctorView() {
 
         {/* Right: Model Provider Matrix */}
         <div className="rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] overflow-hidden shadow-2xs">
-          <div className="px-4 py-2.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
+          <div className="px-4 py-2.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
             {t.doctor.providerMatrix}
           </div>
           <div className="divide-y divide-[var(--paper-border)]">
@@ -162,15 +162,19 @@ export function SystemDoctorView() {
                 <div key={profile.model_pattern} className="p-3.5 text-xs">
                   <div className="font-semibold text-[var(--ink-primary)] flex items-center gap-2">
                     <span className="font-mono truncate">{profile.model_pattern}</span>
-                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--paper-subsurface)] text-[var(--ink-muted)] border border-[var(--paper-border)]">
+                    <span className="text-xs font-mono px-1.5 py-0.5 rounded bg-[var(--paper-subsurface)] text-[var(--ink-muted)] border border-[var(--paper-border)]">
                       {profile.prompt_strategy}
                     </span>
                   </div>
-                  <div className="text-[11px] text-[var(--ink-secondary)] mt-1 flex flex-wrap gap-1.5 font-mono">
-                    {profile.supports_vision && <span>vision</span>}
-                    {profile.supports_reasoning_effort && <span>reasoning</span>}
-                    {profile.supports_system_prompt ? <span>system</span> : <span>no-system</span>}
-                    <span>extract:{profile.extraction_strategy}</span>
+                  <div className="text-xs text-[var(--ink-secondary)] mt-1 flex flex-wrap gap-1.5 font-mono">
+                    {profile.supports_vision && <span>{t.doctor.capabilityVision}</span>}
+                    {profile.supports_reasoning_effort && <span>{t.doctor.capabilityReasoning}</span>}
+                    {profile.supports_system_prompt ? (
+                      <span>{t.doctor.capabilitySystem}</span>
+                    ) : (
+                      <span>{t.doctor.capabilityNoSystem}</span>
+                    )}
+                    <span>{t.doctor.capabilityExtract}:{profile.extraction_strategy}</span>
                   </div>
                 </div>
               ))
@@ -181,7 +185,7 @@ export function SystemDoctorView() {
 
       {/* Security Boundary Panel */}
       <div className="p-4 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] space-y-1.5 text-xs font-mono text-[var(--ink-secondary)] shadow-2xs">
-        <div className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] mb-2 font-semibold">
+        <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] mb-2 font-semibold">
           {t.doctor.securityBoundary}
         </div>
         {info ? (
@@ -190,8 +194,8 @@ export function SystemDoctorView() {
               <span className={info.is_loopback ? 'text-[#15803d]' : 'text-[#b45309]'}>
                 • {t.doctor.listenInterface}: {info.host}
               </span>
-              <Badge variant={info.is_loopback ? 'success' : 'warning'} className="text-[10px]">
-                {info.is_loopback ? t.doctor.loopbackOnly : 'EXPOSED'}
+              <Badge variant={info.is_loopback ? 'success' : 'warning'} className="text-xs">
+                {info.is_loopback ? t.doctor.loopbackOnly : t.doctor.exposed}
               </Badge>
             </div>
             <div>• {t.doctor.authGate}: {info.auth_enabled ? t.doctor.enabled : t.doctor.disabled}</div>

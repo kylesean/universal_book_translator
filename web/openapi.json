@@ -3397,6 +3397,11 @@
           "detail_zh": {
             "type": "string",
             "title": "Detail Zh"
+          },
+          "params": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Params"
           }
         },
         "type": "object",
@@ -3406,7 +3411,7 @@
           "detail_zh"
         ],
         "title": "AssessWarning",
-        "description": "One degraded probe: a stable machine code plus Chinese human copy."
+        "description": "One degraded probe: a stable machine code plus Chinese human copy.\n\n``params`` carries the values interpolated into ``detail_zh`` so a\nnon-Chinese console can render the warning from its own catalogue; it falls\nback to ``detail_zh`` for a code it does not know."
       },
       "Body_upload_source_document_jobs_upload_post": {
         "properties": {
@@ -3705,6 +3710,39 @@
               }
             ],
             "title": "Estimated Cost Usd"
+          },
+          "stage": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "extract",
+                  "segment",
+                  "tm",
+                  "translate",
+                  "qe",
+                  "repair",
+                  "render",
+                  "verify",
+                  "package"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stage"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
           },
           "output_file": {
             "anyOf": [
@@ -4588,6 +4626,18 @@
             "type": "string",
             "title": "Host",
             "description": "Host this request reached (client-visible)"
+          },
+          "port": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Port",
+            "description": "Port this request reached (client-visible)"
           },
           "is_loopback": {
             "type": "boolean",

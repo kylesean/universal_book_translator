@@ -10,15 +10,10 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   shortcut?: string
 }
 
-export function Button({
-  className,
-  variant = 'secondary',
-  size = 'md',
-  shortcut,
-  disabled,
-  children,
-  ...props
-}: ButtonProps) {
+export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function Button(
+  { className, variant = 'secondary', size = 'md', shortcut, disabled, children, ...props },
+  ref
+) {
   const base =
     'inline-flex items-center justify-center font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--ink-primary)] disabled:pointer-events-none disabled:opacity-40 select-none rounded-[5px] tracking-tight gap-2'
 
@@ -46,16 +41,17 @@ export function Button({
 
   return (
     <button
+      ref={ref}
       className={clsx(base, variants[variant], sizes[size], className)}
       disabled={disabled}
       {...props}
     >
       {children}
       {shortcut && (
-        <span className="text-[10px] font-mono px-1 py-0.5 rounded bg-[var(--paper-border)] text-[var(--ink-primary)] ml-1 opacity-80">
+        <span className="text-xs font-mono px-1 py-0.5 rounded bg-[var(--paper-border)] text-[var(--ink-primary)] ml-1 opacity-80">
           {shortcut}
         </span>
       )}
     </button>
   )
-}
+})

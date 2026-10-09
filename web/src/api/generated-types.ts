@@ -808,6 +808,10 @@ export interface components {
         /**
          * AssessWarning
          * @description One degraded probe: a stable machine code plus Chinese human copy.
+         *
+         *     ``params`` carries the values interpolated into ``detail_zh`` so a
+         *     non-Chinese console can render the warning from its own catalogue; it falls
+         *     back to ``detail_zh`` for a code it does not know.
          */
         AssessWarning: {
             /** Code */
@@ -816,6 +820,10 @@ export interface components {
             level: string;
             /** Detail Zh */
             detail_zh: string;
+            /** Params */
+            params?: {
+                [key: string]: unknown;
+            };
         };
         /** Body_upload_source_document_jobs_upload_post */
         Body_upload_source_document_jobs_upload_post: {
@@ -1000,6 +1008,10 @@ export interface components {
             bottom_15_avg_qe: number;
             /** Estimated Cost Usd */
             estimated_cost_usd?: number | null;
+            /** Stage */
+            stage?: ("extract" | "segment" | "tm" | "translate" | "qe" | "repair" | "render" | "verify" | "package") | null;
+            /** Message */
+            message?: string | null;
             /** Output File */
             output_file?: string | null;
             /** Report File */
@@ -1406,6 +1418,11 @@ export interface components {
              * @description Host this request reached (client-visible)
              */
             host: string;
+            /**
+             * Port
+             * @description Port this request reached (client-visible)
+             */
+            port?: number | null;
             /**
              * Is Loopback
              * @description True when the request arrived on a loopback host

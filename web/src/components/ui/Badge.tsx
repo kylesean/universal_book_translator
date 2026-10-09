@@ -9,6 +9,10 @@ interface BadgeProps extends React.HTMLAttributes<HTMLDivElement> {
 }
 
 export function Badge({ className, variant = 'default', dot = false, children, ...props }: BadgeProps) {
+  // Semantic tints stay as literals: Tailwind v3 cannot apply an opacity
+  // modifier to a `var()` colour — `bg-[var(--ink-amber)]/10` emits *no rule at
+  // all*, so the badge would render transparent. Only the solid dot goes
+  // through a token (no modifier needed).
   const variantStyles = {
     default: 'bg-[var(--paper-subsurface)] text-[var(--ink-secondary)] border-[var(--paper-border)]',
     success: 'bg-[#15803d]/10 text-[#15803d] border-[#15803d]/25',
@@ -20,10 +24,10 @@ export function Badge({ className, variant = 'default', dot = false, children, .
 
   const dotColors = {
     default: 'bg-[var(--ink-muted)]',
-    success: 'bg-[#15803d]',
-    destructive: 'bg-[#b91c1c]',
-    warning: 'bg-[#b45309]',
-    info: 'bg-[#0369a1]',
+    success: 'bg-[var(--ink-highlight)]',
+    destructive: 'bg-[var(--ink-rose)]',
+    warning: 'bg-[var(--ink-amber)]',
+    info: 'bg-[var(--ink-info)]',
     outline: 'bg-[var(--ink-muted)]',
   }
 

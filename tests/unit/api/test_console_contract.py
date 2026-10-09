@@ -36,9 +36,15 @@ pytestmark = pytest.mark.fast
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _CLIENT_TS = _REPO_ROOT / "web" / "src" / "api" / "client.ts"
 _OPENAPI_JSON = _REPO_ROOT / "web" / "openapi.json"
+_EN_TS = _REPO_ROOT / "web" / "src" / "i18n" / "translations" / "en.ts"
+_ASSESS_PY = _REPO_ROOT / "ubt" / "core" / "assess.py"
+_WIZARD_TSX = _REPO_ROOT / "web" / "src" / "views" / "wizard" / "NewJobWizard.tsx"
 
 #: Matches ``${BASE_URL}/some/path?query`` inside a fetch/EventSource template.
 _CLIENT_URL_RE = re.compile(r"\$\{BASE_URL\}(/[^`\"']*)")
+
+#: The stable warning codes the assess module emits as ``AssessmentWarning(code, ...)``.
+_ASSESS_WARNING_CODE_RE = re.compile(r'AssessmentWarning\(\s*\n\s*"([A-Z][A-Z0-9_]+)"')
 
 
 def _normalize(path: str) -> str:
@@ -82,12 +88,200 @@ def test_client_stream_path_is_the_real_sse_route() -> None:
 
 
 def test_committed_openapi_schema_matches_the_app() -> None:
+    """The committed schema must equal the app's, not merely share its paths.
+
+    Comparing only path *sets* let a field added to a response model ship
+    without regenerating the client types: the console then read a property
+    TypeScript did not know about. Compare the whole document instead.
+    """
     if not _OPENAPI_JSON.exists():
         pytest.skip("web/ frontend is not present in this checkout")
     committed = json.loads(_OPENAPI_JSON.read_text(encoding="utf-8"))
     current = create_app().openapi()
-    assert set(committed.get("paths", {})) == set(current.get("paths", {})), (
-        "web/openapi.json is stale — rerun scripts/generate_api_types.py"
+    assert committed == current, "web/openapi.json is stale — rerun scripts/generate_api_types.py"
+
+
+def test_generated_types_match_the_committed_schema() -> None:
+    """``generated-types.ts`` must be regenerated whenever the schema changes.
+
+    The file is what the console's ``tsc -b`` type-checks against, so a stale
+    copy type-checks clean while describing an API that no longer exists.
+    """
+    generated = _REPO_ROOT / "web" / "src" / "api" / "generated-types.ts"
+    if not generated.exists() or not _OPENAPI_JSON.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+    schema = json.loads(_OPENAPI_JSON.read_text(encoding="utf-8"))
+    text = generated.read_text(encoding="utf-8")
+    # Every component schema the API advertises must appear as a generated
+    # interface; the generator names them verbatim.
+    for name in schema.get("components", {}).get("schemas", {}):
+        # Object schemas generate ``Name: {``; enums generate ``Name: "a" | ...``.
+        assert re.search(rf"^\s*{re.escape(name)}: ", text, re.M), (
+            f"generated-types.ts is stale: no declaration for schema {name!r}; "
+            "rerun scripts/generate_api_types.py"
+        )
+
+
+def test_i18n_warning_catalogue_covers_every_engine_warning_code() -> None:
+    """Every warning the assess stage emits must have English copy.
+
+    The wizard renders ``t.wizard.warningCodes[code]`` and falls back to the
+    engine's Chinese ``detail_zh``; a code with no entry therefore leaks
+    Chinese copy into the English console. The engine's own ``_safe``-helper
+    codes are passed as a variable, so they are pinned separately below.
+    """
+    if not _EN_TS.exists() or not _ASSESS_PY.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+
+    emitted = set(_ASSESS_WARNING_CODE_RE.findall(_ASSESS_PY.read_text(encoding="utf-8")))
+    # Codes routed through the ``_safe(...)`` degrade helper rather than a
+    # literal call site.
+    emitted |= {
+        "PDF_PLAN_UNAVAILABLE",
+        "PAGE_PROFILE_UNAVAILABLE",
+        "FONT_WITNESS_UNAVAILABLE",
+        "PDF_PROBE_UNAVAILABLE",
+        "ROUTE_PROBE_UNAVAILABLE",
+    }
+    assert len(emitted) >= 15, f"warning-code extractor found too few codes: {sorted(emitted)}"
+
+    en = _EN_TS.read_text(encoding="utf-8")
+    catalogue = re.search(r"warningCodes:\s*\{(.*?)\n    \}", en, re.S)
+    assert catalogue, "en.ts has no warningCodes block"
+    translated = set(re.findall(r"^\s{6}([A-Z][A-Z0-9_]+):", catalogue.group(1), re.M))
+
+    missing = emitted - translated
+    assert not missing, (
+        f"warning codes with no English copy in en.ts warningCodes: {sorted(missing)}"
+    )
+    # And the reverse: a catalogue entry for a code the engine never emits is
+    # dead copy that will silently rot.
+    assert not translated - emitted, (
+        f"warningCodes entries the engine never emits: {sorted(translated - emitted)}"
+    )
+
+
+def _warning_calls(text: str) -> list[tuple[str, list[str], bool]]:
+    """Each ``AssessmentWarning(...)`` call as (code, string literals, has_dict_arg).
+
+    Uses balanced-paren scanning rather than a regex: the copy argument is an
+    implicit f-string concatenation that can wrap lines, and a regex over that
+    silently matches nothing — a vacuous pass.
+    """
+    calls: list[tuple[str, list[str], bool]] = []
+    for match in re.finditer(r"AssessmentWarning\(", text):
+        start = match.end()
+        depth = 1
+        cursor = start
+        while depth and cursor < len(text):
+            if text[cursor] == "(":
+                depth += 1
+            elif text[cursor] == ")":
+                depth -= 1
+            cursor += 1
+        body = text[start : cursor - 1]
+        literals = re.findall(r'"((?:[^"\\]|\\.)*)"', body)
+        if len(literals) < 3 or not literals[0].isupper():
+            continue  # the ``_safe`` helper passes ``code`` as a variable
+        has_dict = bool(re.search(r"\{\s*[\"']", body))
+        calls.append((literals[0], literals[2:], has_dict))
+    return calls
+
+
+def test_assess_warnings_carry_structured_params() -> None:
+    """A warning that interpolates values must expose them for localization.
+
+    ``detail_zh`` is a rendered string; a non-Chinese consumer cannot rebuild
+    it without the raw values, so any warning whose copy contains a
+    placeholder must populate ``params``.
+    """
+    if not _ASSESS_PY.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+    calls = _warning_calls(_ASSESS_PY.read_text(encoding="utf-8"))
+    # Guard against the extractor silently finding nothing.
+    assert len(calls) >= 12, f"warning extractor found too few calls: {calls}"
+
+    interpolating = [(code, has_dict) for code, copy, has_dict in calls if "{" in "".join(copy)]
+    assert interpolating, "no interpolating warning found — extractor is broken"
+    missing = sorted(code for code, has_dict in interpolating if not has_dict)
+    assert not missing, f"warnings interpolate values but pass no params dict: {missing}"
+
+
+def test_language_picker_covers_every_engine_profile() -> None:
+    """The wizard's language list must not be narrower than the engine's.
+
+    The console once offered four source / three target languages while the
+    engine supported ten, so ja→ko or en→ru were unreachable from the UI.
+    """
+    if not _WIZARD_TSX.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+    from ubt.core.language_profile import supported_lang_codes
+
+    text = _WIZARD_TSX.read_text(encoding="utf-8")
+    block = re.search(r"const LANGUAGES[^=]*=\s*\[(.*?)\n\]", text, re.S)
+    assert block, "NewJobWizard.tsx has no LANGUAGES block"
+    offered = set(re.findall(r"code:\s*'([a-z-]+)'", block.group(1)))
+
+    engine = set(supported_lang_codes())
+    missing = engine - offered
+    assert not missing, f"engine languages missing from the wizard picker: {sorted(missing)}"
+    # The only code the picker may add beyond the engine profiles is the
+    # Traditional Chinese variant the target validator accepts.
+    assert offered - engine == {"zh-tw"}, (
+        f"unexpected extra wizard languages: {sorted(offered - engine)}"
+    )
+
+
+def test_every_css_var_used_in_tsx_is_defined_in_the_stylesheet() -> None:
+    """A ``var(--x)`` with no declaration renders unstyled, silently.
+
+    The AuthGate sign-in card once referenced four variables that were never
+    defined (``--rule``, ``--paper-raised``, ``--accent``, ``--ink``): the card
+    came out transparent and its button white-on-white. Nothing in the build
+    catches that, so the definition set is pinned here.
+    """
+    src_dir = _REPO_ROOT / "web" / "src"
+    css = src_dir / "index.css"
+    if not css.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+
+    defined = set(re.findall(r"^\s*(--[a-z0-9-]+)\s*:", css.read_text(encoding="utf-8"), re.M))
+    assert defined, "index.css declares no custom properties"
+
+    used: set[str] = set()
+    for path in src_dir.rglob("*.tsx"):
+        used |= set(re.findall(r"var\((--[a-z0-9-]+)", path.read_text(encoding="utf-8")))
+
+    undefined = sorted(used - defined)
+    assert not undefined, f"CSS variables used in TSX but never defined: {undefined}"
+
+
+def test_no_css_var_uses_a_tailwind_opacity_modifier() -> None:
+    """``bg-[var(--x)]/10`` silently emits no CSS under Tailwind v3.
+
+    The colour is an arbitrary value, not a theme colour, so Tailwind cannot
+    split it into ``rgb(... / <alpha>)`` and drops the utility entirely — the
+    element renders transparent with no build error. Tint a literal instead, or
+    add a dedicated ``--ink-*-wash`` token.
+    """
+    src_dir = _REPO_ROOT / "web" / "src"
+    if not src_dir.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+    pattern = re.compile(
+        r"(?:bg|text|border|divide|ring|from|to|via|fill|stroke|shadow|outline|decoration)"
+        r"-\[var\(--[a-z0-9-]+\)\]/\d+"
+    )
+    offenders: list[str] = []
+    for path in src_dir.rglob("*.tsx"):
+        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            stripped = line.strip()
+            if stripped.startswith("//") or stripped.startswith("*"):
+                continue
+            if pattern.search(line):
+                offenders.append(f"{path.relative_to(_REPO_ROOT)}:{lineno}")
+    assert not offenders, (
+        "Tailwind v3 drops an opacity modifier on a var() colour, so these "
+        f"classes render nothing: {offenders}"
     )
 
 

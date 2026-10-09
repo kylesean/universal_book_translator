@@ -3,44 +3,33 @@ export type Language = 'en' | 'zh'
 export interface TranslationDictionary {
   common: {
     compilerConsole: string
-    publicationCompiler: string
-    healthy: string
     disconnected: string
     cancel: string
-    save: string
-    retry: string
     confirm: string
-    loading: string
-    pages: string
-    words: string
-    cost: string
     status: string
-    action: string
     search: string
-    back: string
     ready: string
     running: string
     completed: string
     failed: string
-    verified: string
     warning: string
-    blocked: string
+    online: string
+    idle: string
+    dismiss: string
+    paperToneCotton: string
+    paperToneDowling: string
+    paperToneSwitchTo: string
+    switchLanguage: string
   }
   nav: {
     operatorControl: string
     newJob: string
-    newJobSub: string
     missionControl: string
-    missionControlSub: string
     qualityGate: string
-    qualityGateSub: string
     languageAssets: string
-    languageAssetsSub: string
     systemDoctor: string
-    systemDoctorSub: string
     workbenches: string
     reviewWorkbench: string
-    reviewWorkbenchSub: string
   }
   wizard: {
     title: string
@@ -51,7 +40,6 @@ export interface TranslationDictionary {
     uploading: string
     orBrowse: string
     manualPathPlaceholder: string
-    languages: string
     sourceLang: string
     targetLang: string
     presets: string
@@ -63,17 +51,22 @@ export interface TranslationDictionary {
     presetFastDesc: string
     presetPreview: string
     presetPreviewDesc: string
+    presetGateRich: string
+    presetGateAdaptive: string
+    presetGateFormulaImage: string
+    presetGateShortChain: string
+    walLedger: string
+    notPriced: string
+    formatUnknown: string
     budgetCeiling: string
     preflightTitle: string
     preflightSubtitle: string
     waitingFile: string
-    assessing: string
     assessBtn: string
     startCompile: string
     compiling: string
     estTokens: string
     estCost: string
-    detectedMath: string
     pageCount: string
     recommendation: string
     scannedRatio: string
@@ -83,6 +76,12 @@ export interface TranslationDictionary {
     estTime: string
     confidence: string
     probeWarnings: string
+    /** Pre-flight warning copy keyed by the engine's stable warning code. */
+    warningCodes: Record<string, string>
+    warningRemedyRescan: string
+    warningRemedyOcr: string
+    /** Separator for a warning param that is a list (e.g. unpriced model names). */
+    listSeparator: string
     advancedOptionsTitle: string
     advancedOptionsSubtitle: string
     advancedOptionsTag: string
@@ -122,6 +121,15 @@ export interface TranslationDictionary {
     noActiveJobTitle: string
     noActiveJobDesc: string
     pipelineGraph: string
+    stageExtract: string
+    stageSegment: string
+    stageTm: string
+    stageTranslate: string
+    stageQe: string
+    stageRepair: string
+    stageRender: string
+    stageVerify: string
+    stagePackage: string
     liveStream: string
     cancelCompile: string
     inspectGate: string
@@ -130,6 +138,13 @@ export interface TranslationDictionary {
     completedPages: string
     totalSpend: string
     executionState: string
+    blocksRemaining: string
+    stateCertified: string
+    stateDrafting: string
+    logAborted: string
+    logResumed: string
+    logDeleted: string
+    sseStream: string
     bufferedLines: string
     waitingStream: string
     queueTitle: string
@@ -158,6 +173,7 @@ export interface TranslationDictionary {
     noJobDesc: string
     decisionReady: string
     decisionBlocked: string
+    deliveryAdvisory: string
     allPassedDesc: string
     blockedDesc: string
     fidelityScore: string
@@ -173,12 +189,13 @@ export interface TranslationDictionary {
     pillar5Desc: string
     deliverablesTitle: string
     deliverablesSubtitle: string
-    dualPdf: string
     targetPdf: string
     epub: string
     contractJson: string
-    contractDesc: string
-    radarTitle: string
+    secondaryDoc: string
+    qualityReportJson: string
+    visualReportJson: string
+    metricsJson: string
     axisMath: string
     axisTerminology: string
     axisVisual: string
@@ -192,14 +209,20 @@ export interface TranslationDictionary {
     noDrift: string
     visualFindingsTitle: string
     noVisualFindings: string
+    noDeliverables: string
+    pageAlt: string
     flaggedPages: string
-    auditTitle: string
     auditDraftModel: string
     auditRepairModel: string
     auditQeEngine: string
     auditRetries: string
     auditCacheHit: string
     auditTypst: string
+    metricMaskedSpans: string
+    metricCorruptSpans: string
+    metricMaskedBlocks: string
+    metricCorruptBlocks: string
+    metricFormulaBlocks: string
   }
   assets: {
     title: string
@@ -207,19 +230,12 @@ export interface TranslationDictionary {
     tabGlossary: string
     tabTm: string
     tabBible: string
-    addTerm: string
     sourceTerm: string
     targetTerm: string
-    domain: string
-    rule: string
     submitTerm: string
-    importCsv: string
     activeTerms: string
     tmTitle: string
     tmDesc: string
-    exportTm: string
-    bibleTitle: string
-    bibleDesc: string
     conflictsTitle: string
     conflictTargets: string
     noConflicts: string
@@ -235,8 +251,15 @@ export interface TranslationDictionary {
     bibleOverviewDesc: string
     bibleStructureTitle: string
     bibleStructureDesc: string
+    bibleSourceSeeds: string
+    bibleSourceGlossary: string
+    bibleSourceChapters: string
+    bibleSourceMined: string
     bibleWorkflowTitle: string
     bibleWorkflowDesc: string
+    bibleStep1: string
+    bibleStep2: string
+    bibleStep3: string
   }
   doctor: {
     title: string
@@ -266,22 +289,25 @@ export interface TranslationDictionary {
     enabled: string
     disabled: string
     exposedWarning: string
+    exposed: string
     loopbackOnly: string
+    capabilityVision: string
+    capabilityReasoning: string
+    capabilitySystem: string
+    capabilityNoSystem: string
+    capabilityExtract: string
   }
   review: {
     title: string
-    faultCount: string
-    verifiedCount: string
     modeSegments: string
     modeVisual: string
     sourceSegment: string
     targetSegment: string
-    applyNorm: string
     saveFeedback: string
     sourceCanvas: string
     targetCanvas: string
-    pixelDiff: string
-    faultRibbon: string
+    sourceCanvasAlt: string
+    targetCanvasAlt: string
     filterAll: string
     filterIssues: string
     filterNeedsHuman: string
@@ -290,11 +316,9 @@ export interface TranslationDictionary {
     saving: string
     saved: string
     humanVerified: string
-    visualPending: string
     prevIssue: string
     nextIssue: string
     previewPage: string
-    previewLoading: string
     previewFailed: string
     rerenderPage: string
     rerenderHint: string
@@ -308,7 +332,6 @@ export interface TranslationDictionary {
     cascadeConfirmProceed: string
     cascadeConfirmCancel: string
     diffBlend: string
-    noSourcePage: string
     inspectorTitle: string
     inspectorQe: string
     inspectorTmHit: string
@@ -316,7 +339,6 @@ export interface TranslationDictionary {
     inspectorRepairs: string
     inspectorSeverity: string
     inspectorProvenance: string
-    inspectorNone: string
     editHint: string
     cancelEdit: string
   }

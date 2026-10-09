@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import {
   getJobStatus,
   cancelJob,
@@ -22,9 +23,11 @@ import {
   deliverableDownloadUrl,
   subscribeJobProgress,
   type JobSummary,
+  type PipelineStage,
   type ProgressStreamFrame,
 } from '@/api/client'
 import { useI18n } from '@/i18n/useI18n'
+import { useToast } from '@/components/ui/useToast'
 
 type LogLevel = 'INFO' | 'WARN' | 'ERROR'
 
@@ -35,6 +38,7 @@ interface LogEntry {
 
 export function MissionControl() {
   const { t } = useI18n()
+  const toast = useToast()
   const navigate = useNavigate()
   const { jobId } = useParams<{ jobId: string }>()
   const currentJobId = jobId ?? null
@@ -47,6 +51,7 @@ export function MissionControl() {
   const [autoScroll, setAutoScroll] = useState(true)
   const [isLiveStreaming, setIsLiveStreaming] = useState(false)
   const [statusStr, setStatusStr] = useState<string>('running')
+  const [stage, setStage] = useState<PipelineStage | null>(null)
   const [progressPct, setProgressPct] = useState<number>(0)
   const [completedBlocks, setCompletedBlocks] = useState<number>(0)
   const [totalBlocks, setTotalBlocks] = useState<number>(0)
@@ -55,6 +60,7 @@ export function MissionControl() {
   const [jobs, setJobs] = useState<JobSummary[]>([])
   const [resuming, setResuming] = useState(false)
   const [downloading, setDownloading] = useState(false)
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null)
 
   const logContainerRef = useRef<HTMLDivElement>(null)
 
@@ -83,6 +89,7 @@ export function MissionControl() {
     let isMounted = true
     const applyStatus = (res: Record<string, unknown>) => {
       if (res.status) setStatusStr(String(res.status))
+      if (typeof res.stage === 'string') setStage(res.stage as PipelineStage)
       if (typeof res.progress_percent === 'number') setProgressPct(res.progress_percent)
       if (typeof res.completed_blocks === 'number') setCompletedBlocks(res.completed_blocks)
       if (typeof res.total_blocks === 'number') setTotalBlocks(res.total_blocks)
@@ -109,16 +116,23 @@ export function MissionControl() {
       (frame: ProgressStreamFrame) => {
         if (!isMounted) return
         if (frame.status) setStatusStr(frame.status)
+        if (frame.stage) setStage(frame.stage)
         if (typeof frame.progress_percent === 'number') setProgressPct(frame.progress_percent)
         if (typeof frame.completed_blocks === 'number') setCompletedBlocks(frame.completed_blocks)
         if (typeof frame.total_blocks === 'number') setTotalBlocks(frame.total_blocks)
         if (typeof frame.estimated_cost_usd === 'number') setCostUsd(frame.estimated_cost_usd)
         if (typeof frame.current_avg_qe === 'number') setAvgQe(frame.current_avg_qe)
 
+        // Log the engine's own message when it has one — the stream is a build
+        // log, not a counter echo. The counters stay on the line as the tail so
+        // a frame without a message still reads as progress.
         const level: LogLevel = frame.error ? 'ERROR' : frame.status === 'failed' ? 'ERROR' : 'INFO'
+        const counters = `${frame.completed_blocks ?? 0}/${frame.total_blocks ?? 0} blocks · QE ${(frame.current_avg_qe ?? 0).toFixed(3)}`
         const text = frame.error
           ? `ERROR ${frame.error}`
-          : `${frame.status ?? 'running'} · ${frame.completed_blocks ?? 0}/${frame.total_blocks ?? 0} blocks · QE ${(frame.current_avg_qe ?? 0).toFixed(3)}`
+          : frame.message
+            ? `${frame.message} · ${counters}`
+            : `${frame.status ?? 'running'} · ${counters}`
         setLogs((prev) => [...prev.slice(-400), { text, level }])
       },
       undefined,
@@ -146,10 +160,10 @@ export function MissionControl() {
       await cancelJob(currentJobId)
       setLogs((prev) => [
         ...prev,
-        { text: '[USER_SIGNAL] Compilation aborted by operator.', level: 'WARN' },
+        { text: t.mission.logAborted, level: 'WARN' },
       ])
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Cancel failed')
+      toast.push(err instanceof Error ? err.message : 'Cancel failed', 'error')
     }
   }
 
@@ -160,11 +174,11 @@ export function MissionControl() {
       await resumeJob(currentJobId)
       setLogs((prev) => [
         ...prev,
-        { text: '[USER_SIGNAL] Resuming from the last ledger checkpoint.', level: 'INFO' },
+        { text: t.mission.logResumed, level: 'INFO' },
       ])
       setStatusStr('submitted')
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Resume failed')
+      toast.push(err instanceof Error ? err.message : 'Resume failed', 'error')
     } finally {
       setResuming(false)
     }
@@ -181,10 +195,10 @@ export function MissionControl() {
       if (primary) {
         window.open(deliverableDownloadUrl(currentJobId, primary.key), '_blank')
       } else {
-        alert(t.mission.noDeliverables)
+        toast.push(t.mission.noDeliverables, 'error')
       }
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Download failed')
+      toast.push(err instanceof Error ? err.message : 'Download failed', 'error')
     } finally {
       setDownloading(false)
     }
@@ -192,50 +206,56 @@ export function MissionControl() {
 
   // History management: removes the ledger + deliverables of a finished job.
   // The backend refuses anything still running; the confirm spells out that
-  // this is permanent, unlike cancel.
-  const handleDeleteJob = async (jobId: string) => {
-    if (!window.confirm(t.mission.deleteConfirm)) return
+  // this is permanent, unlike cancel. Confirmation is an in-app dialog rather
+  // than ``window.confirm`` so it can be styled, translated and announced.
+  const handleDeleteJob = (jobId: string) => {
+    setPendingDelete(jobId)
+  }
+
+  const confirmDeleteJob = async () => {
+    const jobId = pendingDelete
+    setPendingDelete(null)
+    if (!jobId) return
     try {
       await deleteJob(jobId)
       if (jobId === currentJobId) {
         setLogs((prev) => [
           ...prev,
-          { text: '[USER_SIGNAL] Job history deleted from the console.', level: 'WARN' },
+          { text: t.mission.logDeleted, level: 'WARN' },
         ])
       }
       await refreshQueue()
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Delete failed')
+      toast.push(err instanceof Error ? err.message : 'Delete failed', 'error')
     }
   }
 
-  const pipelineStages = [
-    { key: 'extract', label: '1. Extract' },
-    { key: 'segment', label: '2. Chunk' },
-    { key: 'tm', label: '3. TM' },
-    { key: 'translate', label: '4. Drafting' },
-    { key: 'qe', label: '5. Fast QE' },
-    { key: 'render', label: '6. Typst' },
-    { key: 'verify', label: '7. Gate' },
-    { key: 'package', label: '8. Package' },
+  const pipelineStages: { key: PipelineStage; label: string }[] = [
+    { key: 'extract', label: t.mission.stageExtract },
+    { key: 'segment', label: t.mission.stageSegment },
+    { key: 'tm', label: t.mission.stageTm },
+    { key: 'translate', label: t.mission.stageTranslate },
+    { key: 'qe', label: t.mission.stageQe },
+    { key: 'repair', label: t.mission.stageRepair },
+    { key: 'render', label: t.mission.stageRender },
+    { key: 'verify', label: t.mission.stageVerify },
+    { key: 'package', label: t.mission.stagePackage },
   ]
 
   const isCompleted = statusStr === 'completed'
   const isFailed = statusStr === 'failed' || statusStr === 'cancelled'
-  // The backend stream carries no `stage` field, so the stepper highlight is
-  // derived from the real status + progress_percent rather than a fabricated
-  // stage the server never sends.
-  const derivedStage = (() => {
-    if (statusStr === 'completed') return 'package'
-    if (statusStr === 'queued' || statusStr === 'submitted') return 'extract'
-    if (statusStr === 'failed' || statusStr === 'cancelled') return ''
-    if (progressPct >= 100) return 'package'
-    if (progressPct >= 90) return 'verify'
-    if (progressPct >= 75) return 'render'
-    if (progressPct >= 40) return 'translate'
-    if (progressPct >= 15) return 'segment'
-    return 'extract'
-  })()
+  // The engine reports its own pipeline step on every event (``stage``), so the
+  // stepper highlights where the run actually is. Falling back to a
+  // ``progress_percent`` threshold — the old approach — mislabelled a job in
+  // repair as "Typst", because both sit past 75% and the guess could not tell
+  // them apart. Only a queued/submitted job (no event yet) is inferred.
+  const derivedStage: PipelineStage | '' = isFailed
+    ? ''
+    : statusStr === 'completed'
+      ? 'package'
+      : statusStr === 'queued' || statusStr === 'submitted'
+        ? 'extract'
+        : (stage ?? '')
 
   const statusVariant = (status: string): 'success' | 'warning' | 'destructive' | 'info' =>
     status === 'completed'
@@ -254,6 +274,16 @@ export function MissionControl() {
 
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden px-8 py-6 space-y-5">
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title={t.mission.deleteJob}
+        body={t.mission.deleteConfirm}
+        confirmLabel={t.common.confirm}
+        cancelLabel={t.common.cancel}
+        danger
+        onConfirm={() => void confirmDeleteJob()}
+        onCancel={() => setPendingDelete(null)}
+      />
       {/* Header bar */}
       <div className="flex items-center justify-between shrink-0 border-b border-[var(--paper-border)] pb-4">
         <div>
@@ -267,13 +297,13 @@ export function MissionControl() {
               </Badge>
             )}
             {currentJobId && isLiveStreaming && (
-              <span className="text-[11px] font-mono text-[#15803d] flex items-center gap-1.5 font-medium">
+              <span className="text-xs font-mono text-[#15803d] flex items-center gap-1.5 font-medium">
                 <span className="h-1.5 w-1.5 rounded-full bg-[#15803d] animate-pulse" />
-                SSE STREAM
+                {t.mission.sseStream}
               </span>
             )}
           </div>
-          <div className="text-[11px] text-[var(--ink-secondary)] font-mono mt-0.5">
+          <div className="text-xs text-[var(--ink-secondary)] font-mono mt-0.5">
             JOB:{' '}
             <span className="text-[var(--ink-primary)] font-semibold">
               {currentJobId ?? t.mission.noActiveJobTitle}
@@ -329,7 +359,7 @@ export function MissionControl() {
           restarted console still lists finished runs. */}
       <div className="rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] overflow-hidden shrink-0 shadow-2xs">
         <div className="h-8 px-3.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] flex items-center justify-between">
-          <span className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
+          <span className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
             {t.mission.queueTitle}
           </span>
           <Badge variant="outline">{jobs.length}</Badge>
@@ -347,7 +377,7 @@ export function MissionControl() {
                     (label) => (
                       <th
                         key={label}
-                        className="py-2 px-3 font-semibold uppercase text-[10px] tracking-wider"
+                        className="py-2 px-3 font-semibold uppercase text-xs tracking-wider"
                       >
                         {label}
                       </th>
@@ -363,7 +393,7 @@ export function MissionControl() {
                     className={`transition-colors ${
                       job.job_id === currentJobId
                         ? 'bg-[var(--paper-subsurface)]'
-                        : 'hover:bg-[var(--paper-subsurface)]/60'
+                        : 'hover:bg-[var(--paper-subsurface)]'
                     }`}
                   >
                     <td className="py-2 px-3 font-mono text-[var(--ink-primary)] truncate max-w-[9rem]">
@@ -373,7 +403,7 @@ export function MissionControl() {
                       {job.file_name}
                     </td>
                     <td className="py-2 px-3">
-                      <Badge variant={statusVariant(job.status)} dot className="text-[10px]">
+                      <Badge variant={statusVariant(job.status)} dot className="text-xs">
                         {job.status.toUpperCase()}
                       </Badge>
                     </td>
@@ -385,7 +415,7 @@ export function MissionControl() {
                         ? '—'
                         : `$${job.estimated_cost_usd.toFixed(3)}`}
                     </td>
-                    <td className="py-2 px-3 font-mono text-[11px] text-[var(--ink-muted)]">
+                    <td className="py-2 px-3 font-mono text-xs text-[var(--ink-muted)]">
                       {formatTimestamp(job.updated_at)}
                     </td>
                     <td className="py-2 px-3 text-right">
@@ -394,7 +424,7 @@ export function MissionControl() {
                           onClick={() => onSelectJob(job.job_id)}
                           variant="secondary"
                           size="sm"
-                          className="text-[11px] h-6 px-2"
+                          className="text-xs h-6 px-2"
                         >
                           {t.mission.selectJob}
                         </Button>
@@ -433,22 +463,29 @@ export function MissionControl() {
         <>
       {/* Slim Pipeline Stepper */}
       <div className="p-3.5 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] shrink-0 shadow-2xs">
-        <div className="flex items-center justify-between text-[10px] font-mono uppercase text-[var(--ink-muted)] mb-2 px-1 font-semibold">
+        <div className="flex items-center justify-between text-xs font-mono uppercase text-[var(--ink-muted)] mb-2 px-1 font-semibold">
           <span>{t.mission.pipelineGraph}</span>
           <span className="text-[var(--ink-primary)] font-bold">
             STAGE: {(derivedStage || statusStr).toUpperCase()}
           </span>
         </div>
-        <div className="grid grid-cols-8 gap-1.5">
+        <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-1.5">
           {pipelineStages.map((stage) => {
+            const currentIndex = pipelineStages.findIndex((s) => s.key === derivedStage)
+            const stageIndex = pipelineStages.findIndex((s) => s.key === stage.key)
             const isCurrent = derivedStage !== '' && derivedStage === stage.key
+            // A stage the run has already passed stays marked, so the stepper
+            // reads as progress rather than a single moving highlight.
+            const isDone = currentIndex >= 0 && stageIndex < currentIndex
             return (
               <div
                 key={stage.key}
                 className={`py-1.5 text-center text-xs font-mono font-medium rounded-[4px] border transition-colors ${
                   isCurrent
                     ? 'border-[var(--ink-primary)] bg-[var(--paper-subsurface)] text-[var(--ink-primary)] font-bold shadow-2xs'
-                    : 'border-[var(--paper-border)] bg-[var(--paper-surface)] text-[var(--ink-muted)]'
+                    : isDone
+                      ? 'border-[#15803d]/30 bg-[#15803d]/5 text-[#15803d]'
+                      : 'border-[var(--paper-border)] bg-[var(--paper-surface)] text-[var(--ink-muted)]'
                 }`}
               >
                 {stage.label}
@@ -461,7 +498,7 @@ export function MissionControl() {
       {/* Metric Tiles (Hairline Dividers, Flat Container) */}
       <div className="grid grid-cols-4 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] divide-x divide-[var(--paper-border)] shrink-0 shadow-2xs">
         <div className="p-4">
-          <div className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">{t.mission.progress}</div>
+          <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">{t.mission.progress}</div>
           <div className="text-xl font-bold font-mono text-[var(--ink-primary)] mt-0.5">
             {progressPct.toFixed(1)}%
           </div>
@@ -474,41 +511,41 @@ export function MissionControl() {
         </div>
 
         <div className="p-4">
-          <div className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">{t.mission.completedPages}</div>
+          <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">{t.mission.completedPages}</div>
           <div className="text-xl font-bold font-mono text-[var(--ink-primary)] mt-0.5">
             {completedBlocks} <span className="text-xs text-[var(--ink-muted)] font-normal">/ {totalBlocks || '—'}</span>
           </div>
-          <div className="text-[11px] text-[#15803d] font-mono mt-1.5 font-medium">
+          <div className="text-xs text-[#15803d] font-mono mt-1.5 font-medium">
             Avg QE {avgQe.toFixed(3)}
           </div>
         </div>
 
         <div className="p-4">
-          <div className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">{t.mission.totalSpend}</div>
+          <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">{t.mission.totalSpend}</div>
           <div className="text-xl font-bold font-mono text-[#b45309] mt-0.5">
             ${costUsd.toFixed(3)}
           </div>
-          <div className="text-[11px] text-[var(--ink-secondary)] font-mono mt-1.5">
-            {totalBlocks - completedBlocks} blocks remaining
+          <div className="text-xs text-[var(--ink-secondary)] font-mono mt-1.5">
+            {totalBlocks - completedBlocks} {t.mission.blocksRemaining}
           </div>
         </div>
 
         <div className="p-4">
-          <div className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">{t.mission.executionState}</div>
+          <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">{t.mission.executionState}</div>
           <div className="text-sm font-bold font-mono text-[var(--ink-primary)] mt-1 capitalize">
             {statusStr}
           </div>
-          <div className="text-[11px] text-[var(--ink-secondary)] mt-1.5 truncate">
-            {isCompleted ? 'Compiler output certified' : 'Drafting and typesetting blocks'}
+          <div className="text-xs text-[var(--ink-secondary)] mt-1.5 truncate">
+            {isCompleted ? t.mission.stateCertified : t.mission.stateDrafting}
           </div>
         </div>
       </div>
 
       {/* Real-time Compiler Log Output */}
-      <div className="flex-1 min-h-0 flex flex-col rounded-lg border border-[var(--paper-border)] bg-[#141517] overflow-hidden shadow-2xs">
-        <div className="h-9 px-3 border-b border-[#23252a] bg-[#1a1b1f] flex items-center justify-between gap-3 shrink-0">
-          <div className="flex items-center gap-2 text-xs font-mono text-[#a1a1aa]">
-            <Terminal className="h-3.5 w-3.5 text-[#a1a1aa]" />
+      <div className="flex-1 min-h-0 flex flex-col rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] overflow-hidden shadow-2xs">
+        <div className="h-9 px-3 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] flex items-center justify-between gap-3 shrink-0">
+          <div className="flex items-center gap-2 text-xs font-mono text-[var(--ink-secondary)]">
+            <Terminal className="h-3.5 w-3.5 text-[var(--ink-muted)]" />
             <span>{t.mission.liveStream}</span>
           </div>
           <div className="flex items-center gap-2">
@@ -517,24 +554,24 @@ export function MissionControl() {
               value={logSearch}
               onChange={(e) => setLogSearch(e.target.value)}
               placeholder={t.mission.logSearch}
-              className="h-6 w-40 px-2 rounded-[4px] bg-[#141517] border border-[#2a2c31] text-[11px] font-mono text-[#d4d4d8] placeholder:text-[#52525b] focus:outline-none focus:border-[#3f4147]"
+              className="h-6 w-40 px-2 rounded-[4px] bg-[var(--paper-surface)] border border-[var(--paper-border)] text-xs font-mono text-[var(--ink-primary)] placeholder:text-[var(--ink-muted)] focus:outline-none focus:border-[var(--paper-border-hover)]"
             />
-            <div className="flex bg-[#141517] border border-[#2a2c31] rounded-[4px] p-0.5">
+            <div className="flex bg-[var(--paper-surface)] border border-[var(--paper-border)] rounded-[4px] p-0.5">
               {(['ALL', 'INFO', 'WARN', 'ERROR'] as const).map((level) => (
                 <button
                   key={level}
                   onClick={() => setLogLevel(level)}
-                  className={`px-1.5 py-0.5 text-[10px] font-mono rounded-[3px] transition-colors ${
+                  className={`px-1.5 py-0.5 text-xs font-mono rounded-[3px] transition-colors ${
                     logLevel === level
-                      ? 'bg-[#2a2c31] text-[#e4e4e7]'
-                      : 'text-[#71717a] hover:text-[#a1a1aa]'
+                      ? 'bg-[var(--btn-bg)] text-[var(--btn-fg)]'
+                      : 'text-[var(--ink-muted)] hover:text-[var(--ink-primary)]'
                   }`}
                 >
                   {level}
                 </button>
               ))}
             </div>
-            <label className="flex items-center gap-1 text-[10px] font-mono text-[#71717a] cursor-pointer select-none">
+            <label className="flex items-center gap-1 text-xs font-mono text-[var(--ink-muted)] cursor-pointer select-none">
               <input
                 type="checkbox"
                 checked={autoScroll}
@@ -542,7 +579,7 @@ export function MissionControl() {
               />
               {t.mission.autoScroll}
             </label>
-            <div className="text-[11px] font-mono text-[#71717a]">
+            <div className="text-xs font-mono text-[var(--ink-muted)]">
               {filteredLogs.length}/{logs.length} {t.mission.bufferedLines}
             </div>
           </div>
@@ -550,25 +587,28 @@ export function MissionControl() {
 
         <div
           ref={logContainerRef}
-          className="flex-1 p-3 overflow-y-auto font-mono text-xs leading-relaxed text-[#d4d4d8] space-y-1 select-text bg-[#141517]"
+          className="flex-1 p-3 overflow-y-auto font-mono text-xs leading-relaxed text-[var(--ink-primary)] space-y-1 select-text bg-[var(--paper-surface)]"
         >
           {logs.length === 0 ? (
-            <div className="text-[#71717a] italic">{t.mission.waitingStream}</div>
+            <div className="text-[var(--ink-muted)] italic">{t.mission.waitingStream}</div>
           ) : filteredLogs.length === 0 ? (
-            <div className="text-[#71717a] italic">{t.mission.noMatch}</div>
+            <div className="text-[var(--ink-muted)] italic">{t.mission.noMatch}</div>
           ) : (
             filteredLogs.map((log, idx) => {
               const lineNo = (idx + 1).toString().padStart(3, '0')
               return (
-                <div key={idx} className="flex gap-3 hover:bg-[#1c1d22] px-1 py-0.5 rounded">
-                  <span className="text-[#52525b] select-none text-[11px]">{lineNo}</span>
+                <div
+                  key={idx}
+                  className="flex gap-3 hover:bg-[var(--paper-subsurface)] px-1 py-0.5 rounded"
+                >
+                  <span className="text-[var(--ink-muted)] select-none text-xs">{lineNo}</span>
                   <span
                     className={
                       log.level === 'ERROR'
-                        ? 'text-[#f87171]'
+                        ? 'text-[var(--ink-rose)]'
                         : log.level === 'WARN'
-                          ? 'text-[#fbbf24]'
-                          : 'text-[#e4e4e7]'
+                          ? 'text-[var(--ink-amber)]'
+                          : 'text-[var(--ink-primary)]'
                     }
                   >
                     {log.text}

@@ -23,6 +23,68 @@ function formatDuration(seconds: number): string {
   return `${(seconds / 3600).toFixed(1)}h`
 }
 
+/**
+ * Substitute ``{key}`` placeholders; a missing key is left visible, not blank.
+ * A list value joins with the locale's separator rather than JS's default comma.
+ */
+function interpolate(
+  template: string,
+  params: Record<string, unknown>,
+  listSeparator: string,
+): string {
+  return template.replace(/\{(\w+)\}/g, (whole, key: string) => {
+    if (!(key in params)) return whole
+    const value = params[key]
+    return Array.isArray(value) ? value.join(listSeparator) : String(value)
+  })
+}
+
+/**
+ * Localize a pre-flight warning by its stable engine code.
+ *
+ * The engine's ``detail_zh`` is Chinese only, so rendering it directly showed
+ * Chinese copy in the English console. The dictionary is keyed on the same
+ * codes the engine switches on; an unknown code falls back to the engine copy
+ * (Chinese, but honest) rather than printing a raw key.
+ */
+function warningText(
+  warning: JobAssessResponse['warnings'][number],
+  t: ReturnType<typeof useI18n>['t'],
+): string {
+  const template = t.wizard.warningCodes[warning.code]
+  if (!template) return warning.detail_zh
+  const params: Record<string, unknown> = { ...(warning.params ?? {}) }
+  // FONT_RESIDUE_RISK interpolates a remedy clause, which the engine picks
+  // from a scanned / not-scanned branch.
+  if (warning.code === 'FONT_RESIDUE_RISK') {
+    params.remedy = params.is_scanned ? t.wizard.warningRemedyRescan : t.wizard.warningRemedyOcr
+  }
+  return interpolate(template, params, t.wizard.listSeparator)
+}
+
+/**
+ * The languages the engine has a profile for (`ubt/core/language_profile.py`),
+ * plus the two Chinese script variants the target validator accepts. Labels are
+ * the language's own endonym, which needs no translation.
+ *
+ * The old picker offered four source / three target languages while the engine
+ * supported ten, so ja→ko or en→ru were unreachable from the console. A test
+ * (tests/unit/api/test_console_contract.py) pins this list to the engine's.
+ */
+const LANGUAGES: ReadonlyArray<{ code: string; label: string }> = [
+  { code: 'en', label: 'English (en)' },
+  { code: 'zh', label: '简体中文 (zh)' },
+  { code: 'zh-tw', label: '繁體中文 (zh-tw)' },
+  { code: 'ja', label: '日本語 (ja)' },
+  { code: 'ko', label: '한국어 (ko)' },
+  { code: 'de', label: 'Deutsch (de)' },
+  { code: 'fr', label: 'Français (fr)' },
+  { code: 'es', label: 'Español (es)' },
+  { code: 'ru', label: 'Русский (ru)' },
+  { code: 'ar', label: 'العربية (ar)' },
+  { code: 'he', label: 'עברית (he)' },
+]
+
 export function NewJobWizard() {
   const { t } = useI18n()
   const navigate = useNavigate()
@@ -245,30 +307,34 @@ export function NewJobWizard() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [filePath, isSubmitting])
 
+  // The badge names the engine parameters the preset actually sets
+  // (ubt/core/presets.py). It deliberately does NOT name a model: a preset
+  // never picks one — the router does — so advertising "Claude 3.5" here was a
+  // promise the engine could not keep.
   const presetOptions = [
     {
       id: 'publication' as const,
       name: t.wizard.presetPublication,
       desc: t.wizard.presetPublicationDesc,
-      gate: 'CLAUDE 3.5 + STRICT GATE',
+      gate: t.wizard.presetGateRich,
     },
     {
       id: 'standard' as const,
       name: t.wizard.presetStandard,
       desc: t.wizard.presetStandardDesc,
-      gate: 'FAST PASS + DEEP PROOF',
+      gate: t.wizard.presetGateAdaptive,
     },
     {
       id: 'preview' as const,
       name: t.wizard.presetPreview,
       desc: t.wizard.presetPreviewDesc,
-      gate: 'STRUCTURE & LAYOUT PROOF',
+      gate: t.wizard.presetGateFormulaImage,
     },
     {
       id: 'fast' as const,
       name: t.wizard.presetFast,
       desc: t.wizard.presetFastDesc,
-      gate: 'ECONOMY TOKEN BUDGET',
+      gate: t.wizard.presetGateShortChain,
     },
   ]
 
@@ -284,8 +350,8 @@ export function NewJobWizard() {
             {t.wizard.subtitle}
           </p>
         </div>
-        <div className="text-[11px] font-mono text-[var(--ink-muted)]">
-          WAL LEDGER: <span className="text-[#15803d] font-semibold">ONLINE</span>
+        <div className="text-xs font-mono text-[var(--ink-muted)]">
+          {t.wizard.walLedger}: <span className="text-[#15803d] font-semibold">{t.common.online}</span>
         </div>
       </div>
 
@@ -313,7 +379,7 @@ export function NewJobWizard() {
               className={`rounded-lg border-2 border-dashed p-7 transition-all cursor-pointer text-center ${
                 isDragOver
                   ? 'border-[var(--ink-primary)] bg-[var(--paper-subsurface)]'
-                  : 'border-[var(--paper-border)] hover:border-[var(--paper-border-hover)] bg-[var(--paper-surface)] hover:bg-[#fdfdfc]'
+                  : 'border-[var(--paper-border)] hover:border-[var(--paper-border-hover)] bg-[var(--paper-surface)] hover:bg-[var(--paper-subsurface)]'
               }`}
             >
               <div className="h-10 w-10 mx-auto rounded-full bg-[var(--paper-subsurface)] border border-[var(--paper-border)] flex items-center justify-center text-[var(--ink-secondary)] mb-2.5 shadow-2xs">
@@ -330,11 +396,11 @@ export function NewJobWizard() {
                     ? t.wizard.dropzoneActive
                     : t.wizard.dropzoneTitle}
               </div>
-              <div className="text-[11px] text-[var(--ink-secondary)] mt-1">
+              <div className="text-xs text-[var(--ink-secondary)] mt-1">
                 {t.wizard.dropzoneSubtitle}
               </div>
               <div className="mt-3">
-                <span className="text-[11px] font-mono text-[var(--ink-primary)] underline decoration-[var(--paper-border-hover)] hover:text-black font-medium">
+                <span className="text-xs font-mono text-[var(--ink-primary)] underline decoration-[var(--paper-border-hover)] hover:text-black font-medium">
                   {t.wizard.orBrowse}
                 </span>
               </div>
@@ -384,7 +450,7 @@ export function NewJobWizard() {
             {/* Language Pair */}
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] block mb-1 font-semibold">
+                <label className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] block mb-1 font-semibold">
                   {t.wizard.sourceLang}
                 </label>
                 <select
@@ -392,14 +458,15 @@ export function NewJobWizard() {
                   onChange={(e) => setSourceLang(e.target.value)}
                   className="w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs font-medium"
                 >
-                  <option value="en">English (en)</option>
-                  <option value="ja">Japanese (ja)</option>
-                  <option value="de">German (de)</option>
-                  <option value="fr">French (fr)</option>
+                  {LANGUAGES.map((lang) => (
+                    <option key={lang.code} value={lang.code}>
+                      {lang.label}
+                    </option>
+                  ))}
                 </select>
               </div>
               <div>
-                <label className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] block mb-1 font-semibold">
+                <label className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] block mb-1 font-semibold">
                   {t.wizard.targetLang}
                 </label>
                 <select
@@ -407,16 +474,18 @@ export function NewJobWizard() {
                   onChange={(e) => setTargetLang(e.target.value)}
                   className="w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs font-medium"
                 >
-                  <option value="zh">简体中文 (zh)</option>
-                  <option value="zh-tw">繁體中文 (zh-tw)</option>
-                  <option value="ja">日本語 (ja)</option>
+                  {LANGUAGES.map((lang) => (
+                    <option key={lang.code} value={lang.code}>
+                      {lang.label}
+                    </option>
+                  ))}
                 </select>
               </div>
             </div>
 
             {/* Presets List */}
             <div>
-              <label className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] block mb-2 font-semibold">
+              <label className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] block mb-2 font-semibold">
                 {t.wizard.presets}
               </label>
               <div className="space-y-2">
@@ -449,16 +518,16 @@ export function NewJobWizard() {
                             {p.name}
                           </span>
                           {isRecommended && (
-                            <span className="inline-flex items-center text-[10px] font-mono font-medium text-[#15803d] bg-[#15803d]/10 px-1.5 py-0.5 rounded border border-[#15803d]/20">
+                            <span className="inline-flex items-center text-xs font-mono font-medium text-[#15803d] bg-[#15803d]/10 px-1.5 py-0.5 rounded border border-[#15803d]/20">
                               {t.wizard.engineRecommended}
                             </span>
                           )}
                         </div>
-                        <span className="font-mono text-[10px] text-[var(--ink-muted)] uppercase tracking-wider">
+                        <span className="font-mono text-xs text-[var(--ink-muted)] uppercase tracking-wider">
                           {p.gate}
                         </span>
                       </div>
-                      <div className="text-[11px] text-[var(--ink-secondary)] mt-1 leading-relaxed">
+                      <div className="text-xs text-[var(--ink-secondary)] mt-1 leading-relaxed">
                         {p.desc}
                       </div>
                     </div>
@@ -470,7 +539,7 @@ export function NewJobWizard() {
             {/* Budget Cap */}
             <div className="pt-2">
               <div className="flex items-center justify-between text-xs mb-1.5">
-                <span className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
+                <span className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
                   {t.wizard.budgetCeiling}
                 </span>
                 <span className="font-mono text-xs font-bold text-[#15803d]">
@@ -498,7 +567,7 @@ export function NewJobWizard() {
                 <div className="flex items-center gap-2">
                   <Sliders className="h-3.5 w-3.5 text-[var(--ink-secondary)] group-hover:text-[var(--ink-primary)]" />
                   <span>{t.wizard.advancedOptionsTitle}</span>
-                  <Badge variant="outline" className="text-[9px] font-mono font-normal uppercase tracking-wider py-0 px-1.5">
+                  <Badge variant="outline" className="text-xs font-mono font-normal uppercase tracking-wider py-0 px-1.5">
                     {t.wizard.advancedOptionsTag}
                   </Badge>
                 </div>
@@ -508,7 +577,7 @@ export function NewJobWizard() {
                   <ChevronRight className="h-4 w-4 text-[var(--ink-muted)] group-hover:text-[var(--ink-primary)] transition-transform" />
                 )}
               </button>
-              <p className="text-[11px] text-[var(--ink-muted)] mt-0.5 mb-2 leading-relaxed">
+              <p className="text-xs text-[var(--ink-muted)] mt-0.5 mb-2 leading-relaxed">
                 {t.wizard.advancedOptionsSubtitle}
               </p>
 
@@ -517,7 +586,7 @@ export function NewJobWizard() {
                   {/* Row 1: Profile & Dual Mode */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                     <div>
-                      <label className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] block mb-1 font-semibold">
+                      <label className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] block mb-1 font-semibold">
                         {t.wizard.domainProfile}
                       </label>
                       <select
@@ -538,7 +607,7 @@ export function NewJobWizard() {
                     </div>
 
                     <div>
-                      <label className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] block mb-1 font-semibold">
+                      <label className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] block mb-1 font-semibold">
                         {t.wizard.dualMode}
                       </label>
                       <select
@@ -561,7 +630,7 @@ export function NewJobWizard() {
                   {/* Row 2: Formula Mode */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                     <div>
-                      <label className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] block mb-1 font-semibold">
+                      <label className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] block mb-1 font-semibold">
                         {t.wizard.formulaMode}
                       </label>
                       <select
@@ -579,13 +648,13 @@ export function NewJobWizard() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                     <div>
                       <div className="flex items-center justify-between mb-1">
-                        <label className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
+                        <label className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
                           {t.wizard.pageFilter}
                         </label>
                         <button
                           type="button"
                           onClick={() => setPageRange('1-5')}
-                          className="text-[10px] font-mono text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] underline cursor-pointer"
+                          className="text-xs font-mono text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] underline cursor-pointer"
                         >
                           {t.wizard.sliceSampleQuickBtn}
                         </button>
@@ -597,13 +666,13 @@ export function NewJobWizard() {
                         placeholder={t.wizard.pageFilterPlaceholder}
                         className="w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs font-mono placeholder:text-[var(--ink-muted)]"
                       />
-                      <p className="text-[10px] text-[var(--ink-muted)] mt-1">
+                      <p className="text-xs text-[var(--ink-muted)] mt-1">
                         {t.wizard.pageFilterHelp}
                       </p>
                     </div>
 
                     <div>
-                      <label className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] block mb-1 font-semibold">
+                      <label className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] block mb-1 font-semibold">
                         {t.wizard.execMode}
                       </label>
                       <select
@@ -620,7 +689,7 @@ export function NewJobWizard() {
 
                   {/* Row 4: External Glossary Path */}
                   <div>
-                    <label className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] block mb-1 font-semibold">
+                    <label className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] block mb-1 font-semibold">
                       {t.wizard.glossaryPath}
                     </label>
                     <input
@@ -630,7 +699,7 @@ export function NewJobWizard() {
                       placeholder={t.wizard.glossaryPathPlaceholder}
                       className="w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs font-mono placeholder:text-[var(--ink-muted)]"
                     />
-                    <p className="text-[10px] text-[var(--ink-muted)] mt-1">
+                    <p className="text-xs text-[var(--ink-muted)] mt-1">
                       {t.wizard.glossaryPathHelp}
                     </p>
                   </div>
@@ -648,12 +717,12 @@ export function NewJobWizard() {
                 <h3 className="text-xs font-bold text-[var(--ink-primary)] tracking-tight">
                   {t.wizard.preflightTitle}
                 </h3>
-                <p className="text-[11px] text-[var(--ink-secondary)] mt-0.5">
+                <p className="text-xs text-[var(--ink-secondary)] mt-0.5">
                   {t.wizard.preflightSubtitle}
                 </p>
               </div>
               {isReassessing ? (
-                <Badge variant="outline" className="animate-pulse text-[10px] font-mono">
+                <Badge variant="outline" className="animate-pulse text-xs font-mono">
                   <Loader2 className="h-3 w-3 animate-spin mr-1 inline" />
                   UPDATING...
                 </Badge>
@@ -662,7 +731,7 @@ export function NewJobWizard() {
                   {t.common.ready}
                 </Badge>
               ) : (
-                <Badge variant="outline">IDLE</Badge>
+                <Badge variant="outline">{t.common.idle}</Badge>
               )}
             </div>
 
@@ -677,11 +746,12 @@ export function NewJobWizard() {
                         <div className="text-xs font-semibold text-[var(--ink-primary)] truncate font-mono">
                           {fileName}
                         </div>
-                        <div className="text-[11px] text-[var(--ink-secondary)] font-mono">{fileSize}</div>
+                        <div className="text-xs text-[var(--ink-secondary)] font-mono">{fileSize}</div>
                       </div>
                     </div>
-                    <Badge variant="outline" className="uppercase shrink-0 text-[10px] font-mono">
-                      {assessment.document.format_ext.replace('.', '') || 'PDF'}
+                    <Badge variant="outline" className="uppercase shrink-0 text-xs font-mono">
+                      {assessment.document.format_ext.replace('.', '').toUpperCase() ||
+                        t.wizard.formatUnknown}
                     </Badge>
                   </div>
                 )}
@@ -752,11 +822,11 @@ export function NewJobWizard() {
                     <span className="font-mono font-bold">
                       {assessment.cost.total_cost_usd === null ||
                       assessment.cost.total_cost_usd === undefined ? (
-                        <span className="text-[var(--ink-muted)]">not priced</span>
+                        <span className="text-[var(--ink-muted)]">{t.wizard.notPriced}</span>
                       ) : assessment.cost.total_cost_usd === 0 ? (
                         <span className="text-[#15803d]">
                           $0.00{' '}
-                          <span className="text-[10px] font-normal text-[var(--ink-secondary)]">
+                          <span className="text-xs font-normal text-[var(--ink-secondary)]">
                             ({t.wizard.localFreeLabel})
                           </span>
                         </span>
@@ -778,7 +848,7 @@ export function NewJobWizard() {
                     <span className="text-[var(--ink-secondary)] shrink-0">
                       {t.wizard.recommendation}
                     </span>
-                    <span className="font-mono text-[#15803d] text-[11px] font-semibold text-right">
+                    <span className="font-mono text-[#15803d] text-xs font-semibold text-right">
                       {assessment.route.recommended_dual_mode} · {assessment.route.recommended_preset}
                       <span className="text-[var(--ink-muted)] font-normal">
                         {' '}
@@ -790,15 +860,17 @@ export function NewJobWizard() {
 
                 {assessment.warnings.length > 0 && (
                   <div className="rounded-[5px] border border-[#b45309]/30 bg-[#b45309]/5 p-2.5 space-y-1">
-                    <div className="text-[10px] font-mono uppercase tracking-wider text-[#b45309] font-semibold">
+                    <div className="text-xs font-mono uppercase tracking-wider text-[#b45309] font-semibold">
                       {t.wizard.probeWarnings} ({assessment.warnings.length})
                     </div>
-                    {assessment.warnings.slice(0, 4).map((warning) => (
-                      <div key={warning.code} className="text-[11px] text-[var(--ink-secondary)]">
-                        <span className="font-mono text-[var(--ink-muted)]">{warning.code}</span> ·{' '}
-                        {warning.detail_zh}
-                      </div>
-                    ))}
+                    <div className="space-y-1 max-h-40 overflow-y-auto">
+                      {assessment.warnings.map((warning) => (
+                        <div key={warning.code} className="text-xs text-[var(--ink-secondary)]">
+                          <span className="font-mono text-[var(--ink-muted)]">{warning.code}</span>{' '}
+                          · {warningText(warning, t)}
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>

@@ -39,10 +39,18 @@ function deliverableLabel(key: string, fallback: string, t: ReturnType<typeof us
   switch (key) {
     case 'primary':
       return t.quality.targetPdf
+    case 'secondary':
+      return t.quality.secondaryDoc
     case 'epub':
       return t.quality.epub
     case 'contract':
       return t.quality.contractJson
+    case 'quality_report':
+      return t.quality.qualityReportJson
+    case 'visual_report':
+      return t.quality.visualReportJson
+    case 'metrics':
+      return t.quality.metricsJson
     default:
       return fallback
   }
@@ -189,8 +197,16 @@ export function QualityGateView() {
   const config = report?.config_snapshot ?? {}
 
   const failedBlocks = summary.failed_blocks ?? 0
-  const unsuitable = report?.delivery_status === 'UNSUITABLE_FOR_DELIVERY'
-  const isPassed = !unsuitable && failedBlocks === 0
+  // ``delivery_status`` is set by the export stage's layout advisory whenever a
+  // formula-dense document is composed through the source-canvas overlay engine
+  // (ubt/core/engine/stages/advisory.py). It is an *advisory*, not a gate stop:
+  // the only literal the engine ever writes is the LAYOUT_TRADEOFF_ADVISORY
+  // string, so the screen must surface whatever status/warning the report
+  // carries rather than testing for a sentinel the engine never produces.
+  // The gate decision itself stays what it always was — failed blocks.
+  const deliveryStatus: string | null = report?.delivery_status ?? null
+  const deliveryWarning: string | null = report?.delivery_warning ?? null
+  const isPassed = failedBlocks === 0
   const fidelityScore = Math.round((summary.pass_rate ?? 0) * 1000) / 10
 
   const pct = (value: number | undefined, digits = 1) =>
@@ -220,25 +236,25 @@ export function QualityGateView() {
       status: (placeholder.corrupt_spans ?? 0) > 0 ? 'fail' : 'pass',
       score: clampScore(placeholder.retention_rate),
       detail: (
-        <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-[11px] font-mono">
+        <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs font-mono">
           <div className="flex justify-between">
-            <dt className="text-[var(--ink-muted)]">masked_spans</dt>
+            <dt className="text-[var(--ink-muted)]">{t.quality.metricMaskedSpans}</dt>
             <dd>{placeholder.masked_spans ?? 0}</dd>
           </div>
           <div className="flex justify-between">
-            <dt className="text-[var(--ink-muted)]">corrupt_spans</dt>
+            <dt className="text-[var(--ink-muted)]">{t.quality.metricCorruptSpans}</dt>
             <dd>{placeholder.corrupt_spans ?? 0}</dd>
           </div>
           <div className="flex justify-between">
-            <dt className="text-[var(--ink-muted)]">masked_blocks</dt>
+            <dt className="text-[var(--ink-muted)]">{t.quality.metricMaskedBlocks}</dt>
             <dd>{placeholder.masked_blocks ?? 0}</dd>
           </div>
           <div className="flex justify-between">
-            <dt className="text-[var(--ink-muted)]">corrupt_blocks</dt>
+            <dt className="text-[var(--ink-muted)]">{t.quality.metricCorruptBlocks}</dt>
             <dd>{placeholder.corrupt_blocks ?? 0}</dd>
           </div>
           <div className="flex justify-between">
-            <dt className="text-[var(--ink-muted)]">formula_blocks</dt>
+            <dt className="text-[var(--ink-muted)]">{t.quality.metricFormulaBlocks}</dt>
             <dd>{report?.formula_blocks ?? 0}</dd>
           </div>
         </dl>
@@ -252,13 +268,13 @@ export function QualityGateView() {
       score: clampScore(terminology.term_recall),
       detail:
         topDrifted.length === 0 ? (
-          <div className="text-[11px] text-[var(--ink-muted)]">{t.quality.noDrift}</div>
+          <div className="text-xs text-[var(--ink-muted)]">{t.quality.noDrift}</div>
         ) : (
           <div className="space-y-1.5">
-            <div className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
+            <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
               {t.quality.termDriftTitle}
             </div>
-            <table className="w-full text-[11px] text-left font-mono">
+            <table className="w-full text-xs text-left font-mono">
               <thead className="text-[var(--ink-muted)]">
                 <tr>
                   <th className="py-1 pr-3 font-semibold">{t.quality.colTerm}</th>
@@ -302,14 +318,14 @@ export function QualityGateView() {
       detail: (
         <div className="space-y-2">
           {visualFindings.length === 0 ? (
-            <div className="text-[11px] text-[var(--ink-muted)]">{t.quality.noVisualFindings}</div>
+            <div className="text-xs text-[var(--ink-muted)]">{t.quality.noVisualFindings}</div>
           ) : (
             <>
-              <div className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
+              <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
                 {t.quality.visualFindingsTitle}
               </div>
-              <ul className="space-y-1 text-[11px]">
-                {visualFindings.slice(0, 8).map((finding, index) => (
+              <ul className="space-y-1 text-xs max-h-56 overflow-y-auto">
+                {visualFindings.map((finding, index) => (
                   <li key={index} className="flex gap-2">
                     <span className="font-mono text-[var(--ink-muted)] shrink-0">
                       {finding.page != null ? `P${finding.page}` : '—'}
@@ -324,21 +340,21 @@ export function QualityGateView() {
             </>
           )}
           {flaggedPages.length > 0 && (
-            <div className="grid grid-cols-4 gap-2 pt-1">
-              {flaggedPages.slice(0, 8).map((page) => (
+            <div className="grid grid-cols-4 gap-2 pt-1 max-h-72 overflow-y-auto">
+              {flaggedPages.map((page) => (
                 <div
                   key={page}
                   className="rounded-[4px] border border-[var(--paper-border)] overflow-hidden bg-white"
                 >
                   <img
                     src={pagePreviewUrl(jobId, page, { dpi: 70 })}
-                    alt={`Page ${page}`}
+                    alt={t.quality.pageAlt.replace('{n}', String(page))}
                     className="w-full h-24 object-contain"
                     onError={(e) => {
                       e.currentTarget.style.display = 'none'
                     }}
                   />
-                  <div className="text-center text-[10px] font-mono text-[var(--ink-muted)] py-0.5 border-t border-[var(--paper-border)]">
+                  <div className="text-center text-xs font-mono text-[var(--ink-muted)] py-0.5 border-t border-[var(--paper-border)]">
                     P{page}
                   </div>
                 </div>
@@ -355,7 +371,7 @@ export function QualityGateView() {
       status: (coverage.fail_closed_blocks ?? 0) > 0 ? 'fail' : 'pass',
       score: clampScore(coverage.render_coverage),
       detail: (
-        <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-[11px] font-mono">
+        <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs font-mono">
           {[
             ['rendered_blocks', coverage.rendered_blocks ?? 0],
             ['skipped_blocks', coverage.skipped_blocks ?? 0],
@@ -380,7 +396,7 @@ export function QualityGateView() {
       status: 'pass',
       score: 100,
       detail: (
-        <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-[11px] font-mono">
+        <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs font-mono">
           {[
             [t.quality.auditDraftModel, config.draft_model ?? '—'],
             [t.quality.auditRepairModel, config.repair_model ?? '—'],
@@ -441,6 +457,23 @@ export function QualityGateView() {
         </div>
       )}
 
+      {/* Delivery advisory (layout tradeoff on formula-dense documents). The
+          engine writes this on every overlay render of a formula-dense book, so
+          the operator must see the tradeoff before trusting the artifact. */}
+      {deliveryStatus && (
+        <div className="p-3 rounded-lg border border-[#b45309]/30 bg-[#b45309]/5 text-xs flex items-start gap-2">
+          <AlertTriangle className="h-4 w-4 text-[#b45309] shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <div className="font-mono uppercase tracking-wider text-xs font-semibold text-[#b45309]">
+              {t.quality.deliveryAdvisory}
+            </div>
+            <p className="text-[var(--ink-secondary)] leading-relaxed">
+              {deliveryWarning ?? deliveryStatus}
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Decision Banner + Radar */}
       <div className="p-5 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] flex items-center justify-between gap-6 shadow-2xs">
         <div className="flex items-center gap-3.5">
@@ -463,7 +496,7 @@ export function QualityGateView() {
             <p className="text-xs text-[var(--ink-secondary)] mt-0.5">
               {isPassed ? t.quality.allPassedDesc : t.quality.blockedDesc}
             </p>
-            <div className="text-[10px] font-mono text-[var(--ink-muted)] mt-1.5">
+            <div className="text-xs font-mono text-[var(--ink-muted)] mt-1.5">
               pass rate {pct(summary.pass_rate)} · avg QE {Number(score.avg_qe ?? 0).toFixed(3)}
             </div>
           </div>
@@ -471,7 +504,7 @@ export function QualityGateView() {
 
         <div className="flex items-center gap-4">
           <div className="text-right">
-            <div className="text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
+            <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
               {t.quality.fidelityScore}
             </div>
             <div className="text-2xl font-bold font-mono text-[var(--ink-primary)] mt-0.5">
@@ -485,7 +518,7 @@ export function QualityGateView() {
 
       {/* Formal Verification Checklist */}
       <div className="rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] overflow-hidden shadow-2xs">
-        <div className="px-4 py-2.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] text-[10px] font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
+        <div className="px-4 py-2.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
           FORMAL VERIFICATION GATEWAYS (5 PILLARS)
         </div>
         <div className="divide-y divide-[var(--paper-border)]">
@@ -493,7 +526,7 @@ export function QualityGateView() {
             <div key={idx}>
               <button
                 onClick={() => setExpanded(expanded === idx ? null : idx)}
-                className="w-full p-4 flex items-center justify-between hover:bg-[var(--paper-subsurface)]/60 transition-colors text-left"
+                className="w-full p-4 flex items-center justify-between hover:bg-[var(--paper-subsurface)] transition-colors text-left"
               >
                 <div className="flex items-start gap-2.5">
                   {expanded === idx ? (
@@ -505,7 +538,7 @@ export function QualityGateView() {
                     <div className="text-xs font-semibold text-[var(--ink-primary)]">
                       {item.title}
                     </div>
-                    <div className="text-[11px] text-[var(--ink-secondary)] mt-0.5 leading-relaxed">
+                    <div className="text-xs text-[var(--ink-secondary)] mt-0.5 leading-relaxed">
                       {item.desc}
                     </div>
                   </div>
@@ -533,14 +566,14 @@ export function QualityGateView() {
           <h3 className="text-xs font-bold text-[var(--ink-primary)] tracking-tight">
             {t.quality.deliverablesTitle}
           </h3>
-          <p className="text-[11px] text-[var(--ink-secondary)] mt-0.5">
+          <p className="text-xs text-[var(--ink-secondary)] mt-0.5">
             {t.quality.deliverablesSubtitle}
           </p>
         </div>
 
         {deliverables.length === 0 ? (
           <div className="text-xs text-[var(--ink-muted)] py-2">
-            No deliverables are available for this job yet.
+            {t.quality.noDeliverables}
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3">

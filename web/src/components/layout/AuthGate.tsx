@@ -87,22 +87,22 @@ export function AuthGate({ children }: AuthGateProps) {
       <div className="flex h-screen items-center justify-center bg-[color:var(--paper-bg)] p-6">
         <form
           onSubmit={submit}
-          className="w-full max-w-md rounded-xl border border-[color:var(--rule)] bg-[color:var(--paper-raised)] p-8 shadow-sm"
+          className="w-full max-w-md rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] p-8 shadow-2xs"
         >
           <div className="mb-4 flex items-center gap-3">
-            <ShieldAlert className="h-6 w-6 text-[color:var(--accent)]" />
-            <h1 className="font-serif text-lg font-semibold text-[color:var(--ink)]">
+            <ShieldAlert className="h-6 w-6 text-[var(--ink-amber)]" />
+            <h1 className="text-lg font-semibold tracking-tight text-[var(--ink-primary)]">
               {t.doctor.auth.title}
             </h1>
           </div>
-          <p className="mb-6 text-sm text-[color:var(--ink-muted)]">{t.doctor.auth.subtitle}</p>
+          <p className="mb-6 text-sm text-[var(--ink-secondary)]">{t.doctor.auth.subtitle}</p>
           <label
             htmlFor="ubt-api-key"
-            className="mb-1 block text-xs font-medium uppercase tracking-wide text-[color:var(--ink-muted)]"
+            className="mb-1 block text-xs font-medium uppercase tracking-wide text-[var(--ink-muted)]"
           >
             {t.doctor.auth.keyLabel}
           </label>
-          <div className="mb-4 flex items-center gap-2 rounded-lg border border-[color:var(--rule)] bg-[color:var(--paper-bg)] px-3">
+          <div className="mb-4 flex items-center gap-2 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-bg)] px-3">
             <KeyRound className="h-4 w-4 shrink-0 text-[color:var(--ink-muted)]" />
             <input
               id="ubt-api-key"
@@ -112,14 +112,14 @@ export function AuthGate({ children }: AuthGateProps) {
               value={key}
               onChange={(event) => setKey(event.target.value)}
               placeholder={t.doctor.auth.keyPlaceholder}
-              className="w-full bg-transparent py-2 text-sm text-[color:var(--ink)] outline-none"
+              className="w-full bg-transparent py-2 text-sm text-[var(--ink-primary)] outline-none"
             />
           </div>
-          {failed && <p className="mb-4 text-sm text-red-600">{t.doctor.auth.failed}</p>}
+          {failed && <p className="mb-4 text-sm text-[var(--ink-rose)]">{t.doctor.auth.failed}</p>}
           <button
             type="submit"
             disabled={busy || !key.trim()}
-            className="flex w-full items-center justify-center gap-2 rounded-lg bg-[color:var(--accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+            className="flex w-full items-center justify-center gap-2 rounded-[5px] bg-[var(--btn-bg)] px-4 py-2 text-sm font-semibold text-[var(--btn-fg)] transition-colors hover:bg-[var(--btn-hover)] disabled:opacity-50"
           >
             {busy && <Loader2 className="h-4 w-4 animate-spin" />}
             {busy ? t.doctor.auth.checking : t.doctor.auth.signIn}

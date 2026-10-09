@@ -353,13 +353,19 @@ class AssessRuntime(BaseModel):
 
 
 class AssessWarning(BaseModel):
-    """One degraded probe: a stable machine code plus Chinese human copy."""
+    """One degraded probe: a stable machine code plus Chinese human copy.
+
+    ``params`` carries the values interpolated into ``detail_zh`` so a
+    non-Chinese console can render the warning from its own catalogue; it falls
+    back to ``detail_zh`` for a code it does not know.
+    """
 
     model_config = ConfigDict(extra="ignore")
 
     code: str
     level: str
     detail_zh: str
+    params: dict[str, Any] = Field(default_factory=dict)
 
 
 class JobAssessResponse(BaseModel):
@@ -417,6 +423,7 @@ class SystemInfoResponse(BaseModel):
 
     version: str
     host: str = Field(description="Host this request reached (client-visible)")
+    port: int | None = Field(default=None, description="Port this request reached (client-visible)")
     is_loopback: bool = Field(description="True when the request arrived on a loopback host")
     auth_enabled: bool = Field(description="True when an API key gate is configured")
     allowed_bases: list[str] = Field(description="Filesystem roots the server will read/write")

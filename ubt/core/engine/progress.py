@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -25,6 +25,41 @@ if TYPE_CHECKING:
 # Fields that only exist once a render has named them, as opposed to the
 # counters, which every row reports from the first event.
 ARTIFACT_KEYS = ("output_file", "report_file", "visual_report_file")
+
+#: Pipeline stage vocabulary, coarse enough to be one stepper in the console and
+#: stable enough to be an on-disk contract (the value lands in ``progress_json``).
+PipelineStage = Literal[
+    "extract",
+    "segment",
+    "tm",
+    "translate",
+    "qe",
+    "repair",
+    "render",
+    "verify",
+    "package",
+]
+
+#: Event -> stage. The engine's event vocabulary is finer than the console's
+#: stepper (C-track, chapter streaming and triage all report as their nearest
+#: step), so the console can highlight a real pipeline position instead of
+#: guessing one from ``progress_percent`` thresholds — a guess that marked
+#: "Typst" as active for a job still in repair, because both sit past 75%.
+_STAGE_BY_EVENT: dict[EventType, PipelineStage] = {
+    EventType.JOB_STARTED: "extract",
+    EventType.PREPROCESSING_DONE: "segment",
+    EventType.BIBLE_EXTRACTED: "tm",
+    EventType.MODE_ADVISED: "segment",
+    EventType.DRAFT_BATCH_COMPLETED: "translate",
+    EventType.CTEXT_COMPLETED: "translate",
+    EventType.CHAPTER_COMPLETED: "translate",
+    EventType.MTQE_EVALUATED: "qe",
+    EventType.REPAIR_BATCH_COMPLETED: "repair",
+    EventType.TRIAGE_COMPLETED: "verify",
+    EventType.EXPORT_COMPLETED: "package",
+}
+
+_PIPELINE_STAGES: frozenset[str] = frozenset(_STAGE_BY_EVENT.values())
 
 
 def _processed_blocks(completed: int, failed: int, needs_human: int, blocked_human: int) -> int:
@@ -79,6 +114,15 @@ class ProgressSnapshot(BaseModel):
     # None means "no usage reported yet", never a fabricated zero: a polling
     # client reads 0.0 as "confirmed no spend".
     estimated_cost_usd: float | None = None
+    #: The pipeline step the last event reported, or ``None`` before the first
+    #: event. Derived from the engine's own event type (``_STAGE_BY_EVENT``),
+    #: not from ``progress_percent``: the console highlights a real stage.
+    stage: PipelineStage | None = None
+    #: The last event's human-readable message. A progress *log* line, kept for
+    #: the console's stream drawer. Path-bearing messages (export naming its
+    #: artifact) are dropped here — the wire form must not leak host layout; the
+    #: artifact keys above carry the basename instead.
+    message: str | None = None
     output_file: str | None = None
     report_file: str | None = None
     visual_report_file: str | None = None
@@ -104,6 +148,12 @@ class ProgressSnapshot(BaseModel):
             event.needs_human_blocks,
             event.blocked_human_blocks,
         )
+        # EXPORT_COMPLETED's message names the output path; the console gets the
+        # basename through ``output_file`` instead, so the raw text is dropped
+        # rather than forwarded to the wire.
+        message = (
+            None if event.event_type is EventType.EXPORT_COMPLETED else (event.message or None)
+        )
         return cls(
             total_blocks=event.total_blocks,
             completed_blocks=event.completed_blocks,
@@ -116,6 +166,8 @@ class ProgressSnapshot(BaseModel):
             current_avg_qe=event.current_avg_qe,
             bottom_15_avg_qe=event.bottom_15_avg_qe,
             estimated_cost_usd=event.estimated_cost_usd,
+            stage=_STAGE_BY_EVENT.get(event.event_type),
+            message=message,
             **files,
         )
 
@@ -140,6 +192,8 @@ class ProgressSnapshot(BaseModel):
         completed = int(stats.get("completed", 0))
         total = int(stats.get("total", 0))
         processed = _processed_blocks(completed, failed, needs_human, blocked_human)
+        stage_raw = meta("stage")
+        stage = stage_raw if stage_raw in _PIPELINE_STAGES else None
         return cls(
             total_blocks=total,
             completed_blocks=completed,
@@ -152,6 +206,8 @@ class ProgressSnapshot(BaseModel):
             current_avg_qe=float(stats.get("avg_qe_score", 0.0)),
             bottom_15_avg_qe=float(stats.get("bottom_15_avg_qe", 0.0)),
             estimated_cost_usd=_as_float(meta("estimated_cost_usd")),
+            stage=stage,
+            message=_as_str(meta("message")),
             output_file=_as_str(meta("output_file")),
             report_file=_as_str(meta("report_file")),
             visual_report_file=_as_str(meta("visual_report_file")),
@@ -200,8 +256,9 @@ def persist_progress_metadata(
     from ubt.core.engine.ledger import SQLiteJobLedger
 
     progress = ProgressSnapshot.from_event(event)
+    persisted_keys = (*ARTIFACT_KEYS, "estimated_cost_usd", "stage", "message")
     if isinstance(ledger_or_path, SQLiteJobLedger):
-        for metadata_key in (*ARTIFACT_KEYS, "estimated_cost_usd"):
+        for metadata_key in persisted_keys:
             value = getattr(progress, metadata_key)
             if value is not None:
                 ledger_or_path.set_job_metadata_value(job_id, metadata_key, value)
@@ -211,7 +268,7 @@ def persist_progress_metadata(
     if not ledger_path.exists():
         return
     with SQLiteJobLedger(ledger_path) as ldg:
-        for metadata_key in (*ARTIFACT_KEYS, "estimated_cost_usd"):
+        for metadata_key in persisted_keys:
             value = getattr(progress, metadata_key)
             if value is not None:
                 ldg.set_job_metadata_value(job_id, metadata_key, value)
