@@ -4,11 +4,9 @@
 """
 
 from ubt.adapters.pdf.alternator import BilingualAlternator
-from ubt.adapters.pdf.diagram_localizer import DiagramLocalizer
 from ubt.adapters.pdf.docling_adapter import DoclingPDFAdapter
 
 __all__ = [
-    "DiagramLocalizer",
     "DoclingPDFAdapter",
     "BilingualAlternator",
 ]

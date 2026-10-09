@@ -26,7 +26,6 @@ from typing import TYPE_CHECKING, Any
 
 from ubt.adapters.base import BasePDFEngineAdapter
 from ubt.adapters.pdf.alternator import BilingualAlternator
-from ubt.adapters.pdf.diagram_localizer import DiagramLocalizer
 from ubt.adapters.pdf.docling_parser import (
     annotate_page_kinds,
     extract_with_docling,
@@ -90,7 +89,6 @@ class _PDFRenderStackMixin:
     """
 
     alternator: BilingualAlternator
-    diagram_localizer: DiagramLocalizer
     last_render_skips: list[tuple[str, str]]
     last_render_flags: list[tuple[str, str]]
     last_render_outcome: RenderOutcome | None
@@ -100,11 +98,9 @@ class _PDFRenderStackMixin:
     def _init_render_stack(
         self,
         alternator: BilingualAlternator | None = None,
-        diagram_localizer: DiagramLocalizer | None = None,
         font_family: str | None = None,
     ) -> None:
         self.alternator = alternator or BilingualAlternator()
-        self.diagram_localizer = diagram_localizer or DiagramLocalizer()
         self.allow_page_upload = False
         self._font_family = None
         self.last_render_skips = []
@@ -112,7 +108,6 @@ class _PDFRenderStackMixin:
         self.last_render_outcome = None
         self._renderer = DoclingRenderStrategy(
             alternator=self.alternator,
-            diagram_localizer=self.diagram_localizer,
             font_family=None,
         )
         self.font_family = font_family
@@ -167,7 +162,6 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
     def __init__(
         self,
         alternator: BilingualAlternator | None = None,
-        diagram_localizer: DiagramLocalizer | None = None,
         ocr_mode: str = "auto",
         ocr_endpoint: str | None = None,
         ocr_api_key: str | None = None,
@@ -177,7 +171,7 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
         font_family: str | None = None,
         allow_page_upload: bool = False,
     ) -> None:
-        self._init_render_stack(alternator, diagram_localizer, font_family)
+        self._init_render_stack(alternator, font_family)
         self.ocr_mode = ocr_mode
         self.ocr_endpoint = ocr_endpoint
         self.ocr_api_key = ocr_api_key

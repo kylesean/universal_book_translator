@@ -36,7 +36,7 @@ def subprocess_env() -> dict[str, str]:
     """``os.environ`` minus credential-shaped variables.
 
     The external binaries this project drives (typst, pandoc,
-    pdftocairo, the COMET scorer) inherit the full environment today, keys
+    pdftotext, the COMET scorer) inherit the full environment today, keys
     included, so a poisoned dependency or toolchain plugin can read the LLM
     credentials the parent holds, preventing credential leakage to
     untrusted child processes or plugin toolchains.

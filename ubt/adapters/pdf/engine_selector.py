@@ -69,7 +69,6 @@ class PDFRoutePlan:
     has_vector_diagrams: bool
     has_formulas: bool
     has_multicolumn: bool
-    diagram_strategy: str
     page_plans: tuple[PageIngestPlan, ...] = ()
 
 
@@ -139,7 +138,7 @@ def inspect_pdf_route_plan(
     Decouples narrative prose routing from specialized component routing:
     - Pure single-column born-digital text routes to the fast pdfium backend;
     - Formula-dense pages or multi-column layouts route to docling;
-    - Vector-heavy diagram pages trigger SVG mask backfill strategy.
+    - Vector-heavy diagram pages are reported via ``has_vector_diagrams``.
 
     ``page_plans`` is opt-in because building it profiles *every* page, while the
     probe above samples only a handful — and nothing in production reads the
@@ -151,7 +150,6 @@ def inspect_pdf_route_plan(
         has_vector_diagrams=False,
         has_formulas=False,
         has_multicolumn=False,
-        diagram_strategy="none",
         page_plans=(),
     )
     try:
@@ -238,7 +236,6 @@ def inspect_pdf_route_plan(
                 has_vector_diagrams=has_vector_diagrams,
                 has_formulas=has_formulas,
                 has_multicolumn=has_multicolumn,
-                diagram_strategy="svg_mask_backfill" if has_vector_diagrams else "none",
                 page_plans=page_plans,
             )
         finally:

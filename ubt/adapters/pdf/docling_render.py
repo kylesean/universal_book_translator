@@ -2,8 +2,8 @@
 
 Turns translated ``IRBlock``s into a delivered artifact: Markdown export,
 three-layer absolute composition via LayerCompositor, and alternating/facing
-bilingual interleaving. Holds only delivery collaborators (alternator, diagram localizer,
-font family), so the adapter can construct it once and forward ``render_blocks`` to it.
+bilingual interleaving. Holds only delivery collaborators (alternator, font
+family), so the adapter can construct it once and forward ``render_blocks`` to it.
 """
 
 from __future__ import annotations
@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ubt.adapters.pdf.alternator import BilingualAlternator
-from ubt.adapters.pdf.diagram_localizer import DiagramLocalizer
 from ubt.adapters.pdf.typst_compile import typst_version
 from ubt.core.config import PAGE_BILINGUAL_MODES
 from ubt.core.exceptions import DocumentParseError
@@ -73,11 +72,9 @@ class DoclingRenderStrategy:
         self,
         *,
         alternator: BilingualAlternator | None = None,
-        diagram_localizer: DiagramLocalizer | None = None,
         font_family: str | None = None,
     ) -> None:
         self.alternator = alternator or BilingualAlternator()
-        self.diagram_localizer = diagram_localizer or DiagramLocalizer()
         self.font_family = font_family
         # Render skip side channel: plain (block_id, reason) pairs
         # from the most recent render_blocks call. Reset every render.

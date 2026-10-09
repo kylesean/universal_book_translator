@@ -682,9 +682,9 @@ def collect_checks(config: UBTConfig, *, probe: bool = False) -> list[_Check]:
     except ImportError:
         record("CJK fonts (render)", "SKIP", "font probe module unavailable")
 
-    poppler_missing = [b for b in ("pdftotext", "pdftocairo") if shutil.which(b) is None]
+    poppler_missing = [b for b in ("pdftotext",) if shutil.which(b) is None]
     if not poppler_missing:
-        record("Poppler", "OK", "pdftotext + pdftocairo available")
+        record("Poppler", "OK", "pdftotext available")
     else:
         record(
             "Poppler",
@@ -702,15 +702,6 @@ def collect_checks(config: UBTConfig, *, probe: bool = False) -> list[_Check]:
             "FAIL",
             "pdf_oxide is a base dependency but not importable \u2014 pixel gates dead",
             fix="reinstall the project environment (uv sync)",
-        )
-    if shutil.which("pdftocairo") is not None and shutil.which("pdftotext") is not None:
-        record("Diagram SVG", "OK", "pdftocairo vector route available")
-    else:
-        record(
-            "Diagram SVG",
-            "WARN",
-            "vector SVG unavailable \u2014 diagrams fall back to raster PNG",
-            fix="install poppler-utils for the vector route",
         )
     if importlib.util.find_spec("PIL") is not None:
         record("Pillow", "OK", "pixel heuristics available")
