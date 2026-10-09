@@ -87,7 +87,7 @@ def test_phantom_block_with_no_physical_lines_is_sunk_to_opaque() -> None:
     demoted = result[0]
     assert demoted.skip_translate is True
     assert demoted.element.confidence is Confidence.UNKNOWN
-    assert "no_physical_lines" in demoted.provenance.get("iou_crosscheck", "")
+    assert "no_physical_lines" in (demoted.provenance.iou_crosscheck or "")
 
 
 def test_low_iou_displaced_box_is_sunk_to_opaque() -> None:
@@ -109,7 +109,7 @@ def test_low_iou_displaced_box_is_sunk_to_opaque() -> None:
     demoted = result[0]
     assert demoted.skip_translate is True
     assert demoted.element.confidence is Confidence.UNKNOWN
-    assert "iou=" in demoted.provenance.get("iou_crosscheck", "")
+    assert "iou=" in (demoted.provenance.iou_crosscheck or "")
 
 
 def test_scanned_textless_pages_skip_crosscheck() -> None:

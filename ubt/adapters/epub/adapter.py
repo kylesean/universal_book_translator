@@ -1100,7 +1100,7 @@ class EPUBAdapter(BaseDocumentAdapter):
 
             candidates.setdefault(chapter.source_file, []).append((b.spine_index, cleaned))
 
-            html_id = b.provenance.get("html_id")
+            html_id = b.provenance.html_id
             if html_id:
                 result[f"{chapter.source_file}#{html_id}"] = cleaned
 

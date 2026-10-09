@@ -84,7 +84,7 @@ def test_repair_math_symbols_with_lines_end_to_end() -> None:
         blocks = repair_math_symbols_with_lines([block], Path("/dummy/book.pdf"))
 
     assert blocks[0].source_text == "17 mod 5 = 2, because 17 = 3 · 5 + 2."
-    assert blocks[0].provenance.get("math_symbol_repair") == "pdfium-line-witness"
+    assert blocks[0].provenance.math_symbol_repair == "pdfium-line-witness"
 
 
 def test_math_symbol_repair_unlocks_space_repair() -> None:

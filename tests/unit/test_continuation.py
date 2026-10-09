@@ -250,7 +250,7 @@ def test_fuse_continuation_blocks_creates_composite_span() -> None:
     assert isinstance(fused.element.span, CompositeSpan)
     assert len(fused.element.span.boxes) == 2
     assert [b.page for b in fused.element.span.boxes] == [1, 2]
-    assert fused.provenance.get("fused_block_ids") == ["b1", "b2"]
+    assert fused.provenance.fused_block_ids == ["b1", "b2"]
 
 
 def test_fused_span_survives_the_ledger_round_trip() -> None:
@@ -268,7 +268,7 @@ def test_fused_span_survives_the_ledger_round_trip() -> None:
     first = _block("b1", "The machine relies on attention", page=1, spine=1)
     second = _block("b2", "and runs a forward pass.", page=2, spine=2)
     fused = fuse_continuation_blocks([first, second])[0]
-    assert [box["page"] for box in fused.provenance["physical_boxes"]] == [1, 2]
+    assert [box["page"] for box in fused.provenance.physical_boxes] == [1, 2]
 
     ledger = SQLiteJobLedger(Path(tempfile.mkdtemp()) / "l.sqlite")
     with ledger._get_conn() as conn:

@@ -1,7 +1,7 @@
 """The box-chain provenance round-trip: write and read must agree.
 
 An element spanning several physical boxes (a paragraph crossing a page break)
-serializes its chain into ``block.provenance["physical_boxes"]`` for the ledger,
+serializes its chain into ``block.provenance.physical_boxes`` for the ledger,
 which cannot store the typed ``CompositeSpan``. The shape was hand-rolled in
 three writers and one reader; a typo in any of them silently collapsed the chain
 to the element's first box on reload, squeezing a whole translation into one

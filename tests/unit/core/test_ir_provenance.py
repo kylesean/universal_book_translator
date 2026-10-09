@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, MutableMapping
 
 import pytest
 
@@ -39,73 +38,24 @@ def test_block_provenance_field_typing() -> None:
     assert prov.bifurcation_index == 1
 
 
-def test_block_provenance_mapping_protocol() -> None:
+def test_block_provenance_model_copy() -> None:
     prov = BlockProvenance(is_bold=True, font_size=14.0)
+    updated = prov.model_copy(update={"is_italic": True, "font_size": 16.0})
 
-    # Virtual subclass of Mapping / MutableMapping
-    assert isinstance(prov, Mapping)
-    assert isinstance(prov, MutableMapping)
-
-    # Bracket indexing
-    assert prov["is_bold"] is True
-    assert prov["font_size"] == 14.0
-    assert prov["toc_entry"] is None
-
-    # Membership
-    assert "is_bold" in prov
-    assert "font_size" in prov
-    assert "toc_entry" not in prov
-    assert "nonexistent" not in prov
-
-    # .get()
-    assert prov.get("is_bold") is True
-    assert prov.get("toc_entry") is None
-    assert prov.get("nonexistent", "fallback") == "fallback"
-
-    # Mutation via bracket
-    prov["is_italic"] = True
-    assert prov.is_italic is True
-    assert "is_italic" in prov
-
-    # Deletion
-    del prov["is_italic"]
+    assert updated.is_bold is True
+    assert updated.is_italic is True
+    assert updated.font_size == 16.0
+    # Original is untouched
     assert prov.is_italic is None
-    assert "is_italic" not in prov
+    assert prov.font_size == 14.0
 
 
 def test_block_provenance_extra_fields() -> None:
     prov = BlockProvenance.model_validate({"custom_prop": "value_1"})
-    assert prov["custom_prop"] == "value_1"
-    assert "custom_prop" in prov
-    assert prov.get("custom_prop") == "value_1"
+    assert getattr(prov, "custom_prop") == "value_1"  # noqa: B009
 
-    prov["dynamic_prop"] = 999
-    assert prov["dynamic_prop"] == 999
-    assert prov.to_dict()["dynamic_prop"] == 999
-
-    del prov["dynamic_prop"]
-    assert "dynamic_prop" not in prov
-
-
-def test_block_provenance_dict_unpacking_and_equality() -> None:
-    prov = BlockProvenance(is_bold=True, font_size=11.0)
-    prov["extra_key"] = "extra_val"
-
-    # Dict unpacking
-    unpacked = {**prov, "added": 1}
-    assert unpacked == {
-        "is_bold": True,
-        "font_size": 11.0,
-        "extra_key": "extra_val",
-        "added": 1,
-    }
-
-    # Equality with dict
-    assert prov == {
-        "is_bold": True,
-        "font_size": 11.0,
-        "extra_key": "extra_val",
-    }
+    dumped = prov.model_dump(exclude_none=True)
+    assert dumped["custom_prop"] == "value_1"
 
 
 def test_ir_block_provenance_coercion() -> None:
@@ -126,7 +76,12 @@ def test_ir_block_provenance_coercion() -> None:
     # Assignment with None falls back to empty BlockProvenance
     block1.provenance = None  # type: ignore[assignment]
     assert isinstance(block1.provenance, BlockProvenance)
-    assert block1.provenance.to_dict() == {}
+    assert block1.provenance.model_dump(exclude_none=True) == {
+        "physical_boxes": [],
+        "fused_sources": [],
+        "fused_block_ids": [],
+        "vlm_lines": [],
+    }
 
 
 def test_block_provenance_json_roundtrip() -> None:
@@ -134,7 +89,7 @@ def test_block_provenance_json_roundtrip() -> None:
         physical_boxes=[{"page": 1, "bbox": [10.0, 20.0, 30.0, 40.0]}],
         is_bold=True,
     )
-    serialized = json.dumps(prov.to_dict())
+    serialized = json.dumps(prov.model_dump(exclude_none=True))
     deserialized_data = json.loads(serialized)
     restored = BlockProvenance(**deserialized_data)
     assert restored.is_bold is True

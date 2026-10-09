@@ -105,7 +105,9 @@ def _upsert_blocks_batch(cursor: sqlite3.Cursor, job_id: str, blocks: Sequence[I
             (1 if b.policy_translate else 0) if b.policy_translate is not None else None,
             b.policy_reason,
             json.dumps(
-                b.provenance.to_dict() if hasattr(b.provenance, "to_dict") else b.provenance,
+                b.provenance.model_dump(exclude_none=True)
+                if hasattr(b.provenance, "model_dump")
+                else b.provenance,
                 ensure_ascii=False,
             ),
             b.mqm_severity,

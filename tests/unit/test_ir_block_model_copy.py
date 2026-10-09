@@ -89,15 +89,16 @@ def test_ir_block_model_copy_isolates_mutable_state() -> None:
     el = make_element(id="b1", spine_index=1, block_type=BlockType.NARRATIVE, source_text="Hi")
     block = IRBlock(element=el)
     block.error_flags.append("orig")
-    block.provenance["k"] = "v"
+    block.provenance.parser = "v"
 
     copied = block.model_copy(update={"target_text": "你好"})
     assert copied.error_flags is not block.error_flags
     assert copied.provenance is not block.provenance
     copied.error_flags.append("added_on_copy")
-    copied.provenance["k2"] = "v2"
+    copied.provenance.parser = "v2"
     assert block.error_flags == ["orig"]
-    assert block.provenance == {"k": "v"}
+    assert block.provenance.parser == "v"
+    assert copied.provenance.parser == "v2"
 
 
 def test_ir_block_from_element_factories() -> None:

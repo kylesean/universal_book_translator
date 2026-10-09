@@ -243,9 +243,9 @@ async def run_quality_gate_stage(
             # Dual-witness agreement boost (+0.05) when matched and no review needed.
             # Disagreement (needs_review or high vlm_only discrepancy) routes to REPAIR_PENDING.
             prov = b.provenance
-            anchor_prov = str(prov.get("anchor_provenance", ""))
-            needs_review = bool(prov.get("needs_review", False))
-            stats = prov.get("anchor_stats")
+            anchor_prov = str(prov.anchor_provenance or "")
+            needs_review = bool(prov.needs_review)
+            stats = prov.anchor_stats
             if isinstance(stats, dict):
                 matched = stats.get("matched", 0)
                 vlm_only = stats.get("vlm_only", 0)

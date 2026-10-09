@@ -141,7 +141,12 @@ def synthetic_vlm_lines(blocks: Sequence[IRBlock] | None) -> list[VlmEvidence]:
     """
     out: list[VlmEvidence] = []
     for block in blocks or []:
-        members = (getattr(block, "provenance", None) or {}).get("vlm_lines") or []
+        prov = getattr(block, "provenance", None)
+        members = (
+            getattr(prov, "vlm_lines", None)
+            or (prov.get("vlm_lines") if isinstance(prov, dict) else None)
+            or []
+        )
         for member in members:
             try:
                 text = str(member.get("text", "")).strip()

@@ -212,7 +212,7 @@ def test_a_multi_line_heading_records_its_line_boxes(monkeypatch: pytest.MonkeyP
     assert out[0].style is not None and out[0].style.alignment == "center"
     # The chain is mirrored into the one provenance key the ledger rebuilds it
     # from; without it the export stage sees a single first-line span.
-    assert [box["bbox"][1] for box in out[0].provenance["physical_boxes"]] == [
+    assert [box["bbox"][1] for box in out[0].provenance.physical_boxes] == [
         pytest.approx(710.0),
         pytest.approx(690.0),
     ]

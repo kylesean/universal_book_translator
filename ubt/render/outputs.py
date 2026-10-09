@@ -2509,11 +2509,11 @@ def overlays_from_blocks(
             blk_style = by_id[block.id].style
             font_size = (blk_style.font_size if blk_style is not None else None) or by_id[
                 block.id
-            ].provenance.get("font_size")
+            ].provenance.font_size
             if font_size is not None and font_size < 4.5:
                 font_size = None
             is_bold = bool(
-                by_id[block.id].provenance.get("is_bold")
+                by_id[block.id].provenance.is_bold
                 or (by_id[block.id].block_type == BlockType.HEADING)
             )
             first = run.boxes[0]
@@ -2534,7 +2534,7 @@ def overlays_from_blocks(
             continue
         if _overlayable(block):
             box = narrow(block.bbox, what=f"overlayable block {block.id!r} bbox")
-            if block.provenance.get("toc_entry"):
+            if block.provenance.toc_entry:
                 # A translated table-of-contents row: the compositor redraws the
                 # leaders and the page number the reader stripped.
                 kind = "toc"
@@ -2573,12 +2573,10 @@ def overlays_from_blocks(
             cur_style = block.style
             font_size = (
                 cur_style.font_size if cur_style is not None else None
-            ) or block.provenance.get("font_size")
+            ) or block.provenance.font_size
             if font_size is not None and font_size < 4.5:
                 font_size = None
-            is_bold = bool(
-                block.provenance.get("is_bold") or (block.block_type == BlockType.HEADING)
-            )
+            is_bold = bool(block.provenance.is_bold or (block.block_type == BlockType.HEADING))
             # A first-line indent is a body-paragraph or list-marker attribute;
             # a heading carries alignment instead — a centered title is
             # re-centered within its box, not indented.
@@ -2600,8 +2598,10 @@ def overlays_from_blocks(
                 boxes=boxes,
                 kind=kind,
                 source=source,
-                toc_page=str(block.provenance.get("toc_page", "")),
-                toc_leaders=bool(block.provenance.get("toc_leaders", True)),
+                toc_page=str(block.provenance.toc_page or ""),
+                toc_leaders=True
+                if block.provenance.toc_leaders is None
+                else bool(block.provenance.toc_leaders),
                 font_size=font_size,
                 is_bold=is_bold,
                 indent_pt=indent_pt,

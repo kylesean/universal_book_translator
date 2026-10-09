@@ -144,7 +144,7 @@ def test_a_letter_spaced_witness_is_not_used(monkeypatch: pytest.MonkeyPatch) ->
     )
     out = repair_missing_spaces_with_lines([block], Path("/does/not/matter.pdf"))
     assert out[0].source_text == "Data Blocks"
-    assert "space_repair" not in out[0].provenance
+    assert out[0].provenance.space_repair is None
 
 
 # -- the driver --------------------------------------------------------------- #
@@ -177,7 +177,7 @@ def test_the_title_is_repaired_from_the_page_lines(monkeypatch: pytest.MonkeyPat
     assert out[0].source_text == (
         "DeepSeek Elastic Compute (DSec): A Sandbox Infrastructure for Effective Agentic Training"
     )
-    assert out[0].provenance["space_repair"] == "pdfium-line-witness"
+    assert out[0].provenance.space_repair == "pdfium-line-witness"
 
 
 def test_a_control_glyph_line_break_is_not_read_as_a_space(

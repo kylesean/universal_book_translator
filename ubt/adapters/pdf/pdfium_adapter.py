@@ -45,9 +45,9 @@ def _block_page_in_range(b: IRBlock, first: int, last: int) -> bool:
     """True when a block's page (from bbox or provenance) falls within [first, last]."""
     if b.bbox is not None:
         return first <= b.bbox.page <= last
-    page = b.provenance.get("page")
+    page = getattr(b.provenance, "page", None)
     if page is None:
-        page = b.provenance.get("source_page")
+        page = b.provenance.source_page
     if isinstance(page, int):
         return first <= page <= last
     if isinstance(page, str) and page.isdigit():
@@ -94,8 +94,8 @@ def extract_blocks_with_pdfium(
             # ledger round-trip and reaches the TOC-aware renderer.
             toc_page = getattr(block.element, "toc_page", "")
             if toc_page:
-                block.provenance["toc_entry"] = True
-                block.provenance["toc_page"] = toc_page
+                block.provenance.toc_entry = True
+                block.provenance.toc_page = toc_page
         return blocks
 
     return cached_blocks(store, path=path, page_range=page_range, compute=_read)

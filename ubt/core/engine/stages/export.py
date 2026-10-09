@@ -28,7 +28,7 @@ from ubt.core.exceptions import (
     JobInterruptedError,
     UBTError,
 )
-from ubt.core.ir.models import BlockProvenance, BlockStatus, BlockType, BookManifest, IRBlock
+from ubt.core.ir.models import BlockStatus, BlockType, BookManifest, IRBlock
 from ubt.core.job_options import RUN_REPORT_KINDS, resolve_target_output, sidecar_path
 from ubt.core.metrics.collect import collect_kpis, save_metrics_report
 from ubt.core.policy.bilingual_advisor import SECONDARY_SUFFIX
@@ -208,8 +208,7 @@ def apply_length_policy_flags(
         fb = by_id.get(block_id)
         if fb is None or fb.skip_translate:
             continue
-        provenance = fb.provenance if isinstance(fb.provenance, (dict, BlockProvenance)) else {}
-        if str(provenance.get("page_kind", "")) not in LENGTH_POLICY_PAGE_KINDS:
+        if str(fb.provenance.page_kind or "") not in LENGTH_POLICY_PAGE_KINDS:
             continue
         reason = next(
             (

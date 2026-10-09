@@ -23,7 +23,6 @@ from dataclasses import dataclass
 from ubt.core.cjk_ranges import is_cjk_wide_char
 from ubt.core.ir.bifurcation import SEMANTIC_BREAK_FLAG
 from ubt.core.ir.models import (
-    BlockProvenance,
     BlockType,
     BoundingBox,
     IRBlock,
@@ -125,7 +124,7 @@ def _candidate(block: IRBlock) -> bool:
     # A block a semantic break split out is *not* a continuation: the break is
     # the decision that the layout parser glued separate passages together.
     # Re-fusing here would undo the bifurcation before the compositor sees it.
-    if SEMANTIC_BREAK_FLAG in block.error_flags or "bifurcated_from" in block.provenance:
+    if SEMANTIC_BREAK_FLAG in block.error_flags or block.provenance.bifurcated_from is not None:
         return False
     # A block that already carries a box *chain* is a complete element (fused at
     # ingest, or rebuilt from ``physical_boxes`` on ledger reload). Re-deriving a
@@ -274,15 +273,16 @@ def fuse_continuation_blocks(blocks: Sequence[IRBlock]) -> list[IRBlock]:
         elem = dataclasses.replace(elem, span=CompositeSpan(boxes=run.boxes))
 
         fused = IRBlock(element=elem)
-        fused.provenance = BlockProvenance(
-            **block.provenance.to_dict(),
-            fused_block_ids=list(run.block_ids),
-            fused_sources=[b.source_text for b in run_blocks],
-            # The box chain must survive the ledger round-trip: ``_row_to_block``
-            # rebuilds the CompositeSpan from ``physical_boxes`` alone, so without
-            # this the fused paragraph comes back as a single first-box overlay and
-            # its whole target is squeezed into one line (a jarring shrink).
-            physical_boxes=boxes_to_provenance(run.boxes),
+        fused.provenance = block.provenance.model_copy(
+            update={
+                "fused_block_ids": list(run.block_ids),
+                "fused_sources": [b.source_text for b in run_blocks],
+                # The box chain must survive the ledger round-trip: ``_row_to_block``
+                # rebuilds the CompositeSpan from ``physical_boxes`` alone, so without
+                # this the fused paragraph comes back as a single first-box overlay and
+                # its whole target is squeezed into one line (a jarring shrink).
+                "physical_boxes": boxes_to_provenance(run.boxes),
+            }
         )
         if joined_target:
             fused.target_text = joined_target

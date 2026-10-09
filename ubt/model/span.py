@@ -106,7 +106,7 @@ def boxes_to_provenance(boxes: Sequence[PhysicalBox]) -> list[dict[str, Any]]:
 
 
 def boxes_from_provenance(raw: object) -> tuple[PhysicalBox, ...]:
-    """Rebuild a box chain from ``provenance["physical_boxes"]`` (empty if absent).
+    """Rebuild a box chain from ``provenance.physical_boxes`` (empty if absent).
 
     Returns an empty tuple for a missing, malformed or single-box value, so the
     caller falls back to the element's own span rather than trusting a partial

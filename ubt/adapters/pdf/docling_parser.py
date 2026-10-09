@@ -661,7 +661,7 @@ def annotate_layout_metadata(blocks: list[IRBlock], pdf_path: Path | None) -> li
                 # holding the *first* line's box: only that line is masked and
                 # the whole translation is squeezed into it, while the rest of
                 # the source heading stays in the source language on the page.
-                block.provenance["physical_boxes"] = boxes_to_provenance(line_boxes)
+                block.provenance.physical_boxes = boxes_to_provenance(line_boxes)
     return blocks
 
 
@@ -1417,7 +1417,7 @@ def annotate_page_kinds(path: Path, blocks: list[IRBlock]) -> dict[int, str]:
     kinds = {p.page_number: p.kind.value for p in plans}
     for b in blocks:
         if b.bbox is not None and b.bbox.page in kinds:
-            b.provenance["page_kind"] = kinds[b.bbox.page]
+            b.provenance.page_kind = kinds[b.bbox.page]
     logger.debug("page kinds for '%s': %s", path.name, kinds)
     return kinds
 
@@ -1545,7 +1545,7 @@ def vlm_fallback_missing_pages(
             if block.bbox is not None:
                 text_covered.add(block.bbox.page)
             else:
-                source_page = block.provenance.get("source_page")
+                source_page = block.provenance.source_page
                 if source_page is not None:
                     text_covered.add(int(source_page))
     with PDFIUM_LOCK:

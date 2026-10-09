@@ -39,7 +39,7 @@ from ubt.adapters.pdf.textgeom import (
     extract_lines,
     styled_runs_in_box,
 )
-from ubt.core.ir.models import BlockProvenance, BlockType, IRBlock
+from ubt.core.ir.models import BlockType, IRBlock
 from ubt.core.policy.layout_policy import CONTROL_RE
 from ubt.model.ast import Confidence
 from ubt.model.span import CompositeSpan, PhysicalBox
@@ -362,7 +362,7 @@ def repair_math_symbols_with_lines(blocks: Sequence[IRBlock], pdf_path: Path) ->
                 repaired[:40],
             )
             block.set_source_text(repaired)
-            block.provenance["math_symbol_repair"] = "pdfium-line-witness"
+            block.provenance.math_symbol_repair = "pdfium-line-witness"
 
     return list(blocks)
 
@@ -450,7 +450,7 @@ def repair_missing_spaces_with_lines(blocks: Sequence[IRBlock], pdf_path: Path) 
             block.id,
         )
         block.set_source_text(repaired)
-        block.provenance["space_repair"] = "pdfium-line-witness"
+        block.provenance.space_repair = "pdfium-line-witness"
 
     return list(blocks)
 
@@ -564,9 +564,8 @@ def cross_check_blocks_with_pdfium(
             demoted = IRBlock(element=fused_elem)
             demoted.skip_translate = True
             demoted.policy_translate = False
-            demoted.provenance = BlockProvenance(
-                **block.provenance.to_dict(),
-                iou_crosscheck=f"opaque: {failed_reason}",
+            demoted.provenance = block.provenance.model_copy(
+                update={"iou_crosscheck": f"opaque: {failed_reason}"}
             )
             demoted.error_flags = list(block.error_flags) + [
                 f"skip:preserved_opaque({failed_reason})"
@@ -584,11 +583,11 @@ def cross_check_blocks_with_pdfium(
                     # Preserve any style already found (e.g. the first-line indent
                     # the parser recorded): a bare StyleMeta would drop it.
                     block.style = (block.style or StyleMeta()).model_copy(update={"font_size": fsz})
-                    block.provenance["font_size"] = fsz
+                    block.provenance.font_size = fsz
                 if is_bold:
-                    block.provenance["is_bold"] = True
+                    block.provenance.is_bold = True
                 if is_italic:
-                    block.provenance["is_italic"] = True
+                    block.provenance.is_italic = True
             except Exception as exc:
                 logger.debug("Failed to extract line styles for block %s: %s", block.id, exc)
 

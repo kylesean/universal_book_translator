@@ -68,7 +68,7 @@ def _source_with_bold_markers(block: IRBlock) -> str:
     are parsed back out in :meth:`_DraftProcessor.finalize_draft`.
     """
     style = block.style
-    if style is None or block.provenance.get("is_bold"):
+    if style is None or block.provenance.is_bold:
         return block.source_text
     spans = [run.text for run in style.inline_runs if run.bold and run.text.strip()]
     if not spans:
