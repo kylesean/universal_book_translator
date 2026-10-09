@@ -303,6 +303,14 @@ class JobWorker:
                     ):
                         raise JobInterruptedError(f"job {job.job_id} cancelled by request")
 
+            # Check if lease loss or cancellation occurred right as the generator finished
+            if lease_lost.is_set():
+                raise LeaseLostError(f"job {job.job_id} lost its lease to another worker")
+            if cancel_token.is_set() or await self._q(
+                self.queue.is_cancel_requested, job.job_id, owner
+            ):
+                raise JobInterruptedError(f"job {job.job_id} cancelled by request")
+
             completed = False
             try:
                 completed = await self._q(

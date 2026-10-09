@@ -10,7 +10,7 @@ import pytest
 from ubt.adapters.markdown.adapter import _format_markdown_block
 from ubt.core.cleaners.cjk_spacing import apply_pangu_spacing
 from ubt.core.config import UBTConfig
-from ubt.core.engine.events import TranslationProgressEvent
+from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.job_queue import JobQueue, QueuedJob
 from ubt.core.engine.job_worker import JobWorker
 from ubt.core.engine.stages.chapter_streaming import _DONE
@@ -140,6 +140,41 @@ async def test_job_worker_execute_terminal_failure_isolation(
     # execute handles the exception cleanly without bubbling up to crash the worker process
     assert res is True
     assert worker.failed_jobs == 1
+
+
+@pytest.mark.asyncio
+async def test_job_worker_cancellation_race_at_stream_end(tmp_path: Path) -> None:
+    from ubt.core.engine.job_queue import JobStatus
+
+    config = UBTConfig(provider="openai")
+    queue = JobQueue(tmp_path / "test_queue.db")
+    queue.enqueue("test-job-cancel-race", {"input_path": "book.epub"})
+    claimed = queue.claim(worker_id="test-w1")
+    assert claimed is not None
+
+    async def finishing_event_source(
+        j: QueuedJob, cfg: UBTConfig, cancel_token: asyncio.Event | None = None
+    ) -> AsyncGenerator[TranslationProgressEvent, None]:
+        # User requested cancel right as events finished
+        queue.request_cancel(j.job_id)
+        yield TranslationProgressEvent(
+            job_id=j.job_id,
+            event_type=EventType.EXPORT_COMPLETED,
+            total_blocks=1,
+            completed_blocks=1,
+        )
+
+    worker = JobWorker(
+        queue=queue,
+        config=config,
+        worker_id="test-w1",
+        event_source=finishing_event_source,
+    )
+    res = await worker.execute(claimed)
+    assert res is True
+    final_job = queue.get(claimed.job_id)
+    assert final_job is not None
+    assert final_job.status == JobStatus.CANCELLED
 
 
 @pytest.mark.asyncio
