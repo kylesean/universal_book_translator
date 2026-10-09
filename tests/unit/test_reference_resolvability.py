@@ -123,6 +123,29 @@ def test_doc_markdown_links_resolve() -> None:
     assert not problems, "broken doc links:\n" + "\n".join(problems)
 
 
+#: Shell harnesses pass their pytest targets as bare argv, not backticked spans,
+#: so the backtick scan above cannot see them. A harness whose target was deleted
+#: still passes ``bash -n``, is never collected by pytest (``testpaths = ["tests"]``)
+#: and is run by hand, so nothing else in the tree would notice. Two harnesses sat
+#: broken this way after the unit suite was rebuilt.
+_SHELL_SCRIPT_DIRS = (_REPO_ROOT / "scripts",)
+_SHELL_TEST_REF = re.compile(r"(?<![\w./-])(tests/[A-Za-z0-9_./-]+\.py)")
+
+
+def test_shell_harness_test_targets_resolve() -> None:
+    """A shell harness must not invoke a pytest file that no longer exists."""
+    problems: list[str] = []
+    for root in _SHELL_SCRIPT_DIRS:
+        for path in root.rglob("*.sh"):
+            text = path.read_text(encoding="utf-8", errors="replace")
+            rel = path.relative_to(_REPO_ROOT)
+            for match in _SHELL_TEST_REF.finditer(text):
+                ref = match.group(1)
+                if not (_REPO_ROOT / ref).is_file():
+                    problems.append(f"{rel}: pytest target `{ref}` does not exist")
+    assert not problems, "shell harnesses point at missing tests:\n" + "\n".join(problems)
+
+
 #: A test file is named for the module it pins, never for the review activity that
 #: produced it ("One Behavior, One Home"). Review/round/date names scatter one
 #: module's coverage across files and hide it from the next reviewer. Only the

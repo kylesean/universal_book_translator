@@ -703,8 +703,7 @@ class UBTConfig(BaseSettings):
     # but ``DoclingPDFAdapter.apply_config`` deliberately does not read it and
     # no renderer consumes it: display formulas are typeset by the home-grown
     # LaTeX->Typst converter and governed by ``formula_render``. Nothing reads
-    # ``math_backend``: the MathJax/SVG backend it names is gone, and
-    # ``scripts/mathjax/`` has no caller.
+    # ``math_backend``: the MathJax/SVG backend it names is gone.
     math_backend: MathBackend = "mathjax"
 
     # -- Page range filter -----------------------------------------------------

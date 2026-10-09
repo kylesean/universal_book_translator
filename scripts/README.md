@@ -25,8 +25,8 @@ It takes `--corpus corpus` (default) and exits 0 on pass.
 
 - `cost_benchmark.py` — writes `docs/benchmarks/` (see that README).
 - `knob_sweep.py`, `oxide_render_ab.py`,
-  `biou_score.py`, `fidelity_baseline.py`, `run_real_benchmark.sh`,
-  `formula_matrix.sh` — experiment/benchmark harnesses for tuning and A/B runs.
+  `biou_score.py`, `fidelity_baseline.py` — experiment/benchmark harnesses for
+  tuning and A/B runs.
 
 ## Utilities
 
@@ -38,9 +38,20 @@ It takes `--corpus corpus` (default) and exits 0 on pass.
   line number is past its file's end. Run it after a refactor that moves code
   the docs cite. Comparison-repo and draft references are skipped by design.
 - `export_pdf_to_markdown.py` — one-off PDF → Markdown extraction helper.
-- `mathjax/` — node renderer used by the formula pipeline (`render.mjs`).
 
 ## Removed
 
 Migration-era `shadow_*.py` harnesses were deleted once their contracts were
 pinned as unit tests; git history retains the code.
+
+The `run_real_benchmark.sh` and `formula_matrix.sh` harnesses were deleted with
+the test files they drove: the live-model tiers they invoked
+(`test_mt_tier_live`, `test_qe_calibration`, `test_local_model_baseline`,
+`test_mt_vs_llm_compare`) and the per-backend formula matrix
+(`test_formula_engine_matrix`) went with the unit-suite rebuild, and
+`--math-backend` is a retired knob no renderer reads. Capability probing is
+`ubt doctor --probe`, which covers the same ground without a shell duplicate.
+`scripts/mathjax/` went with the MathJax backend it rendered for.
+
+`tests/unit/test_reference_resolvability.py` now fails when a harness under
+`scripts/` names a pytest file that no longer exists, so this cannot recur.
