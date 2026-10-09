@@ -143,6 +143,17 @@ def split_prov_spans(item: Any) -> tuple[str, str, BoundingBox | None] | None:
 #: overlapping the picture is enough to anchor the label to the figure.
 _PICTURE_LABEL_SHARE = 0.5
 
+#: How far past the picture's bbox a text item may sit and still count as the
+#: figure's own text. A figure's headers float *above* the plot area, outside
+#: Docling's picture bbox: the Figure 6 legend in the two-column corpus sits
+#: 6.8pt above it and a panel title 7.3pt, so the old 2pt tolerance let both
+#: through as prose -- the legend, squeezed into its 41pt column, kept source
+#: and tripped the delivery gate. Measured across the reference corpus the gap
+#: is clean: figure-internal items sit within ~8pt of the bbox, the nearest
+#: genuine body text 21.9pt away, so 10pt clears every true positive with ~12pt
+#: of headroom before it could touch real prose.
+_PICTURE_CONTAINMENT_MARGIN_PT = 10.0
+
 
 def _overlap_share(box: Any, pbox: Any) -> float:
     """Fraction of ``box``'s own area that lies inside ``pbox``."""
@@ -164,22 +175,24 @@ def is_inside_picture(
     page_no: int,
     bbox: Any,
     picture_boxes: list[tuple[int, Any]],
-    margin_pt: float = 2.0,
+    margin_pt: float = _PICTURE_CONTAINMENT_MARGIN_PT,
 ) -> bool:
     """Whether a Docling item is the picture's own text (same page).
 
     A figure's text sits *on* the picture rather than neatly inside it: an axis
-    title's baseline hangs a few points below the plot area's bbox, and a rotated
-    axis label straddles its edge. Requiring full containment let exactly those
-    labels through as ordinary prose, which then reached the translator and was
-    painted into its ~100pt box at the source's 15pt size -- wrecking the figure's
-    layout and leaving the figure half translated, because its tick labels, legend
-    and in-chart annotations stay in the preserved source graphic.
+    title's baseline hangs a few points below the plot area's bbox, a rotated
+    axis label straddles its edge, and a legend floats above it. Requiring full
+    containment let exactly those labels through as ordinary prose, which then
+    reached the translator and was painted into its ~100pt box at the source's
+    15pt size -- wrecking the figure's layout and leaving the figure half
+    translated, because its tick labels, legend and in-chart annotations stay in
+    the preserved source graphic.
 
-    A label belongs to the figure when it is fully inside it, when most of its own
-    area overlaps it, or when its centre falls inside it. A caption is placed
-    *below* the picture with no overlap at all, so captions and footnotes stay
-    translatable (the caller keeps them out of this test).
+    A label belongs to the figure when it is fully inside it (within
+    ``margin_pt``, wide enough to cover a header just outside the bbox), when
+    most of its own area overlaps it, or when its centre falls inside it. A
+    caption is placed *below* the picture with no overlap at all, so captions
+    and footnotes stay translatable (the caller keeps them out of this test).
     """
     for pno, pbox in picture_boxes:
         if pno != page_no:

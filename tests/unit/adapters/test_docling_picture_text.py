@@ -14,6 +14,10 @@ pytestmark = pytest.mark.fast
 #: A plot area, in Docling's bottom-left coordinates.
 _PLOT = SimpleNamespace(l=141.7, b=211.1, r=453.4, t=355.2)
 
+#: Figure 6's plot area in the two-column corpus (Docling bottom-left coords),
+#: the picture whose legend escaped at the old 2pt containment tolerance.
+_FIGURE_6 = SimpleNamespace(l=63.47, b=554.50, r=531.82, t=744.74)
+
 
 def _box(left: float, bottom: float, right: float, top: float) -> SimpleNamespace:
     return SimpleNamespace(l=left, b=bottom, r=right, t=top)
@@ -36,6 +40,24 @@ def test_an_axis_title_hanging_past_the_plot_edge_is_the_figures_own_text() -> N
     # translated and painted into its ~100pt box at 15pt, wrecking the figure.
     axis_title = _box(262.3, 207.6, 361.6, 218.2)
     assert _in_picture(axis_title)
+
+
+def test_a_legend_floating_above_the_plot_area_is_the_figures_own_text() -> None:
+    # The real b0084 case: a two-series legend ("Enabled Alone" / "All Mechanisms
+    # Enabled") whose top sits 6.8pt above the picture bbox -- no overlap, centre
+    # outside, so only the (widened) containment test can claim it. At the old 2pt
+    # tolerance it leaked through as body prose, kept source in its 41pt column,
+    # and tripped the delivery gate.
+    legend = _box(234.9, 744.78, 379.1, 751.51)
+    assert _in_picture(legend, page=10, pictures=[(10, _FIGURE_6)])
+
+
+def test_body_text_above_the_figure_is_not_the_figures_own_text() -> None:
+    # The nearest genuine prose sits ~22pt above the picture (the corpus
+    # "SoL-Pi : Recursively Scaling..." heading); the widened margin must stop
+    # well short of it, or a heading above a figure would be swallowed as its text.
+    prose_above = _box(141.7, 755.0, 453.4, 766.7)
+    assert not _in_picture(prose_above, page=10, pictures=[(10, _FIGURE_6)])
 
 
 def test_a_caption_below_the_picture_is_not_the_figures_own_text() -> None:
