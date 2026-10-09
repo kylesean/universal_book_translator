@@ -17,7 +17,10 @@ from ubt.adapters.pdf.overlay_text import typstify_math
 from ubt.adapters.pdf.typst_math_probe import TypstMathProbe
 from ubt.adapters.pdf.typst_symbols import INLINE_SYMBOLS, SPECIAL_LATEX_COMMANDS
 
-pytestmark = pytest.mark.fast
+#: Per-test ``fast`` marks, not a module-level ``pytestmark``: a module-level
+#: mark is ANDed onto every test in the file, so the three ``slow`` typst-probe
+#: tests below would also carry ``fast`` and be pulled into the pre-push
+#: ``-m fast`` tier (a 130s typst-compile loop inside a 50s tier).
 
 #: Symbol-table commands that take an argument and cannot be probed bare.
 _ARG_TAKING = {"frac": r"\frac{a}{b}", "sqrt": r"\sqrt{a}"}
@@ -65,10 +68,12 @@ _SPECIAL_BODIES = {
         (r"\vec{v} \cdot \hat{n}", "vec(v) dot hat(n)"),
     ],
 )
+@pytest.mark.fast
 def test_latex_accents_become_typst_calls(body: str, expected: str) -> None:
     assert typstify_math(body) == expected
 
 
+@pytest.mark.fast
 @pytest.mark.parametrize("body", [r"\acute{x}", r"\breve{x}"])
 def test_accents_with_no_typst_spelling_fail_closed(body: str) -> None:
     # None sends the block back to escaped literal text; a guessed spelling
@@ -87,11 +92,19 @@ def test_every_inline_symbol_table_command_compiles() -> None:
     # Pin the table itself to reality: every mapped command converts and the
     # probe accepts the spelling.
     probe = TypstMathProbe()
-    failures = []
-    for command in sorted(INLINE_SYMBOLS):
-        converted = typstify_math(_ARG_TAKING.get(command, "\\" + command))
-        if converted is None or not probe.check(converted):
-            failures.append((command, converted))
+    converted = {
+        command: typstify_math(_ARG_TAKING.get(command, "\\" + command))
+        for command in sorted(INLINE_SYMBOLS)
+    }
+    # One Typst invocation resolves the whole table (check_many bisects only on
+    # failure); a per-body check() loop spawned 196 compilers, ~115s of a
+    # ~0.7s job. The per-body check() below then reads the populated cache.
+    probe.check_many(body for body in converted.values() if body is not None)
+    failures = [
+        (command, body)
+        for command, body in converted.items()
+        if body is None or not probe.check(body)
+    ]
     assert failures == []
 
 
@@ -107,11 +120,16 @@ def test_every_special_latex_command_renders() -> None:
     # converter no longer strips.
     probe = TypstMathProbe()
     assert set(_SPECIAL_BODIES) == set(SPECIAL_LATEX_COMMANDS)
-    failures = []
-    for command in sorted(SPECIAL_LATEX_COMMANDS):
-        converted = typstify_math(_SPECIAL_BODIES[command])
-        if converted is None or not probe.check(converted):
-            failures.append((command, converted))
+    converted = {
+        command: typstify_math(_SPECIAL_BODIES[command])
+        for command in sorted(SPECIAL_LATEX_COMMANDS)
+    }
+    probe.check_many(body for body in converted.values() if body is not None)
+    failures = [
+        (command, body)
+        for command, body in converted.items()
+        if body is None or not probe.check(body)
+    ]
     assert failures == []
 
 
