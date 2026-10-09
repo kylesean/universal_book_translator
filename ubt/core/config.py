@@ -642,6 +642,17 @@ class UBTConfig(BaseSettings):
     # regardless of this flag.
     strict_contract: bool = False
 
+    # Policy when translated text cannot fit in layout bounding boxes even after
+    # minimum font shrinking (spill / overflow):
+    # - 'error': strict delivery contract, space failures are ERROR severity (Axiom B)
+    # - 'warn': graceful degradation, space failures are downgraded to WARNING with audit note
+    # - 'appendix': graceful degradation, writes an overflow companion (*_spill_appendix.json & .md)
+    #   listing all displaced text blocks, and downgrades contract violation to WARNING.
+    spill_policy: str = Field(
+        default="error",
+        description="Layout spill policy ('error', 'warn', 'appendix').",
+    )
+
     # -- PDF render engine --------------------------------------------------------
     # There is no engine knob: every PDF route composes through the unified
     # source-canvas LayerCompositor (see ``RENDER_ENGINE``). The former
@@ -769,6 +780,7 @@ class UBTConfig(BaseSettings):
         "formula_enrichment",
         "formula_render",
         "math_backend",
+        "spill_policy",
         "env",
         mode="before",
     )

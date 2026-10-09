@@ -331,6 +331,14 @@ export interface TranslationDictionary {
     cascadeConfirmDesc: string
     cascadeConfirmProceed: string
     cascadeConfirmCancel: string
+    scopeSelectLabel: string
+    scopeBlock: string
+    scopeSubsequent: string
+    scopeAll: string
+    scopeCount: string
+    cascadeTmSync: string
+    clearFilter: string
+    filterByIssueKind: string
     diffBlend: string
     inspectorTitle: string
     inspectorQe: string

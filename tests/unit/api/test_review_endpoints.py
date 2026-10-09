@@ -123,6 +123,21 @@ def test_segments_filter_status_all_returns_every_block(tmp_path: Path) -> None:
     assert body["total"] == 4
 
 
+def test_segments_filter_by_issue_kind(tmp_path: Path) -> None:
+    client = TestClient(create_app(_seed(tmp_path)))
+    body_term = client.get(
+        f"/jobs/{_JOB}/segments", params={"status": "terminology"}, headers=_AUTH
+    ).json()
+    assert [s["block_id"] for s in body_term["segments"]] == ["b002"]
+    assert body_term["total"] == 1
+
+    body_render = client.get(
+        f"/jobs/{_JOB}/segments", params={"status": "render"}, headers=_AUTH
+    ).json()
+    assert [s["block_id"] for s in body_render["segments"]] == ["b003"]
+    assert body_render["total"] == 1
+
+
 def test_edit_segment_writes_ledger_and_tm(tmp_path: Path) -> None:
     config = _seed(tmp_path)
     client = TestClient(create_app(config))

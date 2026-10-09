@@ -822,7 +822,12 @@ def _deliver_contract(
         title=str(getattr(manifest, "title", "") or ""),
         source_path=str(getattr(manifest, "source_path", "") or ""),
     )
-    contract = reconcile(graph)
+    allow_spill_warning = getattr(ctx.config, "spill_policy", "error") in (
+        "warn",
+        "appendix",
+        "source_kept_warn",
+    )
+    contract = reconcile(graph, allow_spill_warning=allow_spill_warning)
     payload = contract.model_dump(mode="json")
     contract_path = sidecar_path(rendered_path, "contract.json")
     try:
@@ -843,6 +848,68 @@ def _deliver_contract(
             contract_path,
         )
     return contract
+
+
+def _write_spill_appendix(
+    ctx: StageContext,
+    rendered_path: Path,
+    blocks: list[IRBlock],
+    contract: ReconciliationReport,
+) -> Path | None:
+    """Write an overflow/spill appendix companion when blocks could not fit into layout boxes."""
+    from ubt.core.content.contract import _is_space_failure
+    from ubt.core.job_options import companion_path
+
+    spill_violations = [v for v in contract.violations if _is_space_failure(v.detail)]
+    if not spill_violations:
+        return None
+    try:
+        by_id = {b.id: b for b in blocks}
+        items: list[dict[str, Any]] = []
+        md_lines: list[str] = [
+            "# 排版溢出优雅降级对照附录 (Layout Spill Appendix)",
+            "",
+            f"- **Job ID**: `{ctx.job_id}`",
+            f"- **Document**: `{rendered_path.name}`",
+            f"- **溢出段落数**: {len(spill_violations)}",
+            "",
+            "以下段落在最小字号收缩策略下仍超出原始版面物理边界，已安全降级并在此提供完整双语对照：",
+            "",
+            "| 段落 ID | 页码 | 原因 | 原文 | 译文 |",
+            "| :--- | :---: | :--- | :--- | :--- |",
+        ]
+        for v in spill_violations:
+            block = by_id.get(v.node_id)
+            page = block.bbox.page if block and block.bbox else "—"
+            src = (block.source_text or "") if block else ""
+            tgt = (block.target_text or "") if block else ""
+            items.append(
+                {
+                    "block_id": v.node_id,
+                    "page": page,
+                    "reason": v.detail,
+                    "source_text": src,
+                    "target_text": tgt,
+                }
+            )
+            src_escaped = src.replace("\n", " ").replace("|", "\\|")[:80]
+            tgt_escaped = tgt.replace("\n", " ").replace("|", "\\|")[:80]
+            md_lines.append(
+                f"| `{v.node_id}` | P{page} | `{v.detail}` | {src_escaped} | {tgt_escaped} |"
+            )
+
+        json_path = companion_path(rendered_path, ".spill_appendix.json")
+        json_path.write_text(
+            json.dumps({"job_id": ctx.job_id, "spills": items}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        md_path = companion_path(rendered_path, ".spill_appendix.md")
+        md_path.write_text("\n".join(md_lines), encoding="utf-8")
+        logger.info("Spill appendix generated: %s (%d items)", md_path.name, len(items))
+        return md_path
+    except Exception as exc:
+        logger.warning("Spill appendix generation skipped for job %s: %s", ctx.job_id, exc)
+        return None
 
 
 def _write_xliff_companion(
@@ -1265,6 +1332,8 @@ async def run_export_stage(
     await asyncio.to_thread(_write_html_view, ctx, rendered_path, translations, final_blocks)
     await asyncio.to_thread(_write_epub_view, ctx, rendered_path, translations, final_blocks)
     await asyncio.to_thread(_write_artifact_check, ctx, rendered_path, translations, final_blocks)
+    if getattr(ctx.config, "spill_policy", "error") in ("appendix", "warn", "source_kept_warn"):
+        await asyncio.to_thread(_write_spill_appendix, ctx, rendered_path, final_blocks, contract)
 
     # Post-render visual gate: T0/T1 deterministic +
     # optional pixel confirmation + sampled T2 VLM + ReflowControlLoop.

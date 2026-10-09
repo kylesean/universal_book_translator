@@ -114,6 +114,8 @@ class ReconciliationReport(BaseModel):
 def reconcile(
     graph: ContentGraph,
     ledgers: tuple[ContentLedger, AssetLedger] | None = None,
+    *,
+    allow_spill_warning: bool = False,
 ) -> ReconciliationReport:
     """The delivery contract: reconcile the content graph's two ledgers.
 
@@ -121,6 +123,10 @@ def reconcile(
     PENDING node was never decided and a SKIPPED node was dropped. An asset is
     accounted for when it is PRESERVED_OPAQUE or a *verified* RECONSTRUCTED; an
     unverified reconstruction is a warning, and MISSING is an error.
+
+    When ``allow_spill_warning`` is True (under graceful degradation policies
+    such as 'warn' or 'appendix'), space-overflow failures that keep the source
+    are downgraded from ERROR to WARNING so delivery can proceed with full audit trail.
     """
     content, assets = ledgers if ledgers is not None else build_ledgers(graph)
     violations: list[Violation] = []
@@ -133,14 +139,17 @@ def reconcile(
             verbatim += 1
         elif entry.disposition is TextDisposition.SOURCE_KEPT:
             source_kept += 1
+            is_space = _is_space_failure(entry.reason)
+            sev = Severity.WARNING if (allow_spill_warning or not is_space) else Severity.ERROR
+            reason_str = entry.reason or "shipped source; translation not placed"
+            if is_space and allow_spill_warning:
+                reason_str = f"{reason_str} [spill_degraded_to_warning]"
             violations.append(
                 Violation(
                     kind=ViolationKind.TEXT_SOURCE_KEPT,
-                    severity=(
-                        Severity.ERROR if _is_space_failure(entry.reason) else Severity.WARNING
-                    ),
+                    severity=sev,
                     node_id=entry.node_id,
-                    detail=entry.reason or "shipped source; translation not placed",
+                    detail=reason_str,
                 )
             )
         elif entry.disposition is TextDisposition.SKIPPED:

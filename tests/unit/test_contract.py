@@ -244,3 +244,20 @@ def test_a_violation_carries_the_node_reason_or_a_default_detail() -> None:
     assert with_reason.violations[0].detail == "unrenderable math"
     without_reason = reconcile(_graph(_text("t1", TextDisposition.SKIPPED)))
     assert without_reason.violations[0].detail
+
+
+def test_graceful_spill_degradation_downgrades_space_failure() -> None:
+    graph = _graph(_text("t1", TextDisposition.SOURCE_KEPT, "no_fit: source kept"))
+    # Default strict behavior: space failure is an error
+    strict_report = reconcile(graph, allow_spill_warning=False)
+    assert not strict_report.passed
+    assert len(strict_report.errors) == 1
+    assert strict_report.errors[0].severity == Severity.ERROR
+
+    # Graceful degradation policy: downgraded to warning
+    graceful_report = reconcile(graph, allow_spill_warning=True)
+    assert graceful_report.passed
+    assert len(graceful_report.errors) == 0
+    assert len(graceful_report.warnings) == 1
+    assert graceful_report.warnings[0].severity == Severity.WARNING
+    assert "spill_degraded_to_warning" in graceful_report.warnings[0].detail

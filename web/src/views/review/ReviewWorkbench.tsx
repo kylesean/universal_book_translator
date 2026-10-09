@@ -13,6 +13,7 @@ import {
   ImageOff,
   Wand2,
   RefreshCw,
+  Sparkles,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
@@ -30,7 +31,7 @@ import {
 } from '@/api/client'
 import { useI18n } from '@/i18n/useI18n'
 
-type Filter = 'issues' | 'all' | 'needs_human'
+type Filter = 'issues' | 'all' | 'needs_human' | string
 
 //: Human labels for the backend's issue kinds (ribbon + card chips).
 const ISSUE_LABELS: Record<string, string> = {
@@ -313,19 +314,39 @@ export function ReviewWorkbench() {
                 <CheckCircle2 className="h-3.5 w-3.5" /> 0 issues
               </span>
             ) : (
-              ribbonCounts.map(([kind, value]) => (
-                <span
-                  key={kind}
-                  className="px-1.5 py-0.5 rounded border border-[var(--paper-border)] bg-[var(--paper-subsurface)] text-[var(--ink-secondary)]"
-                >
-                  {ISSUE_LABELS[kind] ?? kind} {value}
-                </span>
-              ))
+              ribbonCounts.map(([kind, value]) => {
+                const isActive = filter === kind
+                return (
+                  <button
+                    key={kind}
+                    type="button"
+                    onClick={() => setFilter(isActive ? 'issues' : kind)}
+                    className={`px-1.5 py-0.5 rounded border transition-colors cursor-pointer text-xs font-mono flex items-center gap-1 ${
+                      isActive
+                        ? 'border-[#b45309] bg-[#b45309]/20 text-[#b45309] font-bold shadow-xs'
+                        : 'border-[var(--paper-border)] bg-[var(--paper-subsurface)] text-[var(--ink-secondary)] hover:border-[var(--paper-border-hover)] hover:text-[var(--ink-primary)]'
+                    }`}
+                    title={isActive ? t.review.clearFilter : `${t.review.filterByIssueKind}: ${ISSUE_LABELS[kind] ?? kind}`}
+                  >
+                    <span>{ISSUE_LABELS[kind] ?? kind}</span>
+                    <span className="opacity-80 font-bold">{value}</span>
+                    {isActive && <span className="ml-0.5 text-[10px] opacity-70">✕</span>}
+                  </button>
+                )
+              })
             )}
             {(issues?.status.needs_human ?? 0) > 0 && (
-              <span className="text-[#b45309] font-medium">
+              <button
+                type="button"
+                onClick={() => setFilter(filter === 'needs_human' ? 'issues' : 'needs_human')}
+                className={`px-1.5 py-0.5 rounded border transition-colors cursor-pointer text-xs font-mono flex items-center gap-1 ${
+                  filter === 'needs_human'
+                    ? 'border-[#b45309] bg-[#b45309]/20 text-[#b45309] font-bold shadow-xs'
+                    : 'border-[#b45309]/40 bg-[#b45309]/10 text-[#b45309] hover:bg-[#b45309]/20'
+                }`}
+              >
                 needs human {issues?.status.needs_human}
-              </span>
+              </button>
             )}
           </div>
           <div className="flex items-center gap-1">
@@ -347,6 +368,19 @@ export function ReviewWorkbench() {
         </div>
 
         <div className="flex items-center gap-2">
+          {filter !== 'issues' && filter !== 'needs_human' && filter !== 'all' && (
+            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-[4px] bg-[#b45309]/15 border border-[#b45309]/40 text-[#b45309] text-xs font-mono">
+              <span className="font-semibold">{ISSUE_LABELS[filter] ?? filter}</span>
+              <button
+                type="button"
+                onClick={() => setFilter('issues')}
+                title={t.review.clearFilter}
+                className="hover:opacity-100 opacity-60 text-xs font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+          )}
           <div className="flex bg-[var(--paper-subsurface)] p-0.5 rounded-[4px] border border-[var(--paper-border)]">
             {(
               [
@@ -837,6 +871,8 @@ export function ReviewWorkbench() {
   )
 }
 
+type TermScope = 'block' | 'subsequent' | 'all'
+
 interface TermPanelProps {
   jobId: string
   segment: Segment
@@ -845,16 +881,26 @@ interface TermPanelProps {
 
 /**
  * Terminology recommendations for one segment (PRD §5.2.2). Fetches lazily on
- * mount so only the virtualizer's visible window hits the backend, and shows the
- * "fix all N" cascade checkbox with the book-wide count.
+ * mount so only the virtualizer's visible window hits the backend, and provides
+ * a 3-way Scope Selector ('block' | 'subsequent' | 'all') with diff preview and
+ * TM feedback indicators.
  */
 function TermPanel({ jobId, segment, onReplaced }: TermPanelProps) {
   const { t } = useI18n()
   const [violations, setViolations] = useState<TermViolation[] | null>(null)
-  const [cascade, setCascade] = useState(false)
-  const [confirmViolation, setConfirmViolation] = useState<TermViolation | null>(null)
+  const [scopes, setScopes] = useState<Record<string, TermScope>>({})
+  const [confirmViolation, setConfirmViolation] = useState<{
+    violation: TermViolation
+    scope: TermScope
+  } | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  const reloadTerms = useCallback(() => {
+    getBlockTerms(jobId, segment.block_id)
+      .then((report) => setViolations(report.violations))
+      .catch(() => setViolations([]))
+  }, [jobId, segment.block_id])
 
   useEffect(() => {
     let alive = true
@@ -870,15 +916,32 @@ function TermPanel({ jobId, segment, onReplaced }: TermPanelProps) {
     }
   }, [jobId, segment.block_id, segment.target_text])
 
-  const handleTriggerReplace = (violation: TermViolation) => {
-    if (cascade && violation.cascade_all > 0) {
-      setConfirmViolation(violation)
-    } else {
-      void executeReplace(violation)
+  const getScope = (v: TermViolation): TermScope => {
+    const key = `${v.surface}:${v.expected}`
+    if (scopes[key]) return scopes[key]
+    if (v.cascade_subsequent > 1) return 'subsequent'
+    if (v.cascade_all > 1) return 'all'
+    return 'block'
+  }
+
+  const setScopeFor = (v: TermViolation, s: TermScope) => {
+    const key = `${v.surface}:${v.expected}`
+    setScopes((prev) => ({ ...prev, [key]: s }))
+    if (confirmViolation?.violation === v) {
+      setConfirmViolation({ violation: v, scope: s })
     }
   }
 
-  const executeReplace = async (violation: TermViolation) => {
+  const handleTriggerReplace = (violation: TermViolation) => {
+    const currentScope = getScope(violation)
+    if (currentScope === 'block') {
+      void executeReplace(violation, 'block')
+    } else {
+      setConfirmViolation({ violation, scope: currentScope })
+    }
+  }
+
+  const executeReplace = async (violation: TermViolation, scope: TermScope) => {
     setBusy(true)
     setError(null)
     setConfirmViolation(null)
@@ -887,9 +950,10 @@ function TermPanel({ jobId, segment, onReplaced }: TermPanelProps) {
         block_id: segment.block_id,
         surface: violation.surface,
         expected: violation.expected,
-        scope: cascade ? 'all' : 'block',
+        scope,
       })
       onReplaced(res.replacements)
+      reloadTerms()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to propagate term')
     } finally {
@@ -902,74 +966,145 @@ function TermPanel({ jobId, segment, onReplaced }: TermPanelProps) {
   return (
     <div className="mt-3 rounded-[6px] border border-[#b45309]/40 bg-[#b45309]/5 divide-y divide-[#b45309]/20">
       {violations.map((violation) => {
-        const isConfirming = confirmViolation === violation
+        const key = `${violation.surface}:${violation.expected}`
+        const currentScope = getScope(violation)
+        const isConfirming = confirmViolation?.violation === violation
+        const countAll = Math.max(1, violation.cascade_all)
+        const countSubsequent = Math.max(1, violation.cascade_subsequent)
+        const targetCount =
+          currentScope === 'all'
+            ? countAll
+            : currentScope === 'subsequent'
+              ? countSubsequent
+              : 1
+
         return (
-          <div
-            key={`${violation.surface}:${violation.expected}`}
-            className="px-2.5 py-2 flex flex-col gap-2 text-xs"
-          >
+          <div key={key} className="px-2.5 py-2 flex flex-col gap-2 text-xs">
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-mono text-[var(--ink-muted)]">{t.review.recommendedTerm}</span>
               <span className="line-through text-[#b45309] font-mono">{violation.surface}</span>
               <span className="text-[var(--ink-muted)]">→</span>
               <span className="font-semibold text-[#15803d] font-mono">{violation.expected}</span>
-              {violation.cascade_all > 0 && (
-                <label className="flex items-center gap-1 text-[var(--ink-secondary)] cursor-pointer ml-auto select-none">
-                  <input
-                    type="checkbox"
-                    checked={cascade}
-                    onChange={(e) => {
-                      setCascade(e.target.checked)
-                      if (!e.target.checked) setConfirmViolation(null)
-                    }}
-                  />
-                  {t.review.cascadeFix.replace('{n}', String(violation.cascade_all))}
-                </label>
+
+              {violation.cascade_all > 1 && (
+                <div className="flex items-center gap-0.5 bg-[var(--paper-subsurface)] p-0.5 rounded border border-[var(--paper-border)] ml-auto">
+                  <button
+                    type="button"
+                    onClick={() => setScopeFor(violation, 'block')}
+                    className={`px-1.5 py-0.5 rounded text-[10.5px] transition-colors cursor-pointer ${
+                      currentScope === 'block'
+                        ? 'bg-[var(--paper-surface)] text-[var(--ink-primary)] font-bold shadow-xs'
+                        : 'text-[var(--ink-muted)] hover:text-[var(--ink-primary)]'
+                    }`}
+                    title={t.review.scopeBlock}
+                  >
+                    {t.review.scopeBlock} (1)
+                  </button>
+                  {violation.cascade_subsequent > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => setScopeFor(violation, 'subsequent')}
+                      className={`px-1.5 py-0.5 rounded text-[10.5px] transition-colors cursor-pointer ${
+                        currentScope === 'subsequent'
+                          ? 'bg-[var(--paper-surface)] text-[var(--ink-primary)] font-bold shadow-xs'
+                          : 'text-[var(--ink-muted)] hover:text-[var(--ink-primary)]'
+                      }`}
+                      title={t.review.scopeSubsequent}
+                    >
+                      {t.review.scopeSubsequent} ({countSubsequent})
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setScopeFor(violation, 'all')}
+                    className={`px-1.5 py-0.5 rounded text-[10.5px] transition-colors cursor-pointer ${
+                      currentScope === 'all'
+                        ? 'bg-[var(--paper-surface)] text-[var(--ink-primary)] font-bold shadow-xs'
+                        : 'text-[var(--ink-muted)] hover:text-[var(--ink-primary)]'
+                    }`}
+                    title={t.review.scopeAll}
+                  >
+                    {t.review.scopeAll} ({countAll})
+                  </button>
+                </div>
               )}
+
               <Button
                 onClick={() => handleTriggerReplace(violation)}
                 variant="primary"
                 size="sm"
                 disabled={busy}
-                className="text-xs h-6 px-2.5 font-bold"
+                className={`text-xs h-6 px-2.5 font-bold ${violation.cascade_all <= 1 ? 'ml-auto' : ''}`}
               >
                 {busy ? (
                   <Loader2 className="h-3 w-3 mr-1 animate-spin" />
                 ) : (
                   <Wand2 className="h-3 w-3 mr-1" />
                 )}
-                {busy ? t.review.cascadeApplying : t.review.replaceTerm}
+                {busy
+                  ? t.review.cascadeApplying
+                  : currentScope === 'block'
+                    ? t.review.replaceTerm
+                    : `${t.review.replaceTerm} (${targetCount})`}
               </Button>
             </div>
 
             {isConfirming && (
-              <div className="w-full mt-1 p-2 rounded-[4px] bg-[#b45309]/10 border border-[#b45309]/30 space-y-1.5 animate-in fade-in duration-150">
-                <div className="font-semibold text-[var(--ink-primary)]">
-                  {t.review.cascadeConfirmTitle}
+              <div className="w-full mt-1 p-2.5 rounded-[4px] bg-[#b45309]/10 border border-[#b45309]/30 space-y-2 animate-in fade-in duration-150">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-[var(--ink-primary)] text-xs">
+                    {currentScope === 'all'
+                      ? t.review.cascadeConfirmTitle
+                      : `${t.review.scopeSubsequent} · ${t.review.cascadeConfirmTitle}`}
+                  </span>
+                  <span className="text-[10.5px] font-mono px-1.5 py-0.5 rounded bg-[#b45309]/20 text-[#b45309] font-bold">
+                    {t.review.scopeCount.replace('{n}', String(targetCount))}
+                  </span>
                 </div>
+
+                <div className="flex items-center gap-2 p-1.5 rounded bg-[var(--paper-surface)] border border-[var(--paper-border)] font-mono text-xs">
+                  <span className="line-through text-[#b45309] font-medium bg-[#b45309]/10 px-1.5 py-0.5 rounded">
+                    {violation.surface}
+                  </span>
+                  <span className="text-[var(--ink-muted)]">➔</span>
+                  <span className="text-[#15803d] font-bold bg-[#15803d]/10 px-1.5 py-0.5 rounded">
+                    {violation.expected}
+                  </span>
+                </div>
+
                 <div className="text-[var(--ink-secondary)] text-[10.5px] leading-relaxed">
                   {t.review.cascadeConfirmDesc
-                    .replace('{n}', String(violation.cascade_all))
+                    .replace('{n}', String(targetCount))
                     .replace('{surface}', violation.surface)
                     .replace('{expected}', violation.expected)}
                 </div>
-                <div className="flex items-center gap-2 pt-0.5">
+
+                <div className="flex items-center gap-1.5 text-[var(--ink-secondary)] text-[11px] pt-0.5">
+                  <Sparkles className="h-3 w-3 text-amber-500 shrink-0" />
+                  <span>{t.review.cascadeTmSync}</span>
+                </div>
+
+                <div className="flex items-center gap-2 pt-1 border-t border-[#b45309]/20">
                   <Button
-                    onClick={() => executeReplace(violation)}
+                    onClick={() => executeReplace(violation, currentScope)}
                     variant="primary"
                     size="sm"
                     disabled={busy}
-                    className="text-xs h-5 px-2 bg-[#b45309] hover:bg-[#92400e] text-white font-bold"
+                    className="text-xs h-6 px-2.5 bg-[#b45309] hover:bg-[#92400e] text-white font-bold"
                   >
-                    {busy ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
-                    {t.review.cascadeConfirmProceed}
+                    {busy ? (
+                      <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                    ) : (
+                      <Wand2 className="h-3 w-3 mr-1" />
+                    )}
+                    {t.review.cascadeConfirmProceed} ({targetCount})
                   </Button>
                   <Button
                     onClick={() => setConfirmViolation(null)}
                     variant="secondary"
                     size="sm"
                     disabled={busy}
-                    className="text-xs h-5 px-2"
+                    className="text-xs h-6 px-2.5"
                   >
                     {t.review.cascadeConfirmCancel}
                   </Button>

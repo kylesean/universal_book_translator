@@ -147,8 +147,9 @@ def segment_matches_filter(block: IRBlock, status_filter: str | None) -> bool:
     """Whether a block belongs in a workbench view.
 
     ``status_filter`` is one of ``all``/``None`` (everything), ``issues``
-    (anything the ribbon counts, plus PE-queue members), or a concrete
-    ``BlockStatus`` value.
+    (anything the ribbon counts, plus PE-queue members), a concrete
+    ``BlockStatus`` value, or a defect kind from ``ISSUE_KINDS``
+    (e.g. 'terminology', 'formula', 'numeric').
     """
     if status_filter in (None, "", "all"):
         return True
@@ -157,6 +158,8 @@ def segment_matches_filter(block: IRBlock, status_filter: str | None) -> bool:
             BlockStatus.NEEDS_HUMAN,
             BlockStatus.BLOCKED_HUMAN,
         )
+    if status_filter in ISSUE_KINDS:
+        return status_filter in segment_issue_kinds(block)
     return block.status.value == status_filter
 
 
