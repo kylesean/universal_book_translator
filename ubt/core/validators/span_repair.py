@@ -333,9 +333,19 @@ class SpanRepairSplicer:
             for span in sorted_spans:
                 if span.id in corrections:
                     replacement = corrections[span.id]
-                    # Never blindly append a bare missing number/token to the very end of the paragraph
+                    # Never blindly append a bare missing number/token to the very end of the paragraph.
+                    # Only treat as wholesale rewritten text if this is the only span and
+                    # the replacement is substantially full-length (>= 80%) or shares the draft's prefix.
                     if span.start_pos == span.end_pos == len(original_draft):
-                        if len(replacement) > len(original_draft) * 0.5:
+                        if len(spans) == 1 and (
+                            len(replacement) >= len(original_draft) * 0.8
+                            or (
+                                len(original_draft) >= 10
+                                and replacement.startswith(
+                                    original_draft[: min(10, len(original_draft) // 2)]
+                                )
+                            )
+                        ):
                             return replacement, False
                         continue
                     result = result[: span.start_pos] + replacement + result[span.end_pos :]

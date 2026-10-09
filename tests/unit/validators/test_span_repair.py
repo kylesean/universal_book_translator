@@ -326,3 +326,29 @@ def test_correction_pattern_tolerates_extra_attributes() -> None:
         "value is 42",
         True,
     )
+
+
+def test_splicer_does_not_wholesale_replace_if_multiple_spans() -> None:
+    # When multiple spans exist, an end insertion must not abort other splices
+    spans = [
+        MQMErrorSpan("1", "numeric", "r", "11", 2, 4, "11", "critical"),
+        MQMErrorSpan("2", "numeric", "r", "42", 8, 8, "", "critical"),
+    ]
+    # Span 2 is an end insertion with a long text (>50%), span 1 is mid-text
+    output = '<correction id="1">X</correction><correction id="2">very long trailing explanation</correction>'
+    result, spliced = SpanRepairSplicer().splice_repairs("a 11 end", spans, output)
+    # Span 1 is spliced in place; end insertion is not wholesale replaced
+    assert spliced is True
+    assert result == "a X end"
+
+
+def test_splicer_does_not_wholesale_replace_on_short_fragment() -> None:
+    # Draft is 100 chars, end replacement is 55 chars (no shared prefix, <80%)
+    draft = "a" * 100
+    end_span = [MQMErrorSpan("1", "numeric", "r", "42", 100, 100, "42", "critical")]
+    fragment = "b" * 55
+    output = f'<correction id="1">{fragment}</correction>'
+    result, spliced = SpanRepairSplicer().splice_repairs(draft, end_span, output)
+    # Must NOT replace 100 chars with 55 chars
+    assert spliced is False
+    assert result == draft
