@@ -38,6 +38,7 @@ from ubt.core.cleaners.html_sanitizer import (
 )
 from ubt.core.exceptions import DocumentParseError
 from ubt.core.ir.models import (
+    BlockProvenance,
     BlockType,
     BookManifest,
     ChapterIR,
@@ -404,7 +405,7 @@ def _parse_chapter_blocks(
         chapter_blocks.append(
             IRBlock(
                 element=dataclasses.replace(elem, spine_index=global_spine),
-                provenance=prov,
+                provenance=BlockProvenance(**prov),
             )
         )
         global_spine += 1
@@ -1099,7 +1100,7 @@ class EPUBAdapter(BaseDocumentAdapter):
 
             candidates.setdefault(chapter.source_file, []).append((b.spine_index, cleaned))
 
-            html_id = (b.provenance or {}).get("html_id")
+            html_id = b.provenance.get("html_id")
             if html_id:
                 result[f"{chapter.source_file}#{html_id}"] = cleaned
 

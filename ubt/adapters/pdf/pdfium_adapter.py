@@ -23,6 +23,7 @@ fast path explicitly.
 from __future__ import annotations
 
 import asyncio
+import gc
 import logging
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -30,8 +31,9 @@ from typing import TYPE_CHECKING
 
 from ubt.adapters.base import BasePDFEngineAdapter
 from ubt.adapters.pdf.docling_adapter import _PDFRenderStackMixin
+from ubt.adapters.pdf.page_chunking import compute_pdf_page_chunks, get_pdf_page_chunk_size
 from ubt.adapters.pdf.pdfium_gate import pdfium_serialized
-from ubt.core.ir.models import BookManifest, ChapterIR, IRBlock
+from ubt.core.ir.models import BookManifest, ChapterIR, ChapterMeta, IRBlock
 
 if TYPE_CHECKING:
     from ubt.cache.store import CacheStore
@@ -131,24 +133,71 @@ class PDFiumAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
     async def parse_stream(
         self, input_path: Path, pages: set[int] | None = None
     ) -> AsyncIterator[ChapterIR]:
-        """Stream PDF contents as a single ChapterIR partition."""
+        """Stream PDF contents as structured ChapterIR partitions.
+
+        Partitions long PDFs into out-of-core page chunks (e.g. 50 pages)
+        to bound resident memory (RSS) to O(1) during full document ingest.
+        AST objects and line caches are evicted between chunks.
+        """
         path = Path(input_path)
         manifest = await self.extract_manifest(path)
-        chapter_meta = manifest.chapters[0]
+        chunk_size = get_pdf_page_chunk_size()
 
+        total_pages = int(manifest.metadata.get("page_count", 0))
+        if total_pages <= 0:
+            try:
+                from ubt.adapters.pdf.short_doc import probe_pdf_pages
+
+                total_pages, _ = probe_pdf_pages(path)
+            except Exception:
+                total_pages = 0
+
+        page_chunks = compute_pdf_page_chunks(total_pages, pages=pages, chunk_size=chunk_size)
         loop = asyncio.get_running_loop()
-        blocks = await loop.run_in_executor(None, self._extract_blocks_sync, path, None)
+        global_block_idx = 1
 
-        if pages:
-            blocks = [b for b in blocks if _block_page_in_range(b, min(pages), max(pages))]
+        for chunk_idx, chunk_pages in enumerate(page_chunks):
+            chunk_range: tuple[int, int] | None = (
+                (min(chunk_pages), max(chunk_pages)) if chunk_pages else None
+            )
 
-        yield ChapterIR(
-            doc_id=manifest.doc_id,
-            chapter_id=chapter_meta.chapter_id,
-            title=chapter_meta.title,
-            spine_index=0,
-            blocks=blocks,
-        )
+            chapter_meta = (
+                manifest.chapters[chunk_idx]
+                if chunk_idx < len(manifest.chapters)
+                else ChapterMeta(
+                    chapter_id=f"c{chunk_idx + 1:04d}",
+                    title=f"Pages {chunk_range[0]}-{chunk_range[1]}" if chunk_range else "Main",
+                    spine_index=chunk_idx + 1,
+                    source_file=path.name,
+                )
+            )
+
+            blocks = await loop.run_in_executor(None, self._extract_blocks_sync, path, chunk_range)
+
+            if pages and chunk_pages:
+                chunk_set = set(chunk_pages)
+                blocks = [b for b in blocks if b.bbox is None or b.bbox.page in chunk_set]
+
+            if len(page_chunks) > 1:
+                for b in blocks:
+                    b.set_id(f"pdf_main#b{global_block_idx:04d}")
+                    b.set_spine_index(global_block_idx)
+                    global_block_idx += 1
+            else:
+                global_block_idx += len(blocks)
+
+            chapter_ir = ChapterIR(
+                doc_id=manifest.doc_id,
+                chapter_id=chapter_meta.chapter_id,
+                title=chapter_meta.title,
+                spine_index=chapter_meta.spine_index,
+                blocks=blocks,
+            )
+            yield chapter_ir
+
+            del blocks
+            del chapter_ir
+            gc.collect()
 
     def _extract_blocks_sync(
         self, path: Path, page_range: tuple[int, int] | None = None

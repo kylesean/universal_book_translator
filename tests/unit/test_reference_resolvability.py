@@ -29,15 +29,21 @@ pytestmark = pytest.mark.fast
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SCAN_DIRS = (_REPO_ROOT / "ubt", _REPO_ROOT / "tests")
 #: Only unambiguous repo-relative paths are checked; a bare ``foo/bar.py`` may
-#: be relative to anywhere and would produce false positives.
-_FILE_REF_ROOTS = ("ubt/", "tests/", "scripts/", "docs/")
+#: be relative to anywhere and would produce false positives. ``docs/`` is
+#: intentionally unversioned (gitignored), so it counts as a checked root only
+#: while it is present in the working tree — a fresh clone without docs must not
+#: fail on the many ``docs/...`` references in code comments.
+_FILE_REF_ROOTS = tuple(
+    root for root in ("ubt/", "tests/", "scripts/", "docs/") if (_REPO_ROOT / root).exists()
+)
 _FILE_REF = re.compile(r"`([A-Za-z0-9_./-]+\.(?:py|md|toml|json|sql))`")
 _DOT_REF = re.compile(r"`(ubt(?:\.[A-Za-z_][A-Za-z0-9_]*)+)`")
 _IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 #: Dotted spans that are not module references: ``ubt.toml`` (a config file, not a
-#: module), and illustrative placeholders in docs/tests (``ubt.pkg.sub``).
-_DOT_REF_SKIP = frozenset({"ubt.toml", "ubt.pkg.sub"})
+#: module), illustrative placeholders in docs/tests (``ubt.pkg.sub``), and
+#: entry-point groups (``ubt.spi``).
+_DOT_REF_SKIP = frozenset({"ubt.toml", "ubt.pkg.sub", "ubt.spi"})
 
 
 def _resolve_module(parts: list[str]) -> tuple[Path | None, list[str]]:

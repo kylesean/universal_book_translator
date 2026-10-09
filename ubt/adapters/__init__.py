@@ -14,6 +14,7 @@ from ubt.adapters.html.adapter import HTMLAdapter
 from ubt.adapters.markdown.adapter import MarkdownAdapter
 from ubt.adapters.pdf.docling_adapter import DoclingPDFAdapter
 from ubt.adapters.pdf.pdfium_adapter import PDFiumAdapter
+from ubt.adapters.spi import register_spi_providers
 
 __all__ = [
     "BaseDocumentAdapter",
@@ -28,5 +29,6 @@ __all__ = [
     "is_pdf_engine_registered",
     "register_adapter",
     "register_pdf_engine",
+    "register_spi_providers",
     "supported_suffixes",
 ]

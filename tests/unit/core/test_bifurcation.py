@@ -9,7 +9,7 @@ from ubt.core.ir.bifurcation import (
     bifurcate_block,
     bifurcate_blocks,
 )
-from ubt.core.ir.models import BlockStatus, IRBlock
+from ubt.core.ir.models import BlockProvenance, BlockStatus, IRBlock
 from ubt.model.ast import Paragraph
 from ubt.model.span import CompositeSpan, PhysicalBox, Span
 from ubt.render.outputs import overlays_from_blocks
@@ -64,13 +64,13 @@ def test_bifurcate_multi_box_composite_span() -> None:
         spine_index=0,
     )
     block = IRBlock(element=elem)
-    block.provenance = {
-        "fused_block_ids": ["src_b1", "src_b2"],
-        "fused_sources": [
+    block.provenance = BlockProvenance(
+        fused_block_ids=["src_b1", "src_b2"],
+        fused_sources=[
             "The attention mechanism was proposed.",
             "It enables seq2seq learning.",
         ],
-    }
+    )
     block.target_text = f"注意力机制被提出。{SEMANTIC_BREAK_TOKEN}它支持序列到序列学习。"
     block.draft_text = block.target_text
     block.status = BlockStatus.DRAFTED
@@ -155,10 +155,10 @@ def test_overlays_from_blocks_multi_box_bifurcation_emits_separate_overlays() ->
         spine_index=0,
     )
     block = IRBlock(element=elem)
-    block.provenance = {
-        "fused_block_ids": ["p1_b", "p2_b"],
-        "fused_sources": ["Part 1.", "Part 2."],
-    }
+    block.provenance = BlockProvenance(
+        fused_block_ids=["p1_b", "p2_b"],
+        fused_sources=["Part 1.", "Part 2."],
+    )
     block.target_text = f"第一页。{SEMANTIC_BREAK_TOKEN}第二页。"
 
     overlays = overlays_from_blocks([block])
@@ -185,10 +185,10 @@ def test_overlays_from_blocks_multi_box_bifurcation_with_lowercase_continuation(
         spine_index=0,
     )
     block = IRBlock(element=elem)
-    block.provenance = {
-        "fused_block_ids": ["p1_b", "p2_b"],
-        "fused_sources": ["The machine relies on", "attention and runs a forward pass."],
-    }
+    block.provenance = BlockProvenance(
+        fused_block_ids=["p1_b", "p2_b"],
+        fused_sources=["The machine relies on", "attention and runs a forward pass."],
+    )
     block.target_text = f"第一部分。{SEMANTIC_BREAK_TOKEN}第二部分。"
 
     overlays = overlays_from_blocks([block])

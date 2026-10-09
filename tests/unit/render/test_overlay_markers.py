@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from ubt.core.ir.models import BlockType, BoundingBox, IRBlock, make_element
+from ubt.core.ir.models import BlockProvenance, BlockType, BoundingBox, IRBlock, make_element
 from ubt.render.outputs import overlays_from_blocks
 
 pytestmark = pytest.mark.fast
@@ -72,7 +72,7 @@ def test_a_toc_row_becomes_a_toc_overlay_carrying_its_page_number() -> None:
     # overlay must keep the TOC kind and the number so the compositor can redraw
     # title + leaders + number instead of a plain text overlay.
     block = _block(BlockType.NARRATIVE, source="3. Effects", target="3. 效应")
-    block.provenance = {"toc_entry": True, "toc_page": "9"}
+    block.provenance = BlockProvenance(toc_entry=True, toc_page="9")
     (overlay,) = overlays_from_blocks([block])
     assert overlay.kind == "toc"
     assert overlay.toc_page == "9"

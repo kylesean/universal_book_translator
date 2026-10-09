@@ -89,6 +89,11 @@ ubt = "ubt.cli.main:app"
 ubt-api = "ubt.api.app:run_server"
 ubt-mcp = "ubt.mcp._entrypoint:main"
 
+[project.entry-points."ubt.spi"]
+adapters = "ubt.adapters.spi:register_spi_providers"
+segment = "ubt.segment.spi:register_spi_providers"
+translate = "ubt.translate.spi:register_spi_providers"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8.2.0",

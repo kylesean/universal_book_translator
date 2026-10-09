@@ -11,11 +11,11 @@ the two cannot disagree. What is left on the block is execution state
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, MutableMapping
 from enum import StrEnum
 from typing import Annotated, Any, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ubt.core.ir.run_metadata import RunMetadata
 from ubt.model.ast import (
@@ -291,6 +291,173 @@ def make_element(
     return Paragraph(text=source_text, **common)
 
 
+_MISSING = object()
+
+
+class BlockProvenance(BaseModel):
+    """Strongly typed provenance metadata for an IRBlock.
+
+    Upgrades unstructured dictionaries to a strongly validated Pydantic model
+    while maintaining 100% dictionary interface compatibility (indexing,
+    membership, iteration, .get(), .to_dict(), and unpack semantics).
+    """
+
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    # Physical bounding boxes & source layout
+    physical_boxes: list[dict[str, Any]] = Field(default_factory=list)
+    source_page: int | None = None
+    page_kind: str | None = None
+
+    # Typography & styling
+    is_bold: bool | None = None
+    is_italic: bool | None = None
+    font_size: float | None = None
+    font_family: str | None = None
+    font_name: str | None = None
+    alignment: str | None = None
+
+    # Table of contents (TOC) metadata
+    toc_entry: bool | None = None
+    toc_page: str | None = None
+    toc_leaders: bool | None = None
+
+    # Cross-page continuation & bifurcation
+    fused_sources: list[str] | None = None
+    fused_block_ids: list[str] | None = None
+    fused_count: int | None = None
+    bifurcated_from: str | None = None
+    bifurcated_order: int | None = None
+    bifurcated_total: int | None = None
+    bifurcation_index: int | None = None
+
+    # Layout witnesses, VLM & repairs
+    vlm_lines: list[Any] | None = None
+    anchor_provenance: str | None = None
+    anchor_stats: dict[str, Any] | None = None
+    parser: str | None = None
+    needs_review: bool | None = None
+    ocr_truncated: bool | None = None
+    docling_span_split_tail: bool | None = None
+    space_repair: str | None = None
+    math_symbol_repair: str | None = None
+    iou_crosscheck: str | None = None
+    html_id: str | None = None
+    is_diagram_text: bool | None = None
+    has_complex_symbols: bool | None = None
+
+    def __getitem__(self, key: str) -> Any:
+        fields = type(self).model_fields
+        if key in fields:
+            val = getattr(self, key)
+            if key == "physical_boxes":
+                return val
+            if val is not None:
+                return val
+            return None
+        if self.__pydantic_extra__ and key in self.__pydantic_extra__:
+            return self.__pydantic_extra__[key]
+        raise KeyError(key)
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        if key in type(self).model_fields:
+            setattr(self, key, value)
+        else:
+            if self.__pydantic_extra__ is None:
+                self.__pydantic_extra__ = {}
+            self.__pydantic_extra__[key] = value
+
+    def __delitem__(self, key: str) -> None:
+        if key in type(self).model_fields:
+            setattr(self, key, None)
+        elif self.__pydantic_extra__ and key in self.__pydantic_extra__:
+            del self.__pydantic_extra__[key]
+        else:
+            raise KeyError(key)
+
+    def __contains__(self, key: object) -> bool:
+        if not isinstance(key, str):
+            return False
+        if key in type(self).model_fields:
+            val = getattr(self, key)
+            if key == "physical_boxes":
+                return bool(val)
+            return val is not None
+        return bool(self.__pydantic_extra__ and key in self.__pydantic_extra__)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        if key in type(self).model_fields:
+            val = getattr(self, key)
+            if key == "physical_boxes":
+                return val if val else default
+            if val is not None:
+                return val
+            return default
+        if self.__pydantic_extra__ and key in self.__pydantic_extra__:
+            return self.__pydantic_extra__[key]
+        return default
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dict, omitting None values and empty physical_boxes if empty."""
+        res: dict[str, Any] = {}
+        for k in type(self).model_fields:
+            v = getattr(self, k)
+            if v is not None:
+                if k == "physical_boxes" and not v:
+                    continue
+                res[k] = v
+        if self.__pydantic_extra__:
+            res.update(self.__pydantic_extra__)
+        return res
+
+    def keys(self) -> Any:
+        return self.to_dict().keys()
+
+    def values(self) -> Any:
+        return self.to_dict().values()
+
+    def items(self) -> Any:
+        return self.to_dict().items()
+
+    def __iter__(self) -> Any:
+        return iter(self.to_dict())
+
+    def __len__(self) -> int:
+        return len(self.to_dict())
+
+    def pop(self, key: str, default: Any = _MISSING) -> Any:
+        if key in self:
+            val = self[key]
+            del self[key]
+            return val
+        if default is not _MISSING:
+            return default
+        raise KeyError(key)
+
+    def update(
+        self, other: Mapping[str, Any] | Iterable[tuple[str, Any]] | None = None, **kwargs: Any
+    ) -> None:
+        if other:
+            if isinstance(other, Mapping):
+                for k, v in other.items():
+                    self[k] = v
+            else:
+                for k, v in other:
+                    self[k] = v
+        for k, v in kwargs.items():
+            self[k] = v
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, BlockProvenance):
+            return self.to_dict() == other.to_dict()
+        if isinstance(other, dict):
+            return self.to_dict() == other
+        return super().__eq__(other)
+
+
+MutableMapping.register(BlockProvenance)
+
+
 class IRBlock(BaseModel):
     """Atomic content block in Universal Book Translator IR.
 
@@ -300,7 +467,9 @@ class IRBlock(BaseModel):
     ``region`` to a value disagreeing with the element.
     """
 
-    model_config = ConfigDict(extra="ignore", arbitrary_types_allowed=True)
+    model_config = ConfigDict(
+        extra="ignore", arbitrary_types_allowed=True, validate_assignment=True
+    )
 
     #: The typed structure: element class = type, flow, region, span, text.
     element: Annotated[ElementT, Field(discriminator="kind")]
@@ -328,7 +497,18 @@ class IRBlock(BaseModel):
     # Policy verdict (single source of truth: the pipeline's decision, not the extractor's)
     policy_translate: bool | None = None  # None = undecided, fall back to skip_translate
     policy_reason: str | None = None  # Required when policy_translate is False
-    provenance: dict[str, Any] = Field(default_factory=dict)
+    provenance: BlockProvenance = Field(default_factory=BlockProvenance)
+
+    @field_validator("provenance", mode="before")
+    @classmethod
+    def _validate_provenance(cls, v: Any) -> Any:
+        if isinstance(v, BlockProvenance):
+            return v
+        if isinstance(v, dict):
+            return BlockProvenance(**v)
+        if v is None:
+            return BlockProvenance()
+        return v
 
     # ------------------------------------------------------------------ #
     # Structural projections of ``element`` (read-only; one source)

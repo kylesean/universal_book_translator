@@ -39,7 +39,7 @@ from ubt.adapters.pdf.textgeom import (
     extract_lines,
     styled_runs_in_box,
 )
-from ubt.core.ir.models import BlockType, IRBlock
+from ubt.core.ir.models import BlockProvenance, BlockType, IRBlock
 from ubt.core.policy.layout_policy import CONTROL_RE
 from ubt.model.ast import Confidence
 from ubt.model.span import CompositeSpan, PhysicalBox
@@ -564,10 +564,10 @@ def cross_check_blocks_with_pdfium(
             demoted = IRBlock(element=fused_elem)
             demoted.skip_translate = True
             demoted.policy_translate = False
-            demoted.provenance = {
-                **block.provenance,
-                "iou_crosscheck": f"opaque: {failed_reason}",
-            }
+            demoted.provenance = BlockProvenance(
+                **block.provenance.to_dict(),
+                iou_crosscheck=f"opaque: {failed_reason}",
+            )
             demoted.error_flags = list(block.error_flags) + [
                 f"skip:preserved_opaque({failed_reason})"
             ]

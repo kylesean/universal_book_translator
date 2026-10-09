@@ -576,7 +576,7 @@ def chart_pages_from_blocks(blocks: Sequence[object]) -> set[int]:
     pages: set[int] = set()
     for block in blocks:
         provenance = getattr(block, "provenance", None)
-        if not isinstance(provenance, dict):
+        if not isinstance(provenance, (dict, Mapping)):
             continue
         if str(provenance.get("page_kind", "")) in CHART_PAGE_KINDS:
             bbox = getattr(block, "bbox", None)

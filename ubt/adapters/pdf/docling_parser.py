@@ -32,6 +32,7 @@ from ubt.adapters.pdf.docling_blocks import (
     split_prov_spans,
     table_to_markdown,
 )
+from ubt.adapters.pdf.page_chunking import compute_pdf_page_chunks, get_pdf_page_chunk_size
 from ubt.adapters.pdf.pdfium_gate import PDFIUM_LOCK, unify_docling_pdfium_lock
 from ubt.adapters.pdf.plain_text_extractor import pages_to_blocks
 from ubt.analyze.structure import looks_like_debris, looks_like_listing, pdf_list_marker
@@ -39,6 +40,7 @@ from ubt.core.cleaners.lnds_pruner import normalize_academic_pdf_math
 from ubt.core.exceptions import DocumentParseError
 from ubt.core.fs_perms import restrict_dir_to_owner, restrict_file_to_owner
 from ubt.core.ir.models import (
+    BlockProvenance,
     BlockType,
     BookManifest,
     BoundingBox,
@@ -74,19 +76,44 @@ def extract_manifest(path: Path, *, is_docling_installed: bool) -> BookManifest:
 
     doc_id = compute_file_sha256_cached(path)
     clean_title = clean_source_stem(path)
-    chapter = ChapterMeta(
-        chapter_id="pdf_main",
-        title=clean_title,
-        spine_index=1,
-        source_file=path.name,
-    )
+
+    total_pages = 0
+    try:
+        from ubt.adapters.pdf.short_doc import probe_pdf_pages
+
+        total_pages, _ = probe_pdf_pages(path)
+    except Exception:
+        total_pages = 0
+
+    chunk_size = get_pdf_page_chunk_size()
+    if total_pages > chunk_size:
+        chunks = compute_pdf_page_chunks(total_pages, chunk_size=chunk_size)
+        chapters = [
+            ChapterMeta(
+                chapter_id=f"c{i + 1:04d}",
+                title=f"Pages {chunk[0]}-{chunk[-1]}",
+                spine_index=i + 1,
+                source_file=path.name,
+            )
+            for i, chunk in enumerate(chunks)
+        ]
+    else:
+        chapters = [
+            ChapterMeta(
+                chapter_id="pdf_main",
+                title=clean_title,
+                spine_index=1,
+                source_file=path.name,
+            )
+        ]
+
     parser_engine = "docling" if is_docling_installed else "oxide_fallback"
     return BookManifest(
         doc_id=doc_id,
         title=clean_title,
         source_path=str(path),
-        chapters=[chapter],
-        metadata={"pdf_parser_engine": parser_engine},
+        chapters=chapters,
+        metadata={"pdf_parser_engine": parser_engine, "page_count": total_pages},
     )
 
 
@@ -926,13 +953,13 @@ def _extract_document_index_blocks(
                             y1=float(ln.rect[3]),
                         ),
                     ),
-                    provenance={
-                        "source_page": page_no,
-                        "toc_entry": True,
-                        "toc_page": toc_page,
-                        "toc_leaders": has_leaders,
-                        "is_bold": ln.bold,
-                    },
+                    provenance=BlockProvenance(
+                        source_page=page_no,
+                        toc_entry=True,
+                        toc_page=toc_page,
+                        toc_leaders=has_leaders,
+                        is_bold=ln.bold,
+                    ),
                 )
             )
     return out
@@ -1242,7 +1269,7 @@ def map_iterated_items(
                     skip_translate=skip,
                     region=region,
                 ),
-                provenance=block_provenance,
+                provenance=BlockProvenance(**block_provenance),
             )
         )
         if span_split is not None:
@@ -1258,7 +1285,7 @@ def map_iterated_items(
                         bbox=tail_bbox,
                         region=RegionKind.CAPTION,
                     ),
-                    provenance={"docling_span_split_tail": True},
+                    provenance=BlockProvenance(docling_span_split_tail=True),
                 )
             )
 

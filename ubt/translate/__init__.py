@@ -9,5 +9,6 @@ clean. The draft stage drives it.
 from __future__ import annotations
 
 from ubt.translate.engine import RestoreResult, TranslateFn, TranslationEngine
+from ubt.translate.spi import register_spi_providers
 
-__all__ = ["RestoreResult", "TranslateFn", "TranslationEngine"]
+__all__ = ["RestoreResult", "TranslateFn", "TranslationEngine", "register_spi_providers"]

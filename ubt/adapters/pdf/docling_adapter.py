@@ -17,6 +17,7 @@ patch points and call sites keep working.
 from __future__ import annotations
 
 import asyncio
+import gc
 import importlib
 import importlib.util
 import logging
@@ -38,8 +39,9 @@ from ubt.adapters.pdf.docling_parser import (
 )
 from ubt.adapters.pdf.docling_render import DoclingRenderStrategy
 from ubt.adapters.pdf.font_metrics import sanitize_font_family
+from ubt.adapters.pdf.page_chunking import compute_pdf_page_chunks, get_pdf_page_chunk_size
 from ubt.core.env import has_accelerator as _has_accelerator
-from ubt.core.ir.models import BookManifest, ChapterIR, IRBlock
+from ubt.core.ir.models import BookManifest, ChapterIR, ChapterMeta, IRBlock
 from ubt.core.ir.render_plan import RenderOutcome, RenderPlan
 
 if TYPE_CHECKING:
@@ -235,66 +237,95 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
     ) -> AsyncIterator[ChapterIR]:
         """Stream PDF contents as structured ChapterIR partitions.
 
-        A contiguous ``pages`` selection is pushed down into Docling so the
-        expensive layout plus formula-VLM pass only sees the requested range
-        (the ingest stage still filters blocks, which also covers the
-        non-contiguous fallback and engines that ignore the hint).
+        Partitions long PDFs into out-of-core page chunks (e.g. 50 pages)
+        to bound resident memory (RSS) to O(1) during full document ingest.
+        AST objects and line caches are evicted between chunks.
         """
         path = Path(input_path)
         manifest = await self.extract_manifest(path)
-        chapter_meta = manifest.chapters[0]
+        chunk_size = get_pdf_page_chunk_size()
 
-        page_range = _contiguous_page_range(pages)
-        if pages and page_range is None:
-            logger.debug(
-                "Page selection %s is non-contiguous; parsing the full PDF and "
-                "filtering blocks after ingest",
-                sorted(pages),
+        total_pages = int(manifest.metadata.get("page_count", 0))
+        if total_pages <= 0:
+            try:
+                from ubt.adapters.pdf.short_doc import probe_pdf_pages
+
+                total_pages, _ = probe_pdf_pages(path)
+            except Exception:
+                total_pages = 0
+
+        page_chunks = compute_pdf_page_chunks(total_pages, pages=pages, chunk_size=chunk_size)
+        loop = asyncio.get_running_loop()
+        global_block_idx = 1
+
+        for chunk_idx, chunk_pages in enumerate(page_chunks):
+            chunk_range: tuple[int, int] | None = (
+                (min(chunk_pages), max(chunk_pages)) if chunk_pages else None
             )
 
-        loop = asyncio.get_running_loop()
-        blocks = await loop.run_in_executor(None, self._extract_blocks_sync, path, page_range)
+            chapter_meta = (
+                manifest.chapters[chunk_idx]
+                if chunk_idx < len(manifest.chapters)
+                else ChapterMeta(
+                    chapter_id=f"c{chunk_idx + 1:04d}",
+                    title=f"Pages {chunk_range[0]}-{chunk_range[1]}" if chunk_range else "Main",
+                    spine_index=chunk_idx + 1,
+                    source_file=path.name,
+                )
+            )
 
-        # Textless-page VLM fallback (default OFF via UBT_VLM_SCAN_FALLBACK).
-        # Docling runs with do_ocr=False, so pages whose only content is an
-        # image yield zero blocks; with the switch on, those pages are
-        # transcribed through the vlm/ core (proofread→recognition) and
-        # spliced back in page order. Late import: vlm stays optional.
-        # ``to_thread``, not ``run_in_executor``: the OCR driver books its
-        # tokens on the run's usage sink, a ContextVar that
-        # ``loop.run_in_executor`` does NOT propagate (it does not copy the
-        # caller's context), so an executor thread would record nothing and the
-        # paid OCR channel would stay invisible to the bill.
-        blocks = await asyncio.to_thread(
-            self._vlm_fallback_missing_pages,
-            path,
-            blocks,
-            self.ocr_mode,
-            self.ocr_endpoint,
-            self.ocr_api_key,
-            self.ocr_model,
-            page_range,
-            self.allow_page_upload,
-        )
+            blocks = await loop.run_in_executor(None, self._extract_blocks_sync, path, chunk_range)
 
-        # Per-page profile kinds ride into block provenance (render routing)
-        # and chapter metadata. Best-effort: profiling must never break
-        # parsing.
-        page_kinds = await loop.run_in_executor(None, self._annotate_page_kinds, path, blocks)
+            # Filter blocks to requested pages if non-contiguous inside chunk
+            if pages and chunk_pages:
+                chunk_set = set(chunk_pages)
+                blocks = [b for b in blocks if b.bbox is None or b.bbox.page in chunk_set]
 
-        metadata: dict[str, Any] = {}
-        if page_kinds:
-            metadata["page_kinds"] = page_kinds
+            # Textless-page VLM fallback (default OFF via UBT_VLM_SCAN_FALLBACK).
+            blocks = await asyncio.to_thread(
+                self._vlm_fallback_missing_pages,
+                path,
+                blocks,
+                self.ocr_mode,
+                self.ocr_endpoint,
+                self.ocr_api_key,
+                self.ocr_model,
+                chunk_range,
+                self.allow_page_upload,
+            )
 
-        chapter_ir = ChapterIR(
-            doc_id=manifest.doc_id,
-            chapter_id=chapter_meta.chapter_id,
-            title=chapter_meta.title,
-            spine_index=chapter_meta.spine_index,
-            blocks=blocks,
-            metadata=metadata,
-        )
-        yield chapter_ir
+            # Re-key block IDs and spine indices so they are globally unique and monotonic across chunks
+            if len(page_chunks) > 1:
+                for b in blocks:
+                    b.set_id(f"pdf_main#b{global_block_idx:04d}")
+                    b.set_spine_index(global_block_idx)
+                    global_block_idx += 1
+            else:
+                global_block_idx += len(blocks)
+
+            # Per-page profile kinds ride into block provenance (render routing)
+            page_kinds = await loop.run_in_executor(None, self._annotate_page_kinds, path, blocks)
+
+            metadata: dict[str, Any] = {}
+            if page_kinds:
+                metadata["page_kinds"] = page_kinds
+            if chunk_range:
+                metadata["page_range"] = list(chunk_range)
+
+            chapter_ir = ChapterIR(
+                doc_id=manifest.doc_id,
+                chapter_id=chapter_meta.chapter_id,
+                title=chapter_meta.title,
+                spine_index=chapter_meta.spine_index,
+                blocks=blocks,
+                metadata=metadata,
+            )
+            yield chapter_ir
+
+            # Out-of-core memory eviction: explicitly reclaim AST objects and line caches
+            del blocks
+            del chapter_ir
+            gc.collect()
 
     @staticmethod
     def _annotate_page_kinds(path: Path, blocks: list[IRBlock]) -> dict[int, str]:

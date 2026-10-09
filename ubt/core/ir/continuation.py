@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from ubt.core.cjk_ranges import is_cjk_wide_char
 from ubt.core.ir.bifurcation import SEMANTIC_BREAK_FLAG
 from ubt.core.ir.models import (
+    BlockProvenance,
     BlockType,
     BoundingBox,
     IRBlock,
@@ -273,16 +274,16 @@ def fuse_continuation_blocks(blocks: Sequence[IRBlock]) -> list[IRBlock]:
         elem = dataclasses.replace(elem, span=CompositeSpan(boxes=run.boxes))
 
         fused = IRBlock(element=elem)
-        fused.provenance = {
-            **block.provenance,
-            "fused_block_ids": list(run.block_ids),
-            "fused_sources": [b.source_text for b in run_blocks],
+        fused.provenance = BlockProvenance(
+            **block.provenance.to_dict(),
+            fused_block_ids=list(run.block_ids),
+            fused_sources=[b.source_text for b in run_blocks],
             # The box chain must survive the ledger round-trip: ``_row_to_block``
             # rebuilds the CompositeSpan from ``physical_boxes`` alone, so without
             # this the fused paragraph comes back as a single first-box overlay and
             # its whole target is squeezed into one line (a jarring shrink).
-            "physical_boxes": boxes_to_provenance(run.boxes),
-        }
+            physical_boxes=boxes_to_provenance(run.boxes),
+        )
         if joined_target:
             fused.target_text = joined_target
         output.append(fused)

@@ -18,7 +18,7 @@ import dataclasses
 import re
 from collections.abc import Sequence
 
-from ubt.core.ir.models import IRBlock, _with_element_source
+from ubt.core.ir.models import BlockProvenance, IRBlock, _with_element_source
 from ubt.model.span import CompositeSpan, Span
 
 SEMANTIC_BREAK_TOKEN: str = "⟦SEMANTIC_BREAK⟧"
@@ -118,11 +118,11 @@ def bifurcate_block(block: IRBlock) -> list[IRBlock]:
             new_block.target_text = part
             new_block.status = block.status
             new_block.error_flags = [*block.error_flags, SEMANTIC_BREAK_FLAG]
-            new_block.provenance = {
-                **block.provenance,
-                "bifurcated_from": block.id,
-                "bifurcation_index": i,
-            }
+            new_block.provenance = BlockProvenance(
+                **block.provenance.to_dict(),
+                bifurcated_from=block.id,
+                bifurcation_index=i,
+            )
             results.append(new_block)
         return results
 
@@ -141,11 +141,11 @@ def bifurcate_block(block: IRBlock) -> list[IRBlock]:
         new_block.target_text = part
         new_block.status = block.status
         new_block.error_flags = [*block.error_flags, SEMANTIC_BREAK_FLAG]
-        new_block.provenance = {
-            **block.provenance,
-            "bifurcated_from": block.id,
-            "bifurcation_index": i,
-        }
+        new_block.provenance = BlockProvenance(
+            **block.provenance.to_dict(),
+            bifurcated_from=block.id,
+            bifurcation_index=i,
+        )
         results.append(new_block)
     return results
 

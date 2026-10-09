@@ -18,7 +18,14 @@ from ubt.adapters.pdf.pdfium_gate import PDFIUM_LOCK
 from ubt.adapters.pdf.vlm.anchor import AnchorStats, anchor_transcript
 from ubt.adapters.pdf.vlm.registry import get_driver
 from ubt.adapters.pdf.vlm.types import VlmDriver
-from ubt.core.ir.models import BlockType, BoundingBox, FlowID, IRBlock, make_element
+from ubt.core.ir.models import (
+    BlockProvenance,
+    BlockType,
+    BoundingBox,
+    FlowID,
+    IRBlock,
+    make_element,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -229,21 +236,21 @@ def transcribe_page_to_blocks(
                     bbox=BoundingBox(page=page_no, x0=x0, y0=y0, x1=x1, y1=y1),
                     source_text=text,
                 ),
-                provenance={
-                    "parser": f"vlm:{transcript.engine}",
-                    "anchor_provenance": "+".join(provenances),
-                    "needs_review": any(m.needs_review for m in members),
+                provenance=BlockProvenance(
+                    parser=f"vlm:{transcript.engine}",
+                    anchor_provenance="+".join(provenances),
+                    needs_review=any(m.needs_review for m in members),
                     # A truncated driver transcript loses the page tail; carry
                     # the flag so the ledger/report can show it rather than
                     # trusting a half-page as complete.
-                    "ocr_truncated": transcript.truncated,
-                    "anchor_stats": {
+                    ocr_truncated=transcript.truncated,
+                    anchor_stats={
                         "matched": stats.matched,
                         "vlm_only": stats.vlm_only,
                         "pdfium_only": stats.pdfium_only,
                     },
-                    "vlm_lines": [{"text": m.text, "box": list(m.box)} for m in members],
-                },
+                    vlm_lines=[{"text": m.text, "box": list(m.box)} for m in members],
+                ),
             )
         )
     return blocks, stats

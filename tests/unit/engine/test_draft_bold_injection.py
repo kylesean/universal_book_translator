@@ -8,7 +8,14 @@ import pytest
 
 from ubt.core.engine.stages.draft import _source_with_bold_markers
 from ubt.core.ir.emphasis import BOLD_CLOSE, BOLD_OPEN
-from ubt.core.ir.models import BlockType, InlineRun, IRBlock, StyleMeta, make_element
+from ubt.core.ir.models import (
+    BlockProvenance,
+    BlockType,
+    InlineRun,
+    IRBlock,
+    StyleMeta,
+    make_element,
+)
 
 pytestmark = pytest.mark.fast
 
@@ -19,7 +26,11 @@ def _block(
     element = make_element(
         id="b1", spine_index=1, block_type=BlockType.NARRATIVE, source_text=source
     )
-    return IRBlock(element=element, style=style, provenance=provenance or {})
+    return IRBlock(
+        element=element,
+        style=style,
+        provenance=BlockProvenance(**(provenance or {})),
+    )
 
 
 def test_injects_markers_around_bold_spans() -> None:

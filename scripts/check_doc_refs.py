@@ -52,6 +52,7 @@ _SEARCH_BASES = (
     "ubt/core/qe",
     "ubt/core/router",
     "ubt/core/validators",
+    "ubt/core/metrics",
     "ubt/cli/commands",
     "ubt/model",
     "ubt/render",

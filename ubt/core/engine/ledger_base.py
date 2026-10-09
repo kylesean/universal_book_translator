@@ -19,6 +19,7 @@ from ubt.core.exceptions import LedgerError
 from ubt.core.fs_perms import ensure_private_dir, restrict_sqlite_family
 from ubt.core.ir.models import (
     TERMINAL_STATUSES,
+    BlockProvenance,
     BlockStatus,
     BlockType,
     BoundingBox,
@@ -103,7 +104,10 @@ def _upsert_blocks_batch(cursor: sqlite3.Cursor, job_id: str, blocks: Sequence[I
             b.region.value if b.region else None,
             (1 if b.policy_translate else 0) if b.policy_translate is not None else None,
             b.policy_reason,
-            json.dumps(b.provenance, ensure_ascii=False),
+            json.dumps(
+                b.provenance.to_dict() if hasattr(b.provenance, "to_dict") else b.provenance,
+                ensure_ascii=False,
+            ),
             b.mqm_severity,
             json.dumps(b.mqm_spans, ensure_ascii=False) if b.mqm_spans else None,
             getattr(b.element, "level", None),
@@ -742,5 +746,5 @@ class LedgerBase:
             mqm_spans=mqm_spans,
             policy_translate=bool(policy_raw) if policy_raw is not None else None,
             policy_reason=row["policy_reason"],
-            provenance=provenance,
+            provenance=BlockProvenance(**provenance),
         )

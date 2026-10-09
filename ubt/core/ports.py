@@ -27,13 +27,13 @@ call site). If nothing calls a piece of surface, it does not belong here.
 
 from __future__ import annotations
 
-import logging
 from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 
 from ubt.core.ir.models import BookManifest, ChapterIR, IRBlock
+from ubt.core.spi import get_spi_registry
 
 if TYPE_CHECKING:
     # Type-only edges: they keep the port's signature checked against the
@@ -133,24 +133,21 @@ VisualGateRunnerFn = Callable[..., Any]
 
 def resolve_adapter(input_path: Path, pdf_engine: str = "auto") -> DocumentAdapter:
     """Return the document adapter for ``input_path`` without a core import edge."""
-    from ubt.adapters.factory import get_adapter_for_path
-
-    res = get_adapter_for_path(input_path, pdf_engine=pdf_engine)
-    return res
+    resolver = get_spi_registry().get("adapter_resolver")
+    res = resolver(input_path, pdf_engine=pdf_engine)
+    return cast(DocumentAdapter, res)
 
 
 def detect_figure_pages(input_path: Path, blocks: list[Any]) -> set[int]:
     """Return 1-based figure-page numbers."""
-    from ubt.adapters.pdf.svg_diagram import detect_figure_pages as _detect
-
-    return set(_detect(input_path, blocks))
+    detector = get_spi_registry().get("detect_figure_pages")
+    return set(detector(input_path, blocks))
 
 
 def get_visual_gate_runner() -> VisualGateRunnerFn:
     """Return the post-render visual gate entry point."""
-    from ubt.adapters.pdf.visual_gate import run_visual_gate
-
-    return run_visual_gate
+    runner = get_spi_registry().get("visual_gate_runner")
+    return cast(VisualGateRunnerFn, runner)
 
 
 def crashed_visual_gate_result(message: str) -> VisualGateResult:
@@ -160,13 +157,8 @@ def crashed_visual_gate_result(message: str) -> VisualGateResult:
     crash record through this bridge; a crash must not degrade to "no gate",
     which skips blocking enforcement and reads as a perfect KPI pass.
     """
-    from ubt.adapters.pdf.visual_gate import VisualFinding, VisualGateResult
-
-    return VisualGateResult(
-        passed=False,
-        findings=(VisualFinding(severity="critical", code="visual_gate_crashed", message=message),),
-        stats={"total_pages": 0},
-    )
+    builder = get_spi_registry().get("crashed_visual_gate_result")
+    return cast(VisualGateResult, builder(message))
 
 
 def artifact_parity_findings(
@@ -182,10 +174,9 @@ def artifact_parity_findings(
     Duck-typed findings: (severity, code, message); see visual_gate for the
     contract. Empty list when the probes cannot answer.
     """
-    from ubt.adapters.pdf.artifact_parity import check_artifact_parity
-
+    checker = get_spi_registry().get("artifact_parity_findings")
     return list(
-        check_artifact_parity(
+        checker(
             source_pdf=source_pdf,
             artifact_pdf=artifact_pdf,
             target_lang=target_lang,
@@ -203,30 +194,26 @@ def probe_unavailable_finding(code: str, message: str) -> Any:
     made a crashed probe indistinguishable from a clean measurement, so the
     quality report showed a perfect pass for a check that never ran.
     """
-    from ubt.adapters.pdf.artifact_parity import ParityFinding
-
-    return ParityFinding("info", code, message)
+    finder = get_spi_registry().get("probe_unavailable_finding")
+    return finder(code, message)
 
 
 def inspect_font_encoding_damage(pdf_path: Path) -> list[PageVerdict]:
     """Run the extraction witness; returns per-page verdicts."""
-    from ubt.adapters.pdf.extraction_witness import inspect_pdf
-
-    return inspect_pdf(pdf_path)
+    inspector = get_spi_registry().get("inspect_font_encoding_damage")
+    return cast(list[PageVerdict], inspector(pdf_path))
 
 
 def summarize_font_encoding_damage(verdicts: Any) -> dict[str, int]:
     """Aggregate witness verdicts into report metadata."""
-    from ubt.adapters.pdf.extraction_witness import summarize
-
-    return summarize(verdicts)
+    summarizer = get_spi_registry().get("summarize_font_encoding_damage")
+    return cast(dict[str, int], summarizer(verdicts))
 
 
 def flag_font_encoding_damage(blocks: list[Any], verdicts: Any) -> list[Any]:
     """Flag blocks on confirmed-damaged pages; returns the flagged subset."""
-    from ubt.adapters.pdf.extraction_witness import annotate_blocks
-
-    return annotate_blocks(blocks, verdicts)
+    flagger = get_spi_registry().get("flag_font_encoding_damage")
+    return cast(list[Any], flagger(blocks, verdicts))
 
 
 def blocking_gate_tripped(findings: Any, total_pages: int, enabled: bool) -> list[Any]:
@@ -235,23 +222,20 @@ def blocking_gate_tripped(findings: Any, total_pages: int, enabled: bool) -> lis
     Returns the CRITICAL findings that refuse export for short docs when
     enabled; otherwise []. Duck-typed over findings (severity/code/page).
     """
-    from ubt.adapters.pdf.visual_gate import blocking_gate_tripped as _impl
-
-    return list(_impl(findings, total_pages, enabled))
+    evaluator = get_spi_registry().get("blocking_gate_tripped")
+    return list(evaluator(findings, total_pages, enabled))
 
 
 def is_fast_lane_eligible(input_path: Path) -> bool:
     """Fast-lane probe."""
-    from ubt.adapters.pdf.short_doc import is_fast_lane_eligible as _probe
-
-    return bool(_probe(input_path))
+    prober = get_spi_registry().get("is_fast_lane_eligible")
+    return bool(prober(input_path))
 
 
 def crop_block_image(pdf_path: Path, block: Any, dpi: int = 150) -> str | None:
     """Crop block BBox from source PDF as base64 PNG."""
-    from ubt.adapters.pdf.visual_scalpel import crop_ir_block_image as _crop
-
-    return _crop(pdf_path, block, dpi=dpi)
+    cropper = get_spi_registry().get("crop_block_image")
+    return cast(str | None, cropper(pdf_path, block, dpi=dpi))
 
 
 def is_visual_scalpel_applicable(
@@ -260,9 +244,10 @@ def is_visual_scalpel_applicable(
     vision_threshold: float = 0.60,
 ) -> bool:
     """Check if block qualifies for visual scalpel repair (lazy adapter bridge)."""
-    from ubt.adapters.pdf.visual_scalpel import is_visual_scalpel_applicable as _check
-
-    return _check(block, source_pdf_path=source_pdf_path, qe_threshold_for_vision=vision_threshold)
+    checker = get_spi_registry().get("is_visual_scalpel_applicable")
+    return cast(
+        bool, checker(block, source_pdf_path=source_pdf_path, vision_threshold=vision_threshold)
+    )
 
 
 def get_last_render_skips(adapter: Any) -> list[tuple[str, str]]:
@@ -311,9 +296,8 @@ def get_last_render_flags(adapter: Any) -> list[tuple[str, str]]:
 
 def probe_pdf_pages(input_path: Path) -> tuple[int, int]:
     """Return (page_count, char_count) via short_doc probe."""
-    from ubt.adapters.pdf.short_doc import probe_pdf_pages as _probe
-
-    return _probe(input_path)
+    prober = get_spi_registry().get("probe_pdf_pages")
+    return cast(tuple[int, int], prober(input_path))
 
 
 @dataclass(frozen=True)
@@ -332,75 +316,38 @@ class PdfStructureFacts:
 
 
 def classify_pdf_structure(input_path: Path) -> PdfStructureFacts:
-    """Census the document's pages once and return the routing signals.
-
-    Fail-open stays (a probe failure is conservative), but it is logged: a
-    silent default quietly distorts the ``pdf_engine='auto'`` routing decision.
-    """
-    try:
-        from ubt.adapters.pdf.page_profiler import (
-            classify_page,
-            collect_page_facts,
-            majority_flags,
-            structural_page_shares,
-        )
-
-        facts = collect_page_facts(input_path)
-        has_scan, formula_heavy = majority_flags([classify_page(f) for f in facts])
-        multicolumn_share, structural_share = structural_page_shares(facts)
-        return PdfStructureFacts(
-            has_scan=has_scan,
-            formula_heavy=formula_heavy,
-            multicolumn_page_share=multicolumn_share,
-            structural_page_share=structural_share,
-        )
-    except Exception as exc:
-        logging.getLogger(__name__).warning(
-            "PDF content classification failed for %s (routing probe degraded): %s",
-            input_path,
-            exc,
-        )
-        return PdfStructureFacts(False, False, 0.0, 0.0)
+    """Census the document's pages once and return the routing signals."""
+    classifier = get_spi_registry().get("classify_pdf_structure")
+    return cast(PdfStructureFacts, classifier(input_path))
 
 
 # ---------------------------------------------------------------------------
-# PDF route-assessment bridges: thin lazy helpers that keep ``ubt/core`` from
-# naming adapter modules (ubt.adapters.pdf.*) or heavy PDF dependencies
-# (pypdfium2, pypdf) directly. Routing through here preserves the "core names
-# adapters only inside ports.py" discipline without changing behaviour, and
-# hides the adapter-owned constants (PROFILE_CACHE_DIR / PageKind)
-# so core never imports them.
+# PDF route-assessment bridges: thin lazy helpers routed through SPIRegistry.
+# Preserves the "core has zero concrete downstream imports" architecture.
 # ---------------------------------------------------------------------------
 
 
 def inspect_pdf_route_plan(input_path: Path) -> PDFRoutePlan:
     """Return the doc-wide PDFRoutePlan (primary_engine / has_* flags)."""
-    from ubt.adapters.pdf.engine_selector import PROFILE_CACHE_DIR
-    from ubt.adapters.pdf.engine_selector import inspect_pdf_route_plan as _plan
-
-    return _plan(input_path, cache_dir=PROFILE_CACHE_DIR)
+    inspector = get_spi_registry().get("inspect_pdf_route_plan")
+    return cast("PDFRoutePlan", inspector(input_path))
 
 
 def profile_pdf_pages(input_path: Path) -> list[Any]:
     """Return the per-page profile list from the page profiler."""
-    from ubt.adapters.pdf.engine_selector import PROFILE_CACHE_DIR
-    from ubt.adapters.pdf.page_profiler import profile_pdf as _profile
-
-    return list(_profile(input_path, cache_dir=PROFILE_CACHE_DIR))
+    profiler = get_spi_registry().get("profile_pdf_pages")
+    return list(profiler(input_path))
 
 
 def page_kind_enum() -> type[PageKind]:
     """Return the adapter-side PageKind enum (kept out of the core import graph)."""
-    from ubt.adapters.pdf.page_profiler import PageKind
-
-    return PageKind
+    return cast("type[PageKind]", get_spi_registry().get("page_kind_enum"))
 
 
 def supported_suffixes() -> set[str]:
     """File suffixes the adapter registry can open (from the factory)."""
-    from ubt.adapters.factory import supported_suffixes as _supported
-
-    return set(_supported())
+    provider = get_spi_registry().get("supported_suffixes")
+    return set(provider())
 
 
 def render_fidelity_stats(
@@ -410,51 +357,32 @@ def render_fidelity_stats(
     *,
     dpi: int = 300,
 ) -> dict[str, Any]:
-    """Measure overlay-render fidelity (non-text residual + painted coverage).
-
-    Advisory bridge to the adapter's pdfium+Pillow diff so ``ubt/core`` stays
-    free of the heavy raster import edge. Returns a plain stats dict.
-    """
-    from ubt.adapters.pdf.render_fidelity import compute_render_fidelity
-
-    return compute_render_fidelity(source_pdf, artifact_pdf, blocks, dpi=dpi)
+    """Measure overlay-render fidelity (non-text residual + painted coverage)."""
+    measurer = get_spi_registry().get("render_fidelity_stats")
+    return cast(dict[str, Any], measurer(source_pdf, artifact_pdf, blocks, dpi=dpi))
 
 
 def render_fidelity_findings(stats: dict[str, Any]) -> list[Any]:
     """Advisory ``info`` ParityFindings from a fidelity stats dict (never blocking)."""
-    from ubt.adapters.pdf.render_fidelity import fidelity_findings
-
-    return list(fidelity_findings(stats))
+    provider = get_spi_registry().get("render_fidelity_findings")
+    return list(provider(stats))
 
 
 def sample_pdf_pages(input_path: Path) -> tuple[int, bool, str]:
-    """Sample a PDF into ``(page_count, is_scanned, text_preview)``.
-
-    Thin bridge over the adapter's sampler so ``ubt/core/archetype.py`` never
-    names an adapter module or a heavy PDF dependency (the pypdfium2 gate +
-    pdf_oxide fallback live in ``ubt.adapters.pdf.plain_text_extractor``). Failures
-    degrade to ``(1, False, "")``.
-    """
-    from ubt.adapters.pdf.plain_text_extractor import sample_pdf_pages as _sample
-
-    return _sample(input_path)
+    """Sample a PDF into ``(page_count, is_scanned, text_preview)``."""
+    sampler = get_spi_registry().get("sample_pdf_pages")
+    return cast(tuple[int, bool, str], sampler(input_path))
 
 
 # --------------------------------------------------------------------------- #
 # Translation-unit layer bridges (``ubt.segment`` / ``ubt.translate``).
-#
-# The mask order, its exact reverse, and the per-unit judgement live in the
-# compiler. ``ubt/core`` names them only here, inside function bodies, so the
-# module-level core import graph never reaches the compiler packages -- the
-# reverse edge is what makes the ``core.engine <-> pipeline`` cycle.
 # --------------------------------------------------------------------------- #
 
 
 def placeholder_engine() -> PlaceholderEngine:
     """The default placeholder engine (the one mask-order owner in ``ubt.segment``)."""
-    from ubt.segment.placeholders import default_placeholder_engine
-
-    return default_placeholder_engine()
+    factory = get_spi_registry().get("placeholder_engine")
+    return cast("PlaceholderEngine", factory())
 
 
 def masked_source(
@@ -467,15 +395,17 @@ def masked_source(
     email_map: dict[str, str] | None = None,
 ) -> MaskedSource:
     """Rebuild a ``MaskedSource`` from the per-family maps a draft carries."""
-    from ubt.segment.placeholders import MaskedSource
-
-    return MaskedSource(
-        text=text,
-        email_map=email_map or {},
-        code_map=code_map,
-        math_map=math_map,
-        soup_map=soup_map,
-        cite_map=cite_map,
+    factory = get_spi_registry().get("masked_source")
+    return cast(
+        "MaskedSource",
+        factory(
+            text=text,
+            email_map=email_map or {},
+            code_map=code_map,
+            math_map=math_map,
+            soup_map=soup_map,
+            cite_map=cite_map,
+        ),
     )
 
 
@@ -487,11 +417,13 @@ def translation_engine(
     cache: Any = None,
 ) -> TranslationEngine:
     """Build the per-unit transform engine (mask -> restore -> judge)."""
-    from ubt.translate.engine import TranslationEngine
-
-    return TranslationEngine(
-        placeholders=placeholders,
-        model=model,
-        prompt_version=prompt_version,
-        cache=cache,
+    factory = get_spi_registry().get("translation_engine")
+    return cast(
+        "TranslationEngine",
+        factory(
+            placeholders=placeholders,
+            model=model,
+            prompt_version=prompt_version,
+            cache=cache,
+        ),
     )
