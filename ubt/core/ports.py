@@ -191,6 +191,19 @@ def artifact_parity_findings(
     )
 
 
+def probe_unavailable_finding(code: str, message: str) -> Any:
+    """An advisory finding recording that a measurement probe did not run.
+
+    A probe that raises is not evidence of a defect, so this is ``info`` and
+    never blocks delivery -- but it must reach the report. Recording nothing
+    made a crashed probe indistinguishable from a clean measurement, so the
+    quality report showed a perfect pass for a check that never ran.
+    """
+    from ubt.adapters.pdf.artifact_parity import ParityFinding
+
+    return ParityFinding("info", code, message)
+
+
 def inspect_font_encoding_damage(pdf_path: Path) -> list[PageVerdict]:
     """Run the extraction witness; returns per-page verdicts."""
     from ubt.adapters.pdf.extraction_witness import inspect_pdf

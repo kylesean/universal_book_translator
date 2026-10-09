@@ -84,16 +84,29 @@ def _manifest(tmp_path: Path) -> BookManifest:
     )
 
 
+def _manifest_with_source(tmp_path: Path) -> BookManifest:
+    """A manifest whose source file exists, so the T0.5/T0.6 probes run."""
+    source = tmp_path / "source.pdf"
+    source.write_bytes(b"%PDF-1.4\n%%EOF\n")
+    return BookManifest(
+        doc_id="doc",
+        title="Book",
+        source_path=str(source),
+        chapters=[],
+    )
+
+
 def _loop(
     tmp_path: Path,
     ledger: _RecordingLedger,
     gate: VisualGateResult | BaseException,
     *,
     blocks: list[IRBlock] | None = None,
+    manifest: BookManifest | None = None,
 ) -> ReflowControlLoop:
     loop = ReflowControlLoop(
         adapter=Any,  # type: ignore[arg-type]
-        manifest=_manifest(tmp_path),
+        manifest=manifest or _manifest(tmp_path),
         ledger=ledger,  # type: ignore[arg-type]
         job_id="job-1",
         target_lang="zh",
@@ -290,3 +303,87 @@ def test_a_crashing_gate_is_recorded_as_a_failure_not_an_absence(tmp_path: Path)
     with pytest.raises(RuntimeError, match="gate exploded"):
         _run(_loop(tmp_path, ledger, RuntimeError("gate exploded")), tmp_path, [])
     assert ledger.visual_reports == []
+
+
+# --------------------------------------------------------------------------- #
+# Probe degradation
+# --------------------------------------------------------------------------- #
+
+
+def _finding_codes(gate: Any) -> list[str]:
+    return [getattr(f, "code", "") for f in gate.findings]
+
+
+def test_a_crashed_parity_probe_is_recorded_not_swallowed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A crashed T0.5 probe must appear in the report as unmeasured.
+
+    The probe is allowed to fail without breaking delivery, but recording
+    nothing made the crash indistinguishable from a clean measurement.
+    """
+    import ubt.core.ports as ports
+
+    ledger = _RecordingLedger()
+
+    def _boom(**_kwargs: Any) -> list[Any]:
+        raise RuntimeError("parity exploded")
+
+    monkeypatch.setattr(ports, "artifact_parity_findings", _boom)
+    loop = _loop(
+        tmp_path,
+        ledger,
+        VisualGateResult(passed=True),
+        manifest=_manifest_with_source(tmp_path),
+    )
+    _, _, gate = _run(loop, tmp_path, [])
+
+    assert "parity_probe_crashed" in _finding_codes(gate)
+    assert gate.passed is True, "an unmeasured probe is advisory, not a delivery block"
+
+
+def test_a_crashed_fidelity_probe_is_recorded_not_swallowed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import ubt.core.ports as ports
+
+    ledger = _RecordingLedger()
+
+    def _boom(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("fidelity exploded")
+
+    monkeypatch.setattr(ports, "render_fidelity_stats", _boom)
+    loop = _loop(
+        tmp_path,
+        ledger,
+        VisualGateResult(passed=True),
+        manifest=_manifest_with_source(tmp_path),
+    )
+    _, _, gate = _run(loop, tmp_path, [])
+
+    assert "fidelity_probe_crashed" in _finding_codes(gate)
+    assert gate.passed is True
+
+
+def test_a_fidelity_probe_that_measures_nothing_records_its_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`pages_measured == 0` is 'could not measure', not 'measured and clean'."""
+    import ubt.core.ports as ports
+
+    ledger = _RecordingLedger()
+
+    def _empty(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        return {"pages_measured": 0, "skipped_reason": "pypdfium2_unavailable"}
+
+    monkeypatch.setattr(ports, "render_fidelity_stats", _empty)
+    loop = _loop(
+        tmp_path,
+        ledger,
+        VisualGateResult(passed=True),
+        manifest=_manifest_with_source(tmp_path),
+    )
+    _, _, gate = _run(loop, tmp_path, [])
+
+    assert "fidelity_not_measured" in _finding_codes(gate)
+    assert any("pypdfium2_unavailable" in getattr(f, "message", "") for f in gate.findings)

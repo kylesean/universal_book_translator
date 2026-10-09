@@ -191,7 +191,7 @@ class ReflowControlLoop:
         source_pdf = Path(source_str)
         if source_pdf.exists():
             try:
-                from ubt.core.ports import artifact_parity_findings
+                from ubt.core.ports import artifact_parity_findings, probe_unavailable_finding
 
                 sel_pages = (
                     getattr(getattr(self.manifest, "run", None), "selected_pages", None) or None
@@ -208,8 +208,18 @@ class ReflowControlLoop:
                     keeps_source_geometry=True,
                     selected_pages=sel_pages,
                 )
-            except Exception as exc:  # pragma: no cover - probe must never break export
-                logger.debug("artifact parity skipped for job %s: %s", self.job_id, exc)
+            except Exception as exc:
+                # The probe must not break export, but a crashed probe is not a
+                # clean measurement: without a finding the report reads as a
+                # perfect pass for a check that never ran. Record it and keep
+                # going.
+                logger.warning("artifact parity probe failed for job %s: %s", self.job_id, exc)
+                parity_findings = [
+                    probe_unavailable_finding(
+                        "parity_probe_crashed",
+                        f"artifact parity probe raised {type(exc).__name__}: {exc}",
+                    )
+                ]
         if parity_findings:
             gate = dataclasses.replace(
                 gate,
@@ -229,7 +239,11 @@ class ReflowControlLoop:
         # never blocked by it.
         if source_pdf.exists():
             try:
-                from ubt.core.ports import render_fidelity_findings, render_fidelity_stats
+                from ubt.core.ports import (
+                    probe_unavailable_finding,
+                    render_fidelity_findings,
+                    render_fidelity_stats,
+                )
 
                 fidelity_stats = await asyncio.to_thread(
                     render_fidelity_stats, source_pdf, rendered_path, blocks
@@ -252,8 +266,34 @@ class ReflowControlLoop:
                     )
                     if isinstance(getattr(self.manifest, "metadata", None), dict):
                         self.manifest.metadata["fidelity"] = fidelity_stats
-            except Exception as exc:  # pragma: no cover - probe must never break export
-                logger.debug("render fidelity skipped for job %s: %s", self.job_id, exc)
+                else:
+                    # The probe ran but measured nothing (no rasterizer, no
+                    # measurable page, an internal error). Record the reason:
+                    # silently dropping it made "could not measure" look like
+                    # "measured and clean".
+                    gate = dataclasses.replace(
+                        gate,
+                        findings=(
+                            *gate.findings,
+                            probe_unavailable_finding(
+                                "fidelity_not_measured",
+                                "render fidelity not measured: "
+                                f"{fidelity_stats.get('skipped_reason') or 'unknown reason'}",
+                            ),
+                        ),
+                    )
+            except Exception as exc:
+                logger.warning("render fidelity probe failed for job %s: %s", self.job_id, exc)
+                gate = dataclasses.replace(
+                    gate,
+                    findings=(
+                        *gate.findings,
+                        probe_unavailable_finding(
+                            "fidelity_probe_crashed",
+                            f"render fidelity probe raised {type(exc).__name__}: {exc}",
+                        ),
+                    ),
+                )
 
         report_dict: dict[str, Any] = {
             **gate.report_payload(),
