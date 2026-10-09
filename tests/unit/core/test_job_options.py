@@ -1,6 +1,10 @@
 from pathlib import Path
 
+import pytest
+
 from ubt.core.job_options import clean_source_stem, default_output_path, resolve_target_output
+
+pytestmark = pytest.mark.fast
 
 
 def test_clean_source_stem_strips_upload_prefix() -> None:

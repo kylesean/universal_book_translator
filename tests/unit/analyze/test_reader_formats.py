@@ -23,6 +23,8 @@ from ubt.analyze.reader_epub import read_epub
 from ubt.analyze.reader_html import read_html
 from ubt.model.ast import Document, Table
 
+pytestmark = pytest.mark.fast
+
 #: A 1x1 transparent PNG, for the DOCX picture fixture.
 _PNG = bytes.fromhex(
     "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"

@@ -280,6 +280,11 @@ python_files = ["test_*.py"]
 # with a checksum-pinned typst; the local git hooks stay the inner-loop gate
 # (see docs/guides/CI_AND_QUALITY_GATES.md).
 #
+# Both CI pytest steps pass an explicit `-m`, which REPLACES this filter rather
+# than narrowing it, so the tiers a gate runs are exactly `fast` and `slow`.
+# Every test must therefore carry one of those two marks or no gate executes it;
+# tests/unit/test_marker_hygiene.py enforces that with a pure-AST check.
+#
 # `--timeout=600` (pytest-timeout, dev extra) caps any single test: a hang fails
 # in 10 minutes instead of sitting until the runner's wall-clock cap. It rides
 # in addopts, so `-o addopts=""` also clears it — that is deliberate, and is how
@@ -288,7 +293,7 @@ addopts = "-m 'not slow and not legacy_drift' --timeout=600"
 markers = [
     "network: marks tests that require network access (e.g. Docling HuggingFace model downloads)",
     "slow: marks tests that spawn heavy subprocesses (typst compiles, pandoc, pdftoppm) or the oxide/pdftoppm render A/B comparison; deselect with -m 'not slow'",
-    "fast: pure-logic unit tests cheap enough for the per-edit inner loop; `pytest -m fast` runs the whole tier in ~2 s",
+    "fast: pure-logic unit tests cheap enough for the per-edit inner loop; `pytest -m fast` runs the whole tier in ~52 s",
     # AGENTS.md §2: a legacy check that blocks work and costs more than 15 min of
     # archaeology moves here instead of being deleted or left red. Quarantine is not
     # amnesty — the full local suite (and the stage-1 CI job once activated,

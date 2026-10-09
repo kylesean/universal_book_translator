@@ -20,6 +20,8 @@ from ubt.adapters.epub.adapter import EPUBAdapter
 from ubt.adapters.html.adapter import HTMLAdapter
 from ubt.core.ir.models import IRBlock
 
+pytestmark = pytest.mark.fast
+
 #: A 1x1 transparent PNG, for the picture fixtures.
 _PNG = bytes.fromhex(
     "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"

@@ -11,6 +11,8 @@ from ubt.model.span import PhysicalBox
 from ubt.render.outputs import Overlay
 from ubt.render.reflow import reflow_overlays
 
+pytestmark = pytest.mark.fast
+
 _Item = tuple[str, float, float, float | None, str, bool, tuple[Any, ...]]
 
 

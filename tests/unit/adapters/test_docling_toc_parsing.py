@@ -2,10 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from ubt.adapters.pdf.docling_blocks import parse_toc_entry_line
 from ubt.core.config import UBTConfig
 from ubt.core.job_options import adaptive_dual_mode
 from ubt.render.outputs import TypstFragmentTypesetter
+
+pytestmark = pytest.mark.fast
 
 
 def test_parse_toc_entry_line_leaded() -> None:

@@ -29,6 +29,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from ubt.core.config import UBTConfig
 from ubt.core.engine.dry_run import create_dry_run_orchestrator
 from ubt.core.engine.events import EventType, TranslationProgressEvent
@@ -37,6 +39,8 @@ from ubt.core.ir.models import TERMINAL_STATUSES
 from ubt.core.job_options import companion_path, sidecar_path
 from ubt.core.qe.fast_pass import REHEARSAL_MARKER
 from ubt.segment.xliff import from_xliff
+
+pytestmark = pytest.mark.fast
 
 _CODE_LINE = "def train(model): return model"
 _MATH = "$e^{i\\pi} + 1 = 0$"

@@ -14,6 +14,8 @@ from ubt.adapters.pdf.textgeom import LineBox
 from ubt.core.ir.models import BlockType, BoundingBox, FlowID, IRBlock, make_element
 from ubt.model.span import CompositeSpan
 
+pytestmark = pytest.mark.fast
+
 
 def _para(
     eid: str,

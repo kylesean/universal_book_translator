@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from ubt.core.ir.bifurcation import (
     SEMANTIC_BREAK_TOKEN,
     bifurcate_block,
@@ -11,6 +13,8 @@ from ubt.core.ir.models import BlockStatus, IRBlock
 from ubt.model.ast import Paragraph
 from ubt.model.span import CompositeSpan, PhysicalBox, Span
 from ubt.render.outputs import overlays_from_blocks
+
+pytestmark = pytest.mark.fast
 
 
 def _make_block(

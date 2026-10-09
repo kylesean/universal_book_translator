@@ -18,10 +18,14 @@ import re
 from collections import Counter
 from pathlib import Path
 
+import pytest
+
 from ubt.adapters.markdown.adapter import MarkdownAdapter
 from ubt.analyze.assemble import element_text
 from ubt.analyze.bridge import blocks_from_document, document_from_blocks
 from ubt.analyze.reader_md import read_md
+
+pytestmark = pytest.mark.fast
 
 _BOOK = """# Attention
 

@@ -17,6 +17,8 @@ from ubt.adapters.pdf.vlm.registry import probe_effective_driver
 from ubt.core.exceptions import DocumentParseError
 from ubt.core.ir.models import BlockType, BoundingBox, IRBlock, make_element
 
+pytestmark = pytest.mark.fast
+
 
 def _make_block(
     block_type: BlockType,

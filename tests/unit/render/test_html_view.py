@@ -14,12 +14,16 @@ import html
 import zipfile
 from pathlib import Path
 
+import pytest
+
 from ubt.core.ir.models import IRBlock
 from ubt.core.qe.fast_pass import REHEARSAL_MARKER
 from ubt.model.ast import ElementT, Heading, Paragraph
 from ubt.model.span import Span
 from ubt.render.epub_view import compose_epub
 from ubt.render.html_view import compose_html, element_text
+
+pytestmark = pytest.mark.fast
 
 _ELEMENTS: tuple[ElementT, ...] = (
     Heading(id="h1", spine_index=0, span=Span(page=1), text="Chapter One"),

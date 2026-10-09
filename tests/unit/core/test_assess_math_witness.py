@@ -9,6 +9,8 @@ from ubt.core.archetype import Archetype, DocCategory, MathDensity
 from ubt.core.assess import RouteRecommendation, _synthesize_warnings, assess_document_async
 from ubt.core.config import UBTConfig
 
+pytestmark = pytest.mark.fast
+
 
 def test_sample_page_indices_edge_cases() -> None:
     assert sample_page_indices(0) == []
