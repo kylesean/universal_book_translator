@@ -56,6 +56,18 @@ _PAREN_CITATION_PATTERN = re.compile(
 )
 
 
+def _is_standalone_citation(text: str, match: re.Match[str]) -> bool:
+    """Filter out non-citation look-alikes like array subscripts and Markdown links."""
+    start, end = match.start(), match.end()
+    val = match.group(0)
+    if val.startswith("[") and val.endswith("]"):
+        if start > 0 and re.match(r"[a-z0-9_)]", text[start - 1]):
+            return False
+        if end < len(text) and text[end] == "(":
+            return False
+    return True
+
+
 class CitationMasker(BaseMasker):
     """Masks inline citations before translation and unmasks afterwards."""
 
@@ -81,4 +93,5 @@ class CitationMasker(BaseMasker):
             fuzzy_pattern=fuzzy,
             checksumless_restores=False,
             nested=False,
+            standalone_guard=_is_standalone_citation,
         )

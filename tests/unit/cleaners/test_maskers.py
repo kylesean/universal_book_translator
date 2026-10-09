@@ -301,3 +301,19 @@ def test_unmask_report_clean_ignores_unverified_but_not_reordered_or_duplicated(
     assert not UnmaskReport(text="x", missing=[1]).clean
     assert not UnmaskReport(text="x", mismatched=[1]).clean
     assert not UnmaskReport(text="x", mutated=["1"]).clean
+
+
+def test_citation_masker_array_subscript_coexistence_is_clean() -> None:
+    masker = CitationMasker()
+    cases = [
+        "The array arr[12] holds the value; see [12].",
+        "Given matrix[3] and refs [3], [3].",
+        "index[7] growth; cf. [7].",
+        "Results [12] contradict Smith[12].",
+    ]
+    for text in cases:
+        masked, mapping = masker.mask(text)
+        report = masker.unmask_checked(masked, mapping)
+        assert report.clean, f"Failed on: {text!r}, report: {report}"
+        assert report.text == text
+        assert report.duplicated == []

@@ -12,6 +12,7 @@ import functools
 import hashlib
 import re
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 
@@ -191,6 +192,8 @@ class RestoreStyle:
     #: Re-run restore to a fixed point so a token revealed by restoring an
     #: enclosing token (a math environment nested inside inline math) expands.
     nested: bool = False
+    #: Optional filter rejecting false-positive occurrences (e.g. array subscripts).
+    standalone_guard: Callable[[str, re.Match[str]], bool] | None = None
 
 
 class BaseMasker:
@@ -275,7 +278,11 @@ def _restore_text(
     return result
 
 
-def _free_text_counts(table: dict[int, tuple[str, str, str]], restored: str) -> Counter[str]:
+def _free_text_counts(
+    table: dict[int, tuple[str, str, str]],
+    restored: str,
+    style: RestoreStyle | None = None,
+) -> Counter[str]:
     """How many *standalone* times each original survived in the restored text.
 
     A plain ``str.count`` counts substring occurrences, so an original that is a
@@ -289,7 +296,16 @@ def _free_text_counts(table: dict[int, tuple[str, str, str]], restored: str) -> 
     if not originals:
         return Counter()
     pattern = re.compile("|".join(re.escape(original) for original in originals))
-    return Counter(match.group(0) for match in pattern.finditer(restored))
+    counts: Counter[str] = Counter()
+    for match in pattern.finditer(restored):
+        if (
+            style is not None
+            and style.standalone_guard is not None
+            and not style.standalone_guard(restored, match)
+        ):
+            continue
+        counts[match.group(0)] += 1
+    return counts
 
 
 def _missing_indices(
@@ -348,7 +364,7 @@ def restore_masked(text: str, mapping: dict[str, str], style: RestoreStyle) -> U
 
     restored = _restore_text(text, mapping, table, style)
 
-    free_counts = _free_text_counts(table, restored)
+    free_counts = _free_text_counts(table, restored, style)
     missing = _missing_indices(table, seen, free_counts)
     # A token echoed without its checksum is "unverified", not "mismatched":
     # the suffix is optional, so a faithful model may drop it. Only a checksum
