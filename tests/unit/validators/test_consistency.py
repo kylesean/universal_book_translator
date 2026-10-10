@@ -532,6 +532,29 @@ def test_invented_number_absent_from_source_is_the_new_gate() -> None:
     assert res.details["invented_numbers"] == ["95"]
 
 
+def test_the_indefinite_article_is_not_an_invented_number() -> None:
+    # Chinese '一' before a measure word is the indefinite article ('a method'),
+    # the same grammar English writes as 'a/an'. The normalizer folds it to '1种'
+    # so a source 'one method' matches, but that fold must not make the target
+    # read as *stating* the number 1. 36 of 39 quarantined blocks in arXiv
+    # 2610.02185 came from this false positive.
+    for original, translated in [
+        ("We introduce a training-free decoding framework", "我们提出了一种无需训练的解码框架"),
+        ("a shared block", "一个共享块"),
+        ("It adds one extra output pass", "它增加了一次额外的输出传递"),
+    ]:
+        res = _check(original, translated)
+        assert res.is_valid, (original, translated, res.message)
+
+
+def test_the_article_exemption_does_not_launder_a_real_count() -> None:
+    # Only the bare article is exempt: a '1' that is a genuine count in the
+    # target is still unauthorized when the source never stated it.
+    res = _check("No figures here.", "其实有 1 项。")
+    assert not res.is_valid
+    assert res.details["invented_numbers"] == ["1"]
+
+
 @pytest.mark.parametrize(
     ("original", "translated"),
     [

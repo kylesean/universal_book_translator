@@ -793,6 +793,21 @@ def _zero_fold(token: str) -> str:
     return token
 
 
+#: A Chinese numeral used as an indefinite article before a measure word
+#: ('一种方法' = 'a method', '一个块' = 'a block'). ``normalize_for_numeric_matching``
+#: folds it to '1种方法' so a source 'one method' matches a target '一种方法', but
+#: that fold must not make the *invention* check read the target as stating the
+#: number 1: 'a method' -> '一种方法' is correct, not fabricated (arXiv
+#: 2610.02185 had 36 of 39 quarantined blocks from this alone). Only the bare
+#: article is exempt — '一' inside a longer numeral run ('十二种') is a count.
+_CN_ARTICLE_QUANTIFIER_RE = re.compile(rf"(?<![{_CN_NUMERAL_CHARS}])一(?={_CN_MEASURE_RE})")
+
+
+def _cn_article_quantifier_values(text: str) -> set[str]:
+    """Values the article '一' contributes, exempt from the invention check."""
+    return {"1"} if _CN_ARTICLE_QUANTIFIER_RE.search(text or "") else set()
+
+
 def _invented_target_numbers(
     source_view: str,
     normalized_target: str,
@@ -801,6 +816,7 @@ def _invented_target_numbers(
     src_scales: dict[str, set[str]],
     ambiguous_readings: dict[str, set[str]],
     source_compounds: list[tuple[list[str], str]],
+    target_original: str = "",
 ) -> list[str]:
     """Target digit tokens the source cannot account for — fabricated facts.
 
@@ -820,6 +836,10 @@ def _invented_target_numbers(
     for values in src_scales.values():
         authorized |= values
     authorized |= set(src_scales)
+    # The target's own indefinite article ('一种' -> '1种') is grammar the
+    # normalizer synthesized, not a number the translation stated. Exempt it so
+    # 'a method' -> '一种方法' is not read as inventing a '1'.
+    authorized |= _cn_article_quantifier_values(target_original)
     for _tokens, total in source_compounds:
         authorized.add(total)
     for values in ambiguous_readings.values():
@@ -1150,6 +1170,7 @@ class NumericConsistencyValidator(ContentValidator):
             src_scales=src_scales,
             ambiguous_readings=ambiguous_readings,
             source_compounds=source_compounds,
+            target_original=translated,
         )
         if invented_numbers:
             return ValidationResult.failure(
