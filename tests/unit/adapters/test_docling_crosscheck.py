@@ -112,6 +112,55 @@ def test_low_iou_displaced_box_is_sunk_to_opaque() -> None:
     assert "iou=" in (demoted.provenance.iou_crosscheck or "")
 
 
+def test_a_tight_box_under_an_overshooting_witness_is_preserved() -> None:
+    """A block fully covered by its witness lines passes even when IoU < 0.60.
+
+    IoU conflates a *displaced* box (its text is elsewhere -- sink it) with a
+    *tight* box the witness merely overshoots (a pdfium line spanning into the
+    neighbouring column inflates the union). On arXiv 2610.02185 all 75
+    IoU-demoted blocks were the second kind (containment >= 0.85), including 20
+    captions and the references list, which shipped untranslated for a 0.01
+    margin. Containment is the second acceptance path.
+    """
+    # Block box = 200x100; witness covers it entirely but is 3x as wide, so IoU
+    # is 0.33 (< 0.60) while containment is 1.0.
+    block = _block(
+        "b1", "A caption the witness line overshoots.", x0=50.0, y0=600.0, x1=250.0, y1=700.0
+    )
+    mock_lines = [
+        LineBox(text="A caption the witness line overshoots", rect=(0.0, 600.0, 600.0, 700.0)),
+    ]
+
+    with patch(
+        "ubt.adapters.pdf.docling_crosscheck.extract_lines",
+        return_value=(mock_lines, (600.0, 800.0)),
+    ):
+        result = cross_check_blocks_with_pdfium([block], Path("dummy.pdf"), min_iou=DEFAULT_MIN_IOU)
+
+    assert len(result) == 1
+    assert result[0].skip_translate is False
+    assert result[0].element.confidence is not Confidence.UNKNOWN
+
+
+def test_a_half_covered_box_is_still_sunk_to_opaque() -> None:
+    """Containment < 0.85 must not rescue a box the witness only half covers."""
+    # Witness covers the top half only: containment = 0.5 < 0.85, IoU < 0.60.
+    block = _block("b1", "Half the box has no ink.", x0=50.0, y0=600.0, x1=250.0, y1=700.0)
+    mock_lines = [
+        LineBox(text="Half the box", rect=(50.0, 650.0, 250.0, 700.0)),
+    ]
+
+    with patch(
+        "ubt.adapters.pdf.docling_crosscheck.extract_lines",
+        return_value=(mock_lines, (600.0, 800.0)),
+    ):
+        result = cross_check_blocks_with_pdfium([block], Path("dummy.pdf"), min_iou=DEFAULT_MIN_IOU)
+
+    assert len(result) == 1
+    assert result[0].skip_translate is True
+    assert result[0].element.confidence is Confidence.UNKNOWN
+
+
 def test_scanned_textless_pages_skip_crosscheck() -> None:
     # On a pure image/scanned page where PDFium returns 0 lines, cross-check skips
     # without demoting blocks (leaving transcription to OCR / VLM).

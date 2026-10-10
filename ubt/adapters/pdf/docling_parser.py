@@ -59,7 +59,7 @@ from ubt.core.policy.layout_policy import (
     VLM_CIRCUIT_MIN_TRIES,
 )
 from ubt.model.ast import RegionKind
-from ubt.model.span import CompositeSpan, PhysicalBox, boxes_to_provenance
+from ubt.model.span import CompositeSpan, PhysicalBox, Span, boxes_to_provenance
 
 if TYPE_CHECKING:
     from docling.datamodel.pipeline_options import PdfPipelineOptions
@@ -1300,7 +1300,87 @@ def map_iterated_items(
                 )
             )
 
-    return type_docling_blocks(annotate_layout_metadata(blocks, pdf_path))
+    return type_docling_blocks(
+        annotate_layout_metadata(drop_phantom_continuation_boxes(blocks), pdf_path)
+    )
+
+
+def drop_phantom_continuation_boxes(blocks: list[IRBlock]) -> list[IRBlock]:
+    """Drop a spurious cross-page box Docling attached to a single element.
+
+    Docling occasionally gives one text item two ``prov`` boxes on different
+    pages, the second of which is *another* element's box (a caption, a figure
+    label). The parser fused them into a ``CompositeSpan`` and the compositor
+    then flowed the paragraph's text across the page boundary into the caption's
+    box -- overlapping, unreadable text on arXiv 2610.02185 p6.
+
+    The tell is exact duplication: a real cross-page continuation's second box is
+    a distinct region at the top of the next page, never the *same* box another
+    block already owns. A chain box that coincides with a single-box block's box
+    on that page is that block's, not this one's, so it is removed. When the
+    first box alone remains, the block is a normal single-box element.
+    """
+    owned: dict[tuple[int, tuple[float, float, float, float]], str] = {}
+    for block in blocks:
+        boxes = block.provenance.physical_boxes
+        if len(boxes) <= 1 and block.bbox is not None and block.bbox.page > 0:
+            key = (
+                block.bbox.page,
+                (
+                    round(block.bbox.x0, 1),
+                    round(block.bbox.y0, 1),
+                    round(block.bbox.x1, 1),
+                    round(block.bbox.y1, 1),
+                ),
+            )
+            owned.setdefault(key, block.id)
+
+    for block in blocks:
+        boxes = block.provenance.physical_boxes
+        if len(boxes) <= 1:
+            continue
+        kept = []
+        for entry in boxes:
+            key = (entry["page"], tuple(round(v, 1) for v in entry["bbox"]))
+            owner = owned.get(key)
+            if owner is not None and owner != block.id:
+                continue  # another block owns this box: not this element's
+            kept.append(entry)
+        if len(kept) == len(boxes):
+            continue
+        if len(kept) <= 1:
+            # Back to a single-box element: drop the chain on both carriers --
+            # the renderer reads ``element.span`` (the CompositeSpan), the ledger
+            # round-trip reads ``provenance.physical_boxes``; both must agree.
+            block.provenance.physical_boxes = []
+            if kept:
+                single = BoundingBox(
+                    page=kept[0]["page"],
+                    x0=kept[0]["bbox"][0],
+                    y0=kept[0]["bbox"][1],
+                    x1=kept[0]["bbox"][2],
+                    y1=kept[0]["bbox"][3],
+                )
+                block.set_bbox(single)
+                if isinstance(block.element.span, CompositeSpan):
+                    block.element = dataclasses.replace(
+                        block.element,
+                        span=Span(
+                            page=single.page,
+                            bbox=(single.x0, single.y0, single.x1, single.y1),
+                        ),
+                    )
+        else:
+            block.provenance.physical_boxes = kept
+            block.element = dataclasses.replace(
+                block.element,
+                span=CompositeSpan(
+                    boxes=tuple(
+                        PhysicalBox.of(entry["page"], tuple(entry["bbox"])) for entry in kept
+                    )
+                ),
+            )
+    return blocks
 
 
 def map_export_dict(data: dict[str, Any]) -> list[IRBlock]:

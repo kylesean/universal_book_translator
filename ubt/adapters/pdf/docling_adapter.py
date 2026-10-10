@@ -419,6 +419,7 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
         """Extract structured blocks using IBM Docling (delegates to docling_parser)."""
         from ubt.adapters.pdf.docling_crosscheck import (
             cross_check_blocks_with_pdfium,
+            repair_heading_numbers_with_lines,
             repair_math_symbols_with_lines,
             repair_missing_spaces_with_lines,
         )
@@ -431,6 +432,10 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
             enrich=self._resolve_formula_enrichment(path),
             device=self.docling_device,
         )
+        # Docling glues a heading's section number to the wrong end
+        # ("3.1 Guidance Space" -> "Guidance Space 3.1"); the page's own pdfium
+        # lines restore the correct order before the heading is translated.
+        blocks = repair_heading_numbers_with_lines(blocks, path)
         # Docling mis-maps TeX math symbols (e.g. '=' -> '∅', '+' -> '⊕', '−' -> 'ϒ');
         # the page's own pdfium lines restore ground-truth math glyphs first.
         blocks = repair_math_symbols_with_lines(blocks, path)

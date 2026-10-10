@@ -54,11 +54,40 @@ _VERIFIABLE_TYPES = frozenset(
 #: Default IoU threshold below which a Docling box is considered ungrounded or displaced.
 DEFAULT_MIN_IOU = 0.60
 
+#: Share of the Docling box that must fall inside the pdfium witness union for a
+#: low-IoU block to be accepted anyway. IoU alone conflates two very different
+#: failures: a *displaced* box (its text is somewhere else -- must sink to opaque)
+#: and a *tight* box the witness merely overshoots (a pdfium line spanning into
+#: the neighbouring column inflates the union, so IoU drops while the block's own
+#: text is fully covered). On arXiv 2610.02185 every one of the 75 IoU-demoted
+#: blocks had containment >= 0.85 -- including 20 figure/table captions and the
+#: whole references list, which shipped untranslated for want of a 0.01 margin.
+#: Containment separates the two: a displaced box is covered by the wrong lines'
+#: union only if those lines happen to sit over it, which is what IoU already
+#: catches. This is the second acceptance path, not a lowered IoU bar.
+_MIN_WITNESS_CONTAINMENT = 0.85
+
 
 def _boxes_intersect(
     a: tuple[float, float, float, float], b: tuple[float, float, float, float]
 ) -> bool:
     return max(a[0], b[0]) < min(a[2], b[2]) and max(a[1], b[1]) < min(a[3], b[3])
+
+
+def _containment(
+    inner: tuple[float, float, float, float], outer: tuple[float, float, float, float]
+) -> float:
+    """Share of ``inner``'s area that lies inside ``outer`` (0.0 when empty)."""
+    inner_area = box_area(*inner)
+    if inner_area <= 0:
+        return 0.0
+    ix0 = max(inner[0], outer[0])
+    iy0 = max(inner[1], outer[1])
+    ix1 = min(inner[2], outer[2])
+    iy1 = min(inner[3], outer[3])
+    if ix1 <= ix0 or iy1 <= iy0:
+        return 0.0
+    return ((ix1 - ix0) * (iy1 - iy0)) / inner_area
 
 
 # ---------------------------------------------------------------------------
@@ -387,6 +416,112 @@ def _line_centered_in_box(
     return min(rect[2], box[2]) - max(rect[0], box[0]) > 1.0
 
 
+#: A section-number token: ``6``, ``3.1``, ``A.3``, ``4.2.1`` -- digits with
+#: optional dotted groups, optionally led by a single appendix letter.
+_SECTION_NUMBER_RE = re.compile(r"^[A-Z]?\.?\d+(?:\.\d+)*$")
+#: A heading whose section number was glued to the *end* instead of the front.
+#: The trailing token may be a bare integer (``Conclusion 6``) or a dotted /
+#: appendix number (``3.1``, ``A.3``); the witness guard below is what rejects a
+#: heading that merely ends in a number (``AIME 2024`` -- its witness leads with
+#: a word, not a number).
+_TRAILING_SECTION_RE = re.compile(r"^(?P<body>.+?)\s+(?P<num>[A-Z]?\.?\d+(?:\.\d+)*)$")
+
+
+def restore_heading_number_order(text: str, witness: str) -> str | None:
+    """``text`` with a trailing section number moved to the front, or ``None``.
+
+    IBM Docling's PDF reader emits a section heading with its number glued to
+    the *end* (``"Guidance Space 3.1"`` for a page that reads ``"3.1 Guidance
+    Space"``) -- it reads the heading text run and the number run in the wrong
+    order. The page's own pdfium line witness spells the heading correctly, so
+    this moves the number only when the witness confirms it leads.
+
+    Only ever *reorders* an existing trailing number onto the front, and only a
+    number the witness also leads with; a heading that genuinely ends in a
+    number the witness also ends with is left untouched, and a body paragraph is
+    never passed here.
+    """
+    match = _TRAILING_SECTION_RE.match(text.strip())
+    if match is None:
+        return None
+    number = match.group("num")
+    body = match.group("body").strip()
+    # The witness must lead with the same number and carry the same body, or we
+    # are guessing: leave the text alone.
+    witness_words = witness.split()
+    if not witness_words or not _SECTION_NUMBER_RE.match(witness_words[0]):
+        return None
+    if witness_words[0] != number:
+        return None
+    if body not in witness:
+        return None
+    return f"{number} {body}"
+
+
+def repair_heading_numbers_with_lines(blocks: Sequence[IRBlock], pdf_path: Path) -> list[IRBlock]:
+    """Restore section-number order on headings Docling emitted number-last.
+
+    A heading whose number is glued to the end reaches the translator verbatim,
+    and the model -- seeing a heading that *ends* in ``3.1`` -- renders it as
+    ``引导空间 3.1``. The number must lead before translation, or every
+    downstream consumer is faithfully wrong. The page's pdfium line witness is
+    the ground truth (it reads ``3.1 Guidance Space``); this pass applies it.
+    """
+    path = Path(pdf_path)
+    lines_by_page: dict[int, list[LineBox]] = {}
+
+    def _page_lines(page: int) -> list[LineBox]:
+        if page not in lines_by_page:
+            try:
+                lines_by_page[page] = list(extract_lines(path, page)[0])
+            except Exception as exc:
+                logger.debug(
+                    "Heading-number repair: pdfium line extraction failed on p%d: %s", page, exc
+                )
+                lines_by_page[page] = []
+        return lines_by_page[page]
+
+    for block in blocks:
+        if block.block_type is not BlockType.HEADING or block.skip_translate:
+            continue
+        text = block.source_text
+        if not text.strip() or _TRAILING_SECTION_RE.match(text.strip()) is None:
+            continue
+        seen: set[tuple[float, float, float, float, str]] = set()
+        witness_lines: list[LineBox] = []
+        for pbox in _span_boxes(block):
+            for line in _page_lines(pbox.page):
+                if not line.text.strip() or not _line_centered_in_box(line.rect, pbox.bbox):
+                    continue
+                key = (
+                    round(line.rect[0], 1),
+                    round(line.rect[1], 1),
+                    round(line.rect[2], 1),
+                    round(line.rect[3], 1),
+                    line.text,
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                witness_lines.append(line)
+        if not witness_lines:
+            continue
+        witness = join_witness_lines(witness_lines)
+        repaired = restore_heading_number_order(text, witness)
+        if repaired is None or repaired == text:
+            continue
+        logger.info(
+            "Restored section-number order in heading %s from pdfium lines: %r -> %r",
+            block.id,
+            text[:40],
+            repaired[:40],
+        )
+        block.set_source_text(repaired)
+        block.provenance.space_repair = block.provenance.space_repair or "pdfium-line-witness"
+
+    return list(blocks)
+
+
 def repair_missing_spaces_with_lines(blocks: Sequence[IRBlock], pdf_path: Path) -> list[IRBlock]:
     """Re-insert the inter-word spaces Docling's PDF line join drops.
 
@@ -544,10 +679,17 @@ def cross_check_blocks_with_pdfium(
             uy0 = min(line.rect[1] for line in inter_lines)
             ux1 = max(line.rect[2] for line in inter_lines)
             uy1 = max(line.rect[3] for line in inter_lines)
-            iou = box_iou(doc_box, (ux0, uy0, ux1, uy1))
+            witness_box = (ux0, uy0, ux1, uy1)
+            iou = box_iou(doc_box, witness_box)
 
             effective_min_iou = 0.40 if text_len <= 5 else min_iou
-            if iou < effective_min_iou:
+            # Accept when the block's own box is well covered by its witness
+            # lines: IoU can be dragged below the bar by a witness union that
+            # overshoots into a neighbouring column, while the block's text is
+            # fully grounded. A genuinely displaced box is not contained.
+            if iou < effective_min_iou and _containment(doc_box, witness_box) < (
+                _MIN_WITNESS_CONTAINMENT
+            ):
                 failed_reason = f"iou_mismatch(p{p_page}: iou={iou:.2f} < {effective_min_iou:.2f})"
                 break
 
@@ -621,8 +763,10 @@ __all__ = [
     "cross_check_blocks_with_pdfium",
     "join_witness_lines",
     "reinsert_missing_spaces",
+    "repair_heading_numbers_with_lines",
     "repair_math_symbol_corruptions",
     "repair_math_symbols_with_lines",
     "repair_missing_spaces_with_lines",
+    "restore_heading_number_order",
     "witness_line_text",
 ]
