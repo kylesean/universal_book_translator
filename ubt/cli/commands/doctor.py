@@ -560,7 +560,12 @@ def collect_checks(config: UBTConfig, *, probe: bool = False) -> list[_Check]:
                 fix="uv sync --extra pdf",
             )
     elif config.pdf_engine == "pdfium":
-        record("PDF engine", "OK", "pypdfium2 fast path (bundled dependency)")
+        record(
+            "PDF engine",
+            "OK",
+            "pypdfium2 fast path (bundled dependency); a scanned document "
+            "still routes to docling automatically",
+        )
     elif config.pdf_engine == "auto":
         if importlib.util.find_spec("docling") is not None:
             record("PDF engine", "OK", "auto-select (pdfium fast path / docling layout)")

@@ -296,7 +296,7 @@ def translate(
         Preset | None,
         typer.Option(
             "--preset",
-            help="Quality tier (prompt depth + formula care; never the render route): 'publication' (rich context + term bible), 'standard' (model-adaptive prompts), 'preview' (formula source images), or 'fast' (zero-model fast paper). An explicit flag always beats the preset; without this option the engine defaults apply",
+            help="Quality tier (prompt depth + formula care; never the render route): 'publication' (rich context + term bible + docling routing), 'standard' (model-adaptive prompts + docling routing), 'preview' (fast pdfium path, formula source images), or 'fast' (fast pdfium path, short chain). An explicit flag always beats the preset; without this option the engine defaults apply",
             show_default=False,
         ),
     ] = None,
@@ -466,7 +466,7 @@ def translate(
         PdfEngine | None,
         typer.Option(
             "--pdf-engine",
-            help="PDF 提取/解析引擎：'docling' (默认布局解析器), 'pdfium' (快速文本提取), 或 'auto'",
+            help="PDF 解析引擎：'auto'（默认，按文档探测自动选；干净单栏走 pdfium，多栏/表格/公式/扫描走 docling）、'pdfium'（强制快速文本提取）、或 'docling'（强制版面/表格/公式保真，需 torch）",
             show_default=False,
         ),
     ] = None,

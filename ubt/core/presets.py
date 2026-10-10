@@ -51,6 +51,12 @@ class PresetPolicy:
     math_backend: MathBackend
     formula_render: FormulaRender
     emit_both: bool
+    #: PDF parser the preset selects. ``auto`` is quality-first probe routing
+    #: (scan / formula / multicolumn / vector-heavy -> docling); ``pdfium`` is
+    #: the fast path, which still escapes to docling for a scanned document
+    #: because pdfium cannot read one at all. An explicit ``--pdf-engine``
+    #: always beats this.
+    pdf_engine: str
 
     def engine_overrides(self) -> dict[str, Any]:
         """Engine parameter overrides this preset contributes."""
@@ -78,6 +84,7 @@ PRESETS: dict[Preset, PresetPolicy] = {
         math_backend="mathjax",
         formula_render="witness",
         emit_both=False,
+        pdf_engine="auto",
     ),
     Preset.STANDARD: PresetPolicy(
         key=Preset.STANDARD,
@@ -90,30 +97,33 @@ PRESETS: dict[Preset, PresetPolicy] = {
         math_backend="mathjax",
         formula_render="witness",
         emit_both=False,
+        pdf_engine="auto",
     ),
     Preset.PREVIEW: PresetPolicy(
         key=Preset.PREVIEW,
         label="快速预览",
         tagline="省时省费：跳过公式视觉识别，公式直接用源图",
-        description="自动路由 · 精简提示 · 公式源图保真（不重排）· 完整质量报告",
+        description="快速路径（pdfium，扫描件自动转 Docling）· 精简提示 · 公式源图保真（不重排）· 完整质量报告",
         exec_mode="auto",
         prompt_strategy="minimal",
         formula_enrichment="off",
         math_backend="image",
         formula_render="witness",
         emit_both=False,
+        pdf_engine="pdfium",
     ),
     Preset.FAST: PresetPolicy(
         key=Preset.FAST,
         label="极速论文",
         tagline="极速开箱即用：零重型依赖，轻量几何抽取，短链快速翻译",
-        description="短链极速执行 · 最小提示词 · 公式源图保真 · 零重型环境门槛",
+        description="快速路径（pdfium；扫描件无文本层，自动转 Docling）· 最小提示词 · 公式源图保真 · 零重型环境门槛",
         exec_mode="short",
         prompt_strategy="minimal",
         formula_enrichment="off",
         math_backend="image",
         formula_render="image",
         emit_both=False,
+        pdf_engine="pdfium",
     ),
 }
 

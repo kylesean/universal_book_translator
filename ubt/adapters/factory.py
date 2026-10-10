@@ -10,7 +10,7 @@ from ubt.adapters.epub.adapter import EPUBAdapter
 from ubt.adapters.html.adapter import HTMLAdapter
 from ubt.adapters.markdown.adapter import MarkdownAdapter
 from ubt.adapters.pdf.docling_adapter import DoclingPDFAdapter
-from ubt.adapters.pdf.engine_selector import select_pdf_engine
+from ubt.adapters.pdf.engine_selector import inspect_pdf_route_plan
 from ubt.adapters.pdf.pdfium_adapter import PDFiumAdapter
 from ubt.core.exceptions import UnsupportedDocumentFormatError
 
@@ -77,33 +77,52 @@ def _resolve_pdf_adapter(pdf_engine: str, path: Path | None = None) -> BasePDFEn
             "BabelDOC engine is deprecated and removed due to licensing constraints "
             "and upstream CLI contract incompatibility. Please use pdf_engine='docling' (MIT/Apache-2.0)."
         )
-    if engine_key == "auto":
-        # First-page heuristic routing — born-digital single-column
-        # PDFs take the pypdfium2 fast path; scans and multi-column layouts
-        # stay on the Docling mainline (best reading-order / OCR quality).
-        engine_key = select_pdf_engine(path) if path is not None else "docling"
-    elif engine_key == "pdfium" and path is not None and path.exists():
-        # Gate 1b (explicit routing): a forced pdfium fast path on a
-        # formula-dense/scan/multicolumn document reproduces the KV-handbook
-        # failure (shattered equations translated as prose). The force is
-        # honored — speed is a legitimate choice — but never silently.
-        try:
-            probe = select_pdf_engine(path)
-        except Exception as exc:
-            logger.warning(
-                "Content probe failed on '%s' (%s); defaulting engine check assumption to 'pdfium'.",
-                path.name,
-                exc,
-            )
-            probe = "pdfium"
-        if probe == "docling":
-            logger.warning(
-                "UBT_PDF_ENGINE='pdfium' forced on '%s', but the content probe "
-                "recommends 'docling' (formula-dense/scan/multicolumn): "
-                "expect math-debris blocks guarded as verbatim FORMULA skips "
-                "and degraded equation fidelity. Use 'auto' for probe routing.",
-                path.name,
-            )
+    if engine_key in ("auto", "pdfium"):
+        # ``auto`` is the quality-routing mode: the probe may send a document to
+        # docling on a fuzzy signal (formula debris, a right-column edge, a
+        # vector-heavy page) as well as on a scan. ``pdfium`` is the fast mode
+        # and the default: it stays on the fast path for every fuzzy signal, but
+        # a scanned (text-less) document still escapes to docling — pdfium
+        # extracts zero blocks from one, which is a capability boundary, not a
+        # routing preference. See docs/guides/PDF_ENGINE_ROUTING_REDESIGN.md.
+        if path is None:
+            # No path to probe (a registry lookup): ``auto`` is conservative.
+            engine_key = "docling" if engine_key == "auto" else "pdfium"
+        else:
+            try:
+                plan = inspect_pdf_route_plan(path)
+            except Exception as exc:
+                logger.warning(
+                    "Content probe failed on '%s' (%s); defaulting engine to 'pdfium'.",
+                    path.name,
+                    exc,
+                )
+                plan = None
+            if plan is None:
+                engine_key = "pdfium"
+            elif engine_key == "auto":
+                engine_key = plan.primary_engine
+            elif plan.has_scan:
+                logger.warning(
+                    "'%s' looks scanned (pages without a text layer); pdfium would "
+                    "extract 0 blocks, so routing it to docling for OCR-grade ingest.",
+                    path.name,
+                )
+                engine_key = "docling"
+            elif plan.primary_engine == "docling":
+                # Fast path honoured, but never silently: the probe saw a
+                # multi-column / formula / vector signal pdfium reads poorly.
+                logger.warning(
+                    "pdfium fast path chosen for '%s', but the content probe saw a "
+                    "layout signal it reads poorly (multicolumn=%s, formulas=%s, "
+                    "vector-heavy=%s): expect interleaved columns and math-debris "
+                    "blocks. Use --pdf-engine docling (or --preset standard) for "
+                    "layout fidelity.",
+                    path.name,
+                    plan.has_multicolumn,
+                    plan.has_formulas,
+                    plan.has_vector_diagrams,
+                )
     factory_fn = _PDF_ENGINE_REGISTRY.get(engine_key)
     if factory_fn is None:
         # Read the registry rather than a hardcoded list: this is the one place

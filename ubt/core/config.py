@@ -326,9 +326,20 @@ class UBTConfig(BaseSettings):
     repair_reasoning_effort: str = "high"
 
     # -- PDF engine selection ------------------------------------------------
-    # 'auto' routes via the first-page heuristic: born-digital single-column
-    # PDFs take the pypdfium2 fast path, scans and multi-column layouts stay
-    # on the Docling mainline. Explicit 'docling' / 'pdfium' forces one engine.
+    # ``auto`` probes the document and picks the engine that can actually read
+    # it: clean single-column born-digital PDFs take the fast pypdfium2 path,
+    # while multi-column / table / formula / vector-heavy / scanned documents go
+    # to docling for layout, table and formula fidelity. This is the default
+    # because it is the best *delivery* for an unconfigured user, not the
+    # fastest: measured on arXiv 2610.02185, pdfium splits the paper into 1801
+    # fragments (0 tables, title shattered into 15 pieces) where docling yields
+    # 350 structured blocks (19 tables, title intact), and the fragment storm
+    # then trips the numeric/structural validators into quarantining ~14% of the
+    # book. ``publication``/``standard`` presets also select ``auto``;
+    # ``preview``/``fast`` pin ``pdfium`` for speed, and ``--pdf-engine`` always
+    # wins. A scanned (text-less) PDF is a capability boundary, not a
+    # preference: pdfium extracts 0 blocks from one, so it always routes to
+    # docling. See docs/guides/PDF_ENGINE_ROUTING_REDESIGN.md.
     pdf_engine: PdfEngine = "auto"
 
     # -- Docling accelerator device -------------------------------------------
