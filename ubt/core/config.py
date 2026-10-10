@@ -653,6 +653,18 @@ class UBTConfig(BaseSettings):
         description="Layout spill policy ('error', 'warn', 'appendix').",
     )
 
+    # -- Table rendering strategy for PDF ----------------------------------------
+    # How tables are rendered when targeting PDF format:
+    # - 'auto': Simple tables rendered in-place via Typst micro-grid overlay; complex tables
+    #   preserve source Layer 0 and compile into an appended translated table appendix.
+    # - 'overlay': Attempt in-place overlay for simple tables; complex tables fall back to Layer 0.
+    # - 'appendix': Keep all tables on source Layer 0, compile all translated tables into appendix.
+    # - 'skip': Skip translating tables entirely when targeting PDF (saving 100% table LLM tokens).
+    table_render_mode: str = Field(
+        default="auto",
+        description="Table handling mode for PDF ('auto', 'overlay', 'appendix', 'skip').",
+    )
+
     # -- PDF render engine --------------------------------------------------------
     # There is no engine knob: every PDF route composes through the unified
     # source-canvas LayerCompositor (see ``RENDER_ENGINE``). The former
@@ -781,6 +793,7 @@ class UBTConfig(BaseSettings):
         "formula_render",
         "math_backend",
         "spill_policy",
+        "table_render_mode",
         "env",
         mode="before",
     )

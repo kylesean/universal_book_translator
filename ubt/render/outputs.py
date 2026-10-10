@@ -1293,6 +1293,19 @@ class TypstFragmentTypesetter:
         source = self._math_source(latex, width_pt, height_pt)
         return None if source is None else self._compile(source, tag="math:")
 
+    def typeset_table(self, markup: str, width_pt: float, height_pt: float) -> Path | None:
+        """Typeset a table body as a Typst table fragment."""
+        from ubt.render.table_compiler import markdown_table_to_typst
+
+        source = markdown_table_to_typst(
+            markup,
+            width_pt=width_pt,
+            height_pt=height_pt,
+            font_size_pt=7.5,
+            font_line=self._font_line,
+        )
+        return None if source is None else self._compile(source, tag="table:")
+
     def _batch_compile(self, pages: Sequence[tuple[str, str]]) -> None:
         """Compile many fragment sources as one Typst document, split by page.
 
@@ -1781,9 +1794,8 @@ class LayerCompositor:
         for overlay, boxes in prepared:
             if len(boxes) != 1:
                 continue
-            # A TOC row's fragment depends on its page number, which the prefetch
-            # request tuple does not carry; it compiles on demand instead.
-            if overlay.kind == "toc":
+            # A TOC row or table fragment compiles on demand instead.
+            if overlay.kind in ("toc", "table"):
                 continue
             width = boxes[0].bbox[2] - boxes[0].bbox[0]
             # A reflowed box already equals the fragment's natural height, so the
@@ -2180,6 +2192,8 @@ class LayerCompositor:
         fragment: Path | None
         if overlay.kind == "math":
             fragment = typesetter.typeset_math(part.text, width, height)
+        elif overlay.kind == "table" and hasattr(typesetter, "typeset_table"):
+            fragment = typesetter.typeset_table(part.text, width, height)
         elif overlay.kind == "toc" and toc_typeset is not None:
             fragment = toc_typeset(
                 part.text,
@@ -2454,10 +2468,15 @@ def _overlayable(block: IRBlock) -> bool:
     box = block.bbox
     if block.skip_translate or box is None or box.page <= 0:
         return False
-    # Tables and figures are canvas assets, not flowing text: the compositor
-    # cannot reconstruct a grid or a graphic, so they always stay on Layer 0.
-    if block.block_type in (BlockType.TABLE, BlockType.IMAGE):
+    if block.block_type == BlockType.IMAGE:
         return False
+    if block.block_type == BlockType.TABLE:
+        target = (block.target_text or "").strip()
+        if not target:
+            return False
+        from ubt.render.table_compiler import probe_table_complexity
+
+        return not probe_table_complexity(target, box).is_complex
     return bool((block.target_text or "").strip())
 
 
@@ -2548,6 +2567,8 @@ def overlays_from_blocks(
                 kind = "math"
             elif block.block_type == BlockType.HEADING:
                 kind = "heading"
+            elif block.block_type == BlockType.TABLE:
+                kind = "table"
             else:
                 kind = "text"
             source = (

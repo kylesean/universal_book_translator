@@ -589,6 +589,14 @@ def translate(
             show_default=False,
         ),
     ] = None,
+    table_render_mode: Annotated[
+        str | None,
+        typer.Option(
+            "--table-render-mode",
+            help="Table handling mode for PDF: 'auto' (in-place overlay for simple, appendix for complex), 'overlay' (in-place only, skip complex), 'appendix' (append translated tables), or 'skip' (skip tables entirely, 0 tokens)",
+            show_default=False,
+        ),
+    ] = None,
     short_max_pages: Annotated[
         int | None,
         typer.Option(
@@ -687,6 +695,7 @@ def translate(
         "formula_enrichment": formula_enrichment,
         "formula_render": formula_render,
         "math_backend": math_backend,
+        "table_render_mode": table_render_mode,
         "short_max_pages": short_max_pages,
         "glossary": glossary,
         "domain": domain,

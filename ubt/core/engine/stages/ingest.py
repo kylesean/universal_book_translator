@@ -414,6 +414,33 @@ async def run_ingest_stage(
                     b.target_text = b.source_text
                     b.mtqe_score = 1.0
                     continue
+                if b.block_type is BlockType.TABLE:
+                    table_mode = getattr(ctx.config, "table_render_mode", "auto")
+                    is_pdf_target = bool(
+                        (ctx.output_path and ctx.output_path.suffix.lower() == ".pdf")
+                        or (ctx.input_path and ctx.input_path.suffix.lower() == ".pdf")
+                    )
+                    if is_pdf_target:
+                        if table_mode == "skip":
+                            b.policy_translate = False
+                            b.policy_reason = "skip:table_mode_skip"
+                            b.skip_translate = True
+                            b.status = BlockStatus.MTQE_PASSED
+                            b.target_text = b.source_text
+                            b.mtqe_score = 1.0
+                            continue
+                        elif table_mode == "overlay":
+                            from ubt.render.table_compiler import probe_table_complexity
+
+                            comp = probe_table_complexity(b.source_text, b.bbox)
+                            if comp.is_complex:
+                                b.policy_translate = False
+                                b.policy_reason = f"skip:table_complex_{comp.reason}"
+                                b.skip_translate = True
+                                b.status = BlockStatus.MTQE_PASSED
+                                b.target_text = b.source_text
+                                b.mtqe_score = 1.0
+                                continue
                 # Untranslatable residue (watermarks, bib entries, symbol
                 # debris) ships verbatim without spending LLM / QE / repair.
                 skip_reason = classify_skip(

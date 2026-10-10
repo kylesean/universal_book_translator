@@ -917,6 +917,117 @@ def _write_spill_appendix(
         return None
 
 
+def _write_table_appendix(
+    ctx: StageContext,
+    rendered_path: Path,
+    blocks: list[IRBlock],
+) -> Path | None:
+    """Write translated table appendix companion (.md / .json) and append pages to PDF when appropriate."""
+    from ubt.adapters.pdf.typst_compile import typst_compile
+    from ubt.core.job_options import companion_path
+    from ubt.render.table_compiler import probe_table_complexity, render_table_appendix_typst
+
+    table_mode = getattr(ctx.config, "table_render_mode", "auto")
+    if table_mode == "skip":
+        return None
+
+    # Collect translated table blocks
+    table_blocks = [
+        b
+        for b in blocks
+        if b.block_type is BlockType.TABLE
+        and not b.skip_translate
+        and bool((b.target_text or "").strip())
+    ]
+    if not table_blocks:
+        return None
+
+    appendix_tables: list[tuple[int, str, str]] = []
+    for b in table_blocks:
+        target = (b.target_text or "").strip()
+        page = b.bbox.page if b.bbox and b.bbox.page > 0 else 1
+        label = b.id
+        if table_mode == "appendix":
+            appendix_tables.append((page, label, target))
+        elif table_mode == "auto":
+            comp = probe_table_complexity(target, b.bbox)
+            if comp.is_complex:
+                appendix_tables.append((page, label, target))
+
+    if not appendix_tables:
+        return None
+
+    try:
+        items = [
+            {
+                "block_id": label,
+                "page": page,
+                "target_text": target,
+            }
+            for page, label, target in appendix_tables
+        ]
+        json_path = companion_path(rendered_path, ".table_appendix.json")
+        atomic_write_text(
+            json_path,
+            json.dumps({"job_id": ctx.job_id, "tables": items}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+        md_lines: list[str] = [
+            "# 核心图表与数据矩阵对照附录 (Translated Tables Appendix)",
+            "",
+            f"- **Job ID**: `{ctx.job_id}`",
+            f"- **Document**: `{rendered_path.name}`",
+            f"- **收录图表数**: {len(appendix_tables)}",
+            "",
+            "以下图表为正文中因物理版面紧凑而保留原貌的复杂图表完整译文：",
+            "",
+        ]
+        for page, label, target in appendix_tables:
+            md_lines.append(f"## 原书第 {page} 页图表 (`{label}`)")
+            md_lines.append("")
+            md_lines.append(target)
+            md_lines.append("")
+
+        md_path = companion_path(rendered_path, ".table_appendix.md")
+        atomic_write_text(md_path, "\n".join(md_lines), encoding="utf-8")
+        logger.info("Table appendix companion generated: %s (%d items)", md_path.name, len(items))
+
+        # Physical PDF page appending
+        if rendered_path.suffix.lower() == ".pdf" and rendered_path.exists():
+            try:
+                typ_source = render_table_appendix_typst(appendix_tables)
+                typ_path = rendered_path.parent / f"{rendered_path.stem}.table_appendix.typ"
+                app_pdf_path = rendered_path.parent / f"{rendered_path.stem}.table_appendix.pdf"
+                atomic_write_text(typ_path, typ_source, encoding="utf-8")
+                ok, _ = typst_compile(str(typ_path), str(app_pdf_path))
+                if ok and app_pdf_path.exists():
+                    import pikepdf
+
+                    with pikepdf.open(rendered_path, allow_overwriting_input=True) as main_pdf:
+                        with pikepdf.open(app_pdf_path) as app_pdf:
+                            main_pdf.pages.extend(app_pdf.pages)
+                        main_pdf.save(rendered_path)
+                    logger.info(
+                        "Table appendix appended pages to %s (%d table(s))",
+                        rendered_path.name,
+                        len(appendix_tables),
+                    )
+                typ_path.unlink(missing_ok=True)
+                app_pdf_path.unlink(missing_ok=True)
+            except Exception as append_exc:
+                logger.warning(
+                    "Table appendix PDF page append skipped for %s: %s",
+                    rendered_path.name,
+                    append_exc,
+                )
+
+        return md_path
+    except Exception as exc:
+        logger.warning("Table appendix generation skipped for job %s: %s", ctx.job_id, exc)
+        return None
+
+
 def _write_xliff_companion(
     ctx: StageContext, rendered_path: Path, blocks: list[IRBlock]
 ) -> Path | None:
@@ -1361,6 +1472,11 @@ async def run_export_stage(
     secondary_path = await _render_complementary_artifact(
         ctx, adapter, final_blocks, artifact, render
     )
+
+    # Append translated table appendix and generate companion files when tables were translated
+    table_mode = getattr(ctx.config, "table_render_mode", "auto")
+    if table_mode in ("auto", "appendix"):
+        await asyncio.to_thread(_write_table_appendix, ctx, rendered_path, final_blocks)
 
     # Persist this run's spend to the ledger before the report reads it: the
     # visual gate and complementary render above made paid calls after the last
