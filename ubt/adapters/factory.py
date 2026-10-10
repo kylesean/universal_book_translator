@@ -89,7 +89,12 @@ def _resolve_pdf_adapter(pdf_engine: str, path: Path | None = None) -> BasePDFEn
         # honored — speed is a legitimate choice — but never silently.
         try:
             probe = select_pdf_engine(path)
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                "Content probe failed on '%s' (%s); defaulting engine check assumption to 'pdfium'.",
+                path.name,
+                exc,
+            )
             probe = "pdfium"
         if probe == "docling":
             logger.warning(

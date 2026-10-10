@@ -120,7 +120,7 @@ class ProgressSnapshot(BaseModel):
     #: The last event's human-readable message. A progress *log* line, kept for
     #: the console's stream drawer. Path-bearing messages (export naming its
     #: artifact) are dropped here — the wire form must not leak host layout; the
-    #: artifact keys above carry the basename instead.
+    #: artifact keys above carry the resolved paths (sanitized on external endpoints).
     message: str | None = None
     output_file: str | None = None
     report_file: str | None = None
@@ -147,8 +147,8 @@ class ProgressSnapshot(BaseModel):
             event.needs_human_blocks,
             event.blocked_human_blocks,
         )
-        # EXPORT_COMPLETED's message names the output path; the console gets the
-        # basename through ``output_file`` instead, so the raw text is dropped
+        # EXPORT_COMPLETED's message names the output path; the snapshot carries
+        # the path in ``output_file`` instead, so the raw message text is dropped
         # rather than forwarded to the wire.
         message = (
             None if event.event_type is EventType.EXPORT_COMPLETED else (event.message or None)

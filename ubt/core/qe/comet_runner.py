@@ -479,6 +479,11 @@ class SubprocessQERunner(BaseQERunner):
             return await self._heuristic_runner().score_pairs(pairs)
         scores = await self._score_via_backend(pairs)
         if self._last_engine != "neural":
+            logger.warning(
+                "Neural COMET runner is unavailable (reported engine='%s'); "
+                "falling back to in-process heuristic scorer for the remainder of this run.",
+                self._last_engine,
+            )
             self._neural_unavailable = True
             return await self._heuristic_runner().score_pairs(pairs)
         return scores
