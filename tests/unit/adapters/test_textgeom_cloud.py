@@ -110,3 +110,37 @@ def test_a_clean_page_says_nothing(tmp_path: Path, caplog: pytest.LogCaptureFixt
         lines, _size = extract_lines(path, 1)
     assert [line.text for line in lines] == ["One line only.", "And another."]
     assert caplog.records == []
+
+
+def test_dense_per_character_text_is_not_a_cloud() -> None:
+    """Thousands of ~5pt character rects are text, not marker debris.
+
+    A PDF that gives pdfium one rect per character clears both the rect count
+    and the debris count, but its rects are lowercase letters (~5pt), not
+    scatter dots (~1pt). Dropping them deleted 61% of a real page's characters
+    (arXiv 2610.02185). The median rect height is the tell.
+    """
+    # 700 character-sized rects, all below the 5pt/3pt debris thresholds.
+    chars = [
+        (
+            60.0 + i % 50 * 4.0,
+            700.0 - i // 50 * 8.0,
+            60.0 + i % 50 * 4.0 + 3.5,
+            700.0 - i // 50 * 8.0 + 4.9,
+        )
+        for i in range(700)
+    ]
+    kept, dropped = _drop_scatter_debris(list(chars))
+    assert dropped == 0
+    assert kept == chars
+
+
+def test_a_marker_cloud_is_still_dropped() -> None:
+    """~1pt scatter dots are still debris: the gate must not go blind."""
+    dots = [
+        (60.0 + i % 300, 700.0 - i // 300, 60.0 + i % 300 + 1.0, 700.0 - i // 300 + 1.1)
+        for i in range(_DEBRIS_MIN_COUNT + 400)
+    ]
+    kept, dropped = _drop_scatter_debris(list(dots))
+    assert dropped == len(dots)
+    assert kept == []

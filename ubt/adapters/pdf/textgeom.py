@@ -323,6 +323,17 @@ _DEBRIS_MAX_HEIGHT_PT = 60.0
 #: any page over the count had its sub-5pt rects dropped (its superscripts and
 #: footnote marks) with nothing said about it.
 _DEBRIS_MIN_COUNT = 300
+#: A genuine marker cloud's glyphs are ~1pt (a scatter dot). A per-character
+#: prose page's rects are ~5pt (a lowercase letter), which clears both the rect
+#: count and the debris count while being real text. The median rect height
+#: separates them, so only a page below this is treated as a cloud.
+_CLOUD_MAX_MEDIAN_HEIGHT_PT = 2.0
+
+
+def _median_rect_height(rects: Sequence[tuple[float, float, float, float]]) -> float:
+    """Median rect height, the marker-cloud tell (see ``_drop_scatter_debris``)."""
+    heights = sorted(rect[3] - rect[1] for rect in rects)
+    return heights[len(heights) // 2] if heights else 0.0
 
 
 def _is_debris_rect(rect: tuple[float, float, float, float]) -> bool:
@@ -345,11 +356,23 @@ def _drop_scatter_debris(
     rects, hundreds of them debris-sized). A caller that sees a nonzero count
     must report it: those rects, and whatever text the extractor placed under
     them, are gone from the line list.
+
+    A page can clear both the rect count and the debris count and still be real
+    text: a PDF that gives pdfium one rect per *character* puts thousands of
+    3-5pt glyphs on an ordinary prose page (arXiv 2610.02185), and the old
+    size test then discarded 61% of the page's characters. The tell is the
+    median rect height — a marker cloud's glyphs are ~1pt (a scatter dot), a
+    per-character prose page's are ~5pt (a lowercase letter). Only a page whose
+    median rect is that tiny is a cloud.
     """
     if len(rects) <= _CLOUD_MIN_RECTS:
         return rects, 0
     debris = sum(1 for rect in rects if _is_debris_rect(rect))
     if debris < _DEBRIS_MIN_COUNT:
+        return rects, 0
+    if _median_rect_height(rects) >= _CLOUD_MAX_MEDIAN_HEIGHT_PT:
+        # Dense per-character text, not a marker cloud: the tiny rects are
+        # letters, and dropping them would delete the page's content.
         return rects, 0
     kept = [rect for rect in rects if not _is_debris_rect(rect)]
     return kept, len(rects) - len(kept)
@@ -637,6 +660,23 @@ def merge_row_fragments(
 #: sub-point tolerance separates a double-count from two adjacent words.
 _OVERREAD_X_TOL_PT = 0.05
 
+#: A row whose fragments are mostly single characters is a *glyph* row, not a
+#: word row: some PDFs give pdfium one rect per character (``LOOPCD`` arrives as
+#: ``L``, ``O``, ``O``, ``P``, ...). Space-joining those bakes ``L O O P C D``
+#: into the line and shatters every word (arXiv 2610.02185: 99% fragment rate,
+#: 4 of 20 documents in a local corpus). A glyph row joins on the inter-glyph
+#: gap instead, so letters inside a word touch and only real spaces separate.
+#: The threshold is low because pdfium often mixes granularities in one row
+#: (``a``, ``L``, ``oopCD r``, ``eads``): a third of the fragments being single
+#: characters is already a glyph row.
+_GLYPH_ROW_SINGLE_SHARE = 0.2
+#: Inter-glyph gap as a fraction of the row's median glyph height. Below it the
+#: two glyphs are the same word; above it a space separates them. Calibrated
+#: against the visible text of the local corpus (word-recovery sweep): 0.4
+#: recovers 19/20 anchor words, while 0.5 recovers 15/20 and 0.45 recovers
+#: 17/20 — too wide a threshold glues real word gaps ("The Model" -> "TheModel").
+_GLYPH_ROW_GAP_RATIO = 0.4
+
 
 def _merge_boundary_overreads(fragments: list[LineBox]) -> list[LineBox]:
     """Fold a fragment's duplicated boundary run back into its left neighbour.
@@ -723,6 +763,8 @@ def _glue_run(run: list[LineBox]) -> LineBox:
     y1 = max(ln.rect[3] for ln in kept)
     fsz, is_bold, is_italic = _aggregate_line_styles(kept)
     glued_text = _join_fragments_with_superscripts(kept, fsz)
+    if _is_glyph_row(kept):
+        glued_text = _join_glyph_row(kept)
     return LineBox(
         glued_text,
         (x0, y0, x1, y1),
@@ -731,6 +773,42 @@ def _glue_run(run: list[LineBox]) -> LineBox:
         bold=is_bold,
         italic=is_italic,
     )
+
+
+def _is_glyph_row(kept: Sequence[LineBox]) -> bool:
+    """True when a row's fragments are characters, not words.
+
+    Some PDFs hand pdfium one rect per character, so ``LOOPCD`` arrives as
+    ``L``/``O``/``O``/``P``/``C``/``D``. Space-joining those bakes ``L O O P C D``
+    into the line. A row is a glyph row when most of its fragments are a single
+    character; a word row (``Contents``, ``the``) never is.
+    """
+    if len(kept) < 3:
+        return False
+    singles = sum(1 for ln in kept if len((ln.text or "").strip()) <= 1)
+    return singles / len(kept) > _GLYPH_ROW_SINGLE_SHARE
+
+
+def _join_glyph_row(kept: Sequence[LineBox]) -> str:
+    """Join a per-character row on the inter-glyph gap, not on every fragment.
+
+    Letters inside a word sit ~1pt apart; a word space is several points wide.
+    A gap above ``_GLYPH_ROW_GAP_RATIO`` of the row's median glyph height is a
+    space, anything narrower is the same word — so ``L``+``o``+``o``+``p``+``e``+``d``
+    glues to ``Looped`` while a real space still separates.
+    """
+    ordered = sorted(kept, key=lambda ln: ln.rect[0])
+    heights = sorted(ln.rect[3] - ln.rect[1] for ln in ordered)
+    median_h = heights[len(heights) // 2]
+    threshold = _GLYPH_ROW_GAP_RATIO * median_h
+    out = [(ordered[0].text or "").strip()]
+    for prev, ln in zip(ordered, ordered[1:], strict=False):
+        raw = (ln.text or "").strip()
+        if not raw:
+            continue
+        gap = ln.rect[0] - prev.rect[2]
+        out.append((" " if gap > threshold else "") + raw)
+    return "".join(out)
 
 
 def _join_fragments_with_superscripts(kept: Sequence[LineBox], main_fsz: float) -> str:

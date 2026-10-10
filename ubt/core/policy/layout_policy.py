@@ -210,7 +210,16 @@ ROW_MERGE_Y_TOL = 0.5
 # A fragment this many times the median row height is not a row (vertical
 # sidebar text, rotated watermarks); it must never seed a band that normal
 # rows join, or the whole span collapses into one glued line.
-ROW_MERGE_TALL_FACTOR = 3.0
+#
+# 8.0, not 3.0: a large heading glyph is ~4x the page's median rect height when
+# the page mixes body text with a display title (arXiv 2610.02185: title caps
+# 18.6pt against a 4.92pt median = 3.8x), and a 3x cut sealed every title glyph
+# into its own band — the title arrived as 15 fragments ("D", "i", "eco n")
+# which each translated and drew into overlapping boxes. A real sidebar or
+# watermark is an order of magnitude larger (arXiv 2609.32391's rotated
+# identifier column is 48.6x the median), so 8.0 keeps them sealed with room to
+# spare while letting heading glyphs band normally.
+ROW_MERGE_TALL_FACTOR = 8.0
 
 # ---------------------------------------------------------------------------
 # PDF operator inventory (page profiler / engine selector)

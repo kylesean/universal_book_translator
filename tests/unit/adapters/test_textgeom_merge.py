@@ -68,6 +68,27 @@ def test_normal_row_fragments_still_glue() -> None:
     assert merged[0].text == "Continual-learning agents are systems of models"
 
 
+def test_a_large_heading_glyph_still_bands_with_its_row() -> None:
+    # A display title's caps are ~4x the page's median rect height, not the
+    # 48x a rotated sidebar is. A 3x tall cut sealed each title glyph into its
+    # own band, so the title arrived as 15 fragments ("D", "i", "eco n") that
+    # each translated and drew into overlapping boxes (arXiv 2610.02185's
+    # title was destroyed). Glyph rows must band by baseline, not by height.
+    title = [
+        LineBox("D", (61.1, 687.0, 76.8, 705.6)),
+        LineBox("e", (77.5, 686.7, 91.1, 701.1)),
+        LineBox("c", (91.1, 686.7, 104.4, 701.1)),
+        LineBox("o", (104.4, 686.7, 118.4, 701.1)),
+        LineBox("d", (118.4, 686.7, 133.4, 705.6)),
+        LineBox("i", (133.4, 687.0, 138.8, 706.5)),
+        LineBox("n", (138.8, 687.0, 152.4, 701.1)),
+        LineBox("g", (152.4, 682.3, 165.9, 701.1)),
+    ]
+    merged = merge_row_fragments(title)
+    assert len(merged) == 1, [ln.text for ln in merged]
+    assert merged[0].text == "Decoding"
+
+
 def test_superscript_attaches_to_its_row_not_a_tall_fragment() -> None:
     rows = [
         _sidebar(),
@@ -127,3 +148,49 @@ def test_a_longer_word_extension_is_not_folded() -> None:
     ]
     merged = merge_row_fragments(rows)
     assert "recover recovers the context" in " ".join(ln.text for ln in merged)
+
+
+# --------------------------------------------------------------------------- #
+# Per-character rows (one pdfium rect per glyph)
+# --------------------------------------------------------------------------- #
+
+
+def _glyph_row(text: str, *, x: float = 60.0, h: float = 5.0) -> list[LineBox]:
+    """One glyph per LineBox, ~1pt apart, with a 6pt gap at each space."""
+    out: list[LineBox] = []
+    for ch in text:
+        if ch == " ":
+            x += 6.0
+            continue
+        out.append(LineBox(ch, (x, 700.0, x + 4.0, 700.0 + h)))
+        x += 5.0
+    return out
+
+
+def test_a_glyph_row_glues_letters_into_words() -> None:
+    # Some PDFs give pdfium one rect per character. Space-joining those bakes
+    # "L O O P C D" into the line; the row must join on the inter-glyph gap
+    # instead (arXiv 2610.02185: 99% fragment rate, 4 of 20 local documents).
+    merged = merge_row_fragments(_glyph_row("LOOPCD"))
+    assert [ln.text for ln in merged] == ["LOOPCD"]
+
+
+def test_a_glyph_row_keeps_real_spaces() -> None:
+    merged = merge_row_fragments(_glyph_row("The Model"))
+    assert [ln.text for ln in merged] == ["The Model"]
+
+
+def test_a_glyph_row_recovers_a_sentence() -> None:
+    merged = merge_row_fragments(_glyph_row("Looped Transformers"))
+    assert [ln.text for ln in merged] == ["Looped Transformers"]
+
+
+def test_a_word_row_still_space_separates() -> None:
+    # The glyph-row join must not touch ordinary word fragments.
+    rows = [
+        LineBox("Continual-learning", (88.2, 541.1, 180.0, 549.0)),
+        LineBox("agents", (184.0, 541.1, 230.0, 549.0)),
+        LineBox("are systems", (234.0, 541.1, 380.0, 549.0)),
+    ]
+    merged = merge_row_fragments(rows)
+    assert merged[0].text == "Continual-learning agents are systems"
