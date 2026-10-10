@@ -170,6 +170,7 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
         ocr_model: str | None = None,
         formula_enrichment: str = "auto",
         formula_render: str = "witness",
+        docling_device: str = "auto",
         font_family: str | None = None,
         allow_page_upload: bool = False,
     ) -> None:
@@ -180,6 +181,7 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
         self.ocr_model = ocr_model
         self.formula_enrichment = formula_enrichment
         self.formula_render = formula_render
+        self.docling_device = docling_device
         self.allow_page_upload = allow_page_upload
 
     def apply_config(self, runtime_config: AdapterRuntimeConfig) -> None:
@@ -199,6 +201,9 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
             self.ocr_model = runtime_config.ocr_model
         self.formula_enrichment = runtime_config.formula_enrichment
         self.formula_render = runtime_config.formula_render
+        # Whether Docling touches the GPU is a separate decision from whether it
+        # runs at all: a local LLM on the same card needs Docling on CPU.
+        self.docling_device = runtime_config.docling_device
         # The page-image egress gate comes from the resolved config, not a
         # second ``os.environ`` read in the parser.
         self.allow_page_upload = runtime_config.allow_page_upload
@@ -424,6 +429,7 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
             page_range,
             symbols=_docling_symbols,
             enrich=self._resolve_formula_enrichment(path),
+            device=self.docling_device,
         )
         # Docling mis-maps TeX math symbols (e.g. '=' -> '∅', '+' -> '⊕', '−' -> 'ϒ');
         # the page's own pdfium lines restore ground-truth math glyphs first.

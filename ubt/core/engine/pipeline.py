@@ -723,6 +723,7 @@ class PipelineOrchestrator:
                 ocr_model=self.config.ocr_model,
                 formula_enrichment=self.config.formula_enrichment,
                 formula_render=self.config.formula_render,
+                docling_device=self.config.docling_device,
                 font_family=self.config.font_family,
                 math_backend=self.config.math_backend,
                 allow_page_upload=self.config.allow_page_upload,

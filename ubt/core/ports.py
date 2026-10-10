@@ -67,6 +67,10 @@ class AdapterRuntimeConfig:
     ocr_model: str
     formula_enrichment: str
     formula_render: str
+    #: Accelerator device Docling uses (``auto`` / ``cpu`` / ``cuda``). Carried
+    #: here so the adapter reads the resolved config value instead of the
+    #: parser re-deriving it: one knob, one source.
+    docling_device: str
     font_family: str | None
     math_backend: str
     #: Whether page images may leave this machine (visual repair / cloud OCR /

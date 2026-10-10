@@ -691,6 +691,7 @@ def extract_with_docling(
     *,
     symbols: Callable[[], tuple[Any, Any, Any, Any]],
     enrich: bool,
+    device: str = "auto",
 ) -> list[IRBlock]:
     """Extract structured blocks using IBM Docling in strict reading order."""
     configure_hf_environment(enrich=enrich)
@@ -704,6 +705,16 @@ def extract_with_docling(
     options.do_formula_enrichment = enrich
     options.generate_picture_images = True
     options.images_scale = 2.0
+    # Whether Docling's layout/table/formula models touch the GPU is a separate
+    # decision from whether Docling runs. ``auto`` (the default) leaves Docling's
+    # own probe in charge; ``cpu`` keeps it off the card so a local LLM sharing
+    # the GPU can still load its weights (see
+    # docs/guides/PDF_ENGINE_ROUTING_REDESIGN.md §L4). The device is part of the
+    # conversion cache key below, so a CPU and a CUDA conversion never alias.
+    device = (device or "auto").strip().lower()
+    if device in ("cpu", "cuda"):
+        options.accelerator_options.device = device
+        logger.info("Docling accelerator device pinned to '%s' for '%s'", device, path.name)
 
     if enrich:
         logger.info(

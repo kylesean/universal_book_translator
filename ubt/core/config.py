@@ -68,6 +68,17 @@ DualMode = Literal["inline", "alternating", "monolingual", "facing", "auto"]
 #: and its legacy aliases were removed when every PDF route converged onto it.
 RENDER_ENGINE: Final[str] = "overlay"
 
+#: Accelerator device Docling uses for its layout/table/formula models.
+#: ``auto`` (default) keeps Docling's own probe: CUDA when a GPU is present.
+#: ``cpu`` keeps Docling off the GPU entirely — the escape hatch for a local
+#: LLM sharing one card, where Docling's CUDA footprint (measured on arXiv
+#: 2610.02185: ~388 MiB allocated, ~1.4 GiB reserved by the caching allocator,
+#: ~1.6 GiB as nvidia-smi reports the process) otherwise makes the LLM fail to
+#: load with cudaMalloc OOM. ``cuda`` forces the GPU. Note the footprint is
+#: only paid on a cache MISS: Docling loads its models lazily in
+#: ``convert()``, so a cached conversion uses zero GPU.
+DoclingDevice = Literal["auto", "cpu", "cuda"]
+
 #: Bilingual modes that pair whole source and target pages (a page zipper), as
 #: opposed to interleaving source and target within a page. A source-canvas
 #: engine is page-aligned with the source, so it can serve exactly these.
@@ -319,6 +330,13 @@ class UBTConfig(BaseSettings):
     # PDFs take the pypdfium2 fast path, scans and multi-column layouts stay
     # on the Docling mainline. Explicit 'docling' / 'pdfium' forces one engine.
     pdf_engine: PdfEngine = "auto"
+
+    # -- Docling accelerator device -------------------------------------------
+    # Decouples *whether* Docling runs from *where* it runs. 'auto' keeps
+    # Docling's own CUDA probe; 'cpu' keeps it off the GPU so a local LLM
+    # sharing the card can still load its weights. See
+    # docs/guides/PDF_ENGINE_ROUTING_REDESIGN.md §L4.
+    docling_device: DoclingDevice = "auto"
 
     # -- Pluggable OCR Configuration -------------------------------------------
     # 'auto' (default): Probes local Docker sidecar -> local rapidocr -> Cloud/VLM -> off
@@ -782,6 +800,7 @@ class UBTConfig(BaseSettings):
     @field_validator(
         "api_mode",
         "pdf_engine",
+        "docling_device",
         "ocr_mode",
         "qe_engine",
         "dual_mode",
