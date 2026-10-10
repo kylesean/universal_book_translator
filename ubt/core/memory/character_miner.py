@@ -1118,6 +1118,8 @@ def mine_characters_stream(
             if is_new and (len(core) < cfg.min_core_len or core.lower() in cfg.not_names):
                 continue
             if is_new:
+                if len(found) >= max_entries:
+                    continue
                 seen_full_names.add(full_name.lower())
             hon_core_counts[core.lower()] = hon_core_counts.get(core.lower(), 0) + 1
             if is_new:
@@ -1180,4 +1182,4 @@ def mine_characters_stream(
                 "frequency": count,
             }
 
-    return list(found.values())
+    return list(found.values())[:max_entries]
