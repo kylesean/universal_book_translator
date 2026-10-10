@@ -71,7 +71,8 @@ def _is_reflowable(overlay: Overlay) -> bool:
     structure or the flow solver, so they bound the bands instead.
     """
     return (
-        not overlay.boxes
+        overlay.reflowable
+        and not overlay.boxes
         and overlay.kind == "text"
         and not overlay.source
         and not overlay.fixed_box
@@ -173,6 +174,68 @@ def _layout_band(
     return placed
 
 
+def _fit_captions(
+    overlays: Sequence[Overlay],
+    obstacle_boxes: Sequence[PhysicalBox],
+    measure_many: MeasureMany,
+    cap_size: CapSize,
+) -> dict[str, tuple[float, float, float, float]]:
+    """Grow a caption's box into the free vertical gap when its target is taller.
+
+    A caption is not reflowable -- it belongs to the figure/table above it -- but
+    its translated box is the *source* box, sized for the source text. A CJK
+    caption a line longer than its English source then overflows the box and is
+    drawn on top of the paragraph below (overlapping text on arXiv 2610.02185
+    p6). This expands the box downward into the free gap up to the next obstacle,
+    leaving the text at its source position otherwise. Returns ``element_id ->
+    new bbox`` for the captions it could grow; a caption with no room is left
+    unchanged (the compositor's fit search then shrinks it, never overlaps).
+    """
+    result: dict[str, tuple[float, float, float, float]] = {}
+    for overlay in overlays:
+        if overlay.reflowable or overlay.fixed_box or not overlay.text.strip():
+            continue
+        x0, y0, x1, y1 = overlay.bbox
+        width = x1 - x0
+        if width <= 0 or y1 <= y0:
+            continue
+        natural = measure_many(
+            [
+                (
+                    overlay.text,
+                    width,
+                    cap_size(overlay.kind, overlay.font_size),
+                    overlay.indent_pt,
+                    overlay.kind,
+                    overlay.is_bold,
+                    overlay.runs,
+                )
+            ]
+        )[0]
+        if not math.isfinite(natural) or natural <= 0:
+            continue
+        needed = natural + _BOX_EPS
+        if needed <= (y1 - y0) + 0.5:
+            continue  # already fits
+        # The free gap below: the nearest obstacle top strictly under the caption.
+        floor = None
+        for box in obstacle_boxes:
+            if box.page != overlay.page:
+                continue
+            bx0, by0, bx1, by1 = box.bbox
+            if bx1 <= x0 or bx0 >= x1:  # no horizontal overlap
+                continue
+            if by1 <= y0 + 1.0 and (floor is None or by1 > floor):
+                floor = by1
+        if floor is None:
+            continue
+        room = y0 - floor
+        if needed > room + 0.5:
+            continue  # not enough free space: leave it to the fit search
+        result[overlay.element_id] = (x0, y1 - needed, x1, y1)
+    return result
+
+
 def _partition_columns(overlays: Sequence[Overlay]) -> list[list[Overlay]]:
     """Partition a page's reflowable overlays into column clusters.
 
@@ -256,14 +319,31 @@ def reflow_overlays(
     unchanged, so the caller can always use the result.
     """
     reflowable = [ov for ov in overlays if _is_reflowable(ov)]
-    if not reflowable:
-        return tuple(overlays)
     reflowable_ids = {overlay.element_id for overlay in reflowable}
+    # A caption is an obstacle (non-reflowable), but its translated box may be
+    # too short for its target and overflow onto the paragraph below. Grow it
+    # into the free gap first, using the reflowable blocks' source boxes as the
+    # floor, so the band pass then treats the grown box as the barrier.
+    anchors = [ov for ov in overlays if ov.element_id not in reflowable_ids]
+    floor_boxes = list(obstacles)
+    floor_boxes.extend(PhysicalBox.of(ov.page, ov.bbox) for ov in reflowable)
+    caption_fits = _fit_captions(anchors, floor_boxes, measure_many, cap_size)
+    if not reflowable:
+        if not caption_fits:
+            return tuple(overlays)
+        return tuple(
+            replace(ov, bbox=caption_fits[ov.element_id]) if ov.element_id in caption_fits else ov
+            for ov in overlays
+        )
     obstacle_boxes: list[PhysicalBox] = list(obstacles)
     for overlay in overlays:
         if overlay.element_id in reflowable_ids:
             continue
-        obstacle_boxes.extend(overlay.flow_boxes)
+        grown = caption_fits.get(overlay.element_id)
+        if grown is not None:
+            obstacle_boxes.append(PhysicalBox.of(overlay.page, grown))
+        else:
+            obstacle_boxes.extend(overlay.flow_boxes)
     # One draw size per style class, so same-size body text stays uniform after
     # the reflow. It is the source-size cap the compositor's fit path also uses,
     # so a reflowed paragraph and a lone fitted one land on the same size.
@@ -309,9 +389,15 @@ def reflow_overlays(
                         # box, which ``clip`` hides as an ink-less line.
                         draw_size_pt=_class_size(overlay),
                     )
-    if not new_by_id:
-        return tuple(overlays)
-    return tuple(new_by_id.get(overlay.element_id, overlay) for overlay in overlays)
+    return tuple(
+        new_by_id.get(
+            overlay.element_id,
+            replace(overlay, bbox=caption_fits[overlay.element_id])
+            if overlay.element_id in caption_fits
+            else overlay,
+        )
+        for overlay in overlays
+    )
 
 
 __all__ = ["CapSize", "MeasureMany", "reflow_overlays"]

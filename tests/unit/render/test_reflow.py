@@ -129,6 +129,69 @@ def test_non_text_overlays_are_anchors_not_moved() -> None:
     assert by_id["a"].fixed_box and by_id["b"].fixed_box
 
 
+def test_a_caption_is_not_packed_into_a_body_band() -> None:
+    """A caption is anchored at its source geometry, not reflowed as prose.
+
+    Packing a translated caption as an ordinary paragraph pushed it onto the
+    paragraph below it and produced overlapping, unreadable text on arXiv
+    2610.02185 p6. ``reflowable=False`` keeps it fixed and makes it an obstacle,
+    so the body paragraph beside it is not packed against it either.
+    """
+    caption = Overlay("cap", 1, (10.0, 150.0, 200.0, 165.0), "Figure 6 caption", reflowable=False)
+    body = _ov("body", 1, (10.0, 100.0, 200.0, 140.0))
+
+    out = reflow_overlays([caption, body], [], measure_many=_measure(20.0), cap_size=_cap)
+    by_id = {ov.element_id: ov for ov in out}
+
+    # The caption is returned byte-identical (never moved).
+    assert by_id["cap"] == caption
+    # The body paragraph, alone in its band, is also untouched -- it cannot be
+    # packed up against the caption.
+    assert by_id["body"] == body
+
+
+def test_a_caption_too_tall_for_its_box_grows_into_the_free_gap() -> None:
+    """A caption whose target is taller than its source box grows downward.
+
+    A caption keeps its source box, but a CJK target a line longer than the
+    English source overflows it and is drawn over the paragraph below (the
+    overlapping text on arXiv 2610.02185 p6). The box grows into the free gap up
+    to the next obstacle; the paragraph below must not be pushed or overlapped.
+    """
+    caption = Overlay("cap", 1, (10.0, 390.0, 500.0, 405.0), "long caption", reflowable=False)
+    body = _ov("body", 1, (10.0, 280.0, 500.0, 360.0))  # top at 360, 30pt gap
+
+    # The caption needs 22pt (its box is 15pt) and the gap to the body top is
+    # 30pt, so it grows to 22pt tall and stops clear of the body.
+    out = reflow_overlays([caption, body], [], measure_many=_measure(22.0), cap_size=_cap)
+    by_id = {ov.element_id: ov for ov in out}
+    grown = by_id["cap"]
+    assert grown.bbox[3] == pytest.approx(405.0)  # top unchanged
+    assert grown.bbox[1] == pytest.approx(405.0 - 22.5)  # grew to natural + eps
+    assert grown.bbox[1] > by_id["body"].bbox[3]  # clear of the body below
+    # The body paragraph is untouched (not reflowed onto the caption).
+    assert by_id["body"] == body
+
+
+def test_a_caption_with_no_room_is_left_unchanged() -> None:
+    """No free gap: the caption stays put and the fit search handles it."""
+    caption = Overlay("cap", 1, (10.0, 390.0, 500.0, 405.0), "long caption", reflowable=False)
+    # Body top at 404 -- only 1pt below the caption: no room to grow.
+    body = _ov("body", 1, (10.0, 350.0, 500.0, 404.0))
+    out = reflow_overlays([caption, body], [], measure_many=_measure(25.0), cap_size=_cap)
+    by_id = {ov.element_id: ov for ov in out}
+    assert by_id["cap"] == caption
+
+
+def test_a_quarantine_badge_is_not_reflowed() -> None:
+    """A badge is a margin marker; the reflow pass must leave it in place."""
+    badge = Overlay("q", 1, (56.0, 628.0, 68.0, 640.0), "⚠ 未译", reflowable=False, font_size=7.4)
+    a = _ov("a", 1, (100.0, 600.0, 300.0, 640.0))
+    out = reflow_overlays([badge, a], [], measure_many=_measure(20.0), cap_size=_cap)
+    by_id = {ov.element_id: ov for ov in out}
+    assert by_id["q"] == badge
+
+
 def test_the_class_size_is_the_document_minimum_cap() -> None:
     # Two same-class paragraphs whose caps differ (a caller-supplied cap) must be
     # measured and drawn at one shared size, matching the compositor's uniform rule.

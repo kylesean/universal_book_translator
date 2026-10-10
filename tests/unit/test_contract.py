@@ -98,6 +98,24 @@ def test_translated_text_is_delivered_without_a_violation() -> None:
     report = reconcile(_graph(_text("t1", TextDisposition.TRANSLATED)))
     assert report.delivered_text == 1
     assert report.violations == ()
+
+
+def test_a_quarantined_block_surfaces_as_a_source_kept_warning() -> None:
+    """End-to-end: a quarantined block's graph row reconciles to a warning.
+
+    Ties the classification fix (``adapt._text_node``) to the contract: the
+    block must be counted as source-kept, not delivered, and the run must stay
+    ``passed`` (a quarantine is honest, not a space failure).
+    """
+    report = reconcile(
+        _graph(_text("q1", TextDisposition.SOURCE_KEPT, reason="quarantined:blocked_human"))
+    )
+    assert report.delivered_text == 0
+    assert report.source_kept_text == 1
+    assert report.passed is True
+    (violation,) = report.violations
+    assert violation.kind is ViolationKind.TEXT_SOURCE_KEPT
+    assert violation.severity is Severity.WARNING
     assert report.passed
 
 

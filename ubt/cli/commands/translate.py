@@ -190,6 +190,57 @@ def _refuse_existing_output(
     return output
 
 
+def _delivery_verdict(summary: dict[str, Any]) -> tuple[str, str]:
+    """The three-state delivery verdict from a quality-report summary.
+
+    Returns ``(state, message)`` where ``state`` is ``"passed"``,
+    ``"warning"``, or ``"blocked"`` -- the PASSED / WARNING / BLOCKED
+    vocabulary of the operator console (``docs/UBT_OPERATOR_CONSOLE_PRD.md``).
+    The artifact is delivered in all three cases; the state only says whether
+    the reader will meet untranslated source.
+
+    A quarantined (``blocked_human``) or failed block ships its *source*, so the
+    delivery is materially incomplete -- BLOCKED. A ``needs_human`` block still
+    ships its translation and is only queued for review -- WARNING. Anything
+    else is PASSED. This replaces the old banner, which only looked at
+    ``completed_blocks`` and so printed green success with 20 untranslated
+    blocks on the page.
+    """
+    failed = int(summary.get("failed_blocks", 0) or 0)
+    blocked = int(summary.get("blocked_human_blocks", 0) or 0)
+    needs_human = int(summary.get("needs_human_blocks", 0) or 0)
+    completed = int(summary.get("completed_blocks", 0) or 0)
+    if failed or blocked:
+        return (
+            "blocked",
+            _ui_msg(
+                f"⚠ Delivered with {blocked + failed} block(s) shipped untranslated "
+                "(source shown; quarantined for human post-editing) — inspect the "
+                "quality report before publishing",
+                f"⚠ 已交付但含 {blocked + failed} 个未译块（出厂为原文，已隔离待人工后编）"
+                "— 发布前请查看质量报告",
+            ),
+        )
+    if not completed:
+        return (
+            "blocked",
+            _ui_msg(
+                "⚠ 0 blocks passed automated QA — inspect the quality report before delivery",
+                "⚠ 0 块通过自动质检 — 请查看质量报告后再交付",
+            ),
+        )
+    if needs_human:
+        return (
+            "warning",
+            _ui_msg(
+                f"⚠ Delivered with {needs_human} block(s) awaiting human review "
+                "(translations shipped) — verify the quality report",
+                f"⚠ 已交付，含 {needs_human} 个待人工审校块（译文已出厂）— 请核对质量报告",
+            ),
+        )
+    return "passed", ""
+
+
 def _report_degrades_bilingual_delivery(report_data: dict[str, Any]) -> bool:
     """Whether the quality report says the delivery is not a bilingual document.
 
@@ -835,11 +886,28 @@ def translate(
                         f"\n[bold red]Strict gate failed:[/] {escape('; '.join(failures))}"
                     )
                 raise typer.Exit(code=1)
+        # Delivery verdict: an exported artifact with quarantined or failed
+        # blocks must not be announced as an unqualified success. The summary is
+        # read once, before either output path, so JSON and the banner agree.
+        summary: dict[str, Any] = {}
+        if report_path.exists():
+            try:
+                summary = (
+                    json.loads(report_path.read_text(encoding="utf-8")).get("summary", {}) or {}
+                )
+            except (OSError, json.JSONDecodeError):
+                summary = {}
+        verdict, verdict_msg = _delivery_verdict(summary) if summary else ("passed", "")
         if json_output:
             print(
                 json.dumps(
                     {
-                        "status": "completed",
+                        "status": (
+                            "completed" if verdict == "passed" else f"completed_with_{verdict}"
+                        ),
+                        "delivery_verdict": verdict,
+                        "blocked_human_blocks": int(summary.get("blocked_human_blocks", 0) or 0),
+                        "needs_human_blocks": int(summary.get("needs_human_blocks", 0) or 0),
                         "output_file": str(result_path),
                         "companion_file": str(companions[0]) if companions else None,
                         "companion_files": [str(p) for p in companions],
@@ -849,26 +917,9 @@ def translate(
                 )
             )
             return
-        # Transparent banner: a run that exported but passed zero blocks through
-        # automated QA must not be displayed as an unqualified success.
-        summary: dict[str, Any] = {}
-        if report_path.exists():
-            try:
-                summary = (
-                    json.loads(report_path.read_text(encoding="utf-8")).get("summary", {}) or {}
-                )
-            except (OSError, json.JSONDecodeError):
-                summary = {}
-        if summary and not summary.get("completed_blocks"):
-            awaiting = int(summary.get("needs_human_blocks", 0)) + int(
-                summary.get("blocked_human_blocks", 0)
-            )
-            console.print(
-                _ui_msg(
-                    f"[bold yellow]⚠ 0 blocks passed automated QA[/] ({awaiting} pending human review) — inspect quality report before delivery",
-                    f"[bold yellow]⚠ 0 块通过自动质检[/]（{awaiting} 块待人工审校）— 请查看质量报告后再交付",
-                )
-            )
+        if verdict != "passed":
+            color = "bold red" if verdict == "blocked" else "bold yellow"
+            console.print(f"\n[{color}]{verdict_msg}[/]")
         is_bilingual = True
         if report_data:
             if _report_degrades_bilingual_delivery(report_data):
@@ -881,7 +932,10 @@ def translate(
             if is_bilingual
             else _ui_msg("Translated Document:", "译文交付文档:")
         )
-        console.print("\n[bold green]✓ Translation Completed Successfully![/]")
+        if verdict == "passed":
+            console.print("\n[bold green]✓ Translation Completed Successfully![/]")
+        else:
+            console.print("\n[bold]✓ Translation completed[/] [yellow](with warnings)[/]")
         console.print(f"  [cyan]{doc_label}[/] [link=file://{result_path}]{result_path}[/]")
         for companion in companions:
             console.print(

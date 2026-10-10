@@ -30,7 +30,7 @@ from ubt.cache.dirs import cache_root
 from ubt.core.atomic import atomic_write_path
 from ubt.core.ir.bifurcation import bifurcate_blocks
 from ubt.core.ir.continuation import find_continuation_runs, join_continuous_text
-from ubt.core.ir.models import BlockStatus, BlockType, IRBlock
+from ubt.core.ir.models import BlockStatus, BlockType, FlowID, IRBlock
 from ubt.core.narrowing import narrow
 from ubt.model.span import BBox, CompositeSpan, PhysicalBox
 from ubt.render.flow import FlowPlacement, solve_flow
@@ -166,6 +166,13 @@ class Overlay:
     #: Source-derived styled spans to re-apply to the target (a blue citation, a
     #: raised footnote dagger) where the span survives verbatim.
     runs: tuple[StyledRun, ...] = ()
+    #: Whether the band-reflow pass may move this overlay. False for a caption
+    #: (it belongs to the figure/table above it, not to the prose flow -- packing
+    #: it as prose pushed it onto the paragraph below and produced overlapping,
+    #: unreadable text on arXiv 2610.02185 p6) and for a quarantine badge (it is
+    #: a margin marker, not a paragraph). A non-reflowable overlay is added to
+    #: the pass's obstacle set, so prose cannot be packed against it either.
+    reflowable: bool = True
 
     @property
     def flow_boxes(self) -> tuple[PhysicalBox, ...]:
@@ -2463,6 +2470,52 @@ class LayerCompositor:
         )
 
 
+def _quarantine_badge_text(target_lang: str) -> str:
+    """The short badge drawn beside a quarantined block, in the reader's language."""
+    if (target_lang or "").lower().startswith("zh"):
+        return "⚠ 未译"
+    return "⚠ untranslated"
+
+
+#: Side of the small square a quarantine badge draws in, and its colour (a warm
+#: amber that reads as "attention" on both white and tinted pages).
+_BADGE_SIDE_PT = 12.0
+_BADGE_COLOR_HEX = "#B45309"
+
+
+def _quarantine_badge(block: IRBlock, target_lang: str) -> Overlay | None:
+    """A small marker beside a quarantined block's source, or ``None``.
+
+    A quarantined block ships its *source* (the renderer leaves it on Layer 0),
+    so without this the reader meets untranslated text with no signal that it is
+    deliberate. Drawing the full ``<mark>【待人工审校】…`` target instead put 233
+    markers on the page in arXiv 2610.02185's first run -- "带毒成品出库". The
+    middle path is a small badge in the left margin, beside the block's top line,
+    never over the text: the source stays fully readable, and the reader is told.
+    """
+    box = block.bbox
+    if box is None or box.page <= 0 or box.x1 <= box.x0 or box.y1 <= box.y0:
+        return None
+    left = box.x0 - (_BADGE_SIDE_PT + 4.0)
+    if left < 2.0:  # no room in the margin: pin it just inside the left edge
+        left = 2.0
+    top = box.y1
+    bbox = (left, top - _BADGE_SIDE_PT, left + _BADGE_SIDE_PT, top)
+    text = _quarantine_badge_text(target_lang)
+    return Overlay(
+        block.id,
+        box.page,
+        bbox,
+        text,
+        kind="text",
+        font_size=_BADGE_SIDE_PT * 0.62,
+        # A thin amber rule down the margin: visible, never over the source.
+        runs=(StyledRun(text=text, color_hex=_BADGE_COLOR_HEX),),
+        # A margin marker, not prose: the band-reflow pass must not move it.
+        reflowable=False,
+    )
+
+
 def _overlayable(block: IRBlock) -> bool:
     """Whether this block should be drawn above the source (not kept opaque)."""
     box = block.bbox
@@ -2470,10 +2523,10 @@ def _overlayable(block: IRBlock) -> bool:
         return False
     # A quarantined block's target is an HTML marker wrapping the *source*
     # (``【待人工审校 | Human review required】<source>``), not a translation.
-    # Drawing it puts the marker text and the untranslated source on top of the
-    # source page: 233 such markers shipped in arXiv 2610.02185's first run, and
-    # the project's own veto list calls that "带毒成品出库". Leave the block on
-    # Layer 0 so the source page shows through unmodified.
+    # Drawing that target puts the marker text and the untranslated source on top
+    # of the source page (233 such markers shipped in arXiv 2610.02185's first
+    # run). Leave the block on Layer 0 so the source shows through unmodified;
+    # ``overlays_from_blocks`` draws a small side badge instead.
     if block.status is BlockStatus.BLOCKED_HUMAN:
         return False
     if block.block_type == BlockType.IMAGE:
@@ -2492,6 +2545,7 @@ def overlays_from_blocks(
     blocks: Sequence[IRBlock],
     *,
     bilingual: bool = False,
+    target_lang: str = "en",
 ) -> tuple[Overlay, ...]:
     """Build overlays from IR blocks, merging continuation runs into box chains.
 
@@ -2564,6 +2618,14 @@ def overlays_from_blocks(
                 )
             )
             consumed.update(run.block_ids)
+            continue
+        if block.status is BlockStatus.BLOCKED_HUMAN:
+            # Ships its source (not overlayable), but the reader must be told it
+            # is untranslated -- draw a small margin badge beside it.
+            badge = _quarantine_badge(block, target_lang)
+            if badge is not None:
+                overlays.append(badge)
+            consumed.add(block.id)
             continue
         if _overlayable(block):
             box = narrow(block.bbox, what=f"overlayable block {block.id!r} bbox")
@@ -2642,6 +2704,11 @@ def overlays_from_blocks(
                 indent_pt=indent_pt,
                 align_center=align_center,
                 runs=_styled_runs(block),
+                # A caption belongs to the figure/table above it, not to the
+                # prose flow: packing it as prose pushed it onto the paragraph
+                # below (overlapping text on arXiv 2610.02185 p6). Keep it at
+                # its source geometry, and let it bound the bands as an obstacle.
+                reflowable=block.flow_id is not FlowID.CAPTION,
             )
             overlays.append(overlay)
             if not boxes:

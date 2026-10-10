@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from ubt.core.ir.models import IRBlock
+from ubt.core.ir.models import BlockStatus, IRBlock
 from ubt.core.qe.fast_pass import REHEARSAL_MARKER
 from ubt.model.ast import ElementT, Heading, Paragraph
 from ubt.model.span import Span
@@ -88,3 +88,25 @@ def test_a_block_kept_in_source_shows_its_source_text(tmp_path: Path) -> None:
     text = out.read_text(encoding="utf-8")
     assert "<p>The body of the matter.</p>" in text
     assert REHEARSAL_MARKER + " The body of the matter." not in text
+
+
+def test_a_quarantined_block_shows_source_not_the_marker(tmp_path: Path) -> None:
+    """A BLOCKED_HUMAN target is a marker around the source, not a translation.
+
+    The view's private copy of ``kept_in_source`` only checked skip flags, so it
+    rendered the raw ``<mark>【待人工审校】…`` text into the HTML/EPUB. It now
+    delegates to the single owner, which names BLOCKED_HUMAN explicitly.
+    """
+    blocks, translations = _blocks()
+    blocks[1].status = BlockStatus.BLOCKED_HUMAN
+    blocks[1].target_text = (
+        '<mark class="ubt-blocked-human">【待人工审校 | Human review required】'
+        "The body of the matter.</mark>"
+    )
+    translations.pop(blocks[1].id, None)
+    out = tmp_path / "view.html"
+    compose_html(blocks, translations, out)
+    text = out.read_text(encoding="utf-8")
+    assert "<p>The body of the matter.</p>" in text
+    assert "待人工审校" not in text
+    assert "ubt-blocked-human" not in text

@@ -119,7 +119,7 @@ class DoclingRenderStrategy:
                 f"(manifest.source_path={source_pdf!r})"
             )
 
-        overlays = overlays_from_blocks(list(blocks), bilingual=bilingual)
+        overlays = overlays_from_blocks(list(blocks), bilingual=bilingual, target_lang=target_lang)
 
         font = getattr(self, "font_family", None)
         from ubt.layout.theme import resolve_theme

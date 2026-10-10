@@ -55,14 +55,17 @@ def element_text(block: IRBlock, translations: Mapping[str, str]) -> str:
 
 
 def _kept_in_source(block: IRBlock) -> bool:
-    """Whether the delivery keeps this block in the source (deliberate or fail-closed)."""
-    if block.skip_translate:
-        return True
-    flags = block.error_flags or []
-    return any(
-        isinstance(flag, str) and flag.startswith(("render_skip:", "inplace_skip:"))
-        for flag in flags
-    )
+    """Whether the delivery keeps this block in the source (deliberate or fail-closed).
+
+    Delegates to the single owner of this decision (``content.adapt``) rather
+    than re-listing the skip-flag prefixes: a local copy drifted, so a
+    quarantined (``BLOCKED_HUMAN``) block -- whose ``target_text`` is a ``<mark>``
+    wrapper around the source, not a translation -- was rendered as its raw
+    marker text in the HTML/EPUB view. One predicate, one place to keep correct.
+    """
+    from ubt.core.content.adapt import kept_in_source
+
+    return kept_in_source(block)
 
 
 def _render_element(element: Element, body: str) -> str:

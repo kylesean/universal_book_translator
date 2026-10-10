@@ -27,7 +27,7 @@ from ubt.core.content.nodes import (
     TextDisposition,
     TextNode,
 )
-from ubt.core.ir.models import TERMINAL_STATUSES, BlockType, IRBlock
+from ubt.core.ir.models import TERMINAL_STATUSES, BlockStatus, BlockType, IRBlock
 from ubt.core.qe.defect_taxonomy import INTENTIONAL_PRESERVED_SKIP_PREFIXES
 
 _ASSET_KIND: dict[BlockType, AssetKind] = {
@@ -69,13 +69,24 @@ def kept_in_source(block: IRBlock) -> bool:
     """Whether the delivery keeps this *text* block in the source.
 
     True for a deliberate keep (``skip_translate``, an intentional render-skip
-    such as page chrome) *and* for a fail-closed render-skip (a translation that
-    could not be placed). In both cases the reader gets the source, so there is
-    no placed translation -- and none for a backend to reflow. This is exactly
-    the contract's ``TRANSLATED`` condition, stated once beside the skip-flag
-    vocabulary it reads, so the two cannot drift.
+    such as page chrome), for a fail-closed render-skip (a translation that
+    could not be placed), and for a quarantined block (``BLOCKED_HUMAN``). In
+    every case the reader gets the source, so there is no placed translation --
+    and none for a backend to reflow. This is exactly the contract's
+    ``TRANSLATED`` condition, stated once beside the skip-flag vocabulary it
+    reads, so the two cannot drift.
+
+    ``BLOCKED_HUMAN`` must be named here, not left to the skip flags: its
+    ``target_text`` is a ``<mark>`` wrapper around the *source*, not a
+    translation, and it carries no skip flag -- so a truthiness test on the
+    target would call it delivered and ship the raw marker into the HTML/EPUB
+    views (and into the artifact's expected-text map).
     """
-    return block.skip_translate or bool(_skip_flags(block))
+    return (
+        block.skip_translate
+        or bool(_skip_flags(block))
+        or block.status is BlockStatus.BLOCKED_HUMAN
+    )
 
 
 def _text_node(block: IRBlock, order: int, region: SourceRegion | None) -> TextNode:
@@ -88,6 +99,18 @@ def _text_node(block: IRBlock, order: int, region: SourceRegion | None) -> TextN
         disposition, reason = TextDisposition.VERBATIM, f"preserved:{_skip_reason(flags[0])}"
     elif block.skip_translate:
         disposition, reason = TextDisposition.VERBATIM, "skip_translate"
+    elif block.status is BlockStatus.BLOCKED_HUMAN:
+        # Quarantined for human post-editing: its ``target_text`` is a ``<mark>``
+        # wrapper around the *source*, not a translation, and the renderer
+        # deliberately leaves it on Layer 0 (``_overlayable``). So the reader
+        # gets the source. This branch must precede the target-truthiness test
+        # below, or the non-empty marker would be counted as delivered -- the
+        # defect that let 20 untranslated blocks report ``violations: []`` and
+        # ``source_kept_text: 0`` in arXiv 2610.02185.
+        disposition, reason = (
+            TextDisposition.SOURCE_KEPT,
+            f"quarantined:{block.status.value}",
+        )
     elif (block.target_text or "").strip():
         disposition, reason = TextDisposition.TRANSLATED, ""
     elif block.status in TERMINAL_STATUSES:

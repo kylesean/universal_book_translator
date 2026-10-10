@@ -209,7 +209,16 @@ def test_a_quarantined_block_is_left_on_the_source_layer() -> None:
         "【待人工审校 | Human review required】source</mark>"
     )
     block.status = BlockStatus.BLOCKED_HUMAN
-    assert overlays_from_blocks([block]) == ()
+    overlays = overlays_from_blocks([block])
+    # Exactly one overlay: a small side badge, NOT the marker text. The source
+    # block itself is never overlaid, so its English stays readable.
+    assert len(overlays) == 1
+    badge = overlays[0]
+    assert badge.text == "⚠ untranslated"
+    assert "待人工审校" not in badge.text
+    # The badge sits in the left margin, outside the source block's own box.
+    assert block.bbox is not None
+    assert badge.bbox[2] <= block.bbox.x0
 
 
 def test_a_quarantined_block_does_not_block_its_neighbours() -> None:
@@ -229,5 +238,21 @@ def test_a_quarantined_block_does_not_block_its_neighbours() -> None:
     healthy.target_text = "正常译文"
     healthy.status = BlockStatus.MTQE_PASSED
     overlays = overlays_from_blocks([quarantined, healthy])
+    # The healthy neighbour is drawn in full; the quarantined block contributes
+    # only its badge, which must not displace the neighbour's overlay.
+    texts = [overlay.text for overlay in overlays]
+    assert "正常译文" in texts
+    assert len(overlays) == 2
+    healthy_overlay = next(o for o in overlays if o.text == "正常译文")
+    assert healthy_overlay.bbox == (54.0, 700.0, 354.0, 712.0)
+
+
+def test_a_clean_run_emits_no_quarantine_badge() -> None:
+    """Guard against over-emitting: a passed block gets no badge."""
+    block = _block(BlockType.NARRATIVE)
+    block.target_text = "正常译文"
+    block.status = BlockStatus.MTQE_PASSED
+    overlays = overlays_from_blocks([block])
     assert len(overlays) == 1
     assert overlays[0].text == "正常译文"
+    assert all("未译" not in o.text for o in overlays)

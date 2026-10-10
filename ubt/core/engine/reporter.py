@@ -79,6 +79,12 @@ class ReportScoreMetrics(BaseModel):
     #: Number of blocks the metrics above were computed over (0 = nothing was
     #: scored; every block was a skip/TM hit or never reached the gate).
     scored_blocks: int = 0
+    #: Whether any block was actually scored. When False, the ``*_qe`` fields
+    #: above are the ``0.0`` sentinel, NOT a measured zero -- under the default
+    #: heuristic engine nothing is scored at all, and a consumer that reads only
+    #: ``avg_qe`` cannot tell "unmeasured" from "measured 0.0". This flag makes
+    #: the difference explicit so a report is never misread as a failing score.
+    qe_measured: bool = False
 
 
 class ReportPlaceholderMetrics(BaseModel):
@@ -482,6 +488,7 @@ def build_quality_report(
             p90_qe=p90_qe,
             bottom_15_avg_qe=bottom_15_avg,
             scored_blocks=scored_blocks,
+            qe_measured=bool(scored),
         ),
         terminology=terminology_metrics or ReportTerminologyMetrics(),
         entity_consistency=entity_consistency or ReportEntityConsistency(),
