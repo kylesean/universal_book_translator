@@ -360,13 +360,14 @@ def _pdf_facts(
     return out
 
 
-async def _deep_blocks(path: Path, config: UBTConfig) -> tuple[int, int]:
-    """Exact (billable_blocks, source_chars) from the real adapter ingest path."""
+async def _deep_blocks(path: Path, config: UBTConfig) -> tuple[int, int, bool]:
+    """Exact (billable_blocks, source_chars, is_page_slice) from the real adapter ingest path."""
     from ubt.core.cleaners.skip_rules import classify_skip
     from ubt.core.ir.models import BlockType
 
     adapter = resolve_adapter(path, pdf_engine=config.pdf_engine)
-    await adapter.extract_manifest(path)
+    manifest = await adapter.extract_manifest(path)
+    is_page_slice = bool(manifest.metadata.get("is_page_slice_epub", False))
     blocks: list[Any] = []
     async for chapter in adapter.parse_stream(path):
         blocks.extend(chapter.blocks)
@@ -377,7 +378,11 @@ async def _deep_blocks(path: Path, config: UBTConfig) -> tuple[int, int]:
         and getattr(b, "block_type", None) not in (BlockType.FORMULA, BlockType.IMAGE)
         and not classify_skip(getattr(b, "source_text", "") or "")
     ]
-    return len(billable), sum(len(getattr(b, "source_text", "") or "") for b in billable)
+    return (
+        len(billable),
+        sum(len(getattr(b, "source_text", "") or "") for b in billable),
+        is_page_slice,
+    )
 
 
 def _recommend_route(
@@ -444,6 +449,7 @@ def _build_cost(
     source_lang: str = "en",
     target_lang: str = "zh",
     estimated_tokens: int | None = None,
+    is_page_slice: bool = False,
 ) -> CostQuote:
     """Draft (measured tooling) + config-driven fan-out, all labeled expected."""
     # Shared with the engine so the rollup gate cannot drift from the
@@ -642,7 +648,9 @@ def _build_cost(
     # for more than 40 of them, for academic/textbook profiles and for
     # page-sliced EPUBs; quoting a rollup call for those documents priced work
     # the engine provably never does.
-    rollup_chapters_ok = 1 < chapters <= 40 and profile_name.lower() not in ACADEMIC_PROFILES
+    rollup_chapters_ok = (
+        1 < chapters <= 40 and profile_name.lower() not in ACADEMIC_PROFILES and not is_page_slice
+    )
     rollup_calls = (
         chapters
         if (route_mode == "long" and config.enable_rolling_summary and rollup_chapters_ok)
@@ -961,9 +969,10 @@ async def assess_document_async(
         except Exception as exc:
             logger.debug("assess: page range parsing failed (%s)", exc)
 
+    is_page_slice = False
     if deep:
         try:
-            billable, deep_chars = await _deep_blocks(p, config)
+            billable, deep_chars, is_page_slice = await _deep_blocks(p, config)
             billable_blocks, source_chars = billable, deep_chars or source_chars
             is_exact = True
         except Exception as exc:  # deep is best-effort precision
@@ -1012,6 +1021,7 @@ async def assess_document_async(
         source_lang=source_lang,
         target_lang=target_lang,
         estimated_tokens=estimated_tokens,
+        is_page_slice=is_page_slice,
     )
 
     draft_calls = cost.draft_calls

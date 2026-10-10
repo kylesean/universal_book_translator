@@ -170,3 +170,40 @@ async def test_assess_document_async_page_slice(
     assert rep.document.selected_pages == 10
     assert rep.document.source_chars == 5000
     assert any(w.code == "PAGE_RANGE_FILTERED" for w in rep.warnings)
+
+
+def test_build_cost_disables_rolling_summary_for_page_slice() -> None:
+    from ubt.core.assess import _build_cost
+
+    config = UBTConfig(enable_rolling_summary=True)
+    cost_normal = _build_cost(
+        config,
+        billable_blocks=50,
+        source_chars=5000,
+        prefix=100,
+        is_exact=True,
+        pages=10,
+        scan_pages=0,
+        chapters=5,
+        route_mode="long",
+        profile_name="general",
+        warnings=[],
+        is_page_slice=False,
+    )
+    assert cost_normal.rollup_calls == 5
+
+    cost_slice = _build_cost(
+        config,
+        billable_blocks=50,
+        source_chars=5000,
+        prefix=100,
+        is_exact=True,
+        pages=10,
+        scan_pages=0,
+        chapters=5,
+        route_mode="long",
+        profile_name="general",
+        warnings=[],
+        is_page_slice=True,
+    )
+    assert cost_slice.rollup_calls == 0
