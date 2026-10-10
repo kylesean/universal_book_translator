@@ -258,9 +258,30 @@ PROBE_COLUMN_SHARE = 0.25
 # synthetic corpus papers (mono share 0.000, duo ~0.49).
 PROBE_COLUMN_GAP_RATIO = 0.03
 PROBE_MIN_ROWS = 6
-PROBE_SAMPLE_FRACTIONS = (0.0, 0.25, 0.5, 0.75, 1.0)
+#: Sampled page positions (fractions of the document). The back sample is 0.92,
+#: not 1.0: the last page of an academic paper is its reference list, which is
+#: dense with name initials and therefore scores as "formula debris" on a page
+#: that carries no formulas at all (arXiv 2609.22978's bibliography scored 0.18
+#: against a 0.067 body maximum).
+PROBE_SAMPLE_FRACTIONS = (0.0, 0.25, 0.5, 0.75, 0.92)
 PROBE_FORMULA_SHARE = 0.10
+#: A fuzzy layout signal (formula debris / right-column edge) must appear on at
+#: least this many sampled pages before it flips the whole document's route.
+#: One page is noise — a reference page reads as formula debris, a figure page
+#: reads as two columns — while two pages is a signal. A plain majority is too
+#: strict with a five-page sample: a 296-page maths textbook whose formula pages
+#: are 41% of the document draws only 2 of 5 samples, so a >50% bar would send
+#: it to pdfium and shatter its equations. See
+#: docs/guides/PDF_ENGINE_ROUTING_REDESIGN.md §L2.
+PROBE_MIN_SIGNAL_PAGES = 2
 PROSE_SINGLE_LETTERS = frozenset({"a", "A", "I"})
+#: Name initials in reference entries (``P. Zijlstra``, ``D. Guo``,
+#: ``J. K. Rowling``). Reference pages are dense with these, and each initial is
+#: an isolated single letter — the same shape a shattered equation sheds. Without
+#: stripping them first, a paper's bibliography out-scores its real formula pages
+#: and routes the whole book to Docling on a false positive (arXiv 2609.22978
+#: scored 0.18 on its reference pages vs 0.067 max on body pages).
+_NAME_INITIAL_RE = re.compile(r"\b[A-Z]\.(?:\s*[A-Z]\.)*\s+[A-Z][a-z]+")
 
 # ---------------------------------------------------------------------------
 # Page profiler (page_profiler.py — per-page fact/decision layer)
@@ -378,7 +399,13 @@ def formula_debris_share(text: str) -> float:
 
     Shattered equations shed isolated capitals (``K``, ``V``, ``x``);
     ordinary prose stays below ~0.08, formula pages score 0.16+.
+
+    Reference-entry name initials (``P. Zijlstra``) have the same isolated-
+    single-letter shape and are stripped before counting: a bibliography is not
+    a formula page, and treating it as one routes whole books down the Docling
+    path on a false positive (see ``_NAME_INITIAL_RE``).
     """
+    text = _NAME_INITIAL_RE.sub(" ", text)
     tokens = ASCII_WORD_RE.findall(text)
     if not tokens:
         return 0.0
@@ -466,8 +493,18 @@ CALIBRATION: dict[str, KnobMeta] = {
     "PROBE_COLUMN_SHARE": KnobMeta(S, "0.25 share observed on two-column pages"),
     "PROBE_COLUMN_GAP_RATIO": KnobMeta(S, "0.03 of page width splits gutter from word gap"),
     "PROBE_MIN_ROWS": KnobMeta(S, "6 rows minimum avoids title-page misfire"),
-    "PROBE_SAMPLE_FRACTIONS": KnobMeta(S, "front/quarters/back defeats cover spoofing"),
-    "PROBE_FORMULA_SHARE": KnobMeta(S, "0.10 separates formula pages (0.16+) from prose (<0.08)"),
+    "PROBE_MIN_SIGNAL_PAGES": KnobMeta(
+        S,
+        "2 sampled pages before a fuzzy signal flips the route; 1 is noise, and a strict majority misses a maths textbook whose formula pages sample sparsely",
+    ),
+    "PROBE_SAMPLE_FRACTIONS": KnobMeta(
+        S,
+        "front/quarters/back defeats cover spoofing; back sample is 0.92, not 1.0, so a paper's reference list is not sampled",
+    ),
+    "PROBE_FORMULA_SHARE": KnobMeta(
+        S,
+        "0.10 separates formula pages (0.16+) from prose (<0.08); name initials excluded at the source (2026-10-10 false-positive fix)",
+    ),
     "PROSE_SINGLE_LETTERS": KnobMeta(P, "a/A/I exclusions, behaviour-tested"),
     "PROFILE_VECTOR_PATH_OPS": KnobMeta(S, "200 ops separates drawings from prose"),
     "PROFILE_VECTOR_TEXT_CHARS": KnobMeta(S, "100 chars separates labels from body"),
@@ -630,6 +667,7 @@ __all__ = [
     "PROBE_FORMULA_SHARE",
     "PROBE_MIN_CHARS",
     "PROBE_MIN_ROWS",
+    "PROBE_MIN_SIGNAL_PAGES",
     "PROBE_SAMPLE_FRACTIONS",
     "PROFILE_VECTOR_PATH_OPS",
     "PROFILE_VECTOR_TEXT_CHARS",

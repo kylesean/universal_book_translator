@@ -37,6 +37,7 @@ from ubt.core.policy.layout_policy import (
     PROBE_FORMULA_SHARE,
     PROBE_MIN_CHARS,
     PROBE_MIN_ROWS,
+    PROBE_MIN_SIGNAL_PAGES,
     PROBE_SAMPLE_FRACTIONS,
     PROFILE_VECTOR_PATH_OPS,
     formula_debris_share,
@@ -66,6 +67,7 @@ class PDFRoutePlan:
     """Decoupled engine routing plan across document layout and page components."""
 
     primary_engine: str
+    has_scan: bool
     has_vector_diagrams: bool
     has_formulas: bool
     has_multicolumn: bool
@@ -147,6 +149,7 @@ def inspect_pdf_route_plan(
     """
     default_docling = PDFRoutePlan(
         primary_engine="docling",
+        has_scan=False,
         has_vector_diagrams=False,
         has_formulas=False,
         has_multicolumn=False,
@@ -172,6 +175,14 @@ def inspect_pdf_route_plan(
             has_vector_diagrams = False
             vector_flagged_pages = 0
             sampled_char_counts: list[int] = []
+            # Per-signal page counts. One page must not veto the whole document:
+            # a single reference page scored as formula debris, or one figure
+            # page read as two columns, flipped an entire book to Docling
+            # (2026-10-10). ``PROBE_MIN_SIGNAL_PAGES`` is the bar — two pages is
+            # a signal, one is noise, and a strict majority is too high for a
+            # five-page sample on a long maths book (see the constant).
+            formula_pages = 0
+            multicolumn_pages = 0
 
             for idx in page_indices:
                 page = pdf[idx]
@@ -181,22 +192,35 @@ def inspect_pdf_route_plan(
                     if probe.n_chars < PROBE_MIN_CHARS:
                         continue
                     if formula_debris_share(probe.text) >= PROBE_FORMULA_SHARE:
-                        logger.debug(
-                            "PDF engine probe: formula-dense page %d in '%s'; using docling",
-                            idx + 1,
-                            pdf_path.name,
-                        )
-                        has_formulas = True
+                        formula_pages += 1
                     if (
                         probe.n_rect_rows >= PROBE_MIN_ROWS
                         and column_right_share(list(probe.rects), probe.width_pt)
                         > PROBE_COLUMN_SHARE
                     ):
-                        has_multicolumn = True
+                        multicolumn_pages += 1
                 finally:
                     page.close()
 
             scanned_detected = _scan_detected_from_probe(sampled_char_counts)
+            has_formulas = formula_pages >= PROBE_MIN_SIGNAL_PAGES
+            has_multicolumn = multicolumn_pages >= PROBE_MIN_SIGNAL_PAGES
+            if formula_pages and not has_formulas:
+                logger.debug(
+                    "PDF engine probe: %d/%d sampled pages show formula debris in '%s' "
+                    "(below the signal bar; not routing to docling)",
+                    formula_pages,
+                    len(page_indices),
+                    pdf_path.name,
+                )
+            if multicolumn_pages and not has_multicolumn:
+                logger.debug(
+                    "PDF engine probe: %d/%d sampled pages show a right-column edge in '%s' "
+                    "(below the signal bar; not routing to docling)",
+                    multicolumn_pages,
+                    len(page_indices),
+                    pdf_path.name,
+                )
 
             # Inspect vector diagrams via pikepdf (raw content-stream ops).
             # The signal aggregates over the sampled pages with the same
@@ -233,6 +257,7 @@ def inspect_pdf_route_plan(
             )
             return PDFRoutePlan(
                 primary_engine="docling" if needs_docling else "pdfium",
+                has_scan=scanned_detected,
                 has_vector_diagrams=has_vector_diagrams,
                 has_formulas=has_formulas,
                 has_multicolumn=has_multicolumn,

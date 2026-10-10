@@ -55,7 +55,7 @@ def test_every_calibration_key_resolves_to_a_module_attribute() -> None:
 
 def test_calibration_summary_matches_registry() -> None:
     summary = calibration_summary()
-    assert summary == {"proven": 28, "single_doc": 30, "hypothesis": 16}
+    assert summary == {"proven": 28, "single_doc": 31, "hypothesis": 16}
     assert sum(summary.values()) == len(CALIBRATION)
 
 
@@ -86,6 +86,21 @@ def test_formula_debris_prose_stays_low() -> None:
 
 def test_formula_debris_ignores_non_ascii_tokens() -> None:
     assert formula_debris_share("x 中文 中") == 1.0  # only "x" is an ASCII word token
+
+
+def test_formula_debris_excludes_name_initials() -> None:
+    # A bibliography is not a formula page. Reference entries are dense with
+    # isolated single-letter initials (P. Zijlstra, D. Guo), the same shape a
+    # shattered equation sheds; counting them routed arXiv 2609.22978 to Docling
+    # on its reference pages (0.18) while its body peaked at 0.067.
+    assert formula_debris_share("P. Zijlstra, J. Fernandes, and V. Pillai.") < 0.05
+    assert formula_debris_share("D. Guo, D. Yang, H. Zhang, J. Song, P. Wang") < 0.05
+    assert formula_debris_share("J. K. Rowling wrote this") < 0.05
+
+
+def test_formula_debris_still_catches_real_debris() -> None:
+    # Regression guard: the name-initial strip must not blunt real detection.
+    assert formula_debris_share("K = x plus") == pytest.approx(2 / 3)
 
 
 # --------------------------------------------------------------------------- #
