@@ -30,7 +30,7 @@ from ubt.cache.dirs import cache_root
 from ubt.core.atomic import atomic_write_path
 from ubt.core.ir.bifurcation import bifurcate_blocks
 from ubt.core.ir.continuation import find_continuation_runs, join_continuous_text
-from ubt.core.ir.models import BlockType, IRBlock
+from ubt.core.ir.models import BlockStatus, BlockType, IRBlock
 from ubt.core.narrowing import narrow
 from ubt.model.span import BBox, CompositeSpan, PhysicalBox
 from ubt.render.flow import FlowPlacement, solve_flow
@@ -2467,6 +2467,14 @@ def _overlayable(block: IRBlock) -> bool:
     """Whether this block should be drawn above the source (not kept opaque)."""
     box = block.bbox
     if block.skip_translate or box is None or box.page <= 0:
+        return False
+    # A quarantined block's target is an HTML marker wrapping the *source*
+    # (``【待人工审校 | Human review required】<source>``), not a translation.
+    # Drawing it puts the marker text and the untranslated source on top of the
+    # source page: 233 such markers shipped in arXiv 2610.02185's first run, and
+    # the project's own veto list calls that "带毒成品出库". Leave the block on
+    # Layer 0 so the source page shows through unmodified.
+    if block.status is BlockStatus.BLOCKED_HUMAN:
         return False
     if block.block_type == BlockType.IMAGE:
         return False

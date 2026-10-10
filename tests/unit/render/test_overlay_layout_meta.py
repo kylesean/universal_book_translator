@@ -23,6 +23,7 @@ from typing import Any, ClassVar
 import pytest
 
 from ubt.core.ir.models import (
+    BlockStatus,
     BlockType,
     BoundingBox,
     FlowID,
@@ -193,3 +194,40 @@ def measured_widths_first_is_widest(spy: _SizeSpy) -> bool:
 
 
 _PAGE_TEXT = ["DeepSeek Elastic Compute (DSec): A Sandbox Infrastructure"]
+
+
+def test_a_quarantined_block_is_left_on_the_source_layer() -> None:
+    """A BLOCKED_HUMAN target is an HTML marker around the *source*, not a
+    translation. Drawing it put '【待人工审校 | Human review required】' plus the
+    untranslated English on top of the source page — 233 markers shipped in
+    arXiv 2610.02185's first run, which the project's veto list calls
+    '带毒成品出库'. The block must stay on Layer 0 so the source shows through.
+    """
+    block = _block(BlockType.NARRATIVE)
+    block.target_text = (
+        '<mark class="ubt-blocked-human" title="MQM Critical unresolved">'
+        "【待人工审校 | Human review required】source</mark>"
+    )
+    block.status = BlockStatus.BLOCKED_HUMAN
+    assert overlays_from_blocks([block]) == ()
+
+
+def test_a_quarantined_block_does_not_block_its_neighbours() -> None:
+    quarantined = IRBlock(
+        element=make_element(
+            id="blocked",
+            spine_index=1,
+            block_type=BlockType.NARRATIVE,
+            flow_id=FlowID.MAIN_STORY,
+            source_text="source",
+            bbox=BoundingBox(x0=54.0, y0=700.0, x1=354.0, y1=712.0, page=1),
+        )
+    )
+    quarantined.target_text = "<mark>【待人工审校】source</mark>"
+    quarantined.status = BlockStatus.BLOCKED_HUMAN
+    healthy = _block(BlockType.NARRATIVE)
+    healthy.target_text = "正常译文"
+    healthy.status = BlockStatus.MTQE_PASSED
+    overlays = overlays_from_blocks([quarantined, healthy])
+    assert len(overlays) == 1
+    assert overlays[0].text == "正常译文"
