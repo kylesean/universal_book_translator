@@ -15,10 +15,17 @@ it, the block is gracefully demoted to PRESERVED_OPAQUE:
 - Its provenance records the mismatch details.
 - LayerCompositor leaves Layer 0 (the original canvas) intact without masking.
 
-The same physical lines are the witness for one text-content repair:
-:func:`repair_missing_spaces_with_lines` re-inserts inter-word spaces Docling's
-line join drops ("A Sandbox" -> "ASandbox"), which otherwise reaches the model
-as a single token and mistranslates.
+The same physical lines are the witness for three text-content repairs, each a
+pure function applied to a block only when the witness proves the change, so a
+repair that cannot prove itself leaves the block byte-identical:
+
+- :func:`repair_missing_spaces_with_lines` re-inserts inter-word spaces Docling's
+  line join drops ("A Sandbox" -> "ASandbox");
+- :func:`repair_heading_numbers_with_lines` moves a section number Docling glued
+  to the end back to the front ("Guidance Space 3.1" -> "3.1 Guidance Space");
+- :func:`repair_inline_math_with_lines` puts back the inline math Docling pulls
+  out of a sentence and piles at the paragraph end ("let be the initial state
+  ... : h 0 h k k f R h R" -> "let h0 be the initial state ... :").
 """
 
 from __future__ import annotations
@@ -27,7 +34,7 @@ import dataclasses
 import difflib
 import logging
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from ubt.adapters.pdf.textgeom import (
@@ -327,6 +334,55 @@ _MATH_REPAIR_TYPES = frozenset(
 )
 
 
+def _page_line_reader(path: Path, label: str) -> Callable[[int], list[LineBox]]:
+    """A memoized ``page -> pdfium lines`` reader that degrades to ``[]``.
+
+    Every witness repair reads the same lines; extraction failure on one page
+    must leave that page's blocks untouched (the repair's own guard), never
+    abort the pass. ``label`` names the caller in the debug log.
+    """
+    cache: dict[int, list[LineBox]] = {}
+
+    def _page_lines(page: int) -> list[LineBox]:
+        if page not in cache:
+            try:
+                cache[page] = list(extract_lines(path, page)[0])
+            except Exception as exc:
+                logger.debug("%s: pdfium line extraction failed on p%d: %s", label, page, exc)
+                cache[page] = []
+        return cache[page]
+
+    return _page_lines
+
+
+def _block_lines(block: IRBlock, page_lines: Callable[[int], list[LineBox]]) -> list[LineBox]:
+    """The page's own pdfium lines under a block, in reading order.
+
+    A line belongs when its centre sits within one of the block's boxes (its
+    chain when it has one) and it horizontally overlaps that box. Deduped by
+    geometry+text so a shared line is not counted twice.
+    """
+    seen: set[tuple[float, float, float, float, str]] = set()
+    out: list[LineBox] = []
+    for pbox in _span_boxes(block):
+        for line in page_lines(pbox.page):
+            if not line.text.strip() or not _line_centered_in_box(line.rect, pbox.bbox):
+                continue
+            key = (
+                round(line.rect[0], 1),
+                round(line.rect[1], 1),
+                round(line.rect[2], 1),
+                round(line.rect[3], 1),
+                line.text,
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(line)
+    out.sort(key=lambda line: (-line.rect[3], line.rect[0]))
+    return out
+
+
 def repair_math_symbols_with_lines(blocks: Sequence[IRBlock], pdf_path: Path) -> list[IRBlock]:
     """Repair Docling math glyph corruptions using the page's PDFium line witness.
 
@@ -336,19 +392,7 @@ def repair_math_symbols_with_lines(blocks: Sequence[IRBlock], pdf_path: Path) ->
     This function aligns each block against intersecting PDFium lines and replaces
     the corrupted characters with their ground-truth equivalents.
     """
-    path = Path(pdf_path)
-    lines_by_page: dict[int, list[LineBox]] = {}
-
-    def _page_lines(page: int) -> list[LineBox]:
-        if page not in lines_by_page:
-            try:
-                lines_by_page[page] = list(extract_lines(path, page)[0])
-            except Exception as exc:
-                logger.debug(
-                    "Math symbol repair: pdfium line extraction failed on p%d: %s", page, exc
-                )
-                lines_by_page[page] = []
-        return lines_by_page[page]
+    page_lines = _page_line_reader(Path(pdf_path), "Math symbol repair")
 
     for block in blocks:
         if block.block_type not in _MATH_REPAIR_TYPES:
@@ -357,24 +401,7 @@ def repair_math_symbols_with_lines(blocks: Sequence[IRBlock], pdf_path: Path) ->
         if not text or not any(c in MATH_SYMBOL_CONFUSIONS for c in text):
             continue
 
-        seen: set[tuple[float, float, float, float, str]] = set()
-        witness_lines: list[LineBox] = []
-        for pbox in _span_boxes(block):
-            for line in _page_lines(pbox.page):
-                if not line.text.strip() or not _line_centered_in_box(line.rect, pbox.bbox):
-                    continue
-                key = (
-                    round(line.rect[0], 1),
-                    round(line.rect[1], 1),
-                    round(line.rect[2], 1),
-                    round(line.rect[3], 1),
-                    line.text,
-                )
-                if key in seen:
-                    continue
-                seen.add(key)
-                witness_lines.append(line)
-
+        witness_lines = _block_lines(block, page_lines)
         if not witness_lines:
             continue
 
@@ -467,19 +494,7 @@ def repair_heading_numbers_with_lines(blocks: Sequence[IRBlock], pdf_path: Path)
     downstream consumer is faithfully wrong. The page's pdfium line witness is
     the ground truth (it reads ``3.1 Guidance Space``); this pass applies it.
     """
-    path = Path(pdf_path)
-    lines_by_page: dict[int, list[LineBox]] = {}
-
-    def _page_lines(page: int) -> list[LineBox]:
-        if page not in lines_by_page:
-            try:
-                lines_by_page[page] = list(extract_lines(path, page)[0])
-            except Exception as exc:
-                logger.debug(
-                    "Heading-number repair: pdfium line extraction failed on p%d: %s", page, exc
-                )
-                lines_by_page[page] = []
-        return lines_by_page[page]
+    page_lines = _page_line_reader(Path(pdf_path), "Heading-number repair")
 
     for block in blocks:
         if block.block_type is not BlockType.HEADING or block.skip_translate:
@@ -487,23 +502,7 @@ def repair_heading_numbers_with_lines(blocks: Sequence[IRBlock], pdf_path: Path)
         text = block.source_text
         if not text.strip() or _TRAILING_SECTION_RE.match(text.strip()) is None:
             continue
-        seen: set[tuple[float, float, float, float, str]] = set()
-        witness_lines: list[LineBox] = []
-        for pbox in _span_boxes(block):
-            for line in _page_lines(pbox.page):
-                if not line.text.strip() or not _line_centered_in_box(line.rect, pbox.bbox):
-                    continue
-                key = (
-                    round(line.rect[0], 1),
-                    round(line.rect[1], 1),
-                    round(line.rect[2], 1),
-                    round(line.rect[3], 1),
-                    line.text,
-                )
-                if key in seen:
-                    continue
-                seen.add(key)
-                witness_lines.append(line)
+        witness_lines = _block_lines(block, page_lines)
         if not witness_lines:
             continue
         witness = join_witness_lines(witness_lines)
@@ -536,17 +535,7 @@ def repair_missing_spaces_with_lines(blocks: Sequence[IRBlock], pdf_path: Path) 
     the gaps Docling left empty. Anything else (a witness that disagrees at all,
     a layout whose spacing is not prose-like) leaves the block byte-identical.
     """
-    path = Path(pdf_path)
-    lines_by_page: dict[int, list[LineBox]] = {}
-
-    def _page_lines(page: int) -> list[LineBox]:
-        if page not in lines_by_page:
-            try:
-                lines_by_page[page] = list(extract_lines(path, page)[0])
-            except Exception as exc:
-                logger.debug("Space repair: pdfium line extraction failed on p%d: %s", page, exc)
-                lines_by_page[page] = []
-        return lines_by_page[page]
+    page_lines = _page_line_reader(Path(pdf_path), "Space repair")
 
     for block in blocks:
         if block.skip_translate or block.block_type not in _VERIFIABLE_TYPES:
@@ -554,23 +543,7 @@ def repair_missing_spaces_with_lines(blocks: Sequence[IRBlock], pdf_path: Path) 
         text = block.source_text
         if not text.strip():
             continue
-        seen: set[tuple[float, float, float, float, str]] = set()
-        witness_lines: list[LineBox] = []
-        for pbox in _span_boxes(block):
-            for line in _page_lines(pbox.page):
-                if not line.text.strip() or not _line_centered_in_box(line.rect, pbox.bbox):
-                    continue
-                key = (
-                    round(line.rect[0], 1),
-                    round(line.rect[1], 1),
-                    round(line.rect[2], 1),
-                    round(line.rect[3], 1),
-                    line.text,
-                )
-                if key in seen:
-                    continue
-                seen.add(key)
-                witness_lines.append(line)
+        witness_lines = _block_lines(block, page_lines)
         if not witness_lines:
             continue
         witness = join_witness_lines(witness_lines)
@@ -586,6 +559,293 @@ def repair_missing_spaces_with_lines(blocks: Sequence[IRBlock], pdf_path: Path) 
         )
         block.set_source_text(repaired)
         block.provenance.space_repair = "pdfium-line-witness"
+
+    return list(blocks)
+
+
+# ---------------------------------------------------------------------------
+# Inline math Docling strips out of a sentence and piles at the paragraph end
+# ---------------------------------------------------------------------------
+#: Math-symbol characters that mark a token as math content. A token carrying
+#: any of these is never prose.
+_MATH_SYMBOLS = frozenset("=∑∫√≈≤≥≠∂∇∞∅ϒ∩∪ϕ←→↔↦∘≔≃≅⊤⊥⊢⊣∈∉⊆⊂∀∃∧∨¬∏⋯⋃⋂′″⟨⟩+−±×·^*/")
+#: Short English words that are prose even though they look like a variable
+#: ("a", "in", "at"; a lone capital like "K" is *not* here -- it is a variable).
+_MATH_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "the",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "am",
+        "of",
+        "in",
+        "on",
+        "at",
+        "to",
+        "from",
+        "by",
+        "for",
+        "with",
+        "as",
+        "or",
+        "and",
+        "but",
+        "not",
+        "no",
+        "nor",
+        "so",
+        "if",
+        "then",
+        "than",
+        "that",
+        "this",
+        "these",
+        "those",
+        "it",
+        "its",
+        "we",
+        "our",
+        "you",
+        "your",
+        "they",
+        "their",
+        "he",
+        "she",
+        "his",
+        "her",
+        "him",
+        "them",
+        "us",
+        "i",
+        "me",
+        "my",
+        "can",
+        "may",
+        "must",
+        "will",
+        "would",
+        "could",
+        "should",
+        "shall",
+        "do",
+        "does",
+        "did",
+        "done",
+        "has",
+        "have",
+        "had",
+        "having",
+        "all",
+        "any",
+        "each",
+        "few",
+        "more",
+        "most",
+        "other",
+        "some",
+        "such",
+        "only",
+        "own",
+        "same",
+        "too",
+        "very",
+        "just",
+        "also",
+        "per",
+        "sub",
+        "new",
+        "old",
+        "one",
+        "two",
+        "three",
+        "six",
+        "ten",
+        "end",
+        "set",
+        "top",
+        "far",
+        "low",
+        "way",
+        "via",
+        "thus",
+        "hence",
+        "out",
+        "up",
+        "down",
+        "over",
+        "under",
+        "both",
+        "eq",
+        "fig",
+        "tab",
+        "sec",
+        "ref",
+        "vs",
+        "eg",
+        "ie",
+        "et",
+        "al",
+    }
+)
+
+
+def _is_math_char(char: str) -> bool:
+    if char in _MATH_SYMBOLS:
+        return True
+    code = ord(char)
+    # Mathematical alphanumeric symbols (U+1D400..) and Greek (U+0370..).
+    return 0x1D400 <= code <= 0x1D7FF or 0x370 <= code <= 0x3FF
+
+
+def _token_core(token: str) -> str:
+    return token.strip(".,;:()[]{}'\"`%!?—–…")
+
+
+def _is_math_token(token: str) -> bool:
+    """A variable-like identifier (``h``, ``hk``, ``hR``, ``z1``, ``K``) or a token
+    carrying a math symbol. A bare number is prose: Docling keeps numbers in the
+    sentence, so moving one would duplicate it."""
+    core = _token_core(token)
+    if not core:
+        return False
+    if any(_is_math_char(char) for char in core):
+        return True
+    if core.lower() in _MATH_STOPWORDS:
+        return False
+    return bool(re.fullmatch(r"[A-Za-z][A-Za-z0-9]?", core))
+
+
+def _is_pile_token(token: str) -> bool:
+    """A math token, or a bare number -- Docling's end-of-paragraph math pile
+    splits ``h0`` into ``h`` ``0``, so a trailing number may belong to it."""
+    return _is_math_token(token) or bool(re.fullmatch(r"\d+(?:[.,]\d+)*", _token_core(token)))
+
+
+def _pile_len(tokens: Sequence[str]) -> int:
+    """Length of Docling's trailing math pile, or 0.
+
+    Only a run that contains at least one *letter-bearing* math token counts: a
+    paragraph merely ending in a bare number ("in Figure 4.") is prose, not a
+    pile, and must be left alone.
+    """
+    length = 0
+    has_letter = False
+    for token in reversed(tokens):
+        if not _is_pile_token(token):
+            break
+        length += 1
+        has_letter = has_letter or _is_math_token(token)
+    return length if has_letter else 0
+
+
+def _norm_token(token: str) -> str:
+    return "".join(char.lower() for char in token if char.isalnum())
+
+
+def _witness_tokens(witness: str) -> list[str]:
+    """pdfium line text -> tokens, with line-break hyphenation rejoined.
+
+    A word broken across a line reads ``"represen-"`` ``"tation"``; the join is
+    what makes the witness comparable to the block's own text.
+    """
+    witness = witness.replace("\xa0", " ").replace("‐", "-").replace("‑", "-")
+    raw = witness.split()
+    out: list[str] = []
+    index = 0
+    while index < len(raw):
+        token = raw[index]
+        nxt = raw[index + 1] if index + 1 < len(raw) else ""
+        if token.endswith("-") and len(token) > 1 and nxt[:1].islower():
+            out.append(token[:-1] + nxt)
+            index += 2
+        else:
+            out.append(token)
+            index += 1
+    return [token for token in out if _token_core(token)]
+
+
+def reinsert_inline_math(text: str, witness: str) -> str | None:
+    """``text`` with Docling's stripped inline math spliced back in, or ``None``.
+
+    Docling pulls inline math (``h0``, ``ω``, ``hR``) out of a sentence and
+    concatenates the glyphs at the paragraph's end -- ``"... map the final state
+    to token logits: h 0 h k k f R h R"`` for a page that reads ``"... the final
+    state hR to token logits:"``. The math is what the reader needs and what the
+    model must not translate around; without it the sentence is a hole
+    (``"let be the initial state"``).
+
+    The proof that the witness is the same sentence is that the two share the
+    same prose *token sequence* -- punctuation-insensitively, so the witness's
+    line-join noise cannot veto a real repair. When it holds, the witness's math
+    tokens are spliced in at their positions and the doc's own prose tokens are
+    kept verbatim; otherwise ``None`` leaves the block byte-identical.
+    """
+    doc_tokens = text.split()
+    pile = _pile_len(doc_tokens)
+    if pile == 0 or pile >= len(doc_tokens):
+        return None
+    doc_prose = doc_tokens[: len(doc_tokens) - pile]
+    wit_tokens = _witness_tokens(witness)
+    wit_prose = [token for token in wit_tokens if not _is_math_token(token)]
+    if not wit_prose or len(doc_prose) != len(wit_prose):
+        return None
+    if any(_norm_token(a) != _norm_token(b) for a, b in zip(doc_prose, wit_prose, strict=True)):
+        return None
+    if not any(_is_math_token(token) for token in wit_tokens):
+        return None
+    out: list[str] = []
+    prose_index = 0
+    for token in wit_tokens:
+        if _is_math_token(token):
+            out.append(token)
+        else:
+            out.append(doc_prose[prose_index])
+            prose_index += 1
+    repaired = " ".join(out)
+    repaired = re.sub(r"\s+([.,;:!?])", r"\1", repaired)
+    repaired = repaired.replace("( ", "(").replace(" )", ")")
+    if repaired.split() == doc_tokens:
+        return None
+    return repaired
+
+
+def repair_inline_math_with_lines(blocks: Sequence[IRBlock], pdf_path: Path) -> list[IRBlock]:
+    """Put back the inline math Docling strips out of a sentence.
+
+    Only prose blocks are touched, and only those whose text ends in a math pile
+    the page's own pdfium lines place elsewhere. The witness is the raw line
+    text: :func:`witness_line_text` re-decides spacing from geometry, which turns
+    a clean ``"iterations. The"`` into a glued ``"iterations.The"`` and would
+    break the token alignment this repair depends on.
+    """
+    page_lines = _page_line_reader(Path(pdf_path), "Inline math repair")
+
+    for block in blocks:
+        if block.skip_translate or block.block_type not in _VERIFIABLE_TYPES:
+            continue
+        text = block.source_text
+        if not text.strip():
+            continue
+        witness = " ".join(line.text for line in _block_lines(block, page_lines))
+        if not witness:
+            continue
+        repaired = reinsert_inline_math(text, witness)
+        if repaired is None:
+            continue
+        logger.info(
+            "Restored %d inline math token(s) in block %s from the page's pdfium lines",
+            len(repaired.split()) - len(text.split()),
+            block.id,
+        )
+        block.set_source_text(repaired)
+        block.provenance.math_symbol_repair = "pdfium-line-witness"
 
     return list(blocks)
 
@@ -762,8 +1022,10 @@ __all__ = [
     "MATH_SYMBOL_CONFUSIONS",
     "cross_check_blocks_with_pdfium",
     "join_witness_lines",
+    "reinsert_inline_math",
     "reinsert_missing_spaces",
     "repair_heading_numbers_with_lines",
+    "repair_inline_math_with_lines",
     "repair_math_symbol_corruptions",
     "repair_math_symbols_with_lines",
     "repair_missing_spaces_with_lines",
