@@ -625,9 +625,10 @@ def test_a_formula_with_a_chinese_text_annotation_stays_math() -> None:
     """
     out = render_prose(r"$\mathbf{A} : ( D , N ) \text{ )← 参数 } \vdash N \times N$", ())
 
-    # It transpiled (``vdash`` is the converted ``\vdash``), which is the proof
-    # it was treated as math; escaped prose would carry the backslashes.
-    assert "vdash" in out, out
+    # It transpiled — the LaTeX commands became Typst math (``bold``, ``tack.r``)
+    # and the delimiters are real math switches. Escaped prose would still carry
+    # the backslashes.
+    assert "bold(A)" in out, out
     assert "\\mathbf" not in out and "\\text" not in out, out
     assert "\\{" not in out, out
 

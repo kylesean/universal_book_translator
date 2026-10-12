@@ -137,6 +137,36 @@ _DISPLAY_ONLY: dict[str, str] = {
     "models": "models",
     "emptyset": "emptyset",
     "vdots": "dots.v",
+    "ddots": "dots.down",
+    # Arrows beyond the plain left/right pair. Measured: ``\downarrow`` and
+    # ``\uparrow`` (the "lower/higher is better" markers in every results
+    # table) and ``\ell`` (the standard index variable) were absent, so a
+    # formula containing one failed closed to literal text — 93 formulas across
+    # the gold corpus. Names verified against the compiler.
+    "downarrow": "arrow.b",
+    "uparrow": "arrow.t",
+    "updownarrow": "arrow.l.r",
+    "Downarrow": "arrow.double.b",
+    "Uparrow": "arrow.double.t",
+    "Updownarrow": "arrow.double.l.r",
+    "nearrow": "arrow.tr",
+    "searrow": "arrow.br",
+    "swarrow": "arrow.bl",
+    "nwarrow": "arrow.tl",
+    "circlearrowleft": "arrow.ccw",
+    "circlearrowright": "arrow.cw",
+    "ell": "ell",
+    # Footnote/annotation marks and the binomial coefficient. ``\dagger`` is
+    # the single most common missing one (9 formulas on the gold corpus): it
+    # marks a statistically significant result in nearly every results table.
+    "dagger": "dagger",
+    "ddagger": "dagger.double",
+    "checkmark": "checkmark",
+    "star": "star",
+    "binom": "binom",
+    # ``\#`` is the escaped hash, used as a counter name (``\#L``). Typst's
+    # math mode has a ``hash`` glyph, so it needs no quoting.
+    r"\#": "hash",
 }
 
 # Commands only the inline LaTeX->Typst converter maps.

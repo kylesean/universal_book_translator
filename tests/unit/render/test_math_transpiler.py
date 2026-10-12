@@ -151,3 +151,81 @@ def test_the_output_actually_compiles(latex: str, tmp_path: Path) -> None:
         text=True,
     )
     assert proc.returncode == 0, f"typst rejected the formula:\n{proc.stderr}"
+
+
+# --------------------------------------------------------------------------- #
+# A script immediately before a converted call must not merge into its name
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    ("latex", "expected"),
+    [
+        (r"\beta_t\sqrt{x}", "beta_t sqrt(x)"),
+        (r"a_b\frac{1}{2}", "a_b frac(1, 2)"),
+        (r"x_i\sqrt{y}", "x_i sqrt(y)"),
+        (r"\alpha_i\frac{a}{b}", "alpha_i frac(a, b)"),
+    ],
+)
+def test_a_bare_subscript_does_not_swallow_the_next_function_name(
+    latex: str, expected: str
+) -> None:
+    r"""``\beta_t\sqrt{x}`` must not become ``beta_#"tsqrt" (x)``.
+
+    ``\frac``/``\sqrt`` strip the backslash and emit a call, so with no
+    separator the subscript's ``t`` merged with the function name. The word-run
+    quoter then read ``tsqrt`` as one word and emitted ``#\"tsqrt\"``, losing the
+    root or the fraction entirely. Measured on the gold corpus: 6 formulas.
+    """
+    assert typstify_math(latex) == expected
+
+
+def test_a_spaced_command_still_converts_identically() -> None:
+    # The separator must not change the already-correct spelling.
+    assert typstify_math(r"\beta_t \sqrt{x}") == "beta_t sqrt(x)"
+    assert typstify_math(r"\frac{a}{b}") == "frac(a, b)"
+
+
+# --------------------------------------------------------------------------- #
+# Symbols that were absent from the table, so whole formulas failed closed
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    ("latex", "expected"),
+    [
+        (r"\downarrow", "arrow.b"),
+        (r"\uparrow", "arrow.t"),
+        (r"\updownarrow", "arrow.l.r"),
+        (r"\ell", "ell"),
+        (r"\ddots", "dots.down"),
+        (r"\dagger", "dagger"),
+        (r"\ddagger", "dagger.double"),
+        (r"\checkmark", "checkmark"),
+        (r"\star", "star"),
+        (r"\#L", " hash L"),
+        (r"\binom{K}{2}", "binom(K, 2)"),
+        (r"2 \uparrow", "2 arrow.t"),
+        (r"y_\ell", "y_ell"),
+    ],
+)
+def test_a_previously_missing_symbol_now_converts(latex: str, expected: str) -> None:
+    r"""These all returned ``None``, degrading the **whole** formula to text.
+
+    ``\downarrow``/``\uparrow`` are the "lower/higher is better" markers in
+    nearly every results table, ``\ell`` is the standard index variable, and
+    ``\dagger`` marks statistical significance. Measured on the gold corpus they
+    accounted for 93 formulas that shipped as readable Unicode instead of
+    typeset math; after adding them 1 remains.
+    """
+    assert typstify_math(latex) == expected
+
+
+def test_a_bare_hash_is_still_rejected() -> None:
+    r"""Only the LaTeX *escape* ``\#`` may pass; a bare ``#`` enters code mode.
+
+    ``#`` is Typst's code-mode marker, so a formula containing one is not
+    representable and must still fail closed rather than reaching the compiler.
+    """
+    assert typstify_math("x # y") is None
+    assert typstify_math('x " y') is None

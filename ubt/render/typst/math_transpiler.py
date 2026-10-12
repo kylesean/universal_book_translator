@@ -72,6 +72,12 @@ _LATEX_CMD_MAP = INLINE_SYMBOLS
 _TYPST_MATH_WORDS = frozenset(_LATEX_CMD_MAP.values()) | {
     "bb",
     "frak",
+    # Emitted by the font-style mapping for ``\mathbf``/``\mathit``. Without
+    # these the word-run quoter below turns them into literal text
+    # (``#"bold" (W)``), so the formula renders the *name* of the function
+    # instead of a bold variable.
+    "bold",
+    "italic",
     "sin",
     "cos",
     "tan",
@@ -121,7 +127,9 @@ _TYPST_MATH_WORDS = frozenset(_LATEX_CMD_MAP.values()) | {
 # never match (math-italic variables stay bare); a trailing dot never
 # joins (letter required after each dot), so "word." still splits.
 _WORD_RUN_RE = re.compile(r"[A-Za-z][A-Za-z0-9]*(?:\.[A-Za-z][A-Za-z0-9]*)+|[A-Za-z][A-Za-z0-9]+")
-_FONT_STYLE_CMD_RE = re.compile(r"\\(mathbb|mathfrak|mathcal)\{([^{}]*)\}")
+_FONT_STYLE_CMD_RE = re.compile(
+    r"\\(mathbb|mathfrak|mathcal|mathbf|mathit|boldsymbol|bm)\{([^{}]*)\}"
+)
 _DOUBLE_BACKSLASH_CMD_RE = re.compile(r"\\\\([a-zA-Z]+)")
 
 
@@ -130,9 +138,14 @@ _DOUBLE_BACKSLASH_CMD_RE = re.compile(r"\\\\([a-zA-Z]+)")
 # the marked-string form keeps models' favourite wrappers compilable
 # ($I_{\text{off}}$ for source "Ioff" class, $2\mathrm{D}$ for "(2D)"
 # class) instead of failing closed to literal backslash garbage. Nested
-# braces do not match and stay fail-closed. Bold/italic wrappers
-# (\mathbf, \mathit, ...) are deliberately NOT mapped: upright would be
-# a silent styling lie, so those still refuse.
+# braces do not match and stay fail-closed.
+#
+# Bold/italic are real styling requests, not labels, so they are mapped to
+# Typst's own math commands (``bold``/``italic``) rather than dropped. Leaving
+# them unmapped refused the **whole formula**: measured, ``$\mathbf{W} x + b$``
+# rendered as "W x + b" — the math layout was lost for a formula whose only
+# unusual feature was a bold matrix, and ``\mathbf`` is among the most common
+# commands in machine-learning papers.
 _TEXTLIKE_CMD_RE = re.compile(r"\\(?:text|mathrm)\{([^{}]*)\}")
 _LATEX_SPACES_RE = re.compile(
     r"\\(?:quad|qquad|enspace|thinspace|thickspace|medspace|negthinspace|[,;! ])"
@@ -254,8 +267,46 @@ def _extract_braced_chunk(text: str, start: int) -> tuple[str, int] | None:
     return None
 
 
+def _convert_binoms(text: str) -> str:
+    r"""Convert LaTeX ``\binom{n}{k}`` to Typst ``binom(n, k)``.
+
+    Two brace arguments, like ``\frac``, so it needs its own pass: the command
+    table only maps names to glyphs and cannot consume arguments. A formula
+    containing one previously failed closed (3 on the gold corpus).
+    """
+    out: list[str] = []
+    i = 0
+    while i < len(text):
+        if text.startswith(r"\binom", i) and (i + 6 == len(text) or not text[i + 6].isalpha()):
+            pos = i + 6
+            while pos < len(text) and text[pos].isspace():
+                pos += 1
+            top_res = _extract_braced_chunk(text, pos)
+            if top_res is not None:
+                top, after_top = top_res
+                while after_top < len(text) and text[after_top].isspace():
+                    after_top += 1
+                bot_res = _extract_braced_chunk(text, after_top)
+                if bot_res is not None:
+                    bot, after_bot = bot_res
+                    if out and (out[-1].isalnum() or out[-1] in "_^"):
+                        out.append(" ")
+                    out.append(f"binom({_convert_binoms(top)}, {_convert_binoms(bot)})")
+                    i = after_bot
+                    continue
+        out.append(text[i])
+        i += 1
+    return "".join(out)
+
+
 def _convert_fractions(text: str) -> str:
-    """Convert LaTeX \\frac{num}{den} to Typst frac(num, den) with balanced brace support."""
+    """Convert LaTeX \\frac{num}{den} to Typst frac(num, den) with balanced brace support.
+
+    A separator is emitted before the converted call when the preceding
+    character is a script marker or a word character: without it
+    ``a_b\\frac{1}{2}`` became ``a_bfrac(1, 2)`` and the word-run quoter read
+    ``bfrac`` as one word (the same defect as :func:`_convert_sqrts`).
+    """
     out: list[str] = []
     i = 0
     while i < len(text):
@@ -273,6 +324,8 @@ def _convert_fractions(text: str) -> str:
                     den_content, after_den = den_res
                     rec_num = _convert_fractions(num_content)
                     rec_den = _convert_fractions(den_content)
+                    if out and (out[-1].isalnum() or out[-1] in "_^"):
+                        out.append(" ")
                     out.append(f"frac({rec_num}, {rec_den})")
                     i = after_den
                     continue
@@ -282,7 +335,15 @@ def _convert_fractions(text: str) -> str:
 
 
 def _convert_sqrts(text: str) -> str:
-    """Convert LaTeX \\sqrt{arg} to Typst sqrt(arg) with balanced brace support."""
+    """Convert LaTeX \\sqrt{arg} to Typst sqrt(arg) with balanced brace support.
+
+    A separator is emitted before the converted call when the preceding
+    character is a script marker or a word character. Without it,
+    ``\\beta_t\\sqrt{x}`` became ``beta_tsqrt(x)`` — the subscript's ``t``
+    merged with the function name, and the word-run quoter downstream then read
+    ``tsqrt`` as one word and emitted ``beta_#"tsqrt" (x)``, a formula whose
+    root was lost (measured on the gold corpus, 6 formulas).
+    """
     out: list[str] = []
     i = 0
     while i < len(text):
@@ -294,6 +355,8 @@ def _convert_sqrts(text: str) -> str:
             if arg_res is not None:
                 arg_content, after_arg = arg_res
                 rec_arg = _convert_sqrts(arg_content)
+                if out and (out[-1].isalnum() or out[-1] in "_^"):
+                    out.append(" ")
                 out.append(f"sqrt({rec_arg})")
                 i = after_arg
                 continue
@@ -319,7 +382,12 @@ def typstify_math(body: str) -> str | None:
     # BEFORE NFKC, because NFKC would flatten them to plain ASCII Latin letters (C, E, R).
     body = _expand_styled_unicode_in_math(body)
     body = unicodedata.normalize("NFKC", body).strip()
-    if "#" in body or '"' in body or "//" in body.replace(" ", ""):
+    # A bare ``#`` enters Typst code mode and a bare ``"`` opens a string, so
+    # either makes the formula unrepresentable. ``\#`` is the LaTeX *escape*
+    # for a literal hash (used as a counter name, ``\#L``), so it is exempt:
+    # without the exemption the escape was rejected before the conversion pass
+    # that turns it into Typst's ``hash`` glyph could run.
+    if body.replace(r"\#", "").count("#") or '"' in body or "//" in body.replace(" ", ""):
         return None
     body = _normalize_latex_spacing(body)
     body = _DOUBLE_BACKSLASH_CMD_RE.sub(r"\\\1", body)
@@ -341,12 +409,26 @@ def typstify_math(body: str) -> str | None:
     body = _rescue_operators(body)
     # Typst spells these math alphabets as function calls rather than LaTeX
     # commands. Leave syntax validation to the caller's TypstMathProbe.
-    _font_fn = {"mathbb": "bb", "mathfrak": "frak", "mathcal": "cal"}
+    # ``boldsymbol``/``bm`` are LaTeX's bold-for-anything (including symbols),
+    # which Typst's ``bold`` also accepts, so they share the mapping.
+    _font_fn = {
+        "mathbb": "bb",
+        "mathfrak": "frak",
+        "mathcal": "cal",
+        "mathbf": "bold",
+        "boldsymbol": "bold",
+        "bm": "bold",
+        "mathit": "italic",
+    }
     body = _FONT_STYLE_CMD_RE.sub(lambda m: f"{_font_fn[m.group(1)]}({m.group(2)})", body)
 
     # Convert \frac{a}{b} -> frac(a, b) and \sqrt{a} -> sqrt(a) with balanced brace support
     body = _convert_fractions(body)
     body = _convert_sqrts(body)
+    body = _convert_binoms(body)
+    # ``\#`` is an escaped hash and the command regex below only matches
+    # letters, so it is rewritten here. Typst spells the glyph ``hash``.
+    body = body.replace(r"\#", " hash ")
 
     # Convert math accents \hat{a} -> hat(a), \hat a -> hat(a), etc.
     for _ in range(3):
