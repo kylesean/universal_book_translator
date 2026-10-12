@@ -212,32 +212,33 @@ async def run_bible_stage(
     elif hasattr(ledger, "fetch_source_texts"):
         block_texts = await asyncio.to_thread(ledger.fetch_source_texts, actual_job_id)
 
-    # The **LLM-backed** steps are what the fast lane exists to skip
-    # (``is_fast_lane_eligible``: <= 20 pages and born-digital). Skipping the
-    # 0-token mining as well was never justified: it costs 0.1-1.4 ms for a whole
-    # document and needs no model. Measured over the ten short gold-corpus
-    # documents, it yields 40 abbreviation/skeleton entries — so gating it left
-    # every short paper with an empty glossary and its terminology
-    # unmeasurable.
-    if not fast_lane:
-        # Tier-2: Language-agnostic LLM Document-Skeleton Terminology Extraction
-        skeleton_input = blocks if blocks else block_texts
-        if complete_raw_fn is not None and skeleton_input:
-            from ubt.core.memory.skeleton_extractor import extract_skeleton_terms_llm
+    # Tier-2: Language-agnostic LLM Document-Skeleton Terminology Extraction.
+    #
+    # This runs on the fast lane too. Gating it left the short route with **no
+    # terminology mechanism at all**: the fast lane produced no mined terms, the
+    # skeleton call was skipped, and ``deterministic_glossary`` (which the short
+    # route turns on) was then fed an empty glossary, so it enforced nothing.
+    # Measured on `vit`: the short route had 0 measurable terms while the long
+    # route had 28 at 0.9545 precision. The cost is one call over the document
+    # skeleton (a few thousand characters, built once) — not a per-block call —
+    # and the lane's actual saving comes from the batch API, which is unaffected.
+    skeleton_input = blocks if blocks else block_texts
+    if complete_raw_fn is not None and skeleton_input:
+        from ubt.core.memory.skeleton_extractor import extract_skeleton_terms_llm
 
-            skeleton_entries = await extract_skeleton_terms_llm(
-                skeleton_input,
-                complete_raw_fn=complete_raw_fn,
-                source_lang=source_lang,
-                target_lang=target_lang,
+        skeleton_entries = await extract_skeleton_terms_llm(
+            skeleton_input,
+            complete_raw_fn=complete_raw_fn,
+            source_lang=source_lang,
+            target_lang=target_lang,
+        )
+        if skeleton_entries:
+            logger.info(
+                "Extracted %d domain terminology entries from document skeleton for %s",
+                len(skeleton_entries),
+                actual_job_id,
             )
-            if skeleton_entries:
-                logger.info(
-                    "Extracted %d domain terminology entries from document skeleton for %s",
-                    len(skeleton_entries),
-                    actual_job_id,
-                )
-                bible_entries.extend(skeleton_entries)
+            bible_entries.extend(skeleton_entries)
     # 0-token mining: no model call, so the fast lane does not skip it.
     mined_abbreviations = mine_abbreviations_stream(block_texts)
     bible_entries.extend(
@@ -269,10 +270,14 @@ async def run_bible_stage(
 
     merged_entries = merge_bible_entries(bible_entries)
 
-    # Translation backfill channel (skipped on the fast lane: seeds already
-    # carry translations, and untranslated mined entries do not exist there).
+    # Translation backfill channel. It runs on the fast lane too, for the same
+    # reason the skeleton call does: an untranslated mined entry is a term the
+    # glossary cannot enforce, so gating this left the short route with mined
+    # entries that no gate could use. The comment that used to sit here ("seeds
+    # already carry translations, and untranslated mined entries do not exist
+    # there") stopped being true once the 0-token miners were un-gated above.
     backfilled_count = 0
-    if not fast_lane and any(not e.translation for e in merged_entries):
+    if any(not e.translation for e in merged_entries):
         try:
             merged_dicts, backfilled_count = await backfill_abbreviation_translations(
                 [e.model_dump() for e in merged_entries],

@@ -1,19 +1,22 @@
-"""The fast lane gates only what costs a model call.
+"""The bible stage builds terminology on the fast lane too.
 
-`is_fast_lane_eligible` is a page-count probe (<= 20 pages and born-digital).
-It was applied to *every* bible step, including the 0-token miners, which need
-no model at all: measured over the ten short gold-corpus documents the miners
-cost 0.1-1.4 ms and yield 40 entries. Gating them left every short paper with an
-empty glossary, so its terminology was not merely inconsistent but unmeasurable
-(11 of the 20 corpus documents reported `terms_expected == 0`).
+`is_fast_lane_eligible` is a page-count probe (<= 20 pages, born-digital). It was
+applied to *every* bible step, so the short route produced no terminology by any
+path: the 0-token miners were skipped, the skeleton extraction was skipped, and
+the backfill was skipped. The result was not merely "less consistent" — the
+short route had **no** terminology mechanism, and ``deterministic_glossary``
+(which the short route turns on) was fed an empty table, so it enforced nothing.
+Measured on `vit`: 0 measurable terms on the short route against 28 at 0.9545 on
+the long route; after the fix the short route measures 30 terms at 0.9791, at a
+lower cost, because its saving comes from the batch API rather than from
+skipping the bible.
 
 The same gate also silently discarded an explicit `exec_mode`: the route says
 `long`, the stage re-derived `short` from the file probe, and an
 `--exec-mode long` run mined nothing.
 
-These tests assert the *behaviour* — that a fast-lane run still returns mined
-entries — because a source-text assertion cannot tell a gate on this call from
-the indentation of the block above it.
+These tests assert *behaviour* where they can — a source-text assertion cannot
+tell a gate on one call from the indentation of the block above it.
 """
 
 from __future__ import annotations
@@ -63,12 +66,22 @@ def _source_of_bible_stage() -> str:
     return inspect.getsource(bible)
 
 
-def test_the_bible_stage_calls_the_free_miners() -> None:
-    """Both miners must appear as calls, not merely as imports."""
+def test_the_bible_stage_calls_every_terminology_source() -> None:
+    """Mining, skeleton extraction and backfill must all run unconditionally.
+
+    Each is a call, not merely an import, and none may sit behind a fast-lane
+    guard: the three together are the only path by which the short route can
+    obtain a glossary at all.
+    """
     source = _source_of_bible_stage()
 
     assert "= mine_abbreviations_stream(" in source
     assert "= mine_characters_stream(" in source
+    assert "= await extract_skeleton_terms_llm(" in source
+    assert "= await backfill_abbreviation_translations(" in source
+    # No `if not fast_lane:` may remain in the stage body: the lane no longer
+    # gates terminology, only the probe's own decision and the cache key.
+    assert "if not fast_lane:" not in source
 
 
 def test_an_explicit_exec_mode_outranks_the_page_probe() -> None:
