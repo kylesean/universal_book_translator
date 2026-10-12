@@ -56,6 +56,9 @@ from ubt.core.validators.consistency import (
 _is_identifier_shaped = is_identifier_shaped
 # Latin verbatim runs (same shape as the fast-pass carry-over whitelist).
 _LATIN_RUN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_+\-]*")
+#: A run of two or more capitals long enough to be an acronym (``MHA``). Used to
+#: strip acronyms before testing whether a capitalised word is ordinary prose.
+_ALL_CAPS_TOKEN_RE = re.compile(r"(?<![A-Za-z])[A-Z]{2,}(?![a-zA-Z])")
 # Numeric tokens (same shape as NumericConsistencyValidator's scanner).
 _NUM_TOKEN_RE = re.compile(r"\d[\d,.\-–—/]*\d|\d")
 _RANGE_DELIMITERS_RE = re.compile(r"[-–—/]")
@@ -124,13 +127,31 @@ def _is_hyphen_ghost(term: str, freq: "Counter[str]") -> bool:
     )
 
 
-def identifier_terms(source_text: str) -> set[str]:
+def identifier_terms(source_text: str, document_text: str = "") -> set[str]:
     """Source-verbatim identifier-shaped Latin runs the omission gate tracks.
 
     Single source of truth for "which source tokens must survive translation":
     the gate scores recall over exactly this set, and anything that has to
     behave like a competent model (the offline baseline fixtures) reuses it
     instead of re-deriving the rule.
+
+    ``document_text`` disambiguates the one case shape alone cannot. A table
+    often sets an ordinary English word in capitals as a column label
+    (``MASK | SAME | RND``, labelling the standard BERT masking strategies), and
+    an acronym looks identical (``MHA``, ``LSTM``, ``GQA``). Treating the former
+    as an identifier demands the *translation* keep the English word, so a
+    correct rendering is rejected as an omission while the untouched source
+    passes every check — measured on ``bert`` ``pdf_main#b0256``:
+    ``evaluate(source, draft)`` returned "Omission suspected: identifier
+    term(s) missing from target: ['MASK', 'RND', 'SAME']" and the repair then
+    adopted the English source over the Chinese draft.
+
+    The discriminator is usage: a genuine acronym is *never* spelled out in
+    lower case elsewhere in the document, while a capitalised word is. So an
+    all-caps run is dropped from the tracked set when its lower-case form occurs
+    as a stand-alone word in ``document_text`` (the lower-case form may be the
+    run itself in prose, so the count must exceed the capitals' own
+    occurrences). Passing no ``document_text`` keeps the shape-only behaviour.
     """
     runs = [
         match.group(0)
@@ -138,7 +159,37 @@ def identifier_terms(source_text: str) -> set[str]:
         if len(match.group(0)) >= 2
     ]
     freq = Counter(runs)
-    return {t for t in set(runs) if _is_identifier_shaped(t) and not _is_hyphen_ghost(t, freq)}
+    tracked = {t for t in set(runs) if _is_identifier_shaped(t) and not _is_hyphen_ghost(t, freq)}
+    if not document_text:
+        return tracked
+    return {
+        t for t in tracked if not _reads_as_a_word_in_the_document(t, source_text, document_text)
+    }
+
+
+def _reads_as_a_word_in_the_document(term: str, block_text: str, document_text: str) -> bool:
+    """Whether an all-caps run is ordinary prose capitalised for a table.
+
+    Only all-caps runs are candidates: a camelCase or digit-bearing term
+    (``PagedAttention``, ``GQA-8``) is never written in lower case, so the test
+    cannot apply to it.
+
+    The evidence is a **non-all-caps** occurrence of the word in the document.
+    Every all-caps occurrence is stripped first, because an acronym written in
+    prose is still the acronym: ``We use MHA and LSTM`` must not count as
+    evidence that ``MHA`` is a word. What remains is text in ordinary case, so a
+    surviving ``mask`` (or ``Mask``) proves the capitals were a formatting
+    choice, while an acronym leaves nothing behind.
+    """
+    if not term.isupper() or len(term) < 3 or not term.isalpha():
+        return False
+    # Drop every all-caps token, from the block and the wider document alike.
+    stripped = _ALL_CAPS_TOKEN_RE.sub(" ", document_text)
+    stripped = _ALL_CAPS_TOKEN_RE.sub(" ", stripped)
+    return (
+        re.search(rf"(?<![A-Za-z]){re.escape(term)}(?![A-Za-z])", stripped, re.IGNORECASE)
+        is not None
+    )
 
 
 def _math_term_variants(term: str) -> list[str]:
@@ -317,7 +368,24 @@ class OmissionGate:
         self.min_chrf_ngrams = min_chrf_ngrams
         self.ngram_sizes = ngram_sizes
         self._glossary_surfaces: list[tuple[str, str]] = []
+        #: Whole-document source text, for the capitalised-word discriminator.
+        self._document_text: str = ""
         self.set_glossary(glossary)
+
+    def set_document_context(self, document_text: str) -> None:
+        """Bind the run's source text so a table-formatted word is not a term.
+
+        A table sets ordinary English words in capitals as column labels
+        (``MASK | SAME | RND``), and an acronym has the same shape (``MHA``,
+        ``LSTM``). The identifier recall cannot tell them apart from the block
+        alone, so it demanded the *translation* keep the English word: on
+        ``bert`` ``pdf_main#b0256`` a correct Chinese draft was rejected with
+        "Omission suspected: identifier term(s) missing from target: ['MASK',
+        'RND', 'SAME']" and the repair adopted the untranslated source instead.
+        Usage in the wider document is the discriminator — see
+        :func:`identifier_terms`. Bound once per run, like the glossary.
+        """
+        self._document_text = document_text or ""
 
     def set_glossary(self, glossary: Sequence[Mapping[str, Any]] | None) -> None:
         """Bind the run's glossary so a term's canonical rendering counts as kept.
@@ -368,9 +436,14 @@ class OmissionGate:
         *,
         is_table: bool | None = None,
         block_type: object = None,
+        document_text: str = "",
     ) -> OmissionDecision:
         src = source_text.strip()
         tgt = target_text.strip()
+
+        # An explicit argument wins over the bound run context (a caller that
+        # passes it is more specific), and the bound value may be unset.
+        document_text = document_text or self._document_text
 
         if is_table is None:
             bt = getattr(block_type, "value", block_type or "")
@@ -383,7 +456,9 @@ class OmissionGate:
         tgt_sentences = count_sentences(tgt)
         sentence_ratio = tgt_sentences / max(1, src_sentences)
 
-        tracked_terms = identifier_terms(src)
+        # ``document_text`` lets the identifier set drop a word that is only
+        # capitalised for a table label; see :func:`identifier_terms`.
+        tracked_terms = identifier_terms(src, self._document_text)
         surfaces: list[str] = []
         missing_terms = []
         for t in sorted(tracked_terms):

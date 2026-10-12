@@ -33,11 +33,12 @@ def _ledger(tmp_path: Path, rows: list[dict[str, object]]) -> Path:
     conn.execute(
         "CREATE TABLE blocks ("
         " status TEXT, error_flags_json TEXT, target_text TEXT, draft_text TEXT,"
-        " source_text TEXT, skip_translate INTEGER, policy_translate INTEGER)"
+        " source_text TEXT, skip_translate INTEGER, policy_translate INTEGER,"
+        " block_type TEXT)"
     )
     for row in rows:
         conn.execute(
-            "INSERT INTO blocks VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO blocks VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 row.get("status", "delivered"),
                 row.get("error_flags_json", "[]"),
@@ -46,6 +47,7 @@ def _ledger(tmp_path: Path, rows: list[dict[str, object]]) -> Path:
                 row.get("source_text", ""),
                 row.get("skip_translate", 0),
                 row.get("policy_translate"),
+                row.get("block_type"),
             ),
         )
     conn.commit()

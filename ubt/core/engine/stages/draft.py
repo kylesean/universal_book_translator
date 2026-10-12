@@ -1482,6 +1482,18 @@ async def _build_draft_runtime(
     # gates contradict each other on entries like FnCall -> 函数调用接口 and the
     # correct translation is quarantined as an omission.
     active_fast_pass.set_glossary(glossary_dicts)
+    # Teach the omission gate the *shape* of the source document. A table sets an
+    # ordinary word in capitals as a column label (``MASK | SAME | RND``), which
+    # is indistinguishable from an acronym (``MHA``) from one block alone; with
+    # the wider document the gate can see the word used in lower case elsewhere
+    # and stop demanding the English surface in the translation. Measured on
+    # ``bert`` ``pdf_main#b0256``: without this the untranslated source passed
+    # every check while the correct Chinese draft was rejected as an omission,
+    # and the repair shipped the English source instead.
+    document_source = "\n".join(
+        block.source_text or "" for block in ledger.get_all_blocks(actual_job_id)
+    )
+    active_fast_pass.set_document_context(document_source)
     batch_active = bool(config.batch_enabled) and (router.supports_batch_api)
     batch_min_blocks = max(2, int(config.batch_min_blocks))
     batch_poll_interval = max(0.5, float(config.batch_poll_interval))

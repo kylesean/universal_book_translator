@@ -112,6 +112,57 @@ def test_identifier_terms_drop_a_hyphen_ghost() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# A word capitalised for a table label is not an identifier
+# --------------------------------------------------------------------------- #
+
+
+def test_a_table_capitalised_word_is_not_tracked_when_used_in_lower_case() -> None:
+    """`MASK`/`SAME` in a table are prose, not terms.
+
+    Measured on ``bert`` ``pdf_main#b0256``: the header is
+    ``MASK | SAME | RND`` (labels for the BERT masking strategies) and the draft
+    correctly rendered them 掩码/相同/随机. Treating them as identifiers demanded
+    the English surface survive, so ``evaluate(source, draft)`` returned
+    "Omission suspected: identifier term(s) missing from target: ['MASK', 'RND',
+    'SAME']" while ``evaluate(source, source)`` passed — the repair then adopted
+    the untranslated source over the correct translation.
+    """
+    document = (
+        "The mask is applied uniformly. Same as before. We use a random round.\n"
+        "| MASK | SAME | RND |"
+    )
+    # `rnd` never appears spelled out, so it stays tracked; the other two do not.
+    assert identifier_terms("| MASK | SAME | RND |", document) == {"RND"}
+
+
+def test_a_genuine_acronym_is_still_tracked() -> None:
+    """The exemption must not swallow a real term.
+
+    ``MHA``/``LSTM``/``GQA`` are written in capitals *everywhere*, including in
+    prose, so no lower-case occurrence exists and they stay identifiers. This is
+    the whole discriminator: usage, not shape.
+    """
+    document = "We use MHA and LSTM and GQA layers here.\n| MHA | LSTM | GQA |"
+    assert identifier_terms("| MHA | LSTM | GQA |", document) == {"MHA", "LSTM", "GQA"}
+
+
+def test_an_all_caps_prose_occurrence_is_not_evidence_of_a_word() -> None:
+    """An acronym written in capitals in prose must not excuse itself.
+
+    Stripping every all-caps token before the test is what makes this work; a
+    plain lower-case search would find ``MHA`` (case-folded) in the prose it
+    appears in and wrongly exempt it.
+    """
+    document = "The MHA layer and the LSTM block differ.\n| MHA | LSTM |"
+    assert identifier_terms("| MHA | LSTM |", document) == {"MHA", "LSTM"}
+
+
+def test_without_a_document_the_shape_rule_is_unchanged() -> None:
+    """The default keeps the old behaviour, so existing callers are unaffected."""
+    assert identifier_terms("| MASK | SAME | MHA |") == {"MASK", "SAME", "MHA"}
+
+
+# --------------------------------------------------------------------------- #
 # math variants
 # --------------------------------------------------------------------------- #
 

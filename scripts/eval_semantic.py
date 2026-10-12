@@ -313,7 +313,7 @@ def _ledger_stats(ledger_path: Path) -> dict[str, Any]:
         rows = list(
             conn.execute(
                 "SELECT status, error_flags_json, target_text, draft_text, source_text,"
-                " skip_translate, policy_translate FROM blocks"
+                " skip_translate, policy_translate, block_type FROM blocks"
             )
         )
     except sqlite3.OperationalError as exc:
@@ -345,6 +345,24 @@ def _ledger_stats(ledger_path: Path) -> dict[str, Any]:
     kept = [r for r in rows if _keeps_source_row(r)]
     translatable = [r for r in rows if not _keeps_source_row(r)]
 
+    # The RFC's third target is the "表格中文化率" (table sinicization rate). The
+    # unambiguous form of that question is decided per *block*: a table block
+    # whose delivered text differs from its source was worked on. Counting cells
+    # instead (see ``_table_header_cjk``) conflates "not translated" with a cell
+    # that must stay verbatim — a dataset name like ``MNIST`` carries no CJK
+    # however correct the translation is, and measured across the corpus 28% of
+    # the non-CJK header cells are exactly that kind of identifier. This rate is
+    # the one that answers "did the tables get translated", and it is measured
+    # from the ledger rather than from the rendered markup so it cannot be
+    # affected by how a cell happened to be typeset.
+    table_blocks = [r for r in rows if _block_type_of(r) == "table" and not _keeps_source_row(r)]
+    table_translated = 0
+    for row in table_blocks:
+        delivered = (row["target_text"] or row["draft_text"] or "").strip()
+        if delivered and delivered != (row["source_text"] or "").strip():
+            table_translated += 1
+    table_total = len(table_blocks)
+
     def _ratio(selected: list[sqlite3.Row]) -> float | None:
         body = "".join(
             (r["target_text"] or r["draft_text"] or r["source_text"] or "") for r in selected
@@ -360,8 +378,20 @@ def _ledger_stats(ledger_path: Path) -> dict[str, Any]:
         "statuses": dict(statuses.most_common()),
         "blocked_ratio": (quarantined / total) if total else 0.0,
         "cjk_ratio_translatable": _ratio(translatable),
+        "table_blocks": table_total,
+        "tables_translated": table_translated,
+        "table_translation_rate": (table_translated / table_total) if table_total else None,
         "top_flags": dict(flag_counter.most_common(10)),
     }
+
+
+def _block_type_of(row: sqlite3.Row) -> str:
+    """A row's block type as a plain string (``None`` when the column is absent)."""
+    try:
+        value = row["block_type"]
+    except (IndexError, KeyError):
+        return ""
+    return str(getattr(value, "value", value) or "")
 
 
 def _keeps_source_row(row: sqlite3.Row) -> bool:

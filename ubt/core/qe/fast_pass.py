@@ -729,6 +729,17 @@ class FastPassFilter:
         """
         self.omission_gate.set_glossary(glossary)
 
+    def set_document_context(self, document_text: str) -> None:
+        """Bind the run's source text (see :meth:`OmissionGate.set_document_context`).
+
+        Called by the draft stage with the batch's source text, so a word that
+        is merely capitalised for a table label is not demanded verbatim in the
+        target: on ``bert`` ``pdf_main#b0256`` the untranslated source passed
+        every check while the correct Chinese draft was rejected as an omission,
+        and the repair shipped the English source.
+        """
+        self.omission_gate.set_document_context(document_text)
+
     @property
     def policy(self) -> LanguageProfile | LanguagePairPolicy:
         """Active language profile or dynamic language pair policy."""
