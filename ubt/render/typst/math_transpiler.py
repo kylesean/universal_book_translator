@@ -442,14 +442,26 @@ def typstify_math(body: str) -> str | None:
             break
         body = t2
 
-    marked = _TEXTLIKE_CMD_RE.sub(
-        lambda m: (
-            f'#"{m.group(1)}"'
-            if any(ord(c) > 127 for c in m.group(1))
-            else "\0" + m.group(1) + "\0"
-        ),
-        body,
-    )
+    # A ``\text{...}`` label that contains CJK is emitted already quoted, because
+    # the word-run quoter below would otherwise split it on its ASCII words. It
+    # must then be *hidden* from that quoter, which cannot tell an already-quoted
+    # label from bare source: ``\text{总 token 数}`` became
+    # ``#"总 #"token" 数"`` -- the inner quotes close the label early and Typst
+    # fails with ``unknown variable: token``, losing the whole document (measured
+    # on switch-transformers, a figure caption). Park the label behind a
+    # non-word sentinel and restore it once quoting is done.
+    cjk_labels: list[str] = []
+
+    def _textlike(match: re.Match[str]) -> str:
+        argument = match.group(1)
+        if any(ord(c) > 127 for c in argument):
+            cjk_labels.append(argument)
+            return f"\x01{len(cjk_labels) - 1}\x02"
+        # The marked form keeps the label's own spaces out of the quoter's way;
+        # ``_WORD_RUN_RE`` then quotes it as one word (``\0off\0`` -> ``#"off"``).
+        return "\0" + argument + "\0"
+
+    marked = _TEXTLIKE_CMD_RE.sub(_textlike, body)
 
     def _cmd(match: re.Match[str]) -> str:
         name = match.group(1)
@@ -482,6 +494,14 @@ def typstify_math(body: str) -> str | None:
         return f'#"{word}"'
 
     quoted = _WORD_RUN_RE.sub(_quote, marked).replace("\0", "")
+    # Restore the CJK labels the quoter was shielded from. ``re.escape`` is not
+    # needed: the replacement is a literal string, and a backslash in a label
+    # would have to survive Typst's string syntax, which it does verbatim.
+    quoted = re.sub(
+        r"\x01(\d+)\x02",
+        lambda m: f'#"{cjk_labels[int(m.group(1))]}"',
+        quoted,
+    )
 
     # ``\text{tokens per batch}`` is one upright label, but the word-run quoter
     # above split it into ``#"tokens" #"per" #"batch"``. That renders the same

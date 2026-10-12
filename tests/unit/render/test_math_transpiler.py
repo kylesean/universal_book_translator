@@ -234,3 +234,26 @@ def test_a_bare_hash_is_still_rejected() -> None:
     """
     assert typstify_math("x # y") is None
     assert typstify_math('x " y') is None
+
+
+def test_a_cjk_label_with_an_ascii_word_is_not_requoted() -> None:
+    r"""`\text{总 token 数}` is one label; its inner word must not be quoted again.
+
+    The CJK branch emits the label already quoted, and the word-run quoter below
+    then matched the ASCII word *inside* that string: the result was
+    `#"总 #"token" 数"`, whose inner quotes close the label early. Typst rejected
+    it with `unknown variable: token` and the whole document was lost (measured
+    on switch-transformers, in a figure caption).
+    """
+    assert typstify_math(r"\text{总 token 数}") == '#"总 token 数"'
+    assert (
+        typstify_math(r"\frac{\text{总 token 数}}{\text{专家数量}}")
+        == 'frac(#"总 token 数", #"专家数量")'
+    )
+
+
+def test_a_cjk_label_keeps_its_ascii_words_verbatim() -> None:
+    # A pure-CJK label and a mixed one must both survive; the ASCII words keep
+    # their spelling and spacing rather than becoming separate math identifiers.
+    assert typstify_math(r"\text{参数}") == '#"参数"'
+    assert typstify_math(r"\text{第 3 层}") == '#"第 3 层"'

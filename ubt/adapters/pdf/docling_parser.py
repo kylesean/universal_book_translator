@@ -1224,7 +1224,18 @@ def map_iterated_items(
                 # Stable: rows sharing a destination keep the order their source
                 # produced them in, so a sub-section never jumps above its
                 # chapter when both name the same page.
-                blocks.extend(sorted(toc_blocks, key=_toc_sort_key))
+                #
+                # The renumbering is not cosmetic: every downstream consumer
+                # orders blocks by ``spine_index`` (``analyze.bridge``,
+                # ``render_preflight``, the ledger), so reordering the list
+                # alone is undone on the next sort and the delivered contents
+                # still opened on "2.1". Ids are rebuilt from the new position
+                # too, so they stay consistent with the index they encode.
+                ordered_toc = sorted(toc_blocks, key=_toc_sort_key)
+                for new_index, block in enumerate(ordered_toc, start=1):
+                    block.set_spine_index(new_index)
+                    block.set_id(f"pdf_main#b{new_index:04d}")
+                blocks.extend(ordered_toc)
             continue
 
         if label == DocItemLabel.PICTURE:
