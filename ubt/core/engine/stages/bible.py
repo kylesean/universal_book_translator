@@ -96,7 +96,14 @@ async def run_bible_stage(
     create_event_fn = ctx.create_event
     glossary_path = ctx.config.glossary_path
     use_cache = not ctx.config.fresh
-    if ctx.source_pdf_path is not None and not fast_lane:
+    # An explicit ``exec_mode`` outranks the page-count probe. The route already
+    # applied it (``router_mode.decide`` returns ``long`` for
+    # ``exec_mode=long``), so re-deriving the fast lane here from
+    # ``is_fast_lane_eligible`` silently discarded the caller's decision: a
+    # ``--exec-mode long`` run logged "Fast lane enabled" and mined nothing.
+    # The probe fills in only the undecided ``auto`` case.
+    exec_mode = getattr(ctx.config, "exec_mode", "auto")
+    if ctx.source_pdf_path is not None and not fast_lane and exec_mode == "auto":
         # A short born-digital PDF also takes the shortcut on its own merits:
         # same stage graph, subset policy, every fast-lane entry also exists in
         # the full run.
@@ -196,16 +203,23 @@ async def run_bible_stage(
     mined_abbreviations: list[dict[str, Any]] = []
     mined_characters: list[dict[str, Any]] = []
     block_texts: list[str] = []
+    blocks: list[IRBlock] = []
+    if hasattr(ledger, "get_all_blocks"):
+        blocks = await asyncio.to_thread(ledger.get_all_blocks, actual_job_id)
+
+    if blocks:
+        block_texts = [b.source_text for b in blocks if b.source_text]
+    elif hasattr(ledger, "fetch_source_texts"):
+        block_texts = await asyncio.to_thread(ledger.fetch_source_texts, actual_job_id)
+
+    # The **LLM-backed** steps are what the fast lane exists to skip
+    # (``is_fast_lane_eligible``: <= 20 pages and born-digital). Skipping the
+    # 0-token mining as well was never justified: it costs 0.1-1.4 ms for a whole
+    # document and needs no model. Measured over the ten short gold-corpus
+    # documents, it yields 40 abbreviation/skeleton entries — so gating it left
+    # every short paper with an empty glossary and its terminology
+    # unmeasurable.
     if not fast_lane:
-        blocks: list[IRBlock] = []
-        if hasattr(ledger, "get_all_blocks"):
-            blocks = await asyncio.to_thread(ledger.get_all_blocks, actual_job_id)
-
-        if blocks:
-            block_texts = [b.source_text for b in blocks if b.source_text]
-        elif hasattr(ledger, "fetch_source_texts"):
-            block_texts = await asyncio.to_thread(ledger.fetch_source_texts, actual_job_id)
-
         # Tier-2: Language-agnostic LLM Document-Skeleton Terminology Extraction
         skeleton_input = blocks if blocks else block_texts
         if complete_raw_fn is not None and skeleton_input:
@@ -224,7 +238,8 @@ async def run_bible_stage(
                     actual_job_id,
                 )
                 bible_entries.extend(skeleton_entries)
-        mined_abbreviations = mine_abbreviations_stream(block_texts)
+    # 0-token mining: no model call, so the fast lane does not skip it.
+    mined_abbreviations = mine_abbreviations_stream(block_texts)
     bible_entries.extend(
         BibleEntry(
             source=m["source"],
@@ -236,12 +251,11 @@ async def run_bible_stage(
         for m in mined_abbreviations
     )
 
-    # 0-token person-name mining
+    # 0-token person-name mining (same: free, so not gated on the fast lane).
     is_fiction = profile_name.lower() in ("fiction", "novel", "literature", "classic")
-    if not fast_lane:
-        mined_characters = mine_characters_stream(
-            block_texts, source_lang=source_lang, allow_bare_tokens=is_fiction
-        )
+    mined_characters = mine_characters_stream(
+        block_texts, source_lang=source_lang, allow_bare_tokens=is_fiction
+    )
     bible_entries.extend(
         BibleEntry(
             source=m["source"],
