@@ -177,7 +177,8 @@ def test_scanned_textless_pages_skip_crosscheck() -> None:
 
 
 def test_non_prose_blocks_are_not_checked() -> None:
-    # Tables and images are already canvas assets handled by Layer 0; they are untouched.
+    # Tables and images are assets the renderer places or rebuilds itself, so the
+    # prose-glyph cross-check does not apply to them.
     table = _block("t1", "a | b", block_type=BlockType.TABLE)
     image = _block("i1", "", block_type=BlockType.IMAGE)
 

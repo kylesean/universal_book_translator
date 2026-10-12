@@ -15,7 +15,6 @@ from rich.panel import Panel
 
 from ubt.core.config import (
     ApiMode,
-    CoverMode,
     DualMode,
     OcrMode,
     PdfEngine,
@@ -523,14 +522,6 @@ def translate(
             show_default=False,
         ),
     ] = None,
-    cover_mode: Annotated[
-        CoverMode | None,
-        typer.Option(
-            "--cover-mode",
-            help="Cover policy: 'auto' (cover only when page 1 has no body text), 'always', or 'never'. Unset follows config",
-            show_default=False,
-        ),
-    ] = None,
     fresh: Annotated[
         bool | None,
         typer.Option(
@@ -646,7 +637,6 @@ def translate(
         "preset": preset,
         "pdf_engine": pdf_engine,
         "emit_both": emit_both,
-        "cover_mode": cover_mode,
         "fresh": fresh,
         "ocr_mode": ocr,
         "ocr_endpoint": ocr_endpoint,

@@ -94,12 +94,16 @@ def resolve_repair_model(
     return repair_model if repair_is_independent else draft_model
 
 
-CoverMode = Literal["auto", "always", "never"]
 PromptStrategyName = Literal["auto", "minimal", "hybrid", "rich"]
 OcrMode = Literal["auto", "sidecar", "cloud", "vlm", "rapidocr", "off"]
 ExecMode = Literal["auto", "short", "long"]
 FormulaEnrichment = Literal["auto", "on", "off"]
-TableRenderMode = Literal["auto", "overlay", "appendix", "skip"]
+#: Table handling for PDF. ``overlay`` is gone with the overlay renderer: its
+#: whole meaning was "translate simple tables, leave complex ones on the source
+#: page", and there is no source page any more — a kept table is simply absent
+#: from the rebuilt document. A config or ``UBT_TABLE_RENDER_MODE=overlay`` set
+#: from before this change is rejected rather than silently reinterpreted.
+TableRenderMode = Literal["auto", "appendix", "skip"]
 
 
 #: Default endpoint when no provider is selected and no UBT_BASE_URL is set.
@@ -675,18 +679,15 @@ class UBTConfig(BaseSettings):
 
     # -- Table rendering strategy for PDF ----------------------------------------
     # The publication renderer rebuilds every table from the IR, so a table is
-    # either translated into the page or deliberately left in the source. How
-    # complex tables are handled when they cannot be rebuilt faithfully:
+    # either translated into the page or deliberately left in the source.
     # - 'auto': translate every table; complex ones also get a translated
     #   appendix companion so the grid is readable even if the rebuild is lossy.
-    # - 'overlay': translate simple tables, keep complex ones in the source
-    #   language (the historical name is kept; there is no overlay render).
     # - 'appendix': same as 'auto' — translate every table and always write the
     #   appendix companion.
     # - 'skip': never translate tables (saves 100% table LLM tokens).
     table_render_mode: TableRenderMode = Field(
         default="auto",
-        description="Table handling mode for PDF ('auto', 'overlay', 'appendix', 'skip').",
+        description="Table handling mode for PDF ('auto', 'appendix', 'skip').",
     )
 
     # -- PDF render engine --------------------------------------------------------
@@ -707,13 +708,6 @@ class UBTConfig(BaseSettings):
     # PAGE_NUMBER) reach the translator and the rigid engine paints them in
     # their own band, still fail-closed on fit.
     translate_chrome: bool = False
-
-    # -- Cover-page policy (deterministic, never heuristic) ---------------------
-    # 'auto' (default): page 1 renders as a cover only when it carries no
-    # body text (headings/images/meta only). 'always' forces a cover page,
-    # 'never' renders page 1 as interior content. Single-page documents and
-    # chapter pages therefore always keep their body as content.
-    cover_mode: CoverMode = "auto"
 
     # -- Prompt-strategy override (local test vs production) --------------------
     # 'auto' (default): the capability registry decides per model.
@@ -793,7 +787,6 @@ class UBTConfig(BaseSettings):
         "ocr_mode",
         "qe_engine",
         "dual_mode",
-        "cover_mode",
         "prompt_strategy",
         "exec_mode",
         "formula_enrichment",
@@ -945,6 +938,13 @@ class UBTConfig(BaseSettings):
             for ep in self.local_endpoints.replace(os.pathsep, ",").split(","):
                 if ep.strip():
                     declare_custom_free_endpoint(ep.strip())
+
+        # The config's own prices file. Without this a path set in a config file
+        # was silently ignored while ``UBT_PRICES_FILE`` worked (measured: the
+        # model stayed unpriced), so the field read as a working knob.
+        from ubt.core.router.pricing import declare_custom_prices_file
+
+        declare_custom_prices_file(self.prices_file)
 
         if (
             self.capability_profile

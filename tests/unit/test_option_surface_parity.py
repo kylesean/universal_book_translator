@@ -12,7 +12,9 @@ knobs a user can set, rather than asserting any single surface's contents.
 
 from __future__ import annotations
 
+import dataclasses
 import inspect
+from pathlib import Path
 
 import pytest
 
@@ -28,16 +30,16 @@ pytestmark = pytest.mark.fast
 
 #: The mode knobs a user may set from any surface. Deliberately short: the
 #: converged design puts exactly two decisions in front of a user — what the
-#: reader receives (``dual_mode``) and how much effort to spend (``preset``) —
-#: plus ``cover_mode``, which is a clear, low-frequency layout choice. Every
-#: other mode field is an engine detail set by a preset or the operator's
+#: reader receives (``dual_mode``) and how much effort to spend (``preset``).
+#: Every other mode field is an engine detail set by a preset or the operator's
 #: ``UBT_*`` environment.
-_USER_MODE_KNOBS = ("dual_mode", "preset", "cover_mode")
+_USER_MODE_KNOBS = ("dual_mode", "preset")
 
 #: Engine details that must NOT reappear on a user surface. Each one is either
-#: inert (measured: ``formula_render`` changes no behavior), already implied by
-#: the renderer (``table_render_mode``), or a preset's business
-#: (``exec_mode``/``prompt_strategy``/``qe_engine``/``formula_enrichment``).
+#: inert (measured: ``formula_render`` and ``cover_mode`` change no behavior),
+#: already implied by the renderer (``table_render_mode``), or a preset's
+#: business (``exec_mode``/``prompt_strategy``/``qe_engine``/
+#: ``formula_enrichment``).
 _INTERNAL_KNOBS = (
     "exec_mode",
     "prompt_strategy",
@@ -47,6 +49,7 @@ _INTERNAL_KNOBS = (
     "formula_render",
     "formula_mode",
     "math_backend",
+    "cover_mode",
 )
 
 
@@ -138,3 +141,92 @@ def test_an_out_of_vocabulary_value_is_rejected_up_front(knob: str) -> None:
     """
     with pytest.raises(UBTError, match=knob):
         validate_request_enums({knob: "definitely-not-a-real-value"})
+
+
+# --------------------------------------------------------------------------- #
+# Knobs deleted for being inert, not merely internal
+# --------------------------------------------------------------------------- #
+
+
+def test_cover_mode_is_gone_from_the_config_too() -> None:
+    """``cover_mode`` was never implemented — delete it, do not hide it.
+
+    Every other knob in ``_INTERNAL_KNOBS`` is a real engine decision moved to a
+    preset; ``cover_mode`` was different. It was plumbed through the CLI, REST
+    and MCP surfaces and stored on the ``RenderPlan``, but nothing ever read it:
+    ``TypstDocumentRenderer`` does not accept it, and end-to-end runs with
+    ``auto`` / ``always`` / ``never`` produced byte-identical text layers and
+    identical page counts. A user-visible switch that changes nothing is worse
+    than an absent one, because the help text claims otherwise.
+    """
+    from ubt.core.config import UBTConfig
+    from ubt.core.ir.render_plan import RenderPlan
+
+    assert "cover_mode" not in UBTConfig.model_fields
+    assert "cover_mode" not in {f.name for f in dataclasses.fields(RenderPlan)}
+
+
+def test_the_dead_overlay_table_mode_is_not_accepted() -> None:
+    """``table_render_mode='overlay'`` named a render that no longer exists.
+
+    Its whole meaning was "translate simple tables, leave complex ones on the
+    source page". There is no source page: a kept table is simply absent from
+    the rebuilt document. Accepting the value silently reinterpreted a stale
+    config as ``auto``, so a user who had set it got translated tables they had
+    asked to leave alone — a rejected value is the honest outcome.
+    """
+    import typing
+
+    from ubt.core.config import TableRenderMode
+
+    assert "overlay" not in typing.get_args(TableRenderMode)
+
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        UBTConfig_from_env(env={"UBT_TABLE_RENDER_MODE": "overlay"})
+
+
+def UBTConfig_from_env(*, env: dict[str, str]) -> object:
+    """Build a config with ``env`` applied, restoring the process env after."""
+    import os
+
+    from ubt.core.config import UBTConfig
+
+    saved = {k: os.environ.get(k) for k in env}
+    os.environ.update(env)
+    try:
+        return UBTConfig.from_env()
+    finally:
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def test_the_render_metadata_keys_have_a_writer() -> None:
+    """Every artifact metadata key must be written by something.
+
+    ``render_engine_effective`` and ``render_padding_pages`` were carried in
+    ``ARTIFACT_METADATA_KEYS`` after their writers were deleted with the overlay
+    engine — so the set advertised passthrough for keys the pipeline never
+    produces. This guard is cheap and catches the next one.
+    """
+    import subprocess
+
+    from ubt.core.ir.run_metadata import ARTIFACT_METADATA_KEYS
+
+    root = Path(__file__).resolve().parents[2]
+    for key in ARTIFACT_METADATA_KEYS:
+        result = subprocess.run(
+            ["grep", "-rl", f'"{key}"', str(root / "ubt")],
+            capture_output=True,
+            text=True,
+        )
+        writers = [
+            line
+            for line in result.stdout.splitlines()
+            if "__pycache__" not in line and not line.endswith("run_metadata.py")
+        ]
+        assert writers, f"{key} is declared but nothing writes it"

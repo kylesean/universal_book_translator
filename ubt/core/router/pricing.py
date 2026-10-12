@@ -77,6 +77,11 @@ def find_prices_file(custom_path: Path | str | None = None) -> Path | None:
             return p
         raise FileNotFoundError(f"Prices file not found: {custom_path}")
 
+    # A path set through ``UBTConfig.prices_file`` (a config file or a plain
+    # assignment) outranks the environment: it is the more specific statement.
+    if _CUSTOM_PRICES_FILE is not None and _CUSTOM_PRICES_FILE.is_file():
+        return _CUSTOM_PRICES_FILE
+
     env_path = os.environ.get("UBT_PRICES_FILE")
     if env_path:
         p = Path(env_path).expanduser().resolve()
@@ -271,6 +276,31 @@ _CUSTOM_PRICES: dict[str, tuple[float, float]] = {}
 _CUSTOM_CACHED_PRICES: dict[str, float] = {}
 _CUSTOM_BATCH_DISCOUNTS: dict[str, float] = {}
 _CUSTOM_FREE_ENDPOINTS: set[str] = set()
+
+#: A prices file named by configuration rather than by environment. The env var
+#: is read inside :func:`find_prices_file`; a ``UBTConfig`` field has no way to
+#: reach there, so ``bootstrap_runtime_environment`` registers it here. Without
+#: this the documented ``prices_file`` setting was silently ignored (measured:
+#: a config-file path left the model unpriced while ``UBT_PRICES_FILE`` priced
+#: it), which is the worst kind of knob — it reads as working.
+_CUSTOM_PRICES_FILE: Path | None = None
+
+
+def declare_custom_prices_file(path: Path | str | None) -> None:
+    """Declare the prices file to layer over the shipped table.
+
+    Called by ``UBTConfig.bootstrap_runtime_environment`` when the config names
+    one, so a config-file setting and ``UBT_PRICES_FILE`` behave the same. A
+    path that does not exist is ignored rather than raising: an unreadable
+    optional override falls back to the shipped table, which is what
+    :func:`find_prices_file` already does for a bad env value.
+    """
+    global _CUSTOM_PRICES_FILE
+    if path is None:
+        _CUSTOM_PRICES_FILE = None
+        return
+    candidate = Path(path).expanduser()
+    _CUSTOM_PRICES_FILE = candidate if candidate.is_file() else None
 
 
 def register_custom_model_pricing(

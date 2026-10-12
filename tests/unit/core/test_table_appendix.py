@@ -75,7 +75,8 @@ def test_write_table_appendix_auto_mode_complex_table(tmp_path: Path) -> None:
     assert "核心图表与数据矩阵对照附录" in md_content
     assert "test-table-job-456" in md_content
     assert "tbl_complex" in md_content
-    # Simple block was eligible for in-place overlay, so auto mode should exclude it from appendix
+    # A simple grid is rebuilt in the page, so it needs no appendix companion;
+    # ``auto`` only appends the complex ones.
     assert "tbl_simple" not in md_content
 
     from ubt.core.job_options import companion_path

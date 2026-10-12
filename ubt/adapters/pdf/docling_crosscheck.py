@@ -866,8 +866,8 @@ def cross_check_blocks_with_pdfium(
     3. Finds PDFium lines intersecting the block's bounding box.
     4. Computes the IoU between the block's bbox and the union of intersecting lines.
     5. If IoU < min_iou (or zero intersecting lines for substantial text), marks the
-       block with Confidence.UNKNOWN and skip_translate=True so it sinks to
-       PRESERVED_OPAQUE on Layer 0.
+       block with Confidence.UNKNOWN and skip_translate=True, so it ships as its
+       own source text instead of a translation.
     """
     path = Path(pdf_path)
     output: list[IRBlock] = []

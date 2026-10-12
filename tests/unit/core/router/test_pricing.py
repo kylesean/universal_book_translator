@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from ubt.core.router.pricing import (
+    find_prices_file,
     has_price_entry,
     price_is_known,
     resolve_batch_discount,
@@ -66,3 +69,52 @@ def test_price_is_known_reports_false_for_unpriced_cloud_models() -> None:
     )
     # Self-hosted / local endpoints are treated as free/known
     assert price_is_known("any-model", base_url="http://127.0.0.1:11434/v1")
+
+
+# --------------------------------------------------------------------------- #
+# The config's own prices file must reach the resolver
+# --------------------------------------------------------------------------- #
+
+
+def test_a_prices_file_set_in_config_is_used(tmp_path: Path) -> None:
+    """``UBTConfig.prices_file`` must behave like ``UBT_PRICES_FILE``.
+
+    The field's own docstring names the env var as its counterpart, but the
+    resolver only read the environment: a config-file path was silently ignored
+    and the model stayed unpriced (measured), while the env var priced it. A
+    documented knob that does nothing is worse than an absent one.
+    """
+    from ubt.core.config import UBTConfig
+    from ubt.core.router.pricing import declare_custom_prices_file
+
+    prices = tmp_path / "prices.toml"
+    prices.write_text(
+        '[prices."ubt-test-model-xyz"]\ninput = 1.0\noutput = 2.0\n', encoding="utf-8"
+    )
+
+    assert not has_price_entry("ubt-test-model-xyz"), "the name must start unknown"
+
+    config = UBTConfig(prices_file=prices)
+    config.bootstrap_runtime_environment()
+    try:
+        assert has_price_entry("ubt-test-model-xyz")
+        assert resolve_model_prices("ubt-test-model-xyz") == (1.0, 2.0)
+    finally:
+        # Module-level state: clear it so the test cannot leak into another.
+        declare_custom_prices_file(None)
+        from ubt.core.router import pricing
+
+        pricing._load_prices_cached.cache_clear()
+
+
+def test_a_missing_prices_file_falls_back_to_the_shipped_table() -> None:
+    """A bad path is ignored, not fatal — same as a bad ``UBT_PRICES_FILE``."""
+    from ubt.core.router.pricing import declare_custom_prices_file
+
+    declare_custom_prices_file("/nonexistent/definitely-not-here.toml")
+    try:
+        # Falls through to the search path rather than raising. There may be no
+        # user file at all, so only "does not raise" is asserted.
+        find_prices_file()
+    finally:
+        declare_custom_prices_file(None)

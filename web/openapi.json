@@ -293,7 +293,7 @@
           "System"
         ],
         "summary": "System Info",
-        "description": "The console's security-boundary panel (real host + allowed roots).\n\nReports the host this request reached (loopback vs exposed), whether the\nAPI-key gate is on, and the filesystem roots ``resolve_secure_path``\nactually enforces — so the panel shows the live policy, not a hardcoded\nsample.",
+        "description": "The console's security-boundary panel (real host + allowed roots).\n\nReports the host this request reached (loopback vs exposed), whether the\nAPI-key gate is on, and the filesystem roots ``resolve_secure_path``\nactually enforces \u2014 so the panel shows the live policy, not a hardcoded\nsample.",
         "operationId": "system_info_system_info_get",
         "parameters": [
           {
@@ -787,7 +787,7 @@
           "Jobs"
         ],
         "summary": "Resume Job",
-        "description": "Re-run a failed/cancelled job from its ledger checkpoints (PRD §4.2.4).\n\nThe pipeline resumes from the blocks still pending in the ledger, so no\nfinished segment is re-translated. Resume reuses the *original* request\n(kept on the in-memory record), which keeps the run-identity guard happy\n— a reconstructed request would silently drop knobs and could be refused\nas a different profile/engine. That makes this a same-session recovery\n(the network-drop case); a job whose record is gone after a restart must\nbe resubmitted instead.",
+        "description": "Re-run a failed/cancelled job from its ledger checkpoints (PRD \u00a74.2.4).\n\nThe pipeline resumes from the blocks still pending in the ledger, so no\nfinished segment is re-translated. Resume reuses the *original* request\n(kept on the in-memory record), which keeps the run-identity guard happy\n\u2014 a reconstructed request would silently drop knobs and could be refused\nas a different profile/engine. That makes this a same-session recovery\n(the network-drop case); a job whose record is gone after a restart must\nbe resubmitted instead.",
         "operationId": "resume_job_jobs__job_id__resume_post",
         "parameters": [
           {
@@ -876,7 +876,7 @@
           "Jobs"
         ],
         "summary": "Remove a finished job's ledger and deliverables from the console",
-        "description": "Delete one job's history: the db_dir ledger plus its deliverable dir.\n\nA running job must reach a terminal status first — deletion is history\nmanagement, not a stop button. A non-terminal queue-mode record is\nlikewise refused: the durable queue owns its rows (``prune_terminal``\nis their lifecycle) and removing the ledger underneath a worker would\ndesynchronize its view.",
+        "description": "Delete one job's history: the db_dir ledger plus its deliverable dir.\n\nA running job must reach a terminal status first \u2014 deletion is history\nmanagement, not a stop button. A non-terminal queue-mode record is\nlikewise refused: the durable queue owns its rows (``prune_terminal``\nis their lifecycle) and removing the ledger underneath a worker would\ndesynchronize its view.",
         "operationId": "delete_job_jobs__job_id__delete",
         "parameters": [
           {
@@ -1057,7 +1057,7 @@
           "Jobs"
         ],
         "summary": "Stream Progress",
-        "description": "SSE: ``event: progress`` snapshots until one ``event: <status>`` terminal frame.\n\nBoth deployment modes emit that one contract (see ``_progress_frame`` /\n``_terminal_frame``); the payload never depends on how the server was\nstarted. Every frame carries an ``id:`` cursor, so a client reconnecting\nwith ``Last-Event-ID`` (header or ``?last_event_id=``) receives the\nframes it missed before the live stream resumes (PRD §9.2).",
+        "description": "SSE: ``event: progress`` snapshots until one ``event: <status>`` terminal frame.\n\nBoth deployment modes emit that one contract (see ``_progress_frame`` /\n``_terminal_frame``); the payload never depends on how the server was\nstarted. Every frame carries an ``id:`` cursor, so a client reconnecting\nwith ``Last-Event-ID`` (header or ``?last_event_id=``) receives the\nframes it missed before the live stream resumes (PRD \u00a79.2).",
         "operationId": "stream_progress_jobs__job_id__stream_get",
         "parameters": [
           {
@@ -1930,7 +1930,7 @@
           "Jobs"
         ],
         "summary": "Segment Terms",
-        "description": "Terminology findings for one block, with the cascade size each implies.\n\nEach finding carries the offending ``surface``, the ``expected``\nrendering, and how many *other* blocks in the job carry the same\nerror — ``cascade_all`` for the whole book, ``cascade_subsequent`` for\nblocks at or after this one. This is what the \"fix all N\" checkbox\ncounts.",
+        "description": "Terminology findings for one block, with the cascade size each implies.\n\nEach finding carries the offending ``surface``, the ``expected``\nrendering, and how many *other* blocks in the job carry the same\nerror \u2014 ``cascade_all`` for the whole book, ``cascade_subsequent`` for\nblocks at or after this one. This is what the \"fix all N\" checkbox\ncounts.",
         "operationId": "segment_terms_jobs__job_id__segments__block_id__terms_get",
         "parameters": [
           {
@@ -2028,7 +2028,7 @@
           "Jobs"
         ],
         "summary": "Propagate Term",
-        "description": "Replace one offending term surface across the job (PRD §5.2.2).\n\nRewrites the selected block and, per ``scope``, every matching block;\neach rewritten block is promoted to a human revision and its pair fed\nback to the shared TM, exactly like a manual edit.",
+        "description": "Replace one offending term surface across the job (PRD \u00a75.2.2).\n\nRewrites the selected block and, per ``scope``, every matching block;\neach rewritten block is promoted to a human revision and its pair fed\nback to the shared TM, exactly like a manual edit.",
         "operationId": "propagate_term_jobs__job_id__term_propagation_post",
         "parameters": [
           {
@@ -2701,7 +2701,7 @@
           "Assets"
         ],
         "summary": "Get Glossary Conflicts",
-        "description": "Sources configured with more than one target rendering (PRD §4.4.2).",
+        "description": "Sources configured with more than one target rendering (PRD \u00a74.4.2).",
         "operationId": "get_glossary_conflicts_assets_glossary_conflicts_get",
         "parameters": [
           {
@@ -4104,23 +4104,6 @@
             ],
             "title": "Emit Both",
             "description": "Emit both the primary and complementary dual_mode deliverables (e.g. mono and bilingual)"
-          },
-          "cover_mode": {
-            "anyOf": [
-              {
-                "type": "string",
-                "enum": [
-                  "auto",
-                  "always",
-                  "never"
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cover Mode",
-            "description": "Cover handling (auto, always, never)"
           },
           "ocr_mode": {
             "anyOf": [

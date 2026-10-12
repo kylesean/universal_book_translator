@@ -319,7 +319,7 @@ INLINE_SYMBOLS: dict[str, str] = _merged(
     _SHARED, INLINE_VALUE_OVERRIDES, _DISPLAY_ONLY, _INLINE_ONLY
 )
 
-#: Every LaTeX command the inline overlay converter recognises. The QE gate
+#: Every LaTeX command the Typst math transpiler recognises. The QE gate
 #: (``ubt.core.validators.math_guard.RENDERABLE_LATEX_COMMANDS``) imports this,
 #: so the gate and the renderer cannot disagree about what compiles.
 INLINE_RENDERABLE_COMMANDS: frozenset[str] = frozenset(INLINE_SYMBOLS) | SPECIAL_LATEX_COMMANDS

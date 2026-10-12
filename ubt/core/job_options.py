@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import Any, Literal, get_args
 
 from ubt.core.config import (
-    CoverMode,
     DualMode,
     UBTConfig,
     env_var_names,
@@ -37,7 +36,6 @@ from ubt.core.presets import PRESET_ENGINE_FIELDS, Preset, resolve_engine_params
 #: surfaces no longer offer it.
 _ENUM_REQUEST_FIELDS: dict[str, tuple[str, ...]] = {
     "dual_mode": get_args(DualMode),
-    "cover_mode": get_args(CoverMode),
     "preset": tuple(p.value for p in Preset),
 }
 

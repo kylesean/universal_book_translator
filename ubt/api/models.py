@@ -6,7 +6,6 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ubt.core.config import (
-    CoverMode,
     DualMode,
     OcrMode,
     PdfEngine,
@@ -158,9 +157,6 @@ class JobSubmitRequest(BaseModel):
     emit_both: bool | None = Field(
         default=None,
         description="Emit both the primary and complementary dual_mode deliverables (e.g. mono and bilingual)",
-    )
-    cover_mode: CoverMode | None = Field(
-        default=None, description="Cover handling (auto, always, never)"
     )
     # Formula pipeline.
     # OCR engine selection. ``ocr_endpoint`` / ``ocr_api_key`` stay operator-only.

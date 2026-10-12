@@ -42,8 +42,10 @@ ARTIFACT_METADATA_KEYS: Final[frozenset[str]] = frozenset(
         "is_page_slice_epub",
         "page_kinds",
         # Render telemetry, consumed by the quality report and the visual gate.
-        "render_engine_effective",
-        "render_padding_pages",
+        # ``render_engine_effective`` and ``render_padding_pages`` were deleted
+        # with the overlay engine: nothing writes either any more (the former
+        # named a renderer choice that no longer exists; the latter counted the
+        # flyleaf pages the ``facing_spread`` page-zip used to insert).
         "typst_version",
     }
 )

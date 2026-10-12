@@ -1,4 +1,4 @@
-"""Unit tests for overlay math fallback and balanced frac/sqrt compilation."""
+"""Math fallback: balanced frac/sqrt must compile, degrades must stay readable."""
 
 from __future__ import annotations
 

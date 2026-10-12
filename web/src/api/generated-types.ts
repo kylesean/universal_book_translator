@@ -1163,11 +1163,6 @@ export interface components {
              */
             emit_both?: boolean | null;
             /**
-             * Cover Mode
-             * @description Cover handling (auto, always, never)
-             */
-            cover_mode?: ("auto" | "always" | "never") | null;
-            /**
              * Ocr Mode
              * @description OCR engine (auto, sidecar, cloud, vlm, rapidocr, off)
              */

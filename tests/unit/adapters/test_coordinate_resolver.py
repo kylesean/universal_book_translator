@@ -4,7 +4,7 @@ A per-box ``auto`` guess cannot tell a normalized-1000 box that fits inside an
 A4 page from a native PDF-point box, so ``infer_coord_system`` decides once per
 page from the boxes' extremes. These tests pin that decision and the resolved
 geometry it feeds, because a wrong choice scales only some boxes and silently
-misplaces the translation overlay.
+misplaces the extracted block on the page.
 """
 
 from __future__ import annotations

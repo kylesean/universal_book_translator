@@ -30,7 +30,6 @@ _MODE_CLUSTER = (
     "effective_dual_mode",
     "dual_mode_downgraded",
     "translate_chrome",
-    "cover_mode",
 )
 
 #: The purely-advisory outputs that moved to the plan in the earlier cut.

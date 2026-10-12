@@ -38,7 +38,6 @@ class RenderPlan:
     effective_dual_mode: str | None = None
     dual_mode_downgraded: str | None = None
     translate_chrome: bool | None = None
-    cover_mode: str | None = None
     bilingual_advisory: dict[str, Any] | None = None
     emit_secondary_mode: str | None = None
 

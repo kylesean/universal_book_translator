@@ -1,7 +1,8 @@
-"""Regression: the content-graph asset policy for the single overlay engine.
+"""Regression: the content-graph asset policy for the single publish renderer.
 
-Every PDF composes onto the source page through the unified LayerCompositor, so
-a non-text block must be reported PRESERVED_OPAQUE rather than RECONSTRUCTED.
+The document is rebuilt from the IR by Typst, so a non-text block the renderer
+placed or rebuilt is reported PRESERVED_OPAQUE rather than RECONSTRUCTED — the
+latter demands a verified round trip, which nothing claims.
 """
 
 from __future__ import annotations

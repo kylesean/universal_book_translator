@@ -171,11 +171,11 @@ def test_a_flush_left_heading_is_not_marked_centered(monkeypatch: pytest.MonkeyP
 
 
 def test_a_multi_line_heading_records_its_line_boxes(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The title's own two line boxes become the overlay's flow chain.
+    """The title's own two line boxes are recorded on the block's span.
 
-    The compositor flows the translation across the source's line structure,
-    so the title breaks where the source breaks (at the subtitle colon)
-    instead of at an arbitrary width-fill point.
+    The extractor keeps the source's line structure, so a later stage can see
+    that the title breaks at the subtitle colon rather than at an arbitrary
+    width-fill point.
     """
 
     def fake_extract_lines(_path: Path, _page: int) -> tuple[list[LineBox], tuple[float, float]]:
