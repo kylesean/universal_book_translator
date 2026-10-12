@@ -607,3 +607,67 @@ def test_parse_markdown_table_can_return_raw_cells() -> None:
     assert escaped is not None and raw is not None
     assert escaped[1][0][0] == "O(\\$n\\$)"
     assert raw[1][0][0] == "O($n$)"
+
+
+# --------------------------------------------------------------------------- #
+# A formula that annotates itself in Chinese is still math
+# --------------------------------------------------------------------------- #
+
+
+def test_a_formula_with_a_chinese_text_annotation_stays_math() -> None:
+    r"""``$\mathbf{A} : ( D , N ) \text{ 参数 }$`` is math, not prose.
+
+    Rejecting every CJK-bearing span (the fix for the unbalanced ``$`` case)
+    was too broad: a translated document routinely annotates formula parts in
+    Chinese. Measured on mamba ``pdf_main#b0086``, the whole formula was escaped
+    as prose and shipped as literal backslashes
+    (``\$\\mathbf\{A\} \text\{ )← 参数 \}\$``).
+    """
+    out = render_prose(r"$\mathbf{A} : ( D , N ) \text{ )← 参数 } \vdash N \times N$", ())
+
+    # It transpiled (``vdash`` is the converted ``\vdash``), which is the proof
+    # it was treated as math; escaped prose would carry the backslashes.
+    assert "vdash" in out, out
+    assert "\\mathbf" not in out and "\\text" not in out, out
+    assert "\\{" not in out, out
+
+
+def test_a_formula_made_only_of_chinese_words_is_prose() -> None:
+    # The original repair must still hold: prose wearing delimiters is prose.
+    out = render_prose("$ 是一个序列，其中 $", ())
+    assert "$" not in out.replace("\\$", ""), out
+
+
+def test_a_punctuation_only_span_is_not_math() -> None:
+    r"""A stray ``$`` leaves ``$、$`` behind; treating it as math misaligns the rest.
+
+    Measured on mamba ``pdf_main#b0086``: the model wrote ``$\Delta$、$$、$C$``
+    (three delimiters where two were meant), and the punctuation-only ``$、$``
+    being accepted as math made ``$ 和矩阵 $`` a span, so the surrounding prose
+    was rendered as a formula.
+    """
+    for span in ("$、$", "$, $", "$，$"):
+        out = render_prose(span, ())
+        assert "$" not in out.replace("\\$", ""), f"{span} entered math mode: {out!r}"
+
+
+def test_a_run_with_unbalanced_delimiters_is_not_wrapped() -> None:
+    r"""A styled run whose text holds an odd number of ``$`` must lose its style.
+
+    ``#strong[…]`` wraps the slice, so one delimiter would fall outside the
+    wrapper and its partner inside and Typst reads an unbalanced span. Measured
+    on mamba ``pdf_main#b0086``: the model's bold marker began mid-formula with
+    five ``$``, and the render emitted ``\$#strong[\$`` — the formula as literal
+    backslashes.
+    """
+    text = r"用于 $Delta$、$\$、$C$ 和矩阵 $\llbracket A \rrbracket$ 的投影"
+    bad = InlineRun(text=r"$、$C$ 和矩阵 $\llbracket A \rrbracket$ 的投影", bold=True)
+    out = render_prose(text, [bad])
+
+    assert "#strong[" not in out, out
+
+
+def test_a_run_with_balanced_delimiters_is_still_wrapped() -> None:
+    # The guard must be narrow: an ordinary styled run keeps its markup.
+    out = render_prose("粗体结尾", (InlineRun(text="粗体结尾", bold=True),))
+    assert "#strong[粗体结尾]" in out, out

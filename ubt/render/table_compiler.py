@@ -23,6 +23,49 @@ class TableComplexity:
     cols: int
 
 
+def _split_row(line: str) -> list[str]:
+    r"""Split one Markdown table row on its real field separators.
+
+    A ``|`` is content — not a separator — when it is escaped (``\|``, the LaTeX
+    double-bar norm ``\left\| x \right\|``) or when it sits inside inline math
+    (``$a | b$``). A bare ``|`` elsewhere separates fields. The leading and
+    trailing boundary ``|`` of the row are dropped, as before.
+
+    Splitting naively on every ``|`` cut ``$\left\| \mu - \nu \right\|$`` into
+    three cells, so the renderer emitted ``[\$\\left\\], [\\tilde{...}], [\$]``
+    — LaTeX residue split across cells and a table that no longer compiles
+    (measured on ``ddpm`` ``pdf_main#b0053``).
+    """
+    text = line.strip()
+    cells: list[str] = []
+    current: list[str] = []
+    in_math = False
+    index = 0
+    while index < len(text):
+        ch = text[index]
+        if ch == "\\" and index + 1 < len(text):
+            # Keep the escape and its target together; `\|` is a literal bar.
+            current.append(text[index : index + 2])
+            index += 2
+            continue
+        if ch == "$":
+            in_math = not in_math
+        elif ch == "|" and not in_math:
+            cells.append("".join(current))
+            current = []
+            index += 1
+            continue
+        current.append(ch)
+        index += 1
+    cells.append("".join(current))
+    # Drop the boundary fields the surrounding `|` produced.
+    if cells and not cells[0].strip():
+        cells = cells[1:]
+    if cells and not cells[-1].strip():
+        cells = cells[:-1]
+    return cells
+
+
 def parse_markdown_table(
     markup: str, *, escape: bool = True
 ) -> tuple[list[str], list[list[str]]] | None:
@@ -47,7 +90,7 @@ def parse_markdown_table(
     header_line = table_lines[0]
     sep_idx = -1
     for idx in range(1, min(3, len(table_lines))):
-        cells = [c.strip() for c in table_lines[idx].split("|")[1:-1]]
+        cells = [c.strip() for c in _split_row(table_lines[idx])]
         if cells and all(re.match(r"^:?-+:?$", c) for c in cells):
             sep_idx = idx
             break
@@ -60,14 +103,14 @@ def parse_markdown_table(
         stripped = value.strip()
         return typst_escape(stripped) if escape else stripped
 
-    headers = [_cell(c) for c in header_line.split("|")[1:-1]]
+    headers = [_cell(c) for c in _split_row(header_line)]
     cols = len(headers)
     if cols == 0:
         return None
 
     rows: list[list[str]] = []
     for line in table_lines[sep_idx + 1 :]:
-        cells = [_cell(c) for c in line.split("|")[1:-1]]
+        cells = [_cell(c) for c in _split_row(line)]
         if len(cells) < cols:
             cells.extend([""] * (cols - len(cells)))
         elif len(cells) > cols:

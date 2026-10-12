@@ -8,6 +8,7 @@ import pytest
 
 from ubt.render.table_compiler import (
     TableComplexity,
+    _split_row,
     markdown_table_to_typst,
     parse_markdown_table,
     probe_table_complexity,
@@ -142,3 +143,53 @@ def test_render_table_appendix_typst() -> None:
     assert "原书第 15 页: Table 4: 性能测试" in doc
     assert "BLEU" in doc
     assert "延迟" in doc
+
+
+# --------------------------------------------------------------------------- #
+# An escaped or in-math pipe is cell content, not a field separator
+# --------------------------------------------------------------------------- #
+
+
+def test_an_escaped_pipe_inside_math_does_not_split_the_cell() -> None:
+    r"""``$\left\| x \right\|$`` is one cell, not three.
+
+    Measured on ``ddpm`` ``pdf_main#b0053``: the norm bars around
+    ``\tilde{\mu}`` are written ``\|``, and splitting on every ``|`` cut the
+    formula into ``[\$\\left\\]``, ``[\\tilde{...}]``, ``[\$]`` — LaTeX
+    residue split across cells, which no longer compiles as math.
+    """
+    line = r"| PixelIQN [43] | 5.29 | $\left\| \tilde{\mu} \right\|$ |"
+    cells = [c.strip() for c in _split_row(line)]
+
+    assert cells == ["PixelIQN [43]", "5.29", r"$\left\| \tilde{\mu} \right\|$"]
+
+
+def test_a_pipe_inside_a_math_span_is_not_a_separator() -> None:
+    cells = [c.strip() for c in _split_row("| x | $a | b$ | y |")]
+    assert cells == ["x", "$a | b$", "y"]
+
+
+def test_a_plain_escaped_pipe_stays_in_its_cell() -> None:
+    cells = [c.strip() for c in _split_row(r"| a\|b | c |")]
+    assert cells == [r"a\|b", "c"]
+
+
+def test_ordinary_rows_are_unaffected() -> None:
+    assert [c.strip() for c in _split_row("| a | b | c |")] == ["a", "b", "c"]
+    assert [c.strip() for c in _split_row("| $a$ | $b$ |")] == ["$a$", "$b$"]
+
+
+def test_the_rendered_cell_keeps_the_norm_as_math() -> None:
+    """The end-to-end shape: one cell containing a transpiled formula."""
+    from ubt.render.typst.document_renderer import render_table
+
+    src = (
+        "| Model | IS | FID | d |\n|---|---|---|---|\n"
+        r"| PixelIQN [43] | 5.29 | 49.46 | $\left\| \tilde{\mu} \right\|$ |"
+    )
+    out = render_table(src)
+
+    assert out.count("[") and "#table(" in out
+    # One math span, not three fragments.
+    assert out.count("$") == 2, out
+    assert "\\left" not in out and "\\tilde" not in out, out

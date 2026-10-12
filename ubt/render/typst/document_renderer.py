@@ -52,9 +52,21 @@ if TYPE_CHECKING:
 #: A match is only *candidate* math; ``_is_math_span`` decides.
 _MATH_SPAN_RE = re.compile(r"(\$\$[\s\S]*?\$\$|\$[^$\n]+\$)")
 
-#: CJK ideographs and kana/hangul. Real math does not contain them; a ``$...$``
-#: span that does is prose wearing delimiters.
+#: CJK ideographs and kana/hangul.
 _CJK_RE = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7a3]")
+
+#: Signals that a span is *structure*, not prose: a LaTeX control sequence, a
+#: math operator or relation, or a subscript/superscript. A formula that
+#: annotates itself in Chinese (``$\mathbf{A} : ( D , N ) \text{ 参数 }$``) is
+#: still math; a span made of nothing but Chinese words is not.
+_MATH_STRUCTURE_RE = re.compile(r"\\[A-Za-z]+|[_^]|[=+<>≤≥×÷∑∏∈∀∃→←↔±∓⋅·]")
+
+#: A span holding only punctuation is not a formula. A model that emits a stray
+#: ``$`` (meaning ``$B$`` but writing ``$$``) leaves a ``$、$`` pair behind, and
+#: accepting it as math shifts every later delimiter pairing — measured on mamba
+#: ``pdf_main#b0086``, where ``$\Delta$、$$、$C$`` made ``$ 和矩阵 $`` a math
+#: span and the surrounding prose was rendered as a formula.
+_PUNCTUATION_ONLY_RE = re.compile(r"^[^\w\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]+$")
 
 
 def _is_math_span(span: str) -> bool:
@@ -69,11 +81,24 @@ def _is_math_span(span: str) -> bool:
     Rejecting such a span is enough to repair it: the delimiters are then not
     treated as math, so the prose walk escapes them to literal ``\\$`` and the
     remaining formulas still pair correctly.
+
+    CJK alone is **not** the test, though it is a strong hint. A formula that
+    annotates its parts in Chinese is common in a translated document
+    (``$\\mathbf{A} : ( D , N ) \\text{ 参数 }$``, ``$x = \\text{总令牌数}$``),
+    and rejecting it escaped the whole formula as prose — measured on mamba,
+    where ``\\$\\mathbf\\{A\\}\\} \\text\\{ )← 参数 \\}\\$`` shipped as literal
+    backslashes. A span is prose only when it has CJK and **no** math
+    structure, and a span of pure punctuation is never math at all (it is a
+    stray delimiter, and treating it as math misaligns every later pair).
     """
     inner = span.strip().strip("$").strip()
     if not inner:
         return False
-    return _CJK_RE.search(inner) is None
+    if _PUNCTUATION_ONLY_RE.match(inner):
+        return False
+    if _CJK_RE.search(inner) is None:
+        return True
+    return _MATH_STRUCTURE_RE.search(inner) is not None
 
 
 def _math_spans(text: str) -> list[tuple[int, int]]:
@@ -156,6 +181,17 @@ def render_prose(text: str, runs: Sequence[InlineRun] = ()) -> str:
                 span[0] < end and start < span[1] and not (span[0] <= start and end <= span[1])
                 for start, end in math_spans
             )
+            # A run whose *own* text has an odd number of ``$`` cannot be
+            # wrapped: ``#strong[…]`` is emitted around the slice, so one
+            # delimiter would sit outside the wrapper and its partner inside,
+            # and Typst reads an unbalanced span. Measured on mamba
+            # ``pdf_main#b0086``, where the model's bold marker began
+            # mid-formula with the text ``$、$C$ 和矩阵
+            # $\llbracket A \rrbracket$ 的投影）…`` (five delimiters) and the
+            # render emitted ``\$#strong[\$`` — the formula as literal
+            # backslashes. Dropping the style is the honest outcome: the run's
+            # boundaries are not trustworthy when they fall inside a formula.
+            and not _unbalanced_delimiters(text[span[0] : span[1]])
         ]
     if not spans:
         return _render_math_and_prose(text)
@@ -176,6 +212,16 @@ def render_prose(text: str, runs: Sequence[InlineRun] = ()) -> str:
             rendered = _wrap_style(rendered, style[2], style[3], style[4], style[5])
         out.append(rendered)
     return _break_run_call_chains(out)
+
+
+def _unbalanced_delimiters(text: str) -> bool:
+    """Whether a run's text has an odd number of ``$`` delimiters.
+
+    Such a run cannot be wrapped in ``#strong[…]``/``#emph[…]`` without moving a
+    math delimiter across the wrapper boundary, which Typst reads as an
+    unbalanced span. See the filter in :func:`render_prose`.
+    """
+    return text.count("$") % 2 == 1
 
 
 def _break_run_call_chains(segments: Sequence[str]) -> str:
