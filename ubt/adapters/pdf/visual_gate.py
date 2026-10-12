@@ -64,18 +64,18 @@ BANNED_NON_BREAKING_HYPHEN = "\u2011"
 # ``visual_gate_crashed`` joins them: a gate that died mid-run leaves the
 # artifact's visual state unknown, and "unknown" must not read as a pass.
 _ALWAYS_FAIL_CLOSED_CODES = frozenset({"target_language_absent", "visual_gate_crashed"})
-# Delivery-breaking parity MAJORS. The geometry ones only fire on
-# geometry-preserving renders (artifact_parity gates them on
-# keeps_source_geometry), so a change here is not "different layout by
-# design" but a broken artifact: rigid must keep the page count, and losing
-# or duplicating image XObjects under the overlay means assets were eaten.
-# ``target_language_sparse`` (>=92% of the artifact is not the commissioned
-# language) is unshippable on the same reasoning. A gate reporting
-# passed=False on exactly these codes must not ship the artifact.
+# Delivery-breaking parity MAJOR. ``target_language_sparse`` (>=92% of the
+# artifact is not the commissioned language) is unshippable: there is nothing
+# for a reader to consume. A gate reporting passed=False on exactly these codes
+# must not ship the artifact.
+#
+# ``page_count_changed`` / ``image_count_changed`` used to sit here too. They
+# only fired on a render that promised to preserve the source page, which the
+# reflow renderer never does — it rebuilds every page and re-stages every
+# asset — so they reported a defect on every correct run and refused export.
+# They were deleted with the overlay engine.
 _ALWAYS_FAIL_CLOSED_MAJORS = frozenset(
     {
-        "page_count_changed",
-        "image_count_changed",
         "target_language_sparse",
     }
 )
@@ -623,10 +623,9 @@ def blocking_gate_tripped(
     # unshippable on the same reasoning as the unreadable-PDF case,
     # regardless of ``enabled`` or the
     # page window — there is nothing for a reader to consume. The parity
-    # majors in _ALWAYS_FAIL_CLOSED_MAJORS join that reasoning: they only
-    # fire when the render promises preserved geometry/assets and the
-    # measurement says otherwise, which is a broken artifact, not a style
-    # preference.
+    # major in _ALWAYS_FAIL_CLOSED_MAJORS joins that reasoning: it only fires
+    # when the delivered text layer is almost entirely not the commissioned
+    # language, which is a broken artifact, not a style preference.
     always_fail = [
         f
         for f in findings
@@ -761,16 +760,8 @@ async def run_visual_gate(
     max_vlm_pages: int = 3,
     vlm_judge: VlmJudgeFn | None = None,
     dpi: int = DEFAULT_DPI,
-    facing_spread: bool = False,
-    padding_pages: Sequence[int] = (),
 ) -> VisualGateResult:
-    """Run T0+T1 always, pixel+T2 only when tools/judge are available.
-
-    ``padding_pages`` names the 1-based pages the bilingual alternator filled
-    with intentional blanks (facing flyleaf plus page-count padding). They are
-    exempt from the blank-page checks — the gate cannot tell a deliberate blank
-    from a failed render, so the renderer has to declare them.
-    """
+    """Run T0+T1 always, pixel+T2 only when tools/judge are available."""
     if not pdf_path.exists() or pdf_path.suffix.lower() != ".pdf":
         return VisualGateResult(passed=True, skipped_reason="not a rendered pdf")
     total = pdf_page_count(pdf_path)
@@ -792,13 +783,9 @@ async def run_visual_gate(
     findings: list[VisualFinding] = []
     if typ_text is not None:
         findings.extend(scan_typ_source(typ_text))
-    # Intentional blanks: the facing flyleaf plus every page the alternator
-    # padded to square up unequal page counts. The gate cannot tell a
-    # deliberate blank from a failed render, so the renderer declares them and
-    # the blank-page checks skip them.
-    exempt_blank_pages = set(padding_pages)
-    if facing_spread:
-        exempt_blank_pages.add(1)
+    # A blank page is a defect: the publication renderer emits every block it
+    # is given, so an empty page means content was dropped, not padded.
+    exempt_blank_pages: set[int] = set()
     # blank_page_candidates extracts every page's text in-process — CPU
     # bound; keep it off the loop so concurrent SSE streams and lease
     # renewals are never frozen.

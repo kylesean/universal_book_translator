@@ -1,0 +1,153 @@
+"""The LaTeX → Typst math transpiler (RFC-2026-02 §5).
+
+The transpiler is the one component the semantic reflow path cannot route
+around: every display formula goes through it, and a failure is visible to the
+reader as a literal ``\\frac`` on the page. These tests pin the three defects
+found by measuring the arXiv 2101.03961 reference run, where the transpiler
+returned ``None`` for **6 of 7** display formulas:
+
+1. Docling emits spaced LaTeX (``\\frac { a } { b }``). Every pattern in the
+   module requires the brace adjacent, so the whole transpiler failed closed.
+   This was the single root cause of 15 failures in that one paper.
+2. ``\\arg`` (and friends) are absent from the symbol table, and the
+   unknown-command guard fails the *entire formula* closed over one name.
+3. ``\\text{tokens per batch}`` was split into ``#"tokens" #"per" #"batch"``.
+   Harmless in display position, but in a script position Typst renders
+   ``A_(#"i" #"j")`` as ``A_i j`` with a space, not ``A_ij``.
+
+Each test names the paper block it came from so a future failure can be traced
+back to the source.
+"""
+
+from __future__ import annotations
+
+import re
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from ubt.render.typst.math_transpiler import typstify_math, typstify_math_span
+
+pytestmark = pytest.mark.fast
+
+#: The seven display formulas of arXiv 2101.03961 (Switch Transformers), exactly
+#: as Docling emitted them — spaced commands and all.
+SWITCH_TRANSFORMER_FORMULAS = [
+    r"p _ { i } ( x ) = \frac { e ^ { h ( x ) _ { i } } } { \sum _ { j } ^ { N } e ^ { h ( x ) _ { j } } } .",
+    r"y = \sum _ { i \in \mathcal { T } } p _ { i } ( x ) E _ { i } ( x ) .",
+    r"\exp { \, \cap c a p a c i t y } = \left ( \frac { \, \text {tokens per batch} } { \, \text {number of experts} } \right ) \times \, \text {capacity factor} .",
+    r"\text {loss} = \alpha \cdot N \cdot \sum _ { i = 1 } ^ { N } f _ { i } \cdot P _ { i }",
+    r"f _ { i } = \frac { 1 } { T } \sum _ { x \in \mathcal { B } } \mathbb { 1 } \{ \arg \max p ( x ) = i \} \\ \text {on of the router probability allocated for expert } i , \, 2",
+    r"P _ { i } = \frac { 1 } { T } \sum _ { x \in \mathcal { B } } p _ { i } ( x ) .",
+    r"\ e i n s u m ( [ n , B / n , d _ { m o d e l } ] , [ n , B / n , E , C ] , \text {dimension} = [ B / n ] )",
+]
+
+
+@pytest.mark.parametrize("latex", SWITCH_TRANSFORMER_FORMULAS)
+def test_every_reference_formula_converts(latex: str) -> None:
+    """All 7 convert; before the fixes only the 1 command-free formula did."""
+    result = typstify_math(latex)
+    assert result is not None, f"transpiler returned None for {latex[:60]!r}"
+
+
+@pytest.mark.parametrize("latex", SWITCH_TRANSFORMER_FORMULAS)
+def test_no_latex_survives_the_conversion(latex: str) -> None:
+    """No backslash command may reach the page as literal text."""
+    result = typstify_math(latex)
+    assert result is not None
+    # A trailing `\\` is a legitimate Typst line break inside math; a `\cmd`
+    # or an escaped brace is not.
+    assert not re.search(r"\\[A-Za-z]", result), f"LaTeX command survived: {result!r}"
+
+
+def test_docling_spaced_commands_are_normalized() -> None:
+    """`\\frac { a } { b }` — the root cause of 15 failures in one paper."""
+    assert typstify_math(r"\frac { a } { b }") == "frac(a, b)"
+    assert typstify_math(r"\mathbb { R }") == "bb(R)"
+    assert typstify_math(r"\mathcal { T }") == "cal(T)"
+
+
+def test_a_single_unknown_operator_does_not_kill_the_formula() -> None:
+    """`\\arg` alone cost a whole display formula before the operator rescue."""
+    result = typstify_math(r"\arg \max p ( x )")
+    assert result is not None
+    assert "arg" in result
+    assert "\\arg" not in result
+
+
+def test_operatorname_keeps_its_argument_as_a_name() -> None:
+    r"""`\operatorname{rank}` must be quoted: bare ``rank`` is an unknown variable.
+
+    Verified against the compiler — ``$ rank ( A ) $`` fails with "unknown
+    variable: rank", while ``$ #"rank" ( A ) $`` renders the upright name.
+    """
+    assert typstify_math(r"\operatorname{rank} ( A )") == '#"rank" ( A )'
+
+
+def test_spacing_hints_are_dropped() -> None:
+    """`\\limits`/`\\displaystyle` carry no glyph."""
+    with_limits = typstify_math(r"\sum \limits _ { i }")
+    with_displaystyle = typstify_math(r"\displaystyle x")
+    assert with_limits is not None and "limits" not in with_limits
+    assert with_displaystyle is not None and "displaystyle" not in with_displaystyle
+
+
+def test_mathrm_still_produces_an_upright_label() -> None:
+    """The operator rescue must NOT swallow `\\mathrm` (a real regression)."""
+    assert typstify_math(r"\mathrm{差值}") == '#"差值"'
+    assert typstify_math(r"\text{总和} + \mathrm{差值}") == '#"总和" + #"差值"'
+
+
+def test_text_with_spaces_becomes_one_string() -> None:
+    """`\\text{tokens per batch}` is one label, not three adjacent strings."""
+    assert typstify_math(r"\text{tokens per batch}") == '"tokens per batch"'
+
+
+def test_a_multiword_text_in_a_subscript_stays_one_string() -> None:
+    """In a script position the split form renders with a spurious space.
+
+    Typst typesets ``A_(#"i" #"j")`` as ``A_i j`` but ``A_#"ij"`` as ``A_ij``,
+    so the label must survive as a single string inside a script group.
+    """
+    result = typstify_math(r"I_{\text{off}}")
+    assert result == 'I_#"off"'
+    assert result.count('"') == 2
+
+
+def test_span_form_unwraps_the_delimiters() -> None:
+    assert typstify_math_span("$x^2$") == "x^2"
+    assert typstify_math_span(r"\(x^2\)") == "x^2"
+    assert typstify_math_span(r"\[x^2\]") == "x^2"
+    assert typstify_math_span("$$x^2$$") == "x^2"
+
+
+def test_a_bare_number_is_not_math() -> None:
+    """`$5` is currency, not a formula."""
+    assert typstify_math_span("$5$") is None
+
+
+@pytest.mark.parametrize("latex", SWITCH_TRANSFORMER_FORMULAS)
+def test_the_output_actually_compiles(latex: str, tmp_path: Path) -> None:
+    """The end-to-end contract: Typst accepts every converted formula.
+
+    Skipped when the compiler is absent, so the suite stays runnable without
+    the toolchain — but a present compiler must accept all seven.
+    """
+    typst = "/home/kyle/.cargo/bin/typst"
+    import shutil
+
+    binary = typst if shutil.which(typst) else shutil.which("typst")
+    if binary is None:
+        pytest.skip("typst compiler not installed")
+
+    body = typstify_math(latex)
+    assert body is not None
+    source = tmp_path / "f.typ"
+    source.write_text(f"$ {body} $\n", encoding="utf-8")
+    proc = subprocess.run(
+        [binary, "compile", str(source), str(tmp_path / "f.pdf")],
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, f"typst rejected the formula:\n{proc.stderr}"

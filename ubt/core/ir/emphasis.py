@@ -24,10 +24,14 @@ from ubt.core.ir.models import InlineRun
 BOLD_OPEN = "⟦B⟧"
 BOLD_CLOSE = "⟦/B⟧"
 
-#: Tolerant marker match: spacing and case inside the brackets are accepted so
-#: a model that writes ``⟦ B ⟧`` or ``⟦/b⟧`` is still understood. The ``⟦⟧``
-#: delimiters make a false positive on ordinary text effectively impossible.
-_MARKER_RE = re.compile(r"⟦\s*(/)?\s*[Bb]\s*⟧")
+#: Tolerant marker match. A model reading the sentinels as mathematical brackets
+#: routinely transcribes ``⟦B⟧`` into LaTeX (``\llbracket B \rrbracket``), and
+#: ``⟦/B⟧`` into ``\llbracket /B \rrbracket`` or ``\llbracket / B \rrbracket``.
+#: Those are the *same* marker: leaving them in the text put a stray ``\llbracket``
+#: and a bare ``/`` inside a math span, and Typst failed with ``unknown variable:
+#: lbracket`` (mamba ``pdf_main#b0426``) — losing the document. Spacing and case
+#: inside the brackets are accepted too, so ``⟦ B ⟧`` and ``⟦/b⟧`` match.
+_MARKER_RE = re.compile(r"(?:\u27e6|\\llbracket)\s*(/)?\s*[Bb]\s*(?:\u27e7|\\rrbracket)")
 
 #: A pdfium char probe and the docling text can disagree on a dash or quote
 #: (``agent–environment`` vs ``agent-environment``), so a source span located

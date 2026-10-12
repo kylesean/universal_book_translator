@@ -28,10 +28,32 @@ from pathlib import Path
 from typing import Any
 
 from ubt.adapters.pdf import pdf_struct
-from ubt.adapters.pdf.stream_strip import mul_matrix
 from ubt.core.env import subprocess_env
 
 logger = logging.getLogger(__name__)
+
+#: A 2D affine transform as PDF stores it: ``(a, b, c, d, e, f)``.
+Matrix2D = tuple[float, float, float, float, float, float]
+
+
+def mul_matrix(m1: Matrix2D, m2: Matrix2D) -> Matrix2D:
+    """Multiply two 3x3 affine transform matrices: M1 x M2.
+
+    [ a1 b1 0 ]   [ a2 b2 0 ]   [ a1*a2 + b1*c2       a1*b2 + b1*d2       0 ]
+    [ c1 d1 0 ] x [ c2 d2 0 ] = [ c1*a2 + d1*c2       c1*b2 + d1*d2       0 ]
+    [ e1 f1 1 ]   [ e2 f2 1 ]   [ e1*a2 + f1*c2 + e2  e1*b2 + f1*d2 + f2  1 ]
+    """
+    a1, b1, c1, d1, e1, f1 = m1
+    a2, b2, c2, d2, e2, f2 = m2
+    return (
+        a1 * a2 + b1 * c2,
+        a1 * b2 + b1 * d2,
+        c1 * a2 + d1 * c2,
+        c1 * b2 + d1 * d2,
+        e1 * a2 + f1 * c2 + e2,
+        e1 * b2 + f1 * d2 + f2,
+    )
+
 
 # Minimum diagram edge length; smaller regions are picture noise, not diagrams.
 _MIN_DIAGRAM_EDGE_PT = 20.0

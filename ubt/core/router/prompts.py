@@ -404,6 +404,7 @@ def build_macro_chunk_draft_prompt(
     few_shot_reference: str = "",
     epoch_summary: str = "",
     domain: str | None = None,
+    section_context: str = "",
 ) -> tuple[str, str]:
     """Construct structured multi-block prompt for high-throughput macro-chunk drafting."""
     src_profile = PROFILES.get(source_lang.strip().lower()) if source_lang else None
@@ -483,6 +484,13 @@ def build_macro_chunk_draft_prompt(
         )
     if glossary_table.strip():
         user_parts.append(f"### Translation Bible (Strict Mappings)\n{glossary_table.strip()}\n")
+
+    if section_context.strip():
+        # Where these blocks sit in the document. A chunk that does not itself
+        # contain the heading otherwise reaches the model with no idea which
+        # section it belongs to, and a back-reference ("this approach") loses
+        # its antecedent.
+        user_parts.append(f"### Section Context\n{section_context.strip()}\n")
 
     if neighbor_context.strip():
         user_parts.append(f"{neighbor_context.strip()}\n")

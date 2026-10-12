@@ -1,7 +1,7 @@
 """Unified policy: every tunable in one view.
 
 Single source of truth for all numeric thresholds, regexes, and categorical
-sets across overlay layout, translate pre-filter, continuation, and page
+sets across render layout, translate pre-filter, continuation, and page
 profiling. Import direction is always safe: adapters import this core module,
 never the reverse.
 
@@ -80,9 +80,9 @@ PROSE_BLOCK_TYPES = frozenset({BlockType.HEADING, BlockType.NARRATIVE, BlockType
 # translated -- keeping them here meant no
 # run ever sent one to the model, and the verdict's keep stamped them
 # MTQE_PASSED/1.0 so a whole book of source-language tables reported a perfect
-# pass rate. The PDF compositor still leaves them on Layer 0 (``_overlayable``
-# paints text prose only -- it cannot rebuild a grid), which is that path's
-# stated contract; see README "Tables".
+# pass rate. The publication renderer rebuilds tables from the IR (see
+# ``render.typst.document_renderer``), so a table marked skip would ship in the
+# source language; see README "Tables".
 NON_TEXT_BLOCK_TYPES = frozenset({BlockType.FORMULA, BlockType.CODE, BlockType.IMAGE})
 NON_PROSE_FLOWS = frozenset({FlowID.FOOTNOTE, FlowID.CAPTION, FlowID.TABLE_GRID})
 CAPTION_RE = re.compile(r"^(FIG\.|Fig\.|Figure|Table|TAB\.|图|表)\s*[A-Za-z0-9]", re.IGNORECASE)
@@ -387,7 +387,7 @@ CONT_LABEL_BARRIER_RE = re.compile(
 )
 CONT_LIST_MARKER_RE = re.compile(r"^(\d+[.)、]|[•·\-–—*]|\([a-z0-9]+\))\s+")
 # Leading section number on headings ("1.1 ", "2.2.1 ") — universal numbering
-# the overlay carries over when the translation dropped it.
+# the renderer carries over when the translation dropped it.
 HEADING_NUMBER_RE = re.compile(r"^(\d+(?:\.\d+)*)\s+")
 # Target already numbered: same dotted pattern, or CJK section word up front.
 # ("21世纪" does NOT count — bare digits without dot/space are content.)
@@ -581,10 +581,30 @@ def calibration_summary() -> dict[str, int]:
     return counts
 
 
-_FATAL_LEAK_MARKERS: tuple[str, ...] = (
+#: Flags that make a draft unsafe to ship at all — not "the translation may be
+#: wrong" but "the machine emitted something that must never reach a reader",
+#: such as the system prompt or the template scaffolding. These keep the hard
+#: quarantine (source shown, machine output stripped).
+#:
+#: Every *quality* defect (numeric fidelity, math drift, glossary, omission,
+#: echo) is deliberately absent: shipping a draft that is 95% right and flagged
+#: beats shipping the source language with a badge. Measured on the arXiv
+#: 2101.03961 run: 18 of 18 quarantined blocks were quality verdicts and 17 of
+#: them were *correct* translations that a false-positive numeric check had
+#: rejected — the reader got English where a good Chinese sentence existed.
+FATAL_LEAK_MARKERS: tuple[str, ...] = (
     "Prompt template XML artifacts",
     "Prompt scaffold",
 )
+
+
+def is_fatal_leak(error_flags: Iterable[str]) -> bool:
+    """True when a block carries a must-not-ship leak (prompt/template escape).
+
+    The single predicate both the layout policy and the triage stage read, so
+    the "strip machine output" decision cannot drift between them.
+    """
+    return any(marker in flag for flag in error_flags for marker in FATAL_LEAK_MARKERS)
 
 
 def is_non_prose_degradable(
@@ -594,10 +614,11 @@ def is_non_prose_degradable(
     """True when a non-prose block (e.g. table) should degrade to NEEDS_HUMAN
     rather than BLOCKED_HUMAN on non-fatal defects.
 
-    The overlay engine preserves non-prose blocks (tables, code, formulas,
-    figures) verbatim in the rendered PDF via render_skip:non_prose. Unless a
-    defect is truly fatal (e.g. prompt template leak), quarantining the block as
-    BLOCKED_HUMAN would abort export catastrophically.
+    The reflow renderer rebuilds the page from the IR, so a non-prose block
+    (table, code, formula, figure) that fails its checks is still deliverable —
+    the failure is reported on the block, not by dropping it. Unless a defect is
+    truly fatal (e.g. a prompt-template leak), quarantining the block as
+    BLOCKED_HUMAN would abort export for a defect the reader cannot see anyway.
     """
     bt = getattr(block_type, "value", block_type or "")
     # Non-prose is simply the complement of PROSE_BLOCK_TYPES; the explicit
@@ -607,7 +628,7 @@ def is_non_prose_degradable(
         return False
 
     # Truly fatal prompt template leak or security injection must still be quarantined
-    return not any(m in flag for flag in error_flags for m in _FATAL_LEAK_MARKERS)
+    return not is_fatal_leak(error_flags)
 
 
 __all__ = [
@@ -647,6 +668,7 @@ __all__ = [
     "INDEX_MIN_SINGLE_SHARE",
     "ISBN_DIGITS_RE",
     "is_non_prose_degradable",
+    "is_fatal_leak",
     "JOIN_CROSS_NO_TERMINAL",
     "JOIN_HYPHEN_TAIL",
     "JOIN_LOWER_START",

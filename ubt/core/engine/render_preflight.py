@@ -26,7 +26,7 @@ from typing import Any
 from ubt.core.exceptions import DocumentParseError
 from ubt.core.ir.models import BlockType, IRBlock
 from ubt.core.ir.render_plan import RenderPlan
-from ubt.core.ports import DocumentAdapter, get_last_render_skips
+from ubt.core.ports import DocumentAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -44,23 +44,22 @@ _SAMPLE_PREFERENCE = (
 def _sample_key(block: IRBlock) -> tuple[int, int, int]:
     """Rank blocks so the sample exercises the most markup-sensitive paths.
 
-    Blocks the compositor can never draw above the source (tables, figures,
-    bbox-less blocks) rank last: ``overlays_from_blocks`` excludes them, so a
-    sample made only of them renders Layer 0 alone and the pre-flight never
-    reaches the typesetter — a dead Typst toolchain would pass silently. Within
-    the drawable set, inline math and structure blocks come first.
+    Every block type the publication renderer emits is fair game — it rebuilds
+    the page from the IR, so a table or a figure is typeset exactly like prose.
+    A sample made only of them still reaches the typesetter, which is the
+    property this pre-flight exists to prove (a dead Typst toolchain must fail
+    before anything is billed).
+
+    Ranking therefore favours the paths with the most ways to break: display
+    formulas, then tables, then headings, then everything else. Inline math and
+    structure come before plain prose at equal type.
     """
-    drawable = (
-        block.bbox is not None
-        and block.bbox.page > 0
-        and block.block_type not in (BlockType.TABLE, BlockType.IMAGE)
-    )
     inline_math = "$" in (block.source_text or "")
     try:
         type_rank = _SAMPLE_PREFERENCE.index(block.block_type)
     except ValueError:
         type_rank = len(_SAMPLE_PREFERENCE)
-    return (0 if drawable else 1, 0 if inline_math else 1, type_rank)
+    return (type_rank, 0 if inline_math else 1, block.spine_index)
 
 
 def select_preflight_sample(
@@ -88,10 +87,12 @@ def _placeholder_text(block: IRBlock) -> str:
     """
     text = (block.source_text or "").strip()
     if block.block_type == BlockType.FORMULA:
-        from ubt.adapters.pdf.overlay_text import typstify_math  # noqa: PLC0415
-        from ubt.render.outputs import _strip_math_delimiters  # noqa: PLC0415
+        from ubt.render.typst.math_transpiler import (  # noqa: PLC0415
+            strip_math_delimiters,
+            typstify_math,
+        )
 
-        if typstify_math(_strip_math_delimiters(text)) is None:
+        if typstify_math(strip_math_delimiters(text)) is None:
             return "preflight"
     return text or "preflight"
 
@@ -99,16 +100,16 @@ def _placeholder_text(block: IRBlock) -> str:
 def _placeholder_blocks(sample: list[IRBlock]) -> list[IRBlock]:
     """The sample carrying each source text as its placeholder translation.
 
-    The compositor only overlays a block that already holds target text; a
-    source-only sample renders Layer 0 alone and never reaches the typesetter,
-    which would make this gate blind to a dead Typst toolchain. Substituting the
-    source text keeps the rehearsal on the real render path and hands the
-    compiler the markup (math, escapes) it has to accept.
+    The rehearsal has to reach the typesetter: a sample with no text at all
+    would compile trivially and the gate would be blind to a dead Typst
+    toolchain. Substituting the source text keeps the rehearsal on the real
+    render path and hands the compiler the markup (math, escapes) it has to
+    accept.
 
     ``skip_translate`` is cleared too: a formula/table sample is a static skip
-    by policy, and ``overlays_from_blocks`` never draws a skip block, so without
-    this the substituted text would still be excluded and the gate would stay
-    blind exactly on the formula/table-heavy books it most needs to check.
+    by policy, so without this the substituted text would still be excluded and
+    the gate would stay blind exactly on the formula/table-heavy books it most
+    needs to check.
     """
     return [
         block.model_copy(
@@ -178,18 +179,15 @@ async def run_render_preflight(
             bilingual_mode=bilingual_mode,
             render_plan=render_plan,
         )
-        # LayerCompositor records a failed fragment as a skip and keeps the
-        # source instead of raising, so a dead toolchain would still exit zero.
-        # The preflight must fail when nothing at all was drawn, or a broken
-        # Typst only surfaces after the whole book has been billed.
-        from ubt.render.outputs import overlays_from_blocks
-
-        expected = overlays_from_blocks(scratch_blocks)
-        skips = get_last_render_skips(adapter)
-        if expected and len(skips) >= len(expected):
+        # The reflow renderer raises on a compile failure, so reaching here means
+        # Typst accepted the sample. What it does *not* guarantee is that the
+        # compile produced a file: a zero-byte or absent artifact would pass a
+        # toolchain check that only looked for an exception. Fail on that
+        # instead of on a fragment count: the renderer has no silent-degrade
+        # mode, so counting skips would be checking nothing.
+        if not preflight_path.exists() or preflight_path.stat().st_size == 0:
             raise DocumentParseError(
-                f"Render pre-flight could not typeset any of the {len(expected)} "
-                f"sample fragment(s): {skips[:3]}"
+                f"the sample compiled but produced no usable PDF (exists={preflight_path.exists()})"
             )
     except DocumentParseError as exc:
         raise DocumentParseError(
@@ -197,8 +195,8 @@ async def run_render_preflight(
             f"({len(sample)} sample block(s) of {len(blocks)}): {exc}\n"
             "The configured PDF renderer could not compile a source-text "
             "sample. Check `ubt doctor` (Typst row) and the Typst binary "
-            "setting, or switch with --render-engine; nothing has been sent "
-            "to the model yet. The rejected scratch sample was removed."
+            "setting; nothing has been sent to the model yet. The rejected "
+            "scratch sample was removed."
         ) from exc
     finally:
         # A renderer may raise an unexpected exception (not only

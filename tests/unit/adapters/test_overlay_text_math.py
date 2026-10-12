@@ -13,9 +13,9 @@ import shutil
 
 import pytest
 
-from ubt.adapters.pdf.overlay_text import typstify_math
 from ubt.adapters.pdf.typst_math_probe import TypstMathProbe
 from ubt.adapters.pdf.typst_symbols import INLINE_SYMBOLS, SPECIAL_LATEX_COMMANDS
+from ubt.render.typst.math_transpiler import typstify_math
 
 #: Per-test ``fast`` marks, not a module-level ``pytestmark``: a module-level
 #: mark is ANDed onto every test in the file, so the three ``slow`` typst-probe

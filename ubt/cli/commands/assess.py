@@ -196,7 +196,7 @@ def assess_cmd(
             engine_signature=f"preset{effective_preset.value}",
         ),
     ]
-    if report.route.recommended_dual_mode != "inline":
+    if report.route.recommended_dual_mode != "dual":
         command_parts += ["--dual-mode", report.route.recommended_dual_mode]
     # The profile decides prompt assembly, glossary seeding and whether
     # chapter rolling summaries happen at all, so a quote taken under the

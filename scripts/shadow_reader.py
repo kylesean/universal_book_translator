@@ -100,7 +100,13 @@ def _load_cases(corpus_dir: Path) -> list[tuple[str, Path]]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--corpus", default="corpus")
-    parser.add_argument("--engine", default="auto")
+    # The baseline is deliberately the *pdfium* leg: this harness asks whether
+    # the native reader swallows text the lightweight geometric extractor saw.
+    # ``auto`` no longer means pdfium (it takes the lossless engine), so leaving
+    # the default there compared the native reader against a different
+    # extractor's character set and failed on documents whose extra structure
+    # docling represents but pdfium never had.
+    parser.add_argument("--engine", default="pdfium")
     parser.add_argument("--min-coverage", type=float, default=0.98)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()

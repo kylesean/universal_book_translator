@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from ubt.adapters.pdf import pdf_struct
-from ubt.adapters.pdf.page_profiler import PageKind, column_right_share, probe_pdfium_page
+from ubt.adapters.pdf.page_profiler import column_right_share, probe_pdfium_page
 from ubt.adapters.pdf.pdfium_gate import pdfium_serialized
 from ubt.cache.dirs import cache_root
 from ubt.core.policy.layout_policy import (
@@ -47,22 +47,6 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
-class PageIngestPlan:
-    """Per-page ingest plan derived from page profile facts.
-
-    Deliberately minimal: per-page fields are only worth carrying when a
-    consumer reads them — ``parser_backend`` / ``extract_diagram_vector``
-    style provenance without a reader is paper manifest data. The
-    document-level engine routing (the decision that actually executes)
-    lives in :func:`inspect_pdf_route_plan`. Add a per-page field back the
-    day a reader appears.
-    """
-
-    page_number: int
-    kind: PageKind
-
-
-@dataclass(frozen=True)
 class PDFRoutePlan:
     """Decoupled engine routing plan across document layout and page components."""
 
@@ -71,7 +55,6 @@ class PDFRoutePlan:
     has_vector_diagrams: bool
     has_formulas: bool
     has_multicolumn: bool
-    page_plans: tuple[PageIngestPlan, ...] = ()
 
 
 # Where cheap page-profile facts are memoized. The cache key is
@@ -80,22 +63,6 @@ class PDFRoutePlan:
 # Under the shared cache root: CWD-relative paths silently forked the cache per
 # working directory.
 PROFILE_CACHE_DIR = cache_root() / "profile_cache"
-
-
-def build_page_ingest_plans(pdf_path: Path, cache_dir: Path | None = None) -> list[PageIngestPlan]:
-    """Construct per-page ingest plans from cheap page profiler facts."""
-    try:
-        from ubt.adapters.pdf.page_profiler import profile_pdf
-
-        profiles = profile_pdf(pdf_path, cache_dir=cache_dir)
-    except Exception as exc:
-        logger.debug("Failed to profile PDF '%s' for ingest plans: %s", pdf_path.name, exc)
-        return []
-
-    plans: list[PageIngestPlan] = []
-    for p in profiles:
-        plans.append(PageIngestPlan(page_number=p.facts.page, kind=p.kind))
-    return plans
 
 
 def _scan_detected_from_probe(char_counts: Sequence[int]) -> bool:
@@ -132,8 +99,6 @@ def _probe_page_vector_ops(page: Any) -> int:
 def inspect_pdf_route_plan(
     pdf_path: Path,
     cache_dir: Path | None = None,
-    *,
-    include_page_plans: bool = False,
 ) -> PDFRoutePlan:
     """Inspect sampled pages to build a decoupled layout and engine routing plan.
 
@@ -142,10 +107,6 @@ def inspect_pdf_route_plan(
     - Formula-dense pages or multi-column layouts route to docling;
     - Vector-heavy diagram pages are reported via ``has_vector_diagrams``.
 
-    ``page_plans`` is opt-in because building it profiles *every* page, while the
-    probe above samples only a handful — and nothing in production reads the
-    field (the parser that wants per-page plans calls
-    :func:`build_page_ingest_plans` itself, with its own cached call).
     """
     default_docling = PDFRoutePlan(
         primary_engine="docling",
@@ -153,7 +114,6 @@ def inspect_pdf_route_plan(
         has_vector_diagrams=False,
         has_formulas=False,
         has_multicolumn=False,
-        page_plans=(),
     )
     try:
         import pypdfium2 as pdfium
@@ -247,21 +207,42 @@ def inspect_pdf_route_plan(
                 logger.debug("PDF vector probe skipped on '%s': %s", pdf_path.name, exc)
             has_vector_diagrams = vector_flagged_pages * 2 >= len(page_indices)
 
-            needs_docling = (
-                scanned_detected or has_formulas or has_multicolumn or has_vector_diagrams
-            )
-            page_plans = (
-                tuple(build_page_ingest_plans(pdf_path, cache_dir=cache_dir))
-                if include_page_plans
-                else ()
-            )
+            # A PDF target is *rebuilt* from the IR, so a block the extractor
+            # cannot represent is content the reader loses. The pdfium path
+            # (``ubt/analyze/reader_pdf``) emits only headings, paragraphs, list
+            # items and code — no tables, no figures, no formulas. Its loss used
+            # to be survivable because the overlay renderer kept the source page
+            # as a canvas, so an unextracted table was still visible in the
+            # original language. The semantic reflow renderer has no canvas, so
+            # the same omission is now a hole in the delivered book.
+            #
+            # The probe cannot rule that out. Measured on the reference corpus
+            # every document carried structure, and one (``mamba``) had 19
+            # figures and 16 tables with *every* cheap signal reading zero — its
+            # figures are vector drawings, which ``resource_image_count`` does
+            # not see. Sampling five pages also misses structure spread thin
+            # (``llama2``: 90 structural blocks across 55 pages, 4 on a sampled
+            # page). A full-page scan costs 0.05–0.10s on a 75-page paper, but
+            # even that finds no signal for a vector-drawn figure.
+            #
+            # The cost argument for pdfium also expired: ingestion finishes
+            # before drafting starts (``ubt/core/engine/plan.py``), so there is
+            # no VRAM contention with the LLM, and docling's converter is
+            # cleaned up deterministically after each document. On a 75-page
+            # paper docling costs 4.2s against pdfium's 0.8s — under 1% of a run
+            # that then spends minutes translating 811 blocks.
+            #
+            # So ``auto`` takes the lossless engine. ``pdfium`` remains a real
+            # opt-in (``--pdf-engine pdfium``, the ``preview``/``fast`` presets)
+            # for a document known to be prose only; the probe still runs there
+            # to warn about what it would miss.
+            needs_docling = True
             return PDFRoutePlan(
                 primary_engine="docling" if needs_docling else "pdfium",
                 has_scan=scanned_detected,
                 has_vector_diagrams=has_vector_diagrams,
                 has_formulas=has_formulas,
                 has_multicolumn=has_multicolumn,
-                page_plans=page_plans,
             )
         finally:
             pdf.close()

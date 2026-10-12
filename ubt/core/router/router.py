@@ -1311,6 +1311,7 @@ class ModelRouter:
         epoch_summary: str = "",
         model: str | None = None,
         domain: str | None = None,
+        section_context: str = "",
     ) -> dict[str, str]:
         """Draft a group of blocks in a single structured XML prompt.
 
@@ -1335,6 +1336,7 @@ class ModelRouter:
                 few_shot_reference=few_shot_reference,
                 epoch_summary=epoch_summary,
                 domain=domain,
+                section_context=section_context,
             )
 
         def _calc_max_tokens(cand_model: str, cand_profile: ModelProfile) -> int | None:

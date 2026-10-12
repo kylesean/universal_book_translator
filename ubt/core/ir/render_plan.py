@@ -6,8 +6,8 @@ is a value the plan owns and hands to the stage that acts on it; the renderer,
 the export stage and the visual gate read it as an argument rather than from the
 run manifest.
 
-There is no render-engine field: every PDF composes through the single
-source-canvas ``overlay`` engine (``ubt.core.config.RENDER_ENGINE``).
+There is no render-engine field: every PDF is rebuilt from the semantic IR by
+the Typst publication renderer.
 
 ``RenderOutcome`` is the other half: what the renderer *actually did* -- today
 only the effective bilingual mode it shipped. The adapter records it after
@@ -37,7 +37,6 @@ class RenderPlan:
     bilingual_mode: str | None = None
     effective_dual_mode: str | None = None
     dual_mode_downgraded: str | None = None
-    facing_spread: bool = False
     translate_chrome: bool | None = None
     cover_mode: str | None = None
     bilingual_advisory: dict[str, Any] | None = None

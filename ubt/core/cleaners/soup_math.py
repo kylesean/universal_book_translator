@@ -7,7 +7,7 @@ make docling merge display equations *into* narrative blocks as delimiter-free
 unicode soup (``whereQ0``, ``βSI=e−ψpert/(2Vtm)``, ``5CfinVtm``): no ``$``,
 no backslash, nothing ``MathMasker`` can see. Left unmasked, the LLM
 "translates" the soup (``——√((——))`` debris in the PDF) and the anchored
-overlay then blanks the perfect vector original underneath.
+a rewrite then blanks the perfect vector original underneath.
 
 This module detects such spans (precision-first: a span must carry real math
 signal, never bare identifiers) and masks them behind opaque tokens reusing

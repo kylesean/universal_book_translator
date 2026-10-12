@@ -34,7 +34,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Any, ClassVar, Final, Literal
+from typing import Any, ClassVar, Literal
 from urllib.parse import urlsplit
 
 from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
@@ -60,13 +60,12 @@ PdfEngine = str
 # ubt/core/qe/comet_runner.py. Calibrated numbers require a neural runner
 # ("comet"/"subprocess") or the tiered mix.
 QeEngine = Literal["heuristic", "comet", "cometkiwi", "neural", "subprocess", "tiered"]
-DualMode = Literal["inline", "alternating", "monolingual", "facing", "auto"]
-#: The PDF render engine. There is exactly one: the unified source-canvas
-#: compositor (Layer 0 keeps the source page, Layer 1 strips the replaced text,
-#: Layer 2 overlays the translated fragments back into the source geometry). It
-#: is a constant, not a user choice: the ``render_engine`` config/env/API knob
-#: and its legacy aliases were removed when every PDF route converged onto it.
-RENDER_ENGINE: Final[str] = "overlay"
+#: What the reader receives: target only, or source beside target.
+#: ``dual`` is a single layout — each block's source line above its translation —
+#: because the reflow renderer rebuilds the page and a page-zip against the
+#: source is impossible (it changes the page count). ``auto`` lets the advisor
+#: pick from the document's structure.
+DualMode = Literal["mono", "dual", "auto"]
 
 #: Accelerator device Docling uses for its layout/table/formula models.
 #: ``auto`` (default) keeps Docling's own probe: CUDA when a GPU is present.
@@ -78,11 +77,6 @@ RENDER_ENGINE: Final[str] = "overlay"
 #: only paid on a cache MISS: Docling loads its models lazily in
 #: ``convert()``, so a cached conversion uses zero GPU.
 DoclingDevice = Literal["auto", "cpu", "cuda"]
-
-#: Bilingual modes that pair whole source and target pages (a page zipper), as
-#: opposed to interleaving source and target within a page. A source-canvas
-#: engine is page-aligned with the source, so it can serve exactly these.
-PAGE_BILINGUAL_MODES: frozenset[str] = frozenset({"alternating", "facing", "facing_spread"})
 
 
 def resolve_repair_model(
@@ -104,10 +98,8 @@ CoverMode = Literal["auto", "always", "never"]
 PromptStrategyName = Literal["auto", "minimal", "hybrid", "rich"]
 OcrMode = Literal["auto", "sidecar", "cloud", "vlm", "rapidocr", "off"]
 ExecMode = Literal["auto", "short", "long"]
-FormulaMode = Literal["strict", "readable"]
 FormulaEnrichment = Literal["auto", "on", "off"]
-FormulaRender = Literal["native", "image", "witness"]
-MathBackend = Literal["typst", "mathjax", "image"]
+TableRenderMode = Literal["auto", "overlay", "appendix", "skip"]
 
 
 #: Default endpoint when no provider is selected and no UBT_BASE_URL is set.
@@ -639,7 +631,6 @@ class UBTConfig(BaseSettings):
     # Default 'auto' allows the advisory layout stage to inspect document signals
     # and automatically adopt monolingual when layout is heavily structured/discouraged.
     dual_mode: DualMode = "auto"
-    facing_spread: bool = False
     # Also render the complementary artifact (mono when primary is dual and
     # vice versa), BabelDOC no-dual/no-mono style.
     emit_both: bool = False
@@ -683,22 +674,26 @@ class UBTConfig(BaseSettings):
     )
 
     # -- Table rendering strategy for PDF ----------------------------------------
-    # How tables are rendered when targeting PDF format:
-    # - 'auto': Simple tables rendered in-place via Typst micro-grid overlay; complex tables
-    #   preserve source Layer 0 and compile into an appended translated table appendix.
-    # - 'overlay': Attempt in-place overlay for simple tables; complex tables fall back to Layer 0.
-    # - 'appendix': Keep all tables on source Layer 0, compile all translated tables into appendix.
-    # - 'skip': Skip translating tables entirely when targeting PDF (saving 100% table LLM tokens).
-    table_render_mode: str = Field(
+    # The publication renderer rebuilds every table from the IR, so a table is
+    # either translated into the page or deliberately left in the source. How
+    # complex tables are handled when they cannot be rebuilt faithfully:
+    # - 'auto': translate every table; complex ones also get a translated
+    #   appendix companion so the grid is readable even if the rebuild is lossy.
+    # - 'overlay': translate simple tables, keep complex ones in the source
+    #   language (the historical name is kept; there is no overlay render).
+    # - 'appendix': same as 'auto' — translate every table and always write the
+    #   appendix companion.
+    # - 'skip': never translate tables (saves 100% table LLM tokens).
+    table_render_mode: TableRenderMode = Field(
         default="auto",
         description="Table handling mode for PDF ('auto', 'overlay', 'appendix', 'skip').",
     )
 
     # -- PDF render engine --------------------------------------------------------
-    # There is no engine knob: every PDF route composes through the unified
-    # source-canvas LayerCompositor (see ``RENDER_ENGINE``). The former
-    # ``render_engine`` field and its ``rigid``/``reflow``/``publication``/
-    # ``composite``/``auto`` aliases were deleted in the overlay convergence.
+    # There is no engine knob: every PDF is rebuilt from the semantic IR by the
+    # Typst publication renderer. The former ``render_engine`` field and its
+    # ``rigid``/``reflow``/``publication``/``composite``/``auto`` aliases were
+    # deleted in the overlay convergence.
     font_family: str | None = Field(
         default=None,
         description="Override body font family for typesetter (e.g. 'Noto Serif CJK SC').",
@@ -737,26 +732,9 @@ class UBTConfig(BaseSettings):
     #   raises a clear error instead of burning context).
     exec_mode: ExecMode = "auto"
     short_max_pages: int = Field(default=30, gt=0)
-    # Short-chain formula policy: 'readable' (default) renders formulas as
-    # Unicode近似 + 编号对应 (Codex-style, 可读优先); 'strict' keeps the
-    # byte-identical four-gate pipeline (严谨优先).
-    formula_mode: FormulaMode = "readable"
     # Docling math formula enrichment (CodeFormulaV2 VLM): 'auto' (GPU probe with graceful
     # degradation), 'on' (force VLM), or 'off' (bypass VLM for fast ingest).
     formula_enrichment: FormulaEnrichment = "auto"
-    # Display-formula fidelity mode. 'witness' (recommended):
-    # keep converted Typst math, but verify every display formula against its
-    # source pixels and fall back to the source graphic on a structural
-    # mismatch. 'image': render every display formula from its source graphic
-    # (zero conversion risk). 'native': keep the converted math as-is.
-    formula_render: FormulaRender = "witness"
-    # Retired knob, kept only so the engine signature (and therefore every
-    # persisted job id) stays stable. ``AdapterRuntimeConfig`` still carries it,
-    # but ``DoclingPDFAdapter.apply_config`` deliberately does not read it and
-    # no renderer consumes it: display formulas are typeset by the home-grown
-    # LaTeX->Typst converter and governed by ``formula_render``. Nothing reads
-    # ``math_backend``: the MathJax/SVG backend it names is gone.
-    math_backend: MathBackend = "mathjax"
 
     # -- Page range filter -----------------------------------------------------
     pages: str | None = Field(
@@ -818,10 +796,7 @@ class UBTConfig(BaseSettings):
         "cover_mode",
         "prompt_strategy",
         "exec_mode",
-        "formula_mode",
         "formula_enrichment",
-        "formula_render",
-        "math_backend",
         "spill_policy",
         "table_render_mode",
         "env",

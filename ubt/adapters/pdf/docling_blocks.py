@@ -336,10 +336,10 @@ def merge_table_continuation_fragments(blocks: list[IRBlock]) -> list[IRBlock]:
     Docling occasionally fails to include the bottom row(s) of a complex table (e.g.
     method signatures, key-value rows, or formulas) into the table item, emitting
     them as a constellation of tiny formula/narrative fragments directly underneath
-    the table grid. In rigid typesetting, these fragments get translated into
-    narrow bboxes causing catastrophic multi-line overlapping and layout wreckage.
-    Merging them into the preceding table block extends the table's protective
-    envelope and preserves the entire table structure intact.
+    the table grid. Left alone they would be translated as separate paragraphs
+    and lose their column alignment, so the reader would see the table's tail
+    scattered as prose. Merging them into the preceding table block keeps the
+    whole structure inside one table element.
     """
     if len(blocks) < 2:
         return blocks

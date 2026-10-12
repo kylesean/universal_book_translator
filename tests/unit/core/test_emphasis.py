@@ -107,3 +107,55 @@ def test_parse_never_leaves_a_marker_in_the_clean_text() -> None:
         clean, _ = parse_bold(raw)
         assert "⟦" not in clean
         assert "⟧" not in clean
+
+
+# --------------------------------------------------------------------------- #
+# A model transcribing the sentinels as LaTeX brackets
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "marker_open",
+    ["⟦B⟧", "⟦ B ⟧", "\\llbracket B \\rrbracket", "\\llbracket b \\rrbracket"],
+)
+@pytest.mark.parametrize(
+    "marker_close",
+    ["⟦/B⟧", "⟦ /B ⟧", "\\llbracket /B \\rrbracket", "\\llbracket / B \\rrbracket"],
+)
+def test_a_latex_transcribed_marker_is_still_recognised(
+    marker_open: str, marker_close: str
+) -> None:
+    """The model reads the sentinels as math brackets and writes them as LaTeX.
+
+    Measured on the gold corpus (mamba ``pdf_main#b0426``): the draft carried
+    ``$\\llbracket B \\rrbracket A \\llbracket /B \\rrbracket$``. The marker
+    survived the parse, so a stray ``\\llbracket`` and a bare ``/`` reached a math
+    span and Typst failed with ``unknown variable: lbracket`` — losing the whole
+    document.
+    """
+    clean, runs = parse_bold(f"{marker_open}粗体{marker_close}")
+
+    assert clean == "粗体", f"the marker must be stripped: {clean!r}"
+    assert [r.text for r in runs] == ["粗体"]
+    assert [r.bold for r in runs] == [True]
+
+
+def test_a_marker_inside_a_formula_leaves_no_math_residue() -> None:
+    text = r"$(\Delta, \llbracket B \rrbracket A \llbracket /B \rrbracket)$"
+    clean, runs = parse_bold(text)
+
+    assert "llbracket" not in clean and "rrbracket" not in clean, clean
+    assert "⟦" not in clean, clean
+    assert [r.text for r in runs] == ["A"]
+
+
+def test_strip_emphasis_markers_handles_the_latex_form() -> None:
+    assert strip_emphasis_markers(r"a \llbracket B \rrbracket b") == "a  b"
+
+
+def test_ordinary_brackets_are_not_markers() -> None:
+    # The tolerant pattern must not fire on a real interval or a citation.
+    for text in (r"$[a, b]$", r"see [21] and [32]", r"$\{x\}$"):
+        clean, runs = parse_bold(text)
+        assert clean == text, f"false positive on {text!r}"
+        assert runs == ()

@@ -31,6 +31,7 @@ import pytest
 from pdf_builders import write_text_pdf, write_two_column_pdf
 
 from ubt.adapters.factory import get_adapter_for_path
+from ubt.adapters.pdf.docling_adapter import DoclingPDFAdapter
 from ubt.adapters.pdf.pdfium_adapter import PDFiumAdapter
 from ubt.analyze.bridge import blocks_from_document, document_from_blocks
 from ubt.core.ir.models import IRBlock
@@ -70,12 +71,20 @@ def _blocks(path: Path, *, pdf_engine: str) -> list[IRBlock]:
     return asyncio.run(collect())
 
 
-def test_auto_routes_a_single_column_born_digital_pdf_to_the_pdfium_engine(
-    tmp_path: Path,
-) -> None:
-    """Pin the engine probe: a plain single-column PDF must not need the OCR extra."""
+def test_auto_routes_to_docling_even_for_single_column_prose(tmp_path: Path) -> None:
+    """`auto` is the lossless mode: it cannot risk dropping structure.
+
+    pdfium's reader represents only headings, paragraphs, list items and code.
+    The probe cannot prove a document has nothing else — a vector-drawn figure
+    reads as zero on every cheap signal — and the reflow renderer has no source
+    canvas to fall back on, so an unextracted table would be a hole in the book.
+
+    ``pdfium`` remains available explicitly (``pdf_engine="pdfium"``) and is what
+    the ``preview``/``fast`` presets select.
+    """
     pdf = write_text_pdf(tmp_path / "single.pdf", [_PAGE_ONE])
-    assert isinstance(get_adapter_for_path(pdf, pdf_engine="auto"), PDFiumAdapter)
+    assert isinstance(get_adapter_for_path(pdf, pdf_engine="auto"), DoclingPDFAdapter)
+    assert isinstance(get_adapter_for_path(pdf, pdf_engine="pdfium"), PDFiumAdapter)
 
 
 def test_extraction_keeps_every_source_character_and_the_page_number(tmp_path: Path) -> None:

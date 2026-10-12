@@ -45,7 +45,7 @@ class LayoutAdvisory:
     """
 
     advisory: Advisory | None = None
-    tier_basis: DualMode = "inline"
+    tier_basis: DualMode = "dual"
     enforcement: Literal["advise", "auto"] = "advise"
 
 

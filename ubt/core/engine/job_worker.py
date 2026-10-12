@@ -449,15 +449,6 @@ class JobWorker:
             with suppress(asyncio.CancelledError):
                 await heartbeat
 
-    async def process_one(self) -> bool:
-        """Claim and run one job; ``False`` when the queue has nothing to give."""
-        job = await self._q(
-            self.queue.claim, self.worker_id, lease_seconds=self.lease_seconds, now=time.time()
-        )
-        if job is None:
-            return False
-        return await self.execute(job)
-
     # -- loops ----------------------------------------------------------------
     async def _slot(self, worker_id: str, *, drain: bool) -> int:
         processed = 0

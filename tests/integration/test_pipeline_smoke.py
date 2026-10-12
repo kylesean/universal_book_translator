@@ -63,14 +63,22 @@ The second chapter widens the lens to every descendant of the first model.
 """
 
 
-def _config(tmp_path: Path) -> UBTConfig:
-    """A hermetic config: ledgers and memory under tmp, no page-image egress."""
+def _config(tmp_path: Path, *, dual_mode: str = "dual") -> UBTConfig:
+    """A hermetic config: ledgers and memory under tmp, no page-image egress.
+
+    ``dual_mode`` is pinned rather than left ``auto``: the rehearsal book is
+    deliberately structure-heavy (formulas, a table, code, fragments), and the
+    advisor's job is to recommend target-only for exactly that shape. These
+    tests are about the bilingual pairing path, so they ask for it explicitly
+    instead of depending on what the advisor decides for a synthetic fixture.
+    """
     return UBTConfig().model_copy(
         update={
             "db_dir": tmp_path / "ledgers",
             "ocr_mode": "off",
             "allow_page_upload": False,
             "visual_judge_enabled": False,
+            "dual_mode": dual_mode,
         }
     )
 

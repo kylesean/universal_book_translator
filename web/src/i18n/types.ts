@@ -94,10 +94,8 @@ export interface TranslationDictionary {
     domainSemiconductor: string
     dualMode: string
     dualModeAuto: string
-    dualModeInline: string
-    dualModeFacing: string
-    dualModeAlternating: string
-    dualModeMonolingual: string
+    dualModeDual: string
+    dualModeMono: string
     pageFilter: string
     pageFilterPlaceholder: string
     pageFilterHelp: string
@@ -108,9 +106,6 @@ export interface TranslationDictionary {
     execModeAuto: string
     execModeShort: string
     execModeLong: string
-    formulaMode: string
-    formulaModeReadable: string
-    formulaModeStrict: string
     engineRecommended: string
     sliceSampleQuickBtn: string
     localFreeLabel: string

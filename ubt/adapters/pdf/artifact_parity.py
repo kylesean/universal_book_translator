@@ -14,9 +14,11 @@ them; ``target_language_absent`` is the one fail-closed code: an artifact
 containing none of the language it was commissioned in must not ship
 regardless of gate settings.
 
-Geometry and image-count parity apply only when the render kept the source
-page (rigid/overlay). A publication reflow legitimately rebuilds pages and
-re-stages assets, so those checks would fire on every correct run.
+Geometry and image-count parity were deleted with the overlay engine. They
+existed to catch a render that *promised* to keep the source page and then
+altered it; the reflow renderer rebuilds every page by design, so both checks
+fired on every correct run. What survives is script coverage, which is
+engine-independent.
 """
 
 from __future__ import annotations
@@ -88,51 +90,6 @@ def target_script_ratio(text: str, target_lang: str) -> float:
     return (hits / total) if total else 0.0
 
 
-def read_page_sizes(pdf_path: Path) -> list[tuple[float, float]]:
-    """``(width_pt, height_pt)`` per page, rotation applied.
-
-    pikepdf rather than ``pdfinfo``: poppler's pdfinfo prints one overall
-    ``Page size:`` line and never per-page sizes, so a mixed-geometry book
-    would sail through a pdfinfo-based check.
-    """
-    from ubt.adapters.pdf import pdf_struct
-
-    sizes: list[tuple[float, float]] = []
-    try:
-        with pdf_struct.open_pdf(pdf_path) as pdf:
-            for page in pdf.pages:
-                w, h = pdf_struct.page_size(page)
-                rotate = int(page.get("/Rotate", 0) or 0)
-                if rotate % 180:
-                    w, h = h, w
-                sizes.append((w, h))
-    except Exception:
-        return []
-    return sizes
-
-
-def parse_image_objects(pdfimages_stdout: str) -> dict[int, int]:
-    """Per-page image counts from ``pdfimages -list`` output.
-
-    smask-aware: a transparent image lists its soft mask as an extra ``smask``
-    row attached to the same asset, so counting rows naively over-reports;
-    mask rows are dropped. Object xrefs are *not* compared — a pypdf/reportlab
-    merge rewrites every xref number, so counting per page is the stable form
-    of count parity.
-    """
-    counts: dict[int, int] = {}
-    for line in pdfimages_stdout.splitlines():
-        parts = line.split()
-        # Columns: page num type w h color comp bpc enc interp object ID ...
-        if len(parts) < 11 or not parts[0].isdigit():
-            continue
-        if parts[2] == "smask":  # soft mask of the paired image row, not an asset
-            continue
-        page = int(parts[0])
-        counts[page] = counts.get(page, 0) + 1
-    return counts
-
-
 def _run(cmd: list[str]) -> str | None:
     """Total subprocess text: stdout, or None when the binary is missing/fails."""
     binary = shutil.which(cmd[0])
@@ -170,10 +127,8 @@ def _page_text(pdf_path: Path, pages: Sequence[int] | None = None) -> str | None
 
 def check_artifact_parity(
     *,
-    source_pdf: Path,
     artifact_pdf: Path,
     target_lang: str,
-    keeps_source_geometry: bool,
     selected_pages: Sequence[int] | None = None,
 ) -> list[ParityFinding]:
     """Physical-evidence diff between the delivered PDF and its source.
@@ -195,8 +150,8 @@ def check_artifact_parity(
     hits, total = target_script_counts(artifact_text, target_lang)
     if not _script_ranges(target_lang):
         # Latin-script targets have no measurable range here. Saying so is the
-        # honest form of the gate: silently skipping let a zh->en rigid render
-        # whose overlay failed pass the "must not ship" check unexamined.
+        # honest form of the gate: silently skipping would let an artifact that
+        # carries none of its commissioned language pass unexamined.
         findings.append(
             ParityFinding(
                 "info",
@@ -246,58 +201,12 @@ def check_artifact_parity(
             )
         )
 
-    if not keeps_source_geometry or not source_pdf.exists():
-        return findings
-
-    src_sizes = read_page_sizes(source_pdf)
-    art_sizes = read_page_sizes(artifact_pdf)
-    if src_sizes and art_sizes:
-        if len(src_sizes) != len(art_sizes):
-            findings.append(
-                ParityFinding(
-                    "major",
-                    "page_count_changed",
-                    f"Source has {len(src_sizes)} pages, delivered artifact "
-                    f"{len(art_sizes)} (geometry-preserving render)",
-                )
-            )
-        elif any(
-            abs(a[0] - b[0]) > 1.0 or abs(a[1] - b[1]) > 1.0
-            for a, b in zip(src_sizes, art_sizes, strict=False)
-        ):
-            findings.append(
-                ParityFinding(
-                    "major",
-                    "page_geometry_changed",
-                    "Delivered pages no longer match source page sizes "
-                    "(geometry-preserving render must keep them)",
-                )
-            )
-
-    src_imgs = _run(["pdfimages", "-list", str(source_pdf)])
-    art_imgs = _run(["pdfimages", "-list", str(artifact_pdf)])
-    if src_imgs and art_imgs:
-        src_counts = parse_image_objects(src_imgs)
-        art_counts = parse_image_objects(art_imgs)
-        if src_counts != art_counts:
-            findings.append(
-                ParityFinding(
-                    "major",
-                    "image_count_changed",
-                    f"Source and artifact disagree on per-page image counts "
-                    f"(source total {sum(src_counts.values())}, artifact total "
-                    f"{sum(art_counts.values())}; smask-aware, overlay renders "
-                    "must not lose or duplicate assets)",
-                )
-            )
     return findings
 
 
 __all__ = [
     "ParityFinding",
     "check_artifact_parity",
-    "parse_image_objects",
-    "read_page_sizes",
     "target_script_counts",
     "target_script_ratio",
 ]

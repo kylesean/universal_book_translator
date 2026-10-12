@@ -368,7 +368,7 @@ class LedgerJobsMixin(_LedgerHost):
     def get_job_source_path(self, job_id: str) -> str | None:
         """Source document path stored at ingest (None if unspecified).
 
-        The delivery render composes onto this PDF as its canvas, so the L3
+        The delivery render reads this PDF for figure/formula crops, so the L3
         single-page preview needs the same path back from the ledger.
         """
         with self._get_conn() as conn:
@@ -1407,23 +1407,6 @@ class LedgerBlocksMixin(_LedgerHost):
             cursor = conn.execute(
                 query, (actual_id, *terminal_statuses, max_rounds, *chapter_params)
             )
-            rows = cursor.fetchall()
-            return [self._row_to_block(r) for r in rows]
-
-    def get_blocks_by_chapter(self, job_id: str, chapter_id: str) -> list[IRBlock]:
-        """Fetch all blocks for a specific chapter using prefix matching, avoiding full table scans."""
-        if not chapter_id:
-            return self.get_all_blocks(job_id)
-        with self._get_conn() as conn:
-            actual_id = self._resolve_actual_job_id(conn, job_id)
-            chapter_clause, chapter_params = _chapter_match(chapter_id)
-            query = f"""
-                SELECT * FROM blocks
-                WHERE job_id = ?{chapter_clause}
-                ORDER BY spine_index ASC
-            """
-            params = (actual_id, *chapter_params)
-            cursor = conn.execute(query, params)
             rows = cursor.fetchall()
             return [self._row_to_block(r) for r in rows]
 

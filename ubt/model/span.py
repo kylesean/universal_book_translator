@@ -159,12 +159,6 @@ class CanonicalSource:
     text: str = ""
     pages: tuple[PageGeometry, ...] = ()
 
-    def page_geometry(self, index: int) -> PageGeometry | None:
-        for page in self.pages:
-            if page.index == index:
-                return page
-        return None
-
 
 __all__ = [
     "BBox",

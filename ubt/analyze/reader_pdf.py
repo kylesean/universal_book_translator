@@ -320,7 +320,7 @@ def _classify(
     if group.toc_page is not None:
         # A TOC row translates like prose, but its dot leaders and page number
         # are source layout the compositor must redraw (the reader drops the
-        # leader/​number lines, so a plain text overlay would leave a gap). Keep
+        # leader/​number lines, so plain text extraction would leave a gap). Keep
         # the title as the translatable text and carry the page number for the
         # TOC-aware renderer; the box spans the whole row.
         return (

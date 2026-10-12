@@ -49,8 +49,7 @@ class KpiDefinition:
     #: these too, not only the candidate).
     #: Deliberately unbounded: ``pass_rate`` (how loudly a corpus quarantines is
     #: a policy choice, not a defect), ``avg_qe`` / ``repair_rate`` / ``term_*``
-    #: (means over a handful of flagged blocks, so corpus-shaped noise), the two
-    #: rigid-fidelity keys (0 whenever the render was not rigid), and
+    #: (means over a handful of flagged blocks, so corpus-shaped noise), and
     #: ``cost_per_1k_chars`` (0 when the run could not be priced).
     floor: float | None = None
     ceiling: float | None = None
@@ -156,24 +155,6 @@ KPI_DEFINITIONS: tuple[KpiDefinition, ...] = (
         "quality_report.summary.blocked_human_blocks / summary.total_blocks",
         0.0,
         ceiling=0.0,
-    ),
-    KpiDefinition(
-        "fidelity_non_text_residual",
-        "ratio",
-        Direction.LOWER_IS_BETTER,
-        "fraction of pixels OUTSIDE painted text boxes that differ from the "
-        "source on a rigid render (should be ~0; advisory, 0 when not measured)",
-        "quality_report.fidelity.non_text_residual",
-        0.002,
-    ),
-    KpiDefinition(
-        "rigid_painted_coverage",
-        "ratio",
-        Direction.HIGHER_IS_BETTER,
-        "fraction of page area actually painted as translated prose on a rigid "
-        "render (the overlay-coverage metric; low = most page still source text)",
-        "quality_report.fidelity.painted_coverage",
-        0.03,
     ),
     KpiDefinition(
         "visual_critical_rate",

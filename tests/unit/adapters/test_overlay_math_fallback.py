@@ -4,11 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from ubt.adapters.pdf.overlay_text import (
-    clean_math_fallback_text,
-    render_overlay_line,
-    typstify_math,
-)
+from ubt.render.typst.document_renderer import render_prose
+from ubt.render.typst.math_transpiler import clean_math_fallback_text, typstify_math
 
 pytestmark = pytest.mark.fast
 
@@ -49,14 +46,28 @@ def test_clean_math_fallback_text_display_math() -> None:
     assert "(x_{i+1} + x_i)/2" in cleaned
 
 
-def test_render_overlay_line_uncompilable_math_does_not_leak_latex() -> None:
-    # When math_probe returns False (or None), render_overlay_line must use clean_math_fallback_text
-    # and NEVER leak raw LaTeX commands like \frac or \phi into the rendered text.
+def test_uncompilable_math_does_not_leak_latex_into_the_page() -> None:
+    # A math span the transpiler cannot convert must degrade to readable Unicode
+    # rather than leak raw LaTeX command names (\frac, \phi) into the rendered
+    # text. ``render_prose`` is the single place that decides this now.
     line = r"公式为：$\frac{1}{2} \phi s_2 \gamma s_1 \phi d$。"
-    rendered = render_overlay_line(line, math_probe=lambda _: False)
+    rendered = render_prose(line)
+    # This body *is* convertible, so it becomes real Typst math (better than a
+    # Unicode approximation). What matters is that no LaTeX command name
+    # survives into the page.
     assert r"\frac" not in rendered
     assert r"\phi" not in rendered
     assert r"\gamma" not in rendered
-    assert "1/2" in rendered
+    assert "$frac(1, 2) phi s_2 gamma s_1 phi d$" in rendered
+
+
+def test_an_unconvertible_formula_degrades_to_unicode_not_latex() -> None:
+    # The case the fallback exists for: a command the transpiler does not know
+    # cannot become math, and must not become LaTeX source either.
+    rendered = render_prose(r"公式：$\unknowncmd{x} + \phi$。")
+    # ``\{`` is Typst's escape for a literal brace, so the visible text is
+    # "unknowncmd{x}" — the command name without its backslash, which is the
+    # point: no LaTeX syntax survives, only the word.
+    assert "\\unknowncmd" not in rendered
+    assert r"unknowncmd\{x\}" in rendered
     assert "ϕ" in rendered
-    assert "γ" in rendered

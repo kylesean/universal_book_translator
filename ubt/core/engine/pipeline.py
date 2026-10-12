@@ -20,7 +20,6 @@ from ubt.core.engine.repair_loop import RepairLoop
 from ubt.core.engine.services import RunServices
 from ubt.core.engine.stage_context import StageContext
 from ubt.core.engine.stages import (
-    apply_layout_tradeoff_advisory,
     run_tm_writeback_stage,
 )
 from ubt.core.engine.usage import JobBill, bill_job_run, budget_violation
@@ -121,8 +120,6 @@ _ENGINE_SIGNATURE_FIELDS: tuple[tuple[str, str], ...] = (
     ("prompt_strategy", "ps"),
     ("exec_mode", "em"),
     ("formula_enrichment", "fe"),
-    ("formula_render", "fr"),
-    ("math_backend", "mb"),
 )
 
 
@@ -722,10 +719,8 @@ class PipelineOrchestrator:
                 ocr_api_key=self.config.ocr_api_key.get_secret_value(),
                 ocr_model=self.config.ocr_model,
                 formula_enrichment=self.config.formula_enrichment,
-                formula_render=self.config.formula_render,
                 docling_device=self.config.docling_device,
                 font_family=self.config.font_family,
-                math_backend=self.config.math_backend,
                 allow_page_upload=self.config.allow_page_upload,
                 cache_dir=str(self.config.cache_dir) if self.config.cache_enabled else "",
             ),
@@ -822,7 +817,6 @@ class PipelineOrchestrator:
                 )
             manifest.run.route_decision = route_decision.to_dict()
             manifest.run.route_mode = route_decision.mode
-            manifest.run.formula_mode = self.config.formula_mode
             manifest.run.config_snapshot = {
                 "draft_model": self.config.draft_model,
                 "repair_model": self.config.repair_model,
@@ -920,14 +914,6 @@ class PipelineOrchestrator:
                 "Adaptive execution policy for %s: %s",
                 actual_job_id,
                 adaptive_policy.reason,
-            )
-
-            # Pre-flight Layout Advisory: overlay on a formula-dense document is
-            # a deliberate tradeoff, not a delivery failure (see the helper).
-            apply_layout_tradeoff_advisory(
-                manifest,
-                input_name=input_path.name,
-                formula_heavy=bool(getattr(route_decision, "formula_heavy", False)),
             )
 
             # -----------------------------------------------------------------

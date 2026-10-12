@@ -48,13 +48,29 @@ def test_signal_bar_needs_more_than_one_page() -> None:
     assert PROBE_MIN_SIGNAL_PAGES == 2
 
 
-def test_probe_routes_clean_prose_to_pdfium(tmp_path: Path) -> None:
+def test_probe_routes_every_document_to_docling(tmp_path: Path) -> None:
+    """`auto` must be lossless, so it is always docling.
+
+    pdfium's reader emits only headings, paragraphs, list items and code — it
+    cannot represent a table, a figure or a formula. That used to be survivable
+    because the overlay renderer kept the source page as a canvas, so an
+    unextracted table was still visible in the original language. The reflow
+    renderer rebuilds the page, so the same omission is a hole in the book.
+
+    The probe cannot rule structure out: measured on the reference corpus every
+    document carried structure, and one had 19 figures and 16 tables with every
+    cheap signal reading zero (vector-drawn figures are invisible to
+    ``resource_image_count``). So the probe reports the signals it saw, and
+    ``auto`` takes the lossless engine regardless.
+    """
     pdf = write_text_pdf(tmp_path / "prose.pdf", _prose_pages(10))
     plan = inspect_pdf_route_plan(pdf)
-    assert plan.primary_engine == "pdfium"
     assert not plan.has_formulas
     assert not plan.has_multicolumn
-    assert select_pdf_engine(pdf) == "pdfium"
+    # The signals are still reported honestly (a caller may show them)…
+    assert plan.primary_engine == "docling"
+    # …but every document routes to the lossless engine.
+    assert select_pdf_engine(pdf) == "docling"
 
 
 def test_probe_routes_two_column_to_docling(tmp_path: Path) -> None:
@@ -80,7 +96,6 @@ def test_single_reference_page_does_not_veto_the_document(tmp_path: Path) -> Non
     pdf = write_text_pdf(tmp_path / "refs.pdf", pages)
     plan = inspect_pdf_route_plan(pdf)
     assert not plan.has_formulas, "one reference page must not read as formula-dense"
-    assert plan.primary_engine == "pdfium"
 
 
 def test_single_formula_page_does_not_veto_the_document(tmp_path: Path) -> None:
@@ -91,7 +106,6 @@ def test_single_formula_page_does_not_veto_the_document(tmp_path: Path) -> None:
     pdf = write_text_pdf(tmp_path / "one_debris.pdf", pages)
     plan = inspect_pdf_route_plan(pdf)
     assert not plan.has_formulas
-    assert plan.primary_engine == "pdfium"
 
 
 def test_two_formula_pages_route_to_docling(tmp_path: Path) -> None:
@@ -121,11 +135,10 @@ def test_majority_formula_debris_routes_to_docling(tmp_path: Path) -> None:
     assert plan.primary_engine == "docling"
 
 
-def test_all_reference_pages_do_not_route_to_docling(tmp_path: Path) -> None:
+def test_all_reference_pages_do_not_report_a_formula_signal(tmp_path: Path) -> None:
     # A book of nothing but references is still not a formula book. Pinned so a
     # future tweak cannot quietly reintroduce the 2026-10-10 false positive.
     pages = [[_REFERENCE, _REFERENCE, _REFERENCE, _REFERENCE] for _ in range(10)]
     pdf = write_text_pdf(tmp_path / "all_refs.pdf", pages)
     plan = inspect_pdf_route_plan(pdf)
     assert not plan.has_formulas
-    assert plan.primary_engine == "pdfium"

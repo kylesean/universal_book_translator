@@ -13,7 +13,9 @@ it, the block is gracefully demoted to PRESERVED_OPAQUE:
 - Its element confidence is set to Confidence.UNKNOWN.
 - Its skip_translate and policy_translate are set to False/True (skip translation).
 - Its provenance records the mismatch details.
-- LayerCompositor leaves Layer 0 (the original canvas) intact without masking.
+- The block is rendered as its source text (see
+  ``document_renderer._block_text``), so the reader sees the original rather
+  than a mistranslation of a hallucinated box.
 
 The same physical lines are the witness for three text-content repairs, each a
 pure function applied to a block only when the witness proves the change, so a

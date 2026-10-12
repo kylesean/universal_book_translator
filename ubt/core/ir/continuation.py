@@ -279,7 +279,7 @@ def fuse_continuation_blocks(blocks: Sequence[IRBlock]) -> list[IRBlock]:
                 "fused_sources": [b.source_text for b in run_blocks],
                 # The box chain must survive the ledger round-trip: ``_row_to_block``
                 # rebuilds the CompositeSpan from ``physical_boxes`` alone, so without
-                # this the fused paragraph comes back as a single first-box overlay and
+                # this the fused paragraph comes back as a single first-box span and
                 # its whole target is squeezed into one line (a jarring shrink).
                 "physical_boxes": boxes_to_provenance(run.boxes),
             }

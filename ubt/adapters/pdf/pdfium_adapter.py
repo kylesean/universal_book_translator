@@ -2,9 +2,13 @@
 
 pypdfium2 is Apache-2.0 (the bundled PDFium binary is BSD-3-Clause), which
 keeps the repository's Zero-AGPL delivery guarantee intact. The adapter
-reuses the Docling mainline delivery pipeline (Typst reconstruction,
-facing-page interleaving, rigid typesetting) so only the extraction leg
-differs.
+reuses the Docling mainline delivery pipeline (Typst publication
+reconstruction) so only the extraction leg differs.
+
+Note this path cannot represent tables, figures or formulas (see
+``ubt.analyze.reader_pdf``), so it is only lossless for a document that has
+none. ``auto`` therefore never selects it — it is an explicit opt-in for
+prose-only inputs.
 
 Extraction is the native reader (:mod:`ubt.analyze.reader_pdf`): it owns
 reading order, paragraph grouping, heading detection and page furniture
@@ -109,9 +113,10 @@ def extract_blocks_with_pdfium(
 class PDFiumAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
     """Born-digital PDF fast path: CPU-cheap pypdfium2 extraction, zero model downloads.
 
-    Shares the Docling-mainline render stack (publication Typst, rigid
-    typesetting, alternating bilingual interleaving) via the render mixin —
-    only extraction is replaced with geometric text harvesting.
+    Shares the Docling-mainline render stack (publication Typst, bilingual
+    per-block pairing) via the render mixin — only extraction is replaced with
+    geometric text harvesting, which cannot represent tables, figures or
+    formulas.
     """
 
     #: Content-addressed analyze cache (set in apply_config).

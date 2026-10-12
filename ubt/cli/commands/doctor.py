@@ -629,7 +629,7 @@ def collect_checks(config: UBTConfig, *, probe: bool = False) -> list[_Check]:
     record(
         "Render",
         "OK",
-        f"dual_mode={config.dual_mode}, pdf=overlay",
+        f"dual_mode={config.dual_mode}, pdf=typst-reflow",
     )
 
     # -- local render toolchain -----------------------------------------------
@@ -640,7 +640,7 @@ def collect_checks(config: UBTConfig, *, probe: bool = False) -> list[_Check]:
     except ImportError:
         has_typst = False
     if has_typst:
-        record("Typst", "OK", "PDF overlay rendering available")
+        record("Typst", "OK", "PDF publication rendering available")
     else:
         record(
             "Typst",

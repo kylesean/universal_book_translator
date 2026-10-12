@@ -29,7 +29,6 @@ _MODE_CLUSTER = (
     "bilingual_mode",
     "effective_dual_mode",
     "dual_mode_downgraded",
-    "facing_spread",
     "translate_chrome",
     "cover_mode",
 )

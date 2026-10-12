@@ -21,14 +21,6 @@ from typing import Any, Literal, get_args
 from ubt.core.config import (
     CoverMode,
     DualMode,
-    ExecMode,
-    FormulaEnrichment,
-    FormulaMode,
-    FormulaRender,
-    MathBackend,
-    OcrMode,
-    PromptStrategyName,
-    QeEngine,
     UBTConfig,
     env_var_names,
 )
@@ -40,17 +32,12 @@ from ubt.core.presets import PRESET_ENGINE_FIELDS, Preset, resolve_engine_params
 #: already enforce. MCP takes plain strings, so it validates against this map at
 #: the entry point instead of letting ``validate_assignment`` reject the value
 #: inside the background task (job accepted, then fails).
+#: User-facing mode knobs. Everything else is an engine detail: a preset (or an
+#: operator's ``UBT_*`` environment variable) sets it, and the CLI/REST/MCP
+#: surfaces no longer offer it.
 _ENUM_REQUEST_FIELDS: dict[str, tuple[str, ...]] = {
     "dual_mode": get_args(DualMode),
-    "exec_mode": get_args(ExecMode),
-    "formula_mode": get_args(FormulaMode),
-    "qe_engine": get_args(QeEngine),
-    "prompt_strategy": get_args(PromptStrategyName),
     "cover_mode": get_args(CoverMode),
-    "formula_enrichment": get_args(FormulaEnrichment),
-    "formula_render": get_args(FormulaRender),
-    "math_backend": get_args(MathBackend),
-    "ocr_mode": get_args(OcrMode),
     "preset": tuple(p.value for p in Preset),
 }
 
@@ -219,7 +206,7 @@ def adaptive_dual_mode(
         return explicit_dual_mode
     norm_profile = (profile or "").strip().lower()
     if norm_profile in ("paper", "fiction", "novel", "textbook"):
-        return "monolingual"
+        return "mono"
     return None
 
 

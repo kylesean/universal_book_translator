@@ -1,11 +1,11 @@
-"""Font helpers the overlay path actually uses.
+"""Font helpers the render path actually uses.
 
 ``resolve_cjk_ttc`` is the piece the runtime doctor check uses to resolve a CJK
 font; ``sanitize_font_family`` filters a family name for Typst's ``#set text``.
 
 The width-metrics half of this module (fontTools advance sums, a width fitter)
-was deleted with the rigid typesetter: overlay fitting measures through Typst
-compiles instead, and the advance-sum path had no remaining caller.
+was deleted with the rigid typesetter: the publication renderer lets Typst
+measure text itself, and the advance-sum path had no remaining caller.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ def resolve_cjk_ttc() -> str:
         if Path(cand).exists():
             return cand
     raise DocumentParseError(
-        "No CJK font found for overlay width metrics "
+        "No CJK font found for Typst rendering "
         f"(tried {', '.join(CJK_FONT_CANDIDATES)}); "
         "set UBT_CJK_FONT to any CJK TrueType *collection* (.ttc) — a bare .ttf/.otf "
         "will not do, this is read with fontTools' TTCollection"

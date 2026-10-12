@@ -170,7 +170,7 @@ def target_missing_math_delimiters(source: str, target: str) -> bool:
     Delimited sources are covered by the span-mismatch gate (3b); this is
     the docling-flattened counterpart (3c): the source carries math
     signals (``Ag 0``, ``F th,SI``, ``psi_pert`` residue, debris) yet the
-    target has no ``$...$`` span for the overlay to render in math mode.
+    target has no ``$...$`` span for the renderer to typeset in math mode.
     Fires only when the target actually contains ASCII runs worth
     delimiting — pure-CJK targets take the omission path instead.
     Conservative by design: score >= 2 required, so ordinary prose with
@@ -222,12 +222,12 @@ def target_missing_math_delimiters(source: str, target: str) -> bool:
     return score >= 2
 
 
-# LaTeX control sequences the inline overlay probe compiles. Derived from
+# LaTeX control sequences the inline math probe compiles. Derived from
 # the render vocabulary (:mod:`ubt.core.math_symbols`) so the gate and the
 # renderer cannot disagree: membership means "the converter knows this
 # command", and TypstMathProbe remains the final compile gate for syntax the
 # lightweight converter cannot represent. Anything else in a target is
-# unrenderable in the in-place overlay (probe rejects -> literal
+# unrenderable by the transpiler (probe rejects -> literal
 # "\\mathrm"-style garbage) and therefore sanctioned NOWHERE.
 RENDERABLE_LATEX_COMMANDS: frozenset[str] = INLINE_RENDERABLE_COMMANDS
 

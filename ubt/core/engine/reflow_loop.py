@@ -6,9 +6,8 @@ Coordinates post-render visual verification (T0/T1/T2):
    as NEEDS_HUMAN with visual_gate_failed flags;
 3. Persists visual_report.json to disk and SQLite ledger.
 
-All PDF targets render through the unified LayerCompositor onto the source
-canvas, so there is no typography-retune self-healing pass: a defect is
-quarantined directly rather than re-rendered at a different scale.
+The publication renderer has no typography-retune self-healing pass: a
+defect is quarantined directly rather than re-rendered at a different scale.
 """
 
 from __future__ import annotations
@@ -101,22 +100,11 @@ class ReflowControlLoop:
                     )
                 )[:200_000]
 
-        facing_spread = False
-        if self.render_plan is not None:
-            facing_spread = bool(
-                self.render_plan.facing_spread
-                or self.render_plan.bilingual_mode in ("facing", "facing_spread")
-            )
-        # Pages the alternator filled with intentional blanks. Without this the
-        # gate flags the page-count padding as CRITICAL blank_page and flips a
-        # correct facing artifact to passed=False.
-        padding_pages: tuple[int, ...] = ()
-        if isinstance(getattr(self.manifest, "metadata", None), dict):
-            padding_pages = tuple(self.manifest.metadata.get("render_padding_pages") or ())
-        # T1 (out of bounds) and the overlap check both read the SOURCE page's
-        # bboxes, which describe the artifact: every PDF route composes onto the
-        # source page canvas, so a block's source rectangle is where its text
-        # lands.
+        # T1 (out of bounds) and the overlap check read the artifact's own text
+        # boxes, not the IR's source bboxes: the reflow renderer changes where
+        # text lands, so the source rectangle says nothing about the delivered
+        # page. ``run_visual_gate`` falls back to the IR and says so when pdfium
+        # cannot read the artifact.
         gate_blocks = blocks
         vlm_judge = self._build_vlm_judge()
         return await runner(
@@ -126,8 +114,6 @@ class ReflowControlLoop:
             sample_pages=self.sample_pages,
             max_vlm_pages=self.max_vlm_pages,
             vlm_judge=vlm_judge,
-            facing_spread=facing_spread,
-            padding_pages=padding_pages,
         )
 
     async def run(
@@ -140,9 +126,8 @@ class ReflowControlLoop:
             raise JobInterruptedError(f"Job {self.job_id} cancelled before visual gate evaluation")
         gate = await self._evaluate_gate(rendered_path, blocks)
 
-        # All PDF targets render through LayerCompositor onto the source canvas,
-        # so geometry is preserved. If gate has major or critical findings,
-        # quarantine blocks on failing pages directly.
+        # If the gate reports major or critical findings, quarantine the blocks
+        # on the failing pages directly.
         bad_after = [
             f for f in gate.findings if getattr(f, "severity", "") in ("major", "critical")
         ]
@@ -181,8 +166,8 @@ class ReflowControlLoop:
                 )
 
         # T0.5 artifact parity (physical evidence vs the source file). Runs
-        # after the retune/quarantine decisions: its defects (lost coverage,
-        # shifted geometry, changed asset counts) are not fixable by typography
+        # after the retune/quarantine decisions: its defects (untranslated
+        # coverage, replacement characters) are not fixable by typography
         # retuning, and a re-render would burn a full render to change nothing.
         # Critical findings still reach gate.findings, so the blocking gate and
         # the export-time refusal see them.
@@ -202,10 +187,8 @@ class ReflowControlLoop:
                     )
                 parity_findings = await asyncio.to_thread(
                     artifact_parity_findings,
-                    source_pdf=source_pdf,
                     artifact_pdf=rendered_path,
                     target_lang=self.target_lang,
-                    keeps_source_geometry=True,
                     selected_pages=sel_pages,
                 )
             except Exception as exc:
@@ -231,69 +214,6 @@ class ReflowControlLoop:
                     "parity_findings": len(parity_findings),
                 },
             )
-
-        # T0.6 render fidelity (advisory ruler, never a gate). Every PDF route
-        # composes onto the source canvas, so the residual and painted coverage
-        # are measurable on every run; the flag is an explicit opt-in for any
-        # non-source-canvas engine. ``gate.passed`` is untouched, so delivery is
-        # never blocked by it.
-        if source_pdf.exists():
-            try:
-                from ubt.core.ports import (
-                    probe_unavailable_finding,
-                    render_fidelity_findings,
-                    render_fidelity_stats,
-                )
-
-                fidelity_stats = await asyncio.to_thread(
-                    render_fidelity_stats, source_pdf, rendered_path, blocks
-                )
-                if fidelity_stats.get("pages_measured", 0) > 0:
-                    fid_findings = render_fidelity_findings(fidelity_stats)
-                    gate = dataclasses.replace(
-                        gate,
-                        findings=(*gate.findings, *fid_findings),
-                        stats={
-                            **gate.stats,
-                            "fidelity_non_text_residual": fidelity_stats.get(
-                                "non_text_diff_ratio", 0.0
-                            ),
-                            "fidelity_painted_coverage": fidelity_stats.get(
-                                "masked_coverage_ratio", 0.0
-                            ),
-                            "fidelity_pages": fidelity_stats.get("pages_measured", 0),
-                        },
-                    )
-                    if isinstance(getattr(self.manifest, "metadata", None), dict):
-                        self.manifest.metadata["fidelity"] = fidelity_stats
-                else:
-                    # The probe ran but measured nothing (no rasterizer, no
-                    # measurable page, an internal error). Record the reason:
-                    # silently dropping it made "could not measure" look like
-                    # "measured and clean".
-                    gate = dataclasses.replace(
-                        gate,
-                        findings=(
-                            *gate.findings,
-                            probe_unavailable_finding(
-                                "fidelity_not_measured",
-                                "render fidelity not measured: "
-                                f"{fidelity_stats.get('skipped_reason') or 'unknown reason'}",
-                            ),
-                        ),
-                    )
-            except Exception as exc:
-                logger.warning("render fidelity probe failed for job %s: %s", self.job_id, exc)
-                gate = dataclasses.replace(
-                    gate,
-                    findings=(
-                        *gate.findings,
-                        probe_unavailable_finding(
-                            "fidelity_probe_crashed",
-                            f"render fidelity probe raised {type(exc).__name__}: {exc}",
-                        ),
-                    ),
-                )
 
         report_dict: dict[str, Any] = {
             **gate.report_payload(),

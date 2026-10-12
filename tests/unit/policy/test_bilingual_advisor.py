@@ -66,7 +66,7 @@ def _rule(name: str) -> AdvisorRule:
 
 
 def test_mode_vocabulary_and_cutoffs_are_pinned() -> None:
-    assert MODES == ("inline", "alternating", "monolingual")
+    assert MODES == ("dual", "mono")
     assert _OK_CUTOFF == 0.70
     assert _SUGGEST_CUTOFF == 0.40
     assert _DIFFICULTY_DOWNGRADE_RATE == 0.15
@@ -76,40 +76,24 @@ def test_profile_sensitivity_defaults() -> None:
     assert _PROFILE_SENSITIVITY == {"paper": 1.0, "textbook": 1.0, "general": 0.8}
 
 
-def test_base_mode_penalty_penalizes_only_monolingual() -> None:
-    assert _BASE_MODE_PENALTY == {"inline": 0.0, "alternating": 0.0, "monolingual": 0.20}
+def test_base_mode_penalty_penalizes_only_mono() -> None:
+    assert _BASE_MODE_PENALTY == {"dual": 0.0, "mono": 0.20}
 
 
 @pytest.mark.parametrize(
     ("mode", "value"),
-    [
-        ("inline", "bilingual"),
-        ("alternating", "alternating"),
-        ("monolingual", "monolingual"),
-        ("facing", "facing_spread"),
-    ],
+    [("dual", "bilingual"), ("mono", "monolingual")],
 )
 def test_render_mode_value_mapping(mode: DualMode, value: str) -> None:
     assert RENDER_MODE_VALUE[mode] == value
 
 
-@pytest.mark.parametrize(
-    ("mode", "suffix"),
-    [("inline", "_mono"), ("alternating", "_mono"), ("facing", "_mono"), ("monolingual", "_dual")],
-)
+@pytest.mark.parametrize(("mode", "suffix"), [("dual", "_mono"), ("mono", "_dual")])
 def test_secondary_suffix_mapping(mode: DualMode, suffix: str) -> None:
     assert SECONDARY_SUFFIX[mode] == suffix
 
 
-@pytest.mark.parametrize(
-    ("primary", "secondary"),
-    [
-        ("inline", "monolingual"),
-        ("alternating", "monolingual"),
-        ("facing", "monolingual"),
-        ("monolingual", "alternating"),
-    ],
-)
+@pytest.mark.parametrize(("primary", "secondary"), [("dual", "mono"), ("mono", "dual")])
 def test_secondary_mode_is_the_complement(primary: DualMode, secondary: DualMode) -> None:
     assert secondary_mode(primary) == secondary
 
@@ -179,13 +163,12 @@ def test_fragment_heavy_boundary(value: float, fires: bool) -> None:
     assert (detail is not None) is fires
 
 
-def test_every_rule_penalizes_inline_most_and_monolingual_least() -> None:
+def test_every_rule_penalizes_dual_and_never_mono() -> None:
+    # Mono is the safe fallback: no rule may push a document toward it except
+    # by penalizing the pairing.
     for rule in RULES:
-        assert (
-            rule.penalties["inline"]
-            >= rule.penalties["alternating"]
-            >= rule.penalties["monolingual"]
-        )
+        assert rule.penalties["dual"] >= 0.0
+        assert rule.penalties["mono"] == 0.0
 
 
 # --------------------------------------------------------------------------- #
@@ -268,21 +251,22 @@ def test_heading_and_dialogue_count_as_prose() -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_clean_prose_recommends_inline_with_ok_tier() -> None:
-    advisory = advise_layout([_block("a"), _block("b")], "inline", page_count=1)
+def test_clean_prose_recommends_dual_with_ok_tier() -> None:
+    advisory = advise_layout([_block("a"), _block("b")], "dual", page_count=1)
     assert advisory.tier == "ok"
-    assert advisory.recommended == "inline"
-    assert [m.mode for m in advisory.ranking] == ["inline", "alternating", "monolingual"]
+    assert advisory.recommended == "dual"
+    assert [m.mode for m in advisory.ranking] == ["dual", "mono"]
     assert advisory.ranking[0].score == 1.0
-    assert advisory.ranking[2].score == 0.8  # monolingual baseline penalty
+    assert advisory.ranking[1].score == 0.8  # mono baseline penalty
     assert advisory.reasons == ()
 
 
-def test_off_vocabulary_request_is_normalized_to_inline() -> None:
-    advisory = advise_layout([_block("a")], "facing", page_count=1)
-    assert advisory.requested == "inline"
+def test_off_vocabulary_request_is_normalized_to_dual() -> None:
+    # ``auto`` and any stale value never reach tiering; they tier as the default.
+    advisory = advise_layout([_block("a")], "auto", page_count=1)
+    assert advisory.requested == "dual"
     advisory_auto = advise_layout([_block("a")], "auto", page_count=1)
-    assert advisory_auto.requested == "inline"
+    assert advisory_auto.requested == "dual"
 
 
 def _high_interruption_only_blocks() -> list[IRBlock]:
@@ -295,13 +279,13 @@ def _high_interruption_only_blocks() -> list[IRBlock]:
 
 def test_single_high_density_rule_lands_in_suggest() -> None:
     advisory = advise_layout(
-        _high_interruption_only_blocks(), "inline", profile="paper", page_count=2
+        _high_interruption_only_blocks(), "dual", profile="paper", page_count=2
     )
     assert advisory.tier == "suggest"
-    assert advisory.ranking[0].mode == "alternating"
-    inline = next(m for m in advisory.ranking if m.mode == "inline")
-    assert inline.score == 0.5
-    assert inline.penalties == ("high_interruption_density",)
+    assert advisory.ranking[0].mode == "mono"  # 0.8 beats dual's 0.5
+    dual = next(m for m in advisory.ranking if m.mode == "dual")
+    assert dual.score == 0.5
+    assert dual.penalties == ("high_interruption_density",)
     assert advisory.reasons == ("high_interruption_density: 2.50 structural interruptions/page",)
 
 
@@ -322,15 +306,15 @@ def _chaotic_blocks() -> list[IRBlock]:
     ]
 
 
-def test_chaotic_document_discourages_inline_and_recommends_monolingual() -> None:
+def test_chaotic_document_discourages_dual_and_recommends_mono() -> None:
     advisory = advise_layout(
-        _chaotic_blocks(), "inline", profile="paper", page_count=2, figure_pages={1, 2}
+        _chaotic_blocks(), "dual", profile="paper", page_count=2, figure_pages={1, 2}
     )
     assert advisory.tier == "discourage"
-    assert advisory.recommended == "monolingual"
-    inline = next(m for m in advisory.ranking if m.mode == "inline")
-    assert inline.score == 0.0  # clamped after >1.0 of penalties
-    assert set(inline.penalties) == {
+    assert advisory.recommended == "mono"
+    dual = next(m for m in advisory.ranking if m.mode == "dual")
+    assert dual.score == 0.0  # clamped after >1.0 of penalties
+    assert set(dual.penalties) == {
         "high_interruption_density",
         "figure_heavy",
         "struct_block_heavy",
@@ -349,69 +333,69 @@ def test_chaotic_document_discourages_inline_and_recommends_monolingual() -> Non
 
 def test_general_profile_is_lenient_relative_to_paper() -> None:
     blocks = _high_interruption_only_blocks()
-    paper = advise_layout(blocks, "inline", profile="paper", page_count=2)
-    general = advise_layout(blocks, "inline", profile="general", page_count=2)
-    paper_inline = next(m for m in paper.ranking if m.mode == "inline")
-    general_inline = next(m for m in general.ranking if m.mode == "inline")
-    assert paper_inline.score == 0.5
-    assert general_inline.score == 0.6  # 0.5 * 0.8 sensitivity
+    paper = advise_layout(blocks, "dual", profile="paper", page_count=2)
+    general = advise_layout(blocks, "dual", profile="general", page_count=2)
+    paper_dual = next(m for m in paper.ranking if m.mode == "dual")
+    general_dual = next(m for m in general.ranking if m.mode == "dual")
+    assert paper_dual.score == 0.5
+    assert general_dual.score == 0.6  # 0.5 * 0.8 sensitivity
     assert paper.tier == "suggest"
     assert general.tier == "suggest"
 
 
 def test_unknown_profile_falls_back_to_general_sensitivity() -> None:
     blocks = _high_interruption_only_blocks()
-    unknown = advise_layout(blocks, "inline", profile="nope", page_count=2)
-    general = advise_layout(blocks, "inline", profile="general", page_count=2)
+    unknown = advise_layout(blocks, "dual", profile="nope", page_count=2)
+    general = advise_layout(blocks, "dual", profile="general", page_count=2)
     assert unknown.ranking == general.ranking
 
 
 def test_tier_tracks_the_requested_mode_not_the_ranking_head() -> None:
     blocks = _high_interruption_only_blocks()
-    inline = advise_layout(blocks, "inline", profile="paper", page_count=2)
-    mono = advise_layout(blocks, "monolingual", profile="paper", page_count=2)
+    dual = advise_layout(blocks, "dual", profile="paper", page_count=2)
+    mono = advise_layout(blocks, "mono", profile="paper", page_count=2)
     # Same signals and ranking; only the tiered mode differs.
-    assert inline.ranking == mono.ranking
-    assert inline.ranking[0].mode == "alternating"
-    assert inline.tier == "suggest"  # inline scores 0.5
-    assert mono.tier == "ok"  # monolingual scores 0.8
+    assert dual.ranking == mono.ranking
+    assert dual.ranking[0].mode == "mono"
+    assert dual.tier == "suggest"  # dual scores 0.5
+    assert mono.tier == "ok"  # mono scores 0.8
 
 
 def test_ok_tier_boundary_at_exactly_point_seven() -> None:
     # One figure among 100 blocks over 4 pages: only figure_heavy fires for
-    # inline (0.30 penalty), landing the score on exactly 0.70.
+    # dual (0.30 penalty), landing the score on exactly 0.70.
     blocks = [_block("fig", block_type=BlockType.IMAGE)] + [_block(f"p{i}") for i in range(99)]
-    advisory = advise_layout(blocks, "inline", profile="paper", page_count=4, figure_pages={1})
-    inline = next(m for m in advisory.ranking if m.mode == "inline")
-    assert inline.score == 0.70
+    advisory = advise_layout(blocks, "dual", profile="paper", page_count=4, figure_pages={1})
+    dual = next(m for m in advisory.ranking if m.mode == "dual")
+    assert dual.score == 0.70
     assert advisory.tier == "ok"
 
 
 def test_suggest_tier_boundary_at_exactly_point_four() -> None:
-    # High interruption (0.50) + fragment-heavy (0.10) -> inline exactly 0.40.
+    # High interruption (0.50) + fragment-heavy (0.10) -> dual exactly 0.40.
     structs = [_block(f"s{i}", block_type=BlockType.FORMULA) for i in range(5)]
     fragments = [_block(f"f{i}", source="") for i in range(21)]
     prose = [_block(f"p{i}") for i in range(75)]
-    advisory = advise_layout(structs + fragments + prose, "inline", profile="paper", page_count=2)
-    inline = next(m for m in advisory.ranking if m.mode == "inline")
-    assert inline.score == 0.40
+    advisory = advise_layout(structs + fragments + prose, "dual", profile="paper", page_count=2)
+    dual = next(m for m in advisory.ranking if m.mode == "dual")
+    assert dual.score == 0.40
     assert advisory.tier == "suggest"
 
 
 def test_recommended_is_ranking_head() -> None:
     advisory = advise_layout(
-        _chaotic_blocks(), "inline", profile="paper", page_count=2, figure_pages={1, 2}
+        _chaotic_blocks(), "dual", profile="paper", page_count=2, figure_pages={1, 2}
     )
     assert advisory.recommended == advisory.ranking[0].mode
 
 
 def test_advisory_to_dict_shape_and_rounding() -> None:
-    advisory = advise_layout([_block("a")], "inline", page_count=1)
+    advisory = advise_layout([_block("a")], "dual", page_count=1)
     payload = advisory.to_dict()
-    assert payload["requested"] == "inline"
+    assert payload["requested"] == "dual"
     assert payload["tier"] == "ok"
-    assert payload["recommended"] == "inline"
-    assert payload["ranking"][0] == {"mode": "inline", "score": 1.0, "penalties": []}
+    assert payload["recommended"] == "dual"
+    assert payload["ranking"][0] == {"mode": "dual", "score": 1.0, "penalties": []}
     assert payload["reasons"] == []
     assert payload["signals"] == {
         "total_blocks": 1,
@@ -456,31 +440,21 @@ def test_assess_at_threshold_is_hard_with_reason() -> None:
 
 @pytest.mark.parametrize(
     ("mode", "expected"),
-    [
-        ("inline", "alternating"),
-        ("alternating", "monolingual"),
-        ("monolingual", "monolingual"),
-        ("facing", "facing"),
-        ("auto", "auto"),
-    ],
+    [("dual", "mono"), ("mono", "mono"), ("auto", "auto")],
 )
 def test_downgrade_ladder_and_off_ladder_passthrough(mode: DualMode, expected: DualMode) -> None:
     assert downgrade_mode(mode) == expected
 
 
 def test_downgrade_ladder_matches_table() -> None:
-    assert _DOWNGRADE_LADDER == {
-        "inline": "alternating",
-        "alternating": "monolingual",
-        "monolingual": "monolingual",
-    }
+    assert _DOWNGRADE_LADDER == {"dual": "mono", "mono": "mono"}
 
 
-def _advisory(tier: str, recommended: DualMode = "alternating") -> Advisory:
+def _advisory(tier: str, recommended: DualMode = "mono") -> Advisory:
     return Advisory(
-        requested="inline",
+        requested="dual",
         tier=tier,  # type: ignore[arg-type]
-        ranking=(ModeScore(recommended, 0.9), ModeScore("inline", 0.1)),
+        ranking=(ModeScore(recommended, 0.9), ModeScore("dual", 0.1)),
         reasons=(),
     )
 
@@ -494,47 +468,81 @@ def _easy() -> DifficultyAssessment:
 
 
 def test_advise_enforcement_always_keeps_requested() -> None:
-    assert resolve_effective_mode("inline", _advisory("discourage"), _hard()) == "inline"
+    assert resolve_effective_mode("dual", _advisory("discourage"), _hard()) == "dual"
     assert (
-        resolve_effective_mode("inline", _advisory("discourage"), _hard(), enforcement="advise")
-        == "inline"
+        resolve_effective_mode("dual", _advisory("discourage"), _hard(), enforcement="advise")
+        == "dual"
     )
 
 
 def test_auto_keeps_requested_when_not_discouraged() -> None:
+    assert resolve_effective_mode("dual", _advisory("ok"), _easy(), enforcement="auto") == "dual"
     assert (
-        resolve_effective_mode("inline", _advisory("ok"), _easy(), enforcement="auto") == "inline"
-    )
-    assert (
-        resolve_effective_mode("inline", _advisory("suggest"), _easy(), enforcement="auto")
-        == "inline"
+        resolve_effective_mode("dual", _advisory("suggest"), _easy(), enforcement="auto") == "dual"
     )
 
 
 def test_auto_switches_to_recommended_when_discouraged() -> None:
     assert (
-        resolve_effective_mode(
-            "inline", _advisory("discourage", "monolingual"), _easy(), enforcement="auto"
-        )
-        == "monolingual"
+        resolve_effective_mode("dual", _advisory("discourage", "mono"), _easy(), enforcement="auto")
+        == "mono"
     )
 
 
 def test_auto_downgrades_one_step_when_hard() -> None:
-    assert (
-        resolve_effective_mode("inline", _advisory("ok"), _hard(), enforcement="auto")
-        == "alternating"
-    )
+    assert resolve_effective_mode("dual", _advisory("ok"), _hard(), enforcement="auto") == "mono"
 
 
 def test_auto_downgrades_after_switching_to_recommended() -> None:
     result = resolve_effective_mode(
-        "inline", _advisory("discourage", "monolingual"), _hard(), enforcement="auto"
+        "dual", _advisory("discourage", "mono"), _hard(), enforcement="auto"
     )
-    assert result == "monolingual"  # monolingual is the ladder floor
+    assert result == "mono"  # mono is the ladder floor
 
 
 def test_auto_hard_requested_off_ladder_passes_through() -> None:
-    assert (
-        resolve_effective_mode("facing", _advisory("ok"), _hard(), enforcement="auto") == "facing"
+    # ``auto`` is never tiered, so a hard document leaves it alone.
+    assert resolve_effective_mode("auto", _advisory("ok"), _hard(), enforcement="auto") == "auto"
+
+
+# --------------------------------------------------------------------------- #
+# The converged two-value space: ``auto`` and the pairing layout
+# --------------------------------------------------------------------------- #
+
+
+def test_auto_is_never_a_tiered_mode() -> None:
+    """``auto`` is resolved before tiering; it is not itself a layout."""
+    from ubt.core.policy.bilingual_advisor import MODES, RENDER_MODE_VALUE
+
+    assert "auto" not in MODES
+    assert "auto" not in RENDER_MODE_VALUE
+
+
+def test_dual_is_the_only_pairing_layout() -> None:
+    """There is exactly one bilingual layout: the per-block source/translation pair.
+
+    A page-zip against the source cannot exist under reflow (it changes the page
+    count), so ``inline``/``alternating``/``facing`` collapsed into one value.
+    """
+    from ubt.core.policy.bilingual_advisor import RENDER_MODE_VALUE, SECONDARY_SUFFIX
+
+    assert RENDER_MODE_VALUE["dual"] == "bilingual"
+    assert set(SECONDARY_SUFFIX) == {"dual", "mono"}
+
+
+def test_a_structure_heavy_document_is_advised_toward_mono() -> None:
+    """The advisor's whole point: pairing degrades on a chaotic document."""
+    advisory = advise_layout(
+        _chaotic_blocks(), "dual", profile="paper", page_count=2, figure_pages={1, 2}
     )
+    assert advisory.tier == "discourage"
+    assert advisory.recommended == "mono"
+    assert advisory.to_dict()["recommended"] == "mono"
+
+
+def test_every_advisor_mode_has_an_adapter_mapping() -> None:
+    """A mode the advisor can recommend must be renderable."""
+    from ubt.core.policy.bilingual_advisor import MODES, RENDER_MODE_VALUE
+
+    for mode in MODES:
+        assert mode in RENDER_MODE_VALUE, f"{mode} has no adapter mapping"

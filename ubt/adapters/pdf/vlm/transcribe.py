@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -126,36 +125,6 @@ class VlmEvidence:
 
     text: str
     box: tuple[float, float, float, float]
-
-
-def synthetic_vlm_lines(blocks: Sequence[IRBlock] | None) -> list[VlmEvidence]:
-    """VLM-measured member lines for render pairing on textless pages.
-
-    Textless scan pages yield zero pdfium lines, so VLM paragraph blocks
-    could never pair and never render. Member lines stored in provenance
-    (``vlm_lines``) re-enter here as pairing evidence: same text the block
-    was built from, same measured boxes. Ordinary blocks (no ``vlm_lines``)
-    contribute nothing — zero behavior change elsewhere. Lives here (not in
-    the render engine) to avoid an import cycle; the engine wraps these in
-    LineBox.
-    """
-    out: list[VlmEvidence] = []
-    for block in blocks or []:
-        prov = getattr(block, "provenance", None)
-        members = (
-            getattr(prov, "vlm_lines", None)
-            or (prov.get("vlm_lines") if isinstance(prov, dict) else None)
-            or []
-        )
-        for member in members:
-            try:
-                text = str(member.get("text", "")).strip()
-                x0, y0, x1, y1 = (float(v) for v in member.get("box", ()))
-            except (TypeError, ValueError, AttributeError):
-                continue
-            if text and x1 > x0 and y1 > y0:
-                out.append(VlmEvidence(text, (x0, y0, x1, y1)))
-    return out
 
 
 def transcribe_page_to_blocks(

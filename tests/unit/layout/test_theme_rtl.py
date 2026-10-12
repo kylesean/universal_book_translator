@@ -20,7 +20,7 @@ from __future__ import annotations
 import pytest
 
 from ubt.layout.theme import Direction, direction_for, resolve_theme
-from ubt.render.outputs import TypstFragmentTypesetter
+from ubt.render.typst.document_renderer import TypstDocumentRenderer
 
 pytestmark = pytest.mark.fast
 
@@ -57,6 +57,23 @@ def test_an_rtl_target_resolves_an_rtl_theme_with_fonts() -> None:
     assert ar.fonts, "an RTL target must still resolve a font stack"
 
 
-def test_the_typesetter_emits_the_rtl_direction_line_only_for_rtl() -> None:
-    assert TypstFragmentTypesetter(target_lang="zh")._dir_line == ""
-    assert TypstFragmentTypesetter(target_lang="ar")._dir_line == "#set text(dir: rtl)\n"
+def test_the_preamble_emits_the_rtl_direction_line_only_for_rtl() -> None:
+    """An RTL target must declare its direction, and an LTR one must not.
+
+    The reflow renderer used to hardcode ``lang: "zh"``, so an Arabic or Hebrew
+    book got Chinese line-breaking and left-to-right layout on every page. The
+    language and direction now come from the target.
+    """
+    ltr = TypstDocumentRenderer.preamble("zh")
+    assert 'lang: "zh"' in ltr
+    assert "dir: rtl" not in ltr
+
+    rtl = TypstDocumentRenderer.preamble("ar")
+    assert 'lang: "ar"' in rtl
+    assert "dir: rtl" in rtl
+
+
+def test_the_preamble_uses_the_target_language_not_a_hardcoded_one() -> None:
+    """Every target gets its own ``lang``: hyphenation and line-breaking follow it."""
+    for lang in ("en", "ja", "de", "he"):
+        assert f'lang: "{lang}"' in TypstDocumentRenderer.preamble(lang)

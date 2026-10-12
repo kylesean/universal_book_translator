@@ -89,7 +89,6 @@ def collect_kpis(report: QualityReport, visual_report: Mapping[str, Any] | None 
     formula_blocks = report.formula_blocks
     severities = _severity_counts(visual_report)
     visual_pages = _visual_page_count(visual_report, route_pages)
-    fidelity = report.fidelity
 
     kpis: dict[str, float] = {
         "term_consistency": 1.0 - _div(entity.terms_with_drift, entity.terms_audited),
@@ -106,8 +105,6 @@ def collect_kpis(report: QualityReport, visual_report: Mapping[str, Any] | None 
         "blocked_human_rate": _div(report.summary.blocked_human_blocks, total_blocks),
         "visual_critical_rate": _div(severities["critical"], visual_pages),
         "visual_major_rate": _div(severities["major"], visual_pages),
-        "fidelity_non_text_residual": fidelity.non_text_residual,
-        "rigid_painted_coverage": fidelity.painted_coverage,
         "untranslated_leak_rate": _div(
             _flag_count(report.defect_flags, "untranslated"), total_blocks
         ),

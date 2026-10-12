@@ -409,8 +409,8 @@ def _recommend_route(
         confidence, basis = 0.5, "仅前5页采样启发式"
 
     # There is no render-engine recommendation: every PDF renders through the
-    # single source-canvas overlay engine, so the engine is not a user choice.
-    dual_mode = "monolingual" if academic or math_heavy else "inline"
+    # single semantic reflow renderer, so the engine is not a user choice.
+    dual_mode = "mono" if academic or math_heavy else "dual"
     preset = "publication" if (math_heavy or academic) else "standard"
     profile = (
         "paper"
@@ -766,7 +766,7 @@ def _synthesize_warnings(
             AssessmentWarning(
                 "SCANNED_PAGES_DOMINANT",
                 "warn",
-                "文档以扫描/图像页为主，译文依赖视觉转写，成本与时延显著上升；建议先做 OCR 预检（将采用原位覆盖 overlay 路线）。",
+                "文档以扫描/图像页为主，译文依赖视觉转写，成本与时延显著上升；建议先做 OCR 预检（将走视觉转写重排路线）。",
             )
         )
     wit = pdf.get("witness")
@@ -824,9 +824,7 @@ def _synthesize_warnings(
     if pdf.get("text_layer_coverage") is not None:
         quality_signals.append(f"文本层覆盖率 {pdf['text_layer_coverage']:.0%}")
     if pdf.get("poster_pages"):
-        quality_signals.append(
-            f"海报/固定版式页 {pdf['poster_pages']} 页（将采用原位覆盖 overlay）"
-        )
+        quality_signals.append(f"海报/固定版式页 {pdf['poster_pages']} 页（将走视觉转写重排）")
     if arch.detected_domain != "general":
         quality_signals.append(
             f"领域判定 {arch.detected_domain}（置信度 {arch.domain_confidence}），可挂载领域术语表"

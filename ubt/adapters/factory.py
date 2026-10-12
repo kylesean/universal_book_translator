@@ -109,15 +109,20 @@ def _resolve_pdf_adapter(pdf_engine: str, path: Path | None = None) -> BasePDFEn
                     path.name,
                 )
                 engine_key = "docling"
-            elif plan.primary_engine == "docling":
-                # Fast path honoured, but never silently: the probe saw a
-                # multi-column / formula / vector signal pdfium reads poorly.
+            else:
+                # An explicit ``pdfium`` request is honoured, but never silently:
+                # pdfium's reader represents only headings, paragraphs, list items
+                # and code, so every table, figure and formula in the document is
+                # dropped from the rebuilt PDF. The probe's signals say how likely
+                # that is, but they cannot rule it out (a vector-drawn figure reads
+                # as zero on all of them).
                 logger.warning(
-                    "pdfium fast path chosen for '%s', but the content probe saw a "
-                    "layout signal it reads poorly (multicolumn=%s, formulas=%s, "
-                    "vector-heavy=%s): expect interleaved columns and math-debris "
-                    "blocks. Use --pdf-engine docling (or --preset standard) for "
-                    "layout fidelity.",
+                    "pdfium requested for '%s': its reader cannot represent tables, "
+                    "figures or formulas, so any the document contains are omitted "
+                    "from the rebuilt PDF (probe signals — multicolumn=%s, "
+                    "formulas=%s, vector-heavy=%s — are only a lower bound). "
+                    "Use --pdf-engine docling (or --preset standard) for lossless "
+                    "ingest.",
                     path.name,
                     plan.has_multicolumn,
                     plan.has_formulas,

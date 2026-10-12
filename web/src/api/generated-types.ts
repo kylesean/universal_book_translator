@@ -522,7 +522,7 @@ export interface paths {
          * Preview Page
          * @description Re-compose one source page with the current ledger text, as PNG.
          *
-         *     Reuses the delivery compositor (source page as canvas) for a single page,
+         *     Reuses the delivery renderer for a single page,
          *     so a human edit can be previewed without re-rendering the book. 503 when
          *     the page has nothing to compose or the rasterizer is unavailable.
          */
@@ -1089,9 +1089,9 @@ export interface components {
             pdf_engine?: string | null;
             /**
              * Dual Mode
-             * @description Bilingual mode (inline, alternating, facing, monolingual, auto)
+             * @description What the reader receives (dual, mono, auto)
              */
-            dual_mode?: ("inline" | "alternating" | "monolingual" | "facing" | "auto") | null;
+            dual_mode?: ("mono" | "dual" | "auto") | null;
             /**
              * Pages
              * @description Page range filter (e.g. 1-10)
@@ -1102,16 +1102,6 @@ export interface components {
              * @description Path to an external glossary file to enforce (CLI/MCP parity)
              */
             glossary?: string | null;
-            /**
-             * Exec Mode
-             * @description Execution mode (auto, short, long)
-             */
-            exec_mode?: ("auto" | "short" | "long") | null;
-            /**
-             * Formula Mode
-             * @description Formula handling (strict, readable)
-             */
-            formula_mode?: ("strict" | "readable") | null;
             /**
              * Budget Usd
              * @description Hard USD cap for this job across every resume; the run fails once priced cost exceeds it
@@ -1153,11 +1143,6 @@ export interface components {
              */
             offline_batch_enabled?: boolean | null;
             /**
-             * Qe Engine
-             * @description QE runner (heuristic, comet, cometkiwi, neural, subprocess, tiered)
-             */
-            qe_engine?: ("heuristic" | "comet" | "cometkiwi" | "neural" | "subprocess" | "tiered") | null;
-            /**
              * Visual Judge Enabled
              * @description Enable the VLM visual judge over rendered pages
              */
@@ -1168,20 +1153,10 @@ export interface components {
              */
             visual_judge_model?: string | null;
             /**
-             * Prompt Strategy
-             * @description Prompt depth (auto, minimal, hybrid, rich)
-             */
-            prompt_strategy?: ("auto" | "minimal" | "hybrid" | "rich") | null;
-            /**
              * Translate Chrome
              * @description Translate running heads, footers and page chrome
              */
             translate_chrome?: boolean | null;
-            /**
-             * Facing Spread
-             * @description Lay the bilingual output out as facing pages
-             */
-            facing_spread?: boolean | null;
             /**
              * Emit Both
              * @description Emit both the primary and complementary dual_mode deliverables (e.g. mono and bilingual)
@@ -1192,21 +1167,6 @@ export interface components {
              * @description Cover handling (auto, always, never)
              */
             cover_mode?: ("auto" | "always" | "never") | null;
-            /**
-             * Formula Enrichment
-             * @description Formula enrichment (auto, on, off)
-             */
-            formula_enrichment?: ("auto" | "on" | "off") | null;
-            /**
-             * Formula Render
-             * @description Formula rendering (native, image, witness)
-             */
-            formula_render?: ("native" | "image" | "witness") | null;
-            /**
-             * Math Backend
-             * @description Retired knob: recorded in the engine signature but no renderer consumes it; formula fidelity is controlled by formula_render.
-             */
-            math_backend?: ("typst" | "mathjax" | "image") | null;
             /**
              * Ocr Mode
              * @description OCR engine (auto, sidecar, cloud, vlm, rapidocr, off)

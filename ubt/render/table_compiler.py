@@ -10,7 +10,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from ubt.adapters.pdf.overlay_text import typst_escape
+from ubt.render.typst.escape import typst_escape
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,10 +23,20 @@ class TableComplexity:
     cols: int
 
 
-def parse_markdown_table(markup: str) -> tuple[list[str], list[list[str]]] | None:
+def parse_markdown_table(
+    markup: str, *, escape: bool = True
+) -> tuple[list[str], list[list[str]]] | None:
     """Parse a Markdown table into (headers, rows).
 
     Returns None if markup does not look like a recognizable Markdown table.
+
+    ``escape=True`` (the default) Typst-escapes every cell, which is what the
+    callers that interpolate cells **raw** into ``[...]`` need (see
+    :func:`markdown_table_to_typst`). A caller that runs each cell through the
+    prose renderer instead must pass ``escape=False``: that renderer owns
+    escaping *and* math transpilation, so a pre-escaped ``\\$`` would be escaped
+    a second time into ``\\\\$`` — inside a content block ``\\\\`` is a line break,
+    so the cell's math delimiter never closes and the compile fails.
     """
     lines = [line.strip() for line in markup.strip().splitlines() if line.strip()]
     table_lines = [line for line in lines if line.startswith("|") and line.endswith("|")]
@@ -46,14 +56,18 @@ def parse_markdown_table(markup: str) -> tuple[list[str], list[list[str]]] | Non
         # No standard separator line found
         return None
 
-    headers = [typst_escape(c.strip()) for c in header_line.split("|")[1:-1]]
+    def _cell(value: str) -> str:
+        stripped = value.strip()
+        return typst_escape(stripped) if escape else stripped
+
+    headers = [_cell(c) for c in header_line.split("|")[1:-1]]
     cols = len(headers)
     if cols == 0:
         return None
 
     rows: list[list[str]] = []
     for line in table_lines[sep_idx + 1 :]:
-        cells = [typst_escape(c.strip()) for c in line.split("|")[1:-1]]
+        cells = [_cell(c) for c in line.split("|")[1:-1]]
         if len(cells) < cols:
             cells.extend([""] * (cols - len(cells)))
         elif len(cells) > cols:

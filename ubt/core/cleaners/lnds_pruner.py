@@ -544,7 +544,7 @@ def dedup_duplicate_blocks(blocks: list[IRBlock]) -> list[IRBlock]:
     Docling sometimes emits a figure's sub-panel label twice — two narrative
     blocks with identical text and near-coincident boxes (arXiv 2609.20519
     page 1: ``(a) SoL-Pi: Scaling Auto-Research Loop`` extracted as both
-    ``b0008`` and ``b0009``, IoU 0.95). The pair survives into the overlay as
+    ``b0008`` and ``b0009``, IoU 0.95). The pair survives into the render as
     two ``no_zone`` blocks whose boxes overlap, tripping the visual gate's
     ``block_overlap`` finding and cascading ``needs_human`` onto every block
     that shares the page. Requiring *identical normalized text* keeps

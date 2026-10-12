@@ -1,0 +1,5 @@
+# Real artifacts are large and (usually) third-party licensed: never commit them.
+# Populate this directory locally to run `ubt verify --corpus corpus`.
+*
+!.gitkeep
+!.gitignore

@@ -1,0 +1,348 @@
+{
+  "schema_version": 1,
+  "description": "Semantic-path gold corpus (RFC-2026-02 Sprint 1). Each entry is a real public document chosen to stress one dimension of the semantic reflow path. Every case is scored by scripts/eval_semantic.py; the thresholds in `expect` are the RFC §4.3 / §9 targets, not the current measurements (which are recorded in `baseline` as they are taken).",
+  "categories": {
+    "formula-dense": "Display math dominates; the Typst math transpiler is the failure surface.",
+    "complex-tables": "Multi-column grids with numeric cells; the overlay path cannot rebuild these.",
+    "two-column-figures": "Two-column layout with floats; reading-order and caption pairing.",
+    "long-mixed": "Long document mixing all of the above plus references.",
+    "toc-outline": "Has a PDF bookmark tree; tests the outline-based TOC merge.",
+    "no-outline": "No bookmark tree; the Docling-only TOC path must still hold."
+  },
+  "cases": [
+    {
+      "id": "switch-transformers",
+      "category": [
+        "formula-dense",
+        "complex-tables",
+        "toc-outline"
+      ],
+      "source": "arxiv:2101.03961v3",
+      "title": "Switch Transformers: Scaling to Trillion Parameter Models",
+      "why": "The reference paper for the RFC. 14 tables, 7 display formulas, 13 figures, 31 bookmarks. The run that exposed every defect in §1.",
+      "measured": {
+        "pages": 40,
+        "bookmarks": 31,
+        "size_mb": 1.3
+      }
+    },
+    {
+      "id": "attention-is-all-you-need",
+      "category": [
+        "formula-dense",
+        "toc-outline"
+      ],
+      "source": "arxiv:1706.03762v7",
+      "title": "Attention Is All You Need",
+      "why": "Small, dense math, universally known: a good first smoke test.",
+      "measured": {
+        "pages": 15,
+        "bookmarks": 22,
+        "size_mb": 2.2
+      }
+    },
+    {
+      "id": "bert",
+      "category": [
+        "complex-tables",
+        "no-outline"
+      ],
+      "source": "arxiv:1810.04805v2",
+      "title": "BERT: Pre-training of Deep Bidirectional Transformers",
+      "why": "Heavy table use for GLUE/SQuAD results; long appendix tables.",
+      "measured": {
+        "pages": 16,
+        "bookmarks": 0,
+        "size_mb": 0.8
+      }
+    },
+    {
+      "id": "resnet",
+      "category": [
+        "two-column-figures",
+        "complex-tables",
+        "no-outline"
+      ],
+      "source": "arxiv:1512.03385v1",
+      "title": "Deep Residual Learning for Image Recognition",
+      "why": "Two-column CV layout with many architecture tables and figures.",
+      "measured": {
+        "pages": 12,
+        "bookmarks": 0,
+        "size_mb": 0.8
+      }
+    },
+    {
+      "id": "gpt3",
+      "category": [
+        "long-mixed",
+        "complex-tables",
+        "toc-outline"
+      ],
+      "source": "arxiv:2005.14165v4",
+      "title": "Language Models are Few-Shot Learners",
+      "why": "Very long (75 pages), table-heavy appendix, mixed content.",
+      "measured": {
+        "pages": 75,
+        "bookmarks": 32,
+        "size_mb": 6.8
+      }
+    },
+    {
+      "id": "vit",
+      "category": [
+        "two-column-figures",
+        "toc-outline"
+      ],
+      "source": "arxiv:2010.11929v2",
+      "title": "An Image is Worth 16x16 Words",
+      "why": "Figure-first layout; caption pairing stress.",
+      "measured": {
+        "pages": 22,
+        "bookmarks": 30,
+        "size_mb": 3.7
+      }
+    },
+    {
+      "id": "ddpm",
+      "category": [
+        "formula-dense",
+        "two-column-figures",
+        "toc-outline"
+      ],
+      "source": "arxiv:2006.11239v2",
+      "title": "Denoising Diffusion Probabilistic Models",
+      "why": "Derivation-heavy: long aligned equation chains.",
+      "measured": {
+        "pages": 25,
+        "bookmarks": 18,
+        "size_mb": 10.3
+      }
+    },
+    {
+      "id": "alphafold2",
+      "category": [
+        "formula-dense",
+        "long-mixed",
+        "complex-tables",
+        "toc-outline"
+      ],
+      "source": "arxiv:2107.07479v2",
+      "title": "Highly accurate protein structure prediction with AlphaFold",
+      "why": "Dense math plus very large supplementary tables.",
+      "measured": {
+        "pages": 24,
+        "bookmarks": 17,
+        "size_mb": 0.4
+      }
+    },
+    {
+      "id": "flamingo",
+      "category": [
+        "two-column-figures",
+        "complex-tables",
+        "toc-outline"
+      ],
+      "source": "arxiv:2204.14198v2",
+      "title": "Flamingo: a Visual Language Model for Few-Shot Learning",
+      "why": "Figure-heavy multimodal layout.",
+      "measured": {
+        "pages": 54,
+        "bookmarks": 53,
+        "size_mb": 31.6
+      }
+    },
+    {
+      "id": "instructgpt",
+      "category": [
+        "long-mixed",
+        "complex-tables",
+        "toc-outline"
+      ],
+      "source": "arxiv:2203.02155v1",
+      "title": "Training language models to follow instructions",
+      "why": "Long, annotation-heavy tables, mixed prose.",
+      "measured": {
+        "pages": 68,
+        "bookmarks": 54,
+        "size_mb": 1.8
+      }
+    },
+    {
+      "id": "llama2",
+      "category": [
+        "long-mixed",
+        "complex-tables",
+        "toc-outline"
+      ],
+      "source": "arxiv:2307.09288v2",
+      "title": "Llama 2: Open Foundation and Fine-Tuned Chat Models",
+      "why": "Long with many safety-evaluation tables.",
+      "measured": {
+        "pages": 77,
+        "bookmarks": 29,
+        "size_mb": 13.7
+      }
+    },
+    {
+      "id": "whisper",
+      "category": [
+        "two-column-figures",
+        "complex-tables",
+        "no-outline"
+      ],
+      "source": "arxiv:2212.04356v1",
+      "title": "Robust Speech Recognition via Large-Scale Weak Supervision",
+      "why": "Wide result tables and audio figures.",
+      "measured": {
+        "pages": 28,
+        "bookmarks": 0,
+        "size_mb": 1.0
+      }
+    },
+    {
+      "id": "clip",
+      "category": [
+        "two-column-figures",
+        "complex-tables",
+        "no-outline"
+      ],
+      "source": "arxiv:2103.00020v1",
+      "title": "Learning Transferable Visual Models From Natural Language Supervision",
+      "why": "Very large appendix result tables.",
+      "measured": {
+        "pages": 48,
+        "bookmarks": 0,
+        "size_mb": 6.8
+      }
+    },
+    {
+      "id": "stable-diffusion",
+      "category": [
+        "two-column-figures",
+        "formula-dense",
+        "toc-outline"
+      ],
+      "source": "arxiv:2112.10752v2",
+      "title": "High-Resolution Image Synthesis with Latent Diffusion Models",
+      "why": "Figure-heavy generative layout.",
+      "measured": {
+        "pages": 45,
+        "bookmarks": 42,
+        "size_mb": 40.8
+      }
+    },
+    {
+      "id": "mamba",
+      "category": [
+        "formula-dense",
+        "complex-tables",
+        "toc-outline"
+      ],
+      "source": "arxiv:2312.00752v2",
+      "title": "Mamba: Linear-Time Sequence Modeling with Selective State Spaces",
+      "why": "Recent, equation-dense, algorithm blocks.",
+      "measured": {
+        "pages": 36,
+        "bookmarks": 57,
+        "size_mb": 1.2
+      }
+    },
+    {
+      "id": "moe-mistral",
+      "category": [
+        "formula-dense",
+        "complex-tables",
+        "toc-outline"
+      ],
+      "source": "arxiv:2401.04088v1",
+      "title": "Mixture of Experts (Mixtral of Experts)",
+      "why": "A second MoE paper: tests whether the fixed numeric rules generalise beyond the reference paper.",
+      "measured": {
+        "pages": 13,
+        "bookmarks": 10,
+        "size_mb": 2.5
+      }
+    },
+    {
+      "id": "raft",
+      "category": [
+        "formula-dense",
+        "two-column-figures",
+        "toc-outline"
+      ],
+      "source": "arxiv:2003.12039v3",
+      "title": "RAFT: Recurrent All-Pairs Field Transforms for Optical Flow",
+      "why": "Algorithm-block heavy with multi-line equations.",
+      "measured": {
+        "pages": 21,
+        "bookmarks": 1,
+        "size_mb": 7.4
+      }
+    },
+    {
+      "id": "neural-ode",
+      "category": [
+        "formula-dense",
+        "toc-outline"
+      ],
+      "source": "arxiv:1806.07366v5",
+      "title": "Neural Ordinary Differential Equations",
+      "why": "Pure-math paper: the hardest case for the LaTeX→Typst transpiler.",
+      "measured": {
+        "pages": 18,
+        "bookmarks": 21,
+        "size_mb": 4.0
+      }
+    },
+    {
+      "id": "gan",
+      "category": [
+        "formula-dense",
+        "two-column-figures",
+        "no-outline"
+      ],
+      "source": "arxiv:1406.2661v1",
+      "title": "Generative Adversarial Networks",
+      "why": "Short, minimal math, minimal tables: the lower bound case.",
+      "measured": {
+        "pages": 9,
+        "bookmarks": 0,
+        "size_mb": 0.5
+      }
+    },
+    {
+      "id": "dropout",
+      "category": [
+        "formula-dense",
+        "complex-tables",
+        "toc-outline"
+      ],
+      "source": "arxiv:1207.0580v1",
+      "title": "Improving neural networks by preventing co-adaptation",
+      "why": "Older two-column style; different font and table conventions from modern arXiv.",
+      "measured": {
+        "pages": 18,
+        "bookmarks": 20,
+        "size_mb": 1.7
+      }
+    }
+  ],
+  "scoring": {
+    "script": "scripts/eval_semantic.py",
+    "targets": {
+      "cjk_ratio": ">= 0.55 (whole-document; the deliberate source keeps lower it)",
+      "ledger.cjk_ratio_translatable": ">= 0.55 (over only the blocks meant to be translated)",
+      "untranslated_marks": "== 0",
+      "p95_font_size_pt": "in [10, 11]",
+      "source_header_term_leakage": "<= 0.35",
+      "math_residue_ratio": "< 0.001",
+      "ledger.blocked_ratio": "<= 0.05"
+    }
+  },
+  "measured": {
+    "generated": "2026-10-11",
+    "note": "Page/bookmark counts measured with pypdfium2 at corpus build time; categories corrected to match.",
+    "documents": 20
+  }
+}

@@ -7,7 +7,7 @@ The adapter orchestrates three extracted modules:
   fallback, textless-page VLM tiering, page-kind profiling);
 - :mod:`ubt.adapters.pdf.docling_blocks` — pure block shaping;
 - :mod:`ubt.adapters.pdf.docling_render` — IRBlocks → delivered artifact
-  (LayerCompositor source-canvas composition, bilingual interleaving, diagrams).
+  (Typst publication reflow, bilingual per-block pairing, diagrams).
 
 It keeps the module-level ``_docling_symbols`` / ``_has_accelerator`` import
 seams and the tested private-method surface as thin delegates so existing
@@ -26,7 +26,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ubt.adapters.base import BasePDFEngineAdapter
-from ubt.adapters.pdf.alternator import BilingualAlternator
 from ubt.adapters.pdf.docling_parser import (
     annotate_page_kinds,
     extract_with_docling,
@@ -51,22 +50,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _contiguous_page_range(pages: set[int] | None) -> tuple[int, int] | None:
-    """Collapse a 1-based page set into Docling's inclusive ``(start, end)``.
-
-    Docling accepts exactly one contiguous range; a non-contiguous selection
-    returns ``None`` so the caller parses the full PDF and the ingest stage
-    filters the blocks afterwards. Empty or absent selections also return
-    ``None`` (no restriction).
-    """
-    if not pages:
-        return None
-    start, end = min(pages), max(pages)
-    if len(pages) != end - start + 1:
-        return None
-    return (start, end)
-
-
 def _docling_symbols() -> tuple[Any, Any, Any, Any]:
     """Import hook for the Docling converter symbols (seam for tests).
 
@@ -84,13 +67,12 @@ def _docling_symbols() -> tuple[Any, Any, Any, Any]:
 class _PDFRenderStackMixin:
     """Shared PDF render infrastructure (DoclingRenderStrategy delegation).
 
-    Both Docling and PDFium adapters compose onto the source canvas through
-    the same ``DoclingRenderStrategy`` — only extraction differs. This mixin
+    Both Docling and PDFium adapters rebuild the document through the same
+    ``DoclingRenderStrategy`` — only extraction differs. This mixin
     owns the render-stack wiring so the two adapters are siblings under
     ``BasePDFEngineAdapter`` rather than PDFium inheriting Docling.
     """
 
-    alternator: BilingualAlternator
     last_render_skips: list[tuple[str, str]]
     last_render_flags: list[tuple[str, str]]
     last_render_outcome: RenderOutcome | None
@@ -99,17 +81,14 @@ class _PDFRenderStackMixin:
 
     def _init_render_stack(
         self,
-        alternator: BilingualAlternator | None = None,
         font_family: str | None = None,
     ) -> None:
-        self.alternator = alternator or BilingualAlternator()
         self.allow_page_upload = False
         self._font_family = None
         self.last_render_skips = []
-        self.last_render_flags = []
+        self.last_render_flags: list[tuple[str, str]] = []
         self.last_render_outcome = None
         self._renderer = DoclingRenderStrategy(
-            alternator=self.alternator,
             font_family=None,
         )
         self.font_family = font_family
@@ -163,24 +142,21 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
 
     def __init__(
         self,
-        alternator: BilingualAlternator | None = None,
         ocr_mode: str = "auto",
         ocr_endpoint: str | None = None,
         ocr_api_key: str | None = None,
         ocr_model: str | None = None,
         formula_enrichment: str = "auto",
-        formula_render: str = "witness",
         docling_device: str = "auto",
         font_family: str | None = None,
         allow_page_upload: bool = False,
     ) -> None:
-        self._init_render_stack(alternator, font_family)
+        self._init_render_stack(font_family)
         self.ocr_mode = ocr_mode
         self.ocr_endpoint = ocr_endpoint
         self.ocr_api_key = ocr_api_key
         self.ocr_model = ocr_model
         self.formula_enrichment = formula_enrichment
-        self.formula_render = formula_render
         self.docling_device = docling_device
         self.allow_page_upload = allow_page_upload
 
@@ -200,7 +176,6 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
         if runtime_config.ocr_model:
             self.ocr_model = runtime_config.ocr_model
         self.formula_enrichment = runtime_config.formula_enrichment
-        self.formula_render = runtime_config.formula_render
         # Whether Docling touches the GPU is a separate decision from whether it
         # runs at all: a local LLM on the same card needs Docling on CPU.
         self.docling_device = runtime_config.docling_device
@@ -408,7 +383,6 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
         """Resolve effective formula enrichment policy (delegates to docling_parser)."""
         return resolve_formula_enrichment(
             self.formula_enrichment,
-            self.formula_render,
             _has_accelerator,
             path=path,
         )

@@ -39,7 +39,7 @@ class _FakeTypst:
         self.ok = ok
         self.calls = 0
 
-    def __call__(self, typ_path: str, pdf_path: str, binary: str) -> tuple[bool, str]:
+    def __call__(self, typ_path: str, pdf_path: str, binary: str = "typst") -> tuple[bool, str]:
         self.calls += 1
         if not self.ok:
             return False, "fake compiler failure"
@@ -74,8 +74,9 @@ def _setup(tmp_path: Path) -> tuple[Any, BookManifest, list[IRBlock]]:
 
 
 def _patch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fake: _FakeTypst) -> None:
-    monkeypatch.setattr("ubt.render.outputs.typst_compile", fake)
-    monkeypatch.setattr("ubt.render.outputs.cache_root", lambda: tmp_path / "cache")
+    # The reflow renderer compiles through ``ubt.adapters.pdf.typst_compile``;
+    # the overlay path it replaced went through ``ubt.render.outputs``.
+    monkeypatch.setattr("ubt.adapters.pdf.typst_compile.typst_compile", fake)
 
 
 def test_preflight_really_invokes_the_typesetter(
@@ -99,7 +100,7 @@ def test_preflight_fails_when_no_fragment_can_be_typeset(
     _patch(monkeypatch, tmp_path, fake)
     adapter, manifest, blocks = _setup(tmp_path)
 
-    with pytest.raises(DocumentParseError, match="could not typeset any of the"):
+    with pytest.raises(DocumentParseError, match="failed to compile|no usable PDF"):
         asyncio.run(
             run_render_preflight(
                 adapter=adapter, manifest=manifest, blocks=blocks, target_lang="zh"
@@ -110,14 +111,16 @@ def test_preflight_fails_when_no_fragment_can_be_typeset(
 def test_preflight_sample_reaches_the_typesetter_for_a_formula_heavy_book(
     tmp_path: Path,
 ) -> None:
-    # A formula/table-heavy book's sample is all static-skip blocks; the old
-    # placeholder kept skip_translate=True, so overlays_from_blocks returned
-    # nothing and the "nothing was drawn" guard was inert (a dead Typst passed).
+    # A formula/table-heavy book's sample is all static-skip blocks. The reflow
+    # renderer has no "nothing was drawn" skip channel to check, so what has to
+    # hold is that the placeholder sample still emits real markup for the
+    # compiler — an empty sample would compile trivially and the gate would be
+    # inert (a dead Typst would pass).
     from ubt.core.engine.render_preflight import (
         _placeholder_blocks,
         select_preflight_sample,
     )
-    from ubt.render.outputs import overlays_from_blocks
+    from ubt.render.typst.document_renderer import TypstDocumentRenderer
 
     blocks = [
         IRBlock(
@@ -136,7 +139,10 @@ def test_preflight_sample_reaches_the_typesetter_for_a_formula_heavy_book(
 
     sample = select_preflight_sample(blocks)
     assert sample  # the sample is not empty
-    assert len(overlays_from_blocks(_placeholder_blocks(sample))) >= 1
+    renderer = TypstDocumentRenderer()
+    source, stats = renderer.build_source(_placeholder_blocks(sample), tmp_path / "build")
+    assert stats.blocks_rendered >= 1, "the sample emitted nothing to compile"
+    assert "$" in source, "the formula sample produced no math markup"
 
 
 def test_placeholder_text_replaces_an_empty_formula_body() -> None:

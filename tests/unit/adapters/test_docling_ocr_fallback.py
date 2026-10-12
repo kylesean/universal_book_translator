@@ -138,3 +138,31 @@ def test_vlm_fallback_auto_promotes_to_missing_for_textless_scans() -> None:
                 allow_page_upload=False,
             )
         assert "every page lacks an extractable text layer" in str(exc_info.value)
+
+
+# --------------------------------------------------------------------------- #
+# The egress gate: `allow_page_upload` is the only switch that permits page
+# images to leave the machine. `ocr_mode` selects a route, it does not
+# authorize one.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("mode", ["cloud", "vlm"])
+def test_an_explicit_remote_ocr_mode_cannot_bypass_the_upload_gate(mode: str) -> None:
+    """Naming a remote route is not consent to use it.
+
+    Measured: with ``allow_page_upload=False`` (the default) both remote modes
+    raise rather than shipping pages. This was verified because the opposite had
+    been assumed — that an explicit ``ocr_mode=cloud`` was the user's consent
+    action. It is not; ``allow_page_upload`` is, and it is operator-only.
+    """
+    with pytest.raises(ValueError, match="allow_page_upload=false"):
+        probe_effective_driver(mode=mode, allow_page_upload=False)
+
+
+def test_a_local_ocr_mode_still_works_with_the_gate_closed() -> None:
+    """The gate blocks egress, not OCR: a local route keeps working."""
+    with patch.object(RapidOcrDriver, "is_available", return_value=False):
+        # No local engine available and egress closed -> no driver, no error.
+        assert probe_effective_driver(mode="auto", allow_page_upload=False) == (None, None)
+        assert probe_effective_driver(mode="off", allow_page_upload=False) == (None, None)

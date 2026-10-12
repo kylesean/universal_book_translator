@@ -5,9 +5,10 @@ representation. Every delivery gets a graph built here, so the reconciliation
 gate applies to *all* render paths.
 
 Asset policy (Axiom A): a non-text block is only RECONSTRUCTED alongside the
-round-trip check that verifies it. The unified LayerCompositor (overlay engine)
-composes onto the source page, so non-text nodes are PRESERVED_OPAQUE by
-construction.
+round-trip check that verifies it. The reflow renderer places figures as the
+extracted image and rebuilds tables from their markup, so a figure stays
+PRESERVED_OPAQUE while a rebuilt table is a reconstruction the contract has to
+be able to verify.
 """
 
 from __future__ import annotations
@@ -102,8 +103,9 @@ def _text_node(block: IRBlock, order: int, region: SourceRegion | None) -> TextN
     elif block.status is BlockStatus.BLOCKED_HUMAN:
         # Quarantined for human post-editing: its ``target_text`` is a ``<mark>``
         # wrapper around the *source*, not a translation, and the renderer
-        # deliberately leaves it on Layer 0 (``_overlayable``). So the reader
-        # gets the source. This branch must precede the target-truthiness test
+        # deliberately typesets the source instead (see
+        # ``document_renderer._block_text``). So the reader gets the source.
+        # This branch must precede the target-truthiness test
         # below, or the non-empty marker would be counted as delivered -- the
         # defect that let 20 untranslated blocks report ``violations: []`` and
         # ``source_kept_text: 0`` in arXiv 2610.02185.
@@ -159,8 +161,9 @@ def _asset_node(
     asset_kind = _ASSET_KIND[block.block_type]
     flags = _skip_flags(block)
     reasons = {_skip_reason(f) for f in flags}
-    # The overlay engine keeps the source page as the canvas, so every non-text
-    # node survives whole: no asset is ever reconstructed or re-verified.
+    # A non-text node that was neither dropped on purpose nor lost to a render
+    # skip survived whole: the renderer placed the extracted asset (a figure) or
+    # rebuilt it from its own markup (a table).
     if reasons & _DECORATIVE_SKIP_REASONS:
         integrity = AssetIntegrity.DROPPED
         detail = "intentional:" + ",".join(sorted(reasons & _DECORATIVE_SKIP_REASONS))
@@ -199,8 +202,9 @@ def graph_from_blocks(
 ) -> ContentGraph:
     """Build the delivery contract's content graph from the delivered blocks.
 
-    The overlay engine keeps the source page as the canvas, so non-text nodes are
-    always preserved whole.
+    Every non-text node is accounted for: preserved when the renderer placed it,
+    dropped only for a recorded decorative reason, missing when a render skip
+    says so.
     """
     nodes: list[ContentNode] = []
     for order, block in enumerate(blocks):

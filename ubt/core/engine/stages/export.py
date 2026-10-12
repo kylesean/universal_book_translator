@@ -61,6 +61,23 @@ from ubt.core.validators.math_guard import apply_math_guards
 
 logger = logging.getLogger(__name__)
 
+#: Values that mean "target only" in the two vocabularies that meet here: the
+#: advisor's ``DualMode`` and the adapter's ``bilingual_mode``.
+_MONO_VALUES = frozenset({"mono", "monolingual"})
+
+
+def _is_mono(value: object) -> bool:
+    """True when ``value`` explicitly names the target-only delivery.
+
+    Two vocabularies reach this stage — the advisor's ``DualMode``
+    (``mono``/``dual``) and the adapter's ``bilingual_mode``
+    (``monolingual``/``bilingual``). ``None`` means "the renderer reported no
+    outcome", which is *not* an assertion of mono: a non-PDF target has no
+    bilingual form but also no reported mode, so callers decide that case
+    themselves rather than inheriting a guess.
+    """
+    return value is not None and str(value) in _MONO_VALUES
+
 
 async def _render_adapter_output(
     adapter: DocumentAdapter,
@@ -760,7 +777,7 @@ async def _render_complementary_artifact(
         primary_mode = str(
             (primary_outcome.effective_dual_mode if primary_outcome else None)
             or render.effective_dual_mode
-            or "inline"
+            or "dual"
         )
         suffix = SECONDARY_SUFFIX.get(cast(DualMode, primary_mode), "_secondary")
         candidate = artifact.sibling(suffix)
@@ -922,10 +939,15 @@ def _write_table_appendix(
     rendered_path: Path,
     blocks: list[IRBlock],
 ) -> Path | None:
-    """Write translated table appendix companion (.md / .json) and append pages to PDF when appropriate."""
-    from ubt.adapters.pdf.typst_compile import typst_compile
+    """Write translated table appendix companion (.md / .json) and append pages to PDF when appropriate.
+
+    The semantic reflow renderer re-typesets every table inline
+    (``ubt/render/typst/document_renderer.py``), so appending the same tables
+    again would deliver each complex table twice. This remains only for the
+    ``--table-render-mode`` companion exports; no PDF page is appended.
+    """
     from ubt.core.job_options import companion_path
-    from ubt.render.table_compiler import probe_table_complexity, render_table_appendix_typst
+    from ubt.render.table_compiler import probe_table_complexity
 
     table_mode = getattr(ctx.config, "table_render_mode", "auto")
     if table_mode == "skip":
@@ -992,37 +1014,8 @@ def _write_table_appendix(
         md_path = companion_path(rendered_path, ".table_appendix.md")
         atomic_write_text(md_path, "\n".join(md_lines), encoding="utf-8")
         logger.info("Table appendix companion generated: %s (%d items)", md_path.name, len(items))
-
-        # Physical PDF page appending
-        if rendered_path.suffix.lower() == ".pdf" and rendered_path.exists():
-            try:
-                typ_source = render_table_appendix_typst(appendix_tables)
-                typ_path = rendered_path.parent / f"{rendered_path.stem}.table_appendix.typ"
-                app_pdf_path = rendered_path.parent / f"{rendered_path.stem}.table_appendix.pdf"
-                atomic_write_text(typ_path, typ_source, encoding="utf-8")
-                ok, _ = typst_compile(str(typ_path), str(app_pdf_path))
-                if ok and app_pdf_path.exists():
-                    import pikepdf
-
-                    with pikepdf.open(rendered_path, allow_overwriting_input=True) as main_pdf:
-                        with pikepdf.open(app_pdf_path) as app_pdf:
-                            main_pdf.pages.extend(app_pdf.pages)
-                        main_pdf.save(rendered_path)
-                    logger.info(
-                        "Table appendix appended pages to %s (%d table(s))",
-                        rendered_path.name,
-                        len(appendix_tables),
-                    )
-                typ_path.unlink(missing_ok=True)
-                app_pdf_path.unlink(missing_ok=True)
-            except Exception as append_exc:
-                logger.warning(
-                    "Table appendix PDF page append skipped for %s: %s",
-                    rendered_path.name,
-                    append_exc,
-                )
-
         return md_path
+
     except Exception as exc:
         logger.warning("Table appendix generation skipped for job %s: %s", ctx.job_id, exc)
         return None
@@ -1392,12 +1385,10 @@ async def run_export_stage(
     # Default output is isolated under tmp/output/ so a forgotten -o
     # never pollutes the input directory (or docs/). All derived artifacts
     # (secondary render, quality/visual reports, .typ sidecar, PE queue)
-    # hang off target_output and follow it automatically. A monolingual
-    # (rigid) primary gets the honest ``_mono`` default name; an explicit -o is
-    # respected as given.
-    is_monolingual_output = (
-        str(render.effective_dual_mode or render.bilingual_mode or "") == "monolingual"
-    )
+    # hang off target_output and follow it automatically. A target-only primary
+    # gets the honest ``_mono`` default name; an explicit -o is respected as
+    # given.
+    is_monolingual_output = _is_mono(render.effective_dual_mode or render.bilingual_mode)
     target_output = resolve_target_output(
         output_path, input_path, monolingual=is_monolingual_output
     )
@@ -1520,7 +1511,11 @@ async def run_export_stage(
     mode_value = (
         render_outcome.bilingual_mode if render_outcome else None
     ) or render.bilingual_mode
-    is_bilingual = effective_mode not in ("monolingual", None) and mode_value != "monolingual"
+    # An unreported mode counts as monolingual here: the label must not promise
+    # a bilingual pairing the renderer never claimed to produce.
+    is_bilingual = (
+        effective_mode is not None and not _is_mono(effective_mode) and not _is_mono(mode_value)
+    )
     doc_label = "Bilingual document" if is_bilingual else "Translated document"
     event = await create_event_fn(
         EventType.EXPORT_COMPLETED,

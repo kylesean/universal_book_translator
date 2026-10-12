@@ -10,7 +10,6 @@ import pytest
 from ubt.core.engine.reporter import (
     QualityReport,
     ReportEntityConsistency,
-    ReportFidelity,
     ReportPlaceholderMetrics,
     ReportRenderCoverage,
     ReportRepairBreakdown,
@@ -52,8 +51,6 @@ def _report(
     formula_blocks: int = 0,
     defect_flags: dict[str, int] | None = None,
     retention_rate: float = 1.0,
-    non_text_residual: float = 0.0,
-    painted_coverage: float = 0.0,
 ) -> QualityReport:
     return QualityReport(
         job_id="job-1",
@@ -107,9 +104,6 @@ def _report(
             preserved_blocks=preserved_blocks,
             render_coverage=0.0,
             skip_families={},
-        ),
-        fidelity=ReportFidelity(
-            non_text_residual=non_text_residual, painted_coverage=painted_coverage, pages_measured=0
         ),
         defect_flags=defect_flags or {},
         formula_blocks=formula_blocks,

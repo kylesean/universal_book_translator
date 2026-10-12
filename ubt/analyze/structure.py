@@ -169,7 +169,7 @@ _PDF_DASH_BULLETS = ("-", "*", "·", "–")
 def pdf_list_marker(text: str) -> tuple[str, str] | None:
     """``(marker, text)`` for a PDF list-item line, or ``None``.
 
-    The native PDF reader and the overlay builder share this one rule, so a line
+    The native PDF reader and the renderer share this one rule, so a line
     the reader types as a list item is one the marker restorer recognises (and
     vice versa). Ordered markers keep their number/parenthesis and are stripped
     from the returned text; the reader stores that marker on the element.

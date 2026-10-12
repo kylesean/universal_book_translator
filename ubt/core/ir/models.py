@@ -90,9 +90,6 @@ TERMINAL_STATUSES: frozenset[BlockStatus] = frozenset(
 )
 
 
-MQM_SEVERITY_LEVELS: tuple[str, ...] = ("critical", "major", "minor")
-
-
 class BoundingBox(BaseModel):
     """Bounding box for fixed layout formats (e.g. PDF)."""
 
@@ -511,20 +508,6 @@ class IRBlock(BaseModel):
         if bbox is None and page:
             new_span = dataclasses.replace(new_span, page=page)
         self.element = _replace_element(self.element, span=new_span)
-
-    def validate_contract(self) -> list[str]:
-        """Check document-v1 invariants; returns violation messages (empty = ok)."""
-        violations: list[str] = []
-        bbox = self.bbox
-        if bbox is not None:
-            vals = (bbox.x0, bbox.y0, bbox.x1, bbox.y1)
-            if any(not (v == v and v not in (float("inf"), float("-inf"))) for v in vals):
-                violations.append(f"block {self.id}: bbox has non-finite coordinates")
-            elif bbox.x1 <= bbox.x0 or bbox.y1 <= bbox.y0:
-                violations.append(f"block {self.id}: bbox has non-positive area")
-        if self.policy_translate is False and not (self.policy_reason or "").strip():
-            violations.append(f"block {self.id}: policy_translate=False requires policy_reason")
-        return violations
 
 
 class ChapterMeta(BaseModel):

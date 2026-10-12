@@ -6,8 +6,8 @@ suitability detection: they emit dual + mono outputs and let the user pick
 module fills that gap as a differentiator, but aligned with the mainstream:
 
 - it never blocks a job and never silently overrides an explicit user mode;
-- its "discourage inline interleave" verdict promotes the industry-standard
-  answer for figure-dense docs (alternating-pages dual), not "no bilingual";
+- its "discourage dual" verdict promotes the industry-standard answer for
+  figure-dense docs (target-only mono), not a broken pairing;
 - thresholds are documented as BIoU-calibration targets (see
   ``scripts/biou_score.py`` and the evaluation guide), not ground truth.
 
@@ -19,7 +19,7 @@ Two phases, both zero-LLM:
   requested mode.
 - Phase 2 (post-repair, pre-export): difficulty re-assessment from live
   pipeline signals (repair + failure rate). A "hard" document can only
-  downgrade the mode one step (inline -> alternating -> monolingual).
+  downgrade the mode one step (dual -> mono).
 
 Design rules (elegant / robust / extensible):
 
@@ -42,56 +42,50 @@ from ubt.core.ir.models import BlockType, IRBlock
 
 AdviseTier = Literal["ok", "suggest", "discourage"]
 
-MODES: tuple[DualMode, ...] = ("inline", "alternating", "monolingual")
+MODES: tuple[DualMode, ...] = ("dual", "mono")
 
 # Tier cutoffs on the requested mode's suitability score.
 _OK_CUTOFF = 0.70
 _SUGGEST_CUTOFF = 0.40
 
 # Profile sensitivity multipliers on rule penalties: technical profiles keep
-# full weight (figures/formulas break interleave fast); general prose
+# full weight (figures/formulas break the pairing fast); general prose
 # (novels, essays) is lenient. BIoU-calibration targets, see docs.
 _PROFILE_SENSITIVITY = {"paper": 1.0, "textbook": 1.0, "general": 0.8}
 
-# Advisor DualMode -> adapter render bilingual_mode value.
-# "monolingual" needs no adapter change: it maps to bilingual=False
-# (target-only), which the fragment typesetter already supports.
+# Advisor DualMode -> adapter render bilingual_mode value. The adapter domain
+# answers one question — "does each block carry its source line above its
+# translation" — so two values are enough.
 RENDER_MODE_VALUE: dict[DualMode, str] = {
-    "inline": "bilingual",
-    "alternating": "alternating",
-    "monolingual": "monolingual",
-    "facing": "facing_spread",
+    "dual": "bilingual",
+    "mono": "monolingual",
 }
 
-# Baseline mode preference penalties: as a bilingual translator, bilingual layouts
-# (inline / alternating) are intrinsically preferred over degrading to monolingual.
-# Monolingual carries a baseline penalty of 0.20 so alternating is chosen unless
-# structural chaos degrades it below 0.80.
+# Baseline mode preference penalties: as a bilingual translator, dual is
+# intrinsically preferred over degrading to mono. Mono carries a baseline
+# penalty of 0.20 so dual is chosen unless structural chaos degrades it below
+# 0.80.
 _BASE_MODE_PENALTY: dict[DualMode, float] = {
-    "inline": 0.0,
-    "alternating": 0.0,
-    "monolingual": 0.20,
+    "dual": 0.0,
+    "mono": 0.20,
 }
 
 # Secondary artifact suffixes for dual output (BabelDOC no-dual/no-mono style).
 SECONDARY_SUFFIX: dict[DualMode, str] = {
-    "inline": "_mono",
-    "alternating": "_mono",
-    "facing": "_mono",
-    "monolingual": "_dual",
+    "dual": "_mono",
+    "mono": "_dual",
 }
 
 
 def secondary_mode(primary: DualMode) -> DualMode:
     """Complementary artifact for dual output (mono <-> dual)."""
-    return "monolingual" if primary != "monolingual" else "alternating"
+    return "mono" if primary != "mono" else "dual"
 
 
 # Downgrade ladder for Phase-2 difficulty (one step only, never two).
 _DOWNGRADE_LADDER: dict[DualMode, DualMode] = {
-    "inline": "alternating",
-    "alternating": "monolingual",
-    "monolingual": "monolingual",
+    "dual": "mono",
+    "mono": "mono",
 }
 # Phase-2 trigger: repaired + failed share at/above this downgrades one step.
 _DIFFICULTY_DOWNGRADE_RATE = 0.15
@@ -123,7 +117,7 @@ class AdvisorRule:
 def _rule_high_interruption() -> AdvisorRule:
     return AdvisorRule(
         name="high_interruption_density",
-        penalties={"inline": 0.50, "alternating": 0.10, "monolingual": 0.0},
+        penalties={"dual": 0.50, "mono": 0.0},
         fires=lambda s: (
             f"{s.interruption_per_page:.2f} structural interruptions/page"
             if s.interruption_per_page >= 1.0
@@ -135,7 +129,7 @@ def _rule_high_interruption() -> AdvisorRule:
 def _rule_medium_interruption() -> AdvisorRule:
     return AdvisorRule(
         name="medium_interruption_density",
-        penalties={"inline": 0.25, "alternating": 0.05, "monolingual": 0.0},
+        penalties={"dual": 0.25, "mono": 0.0},
         fires=lambda s: (
             f"{s.interruption_per_page:.2f} structural interruptions/page"
             if 0.5 <= s.interruption_per_page < 1.0
@@ -147,7 +141,7 @@ def _rule_medium_interruption() -> AdvisorRule:
 def _rule_figure_heavy() -> AdvisorRule:
     return AdvisorRule(
         name="figure_heavy",
-        penalties={"inline": 0.30, "alternating": 0.05, "monolingual": 0.0},
+        penalties={"dual": 0.30, "mono": 0.0},
         fires=lambda s: (
             f"{s.figure_page_share:.0%} of pages carry figures"
             if s.figure_page_share >= 0.15
@@ -159,7 +153,7 @@ def _rule_figure_heavy() -> AdvisorRule:
 def _rule_struct_heavy() -> AdvisorRule:
     return AdvisorRule(
         name="struct_block_heavy",
-        penalties={"inline": 0.20, "alternating": 0.05, "monolingual": 0.0},
+        penalties={"dual": 0.20, "mono": 0.0},
         fires=lambda s: (
             f"{s.struct_block_share:.0%} of blocks are formula/table/figure/code"
             if s.struct_block_share >= 0.05
@@ -171,7 +165,7 @@ def _rule_struct_heavy() -> AdvisorRule:
 def _rule_untranslatable_heavy() -> AdvisorRule:
     return AdvisorRule(
         name="untranslatable_heavy",
-        penalties={"inline": 0.15, "alternating": 0.05, "monolingual": 0.0},
+        penalties={"dual": 0.15, "mono": 0.0},
         fires=lambda s: (
             f"{s.skip_share:.0%} of blocks ship verbatim (interleave stutter)"
             if s.skip_share >= 0.05
@@ -183,7 +177,7 @@ def _rule_untranslatable_heavy() -> AdvisorRule:
 def _rule_fragment_heavy() -> AdvisorRule:
     return AdvisorRule(
         name="fragment_heavy",
-        penalties={"inline": 0.10, "alternating": 0.0, "monolingual": 0.0},
+        penalties={"dual": 0.10, "mono": 0.0},
         fires=lambda s: (
             f"{s.fragment_share:.0%} of blocks are sub-sentence fragments"
             if s.fragment_share >= 0.20
@@ -287,7 +281,7 @@ def collect_signals(
 
 def advise_layout(
     blocks: list[IRBlock],
-    requested: DualMode = "inline",
+    requested: DualMode = "dual",
     *,
     profile: str = "general",
     page_count: int = 0,
@@ -295,7 +289,7 @@ def advise_layout(
 ) -> Advisory:
     """Phase-1: score each render mode and tier the requested one."""
     if requested not in MODES:
-        requested = "inline"  # e.g. config-level "auto" never reaches tiering
+        requested = "dual"  # e.g. config-level "auto" never reaches tiering
     signals = collect_signals(blocks, page_count=page_count, figure_pages=figure_pages)
     sensitivity = _PROFILE_SENSITIVITY.get(profile, 0.8)
     scored: list[ModeScore] = []
@@ -357,9 +351,9 @@ def assess_difficulty(
 
 
 def downgrade_mode(mode: DualMode) -> DualMode:
-    """One-step downgrade on the inline -> alternating -> monolingual ladder.
+    """One-step downgrade on the dual -> mono ladder.
 
-    Modes off the ladder (facing/auto) pass through unchanged instead of
+    ``auto`` (which never reaches tiering) passes through unchanged instead of
     raising KeyError on a public function.
     """
     return _DOWNGRADE_LADDER.get(mode, mode)

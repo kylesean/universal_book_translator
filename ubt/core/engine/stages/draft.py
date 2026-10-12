@@ -21,6 +21,7 @@ from ubt.core.engine.ledger_flusher import CheckpointBatchFlusher
 from ubt.core.engine.services import RunServices
 from ubt.core.engine.stage_context import StageContext
 from ubt.core.exceptions import BudgetExceededError, JobInterruptedError, UBTError
+from ubt.core.ir.document_tree import section_context_for
 from ubt.core.ir.emphasis import mark_bold_spans, parse_bold, runs_from_json
 from ubt.core.ir.models import BlockStatus, BlockType, BookManifest, IRBlock, StyleMeta
 from ubt.core.memory.abbreviation_miner import format_abbreviations_markdown_table
@@ -136,6 +137,53 @@ def segment_by_chapter(batch: list[IRBlock]) -> list[list[IRBlock]]:
         else:
             segments.append([b])
     return segments
+
+
+def chunk_by_section(
+    prepared: list[tuple[IRBlock, _DraftInputs]],
+    chunk_size: int,
+) -> list[list[tuple[IRBlock, _DraftInputs]]]:
+    """Pack prepared blocks into LLM chunks that never cross a section boundary.
+
+    A fixed ``chunks = prepared[i:i+size]`` split cuts sections in half. Measured
+    on the arXiv 2101.03961 run with the default size 5: one chunk ended in the
+    middle of the Abstract, so the model saw a heading whose prose lived in the
+    *next* request. A heading and the paragraph it introduces are one translation
+    unit (RFC-2026-02 §2.3); splitting them is how a draft loses the antecedent
+    for a pronoun or mistranslates a title in isolation.
+
+    Rules, in order:
+
+    1. A heading starts a new chunk, even when the previous one has room —
+       *unless* the current chunk holds nothing but headings yet. A run of
+       consecutive headings is one unit (a title block: "arXiv:…", "Journal
+       of…", "Submitted…", the title itself), and splitting it into four
+       single-heading calls pays four times for one page.
+    2. A chunk never exceeds ``chunk_size``; a section longer than that is split
+       at the size limit (a long section still needs bounded prompts).
+    3. A section shorter than ``chunk_size`` is *not* merged with its neighbour:
+       merging would reintroduce exactly the cross-boundary packing this exists
+       to prevent.
+
+    Ordering is preserved, so the caller's index alignment with ``prepared``
+    holds.
+    """
+    if chunk_size <= 1:
+        return [[item] for item in prepared]
+
+    chunks: list[list[tuple[IRBlock, _DraftInputs]]] = []
+    current: list[tuple[IRBlock, _DraftInputs]] = []
+    for item in prepared:
+        block = item[0]
+        starts_section = block.block_type == BlockType.HEADING
+        has_prose = any(b.block_type != BlockType.HEADING for b, _ in current)
+        if current and ((starts_section and has_prose) or len(current) >= chunk_size):
+            chunks.append(current)
+            current = []
+        current.append(item)
+    if current:
+        chunks.append(current)
+    return chunks
 
 
 def is_static_skip(block: IRBlock) -> bool:
@@ -257,7 +305,9 @@ class _DraftProcessor:
             return None
         return GlossaryConsistencyValidator(glossary=self.policy.glossary_dicts)
 
-    def chunk_context(self, chunk: list[tuple[IRBlock, _DraftInputs]]) -> str:
+    def chunk_context(
+        self, chunk: list[tuple[IRBlock, _DraftInputs]], section_context: str = ""
+    ) -> str:
         """The content key of one macro-chunk draft prompt (content-addressed cache layer).
 
         A macro chunk is a *different* prompt from any single block's -- all the
@@ -286,6 +336,7 @@ class _DraftProcessor:
             few_shot_reference=first_inp.few_shot_reference or last_inp.few_shot_reference,
             epoch_summary=first_inp.epoch_ctx,
             domain=self.policy.domain,
+            section_context=section_context,
         )
         return step_key(
             "macro_chunk_prompt",
@@ -1069,6 +1120,7 @@ class _DraftProcessor:
         self,
         chunk: list[tuple[IRBlock, _DraftInputs]],
         current_batch: list[IRBlock],
+        section_context: str = "",
     ) -> None:
         """Draft a group of consecutive blocks in a single structured XML LLM call."""
         if not chunk:
@@ -1096,7 +1148,7 @@ class _DraftProcessor:
         if self.runtime.engine.cache is not None:
             # One provider call, many units: keyed on the chunk's own prompt
             # digest, so a re-run of the same chunk is a hit (content-addressed cache layer).
-            cached_context = self.chunk_context(chunk)
+            cached_context = self.chunk_context(chunk, section_context)
             cached_raw = await asyncio.to_thread(
                 self.runtime.engine.cached_value, cached_context, kind="translate_chunk"
             )
@@ -1120,6 +1172,7 @@ class _DraftProcessor:
                                 epoch_summary=epoch_ctx,
                                 global_glossary=self.policy.global_glossary_table,
                                 few_shot_reference=few_shot,
+                                section_context=section_context,
                             )
                             break
                         except Exception as exc:
@@ -1248,13 +1301,24 @@ class _DraftProcessor:
                 return_exceptions=True,
             )
         else:
-            chunks = [
-                prepared[i : i + self.policy.macro_chunk_size]
-                for i in range(0, len(prepared), self.policy.macro_chunk_size)
-            ]
+            chunks = chunk_by_section(prepared, self.policy.macro_chunk_size)
             groups = [[b for b, _ in chunk] for chunk in chunks]
+            # Where each chunk sits in the document. A chunk that does not hold
+            # its own heading otherwise reaches the model with no idea which
+            # section it belongs to, and a back-reference loses its antecedent.
+            section_ctx = {
+                chunk[0][0].id: section_context_for(blocks, groups[i])
+                for i, chunk in enumerate(chunks)
+            }
             results = await asyncio.gather(
-                *[self.draft_macro_chunk_group(chunk, current_batch) for chunk in chunks],
+                *[
+                    self.draft_macro_chunk_group(
+                        chunk,
+                        current_batch,
+                        section_context=section_ctx.get(chunk[0][0].id, ""),
+                    )
+                    for chunk in chunks
+                ],
                 return_exceptions=True,
             )
 

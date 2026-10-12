@@ -2269,7 +2269,7 @@ def _register_review_routes(api_app: FastAPI, scope: ApiScope) -> None:
     ) -> Response:
         """Re-compose one source page with the current ledger text, as PNG.
 
-        Reuses the delivery compositor (source page as canvas) for a single page,
+        Reuses the delivery renderer for a single page,
         so a human edit can be previewed without re-rendering the book. 503 when
         the page has nothing to compose or the rasterizer is unavailable.
         """

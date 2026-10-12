@@ -8,15 +8,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from ubt.core.config import (
     CoverMode,
     DualMode,
-    ExecMode,
-    FormulaEnrichment,
-    FormulaMode,
-    FormulaRender,
-    MathBackend,
     OcrMode,
     PdfEngine,
-    PromptStrategyName,
-    QeEngine,
     parse_page_ranges,
 )
 from ubt.core.engine.progress import ProgressSnapshot
@@ -95,7 +88,7 @@ class JobSubmitRequest(BaseModel):
     )
     dual_mode: DualMode | None = Field(
         default=None,
-        description="Bilingual mode (inline, alternating, facing, monolingual, auto)",
+        description="What the reader receives (dual, mono, auto)",
     )
     pages: str | None = Field(default=None, description="Page range filter (e.g. 1-10)")
 
@@ -107,12 +100,6 @@ class JobSubmitRequest(BaseModel):
     glossary: str | None = Field(
         default=None,
         description="Path to an external glossary file to enforce (CLI/MCP parity)",
-    )
-    exec_mode: ExecMode | None = Field(
-        default=None, description="Execution mode (auto, short, long)"
-    )
-    formula_mode: FormulaMode | None = Field(
-        default=None, description="Formula handling (strict, readable)"
     )
     # Engine knobs. The CLI builds 40+ request keys and the shared mapping
     # (``ubt.core.job_options.overrides_from_request``) accepts any of them that
@@ -157,10 +144,6 @@ class JobSubmitRequest(BaseModel):
     offline_batch_enabled: bool | None = Field(
         default=None, description="Route drafting through the provider's offline batch API"
     )
-    qe_engine: QeEngine | None = Field(
-        default=None,
-        description="QE runner (heuristic, comet, cometkiwi, neural, subprocess, tiered)",
-    )
     # Quality gates.
     visual_judge_enabled: bool | None = Field(
         default=None, description="Enable the VLM visual judge over rendered pages"
@@ -168,15 +151,9 @@ class JobSubmitRequest(BaseModel):
     visual_judge_model: str | None = Field(
         default=None, description="Model the visual judge runs on"
     )
-    prompt_strategy: PromptStrategyName | None = Field(
-        default=None, description="Prompt depth (auto, minimal, hybrid, rich)"
-    )
     # Output shape.
     translate_chrome: bool | None = Field(
         default=None, description="Translate running heads, footers and page chrome"
-    )
-    facing_spread: bool | None = Field(
-        default=None, description="Lay the bilingual output out as facing pages"
     )
     emit_both: bool | None = Field(
         default=None,
@@ -186,17 +163,6 @@ class JobSubmitRequest(BaseModel):
         default=None, description="Cover handling (auto, always, never)"
     )
     # Formula pipeline.
-    formula_enrichment: FormulaEnrichment | None = Field(
-        default=None, description="Formula enrichment (auto, on, off)"
-    )
-    formula_render: FormulaRender | None = Field(
-        default=None, description="Formula rendering (native, image, witness)"
-    )
-    math_backend: MathBackend | None = Field(
-        default=None,
-        description="Retired knob: recorded in the engine signature but no renderer "
-        "consumes it; formula fidelity is controlled by formula_render.",
-    )
     # OCR engine selection. ``ocr_endpoint`` / ``ocr_api_key`` stay operator-only.
     ocr_mode: OcrMode | None = Field(
         default=None, description="OCR engine (auto, sidecar, cloud, vlm, rapidocr, off)"

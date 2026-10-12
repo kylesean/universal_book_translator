@@ -69,7 +69,6 @@ class RunMetadata(BaseModel):
     # this was the last inter-stage bus on the manifest.
 
     # --- Extraction / formula policy --------------------------------------
-    formula_mode: str | None = None
     selected_pages: list[int] | None = None
 
     # --- Delivery verdict -------------------------------------------------

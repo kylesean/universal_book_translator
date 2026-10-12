@@ -1,27 +1,20 @@
-"""Single-page preview: re-compose one source page with the current ledger text.
+"""Single-page preview: render one source page's blocks with the live ledger text.
 
-The delivery render composes every PDF onto the source page as its canvas
-(``LayerCompositor``; the single ``overlay`` engine). This module reuses that exact
-pipeline for a *single* page, so the L3 workbench can show the effect of a human
-edit without re-rendering the book: overlays are built from the current blocks,
-restricted to the requested page, reflowed, composed onto the source PDF, and
-rasterized to PNG.
-
-Cost is one page's worth of Typst fragment compiles, not the whole document:
-``overlays_from_blocks`` is pure Python (no compiles), and the page filter runs
-before ``reflow_overlays``/``compose``, which are the parts that shell out to
-Typst.
+The delivery render rebuilds the whole document from the IR and lets Typst lay
+it out (``ubt/render/typst/document_renderer.py``). This module reuses that
+renderer for a *single page's* blocks, so the L3 workbench can show the effect of
+a human edit without re-rendering the book.
 
 Two deliberate differences from a full delivery render, both fine for a preview
 and both worth stating:
 
+* the preview renders the page's blocks as a standalone document, so pagination
+  differs from the delivered book (a reflowed page is not a fixed grid). The
+  reviewer is checking *wording*, and the words are the same ones the delivery
+  render would typeset.
 * a block the real run held as source (a fail-closed render skip) may appear
-  here as a placed target, because the preview re-composes from the current
-  ledger text rather than the recorded render decisions.
-* the composition is always in-place on the source page (target over source).
-  For the page-zipper bilingual modes (``alternating``/``facing``) the delivered
-  artifact interleaves source and target pages, so page *N* of the preview is the
-  source page *N* composed with its translation — not the delivered page *N*.
+  here as a placed target, because the preview renders from the current ledger
+  text rather than the recorded render decisions.
 """
 
 from __future__ import annotations
@@ -36,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 class PagePreviewUnavailable(RuntimeError):
-    """The page cannot be previewed (no source canvas, no blocks, no rasterizer)."""
+    """The page cannot be previewed (no blocks, no rasterizer, no such page)."""
 
 
 def _block_page(block: IRBlock) -> int | None:
@@ -48,7 +41,7 @@ def render_source_page_png(source_pdf: Path, page: int, dpi: int = 110) -> bytes
     """Rasterize the *source* PDF's page ``page`` (the "before" witness image).
 
     The pixel-witness view pairs this with :func:`render_page_preview` (the
-    "after") so a reviewer can compare the original page against the composed
+    "after") so a reviewer can compare the original page against the reflowed
     translation. Raises :class:`PagePreviewUnavailable` when the file is missing
     or the rasterizer cannot run, so the caller answers 503 rather than serving a
     broken image.
@@ -74,16 +67,14 @@ def render_page_preview(
     dpi: int = 110,
     font: str | None = None,
 ) -> bytes:
-    """Re-compose ``page`` onto the source canvas and return it as PNG bytes.
+    """Render ``page``'s blocks through the semantic reflow renderer as PNG bytes.
 
-    Raises :class:`PagePreviewUnavailable` when the page has nothing to compose
-    or the rasterizer is unavailable, so the caller can answer 503 rather than
-    returning a broken image.
+    Raises :class:`PagePreviewUnavailable` when the page has no blocks or the
+    rasterizer is unavailable, so the caller can answer 503 rather than returning
+    a broken image.
     """
-    from ubt.adapters.pdf.docling_render import _reflow_obstacles
-    from ubt.layout.theme import resolve_theme
-    from ubt.render.outputs import LayerCompositor, TypstFragmentTypesetter, overlays_from_blocks
-    from ubt.render.reflow import reflow_overlays
+    from ubt.adapters.pdf.typst_compile import typst_compile
+    from ubt.render.typst.document_renderer import TypstDocumentRenderer
 
     if not source_pdf.exists():
         raise PagePreviewUnavailable(f"source PDF not found: {source_pdf}")
@@ -92,36 +83,21 @@ def render_page_preview(
     if not page_blocks:
         raise PagePreviewUnavailable(f"no blocks on page {page}")
 
-    # Overlay construction is pure; the page filter keeps the compile-heavy
-    # reflow/compose steps to this page only.
-    overlays = [
-        overlay
-        for overlay in overlays_from_blocks(list(blocks), bilingual=bilingual)
-        if overlay.page == page
-    ]
-    if not overlays:
-        raise PagePreviewUnavailable(f"page {page} has nothing to compose")
-
-    theme = resolve_theme(target_lang=target_lang)
-    typesetter = TypstFragmentTypesetter(
-        font=font or theme.font_stack,
-        size_pt=theme.base_size_pt,
-        target_lang=target_lang,
-    )
     workdir.mkdir(parents=True, exist_ok=True)
-    composed_pdf = workdir / f"preview_p{page}.pdf"
-    try:
-        reflowed = reflow_overlays(
-            overlays,
-            _reflow_obstacles(page_blocks),
-            measure_many=typesetter.measure_many_fixed,
-            cap_size=typesetter.cap_size,
-        )
-        LayerCompositor(source_pdf, typesetter=typesetter).compose(reflowed, composed_pdf)
-    finally:
-        typesetter.close()
+    build_dir = workdir / f"preview_p{page}"
+    renderer = TypstDocumentRenderer(bilingual=bilingual)
+    source, _stats = renderer.build_source(page_blocks, build_dir, target_lang)
+    typ_path = build_dir / "main.typ"
+    typ_path.write_text(source, encoding="utf-8")
 
-    png = render_page_png(composed_pdf, page, dpi)
+    composed_pdf = workdir / f"preview_p{page}.pdf"
+    ok, stderr = typst_compile(str(typ_path), str(composed_pdf))
+    if not ok or not composed_pdf.exists():
+        raise PagePreviewUnavailable(
+            f"page {page} preview failed to compile: {stderr.strip() or 'unknown Typst error'}"
+        )
+
+    png = render_page_png(composed_pdf, 1, dpi)
     if png is None:
         raise PagePreviewUnavailable("page rasterization failed (pdf_oxide unavailable)")
     return png

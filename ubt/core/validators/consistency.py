@@ -128,6 +128,51 @@ def _cn_numeral_value(s: str) -> int:
 # happens to carry exactly the digit the idiom fabricates. Prefer the common
 # false negative over a rare one.
 _CN_NUMERAL_CHARS = "零一二两三四五六七八九十百千"
+#: Multi-character words whose leading numeral character is part of the word,
+#: not a count: '二元' (binary), '两两' (pairwise), '五花八门' (idiom). A regex
+#: cannot separate these from a genuine quantity ('两种方法' = 'two kinds of
+#: methods') because both are <numeral><measure-word>; the measure word '元' in
+#: '二元' is the currency counter and '门' in '五花八门' is a noun classifier.
+#: The earlier comment in this module predicted exactly this and said a lexicon
+#: was the only fix. Measured on the arXiv 2101.03961 run: '二元矩阵' folded to
+#: '2元矩阵', which the invention gate read as a fabricated '2' and quarantined
+#: four correct translations.
+_CN_NUMERAL_COMPOUNDS: frozenset[str] = frozenset(
+    {
+        "二元",  # binary
+        "二维",  # two-dimensional
+        "二进制",  # binary (system)
+        "两两",  # pairwise
+        "再三",  # repeatedly
+        "不一",  # not uniform
+        "唯一",  # only
+        "归一",  # normalized
+        "统一",  # unified
+        "万一",  # in case
+        "一体",  # integral
+        "一律",  # uniformly
+        "一线",  # frontline
+        "一定",  # certain
+        "一般",  # general
+        "一边",  # one side
+        "一贯",  # consistent
+        "一成不变",
+        "五花八门",
+        "三番五次",
+        "一清二楚",
+        "三心二意",
+    }
+)
+
+
+#: '数' before a numeral run marks an *indefinite* quantity ('数十亿' = "billions
+#: of", '数千' = "thousands of", '数百' = "hundreds of"). The source English is
+#: the bare plural ("billions"), which authorizes no exact value, so folding the
+#: Chinese to 1000000000 invents a precision neither side states. The whole
+#: run is left untouched: it then matches neither side and the gate stays
+#: conservative instead of firing on a correct translation.
+_CN_INDEFINITE_QUANTITY_RE = re.compile(rf"数[{_CN_NUMERAL_CHARS}]+")
+
 _CN_MEASURE_RE = "|".join(
     re.escape(word) for word in sorted(CN_MEASURE_WORDS, key=len, reverse=True)
 )
@@ -188,6 +233,13 @@ def _collapse_spaced_decimals(text: str) -> str:
 # '1.500' (DE thousands) and decimal '15,6' (DE/FR) must all survive the
 # digit-presence check regardless of the target language's convention.
 # Leading '0.' / '0,' (e.g. '0.125') is never a thousands separator.
+#: A separator between two digit runs is punctuation, not a thousands mark.
+#: Stripping it glues the runs into one phantom token: 'Shazeer 等，2017，2018；'
+#: became '20172018', which then matched nothing and quarantined a correct
+#: translation (arXiv 2101.03961 b0067). A CJK comma is never a thousands
+#: separator (that role belongs to ',' and '.', handled above), so it is
+#: replaced with a space to keep the runs apart.
+_CJK_LIST_COMMA_RE = re.compile(r"(?<=\d)\s*[，、]\s*(?=\d)")
 _THOUSANDS_COMMA_RE = re.compile(r"(?:(?<=[1-9])|(?<=\d\d)),(?=\d{3}(?!\d))")
 _THOUSANDS_DOT_RE = re.compile(r"(?:(?<=[1-9])|(?<=\d\d))\.(?=\d{3}(?!\d))")
 _DECIMAL_COMMA_RE = re.compile(r"(?<=\d),(?=\d+(?!\d))")
@@ -242,7 +294,27 @@ def normalize_for_numeric_matching(text: str, lang: str = "zh") -> str:
             ),
             text,
         )
+        # Mask the two families the regex cannot separate from a real quantity,
+        # then restore them after folding. Order matters: both are matched on
+        # the original characters (the numeral context pattern only fires on
+        # Chinese numerals, and masking first keeps its matches from overlapping
+        # the placeholders).
+        masked: list[str] = []
+
+        def _mask(span_text: str) -> str:
+            masked.append(span_text)
+            return f"\x00{len(masked) - 1}\x00"
+
+        text = _CN_INDEFINITE_QUANTITY_RE.sub(lambda m: _mask(m.group(0)), text)
+        for compound in _CN_NUMERAL_COMPOUNDS:
+            if compound in text:
+                text = text.replace(compound, _mask(compound))
         text = _CN_NUMERAL_CONTEXT_RE.sub(lambda m: str(_cn_numeral_value(m.group(0))), text)
+        text = re.sub(
+            r"\x00(\d+)\x00",
+            lambda m: masked[int(m.group(1))],
+            text,
+        )
 
         def _scale_sequence(m: re.Match[str]) -> str:
             # Sum the whole adjacent run: "1亿2000万" is 120000000, not
@@ -256,6 +328,7 @@ def normalize_for_numeric_matching(text: str, lang: str = "zh") -> str:
             return str(round(total))
 
         text = _WAN_YI_SEQ_RE.sub(_scale_sequence, text)
+    text = _CJK_LIST_COMMA_RE.sub(" ", text)
     text = _THOUSANDS_COMMA_RE.sub("", text)
     text = _THOUSANDS_DOT_RE.sub("", text)
     text = _DECIMAL_COMMA_RE.sub(".", text)
@@ -697,9 +770,32 @@ _EN_MAGNITUDES: dict[str, int] = {
     "billion": 1_000_000_000,
     "trillion": 1_000_000_000_000,
 }
+#: Multiplier words whose *plural* is how English states an indefinite large
+#: quantity ("billions of parameters", "thousands of cores"). The singular
+#: form already lives in ``_EN_NUMBER_WORDS``; without the plural the source
+#: authorizes nothing and a correct "数十亿" is read as an invented
+#: 1000000000. Measured on the arXiv 2101.03961 reference run: 4 of 16
+#: numeric-fidelity quarantines came from exactly this gap.
+_EN_NUMBER_PLURALS: dict[str, str] = {
+    "hundreds": "100",
+    "thousands": "1000",
+    "millions": "1000000",
+    "billions": "1000000000",
+    "trillions": "1000000000000",
+    "dozens": "12",
+    "scores": "20",
+}
+#: Determiners that state a quantity of *two* without using a number word.
+#: 'both SuperGLUE and TriviaQA' -> '这两个...' is a correct translation, but
+#: the source carries no digit and no number word, so the target's '两'/'2' was
+#: read as invented (arXiv 2101.03961 b0233). They authorize '2' and nothing
+#: else, so a genuinely wrong number is still caught.
+_EN_DUAL_DETERMINERS: tuple[str, ...] = ("both", "either", "neither", "pair", "twice")
 #: Any single number word, longest-first so the alternation is not shadowed.
 _EN_NUMBER_WORD_RE = re.compile(
-    r"\b(" + "|".join(sorted(_EN_NUMBER_WORDS, key=len, reverse=True)) + r")\b",
+    r"\b("
+    + "|".join(sorted([*_EN_NUMBER_WORDS, *_EN_NUMBER_PLURALS], key=len, reverse=True))
+    + r")\b",
     re.IGNORECASE,
 )
 #: A run of number words (plus the "and"/hyphen connectors that join them), the
@@ -861,7 +957,16 @@ def _invented_target_numbers(
     # phrases ("two million") authorize their whole value, not just the two
     # words separately.
     for match in _EN_NUMBER_WORD_RE.finditer(source_view):
-        authorized.add(_EN_NUMBER_WORDS[match.group(1).lower()])
+        word = match.group(1).lower()
+        # A plural multiplier ("billions") authorizes its magnitude; the
+        # singular table below holds only the singular spellings.
+        if word in _EN_NUMBER_PLURALS:
+            authorized.add(_EN_NUMBER_PLURALS[word])
+        else:
+            authorized.add(_EN_NUMBER_WORDS[word])
+    # 'both'/'either'/'neither' state a quantity of two without a number word.
+    if re.search(r"\b(" + "|".join(_EN_DUAL_DETERMINERS) + r")\b", source_view, re.IGNORECASE):
+        authorized.add("2")
     for match in _EN_NUMBER_PHRASE_RE.finditer(source_view):
         for value in _en_number_phrase_value(match.group(0)):
             authorized.add(str(value))

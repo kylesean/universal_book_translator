@@ -21,9 +21,6 @@ number.
 
 import re
 
-from ubt.core.cleaners.inline_math import (
-    is_math_content,
-)
 from ubt.core.cleaners.mask_tokens import (
     BaseMasker,
     RestoreStyle,
@@ -84,11 +81,6 @@ class MathMasker(BaseMasker):
 
         def _replace(match: re.Match[str]) -> str:
             return factory.next(match.group(0))
-
-        def _replace_guarded(match: re.Match[str]) -> str:
-            if not is_math_content(match.group(1)):
-                return match.group(0)
-            return _replace(match)
 
         masked = _MATH_ENV_PATTERN.sub(_replace, text)
         masked = _DISPLAY_DOLLAR_PATTERN.sub(_replace, masked)

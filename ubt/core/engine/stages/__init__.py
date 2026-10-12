@@ -1,7 +1,6 @@
 """Modular execution stages for the Universal Book Translator pipeline."""
 
 from ubt.core.engine.stages.advisory import (
-    apply_layout_tradeoff_advisory,
     run_difficulty_advisory_stage,
     run_extraction_witness_stage,
     run_mode_advisory_stage,
@@ -23,7 +22,6 @@ from ubt.core.engine.stages.tm_writeback import run_tm_writeback_stage
 from ubt.core.engine.stages.triage import run_triage_stage
 
 __all__ = [
-    "apply_layout_tradeoff_advisory",
     "run_extraction_witness_stage",
     "run_mode_advisory_stage",
     "run_difficulty_advisory_stage",

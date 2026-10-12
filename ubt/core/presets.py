@@ -5,8 +5,8 @@ formula handling, exec mode. It never disables a correctness gate, and it
 never picks the render route: "how much care to spend translating" and "how
 to typeset the result" are orthogonal decisions, and bundling them made
 ``--preset publication`` a silent footgun on figure/table-heavy documents.
-The render engine is not settable at all: every PDF composes through the single
-source-canvas ``overlay`` engine (``ubt.core.config.RENDER_ENGINE``).
+The render engine is not settable at all: every PDF is rebuilt from the semantic
+IR by the Typst publication renderer.
 
 Shared by the advisor and the CLI ``--preset`` layer: the CLI
 resolves explicit flags over the preset bundle over the engine defaults.
@@ -21,9 +21,9 @@ from typing import Any
 from ubt.core.config import (
     ExecMode,
     FormulaEnrichment,
-    FormulaRender,
-    MathBackend,
     PromptStrategyName,
+    QeEngine,
+    TableRenderMode,
     UBTConfig,
 )
 
@@ -48,8 +48,8 @@ class PresetPolicy:
     exec_mode: ExecMode
     prompt_strategy: PromptStrategyName
     formula_enrichment: FormulaEnrichment
-    math_backend: MathBackend
-    formula_render: FormulaRender
+    qe_engine: QeEngine
+    table_render_mode: TableRenderMode
     emit_both: bool
     #: PDF parser the preset selects. ``auto`` is quality-first probe routing
     #: (scan / formula / multicolumn / vector-heavy -> docling); ``pdfium`` is
@@ -81,8 +81,8 @@ PRESETS: dict[Preset, PresetPolicy] = {
         exec_mode="auto",
         prompt_strategy="rich",
         formula_enrichment="auto",
-        math_backend="mathjax",
-        formula_render="witness",
+        qe_engine="heuristic",
+        table_render_mode="auto",
         emit_both=False,
         pdf_engine="auto",
     ),
@@ -94,8 +94,8 @@ PRESETS: dict[Preset, PresetPolicy] = {
         exec_mode="auto",
         prompt_strategy="auto",
         formula_enrichment="auto",
-        math_backend="mathjax",
-        formula_render="witness",
+        qe_engine="heuristic",
+        table_render_mode="auto",
         emit_both=False,
         pdf_engine="auto",
     ),
@@ -107,8 +107,8 @@ PRESETS: dict[Preset, PresetPolicy] = {
         exec_mode="auto",
         prompt_strategy="minimal",
         formula_enrichment="off",
-        math_backend="image",
-        formula_render="witness",
+        qe_engine="heuristic",
+        table_render_mode="auto",
         emit_both=False,
         pdf_engine="pdfium",
     ),
@@ -120,8 +120,8 @@ PRESETS: dict[Preset, PresetPolicy] = {
         exec_mode="short",
         prompt_strategy="minimal",
         formula_enrichment="off",
-        math_backend="image",
-        formula_render="image",
+        qe_engine="heuristic",
+        table_render_mode="auto",
         emit_both=False,
         pdf_engine="pdfium",
     ),

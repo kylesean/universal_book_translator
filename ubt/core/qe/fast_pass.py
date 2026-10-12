@@ -919,7 +919,7 @@ class FastPassFilter:
 
         # 3c. Undelimited-math redelimit (docling-flattened counterpart of
         # 3b): the source carries math signals but the target has no $...$
-        # span, so the overlay would print formulas as flat prose
+        # span, so the renderer would print formulas as flat prose
         # (``Fth,SI`` instead of $F_{th,SI}$). Routes to repair, whose
         # prompt surfaces this reason verbatim as the fix instruction.
         # Exemptions come from ``_is_prose``/``skip_translate`` above.
@@ -945,7 +945,7 @@ class FastPassFilter:
         # target invents LaTeX control sequences absent from the source
         # AND outside the renderer-supported set — e.g. a repair round
         # "reconstructing" a plain "(2D)" label into $2\mathrm{D}$, which
-        # the overlay probe cannot compile and prints literally. Renderable
+        # the transpiler cannot compile and prints literally. Renderable
         # newcomers (\text, Greek, \frac...) pass: they compile downstream,
         # so flagging them would fight the math-reconstruction rule. The
         # reason doubles as the repair instruction (surfaced verbatim).

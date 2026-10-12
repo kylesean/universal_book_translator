@@ -70,20 +70,16 @@ def _profile_pdf_pages(input_path: Path) -> list[Any]:
 
 def _artifact_parity_findings(
     *,
-    source_pdf: Path,
     artifact_pdf: Path,
     target_lang: str,
-    keeps_source_geometry: bool,
     selected_pages: Sequence[int] | None = None,
 ) -> list[Any]:
     from ubt.adapters.pdf.artifact_parity import check_artifact_parity
 
     return list(
         check_artifact_parity(
-            source_pdf=source_pdf,
             artifact_pdf=artifact_pdf,
             target_lang=target_lang,
-            keeps_source_geometry=keeps_source_geometry,
             selected_pages=selected_pages,
         )
     )
@@ -97,7 +93,6 @@ def register_spi_providers(registry: SPIRegistry) -> None:
     from ubt.adapters.pdf.extraction_witness import annotate_blocks, inspect_pdf, summarize
     from ubt.adapters.pdf.page_profiler import PageKind
     from ubt.adapters.pdf.plain_text_extractor import sample_pdf_pages
-    from ubt.adapters.pdf.render_fidelity import compute_render_fidelity, fidelity_findings
     from ubt.adapters.pdf.short_doc import is_fast_lane_eligible, probe_pdf_pages
     from ubt.adapters.pdf.svg_diagram import detect_figure_pages
     from ubt.adapters.pdf.visual_gate import (
@@ -132,8 +127,6 @@ def register_spi_providers(registry: SPIRegistry) -> None:
             "inspect_pdf_route_plan": _inspect_pdf_route_plan,
             "profile_pdf_pages": _profile_pdf_pages,
             "page_kind_enum": PageKind,
-            "render_fidelity_stats": compute_render_fidelity,
-            "render_fidelity_findings": lambda stats: list(fidelity_findings(stats)),
             "sample_pdf_pages": sample_pdf_pages,
         }
     )

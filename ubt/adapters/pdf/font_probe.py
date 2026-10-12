@@ -295,10 +295,6 @@ class FontStack:
     # Families added because nothing requested could render a non-Latin target.
     substituted: tuple[str, ...] = ()
 
-    def as_typst_tuple(self) -> str:
-        """Render as a Typst font list: ``("A", "B")``."""
-        return "(" + ", ".join(f'"{f}"' for f in self.families) + ")"
-
     @property
     def primary(self) -> str:
         return self.families[0] if self.families else ""

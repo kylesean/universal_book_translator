@@ -7,11 +7,10 @@ zero-token judgements about the artifact, and they read only post-ingest IR.
 - :func:`run_extraction_witness_stage` flags pages whose math was already
   broken by the extractor's font encoding, before anything is translated.
 - :func:`run_mode_advisory_stage` scores the requested render mode against the
-  layout the document actually has, applies the rigid-engine downgrade, and
+  layout the document actually has, applies the mode downgrade, and
   publishes the run-policy keys the renderer reads.
 - :func:`run_difficulty_advisory_stage` is the post-repair half: live repair
   burden can step the mode down one notch, but only under ``auto``.
-- :func:`apply_layout_tradeoff_advisory` records the formula-dense-on-rigid
   tradeoff in the delivered report (a plain function, not a stage: it runs
   before ingest, from facts the route probe already produced).
 """
@@ -29,7 +28,6 @@ from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.facts import LayoutAdvisory, RenderPlan
 from ubt.core.engine.services import RunServices
 from ubt.core.engine.stage_context import StageContext
-from ubt.core.ir.models import BookManifest
 from ubt.core.policy.bilingual_advisor import (
     RENDER_MODE_VALUE,
     Advisory,
@@ -104,11 +102,9 @@ async def run_mode_advisory_stage(
 ) -> AsyncIterator[TranslationProgressEvent]:
     """Publish the run policy and advise on the requested bilingual mode."""
     config = ctx.config
-    requested_mode: DualMode = (
-        config.dual_mode if config.dual_mode in RENDER_MODE_VALUE else "inline"
-    )
+    requested_mode: DualMode = config.dual_mode if config.dual_mode in RENDER_MODE_VALUE else "dual"
     auto_mode = config.dual_mode == "auto"
-    tier_basis: DualMode = "inline" if auto_mode else requested_mode
+    tier_basis: DualMode = "dual" if auto_mode else requested_mode
     enforcement: Literal["advise", "auto"] = "auto" if auto_mode else "advise"
     layout.tier_basis = tier_basis
     layout.enforcement = enforcement
@@ -146,10 +142,6 @@ async def run_mode_advisory_stage(
     render.bilingual_advisory = adv_dict
     render.bilingual_mode = RENDER_MODE_VALUE[effective_mode]
     render.effective_dual_mode = effective_mode
-    render.facing_spread = config.facing_spread or effective_mode in (
-        "facing",
-        "facing_spread",
-    )
     if advisory.tier != "ok":
         logger.warning(
             "Bilingual advisory for job %s: requested '%s' is '%s' "
@@ -202,7 +194,7 @@ async def run_difficulty_advisory_stage(
         )
     else:
         effective_mode = pre_downgrade  # type: ignore[assignment]
-    # A source-canvas engine serves every mode, so no requested mode downgrades.
+    # The publication renderer serves every mode, so no requested mode downgrades.
     if effective_mode != pre_downgrade:
         logger.warning(
             "Bilingual advisory downgrade for job %s: '%s' -> '%s' (%s)",
@@ -213,10 +205,6 @@ async def run_difficulty_advisory_stage(
         )
     render.bilingual_mode = RENDER_MODE_VALUE[effective_mode]
     render.effective_dual_mode = effective_mode
-    render.facing_spread = config.facing_spread or effective_mode in (
-        "facing",
-        "facing_spread",
-    )
     advisory_dict = dict(advisory.to_dict())
     advisory_dict["effective"] = effective_mode
     advisory_dict["enforcement"] = layout.enforcement
@@ -233,34 +221,3 @@ async def run_difficulty_advisory_stage(
     )
     render.bilingual_advisory = advisory_dict
     render.emit_secondary_mode = RENDER_MODE_VALUE[secondary] if secondary is not None else ""
-
-
-def apply_layout_tradeoff_advisory(
-    manifest: BookManifest,
-    *,
-    input_name: str,
-    formula_heavy: bool,
-) -> None:
-    """Surface the overlay-on-formula-dense tradeoff in the delivered report.
-
-    The source-canvas composition keeps figures and multi-row tables exactly
-    where they are, at the cost of imperfect inline-math typography. When a
-    formula-dense document is rendered, this advisory lets the reader weigh the
-    tradeoff; it is never an UNSUITABLE stop.
-    """
-    if not formula_heavy:
-        return
-    advisory_msg = (
-        f"Document '{input_name}' is formula-dense and is being "
-        "rendered with the overlay engine. This preserves the "
-        "source page geometry — figures and complex tables stay intact — "
-        "but inline math is typeset into the source's text boxes, so "
-        "dense equations may render with imperfect spacing or sizing."
-    )
-    logger.info("Pre-flight Layout Advisory: %s", advisory_msg)
-    manifest.run.delivery_status = (
-        "LAYOUT_TRADEOFF_ADVISORY (formula-dense document rendered "
-        "with the overlay engine: figures/tables preserved, inline "
-        "math typography may be imperfect)"
-    )
-    manifest.run.delivery_warning = advisory_msg

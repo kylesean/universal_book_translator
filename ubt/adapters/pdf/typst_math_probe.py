@@ -4,8 +4,8 @@ A span the model delimited as ``$...$`` is only emitted in math mode when a
 minimal Typst document containing it compiles; anything else (``F_th,SI``
 without braces, stray markup) falls back to escaped text at placement time.
 ``//`` is rejected without compiling (line-comment hazard); ``#`` is
-legitimate here — :mod:`ubt.adapters.pdf.overlay_text` emits code-mode
-strings (``#"th"``) and rejects user-supplied ``#`` upstream.
+legitimate here — the math transpiler emits code-mode strings (``#"th"``) and
+rejects user-supplied ``#`` upstream.
 
 The probe is pure-cache: same body, same verdict, one compile ever. A whole
 document's bodies can be resolved in a handful of compiles via

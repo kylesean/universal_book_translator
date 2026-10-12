@@ -21,7 +21,7 @@ Two defenses, matching the production pdfium paradigm:
    ``with PDFIUM_LOCK:`` when only part of the function is pdfium work
    (never hold the lock across LLM/network/subprocess calls).
    ``threading.RLock`` makes same-thread re-entry safe for nested pdfium
-   calls (e.g. ``rigid.extract_pages`` -> ``textgeom.extract_lines``).
+   calls (e.g. ``reader_pdf`` -> ``textgeom.extract_lines``).
    The lazy font-table initialization happens under this lock, so it is
    warm-once and race-free without any separate warmup step.
 

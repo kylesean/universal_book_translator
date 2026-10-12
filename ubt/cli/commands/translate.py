@@ -5,7 +5,6 @@ import contextlib
 import json
 import logging
 import os
-import sys
 from pathlib import Path
 from typing import Annotated, Any, NoReturn
 
@@ -18,15 +17,8 @@ from ubt.core.config import (
     ApiMode,
     CoverMode,
     DualMode,
-    ExecMode,
-    FormulaEnrichment,
-    FormulaMode,
-    FormulaRender,
-    MathBackend,
     OcrMode,
     PdfEngine,
-    PromptStrategyName,
-    QeEngine,
     parse_page_ranges,
 )
 from ubt.core.job_options import (
@@ -74,11 +66,6 @@ def _get_strict_failures() -> Any:
     from ubt.cli.main import _strict_failures
 
     return _strict_failures
-
-
-def _is_interactive() -> bool:
-    """Return True if running in an interactive terminal session."""
-    return sys.stdin.isatty()
 
 
 #: Domain-profile names are not a closed set: ``seed_entries_for_profile`` and
@@ -254,9 +241,7 @@ def _report_degrades_bilingual_delivery(report_data: dict[str, Any]) -> bool:
     rendered_modes = advisory.get("rendered_modes", [])
     effective = advisory.get("effective")
     return (
-        rendered_modes == ["monolingual"]
-        or effective == "monolingual"
-        or "dual_mode_downgraded" in report_data
+        rendered_modes == ["mono"] or effective == "mono" or "dual_mode_downgraded" in report_data
     )
 
 
@@ -506,13 +491,6 @@ def translate(
             show_default=False,
         ),
     ] = None,
-    qe_engine: Annotated[
-        QeEngine | None,
-        typer.Option(
-            "--qe-engine",
-            help="Quality Estimation engine: 'heuristic' (default fast) or 'comet' (neural CometKiwi)",
-        ),
-    ] = None,
     pdf_engine: Annotated[
         PdfEngine | None,
         typer.Option(
@@ -525,7 +503,7 @@ def translate(
         DualMode | None,
         typer.Option(
             "--dual-mode",
-            help="Bilingual render mode: 'inline' (interleaved, default), 'alternating' (page zipper), 'facing' (spread with flyleaf), 'monolingual' (target only), or 'auto' (advisor decides). Unset follows config/UBT_DUAL_MODE",
+            help="What the reader receives: 'dual' (each block's source line above its translation), 'mono' (target only), or 'auto' (the advisor picks from the document's structure). Unset follows config/UBT_DUAL_MODE",
             show_default=False,
         ),
     ] = None,
@@ -534,14 +512,6 @@ def translate(
         typer.Option(
             "--translate-chrome/--no-translate-chrome",
             help="Translate running heads and footers (page numbers never); off by default so chrome stays source-visible",
-            show_default=False,
-        ),
-    ] = None,
-    facing_spread: Annotated[
-        bool | None,
-        typer.Option(
-            "--facing-spread/--no-facing-spread",
-            help="Pad recto flyleaf in alternating PDF mode so facing pages align properly",
             show_default=False,
         ),
     ] = None,
@@ -558,14 +528,6 @@ def translate(
         typer.Option(
             "--cover-mode",
             help="Cover policy: 'auto' (cover only when page 1 has no body text), 'always', or 'never'. Unset follows config",
-            show_default=False,
-        ),
-    ] = None,
-    prompt_strategy: Annotated[
-        PromptStrategyName | None,
-        typer.Option(
-            "--prompt-strategy",
-            help="Prompt assembly: 'auto' (per-model registry), or force 'minimal'/'hybrid'/'rich'",
             show_default=False,
         ),
     ] = None,
@@ -597,55 +559,6 @@ def translate(
         typer.Option(
             "--ocr-api-key",
             help="API key for Cloud OCR or Vision LLM provider (or UBT_OCR_API_KEY)",
-        ),
-    ] = None,
-    exec_mode: Annotated[
-        ExecMode | None,
-        typer.Option(
-            "--mode",
-            "--exec-mode",
-            help="Execution router: 'auto' (≤short-max born-digital pages → short chain, else the staged long chain), or force 'short'/'long'",
-            show_default=False,
-        ),
-    ] = None,
-    formula_mode: Annotated[
-        FormulaMode | None,
-        typer.Option(
-            "--formula-mode",
-            help="Short-chain formula policy: 'readable' (Unicode近似, default) or 'strict' (byte-identical gates). Unset follows config",
-            show_default=False,
-        ),
-    ] = None,
-    formula_enrichment: Annotated[
-        FormulaEnrichment | None,
-        typer.Option(
-            "--formula-enrichment",
-            help="Docling math formula enrichment (CodeFormulaV2 VLM): 'auto' (GPU-enabled, degrades on failure), 'on' (force VLM), or 'off' (bypass VLM, 10x faster ingest)",
-            show_default=False,
-        ),
-    ] = None,
-    formula_render: Annotated[
-        FormulaRender | None,
-        typer.Option(
-            "--formula-render",
-            help="Display-formula fidelity: 'witness' (default; verify converted math against source pixels, fall back to the source graphic on mismatch), 'image' (always render display formulas from their source graphic), 'native' (converted Typst math only)",
-            show_default=False,
-        ),
-    ] = None,
-    math_backend: Annotated[
-        MathBackend | None,
-        typer.Option(
-            "--math-backend",
-            help="Retired knob, accepted and recorded but not acted on: display formulas are always typeset by the LaTeX->Typst converter. Use --formula-render ('witness' verifies against the source graphic, 'image' keeps the source crop) to control formula fidelity.",
-            show_default=False,
-        ),
-    ] = None,
-    table_render_mode: Annotated[
-        str | None,
-        typer.Option(
-            "--table-render-mode",
-            help="Table handling mode for PDF: 'auto' (in-place overlay for simple, appendix for complex), 'overlay' (in-place only, skip complex), 'appendix' (append translated tables), or 'skip' (skip tables entirely, 0 tokens)",
-            show_default=False,
         ),
     ] = None,
     short_max_pages: Annotated[
@@ -728,25 +641,16 @@ def translate(
         "macro_chunk_size": macro_chunk_size,
         "chapter_streaming_enabled": chapter_streaming,
         "offline_batch_enabled": offline_batch,
-        "qe_engine": qe_engine,
         "dual_mode": dual_mode,
         "translate_chrome": translate_chrome,
         "preset": preset,
-        "facing_spread": facing_spread,
         "pdf_engine": pdf_engine,
         "emit_both": emit_both,
         "cover_mode": cover_mode,
-        "prompt_strategy": prompt_strategy,
         "fresh": fresh,
         "ocr_mode": ocr,
         "ocr_endpoint": ocr_endpoint,
         "ocr_api_key": ocr_api_key,
-        "exec_mode": exec_mode,
-        "formula_mode": formula_mode,
-        "formula_enrichment": formula_enrichment,
-        "formula_render": formula_render,
-        "math_backend": math_backend,
-        "table_render_mode": table_render_mode,
         "short_max_pages": short_max_pages,
         "glossary": glossary,
         "domain": domain,
@@ -924,7 +828,7 @@ def translate(
         if report_data:
             if _report_degrades_bilingual_delivery(report_data):
                 is_bilingual = False
-        elif dual_mode == "monolingual":
+        elif dual_mode == "mono":
             is_bilingual = False
 
         doc_label = (

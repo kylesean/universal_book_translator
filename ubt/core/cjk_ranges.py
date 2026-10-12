@@ -31,7 +31,6 @@ KANA = (0x3040, 0x30FF)
 HANGUL_SYLLABLES = (0xAC00, 0xD7AF)
 CJK_PUNCTUATION = (0x3000, 0x303F)
 FULLWIDTH_FORMS = (0xFF00, 0xFFEF)
-GENERAL_PUNCTUATION = (0x2000, 0x206F)
 #: Astral Han billed as one block (Ext B through the Compatibility Supplement,
 #: unassigned codepoints included): the cost model charges by block, not by
 #: character, so the bucket is deliberately wider than the assigned ranges.

@@ -151,6 +151,10 @@ def test_canonicalize_numeric_token(text: str, expected: str) -> None:
         ("统一", "统一"),  # numeral char inside a word is not a number
         ("十分", "十分"),
         ("一部分", "一部分"),
+        ("二元矩阵", "二元矩阵"),  # 'binary' — the '元' is not a currency count
+        ("两两比较", "两两比较"),  # 'pairwise'
+        ("五花八门", "五花八门"),  # idiom; was a documented residual until the lexicon
+        ("三番五次", "三番五次"),  # idiom; was a documented residual until the lexicon
         ("五项", "5项"),  # followed by a measure word
         ("三百米", "300米"),
         ("β²", "β^2"),  # superscript gains a separator
@@ -158,8 +162,15 @@ def test_canonicalize_numeric_token(text: str, expected: str) -> None:
         ("1e5", "100000"),
         ("3,000", "3000"),
         ("1.50", "1.5"),
-        ("三番五次", "三番5次"),  # documented residual (chengyu)
         ("数量为三。", "数量为三。"),  # documented residual (lone numeral)
+        # '数' + numeral is an indefinite quantity, not an exact value: the
+        # source English is the bare plural ("billions"), so folding to
+        # 1000000000 would invent a precision neither side states.
+        ("数十亿", "数十亿"),
+        ("数千", "数千"),
+        # A CJK comma between digit runs is punctuation, not a thousands
+        # separator; stripping it glued '2017，2018' into '20172018'.
+        ("Shazeer 等，2017，2018；", "Shazeer 等2017 2018；"),
     ],
 )
 def test_normalize_for_numeric_matching(text: str, expected: str) -> None:
@@ -577,6 +588,23 @@ def test_the_article_exemption_does_not_launder_a_real_count() -> None:
         # A glued page range restored as a range states values the source token
         # does not, and is already covered by the loss check's own acceptance.
         ("See pp. 4046 for details.", "见 40-46 页。"),
+        # A plural multiplier states an indefinite large quantity; the Chinese
+        # rendering as a magnitude is faithful, not an invented exact value.
+        # (arXiv 2101.03961 b0132/b0182/b0205/b0223 all quarantined on this.)
+        ("billions of parameters", "数十亿参数"),
+        ("trillions of parameters", "数万亿参数"),
+        ("thousands of cores", "数千个核心"),
+        # 'both X and Y' states a quantity of two without a number word.
+        # (arXiv 2101.03961 b0233.)
+        ("on both SuperGLUE and TriviaQA", "在SuperGLUE和TriviaQA这两个基准上"),
+        # A Chinese word whose leading numeral char is part of the word is not
+        # a count: '二元矩阵' (binary matrix) must not authorize/fabricate a 2.
+        # (arXiv 2101.03961 b0164.)
+        ("the resulting binary matrix", "由此得到的二元矩阵"),
+        # A magnitude-scaled target is equivalent to the source's suffix form.
+        # (arXiv 2101.03961 b0120/b0140/b0175 all quarantined on this.)
+        ("the highly-tuned 223M parameter model", "高度优化的2.23亿参数模型"),
+        ("after 250k steps", "在25万步后"),
     ],
 )
 def test_a_faithful_expansion_is_not_an_invented_number(original: str, translated: str) -> None:

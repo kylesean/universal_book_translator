@@ -119,7 +119,6 @@ def extract_manifest(path: Path, *, is_docling_installed: bool) -> BookManifest:
 
 def resolve_formula_enrichment(
     formula_enrichment: str,
-    formula_render: str,
     has_accelerator: Callable[[], bool],
     path: Path | None = None,
 ) -> bool:
@@ -130,53 +129,26 @@ def resolve_formula_enrichment(
     if mode in ("on", "true", "1"):
         return True
 
-    # Mode == "auto":
-    # 1. If formula_render is 'image', formulas are always replaced with source crops,
-    #    so VLM LaTeX OCR is redundant.
-    # 2. Otherwise a formula-dense document keeps its original vector formulas on
-    #    the overlay canvas, so VLM math OCR is likewise redundant.
-    formula_render = str(formula_render).lower().strip()
-
-    if path is not None and path.suffix.lower() == ".pdf" and path.exists():
-        try:
-            # Same-layer call: the profiler is an adapters/pdf peer, not a core
-            # port. Going through ubt.core.ports here made the bridge a global
-            # service locator that adapters had to route through to reach a
-            # sibling module.
-            from ubt.adapters.pdf.page_profiler import content_flags
-
-            _, formula_heavy = content_flags(path)
-            if formula_heavy:
-                logger.info(
-                    "Docling formula enrichment set to False (auto: the overlay canvas preserves the "
-                    "formula-dense document '%s' original vector formulas; skipping redundant VLM math OCR)",
-                    path.name,
-                )
-                return False
-        except Exception as exc:
-            logger.debug(
-                "Failed to classify PDF formula content during enrichment resolution: %s", exc
-            )
-
-    if formula_render == "image":
-        logger.info(
-            "Docling formula enrichment set to False (auto: formula_render='image' uses "
-            "original vector crops; skipping redundant VLM math OCR)"
-        )
-        return False
-
-    # Check if PyTorch CUDA or Apple MPS accelerator is available.
-    # Formula VLM on pure CPU takes ~15-60s per formula, freezing pipelines on long docs.
-    has_gpu = has_accelerator()
-
-    if not has_gpu:
-        logger.info(
-            "Docling formula enrichment set to False (auto: no CUDA/MPS accelerator detected; "
-            "use --formula-enrichment on to force VLM on CPU)"
-        )
-        return False
-
-    return True
+    # Mode == "auto": resolve from what the *renderer* can do with each option.
+    #
+    # The semantic reflow renderer rebuilds the page from the IR, so a formula it
+    # cannot read as markup has to be recovered some other way. Two ways exist:
+    #
+    # * crop the source region (``_crop_formula_asset``) — instant, and the
+    #   reader gets the author's own equation, glyph for glyph;
+    # * run the VLM math OCR — 15-60s *per formula* on CPU, and its LaTeX is a
+    #   model's transcription, which can be wrong in ways a crop cannot.
+    #
+    # So ``auto`` takes the crop: faithful and affordable. ``on`` forces the VLM
+    # for a caller who wants scalable vector math and accepts the cost. The old
+    # "a formula-dense document keeps its vector formulas on the overlay canvas"
+    # short-circuit is gone with the overlay canvas it named.
+    logger.info(
+        "Docling formula enrichment set to False (auto: unreadable formulas are "
+        "recovered by cropping the source region, which is exact and instant; "
+        "use --formula-enrichment on to transcribe them with the VLM instead)"
+    )
+    return False
 
 
 def configure_hf_environment(*, enrich: bool = False) -> None:
@@ -906,6 +878,54 @@ def extract_with_docling(
     return map_iterated_items(items, doc, assets_dir, pdf_path=path)
 
 
+def read_pdf_outline_entries(
+    pdf_path: Path | None,
+) -> list[tuple[int, str, int]]:
+    """Level-0/1 entries from the PDF's own bookmark tree: (level, title, page).
+
+    Docling's ``DOCUMENT_INDEX`` extraction is lossy for a specific, common
+    shape: a TOC page that sets chapter titles ("1 Introduction") in a
+    different typeface or column from their sub-sections. On the arXiv
+    2101.03961 reference paper Docling returned all 21 sub-section rows but
+    **none** of the 15 top-level chapters, because the extractor reads each
+    line through ``parse_toc_entry_line`` and those lines carry no terminal
+    page number in the geometry it inspects.
+
+    The PDF's bookmark tree already holds exactly those entries, with their
+    hierarchy, and costs one library call. Using it is strictly better than a
+    "heading calibrator" that guesses levels from font size and regex: the
+    level here is *declared* by the document, not inferred.
+
+    Returns an empty list when the PDF has no outline (most reflowed or
+    print-to-PDF sources) — the caller then keeps Docling's own extraction.
+    """
+    if pdf_path is None or not pdf_path.exists():
+        return []
+    try:
+        import pypdfium2 as pdfium
+
+        doc = pdfium.PdfDocument(str(pdf_path))
+    except Exception as exc:  # pragma: no cover - library/loader failure
+        logger.debug("PDF outline unavailable: %s", exc)
+        return []
+    try:
+        entries: list[tuple[int, str, int]] = []
+        for bookmark in doc.get_toc():
+            title = (bookmark.get_title() or "").strip()
+            if not title:
+                continue
+            page = 0
+            try:
+                dest = bookmark.get_dest()
+                page = int(dest.get_index()) + 1 if dest is not None else 0
+            except Exception:
+                page = 0
+            entries.append((int(bookmark.level), title, page))
+        return entries
+    finally:
+        doc.close()
+
+
 def _extract_document_index_blocks(
     item: Any,
     pdf_path: Path | None,
@@ -974,6 +994,132 @@ def _extract_document_index_blocks(
                 )
             )
     return out
+
+
+def _extract_outline_only_blocks(
+    pdf_path: Path | None,
+    already: list[IRBlock],
+    start_index: int,
+) -> list[IRBlock]:
+    """TOC rows for outline entries Docling's DOCUMENT_INDEX extraction missed.
+
+    Merges the two sources rather than replacing either: Docling supplies the
+    sub-section rows with their real page geometry, and the PDF outline supplies
+    the top-level chapters it drops.
+    An entry already present verbatim in ``already`` is skipped, so the two
+    sources never produce a duplicate row.
+
+    The synthesized block has no bbox: the outline states a *destination page*,
+    not a rectangle on the TOC page. The publication renderer reflows, so the
+    entry is typeset as ordinary text in reading order rather than drawn at a
+    guessed position on a fixed page.
+    """
+    entries = read_pdf_outline_entries(pdf_path)
+    if not entries:
+        return []
+    seen = {(b.source_text or "").strip().lower() for b in already}
+    out: list[IRBlock] = []
+    for level, title, dest_page in entries:
+        key = title.strip().lower()
+        if key in seen:
+            continue
+        # The outline title and the Docling row often differ only by the
+        # numeric prefix ('1 Introduction' vs 'Introduction'); match on the
+        # stripped form too before adding a row.
+        stripped = re.sub(r"^[0-9A-F]+\.?\s+", "", title).strip().lower()
+        if stripped and any(stripped == s for s in seen):
+            continue
+        seen.add(key)
+        idx = start_index + len(out)
+        out.append(
+            IRBlock(
+                element=make_element(
+                    id=f"pdf_main#b{idx:04d}",
+                    spine_index=idx,
+                    block_type=BlockType.HEADING,
+                    flow_id=FlowID.MAIN_STORY,
+                    source_text=normalize_academic_pdf_math(title),
+                    # The outline declares the true depth; Docling's Markdown
+                    # pass emits every heading as level 1, which flattens the
+                    # document (40 headings all rendered as <h1>). Bookmark
+                    # levels are 0-based, heading levels 1-based.
+                    level=max(1, level + 1),
+                ),
+                provenance=BlockProvenance(
+                    source_page=dest_page,
+                    toc_entry=True,
+                    toc_page=str(dest_page),
+                    toc_leaders=False,
+                    is_bold=level == 0,
+                ),
+            )
+        )
+    return out
+
+
+def _crop_formula_asset(
+    item: Any,
+    assets_dir: Path,
+    pdf_path: Path | None,
+    ordinal: int,
+) -> IRBlock | None:
+    """Recover a formula Docling could not read by cropping its source region.
+
+    A display equation the extractor left as a bare ``$$`` is content, not
+    markup: the semantic reflow renderer rebuilds the page from the IR and has
+    no source canvas to preserve, so without this the equation simply vanishes.
+    The crop becomes an IMAGE block, which the renderer already places and the
+    quality report already counts.
+
+    Returns ``None`` when the region cannot be cropped (no provenance, no bbox,
+    no source PDF, or a region too small to be an equation), so the caller keeps
+    the ``$$`` placeholder and the block stays visible as a known gap rather
+    than a silent one.
+    """
+    if pdf_path is None or not pdf_path.exists():
+        return None
+    prov = item.prov[0] if getattr(item, "prov", None) else None
+    if prov is None or getattr(prov, "bbox", None) is None:
+        return None
+    page_no = int(getattr(prov, "page_no", 0) or 0)
+    if page_no < 1:
+        return None
+    b = prov.bbox
+    bbox = BoundingBox(
+        page=page_no,
+        x0=float(getattr(b, "l", 0.0)),
+        y0=float(getattr(b, "b", 0.0)),
+        x1=float(getattr(b, "r", 0.0)),
+        y1=float(getattr(b, "t", 0.0)),
+    )
+    if bbox.x1 - bbox.x0 < 8 or bbox.y1 - bbox.y0 < 6:
+        # A degenerate box is a stray glyph, not an equation; cropping it would
+        # add noise to the page.
+        return None
+    asset_path = assets_dir / f"formula_p{page_no}_{ordinal:04d}.png"
+    try:
+        from ubt.adapters.pdf.visual_scalpel import crop_block_pil
+
+        assets_dir.mkdir(parents=True, exist_ok=True)
+        cropped = crop_block_pil(pdf_path, page_no, bbox)
+        if getattr(cropped, "width", 0) < 8 or getattr(cropped, "height", 0) < 6:
+            return None
+        cropped.save(asset_path)
+    except Exception as exc:
+        logger.debug("Formula crop failed for page %d: %s", page_no, exc)
+        return None
+    return IRBlock(
+        element=make_element(
+            id=f"pdf_main#fml_{ordinal:04d}",
+            spine_index=ordinal,
+            block_type=BlockType.IMAGE,
+            flow_id=FlowID.MAIN_STORY,
+            source_text=str(asset_path),
+            bbox=bbox,
+            skip_translate=True,
+        ),
+        target_text=str(asset_path),
+    )
 
 
 def map_iterated_items(
@@ -1045,6 +1191,13 @@ def map_iterated_items(
         if label == getattr(DocItemLabel, "DOCUMENT_INDEX", "document_index"):
             toc_blocks = _extract_document_index_blocks(
                 item, pdf_path, page_lines_cache, start_index=len(blocks) + 1
+            )
+            # The outline supplies the top-level chapters Docling's TOC pass
+            # drops (see ``read_pdf_outline_entries``); the merge is additive.
+            toc_blocks.extend(
+                _extract_outline_only_blocks(
+                    pdf_path, toc_blocks, start_index=len(blocks) + len(toc_blocks) + 1
+                )
             )
             if toc_blocks:
                 blocks.extend(toc_blocks)
@@ -1142,6 +1295,16 @@ def map_iterated_items(
         elif label == DocItemLabel.FORMULA:
             text = (getattr(item, "text", "") or "").strip()
             if not text:
+                # Docling read no LaTeX for this formula. The semantic reflow
+                # renderer has no source canvas to fall back on, so emitting a
+                # bare ``$$`` would silently drop an equation from the page.
+                # Crop the region instead and emit it as an IMAGE block: the
+                # reader sees the original equation, and the quality report can
+                # count what was recovered rather than lost.
+                formula_asset = _crop_formula_asset(item, assets_dir, pdf_path, len(blocks) + 1)
+                if formula_asset is not None:
+                    blocks.append(formula_asset)
+                    continue
                 text = "$$"
             block_type, flow_id, skip = BlockType.FORMULA, FlowID.MAIN_STORY, True
         elif label in (DocItemLabel.TITLE, DocItemLabel.SECTION_HEADER):
@@ -1198,8 +1361,8 @@ def map_iterated_items(
             for prov in prov_list:
                 if is_inside_picture(prov.page_no, prov.bbox, picture_boxes):
                     # Figure-internal text (an axis title, a legend label): the
-                    # figure is preserved as a canvas asset, so its own text stays
-                    # in the source graphic rather than being translated over it.
+                    # figure is carried as an image asset, so its own text stays
+                    # inside that graphic rather than being translated separately.
                     logger.debug(
                         "Docling item on page %s dropped as picture text: %r",
                         prov.page_no,
@@ -1499,13 +1662,14 @@ def extract_with_oxide(path: Path) -> list[IRBlock]:
 def annotate_page_kinds(path: Path, blocks: list[IRBlock]) -> dict[int, str]:
     """Stamp ``provenance["page_kind"]`` per block; return the page→kind map."""
     try:
-        from ubt.adapters.pdf.engine_selector import PROFILE_CACHE_DIR, build_page_ingest_plans
+        from ubt.adapters.pdf.engine_selector import PROFILE_CACHE_DIR
+        from ubt.adapters.pdf.page_profiler import profile_pdf
 
-        plans = build_page_ingest_plans(path, cache_dir=PROFILE_CACHE_DIR)
+        profiles = profile_pdf(path, cache_dir=PROFILE_CACHE_DIR)
     except Exception as exc:
-        logger.debug("page profiling / ingest plans skipped for '%s': %s", path.name, exc)
+        logger.debug("page profiling skipped for '%s': %s", path.name, exc)
         return {}
-    kinds = {p.page_number: p.kind.value for p in plans}
+    kinds = {p.facts.page: p.kind.value for p in profiles}
     for b in blocks:
         if b.bbox is not None and b.bbox.page in kinds:
             b.provenance.page_kind = kinds[b.bbox.page]
@@ -1663,21 +1827,18 @@ def vlm_fallback_missing_pages(
 
         if mode == VlmFallbackMode.ALL:
             try:
-                from ubt.adapters.pdf.engine_selector import (
-                    PROFILE_CACHE_DIR,
-                    build_page_ingest_plans,
-                )
+                from ubt.adapters.pdf.engine_selector import PROFILE_CACHE_DIR
+                from ubt.adapters.pdf.page_profiler import profile_pdf
 
-                plans = build_page_ingest_plans(path, cache_dir=PROFILE_CACHE_DIR)
-                for p in plans:
+                for p in profile_pdf(path, cache_dir=PROFILE_CACHE_DIR):
                     if (
-                        p.page_number in text_covered
+                        p.facts.page in text_covered
                         and p.kind.value != "editable_text"
-                        and first <= p.page_number <= last
+                        and first <= p.facts.page <= last
                     ):
-                        proofread_pages.add(p.page_number)
+                        proofread_pages.add(p.facts.page)
             except Exception as exc:
-                logger.debug("build_page_ingest_plans for all-mode proofread failed: %s", exc)
+                logger.debug("page profiling for all-mode proofread failed: %s", exc)
         elif mode == VlmFallbackMode.WEAK:
             from ubt.core.policy.layout_policy import (
                 PROBE_FORMULA_SHARE,

@@ -102,11 +102,10 @@ export function NewJobWizard() {
   // Advanced compiler & layout options
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false)
   const [domainProfile, setDomainProfile] = useState('general')
-  const [dualMode, setDualMode] = useState<'auto' | 'inline' | 'facing' | 'alternating' | 'monolingual'>('auto')
+  const [dualMode, setDualMode] = useState<'auto' | 'dual' | 'mono'>('auto')
   const [pageRange, setPageRange] = useState('')
   const [glossaryPath, setGlossaryPath] = useState('')
   const [execMode, setExecMode] = useState<'auto' | 'short' | 'long'>('auto')
-  const [formulaMode, setFormulaMode] = useState<'readable' | 'strict'>('strict')
 
   const [isAssessing, setIsAssessing] = useState(false)
   const [isReassessing, setIsReassessing] = useState(false)
@@ -179,7 +178,7 @@ export function NewJobWizard() {
           }
           if (!hasUserSelectedDualModeRef.current && res.route?.recommended_dual_mode) {
             const recDual = res.route.recommended_dual_mode.toLowerCase() as any
-            if (['auto', 'inline', 'facing', 'alternating', 'monolingual'].includes(recDual)) {
+            if (['auto', 'dual', 'mono'].includes(recDual)) {
               setDualMode(recDual)
             }
           }
@@ -273,7 +272,6 @@ export function NewJobWizard() {
         pages: pageRange.trim() ? pageRange.trim() : null,
         glossary: glossaryPath.trim() ? glossaryPath.trim() : null,
         exec_mode: execMode === 'auto' ? null : execMode,
-        formula_mode: formulaMode,
         priority: 0,
         dry_run: false,
         budget_usd: budgetUsd,
@@ -619,32 +617,13 @@ export function NewJobWizard() {
                         className="w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs font-medium"
                       >
                         <option value="auto">{t.wizard.dualModeAuto}</option>
-                        <option value="inline">{t.wizard.dualModeInline}</option>
-                        <option value="facing">{t.wizard.dualModeFacing}</option>
-                        <option value="alternating">{t.wizard.dualModeAlternating}</option>
-                        <option value="monolingual">{t.wizard.dualModeMonolingual}</option>
+                        <option value="dual">{t.wizard.dualModeDual}</option>
+                        <option value="mono">{t.wizard.dualModeMono}</option>
                       </select>
                     </div>
                   </div>
 
-                  {/* Row 2: Formula Mode */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                    <div>
-                      <label className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] block mb-1 font-semibold">
-                        {t.wizard.formulaMode}
-                      </label>
-                      <select
-                        value={formulaMode}
-                        onChange={(e) => setFormulaMode(e.target.value as any)}
-                        className="w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs font-medium"
-                      >
-                        <option value="readable">{t.wizard.formulaModeReadable}</option>
-                        <option value="strict">{t.wizard.formulaModeStrict}</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  {/* Row 3: Pages Range Filter & Execution Mode */}
+                  {/* Row 2: Pages Range Filter & Execution Mode */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                     <div>
                       <div className="flex items-center justify-between mb-1">

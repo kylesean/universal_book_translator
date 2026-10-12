@@ -51,10 +51,8 @@ def test_runtime_config_carries_device_to_adapter() -> None:
         ocr_api_key="",
         ocr_model="",
         formula_enrichment="auto",
-        formula_render="witness",
         docling_device="cpu",
         font_family=None,
-        math_backend="mathjax",
         allow_page_upload=False,
     )
     adapter.apply_config(runtime)

@@ -114,12 +114,11 @@ class ReportRenderCoverage(BaseModel):
     """How much of the pipeline completed, and how much of that was delivered.
 
     ``render_coverage`` is the *translation-completion* ratio
-    (``completed / total``), not a pixel/placement measure: while the overlay
-    engine keeps the source page as canvas, translatable prose is typeset into
-    the page. Those delivery gaps are carried by ``fail_closed_blocks`` /
-    ``skip_families`` (and by the separate per-page render-visibility report) —
-    never folded into this ratio, so a caller that wants "was every translation
-    placed" must read ``fail_closed_blocks`` too.
+    (``completed / total``), not a pixel/placement measure. A block can complete
+    translation and still not reach the page (an unresolved asset, a compile
+    fallback); those gaps are carried by ``fail_closed_blocks`` /
+    ``skip_families``, never folded into this ratio, so a caller that wants "was
+    every translation placed" must read ``fail_closed_blocks`` too.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -132,25 +131,6 @@ class ReportRenderCoverage(BaseModel):
     skip_families: dict[str, int] = Field(default_factory=dict)
 
 
-class ReportFidelity(BaseModel):
-    """Pixel-level fidelity of an ``overlay`` render (advisory, never blocking).
-
-    ``non_text_residual`` is the fraction of pixels *outside* the painted text
-    boxes that differ from the source — it should be ~0 because the overlay route
-    keeps every non-text element untouched. ``painted_coverage`` is the fraction
-    of page area that was actually painted prose (the inverse of the "most of
-    the page still shows source text" failure). ``pages_measured`` is 0 when the
-    probe could not run (rasterizer unavailable), in which case both ratios are
-    meaningless defaults.
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    non_text_residual: float = 0.0
-    painted_coverage: float = 0.0
-    pages_measured: int = 0
-
-
 class ReportRouteInfo(BaseModel):
     """Unified-entry routing decision behind this job (router_mode.decide)."""
 
@@ -160,7 +140,6 @@ class ReportRouteInfo(BaseModel):
     pages: int = 0
     chars: int = 0
     reason: str = ""
-    formula_mode: str = ""
 
 
 class ReportTerminologyMetrics(BaseModel):
@@ -234,7 +213,7 @@ class QualityReport(BaseModel):
     #: translation memory keeps the unenforced draft, so a reader can discount
     #: this many mechanically-corrected spans when comparing the two.
     enforced_spans: int = 0
-    # Render delivery audit (fail-closed overlay skips vs pipeline completion).
+    # Render delivery audit (fail-closed render skips vs pipeline completion).
     render_coverage: ReportRenderCoverage = Field(
         default_factory=lambda: ReportRenderCoverage(
             rendered_blocks=0,
@@ -244,8 +223,6 @@ class QualityReport(BaseModel):
             render_coverage=1.0,
         )
     )
-    # Overlay-render pixel fidelity (advisory; 0 pages when not measured).
-    fidelity: ReportFidelity = Field(default_factory=ReportFidelity)
     # Unified-entry routing decision (router_mode.decide), when the pipeline
     # recorded one. None for pre-router jobs and non-PDF inputs.
     route: ReportRouteInfo | None = None
@@ -270,8 +247,8 @@ class QualityReport(BaseModel):
     # off or no suspicious blocks reached the tiered runner).
     qe_judge_calls: int = 0
     qe_judge_errors: int = 0
-    # Delivery suitability audit flag (e.g. UNSUITABLE_FOR_DELIVERY when math-dense
-    # document was forced through overlay engine). None = normal delivery.
+    # Delivery suitability audit flag: a short machine-readable reason when the
+    # delivery is degraded (set by the stages that detect it). None = normal.
     delivery_status: str | None = None
     delivery_warning: str | None = None
     #: Content/asset ledger reconciliation (ubt.core.content.contract). None for
@@ -388,7 +365,7 @@ def build_quality_report(
         for flag in b.error_flags:
             flag_counts[flag] = flag_counts.get(flag, 0) + 1
 
-    # Render delivery audit: fail-closed overlay skips lose a translation;
+    # Render delivery audit: fail-closed render skips lose a translation;
     # chrome/policy/non-prose keeps are deliberate. Split them so the fail-closed
     # count carries the zero-tolerance ceiling and the keeps are reported apart.
     fail_closed_blocks, preserved_blocks, _skip_verdict = summarize_render_skips(flag_counts)
@@ -401,7 +378,7 @@ def build_quality_report(
         family = reason.split("(", 1)[0].strip()
         skip_families[family or flag] = skip_families.get(family or flag, 0) + count
     # ``completed`` counts every terminal MTQE_PASSED/REPAIRED block, but a
-    # fail-closed overlay skip KEEPS that status, so those blocks were counted as
+    # fail-closed render skip KEEPS that status, so those blocks were counted as
     # rendered AND as fail-closed — making rendered+fail_closed exceed the total.
     # Count only completed blocks that were not fail-closed skipped; a
     # preserved skip sits on a chrome/non-prose block that was never completed.
@@ -423,7 +400,6 @@ def build_quality_report(
                 pages=int(raw_route.get("pages", 0) or 0),
                 chars=int(raw_route.get("chars", 0) or 0),
                 reason=str(raw_route.get("reason", "")),
-                formula_mode=str(manifest.run.formula_mode or ""),
             )
         except (TypeError, ValueError):
             route_info = None
@@ -509,15 +485,6 @@ def build_quality_report(
             render_coverage=coverage,
             skip_families=skip_families,
         ),
-        fidelity=ReportFidelity(
-            non_text_residual=float(
-                (manifest.metadata.get("fidelity") or {}).get("non_text_diff_ratio", 0.0)
-            ),
-            painted_coverage=float(
-                (manifest.metadata.get("fidelity") or {}).get("masked_coverage_ratio", 0.0)
-            ),
-            pages_measured=int((manifest.metadata.get("fidelity") or {}).get("pages_measured", 0)),
-        ),
         route=route_info,
         mode_advisory=mode_advisory,
         config_snapshot=cfg_snapshot,
@@ -531,8 +498,6 @@ def build_quality_report(
         delivery_contract=delivery_contract,
     )
 
-
-PASS_RATE_THRESHOLD = 0.98
 
 #: Prefixes the export stage uses for fail-closed render skips.
 #: Supports both ``inplace_skip:`` and ``render_skip:`` prefixes for full compatibility.
@@ -657,42 +622,6 @@ def compute_placeholder_metrics(blocks: list[Any]) -> ReportPlaceholderMetrics:
         masked_blocks=masked_blocks,
         corrupt_blocks=corrupt_blocks,
     )
-
-
-def _render_advisory_markdown(advisory: dict[str, Any] | None) -> str:
-    """Render the bilingual render-mode advisory as a report section (or empty)."""
-    if not advisory:
-        return ""
-    ranking = advisory.get("ranking", [])
-    rank_lines = "\n".join(
-        f"- **{entry.get('mode')}:** suitability `{entry.get('score')}`"
-        + (
-            f" (penalized: {', '.join(entry.get('penalties', []))})"
-            if entry.get("penalties")
-            else ""
-        )
-        for entry in ranking
-    )
-    reason_lines = "\n".join(f"- {reason}" for reason in advisory.get("reasons", []))
-    rendered = advisory.get("rendered_modes", [])
-    rendered_line = f"\nRendered artifacts: `{', '.join(rendered)}`." if rendered else ""
-    downgrade = advisory.get("difficulty_downgrade")
-    downgrade_line = f"\nDifficulty downgrade applied: {downgrade}." if downgrade else ""
-    return f"""
----
-
-## 5. Render-Mode Advisory (Bilingual Suitability)
-
-- **Requested mode:** `{advisory.get("requested")}` → **effective mode:** `{advisory.get("effective")}`
-- **Advisory tier:** `{advisory.get("tier")}` (enforcement: `{advisory.get("enforcement")}`)
-- **Recommended mode:** `{advisory.get("recommended")}`{rendered_line}{downgrade_line}
-
-### Per-mode suitability
-{rank_lines}
-
-### Fired rules
-{reason_lines if reason_lines else "- (none — document is interleave-friendly)"}
-"""
 
 
 def save_quality_report(report: QualityReport, report_path: Path | str) -> Path:

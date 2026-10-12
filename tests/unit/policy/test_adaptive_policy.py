@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import pytest
 
-from ubt.core import config as config_mod
 from ubt.core.config import UBTConfig
 from ubt.core.ir.models import BookManifest
 from ubt.core.ir.run_metadata import RunMetadata
@@ -37,12 +36,8 @@ def _manifest(run: RunMetadata | None = None) -> BookManifest:
 
 
 # --------------------------------------------------------------------------- #
-# The engine is a constant, not a choice
+# The engine is not a choice
 # --------------------------------------------------------------------------- #
-
-
-def test_the_render_engine_is_a_single_constant() -> None:
-    assert config_mod.RENDER_ENGINE == "overlay"
 
 
 def test_config_has_no_render_engine_knob() -> None:

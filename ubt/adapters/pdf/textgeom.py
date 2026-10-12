@@ -91,7 +91,6 @@ def _aggregate_line_styles(items: Sequence[LineBox]) -> tuple[float, bool, bool]
 #: Public alias: the char-weighted ground-truth style of a group of source lines.
 #: Extraction-side validation reads this to check a block's role against the
 #: typography actually present on the page.
-aggregate_line_styles = _aggregate_line_styles
 
 
 def _probe_rect_font_style(
@@ -169,6 +168,38 @@ def _hex_if_colored(red: int, green: int, blue: int) -> str | None:
 
 
 @pdfium_serialized
+def merge_utf16_surrogates(codes: Sequence[int]) -> list[tuple[int, int]]:
+    """Merge UTF-16 code units into ``(source_index, code_point)`` pairs.
+
+    ``FPDFText_GetUnicode`` returns UTF-16 **code units**, not code points: an
+    astral character (a mathematical italic ``𝑖`` U+1D456, common in formula
+    typesetting) arrives as a high surrogate followed by a low one. Treating
+    each half as its own character produced strings containing lone surrogates,
+    which have no UTF-8 encoding — persisting the block's style then raised
+    ``UnicodeEncodeError: surrogates not allowed`` and the whole ingest failed.
+
+    The reported index is the *high* surrogate's, so the caller reads its box and
+    style (pdfium reports the same metrics for both halves). A dangling high
+    surrogate or an unpaired low one is dropped: neither is a character.
+    """
+    out: list[tuple[int, int]] = []
+    pending: tuple[int, int] | None = None  # (index, high_surrogate)
+    for index, code in enumerate(codes):
+        if 0xD800 <= code <= 0xDBFF:
+            pending = (index, code)
+            continue
+        if 0xDC00 <= code <= 0xDFFF:
+            if pending is None:
+                continue  # low surrogate with no high half
+            high_index, high = pending
+            pending = None
+            out.append((high_index, 0x10000 + ((high - 0xD800) << 10) + (code - 0xDC00)))
+            continue
+        pending = None
+        out.append((index, code))
+    return out
+
+
 def extract_char_styles(pdf_path: Path, page_no: int) -> list[CharStyle]:
     """Per-character box/text/style for one page, straight from pdfium.
 
@@ -188,9 +219,10 @@ def extract_char_styles(pdf_path: Path, page_no: int) -> list[CharStyle]:
         try:
             textpage = page.get_textpage()
             try:
+                count = textpage.count_chars()
+                codes = [pdfium_c.FPDFText_GetUnicode(textpage, i) for i in range(count)]
                 out: list[CharStyle] = []
-                for index in range(textpage.count_chars()):
-                    code = pdfium_c.FPDFText_GetUnicode(textpage, index)
+                for index, code in merge_utf16_surrogates(codes):
                     if code == 0 or code > 0x10FFFF:
                         continue
                     left = ctypes.c_double()

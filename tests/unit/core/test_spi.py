@@ -68,8 +68,6 @@ def test_spi_registry_resolves_all_core_downstream_services() -> None:
         "inspect_pdf_route_plan",
         "profile_pdf_pages",
         "page_kind_enum",
-        "render_fidelity_stats",
-        "render_fidelity_findings",
         "sample_pdf_pages",
         "placeholder_engine",
         "masked_source",

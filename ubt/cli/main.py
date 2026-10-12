@@ -155,16 +155,11 @@ async def _run_translation(
 
     # ``overrides_from_request`` already applied the shared adaptive default, so
     # the CLI does not derive dual_mode here.
-    explicit_dual = request.get("dual_mode")
-    effective_dual = overrides.get("dual_mode") or explicit_dual
     # Do NOT mirror draft_model→repair_model here. UBTConfig already syncs
     # repair_model←draft_model *only when repair was not explicitly set*
     # (config.py `_check_invariants`); pre-setting it here would push a value
     # into the overrides and let `--draft-model` silently override an explicit
     # `UBT_REPAIR_MODEL`, diverging the CLI from the API/MCP path.
-    if request.get("facing_spread") is None and effective_dual == "facing":
-        overrides["facing_spread"] = True
-
     # Call the module-global directly: a `monkeypatch.setattr(ubt.cli.main,
     # "_build_config", …)` rebinds this same global at call time, so the old
     # `sys.modules.get(...)._build_config` lookup was pure indirection.

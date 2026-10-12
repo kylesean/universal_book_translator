@@ -148,22 +148,24 @@ async def test_the_ledger_records_a_completed_job(tmp_path: Path) -> None:
 async def test_the_render_wires_the_run_target_language_into_the_typesetter(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Regression: the compositor constructed the fragment typesetter without
-    # ``target_lang``, so it fell back to the "zh" default and a non-Chinese
-    # render applied Chinese CJK-spacing rules. The run's target language must
-    # reach the typesetter.
-    import ubt.render.outputs as outputs
+    # Regression: the renderer was constructed without the run's ``target_lang``,
+    # so it fell back to the "zh" default and a non-Chinese render applied
+    # Chinese CJK-spacing and line-breaking rules. The run's target language must
+    # reach the renderer.
+    from ubt.render.typst import document_renderer as dr
 
     seen: list[str | None] = []
-    original_init = outputs.TypstFragmentTypesetter.__init__
+    original = dr.TypstDocumentRenderer.build_source
 
-    def _recording_init(self: object, *args: object, **kwargs: object) -> None:
-        seen.append(kwargs.get("target_lang"))  # type: ignore[arg-type]
-        original_init(self, *args, **kwargs)  # type: ignore[arg-type]
+    def _recording_build_source(
+        self: object, blocks: object, build_dir: object, target_lang: str = "zh"
+    ) -> object:
+        seen.append(target_lang)
+        return original(self, blocks, build_dir, target_lang)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(outputs.TypstFragmentTypesetter, "__init__", _recording_init)
+    monkeypatch.setattr(dr.TypstDocumentRenderer, "build_source", _recording_build_source)
     await _run(tmp_path)
-    assert seen, "the render never constructed a fragment typesetter"
+    assert seen, "the render never built a Typst document"
     assert all(lang == "es" for lang in seen), seen
 
 

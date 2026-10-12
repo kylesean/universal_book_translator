@@ -1,6 +1,6 @@
 """Shared LaTeX-command → Typst-symbol vocabulary (the render single source).
 
-The one remaining converter is ``overlay_text`` (inline, in-place math), which
+The one remaining converter is the LaTeX→Typst transpiler, which
 renders through :data:`INLINE_SYMBOLS`. The historical display-block reflow
 converter (``typst_math``) was retired with the unified ``LayerCompositor``, so
 its ``DISPLAY_SYMBOLS`` table is gone too.
@@ -139,7 +139,7 @@ _DISPLAY_ONLY: dict[str, str] = {
     "vdots": "dots.v",
 }
 
-# Commands only the inline converter (overlay_text) maps.
+# Commands only the inline LaTeX->Typst converter maps.
 _INLINE_ONLY: dict[str, str] = {
     "Delta": "Delta",
     "Gamma": "Gamma",
@@ -265,7 +265,7 @@ INLINE_VALUE_OVERRIDES: dict[str, str] = {
 
 #: Commands the inline converter handles with a dedicated pre-pass rather than
 #: a symbol-table entry. Kept beside the table so the renderable set is derived
-#: from one place; each name mirrors a regex in ``overlay_text.typstify_math``.
+#: from one place; each name mirrors a regex in ``math_transpiler``.
 SPECIAL_LATEX_COMMANDS: frozenset[str] = frozenset(
     {
         # font styles -> bb()/frak()/cal()

@@ -6,15 +6,24 @@ deterministic error-span annotation and error flags:
 
 - **Critical** (numeric distortion, unresolved structural corruption) → one
   escalated repair round on the flagship tier (extended circuit breaker +
-  ``high`` reasoning effort). If still unresolved the block is quarantined as
-  ``BLOCKED_HUMAN`` and its machine draft is stripped from the rendered output
-  (source-only placeholder) — nothing unreviewed ships. **Critical escape
-  rate: 0.**
+  ``high`` reasoning effort). If still unresolved the block is routed to
+  ``NEEDS_HUMAN``: **the machine draft is kept** so the reader gets a usable
+  sentence, and the defect stays on the record via ``mqm_critical_blocked``.
+  The one exception is a must-not-ship leak (system prompt / template
+  scaffolding, ``is_fatal_leak``), which is still quarantined as
+  ``BLOCKED_HUMAN`` with its machine output stripped.
 - **Major** (terminology violations, generic repair failures) →
   ``NEEDS_HUMAN``: the draft is preserved for human post-editing via the PE
   queue (CSV / XLIFF 2.1 export).
 - **Minor** → auto-pass when the QE score permits, otherwise conservative
   escalation to ``NEEDS_HUMAN``.
+
+The fail-open rule for *quality* verdicts is deliberate. A translation flagged
+as possibly-wrong is still a translation; replacing it with the source language
+plus a badge hands the reader nothing. Measured on the arXiv 2101.03961
+reference run: all 18 ``BLOCKED_HUMAN`` blocks were quality verdicts and 17 of
+them were correct Chinese drafts rejected by a false-positive numeric check, so
+the old rule published English where good Chinese existed.
 
 Severity and serialized spans are persisted on the ledger (``mqm_severity`` /
 ``mqm_spans_json``) so exporters and auditors can rely on them later.
@@ -33,7 +42,7 @@ from ubt.core.engine.services import RunServices
 from ubt.core.engine.stage_context import StageContext
 from ubt.core.ir.models import BlockStatus, IRBlock
 from ubt.core.memory.glossary_table import build_chunk_glossary_table
-from ubt.core.policy.layout_policy import is_non_prose_degradable
+from ubt.core.policy.layout_policy import is_fatal_leak, is_non_prose_degradable
 from ubt.core.qe.defect_taxonomy import (
     FLAG_MQM_CRITICAL_BLOCKED as _FLAG_MQM_CRITICAL_BLOCKED,
 )
@@ -322,14 +331,25 @@ async def run_triage_stage(
                 )
                 continue
 
-            # Non-prose tables are preserved verbatim in the PDF via
-            # render_skip:non_prose. If the defect is non-fatal, route to
-            # NEEDS_HUMAN instead of hard BLOCKED_HUMAN to prevent catastrophic false-blocking.
-            if is_non_prose_degradable(cand.block_type, cand.error_flags):
+            # A quality defect keeps the machine draft and queues the block
+            # for human post-editing; only a must-not-ship leak still strips it.
+            # The old rule quarantined every critical verdict, which on the
+            # arXiv 2101.03961 run meant 18 blocks of *correct* Chinese replaced
+            # by the English source because a false-positive numeric check had
+            # rejected them. Fail-open is the right default for a translation:
+            # a flagged draft the reader can use beats a clean page in the
+            # wrong language, and the QualityReport still carries the flag.
+            if not is_fatal_leak(cand.error_flags):
                 counters["needs_human"] += 1
                 flags = _needs_human_flags(cand)
-                if not any("render_skip:non_prose" in f for f in flags):
+                if is_non_prose_degradable(cand.block_type, cand.error_flags) and not any(
+                    "render_skip:non_prose" in f for f in flags
+                ):
                     flags.append("render_skip:non_prose")
+                if cand.id in escalation_errors:
+                    flags.append(f"escalation error: {escalation_errors[cand.id]}")
+                if _FLAG_MQM_CRITICAL_BLOCKED not in flags:
+                    flags.append(_FLAG_MQM_CRITICAL_BLOCKED)
                 updates.append(
                     {
                         "block_id": cand.id,

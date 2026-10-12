@@ -66,13 +66,11 @@ class AdapterRuntimeConfig:
     #: environment-only setting quote one model and pay for another.
     ocr_model: str
     formula_enrichment: str
-    formula_render: str
     #: Accelerator device Docling uses (``auto`` / ``cpu`` / ``cuda``). Carried
     #: here so the adapter reads the resolved config value instead of the
     #: parser re-deriving it: one knob, one source.
     docling_device: str
     font_family: str | None
-    math_backend: str
     #: Whether page images may leave this machine (visual repair / cloud OCR /
     #: VLM judge). Carried here so the adapter reads the resolved config value
     #: instead of re-deriving it from the environment — one gate, one source.
@@ -167,10 +165,8 @@ def crashed_visual_gate_result(message: str) -> VisualGateResult:
 
 def artifact_parity_findings(
     *,
-    source_pdf: Path,
     artifact_pdf: Path,
     target_lang: str,
-    keeps_source_geometry: bool,
     selected_pages: Sequence[int] | None = None,
 ) -> list[Any]:
     """T0.5 physical-evidence diff between delivered PDF and source.
@@ -181,10 +177,8 @@ def artifact_parity_findings(
     checker = get_spi_registry().get("artifact_parity_findings")
     return list(
         checker(
-            source_pdf=source_pdf,
             artifact_pdf=artifact_pdf,
             target_lang=target_lang,
-            keeps_source_geometry=keeps_source_geometry,
             selected_pages=selected_pages,
         )
     )
@@ -352,24 +346,6 @@ def supported_suffixes() -> set[str]:
     """File suffixes the adapter registry can open (from the factory)."""
     provider = get_spi_registry().get("supported_suffixes")
     return set(provider())
-
-
-def render_fidelity_stats(
-    source_pdf: Path,
-    artifact_pdf: Path,
-    blocks: list[Any],
-    *,
-    dpi: int = 300,
-) -> dict[str, Any]:
-    """Measure overlay-render fidelity (non-text residual + painted coverage)."""
-    measurer = get_spi_registry().get("render_fidelity_stats")
-    return cast(dict[str, Any], measurer(source_pdf, artifact_pdf, blocks, dpi=dpi))
-
-
-def render_fidelity_findings(stats: dict[str, Any]) -> list[Any]:
-    """Advisory ``info`` ParityFindings from a fidelity stats dict (never blocking)."""
-    provider = get_spi_registry().get("render_fidelity_findings")
-    return list(provider(stats))
 
 
 def sample_pdf_pages(input_path: Path) -> tuple[int, bool, str]:

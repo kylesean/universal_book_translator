@@ -3,10 +3,10 @@
 Facts (cheap, cached) describe *what is on the page*; the decision layer
 maps facts to a :class:`PageKind` that drives parse + render routing:
 
-- ``EDITABLE_TEXT`` → fast operator parse, Typst reflow render;
-- ``VECTOR_HEAVY`` → operator parse, overlay render preferred;
+- ``EDITABLE_TEXT`` → fast operator parse, Typst publication render;
+- ``VECTOR_HEAVY`` → Docling parse (figures must be represented);
 - ``MIXED_COMPLEX`` → Docling parse, per-block render decision;
-- ``SCAN_IMAGE`` → VLM parser, overlay on the source page.
+- ``SCAN_IMAGE`` → VLM parser, then the same publication render.
 
 Only permissive-license libraries are used: pypdfium2 (Apache-2.0) for the
 text layer, pikepdf for content-stream operator counts. No PyMuPDF.
@@ -102,8 +102,8 @@ class PageKind(StrEnum):
     MIXED_COMPLEX = "mixed_complex"
     SCAN_IMAGE = "scan_image"
     # Short-doc品类 (HYPOTHESIS): poster = image-led single
-    # design page; resume = dense single-column prose page. Both route to
-    # the rigid overlay chain (see overlay_preferred + engine_selector).
+    # design page; resume = dense single-column prose page. Both need
+    # vision-grade ingest to be represented at all (see engine_selector).
     POSTER_FIXED = "poster_fixed"
     RESUME_DENSE = "resume_dense"
 
@@ -136,16 +136,6 @@ class PageProfile:
     def needs_vision(self) -> bool:
         """True when the page must go through the VLM parser."""
         return self.kind == PageKind.SCAN_IMAGE
-
-    @property
-    def overlay_preferred(self) -> bool:
-        """True when overlay render beats reflow for this page."""
-        return self.kind in {
-            PageKind.VECTOR_HEAVY,
-            PageKind.SCAN_IMAGE,
-            PageKind.POSTER_FIXED,
-            PageKind.RESUME_DENSE,
-        }
 
 
 def classify_page(facts: PageFacts) -> PageKind:
@@ -205,8 +195,8 @@ def structural_page_shares(facts: Sequence[PageFacts]) -> tuple[float, float]:
 
     - ``multicolumn_page_share`` is the share of pages laid out in more than
       one column (``right_row_share`` past the calibrated gutter). Multi-column
-      extraction ordering is exactly what a reflow re-typeset mangles, so this
-      is the primary "use the overlay engine" tell.
+      extraction ordering is what a reflow re-typeset mangles, so this is the
+      primary tell that a page's reading order will need care.
     - ``structural_page_share`` is the broader share of pages carrying content
       reflow cannot rebuild faithfully (see :data:`_STRUCTURAL_KINDS`) — the
       knob for the zero-cost fidelity-companion decision.
@@ -225,18 +215,6 @@ def majority_flags(kinds: Sequence[PageKind]) -> tuple[bool, bool]:
     has_scan = n > 0 and sum(1 for k in kinds if k == PageKind.SCAN_IMAGE) * 2 >= n
     formula_heavy = n > 0 and sum(1 for k in kinds if k == PageKind.MIXED_COMPLEX) * 2 >= n
     return has_scan, formula_heavy
-
-
-def content_flags(pdf_path: Path) -> tuple[bool, bool]:
-    """Return ``(has_scan, formula_heavy)`` from a full page census.
-
-    Both flags aggregate with a >=50% page share, matching the sampled-page
-    majority the engine selector applies to the same signals: a lone blank
-    page in a born-digital book must not route the whole title down the
-    long-chain/VLM path.
-    """
-    kinds = [classify_page(f) for f in collect_page_facts(pdf_path)]
-    return majority_flags(kinds)
 
 
 @dataclass(frozen=True, slots=True)
