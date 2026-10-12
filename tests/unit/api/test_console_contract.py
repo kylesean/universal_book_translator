@@ -531,3 +531,39 @@ def test_jobs_endpoint_serves_html_to_a_browser_and_json_to_api_clients(tmp_path
     assert api.status_code == 200
     assert api.headers["content-type"].startswith("application/json")
     assert "jobs" in api.json()
+
+
+def test_the_wizard_sends_only_fields_the_submit_endpoint_accepts() -> None:
+    """Every key the wizard puts in its payload must exist on the REST model.
+
+    ``JobSubmitRequest`` sets ``extra="forbid"``, so one stale key makes *every*
+    submission fail with a 422. This happened: the wizard kept sending
+    ``exec_mode`` after the field was removed from the model, so the console
+    could not start a job at all, and nothing caught it because the frontend
+    type-check (``tsc -b``) is a separate gate from the Python suite.
+    """
+    from ubt.api.models import JobSubmitRequest
+
+    source = _WIZARD_TSX.read_text(encoding="utf-8")
+    match = re.search(r"submitJob\(\{(.*?)\n\s*\}\)", source, re.DOTALL)
+    assert match, "NewJobWizard.tsx has no submitJob({...}) payload"
+
+    sent = set(re.findall(r"^\s*([a-z_][a-z0-9_]*)\s*:", match.group(1), re.MULTILINE))
+    accepted = set(JobSubmitRequest.model_fields)
+
+    assert sent, "parsed no payload keys from the wizard"
+    assert not (sent - accepted), (
+        f"the wizard sends fields the API rejects: {sorted(sent - accepted)}"
+    )
+
+
+def test_the_wizard_does_not_reference_a_removed_internal_knob() -> None:
+    """An engine detail must not reappear in the console's source or copy.
+
+    ``exec_mode`` is an internal routing knob (env/CLI only). Leaving its label
+    and options in the i18n tables invites the field to be wired back up.
+    """
+    for path in (_WIZARD_TSX, _EN_TS):
+        text = path.read_text(encoding="utf-8")
+        assert "exec_mode" not in text, f"{path.name} still references exec_mode"
+        assert "execMode" not in text, f"{path.name} still references execMode"

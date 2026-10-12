@@ -454,6 +454,41 @@ _RTL_SCRIPT_RE = re.compile(
 )
 
 
+#: Markers a model leaks when it ignores the prompt envelope and emits its own
+#: scaffolding. The XML pair is what this pipeline's prompts use; the chat-format
+#: and reasoning tags are what other templates emit, and a model asked to
+#: translate will happily reproduce them. Matched case-sensitively for the XML
+#: pair (their exact spelling is the contract) and case-insensitively for the
+#: rest, since ``<Think>`` is the same leak as ``<think>``.
+_PROMPT_ARTIFACT_MARKERS: tuple[str, ...] = (
+    "<issues>",
+    "<translation>",
+    "</translation>",
+    "</issues>",
+)
+#: Case-insensitive markers: reasoning and chat-template scaffolding.
+_PROMPT_ARTIFACT_RE = re.compile(
+    r"</?think\b|<\|im_start\|>|<\|im_end\|>|<\|system\|>|<\|user\|>"
+    r"|<\|assistant\|>|</?\|endoftext\|>",
+    re.IGNORECASE,
+)
+
+
+def _has_prompt_artifact(text: str) -> bool:
+    """True when the target carries model scaffolding that must not ship.
+
+    The original check named two XML tags and nothing else, so a model that
+    leaked its reasoning or a chat-template token passed every gate: measured,
+    ``<think>reasoning</think>这是模型。`` and ``<|im_start|>system`` both reached
+    the reader as if they were translations. Those are the same defect class as
+    the XML pair (the model echoing its envelope), so they are detected the same
+    way — the difference is only which template the model was given.
+    """
+    if any(marker in text for marker in _PROMPT_ARTIFACT_MARKERS):
+        return True
+    return bool(_PROMPT_ARTIFACT_RE.search(text))
+
+
 def is_verbatim_echo(source_text: str, target_text: str) -> bool:
     """True when the target repeats the source with no translation attempt.
 
@@ -775,7 +810,7 @@ class FastPassFilter:
             )
 
         # 1. Prompt artifact residue check (highest priority failure)
-        if "<issues>" in tgt_clean or "<translation>" in tgt_clean:
+        if _has_prompt_artifact(tgt_clean):
             return FastPassDecision(
                 passed=False,
                 reason="Prompt template XML artifacts leaked into target text",

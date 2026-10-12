@@ -203,3 +203,44 @@ def test_section_context_is_empty_without_headings() -> None:
 
 def test_section_context_is_empty_for_an_empty_chunk() -> None:
     assert section_context_for([], []) == ""
+
+
+# --------------------------------------------------------------------------- #
+# A skipped heading level must not nest siblings under each other
+# --------------------------------------------------------------------------- #
+
+
+def test_a_skipped_level_does_not_nest_a_sibling_under_its_sibling() -> None:
+    """The trail stack is keyed by *level*, not by how many ancestors it holds.
+
+    A source that jumps ``1`` -> ``1.0.1`` leaves two stack entries for a
+    level-3 heading, so trimming by ``len(stack)`` never popped the previous
+    sibling and ``1.0.2`` became a child of ``1.0.1``. The error compounds on
+    every following heading.
+    """
+    blocks = [
+        _Block("heading", "1 Intro", level=1),
+        _Block("heading", "1.0.1 Sub", level=3),
+        _Block("heading", "1.0.2 Sub2", level=3),
+    ]
+    sections = build_section_tree(blocks, max_level=3)
+    paths = {s.title: s.path for s in sections}
+
+    # 1.0.2 is a sibling of 1.0.1, so it replaces it rather than nesting under it.
+    assert paths["1.0.1 Sub"] == ("1", "1.0.1")
+    assert paths["1.0.2 Sub2"] == ("1", "1.0.2")
+
+
+def test_a_deeper_heading_still_nests() -> None:
+    # The fix must not flatten real nesting.
+    blocks = [
+        _Block("heading", "1 A", level=1),
+        _Block("heading", "1.1 B", level=2),
+        _Block("heading", "1.1.1 C", level=3),
+        _Block("heading", "1.1.2 D", level=3),
+    ]
+    sections = build_section_tree(blocks, max_level=3)
+    paths = {s.title: s.path for s in sections}
+
+    assert paths["1.1.1 C"] == ("1", "1.1", "1.1.1")
+    assert paths["1.1.2 D"] == ("1", "1.1", "1.1.2")

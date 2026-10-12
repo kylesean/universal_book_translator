@@ -996,6 +996,21 @@ def _extract_document_index_blocks(
     return out
 
 
+def _toc_sort_key(block: IRBlock) -> tuple[int, int]:
+    """Reading-order key for a synthesized TOC row: ``(page, stable)``.
+
+    The page is the row's *destination*, not the page it was read from: both
+    sources store the destination in ``toc_page`` (Docling parses the printed
+    number off the entry line, the outline stringifies the bookmark's target
+    page). Sorting on it restores reading order when the two sources are merged.
+
+    Rows whose destination is not a number sort last, in insertion order — a
+    malformed entry must not be reordered to the front on a guess.
+    """
+    raw = str(block.provenance.toc_page or "").strip()
+    return (int(raw), 0) if raw.isdigit() else (sys.maxsize, 0)
+
+
 def _extract_outline_only_blocks(
     pdf_path: Path | None,
     already: list[IRBlock],
@@ -1194,13 +1209,22 @@ def map_iterated_items(
             )
             # The outline supplies the top-level chapters Docling's TOC pass
             # drops (see ``read_pdf_outline_entries``); the merge is additive.
+            #
+            # The merge then re-sorts by destination page. Appending the outline
+            # rows put every chapter *after* every section, so the delivered
+            # contents read "2.1, 2.2, … 1 Introduction, 2 Switch Transformer" —
+            # the chapter that contains a section printed below it. Measured on
+            # the gold corpus (switch-transformers): the TOC opened on "2.1".
             toc_blocks.extend(
                 _extract_outline_only_blocks(
                     pdf_path, toc_blocks, start_index=len(blocks) + len(toc_blocks) + 1
                 )
             )
             if toc_blocks:
-                blocks.extend(toc_blocks)
+                # Stable: rows sharing a destination keep the order their source
+                # produced them in, so a sub-section never jumps above its
+                # chapter when both name the same page.
+                blocks.extend(sorted(toc_blocks, key=_toc_sort_key))
             continue
 
         if label == DocItemLabel.PICTURE:

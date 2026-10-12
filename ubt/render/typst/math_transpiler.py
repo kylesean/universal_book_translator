@@ -490,9 +490,11 @@ def typstify_math(body: str) -> str | None:
     # Re-join a run of adjacent quoted strings into one, keeping the whitespace
     # that separated them.
     def _rejoin_quoted(match: re.Match[str]) -> str:
-        # ``#"a" #"b" #"c"`` -> ``"a b c"``: drop the leading ``#``, then
-        # turn each ``" #"`` seam back into the space it stood for.
-        return match.group(1)[1:].replace('" #"', " ")
+        # ``#"a" #"b" #"c"`` -> ``#"a b c"``: keep the leading ``#`` (a bare
+        # string is not a value in math mode, and ``_LABEL_GROUP_RE`` below
+        # deliberately refuses to match a bare ``"``), then turn each ``" #"``
+        # seam back into the space it stood for.
+        return match.group(1).replace('" #"', " ")
 
     res = re.sub(r'((?:#"[^"]*"\s*){2,})', _rejoin_quoted, quoted)
     # Bare strings choke inside ``_{...}`` groups (``A_{#"g0"}`` renders

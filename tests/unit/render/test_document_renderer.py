@@ -329,8 +329,12 @@ def test_bilingual_pairs_headings_and_tables_too(tmp_path: Path) -> None:
 
     assert "Related Work" in out
     assert "相关工作" in out
-    assert "| A | B |" in out
     assert "甲" in out
+    # The source half of a table pair is *also* a table. Rendering it as prose
+    # pasted the Markdown grid onto the page as italic grey text; both halves
+    # must now compile as tables, so no bare grid row may survive.
+    assert "| A | B |" not in out
+    assert out.count("#table(") == 2
 
 
 # --------------------------------------------------------------------------- #
@@ -672,3 +676,78 @@ def test_a_run_with_balanced_delimiters_is_still_wrapped() -> None:
     # The guard must be narrow: an ordinary styled run keeps its markup.
     out = render_prose("粗体结尾", (InlineRun(text="粗体结尾", bold=True),))
     assert "#strong[粗体结尾]" in out, out
+
+
+# --------------------------------------------------------------------------- #
+# A missing asset must not take its caption with it
+# --------------------------------------------------------------------------- #
+
+
+def test_a_missing_figure_still_renders_its_caption(tmp_path: Path) -> None:
+    """The caption is the only surviving description of the picture.
+
+    Dropping the asset is unavoidable (the file is gone), but dropping the
+    caption as well removed translated prose the reader needs, and left no trace
+    on the page of what the figure showed. The placeholder stays; the caption is
+    rendered beneath it.
+    """
+    renderer = TypstDocumentRenderer(assets_root=tmp_path / "assets")
+    blocks = [
+        _block(BlockType.IMAGE, block_id="f1", source="figures/gone.png"),
+        _block(
+            BlockType.NARRATIVE,
+            block_id="c1",
+            source="Figure 1: System architecture overview.",
+            target="图 1：系统整体架构示意图。",
+        ),
+    ]
+    out, stats = renderer.build_source(blocks, tmp_path / "build")
+
+    assert "missing figure" in out
+    assert "系统整体架构示意图" in out
+    assert stats.assets_missing == ["figures/gone.png"]
+
+
+def test_a_missing_figure_without_a_caption_renders_only_the_placeholder(
+    tmp_path: Path,
+) -> None:
+    renderer = TypstDocumentRenderer(assets_root=tmp_path / "assets")
+    out, _stats = renderer.build_source(
+        [_block(BlockType.IMAGE, block_id="f1", source="figures/gone.png")],
+        tmp_path / "build",
+    )
+    assert "missing figure" in out
+    # One placeholder, and no caption line beneath it. The preamble's own
+    # figure-caption show rule is the one other ``luma(60)`` block; the caption
+    # branch adds a second.
+    assert out.count("missing figure") == 1
+    assert out.count("fill: luma(60))[") == 1
+
+
+# --------------------------------------------------------------------------- #
+# A bilingual table's source half is a table, not prose
+# --------------------------------------------------------------------------- #
+
+
+def test_a_bilingual_table_does_not_paste_its_markdown_source(tmp_path: Path) -> None:
+    """The source row must be compiled, not shown as literal grid syntax.
+
+    ``_pair`` renders the source through ``render_prose``, which is right for a
+    sentence and wrong for a table: the page showed
+    ``| Method | BLEU |`` in italic grey above the real table. Measured on the
+    default (``dual_mode=auto`` -> bilingual) path.
+    """
+    renderer = TypstDocumentRenderer(bilingual=True)
+    blocks = [
+        _block(
+            BlockType.TABLE,
+            block_id="t1",
+            source="| Method | BLEU |\n| --- | --- |\n| Transformer | 28.4 |",
+            target="| 方法 | BLEU |\n| --- | --- |\n| Transformer | 28.4 |",
+        )
+    ]
+    out, _stats = renderer.build_source(blocks, tmp_path / "build")
+
+    assert "| Method | BLEU |" not in out
+    # Both halves are tables: the source pair and the translation.
+    assert out.count("#table(") == 2

@@ -656,3 +656,62 @@ def test_a_clean_translation_carries_no_advisory() -> None:
     res = _check("The year 1984 was cold.", "1984 年很冷。")
     assert res.is_valid
     assert res.details == {}
+
+
+# --------------------------------------------------------------------------- #
+# A word that is usually a noun must not authorize a number everywhere
+# --------------------------------------------------------------------------- #
+
+
+def test_scores_as_a_noun_does_not_authorize_twenty() -> None:
+    """``scores`` is the numeral 20 only in "scores of".
+
+    As a bare word it is the ordinary noun ("BLEU scores"), so matching it
+    unconditionally authorized an invented "20" anywhere in a sentence that
+    merely mentioned scores. Measured on the gold corpus: "score(s)" occurs 333
+    times and only 33 are the multiplier.
+    """
+    res = _check("We report BLEU scores.", "我们报告了 20 分。")
+    assert not res.is_valid
+    assert res.details["invented_numbers"] == ["20"]
+
+
+def test_scores_of_still_authorizes_twenty() -> None:
+    # The multiplier reading is the one that may be written as a digit.
+    res = _check("Scores of studies have shown this.", "已有 20 项研究证明了这一点。")
+    assert res.is_valid, res.message
+
+
+def test_scores_of_also_authorizes_an_indefinite_chinese_quantity() -> None:
+    # '数十' states no exact value, so it must stay allowed on both sides.
+    res = _check("Scores of studies have shown this.", "已有数十项研究证明了这一点。")
+    assert res.is_valid, res.message
+
+
+def test_the_other_multipliers_keep_the_unconditional_rule() -> None:
+    # 'hundreds'/'millions' have no common-noun reading, so they need no guard.
+    res = _check("There are hundreds of models.", "有 100 个模型。")
+    assert res.is_valid, res.message
+
+
+# --------------------------------------------------------------------------- #
+# The indefinite article excuses its own '1', not every '1' in the block
+# --------------------------------------------------------------------------- #
+
+
+def test_an_article_does_not_launder_a_separate_invented_one() -> None:
+    """'一种' is grammar the normalizer synthesized; a second '1' is a fact.
+
+    Authorizing the *value* '1' exempted every '1' in the block, so a
+    translation that correctly wrote '一种方法' could also state a fabricated '1'
+    and pass. The exemption is now consumed per article occurrence.
+    """
+    res = _check("The model is trained end to end.", "这是一种新方法，需要 1 次迭代。")
+    assert not res.is_valid
+    assert res.details["invented_numbers"] == ["1"]
+
+
+def test_two_articles_excuse_two_ones() -> None:
+    # Each occurrence of the article is excused, so two articles cover two '1's.
+    res = _check("It is a method and a dataset.", "这是一种方法，也是一个数据集。")
+    assert res.is_valid, res.message

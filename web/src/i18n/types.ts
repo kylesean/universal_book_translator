@@ -102,10 +102,6 @@ export interface TranslationDictionary {
     glossaryPath: string
     glossaryPathPlaceholder: string
     glossaryPathHelp: string
-    execMode: string
-    execModeAuto: string
-    execModeShort: string
-    execModeLong: string
     engineRecommended: string
     sliceSampleQuickBtn: string
     localFreeLabel: string

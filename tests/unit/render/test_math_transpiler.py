@@ -100,8 +100,13 @@ def test_mathrm_still_produces_an_upright_label() -> None:
 
 
 def test_text_with_spaces_becomes_one_string() -> None:
-    """`\\text{tokens per batch}` is one label, not three adjacent strings."""
-    assert typstify_math(r"\text{tokens per batch}") == '"tokens per batch"'
+    """`\\text{tokens per batch}` is one label, not three adjacent strings.
+
+    The `#` is load-bearing: a bare string is not a value in math mode, so
+    dropping it produced `A_{"tokens per batch"}`, whose braces Typst then
+    typesets as literal glyphs (measured: the page shows `A_{tokens per batch}`).
+    """
+    assert typstify_math(r"\text{tokens per batch}") == '#"tokens per batch"'
 
 
 def test_a_multiword_text_in_a_subscript_stays_one_string() -> None:

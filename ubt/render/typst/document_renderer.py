@@ -648,7 +648,9 @@ class TypstDocumentRenderer:
         self.bilingual = bilingual
         self.stats = ReflowStats()
 
-    def _maybe_pair(self, block: IRBlock, rendered: str) -> str:
+    def _maybe_pair(
+        self, block: IRBlock, rendered: str, *, source_markup: str | None = None
+    ) -> str:
         """Add the source line above ``rendered`` when this block has a real pair.
 
         Three cases must *not* be paired, or the page shows the same sentence
@@ -659,6 +661,11 @@ class TypstDocumentRenderer:
           its source;
         * the policy deliberately kept the source (a bibliography entry), where
           source and target are the same string by construction.
+
+        ``source_markup`` overrides how the source is typeset. Prose goes through
+        :func:`render_prose`; a *table* must not, because its source is Markdown
+        grid syntax and rendering it as prose puts a literal ``| Method | BLEU |``
+        row above the real table.
         """
         if not self.bilingual:
             return rendered
@@ -668,9 +675,9 @@ class TypstDocumentRenderer:
             return rendered
         if _is_placeholder(source) or _is_placeholder(target):
             return rendered
-        return self._pair(source, rendered)
+        return self._pair(source, rendered, source_markup=source_markup)
 
-    def _pair(self, source: str, target: str) -> str:
+    def _pair(self, source: str, target: str, *, source_markup: str | None = None) -> str:
         """Source above its translation, source visually subordinate.
 
         The reflow-native equivalent of the overlay path's bilingual compose.
@@ -681,13 +688,17 @@ class TypstDocumentRenderer:
         never turns a page to find the sentence being compared.
 
         The source keeps its own math handling (a formula must stay a formula,
-        not become literal ``\\frac`` text), so it goes through
-        :func:`render_prose` exactly as the target does.
+        not become literal ``\\frac`` text), so by default it goes through
+        :func:`render_prose` exactly as the target does. ``source_markup``
+        replaces that rendering for a block whose source is not prose — a table,
+        whose source is Markdown grid syntax that must be compiled as a table
+        rather than pasted as text.
         """
+        rendered_source = source_markup if source_markup is not None else render_prose(source)
         return (
             "#block(above: 0.5em, below: 0.25em)[\n"
             '  #text(size: 9pt, fill: luma(115), style: "italic")['
-            f"{render_prose(source)}]\n"
+            f"{rendered_source}]\n"
             "]\n"
             f"{target}"
         )
@@ -759,7 +770,12 @@ class TypstDocumentRenderer:
                 flush_figure()
                 markup = render_table(_block_text(block))
                 if markup:
-                    body.append(self._maybe_pair(block, markup))
+                    # The source half of a bilingual pair is *also* a table, so
+                    # it is compiled as one. Passing it to ``render_prose``
+                    # pasted the Markdown grid (``| Method | BLEU |``) into the
+                    # page as a run of italic grey text.
+                    source_markup = render_table((block.source_text or "").strip()) or None
+                    body.append(self._maybe_pair(block, markup, source_markup=source_markup))
                     self.stats.tables += 1
                     self.stats.blocks_rendered += 1
                 continue
@@ -832,8 +848,16 @@ class TypstDocumentRenderer:
         if resolved is None:
             self.stats.assets_missing.append(figure.asset)
             # A missing asset must not silently vanish from the page: leave a
-            # visible placeholder so the gap is attributable.
+            # visible placeholder so the gap is attributable. The caption is
+            # rendered too — it is translated prose that the reader needs, and
+            # it is the *only* surviving description of what the picture showed,
+            # which makes dropping it worse here than anywhere else.
             note = escape_markup(f"[missing figure: {Path(figure.asset).name or 'unknown'}]")
+            if figure.caption:
+                return (
+                    f"#block(text(fill: luma(140), size: 9pt)[{note}])\n"
+                    f"#block(text(size: 9pt, fill: luma(60))[{render_prose(figure.caption)}])"
+                )
             return f"#block(text(fill: luma(140), size: 9pt)[{note}])"
         target = build_dir / resolved.name
         if not target.exists() or target.stat().st_size != resolved.stat().st_size:

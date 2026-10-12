@@ -105,7 +105,6 @@ export function NewJobWizard() {
   const [dualMode, setDualMode] = useState<'auto' | 'dual' | 'mono'>('auto')
   const [pageRange, setPageRange] = useState('')
   const [glossaryPath, setGlossaryPath] = useState('')
-  const [execMode, setExecMode] = useState<'auto' | 'short' | 'long'>('auto')
 
   const [isAssessing, setIsAssessing] = useState(false)
   const [isReassessing, setIsReassessing] = useState(false)
@@ -271,7 +270,6 @@ export function NewJobWizard() {
         dual_mode: dualMode === 'auto' ? null : dualMode,
         pages: pageRange.trim() ? pageRange.trim() : null,
         glossary: glossaryPath.trim() ? glossaryPath.trim() : null,
-        exec_mode: execMode === 'auto' ? null : execMode,
         priority: 0,
         dry_run: false,
         budget_usd: budgetUsd,
@@ -648,21 +646,6 @@ export function NewJobWizard() {
                       <p className="text-xs text-[var(--ink-muted)] mt-1">
                         {t.wizard.pageFilterHelp}
                       </p>
-                    </div>
-
-                    <div>
-                      <label className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] block mb-1 font-semibold">
-                        {t.wizard.execMode}
-                      </label>
-                      <select
-                        value={execMode}
-                        onChange={(e) => setExecMode(e.target.value as any)}
-                        className="w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs font-medium"
-                      >
-                        <option value="auto">{t.wizard.execModeAuto}</option>
-                        <option value="short">{t.wizard.execModeShort}</option>
-                        <option value="long">{t.wizard.execModeLong}</option>
-                      </select>
                     </div>
                   </div>
 

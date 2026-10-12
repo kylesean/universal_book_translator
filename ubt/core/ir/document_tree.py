@@ -136,8 +136,12 @@ def build_section_tree(blocks: Sequence[IRBlock], *, max_level: int = 2) -> list
     """
     sections: list[Section] = []
     current: Section | None = None
-    path: list[str] = []
-    titles: list[str] = []
+    #: Ancestors as ``(level, path_token, title_token)``. The level travels with
+    #: the token because the depth of a heading is not the size of the stack: a
+    #: source that skips a level (``1 Intro`` then ``1.0.1 Sub``) leaves two
+    #: entries for a level-3 heading, so trimming by ``len(stack)`` never pops
+    #: the previous sibling and each one nests under the last.
+    stack: list[tuple[int, str, str]] = []
 
     for block in blocks:
         block_type = str(getattr(block.block_type, "value", block.block_type) or "")
@@ -148,20 +152,17 @@ def build_section_tree(blocks: Sequence[IRBlock], *, max_level: int = 2) -> list
                 level = _effective_level(block, 1)
                 number = _heading_number(block.source_text)
                 title = block.source_text.strip()
-                # Trim both trails to this heading's depth before appending, so a
-                # skipped level in the source cannot leave a stale ancestor.
-                while len(path) >= level:
-                    path.pop()
-                while len(titles) >= level:
-                    titles.pop()
-                path.append(number or title[:40])
-                titles.append(title[:80])
+                # Pop every ancestor at or below this heading's level, comparing
+                # *levels* rather than stack size (see ``stack`` above).
+                while stack and stack[-1][0] >= level:
+                    stack.pop()
+                stack.append((level, number or title[:40], title[:80]))
             current = Section(
                 index=len(sections),
                 heading=block if is_opener else None,
                 level=_effective_level(block, 0) if is_opener else 0,
-                path=tuple(path),
-                trail=tuple(titles),
+                path=tuple(entry[1] for entry in stack),
+                trail=tuple(entry[2] for entry in stack),
             )
             sections.append(current)
 

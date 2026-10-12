@@ -405,3 +405,46 @@ def test_half_translated_all_caps_heading_is_rejected_for_insufficient_script_de
     decision = _filter().evaluate(src, tgt)
     assert not decision.passed
     assert "Insufficient zh script density" in decision.reason
+
+
+# --------------------------------------------------------------------------- #
+# Reasoning / chat-template scaffolding is the same defect as the XML pair
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "leaked",
+    [
+        "<think>reasoning</think>这是模型。",
+        "这是模型。</think>",
+        "<Think>x</Think>这是模型。",
+        "<|im_start|>system 这是模型。",
+        "<|im_end|>",
+        "<|system|>这是模型。",
+        "<|user|>这是模型。",
+        "<issues>x</issues>",
+        "<translation>y</translation>",
+    ],
+)
+def test_model_scaffolding_is_a_fatal_leak(leaked: str) -> None:
+    """A model echoing its envelope must not ship, whatever the envelope was.
+
+    The check named two XML tags and nothing else, so a model that leaked its
+    reasoning or a chat-template token passed every gate and reached the reader.
+    """
+    decision = FastPassFilter().validate_structural_invariants(
+        source_text="The model is trained end to end.",
+        target_text=leaked,
+        block_type="narrative",
+    )
+    assert not decision.passed, leaked
+    assert "Prompt template XML artifacts" in decision.reason
+
+
+def test_ordinary_prose_is_not_a_leak() -> None:
+    decision = FastPassFilter().validate_structural_invariants(
+        source_text="The model is trained end to end.",
+        target_text="该模型经过端到端训练。",
+        block_type="narrative",
+    )
+    assert decision.passed

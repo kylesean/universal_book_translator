@@ -899,9 +899,15 @@ def _zero_fold(token: str) -> str:
 _CN_ARTICLE_QUANTIFIER_RE = re.compile(rf"(?<![{_CN_NUMERAL_CHARS}])一(?={_CN_MEASURE_RE})")
 
 
-def _cn_article_quantifier_values(text: str) -> set[str]:
-    """Values the article '一' contributes, exempt from the invention check."""
-    return {"1"} if _CN_ARTICLE_QUANTIFIER_RE.search(text or "") else set()
+def _cn_article_quantifier_count(text: str) -> int:
+    """How many '1's in the target come from the indefinite article '一'.
+
+    Each occurrence is a *token to excuse*, not a value to authorize. Adding
+    '1' to the authorized set exempted every '1' in the block, so a translation
+    that correctly wrote '一种方法' could also state a fabricated '1' anywhere
+    else ('需要 1 次迭代') and the gate stayed silent.
+    """
+    return len(_CN_ARTICLE_QUANTIFIER_RE.findall(text or ""))
 
 
 def _invented_target_numbers(
@@ -933,9 +939,13 @@ def _invented_target_numbers(
         authorized |= values
     authorized |= set(src_scales)
     # The target's own indefinite article ('一种' -> '1种') is grammar the
-    # normalizer synthesized, not a number the translation stated. Exempt it so
-    # 'a method' -> '一种方法' is not read as inventing a '1'.
-    authorized |= _cn_article_quantifier_values(target_original)
+    # normalizer synthesized, not a number the translation stated. It is excused
+    # *per occurrence*, never by adding '1' to the authorized set: authorizing
+    # the value would exempt every '1' in the block, so a translation that
+    # correctly wrote '一种方法' could also invent a '1' elsewhere in the same
+    # sentence and pass. The count is consumed below, at the point where a '1'
+    # would otherwise be reported.
+    article_ones_remaining = _cn_article_quantifier_count(target_original)
     for _tokens, total in source_compounds:
         authorized.add(total)
     for values in ambiguous_readings.values():
@@ -960,8 +970,18 @@ def _invented_target_numbers(
         word = match.group(1).lower()
         # A plural multiplier ("billions") authorizes its magnitude; the
         # singular table below holds only the singular spellings.
+        #
+        # ``scores`` needs one more condition, because unlike the other
+        # multipliers it collides with an ordinary noun: it is the numeral 20 in
+        # "scores of studies" but the noun "score" in "BLEU scores". A bare word
+        # match cannot tell them apart, so any sentence merely mentioning scores
+        # authorized an invented "20" anywhere in its translation. Measured on
+        # the gold corpus: "score(s)" occurs 333 times and only 33 are the
+        # multiplier. The other multipliers ("hundreds", "millions", …) have no
+        # such common-noun reading, so they keep the unconditional rule.
         if word in _EN_NUMBER_PLURALS:
-            authorized.add(_EN_NUMBER_PLURALS[word])
+            if word != "scores" or re.match(r"\s+of\b", source_view[match.end() :], re.IGNORECASE):
+                authorized.add(_EN_NUMBER_PLURALS[word])
         else:
             authorized.add(_EN_NUMBER_WORDS[word])
     # 'both'/'either'/'neither' state a quantity of two without a number word.
@@ -1007,6 +1027,12 @@ def _invented_target_numbers(
         if scaled and (scaled & authorized):
             continue
         if _is_structural_target_number(token, normalized_target):
+            continue
+        # A '1' the target's own indefinite article produced is grammar, not a
+        # stated number. Excuse as many as the target actually has articles for
+        # (one per occurrence, never the value '1' wholesale).
+        if token == "1" and article_ones_remaining > 0:
+            article_ones_remaining -= 1
             continue
         invented.append(token)
     return sorted(set(invented))
