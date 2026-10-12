@@ -181,3 +181,73 @@ def test_both_ratios_are_reported_so_the_gap_is_visible(tmp_path: Path) -> None:
     assert stats["cjk_ratio_translatable"] == pytest.approx(1.0)
     assert stats["total_blocks"] == 2
     assert stats["source_kept_blocks"] == 1
+
+
+# --------------------------------------------------------------------------- #
+# The table-header CJK ratio must be able to score a correct translation
+# --------------------------------------------------------------------------- #
+
+
+def _typst_table(header_cells: str) -> str:
+    """A minimal ``#table`` block shaped like the renderer emits."""
+    return (
+        "#table(\n"
+        "  columns: 2,\n"
+        "  inset: 5pt,\n"
+        "  align: (col, row) => if row == 0 { center + horizon } else { left + horizon },\n"
+        "  stroke: none,\n"
+        "  table.hline(stroke: 1.1pt),\n"
+        f"  {header_cells},\n"
+        "  table.hline(stroke: 0.5pt),\n"
+        "  [甲], [1.0],\n"
+        "  table.hline(stroke: 1.1pt),\n"
+        ")\n"
+    )
+
+
+def test_a_fully_translated_table_scores_one(tmp_path: Path) -> None:
+    """A correct translation must be able to reach 1.0.
+
+    The previous implementation required a header cell to contain Latin and then
+    checked the same cell for CJK. A translated cell has CJK and no Latin, so it
+    was excluded from the numerator *and* its own denominator, while verbatim
+    identifiers were the only cells ever counted — a perfectly translated table
+    measured **0.0**. That is why the whole corpus read 0.146 while the tables
+    were translated.
+    """
+    from scripts.eval_semantic import _table_header_cjk
+
+    typ = tmp_path / "main.typ"
+    typ.write_text(_typst_table("[*模型*], [*准确率*]"), encoding="utf-8")
+    assert _table_header_cjk(typ) == pytest.approx(1.0)
+
+
+def test_an_untranslated_table_scores_zero(tmp_path: Path) -> None:
+    from scripts.eval_semantic import _table_header_cjk
+
+    typ = tmp_path / "main.typ"
+    typ.write_text(_typst_table("[*Model*], [*Accuracy*]"), encoding="utf-8")
+    assert _table_header_cjk(typ) == pytest.approx(0.0)
+
+
+def test_a_verbatim_identifier_lowers_the_ratio_and_is_listed(tmp_path: Path) -> None:
+    """A dataset name counts against the ratio; the list makes that auditable.
+
+    ``MNIST`` must stay verbatim, so it is a legitimate 0 in the ratio. The
+    companion cell list is how a reader tells such an artefact from a real miss.
+    """
+    from scripts.eval_semantic import _table_header_cells, _table_header_cjk
+
+    typ = tmp_path / "main.typ"
+    typ.write_text(_typst_table("[*模型*], [*MNIST*]"), encoding="utf-8")
+
+    assert _table_header_cjk(typ) == pytest.approx(0.5)
+    assert _table_header_cells(typ) == ["MNIST"]
+
+
+def test_a_document_with_no_tables_reports_zero(tmp_path: Path) -> None:
+    from scripts.eval_semantic import _table_header_cjk
+
+    typ = tmp_path / "main.typ"
+    typ.write_text("#set text(size: 10.5pt)\n\nprose only\n", encoding="utf-8")
+    assert _table_header_cjk(typ) == pytest.approx(0.0)

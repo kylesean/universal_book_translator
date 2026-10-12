@@ -200,27 +200,12 @@ def _source_header_term_leakage(body_text: str, source_tables: list[list[str]]) 
     return leaked / len(words)
 
 
-def _table_header_cjk(typst: Path | None) -> float:
-    """Fraction of *translatable* table-header cells carrying CJK, from Typst source.
-
-    Read from the generated Typst rather than the compiled PDF: a Typst table
-    is a ``#table(...)`` call whose cells are literal markup, so the header row
-    is directly addressable. In the PDF the same cells come back as loose text
-    lines with no column structure left, and any heuristic that tries to
-    recover the grid also sweeps up wrapped prose (measured: it scored the
-    *untranslated* overlay artifact at 0.61, which is how a bad metric hides a
-    real regression).
-
-    Only cells holding at least one non-identifier Latin word are counted.
-    ``CB Natural QA``, ``FLOPs/seq`` and ``FFN GEGLU`` are dataset and
-    architecture names that must stay verbatim; counting them as "untranslated"
-    would make the number look worse the more correct the translation is.
-    """
+def _typst_table_cells(typst: Path | None) -> list[str]:
+    """Every header cell of every ``#table`` in a generated Typst source."""
     if typst is None or not typst.exists():
-        return 0.0
+        return []
     source = typst.read_text(encoding="utf-8", errors="replace")
-    total = 0
-    hit = 0
+    cells: list[str] = []
     for table in re.findall(r"#table\((.*?)\n\)", source, re.S):
         header = re.search(
             r"stroke: 1\.1pt\),\n\s*(.*?),(?:\n\s*)table\.hline\(stroke: 0\.5pt\)",
@@ -231,19 +216,41 @@ def _table_header_cjk(typst: Path | None) -> float:
             continue
         for raw in re.findall(r"\[(.*?)\]", header.group(1)):
             cell = re.sub(r"[*\\]", "", raw).strip()
-            if not cell:
-                continue
-            words = [
-                w
-                for w in re.findall(r"[A-Za-z]{3,}", cell)
-                if w.lower() not in HEADER_IDENTIFIER_STOPWORDS
-            ]
-            if not words:
-                continue
-            total += 1
-            if CJK_RE.search(cell):
-                hit += 1
-    return (hit / total) if total else 0.0
+            if cell:
+                cells.append(cell)
+    return cells
+
+
+def _table_header_cjk(typst: Path | None) -> float:
+    """Fraction of table-header cells carrying CJK (RFC §9 「表格单元格 CJK 覆盖」).
+
+    Read from the generated Typst rather than the compiled PDF: a Typst table is
+    a ``#table(...)`` call whose cells are literal markup, so the header row is
+    directly addressable. In the PDF the same cells come back as loose text lines
+    with no column structure left, and any heuristic that recovers the grid also
+    sweeps up wrapped prose (measured: it scored the *untranslated* overlay
+    artifact at 0.61, which is how a bad metric hides a real regression).
+
+    **This is a lower bound, and the number must be read as one.** A cell that is
+    legitimately verbatim — a dataset name (``MNIST``), an architecture
+    (``FLOPs/seq``), a bare symbol (``(%)``) — carries no CJK however correct the
+    translation is, so it counts against the ratio. The previous implementation
+    tried to fix that by counting only cells that contained Latin, and in doing so
+    became unable to score a correct translation **at all**: a translated cell has
+    CJK and no Latin, so it was excluded from the numerator *and* its own
+    denominator, while verbatim identifiers were the only cells counted. A
+    perfectly translated table therefore measured **0.0** (verified against a
+    synthetic two-column table), which is why the corpus figure read 0.146 while
+    the tables were in fact translated.
+
+    When a document has no tables at all the value is ``0.0``; the corpus report
+    pairs this with the table count so "no tables" is distinguishable from "no
+    translated tables".
+    """
+    cells = _typst_table_cells(typst)
+    if not cells:
+        return 0.0
+    return sum(1 for c in cells if CJK_RE.search(c)) / len(cells)
 
 
 def _table_header_cells(typst: Path | None) -> list[str]:
