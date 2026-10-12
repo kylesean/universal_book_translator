@@ -39,6 +39,8 @@ class _Block:
     id: str
     source_text: str
     target_text: str | None
+    skip_translate: bool = False
+    policy_translate: bool | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -214,3 +216,45 @@ def test_recall_counts_distinct_terms() -> None:
     assert metrics.terms_expected == 2
     assert metrics.terms_rendered == 2
     assert metrics.term_recall == 1.0
+
+
+# --------------------------------------------------------------------------- #
+# A deliberately source-kept block cannot render a glossary term
+# --------------------------------------------------------------------------- #
+
+
+def test_a_source_kept_block_is_excluded_from_the_precision_denominator() -> None:
+    """A bibliography entry is *supposed* to hold its English text.
+
+    Counting it measures the deliberate keep, not consistency. Measured across
+    the gold corpus 2-23% of every document's term occurrences sit in such
+    blocks — enough to move term precision from 0.969 to 0.862, below the
+    tier-B floor, with no real inconsistency involved.
+    """
+    blocks: list[Any] = [
+        _Block("b1", "The FinFET device", "鳍式场效应晶体管器件"),
+        # A reference entry: the policy keeps it in the source language.
+        _Block("b2", "FinFET transistor", "FinFET transistor", skip_translate=True),
+    ]
+    metrics = evaluate_terms(blocks, _GLOSSARY)
+
+    assert metrics.term_precision == 1.0
+    assert metrics.terms_expected == 1
+
+
+def test_a_policy_verdict_of_false_also_excludes_the_block() -> None:
+    blocks: list[Any] = [
+        _Block("b1", "The FinFET device", "FinFET device", policy_translate=False),
+    ]
+    assert evaluate_terms(blocks, _GLOSSARY).per_hit == ()
+
+
+def test_a_translatable_block_still_counts() -> None:
+    """The exclusion must be narrow: a real block keeps its defect."""
+    blocks: list[Any] = [
+        _Block("b1", "The FinFET device", "FinFET 器件"),  # drifted
+    ]
+    metrics = evaluate_terms(blocks, _GLOSSARY)
+
+    assert metrics.terms_expected == 1
+    assert metrics.term_precision == 0.0

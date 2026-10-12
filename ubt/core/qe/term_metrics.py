@@ -123,6 +123,19 @@ def _fuzzy_match(target_text: str, expected: str, fuzzy_threshold: float) -> boo
     return fuzz.partial_ratio(expected, target_text) >= fuzzy_threshold * 100
 
 
+def _keeps_source(block: Any) -> bool:
+    """Whether the pipeline decided this block stays in the source language.
+
+    Mirrors ``ubt.render.typst.document_renderer._keeps_source``: the policy
+    verdict is authoritative when it exists, and ``skip_translate`` otherwise.
+    Keeping the two in step is what makes the metric measure the blocks the
+    pipeline actually translated.
+    """
+    if getattr(block, "policy_translate", None) is False:
+        return True
+    return bool(getattr(block, "skip_translate", False))
+
+
 def evaluate_terms(
     blocks: Sequence[Any],
     glossary: Sequence[dict[str, Any]],
@@ -150,6 +163,16 @@ def evaluate_terms(
     for block in blocks:
         target = getattr(block, "target_text", "") or ""
         if not target:
+            continue
+        # A block the pipeline deliberately keeps in the source language (a
+        # bibliography entry, an author affiliation, a code listing) is
+        # *supposed* to hold its English text, so it cannot render a glossary
+        # term in Chinese. Counting it measures the deliberate keep, not
+        # consistency: measured across the gold corpus, 2-23% of every
+        # document's term occurrences sit in such blocks, enough to move the
+        # figure below the tier-B floor on its own (term precision 0.862 over
+        # all blocks against 0.969 over the translatable ones).
+        if _keeps_source(block):
             continue
         source = getattr(block, "source_text", "") or ""
         block_id = str(getattr(block, "id", ""))
