@@ -1,4 +1,4 @@
-"""Draft and repair prompt assembly.
+"""Draft and repair prompt assembly, and the prompt-layout identity.
 
 Pure functions of their arguments -- no router state, no provider, no I/O -- so
 they do not have to live in :mod:`ubt.core.router.router` for that file to mean
@@ -6,10 +6,19 @@ they do not have to live in :mod:`ubt.core.router.router` for that file to mean
 write and :func:`draft_source_from_prompt` reads back into one file: they are one
 contract, and a builder whose heading the parser does not know about leaks its
 instruction tail into what ``--dry-run`` shows the user.
+
+``PROMPT_VERSION`` is the *identity* half of a translation-memory exact hit
+(see :func:`ubt.core.memory.tm.compute_tm_context`): the TM key includes it, so
+a stored translation is reused only when the layout that produced it is the
+layout in use now. It used to be a hand-maintained ``"v1"`` in ``tm.py`` with
+a comment asking the next person to bump it — and nothing checked the promise,
+so the day a layout constant changed without a bump, stored translations would
+have become silent exact hits for a different prompt.
 """
 
 from __future__ import annotations
 
+import hashlib
 import html
 import re
 
@@ -76,6 +85,33 @@ _EMPHASIS_HINT = (
     f" Preserve any {BOLD_OPEN} ... {BOLD_CLOSE} emphasis markers around the "
     "corresponding translated text, balanced and in place."
 )
+
+#: A source that mentions its own wrapper tags must not be mistaken for the
+#: answer envelope; the escaping above is part of the layout.
+#:
+#: The layout identity: built from every literal that shapes what the model
+#: sees. Change one and ``PROMPT_VERSION`` changes with it — which is the
+#: point. Hand-bumping a version string is what the old design asked for and
+#: what nothing enforced.
+_PROMPT_LAYOUT_PARTS: tuple[str, ...] = (
+    _DRAFT_SOURCE_MARKER,
+    *_DRAFT_SOURCE_TAILS,
+    _DRAFT_MINIMAL_ANCHOR,
+    _SHORT_SOURCE_HINT,
+    _EMPHASIS_RULE,
+    _EMPHASIS_HINT,
+    # The reserved-tag escaping pattern is behaviour, not decoration: relaxing
+    # it would let a source span become the envelope.
+    _RESERVED_WRAPPER_RE.pattern,
+)
+_PROMPT_LAYOUT_DIGEST = hashlib.sha256(
+    "\x00".join(_PROMPT_LAYOUT_PARTS).encode("utf-8")
+).hexdigest()[:12]
+
+#: The translation-memory identity for this prompt layout. It changes whenever
+#: a layout literal above changes, so a stored translation can never be reused
+#: across a prompt-layout change (see ``compute_tm_context``).
+PROMPT_VERSION = f"v1-{_PROMPT_LAYOUT_DIGEST}"
 
 
 def _has_emphasis(text: str) -> bool:
