@@ -15,6 +15,7 @@ import random
 import time
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
+from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any, Literal, overload
 
 if TYPE_CHECKING:
@@ -71,6 +72,20 @@ from ubt.core.router.router_errors import (  # noqa: F401 -- re-exported
 )
 
 logger = logging.getLogger(__name__)
+
+#: Cooperative-cancel token for the CURRENT run's provider retry backoff.
+#: A ContextVar, not a router field, because one process can drive several
+#: jobs over ONE shared router (JobWorker with concurrency>1, the API
+#: server): a field is per-instance state, and a second job overwrote the
+#: first job's token — cancelling job B aborted job A's backoff (and a
+#: cancel for A could not interrupt A's own sleep). Context vars are
+#: inherited per asyncio task, so each run's context carries its own token.
+_cancel_token_ctx: ContextVar[asyncio.Event | None] = ContextVar("ubt_cancel_token", default=None)
+
+
+def set_run_cancel_token(token: asyncio.Event | None) -> None:
+    """Bind the current run's cooperative-cancel token for provider backoff."""
+    _cancel_token_ctx.set(token)
 
 
 class ModelRouter:
@@ -142,6 +157,11 @@ class ModelRouter:
         # must not outlive a cancellation: the router aborts the wait and raises
         # JobInterruptedError, the same stop the stages raise, instead of
         # pinning the worker to a 24h sleep it will never finish.
+        # NOTE: this field is the CONSTRUCTION default only. A shared router
+        # (JobWorker with concurrency>1) must not carry a per-job token here —
+        # two concurrent jobs would overwrite each other's token and a cancel
+        # for one would abort the other's backoff. The per-run value lives in
+        # the cancel_token ContextVar below; the pipeline sets it in run().
         self.cancel_token = cancel_token
         self.draft_reasoning_effort = draft_reasoning_effort
         self.repair_reasoning_effort = repair_reasoning_effort
@@ -648,7 +668,7 @@ class ModelRouter:
         token raises :class:`JobInterruptedError` — the same cooperative stop the
         stages raise.
         """
-        token = self.cancel_token
+        token = _cancel_token_ctx.get() or self.cancel_token
         if token is None:
             await asyncio.sleep(seconds)
             return

@@ -55,7 +55,7 @@ from ubt.core.router.pricing import price_is_known
 from ubt.core.router.provider import create_model_provider
 from ubt.core.router.rate_limiter import AdaptiveTokenBucket
 from ubt.core.router.registry import get_default_registry
-from ubt.core.router.router import ModelRouter
+from ubt.core.router.router import ModelRouter, set_run_cancel_token
 from ubt.core.router_mode import decide
 
 logger = logging.getLogger(__name__)
@@ -800,8 +800,12 @@ class PipelineOrchestrator:
         run_session = prep.run_session
         # Make a provider Retry-After backoff cancellable: the router sleeps the
         # clamped header, and a job cancelled mid-wait must stop there rather than
-        # pin the worker to the rest of the pause.
-        self.router.cancel_token = cancel_token
+        # pin the worker to the rest of the pause. The token rides a ContextVar
+        # (per asyncio task), NOT a router field: a shared router (JobWorker
+        # with concurrency>1) serves several jobs at once, and a field write
+        # let job B's run() overwrite job A's token — cancelling B then aborted
+        # A's backoff, and cancelling A could not interrupt A's own sleep.
+        set_run_cancel_token(cancel_token)
         ledger: SQLiteJobLedger | None = None
         tm: TranslationMemory | None = None
         writer_lock: LedgerWriterLock | None = None
