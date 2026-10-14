@@ -10,6 +10,86 @@ multi-chapter long route — a single-chapter document (which is how every PDF i
 ingested), any document over 40 chapters, and academic profiles get no rolling
 summary. Deterministic glossary enforcement is short-document only.
 
+## Install
+
+```bash
+uv sync --extra dev                            # development (Python 3.12+)
+pip install universal-book-translator          # users
+pip install 'universal-book-translator[mcp]'   # users who want the MCP server
+```
+
+Extras: `pdf` (Docling), `ocr` / `academic` (RapidOCR + ONNX runtime), `qe`
+(CometKiwi), `mcp` (the MCP server). PDF output needs the `typst` compiler on
+`PATH` — a PDF job fails at the render stage without it. `ubt doctor` checks the
+key, the ledger directory, Typst and CJK fonts, and says what breaks.
+
+## Quick start
+
+Set the credential and the models. Every setting has one canonical `UBT_*`
+variable, and `ubt config` prints the whole list with the variable that sets
+each one; a provider block in `ubt.toml` / `~/.config/ubt/config.toml` can
+supply the same values instead.
+
+```bash
+export UBT_LLM_API_KEY=sk-...              # the outbound LLM key
+export UBT_BASE_URL=https://api.openai.com/v1
+export UBT_DRAFT_MODEL=gpt-4o-mini         # tier-1 draft model
+export UBT_REPAIR_MODEL=gpt-4o             # tier-2 repair model
+```
+
+`UBT_PROVIDER` selects a named provider from that registry; without one,
+`UBT_BASE_URL` is used directly. To run the whole pipeline without spending
+anything, add `--dry-run`: it uses a deterministic echo provider, so no key is
+needed and no tokens are billed.
+
+```bash
+ubt translate book.pdf -l zh
+```
+
+`-l` is `--target-lang`; `-s` is `--source-lang` (default `en`). Without `-o`
+the deliverable is written to `<documents>/UBT/<stem>_bilingual.pdf`. The run
+prints a Job ID at start, and that id is the resume handle:
+
+```
+Job ID: job_da4c06edac50_zh  (resume with: ubt translate <input> --job-id job_da4c06edac50_zh)
+```
+
+The id is derived from the run's identity, so its suffix grows with what you
+selected — the same book with `--dry-run --profile paper` becomes
+`job_da4c06edac50_zh_mock_prpaper`. Copy the whole id, not the prefix. Resume is
+the default: re-running with the same `--job-id` picks up from the ledger's
+checkpoints instead of re-paying for finished blocks, and `--fresh` discards the
+ledger and re-ingests. Other useful commands: `ubt assess book.pdf` for a
+zero-token quote, `ubt status <job-id>` for checkpoint statistics, and
+`ubt verify <artifact>` to re-reconcile a delivery.
+
+### Operator console
+
+```bash
+ubt console                  # opens http://127.0.0.1:8000/ in a browser
+```
+
+`ubt console` serves the same FastAPI app as the `ubt-api` entry point, on
+`127.0.0.1:8000` by default, and opens the browser for you; for a loopback bind
+it also opens the server without an auth gate. Running `ubt-api` directly
+refuses to start without one and prints the two ways to supply it: set
+`UBT_API_KEY` (the inbound `X-API-Key`, not the LLM key), or opt into an open
+local server for development. The console also runs the review workbench, where
+a human edit is applied to the ledger under the job's writer lock.
+
+### MCP server
+
+```bash
+pip install 'universal-book-translator[mcp]'
+ubt-mcp                      # stdio transport
+```
+
+The stdio server exposes the engine's operations as `ubt_*` tools
+(`ubt_translate_book`, `ubt_job_status`, `ubt_list_issues`, `ubt_edit_segment`,
+`ubt_re_export`, `ubt_list_jobs`, `ubt_doctor`, …). It is local-trust — same
+user, no API-key gate — so front the REST API instead when exposing it beyond
+one machine.
+
 ## Rendering
 
 There is one PDF render path. The document is rebuilt from the IR and Typst
