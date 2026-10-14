@@ -134,6 +134,49 @@ function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
 }
 
 /**
+ * The server's own explanation of a failed request, or a labelled fallback.
+ *
+ * ``res.statusText`` — what these call sites used to interpolate — is EMPTY
+ * under HTTP/2 and HTTP/3 (the protocols do not carry a reason phrase), so
+ * every error surfaced to the operator as "Failed to cancel job: " with no
+ * reason at all. The backend writes an actionable message into the body's
+ * ``detail`` field in three shapes: a plain string (most routes), an object
+ * ``{code, message}`` (structured domain errors such as unsupported format),
+ * and a list (FastAPI's 422 validation errors, one entry per bad field).
+ * This helper reads all three; anything unparseable degrades to
+ * ``<label> (HTTP <status>)`` rather than an empty suffix.
+ */
+export async function apiError(res: Response, label: string): Promise<Error> {
+  const fallback = `${label} (HTTP ${res.status})`
+  try {
+    const body: unknown = await res.json()
+    const detail =
+      body !== null && typeof body === 'object' && 'detail' in body
+        ? (body as { detail: unknown }).detail
+        : null
+    if (typeof detail === 'string' && detail.trim()) return new Error(detail)
+    if (detail !== null && typeof detail === 'object' && 'message' in detail) {
+      const message = (detail as { message: unknown }).message
+      if (typeof message === 'string' && message.trim()) return new Error(message)
+    }
+    if (Array.isArray(detail)) {
+      // FastAPI 422: [{loc: [...], msg: "...", type: "..."}, ...]
+      const messages = detail
+        .map((item) =>
+          item !== null && typeof item === 'object' && 'msg' in item
+            ? String((item as { msg: unknown }).msg)
+            : null,
+        )
+        .filter((msg): msg is string => Boolean(msg))
+      if (messages.length) return new Error(messages.join('; '))
+    }
+  } catch {
+    // Not JSON (a proxy error page, a truncated body): fall through.
+  }
+  return new Error(fallback)
+}
+
+/**
  * Exchange the entered key for the session cookie (and remember the key for
  * header-authenticated fetches). Returns false when the key is rejected.
  */
@@ -157,7 +200,7 @@ export async function signOut(): Promise<void> {
 
 export async function checkHealth(): Promise<HealthResponse> {
   const res = await fetch(`${BASE_URL}/health`)
-  if (!res.ok) throw new Error(`Health check failed: ${res.statusText}`)
+  if (!res.ok) throw await apiError(res, "Health check failed")
   return res.json()
 }
 
@@ -168,8 +211,7 @@ export async function assessJob(req: JobAssessRequest): Promise<JobAssessRespons
     body: JSON.stringify(req),
   })
   if (!res.ok) {
-    const errorBody = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(errorBody.detail?.message || errorBody.detail || 'Assessment failed')
+    throw await apiError(res, "Assessment failed")
   }
   return res.json()
 }
@@ -181,8 +223,7 @@ export async function submitJob(req: JobSubmitRequest): Promise<JobSubmitRespons
     body: JSON.stringify(req),
   })
   if (!res.ok) {
-    const errorBody = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(errorBody.detail || 'Job submission failed')
+    throw await apiError(res, "Job submission failed")
   }
   return res.json()
 }
@@ -199,15 +240,14 @@ export async function uploadSourceDocument(file: File): Promise<JobUploadRespons
   form.append('file', file)
   const res = await apiFetch(`${BASE_URL}/jobs/upload`, { method: 'POST', body: form })
   if (!res.ok) {
-    const body = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(typeof body.detail === 'string' ? body.detail : 'Upload failed')
+    throw await apiError(res, "string")
   }
   return res.json()
 }
 
 export async function getJobStatus(jobId: string): Promise<JobStatusResponse> {
   const res = await apiFetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}/status`)
-  if (!res.ok) throw new Error(`Failed to fetch job status: ${res.statusText}`)
+  if (!res.ok) throw await apiError(res, "Failed to fetch job status")
   return res.json()
 }
 
@@ -215,7 +255,7 @@ export async function cancelJob(jobId: string): Promise<void> {
   const res = await apiFetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}/cancel`, {
     method: 'POST',
   })
-  if (!res.ok) throw new Error(`Failed to cancel job: ${res.statusText}`)
+  if (!res.ok) throw await apiError(res, "Failed to cancel job")
 }
 
 /** Re-run a failed/cancelled job from its ledger checkpoints (embedded mode). */
@@ -224,8 +264,7 @@ export async function resumeJob(jobId: string): Promise<{ job_id: string; status
     method: 'POST',
   })
   if (!res.ok) {
-    const body = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(body.detail || 'Failed to resume job')
+    throw await apiError(res, "Failed to resume job")
   }
   return res.json()
 }
@@ -234,8 +273,7 @@ export async function resumeJob(jobId: string): Promise<{ job_id: string; status
 export async function deleteJob(jobId: string): Promise<{ job_id: string }> {
   const res = await apiFetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' })
   if (!res.ok) {
-    const body = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(body.detail || 'Failed to delete job')
+    throw await apiError(res, "Failed to delete job")
   }
   return res.json()
 }
@@ -243,20 +281,20 @@ export async function deleteJob(jobId: string): Promise<{ job_id: string }> {
 /** The job queue: every ledger under db_dir, newest first. */
 export async function listJobs(limit = 200): Promise<JobSummary[]> {
   const res = await apiFetch(`${BASE_URL}/jobs?limit=${limit}`)
-  if (!res.ok) throw new Error(`Failed to list jobs: ${res.statusText}`)
+  if (!res.ok) throw await apiError(res, "Failed to list jobs")
   const data = await res.json()
   return data.jobs ?? []
 }
 
 export async function getJobReport(jobId: string): Promise<Record<string, unknown>> {
   const res = await apiFetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}/report`)
-  if (!res.ok) throw new Error(`Failed to fetch report: ${res.statusText}`)
+  if (!res.ok) throw await apiError(res, "Failed to fetch report")
   return res.json()
 }
 
 export async function getVisualReport(jobId: string): Promise<Record<string, unknown>> {
   const res = await apiFetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}/visual-report`)
-  if (!res.ok) throw new Error(`Failed to fetch visual report: ${res.statusText}`)
+  if (!res.ok) throw await apiError(res, "Failed to fetch visual report")
   return res.json()
 }
 
@@ -353,7 +391,7 @@ export function subscribeJobProgress(
 
 export async function listDeliverables(jobId: string): Promise<DeliverableItem[]> {
   const res = await apiFetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}/deliverables`)
-  if (!res.ok) throw new Error(`Failed to list deliverables: ${res.statusText}`)
+  if (!res.ok) throw await apiError(res, "Failed to list deliverables")
   const data = await res.json()
   return data.deliverables ?? []
 }
@@ -369,7 +407,7 @@ export function deliverableDownloadUrl(jobId: string, key: string): string {
 export async function getGlossary(): Promise<GlossaryTerm[]> {
   const res = await apiFetch(`${BASE_URL}/assets/glossary`)
   if (res.status === 409) return []
-  if (!res.ok) throw new Error(`Failed to load glossary: ${res.statusText}`)
+  if (!res.ok) throw await apiError(res, "Failed to load glossary")
   const data = await res.json()
   return data.terms ?? []
 }
@@ -381,8 +419,7 @@ export async function upsertGlossaryTerm(source: string, target: string): Promis
     body: JSON.stringify({ source, target }),
   })
   if (!res.ok) {
-    const body = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(body.detail || 'Failed to save term')
+    throw await apiError(res, "Failed to save term")
   }
   const data = await res.json()
   return data.terms ?? []
@@ -392,7 +429,7 @@ export async function deleteGlossaryTerm(source: string): Promise<GlossaryTerm[]
   const res = await apiFetch(`${BASE_URL}/assets/glossary?source=${encodeURIComponent(source)}`, {
     method: 'DELETE',
   })
-  if (!res.ok) throw new Error(`Failed to delete term: ${res.statusText}`)
+  if (!res.ok) throw await apiError(res, "Failed to delete term")
   const data = await res.json()
   return data.terms ?? []
 }
@@ -409,7 +446,7 @@ export async function listTm(params: {
   if (params.src_lang) query.set('src_lang', params.src_lang)
   if (params.tgt_lang) query.set('tgt_lang', params.tgt_lang)
   const res = await apiFetch(`${BASE_URL}/assets/tm?${query.toString()}`)
-  if (!res.ok) throw new Error(`Failed to load translation memory: ${res.statusText}`)
+  if (!res.ok) throw await apiError(res, "Failed to load translation memory")
   const data = await res.json()
   return { total: data.total ?? 0, entries: data.entries ?? [] }
 }
@@ -420,7 +457,7 @@ export async function evictTm(ids: number[]): Promise<number> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ids }),
   })
-  if (!res.ok) throw new Error(`Failed to evict TM entries: ${res.statusText}`)
+  if (!res.ok) throw await apiError(res, "Failed to evict TM entries")
   const data = await res.json()
   return data.removed ?? 0
 }
@@ -433,7 +470,7 @@ export interface GlossaryConflict {
 /** Sources configured with more than one target rendering. */
 export async function getGlossaryConflicts(): Promise<GlossaryConflict[]> {
   const res = await apiFetch(`${BASE_URL}/assets/glossary/conflicts`)
-  if (!res.ok) throw new Error(`Failed to load glossary conflicts: ${res.statusText}`)
+  if (!res.ok) throw await apiError(res, "Failed to load glossary conflicts")
   const data = await res.json()
   return data.conflicts ?? []
 }
@@ -452,8 +489,7 @@ export async function importTm(payload: {
     body: JSON.stringify(payload),
   })
   if (!res.ok) {
-    const body = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(body.detail || 'Failed to import translation memory')
+    throw await apiError(res, "Failed to import translation memory")
   }
   return res.json()
 }
@@ -500,14 +536,14 @@ export async function listSegments(
   if (params.limit !== undefined) query.set('limit', String(params.limit))
   if (params.offset !== undefined) query.set('offset', String(params.offset))
   const res = await apiFetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}/segments?${query.toString()}`)
-  if (!res.ok) throw new Error(`Failed to load segments: ${res.statusText}`)
+  if (!res.ok) throw await apiError(res, "Failed to load segments")
   const data = await res.json()
   return { total: data.total ?? 0, segments: data.segments ?? [] }
 }
 
 export async function listIssues(jobId: string): Promise<IssuesReport> {
   const res = await apiFetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}/issues`)
-  if (!res.ok) throw new Error(`Failed to load issues: ${res.statusText}`)
+  if (!res.ok) throw await apiError(res, "Failed to load issues")
   return res.json()
 }
 
@@ -548,8 +584,7 @@ export async function editSegment(
     }
   )
   if (!res.ok) {
-    const body = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(body.detail || 'Failed to save revision')
+    throw await apiError(res, "Failed to save revision")
   }
   return res.json()
 }
@@ -569,8 +604,7 @@ export async function reExportJob(
     method: 'POST',
   })
   if (!res.ok) {
-    const body = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(body.detail || 'Failed to re-export')
+    throw await apiError(res, "Failed to re-export")
   }
   return res.json()
 }
@@ -597,7 +631,7 @@ export async function getBlockTerms(jobId: string, blockId: string): Promise<Blo
   const res = await apiFetch(
     `${BASE_URL}/jobs/${encodeURIComponent(jobId)}/segments/${encodeURIComponent(blockId)}/terms`
   )
-  if (!res.ok) throw new Error(`Failed to load terminology: ${res.statusText}`)
+  if (!res.ok) throw await apiError(res, "Failed to load terminology")
   return res.json()
 }
 
@@ -626,8 +660,7 @@ export async function propagateTerm(
     body: JSON.stringify(payload),
   })
   if (!res.ok) {
-    const body = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(body.detail || 'Failed to propagate term')
+    throw await apiError(res, "Failed to propagate term")
   }
   return res.json()
 }
@@ -639,19 +672,19 @@ export async function propagateTerm(
 export async function getDoctor(probe = false): Promise<DoctorReport> {
   const url = `${BASE_URL}/system/doctor` + (probe ? '?probe=true' : '')
   const res = await apiFetch(url)
-  if (!res.ok) throw new Error(`Doctor check failed: ${res.statusText}`)
+  if (!res.ok) throw await apiError(res, "Doctor check failed")
   return res.json()
 }
 
 export async function listModelProfiles(): Promise<ModelProfile[]> {
   const res = await apiFetch(`${BASE_URL}/api/v1/model-profiles`)
-  if (!res.ok) throw new Error(`Failed to load model profiles: ${res.statusText}`)
+  if (!res.ok) throw await apiError(res, "Failed to load model profiles")
   return res.json()
 }
 
 /** The live security boundary: reachable host, auth gate, and allowed roots. */
 export async function getSystemInfo(): Promise<SystemInfo> {
   const res = await apiFetch(`${BASE_URL}/system/info`)
-  if (!res.ok) throw new Error(`Failed to load system info: ${res.statusText}`)
+  if (!res.ok) throw await apiError(res, "Failed to load system info")
   return res.json()
 }

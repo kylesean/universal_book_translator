@@ -51,6 +51,7 @@ export function MissionControl() {
   const [autoScroll, setAutoScroll] = useState(true)
   const [isLiveStreaming, setIsLiveStreaming] = useState(false)
   const [statusStr, setStatusStr] = useState<string>('running')
+  const [queuePosition, setQueuePosition] = useState<number | null>(null)
   const [stage, setStage] = useState<PipelineStage | null>(null)
   const [progressPct, setProgressPct] = useState<number>(0)
   const [completedBlocks, setCompletedBlocks] = useState<number>(0)
@@ -99,6 +100,14 @@ export function MissionControl() {
       if (typeof res.total_blocks === 'number') setTotalBlocks(res.total_blocks)
       if (typeof res.estimated_cost_usd === 'number') setCostUsd(res.estimated_cost_usd)
       if (typeof res.current_avg_qe === 'number') setAvgQe(res.current_avg_qe)
+      // Queue mode reports where the job sits while it waits; the field was
+      // always in the response and never rendered, so a queued job looked
+      // identical to a stalled one.
+      if (typeof res.queue_position === 'number' && res.queue_position > 0) {
+        setQueuePosition(res.queue_position)
+      } else {
+        setQueuePosition(null)
+      }
     }
 
     const fetchStatus = async () => {
@@ -517,6 +526,11 @@ export function MissionControl() {
 
         <div className="p-4">
           <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">{t.mission.completedPages}</div>
+          {queuePosition !== null && (
+            <div className="text-xs font-mono text-[var(--ink-secondary)] mt-1">
+              {t.mission.queuePosition}: <span className="font-bold">{queuePosition}</span>
+            </div>
+          )}
           <div className="text-xl font-bold font-mono text-[var(--ink-primary)] mt-0.5">
             {completedBlocks} <span className="text-xs text-[var(--ink-muted)] font-normal">/ {totalBlocks || '—'}</span>
           </div>

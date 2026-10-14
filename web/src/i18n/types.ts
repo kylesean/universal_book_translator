@@ -133,6 +133,7 @@ export interface TranslationDictionary {
     openWorkbench: string
     progress: string
     completedPages: string
+    queuePosition: string
     totalSpend: string
     executionState: string
     blocksRemaining: string
