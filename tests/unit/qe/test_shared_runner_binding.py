@@ -55,6 +55,9 @@ def test_pipeline_binds_an_injected_runner_to_the_run_pair() -> None:
     runner = _runner()
     orchestrator = PipelineOrchestrator(config=config, qe_runner=runner)
     bound = orchestrator._runtime_qe_runner("en", "ja")
+    # The copy keeps the concrete class (a rebind must not degrade it to the
+    # base runner) and carries the requested pair.
+    assert isinstance(bound, SubprocessQERunner)
     # The shared instance is untouched; the run gets a bound copy.
     assert (runner._source_lang, runner._target_lang) == ("en", "zh")
     assert (bound._source_lang, bound._target_lang) == ("en", "ja")

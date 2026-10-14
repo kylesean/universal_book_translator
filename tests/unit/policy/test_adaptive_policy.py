@@ -7,6 +7,7 @@ micro-block architecture. The render engine is a single constant, not a choice.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -17,6 +18,8 @@ from ubt.core.policy.adaptive_policy import (
     AdaptivePolicy,
     resolve_adaptive_policy,
 )
+from ubt.core.qe import BaseQERunner
+from ubt.core.router.router import ModelRouter
 from ubt.core.router_mode import RouteDecision, RouteMode
 
 pytestmark = pytest.mark.fast
@@ -133,11 +136,16 @@ def test_re_export_enforcement_follows_the_config(tmp_path: Path) -> None:
         deterministic_glossary_long_route=True,
     )
     manifest = _manifest()
-    services = _build_services(config, router=object(), qe_runner=object(), manifest=manifest)
+    # No collaborator is invoked: the assertion reads adaptive_policy only.
+    placeholder_router = cast(ModelRouter, object())
+    placeholder_qe = cast(BaseQERunner, object())
+    services = _build_services(
+        config, router=placeholder_router, qe_runner=placeholder_qe, manifest=manifest
+    )
     assert services.adaptive_policy.deterministic_glossary is True
     # And off stays off.
     config_off = UBTConfig(db_dir=tmp_path / "db2")
     services_off = _build_services(
-        config_off, router=object(), qe_runner=object(), manifest=manifest
+        config_off, router=placeholder_router, qe_runner=placeholder_qe, manifest=manifest
     )
     assert services_off.adaptive_policy.deterministic_glossary is False

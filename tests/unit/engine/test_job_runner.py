@@ -17,7 +17,9 @@ import pytest
 
 from ubt.core.config import UBTConfig
 from ubt.core.engine.dry_run import DryRunModelProvider
+from ubt.core.engine.events import TranslationProgressEvent
 from ubt.core.engine.job_runner import build_job_orchestrator, resolve_job_paths
+from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.qe.comet_runner import MockQERunner
 
 pytestmark = pytest.mark.fast
@@ -63,7 +65,7 @@ def test_the_finalize_hook_reaches_both_wirings() -> None:
     """The completion hook is the persistence seam; it must ride both paths."""
     seen: list[str] = []
 
-    def hook(event, ledger):  # noqa: ANN001 - signature pinned by the protocol
+    def hook(event: TranslationProgressEvent, ledger: SQLiteJobLedger) -> None:
         seen.append("called")
 
     config = UBTConfig(draft_model="mock-draft")

@@ -10,6 +10,7 @@ one call — same verdicts, same cache, a handful of invocations.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
 
 import pytest
@@ -54,7 +55,7 @@ def test_build_source_prewarms_every_math_body_in_one_call(tmp_path: Path) -> No
         rendered.append(body)
         return True
 
-    def gate_many(pending) -> None:  # noqa: ANN001 - duck-typed iterable
+    def gate_many(pending: Iterable[str]) -> None:
         bodies.extend(pending)
 
     blocks = [
@@ -81,7 +82,7 @@ def test_a_failing_body_still_degrades_through_the_gate(tmp_path: Path) -> None:
     def gate(body: str) -> bool:
         return body not in rejected
 
-    def gate_many(pending) -> None:  # noqa: ANN001
+    def gate_many(pending: Iterable[str]) -> None:
         list(pending)  # the probe populates its own cache; the fake needs nothing
 
     block = _inline_math_block(0, r"坏公式 $\frac{a}{}$ 在此。")

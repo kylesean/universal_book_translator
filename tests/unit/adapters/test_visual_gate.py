@@ -16,6 +16,7 @@ import pytest
 from PIL import Image, ImageDraw
 
 from ubt.adapters.pdf.visual_gate import (
+    Severity,
     VisualFinding,
     _ArtifactBBox,
     _ArtifactBox,
@@ -148,7 +149,7 @@ def test_pdf_struct_page_rotation(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def _finding(severity: str, code: str = "some_defect") -> VisualFinding:
+def _finding(severity: Severity, code: str = "some_defect") -> VisualFinding:
     return VisualFinding(severity=severity, code=code, message="m")
 
 
