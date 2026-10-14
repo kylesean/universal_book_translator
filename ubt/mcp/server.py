@@ -388,10 +388,21 @@ async def ubt_translate_book(
         if Path(output_path).exists() and not fresh:
             raise ToolError(f"output_path already exists; refusing to overwrite it: {output_path}")
     jid = _check_job_id(job_id) if job_id else ""
-    # A stable job_id that is still live is a resubmit, not a second run.
+    # A stable job_id that is still live is a resubmit, not a second run: the
+    # REST surface returns the existing job (idempotent), and an agent that
+    # retries after a timeout must see the same answer rather than an error it
+    # cannot act on. A failed/cancelled id falls through so the resubmit really
+    # re-runs it.
     existing = _MANAGER.get_job(jid) if jid else None
-    if existing is not None and existing.status in (JobStatus.SUBMITTED, JobStatus.RUNNING):
-        raise UBTError(f"Job {jid} is already running")
+    if existing is not None and existing.status not in (
+        JobStatus.FAILED,
+        JobStatus.CANCELLED,
+    ):
+        return {
+            "job_id": existing.job_id,
+            "status": existing.status,
+            "rehearsal": bool(existing.request.dry_run),
+        }
 
     base_config = UBTConfig.from_env()
     if db_dir:
@@ -789,6 +800,64 @@ async def ubt_edit_segment(
         }
 
     return await asyncio.to_thread(_edit)
+
+
+@mcp.tool()
+@_mcp_error_boundary
+async def ubt_re_export(job_id: str, db_dir: str | None = None) -> dict[str, Any]:
+    """Re-render a finished job's deliverable from its current ledger text.
+
+    A human edit (``ubt_edit_segment``) lands in the ledger, but the delivered
+    file was rendered before it. This re-runs only the export stage over the
+    current text — every block is already terminal, so no token is spent — and
+    overwrites the deliverable in place. Refused (409-equivalent ToolError)
+    while another writer holds the job (a live run, a concurrent edit).
+    """
+    from ubt.core.engine.re_export import ReExportError, re_export_job
+
+    jid = _check_job_id(job_id)
+    base = _safe_output_path(str(db_dir)) if db_dir else UBTConfig.from_env().db_dir
+    db_path = base / f"{jid}.sqlite"
+    if not db_path.exists():
+        raise ToolError(f"no such job: {jid}")
+    try:
+        event = await re_export_job(
+            db_path=db_path,
+            job_id=jid,
+            config=UBTConfig.from_env(),
+            router=_MANAGER.router,
+            qe_runner=_MANAGER.qe_runner,
+        )
+    except ReExportError as exc:
+        raise ToolError(str(exc)) from exc
+    except LedgerWriterLockConflictError as exc:
+        raise ToolError(f"job {jid} is being written by another process: {exc}") from exc
+    return {
+        "job_id": jid,
+        "artifact_path": sanitize_display_path(str(event.artifact_path or "")),
+        "message": event.message,
+    }
+
+
+@mcp.tool()
+@_mcp_error_boundary
+async def ubt_list_jobs(db_dir: str | None = None, limit: int = 50) -> dict[str, Any]:
+    """List jobs found on disk (newest first), with status and artifact path.
+
+    The MCP counterpart of the console's queue table: it enumerates the
+    per-job ledgers under the database directory, so an agent can discover a
+    job id it did not submit itself (or one submitted in an earlier session)
+    before calling ``ubt_job_status`` or ``ubt_re_export``.
+    """
+    from ubt.api.job_catalog import list_job_summaries
+
+    base = _safe_output_path(str(db_dir)) if db_dir else UBTConfig.from_env().db_dir
+    if not base.is_dir():
+        return {"jobs": [], "total": 0}
+
+    summaries = await asyncio.to_thread(list_job_summaries, base)
+    capped = summaries[: max(1, min(int(limit), 500))]
+    return {"jobs": capped, "total": len(summaries)}
 
 
 @mcp.tool()
