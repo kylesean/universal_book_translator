@@ -23,7 +23,7 @@ from __future__ import annotations
 import re
 import unicodedata
 
-from ubt.adapters.pdf.typst_symbols import INLINE_SYMBOLS
+from ubt.core.math_symbols import INLINE_SYMBOLS
 
 #: A bare number is not math worth converting (``$5`` is currency).
 _BARE_NUMBER_RE = re.compile(r"^\d[\d,.]*$")

@@ -85,4 +85,22 @@ a, b = "ubt.core.engine", "ubt.pipeline"
 ab, ba = b in edges.get(a, set()), a in edges.get(b, set())
 cycle = ab and ba
 print(f"== {a} <-> {b}: cycle={cycle}（验收：False）==")
-raise SystemExit(0 if forbidden == 0 and not cycle else 1)
+
+# Render toolbox is a DOWNSTREAM-free layer: ubt/render may not reach back
+# into ubt/adapters at module level. The one edge that made this a real
+# package-level cycle (render/typst/math_transpiler importing the
+# adapters/pdf/typst_symbols shim) is gone; keep it gone.
+render_violations: list[str] = []
+for src, tgts in sorted(edges.items()):
+    if src == "ubt.render" or src.startswith("ubt.render."):
+        for tgt in sorted(tgts):
+            if tgt == "ubt.adapters" or tgt.startswith("ubt.adapters."):
+                render_violations.append(f"{src} -> {tgt}")
+if render_violations:
+    print("== render→adapters 模块级边（验收：0）==")
+    for edge in render_violations:
+        print(f"  {edge}")
+else:
+    print("== render→adapters 模块级边（验收：0）: 0 ==")
+
+raise SystemExit(0 if forbidden == 0 and not cycle and not render_violations else 1)

@@ -22,7 +22,6 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from ubt.adapters.pdf.oxide_render import render_page_png
 from ubt.core.ir.models import IRBlock
 
 logger = logging.getLogger(__name__)
@@ -50,6 +49,13 @@ def render_source_page_png(source_pdf: Path, page: int, dpi: int = 110) -> bytes
         raise PagePreviewUnavailable(f"source PDF not found: {source_pdf}")
     if page < 1:
         raise PagePreviewUnavailable("page must be >= 1")
+    # Function-level: the oxide rasterizer lives in the PDF adapter stack (it
+    # is the page-raster leg of ingestion), and a module-level import made
+    # ubt/render reach back into ubt/adapters — the layering acceptance tool
+    # (dump_compiler_edges) forbids that edge. The lazily-resolved attribute
+    # keeps preview testable with a monkeypatched module function.
+    from ubt.adapters.pdf.oxide_render import render_page_png
+
     png = render_page_png(source_pdf, page, dpi)
     if png is None:
         raise PagePreviewUnavailable("source page rasterization failed (pdf_oxide unavailable)")
@@ -101,6 +107,9 @@ def render_page_preview(
         raise PagePreviewUnavailable(
             f"page {page} preview failed to compile: {stderr.strip() or 'unknown Typst error'}"
         )
+
+    # Function-level: same adapters-edge rule as render_source_page_png above.
+    from ubt.adapters.pdf.oxide_render import render_page_png
 
     png = render_page_png(composed_pdf, 1, dpi)
     if png is None:
