@@ -792,3 +792,30 @@ def test_migration_v11_crash_recovery(tmp_path: Path) -> None:
     conn = sqlite3.connect(db_file)
     assert conn.execute("PRAGMA user_version;").fetchone()[0] == TARGET_SCHEMA_VERSION
     conn.close()
+
+
+def test_get_job_stats_reports_whether_qe_measured_anything(ledger: SQLiteJobLedger) -> None:
+    # The 0.0 avg under the heuristic QE engine is a "nothing scored" sentinel,
+    # not a failing measurement. ``qe_measured`` separates the two so a status
+    # table cannot print a placeholder as quality data.
+    _init(ledger)
+    ledger.append_chapter(
+        "job",
+        _chapter(
+            "ch1",
+            [
+                _block("ch1#1", spine_index=1),
+                _block("ch1#2", spine_index=2, skip_translate=True),
+            ],
+        ),
+    )
+    stats = ledger.get_job_stats("job")
+    assert stats["qe_measured"] is False
+    assert stats["avg_qe_score"] == 0.0
+
+    ledger.save_checkpoint(
+        "ch1#1", BlockStatus.MTQE_PASSED, target_text="T", mtqe_score=0.87, job_id="job"
+    )
+    stats = ledger.get_job_stats("job")
+    assert stats["qe_measured"] is True
+    assert stats["avg_qe_score"] == 0.87

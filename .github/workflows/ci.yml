@@ -65,15 +65,39 @@ jobs:
         # push; the acceptance tool exits non-zero on any violation.
         run: uv run python scripts/dump_compiler_edges.py
 
+      # The fast tier's render-contract tests (math transpiler, render-mode
+      # routing) shell out to the external typst compiler. Installed BEFORE the
+      # fast tier: run after it, those tests silently skipped in CI (8 cases)
+      # while passing locally — the green did not cover what it claimed.
+      # Pin the release version and verify its official SHA-256 rather than
+      # trusting a mutable "latest"/tag download.
+      - name: Install typst (checksum-pinned) and CJK fonts
+        env:
+          TYPST_VERSION: "0.15.1"
+          TYPST_SHA256: "a6d077d0a95eed5a2eba715b2dae06be954f624ccbf85758a03f389ded33118c"
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends fonts-noto-cjk
+          archive="typst-x86_64-unknown-linux-musl.tar.xz"
+          curl --proto '=https' --tlsv1.2 -fsSL \
+            "https://github.com/typst/typst/releases/download/v${TYPST_VERSION}/${archive}" \
+            -o "/tmp/${archive}"
+          echo "${TYPST_SHA256}  /tmp/${archive}" | sha256sum -c -
+          tar -xJf "/tmp/${archive}" -C /tmp
+          sudo install "/tmp/typst-x86_64-unknown-linux-musl/typst" /usr/local/bin/typst
+          typst --version
+
       - name: Fast test tier (pytest)
         # UTF-8 I/O: the product writes CJK to stdout and Windows consoles are
         # cp1252, so pin the encoding even on this Linux job's local runs.
         # The coverage floor is a regression guard (see .pre-commit-config.yaml):
         # it catches a large deletion-without-tests or an orphaned module, the
-        # class of rot that lint/types/tests alone let through.
+        # class of rot that lint/types/tests alone let through. xdist splits
+        # the tier across cores (measured 30s -> 10s; coverage unchanged).
         env:
           PYTHONIOENCODING: "utf-8"
-        run: uv run pytest -m fast -q --cov=ubt --cov-report=term:skip-covered --cov-fail-under=58
+        run: >
+          uv run pytest -m fast -q -n auto --dist=loadscope
+          --cov=ubt --cov-report=term:skip-covered --cov-fail-under=70
 
       # The wheel force-includes the *prebuilt* SPA bundle at ubt/api/static
       # (pyproject.toml), so a `pip install`ed release serves whatever was
@@ -103,28 +127,6 @@ jobs:
             git diff --stat ubt/api/static
             exit 1
           fi
-
-      # The slow tier's synthetic PDF render e2e
-      # (tests/integration/test_synthetic_render_e2e.py) shells out to the
-      # external typst compiler, which `uv sync --extra dev` does not provide.
-      # Pin the release version and verify its official SHA-256 rather than
-      # trusting a mutable "latest"/tag download. The real-document corpus
-      # harnesses in the same tier skip without the gitignored documents, so
-      # this step stays seconds.
-      - name: Install typst (checksum-pinned) and CJK fonts
-        env:
-          TYPST_VERSION: "0.15.1"
-          TYPST_SHA256: "a6d077d0a95eed5a2eba715b2dae06be954f624ccbf85758a03f389ded33118c"
-        run: |
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends fonts-noto-cjk
-          archive="typst-x86_64-unknown-linux-musl.tar.xz"
-          curl --proto '=https' --tlsv1.2 -fsSL \
-            "https://github.com/typst/typst/releases/download/v${TYPST_VERSION}/${archive}" \
-            -o "/tmp/${archive}"
-          echo "${TYPST_SHA256}  /tmp/${archive}" | sha256sum -c -
-          tar -xJf "/tmp/${archive}" -C /tmp
-          sudo install "/tmp/typst-x86_64-unknown-linux-musl/typst" /usr/local/bin/typst
-          typst --version
 
       - name: Slow test tier (synthetic PDF render e2e)
         env:

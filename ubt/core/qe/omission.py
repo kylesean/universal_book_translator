@@ -222,6 +222,16 @@ _KNOWN_TRANSLATABLE_TERMS: dict[str, tuple[str, ...]] = {
     "microvm": ("微虚拟机", "虚拟机", "microvm"),
     "microvms": ("微虚拟机", "虚拟机", "microvms"),
     "ext4formatted": ("ext4", "格式化", "ext4 formatted"),
+    # Universally-expanded acronyms a competent translation renders into the
+    # target language instead of keeping (same class as the miner's stop list —
+    # 'US', 'UK' — rather than the author-attested pairs it mines). arXiv
+    # 2101.03961 b0110/b0133: 'the common NLP approach' -> '自然语言处理领域一种
+    # 常见的方法' is complete, and quarantining it for a missing literal 'NLP'
+    # held two correct blocks in the human queue. Keep this list to acronyms
+    # whose expansion is unambiguous across domains.
+    "nlp": ("自然语言处理", "自然语言"),
+    "ml": ("机器学习",),
+    "ai": ("人工智能",),
 }
 
 

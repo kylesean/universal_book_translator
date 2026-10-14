@@ -57,6 +57,10 @@ export function MissionControl() {
   const [totalBlocks, setTotalBlocks] = useState<number>(0)
   const [costUsd, setCostUsd] = useState<number>(0)
   const [avgQe, setAvgQe] = useState<number>(0)
+  // The engine sends 0.0 as the "nothing scored" sentinel under the heuristic
+  // QE engine; a measured average is never exactly 0 in practice (defect bands
+  // floor at 0.30), so 0 renders as "not measured" instead of a failing score.
+  const qeMeasured = avgQe > 0
   const [jobs, setJobs] = useState<JobSummary[]>([])
   const [resuming, setResuming] = useState(false)
   const [downloading, setDownloading] = useState(false)
@@ -127,7 +131,8 @@ export function MissionControl() {
         // log, not a counter echo. The counters stay on the line as the tail so
         // a frame without a message still reads as progress.
         const level: LogLevel = frame.error ? 'ERROR' : frame.status === 'failed' ? 'ERROR' : 'INFO'
-        const counters = `${frame.completed_blocks ?? 0}/${frame.total_blocks ?? 0} blocks · QE ${(frame.current_avg_qe ?? 0).toFixed(3)}`
+        const qePart = (frame.current_avg_qe ?? 0) > 0 ? `QE ${(frame.current_avg_qe ?? 0).toFixed(3)}` : 'QE not measured'
+        const counters = `${frame.completed_blocks ?? 0}/${frame.total_blocks ?? 0} blocks · ${qePart}`
         const text = frame.error
           ? `ERROR ${frame.error}`
           : frame.message
@@ -516,7 +521,7 @@ export function MissionControl() {
             {completedBlocks} <span className="text-xs text-[var(--ink-muted)] font-normal">/ {totalBlocks || '—'}</span>
           </div>
           <div className="text-xs text-[#15803d] font-mono mt-1.5 font-medium">
-            Avg QE {avgQe.toFixed(3)}
+            {qeMeasured ? `Avg QE ${avgQe.toFixed(3)}` : <span title="No semantic scoring ran (heuristic QE engine)">QE not measured</span>}
           </div>
         </div>
 

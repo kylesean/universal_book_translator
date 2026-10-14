@@ -180,3 +180,37 @@ def test_cjk_terminators_split_without_whitespace() -> None:
 
 def test_a_closing_quote_keeps_the_split() -> None:
     assert count_sentences('He said "Hi." Then left.') == 2
+
+
+# ---------------------------------------------------------------------------
+# Leading ordered-list markers are editorial structure, not sentences
+# (arXiv 2101.03961 b0089): the "3 sentences" were marker + 2 sentences, and a
+# complete translation of both was quarantined 1-vs-3.
+# ---------------------------------------------------------------------------
+
+
+def test_a_leading_list_marker_does_not_count_as_a_sentence() -> None:
+    assert (
+        count_sentences(
+            "2. A potential source of confusion: p i ( x ) is the probability of routing"
+            " token x to expert i . P i is the probability fraction across the batch B ."
+        )
+        == 2
+    )
+
+
+def test_multi_line_list_markers_strip_per_line() -> None:
+    # Each line's marker goes; the real sentences stay.
+    text = "1. One point. More detail.\n2. Two point.\n3. Three point."
+    assert count_sentences(text) == 4
+
+
+def test_a_marker_only_line_leaves_no_fragment() -> None:
+    assert count_sentences("9. Conclusion") == 1
+    assert count_sentences("A. Switch for Attention") == 1
+
+
+def test_mid_line_numbers_are_never_stripped() -> None:
+    # The strip is line-start only: 'Table 9. 7 Our baselines' keeps both
+    # fragments (the footnote-exemption handles the marker, not this counter).
+    assert count_sentences("summarized in Table 9. 7 Our baselines differ") == 2

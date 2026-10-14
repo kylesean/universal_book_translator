@@ -506,6 +506,12 @@ class LedgerJobsMixin(_LedgerHost):
                 "needs_human": row["needs_human"] or 0,
                 "blocked_human": row["blocked_human"] or 0,
                 "avg_qe_score": round(row["avg_score"], 4) if row["avg_score"] is not None else 0.0,
+                # The avg above is a 0.0 SENTINEL when nothing was scored
+                # (heuristic QE engine: skips and FastPass passes never reach a
+                # scorer). Consumers must read this flag before displaying the
+                # number — the status table and CLI summary both do — or a
+                # placeholder zero reads as a measured failing score.
+                "qe_measured": row["avg_score"] is not None,
                 "bottom_15_avg_qe": b15_avg,
             }
 

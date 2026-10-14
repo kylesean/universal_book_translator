@@ -406,3 +406,34 @@ def test_a_drifted_alias_outside_any_compound_is_still_enforced() -> None:
     out, records = _enforce(glossary, "我们使用深度学习法来建模。")
     assert out == "我们使用深度学习来建模。"
     assert [record.original_span for record in records] == ["深度学习法"]
+
+
+# ---------------------------------------------------------------------------
+# Bidirectional CJK<->Latin space tolerance in term matching (2026-10-14):
+# the canonical form now carries the space (clean_bible_entry), but cached
+# bibles and user glossaries still hold unspaced renderings — and a spaced
+# canonical form must accept an unspaced target too. Either direction must
+# match both spellings or old sheets and new text disagree.
+# ---------------------------------------------------------------------------
+
+
+def test_a_spaced_canonical_term_matches_an_unspaced_target() -> None:
+    hits = find_term_occurrences(
+        "切换Transformer 是一个稀疏模型", "切换 Transformer", allow_cjk_latin_space=True
+    )
+    assert hits
+
+
+def test_an_unspaced_canonical_term_matches_a_spaced_target() -> None:
+    hits = find_term_occurrences(
+        "切换 Transformer 是一个稀疏模型", "切换Transformer", allow_cjk_latin_space=True
+    )
+    assert hits
+
+
+def test_a_latin_run_interior_space_is_never_optional() -> None:
+    # The tolerance lives only at script boundaries: "New York" keeps its
+    # required space, and a glued "NewYork" is not a match for it.
+    assert find_term_occurrences("New York city", "New York")
+    assert not find_term_occurrences("NewYork city", "New York")
+    assert find_term_occurrences("NewYork city", "NewYork")

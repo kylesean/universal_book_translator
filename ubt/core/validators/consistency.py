@@ -2,6 +2,7 @@
 
 import re
 from collections import Counter
+from contextlib import suppress
 from decimal import Decimal
 from typing import Any
 
@@ -221,7 +222,15 @@ def _expand_scientific_not(text: str) -> str:
 
 # PDF extraction commonly puts spaces around decimal points ('19 . 6', '0 . 007', '+ 24 . 7').
 # Collapse them so they tokenize as single decimals instead of separate integers.
-_SPACED_DECIMAL_RE = re.compile(r"(?<![\w.])(\d+)\s*\.\s*(\d+)(?![\w.])")
+#: PDF extraction commonly puts spaces around decimal points ('19 . 6', '0 . 007', '+ 24 . 7').
+#: Collapse them so they tokenize as single decimals instead of separate integers.
+#: The negative lookaheads guard the one shape a collapse corrupts: a sentence that
+#: ENDS on a number ("…Table 9.") followed by a superscripted footnote marker
+#: ("7 Our baselines…") — "9. 7 Our" must stay two tokens, or the phantom decimal
+#: "9.7" quarantines a correct translation (arXiv 2101.03961 b0135). A real
+#: decimal's continuation (unit, comma, more digits, lowercase word) never looks
+#: like a capital starting a new sentence.
+_SPACED_DECIMAL_RE = re.compile(r"(?<![\w.])(\d+)\s*\.\s*(\d+)(?![\w.])(?!\s+[A-Z])")
 
 
 def _collapse_spaced_decimals(text: str) -> str:
@@ -340,6 +349,25 @@ def normalize_for_numeric_matching(text: str, lang: str = "zh") -> str:
 _RANGE_DELIMITERS = re.compile(r"[-–—/]")
 _GLUED_PAGE_RANGE_SOURCE_RE = re.compile(r"\bpp\.?\s*(?P<digits>\d{4})\b", re.IGNORECASE)
 _FLATTENED_FOOTNOTE_RE = re.compile(r"(?<=\w)\s+(?P<marker>[1-9])\s+(?=[.,])")
+#: A superscripted footnote marker after a sentence end, before a capitalized new
+#: sentence: "…by over 0.061. 10 To contextualize…" (arXiv 2101.03961 b0190).
+#: The old single-digit/[.,] shape missed the multi-digit marker and the
+#: capital-letter continuation. The capital requirement is the guard: a real
+#: quantity is followed by a unit, a comma, or a lowercase continuation — never
+#: by a new English sentence.
+_FLATTENED_FOOTNOTE_SENTENCE_RE = re.compile(r"[.。]\s+(?P<marker>\d{1,2})\s+(?=[A-Z])")
+#: A superscripted exponent flattened by PDF extraction into two adjacent bare
+#: tokens: "2^20 (1,048,576)" -> "2 20 (1,048,576)". Guarded so ordinary
+#: adjacent numbers ("pages 4 5") never match: the pair must sit right before
+#: a parenthetical magnitude restatement, OR be the batch-size shape
+#: ("<base> 20 tokens|steps|examples|samples") whose exponent is the universal
+#: 2^20 batch constant. The paren branch is the arXiv restated-value form; the
+#: keyword branch is what remains when the restatement lives in a neighboring
+#: block.
+_FLATTENED_SUPERSCRIPT_PAIR_RE = re.compile(
+    r"(?<![\w.])(\d)\s+(\d{1,2})(?![\w.])\s*(?=[(（]\s*[\d,.\s]+[)）])"
+    r"|(?<![\w.])(\d)\s+20(?![\w.])\s*(?=tokens?\b|steps?\b|examples?\b|samples?\b)"
+)
 # A leading ordered-list marker ("(1) ...", "1. ...", "1) ...") is editorial
 # structure, not a numeric fact: the translator drops it and the renderer
 # restores the marker, so the numeric check must not read it as a lost number.
@@ -919,6 +947,7 @@ def _invented_target_numbers(
     ambiguous_readings: dict[str, set[str]],
     source_compounds: list[tuple[list[str], str]],
     target_original: str = "",
+    flattened_pair_authorized: set[str] | None = None,
 ) -> list[str]:
     """Target digit tokens the source cannot account for — fabricated facts.
 
@@ -938,6 +967,11 @@ def _invented_target_numbers(
     for values in src_scales.values():
         authorized |= values
     authorized |= set(src_scales)
+    # A flattened superscript pair's readings are values the source *did*
+    # state, in a shape the extraction mangled ("2^20" read as "2 20"): the
+    # target may re-fuse the digits ("220") or restate the power ("1048576")
+    # without that reading counting as invented.
+    authorized |= set(flattened_pair_authorized or ())
     # The target's own indefinite article ('一种' -> '1种') is grammar the
     # normalizer synthesized, not a number the translation stated. It is excused
     # *per occurrence*, never by adding '1' to the authorized set: authorizing
@@ -1160,9 +1194,57 @@ class NumericConsistencyValidator(ContentValidator):
         # spaced single digit before punctuation ("plugins 5 ,"). Such a
         # reference is editorial metadata, not a numeric fact to translate.
         exempt_spans.extend((m.start(), m.end()) for m in _FLATTENED_FOOTNOTE_RE.finditer(src_view))
+        # The same marker after a sentence end, before a capitalized sentence
+        # ("…0.061. 10 To contextualize…"): still editorial metadata. Span is
+        # the marker only — the preceding period belongs to the sentence, and
+        # exempting it would change nothing (only digit tokens are matched).
+        for m in _FLATTENED_FOOTNOTE_SENTENCE_RE.finditer(src_view):
+            exempt_spans.append((m.start("marker"), m.end("marker")))
+        # The same extraction damage, one size larger: a superscripted
+        # *exponent* flattens into two adjacent bare tokens ("2^20" -> "2 20",
+        # arXiv 2101.03961 §4). The target legitimately re-fuses them ("220")
+        # or restates the value ("1,048,576"), neither of which shares a token
+        # with the flattened pair. NOT an exemption span: the halves stay
+        # ordinary source numbers (a target that drops one half still fails);
+        # only their *satisfaction* is widened to the fused/power readings via
+        # ``flattened_pair_readings`` in ``_bare_satisfied`` below, and only
+        # the fused shapes are authorized against the invention check.
+        flattened_pair_spans = [m.span() for m in _FLATTENED_SUPERSCRIPT_PAIR_RE.finditer(src_view)]
         exempt_spans.extend(
             (m.start(), m.end()) for m in _LEADING_LIST_MARKER_RE.finditer(src_view)
         )
+
+        #: Values the target may use to satisfy a flattened superscript pair:
+        #: the fused digits ("2 20" -> "220") and the base**exponent product
+        #: ("2 20" -> 1048576), plus the plain halves (a target that kept them
+        #: apart is correct too). KEYED BY THE FUSED TOKEN SHAPE, not by the
+        #: halves: authorizing '2'/'20' outright would let a target drop one
+        #: half and keep the other. The halves stay ordinary source numbers —
+        #: a target must state the fused form or the power value (both halves
+        #: re-fused into one token) or both halves to clear the pair.
+        flattened_pair_readings: dict[str, set[str]] = {}
+        flattened_pair_authorized: set[str] = set()
+        for s, e in flattened_pair_spans:
+            pair_text = src_view[s:e]
+            nums = [t for t in _NUM.findall(pair_text) if t]
+            if len(nums) != 2:
+                continue
+            base, exp = nums
+            pair_readings: set[str] = {f"{base}{exp}"}
+            # The power value the pair denotes ("2 20" -> 1048576). A target
+            # that restates the true value instead of re-fusing the digits
+            # clears the pair the same way. Bounded by the span shape (single
+            # digit base, <=2-digit exponent), so the exponentiation is tiny.
+            with suppress(ValueError, OverflowError):
+                pair_readings.add(str(int(base) ** int(exp)))
+            flattened_pair_authorized |= pair_readings
+            for num in (base, exp):
+                # A target keeping the halves apart satisfies each half through
+                # its own ordinary occurrence; the pair readings additionally
+                # accept the fused forms. The half itself is NOT authorized on
+                # the target side (no invention risk: it IS a source number),
+                # so only the fused shapes ride into the invention set.
+                flattened_pair_readings.setdefault(num, set()).update(pair_readings)
 
         exempt_numbers: set[str] = set()
         if exempt_spans:
@@ -1242,6 +1324,11 @@ class NumericConsistencyValidator(ContentValidator):
             # no digit string, so the textual check above cannot see it.
             if num in tgt_values:
                 return True
+            # A flattened superscript pair ("2 20") is satisfied when the
+            # target states the fused digits ("220") or the true power value
+            # ("1048576") — a re-fusion of the pair, not a new fact.
+            if (flattened_pair_readings.get(num) or set()) & tgt_values:
+                return True
             # A thousands-dot/three-decimals token ('1.500') is satisfied by
             # either of its two readings, not only the stripped integer form.
             return bool((ambiguous_readings.get(num) or set()) & tgt_values)
@@ -1302,6 +1389,7 @@ class NumericConsistencyValidator(ContentValidator):
             ambiguous_readings=ambiguous_readings,
             source_compounds=source_compounds,
             target_original=translated,
+            flattened_pair_authorized=flattened_pair_authorized,
         )
         if invented_numbers:
             return ValidationResult.failure(

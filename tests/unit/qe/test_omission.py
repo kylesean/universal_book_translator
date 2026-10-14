@@ -469,3 +469,47 @@ def test_a_translated_range_delimiter_does_not_deflate_recall() -> None:
     decision = OmissionGate().evaluate(src, tgt)
     assert decision.passed is True
     assert decision.metrics.verbatim_chrf_recall >= 0.7
+
+
+# ---------------------------------------------------------------------------
+# Universally-expanded acronyms (arXiv 2101.03961 b0110/b0133): 'the common NLP
+# approach' -> '自然语言处理领域一种常见的方法' is a complete translation; the
+# literal-acronym demand quarantined two correct blocks.
+# ---------------------------------------------------------------------------
+
+
+def test_a_universally_expanded_acronym_counts_as_carried() -> None:
+    gate = OmissionGate(target_lang="zh")
+    decision = gate.evaluate(
+        "Our paper considers the common NLP approach of pre-training on a large corpus"
+        " followed by fine-tuning on smaller downstream tasks such as summarization or"
+        " question answering. One issue that naturally arises is overfitting. During"
+        " fine-tuning of standard Transformers, the authors use dropout at each layer"
+        " to prevent overfitting. Our models have significantly more parameters and"
+        " still regularize well.",
+        "本文探讨了自然语言处理领域一种常见的方法：先在大语料库上进行预训练，再针对规模较小的"
+        "下游任务进行微调。一个自然产生的问题是过拟合。在标准 Transformer 模型的微调阶段，"
+        "作者在每一层都采用了 dropout 以防止过拟合。我们的模型参数显著更多，但仍然正则化良好。",
+    )
+    assert decision.passed, decision.reason
+
+
+def test_a_domain_acronym_without_an_expansion_is_still_demanded() -> None:
+    # A paper-internal acronym (no universal expansion) must still survive:
+    # the fix does not loosen the channel for genuinely identifier-shaped terms.
+    gate = OmissionGate(target_lang="zh")
+    decision = gate.evaluate(
+        "The MHA mechanism and the FFN block both consume parameters. The MHA path"
+        " routes across heads while the FFN path transforms per position. Both paths"
+        " are measured. The benchmark covers both paths across scales.",
+        "MHA 机制与 FFN 块都会消耗参数。前者跨头路由，后者逐位置变换。基准测试覆盖了两个路径。",
+    )
+    # Both acronyms kept → passes for the right reason; a dropped one must fail.
+    assert decision.passed
+    dropped = gate.evaluate(
+        "The MHA mechanism and the FFN block both consume parameters. The MHA path"
+        " routes across heads while the FFN path transforms per position. Both paths"
+        " are measured. The benchmark covers both paths across scales.",
+        "FFN 块会消耗参数。该路径逐位置变换。基准测试覆盖了该路径。",
+    )
+    assert not dropped.passed

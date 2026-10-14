@@ -165,3 +165,67 @@ def test_merge_keeps_distinct_sources_separate() -> None:
         ]
     )
     assert [e.source for e in merged] == ["Bar", "Foo"]
+
+
+# ---------------------------------------------------------------------------
+# Canonical glossary typography (arXiv 2101.03961 autopsy): a rendering mined
+# without the CJK<->Latin space ("切换Transformer") fought the document's own
+# Pangu-spaced convention ("切换 Transformer") for the whole book — three
+# blocks burned repair rounds for "drifting" away from a form the exporter
+# itself would rewrite.
+# ---------------------------------------------------------------------------
+
+
+def test_clean_bible_entry_normalizes_cjk_latin_boundary_spacing() -> None:
+    entry = clean_bible_entry(source="Switch Transformer", translation="切换Transformer")
+    assert entry is not None
+    assert entry.translation == "切换 Transformer"
+
+
+def test_clean_bible_entry_normalizes_both_boundaries_of_a_mixed_rendering() -> None:
+    entry = clean_bible_entry(source="PagedAttention", translation="分页注意力PagedAttention内核")
+    assert entry is not None
+    assert entry.translation == "分页注意力 PagedAttention 内核"
+
+
+def test_clean_bible_entry_never_spaces_full_width_punctuation() -> None:
+    # 多头注意力（MHA） keeps its full-width bracket glued, matching the
+    # Pangu rules the export stage applies (half-width brackets DO space).
+    glued = clean_bible_entry(source="MHA", translation="多头注意力（MHA）")
+    assert glued is not None
+    assert glued.translation == "多头注意力（MHA）"
+    spaced = clean_bible_entry(source="MHA", translation="多头注意力(MHA)层")
+    assert spaced is not None
+    assert spaced.translation == "多头注意力 (MHA) 层"
+
+
+def test_clean_bible_entry_leaves_latin_latin_spacing_alone() -> None:
+    entry = clean_bible_entry(source="New York", translation="New York")
+    assert entry is not None
+    assert entry.translation == "New York"
+
+
+def test_clean_bible_entry_preserves_an_already_spaced_boundary() -> None:
+    entry = clean_bible_entry(source="Switch Transformer", translation="切换 Transformer")
+    assert entry is not None
+    assert entry.translation == "切换 Transformer"  # not doubled
+
+
+def test_the_space_normalized_entry_still_catches_a_real_drift() -> None:
+    # End to end: the canonical spaced form accepts both spellings on the
+    # target side (detection is space-tolerant) but a target that keeps the
+    # English leak is still drift.
+    from ubt.core.validators.consistency import GlossaryConsistencyValidator
+
+    entry = clean_bible_entry(source="Switch Transformer", translation="切换Transformer")
+    assert entry is not None
+    validator = GlossaryConsistencyValidator(glossary=[entry.model_dump()])
+    assert validator.validate(
+        "Is Switch Transformer better?", "切换 Transformer 的性能更好"
+    ).is_valid
+    assert validator.validate(
+        "Is Switch Transformer better?", "切换Transformer 的性能更好"
+    ).is_valid
+    assert not validator.validate(
+        "Is Switch Transformer better?", "Switch Transformer 性能更好"
+    ).is_valid

@@ -364,8 +364,18 @@ def job_status(
         table.add_row("Processed (terminal states)", f"{processed} ({pct}%)")
         table.add_row("Repaired Blocks", str(stats.get("repaired", 0)))
         table.add_row("Failed Blocks", str(stats.get("failed", 0)))
-        table.add_row("Average MTQE Score", str(stats.get("avg_qe_score", 0.0)))
-        table.add_row("Bottom 15% MTQE Score", str(stats.get("bottom_15_avg_qe", 0.0)))
+        # A 0.0 avg is the "nothing scored" sentinel under the heuristic QE
+        # engine, not a failing measurement — say which one it is instead of
+        # printing a number that reads as quality data.
+        qe_measured = bool(stats.get("qe_measured"))
+        table.add_row(
+            "Average MTQE Score",
+            str(stats.get("avg_qe_score", 0.0)) if qe_measured else "not measured (heuristic QE)",
+        )
+        table.add_row(
+            "Bottom 15% MTQE Score",
+            str(stats.get("bottom_15_avg_qe", 0.0)) if qe_measured else "not measured",
+        )
         if visual_summary is not None:
             table.add_row(
                 "Visual Gate",

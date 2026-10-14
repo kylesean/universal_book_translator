@@ -143,16 +143,41 @@ def _term_pattern(term: str) -> str:
     CJK/Latin spacing inserts a space the term itself does not carry
     (``CPU调度`` renders as ``CPU 调度``), so an exact match reports a correctly
     rendered term as drifted. Whitespace is allowed only where the term crosses
-    the CJK/Latin boundary, never inside a Latin run.
+    the CJK/Latin boundary, never inside a Latin run — and a space the term
+    *does* carry at such a boundary folds into the same optional class, so the
+    canonical ``切换 Transformer`` and the unspaced ``切换Transformer`` match
+    each other's texts. Either direction must accept both spellings: the
+    enforcer's canonical form is normalized to carry the space
+    (:func:`normalize_glossary_spacing`), but old caches and user glossaries
+    still hold the unspaced shape.
     """
     parts: list[str] = []
     previous = ""
+    pending_space = False
     for ch in term:
-        if previous and is_cjk_char(previous) != is_cjk_char(ch):
+        if ch in " \t":
+            # Whitespace inside the term: remember it; if the next char is on
+            # the other side of a script boundary the boundary class below
+            # already allows it, and inside a Latin run ("New York") the
+            # literal space is required, so re-emit it there.
+            pending_space = True
+            continue
+        crossing = previous and is_cjk_char(previous) != is_cjk_char(ch)
+        if crossing or (pending_space and previous):
             # Horizontal whitespace only: ``\s`` also matches newlines, which
             # let a term's halves match across a line or paragraph break
-            # ("CPU\n调度器" counting as "CPU调度").
-            parts.append(r"[ \t]*")
+            # ("CPU\n调度器" counting as "CPU调度"). At a genuine script
+            # crossing the class allows the space the typographer inserts;
+            # at a same-script space ("New York") pending_space must NOT
+            # collapse the required separator — emit the literal space back.
+            if crossing or is_cjk_char(ch) or (previous and is_cjk_char(previous)):
+                parts.append(r"[ \t]*")
+            else:
+                parts.append(" ")
+            pending_space = False
+        elif pending_space and not previous:
+            parts.append(" ")
+            pending_space = False
         parts.append(re.escape(ch))
         previous = ch
     return "".join(parts)

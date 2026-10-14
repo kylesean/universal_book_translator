@@ -28,6 +28,17 @@ _HAS_DIGIT_RE = re.compile(r"\d")
 # omission gate. The adjacency test is scoped to CJK/East-Asian ranges, not
 # "any non-ASCII byte", because accented Latin (Café!Go) is whitespace-delimited
 # and must not split on '!'.
+#
+# A leading ordered-list marker ("2. A potential source…") is editorial
+# structure, not a sentence: counting it inflates the source count and
+# quarantines a complete translation of every numbered finding list
+# (arXiv 2101.03961 b0089: "3 sentences" were marker + 2 sentences; the target
+# rendered both and still failed 1-vs-3). Split lines keep their fragments —
+# the marker is stripped only at line starts, never mid-line.
+_LEADING_LIST_MARKER_SPLIT_RE = re.compile(
+    r"^[ \t]*(?:\(\s*\d{1,3}\s*\)|（\s*\d{1,3}\s*）|\d{1,3}\s*[.)、]|[A-Z]\.\s)[ \t]*",
+    re.MULTILINE,
+)
 _CJK_ADJ = f"[{CJK_WIDE_CLASS}]"
 _SENT_END_RE = re.compile(
     r"[。！？؟؛۔]"
@@ -315,6 +326,14 @@ def is_verbatim_carryover(term: str) -> bool:
 
 
 _SPACED_DECIMAL_RE = re.compile(r"(?<=\d)\s*\.\s*(?=\d)")
+# The same collapse corrupts a sentence that ENDS on a number followed by a
+# superscripted footnote marker ("Table 9. 7 Our baselines" reads as the
+# phantom decimal '9.7' — arXiv 2101.03961 b0135). A real decimal is never
+# followed by a capital starting a new English sentence, so the collapse is
+# withheld when the second number's continuation looks like a new sentence
+# (whitespace + capital). The second digit is re-emitted — only the spaces
+# around the dot fold.
+_SPACED_DECIMAL_SENTENCE_GUARD_RE = re.compile(r"(?<=\d)\s*\.\s*(\d)(?!\s*[A-Z])")
 
 
 def count_sentences(text: str) -> int:
@@ -327,9 +346,14 @@ def count_sentences(text: str) -> int:
     ('No. 5', 'Ref. [3]'), so an ordinary word that merely looks abbreviated
     ('lab.', 'max.') still ends its sentence and is counted. Spaced decimals
     from PDF extraction ('19 . 6%') are collapsed to '19.6%' so the dot is not
-    falsely matched as terminal punctuation followed by space.
+    falsely matched as terminal punctuation followed by space — but a sentence
+    that ends on a number before a footnote marker ("Table 9. 7 Our…") is NOT
+    collapsed (the capital continuation is a new sentence, not a decimal).
+    A leading ordered-list marker ("2. A potential source…") is stripped per
+    line: it is editorial structure, not a sentence.
     """
-    cleaned = _SPACED_DECIMAL_RE.sub(".", text)
+    cleaned = _SPACED_DECIMAL_SENTENCE_GUARD_RE.sub(r".\1", text)
+    cleaned = _LEADING_LIST_MARKER_SPLIT_RE.sub("", cleaned)
     masked = _REF_ABBREV_RE.sub(lambda m: m.group(0)[:-1] + _ABBREV_DOT, cleaned)
     masked = _LATIN_ABBREV_RE.sub(lambda m: m.group(0)[:-1] + _ABBREV_DOT, masked)
     masked = _INITIALISM_ABBREV_RE.sub(lambda m: m.group(0)[:-1] + _ABBREV_DOT, masked)

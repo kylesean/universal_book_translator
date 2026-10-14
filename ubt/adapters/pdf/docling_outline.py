@@ -146,8 +146,30 @@ def _extract_document_index_blocks(
     return out
 
 
-def _toc_sort_key(block: IRBlock) -> tuple[int, int]:
-    """Reading-order key for a synthesized TOC row: ``(page, stable)``.
+#: A heading's leading label: ``4``, ``4.1``, ``A``, ``C`` (appendix letters).
+#: Section rows of one paper carry these consistently; prose lines do not.
+_TOC_LABEL_RE = re.compile(r"^(\d+(?:\.\d+)*|[A-Z])(?:\.?\s+|\.)")
+
+
+def _toc_label(title: str) -> tuple[int, tuple[int, ...], str]:
+    """Parse a TOC row's leading label into a sort-friendly shape.
+
+    ``("4 Downstream Results")`` -> ``(0, (4,), "")``; ``4.1`` -> ``(0, (4, 1), "")``;
+    appendix ``C`` -> ``(1, (), "C")``. Unlabelled rows sort by title, after
+    nothing in particular — they are the rare case.
+    """
+    m = _TOC_LABEL_RE.match(title.strip())
+    if not m:
+        return (2, (), "")
+    label = m.group(1)
+    if label[0].isdigit():
+        parts = tuple(int(p) for p in label.split("."))
+        return (0, parts, "")
+    return (1, (), label)
+
+
+def _toc_sort_key(block: IRBlock) -> tuple[int, int, tuple[int, ...], str, str]:
+    """Reading-order key for a synthesized TOC row: ``(page, depth, label, stable)``.
 
     The page is the row's *destination*, not the page it was read from: both
     sources store the destination in ``toc_page`` (Docling parses the printed
@@ -156,9 +178,21 @@ def _toc_sort_key(block: IRBlock) -> tuple[int, int]:
 
     Rows whose destination is not a number sort last, in insertion order — a
     malformed entry must not be reordered to the front on a guess.
+
+    Rows sharing a destination page are ordered by their leading label instead
+    of insertion order: ``4 Downstream Results`` and ``4.1 Fine-Tuning`` both
+    point at page 14 of the arXiv 2101.03961 reference paper, and Docling reads
+    ``4.1`` first, so the stable sort delivered a contents page where the
+    section opened *above* the chapter that contains it. The label puts the
+    shorter (parent) number first; on a tie (two rows with the same label —
+    should not happen) the source order still decides.
     """
     raw = str(block.provenance.toc_page or "").strip()
-    return (int(raw), 0) if raw.isdigit() else (sys.maxsize, 0)
+    if not raw.isdigit():
+        return (sys.maxsize, 0, (), "", "")
+    depth, parts, letter = _toc_label(block.source_text or "")
+    title = (block.source_text or "").strip().lower()
+    return (int(raw), depth, parts, letter, title)
 
 
 def _extract_outline_only_blocks(

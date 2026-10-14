@@ -715,3 +715,114 @@ def test_two_articles_excuse_two_ones() -> None:
     # Each occurrence of the article is excused, so two articles cover two '1's.
     res = _check("It is a method and a dataset.", "这是一种方法，也是一个数据集。")
     assert res.is_valid, res.message
+
+
+# ---------------------------------------------------------------------------
+# arXiv 2101.03961 regression batch: number localization and flattened
+# superscript pairs (2026-10-14 real-run autopsy).
+# ---------------------------------------------------------------------------
+
+
+def test_chinese_magnitude_words_satisfy_the_source_number() -> None:
+    # b0135: "223M" -> "2.23 亿" and "739M" -> "7.39 亿" are correct zh
+    # restatements; the literal-token check alone quarantined them.
+    res = _check(
+        "the highly-tuned 223M parameter T5-Base model and the 739M parameter T5-Large model",
+        "高度优化的 2.23 亿参数 T5-Base 模型以及 7.39 亿参数的 T5-Large 模型",
+    )
+    assert res.is_valid, res.message
+
+
+def test_wan_scaled_counts_pass() -> None:
+    # b0190: "250k steps" -> "25 万步", b0155: "1M steps" -> "100 万步".
+    for src, tgt in (
+        (
+            "After 250k steps, we find both variants improve",
+            "在 25 万步训练后，我们发现两种变体均有提升",
+        ),
+        ("pre-training both versions for 1M steps", "将两种模型均预训练 100 万步后"),
+        ("550k steps on a revised C4 data set", "在修订后的 C4 数据集上进行 55 万步训练"),
+    ):
+        res = _check(src, tgt)
+        assert res.is_valid, (src, res.message)
+
+
+def test_a_flattened_superscript_pair_is_satisfied_by_the_fused_form() -> None:
+    # b0137/b0141: "2^20" flattened by extraction into "2 20"; the target
+    # legitimately re-fuses the digits ("220") or restates the value
+    # ("1,048,576"). Neither shares a token with the flattened pair.
+    for tgt in (
+        "我们以每批 220（1,048,576）个词元进行预训练",
+        "我们以每批 1,048,576 个词元进行预训练",
+    ):
+        res = _check("we pre-train with 2 20 tokens per batch", tgt)
+        assert res.is_valid, (tgt, res.message)
+
+
+def test_a_flattened_pair_value_is_not_counted_as_invented() -> None:
+    # The fused reading must also clear the invention check (the complement
+    # direction): '220' is a re-fusion of source digits, not a new fact.
+    res = _check("pre-trained with 2 20 tokens per batch", "每批 220 个词元进行预训练")
+    assert res.is_valid, res.message
+
+
+def test_dropping_one_half_of_a_flattened_pair_still_fails() -> None:
+    # The pair is satisfied as a pair, not licensed token-by-token: a target
+    # that keeps only one half is a dropped number.
+    for tgt in ("每批 20 个词元", "每批 2 个词元"):
+        res = _check("we pre-train with 2 20 tokens per batch", tgt)
+        assert not res.is_valid, tgt
+        assert "Missing numeric tokens" in (res.message or "")
+
+
+def test_an_ordinary_adjacent_number_pair_is_not_pair_exempt() -> None:
+    # "pages 4 5" / "5 10 items" never match the flattened-pair shape, so a
+    # genuinely dropped number beside another is still caught.
+    res = _check("the runs cover pages 4 5 and the appendix", "运行覆盖了第 4 页和附录")
+    assert not res.is_valid
+    assert "5" in (res.message or "")
+
+
+def test_a_genuinely_changed_number_still_fails() -> None:
+    # All the loosening above must not weaken the base contract.
+    for src, tgt in (
+        ("a batch of 512 tokens", "一批 256 个词元"),
+        ("in 2019 the model grew", "在 2020 年模型增长"),
+    ):
+        res = _check(src, tgt)
+        assert not res.is_valid, (src, tgt)
+
+
+def test_a_sentence_final_number_before_a_footnote_marker_is_not_a_decimal() -> None:
+    # b0135: "Table 9. 7 Our baselines…" — the spaced-decimal collapse fused
+    # '9. 7' into the phantom decimal '9.7' and quarantined a correct
+    # translation. The capital continuation is a new sentence, not a decimal.
+    res = _check(
+        "which is summarized in Table 9. 7 Our baselines differ slightly from those",
+        "具体细节见第 9 表。7 我们的基线模型略有不同",
+    )
+    assert res.is_valid, res.message
+
+
+def test_a_multi_digit_footnote_marker_after_a_sentence_passes() -> None:
+    # b0190: "…by over 0.061. 10 To contextualize…" — the marker is editorial
+    # metadata whatever its width; the translation drops it, as designed.
+    res = _check(
+        "we find the negative log perplexity to improve by over 0.061. 10 To"
+        " contextualize the significance of this gap, we note that the baseline"
+        " requires far more steps to reach the same quality, and the gap widens as"
+        " training progresses. The second variant improves further. Overall the"
+        " trend holds across settings and the comparison stays favorable.",
+        "我们发现负对数困惑度的优势超过 0.061。为说明这一差距的重要性，我们注意到基线"
+        "模型需要多得多的步数才能达到相同质量，且差距随训练持续扩大。第二个变体进一步提升。"
+        "总体趋势在各种设置下保持不变，比较结果持续占优。",
+    )
+    assert res.is_valid, res.message
+
+
+def test_a_real_spaced_decimal_still_collapses() -> None:
+    # The guard must not un-collapse genuine decimals ('19 . 6' -> '19.6').
+    res = _check("the dose was 19 . 6 mg per batch", "每批剂量为 19.6 mg")
+    assert res.is_valid, res.message
+    res = _check("the dose was 19 . 6 mg per batch", "每批剂量为 19 mg")
+    assert not res.is_valid

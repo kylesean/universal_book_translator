@@ -29,6 +29,53 @@ class BookBible(BaseModel):
     system_instruction: str = ""
 
 
+def normalize_glossary_spacing(translation: str, source: str = "") -> str:
+    """Insert one half-width space at every CJK<->Latin/digit boundary of a rendering.
+
+    The canonical form the glossary enforces must match the typography the
+    pipeline itself ships: the export stage applies Pangu spacing
+    (:func:`ubt.core.cleaners.cjk_spacing.apply_pangu_spacing`) to every
+    target, so a rendering mined without the space ("切换Transformer") fights
+    the document's own convention ("切换 Transformer") for the rest of the
+    book — measured on the arXiv 2101.03961 run: the unspaced entry sent three
+    blocks into repair loops for "drifting" away from a form the enforcer's
+    own exporter would rewrite. Matching is space-tolerant both ways (see
+    ``_term_pattern``), so normalizing here only aligns the *canonical
+    surface* shown to models and written by the enforcer. Latin-Latin
+    spacing ("New York") is never touched; spaces already present at a
+    boundary are preserved, not doubled.
+    """
+    tr = translation or ""
+    if not tr or not source:
+        return tr
+    # Only normalize when the source term is Latin-script: a CJK or Cyrillic
+    # source never implies an en->zh typographic convention.
+    from ubt.core.validators.glossary_enforcer import is_cjk_char
+
+    if is_cjk_char(source[0]) or is_cjk_char(source[-1]):
+        return tr
+
+    out: list[str] = []
+    # Boundary pairs the export stage's Pangu rules also space: CJK<->Latin
+    # letter/digit, and CJK<->half-width bracket (式(3.1) -> 式 (3.1)). A space
+    # is never inserted against full-width punctuation — "多头注意力（MHA）"
+    # stays glued, matching apply_pangu_spacing exactly.
+    _latin = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+    _open_half = "([{"
+    _close_half = ")]}"
+    for ch in tr:
+        prev = out[-1] if out else ""
+        if not prev or prev in " \t" or ch in " \t" or is_cjk_char(prev) == is_cjk_char(ch):
+            out.append(ch)
+            continue
+        prev_half = prev in _latin or prev in _close_half
+        ch_half = ch in _latin or ch in _open_half
+        if prev_half or ch_half:
+            out.append(" ")
+        out.append(ch)
+    return "".join(out)
+
+
 def clean_bible_entry(
     source: str,
     translation: str,
@@ -51,6 +98,12 @@ def clean_bible_entry(
             return None
     elif len(src.split()) > 4:
         return None
+
+    # Canonical typography: the enforcer writes this string into targets, so
+    # it must carry the same CJK<->Latin spacing the export stage ships
+    # (Pangu). Applied after the length guards so a spaced rendering can
+    # never push a marginal entry over the cap retroactively.
+    tr = normalize_glossary_spacing(tr, source=src)
 
     cleaned_aliases: list[str] = []
     if aliases:

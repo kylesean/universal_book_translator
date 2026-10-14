@@ -28,6 +28,7 @@ from ubt.core.qe.fast_pass import (
     _has_repeated_line_run,
     _math_spans_equivalent,
     _max_repeated_line_run,
+    _missing_heading_label,
     _normalize_math_body,
     _strip_verbatim_term,
     grid_columns,
@@ -448,3 +449,148 @@ def test_ordinary_prose_is_not_a_leak() -> None:
         block_type="narrative",
     )
     assert decision.passed
+
+
+# ---------------------------------------------------------------------------
+# arXiv 2101.03961 regression batch (real-run quarantine autopsy, 2026-10-14):
+# four gate families quarantined correct work or missed real defects on that
+# paper. Each test below pins one block from the run.
+# ---------------------------------------------------------------------------
+
+
+def test_a_fully_translated_benchmark_table_passes_the_density_gate() -> None:
+    # b0142: the body is numerals and model names; only the header cells are
+    # translatable, so the prose floor (0.25) read the correct table as
+    # untranslated residue. Table blocks hold a near-zero identity floor —
+    # an untouched table still fails (residue pure Latin, ratio 0.0).
+    src = (
+        "| Model | GLUE | SQuAD | SuperGLUE | Winogrande (XL) |\n"
+        "|---|---|---|---|---|\n"
+        "| T5-Base | 84.3 | 85.5 | 75.1 | 66.6 |\n"
+        "| Switch-Base | 86.7 | 87.2 | 79.5 | 73.3 |"
+    )
+    tgt = src.replace("| Model |", "| 模型 |")
+    decision = FastPassFilter().evaluate(src, tgt, block_type="table")
+    assert decision.passed
+
+
+def test_an_untouched_table_still_fails_the_density_gate() -> None:
+    src = "| Model | GLUE | SQuAD |\n|---|---|---|\n| T5-Base | 84.3 | 85.5 |"
+    decision = FastPassFilter().evaluate(src, src, block_type="table")
+    assert not decision.passed
+    assert "script density" in decision.reason
+
+
+def test_a_heading_that_drops_its_appendix_letter_fails_with_a_label_reason() -> None:
+    # b0028: "C Encouraging Exploration Across Experts" -> "鼓励跨专家探索".
+    # The letter orders the document; no other gate saw the loss.
+    decision = FastPassFilter().validate_structural_invariants(
+        source_text="C Encouraging Exploration Across Experts",
+        target_text="鼓励跨专家探索",
+        block_type="heading",
+    )
+    assert not decision.passed
+    assert "Heading label dropped" in decision.reason
+    assert "'C'" in decision.reason
+
+
+def test_a_heading_that_keeps_its_label_passes() -> None:
+    for src, tgt in (
+        (
+            "B Preventing Token Dropping with No-Token-Left-Behind",
+            "B 通过 “无令牌遗留” 机制防止令牌丢失",
+        ),
+        ("9 Conclusion", "9 结论"),
+        ("4.1 Fine-Tuning", "4.1 微调"),
+        ("2 Switch Transformer", "2 切换 Transformer"),
+    ):
+        decision = FastPassFilter().validate_structural_invariants(
+            source_text=src, target_text=tgt, block_type="heading"
+        )
+        assert decision.passed, (src, tgt, decision.reason)
+
+
+def test_a_dropped_section_number_fails_even_when_the_title_is_translated() -> None:
+    decision = FastPassFilter().validate_structural_invariants(
+        source_text="4 Downstream Results",
+        target_text="下游任务结果",
+        block_type="heading",
+    )
+    assert not decision.passed
+    assert "'4'" in decision.reason
+
+
+def test_an_unlabelled_heading_is_not_label_gated() -> None:
+    decision = FastPassFilter().validate_structural_invariants(
+        source_text="Introduction",
+        target_text="引言",
+        block_type="heading",
+    )
+    assert decision.passed
+
+
+def test_a_partial_label_match_does_not_satisfy_a_deeper_label() -> None:
+    # "4.1" must not be satisfied by "4" or by a fragment of "14.1".
+    assert _missing_heading_label("4.1 Fine-Tuning", "4 微调") == "4.1"
+    assert _missing_heading_label("4.1 Fine-Tuning", "14.1 微调") == "4.1"
+    assert _missing_heading_label("4.1 Fine-Tuning", "4.1 微调") is None
+
+
+def test_a_flattened_math_source_gets_the_reconstruction_hint() -> None:
+    # b0068: the extractor flattened "N_{i=1}" into "N_i =1" and "W_r" into
+    # "W r". The old instruction demanded full LaTeX re-emission the text
+    # cannot support; three repair rounds shipped the block unchanged. The
+    # flattened-source hint caps the ambition at what the fragments imply.
+    src = (
+        "Mixture of Expert Routing. Shazeer et al. (2017) proposed a natural "
+        "language Mixtureof-Experts (MoE) layer which takes as an input a token "
+        "representation x and then routes this to the best determined topk "
+        "experts, selected from a set { E i ( x ) } N_i =1 of N experts. The "
+        "router variable W r produces logits h ( x ) = W r · x which are "
+        "normalized via a softmax distribution over the available N experts."
+    )
+    tgt = (
+        "专家混合路由。Shazeer 等人（2017）提出了自然语言专家混合（MoE）层，该层以词元"
+        "表示 x 为输入。专家 i 的门值由下式给出："
+    )
+    decision = FastPassFilter().evaluate(src, tgt, block_type="narrative")
+    assert not decision.passed
+    assert "flattened math fragments" in decision.reason
+    assert "Do not invent new notation" in decision.reason
+
+
+def test_a_real_math_source_keeps_the_full_redelimit_hint() -> None:
+    # A source with genuine LaTeX evidence ($..$) still asks for full
+    # re-delimitation. (Delimited sources route through the 3b span gate, so
+    # the full hint here is exercised via a source whose markers are braces
+    # and escapes without $..$ — the shape extraction leaves when it eats the
+    # dollars but keeps the braces.)
+    src = "The threshold F_{th,SI} governs the transition and \\tau bounds the device."
+    tgt = "阈值 F_th,SI 控制转变过程，tau 限制器件。"
+    decision = FastPassFilter().evaluate(src, tgt, block_type="narrative")
+    assert not decision.passed
+    assert "re-emit each inline physical variable" in decision.reason
+
+
+def test_length_ratio_is_cjk_weighted_not_raw() -> None:
+    # b0028 pre-fix: a correct 41-char heading translated to 7 Han glyphs read
+    # ratio 0.17 (< floor 0.2) on raw characters. The CJK-weighted ratio puts
+    # correct short translations above the floor while a genuinely truncated
+    # prose block still fails.
+    decision = FastPassFilter().evaluate(
+        "C Encouraging Exploration Across Experts",
+        "C 跨专家探索的激励机制",
+        block_type="heading",
+    )
+    assert decision.passed
+    assert decision.length_ratio > 0.2
+
+    truncated = FastPassFilter().evaluate(
+        "The model achieves state-of-the-art results on every benchmark we evaluated, "
+        "spanning translation, summarization, and question answering across more than "
+        "one hundred languages.",
+        "该模型取得了最佳结果。",
+        block_type="narrative",
+    )
+    assert not truncated.passed
+    assert "truncated" in truncated.reason

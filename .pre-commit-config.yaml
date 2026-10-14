@@ -54,12 +54,14 @@ repos:
       # Coverage floor: a regression guard, not a quality target. The 2026-10
       # audit found ~2,500 lines of dead modules that every gate passed; the
       # floor plus tests/unit/test_no_orphaned_modules.py make that class of
-      # rot fail a push. 58% sits ~3pt under the fast-tier baseline so ordinary
-      # work never trips it, but a large deletion-without-tests or an orphaned
-      # module does.
+      # rot fail a push. 70% sits ~3pt under the fast-tier baseline (73%) so
+      # ordinary work never trips it, but a large deletion-without-tests, a
+      # new untested module, or an orphaned module does. (The earlier 58 was
+      # 15pt under the baseline — a gap wide enough to hide ~4,700 uncovered
+      # statements, i.e. it guarded nothing.)
       - id: pytest-fast
         name: pytest -m fast (with coverage floor)
-        entry: uv run pytest -m fast -q --cov=ubt --cov-report=term:skip-covered --cov-fail-under=58
+        entry: uv run pytest -m fast -q -n auto --dist=loadscope --cov=ubt --cov-report=term:skip-covered --cov-fail-under=70
         language: system
         pass_filenames: false
         always_run: true

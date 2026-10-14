@@ -44,6 +44,63 @@ _ECHO_REPAIR_HINT = (
     " keeping identifiers, numerals and quoted strings verbatim"
 )
 
+#: Repair instruction for undelimited math when the source still carries
+#: recoverable math markers: full re-delimitation is possible and expected.
+_UNDELIMITED_MATH_REDELIMIT_HINT = (
+    "Undelimited math: source carries math symbols but the "
+    "target has no $...$ span — re-emit each inline physical "
+    "variable, Greek letter and sub/superscript in standard "
+    "LaTeX inside single dollar signs ($...$, e.g. "
+    "$F_{th,SI}$, $V_{tm}$), translating the prose around them"
+)
+
+#: Repair instruction when the SOURCE's math was already flattened by
+#: extraction ("W r", "N_i =1", "{ E i ( x ) }"): no $...$ evidence exists to
+#: copy, so demanding full LaTeX re-emission asked the model for something
+#: the text cannot support (arXiv 2101.03961: two blocks burned 3 repair
+#: rounds each and shipped to the human queue unchanged). The instruction
+#: caps the ambition at what the fragments imply.
+_UNDELIMITED_MATH_FLATTENED_SOURCE_HINT = (
+    "Undelimited math: the target carries flattened math fragments (like "
+    "N_i, W r, E i ( x )) but no $...$ span. The source's own math was "
+    "flattened by extraction, so reconstruct only what the fragments imply "
+    '— spaced letter pairs are variable+subscript ("W r" -> $W_r$), '
+    '"N_i =1" -> $N_{i=1}$ — wrap each reconstruction in $...$, and keep '
+    "any fragment you cannot interpret as plain text exactly as it appears. "
+    "Do not invent new notation beyond the fragments"
+)
+
+
+def _source_math_is_flattened(source_text: str) -> bool:
+    """Whether the source's math signals are extraction-flattened, not real.
+
+    Flattened = no delimited math, no underscore/caret/LaTeX markers, but
+    spaced single-letter pairs ("W r", "E i") or letter-underscore soup
+    ("N_i") — the shape a PDF text layer leaves where the formula had
+    subscripts. A source with real markers gets the full-redelimit
+    instruction.
+    """
+    from ubt.core.cleaners.math_masker import extract_math_spans
+    from ubt.core.validators.math_guard import _MATH_CANDIDATE_RE
+
+    if extract_math_spans(source_text):
+        return False
+    # A braced subscript ("F_{th,SI}") is real LaTeX evidence — full
+    # re-delimitation applies. A BARE underscore ("N_i =1") is the extraction
+    # artifact itself (the subscript's braces were lost), not a marker.
+    if re.search(r"_\{|\\[a-zA-Z]+|\^", source_text):
+        return False
+    # Spaced variable+subscript pair: single letter, space, single letter
+    # ("W r", "E i") — never an ordinary English bigram (both sides are
+    # single letters, the left one typically uppercase).
+    if re.search(r"(?<![A-Za-z])[A-Z]\s[a-z](?![A-Za-z])", source_text):
+        return True
+    # Letter-underscore soup without a caret anywhere ("N_i =1").
+    return bool(re.search(r"(?<![A-Za-z])[A-Za-z]_[A-Za-z0-9]", source_text)) and bool(
+        _MATH_CANDIDATE_RE.search(source_text)
+    )
+
+
 _REPETITION_PATTERN = re.compile(r"(.{4,20}?)\1{3,}")  # Detect 4+ repetitions of a phrase
 # Line-level loop detection: the flat regex above cannot match a loop whose
 # separator is the trailing newline (the last repeat lacks it inside the
@@ -80,6 +137,20 @@ _CITATION_SPAN_RE = re.compile(r"\[[^\[\]]*\]")
 _TABLE_SEP_RE = re.compile(r"-{2,}")
 _ISOLATED_LETTER_RE = re.compile(r"(?<![A-Za-z])[A-Za-z](?![A-Za-z])")
 _DIGIT_RE = re.compile(r"\d")
+#: English-word-equivalent weight of one CJK glyph in the length-ratio gate.
+#: EN→ZH prose compresses to roughly 0.35–0.6 raw characters per source
+#: character; counting a Han glyph as ~2.2 source characters (one word ≈ 4.4
+#: Latin chars incl. spaces) makes the ratio script-fair. Calibrated against
+#: the reference run: correct prose blocks sat at 0.9–1.3 on this scale,
+#: correct headings at 0.6–1.0, the pre-fix raw ratio at 0.17–0.35.
+_CJK_CHAR_WORD_EQUIVALENT = 2.2
+#: Target-script identity floor for table-shaped blocks. A benchmark table's
+#: residue after verbatim-carry-over stripping is mostly its header cells, so
+#: the prose floor (typically 0.25) reads correct tables as untranslated. The
+#: floor only has to separate "header cells rendered" (any nonzero CJK share)
+#: from "table left in the source language" (residue pure Latin, ratio 0.0),
+#: which a near-zero floor does without weakening the prose gate.
+_TABLE_MIN_TARGET_RATIO = 0.02
 # Latin term runs (units, acronyms, identifiers) preserved verbatim.
 # NOTE: no trailing '.' in the class — a sentence-final period is
 # punctuation, not part of the identifier ("FlashAttention." must match
@@ -299,6 +370,35 @@ def _is_prose_block(block_type: Any) -> bool:
     """
     value = getattr(block_type, "value", block_type or "")
     return not value or str(value).lower() in {str(t.value).lower() for t in PROSE_BLOCK_TYPES}
+
+
+#: A heading's structural label at the front of the source text: a section
+#: number ("4", "4.1", "2.3.1", optionally trailing "."), an appendix letter
+#: ("A"..."Z", optionally trailing "."), or "Appendix C"-style word+letter.
+#: Prose never starts with one of these shapes followed by whitespace.
+_HEADING_LABEL_RE = re.compile(r"^(?P<num>\d+(?:\.\d+)+| Appendix [A-Z]|\d+|[A-Z])(?P<dot>\.?)\s+")
+
+
+def _missing_heading_label(source_text: str, target_text: str) -> str | None:
+    """The heading's leading label when the target dropped it, else ``None``.
+
+    Boundary-aware both ways: the label must not be a fragment of a longer
+    number in the target ("4" inside "4.1" does not satisfy a "4" label), and
+    a label found anywhere in the target (front or after a translator's
+    reorder) counts as carried. ``None`` for an unlabelled source — there is
+    nothing to preserve.
+    """
+    m = _HEADING_LABEL_RE.match(source_text.strip())
+    if not m:
+        return None
+    label = m.group("num")
+    if m.group("dot") and not label.endswith("."):
+        label += "."
+    # Word-boundary search: a bare "4" must not match inside "4.1" or "14".
+    escaped = re.escape(label)
+    if re.search(rf"(?<![\dA-Za-z]){escaped}(?![\d.])", target_text):
+        return None
+    return label
 
 
 def _is_exempt_repetition(src_clean: str, tgt_clean: str, m: re.Match[str]) -> bool:
@@ -845,6 +945,33 @@ class FastPassFilter:
                 length_ratio=1.0,
             )
 
+        # 1c. A heading's structural label is editorial metadata, not prose:
+        # the section number or appendix letter ("4.1", "C") orders the
+        # document and the renderer reproduces it verbatim. A draft that
+        # drops it breaks every cross-reference, and no other gate sees the
+        # loss — measured on the arXiv 2101.03961 run, five of nine appendix
+        # headings shipped without their letter ("C Encouraging Exploration
+        # Across Experts" -> "鼓励跨专家探索") while clearing every
+        # structural invariant. Only headings are gated, only a *label-shaped*
+        # source prefix counts, and the check is boundary-aware so a "4.1"
+        # inside a longer number never satisfies a "4".
+        if (
+            not skip_translate
+            and str(getattr(block_type, "value", block_type or "")).lower() == "heading"
+        ):
+            missing_label = _missing_heading_label(src_clean, tgt_clean)
+            if missing_label is not None:
+                return FastPassDecision(
+                    passed=False,
+                    reason=(
+                        f"Heading label dropped: the source heading is labelled "
+                        f"'{missing_label}' but the target does not carry it — keep the "
+                        f"section number or appendix letter at the front of the heading"
+                    ),
+                    target_ratio=0.0,
+                    length_ratio=1.0,
+                )
+
         # 2. Hallucination repetition check (ignoring formatting and markdown table dividers).
         # A source refrain/table may legitimately repeat, but the exemption is
         # per-match and source-aligned (``_is_exempt_repetition``): a blanket
@@ -969,6 +1096,14 @@ class FastPassFilter:
         # (``Fth,SI`` instead of $F_{th,SI}$). Routes to repair, whose
         # prompt surfaces this reason verbatim as the fix instruction.
         # Exemptions come from ``_is_prose``/``skip_translate`` above.
+        # The instruction differs by what the SOURCE still carries: a source
+        # with real math markers ($..$, _^, LaTeX escapes) can be fully
+        # re-delimited; a source the extractor already flattened ("W r",
+        # "N_i =1" — arXiv 2101.03961 b0068/b0088) cannot, so the repair
+        # instruction must say to reconstruct what the fragments imply and
+        # keep the rest as plain text. The old one-size instruction told the
+        # model to re-emit LaTeX it had no evidence for; three rounds later
+        # the block still had no $...$ span and shipped to the human queue.
         if (
             not skip_translate
             and _is_prose
@@ -977,11 +1112,9 @@ class FastPassFilter:
             return FastPassDecision(
                 passed=False,
                 reason=(
-                    "Undelimited math: source carries math symbols but the "
-                    "target has no $...$ span — re-emit each inline physical "
-                    "variable, Greek letter and sub/superscript in standard "
-                    "LaTeX inside single dollar signs ($...$, e.g. "
-                    "$F_{th,SI}$, $V_{tm}$), translating the prose around them"
+                    _UNDELIMITED_MATH_FLATTENED_SOURCE_HINT
+                    if _source_math_is_flattened(src_clean)
+                    else _UNDELIMITED_MATH_REDELIMIT_HINT
                 ),
                 target_ratio=0.0,
                 length_ratio=0.0,
@@ -1083,8 +1216,20 @@ class FastPassFilter:
         # audit's "silent pass" becomes an operator-visible one.
         num_advisories = tuple(num_res.details.get("numeric_advisories", ()))
 
-        # 5. Length ratio check (thresholds are per-language-pair policy)
-        length_ratio = len(tgt_clean) / max(1, len(src_clean))
+        # 5. Length ratio check (thresholds are per-language-pair policy).
+        # Measured on *informative* content: CJK glyphs carry roughly one
+        # English word each, so a Latin->CJK translation compresses raw
+        # character counts two to three-fold and the raw ratio floors every
+        # short block — the arXiv 2101.03961 run quarantined the correct
+        # heading "C Encouraging Exploration Across Experts" -> "鼓励跨专家
+        # 探索" at ratio 0.17 while its real defect (the dropped letter C)
+        # went unmentioned. Counting each CJK char as its typical English-word
+        # equivalent keeps the gate sensitive to genuine truncation on both
+        # scripts (the same translated text scored against an inflated
+        # max_length_ratio side benefits symmetrically).
+        cjk_chars = sum(1 for ch in tgt_clean if re.match(f"[{CJK_SCRIPT_CLASS}]", ch))
+        informative_tgt = len(tgt_clean) + cjk_chars * (_CJK_CHAR_WORD_EQUIVALENT - 1)
+        length_ratio = informative_tgt / max(1, len(src_clean))
         # Short headings/phrases (e.g. "Introduction" -> "引言", ratio 0.17) in contractive
         # language pairs (e.g. Latin to CJK with min_length_ratio < 0.5) legitimately
         # contract to 2+ characters without terminal sentence punctuation.
@@ -1165,7 +1310,21 @@ class FastPassFilter:
         residue = re.sub(r"[\W\d_]+", "", residue)
         if residue:
             target_ratio = self.profile.target_script_ratio(residue)
-            if target_ratio < self.min_target_ratio:
+            # A benchmark table's body is numerals and model names by
+            # construction (| T5-Base | 84.3 | 85.5 | …). After stripping the
+            # verbatim carry-overs above, the only translatable text left is
+            # the handful of header cells ("模型 | 参数 | 注意力头数"), so the
+            # prose density floor misreads a *fully translated* table as
+            # untranslated residue — measured on the arXiv 2101.03961 run:
+            # four correct tables quarantined at ratio 0.04–0.22. A table whose
+            # residue carries ANY meaningful amount of target script is
+            # therefore held to an identity floor near zero: density cannot
+            # rank "the three header cells got rendered" against prose, and an
+            # untouched table still fails because its residue is pure Latin
+            # (ratio 0.0 < any floor).
+            is_table_block = (not _is_prose) or bool(markdown_grid_shape(src_clean))
+            density_floor = _TABLE_MIN_TARGET_RATIO if is_table_block else self.min_target_ratio
+            if target_ratio < density_floor:
                 return FastPassDecision(
                     passed=False,
                     reason=(
