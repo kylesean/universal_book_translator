@@ -44,9 +44,10 @@ from ubt.core.ports import (
 )
 
 if TYPE_CHECKING:
+    from ubt.adapters.pdf.artifact_text import ArtifactReport
     from ubt.adapters.pdf.visual_gate import VisualGateResult
     from ubt.core.content.contract import ReconciliationReport
-    from ubt.pipeline.artifact import ArtifactReport, DeliveredArtifact
+    from ubt.pipeline.artifact import DeliveredArtifact
 from ubt.core.engine.facts import RenderPlan, Terminology
 from ubt.core.engine.services import RunServices
 from ubt.core.qe.defect_taxonomy import (
@@ -1198,8 +1199,8 @@ def _write_artifact_check(
     if not ctx.config.emit_attestation_shadow:
         return None
     try:
+        from ubt.adapters.pdf.artifact_text import check_artifact
         from ubt.core.job_options import companion_path
-        from ubt.pipeline.artifact import check_artifact
 
         artifact = check_artifact(blocks, translations, rendered_path)
         payload: dict[str, Any] = {"artifact": _artifact_payload(artifact)}

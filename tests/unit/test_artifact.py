@@ -20,18 +20,17 @@ from pathlib import Path
 
 import pytest
 
-from ubt.core.ir.models import BlockType, IRBlock, make_element
-from ubt.core.qe.fast_pass import REHEARSAL_MARKER, strip_rehearsal_marker
-from ubt.pipeline.artifact import (
+from ubt.adapters.pdf.artifact_text import (
     ArtifactReport,
-    DeliveredArtifact,
     ElementCheck,
     _expected,
     _normalize,
     _present,
     _tokenize,
-    delivered_artifact,
 )
+from ubt.core.ir.models import BlockType, IRBlock, make_element
+from ubt.core.qe.fast_pass import REHEARSAL_MARKER, strip_rehearsal_marker
+from ubt.pipeline.artifact import DeliveredArtifact, delivered_artifact
 
 pytestmark = pytest.mark.fast
 
