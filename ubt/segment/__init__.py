@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from ubt.segment.document import segments_from_blocks
 from ubt.segment.placeholders import MaskedSource, PlaceholderEngine, RestoreOutcome
-from ubt.segment.spi import register_spi_providers
 from ubt.segment.xliff import XliffDocument, from_xliff, to_xliff
 
 __all__ = [
@@ -22,7 +21,6 @@ __all__ = [
     "RestoreOutcome",
     "XliffDocument",
     "from_xliff",
-    "register_spi_providers",
     "segments_from_blocks",
     "to_xliff",
 ]
