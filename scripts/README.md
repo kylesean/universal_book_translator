@@ -16,17 +16,11 @@ an on-demand acceptance tool:
 
 It takes `--corpus corpus` (default) and exits 0 on pass.
 
-## Fixture generator
-
-- `make_sample_corpus.py` — regenerates `tests/fixtures/synthetic-*.pdf`
-  (needs `typst`; output is gitignored).
-
 ## Benchmarks & sweeps (not tests)
 
 - `cost_benchmark.py` — writes `docs/benchmarks/` (see that README).
-- `knob_sweep.py`, `oxide_render_ab.py`,
-  `biou_score.py`, `fidelity_baseline.py` — experiment/benchmark harnesses for
-  tuning and A/B runs.
+- `knob_sweep.py`, `biou_score.py` — experiment/benchmark harnesses for
+  tuning runs.
 
 ## Utilities
 

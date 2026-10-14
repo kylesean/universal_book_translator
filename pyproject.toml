@@ -262,9 +262,6 @@ module = [
     # The packaged CometKiwi scorer (ubt/core/qe/comet_score_ipc.py) imports
     # `comet` lazily; the neural-QE extra is absent from the dev env.
     "comet.*",
-    # scripts/oxide_render_ab.py is imported through a sys.path insert by the
-    # gated A/B test; mypy has no MYPYPATH entry for scripts/.
-    "oxide_render_ab",
 ]
 ignore_missing_imports = true
 
