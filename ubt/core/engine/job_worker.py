@@ -23,10 +23,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ubt.core.config import MOCK_API_KEY, UBTConfig
-from ubt.core.engine.dry_run import create_dry_run_orchestrator
 from ubt.core.engine.events import TranslationProgressEvent
 from ubt.core.engine.job_queue import JobQueue, JobStatus, QueuedJob
-from ubt.core.engine.pipeline import PipelineOrchestrator
+from ubt.core.engine.job_runner import build_job_orchestrator
 from ubt.core.engine.progress import ProgressSnapshot, persist_progress_metadata
 from ubt.core.exceptions import (
     JobInterruptedError,
@@ -123,17 +122,14 @@ class JobWorker:
             persist_progress_metadata(event, ledger, job.job_id)
 
         # Rehearsal is decided from THIS process's key (see the helper).
-        if _should_rehearse(payload, job_config):
-            # Deterministic echo provider, mocked QE, no spend.
-            orchestrator = create_dry_run_orchestrator(job_config, finalize_job=_persist_metadata)
-        else:
-            orchestrator = PipelineOrchestrator(
-                config=job_config,
-                router=self.router,
-                qe_runner=self.qe_runner,
-                rate_limiter=self.rate_limiter,
-                finalize_job=_persist_metadata,
-            )
+        orchestrator = build_job_orchestrator(
+            job_config,
+            router=self.router,
+            qe_runner=self.qe_runner,
+            rate_limiter=self.rate_limiter,
+            finalize_job=_persist_metadata,
+            rehearse=_should_rehearse(payload, job_config),
+        )
 
         async for event in orchestrator.run(
             input_path=input_path,

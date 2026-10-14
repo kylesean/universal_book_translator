@@ -92,7 +92,7 @@ async def test_job_manager_safe_error_formatting(tmp_path: Path) -> None:
     )
 
     # 1. BudgetExceededError should be directly readable in record.error
-    with patch("ubt.api.manager.PipelineOrchestrator") as mock_orch_cls:
+    with patch("ubt.core.engine.job_runner.PipelineOrchestrator") as mock_orch_cls:
 
         async def mock_run_budget(*args: object, **kwargs: object) -> AsyncGenerator[Any, None]:
             raise BudgetExceededError("Budget cap of $5.00 exceeded")
@@ -106,7 +106,7 @@ async def test_job_manager_safe_error_formatting(tmp_path: Path) -> None:
     assert record.error == "BudgetExceededError: Budget cap of $5.00 exceeded"
 
     # 2. Sensitive internal exceptions must be masked to prevent data/credential leaks
-    with patch("ubt.api.manager.PipelineOrchestrator") as mock_orch_cls:
+    with patch("ubt.core.engine.job_runner.PipelineOrchestrator") as mock_orch_cls:
 
         async def mock_run_secret(*args: object, **kwargs: object) -> AsyncGenerator[Any, None]:
             raise RuntimeError("Internal DB host 10.0.0.5 connection refused password=secret")

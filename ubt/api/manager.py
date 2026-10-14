@@ -10,11 +10,10 @@ from pathlib import Path
 
 from ubt.api.models import JobSubmitRequest
 from ubt.core.config import UBTConfig
-from ubt.core.engine.dry_run import create_dry_run_orchestrator
 from ubt.core.engine.events import TranslationProgressEvent
 from ubt.core.engine.job_queue import TERMINAL_JOB_STATUSES, JobStatus
+from ubt.core.engine.job_runner import build_job_orchestrator
 from ubt.core.engine.ledger import SQLiteJobLedger
-from ubt.core.engine.pipeline import PipelineOrchestrator
 from ubt.core.engine.progress import ProgressSnapshot, persist_progress_metadata
 from ubt.core.exceptions import (
     ServerCapacityError,
@@ -187,22 +186,18 @@ class JobManager:
                 # Rehearsal: deterministic echo provider, mocked QE, no spend.
                 # finalize_job still runs inside the orchestrator's writer-lock
                 # block so the artifact triple persists exactly as in a real run.
-                orchestrator = create_dry_run_orchestrator(
-                    job_config,
-                    finalize_job=self._persist_final_metadata(job_config, record),
-                )
                 logger.info("Job %s running as a zero-token rehearsal", record.job_id)
-            else:
-                orchestrator = PipelineOrchestrator(
-                    config=job_config,
-                    router=self.router,
-                    qe_runner=self.qe_runner,
-                    rate_limiter=self.rate_limiter,
-                    # Persist the final artifact triple from inside the
-                    # orchestrator's writer-lock block instead of re-opening the
-                    # ledger here after run() released the lock.
-                    finalize_job=self._persist_final_metadata(job_config, record),
-                )
+            orchestrator = build_job_orchestrator(
+                job_config,
+                router=self.router,
+                qe_runner=self.qe_runner,
+                rate_limiter=self.rate_limiter,
+                # Persist the final artifact triple from inside the
+                # orchestrator's writer-lock block instead of re-opening the
+                # ledger here after run() released the lock.
+                finalize_job=self._persist_final_metadata(job_config, record),
+                rehearse=record.request.dry_run,
+            )
             async for event in orchestrator.run(
                 input_path=input_file,
                 output_path=output_file,

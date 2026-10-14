@@ -329,11 +329,24 @@ class LedgerJobsMixin(_LedgerHost):
             return lifetime
 
     def get_job_status(self, job_id: str) -> str | None:
-        """job_meta.status written by finalize_job ('completed'/'failed'/…).
+        """The raw ``job_meta.status`` column, or ``None`` when never written.
 
-        None for unknown or never-finalized jobs — lets disk-fallback status
+        The lifecycle is ``initialized`` (written at ingest) → a terminal
+        ``completed``/``failed``/``cancelled`` (written by ``finalize_job``, the
+        pipeline's abort handler, or the worker's terminal write). Note there is
+        no ``running`` value: a row stays ``initialized`` for the whole run, so
+        this column alone cannot tell a live job from one whose process died
+        mid-run. Every outward surface therefore normalizes before answering —
+        REST's disk fallback downgrades a non-terminal row to ``failed``
+        (embedded mode has no reconciler), and MCP's ``ubt_status`` downgrades
+        only after the ledger goes quiet (``_ledger_is_stale``), so a live run
+        in another process still reads as running. Callers that need the
+        normalized vocabulary should follow those precedents rather than
+        inventing a fourth mapping.
+
+        ``None`` for unknown or never-finalized jobs — lets disk-fallback status
         readers distinguish a genuinely failed job from one still running
-        (otherwise a FAILED job can read as 'running' forever).
+        (otherwise a FAILED job could read as 'running' forever).
         """
         with self._get_conn() as conn:
             try:
