@@ -16,7 +16,7 @@ import asyncio
 import dataclasses
 import json
 import logging
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Sequence
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -32,8 +32,6 @@ from ubt.core.ports import DocumentAdapter, get_visual_gate_runner
 
 logger = logging.getLogger(__name__)
 
-RenderFn = Callable[..., Awaitable[Path]]
-
 
 class VisualVerifyLoop:
     """Visual-verification control loop: verify the render, quarantine on defect.
@@ -48,7 +46,6 @@ class VisualVerifyLoop:
         ledger: SQLiteJobLedger,
         job_id: str,
         target_lang: str,
-        render_fn: RenderFn | None = None,
         router: Any | None = None,
         render_plan: RenderPlan | None = None,
         sample_pages: int = 6,
@@ -62,7 +59,6 @@ class VisualVerifyLoop:
         self.ledger = ledger
         self.job_id = job_id
         self.target_lang = target_lang
-        self.render_fn = render_fn
         self.router = router
         # The render decision, so the retune re-render uses the same mode/engine
         # (compiler render plan protocol) and the gate reads the same facing/mode.

@@ -645,7 +645,6 @@ async def _run_visual_gate(
             ledger=ctx.ledger,
             job_id=ctx.job_id,
             target_lang=ctx.target_lang,
-            render_fn=_render_adapter_output,
             router=ctx.router,
             render_plan=render,
             sample_pages=max(0, ctx.config.visual_sample_pages),
