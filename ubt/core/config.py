@@ -803,8 +803,7 @@ class UBTConfig(BaseSettings):
     # by ModelCapabilityRegistry._load_environment_profiles: the registry
     # bootstraps under a lock that a UBTConfig built there must not re-enter.
 
-    # -- Human PE (HITL) queue: MQM severity triage + post-editing ---------------
-    # -- Normalization ------------------------------------------------------------
+    # -- QE engine normalization --------------------------------------------------
     # Canonical QE engines are heuristic | subprocess | tiered.
     # Alias names comet / cometkiwi / neural all map to "external subprocess scorer"
     # and normalize to subprocess.
