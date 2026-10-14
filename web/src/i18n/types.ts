@@ -314,6 +314,10 @@ export interface TranslationDictionary {
     saving: string
     saved: string
     reExportDone: string
+    reExportAction: string
+    reExportStale: string
+    reExporting: string
+    reExportHelp: string
     reExportFailed: string
     humanVerified: string
     prevIssue: string

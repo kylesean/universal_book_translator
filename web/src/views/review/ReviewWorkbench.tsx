@@ -74,6 +74,8 @@ export function ReviewWorkbench() {
   const [saving, setSaving] = useState<Record<string, boolean>>({})
   const [saved, setSaved] = useState<Record<string, boolean>>({})
   const [reExportNotice, setReExportNotice] = useState<string | null>(null)
+  const [reExporting, setReExporting] = useState(false)
+  const [reExportPending, setReExportPending] = useState(false)
   const [issueCursor, setIssueCursor] = useState(0)
   const [openPreviews, setOpenPreviews] = useState<Record<number, boolean>>({})
   const [previewBust, setPreviewBust] = useState(0)
@@ -222,24 +224,35 @@ export function ReviewWorkbench() {
       }
       // The ledger text changed, but the *delivered file* was rendered before
       // the edit and would otherwise keep the machine draft the reviewer just
-      // corrected. Re-render it from the current ledger (no token spent). A
-      // failure here must not read as "edit lost": the ledger is authoritative
-      // and the reviewer can re-export again.
-      try {
-        const out = await reExportJob(jobId)
-        setReExportNotice(t.review.reExportDone.replace('{path}', out.artifact_path ?? ''))
-      } catch (err) {
-        setReExportNotice(
-          t.review.reExportFailed.replace(
-            '{msg}',
-            err instanceof Error ? err.message : 'unknown error'
-          )
-        )
-      }
+      // corrected. Re-rendering is NOT triggered here: it rebuilds the whole
+      // book, so firing it per save paid a full render for every keystroke
+      // batch a reviewer committed. It is now an explicit action (the
+      // "re-render" button) so a review session re-renders once, at the end.
+      setReExportPending(true)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save revision')
     } finally {
       setSaving((prev) => ({ ...prev, [segment.block_id]: false }))
+    }
+  }
+
+  const handleReExport = async () => {
+    if (!jobId || reExporting) return
+    setReExporting(true)
+    setReExportNotice(null)
+    try {
+      const out = await reExportJob(jobId)
+      setReExportPending(false)
+      setReExportNotice(t.review.reExportDone.replace('{path}', out.artifact_path ?? ''))
+    } catch (err) {
+      setReExportNotice(
+        t.review.reExportFailed.replace(
+          '{msg}',
+          err instanceof Error ? err.message : 'unknown error'
+        )
+      )
+    } finally {
+      setReExporting(false)
     }
   }
 
@@ -443,8 +456,33 @@ export function ReviewWorkbench() {
               {t.review.modeVisual}
             </button>
           </div>
+
+          {/* Explicit re-render: it rebuilds the whole delivered file, so it
+              runs once per review session rather than on every save. */}
+          <button
+            onClick={() => void handleReExport()}
+            disabled={reExporting}
+            className={`px-3 py-1 text-xs rounded-[4px] border transition-colors font-medium cursor-pointer disabled:cursor-wait ${
+              reExportPending
+                ? 'border-[#b45309]/40 bg-[#b45309]/10 text-[#b45309] font-semibold'
+                : 'border-[var(--paper-border)] bg-[var(--paper-surface)] text-[var(--ink-secondary)] hover:text-[var(--ink-primary)]'
+            }`}
+            title={t.review.reExportHelp}
+          >
+            {reExporting
+              ? t.review.reExporting
+              : reExportPending
+                ? t.review.reExportStale
+                : t.review.reExportAction}
+          </button>
         </div>
       </div>
+
+      {reExportNotice && (
+        <div className="px-6 py-2 text-xs text-[var(--ink-secondary)] bg-[var(--paper-subsurface)] border-b border-[var(--paper-border)]">
+          {reExportNotice}
+        </div>
+      )}
 
       {error && (
         <div className="px-6 py-2 text-xs text-[var(--ink-secondary)] bg-[#b45309]/10 border-b border-[var(--paper-border)] flex items-center gap-2">
@@ -561,11 +599,6 @@ export function ReviewWorkbench() {
                                   </span>
                                 )}
                               </div>
-                              {reExportNotice && (
-                                <div className="text-xs text-[var(--ink-muted)] mb-1.5">
-                                  {reExportNotice}
-                                </div>
-                              )}
                               {editing[seg.block_id] ? (
                                 <textarea
                                   autoFocus
