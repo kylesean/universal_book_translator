@@ -1,8 +1,13 @@
-"""Typst math-syntax probe shared by the PDF typesetting engines.
+"""Typst math-syntax probe: the compile gate for a converted math body.
 
-A span the model delimited as ``$...$`` is only emitted in math mode when a
-minimal Typst document containing it compiles; anything else (``F_th,SI``
-without braces, stray markup) falls back to escaped text at placement time.
+``typstify_math`` converts LaTeX to Typst math by rewriting, not by parsing, so
+it can emit a body that reads as valid in its own grammar but does not compile
+in Typst: ``\\frac{a}{}`` becomes ``frac(a, )``, ``\\hat{}`` becomes ``hat()``,
+``a^`` becomes ``a^``. The publish renderer compiles the whole document in one
+invocation, so a single such body fails the *entire* book. This probe compiles a
+minimal document per body and answers whether Typst accepts it; the renderer
+degrades a rejected span to readable Unicode instead of emitting it.
+
 ``//`` is rejected without compiling (line-comment hazard); ``#`` is
 legitimate here — the math transpiler emits code-mode strings (``#"th"``) and
 rejects user-supplied ``#`` upstream.
@@ -11,7 +16,7 @@ The probe is pure-cache: same body, same verdict, one compile ever. A whole
 document's bodies can be resolved in a handful of compiles via
 :meth:`TypstMathProbe.check_many`, which lays every not-yet-known body out as a
 page of one document and bisects on failure — a Typst invocation costs ~0.7s of
-startup, so one process per body dominated a math-dense render.
+startup, so one process per body would dominate a math-dense render.
 """
 
 from __future__ import annotations
@@ -27,14 +32,13 @@ _PROBE_DOC = "#set page(width: 60pt, height: 20pt, margin: 0pt)\n${body}$\n"
 
 
 class TypstMathProbe:
-    """Compile-gated verdict for one inline-math body (cached).
+    """Compile-gated verdict for one math body (cached).
 
     ``binary`` must be the same Typst the surrounding document is compiled
-    with: a probe pinned to PATH ``typst`` while the real compile honors
-    ``UBT_TYPST_BINARY`` reports a false-negative verdict for every formula
-    whenever typst lives off PATH, silently escaping all math to text yet
-    still "succeeding" — and because the probe is pure-cache, that wrong
-    verdict is then reused for the whole run.
+    with: a probe pinned to PATH ``typst`` while the real compile honors a
+    different binary reports a false-negative verdict for every formula,
+    silently escaping all math to text yet still "succeeding" — and because the
+    probe is pure-cache, that wrong verdict is then reused for the whole run.
     """
 
     def __init__(self, binary: str = "typst") -> None:

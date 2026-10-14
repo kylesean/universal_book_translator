@@ -7,11 +7,12 @@ structure itself from the one shared rule set
 into a :class:`~ubt.model.span.CanonicalSource` ``text``, so the typed document
 can be sliced, exported and witnessed without an ``IRBlock`` detour.
 
-Following incremental native reader dispatch) this is the only non-PDF reader added:
+Following incremental native reader dispatch, Markdown was the first non-PDF reader added:
 Markdown is the one format whose source *is* a text stream, so a genuine
-offset-stable canonical text is cheap and faithful. DOCX/EPUB/HTML wait until
-their readers can also supply real spans (page/anchor/char offsets) and the AST
-can carry what they uniquely have (table grids, figure assets, provenance).
+offset-stable canonical text is cheap and faithful. The markup and office
+readers (``read_html``/``read_epub``/``read_docx``) followed once they could
+also supply real spans (page/anchor/char offsets) and the AST could carry what
+they uniquely have (table grids, figure assets, provenance).
 
 Deliberately synchronous, like :func:`ubt.analyze.reader_pdf.read_pdf`: the only
 IO is one file read, and the line loop is pure.
@@ -49,7 +50,7 @@ if TYPE_CHECKING:
 
 def _decode(path: Path) -> str:
     """Decode a text source (BOM / declared encoding first), as the adapter does."""
-    from ubt.adapters.base import decode_markup
+    from ubt.core.text_decode import decode_markup
 
     return decode_markup(path.read_bytes())
 

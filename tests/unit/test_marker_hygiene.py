@@ -38,11 +38,18 @@ pytestmark = pytest.mark.fast
 _TESTS_ROOT = Path(__file__).resolve().parents[1]
 _INNER_LOOP_MARK = "fast"
 _HEAVY_MARK = "slow"
-#: Marks that place a test in some tier. ``network`` and ``legacy_drift`` are
-#: deliberate: the first opts out of the offline guarantee, the second is
-#: quarantined but still collected by a full run. Both are therefore *not*
-#: unmarked, and a test carrying either is exempt from the coverage check below.
-_TIER_MARKS = frozenset({_INNER_LOOP_MARK, _HEAVY_MARK, "network", "legacy_drift"})
+#: The two tiers a gate actually runs. CI's pytest steps pass an explicit ``-m``
+#: (``-m fast``, ``-m slow``), and ``-m`` *replaces* the ``addopts`` filter, so
+#: these are the only marks that put a test in front of a gate.
+_CI_TIER_MARKS = frozenset({_INNER_LOOP_MARK, _HEAVY_MARK})
+#: Marks that modify a test without choosing its tier. ``network`` lifts the
+#: offline socket block; ``legacy_drift`` says "not the inner loop". Neither is
+#: a tier: a test carrying only one of them is executed by *no* gate, which is
+#: exactly the hole this module exists to close. They are therefore additive --
+#: a test must still carry ``fast`` or ``slow`` to be run at all.
+_ADDITIVE_MARKS = frozenset({"network", "legacy_drift"})
+#: Marks that put a test in some tier, for the "is it marked at all" check.
+_TIER_MARKS = _CI_TIER_MARKS | _ADDITIVE_MARKS
 
 
 def _mark_names(node: ast.AST) -> set[str]:
@@ -112,27 +119,53 @@ def test_no_test_carries_both_fast_and_slow() -> None:
 
 
 def test_every_test_carries_a_tier_mark() -> None:
-    """Every test must be in some tier, or no gate ever runs it.
+    """Every test must be in a gate's tier, not merely carry *a* mark.
 
     Both CI steps pass an explicit ``-m``, which replaces the ``addopts``
     filter rather than narrowing it, so the tiers CI actually runs are exactly
-    ``fast`` and ``slow``. A test with neither mark is in no tier: it passes
-    when run by hand and never runs in a gate.
+    ``fast`` and ``slow``. ``network`` and ``legacy_drift`` are additive
+    modifiers, not tiers: a test marked only ``network`` (to lift the socket
+    block) or only ``legacy_drift`` (to leave the inner loop) is executed by no
+    gate at all -- it passes when run by hand and silently stops protecting the
+    tree. Every test must therefore carry ``fast`` or ``slow``.
     """
     offenders: list[str] = []
     for path in sorted(_TESTS_ROOT.rglob("test_*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        inherited = _module_marks(tree) & _TIER_MARKS
+        inherited = _module_marks(tree)
         for func in _test_functions(tree):
-            effective = inherited | (
-                _mark_names(ast.Module(body=[func], type_ignores=[])) & _TIER_MARKS
-            )
-            if not effective:
+            effective = inherited | _mark_names(ast.Module(body=[func], type_ignores=[]))
+            if not (effective & _CI_TIER_MARKS):
                 rel = path.relative_to(_TESTS_ROOT.parent)
                 offenders.append(f"{rel}::{func.name}")
     assert offenders == [], (
-        "test(s) carry no tier mark, so no gate runs them (CI runs only `-m fast` "
-        "and `-m slow`); add `pytestmark = pytest.mark.fast` to the module if the "
-        "tests are offline and cheap, or `@pytest.mark.slow` per test if not:\n"
+        "test(s) carry no CI tier mark, so no gate runs them (CI runs only "
+        "`-m fast` and `-m slow`); `network`/`legacy_drift` are additive, not "
+        "tiers. Add `pytestmark = pytest.mark.fast` to the module if the tests "
+        "are offline and cheap, or `@pytest.mark.slow` per test if not:\n"
+        + "\n".join(f"  {o}" for o in offenders)
+    )
+
+
+def test_legacy_drift_never_joins_the_inner_loop() -> None:
+    """A quarantined test must be ``slow``, never ``fast``.
+
+    ``legacy_drift`` means "kept out of the inner loop"; ``fast`` is the inner
+    loop. A test carrying both is a contradiction -- it would run in the very
+    tier it is quarantined from, which is the regression this module's own
+    docstring records.
+    """
+    offenders: list[str] = []
+    for path in sorted(_TESTS_ROOT.rglob("test_*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        inherited = _module_marks(tree)
+        for func in _test_functions(tree):
+            effective = inherited | _mark_names(ast.Module(body=[func], type_ignores=[]))
+            if "legacy_drift" in effective and _INNER_LOOP_MARK in effective:
+                rel = path.relative_to(_TESTS_ROOT.parent)
+                offenders.append(f"{rel}::{func.name}")
+    assert offenders == [], (
+        "test(s) are both `legacy_drift` and `fast`: a quarantined check cannot "
+        "live in the inner loop it is quarantined from; use `slow`:\n"
         + "\n".join(f"  {o}" for o in offenders)
     )

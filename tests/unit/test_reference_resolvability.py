@@ -189,3 +189,111 @@ def test_test_files_are_named_for_their_module() -> None:
         "test files named for the review that produced them instead of the module "
         "they pin; move each case into its module's canonical file:" + "\n" + "\n".join(offenders)
     )
+
+
+# --------------------------------------------------------------------------- #
+# User-facing prose must not name a CLI flag, config field or mode value that
+# the code does not have. A README describing a deleted engine is invisible to
+# every other gate: the links resolve, the types check, the tests pass.
+# --------------------------------------------------------------------------- #
+
+#: A ``--flag`` in prose. The lookbehind keeps a negative number or a range
+#: (``4pt-12pt``) from matching, and the trailing boundary keeps ``--render-mode``
+#: from being read as ``--render``.
+_DOC_FLAG = re.compile(r"(?<![\w-])--([a-z][a-z0-9-]+)")
+
+#: Flags the docs legitimately mention that are not on the ``ubt`` CLI: shell
+#: builtins and third-party tools (``pip install --extra``, ``git --no-verify``).
+_DOC_FLAG_ALLOWLIST = frozenset(
+    {
+        "no-verify",  # git
+        "extra",  # pip
+        "force-exclude",  # ruff/pre-commit
+        "all-files",  # pre-commit
+        "no-cache",  # pip/uv
+    }
+)
+
+
+def _cli_flag_names() -> set[str]:
+    """Every option name the ``ubt`` CLI actually accepts, long form, no dashes."""
+    import typer.main
+
+    from ubt.cli.main import app
+
+    click_app = typer.main.get_command(app)
+    names: set[str] = set()
+
+    def walk(command: object) -> None:
+        for param in getattr(command, "params", []):
+            for opt in getattr(param, "opts", []) + getattr(param, "secondary_opts", []):
+                if opt.startswith("--"):
+                    names.add(opt[2:].split("=", 1)[0])
+        for sub in getattr(command, "commands", {}).values():
+            walk(sub)
+
+    walk(click_app)
+    return names
+
+
+def test_readme_flags_exist_on_the_cli() -> None:
+    """A ``--flag`` the README tells a user to type must be a real option.
+
+    The README described ``--render-mode`` (and its ``UBT_RENDER_MODE`` env var)
+    long after the overlay engine was deleted, so a user following it got
+    ``No such option``. The links resolved and every other gate passed; only a
+    check that reads the prose against the live CLI catches this class.
+    """
+    readme = _REPO_ROOT / "README.md"
+    if not readme.is_file():
+        pytest.skip("README is not present in this checkout")
+    known = _cli_flag_names()
+    mentioned = set(_DOC_FLAG.findall(readme.read_text(encoding="utf-8")))
+    unknown = sorted(mentioned - known - _DOC_FLAG_ALLOWLIST)
+    assert not unknown, (
+        "README names CLI flag(s) the `ubt` command does not accept (a deleted "
+        f"feature leaves prose behind): {unknown}"
+    )
+
+
+def test_readme_env_vars_exist_on_the_config() -> None:
+    """A ``UBT_*`` variable the README names must map to a real config field.
+
+    Same failure mode as the flags: ``UBT_RENDER_MODE`` outlived the field it set.
+    """
+    from ubt.core.config import UBTConfig, env_var_names
+
+    readme = _REPO_ROOT / "README.md"
+    if not readme.is_file():
+        pytest.skip("README is not present in this checkout")
+    declared: set[str] = set()
+    for field in UBTConfig.model_fields:
+        declared |= set(env_var_names(field))
+    mentioned = set(re.findall(r"\bUBT_[A-Z0-9_]+\b", readme.read_text(encoding="utf-8")))
+    unknown = sorted(mentioned - declared)
+    assert not unknown, f"README names UBT_* variable(s) with no backing config field: {unknown}"
+
+
+def test_readme_mode_values_exist_in_the_code() -> None:
+    """A quoted mode value in the README must be one the engine defines.
+
+    ``alternating``/``facing`` were described as bilingual modes after the
+    ``DualMode`` literal was cut to ``mono``/``dual``/``auto``.
+    """
+    from typing import get_args
+
+    from ubt.core.config import DualMode
+
+    readme = _REPO_ROOT / "README.md"
+    if not readme.is_file():
+        pytest.skip("README is not present in this checkout")
+    text = readme.read_text(encoding="utf-8")
+    known = set(get_args(DualMode))
+    # Any value named as a dual_mode choice in prose must be real. Match the
+    # backticked/quoted spellings the README uses for mode names.
+    for value in ("mono", "dual", "auto", "alternating", "facing", "inline"):
+        if re.search(rf"[`\"']{value}[`\"']", text) and value not in known:
+            raise AssertionError(
+                f"README names bilingual mode {value!r}, which DualMode does not "
+                f"define (real values: {sorted(known)})"
+            )

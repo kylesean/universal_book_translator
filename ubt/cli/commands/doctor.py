@@ -15,6 +15,7 @@ from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
 
+from ubt.cache.dirs import cache_root
 from ubt.core.config import MOCK_API_KEY, UBTConfig
 from ubt.core.exceptions import DocumentParseError, UBTError
 from ubt.core.fs_perms import world_readable_files
@@ -387,14 +388,14 @@ def collect_checks(config: UBTConfig, *, probe: bool = False) -> list[_Check]:
     # -- storage -----------------------------------------------------------
     group = _GROUPS[1]
     probe_writable("Ledger dir", config.db_dir)
-    docling_cache = Path(".ubt/docling_cache")
+    docling_cache = cache_root() / "docling_cache"
     output_dir = default_output_dir_for_scan()
     exposed = world_readable_files(config.db_dir, extra_dirs=(docling_cache, output_dir))
     if exposed:
         # Name the scan roots that hold an exposed file, not each file's
         # immediate parent: the docling cache keeps one hash directory per
         # asset, so listing parents printed five long paths where
-        # ``.ubt/docling_cache`` covers them all — and stays correct as new
+        # ``docling_cache`` covers them all — and stays correct as new
         # hash directories appear.
         def _under(root: Path, file: Path) -> bool:
             try:

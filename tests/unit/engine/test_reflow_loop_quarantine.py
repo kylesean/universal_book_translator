@@ -1,4 +1,4 @@
-"""``ReflowControlLoop``: the post-render visual gate's quarantine decisions.
+"""``VisualVerifyLoop``: the post-render visual gate's quarantine decisions.
 
 The loop is the only place a rendered artifact is judged against its own
 source, and its output decides whether a block ships or is held for a human.
@@ -28,7 +28,7 @@ from typing import Any
 import pytest
 
 from ubt.adapters.pdf.visual_gate import VisualFinding, VisualGateResult
-from ubt.core.engine.reflow_loop import ReflowControlLoop
+from ubt.core.engine.visual_verify_loop import VisualVerifyLoop
 from ubt.core.ir.models import BlockStatus, BlockType, BookManifest, IRBlock, make_element
 
 pytestmark = pytest.mark.fast
@@ -103,8 +103,8 @@ def _loop(
     *,
     blocks: list[IRBlock] | None = None,
     manifest: BookManifest | None = None,
-) -> ReflowControlLoop:
-    loop = ReflowControlLoop(
+) -> VisualVerifyLoop:
+    loop = VisualVerifyLoop(
         adapter=Any,  # type: ignore[arg-type]
         manifest=manifest or _manifest(tmp_path),
         ledger=ledger,  # type: ignore[arg-type]
@@ -121,7 +121,7 @@ def _loop(
     return loop
 
 
-def _run(loop: ReflowControlLoop, tmp_path: Path, blocks: list[IRBlock]) -> Any:
+def _run(loop: VisualVerifyLoop, tmp_path: Path, blocks: list[IRBlock]) -> Any:
     import asyncio
 
     return asyncio.run(loop.run(tmp_path / "artifact.pdf", blocks))

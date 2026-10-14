@@ -328,7 +328,9 @@ def styled_runs_in_box(
     return runs
 
 
-_EXTRACT_LINES_CACHE: dict[tuple[str, int, int], tuple[list[LineBox], tuple[float, float]]] = {}
+_EXTRACT_LINES_CACHE: dict[
+    tuple[str, int, int, int], tuple[list[LineBox], tuple[float, float]]
+] = {}
 
 # --- Vector-figure micro-glyph cleanup -------------------------------------
 # A matplotlib/tikz scatter cloud emits thousands of sub-5pt marker glyphs on
@@ -447,11 +449,14 @@ def extract_lines(pdf_path: Path, page_no: int) -> tuple[list[LineBox], tuple[fl
     """pdfium line rects in column-aware reading order + page size."""
     import pypdfium2 as pdfium
 
-    cache_key: tuple[str, int, int] | None = None
+    cache_key: tuple[str, int, int, int] | None = None
     try:
         resolved = str(pdf_path.resolve())
-        mtime_ns = pdf_path.stat().st_mtime_ns
-        cache_key = (resolved, mtime_ns, page_no)
+        stat = pdf_path.stat()
+        # Size AND mtime: an in-place rewrite that preserves mtime (a test fixture
+        # regenerated with ``os.utime``, a restored backup) kept the same mtime
+        # but different bytes, and the key served the old page's lines.
+        cache_key = (resolved, stat.st_mtime_ns, stat.st_size, page_no)
         cached = _EXTRACT_LINES_CACHE.get(cache_key)
         if cached is not None:
             return list(cached[0]), cached[1]

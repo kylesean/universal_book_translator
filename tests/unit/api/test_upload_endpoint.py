@@ -114,3 +114,78 @@ def test_upload_requires_auth(tmp_path: Path) -> None:
 
 def test_upload_max_constant_is_sane() -> None:
     assert UPLOAD_MAX_BYTES == 512 * 1024 * 1024
+
+
+async def test_oversized_upload_is_rejected_before_the_body_is_read() -> None:
+    """P1-D1: the cap must fire before Starlette spools the body to disk.
+
+    The handler's own counter runs *after* the multipart form is parsed and every
+    part written to a SpooledTemporaryFile — an unauthenticated 32 MiB POST wrote
+    33,554,432 bytes before its 401. The ASGI middleware checks the declared
+    ``Content-Length`` first and refuses with 413 without a single ``receive()``,
+    so no byte reaches disk. This drives the middleware directly (a TestClient
+    cannot show *when* the body was consumed).
+    """
+    from ubt.api.app import UploadSizeLimitMiddleware
+
+    receive_calls = 0
+
+    async def receive() -> dict[str, object]:
+        nonlocal receive_calls
+        receive_calls += 1
+        return {"type": "http.request", "body": b"x" * 10_000, "more_body": False}
+
+    sent: list[dict[str, object]] = []
+
+    async def send(message: dict[str, object]) -> None:
+        sent.append(message)
+
+    async def inner(scope: object, receive: object, send: object) -> None:
+        # The wrapped app must never be reached: the limit fires first.
+        raise AssertionError("inner app ran despite an oversized Content-Length")
+
+    middleware = UploadSizeLimitMiddleware(inner, max_bytes=1024, path_suffix="/jobs/upload")
+    scope = {
+        "type": "http",
+        "path": "/jobs/upload",
+        "headers": [(b"content-length", b"99999999")],
+    }
+    await middleware(scope, receive, send)
+
+    assert receive_calls == 0, "the body was read despite the size limit"
+    start = next(m for m in sent if m["type"] == "http.response.start")
+    assert start["status"] == 413
+
+
+async def test_chunked_upload_without_content_length_is_capped_while_streaming() -> None:
+    """A chunked body (no Content-Length) is counted as it streams and aborted."""
+    from ubt.api.app import UploadSizeLimitMiddleware
+
+    body = b"y" * 4096
+
+    async def receive() -> dict[str, object]:
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    sent: list[dict[str, object]] = []
+
+    async def send(message: dict[str, object]) -> None:
+        sent.append(message)
+
+    inner_ran = False
+
+    async def inner(scope: object, receive: object, send: object) -> None:
+        nonlocal inner_ran
+        inner_ran = True
+        # Drain the (oversized) body the way a real handler would.
+        while True:
+            msg = await receive()  # type: ignore[operator]
+            if not msg.get("more_body"):
+                break
+
+    middleware = UploadSizeLimitMiddleware(inner, max_bytes=1024, path_suffix="/jobs/upload")
+    scope = {"type": "http", "path": "/jobs/upload", "headers": []}
+    await middleware(scope, receive, send)
+
+    assert inner_ran
+    start = next(m for m in sent if m["type"] == "http.response.start")
+    assert start["status"] == 413

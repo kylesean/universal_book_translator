@@ -9,15 +9,15 @@ while most of the book is untranslated.
 
 So every check here reads only the two files — the source and the artifact —
 with poppler subprocesses, and never imports pipeline modules. Findings use the
-visual gate's ``(severity, code, message)`` shape so the reflow loop can merge
+visual gate's ``(severity, code, message)`` shape so the visual-gate loop can merge
 them; ``target_language_absent`` is the one fail-closed code: an artifact
 containing none of the language it was commissioned in must not ship
 regardless of gate settings.
 
-Geometry and image-count parity were deleted with the overlay engine. They
-existed to catch a render that *promised* to keep the source page and then
-altered it; the reflow renderer rebuilds every page by design, so both checks
-fired on every correct run. What survives is script coverage, which is
+Geometry and image-count parity are deliberately not checked: they only made
+sense for a render that *promised* to keep the source page and then altered it,
+and the renderer rebuilds every page by design, so both checks fired on
+every correct run. What is checked is script coverage, which is
 engine-independent.
 """
 

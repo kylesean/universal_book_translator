@@ -97,8 +97,41 @@ def _definition_names(tree: ast.Module) -> list[tuple[str, int]]:
     return found
 
 
+def _exported_names(tree: ast.Module) -> list[str]:
+    """The string entries of every ``__all__`` in a module.
+
+    An ``__all__`` entry is *not* a use: the module's own re-export list is the
+    one place a dead definition can hide, because the naive counter counts the
+    string as a mention. ``page_sizes``, ``VlmEvidence`` and
+    ``resolve_cli_adaptive_dual_mode`` each survived this way -- defined once,
+    named only in their own ``__all__`` beside them, imported by nobody. Their
+    entries are subtracted from the reference count below so the guard sees
+    through the re-export.
+    """
+    names: list[str] = []
+    for node in ast.walk(tree):
+        value = None
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+            value = node.value
+        elif isinstance(node, ast.AnnAssign):
+            targets = [node.target]
+            value = node.value
+        else:
+            continue
+        if not isinstance(value, (ast.List, ast.Tuple, ast.Set)):
+            continue
+        if any(isinstance(t, ast.Name) and t.id == "__all__" for t in targets):
+            names += [
+                e.value
+                for e in value.elts
+                if isinstance(e, ast.Constant) and isinstance(e.value, str)
+            ]
+    return names
+
+
 def test_no_dead_definitions() -> None:
-    """Every module-level definition is named somewhere besides its own ``def`` line.
+    """Every module-level definition is used somewhere besides its own ``def`` line.
 
     Counts identifiers once across the whole tree (a ``Counter``), rather than
     regex-searching the corpus per name: the naive sweep is
@@ -106,11 +139,24 @@ def test_no_dead_definitions() -> None:
     Counting is required, not mere membership — the definition's own line always
     contains its name, so presence alone would make the check vacuous. A count of
     one is exactly that self-reference.
+
+    An ``__all__`` entry is subtracted from every count: a module naming a
+    definition only in its own re-export list has no consumer, and counting the
+    string hid exactly that (see :func:`_exported_names`).
     """
     mentions: Counter[str] = Counter()
     for path in _iter_text_files():
         text = path.read_text(encoding="utf-8", errors="replace")
         mentions.update(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", text))
+    exported: Counter[str] = Counter()
+    for path in sorted(_PACKAGE_ROOT.rglob("*.py")):
+        if "__pycache__" in path.parts:
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        except SyntaxError:  # pragma: no cover - a broken file fails elsewhere
+            continue
+        exported.update(_exported_names(tree))
 
     dead: list[str] = []
     for path in sorted(_PACKAGE_ROOT.rglob("*.py")):
@@ -123,10 +169,10 @@ def test_no_dead_definitions() -> None:
         for name, lineno in _definition_names(tree):
             if name in _UNNAMEABLE_BY_DESIGN:
                 continue
-            if mentions[name] <= 1:
+            if mentions[name] - exported[name] <= 1:
                 dead.append(f"{path.relative_to(_REPO_ROOT)}:{lineno} {name}")
 
     assert not dead, (
-        "dead definition(s) -- nothing in the repository names them. Delete, or "
-        "document why they stay in _UNNAMEABLE_BY_DESIGN: " + ", ".join(sorted(dead))
+        "dead definition(s) -- nothing in the repository uses them. Delete, or "
+        "document why they stay: " + ", ".join(sorted(dead))
     )

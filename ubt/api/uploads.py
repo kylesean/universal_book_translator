@@ -22,6 +22,18 @@ logger = logging.getLogger(__name__)
 
 _SECONDS_PER_DAY = 86400.0
 
+#: Cap for staged uploads. Books are large but not unbounded; this also keeps
+#: a rogue multipart body from filling the disk the ledger lives on. Lived in
+#: ``ubt.api.app`` until the route split; the upload route and the size-limit
+#: middleware both read it, and re-export it (an operator override test
+#: monkeypatches it through :mod:`ubt.api.app`).
+UPLOAD_MAX_BYTES = 512 * 1024 * 1024  # 512 MB
+
+#: Paths whose request bodies are size-capped before the body is read. Only the
+#: upload route streams a client-controlled body to disk; the rest are small
+#: JSON payloads FastAPI buffers anyway.
+UPLOAD_PATH_SUFFIX = "/jobs/upload"
+
 #: Queue rows to inspect when deciding what is still in use. Non-terminal rows
 #: are bounded by ``job_max_queued`` plus the running jobs, so this is a scan
 #: limit in name only; it exists because ``list_jobs`` applies one in SQL.

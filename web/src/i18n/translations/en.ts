@@ -46,7 +46,7 @@ export const en: TranslationDictionary = {
     // The copy describes the engine parameters each preset actually sets
     // (ubt/core/presets.py): prompt depth, formula handling and exec mode.
     // Presets never pick a model or a render route — the router and the single
-    // overlay engine do — so the copy no longer claims either.
+    // Typst renderer do — so the copy no longer claims either.
     presetPublication: 'Publication Grade',
     presetPublicationDesc:
       'Rich context prompts and full-context term bible; vector formula re-render with per-item visual witness.',
@@ -104,7 +104,7 @@ export const en: TranslationDictionary = {
       MODEL_NOT_CONFIGURED:
         'No draft model is configured: the quote treats the model name as unknown and shows cost as "unknown". Set UBT_DRAFT_MODEL, pick a provider (UBT_PROVIDER=...), or declare [providers.<name>].',
       SCANNED_PAGES_DOMINANT:
-        'The document is mostly scanned/image pages, so the translation depends on visual transcription and both cost and latency rise sharply. An OCR pre-check is advised (the run will take the in-place overlay route).',
+        'The document is mostly scanned/image pages, so the translation depends on visual transcription and both cost and latency rise sharply. An OCR pre-check is advised.',
       FONT_RESIDUE_RISK:
         'Font encoding damage: {confirmed_pages} page(s) confirmed with garbled characters ({residue_chars} residue chars in total). Some text may be unrecoverable — {remedy}.',
       FORMULA_HEAVY_NEEDS_ENRICHMENT:
@@ -366,6 +366,8 @@ export const en: TranslationDictionary = {
     loadMore: 'Load more',
     saving: 'Saving...',
     saved: 'Saved & fed back to TM',
+    reExportDone: 'Delivered file re-rendered: {path}',
+    reExportFailed: 'Edit saved, but re-rendering the delivered file failed: {msg}',
     humanVerified: 'Human verified',
     prevIssue: 'Previous issue (Shift+F8)',
     nextIssue: 'Next issue (F8)',

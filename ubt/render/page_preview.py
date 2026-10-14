@@ -67,13 +67,14 @@ def render_page_preview(
     dpi: int = 110,
     font: str | None = None,
 ) -> bytes:
-    """Render ``page``'s blocks through the semantic reflow renderer as PNG bytes.
+    """Render ``page``'s blocks through the renderer as PNG bytes.
 
     Raises :class:`PagePreviewUnavailable` when the page has no blocks or the
     rasterizer is unavailable, so the caller can answer 503 rather than returning
     a broken image.
     """
     from ubt.adapters.pdf.typst_compile import typst_compile
+    from ubt.adapters.pdf.typst_math_probe import TypstMathProbe
     from ubt.render.typst.document_renderer import TypstDocumentRenderer
 
     if not source_pdf.exists():
@@ -85,7 +86,11 @@ def render_page_preview(
 
     workdir.mkdir(parents=True, exist_ok=True)
     build_dir = workdir / f"preview_p{page}"
-    renderer = TypstDocumentRenderer(bilingual=bilingual)
+    # The compile gate the delivery renderer uses (see docling_render). Without
+    # it a malformed formula that the real renderer would degrade to readable
+    # text instead reaches this compile verbatim and fails the *whole* preview
+    # (503), so the workbench could not show a page the deliverable renders fine.
+    renderer = TypstDocumentRenderer(bilingual=bilingual, math_gate=TypstMathProbe().check)
     source, _stats = renderer.build_source(page_blocks, build_dir, target_lang)
     typ_path = build_dir / "main.typ"
     typ_path.write_text(source, encoding="utf-8")

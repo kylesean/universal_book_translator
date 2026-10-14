@@ -20,7 +20,8 @@ import pytest
 
 from ubt.adapters.pdf.textgeom import CharStyle, styled_runs_in_box
 from ubt.core.ir.models import BlockType, InlineRun, IRBlock, StyleMeta, make_element
-from ubt.render.typst.document_renderer import block_runs, render_prose
+from ubt.render.inline_spans import block_runs
+from ubt.render.typst.document_renderer import render_prose
 
 pytestmark = pytest.mark.fast
 

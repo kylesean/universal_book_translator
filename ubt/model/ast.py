@@ -191,21 +191,6 @@ TEXT_ELEMENTS: tuple[type[Element], ...] = (
 #: Element classes that are immutable assets.
 ASSET_ELEMENTS: tuple[type[Element], ...] = (Formula, Table, Figure)
 
-#: The closed set of concrete element classes -- the runtime form of
-#: :data:`ElementT`. Capability declarations and exhaustive dispatches are built
-#: from it, so adding a class is one edit here.
-ELEMENT_CLASSES: tuple[type[Element], ...] = (
-    Heading,
-    Paragraph,
-    Dialogue,
-    ListItem,
-    Caption,
-    CodeBlock,
-    Formula,
-    Table,
-    Figure,
-)
-
 
 def source_slice(element: Element, source: CanonicalSource) -> str:
     """The exact source text one element carries, from its character span.
@@ -257,7 +242,6 @@ class Document:
 
 __all__ = [
     "ASSET_ELEMENTS",
-    "ELEMENT_CLASSES",
     "TEXT_ELEMENTS",
     "Caption",
     "CodeBlock",

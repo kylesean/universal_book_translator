@@ -21,6 +21,7 @@ back to the source.
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -138,11 +139,15 @@ def test_the_output_actually_compiles(latex: str, tmp_path: Path) -> None:
 
     Skipped when the compiler is absent, so the suite stays runnable without
     the toolchain — but a present compiler must accept all seven.
-    """
-    typst = "/home/kyle/.cargo/bin/typst"
-    import shutil
 
-    binary = typst if shutil.which(typst) else shutil.which("typst")
+    The binary is resolved through the same ``resolve_typst_binary`` the render
+    path uses (``UBT_TYPST_BINARY`` / ``typst`` on PATH), not a hardcoded
+    ``$HOME/.cargo/bin`` path: a literal made the fast tier machine-specific and
+    non-hermetic, silently skipping on every runner but the author's.
+    """
+    from ubt.adapters.pdf.typst_compile import resolve_typst_binary
+
+    binary = resolve_typst_binary(os.environ.get("UBT_TYPST_BINARY", "typst"))
     if binary is None:
         pytest.skip("typst compiler not installed")
 
@@ -257,3 +262,33 @@ def test_a_cjk_label_keeps_its_ascii_words_verbatim() -> None:
     # their spelling and spacing rather than becoming separate math identifiers.
     assert typstify_math(r"\text{参数}") == '#"参数"'
     assert typstify_math(r"\text{第 3 层}") == '#"第 3 层"'
+
+
+# --------------------------------------------------------------------------- #
+# A dangling script operator must not fail the whole document
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "latex",
+    [r"a^", r"a_", r"x^", r"x_", r"a^ + b", r"x^{2}^", r"f(x)^", r"a^_b", r"A_"],
+)
+def test_a_dangling_script_does_not_emit_a_broken_body(latex: str) -> None:
+    r"""``$a^$`` is ``error: expected expression`` in Typst, and one bad body
+    fails the *whole* document (the publish path raises on a compile failure).
+
+    The model emits these when it re-encodes a flattened superscript
+    (``x²`` -> ``x^``) or drops a brace. A dangling ``^``/``_`` gets an empty
+    string attached, the same spelling the leading-script guard uses.
+    """
+    body = typstify_math(latex)
+    assert body is not None
+    assert not body.endswith(("^", "_")), body
+    assert "_ _" not in body and "^ ^" not in body
+
+
+def test_a_script_with_an_operand_is_untouched() -> None:
+    # The guard must not rewrite a legitimate script.
+    assert typstify_math("x^2") == "x^2"
+    assert typstify_math("x_i") == "x_i"
+    assert typstify_math("a^{}") == "a^()"

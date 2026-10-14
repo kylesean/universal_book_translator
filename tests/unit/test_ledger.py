@@ -129,11 +129,17 @@ def test_read_only_ledger_reads_an_existing_file(tmp_path: Path) -> None:
         assert reader.get_job_status("job") == "initialized"
 
 
-def test_close_is_idempotent_and_reopens_lazily(ledger: SQLiteJobLedger) -> None:
+def test_close_is_idempotent_and_refuses_to_reopen(ledger: SQLiteJobLedger) -> None:
+    """P2-1: close() is idempotent, and a closed ledger never silently reopens.
+
+    Reopening on the next ``_get_conn`` (the old behaviour) let a stage that
+    finalized *after* the run's teardown write past the writer-lock release.
+    """
     _init(ledger)
     ledger.close()
     ledger.close()  # must never raise
-    assert ledger.get_job_status("job") == "initialized"  # read re-initializes
+    with pytest.raises(LedgerError):
+        ledger.get_job_status("job")
 
 
 def test_blocks_seq_advances_on_writes_only(ledger: SQLiteJobLedger) -> None:
@@ -334,6 +340,39 @@ def test_append_chapter_roundtrips_structural_element_fields(ledger: SQLiteJobLe
     assert isinstance(stored_item.element, ListItem)
     assert stored_item.element.marker == "1."
     assert stored_item.element.confidence is Confidence.INFERRED
+
+
+def test_span_chars_survive_the_ledger_round_trip(ledger: SQLiteJobLedger) -> None:
+    # ``Span.chars`` is the canonical-stream back-reference the native readers
+    # stamp (``source_slice`` slices it). It had no column, so a resumed block
+    # re-materialized without it and a re-export sliced coarser text than the
+    # original export -- the block matched on the first run and not after a
+    # resume. It must survive ``append_chapter`` (write) + ``get_block`` (read).
+    _init(ledger)
+    block = IRBlock(
+        element=make_element(
+            id="ch1#c",
+            spine_index=0,
+            block_type=BlockType.NARRATIVE,
+            source_text="hello world",
+            chars=(12, 23),
+        ),
+    )
+    ledger.append_chapter("job", _chapter("ch1", [block]))
+
+    stored = ledger.get_block("ch1#c", job_id="job")
+    assert stored is not None
+    assert stored.element.span.chars == (12, 23)
+
+
+def test_a_block_without_span_chars_round_trips_as_none(ledger: SQLiteJobLedger) -> None:
+    # A format with no canonical stream (or a block written by an older build)
+    # has no char range; the round-trip must leave it None, not fabricate one.
+    _init(ledger)
+    ledger.append_chapter("job", _chapter("ch1", [_block("ch1#n")]))
+    stored = ledger.get_block("ch1#n", job_id="job")
+    assert stored is not None
+    assert stored.element.span.chars is None
 
 
 def test_save_checkpoint_records_state(ledger: SQLiteJobLedger) -> None:

@@ -101,27 +101,6 @@ def _resolve_db_dir(db_dir: Path | None) -> Path:
     return UBTConfig.from_env().db_dir
 
 
-def resolve_cli_adaptive_dual_mode(
-    explicit_dual_mode: str | None,
-    profile: str | None,
-) -> str | None:
-    """Resolve the smart profile-aware dual_mode default at the CLI layer.
-
-    When --dual-mode is explicitly passed by the user, that choice is preserved.
-    When unset (None), derives the smart default:
-    - Academic papers ('paper') default to 'monolingual' (standard academic publication format);
-    - Textbooks ('textbook') default to 'monolingual' (dense educational layout);
-    - Novels / fiction ('fiction', 'novel') default to 'monolingual' (continuous prose reading);
-    - Other combinations (e.g. 'general', 'humanities') leave it
-      unset to follow config / UBT_DUAL_MODE / 'auto'.
-    """
-    # Single-sourced in ``ubt.core.job_options`` so API/MCP resolve the same
-    # default (see ``overrides_from_request``).
-    from ubt.core.job_options import adaptive_dual_mode
-
-    return adaptive_dual_mode(explicit_dual_mode, profile)
-
-
 async def _run_translation(
     input_path: Path,
     output_path: Path | None,
@@ -564,7 +543,6 @@ __all__ = [
     "_strict_failures",
     "_note_progress",
     "_run_translation",
-    "resolve_cli_adaptive_dual_mode",
 ]
 
 if __name__ == "__main__":

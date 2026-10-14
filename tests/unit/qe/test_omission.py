@@ -392,6 +392,30 @@ def test_ocr_glued_prose_not_tracked_as_identifier() -> None:
     )
 
 
+def test_identifier_terms_drops_a_table_capitalised_word() -> None:
+    """A word set in caps as a table label is dropped when used lower-case.
+
+    Also pins P2-15: the document-scan is hoisted out of the per-term loop, so
+    the verdict must be unchanged (the strip happens once, not once per term).
+    """
+    from ubt.core.qe.omission import identifier_terms
+
+    doc = "MASK | SAME | RND\nWe apply a mask to each token; the same value is reused."
+    terms = identifier_terms("The MASK is same.", doc)
+    # MASK/SAME read as ordinary words elsewhere -> not tracked; RND is absent
+    # here but present in doc; a true acronym would survive.
+    assert "MASK" not in terms
+    assert "SAME" not in terms
+
+
+def test_identifier_terms_keeps_a_true_acronym() -> None:
+    from ubt.core.qe.omission import identifier_terms
+
+    doc = "We use MHA and LSTM layers. The MHA block attends over tokens."
+    terms = identifier_terms("The MHA block.", doc)
+    assert "MHA" in terms
+
+
 def test_clause_merged_sentences_with_full_recall_pass() -> None:
     src = (
         "Workloads. Our workloads are drawn from real RL training and evaluation scenarios. "
@@ -404,6 +428,28 @@ def test_clause_merged_sentences_with_full_recall_pass() -> None:
     )
     decision = OmissionGate().evaluate(src, tgt)
     assert decision.passed is True
+
+
+def test_an_unanchored_prose_run_that_drops_sentences_is_flagged() -> None:
+    """P2-3: the sentence-drop exemption must not fire on vacuous recall.
+
+    With no identifiers and no numbers the exemption's three recall terms are
+    all trivially 1.0 (there is nothing to recall), so a paragraph that
+    translated only its tail read ``Flawless``. The exemption must be earned by
+    at least one signal that had something to preserve.
+    """
+    src = (
+        "Alpha beta gamma delta epsilon zeta eta theta. Iota kappa lambda mu nu xi "
+        "omicron pi. Rho sigma tau upsilon phi chi psi omega. Beta gamma delta epsilon "
+        "zeta eta theta iota."
+    )
+    # Only the last two of the four source sentences are translated.
+    tgt = "Rho sigma tau upsilon phi chi psi omega. Beta gamma delta epsilon zeta eta theta iota."
+    decision = OmissionGate().evaluate(src, tgt)
+    assert decision.metrics.source_sentences == 4
+    assert decision.metrics.sentence_ratio == 0.5
+    assert decision.passed is False
+    assert "Omission suspected" in decision.reason
 
 
 def test_a_translated_range_delimiter_does_not_deflate_recall() -> None:

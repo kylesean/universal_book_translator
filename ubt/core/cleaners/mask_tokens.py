@@ -166,11 +166,21 @@ def token_patterns(mask_prefix: str, core: str) -> tuple[re.Pattern[str], re.Pat
     upper = clean_prefix.upper()
     if core in upper and upper != f"{core}_MASK":
         prefix_pattern = rf"(?:{prefix_pattern}|{core}[:_]?MASK|{core})"
+    # The checksum suffix is ``1..3`` alnum, not exactly 3: the masker always
+    # emits 3, but a model can truncate it (``⟦MATH_MASK_0001-46⟧`` for a 3-char
+    # ``d42``). An exactly-3 pattern matched only the *index* of a truncated
+    # token, restored the span, and left the ``-46⟧`` tail as literal debris in
+    # the delivered text — with every integrity bucket empty, so the block
+    # still counted ``clean`` and shipped (FastPass "Flawless"). Accepting a
+    # short suffix makes the whole token match, so a truncated checksum is seen
+    # as present-but-wrong (``mismatched``) and the token is left intact
+    # (``residue``) instead of silently half-restored. A full token is matched
+    # identically either way, so this only tightens the failure cases.
     fuzzy = re.compile(
-        r"[⟦\[【(]?\s*" + prefix_pattern + r"[:_]?(\d{1,6})(?:-([0-9a-z]{3}))?\s*[⟧\]】)]?",
+        r"[⟦\[【(]?\s*" + prefix_pattern + r"[:_]?(\d{1,6})(?:-([0-9a-z]{1,3}))?\s*[⟧\]】)]?",
         re.IGNORECASE,
     )
-    scan = re.compile(prefix_pattern + r"[:_]?(\d{1,6})(?:-([0-9a-z]{3}))?", re.IGNORECASE)
+    scan = re.compile(prefix_pattern + r"[:_]?(\d{1,6})(?:-([0-9a-z]{1,3}))?", re.IGNORECASE)
     return fuzzy, scan
 
 

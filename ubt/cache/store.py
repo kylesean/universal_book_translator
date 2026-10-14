@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import re
+import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -40,6 +41,13 @@ _PRUNE_INTERVAL_WRITES = 1024
 #: Prune down to this share of the cap, so pruning is not re-triggered on the
 #: very next write (a hysteresis band).
 _PRUNE_TARGET_RATIO = 0.9
+#: Minimum seconds between construction-time prunes for one root. A store is
+#: constructed per ``profile_pdf`` call, which ``annotate_page_kinds`` runs once
+#: per chapter; the prune walks the whole cache tree, so an unthrottled
+#: construct-prune re-scanned it once per chapter. Process-global (keyed by
+#: root) because the per-chapter stores are fresh objects.
+_PRUNE_MIN_INTERVAL_SECONDS = 30.0
+_prune_clock: dict[str, float] = {}
 
 #: The only paths prune() may ever delete: this store's own layout
 #: (``root/<2-hex shard>/<sha256 key>.json``). Everything else under the
@@ -91,8 +99,15 @@ class DiskCacheStore:
         self._writes = 0
         # Prune on open as well as on the write interval: a shared cache dir
         # fed by many short-lived runs (each under the write interval) would
-        # otherwise never see a prune at all.
-        self.prune()
+        # otherwise never see a prune at all. Throttled per root, because some
+        # callers (``profile_pdf`` via ``annotate_page_kinds``) build a fresh
+        # store once per chapter and an unthrottled walk of the whole cache tree
+        # per chapter is pure overhead.
+        now = time.monotonic()
+        last = _prune_clock.get(str(self.root))
+        if last is None or now - last >= _PRUNE_MIN_INTERVAL_SECONDS:
+            _prune_clock[str(self.root)] = now
+            self.prune()
 
     def _path(self, key: str) -> Path:
         return self.root / key[:2] / f"{key}.json"

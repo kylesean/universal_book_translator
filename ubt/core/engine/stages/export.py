@@ -39,6 +39,7 @@ from ubt.core.ports import (
     blocking_gate_tripped,
     crashed_visual_gate_result,
     get_last_render_flags,
+    get_last_render_reconstructions,
     get_last_render_skips,
 )
 
@@ -165,10 +166,16 @@ def apply_render_skip_flags(
 
 
 #: Quality flags this stage owns: a *drawn* fragment whose fitted size fell
-#: below the readable floor. Plain error flags, deliberately never
-#: ``render_skip:`` -- a skip flag would make the contract read the block as
-#: source-kept, and the whole point of drawing it is that the translation ships.
-RENDER_QUALITY_FLAGS: tuple[str, ...] = ("low_legibility_font",)
+#: below the readable floor, a formula delivered as readable Unicode rather than
+#: typeset math, or a block whose text still carried a pipeline sentinel (a
+#: restore pass could not account for a span). Plain error flags, deliberately
+#: never ``render_skip:`` -- a skip flag would make the contract read the block
+#: as source-kept, and the whole point is that the content ships.
+RENDER_QUALITY_FLAGS: tuple[str, ...] = (
+    "low_legibility_font",
+    "formula_degraded",
+    "sentinel_leaked",
+)
 
 
 def apply_render_quality_flags(
@@ -591,7 +598,7 @@ async def _run_visual_gate(
     """Post-render visual gate; never fatal except on cancel.
 
     T0/T1 deterministic checks + optional pixel confirmation + sampled T2
-    VLM + ReflowControlLoop, all driven by the config bound on ``ctx``.
+    VLM + VisualVerifyLoop, all driven by the config bound on ``ctx``.
     Returns the (possibly re-rendered) artifact, its visual report path, and
     the gate object (None when the gate is off or not a PDF).
     """
@@ -600,9 +607,9 @@ async def _run_visual_gate(
     if not ctx.config.visual_gate_enabled or rendered_path.suffix.lower() != ".pdf":
         return rendered_path, visual_report_path, gate
     try:
-        from ubt.core.engine.reflow_loop import ReflowControlLoop
+        from ubt.core.engine.visual_verify_loop import VisualVerifyLoop
 
-        reflow_loop = ReflowControlLoop(
+        verify_loop = VisualVerifyLoop(
             adapter=adapter,
             manifest=ctx.manifest,
             ledger=ctx.ledger,
@@ -617,7 +624,7 @@ async def _run_visual_gate(
             visual_judge_model=ctx.config.visual_judge_model,
             cancel_token=ctx.cancel_token,
         )
-        rendered_path, visual_report_path, gate = await reflow_loop.run(
+        rendered_path, visual_report_path, gate = await verify_loop.run(
             rendered_path=rendered_path,
             blocks=final_blocks,
         )
@@ -634,7 +641,7 @@ async def _run_visual_gate(
             logger.info("Visual gate for job %s skipped: %s", ctx.job_id, gate.skipped_reason)
     except JobInterruptedError:
         # Cooperative cancellation (user cancel or lost lease) is raised from
-        # inside reflow_loop.run and by the check below it; it must reach the
+        # inside verify_loop.run and by the check below it; it must reach the
         # pipeline's handler, not be reported as a non-fatal gate hiccup that
         # then renders, writes the report and stamps the job "completed".
         raise
@@ -825,6 +832,7 @@ def _deliver_contract(
     ctx: StageContext,
     blocks: list[IRBlock],
     rendered_path: Path,
+    reconstructions: list[Any] | None = None,
 ) -> ReconciliationReport:
     """Build the content graph, reconcile it, and persist the contract.
 
@@ -832,6 +840,10 @@ def _deliver_contract(
     report is advisory unless ``config.strict_contract`` is set, in which case
     the caller aborts on an ERROR-severity violation; ``ubt verify`` applies the
     same reconciliation to a delivered artifact or a finished job's ledger.
+
+    ``reconstructions`` is the renderer's per-asset rebuild ledger, so a table
+    the renderer rebuilt from its translated grid is recorded RECONSTRUCTED
+    (and verified or corrupt) rather than an opaque copy.
     """
     from ubt.core.content.adapt import graph_from_blocks
     from ubt.core.content.contract import reconcile
@@ -842,6 +854,7 @@ def _deliver_contract(
         doc_id=str(getattr(manifest, "doc_id", "") or ""),
         title=str(getattr(manifest, "title", "") or ""),
         source_path=str(getattr(manifest, "source_path", "") or ""),
+        reconstructions=reconstructions,
     )
     allow_spill_warning = getattr(ctx.config, "spill_policy", "error") in (
         "warn",
@@ -941,7 +954,7 @@ def _write_table_appendix(
 ) -> Path | None:
     """Write translated table appendix companion (.md / .json) and append pages to PDF when appropriate.
 
-    The semantic reflow renderer re-typesets every table inline
+    The renderer re-typesets every table inline
     (``ubt/render/typst/document_renderer.py``), so appending the same tables
     again would deliver each complex table twice. This remains only for the
     ``--table-render-mode`` companion exports; no PDF page is appended.
@@ -1396,6 +1409,21 @@ async def run_export_stage(
 
     ctx.check_cancelled()
     effective_bilingual_mode = render.bilingual_mode
+    # Persist the render decision before rendering: a re-export (a human edit
+    # re-rendered into the delivered file) has no advisory stage to re-derive it
+    # from, so the mode a re-export reproduces is read back from here. Without
+    # it a re-export would default to monolingual and silently drop the
+    # bilingual pairing the first run shipped.
+    await asyncio.to_thread(
+        ledger.set_job_metadata_value,
+        actual_job_id,
+        "render_plan",
+        {
+            "bilingual_mode": render.bilingual_mode,
+            "effective_dual_mode": render.effective_dual_mode,
+            "emit_secondary_mode": render.emit_secondary_mode,
+        },
+    )
     translations = await asyncio.to_thread(_delivery_translations, final_blocks)
     rendered_path = await _render_adapter_output(
         adapter=adapter,
@@ -1420,8 +1448,12 @@ async def run_export_stage(
 
     # Delivery contract: the content-graph reconciliation, written beside the
     # artifact and embedded in the quality report; an opt-in hard gate
-    # (UBT_STRICT_CONTRACT) aborts a knowingly-broken delivery.
-    contract = _deliver_contract(ctx, final_blocks, rendered_path)
+    # (UBT_STRICT_CONTRACT) aborts a knowingly-broken delivery. The renderer's
+    # per-asset reconstruction ledger goes in, so a table rebuilt from its
+    # translated grid is recorded RECONSTRUCTED (verified/corrupt), not opaque.
+    contract = _deliver_contract(
+        ctx, final_blocks, rendered_path, get_last_render_reconstructions(adapter)
+    )
     if ctx.config.strict_contract and not contract.passed:
         raise IntegrityViolationError(
             f"Export blocked for job {ctx.job_id}: delivery contract failed with "
@@ -1444,7 +1476,7 @@ async def run_export_stage(
         await asyncio.to_thread(_write_spill_appendix, ctx, rendered_path, final_blocks, contract)
 
     # Post-render visual gate: T0/T1 deterministic +
-    # optional pixel confirmation + sampled T2 VLM + ReflowControlLoop.
+    # optional pixel confirmation + sampled T2 VLM + VisualVerifyLoop.
     # Enforcement is deferred until after _build_reports (below): a refusal
     # must still leave the quality/metrics reports on disk for audit.
     rendered_path, visual_report_path, gate = await _run_visual_gate(

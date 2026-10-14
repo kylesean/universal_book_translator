@@ -2,10 +2,7 @@
 
 ``resolve_cjk_ttc`` is the piece the runtime doctor check uses to resolve a CJK
 font; ``sanitize_font_family`` filters a family name for Typst's ``#set text``.
-
-The width-metrics half of this module (fontTools advance sums, a width fitter)
-was deleted with the rigid typesetter: the publication renderer lets Typst
-measure text itself, and the advance-sum path had no remaining caller.
+Typst measures text itself, so this module carries no width-metrics fitter.
 """
 
 from __future__ import annotations

@@ -1,10 +1,7 @@
 """Deterministic file fingerprinting for document adapters.
 
-Note: the former JSON IR serialization functions
-(``serialize_ir`` / ``deserialize_ir`` / ``save_ir_atomic`` /
-``load_ir_file`` / ``compute_block_hash``) were removed — the production
-persistence contract is the SQLite ledger schema, and no production code
-serialized a whole in-memory IR to JSON.
+The production persistence contract is the SQLite ledger schema; a whole
+in-memory IR is never serialized to JSON.
 """
 
 import hashlib

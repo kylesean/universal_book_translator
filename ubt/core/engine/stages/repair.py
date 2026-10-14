@@ -3,7 +3,7 @@
 import asyncio
 import html
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any
 
@@ -27,7 +27,7 @@ async def run_repair_stage(
     scoring: Scoring,
     defer_unresolved_to_triage: bool = True,
     chapter_id: str | None = None,
-) -> AsyncIterator[TranslationProgressEvent]:
+) -> AsyncGenerator[TranslationProgressEvent, None]:
     """Execute iterative surgical repairs on candidate blocks with Option B draft retention."""
     ledger = ctx.ledger
     actual_job_id = ctx.job_id

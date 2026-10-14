@@ -52,6 +52,18 @@ class ApiScope:
         job = self.job_queue.get(job_id)
         return job is None or job.tenant_id == tenant
 
+    def tenant_from_header(self, raw: str | None) -> str:
+        """Resolve the request's tenant, honoring the header only when trusted.
+
+        The ``X-UBT-Tenant`` header is client-forgeable; it is read only when the
+        operator declared a trusted front proxy (``config.trust_tenant_header``).
+        Otherwise every request is the single ``default`` tenant, so a forged
+        header cannot scope a caller into another tenant's job.
+        """
+        from ubt.api.security import _tenant_from_header
+
+        return _tenant_from_header(raw, trust=self.config.trust_tenant_header)
+
     async def tenant_allows_async(self, job_id: str, tenant: str) -> bool:
         if self.job_queue is None:
             return True

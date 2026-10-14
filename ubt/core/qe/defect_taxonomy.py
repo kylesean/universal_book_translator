@@ -197,6 +197,9 @@ INTENTIONAL_PRESERVED_SKIP_PREFIXES: tuple[str, ...] = (
     "render_skip:non_prose",
     "render_skip:chrome",
     "render_skip:footer",
+    # NOTE: ``render_skip:table_unparseable`` is deliberately absent — it is a
+    # *fail-closed* skip (a translated table the render could not place), not a
+    # deliberate source-keep, so it must count against coverage.
     "inplace_skip:policy",
     "inplace_skip:non_prose",
     "inplace_skip:chrome",

@@ -9,7 +9,7 @@ from ubt.core.exceptions import ModelProviderError
 from ubt.core.router.transports.base import (
     BaseTransport,
     _extract_cached_tokens,
-    retry_after_seconds,
+    raise_for_status,
 )
 
 logger = logging.getLogger(__name__)
@@ -181,20 +181,7 @@ class OpenAIResponsesTransport(BaseTransport):
                         self._model_reasoning_mode[target_model] = "none"
                     response = retry_resp
 
-        if response.status_code == 429:
-            raise ModelProviderError(
-                f"Rate limit exceeded (HTTP 429): {response.text[:500]}",
-                details={
-                    "status_code": 429,
-                    "retry_after": retry_after_seconds(response.headers),
-                    "body": response.text[:2000],
-                },
-            )
-        if response.status_code != 200:
-            raise ModelProviderError(
-                f"Model API error ({response.status_code}): {response.text[:500]}",
-                details={"status_code": response.status_code, "body": response.text[:2000]},
-            )
+        raise_for_status(response)
 
         data = response.json()
         if data.get("error"):

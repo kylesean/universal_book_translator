@@ -291,10 +291,10 @@ def _pdfium_facts(pdf_path: Path) -> list[dict[str, Any]]:
 def _struct_facts(pdf_path: Path, n_pages: int) -> list[dict[str, Any]]:
     """Content-stream operator counts + resource census per page via pikepdf.
 
-    ``pdf_struct.count_ops`` matches the retired pypdf raw page-stream counts
-    exactly (verified 147/147 pages), so ``PROFILE_VECTOR_PATH_OPS`` keeps
-    its calibration; the gc-disabling dance was a pypdf memory-workaround
-    and pikepdf (Rust-managed) does not need it.
+    ``pdf_struct.count_ops`` matches the raw page-stream counts the previous
+    backend produced exactly (verified 147/147 pages), so
+    ``PROFILE_VECTOR_PATH_OPS`` keeps its calibration; pikepdf is Rust-managed
+    and needs no gc-disabling memory workaround.
     """
     try:
         pdf = pdf_struct.open_pdf(pdf_path)

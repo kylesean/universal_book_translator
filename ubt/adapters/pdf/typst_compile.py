@@ -1,9 +1,8 @@
 """Typst compilation primitives shared by the PDF typesetting paths.
 
-Subprocess probe used by the fragment typesetter (per-fragment compile) and the
-math probe. The in-place statement-bisect fallback was retired with its engine.
+Subprocess helpers used by the document render and the math compile probe.
 
-Both helpers are total: a missing binary, a timeout, or an OS error becomes a
+Both are total: a missing binary, a timeout, or an OS error becomes a
 ``(False, message)`` verdict (or a clean availability check) instead of an
 unhandled ``FileNotFoundError`` / ``TimeoutExpired``.
 """

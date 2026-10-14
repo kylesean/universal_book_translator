@@ -85,6 +85,8 @@ from ubt.core.job_options import (
     apply_config_overrides,
     default_output_path,
     job_id_is_valid,
+    own_prior_deliverable,
+    prior_output_of,
     profile_name_is_valid,
     resolve_target_output,
     validate_request_enums,
@@ -351,7 +353,17 @@ async def ubt_translate_book(
             # fresh=True resumes the ledger; it is not a licence to overwrite
             # the source document itself.
             raise ToolError("output_path equals the input document; refusing to overwrite it")
-        if target_candidate.exists() and not fresh:
+        # ``fresh`` resumes THIS job's ledger; it is not a licence to overwrite a
+        # file the caller merely names. REST refuses the identical request, so
+        # MCP must too. The one allowed overwrite is a re-run of the same job_id
+        # whose prior run already resolved to this exact deliverable — the shared
+        # authority answers that, and the CLI and REST consult the same helper.
+        if target_candidate.exists() and (
+            not fresh
+            or not own_prior_deliverable(
+                target_candidate, prior_output_of(_MANAGER.get_job(job_id) if job_id else None)
+            )
+        ):
             raise ToolError(f"output_path already exists; refusing to overwrite it: {output_path}")
         output_path = str(target_candidate)
     else:

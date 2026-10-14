@@ -44,7 +44,7 @@ class DryRunModelProvider(MockModelProvider):
     ) -> str:
         src = draft_source_from_prompt(prompt)
         if src.startswith("#"):
-            # Keep the markdown heading sigil attached, or the reflow renderer
+            # Keep the markdown heading sigil attached, or the renderer
             # loses the block's level and the rehearsal stops resembling a book.
             hashes, _, rest = src.partition(" ")
             return f"{hashes} {_DRY_RUN_PREFIX} {rest}".strip()

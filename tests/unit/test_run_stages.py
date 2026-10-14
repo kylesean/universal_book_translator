@@ -22,7 +22,7 @@ The contracts pinned here, with every stage replaced by a recording fake:
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -339,10 +339,7 @@ async def test_a_consumer_that_stops_at_the_terminal_event_keeps_the_hook_effect
     async def hook(event: TranslationProgressEvent) -> None:
         record.append(("hook", event))
 
-    plan = cast(
-        AsyncGenerator[TranslationProgressEvent, None],
-        run_stages(_CTX, _gates(), _FACTS, _SERVICES, blocks=_BLOCKS, on_export_completed=hook),
-    )
+    plan = run_stages(_CTX, _gates(), _FACTS, _SERVICES, blocks=_BLOCKS, on_export_completed=hook)
     async for event in plan:
         record.append(("yield", event))
         if event.event_type is EventType.EXPORT_COMPLETED:

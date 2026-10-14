@@ -15,8 +15,9 @@ from ubt.core.router.transports.base import (
     BaseTransport,
     _extract_cached_tokens,
     _heal_drop_temperature,
+    _heal_max_tokens_rename,
     _heal_reasoning_effort,
-    retry_after_seconds,
+    raise_for_status,
 )
 
 logger = logging.getLogger(__name__)
@@ -98,24 +99,14 @@ class OpenAIChatTransport(BaseTransport):
             chat_url,
             payload,
             response,
-            (_heal_reasoning_effort, _heal_drop_temperature(*_CHAT_TEMPERATURE_KEYS)),
+            (
+                _heal_reasoning_effort,
+                _heal_drop_temperature(*_CHAT_TEMPERATURE_KEYS),
+                _heal_max_tokens_rename,
+            ),
         )
 
-        if response.status_code == 429:
-            raise ModelProviderError(
-                f"Rate limit exceeded (HTTP 429): {response.text[:500]}",
-                details={
-                    "status_code": 429,
-                    "retry_after": retry_after_seconds(response.headers),
-                    "body": response.text[:2000],
-                },
-            )
-
-        if response.status_code != 200:
-            raise ModelProviderError(
-                f"Model API error ({response.status_code}): {response.text[:500]}",
-                details={"status_code": response.status_code, "body": response.text[:2000]},
-            )
+        raise_for_status(response)
 
         data = response.json()
         usage = data.get("usage") or {}

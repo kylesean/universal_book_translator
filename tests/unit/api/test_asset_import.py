@@ -178,6 +178,75 @@ def test_import_rejects_an_unknown_provenance(tmp_path: Path) -> None:
         )
 
 
+def test_an_imported_machine_row_is_actually_hittable(tmp_path: Path) -> None:
+    """P2-11: an imported machine pair must be reachable by the pipeline.
+
+    The import writes ``context_hash=''`` (no pipeline run produced it), while
+    the draft stage looks up with a computed ``compute_tm_context`` hash. Before
+    the fix the read gate required equality, so the row was written but never
+    hit — the import reported success and did nothing.
+    """
+    from ubt.core.memory.tm import compute_tm_context
+
+    tm_path = tmp_path / "tm.sqlite"
+    written = import_tm_entries(
+        tm_path,
+        [
+            {
+                "src_lang": "en",
+                "tgt_lang": "zh",
+                "source_text": "Hello world",
+                "target_text": "你好世界",
+            }
+        ],
+        default_src_lang="en",
+        default_tgt_lang="zh",
+        provenance=PROVENANCE_MACHINE,
+    )
+    assert written == 1
+    tm = TranslationMemory(tm_path)
+    try:
+        # A later run's context fingerprint — different prompt/model/glossary —
+        # must still hit the imported pair.
+        ctx = compute_tm_context("v9", "technical", "glossary-v2", "en", "zh")
+        hit = tm.lookup_exact("en", "zh", "Hello world", ctx)
+        assert hit is not None
+        assert hit.target_text == "你好世界"
+    finally:
+        tm.close()
+
+
+def test_a_pipeline_machine_row_stays_context_gated(tmp_path: Path) -> None:
+    """The import exemption must not un-gate rows the pipeline wrote.
+
+    A pipeline machine row carries a real context hash, so a changed
+    prompt/glossary/model must still miss it.
+    """
+    from ubt.core.memory.tm import TMPendingEntry, compute_tm_context
+
+    tm_path = tmp_path / "tm.sqlite"
+    ctx = compute_tm_context("v1", "general", "", "en", "zh")
+    tm = TranslationMemory(tm_path)
+    try:
+        tm.writeback(
+            [
+                TMPendingEntry(
+                    src_lang="en",
+                    tgt_lang="zh",
+                    source_text="Pipeline row",
+                    target_text="管道行",
+                    provenance=PROVENANCE_MACHINE,
+                    context_hash=ctx,
+                )
+            ]
+        )
+        assert tm.lookup_exact("en", "zh", "Pipeline row", ctx) is not None
+        other = compute_tm_context("v2", "general", "", "en", "zh")
+        assert tm.lookup_exact("en", "zh", "Pipeline row", other) is None
+    finally:
+        tm.close()
+
+
 # --------------------------------------------------------------------------- #
 # HTTP surface
 # --------------------------------------------------------------------------- #

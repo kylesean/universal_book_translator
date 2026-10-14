@@ -491,6 +491,29 @@ def _scan_tag_end(text: str, start: int) -> int:
     return -1
 
 
+def _has_unquoted_lt(text: str, start: int, end: int) -> bool:
+    """Whether ``text[start:end]`` holds a ``<`` outside any quoted value.
+
+    A tag name and its attributes cannot contain a bare ``<``, so one appearing
+    inside the region ``_scan_tag_end`` claimed means that region is *not* a
+    single well-formed tag — it swallowed the ``>`` of a following tag (``<b on
+    the other hand</p>``). The scanner uses this to tell a real tag from a ``<``
+    that is literal prose, before it hands the region to the attribute reader
+    (which would otherwise re-render ``</p>`` into ``< p>``).
+    """
+    quote: str | None = None
+    for i in range(start, end):
+        c = text[i]
+        if quote is not None:
+            if c == quote:
+                quote = None
+        elif c in ("'", '"'):
+            quote = c
+        elif c == "<":
+            return True
+    return False
+
+
 # Existence queries inside ``_neutralize_pseudo_tags`` must not re-scan the whole
 # fragment (``text[:i]`` / ``text[start:]``) once per tag, which would make the
 # pass O(n^2) on adversarial input. These scan the fragment once so every query
@@ -955,8 +978,21 @@ class _SourceTagScrubber:
             name = match.group(2).lower()
             tag_end = _scan_tag_end(markup, open_bracket)
             if tag_end == -1:
-                # Unterminated tag: fail closed by dropping the remainder.
+                # Unterminated tag: fail closed by escaping the remainder rather
+                # than deleting it. A prose ``<`` with no ``>`` (``<b bold``
+                # mid-sentence) must not swallow every following block.
+                out.append(_escape_text(markup[open_bracket:]))
                 break
+            if _has_unquoted_lt(markup, open_bracket + 1, tag_end):
+                # The region up to ``>`` contains another ``<`` outside quotes, so
+                # this ``<`` is literal prose that merely looked like a tag start
+                # (``<b on the other hand</p>``): the ``>`` belongs to a following
+                # tag. Escape this single ``<`` and resume, instead of handing the
+                # region to the attribute reader (which re-rendered ``</p>`` into
+                # ``< p>`` and deleted the words between).
+                out.append("&lt;")
+                index = open_bracket + 1
+                continue
             raw_tag = markup[open_bracket : tag_end + 1]
             index = tag_end + 1
 

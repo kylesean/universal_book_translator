@@ -62,7 +62,7 @@ PdfEngine = str
 QeEngine = Literal["heuristic", "comet", "cometkiwi", "neural", "subprocess", "tiered"]
 #: What the reader receives: target only, or source beside target.
 #: ``dual`` is a single layout — each block's source line above its translation —
-#: because the reflow renderer rebuilds the page and a page-zip against the
+#: because the renderer rebuilds the page and a page-zip against the
 #: source is impossible (it changes the page count). ``auto`` lets the advisor
 #: pick from the document's structure.
 DualMode = Literal["mono", "dual", "auto"]
@@ -98,11 +98,12 @@ PromptStrategyName = Literal["auto", "minimal", "hybrid", "rich"]
 OcrMode = Literal["auto", "sidecar", "cloud", "vlm", "rapidocr", "off"]
 ExecMode = Literal["auto", "short", "long"]
 FormulaEnrichment = Literal["auto", "on", "off"]
-#: Table handling for PDF. ``overlay`` is gone with the overlay renderer: its
-#: whole meaning was "translate simple tables, leave complex ones on the source
-#: page", and there is no source page any more — a kept table is simply absent
-#: from the rebuilt document. A config or ``UBT_TABLE_RENDER_MODE=overlay`` set
-#: from before this change is rejected rather than silently reinterpreted.
+#: Table handling for PDF. ``auto`` translates every table (complex ones also
+#: get a translated appendix companion); ``appendix`` always writes the
+#: companion; ``skip`` never translates tables. ``overlay`` is not a value:
+#: every table is rebuilt from the IR, so a kept table is simply absent from the
+#: document. A stale ``UBT_TABLE_RENDER_MODE=overlay`` is rejected rather than
+#: silently reinterpreted.
 TableRenderMode = Literal["auto", "appendix", "skip"]
 
 
@@ -308,6 +309,21 @@ class UBTConfig(BaseSettings):
         default=SecretStr(""),
         validation_alias="UBT_API_KEY",
     )
+
+    # -- HTTP Host / Origin trust (UBT_TRUSTED_HOSTS) -----------------------
+    # Comma-separated hostnames the API will answer for, beyond loopback and the
+    # in-process test client. A request whose ``Host`` header matches none is
+    # refused (400) — the DNS-rebinding defense: a browser resolving an attacker
+    # domain to 127.0.0.1 sends ``Host: evil.example.com``, which no longer reads
+    # as the loopback console. Empty keeps the loopback + testserver defaults;
+    # an operator serving the console on a real domain sets this to that domain.
+    trusted_hosts: str = Field(default="", validation_alias="UBT_TRUSTED_HOSTS")
+
+    #: Whether ``X-UBT-Tenant`` is honored. Off by default: the header is
+    #: client-forgeable, so honoring it lets any caller read or cancel another
+    #: tenant's job. Set only when a trusted front proxy authenticates the
+    #: tenant and sets the header itself (multi-tenant SaaS deployment).
+    trust_tenant_header: bool = Field(default=False, validation_alias="UBT_TRUST_TENANT_HEADER")
 
     # -- Model routing tiers (role-based canonical names) -------------------
     # No vendor default: a model must come from the environment, a provider
@@ -691,10 +707,8 @@ class UBTConfig(BaseSettings):
     )
 
     # -- PDF render engine --------------------------------------------------------
-    # There is no engine knob: every PDF is rebuilt from the semantic IR by the
-    # Typst publication renderer. The former ``render_engine`` field and its
-    # ``rigid``/``reflow``/``publication``/``composite``/``auto`` aliases were
-    # deleted in the overlay convergence.
+    # There is no engine knob: every PDF is rebuilt from the semantic IR and laid
+    # out by Typst. ``font_family`` only overrides the body font.
     font_family: str | None = Field(
         default=None,
         description="Override body font family for typesetter (e.g. 'Noto Serif CJK SC').",
@@ -1035,14 +1049,22 @@ class UBTConfig(BaseSettings):
 
 
 def _env_supplied_field_names() -> set[str]:
-    """Field names the operator set in the process environment.
+    """Field names the operator set to a *usable* value in the environment.
 
     Feeds ``merge_provider_under`` so a provider block's default cannot override
     an explicit ``UBT_*`` setting — the precedence ``from_env`` documents.
+
+    "Supplied" must mean the same thing pydantic-settings means. This model is
+    built with ``env_ignore_empty=True``, so an empty ``UBT_BASE_URL=""`` is
+    treated as *unset* by the field resolution — but a bare ``var in os.environ``
+    test counted it as set. The mismatch let a provider block's ``base_url`` be
+    stripped (so it fell back to ``api.openai.com``) while the block's ``api_key``
+    was kept: a private-gateway credential then went to the public endpoint.
+    Mirror the parser: a variable counts only when present and non-empty.
     """
     supplied: set[str] = set()
     for name in UBTConfig.model_fields:
-        if any(var in os.environ for var in env_var_names(name)):
+        if any(os.environ.get(var, "") != "" for var in env_var_names(name)):
             supplied.add(name)
     return supplied
 

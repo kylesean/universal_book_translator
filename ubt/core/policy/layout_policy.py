@@ -194,12 +194,8 @@ CN_MEASURE_WORDS = (
     "万",
     "亿",
 )
-# The fitter/rigid min-font knobs (PUNCT_SQUEEZE_*, FIT_*, RIGID_*,
-# rigid_min_font_pt_for) belonged to the retired rigid typesetter and its
-# FlowFitter; both are gone, so the constants went with them. The JIS X 4051
-# kinsoku opener/closer sets went the same way: the real CJK break behaviour
-# lives in Typst's paragraph settings and the pangu-spacing pass, and the sets
-# had no remaining consumer.
+# The CJK break behaviour lives in Typst's paragraph settings and the
+# pangu-spacing pass; there are no separate kinsoku opener/closer sets.
 
 
 # Complex-page nets: row-fragment glue. Thresholds measured on chapter-1
@@ -614,7 +610,7 @@ def is_non_prose_degradable(
     """True when a non-prose block (e.g. table) should degrade to NEEDS_HUMAN
     rather than BLOCKED_HUMAN on non-fatal defects.
 
-    The reflow renderer rebuilds the page from the IR, so a non-prose block
+    The renderer rebuilds the page from the IR, so a non-prose block
     (table, code, formula, figure) that fails its checks is still deliverable —
     the failure is reported on the block, not by dropping it. Unless a defect is
     truly fatal (e.g. a prompt-template leak), quarantining the block as

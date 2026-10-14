@@ -197,6 +197,19 @@ class SubprocessQERunner(BaseQERunner):
         """
         return self._last_engine == "neural"
 
+    def may_be_calibrated(self) -> bool:
+        """True while the subprocess could still answer with neural scores.
+
+        The gate (``run_quality_gate_stage``) must make the first scoring call
+        before ``is_calibrated`` can flip, so it asks this instead of
+        ``is_calibrated``: an un-scored subprocess is "not yet proven", not
+        "cannot". Once the subprocess has answered non-neural for this run
+        (``_neural_unavailable`` latched by ``score_pairs``), there is nothing
+        left to attempt and this returns ``False``. ``reset_residency`` clears
+        the latch for the next run.
+        """
+        return not self._neural_unavailable
+
     def reset_residency(self) -> None:
         """Re-enable the resident scorer for a new run (see BaseQERunner)."""
         self._resident_broken = False

@@ -64,8 +64,7 @@ class CompositeSpan:
 
     The geometry layer's answer to the tension between PDF's discrete 2D boxes
     and the 1D reading-order flow: one element (say, a paragraph crossing a page
-    boundary) owns a chain of boxes in reading order, and the BreakageSolver
-    flows its target text across them.
+    boundary) owns a chain of boxes in reading order.
     """
 
     boxes: tuple[PhysicalBox, ...]

@@ -75,10 +75,9 @@ class BlockStatus(StrEnum):
     BLOCKED_HUMAN = "blocked_human"  # MQM Critical unresolved: MUST NOT ship machine output
 
 
-# Single source of truth for the lifecycle's terminal
-# states. is_finalized, the ledger's NON_TERMINAL_STATUSES and the repair
-# eligibility SQL all derive from this frozenset, so adding a status can never
-# drift between the three former parallel definitions.
+# Single source of truth for the lifecycle's terminal states. is_finalized,
+# the ledger's NON_TERMINAL_STATUSES and the repair eligibility SQL all derive
+# from this frozenset, so adding a status cannot drift between them.
 TERMINAL_STATUSES: frozenset[BlockStatus] = frozenset(
     {
         BlockStatus.MTQE_PASSED,

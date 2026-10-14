@@ -34,8 +34,8 @@ logger = logging.getLogger(__name__)
 RenderFn = Callable[..., Awaitable[Path]]
 
 
-class ReflowControlLoop:
-    """Visual gate reflow control loop: verify the render, quarantine on defect.
+class VisualVerifyLoop:
+    """Visual-verification control loop: verify the render, quarantine on defect.
 
     See the module docstring for the coordination flow this class implements.
     """
@@ -101,7 +101,7 @@ class ReflowControlLoop:
                 )[:200_000]
 
         # T1 (out of bounds) and the overlap check read the artifact's own text
-        # boxes, not the IR's source bboxes: the reflow renderer changes where
+        # boxes, not the IR's source bboxes: the renderer changes where
         # text lands, so the source rectangle says nothing about the delivered
         # page. ``run_visual_gate`` falls back to the IR and says so when pdfium
         # cannot read the artifact.
@@ -159,7 +159,7 @@ class ReflowControlLoop:
             if quarantined:
                 await asyncio.to_thread(self.ledger.save_checkpoints_batch, quarantined)
                 logger.warning(
-                    "ReflowControlLoop: %d block(s) quarantined as NEEDS_HUMAN across pages %s for job %s",
+                    "VisualVerifyLoop: %d block(s) quarantined as NEEDS_HUMAN across pages %s for job %s",
                     len(quarantined),
                     sorted(failing_pages),
                     self.job_id,

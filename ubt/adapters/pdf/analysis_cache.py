@@ -85,6 +85,11 @@ def docling_identity() -> str:
         "ubt.adapters.pdf.docling_crosscheck",
         "ubt.adapters.pdf.textgeom",
         "ubt.core.ir.models",
+        # The parser post-processes every title/body through
+        # ``normalize_academic_pdf_math`` (``ubt.core.cleaners.lnds_pruner``), so
+        # a change to that cleaner changes the cached blocks. It was missing from
+        # the identity, so a pruner fix was invisible on every cached re-run.
+        "ubt.core.cleaners.lnds_pruner",
     )
 
 

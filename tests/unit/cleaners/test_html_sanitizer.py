@@ -180,6 +180,39 @@ def test_scrub_is_idempotent() -> None:
     assert scrub_source_document(once) == once
 
 
+def test_a_prose_lt_before_a_close_tag_does_not_eat_the_close() -> None:
+    """``<b on the other hand</p>`` is prose, not a tag with attributes.
+
+    ``_scan_tag_end`` stopped at the ``>`` of ``</p>`` and handed the whole
+    region to the attribute reader, which re-rendered the close into ``< p>`` and
+    deleted the words between. The ``<`` is now recognised as literal prose (a
+    bare ``<`` inside an unquoted tag region) and escaped in place.
+    """
+    assert scrub_source_document("<b on the other hand</p>") == "&lt;b on the other hand</p>"
+    assert (
+        scrub_source_document("prose <b on the other hand</p> more")
+        == "prose &lt;b on the other hand</p> more"
+    )
+
+
+def test_a_real_tag_with_lt_inside_a_quoted_value_is_untouched() -> None:
+    """The prose guard must not fire on a ``<`` inside a quoted attribute value."""
+    markup = '<img alt="a < b">'
+    assert scrub_source_document(markup) == markup
+    assert scrub_source_document("<div title='x < y'>z</div>") == "<div title='x < y'>z</div>"
+
+
+def test_an_unterminated_lt_escapes_the_remainder_instead_of_dropping_it() -> None:
+    """A ``<`` with no closing ``>`` must not delete the rest of the member.
+
+    Dropping the remainder shipped a truncated member; escaping the tail keeps
+    every following block (the ``<`` renders as literal text).
+    """
+    out = scrub_source_document("<p>unterminated <b bold")
+    assert out == "<p>unterminated &lt;b bold"
+    assert "bold" in out  # the tail survived
+
+
 # --------------------------------------------------------------------------- #
 # CSS and <mark> handling.
 # --------------------------------------------------------------------------- #

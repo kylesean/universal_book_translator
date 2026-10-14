@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 import re
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, get_args
 
@@ -350,6 +351,107 @@ def resolve_target_output(
     if not out.suffix and inp.suffix:
         return out.with_suffix(inp.suffix)
     return out
+
+
+@dataclass(frozen=True, slots=True)
+class PriorOutput:
+    """The output a prior run of a job id recorded, for overwrite authorization."""
+
+    output_path: str
+    input_path: str
+
+
+def prior_output_of(prior: object) -> PriorOutput | None:
+    """Extract the recorded output from a job record or a queue payload.
+
+    The entry points hold the "prior run of this id" in two shapes — a manager
+    ``JobRecord`` (which carries ``.request``) and a queue payload ``dict`` — so
+    the extraction lives here rather than being re-spelled per surface. Returns
+    ``None`` when the record carries no output path (nothing to authorize).
+    """
+    if prior is None:
+        return None
+    if isinstance(prior, dict):
+        payload: object = prior
+    else:
+        payload = getattr(prior, "payload", None)
+        if not isinstance(payload, dict):
+            request = getattr(prior, "request", None)
+            payload = request.model_dump() if request is not None else None
+    if not isinstance(payload, dict):
+        return None
+    out = payload.get("output_path")
+    inp = payload.get("input_path")
+    if not out or not inp:
+        return None
+    return PriorOutput(output_path=str(out), input_path=str(inp))
+
+
+def deliverable_candidates(output: Path | str | None, input_path: Path | str) -> tuple[Path, ...]:
+    """Every file a run could write for this output/input pair.
+
+    An output given as a **directory** (or ``None`` for the default) resolves to
+    a labelled file *inside* it, and the label depends on the run's
+    mono/bilingual decision, which is not known at the entry point — so BOTH
+    candidate names are returned. Every overwrite guard must check all of them;
+    the CLI checked only the bilingual name for a directory and so let a
+    monolingual re-run replace the previous delivery. A file-shaped output
+    resolves to exactly one path.
+    """
+    if output is None:
+        return (
+            default_output_path(input_path, monolingual=False),
+            default_output_path(input_path, monolingual=True),
+        )
+    out = Path(output)
+    # Pass the *original* to ``resolve_target_output``: it decides "directory"
+    # from ``str(...).endswith("/")``, and a trailing slash is lost the moment
+    # the value is a ``Path`` (``Path("out/")`` renders as ``out``).
+    if out.is_dir() or str(output).endswith(("/", "\\")):
+        return (
+            resolve_target_output(output, input_path, monolingual=False),
+            resolve_target_output(output, input_path, monolingual=True),
+        )
+    return (resolve_target_output(output, input_path),)
+
+
+def own_prior_deliverable(target: Path, prior: PriorOutput | None) -> bool:
+    """Whether ``target`` is the exact deliverable a prior run of the SAME id resolved to.
+
+    Overwrite is a *re-run of one job*, not a licence to truncate any file the
+    job could name. The three entry points used to answer this question three
+    different ways — REST compared a directory's *parent*, MCP treated ``fresh``
+    as a blanket licence, and the CLI missed the suffix-less path form — so the
+    same request overwrote a file on one surface and was refused on another.
+    There is one question ("is this the file this very job already produced?")
+    and it has one answer:
+
+    - a prior run whose ``output_path`` was a **directory** licenses only the
+      derived deliverable name(s) inside it (``<stem>_bilingual.<ext>`` /
+      ``<stem>_mono.<ext>``) — never every file in the tree, and never a file
+      another job or a human put there;
+    - a prior run with an explicit file name licenses only that file.
+
+    The comparison is on the fully resolved path, so a different spelling of the
+    same file matches and a different file does not.
+    """
+    if prior is None or not prior.output_path or not prior.input_path:
+        return False
+    try:
+        prior_out = Path(prior.output_path)
+        # ``resolve_target_output`` takes the original string (a trailing slash
+        # is the directory signal and a ``Path`` drops it).
+        if prior_out.is_dir() or str(prior.output_path).endswith(("/", "\\")):
+            candidates: tuple[Path, ...] = (
+                resolve_target_output(prior.output_path, prior.input_path, monolingual=False),
+                resolve_target_output(prior.output_path, prior.input_path, monolingual=True),
+            )
+        else:
+            candidates = (resolve_target_output(prior.output_path, prior.input_path),)
+        target_resolved = target.resolve()
+        return any(candidate.resolve() == target_resolved for candidate in candidates)
+    except (OSError, ValueError):
+        return False
 
 
 #: The derived reports that hang off a deliverable.

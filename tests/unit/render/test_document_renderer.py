@@ -105,6 +105,75 @@ def test_display_math_gets_its_own_block(tmp_path: Path) -> None:
     assert "\n$ " in out
 
 
+def test_a_math_body_the_compiler_rejects_degrades_instead_of_failing(tmp_path: Path) -> None:
+    """A body the transpiler accepts but Typst rejects must not reach the page.
+
+    ``\\frac{a}{}`` converts to ``frac(a, )``, which parses in the transpiler's
+    own grammar but is ``error: expected expression`` in Typst. One such body
+    fails the *whole* document, so the compile gate degrades the span to
+    readable Unicode the same way an unconvertible span does.
+    """
+    rejected = "frac(a, )"
+
+    def gate(body: str) -> bool:
+        return body != rejected
+
+    out = render_prose(r"Bad $\frac{a}{}$ here.", is_math_ok=gate)
+    assert rejected not in out
+    assert out.count("$") % 2 == 0
+
+    # Without the gate the body is emitted verbatim (the pre-fix behaviour the
+    # gate exists to catch).
+    ungated = render_prose(r"Bad $\frac{a}{}$ here.")
+    assert rejected in ungated
+
+
+def test_a_renderer_math_gate_reaches_every_prose_call_site(tmp_path: Path) -> None:
+    """The renderer threads its gate through headings, prose and captions."""
+    renderer = TypstDocumentRenderer(math_gate=lambda body: body != "frac(a, )")
+    blocks = [
+        _block(BlockType.HEADING, block_id="h1", source="Head", target=r"Head $\frac{a}{}$"),
+        _block(BlockType.NARRATIVE, block_id="p1", source="Body", target=r"Body $\frac{a}{}$"),
+    ]
+    out, _stats = renderer.build_source(blocks, tmp_path / "build")
+    assert "frac(a, )" not in out
+
+
+def test_the_gate_reaches_the_formula_block_branch(tmp_path: Path) -> None:
+    """P1-C5: a *formula* block skips the prose transpiler path.
+
+    The formula branch transpiles the block body directly, so the prose-side
+    gate never ran on it: a body the transpiler accepts but Typst rejects
+    (``\\frac{a}{}`` -> ``frac(a, )``) was emitted verbatim and failed the whole
+    document at the single compile. The gate must degrade it to readable Unicode
+    here too, exactly as it does inside prose.
+    """
+    renderer = TypstDocumentRenderer(math_gate=lambda body: body != "frac(a, )")
+    blocks = [
+        _block(
+            BlockType.FORMULA,
+            block_id="f1",
+            source=r"$$\frac{a}{}$$",
+            target="",
+        )
+    ]
+    out, stats = renderer.build_source(blocks, tmp_path / "build")
+    assert "frac(a, )" not in out
+    # Degraded rather than counted as a successful formula transpile.
+    assert stats.formulas == 0
+
+
+def test_an_acceptable_formula_body_still_compiles_under_the_gate(tmp_path: Path) -> None:
+    """The gate must not reject a formula Typst actually accepts."""
+    renderer = TypstDocumentRenderer(math_gate=lambda body: body != "frac(a, )")
+    blocks = [
+        _block(BlockType.FORMULA, block_id="f1", source=r"$$\frac{a}{b}$$", target=""),
+    ]
+    out, stats = renderer.build_source(blocks, tmp_path / "build")
+    assert "frac(a, b)" in out
+    assert stats.formulas == 1
+
+
 # --- block types -----------------------------------------------------------
 
 
@@ -146,6 +215,41 @@ def test_a_formula_block_is_typeset_as_math(tmp_path: Path) -> None:
     out = _render(blocks, tmp_path)
     assert "frac(a, b)" in out
     assert r"\frac" not in out
+
+
+def test_a_formula_uses_its_translated_annotation(tmp_path: Path) -> None:
+    """A localized formula annotation must be typeset, not the source one.
+
+    The formula branch read only ``source_text``, so a model that translated an
+    annotation inside the formula (``\\text{parameter}`` -> ``\\text{参数}``) had
+    its work dropped — the reader got the source-language annotation back with no
+    count. It now follows the target→draft→source priority every other block
+    uses, and counts the target-sourced renders.
+    """
+    blocks = [
+        _block(
+            BlockType.FORMULA,
+            block_id="f1",
+            source=r"$$ \mathbf{A} : \text{parameter} $$",
+            target=r"$$ \mathbf{A} : \text{参数} $$",
+            skip=True,
+        )
+    ]
+    renderer = TypstDocumentRenderer()
+    out, stats = renderer.build_source(blocks, tmp_path / "build")
+    assert "参数" in out
+    assert "parameter" not in out
+    assert stats.formulas_from_target == 1
+
+
+def test_an_untranslated_formula_is_not_counted_as_target_sourced(tmp_path: Path) -> None:
+    """The common case (no localization) keeps reading the source, uncounted."""
+    blocks = [
+        _block(BlockType.FORMULA, block_id="f2", source=r"$$ E = mc^2 $$", skip=True),
+    ]
+    _out, stats = _render_with_stats(blocks, tmp_path)
+    assert stats.formulas == 1
+    assert stats.formulas_from_target == 0
 
 
 def test_a_bibliography_entry_is_kept_in_source(tmp_path: Path) -> None:
@@ -751,3 +855,171 @@ def test_a_bilingual_table_does_not_paste_its_markdown_source(tmp_path: Path) ->
     assert "| Method | BLEU |" not in out
     # Both halves are tables: the source pair and the translation.
     assert out.count("#table(") == 2
+
+
+def test_unparseable_table_falls_back_to_source_and_is_counted(tmp_path: Path) -> None:
+    """A translated table whose grid does not parse must not vanish silently.
+
+    ``parse_markdown_table`` requires every line to both start and end with
+    ``|``. A model that drops the header's leading pipe (``模型 | …``) leaves a
+    grid that does not parse; the renderer used to return "" and drop the whole
+    block with no flag, no count, and a content contract that read it as
+    preserved. The source grid is a valid table, so the fix renders *that* and
+    counts the degradation (``tables_fell_back``) so the source-language cells
+    are visible rather than a silent success.
+    """
+    malformed_target = "模型 | Huginn-0125 |\n|---|---|\n| 前奏 | 测试 |"
+    good_source = "| Model | Huginn-0125 |\n|---|---|\n| Intro | Test |"
+    block = _block(BlockType.TABLE, block_id="tbl", source=good_source, target=malformed_target)
+
+    source, stats = _render_with_stats([block], tmp_path)
+
+    assert stats.tables == 1
+    assert stats.tables_fell_back == 1
+    assert stats.tables_dropped == 0
+    # The source grid is what reached the page (target did not parse).
+    assert "#table(" in source
+    assert "Model" in source
+
+
+def test_table_unparseable_in_both_grids_is_reported_not_silent(tmp_path: Path) -> None:
+    """When neither grid parses the block is dropped, but the drop is reported.
+
+    The renderer records ``(block_id, "table_unparseable")`` so the export
+    stage flags the block through the render-skip channel — the quality report
+    and the content contract both see the gap instead of a shorter document
+    with no explanation.
+    """
+    malformed = "模型 | Huginn-0125 |\n|---|---|\n| 前奏 | 测试 |"
+    block = _block(BlockType.TABLE, block_id="tbl2", source=malformed, target=malformed)
+
+    renderer = TypstDocumentRenderer()
+    _source, stats = renderer.build_source([block], tmp_path / "build")
+
+    assert stats.tables_dropped == 1
+    assert stats.tables == 0
+    assert (("tbl2", "table_unparseable")) in renderer.last_render_skips
+
+
+def test_parseable_table_renders_without_fallback(tmp_path: Path) -> None:
+    grid = "| Model | Score |\n|---|---|\n| A | 1 |"
+    block = _block(BlockType.TABLE, block_id="tbl3", source=grid, target=grid)
+    _source, stats = _render_with_stats([block], tmp_path)
+    assert stats.tables == 1
+    assert stats.tables_fell_back == 0
+    assert stats.tables_dropped == 0
+
+
+def test_a_shape_preserving_table_rebuild_is_verified(tmp_path: Path) -> None:
+    """A translated grid with the source's shape is a verified reconstruction."""
+    source_grid = "| Model | Score |\n|---|---|\n| A | 1 |"
+    target_grid = "| 模型 | 分数 |\n|---|---|\n| 甲 | 一 |"
+    block = _block(BlockType.TABLE, block_id="tv", source=source_grid, target=target_grid)
+
+    renderer = TypstDocumentRenderer()
+    renderer.build_source([block], tmp_path / "build")
+
+    (record,) = renderer.table_reconstructions
+    assert record.block_id == "tv"
+    assert record.verified is True
+    assert record.corrupt is False
+
+
+def test_a_table_rebuild_that_dropped_a_column_is_corrupt(tmp_path: Path) -> None:
+    """A translated grid that lost a column is a corrupt reconstruction.
+
+    This is the defect the delivery contract's RECONSTRUCTED branch exists to
+    catch: the grid still parses and compiles, so nothing downstream would
+    notice the data loss — only the shape check against the source grid does.
+    """
+    source_grid = "| Model | Score | Note |\n|---|---|---|\n| A | 1 | x |"
+    target_grid = "| 模型 | 分数 |\n|---|---|\n| 甲 | 一 |"
+    block = _block(BlockType.TABLE, block_id="tc", source=source_grid, target=target_grid)
+
+    renderer = TypstDocumentRenderer()
+    renderer.build_source([block], tmp_path / "build")
+
+    (record,) = renderer.table_reconstructions
+    assert record.corrupt is True
+    assert record.verified is False
+    assert "column_count_mismatch" in record.reason
+
+
+def test_a_table_that_fell_back_to_source_is_unverified_not_corrupt(tmp_path: Path) -> None:
+    """A fallback is a degradation, not a corruption — no false ERROR."""
+    malformed_target = "模型 | Score |\n|---|---|\n| 甲 | 一 |"
+    good_source = "| Model | Score |\n|---|---|\n| A | 1 |"
+    block = _block(BlockType.TABLE, block_id="tf", source=good_source, target=malformed_target)
+
+    renderer = TypstDocumentRenderer()
+    renderer.build_source([block], tmp_path / "build")
+
+    (record,) = renderer.table_reconstructions
+    assert record.verified is False
+    assert record.corrupt is False
+
+
+# --------------------------------------------------------------------------- #
+# Render side channels: a degradation or a leak must be attributable per block
+# --------------------------------------------------------------------------- #
+
+
+def test_a_degraded_formula_is_recorded_on_the_render_quality_channel(tmp_path: Path) -> None:
+    """A formula delivered as Unicode, not typeset math, flags its block.
+
+    ``formulas_degraded`` is a document total; the quality report needs the
+    *block*, so the renderer also emits it on the render-quality channel
+    (``last_render_flags``), which the export stage turns into a plain
+    ``formula_degraded`` error flag — never a skip, because the equation ships.
+    """
+    # ``\undefinedcmd{x}`` cannot be transpiled, so the body degrades to readable
+    # Unicode rather than being dropped.
+    block = _block(BlockType.FORMULA, block_id="f1", source=r"\$\$\undefinedcmd{x}\$\$")
+
+    renderer = TypstDocumentRenderer()
+    _source, stats = renderer.build_source([block], tmp_path / "build")
+
+    assert stats.formulas_degraded == 1, stats
+    assert stats.formulas_dropped == 0, stats
+    assert ("f1", "formula_degraded") in renderer.last_render_flags
+    assert all(block_id != "f1" for block_id, _reason in renderer.last_render_skips)
+
+
+def test_a_dropped_formula_is_a_fail_closed_render_skip(tmp_path: Path) -> None:
+    """A formula with nothing to place is gone from the page — never silent.
+
+    The empty-body case (a bare ``$$``) has no fallback text, so the block is
+    dropped entirely and must surface as a ``render_skip:math_unrenderable``
+    (a fail-closed family the taxonomy already names) rather than vanishing.
+    """
+    block = _block(BlockType.FORMULA, block_id="fdrop", source="$$")
+
+    renderer = TypstDocumentRenderer()
+    _source, stats = renderer.build_source([block], tmp_path / "build")
+
+    assert stats.formulas_dropped == 1, stats
+    assert ("fdrop", "math_unrenderable") in renderer.last_render_skips
+
+
+def test_a_leaked_sentinel_flags_its_own_block(tmp_path: Path) -> None:
+    """The block that leaks the token is named, not just counted.
+
+    ``sentinels_leaked`` is a document total; a review needs to know *which*
+    block carries a restore defect, so the renderer also emits
+    ``(block_id, "sentinel_leaked")`` on the render-quality channel.
+    """
+    blocks = [
+        _block(
+            BlockType.NARRATIVE,
+            block_id="leaky",
+            target=r"扫描 $(\Delta, \llbracket B \rrbracket A)$ 结束",
+        ),
+        _block(BlockType.NARRATIVE, block_id="clean", target="干净的段落"),
+    ]
+
+    renderer = TypstDocumentRenderer()
+    _source, stats = renderer.build_source(blocks, tmp_path / "build")
+
+    assert stats.sentinels_leaked == 1, stats
+    assert ("leaky", "sentinel_leaked") in renderer.last_render_flags
+    assert ("clean", "sentinel_leaked") not in renderer.last_render_flags

@@ -179,7 +179,7 @@ async def run_render_preflight(
             bilingual_mode=bilingual_mode,
             render_plan=render_plan,
         )
-        # The reflow renderer raises on a compile failure, so reaching here means
+        # The renderer raises on a compile failure, so reaching here means
         # Typst accepted the sample. What it does *not* guarantee is that the
         # compile produced a file: a zero-byte or absent artifact would pass a
         # toolchain check that only looked for an exception. Fail on that

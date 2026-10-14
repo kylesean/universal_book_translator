@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ubt.adapters.pdf.typst_compile import typst_version
+from ubt.core.content.nodes import ReconstructionRecord
 from ubt.core.exceptions import DocumentParseError
 from ubt.core.ir.models import BlockType, BookManifest, IRBlock
 from ubt.core.ir.render_plan import RenderOutcome, RenderPlan
@@ -56,8 +57,12 @@ class DoclingRenderStrategy:
         # Kept apart from the skips: these blocks DID deliver a translation, so
         # the flag must not make the contract read them as source-kept.
         self.last_render_flags: list[tuple[str, str]] = []
+        # Per-asset reconstruction verdicts (block_id, verified, corrupt, reason)
+        # from the most recent render: the delivery contract records a rebuilt
+        # table/formula as RECONSTRUCTED (verified or corrupt) from these.
+        self.last_render_reconstructions: list[ReconstructionRecord] = []
         # Render outcome side channel (compiler render plan protocol): the mode
-        # the renderer actually used. The reflow renderer has no downgrade path
+        # the renderer actually used. The renderer has no downgrade path
         # (bilingual pairing is per block and cannot fail independently), so this
         # only ever reports the mode it was asked for — but the export stage and
         # the complementary-artifact suffix read it, so it must be populated.
@@ -83,10 +88,10 @@ class DoclingRenderStrategy:
         ``.typ`` is left beside the artifact so the failure is inspectable.
 
         ``bilingual`` pairs each block with its source above the translation.
-        The pairing is per block, not per page: a reflowed document is not
-        page-aligned with its source, so the overlay path's page-zip cannot
-        apply here (it would need the page counts to match, and reflow changes
-        them — 41 pages in, 29 out on the reference paper).
+        The pairing is per block, not per page: a rebuilt document is not
+        page-aligned with its source, so a page zip cannot apply (it would need
+        the page counts to match, and a rebuild changes them — 41 pages in, 29
+        out on the reference paper).
         """
         return await asyncio.to_thread(
             self._render_publish_sync, manifest, blocks, target_lang, output_path, bilingual
@@ -101,13 +106,23 @@ class DoclingRenderStrategy:
         bilingual: bool = False,
     ) -> Path:
         from ubt.adapters.pdf.typst_compile import typst_compile
+        from ubt.adapters.pdf.typst_math_probe import TypstMathProbe
         from ubt.render.typst.document_renderer import TypstDocumentRenderer
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
         build_dir = output_path.parent / f".{output_path.stem}_typst"
         assets_root = self._assets_root(manifest)
 
-        renderer = TypstDocumentRenderer(assets_root=assets_root, bilingual=bilingual)
+        # The transpiler can emit a math body that parses in its own grammar but
+        # does not compile in Typst (``\frac{a}{}`` -> ``frac(a, )``), and one
+        # such body fails the *whole* document at the compile below. The probe
+        # catches those at the point of emission, where the span degrades to
+        # readable Unicode instead, so a single malformed formula costs one
+        # formula rather than every page. It compiles a handful of cached
+        # probes; the same Typst the document is compiled with is used.
+        renderer = TypstDocumentRenderer(
+            assets_root=assets_root, bilingual=bilingual, math_gate=TypstMathProbe().check
+        )
         source, stats = renderer.build_source(blocks, build_dir, target_lang)
         typ_path = build_dir / "main.typ"
         typ_path.write_text(source, encoding="utf-8")
@@ -120,16 +135,26 @@ class DoclingRenderStrategy:
             )
         # The generated markup's meaning depends on compiler behavior, so every
         # delivered PDF's quality report carries the exact compiler version.
-        # The overlay path used to call this; the reflow path has to as well, or
-        # the report silently loses the field.
         record_toolchain_versions(manifest)
-        # The render *did* place every block it emitted, so the skip channel is
-        # empty by construction. Reporting the assets that could not be resolved
-        # keeps a dropped figure visible in the quality report instead of a
-        # silently shorter document.
-        self.last_render_skips = [
+        # The render places every block it can; the ones it could not are
+        # reported here so a dropped figure or an unparseable table stays
+        # visible in the quality report instead of a silently shorter document.
+        # ``renderer.last_render_skips`` carries the blocks the reflow could not
+        # emit at all (a table whose target grid did not parse and whose source
+        # grid did not either); the asset misses are added alongside.
+        self.last_render_skips = list(renderer.last_render_skips) + [
             (asset, "asset_not_found") for asset in stats.assets_missing if asset
         ]
+        # The render-quality channel: blocks that were *drawn* but imperfectly
+        # (a formula degraded to readable Unicode). Kept apart from the skips so
+        # the contract does not read them as source-kept.
+        self.last_render_flags = list(renderer.last_render_flags)
+        # Per-table/formula reconstruction verdicts (verified / corrupt) that the
+        # delivery contract reads to record a rebuilt asset as RECONSTRUCTED
+        # rather than the existence-only PRESERVED_OPAQUE it used to assert for
+        # every non-text node. Without this the contract's RECONSTRUCTED branch
+        # and both ASSET_*_RECONSTRUCTION violation kinds were unreachable.
+        self.last_render_reconstructions = list(renderer.table_reconstructions)
         return output_path
 
     def _assets_root(self, manifest: BookManifest) -> Path | None:
@@ -191,7 +216,7 @@ class DoclingRenderStrategy:
             # Bilingual is a per-block pairing, so the mode only has to answer
             # "pair or not". ``inline`` and ``alternating`` both mean "pair";
             # ``facing`` used to mean a page-zip against the source, which the
-            # reflow renderer cannot do (it changes the page count), so it now
+            # renderer cannot do (it changes the page count), so it now
             # pairs per block like the others.
             publish_bilingual = active_mode != "monolingual"
             return await self._render_publish(

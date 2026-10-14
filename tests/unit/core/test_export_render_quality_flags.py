@@ -1,11 +1,14 @@
-"""``low_legibility_font`` is a defect flag, never a skip flag.
+"""Render-quality flags are defects, never skip flags.
 
 The compositor draws a monolingual target below the readable floor (6pt) rather
-than keep the source when the box is too short for the target's line at 6pt.
-That draw must reach the quality report *without* reaching the delivery
-contract's ``source_kept`` count -- a ``render_skip:`` flag would do the latter,
-which is the very outcome drawing it avoided. These tests pin the two halves:
-the flag lands on the block, and a stale one from an earlier render is cleared.
+than keep the source when the box is too short for the target's line at 6pt; the
+renderer delivers a formula as readable Unicode when it cannot typeset it as
+math; and a block whose text still carries a pipeline sentinel is escaped as
+prose rather than mangled. Each of those draws must reach the quality report
+*without* reaching the delivery contract's ``source_kept`` count -- a
+``render_skip:`` flag would do the latter, which is the very outcome drawing it
+avoided. These tests pin the two halves: the flag lands on the block, and a
+stale one from an earlier render is cleared.
 """
 
 from __future__ import annotations
@@ -72,3 +75,19 @@ def test_unknown_block_ids_and_unknown_flags_are_ignored() -> None:
     )
     assert changed == set()
     assert blocks[0].error_flags == []
+
+
+def test_the_new_render_quality_flags_land_and_never_read_as_kept() -> None:
+    """The formula-degradation and sentinel-leak flags behave like the font one.
+
+    Both are drawn-and-delivered defects, not source keeps, so each must land on
+    its block and leave ``kept_in_source`` false.
+    """
+    blocks = [_block("f1", flags=None), _block("s1", flags=None)]
+    changed = apply_render_quality_flags(
+        blocks, [("f1", "formula_degraded"), ("s1", "sentinel_leaked")]
+    )
+    assert changed == {"f1", "s1"}
+    assert blocks[0].error_flags == ["formula_degraded"]
+    assert blocks[1].error_flags == ["sentinel_leaked"]
+    assert all(kept_in_source(b) is False for b in blocks)

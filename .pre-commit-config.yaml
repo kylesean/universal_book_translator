@@ -64,3 +64,18 @@ repos:
         pass_filenames: false
         always_run: true
         stages: [pre-push]
+
+      # Layering acceptance: a module-level ubt.core import of a compiler
+      # package (pipeline/segment/translate) is a forbidden reverse edge, and a
+      # ubt.core.engine <-> ubt.pipeline package cycle fails. The tool existed
+      # but no gate ran it, so a layering regression landed under an all-green
+      # push. Whole-tree (pass_filenames off): the invariant is a property of
+      # the import graph, not of the changed files.
+      - id: layering-invariant
+        name: core→compiler layering (dump_compiler_edges)
+        entry: uv run python scripts/dump_compiler_edges.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+

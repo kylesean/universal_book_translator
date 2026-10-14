@@ -21,6 +21,7 @@ import {
   listSegments,
   listIssues,
   editSegment,
+  reExportJob,
   getBlockTerms,
   propagateTerm,
   pagePreviewUrl,
@@ -72,6 +73,7 @@ export function ReviewWorkbench() {
   const [editing, setEditing] = useState<Record<string, boolean>>({})
   const [saving, setSaving] = useState<Record<string, boolean>>({})
   const [saved, setSaved] = useState<Record<string, boolean>>({})
+  const [reExportNotice, setReExportNotice] = useState<string | null>(null)
   const [issueCursor, setIssueCursor] = useState(0)
   const [openPreviews, setOpenPreviews] = useState<Record<number, boolean>>({})
   const [previewBust, setPreviewBust] = useState(0)
@@ -217,6 +219,22 @@ export function ReviewWorkbench() {
       // The edit changed the ledger text: any open page preview is now stale.
       if (segment.page !== null && openPreviews[segment.page]) {
         setPreviewBust(Date.now())
+      }
+      // The ledger text changed, but the *delivered file* was rendered before
+      // the edit and would otherwise keep the machine draft the reviewer just
+      // corrected. Re-render it from the current ledger (no token spent). A
+      // failure here must not read as "edit lost": the ledger is authoritative
+      // and the reviewer can re-export again.
+      try {
+        const out = await reExportJob(jobId)
+        setReExportNotice(t.review.reExportDone.replace('{path}', out.artifact_path ?? ''))
+      } catch (err) {
+        setReExportNotice(
+          t.review.reExportFailed.replace(
+            '{msg}',
+            err instanceof Error ? err.message : 'unknown error'
+          )
+        )
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save revision')
@@ -543,6 +561,11 @@ export function ReviewWorkbench() {
                                   </span>
                                 )}
                               </div>
+                              {reExportNotice && (
+                                <div className="text-xs text-[var(--ink-muted)] mb-1.5">
+                                  {reExportNotice}
+                                </div>
+                              )}
                               {editing[seg.block_id] ? (
                                 <textarea
                                   autoFocus

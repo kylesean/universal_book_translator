@@ -394,3 +394,33 @@ def test_term_propagation_without_a_glossary_is_422(tmp_path: Path) -> None:
         headers=_AUTH,
     )
     assert res.status_code == 422
+
+
+# --- re-export: a human edit must reach the delivered file (P1-C6) ----------
+
+
+def test_re_export_unknown_job_is_404(tmp_path: Path) -> None:
+    client = TestClient(create_app(_seed(tmp_path)))
+    res = client.post("/jobs/nosuchjob0001/re-export", headers=_AUTH)
+    assert res.status_code == 404
+
+
+def test_re_export_without_a_recorded_output_path_is_409(tmp_path: Path) -> None:
+    """The seed records no ``output_file``, so there is nothing to overwrite.
+
+    A re-export with no explicit path and no recorded deliverable must refuse
+    (409) rather than invent a destination — the caller can still pass one.
+    """
+    config = _seed(tmp_path)
+    # The source must exist so the check that fails is the missing-output one.
+    (tmp_path / "in.md").write_text("# book\n", encoding="utf-8")
+    client = TestClient(create_app(config))
+    res = client.post(f"/jobs/{_JOB}/re-export", headers=_AUTH)
+    assert res.status_code == 409
+    assert "output path" in res.json()["detail"]
+
+
+def test_re_export_requires_the_api_key(tmp_path: Path) -> None:
+    client = TestClient(create_app(_seed(tmp_path)))
+    res = client.post(f"/jobs/{_JOB}/re-export")
+    assert res.status_code == 401

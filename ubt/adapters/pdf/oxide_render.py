@@ -2,8 +2,8 @@
 
 pdf_oxide (Rust/PyO3, zero Python deps, MIT/Apache) renders a page to PNG
 bytes and extracts page text in-process, replacing the poppler ``pdftoppm``
-subprocess (a system binary plus a Popen attack surface) and the retired
-runtime ``pypdf`` text leg. Every entry point here is
+subprocess (a system binary plus a Popen attack surface) and the runtime
+``pypdf`` text leg. Every entry point here is
 non-raising: render ``None`` means "no image", text ``""`` means "no text",
 so a faulty engine degrades the visual gates instead of crashing the run.
 Structural reads (geometry, content-stream ops, resources) deliberately do
@@ -78,9 +78,9 @@ def write_page_png(pdf_path: Path, page: int, dpi: int, out_dir: Path) -> Path |
 def extract_page_texts(pdf_path: Path) -> list[str]:
     """Per-page text (1-based order) via one document open; empty list on failure.
 
-    Replaces the retired pypdf text-extraction legs (blank-page candidates,
-    short-doc char census, plain-text sampling, the docling-parser fallback
-    extractor). Never raises: ``[]`` tells the caller "no text signal".
+    Feeds the blank-page candidates, the short-doc char census, plain-text
+    sampling and the docling-parser fallback extractor. Never raises: ``[]``
+    tells the caller "no text signal".
     """
     try:
         from pdf_oxide import PdfDocument

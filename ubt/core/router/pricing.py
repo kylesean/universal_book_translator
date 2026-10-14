@@ -744,6 +744,16 @@ def estimate_cost_usd(
     return round(total_cost, 6)
 
 
+def has_unmeasured_calls(model_totals: dict[str, dict[str, int]]) -> bool:
+    """True when any model's totals include a call whose response lacked ``usage``.
+
+    Such a call was billed by the provider but cannot be sized here, so
+    :func:`estimate_cost_usd` refuses to fabricate a total. A budget cap reads
+    this to hard-stop a job it cannot measure rather than going inert.
+    """
+    return any(int(t.get("unmeasured_calls", 0) or 0) for t in model_totals.values())
+
+
 def cache_hit_rate_from_usage(model_totals: dict[str, dict[str, int]]) -> float:
     """Prompt-cache hit rate for one usage snapshot (0.0 when unmeasured).
 

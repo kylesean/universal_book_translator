@@ -22,7 +22,7 @@ from contextlib import aclosing, suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from ubt.core.config import UBTConfig
+from ubt.core.config import MOCK_API_KEY, UBTConfig
 from ubt.core.engine.dry_run import create_dry_run_orchestrator
 from ubt.core.engine.events import TranslationProgressEvent
 from ubt.core.engine.job_queue import JobQueue, JobStatus, QueuedJob
@@ -56,9 +56,17 @@ def _should_rehearse(payload: dict[str, Any], job_config: UBTConfig) -> bool:
     Decided from THIS process's key, not the API process's auto-decision: an
     explicit user ``dry_run`` is honored, but an auto-set one (marked
     ``rehearsal_auto``) is overridden when this worker holds a key.
+
+    "Holds a key" means a *real* credential, not the ``MOCK_API_KEY`` sentinel
+    ``UBTConfig`` fills in when nothing is configured. Testing only truthiness
+    let the documented air-gapped default — a keyless worker — build a live
+    provider against the literal string ``mock-key`` and send it to
+    ``api.openai.com``. The API and MCP surfaces already compare against the
+    sentinel; the worker must agree.
     """
     explicit_dry = bool(payload.get("dry_run")) and not payload.get("rehearsal_auto", False)
-    return explicit_dry or not bool(job_config.api_key.get_secret_value().strip())
+    key = job_config.api_key.get_secret_value().strip()
+    return explicit_dry or not key or key == MOCK_API_KEY
 
 
 class JobWorker:
@@ -318,7 +326,11 @@ class JobWorker:
                     job.job_id,
                     owner,
                     status=JobStatus.COMPLETED,
-                    progress=progress,
+                    # ``progress or None`` for every terminal write: an empty
+                    # snapshot (a second attempt that died before its first
+                    # event) must not COALESCE away the previous attempt's
+                    # 90%-complete snapshot down to 0%.
+                    progress=progress or None,
                 )
             except Exception as q_exc:
                 logger.error("Job %s: failed to mark completed in queue: %s", job.job_id, q_exc)
@@ -347,7 +359,7 @@ class JobWorker:
                         job.job_id,
                         owner,
                         status=JobStatus.CANCELLED,
-                        progress=progress,
+                        progress=progress or None,
                     )
                 )
             with suppress(Exception):
@@ -393,7 +405,7 @@ class JobWorker:
                     job.job_id,
                     owner,
                     status=JobStatus.CANCELLED,
-                    progress=progress,
+                    progress=progress or None,
                 )
             with suppress(Exception):
                 await self._write_abort_ledger(
@@ -441,7 +453,9 @@ class JobWorker:
                     # detail is logged above; the client gets the class + job id
                     # (same product guarantee the embedded API manager applies).
                     error=f"{type(exc).__name__} (see server logs; job_id={job.job_id})",
-                    progress=progress,
+                    # Preserve the prior attempt's snapshot when this one died
+                    # before its first event (see the COMPLETED write above).
+                    progress=progress or None,
                 )
             return True
         finally:

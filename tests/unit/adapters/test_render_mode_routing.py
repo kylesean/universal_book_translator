@@ -219,3 +219,35 @@ def test_the_missing_asset_channel_is_reported(
     )
     assert strategy.last_render_skips
     assert any("asset_not_found" in reason for _asset, reason in strategy.last_render_skips)
+
+
+def test_the_publish_path_applies_the_math_compile_gate(tmp_path: Path) -> None:
+    """P1-C5: a math body the transpiler accepts but Typst rejects must not
+    reach the compiler.
+
+    ``\\frac{a}{}`` converts to ``frac(a, )``, which the transpiler emits
+    happily and Typst then refuses — failing the *whole* document at the single
+    compile. The publish render supplies ``TypstMathProbe().check`` as the
+    renderer's ``math_gate`` so such a span degrades to readable Unicode
+    instead. Without the gate the bad body stays in ``main.typ``, so this pins
+    the wiring by inspecting the generated source. The real Typst binary is used
+    (the probe compiles its witness), so the assertion is the compiler's own
+    verdict, not a stub's.
+    """
+    pytest.importorskip("ubt.adapters.pdf.typst_compile")
+    from ubt.adapters.pdf.typst_compile import typst_version
+
+    if typst_version() is None:  # pragma: no cover - environment without typst
+        pytest.skip("typst binary not available")
+
+    strategy = DoclingRenderStrategy()
+    manifest = BookManifest(doc_id="d", title="T", source_path=str(tmp_path / "x.pdf"), chapters=[])
+    strategy._render_publish_sync(
+        manifest,
+        [_block("m1", BlockType.NARRATIVE, "s", r"Bad $\frac{a}{}$ here.")],
+        "zh",
+        tmp_path / "out.pdf",
+    )
+    generated = (tmp_path / ".out_typst" / "main.typ").read_text(encoding="utf-8")
+    assert "frac(a, )" not in generated
+    assert "Bad" in generated  # the prose is still there, just the body degraded

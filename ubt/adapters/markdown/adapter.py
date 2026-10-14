@@ -225,30 +225,6 @@ class MarkdownAdapter(BaseDocumentAdapter):
                     blocks=blocks,
                 )
 
-    async def render_blocks(
-        self,
-        manifest: BookManifest,
-        blocks: list[IRBlock],
-        target_lang: str,
-        output_path: Path,
-        bilingual_mode: str | None = None,
-        **kwargs: Any,
-    ) -> Path:
-        """Render bilingual Markdown document interleaving source and translated paragraphs.
-
-        The render is synchronous string building + a file write; run it off the
-        event loop so a concurrent job/task is not stalled.
-        """
-        return await asyncio.to_thread(
-            self._render_blocks_sync,
-            manifest,
-            blocks,
-            target_lang,
-            output_path,
-            bilingual_mode,
-            **kwargs,
-        )
-
     def _render_blocks_sync(
         self,
         manifest: BookManifest,

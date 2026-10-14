@@ -31,7 +31,7 @@ from ubt.core.ir.models import (
 from ubt.model.ast import Confidence, RegionKind
 from ubt.model.span import CompositeSpan, boxes_from_provenance
 
-TARGET_SCHEMA_VERSION = 13
+TARGET_SCHEMA_VERSION = 14
 
 # Every column ``_row_to_block`` reads by name. Kept as a literal (not derived
 # from the CREATE statement) to guarantee all required schema fields are verified
@@ -64,6 +64,7 @@ _REQUIRED_BLOCK_COLUMNS = frozenset(
         "marker",
         "confidence",
         "decorative",
+        "span_chars_json",
     }
 )
 
@@ -116,6 +117,10 @@ def _upsert_blocks_batch(cursor: sqlite3.Cursor, job_id: str, blocks: Sequence[I
             getattr(b.element, "marker", None),
             b.element.confidence.value,
             1 if b.element.decorative else 0,
+            # The element's canonical ``Span.chars`` as ``[start, end]``. Stored
+            # so a resumed block slices the canonical stream again instead of
+            # falling back to its (coarser) carried text.
+            json.dumps(list(b.element.span.chars)) if b.element.span.chars else None,
         )
         for b in blocks
     ]
@@ -131,8 +136,9 @@ def _upsert_blocks_batch(cursor: sqlite3.Cursor, job_id: str, blocks: Sequence[I
             policy_translate, policy_reason, provenance_json,
             mqm_severity, mqm_spans_json,
             level, marker, confidence, decorative,
+            span_chars_json,
             updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         ON CONFLICT(job_id, block_id) DO UPDATE SET
             flow_id = excluded.flow_id,
             spine_index = excluded.spine_index,
@@ -186,6 +192,10 @@ def _upsert_blocks_batch(cursor: sqlite3.Cursor, job_id: str, blocks: Sequence[I
             marker = excluded.marker,
             confidence = excluded.confidence,
             decorative = excluded.decorative,
+            -- Structural, so adopt the freshly-ingested range; COALESCE only to
+            -- keep a previously-stored range if an update omits it (an old
+            -- writer that does not carry the column).
+            span_chars_json = COALESCE(excluded.span_chars_json, blocks.span_chars_json),
             mqm_severity = COALESCE(excluded.mqm_severity, blocks.mqm_severity),
             mqm_spans_json = COALESCE(excluded.mqm_spans_json, blocks.mqm_spans_json),
             updated_at = CURRENT_TIMESTAMP
@@ -211,6 +221,12 @@ class LedgerBase:
             ensure_private_dir(self.db_path.parent)
         self._lock = threading.RLock()
         self._conn: sqlite3.Connection | None = None
+        # Set by close(). A stage generator that finalizes *after* the run's
+        # finally closed the ledger used to silently reopen a fresh connection
+        # (``_get_conn`` rebuilt one whenever ``_conn`` was None), which wrote
+        # past the writer-lock release the finally had just performed. Once
+        # closed, the ledger refuses to reopen.
+        self._closed = False
         # Bumped by every committed write to a block row. :class:`StageContext`
         # caches a block snapshot against this counter, so a later reader reloads
         # without having to remember to manually invalidate. Valid
@@ -283,6 +299,11 @@ class LedgerBase:
     def _get_conn(self) -> Iterator[sqlite3.Connection]:
         """Provides thread-synchronized access to the persistent database connection."""
         with self._lock:
+            if self._closed:
+                raise LedgerError(
+                    "ledger is closed; refusing to reopen a connection",
+                    details={"db_path": str(self.db_path)},
+                )
             if self._conn is None:
                 self._init_connection()
             if self._conn is None:
@@ -306,8 +327,14 @@ class LedgerBase:
                 raise
 
     def close(self) -> None:
-        """Close the underlying persistent connection (idempotent)."""
+        """Close the underlying persistent connection (idempotent).
+
+        Also marks the ledger closed: a later ``_get_conn`` raises rather than
+        silently reopening, so a stage that finalizes after the run's teardown
+        cannot write past the writer-lock release.
+        """
         with self._lock:
+            self._closed = True
             if self._conn is not None:
                 try:
                     self._conn.close()
@@ -373,6 +400,7 @@ class LedgerBase:
                         marker TEXT DEFAULT NULL,
                         confidence TEXT DEFAULT NULL,
                         decorative INTEGER DEFAULT NULL,
+                        span_chars_json TEXT DEFAULT NULL,
                         PRIMARY KEY (job_id, block_id),
                         FOREIGN KEY(job_id) REFERENCES job_meta(job_id)
                     );
@@ -392,7 +420,7 @@ class LedgerBase:
                     CREATE INDEX IF NOT EXISTS idx_blocks_job_mtqe ON blocks(job_id, mtqe_score);
                     CREATE INDEX IF NOT EXISTS idx_blocks_pending ON blocks(job_id, status, spine_index, block_id);
                     CREATE INDEX IF NOT EXISTS idx_blocks_rollup ON blocks(job_id, skip_translate, mtqe_score, status);
-                    PRAGMA user_version = 13;
+                    PRAGMA user_version = 14;
                 """)
                 current_version = TARGET_SCHEMA_VERSION
 
@@ -652,6 +680,25 @@ class LedgerBase:
                         conn.execute(f"ALTER TABLE blocks ADD COLUMN {name} {decl};")
                 conn.execute("PRAGMA user_version = 13;")
 
+            # Migration to Version 14: persist the element's ``Span.chars``
+            # (canonical character range). The span is stored *through* the
+            # element, but only its bbox/page survived (``bbox_json`` and the
+            # provenance box chain); the char range had no column, so every
+            # block re-materialized on resume lost it. ``source_slice`` then fell
+            # back to the coarser carried text, and a re-export after a resume
+            # could not slice the canonical stream the reader had stamped --
+            # exactly why the original export matched but the resumed one did not.
+            # Nullable: a format with no canonical stream (or a block written by
+            # an older build) simply keeps ``None`` and falls back as before.
+            if current_version < 14:
+                columns = {
+                    str(row["name"])
+                    for row in conn.execute("PRAGMA table_info(blocks);").fetchall()
+                }
+                if "span_chars_json" not in columns:
+                    conn.execute("ALTER TABLE blocks ADD COLUMN span_chars_json TEXT DEFAULT NULL;")
+                conn.execute("PRAGMA user_version = 14;")
+
             # Guard against TARGET_SCHEMA_VERSION drift: migrations above must
             # land exactly on the declared target, otherwise future restarts
             # silently skip new migrations.
@@ -743,10 +790,18 @@ class LedgerBase:
         level = int(level_raw) if level_raw is not None else 1
         marker = row["marker"] or ""
         decorative = bool(row["decorative"])
+        chars: tuple[int, int] | None = None
+        raw_chars = row["span_chars_json"]
+        if raw_chars:
+            try:
+                start, end = json.loads(raw_chars)
+                chars = (int(start), int(end))
+            except (ValueError, TypeError):
+                chars = None
         span: CompositeSpan | None = None
         boxes = boxes_from_provenance(provenance.get("physical_boxes"))
         if boxes:
-            span = CompositeSpan(boxes=boxes)
+            span = CompositeSpan(boxes=boxes, chars=chars)
 
         return IRBlock(
             element=make_element(
@@ -763,6 +818,7 @@ class LedgerBase:
                 decorative=decorative,
                 level=level,
                 marker=marker,
+                chars=chars,
             ),
             style=style,
             draft_text=row["draft_text"],

@@ -22,9 +22,8 @@ from ubt.core.config import (
 )
 from ubt.core.job_options import (
     RUN_REPORT_KINDS,
-    default_output_path,
+    deliverable_candidates,
     profile_name_is_valid,
-    resolve_target_output,
     sidecar_path,
 )
 from ubt.core.log_config import setup_logging
@@ -132,7 +131,11 @@ def _refuse_existing_output(
 
     The other two entry points refuse to overwrite an existing deliverable
     unless the caller asks for a fresh run; the CLI holds the same line, and
-    its default output name collides on a second run.
+    its default output name collides on a second run. The candidate set is
+    :func:`~ubt.core.job_options.deliverable_candidates` — every name this
+    run could actually write — so a suffix-less ``-o out/delivery`` (which
+    resolves to ``out/delivery.md``) and the monolingual name inside a
+    directory are both guarded, not just the bilingual one.
     """
     if output is not None and _same_file(output, input_path):
         raise typer.BadParameter(
@@ -143,10 +146,7 @@ def _refuse_existing_output(
         # both default names here — a second run without --fresh must fail
         # loudly instead of overwriting the first delivery.
         if not fresh:
-            for candidate in (
-                default_output_path(input_path, monolingual=False),
-                default_output_path(input_path, monolingual=True),
-            ):
+            for candidate in deliverable_candidates(None, input_path):
                 if candidate.exists():
                     raise typer.BadParameter(
                         f"default output already exists; refusing to overwrite it: {candidate} "
@@ -163,16 +163,12 @@ def _refuse_existing_output(
                 + ", ".join(escape(p.name) for p in removed)
             )
         return output
-    candidate = output
-    if output.is_dir() or str(output).endswith(("/", "\\")):
-        # Directory form resolves to a labelled file inside it (job_options
-        # documents this); guard the resolved candidate, not the directory.
-        candidate = resolve_target_output(output, input_path)
-    if candidate.exists():
-        raise typer.BadParameter(
-            f"output path already exists; refusing to overwrite it: {output} "
-            "(pass --fresh to overwrite)"
-        )
+    for candidate in deliverable_candidates(output, input_path):
+        if candidate.exists():
+            raise typer.BadParameter(
+                f"output path already exists; refusing to overwrite it: {candidate} "
+                "(pass --fresh to overwrite)"
+            )
     return output
 
 

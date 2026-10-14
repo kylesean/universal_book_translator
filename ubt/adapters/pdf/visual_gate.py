@@ -57,7 +57,7 @@ Severity = Literal["info", "major", "critical"]
 
 BANNED_NON_BREAKING_HYPHEN = "\u2011"
 
-# Artifact-parity codes (injected by the reflow loop from artifact_parity.py)
+# Artifact-parity codes (injected by the visual-gate loop from artifact_parity.py)
 # that refuse export on the same reasoning as the unreadable-PDF case, even
 # when the blocking gate is off:
 # an artifact carrying none of the commissioned target language is unshippable.
@@ -69,11 +69,10 @@ _ALWAYS_FAIL_CLOSED_CODES = frozenset({"target_language_absent", "visual_gate_cr
 # for a reader to consume. A gate reporting passed=False on exactly these codes
 # must not ship the artifact.
 #
-# ``page_count_changed`` / ``image_count_changed`` used to sit here too. They
-# only fired on a render that promised to preserve the source page, which the
-# reflow renderer never does — it rebuilds every page and re-stages every
-# asset — so they reported a defect on every correct run and refused export.
-# They were deleted with the overlay engine.
+# ``page_count_changed`` / ``image_count_changed`` are deliberately not codes:
+# they only fire on a render that promised to preserve the source page, which
+# this renderer never does — it rebuilds every page and re-stages every asset —
+# so they would report a defect on every correct run and refuse export.
 _ALWAYS_FAIL_CLOSED_MAJORS = frozenset(
     {
         "target_language_sparse",

@@ -5,7 +5,7 @@ representation. Every delivery gets a graph built here, so the reconciliation
 gate applies to *all* render paths.
 
 Asset policy (Axiom A): a non-text block is only RECONSTRUCTED alongside the
-round-trip check that verifies it. The reflow renderer places figures as the
+round-trip check that verifies it. The renderer places figures as the
 extracted image and rebuilds tables from their markup, so a figure stays
 PRESERVED_OPAQUE while a rebuilt table is a reconstruction the contract has to
 be able to verify.
@@ -24,6 +24,7 @@ from ubt.core.content.nodes import (
     AssetNode,
     AssetRepresentation,
     ContentNode,
+    ReconstructionRecord,
     SourceRegion,
     TextDisposition,
     TextNode,
@@ -99,7 +100,12 @@ def _text_node(block: IRBlock, order: int, region: SourceRegion | None) -> TextN
     elif flags:  # intentional preserved element (chrome/non-prose/policy/footer)
         disposition, reason = TextDisposition.VERBATIM, f"preserved:{_skip_reason(flags[0])}"
     elif block.skip_translate:
-        disposition, reason = TextDisposition.VERBATIM, "skip_translate"
+        # Carry the specific policy reason (``skip:bibliography entry …``) into
+        # the contract instead of the opaque ``skip_translate``: the audit then
+        # says *why* the block shipped in the source language, not merely that it
+        # did. The reason is the one ``ingest`` recorded, so the two cannot drift.
+        reason = block.policy_reason or "skip_translate"
+        disposition = TextDisposition.VERBATIM
     elif block.status is BlockStatus.BLOCKED_HUMAN:
         # Quarantined for human post-editing: its ``target_text`` is a ``<mark>``
         # wrapper around the *source*, not a translation, and the renderer
@@ -157,10 +163,13 @@ def _asset_node(
     block: IRBlock,
     order: int,
     region: SourceRegion | None,
+    reconstruction: ReconstructionRecord | None = None,
 ) -> AssetNode:
     asset_kind = _ASSET_KIND[block.block_type]
     flags = _skip_flags(block)
     reasons = {_skip_reason(f) for f in flags}
+    verified = False
+    corrupt = False
     # A non-text node that was neither dropped on purpose nor lost to a render
     # skip survived whole: the renderer placed the extracted asset (a figure) or
     # rebuilt it from its own markup (a table).
@@ -170,11 +179,22 @@ def _asset_node(
     elif flags and not _all_intentional(flags):
         integrity = AssetIntegrity.MISSING
         detail = f"render:{_skip_reason(flags[0])}"
+    elif reconstruction is not None:
+        # The renderer reported an *interpreted* rebuild of this asset (a table
+        # rebuilt from the translated grid, a formula transpiled to Typst math).
+        # That is a RECONSTRUCTED asset, not an opaque copy — and only a
+        # shape-verified rebuild may claim it without a warning. A corrupt one
+        # (a grid that dropped/gained a column or row) is an ERROR at the
+        # contract. This is the branch the RECONSTRUCTED integrity and both
+        # ASSET_*_RECONSTRUCTION violation kinds exist for; before it, every
+        # asset was recorded PRESERVED_OPAQUE and the whole gate was dead.
+        integrity = AssetIntegrity.RECONSTRUCTED
+        verified = reconstruction.verified
+        corrupt = reconstruction.corrupt
+        detail = reconstruction.reason
     else:
         integrity = AssetIntegrity.PRESERVED_OPAQUE
         detail = ""
-    verified = False
-    corrupt = False
     return AssetNode(
         id=block.id,
         order=order,
@@ -199,18 +219,27 @@ def graph_from_blocks(
     doc_id: str = "",
     title: str = "",
     source_path: str = "",
+    reconstructions: Sequence[ReconstructionRecord] | None = None,
 ) -> ContentGraph:
     """Build the delivery contract's content graph from the delivered blocks.
 
     Every non-text node is accounted for: preserved when the renderer placed it,
     dropped only for a recorded decorative reason, missing when a render skip
     says so.
+
+    ``reconstructions`` is the renderer's per-asset verdict ledger (a table
+    rebuilt from the translated grid, verified or corrupt). When a block has a
+    record it is recorded ``RECONSTRUCTED`` instead of ``PRESERVED_OPAQUE`` — the
+    difference between "we proved we rebuilt it" and "we only know it exists".
+    Absent (the ledger re-derivation path, which has no render side channel), the
+    graph is the existence-only account it always was.
     """
+    by_id = {rec.block_id: rec for rec in (reconstructions or ())}
     nodes: list[ContentNode] = []
     for order, block in enumerate(blocks):
         region = _region(block)
         if block.block_type in _ASSET_KIND:
-            nodes.append(_asset_node(block, order, region))
+            nodes.append(_asset_node(block, order, region, by_id.get(block.id)))
         else:
             nodes.append(_text_node(block, order, region))
     return ContentGraph(doc_id=doc_id, title=title, source_path=source_path, nodes=tuple(nodes))

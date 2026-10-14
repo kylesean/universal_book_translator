@@ -44,6 +44,44 @@ def retry_after_seconds(headers: httpx.Headers) -> str | None:
         return None
 
 
+def raise_rate_limited(response: httpx.Response) -> None:
+    """Raise the 429 error every transport raises identically.
+
+    Four transports carried byte-identical blocks for this (same message, same
+    ``details`` shape); a fix to one -- a new detail key, a wording change --
+    silently skipped the other three. The router's backoff reads only
+    ``retry_after`` and ``status_code``, so one owner keeps them in step.
+    """
+    raise ModelProviderError(
+        f"Rate limit exceeded (HTTP 429): {response.text[:500]}",
+        details={
+            "status_code": 429,
+            "retry_after": retry_after_seconds(response.headers),
+            "body": response.text[:2000],
+        },
+    )
+
+
+def raise_api_error(response: httpx.Response) -> None:
+    """Raise the non-429 error status every transport raises identically.
+
+    Same duplication history as :func:`raise_rate_limited`: one block, four
+    copies, drifting one fix at a time.
+    """
+    raise ModelProviderError(
+        f"Model API error ({response.status_code}): {response.text[:500]}",
+        details={"status_code": response.status_code, "body": response.text[:2000]},
+    )
+
+
+def raise_for_status(response: httpx.Response) -> None:
+    """The shared status gate: 429 by its own owner, any other failure by the generic one."""
+    if response.status_code == 429:
+        raise_rate_limited(response)
+    if response.status_code != 200:
+        raise_api_error(response)
+
+
 def hostname_of(url: str) -> str:
     """Lowercased hostname of a URL, tolerating a missing scheme.
 
@@ -215,6 +253,37 @@ def _heal_drop_thinking(*keys: str) -> _HealFix:
         return None
 
     return fix
+
+
+#: Error phrases an endpoint uses when it wants ``max_completion_tokens``
+#: instead of the legacy ``max_tokens``. OpenAI rejects ``max_tokens`` on the
+#: gpt-5 family (and o-series) with a 400 that names the replacement.
+_MAX_TOKENS_REPLACEMENT_PHRASES = (
+    "not supported",
+    "unsupported parameter",
+    "use max_completion_tokens",
+)
+
+
+def _heal_max_tokens_rename(err_text: str, payload: dict[str, Any]) -> dict[str, Any] | None:
+    """Chat-completions transport: rename a rejected ``max_tokens``.
+
+    The gpt-5 / o-series endpoints advertise their pricing in this project's
+    table but reject ``max_tokens``, so a run against them failed every call with
+    a permanent 400. The replacement parameter the error names is
+    ``max_completion_tokens``; apply it so those models are usable.
+    """
+    if "max_tokens" not in payload:
+        return None
+    if "max_completion_tokens" in err_text and any(
+        p in err_text for p in _MAX_TOKENS_REPLACEMENT_PHRASES
+    ):
+        fixed = dict(payload)
+        value = fixed.pop("max_tokens", None)
+        if value is not None:
+            fixed["max_completion_tokens"] = value
+        return fixed
+    return None
 
 
 class BaseTransport(ABC):

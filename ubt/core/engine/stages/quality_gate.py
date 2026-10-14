@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from typing import Any
 
 from ubt.core.engine.events import EventType, TranslationProgressEvent
@@ -134,7 +134,7 @@ async def run_quality_gate_stage(
     terminology: Terminology,
     scoring: Scoring,
     chapter_id: str | None = None,
-) -> AsyncIterator[TranslationProgressEvent]:
+) -> AsyncGenerator[TranslationProgressEvent, None]:
     """Evaluate drafted blocks with FastPassFilter and score suspicious blocks via QE runner.
 
     Terminology first: the run's enforced terminology is bound to the heuristic runner
@@ -205,21 +205,34 @@ async def run_quality_gate_stage(
         await asyncio.to_thread(ledger.save_checkpoints_batch, passed_updates)
 
     if suspicious_blocks:
-        calibrated = getattr(qe_runner, "is_calibrated", lambda: False)()
-        if calibrated:
+        # ``may_be_calibrated`` (not ``is_calibrated``): a SubprocessQERunner
+        # reports uncalibrated until its *first* batch answers, so gating the
+        # scoring call on ``is_calibrated`` meant the first call was never made
+        # and every block got ``mtqe_score=None`` forever. Ask whether a call is
+        # worth attempting, make it, then read the settled verdict.
+        runner = qe_runner
+        attempt = getattr(runner, "may_be_calibrated", runner.is_calibrated)()
+        if attempt:
             pairs = [
                 {"src": b.source_text, "mt": b.target_text or "", "block_type": str(b.block_type)}
                 for b in suspicious_blocks
             ]
-            scores: list[float | None] = [float(s) for s in await qe_runner.score_pairs(pairs)]
-            if len(scores) != len(suspicious_blocks):
+            raw_scores = await runner.score_pairs(pairs)
+            if len(raw_scores) != len(suspicious_blocks):
                 raise MTQEEvaluationError(
-                    f"QE runner returned {len(scores)} score(s) for {len(suspicious_blocks)} block(s)",
-                    details={"expected": len(suspicious_blocks), "got": len(scores)},
+                    f"QE runner returned {len(raw_scores)} score(s) "
+                    f"for {len(suspicious_blocks)} block(s)",
+                    details={"expected": len(suspicious_blocks), "got": len(raw_scores)},
                 )
+        # The authoritative verdict after any scoring attempt: a subprocess that
+        # answered with its heuristic fallback is still uncalibrated, and its
+        # discrete bands must not become pseudo-scores.
+        if attempt and runner.is_calibrated():
+            scores: list[float | None] = [float(s) for s in raw_scores]
         else:
             # Bi-modal Gate Track 1: Structural Integrity.
-            # When uncalibrated (HeuristicQERunner), do NOT fabricate continuous pseudo-scores.
+            # When uncalibrated (HeuristicQERunner, or a COMET subprocess whose
+            # torch import failed), do NOT fabricate continuous pseudo-scores.
             # Explicitly mark mtqe_score = None and route to REPAIR_PENDING based on structural defect flags.
             scores = [None] * len(suspicious_blocks)
 

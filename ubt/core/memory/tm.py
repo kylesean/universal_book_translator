@@ -774,10 +774,19 @@ class TranslationMemory:
         context_hash: str,
         domain: str | None,
     ) -> bool:
-        """Gate: context equality, human_pe exemption, same-domain pass."""
+        """Gate: context equality, human_pe exemption, same-domain pass.
+
+        A machine row with an *empty* stored context is an operator import (TMX
+        / JSON via ``/assets/tm/import``) or a pre-context legacy row: it carries
+        no prompt fingerprint because no pipeline run produced it, so it must be
+        reusable under any lookup context rather than silently inert. Pipeline-
+        written machine rows always store a non-empty ``compute_tm_context``
+        hash, so a prompt/glossary/model change still invalidates those — this
+        exemption cannot resurrect a stale pipeline entry.
+        """
         if provenance == PROVENANCE_HUMAN_PE:
             return True
-        if row_context == context_hash:
+        if row_context == context_hash or row_context == "":
             return True
         return bool(domain and row_domain and row_domain == domain)
 

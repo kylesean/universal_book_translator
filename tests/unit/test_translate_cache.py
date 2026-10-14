@@ -306,3 +306,41 @@ def test_disk_cache_prunes_oldest_entries_past_the_cap() -> None:
 def test_disk_cache_prune_never_raises_on_a_missing_root() -> None:
     store = DiskCacheStore("/nonexistent/ubt-cache-does-not-exist", max_entries=10)
     assert store.prune() == 0
+
+
+def test_construction_prune_is_throttled_per_root() -> None:
+    """P2-15: a fresh store per chapter must not re-walk the cache tree each time.
+
+    ``profile_pdf`` builds a ``DiskCacheStore`` per call and ``annotate_page_kinds``
+    runs it once per chapter, so an unthrottled construct-prune scanned the whole
+    cache directory once per chapter. The throttle is per-root.
+    """
+    import ubt.cache.store as store_mod
+
+    with tempfile.TemporaryDirectory() as root:
+        store_mod._prune_clock.pop(root, None)
+        calls: list[int] = []
+        orig = DiskCacheStore.prune
+
+        def counting_prune(self: DiskCacheStore) -> int:
+            calls.append(1)
+            return orig(self)
+
+        DiskCacheStore.prune = counting_prune  # type: ignore[method-assign]
+        try:
+            DiskCacheStore(root, max_entries=10)  # first: prunes
+            DiskCacheStore(root, max_entries=10)  # throttled within the window
+            DiskCacheStore(root, max_entries=10)
+            assert len(calls) == 1
+            # A different root is throttled independently.
+            other = tempfile.mkdtemp()
+            try:
+                store_mod._prune_clock.pop(other, None)
+                DiskCacheStore(other, max_entries=10)
+                assert len(calls) == 2
+            finally:
+                import shutil
+
+                shutil.rmtree(other, ignore_errors=True)
+        finally:
+            DiskCacheStore.prune = orig  # type: ignore[method-assign]

@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from typing import Any
 
 from ubt.core.cleaners.math_text import (
@@ -95,7 +95,7 @@ async def run_c_text_stage(
     ctx: StageContext,
     services: RunServices,
     chapter_id: str | None = None,
-) -> AsyncIterator[TranslationProgressEvent]:
+) -> AsyncGenerator[TranslationProgressEvent, None]:
     """Translate formula text-spans; yields its completion event when enabled.
 
     ``chapter_id`` scopes the fetch to one chapter. The chapter-streaming QE

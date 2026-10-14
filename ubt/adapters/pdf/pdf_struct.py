@@ -37,7 +37,6 @@ __all__ = [
     "page_rotation",
     "page_rotations",
     "page_size",
-    "page_sizes",
     "resource_font_count",
     "resource_image_count",
 ]
@@ -62,12 +61,6 @@ def page_count(path: Path | str) -> int:
 def page_size(page: Page) -> tuple[float, float]:
     """(width_pt, height_pt) of one page, inheritance-resolved."""
     return _box_size(page.MediaBox)
-
-
-def page_sizes(path: Path | str) -> dict[int, tuple[float, float]]:
-    """1-indexed ``{page_no: (width_pt, height_pt)}`` for every page."""
-    with pikepdf.open(str(path)) as pdf:
-        return {idx: page_size(page) for idx, page in enumerate(pdf.pages, start=1)}
 
 
 def page_box(page: Page) -> tuple[float, float, float, float]:

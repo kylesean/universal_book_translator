@@ -71,6 +71,21 @@ class BaseQERunner(ABC):
         """
         return True
 
+    def may_be_calibrated(self) -> bool:
+        """Whether it is worth *attempting* a scoring call to find out.
+
+        Distinguishes "cannot score" from "has not proven it scored yet". A
+        ``SubprocessQERunner`` reports ``is_calibrated() == False`` until its
+        first batch answers ``engine="neural"``, so a caller that gates the
+        scoring call on ``is_calibrated()`` would never make that first call —
+        the runner stayed permanently uncalibrated and every block got
+        ``mtqe_score=None``. Such runners override this to ``True`` so the gate
+        attempts a batch and re-reads ``is_calibrated()`` afterwards; a runner
+        that can never be calibrated (the heuristic) leaves it ``False`` and is
+        never asked.
+        """
+        return self.is_calibrated()
+
     def reset_residency(self) -> None:
         """Drop latched "fall back to the slow path" state at the start of a run.
 

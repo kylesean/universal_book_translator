@@ -285,8 +285,8 @@ export interface paths {
          * Stream Progress
          * @description SSE: ``event: progress`` snapshots until one ``event: <status>`` terminal frame.
          *
-         *     Both deployment modes emit that one contract (see ``_progress_frame`` /
-         *     ``_terminal_frame``); the payload never depends on how the server was
+         *     Both deployment modes emit that one contract (see ``progress_frame`` /
+         *     ``terminal_frame``); the payload never depends on how the server was
          *     started. Every frame carries an ``id:`` cursor, so a client reconnecting
          *     with ``Last-Event-ID`` (header or ``?last_event_id=``) receives the
          *     frames it missed before the live stream resumes (PRD §9.2).
@@ -455,6 +455,32 @@ export interface paths {
          * @description Apply one human revision (ledger + shared TM), the L3 feedback path.
          */
         post: operations["edit_segment_jobs__job_id__segments__block_id__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/jobs/{job_id}/re-export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Re Export
+         * @description Re-render a finished job's deliverable from its current ledger text.
+         *
+         *     A human edit lands in the ledger, but the delivered file was rendered
+         *     before it — the reviewer saw the fix in the preview while the download
+         *     stayed stale. This re-runs the export stage over the current text and
+         *     overwrites the deliverable in place. No token is spent: every block is
+         *     already terminal, so only render + reports run.
+         */
+        post: operations["re_export_jobs__job_id__re_export_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2285,6 +2311,42 @@ export interface operations {
                 "application/json": components["schemas"]["SegmentEditRequest"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    re_export_jobs__job_id__re_export_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-ubt-tenant"?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path: {
+                job_id: string;
+            };
+            cookie?: {
+                ubt_session?: string | null;
+            };
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

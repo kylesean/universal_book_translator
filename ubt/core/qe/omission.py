@@ -162,12 +162,14 @@ def identifier_terms(source_text: str, document_text: str = "") -> set[str]:
     tracked = {t for t in set(runs) if _is_identifier_shaped(t) and not _is_hyphen_ghost(t, freq)}
     if not document_text:
         return tracked
-    return {
-        t for t in tracked if not _reads_as_a_word_in_the_document(t, source_text, document_text)
-    }
+    # Strip the all-caps tokens from the document ONCE, not once per term: the
+    # per-term call was O(terms × document) — on a real book the omission gate
+    # re-scanned the whole document text for every tracked identifier.
+    lowered_document = _ALL_CAPS_TOKEN_RE.sub(" ", document_text)
+    return {t for t in tracked if not _reads_as_a_word_in_the_document(t, lowered_document)}
 
 
-def _reads_as_a_word_in_the_document(term: str, block_text: str, document_text: str) -> bool:
+def _reads_as_a_word_in_the_document(term: str, stripped_document: str) -> bool:
     """Whether an all-caps run is ordinary prose capitalised for a table.
 
     Only all-caps runs are candidates: a camelCase or digit-bearing term
@@ -175,19 +177,17 @@ def _reads_as_a_word_in_the_document(term: str, block_text: str, document_text: 
     cannot apply to it.
 
     The evidence is a **non-all-caps** occurrence of the word in the document.
-    Every all-caps occurrence is stripped first, because an acronym written in
-    prose is still the acronym: ``We use MHA and LSTM`` must not count as
-    evidence that ``MHA`` is a word. What remains is text in ordinary case, so a
-    surviving ``mask`` (or ``Mask``) proves the capitals were a formatting
-    choice, while an acronym leaves nothing behind.
+    The caller strips every all-caps occurrence first (see
+    :func:`identifier_terms`), because an acronym written in prose is still the
+    acronym: ``We use MHA and LSTM`` must not count as evidence that ``MHA`` is
+    a word. What remains is text in ordinary case, so a surviving ``mask`` (or
+    ``Mask``) proves the capitals were a formatting choice, while an acronym
+    leaves nothing behind.
     """
     if not term.isupper() or len(term) < 3 or not term.isalpha():
         return False
-    # Drop every all-caps token, from the block and the wider document alike.
-    stripped = _ALL_CAPS_TOKEN_RE.sub(" ", document_text)
-    stripped = _ALL_CAPS_TOKEN_RE.sub(" ", stripped)
     return (
-        re.search(rf"(?<![A-Za-z]){re.escape(term)}(?![A-Za-z])", stripped, re.IGNORECASE)
+        re.search(rf"(?<![A-Za-z]){re.escape(term)}(?![A-Za-z])", stripped_document, re.IGNORECASE)
         is not None
     )
 
@@ -491,10 +491,24 @@ class OmissionGate:
             and (sentence_ratio <= self.min_sentence_ratio)
         ):
             # A translation that preserves 100% of proper nouns, 100% of numbers,
-            # and verbatim n-grams with normal target length has not dropped sentences;
-            # it merely merged clauses using Chinese comma splices or run-in headings.
+            # and verbatim n-grams with normal target length has not dropped
+            # sentences; it merely merged clauses using Chinese comma splices or
+            # run-in headings.
+            #
+            # The exemption must be *earned*: with no tracked identifiers, no
+            # source numbers and no residue n-grams to check, every recall is
+            # vacuously 1.0 and the exemption would swallow a run that translated
+            # only the tail of a prose paragraph. ``anchored`` requires that at
+            # least one of the three signals actually had something to preserve.
+            residue_grams = self._source_residue_grams(src, surfaces)
+            anchored = (
+                bool(tracked_terms)
+                or bool(_NUM_TOKEN_RE.findall(src))
+                or sum(residue_grams.values()) >= self.min_chrf_ngrams
+            )
             sentence_drop = not (
-                proper_noun_recall >= 1.0
+                anchored
+                and proper_noun_recall >= 1.0
                 and number_recall >= 1.0
                 and chrf_recall >= self.min_chrf_recall
                 and len(tgt) >= len(src) * self.min_length_ratio

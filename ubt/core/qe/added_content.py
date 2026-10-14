@@ -43,17 +43,38 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+# Single-character CJK reference keywords that are also the tail of an ordinary
+# technical compound: 模式 (mode), 格式 (format), 方式 (way), 公式 (formula),
+# 样式/形式 (style/form), 地图 (map), 手表 (watch), 代表 (representative),
+# 图表 (chart), 发表 (publish) … A CJK character drawn from a keyword's prefix
+# set immediately before it belongs to that same word, not to a callout, so the
+# bare keyword must sit on a word boundary. Without the guard "将模式3设置好"
+# ("set mode 3") matched ``式 3`` and routed a correct translation to delete a
+# reference it never invented. The English keywords take their own boundary from
+# whitespace; only these ambiguous single CJK forms need the lookbehind.
+_SINGLE_CJK_KEYWORD_PREFIXES: dict[str, str] = {
+    # X式: 模式/格式/方式/样式/形式/程式/公式/算式/等式/表达式/版式/体式/多项式…
+    "式": "模格方样形程正公算等达版体定变旧新中西法仪款项分根通反单",
+    # X表: 代表/图表/手表/外表/发表/报表/仪表/填表/时间表/秒表/课程表/地表…
+    "表": "代图手外发报仪投填间刻秒课程声地览",
+    # X图: 地图/意图/试图/蓝图/草图/视图/版图/插图/效果图/施工图/设计图/截图…
+    "图": "地力意试蓝草视宏绘版插企果工计线面形平截略",
+}
+_SINGLE_CJK_KEYWORD = "|".join(
+    rf"(?<![{prefix}]){keyword}" for keyword, prefix in _SINGLE_CJK_KEYWORD_PREFIXES.items()
+)
 # Reference keyword, source and target language spellings. "Fig. 3.9" and
 # "图 3.9" are the same reference written two ways and must collapse to one
 # token, or every correctly translated figure callout would look fabricated.
 _REF_KEYWORD = (
     r"(?:§+|FIG|Figs?|Figures?|Eqs?|Equations?|Tables?|Tabs?|Secs?|Sections?|Chaps?|Chapters?|"
     r"Apps?|Appendi(?:x|ces)|List(?:ing)?s?|"
-    # ``列表`` before ``表``: without the list keyword the single ``表``
-    # (table) matched inside ``列表 1`` (Listing 1), fabricating a reference the
-    # source's ``List. 1`` never produced — the false positive that quarantined
-    # every translated listing callout.
-    r"图|式|列表|清单|清單|表|方程|附录|附錄)"
+    rf"{_SINGLE_CJK_KEYWORD}|"
+    # ``列表``/``清单`` before the bare ``表``: without the list keyword the
+    # single ``表`` (table) matched inside ``列表 1`` (Listing 1), fabricating a
+    # reference the source's ``List. 1`` never produced — the false positive that
+    # quarantined every translated listing callout.
+    r"列表|清单|清單|方程|附录|附錄)"
 )
 # Version-shaped number: chapter-3 uses "3.11", three-level section numbers use
 # "3.4.1" and appendices use "A.10". The appendix letter is uppercase by

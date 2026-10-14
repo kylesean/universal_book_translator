@@ -3,15 +3,18 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["ubt"]
-
 # The operator console is a prebuilt Vite bundle copied into ubt/api/static by
-# scripts/build_console_assets.py. It is force-included so a `pip install`ed
-# wheel serves the console with no Node.js/pnpm on the end-user machine (PRD
-# §7.1.2 / §9). Run the asset build before packaging; a source tree without a
-# built frontend has nothing to embed.
-[tool.hatch.build.targets.wheel.force-include]
-"ubt/api/static" = "ubt/api/static"
+# scripts/build_console_assets.py. It ships inside the ``ubt`` package, so
+# ``packages = ["ubt"]`` already includes it and a `pip install`ed wheel serves
+# the console with no Node.js/pnpm on the end-user machine (PRD §7.1.2 / §9).
+#
+# There is deliberately NO ``force-include`` for ubt/api/static: it would add
+# every static file to the archive a *second* time (already covered by
+# ``packages``), and hatchling aborts the build with "A second file is being
+# added to the wheel archive at the same path: ubt/api/static/favicon.svg".
+# Run ``scripts/build_console_assets.py`` before packaging; a source tree
+# without a built frontend has nothing to embed.
+packages = ["ubt"]
 
 # The sdist has no install use beyond source builds, so keep it to what a
 # distributor actually needs. Without this it bundled every ``tests/`` entry --
@@ -213,6 +216,13 @@ indent-style = "space"
 [tool.mypy]
 python_version = "3.12"
 strict = true
+# ``tests/pdf_builders.py`` is imported as a top-level module (``from
+# pdf_builders import ...``), which is how pytest resolves it: ``tests/`` is on
+# sys.path via rootdir conftest discovery. Without this entry mypy sees the same
+# file under two module names (``pdf_builders`` and ``tests.pdf_builders``) and
+# refuses to check anything at all. This is the declared, single spelling of the
+# test-helper import path.
+mypy_path = "tests"
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
 check_untyped_defs = true

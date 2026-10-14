@@ -383,6 +383,79 @@ def test_system_info_reports_the_live_security_boundary(tmp_path: Path) -> None:
     assert isinstance(body["is_loopback"], bool)
 
 
+async def test_system_info_loopback_is_derived_from_the_bind_not_the_host_header(
+    tmp_path: Path,
+) -> None:
+    """P1-D2: ``is_loopback`` must not trust the client-supplied Host header.
+
+    ``request.url`` is built from the ``Host`` header, so a DNS-rebinding probe
+    (``Host: evil.example.com`` reaching the loopback console) read as
+    ``is_loopback=False`` — the panel then told the operator the console was
+    exposed when it was not, and ``Host: localhost`` against a real exposed bind
+    read the reverse. The verdict now comes from the socket's server address.
+
+    Driven at the ASGI layer with a real non-loopback bind IP: ``TestClient``'s
+    own bind is ``testserver`` (a hostname the checker skips), so only a forged
+    scope can tell the two derivations apart.
+    """
+    from ubt.api.app import create_app
+
+    app = create_app(_config(tmp_path))
+    # A request that arrived on an *exposed* bind (203.0.113.5) but carries a
+    # loopback Host header. The old code read the header and reported loopback;
+    # the bind is what actually answers.
+    scope = {
+        "type": "http",
+        "http_version": "1.1",
+        "method": "GET",
+        "path": "/system/info",
+        "raw_path": b"/system/info",
+        "query_string": b"",
+        "scheme": "http",
+        "server": ("203.0.113.5", 8000),
+        "client": ("203.0.113.9", 51000),
+        "root_path": "",
+        "headers": [
+            (b"host", b"localhost"),
+            (b"x-api-key", _API_KEY.encode()),
+        ],
+    }
+    from collections.abc import MutableMapping
+
+    sent: list[dict[str, Any]] = []
+
+    async def receive() -> dict[str, Any]:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message: MutableMapping[str, Any]) -> None:
+        sent.append(dict(message))
+
+    await app(scope, receive, send)
+
+    body = json.loads(
+        b"".join(m.get("body", b"") for m in sent if m["type"] == "http.response.body")
+    )
+    assert body["host"] == "localhost"
+    # Exposed bind → not loopback, regardless of the loopback Host header.
+    assert body["is_loopback"] is False
+
+
+def test_a_forged_host_header_is_refused(tmp_path: Path) -> None:
+    """A Host outside the trusted set is a DNS-rebinding attempt: 400."""
+    client = TestClient(create_app(_config(tmp_path)))
+    assert client.get("/health", headers={"Host": "evil.example.com"}).status_code == 400
+    # The loopback names and the test client's own host stay reachable.
+    assert client.get("/health", headers={"Host": "localhost:8000"}).status_code == 200
+    assert client.get("/health").status_code == 200
+
+
+def test_trusted_hosts_config_admits_an_operator_domain(tmp_path: Path) -> None:
+    config = _config(tmp_path).model_copy(update={"trusted_hosts": "books.example.com"})
+    client = TestClient(create_app(config))
+    assert client.get("/health", headers={"Host": "books.example.com"}).status_code == 200
+    assert client.get("/health", headers={"Host": "other.example.com"}).status_code == 400
+
+
 def test_deliverables_endpoint_serves_only_existing_files(tmp_path: Path) -> None:
     from ubt.core.engine.ledger import SQLiteJobLedger
     from ubt.core.ir.models import BookManifest
@@ -567,3 +640,69 @@ def test_the_wizard_does_not_reference_a_removed_internal_knob() -> None:
         text = path.read_text(encoding="utf-8")
         assert "exec_mode" not in text, f"{path.name} still references exec_mode"
         assert "execMode" not in text, f"{path.name} still references execMode"
+
+
+# --- P1-D3: no host-path echo, no forgeable tenant scoping -------------------
+
+
+def test_assess_reduces_the_source_path_to_a_basename(tmp_path: Path) -> None:
+    """``/jobs/assess`` echoed the source file's absolute path.
+
+    Every other surface (``/status``, ``/download``) reduces artifact paths to
+    their basenames; the quote leaked the host's directory layout to any caller
+    that could reach the (unauthenticated-by-default) port.
+    """
+    source = tmp_path / "sub" / "secret-book.md"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text("# Title\n\nSome body text.\n", encoding="utf-8")
+    client = TestClient(create_app(_config(tmp_path)))
+
+    res = client.post(
+        "/jobs/assess",
+        json={"input_path": str(source)},
+        headers=_AUTH,
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["path"] == "secret-book.md"
+    assert str(tmp_path) not in json.dumps(body)
+
+
+def test_a_forged_tenant_header_is_ignored_by_default(tmp_path: Path) -> None:
+    """``X-UBT-Tenant`` is client-forgeable; honored only when trusted.
+
+    In the default (single-tenant) deployment every request is the ``default``
+    tenant, so a forged header cannot scope a caller into another tenant's job.
+    """
+    from ubt.api.scope import ApiScope
+    from ubt.core.engine.job_queue import JobQueue
+
+    queue = JobQueue(tmp_path / "q.sqlite")
+    queue.enqueue("otherjob0001", {"v": 1}, tenant_id="victim")
+    scope = ApiScope(
+        config=_config(tmp_path),
+        manager=object(),  # type: ignore[arg-type]
+        job_queue=queue,
+        assess_semaphore=None,  # type: ignore[arg-type]
+    )
+    # Default: the forged header resolves to "default", which is NOT the victim,
+    # so the victim's job is invisible.
+    assert scope.tenant_from_header("victim") == "default"
+    assert scope.tenant_allows("otherjob0001", scope.tenant_from_header("victim")) is False
+
+
+def test_the_tenant_header_is_honored_when_the_operator_trusts_it(tmp_path: Path) -> None:
+    """The multi-tenant SaaS path stays available behind the explicit opt-in."""
+    from ubt.api.scope import ApiScope
+    from ubt.core.engine.job_queue import JobQueue
+
+    queue = JobQueue(tmp_path / "q.sqlite")
+    queue.enqueue("otherjob0001", {"v": 1}, tenant_id="victim")
+    scope = ApiScope(
+        config=_config(tmp_path, trust_tenant_header=True),
+        manager=object(),  # type: ignore[arg-type]
+        job_queue=queue,
+        assess_semaphore=None,  # type: ignore[arg-type]
+    )
+    assert scope.tenant_from_header("victim") == "victim"
+    assert scope.tenant_allows("otherjob0001", scope.tenant_from_header("victim")) is True

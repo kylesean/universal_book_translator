@@ -40,11 +40,13 @@ def _compute_crop_coords(
 ) -> tuple[int, int, int, int]:
     """Convert PDF coordinates (origin bottom-left) to raster image coordinates (origin top-left).
 
-    ``origin_x``/``origin_y`` are the MediaBox's lower-left corner. The raster
-    covers only the MediaBox, so a user-space point maps to pixel
-    ``(point - origin) * scale``; a box whose MediaBox origin is not (0, 0)
-    (a cropped or imposed page) would otherwise be cropped shifted by that
-    offset — the wrong region, and the further from the origin, the further off.
+    ``origin_x``/``origin_y`` are the *rendered* box's lower-left corner — the
+    page's CropBox (which pdfium/pdf_oxide rasterize), falling back to the
+    MediaBox when no CropBox is set. The raster covers only that box, so a
+    user-space point maps to pixel ``(point - origin) * scale``; a box whose
+    rendered origin is not (0, 0) (a cropped or imposed page) would otherwise be
+    cropped shifted by that offset — the wrong region, and the further from the
+    origin, the further off.
     """
     if isinstance(bbox, BoundingBox):
         bx0, by0, bx1, by1 = bbox.x0, bbox.y0, bbox.x1, bbox.y1
@@ -134,11 +136,21 @@ def crop_block_pil(
                 # pass its complement; using ``get_width/height`` (display frame)
                 # with the default render crops the wrong region on a /Rotate
                 # page.
-                mediabox = page.get_mediabox()
-                origin_x = float(mediabox[0])
-                origin_y = float(mediabox[1])
-                page_width_pt = float(mediabox[2]) - origin_x
-                page_height_pt = float(mediabox[3]) - origin_y
+                #
+                # The raster covers the page's *CropBox*, not its MediaBox:
+                # pdfium (and pdf_oxide) render the CropBox, and ``get_cropbox``
+                # falls back to the MediaBox when none is set, so on the common
+                # zero-crop page this is identical. Using the MediaBox on a
+                # page that IS cropped (print/imposed PDFs) made every y
+                # coordinate wrong — the raster was shorter than the box the
+                # math assumed, so a bbox in the visible area cropped a blank
+                # strip below the image (fed to the repair VLM, and by the
+                # figure-asset fallback, written into the delivered PDF).
+                cropbox = page.get_cropbox()
+                origin_x = float(cropbox[0])
+                origin_y = float(cropbox[1])
+                page_width_pt = float(cropbox[2]) - origin_x
+                page_height_pt = float(cropbox[3]) - origin_y
                 rotation = (360 - int(page.get_rotation())) % 360
                 bitmap = page.render(scale=scale, rotation=rotation)
                 full_img = bitmap.to_pil().convert("RGB")
@@ -198,7 +210,7 @@ def crop_ir_block_image(
 def is_visual_scalpel_applicable(
     block: IRBlock,
     source_pdf_path: Path | str | None,
-    qe_threshold_for_vision: float = 0.60,
+    vision_threshold: float = 0.60,
 ) -> bool:
     """Evaluate whether an IRBlock qualifies for L4 multimodal visual repair.
 
@@ -207,6 +219,12 @@ def is_visual_scalpel_applicable(
     2. The block has a non-zero-area bounding box and positive page number;
     3. The block is either a formula/table or has an mtqe_score below the vision threshold
        (severe structural defect, omission, or hallucination).
+
+    The threshold keyword is ``vision_threshold``, matching the ports bridge
+    (:func:`ubt.core.ports.is_visual_scalpel_applicable`) that calls this through
+    the SPI registry. The two names drifted (``qe_threshold_for_vision`` here,
+    ``vision_threshold`` there), so every real call raised ``TypeError`` and the
+    L4 visual-repair path never ran.
     """
     if source_pdf_path is None:
         return False
@@ -228,9 +246,17 @@ def is_visual_scalpel_applicable(
         return True
 
     # Low-scoring blocks (severe errors / omissions) trigger visual rescue
-    if block.mtqe_score is not None and block.mtqe_score < qe_threshold_for_vision:
+    if block.mtqe_score is not None and block.mtqe_score < vision_threshold:
         return True
 
-    # Check for metadata indicators (e.g. diagram text, formula markers)
-    meta = getattr(block, "metadata", None) or getattr(block, "provenance", None) or {}
-    return bool(meta.get("is_diagram_text") or meta.get("has_complex_symbols"))
+    # Check for metadata indicators (e.g. diagram text, formula markers).
+    # ``IRBlock.provenance`` is a pydantic ``BlockProvenance`` (an attribute
+    # object, not a ``dict``) with ``extra="allow"``, so .get() on it raises;
+    # read the two indicators with ``getattr`` so both a mapping and the typed
+    # object work.
+    meta = getattr(block, "metadata", None) or getattr(block, "provenance", None)
+    if isinstance(meta, dict):
+        return bool(meta.get("is_diagram_text") or meta.get("has_complex_symbols"))
+    return bool(
+        getattr(meta, "is_diagram_text", False) or getattr(meta, "has_complex_symbols", False)
+    )

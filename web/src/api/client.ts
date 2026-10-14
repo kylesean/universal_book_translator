@@ -554,6 +554,27 @@ export async function editSegment(
   return res.json()
 }
 
+/**
+ * Re-render a finished job's deliverable from its current ledger text.
+ *
+ * A human edit lands in the ledger, but the delivered file was rendered before
+ * it; without this the reviewer sees the fix in the preview while the customer
+ * downloads the stale machine draft. Runs the export stage only — no token is
+ * spent (every block is already terminal).
+ */
+export async function reExportJob(
+  jobId: string
+): Promise<{ artifact_path: string | null; message: string }> {
+  const res = await apiFetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}/re-export`, {
+    method: 'POST',
+  })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(body.detail || 'Failed to re-export')
+  }
+  return res.json()
+}
+
 export interface TermViolation {
   source: string
   expected: string

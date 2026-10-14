@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any
 
 from ubt.core.exceptions import QueueDepthExceededError
+from ubt.core.fs_perms import ensure_private_dir, restrict_sqlite_family
 
 logger = logging.getLogger(__name__)
 
@@ -148,9 +149,16 @@ class JobQueue:
 
     # -- connection -----------------------------------------------------------
     def _init_schema(self) -> None:
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        # The queue row carries each job's full ``payload`` — source and target
+        # absolute paths, every config override, the translation request — so it
+        # is as sensitive as the per-job ledger. SQLite creates the file
+        # 0666&~umask (0644 under a normal umask), which let any local user read
+        # every queued job; the ledger already tightened itself with the same two
+        # helpers. Apply them here too.
+        ensure_private_dir(self.db_path.parent)
         with self._get_conn() as conn:
             conn.executescript(_SCHEMA)
+        restrict_sqlite_family(self.db_path)
 
     def _init_connection(self) -> None:
         conn = sqlite3.connect(

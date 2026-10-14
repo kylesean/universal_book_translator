@@ -151,3 +151,55 @@ async def test_chapter_streaming_consumer_crash_does_not_deadlock(
                 Scoring(),
             ):
                 pass
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_stream_drains_the_per_chapter_generators(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """P2-2: cancelling the stream must close each chapter's stage generator.
+
+    The draft stage's generator owns the checkpoint flusher; its ``finally``
+    persists the chapter's drafted blocks. A bare ``async for`` left that
+    generator open on cancellation, so the ``finally`` ran only at GC — after
+    the pipeline's ledger teardown — and up to ``ledger_flush_batch_size`` paid
+    checkpoints were lost. ``aclosing`` makes the drain happen on cancel.
+    """
+    chapters = [
+        ChapterMeta(chapter_id="c1", spine_index=1, title="Chapter 1"),
+        ChapterMeta(chapter_id="c2", spine_index=2, title="Chapter 2"),
+    ]
+    ctx, _ = _make_context(chapters, queue_size=2)
+
+    closed: list[str] = []
+
+    async def mock_draft(ctx: Any, services: Any, term: Any, chapter_id: str | None = None) -> Any:
+        try:
+            yield _make_event(EventType.DRAFT_BATCH_COMPLETED, f"drafted {chapter_id}")
+            await asyncio.sleep(10)  # park so the cancel lands mid-chapter
+        finally:
+            closed.append(str(chapter_id))
+
+    async def mock_pass(ctx: Any, *a: Any, chapter_id: str | None = None, **kw: Any) -> Any:
+        if False:  # pragma: no cover - async generator
+            yield _make_event(EventType.MTQE_EVALUATED, "unused")
+
+    monkeypatch.setattr("ubt.core.engine.stages.chapter_streaming.run_draft_stage", mock_draft)
+    monkeypatch.setattr(
+        "ubt.core.engine.stages.chapter_streaming.run_quality_gate_stage", mock_pass
+    )
+    monkeypatch.setattr("ubt.core.engine.stages.chapter_streaming.run_repair_stage", mock_pass)
+
+    gen = run_chapter_streaming_pipeline(
+        ctx,
+        SimpleNamespace(),  # type: ignore[arg-type]
+        Terminology(glossary_dicts=[], abbreviation_entries=[]),
+        Scoring(),
+    )
+    # Consume the first event, then cancel the stream mid-chapter.
+    await anext(gen)
+    await gen.aclose()
+
+    # Give the worker tasks a tick to unwind after the closure.
+    await asyncio.sleep(0.05)
+    assert "c1" in closed, "the in-flight chapter's stage generator was not drained"

@@ -198,3 +198,60 @@ def test_a_listing_keyword_without_a_number_is_not_a_reference() -> None:
     decision = AddedContentGate().evaluate("A list of items follows.", "接下来是项目列表。")
     assert decision.passed is True
     assert decision.source_refs == frozenset()
+
+
+# --------------------------------------------------------------------------- #
+# CJK keyword word boundaries (P2-4)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "将模式3设置好",
+        "模式3很常见",
+        "格式2已定义",
+        "方式1不同",
+        "公式3成立",
+        "样式4很好看",
+        "形式2存在",
+        "表达式2求值",
+        "方程式1无解",
+        "他代表3个部门",
+        "地图3标注了边界",
+        "手表2走时精准",
+        "图表2说明了趋势",
+    ],
+)
+def test_a_cjk_compound_tail_is_not_a_bare_keyword(text: str) -> None:
+    # ``式``/``表``/``图`` are ordinary tails of technical compounds
+    # (模式/格式/方式/公式/表达式, 代表/图表/手表, 地图). A digit after one of
+    # those compounds is a plain quantity, not a callout: "将模式3设置好" ("set
+    # mode 3") must not be read as the equation callout "式 3" and routed to
+    # delete a reference the translation never invented.
+    assert reference_tokens(text) == frozenset()
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("见图 3.5", {"3.5"}),
+        ("见表 2", {"2"}),
+        ("如表 3.1 所示", {"3.1"}),
+        ("如式 (3.1) 所示", {"3.1"}),
+        ("参见图 4", {"4"}),
+        ("下图 2 展示了流程", {"2"}),
+        ("图 3.14 和图 3.15", {"3.14", "3.15"}),
+    ],
+)
+def test_a_genuine_cjk_callout_still_matches(text: str, expected: set[str]) -> None:
+    # The word-boundary guard must not silence a real callout: a preceding
+    # prepositional character (见/如/下/和) is not a compound prefix, so the
+    # keyword stays at a boundary and the number is still a reference.
+    assert reference_tokens(text) == frozenset(expected)
+
+
+def test_a_mode_number_is_not_a_fabricated_reference() -> None:
+    decision = AddedContentGate().evaluate("Type 3 is common", "模式3很常见")
+    assert decision.passed is True
+    assert decision.fabricated_refs == ()

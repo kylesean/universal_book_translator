@@ -93,7 +93,7 @@ export const zh: TranslationDictionary = {
       MODEL_NOT_CONFIGURED:
         '未配置 draft 模型：报价按模型名未知处理，费用呈现为「未知」。请设置 UBT_DRAFT_MODEL、选择 provider（UBT_PROVIDER=...），或声明 [providers.<name>]。',
       SCANNED_PAGES_DOMINANT:
-        '文档以扫描/图像页为主，译文依赖视觉转写，成本与时延显著上升；建议先做 OCR 预检（将采用原位覆盖 overlay 路线）。',
+        '文档以扫描/图像页为主，译文依赖视觉转写，成本与时延显著上升；建议先做 OCR 预检。',
       FONT_RESIDUE_RISK:
         '字体编码损伤：{confirmed_pages} 页确认存在字符乱码（共 {residue_chars} 个残字符），部分文字可能不可恢复，{remedy}。',
       FORMULA_HEAVY_NEEDS_ENRICHMENT:
@@ -343,6 +343,8 @@ export const zh: TranslationDictionary = {
     loadMore: '加载更多',
     saving: '保存中...',
     saved: '已保存并回灌 TM',
+    reExportDone: '交付文件已重新渲染：{path}',
+    reExportFailed: '修改已保存，但重新渲染交付文件失败：{msg}',
     humanVerified: '人工已确认',
     prevIssue: '上一处 (Shift+F8)',
     nextIssue: '下一处 (F8)',

@@ -12,7 +12,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from ubt.core.engine.ledger import SQLiteJobLedger, merge_usage_totals
-from ubt.core.router.pricing import cache_hit_rate_from_usage, estimate_cost_usd
+from ubt.core.router.pricing import (
+    cache_hit_rate_from_usage,
+    estimate_cost_usd,
+    has_unmeasured_calls,
+)
 
 UsageTotals = dict[str, dict[str, int]]
 
@@ -28,6 +32,16 @@ class JobBill:
     #: which case cost falls back to price-table-only accounting.
     base_url: str = ""
     endpoint_map: Mapping[str, str] | None = None
+
+    @property
+    def unmeasurable(self) -> bool:
+        """True when some billed call carried no ``usage`` block.
+
+        Such a call's tokens cannot be sized, so ``cost_usd`` is None and the
+        figure is unknown. Under a budget cap this must be a hard stop, not a
+        silently-inert cap (see :func:`budget_violation`).
+        """
+        return has_unmeasured_calls(self.lifetime_usage)
 
     @property
     def cost_usd(self) -> float | None:
@@ -101,9 +115,29 @@ def budget_violation(bill: JobBill, budget_usd: float | None, job_id: str) -> st
 
     A hard stop by design: the ledger keeps everything drafted so far, so
     raising UBT_BUDGET_USD and rerunning the same job id resumes from here.
+
+    A **measured** cost that exceeds the cap is the ordinary case. When the cost
+    is unknown because some billed call returned no ``usage`` block
+    (``bill.unmeasurable``), the cap cannot bound the job at all — the earlier
+    behaviour returned None here and the cap went permanently inert while spend
+    continued. Under a cap that is a hard stop too: the operator asked for a
+    bound, and an unmeasurable job has none.
     """
     cost = bill.cost_usd
-    if budget_usd is None or cost is None or cost <= budget_usd:
+    if budget_usd is None:
+        return None
+    if cost is None:
+        if bill.unmeasurable:
+            return (
+                "Budget unenforceable: a provider response carried no usage block, "
+                f"so this job's spend cannot be measured against "
+                f"--budget-usd/UBT_BUDGET_USD ${budget_usd:.4f}. "
+                f"Job {job_id} stopped; blocks and spend so far are kept in the "
+                "ledger. Use a provider that reports usage, or unset the budget to "
+                "run unmeasured."
+            )
+        return None
+    if cost <= budget_usd:
         return None
     run_cost = bill.run_cost_usd
     this_run = f" (this run ${run_cost:.4f})" if run_cost is not None else ""

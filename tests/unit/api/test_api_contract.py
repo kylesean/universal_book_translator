@@ -742,3 +742,46 @@ def test_queue_mode_stream_serves_a_terminal_job_without_polling_threads(tmp_pat
             assert "event: completed" in response.text
     finally:
         queue.close()
+
+
+def test_is_own_prior_output_directory_licenses_only_the_derived_deliverable(
+    tmp_path: Path,
+) -> None:
+    """A prior run that named a *directory* licenses only its derived deliverable.
+
+    The reported defect: ``_is_own_prior_output``'s directory branch compared
+    only the parent directory, so a job id that once ran with
+    ``output_path='/books/'`` could then overwrite ``/books/anything.md`` — a
+    sibling job's output or a human's manuscript. The licence is now the exact
+    derived deliverable name(s), never the whole tree.
+    """
+    from ubt.api.app import _is_own_prior_output
+
+    class _Prior:
+        def __init__(self, payload: dict[str, Any]) -> None:
+            self.payload = payload
+
+    class _Queue:
+        def __init__(self, prior: Any) -> None:
+            self._prior = prior
+
+        def get(self, job_id: str) -> Any:
+            return self._prior
+
+    class _Manager:
+        def get_job(self, job_id: str) -> Any:
+            return None
+
+    doc = tmp_path / "book.md"
+    doc.write_text("x", encoding="utf-8")
+    books = tmp_path / "books"
+    books.mkdir()
+    prior = _Prior({"input_path": str(doc), "output_path": f"{books}/"})
+    queue, manager = _Queue(prior), _Manager()
+
+    # The derived deliverable inside the directory IS the job's own output.
+    own = resolve_target_output(books, doc)
+    assert _is_own_prior_output("job-1", own, queue, manager) is True
+    # A different file in that directory is NOT.
+    victim = books / "someone_elses_manuscript.md"
+    assert _is_own_prior_output("job-1", victim, queue, manager) is False

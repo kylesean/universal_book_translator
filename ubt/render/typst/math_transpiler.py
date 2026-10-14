@@ -1,6 +1,6 @@
 r"""LaTeX math → Typst math transpiler.
 
-The semantic reflow renderer needs this transform, and
+The renderer needs this transform, and
 ``ubt/render/table_compiler.py`` needs it too, so it lives in ``render`` rather
 than in the PDF adapter (``render`` no longer reaches into ``adapters/pdf`` for
 math).
@@ -32,8 +32,8 @@ _BARE_NUMBER_RE = re.compile(r"^\d[\d,.]*$")
 def typstify_math_span(content: str) -> str | None:
     """Convert one delimited math span to a Typst math body, or ``None``.
 
-    The single entry point for "span in, body out" so the renderer and the
-    probe prefetch agree on exactly which bodies reach :func:`typstify_math`.
+    The single entry point for "span in, body out", so the renderer and the
+    compile gate agree on exactly which bodies reach :func:`typstify_math`.
     """
     body = _math_inner(content)
     return typstify_math(body) if body is not None else None
@@ -65,7 +65,7 @@ def _math_inner(content: str) -> str | None:
 
 
 # LaTeX -> Typst math dialect map (Typst symbols take no backslash).
-# Commands outside this table fail closed to escaped text (probe decides).
+# Commands outside this table fail closed to escaped text.
 _LATEX_CMD_RE = re.compile(r"\\([a-zA-Z]+)")
 _LATEX_CMD_MAP = INLINE_SYMBOLS
 # Converted/builtin Typst math identifiers that must NOT be quoted as text.
@@ -408,7 +408,10 @@ def typstify_math(body: str) -> str | None:
     # whole formula closed over one unrecognized name.
     body = _rescue_operators(body)
     # Typst spells these math alphabets as function calls rather than LaTeX
-    # commands. Leave syntax validation to the caller's TypstMathProbe.
+    # commands. A body that still fails to compile (an empty argument, a
+    # dangling script) is caught by the caller's ``TypstMathProbe`` compile gate
+    # (``ubt.adapters.pdf.typst_math_probe``), which degrades it to readable
+    # Unicode rather than emitting markup the compiler rejects.
     # ``boldsymbol``/``bm`` are LaTeX's bold-for-anything (including symbols),
     # which Typst's ``bold`` also accepts, so they share the mapping.
     _font_fn = {
@@ -522,7 +525,21 @@ def typstify_math(body: str) -> str | None:
     # collapses to one code string (``A_#"g0"``), which parses cleanly.
     res = _LABEL_GROUP_RE.sub(_collapse_label_group, res)
     # Avoid #"foo"(...) being parsed as a Typst code function call
-    return re.sub(r'(#"[^"]*")(?=\()', r"\1 ", res)
+    res = re.sub(r'(#"[^"]*")(?=\()', r"\1 ", res)
+    # A script operator with no operand fails the *whole* document: ``$a^$``
+    # compiles to ``error: expected expression``, and the publish path answers a
+    # compile failure by raising ``DocumentParseError`` -- so one dangling ``^``
+    # anywhere in the book loses every page. The model emits these when it
+    # re-encodes a flattened superscript as LaTeX (``x²`` -> ``x^``) or drops a
+    # brace. ``x^2``/``a^{}`` are fine; only ``^``/``_`` directly followed by
+    # another script operator or by end-of-body is broken. Attach an empty
+    # string, the same spelling the leading-script guard above uses, which Typst
+    # accepts in every position.
+    return _DANGLING_SCRIPT_RE.sub(r'\1""', res)
+
+
+#: A subscript/superscript with nothing to attach to (see the call site).
+_DANGLING_SCRIPT_RE = re.compile(r"([_^])(?=[_^]|\s*$)")
 
 
 _LABEL_GROUP_RE = re.compile(r'([_^])\{((?:[^#"{}]|#"[^"]*")*)\}')

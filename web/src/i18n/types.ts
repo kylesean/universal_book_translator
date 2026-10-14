@@ -306,6 +306,8 @@ export interface TranslationDictionary {
     loadMore: string
     saving: string
     saved: string
+    reExportDone: string
+    reExportFailed: string
     humanVerified: string
     prevIssue: string
     nextIssue: string

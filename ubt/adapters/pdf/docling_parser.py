@@ -9,17 +9,11 @@ in, so these are plain functions; the adapter injects the two import seams
 
 from __future__ import annotations
 
-import contextlib
 import dataclasses
-import gzip
-import hashlib
-import json
 import logging
 import os
 import re
-import sys
 from collections.abc import Callable
-from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -32,13 +26,32 @@ from ubt.adapters.pdf.docling_blocks import (
     split_prov_spans,
     table_to_markdown,
 )
+from ubt.adapters.pdf.docling_cache import (  # noqa: F401 -- re-exported
+    DOCLING_ASSET_SUBDIR,
+    DOCLING_CACHE_DIR,
+    DOCLING_CACHE_VERSION,
+    _cleanup_docling_converter,
+    _ensure_docling_pdfium_lock,
+    _package_version,
+    _strip_picture_payloads,
+    docling_asset_dir,
+    docling_cache_key,
+    read_docling_document,
+    write_docling_document,
+)
+from ubt.adapters.pdf.docling_outline import (  # noqa: F401 -- re-exported
+    _crop_formula_asset,
+    _extract_document_index_blocks,
+    _extract_outline_only_blocks,
+    _toc_sort_key,
+    read_pdf_outline_entries,
+)
 from ubt.adapters.pdf.page_chunking import compute_pdf_page_chunks, get_pdf_page_chunk_size
-from ubt.adapters.pdf.pdfium_gate import PDFIUM_LOCK, unify_docling_pdfium_lock
+from ubt.adapters.pdf.pdfium_gate import PDFIUM_LOCK
 from ubt.adapters.pdf.plain_text_extractor import pages_to_blocks
 from ubt.analyze.structure import looks_like_debris, looks_like_listing, pdf_list_marker
 from ubt.core.cleaners.lnds_pruner import normalize_academic_pdf_math
 from ubt.core.exceptions import DocumentParseError
-from ubt.core.fs_perms import restrict_dir_to_owner, restrict_file_to_owner
 from ubt.core.ir.models import (
     BlockProvenance,
     BlockType,
@@ -131,7 +144,7 @@ def resolve_formula_enrichment(
 
     # Mode == "auto": resolve from what the *renderer* can do with each option.
     #
-    # The semantic reflow renderer rebuilds the page from the IR, so a formula it
+    # The renderer rebuilds the page from the IR, so a formula it
     # cannot read as markup has to be recovered some other way. Two ways exist:
     #
     # * crop the source region (``_crop_formula_asset``) — instant, and the
@@ -140,9 +153,8 @@ def resolve_formula_enrichment(
     #   model's transcription, which can be wrong in ways a crop cannot.
     #
     # So ``auto`` takes the crop: faithful and affordable. ``on`` forces the VLM
-    # for a caller who wants scalable vector math and accepts the cost. The old
-    # "a formula-dense document keeps its vector formulas on the overlay canvas"
-    # short-circuit is gone with the overlay canvas it named.
+    # for a caller who wants scalable vector math and accepts the cost. A
+    # formula-dense document never short-circuits this choice.
     logger.info(
         "Docling formula enrichment set to False (auto: unreadable formulas are "
         "recovered by cropping the source region, which is exact and instant; "
@@ -210,209 +222,6 @@ def configure_hf_environment(*, enrich: bool = False) -> None:
                     "Uncached Docling models will download from huggingface.co; set "
                     "UBT_ALLOW_HF_MIRROR=1 to use https://hf-mirror.com instead."
                 )
-
-
-# ---------------------------------------------------------------------------
-# Docling conversion cache
-# ---------------------------------------------------------------------------
-
-# The enriched Docling pass dominates ingest: measured at 759 s of VLM equation
-# transcription out of 769 s total for a 26-page chapter. Without this cache,
-# re-ingest pays it in full — ``--fresh``, a second target language over the
-# same file, or a crash before the entry is written — even though the layout
-# result depends only on (file bytes, pipeline options, Docling version).
-# Picture payloads are not serialized with the document (see
-# :func:`_strip_picture_payloads`), which is safe here because figures are
-# re-rendered from the source PDF and nothing reads ``picture.image``.
-DOCLING_CACHE_DIR = Path(".ubt/docling_cache")
-DOCLING_CACHE_VERSION = 1
-
-#: Subdirectory of the cache above holding extracted figure assets, per file SHA.
-#:
-#: Assets live under the persistent cache root so they survive reboots and are
-#: reclaimed alongside the cached conversion when clearing the cache directory.
-DOCLING_ASSET_SUBDIR = "assets"
-
-
-def _package_version(name: str) -> str:
-    try:
-        return version(name)
-    except PackageNotFoundError:
-        return "unknown"
-
-
-def docling_cache_key(
-    pdf_sha256: str,
-    page_range: tuple[int, int] | None,
-    options: Any,
-) -> str:
-    """Identify a conversion by everything that can change its output.
-
-    ``options`` is Docling's ``PdfPipelineOptions`` — anything with a
-    ``model_dump()`` of the settings that shaped the conversion will do.
-
-    The option half of the key is that dump, read at call time: the degradation
-    ladder mutates precisely those fields (``do_formula_enrichment``, accelerator
-    device) before retrying, so a degraded retry can never be served the entry the
-    healthy attempt would have written. Docling's version is included because its
-    layout and formula models define the result — an upgrade must re-convert, not
-    replay.
-    """
-    digest = hashlib.sha256()
-    digest.update(f"v{DOCLING_CACHE_VERSION}|{pdf_sha256}|{page_range}|".encode())
-    digest.update(json.dumps(options.model_dump(mode="json"), sort_keys=True, default=str).encode())
-    digest.update(
-        f"|docling={_package_version('docling')}|docling-core={_package_version('docling-core')}".encode()
-    )
-    return digest.hexdigest()[:32]
-
-
-def _strip_picture_payloads(node: Any) -> Any:
-    """Blank out embedded base64 picture data in a Docling dump before caching.
-
-    ``model_dump`` carries every ``PictureItem.image.uri`` data-URI, so the
-    "cheap re-ingest" this cache exists for was storing 31 MB of picture bytes
-    per chapter (measured on a real entry) and ``read_docling_document`` then
-    held the raw bytes, the decompressed string, the dict and the validated model
-    at once — peak RSS scaled about 5x with the book. The geometry stays; only
-    the payload goes.
-    """
-    if isinstance(node, dict):
-        for key, value in node.items():
-            if key == "image" and isinstance(value, dict):
-                uri = value.get("uri")
-                if isinstance(uri, str) and uri.startswith("data:"):
-                    value["uri"] = ""
-            else:
-                _strip_picture_payloads(value)
-    elif isinstance(node, list):
-        for item in node:
-            _strip_picture_payloads(item)
-    return node
-
-
-def read_docling_document(key: str, *, cache_dir: Path | None = None) -> Any | None:
-    """Return the cached DoclingDocument for ``key``, or None on any miss."""
-    target = (cache_dir or DOCLING_CACHE_DIR) / f"{key}.json.gz"
-    try:
-        # Stream the decompression into the parser: ``read_bytes`` +
-        # ``gzip.decompress`` held the compressed file and its full
-        # decompressed form in memory before ``json.loads`` even built the dict.
-        with gzip.open(target, "rt", encoding="utf-8") as fh:
-            payload = json.load(fh)
-        from docling_core.types.doc.document import DoclingDocument
-
-        return DoclingDocument.model_validate(payload)
-    except (OSError, ValueError, TypeError) as exc:
-        if target.exists():
-            logger.warning("Docling cache entry %s is unreadable (%s); re-converting", target, exc)
-        return None
-
-
-def write_docling_document(key: str, document: Any, *, cache_dir: Path | None = None) -> None:
-    """Persist a conversion so the next ingest of the same file skips it.
-
-    A write failure never fails the run, and a document with no pages at all is
-    not stored: that shape means the conversion itself went wrong, and caching it
-    would make the mistake permanent. A scanned book with zero extracted *text*
-    still has pages, so it does get cached.
-    """
-    if not getattr(document, "pages", None):
-        return
-    cache = cache_dir or DOCLING_CACHE_DIR
-    target = cache / f"{key}.json.gz"
-    try:
-        cache.mkdir(parents=True, exist_ok=True)
-        # The cache holds the extracted full manuscript text: restrict to owner.
-        restrict_dir_to_owner(cache)
-        # Stream the dump straight into the gzip file. Building the JSON as a
-        # string (``json.dumps``), then its UTF-8 bytes, then a compressed blob
-        # held three full copies of the manuscript in memory at once, on top of
-        # the model dict -- the peak this cache exists to keep down.
-        staging = target.with_name(f"{target.name}.{os.getpid()}.tmp")
-        with gzip.open(staging, "wt", encoding="utf-8") as fh:
-            json.dump(
-                _strip_picture_payloads(document.model_dump(mode="json")),
-                fh,
-                ensure_ascii=False,
-            )
-        staging.replace(target)
-        restrict_file_to_owner(target)
-        logger.info("Cached Docling conversion for reuse: %s", target)
-    except (OSError, ValueError, TypeError) as exc:
-        logger.warning("Docling cache write failed for %s: %s", target, exc)
-
-
-def docling_asset_dir(pdf_sha256: str) -> Path:
-    """Where the figure assets extracted from ``pdf_sha256`` live.
-
-    Read from ``DOCLING_CACHE_DIR`` at call time (not captured at import), so a
-    caller that redirects the cache — tests, or a future ``--cache-dir`` knob —
-    redirects the assets that belong to it as well.
-    """
-    return DOCLING_CACHE_DIR / DOCLING_ASSET_SUBDIR / pdf_sha256
-
-
-def _cleanup_docling_converter(converter: Any) -> None:
-    """Deterministically release VLM engines held inside a Docling DocumentConverter.
-
-    Docling's ``CodeFormulaVlmModel.__del__`` calls ``self.engine.cleanup()``
-    and logs a warning on failure. When left to Python interpreter shutdown
-    (``Py_FinalizeEx``), ``sys.meta_path`` is already ``None`` and Rich's log
-    renderer raises ``ImportError: sys.meta_path is None, Python is likely
-    shutting down``. Cleaning up and nulling ``stage.engine`` immediately after
-    conversion frees GPU VRAM early and turns ``__del__`` into a safe no-op.
-    """
-    if converter is None:
-        return
-    try:
-        pipelines = getattr(converter, "initialized_pipelines", None)
-        if isinstance(pipelines, dict):
-            for pipe in list(pipelines.values()):
-                for attr in ("enrichment_pipe", "build_pipe", "models"):
-                    stages = getattr(pipe, attr, None)
-                    if not isinstance(stages, (list, tuple)):
-                        continue
-                    for stage in stages:
-                        engine = getattr(stage, "engine", None)
-                        if engine is not None:
-                            cleanup = getattr(engine, "cleanup", None)
-                            if callable(cleanup):
-                                try:
-                                    cleanup()
-                                except Exception as exc:
-                                    logger.debug("Docling VLM engine cleanup ignored: %s", exc)
-                            with contextlib.suppress(Exception):
-                                stage.engine = None
-            pipelines.clear()
-    except Exception as exc:
-        logger.debug("Docling converter cleanup skipped: %s", exc)
-
-
-_DOCLING_LOCK_CHECKED = False
-
-
-def _ensure_docling_pdfium_lock() -> None:
-    """Unify docling's pypdfium2 lock with ``PDFIUM_LOCK`` once, after import.
-
-    Docling's PDF backends render through the same ``libpdfium.so`` pypdfium2
-    loads but hold their own lock (see ``pdfium_gate``). The first real
-    conversion — after ``symbols()`` has imported docling — is the earliest
-    point the lock bindings exist, so the rebind happens here and is cached only
-    on success: while docling is not yet imported nothing is latched, so a later
-    import still gets unified.
-    """
-    global _DOCLING_LOCK_CHECKED
-    if _DOCLING_LOCK_CHECKED or "docling" not in sys.modules:
-        return
-    if unify_docling_pdfium_lock():
-        _DOCLING_LOCK_CHECKED = True
-        return
-    logger.warning(
-        "docling is imported but none of its pypdfium2_lock bindings were "
-        "found; a concurrent docling render could race UBT pdfium work. "
-        "Update ubt.adapters.pdf.pdfium_gate._DOCLING_LOCK_MODULES."
-    )
 
 
 #: An ordered-marker run must be at least this long to be re-typed as a list:
@@ -876,265 +685,6 @@ def extract_with_docling(
         return map_export_dict(doc.export_to_dict())
 
     return map_iterated_items(items, doc, assets_dir, pdf_path=path)
-
-
-def read_pdf_outline_entries(
-    pdf_path: Path | None,
-) -> list[tuple[int, str, int]]:
-    """Level-0/1 entries from the PDF's own bookmark tree: (level, title, page).
-
-    Docling's ``DOCUMENT_INDEX`` extraction is lossy for a specific, common
-    shape: a TOC page that sets chapter titles ("1 Introduction") in a
-    different typeface or column from their sub-sections. On the arXiv
-    2101.03961 reference paper Docling returned all 21 sub-section rows but
-    **none** of the 15 top-level chapters, because the extractor reads each
-    line through ``parse_toc_entry_line`` and those lines carry no terminal
-    page number in the geometry it inspects.
-
-    The PDF's bookmark tree already holds exactly those entries, with their
-    hierarchy, and costs one library call. Using it is strictly better than a
-    "heading calibrator" that guesses levels from font size and regex: the
-    level here is *declared* by the document, not inferred.
-
-    Returns an empty list when the PDF has no outline (most reflowed or
-    print-to-PDF sources) — the caller then keeps Docling's own extraction.
-    """
-    if pdf_path is None or not pdf_path.exists():
-        return []
-    try:
-        import pypdfium2 as pdfium
-
-        doc = pdfium.PdfDocument(str(pdf_path))
-    except Exception as exc:  # pragma: no cover - library/loader failure
-        logger.debug("PDF outline unavailable: %s", exc)
-        return []
-    try:
-        entries: list[tuple[int, str, int]] = []
-        for bookmark in doc.get_toc():
-            title = (bookmark.get_title() or "").strip()
-            if not title:
-                continue
-            page = 0
-            try:
-                dest = bookmark.get_dest()
-                page = int(dest.get_index()) + 1 if dest is not None else 0
-            except Exception:
-                page = 0
-            entries.append((int(bookmark.level), title, page))
-        return entries
-    finally:
-        doc.close()
-
-
-def _extract_document_index_blocks(
-    item: Any,
-    pdf_path: Path | None,
-    page_lines_cache: dict[int, list[Any]],
-    start_index: int,
-) -> list[IRBlock]:
-    """Extract per-line TOC IRBlocks from a Docling DOCUMENT_INDEX item."""
-    from ubt.adapters.pdf.docling_blocks import parse_toc_entry_line
-    from ubt.adapters.pdf.textgeom import extract_lines
-
-    out: list[IRBlock] = []
-    for prov in getattr(item, "prov", []) or []:
-        page_no = int(getattr(prov, "page_no", 0))
-        prov_bbox = getattr(prov, "bbox", None)
-        if page_no < 1 or prov_bbox is None or pdf_path is None or not pdf_path.exists():
-            continue
-        if page_no not in page_lines_cache:
-            try:
-                page_lines_cache[page_no] = extract_lines(pdf_path, page_no)[0]
-            except Exception as exc:
-                logger.debug("TOC line extraction failed on page %d: %s", page_no, exc)
-                page_lines_cache[page_no] = []
-
-        p_left = float(getattr(prov_bbox, "l", 0.0))
-        p_bottom = float(getattr(prov_bbox, "b", 0.0))
-        p_right = float(getattr(prov_bbox, "r", 0.0))
-        p_top = float(getattr(prov_bbox, "t", 0.0))
-
-        matched_lines = [
-            ln
-            for ln in page_lines_cache[page_no]
-            if (p_bottom - 6.0) <= (ln.rect[1] + ln.rect[3]) / 2.0 <= (p_top + 6.0)
-            and ln.rect[0] >= p_left - 12.0
-            and ln.rect[2] <= p_right + 12.0
-        ]
-        matched_lines.sort(key=lambda ln: (-ln.rect[3], ln.rect[0]))
-        for ln in matched_lines:
-            parsed = parse_toc_entry_line(ln.text)
-            if parsed is None:
-                continue
-            title, toc_page, has_leaders = parsed
-            idx = start_index + len(out)
-            out.append(
-                IRBlock(
-                    element=make_element(
-                        id=f"pdf_main#b{idx:04d}",
-                        spine_index=idx,
-                        block_type=BlockType.HEADING if ln.bold else BlockType.NARRATIVE,
-                        flow_id=FlowID.MAIN_STORY,
-                        source_text=normalize_academic_pdf_math(title),
-                        bbox=BoundingBox(
-                            page=page_no,
-                            x0=float(ln.rect[0]),
-                            y0=float(ln.rect[1]),
-                            x1=float(ln.rect[2]),
-                            y1=float(ln.rect[3]),
-                        ),
-                    ),
-                    provenance=BlockProvenance(
-                        source_page=page_no,
-                        toc_entry=True,
-                        toc_page=toc_page,
-                        toc_leaders=has_leaders,
-                        is_bold=ln.bold,
-                    ),
-                )
-            )
-    return out
-
-
-def _toc_sort_key(block: IRBlock) -> tuple[int, int]:
-    """Reading-order key for a synthesized TOC row: ``(page, stable)``.
-
-    The page is the row's *destination*, not the page it was read from: both
-    sources store the destination in ``toc_page`` (Docling parses the printed
-    number off the entry line, the outline stringifies the bookmark's target
-    page). Sorting on it restores reading order when the two sources are merged.
-
-    Rows whose destination is not a number sort last, in insertion order — a
-    malformed entry must not be reordered to the front on a guess.
-    """
-    raw = str(block.provenance.toc_page or "").strip()
-    return (int(raw), 0) if raw.isdigit() else (sys.maxsize, 0)
-
-
-def _extract_outline_only_blocks(
-    pdf_path: Path | None,
-    already: list[IRBlock],
-    start_index: int,
-) -> list[IRBlock]:
-    """TOC rows for outline entries Docling's DOCUMENT_INDEX extraction missed.
-
-    Merges the two sources rather than replacing either: Docling supplies the
-    sub-section rows with their real page geometry, and the PDF outline supplies
-    the top-level chapters it drops.
-    An entry already present verbatim in ``already`` is skipped, so the two
-    sources never produce a duplicate row.
-
-    The synthesized block has no bbox: the outline states a *destination page*,
-    not a rectangle on the TOC page. The publication renderer reflows, so the
-    entry is typeset as ordinary text in reading order rather than drawn at a
-    guessed position on a fixed page.
-    """
-    entries = read_pdf_outline_entries(pdf_path)
-    if not entries:
-        return []
-    seen = {(b.source_text or "").strip().lower() for b in already}
-    out: list[IRBlock] = []
-    for level, title, dest_page in entries:
-        key = title.strip().lower()
-        if key in seen:
-            continue
-        # The outline title and the Docling row often differ only by the
-        # numeric prefix ('1 Introduction' vs 'Introduction'); match on the
-        # stripped form too before adding a row.
-        stripped = re.sub(r"^[0-9A-F]+\.?\s+", "", title).strip().lower()
-        if stripped and any(stripped == s for s in seen):
-            continue
-        seen.add(key)
-        idx = start_index + len(out)
-        out.append(
-            IRBlock(
-                element=make_element(
-                    id=f"pdf_main#b{idx:04d}",
-                    spine_index=idx,
-                    block_type=BlockType.HEADING,
-                    flow_id=FlowID.MAIN_STORY,
-                    source_text=normalize_academic_pdf_math(title),
-                    # The outline declares the true depth; Docling's Markdown
-                    # pass emits every heading as level 1, which flattens the
-                    # document (40 headings all rendered as <h1>). Bookmark
-                    # levels are 0-based, heading levels 1-based.
-                    level=max(1, level + 1),
-                ),
-                provenance=BlockProvenance(
-                    source_page=dest_page,
-                    toc_entry=True,
-                    toc_page=str(dest_page),
-                    toc_leaders=False,
-                    is_bold=level == 0,
-                ),
-            )
-        )
-    return out
-
-
-def _crop_formula_asset(
-    item: Any,
-    assets_dir: Path,
-    pdf_path: Path | None,
-    ordinal: int,
-) -> IRBlock | None:
-    """Recover a formula Docling could not read by cropping its source region.
-
-    A display equation the extractor left as a bare ``$$`` is content, not
-    markup: the semantic reflow renderer rebuilds the page from the IR and has
-    no source canvas to preserve, so without this the equation simply vanishes.
-    The crop becomes an IMAGE block, which the renderer already places and the
-    quality report already counts.
-
-    Returns ``None`` when the region cannot be cropped (no provenance, no bbox,
-    no source PDF, or a region too small to be an equation), so the caller keeps
-    the ``$$`` placeholder and the block stays visible as a known gap rather
-    than a silent one.
-    """
-    if pdf_path is None or not pdf_path.exists():
-        return None
-    prov = item.prov[0] if getattr(item, "prov", None) else None
-    if prov is None or getattr(prov, "bbox", None) is None:
-        return None
-    page_no = int(getattr(prov, "page_no", 0) or 0)
-    if page_no < 1:
-        return None
-    b = prov.bbox
-    bbox = BoundingBox(
-        page=page_no,
-        x0=float(getattr(b, "l", 0.0)),
-        y0=float(getattr(b, "b", 0.0)),
-        x1=float(getattr(b, "r", 0.0)),
-        y1=float(getattr(b, "t", 0.0)),
-    )
-    if bbox.x1 - bbox.x0 < 8 or bbox.y1 - bbox.y0 < 6:
-        # A degenerate box is a stray glyph, not an equation; cropping it would
-        # add noise to the page.
-        return None
-    asset_path = assets_dir / f"formula_p{page_no}_{ordinal:04d}.png"
-    try:
-        from ubt.adapters.pdf.visual_scalpel import crop_block_pil
-
-        assets_dir.mkdir(parents=True, exist_ok=True)
-        cropped = crop_block_pil(pdf_path, page_no, bbox)
-        if getattr(cropped, "width", 0) < 8 or getattr(cropped, "height", 0) < 6:
-            return None
-        cropped.save(asset_path)
-    except Exception as exc:
-        logger.debug("Formula crop failed for page %d: %s", page_no, exc)
-        return None
-    return IRBlock(
-        element=make_element(
-            id=f"pdf_main#fml_{ordinal:04d}",
-            spine_index=ordinal,
-            block_type=BlockType.IMAGE,
-            flow_id=FlowID.MAIN_STORY,
-            source_text=str(asset_path),
-            bbox=bbox,
-            skip_translate=True,
-        ),
-        target_text=str(asset_path),
-    )
 
 
 def map_iterated_items(
@@ -2093,3 +1643,31 @@ def vlm_fallback_missing_pages(
     for i, block in enumerate(out):
         block.set_spine_index(i + 1)
     return _reject_empty_book(path, out)
+
+
+#: Names this module still exports for its consumers: the cache seam moved to
+#: :mod:`ubt.adapters.pdf.docling_cache` and is re-exported here so existing
+#: imports (the render stack, the identity tests) keep resolving.
+__all__ = [
+    "DOCLING_ASSET_SUBDIR",
+    "DOCLING_CACHE_DIR",
+    "DOCLING_CACHE_VERSION",
+    "annotate_page_kinds",
+    "docling_asset_dir",
+    "docling_cache_key",
+    "drop_phantom_continuation_boxes",
+    "extract_manifest",
+    "read_pdf_outline_entries",
+    "_toc_sort_key",
+    "_crop_formula_asset",
+    "_extract_document_index_blocks",
+    "_extract_outline_only_blocks",
+    "extract_with_docling",
+    "extract_with_oxide",
+    "read_docling_document",
+    "resolve_formula_enrichment",
+    "restore_ordered_markers",
+    "annotate_layout_metadata",
+    "vlm_fallback_missing_pages",
+    "write_docling_document",
+]

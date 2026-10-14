@@ -312,6 +312,25 @@ class RepairLoop:
             GlossaryConsistencyValidator(glossary=glossary_entries) if glossary_entries else None
         )
 
+        # Substantive defect checks the *calibrated* track runs but Track 1 does
+        # not. Track 1 promotes a candidate to REPAIRED when the candidate's own
+        # flags are empty — but a tier-1 in-place repair passes only the
+        # structural invariants, so it reports ``[]`` even when the defect that
+        # triggered the repair (a source number the candidate dropped, a glossary
+        # term it still leaks) is still present. Re-running the two validators on
+        # the chosen text surfaces the survivors as flags, so such a block stays
+        # REPAIR_PENDING/FAILED instead of shipping as a finished translation.
+        def _residual_defect_flags(candidate_text: str) -> list[str]:
+            residual: list[str] = []
+            num_res = num_validator.validate(block.source_text, candidate_text)
+            if not num_res.is_valid:
+                residual.append(f"repair_structural_failure: {num_res.message}")
+            if glossary_validator is not None:
+                gloss_res = glossary_validator.validate(block.source_text, candidate_text)
+                if not gloss_res.is_valid:
+                    residual.append(f"repair_structural_failure: {gloss_res.message}")
+            return residual
+
         for raw in raw_candidates:
             candidate_text, is_in_place = self.span_splicer.splice_repairs(
                 original_draft=draft_text,
@@ -374,12 +393,12 @@ class RepairLoop:
                 t1_chosen_text, _, t1_chosen_flags = valid_tier1[0]
                 block.target_text = t1_chosen_text
                 block.mtqe_score = None
-                block.error_flags = list(t1_chosen_flags)
+                block.error_flags = list(t1_chosen_flags) + _residual_defect_flags(t1_chosen_text)
             elif valid_tier2:
                 t2_chosen_text, _, t2_chosen_flags = valid_tier2[0]
                 block.target_text = t2_chosen_text
                 block.mtqe_score = None
-                block.error_flags = list(t2_chosen_flags)
+                block.error_flags = list(t2_chosen_flags) + _residual_defect_flags(t2_chosen_text)
             else:
                 all_fallback = tier1_candidates + tier2_candidates
                 fallback_flags = (

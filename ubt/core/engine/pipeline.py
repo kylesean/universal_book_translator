@@ -6,10 +6,12 @@ import asyncio
 import logging
 import re
 from collections.abc import AsyncGenerator, Callable
+from contextlib import aclosing
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ubt.cache.dirs import cache_root
 from ubt.core.config import UBTConfig
 from ubt.core.engine.blocks import BlockReader
 from ubt.core.engine.events import EventType, TranslationProgressEvent
@@ -669,7 +671,7 @@ class PipelineOrchestrator:
         # artifacts are still group/other-readable. New runs cannot fix them
         # silently (that would be an unasked-for chmod), so say it out loud.
         # Runs off-loop: the recursive scan would otherwise stall heartbeats.
-        scan_dirs = [Path(".ubt/docling_cache"), default_output_dir_for_scan()]
+        scan_dirs = [cache_root() / "docling_cache", default_output_dir_for_scan()]
         if output_path is not None:
             out_p = Path(output_path)
             scan_dirs.append(out_p if out_p.is_dir() else out_p.parent)
@@ -796,6 +798,10 @@ class PipelineOrchestrator:
         runtime_repair_loop = prep.repair_loop
         actual_job_id = prep.actual_job_id
         run_session = prep.run_session
+        # Make a provider Retry-After backoff cancellable: the router sleeps the
+        # clamped header, and a job cancelled mid-wait must stop there rather than
+        # pin the worker to the rest of the pause.
+        self.router.cancel_token = cancel_token
         ledger: SQLiteJobLedger | None = None
         tm: TranslationMemory | None = None
         writer_lock: LedgerWriterLock | None = None
@@ -944,15 +950,25 @@ class PipelineOrchestrator:
                 c_text=self.config.c_text_enabled,
                 consistency=self.config.consistency_enforce != "off",
             )
-            async for event in run_stages(
-                ctx,
-                gates,
-                facts,
-                services,
-                blocks=blocks,
-                on_export_completed=_on_export_completed,
-            ):
-                yield event
+            # ``aclosing`` owns the stage generator: its own ``finally`` (stage
+            # teardown, checkpoint flush) must run *here*, inside the try, so it
+            # finishes before this method's ``finally`` closes the ledger and
+            # releases the writer lock. Without it the inner generator finalized
+            # only when the outer one was GC'd — after the lock release — and
+            # its writes silently reopened the closed ledger (see
+            # ``LedgerBase._get_conn``).
+            async with aclosing(
+                run_stages(
+                    ctx,
+                    gates,
+                    facts,
+                    services,
+                    blocks=blocks,
+                    on_export_completed=_on_export_completed,
+                )
+            ) as stage_events:
+                async for event in stage_events:
+                    yield event
 
         except GeneratorExit:
             # Consumer closed the generator early (job_worker's ``aclosing`` on a

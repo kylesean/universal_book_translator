@@ -198,7 +198,7 @@ export function QualityGateView() {
 
   const failedBlocks = summary.failed_blocks ?? 0
   // ``delivery_status`` is set by the export stage's layout advisory whenever a
-  // formula-dense document is composed through the source-canvas overlay engine
+  // formula-dense document is composed by the renderer
   // (ubt/core/engine/stages/advisory.py). It is an *advisory*, not a gate stop:
   // the only literal the engine ever writes is the LAYOUT_TRADEOFF_ADVISORY
   // string, so the screen must surface whatever status/warning the report
@@ -458,7 +458,7 @@ export function QualityGateView() {
       )}
 
       {/* Delivery advisory (layout tradeoff on formula-dense documents). The
-          engine writes this on every overlay render of a formula-dense book, so
+          engine writes this on every render of a formula-dense book, so
           the operator must see the tradeoff before trusting the artifact. */}
       {deliveryStatus && (
         <div className="p-3 rounded-lg border border-[#b45309]/30 bg-[#b45309]/5 text-xs flex items-start gap-2">

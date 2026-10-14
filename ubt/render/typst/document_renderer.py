@@ -1,12 +1,11 @@
-r"""Semantic reflow renderer: IRBlock sequence → one Typst document → PDF.
+r"""Typst document renderer: IRBlock sequence → one Typst document → PDF.
 
-The overlay path (``LayerCompositor``) draws each translated fragment back onto
-its *source* page, so the output inherits every limit of the source geometry:
-font sizes shrink to fit a fixed box, tables keep the source language layer,
-and a block that cannot fit is quarantined. This renderer takes the other road —
-it rebuilds the document from the IR and lets Typst lay it out — which is what
-makes a uniform body size, native tables and correct math possible at all
-(RFC-2026-02 §1.2).
+This renderer rebuilds the document from the IR and lets Typst lay it out,
+which is what makes a uniform body size, native tables and correct math
+possible at all (RFC-2026-02 §1.2). It does not draw fragments back onto the
+source page: that would inherit every limit of the source geometry (font sizes
+shrunk to fit a fixed box, tables left in the source language, a block that
+cannot fit quarantined).
 
 Design notes that are load-bearing:
 
@@ -33,7 +32,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ubt.render.table_compiler import parse_markdown_table
+from ubt.core.content.nodes import ReconstructionRecord
+from ubt.render.inline_spans import block_runs, locate_runs
+from ubt.render.table_compiler import parse_markdown_table, verify_table_reconstruction
 from ubt.render.typst.artifact_guard import find_sentinels, has_sentinel
 from ubt.render.typst.escape import typst_escape
 from ubt.render.typst.math_transpiler import (
@@ -43,7 +44,7 @@ from ubt.render.typst.math_transpiler import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from ubt.core.ir.models import InlineRun, IRBlock
 
@@ -138,7 +139,12 @@ def escape_markup(text: str) -> str:
     return typst_escape(text)
 
 
-def render_prose(text: str, runs: Sequence[InlineRun] = ()) -> str:
+def render_prose(
+    text: str,
+    runs: Sequence[InlineRun] = (),
+    *,
+    is_math_ok: Callable[[str], bool] | None = None,
+) -> str:
     """Render one paragraph: escape prose, transpile math, apply inline styles.
 
     The span split is the whole point. Escaping first would turn ``$x_i$`` into
@@ -152,8 +158,16 @@ def render_prose(text: str, runs: Sequence[InlineRun] = ()) -> str:
     plain, which is the documented contract of :class:`InlineRun`. Style markup
     is applied *after* escaping, so the injected ``#strong`` is not escaped into
     literal text.
+
+    ``is_math_ok`` is the compile gate for a converted math body (see
+    :class:`~ubt.adapters.pdf.typst_math_probe.TypstMathProbe`). The transpiler
+    can emit a body that parses in its own grammar but does not compile in Typst
+    (``\\frac{a}{}`` -> ``frac(a, )``), and one such body fails the whole
+    document. A body the gate rejects degrades to readable Unicode instead, the
+    same fallback an unconvertible span takes. ``None`` skips the gate, which is
+    what callers that only inspect the emitted source (tests) want.
     """
-    spans = _locate_runs(text, runs) if runs else []
+    spans = locate_runs(text, runs) if runs else []
     if spans:
         # A run that overlaps a math span would split the formula: the chunk
         # walk below renders each boundary slice on its own, so the ``$`` that
@@ -194,7 +208,7 @@ def render_prose(text: str, runs: Sequence[InlineRun] = ()) -> str:
             and not _unbalanced_delimiters(text[span[0] : span[1]])
         ]
     if not spans:
-        return _render_math_and_prose(text)
+        return _render_math_and_prose(text, is_math_ok=is_math_ok)
     boundaries: set[int] = {0, len(text)}
     for start, end, *_style in spans:
         boundaries.update((start, end))
@@ -206,7 +220,7 @@ def render_prose(text: str, runs: Sequence[InlineRun] = ()) -> str:
         if end <= start:
             continue
         chunk = text[start:end]
-        rendered = _render_math_and_prose(chunk)
+        rendered = _render_math_and_prose(chunk, is_math_ok=is_math_ok)
         style = next((s for s in spans if s[0] <= start and end <= s[1]), None)
         if style is not None:
             rendered = _wrap_style(rendered, style[2], style[3], style[4], style[5])
@@ -265,7 +279,7 @@ def _break_run_call_chains(segments: Sequence[str]) -> str:
 #: that a new masker can fall behind.
 
 
-def _render_math_and_prose(text: str) -> str:
+def _render_math_and_prose(text: str, *, is_math_ok: Callable[[str], bool] | None = None) -> str:
     """Escape prose and transpile math spans, with no style handling.
 
     A math span the transpiler cannot convert does **not** fall back to escaped
@@ -273,7 +287,9 @@ def _render_math_and_prose(text: str) -> str:
     the formula being unreadable — it is LaTeX source leaking into a finished
     document. The span degrades to readable Unicode instead
     (:func:`clean_math_fallback_text`), so a reader sees ``\u03d5 + \u03b3 \u2264 \u2211`` rather than
-    command names.
+    command names. ``is_math_ok`` extends that fallback to a body the transpiler
+    *accepts* but Typst rejects (``frac(a, )``), which would otherwise fail the
+    whole compile.
 
     A pipeline sentinel inside a math span is escaped as prose rather than
     transpiled (see :func:`has_sentinel`): the token is an artifact, not math,
@@ -299,6 +315,8 @@ def _render_math_and_prose(text: str) -> str:
                 continue
             if body.startswith("$$"):
                 converted = typstify_math(inner)
+                if converted is not None and is_math_ok is not None and not is_math_ok(converted):
+                    converted = None
                 out.append(
                     f"\n$ {converted} $\n"
                     if converted
@@ -306,6 +324,8 @@ def _render_math_and_prose(text: str) -> str:
                 )
             else:
                 converted = typstify_math(inner)
+                if converted is not None and is_math_ok is not None and not is_math_ok(converted):
+                    converted = None
                 out.append(
                     f"${converted}$" if converted else escape_markup(clean_math_fallback_text(part))
                 )
@@ -332,130 +352,16 @@ def _wrap_style(
     return segment
 
 
-def _fold_char(ch: str) -> str:
-    """Fold one char for tolerant matching.
-
-    Full-width ASCII becomes half-width, the ideographic space a plain space,
-    and the unicode dash/quote variants their ASCII forms — so a run text the
-    extractor and the target spell differently still matches.
-    """
-    code = ord(ch)
-    if code == 0x3000:
-        return " "
-    if 0xFF01 <= code <= 0xFF5E:
-        return chr(code - 0xFEE0)
-    if code == 0x2212 or 0x2010 <= code <= 0x2015:
-        return "-"
-    if code in (0x2018, 0x2019, 0x02BC, 0x0060, 0x00B4):
-        return "'"
-    if code in (0x201C, 0x201D):
-        return '"'
-    return ch
-
-
-def _fold_for_match(text: str) -> tuple[str, list[int], list[int]]:
-    """Fold ``text`` for tolerant matching, with a map back to original indices.
-
-    Drops all whitespace and folds full-width ASCII to half-width, so a run text
-    recorded before the target's publishing normalization still matches it: the
-    CJK pass inserts a space between Latin and CJK that the draft-time run text
-    does not carry.
-    """
-    folded: list[str] = []
-    starts: list[int] = []
-    ends: list[int] = []
-    index = 0
-    length = len(text)
-    while index < length:
-        ch = text[index]
-        if ch.isspace():
-            index += 1
-            continue
-        folded.append(_fold_char(ch))
-        starts.append(index)
-        ends.append(index + 1)
-        index += 1
-    return "".join(folded), starts, ends
-
-
-def _folded_find(text: str, needle: str, from_index: int = 0) -> tuple[int, int] | None:
-    """Find ``needle`` in ``text`` ignoring whitespace/full-width differences."""
-    folded_needle = _fold_for_match(needle)[0].strip()
-    if not folded_needle:
-        return None
-    folded_text, starts, ends = _fold_for_match(text)
-    position = 0
-    if from_index > 0:
-        while position < len(starts) and starts[position] < from_index:
-            position += 1
-    at = folded_text.find(folded_needle, position)
-    if at < 0:
-        return None
-    return starts[at], ends[at + len(folded_needle) - 1]
-
-
-def _locate_runs(
-    text: str, runs: Sequence[InlineRun]
-) -> list[tuple[int, int, bool, bool, bool, str | None]]:
-    """Locate each run's literal span in ``text``, in order.
-
-    A run whose text is not present (a span the translation rewrote) is skipped;
-    the sequential cursor keeps repeated tokens aligned to their occurrence
-    rather than the first one. A span that survives only after the target's CJK
-    normalization is found by the tolerant fallback.
-    """
-    spans: list[tuple[int, int, bool, bool, bool, str | None]] = []
-    cursor = 0
-    for run in runs:
-        if not run.text:
-            continue
-        index = text.find(run.text, cursor)
-        if index < 0:
-            index = text.find(run.text)
-        if index >= 0:
-            spans.append(
-                (
-                    index,
-                    index + len(run.text),
-                    run.bold,
-                    run.italic,
-                    run.superscript,
-                    run.color_hex,
-                )
-            )
-            cursor = index + len(run.text)
-            continue
-        located = _folded_find(text, run.text, cursor)
-        if located is None:
-            located = _folded_find(text, run.text, 0)
-        if located is None:
-            continue
-        start, end = located
-        spans.append((start, end, run.bold, run.italic, run.superscript, run.color_hex))
-        cursor = end
-    return spans
-
-
-def block_runs(block: IRBlock) -> tuple[InlineRun, ...]:
-    """The block's source- and target-derived inline runs, as renderable runs.
-
-    Source-derived runs (``inline_runs``) come first: they are usually the more
-    specific span (a blue citation inside a bold sentence), and the renderer's
-    ``next(...)`` lookup lets the first enclosing span win. Target-derived runs
-    (``target_runs``, the model's bold markers) follow.
-    """
-    style = block.style
-    if style is None:
-        return ()
-    return tuple(run for run in (*style.inline_runs, *style.target_runs) if run.text)
-
-
-def render_table(markup: str) -> str:
+def render_table(markup: str, *, is_math_ok: Callable[[str], bool] | None = None) -> str:
     """Render a Markdown table as a Typst ``#table`` with a three-line frame.
 
-    Rebuilt rather than overlaid: the overlay path cannot change a table's
-    contents at all, which is why table headers stayed in the source language
-    on every overlay delivery (measured 0.96 source-term leakage; RFC §9).
+    Rebuilt from the IR rather than drawn over the source: a source-layer table
+    cannot change its contents at all, which is why table headers stayed in the
+    source language when tables were left on the source page (measured 0.96
+    source-term leakage; RFC §9).
+
+    ``is_math_ok`` is the same compile gate :func:`render_prose` takes; a cell's
+    ``$\\frac{a}{}$`` reaches the compiler exactly as a paragraph's does.
     """
     parsed = parse_markdown_table(markup, escape=False)
     if parsed is None:
@@ -478,7 +384,7 @@ def render_table(markup: str) -> str:
         padded = list(values) + [""] * (columns - len(values))
         rendered = []
         for value in padded:
-            text = render_prose(value.strip())
+            text = render_prose(value.strip(), is_math_ok=is_math_ok)
             rendered.append(f"[*{text}*]" if header and text else f"[{text}]")
         return ", ".join(rendered)
 
@@ -513,6 +419,15 @@ class ReflowStats:
     blocks_seen: int = 0
     blocks_rendered: int = 0
     tables: int = 0
+    #: Tables whose Markdown grid did not parse and were delivered as their
+    #: source grid instead (the target did not parse but the source did). Counted
+    #: so the quality report can see that the cell text is the source language,
+    #: not a silent success.
+    tables_fell_back: int = 0
+    #: Tables that parsed in neither the target nor the source grid and were
+    #: dropped from the page entirely. This is the fail-closed case and must
+    #: never be silent — it is surfaced through the render-skip channel.
+    tables_dropped: int = 0
     figures: int = 0
     formulas: int = 0
     #: Formulas that compiled as real math are in ``formulas``; these two count
@@ -521,6 +436,11 @@ class ReflowStats:
     #: instead of looking like it rendered cleanly.
     formulas_degraded: int = 0
     formulas_dropped: int = 0
+    #: Formulas typeset from the *translated* text (a localized annotation), not
+    #: the source. Counted so a model that localizes formula annotations is
+    #: visible — before this, the formula branch read only ``source_text`` and
+    #: the translated annotation was dropped silently.
+    formulas_from_target: int = 0
     #: Pipeline sentinels (``⟦SOUP_MASK…⟧``, ``⟦B⟧``, ``\llbracket…``) that
     #: survived to the renderer. A block carrying one had a restore that could
     #: not account for a span; the renderer escapes it as prose so the document
@@ -642,11 +562,39 @@ class TypstDocumentRenderer:
         assets_root: Path | None = None,
         figure_width: str = "88%",
         bilingual: bool = False,
+        math_gate: Callable[[str], bool] | None = None,
     ) -> None:
         self.assets_root = Path(assets_root) if assets_root is not None else None
         self.figure_width = figure_width
         self.bilingual = bilingual
+        #: Compile gate for a converted math body (see ``render_prose``). The
+        #: publish caller passes a ``TypstMathProbe``; a test that only inspects
+        #: the emitted source leaves it ``None`` and pays no compiler.
+        self._math_gate = math_gate
         self.stats = ReflowStats()
+        #: ``(block_id, reason)`` for blocks this render could not place, drained
+        #: by the PDF adapter into its ``last_render_skips`` channel so the
+        #: export stage can flag them. A dropped table is the case that matters:
+        #: without it the block vanished with no trace (neither the quality
+        #: report nor the content contract saw a gap).
+        self.last_render_skips: list[tuple[str, str]] = []
+        #: ``(block_id, flag)`` for blocks that were *drawn* but not cleanly: a
+        #: formula the transpiler could not turn into real Typst math and was
+        #: delivered as readable Unicode instead. Drained by the PDF adapter into
+        #: its ``last_render_flags`` channel so the export stage can record the
+        #: degradation, which is a plain quality flag — never a
+        #: ``render_skip:``, because the content did ship.
+        self.last_render_flags: list[tuple[str, str]] = []
+        #: Per-table reconstruction outcomes, drained by the PDF adapter into
+        #: ``last_render_reconstructions`` so the delivery contract can record a
+        #: rebuilt table as ``RECONSTRUCTED`` (verified or corrupt) instead of
+        #: the existence-only ``PRESERVED_OPAQUE`` it used to assert for every
+        #: non-text asset.
+        self.table_reconstructions: list[ReconstructionRecord] = []
+
+    def _prose(self, text: str, runs: Sequence[InlineRun] = ()) -> str:
+        """``render_prose`` bound to this renderer's compile gate."""
+        return render_prose(text, runs, is_math_ok=self._math_gate)
 
     def _maybe_pair(
         self, block: IRBlock, rendered: str, *, source_markup: str | None = None
@@ -680,12 +628,10 @@ class TypstDocumentRenderer:
     def _pair(self, source: str, target: str, *, source_markup: str | None = None) -> str:
         """Source above its translation, source visually subordinate.
 
-        The reflow-native equivalent of the overlay path's bilingual compose.
-        Overlay paired *pages* (source page, then its composed twin), which only
-        works because the composed output is page-aligned with the source; a
-        reflowed document has no such alignment, so the pairing is per block.
-        That is also the more useful form for a rebuilt document: the reader
-        never turns a page to find the sentence being compared.
+        The pairing is per block, not per page: a rebuilt document is not
+        page-aligned with its source, so pairing pages is impossible. That is
+        also the more useful form: the reader never turns a page to find the
+        sentence being compared.
 
         The source keeps its own math handling (a formula must stay a formula,
         not become literal ``\\frac`` text), so by default it goes through
@@ -694,7 +640,7 @@ class TypstDocumentRenderer:
         whose source is Markdown grid syntax that must be compiled as a table
         rather than pasted as text.
         """
-        rendered_source = source_markup if source_markup is not None else render_prose(source)
+        rendered_source = source_markup if source_markup is not None else self._prose(source)
         return (
             "#block(above: 0.5em, below: 0.25em)[\n"
             '  #text(size: 9pt, fill: luma(115), style: "italic")['
@@ -733,6 +679,17 @@ class TypstDocumentRenderer:
             self.stats.blocks_seen += 1
             block_type = str(getattr(block.block_type, "value", block.block_type) or "")
 
+            # A block whose delivered text still carries a pipeline sentinel
+            # (``⟦SOUP_MASK…⟧``, ``⟦B⟧``, ``\\llbracket…``) had a restore pass that
+            # could not account for a span. The renderer escapes such a span as
+            # prose so the document still compiles, but the leak is a defect
+            # upstream: attribute it to the block so the quality report and the
+            # review verdict can see *which* block leaked rather than a silent
+            # count. Checked on the block's own delivered text, so it does not
+            # depend on which emit branch below runs.
+            if has_sentinel(_block_text(block)):
+                self.last_render_flags.append((block.id, "sentinel_leaked"))
+
             # A block the policy deliberately keeps in the source language (a
             # bibliography entry, an author affiliation) is rendered as its
             # source, never as a "translation". Checked *after* the asset
@@ -749,7 +706,7 @@ class TypstDocumentRenderer:
                 body.append(
                     self._maybe_pair(
                         block,
-                        f"#heading(level: {level})[{render_prose(text, block_runs(block))}]",
+                        f"#heading(level: {level})[{self._prose(text, block_runs(block))}]",
                     )
                 )
                 self.stats.blocks_rendered += 1
@@ -768,26 +725,105 @@ class TypstDocumentRenderer:
 
             if block_type == "table":
                 flush_figure()
-                markup = render_table(_block_text(block))
-                if markup:
-                    # The source half of a bilingual pair is *also* a table, so
-                    # it is compiled as one. Passing it to ``render_prose``
-                    # pasted the Markdown grid (``| Method | BLEU |``) into the
-                    # page as a run of italic grey text.
-                    source_markup = render_table((block.source_text or "").strip()) or None
-                    body.append(self._maybe_pair(block, markup, source_markup=source_markup))
-                    self.stats.tables += 1
-                    self.stats.blocks_rendered += 1
+                # The source grid is rendered unconditionally: it is the
+                # fallback when the target grid does not parse, and the source
+                # half of a bilingual pair.
+                source_text = (block.source_text or "").strip()
+                source_markup = render_table(source_text, is_math_ok=self._math_gate) or None
+                target_text = _block_text(block)
+                markup = render_table(target_text, is_math_ok=self._math_gate)
+                fell_back = False
+                if not markup:
+                    # The model's translated grid is not a strict pipe table
+                    # (e.g. it dropped the header's leading ``|``). Falling back
+                    # to the source grid is a *degradation*, not a success, so it
+                    # is counted; dropping the block entirely (no source grid to
+                    # fall back to either) is fail-closed and must never be
+                    # silent — record it so the export stage flags the block
+                    # ``render_skip:table_unparseable`` and the quality report
+                    # and the content contract both see it.
+                    if source_markup:
+                        markup = source_markup
+                        fell_back = True
+                        self.stats.tables_fell_back += 1
+                    else:
+                        self.stats.tables_dropped += 1
+                        self.last_render_skips.append((block.id, "table_unparseable"))
+                        continue
+                # Record the reconstruction verdict. A table delivered as its
+                # *source* grid is a fallback, not a rebuild: verified=False,
+                # corrupt=False (the contract reports it UNVERIFIED, not corrupt).
+                # A target-grid table is verified only when it kept the source
+                # grid's shape; a shape mismatch is a *corrupt* reconstruction the
+                # contract must fail on.
+                if fell_back:
+                    self.table_reconstructions.append(
+                        ReconstructionRecord(block_id=block.id, verified=False, corrupt=False)
+                    )
+                else:
+                    verdict = verify_table_reconstruction(source_text, target_text)
+                    self.table_reconstructions.append(
+                        ReconstructionRecord(
+                            block_id=block.id,
+                            verified=verdict.ok,
+                            corrupt=not verdict.ok,
+                            reason=verdict.reason,
+                        )
+                    )
+                # A bilingual pair whose target fell back to the source grid
+                # would show the same grid twice; pair only a genuine
+                # translation against the source.
+                body.append(
+                    self._maybe_pair(
+                        block, markup, source_markup=None if fell_back else source_markup
+                    )
+                )
+                self.stats.tables += 1
+                self.stats.blocks_rendered += 1
                 continue
 
             if block_type == "formula":
                 flush_figure()
+                # Prefer the translation: a model that localized a formula's
+                # annotations (``\text{parameter}`` -> ``\text{参数}``) puts the
+                # result in ``target_text``, and reading only ``source_text``
+                # dropped it — the reader got the source-language annotation back
+                # with no count. ``_block_text`` applies target→draft→source, so
+                # an untranslated formula (the common case) is unchanged.
                 source = (block.source_text or "").strip()
-                converted = typstify_math(strip_math_delimiters(source))
+                text = _block_text(block)
+                from_target = bool(text) and text != source
+                converted = typstify_math(strip_math_delimiters(text))
+                # The compile gate must run here too, not only in ``render_prose``:
+                # a formula block's body skips the prose transpiler path, so a
+                # body the transpiler accepts but Typst rejects (``frac(a, )``)
+                # used to be emitted verbatim and fail the *whole* document at the
+                # single compile. Rejecting it here degrades just this formula to
+                # readable Unicode (the ``else`` branch below).
+                if (
+                    converted is not None
+                    and self._math_gate is not None
+                    and not self._math_gate(converted)
+                ):
+                    converted = None
                 if converted:
                     body.append(f"$ {converted} $")
                     self.stats.formulas += 1
                     self.stats.blocks_rendered += 1
+                    if from_target:
+                        self.stats.formulas_from_target += 1
+                    # A formula transpiled to real Typst math is an interpreted
+                    # reconstruction, but there is no round-trip proof here (the
+                    # transpiler is not re-parsed), so it is recorded
+                    # *unverified* — the contract reports a WARNING, not a silent
+                    # "preserved". Only a shape-verified table sets verified=True.
+                    self.table_reconstructions.append(
+                        ReconstructionRecord(
+                            block_id=block.id,
+                            verified=False,
+                            corrupt=False,
+                        )
+                    )
                 else:
                     # A formula with no convertible body is content, not markup:
                     # dropping it removes an equation from the page with no
@@ -802,8 +838,19 @@ class TypstDocumentRenderer:
                         body.append(escape_markup(fallback))
                         self.stats.formulas_degraded += 1
                         self.stats.blocks_rendered += 1
+                        # The equation still reads, but as a Unicode
+                        # approximation rather than typeset math. Recorded on
+                        # the render-quality channel (a drawn block, not a
+                        # skip) so the quality report can see the degradation
+                        # instead of reading it as a clean render.
+                        self.last_render_flags.append((block.id, "formula_degraded"))
                     else:
                         self.stats.formulas_dropped += 1
+                        # Nothing to place: the equation is gone from the page.
+                        # Fail-closed, like an unparseable table, so the export
+                        # stage flags the block and the contract sees the gap
+                        # instead of a silently shorter document.
+                        self.last_render_skips.append((block.id, "math_unrenderable"))
                 continue
 
             # A block the policy deliberately keeps in the source language (a
@@ -816,7 +863,7 @@ class TypstDocumentRenderer:
                 flush_figure()
                 kept = (block.source_text or "").strip()
                 if kept:
-                    body.append(render_prose(kept))
+                    body.append(self._prose(kept))
                     self.stats.blocks_rendered += 1
                 continue
 
@@ -830,7 +877,7 @@ class TypstDocumentRenderer:
                     flush_figure()
                     continue
                 flush_figure()
-            body.append(self._maybe_pair(block, render_prose(text, block_runs(block))))
+            body.append(self._maybe_pair(block, self._prose(text, block_runs(block))))
             self.stats.blocks_rendered += 1
 
         flush_figure()
@@ -856,7 +903,7 @@ class TypstDocumentRenderer:
             if figure.caption:
                 return (
                     f"#block(text(fill: luma(140), size: 9pt)[{note}])\n"
-                    f"#block(text(size: 9pt, fill: luma(60))[{render_prose(figure.caption)}])"
+                    f"#block(text(size: 9pt, fill: luma(60))[{self._prose(figure.caption)}])"
                 )
             return f"#block(text(fill: luma(140), size: 9pt)[{note}])"
         target = build_dir / resolved.name
@@ -869,7 +916,7 @@ class TypstDocumentRenderer:
             return (
                 "#figure(\n"
                 f'  image("{target.name}", width: {self.figure_width}),\n'
-                f"  caption: [{render_prose(figure.caption)}],\n"
+                f"  caption: [{self._prose(figure.caption)}],\n"
                 "  numbering: none,\n)"
             )
         return f'#figure(image("{target.name}", width: {self.figure_width}), numbering: none)'

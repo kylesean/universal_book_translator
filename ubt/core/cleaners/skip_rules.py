@@ -52,7 +52,7 @@ _YEAR_RE = re.compile(r"\b(19|20)\d{2}\b")
 _BIB_PUBLISHERS = r"Pearson|Prentice|Elsevier|Wiley|Springer"
 _BIB_VENUE_RE = re.compile(
     r"Technical Digest|Trans\.|Symposium|Conference|Manual|Chapter \d|"
-    rf"pp?\.\s*\d|doi\.org|\bdoi:\s*10\.|https?://|University|{_BIB_PUBLISHERS}|"
+    rf"pp?\.\s*\d|doi\.org|\bdoi:\s*10\.|University|{_BIB_PUBLISHERS}|"
     r"SISPAD|IEDM|VLSI|IEEE Access|IEEE\b|Journal\b|"
     r"Solid-State|Electron Device|Lett\.|Semicond\.|Nanotech|Microelectron|"
     r"Appl\. Phys|Proc\.|Proceedings of\b|CoRR\b|\bvol\.\s*(?:\d+|abs/)|"
@@ -102,6 +102,13 @@ _PAGE_RANGE_RE = re.compile(r"\b\d{2,6}\s*[-–—]\s*\d{2,6}\b")
 # page range ("This approach was published by Springer in 2019, spanning pages
 # 45-60."), shipping the sentence untranslated.
 _NAME_LIST_START_RE = re.compile(r"^[A-Z][A-Za-z'’\-]+\s+[A-Z][A-Za-z'’\-]+\s*[,.]")
+#: A reference that opens with a surname-first author ("Wang, Y.", "Zhang, L.
+#: et al."). Distinct from ``_AUTHOR_RE`` (initial-first "Y. Zhang"): both are
+#: real, and — crucially — this is the structural shape a URL-bearing entry
+#: carries, so the URL tier below can tell it from prose that merely contains a
+#: link ("The tool was released in 2024; see https://…"). Anchored at the start
+#: so a mid-sentence "Washington, D.C." is not an author signal.
+_SURNAME_FIRST_START_RE = re.compile(r"^[A-Z][A-Za-z'’\-]+,\s*(?:[A-Z]\.\s*){1,3}")
 # A "real word": two or more consecutive letters in any script (``[^\W\d_]``
 # is "word char minus digits/underscore", i.e. Unicode letters). Single letters
 # (K/V/x), digits and punctuation do not count as translatable content. The
@@ -158,8 +165,11 @@ _BYLINE_SEGMENT_RE = re.compile(
 #
 # Markers are the typographic referential set (∗ U+2217, † U+2020, ‡ U+2021,
 # § U+00A7, ¶ U+00B6) plus an ASCII ``*`` only when it stands as its own token
-# (so multiplication ``a*b`` and Markdown bullets do not register).
-_REFERENTIAL_MARKER_RE = re.compile(r"[∗†‡§¶]|(?<![A-Za-z0-9])\*(?![A-Za-z0-9])")
+# (so multiplication ``a*b`` and Markdown bullets do not register). A bare
+# ``*`` adjacent to another ``*`` is Markdown emphasis (``**bold**``), not a
+# footnote dagger: two emphasis spans in a sentence used to register as a
+# symbol legend and ship the whole line verbatim.
+_REFERENTIAL_MARKER_RE = re.compile(r"[∗†‡§¶]|(?<![A-Za-z0-9*])\*(?![A-Za-z0-9*])")
 _EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
 #: Institution nouns that mark an affiliation line. Deliberately proper-noun
 #: vocabulary ("University", "Institute", …), never a generic word like
@@ -243,8 +253,21 @@ def _is_bib_entry(text: str) -> bool:
         return True
     if clean_etal_hits >= 1 and (venue_hit or _IN_VENUE_RE.search(text) or initial_authors >= 1):
         return True
+    # A URL is a *citation* cue only when the entry has a bibliography shape: a
+    # leading author (initial-first or surname-first), an "et al.", or an
+    # explicit "Retrieved from"/"[Online]". Without this a prose sentence that
+    # merely contains a link plus a year ("The tool was released in 2024; see
+    # https://…") was read as a reference and shipped untranslated — the URL
+    # alone was enough because ``_BIB_VENUE_RE`` (mis)listed ``https?://`` as a
+    # venue. ``_IN_VENUE_RE`` still counts: "In Proceedings … https://…" is a
+    # citation.
     if _URL_RE.search(text) and (
-        venue_hit or _IN_VENUE_RE.search(text) or authors >= 1 or full_name_start
+        authors >= 1
+        or full_name_start
+        or _SURNAME_FIRST_START_RE.match(text)
+        or clean_etal_hits >= 1
+        or _IN_VENUE_RE.search(text)
+        or re.search(r"(?:Retrieved from|\[Online\])", text, re.IGNORECASE)
     ):
         return True
     if authors >= 2 and venue_hit:

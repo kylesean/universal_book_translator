@@ -13,7 +13,7 @@ encoding them as data would hide the order rather than state it.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass
 
 from ubt.core.engine.blocks import BlockReader
@@ -65,7 +65,7 @@ async def run_stages(
     *,
     blocks: BlockReader,
     on_export_completed: ExportHook | None = None,
-) -> AsyncIterator[TranslationProgressEvent]:
+) -> AsyncGenerator[TranslationProgressEvent, None]:
     """Run the stage plan, yielding every progress event in order.
 
     ``facts`` carries the values a stage produces and a later one consumes (see

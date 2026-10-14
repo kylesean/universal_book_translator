@@ -57,11 +57,10 @@ class PDFRoutePlan:
     has_multicolumn: bool
 
 
-# Where cheap page-profile facts are memoized. The cache key is
-# (resolved path, size, mtime), so the engine probe, the ingest-plan builder and
-# the parser all hit one entry per file instead of each re-scanning the document.
-# Under the shared cache root: CWD-relative paths silently forked the cache per
-# working directory.
+# Where the *per-page* profile cache lives (:func:`profile_pdf` keys it by
+# profiler version + path + size + mtime). Under the shared cache root:
+# CWD-relative paths silently forked the cache per working directory. The engine
+# probe (:func:`inspect_pdf_route_plan`) samples a few pages and is not cached.
 PROFILE_CACHE_DIR = cache_root() / "profile_cache"
 
 
@@ -98,7 +97,6 @@ def _probe_page_vector_ops(page: Any) -> int:
 @pdfium_serialized
 def inspect_pdf_route_plan(
     pdf_path: Path,
-    cache_dir: Path | None = None,
 ) -> PDFRoutePlan:
     """Inspect sampled pages to build a decoupled layout and engine routing plan.
 
@@ -106,6 +104,12 @@ def inspect_pdf_route_plan(
     - Pure single-column born-digital text routes to the fast pdfium backend;
     - Formula-dense pages or multi-column layouts route to docling;
     - Vector-heavy diagram pages are reported via ``has_vector_diagrams``.
+
+    The probe samples a handful of pages and is not memoized here: the
+    per-page profile cache (:func:`ubt.adapters.pdf.page_profiler.profile_pdf`
+    with ``PROFILE_CACHE_DIR``) is where the expensive full-document profile is
+    keyed. This function used to carry a ``cache_dir`` parameter that nothing
+    read, so the comment above implied a cache this path never had.
 
     """
     default_docling = PDFRoutePlan(
@@ -210,11 +214,10 @@ def inspect_pdf_route_plan(
             # A PDF target is *rebuilt* from the IR, so a block the extractor
             # cannot represent is content the reader loses. The pdfium path
             # (``ubt/analyze/reader_pdf``) emits only headings, paragraphs, list
-            # items and code — no tables, no figures, no formulas. Its loss used
-            # to be survivable because the overlay renderer kept the source page
-            # as a canvas, so an unextracted table was still visible in the
-            # original language. The semantic reflow renderer has no canvas, so
-            # the same omission is now a hole in the delivered book.
+            # items and code — no tables, no figures, no formulas. A source-layer
+            # canvas would have kept an unextracted table visible in the original
+            # language; a rebuilt document has no canvas, so the same omission is
+            # a hole in the delivered book.
             #
             # The probe cannot rule that out. Measured on the reference corpus
             # every document carried structure, and one (``mamba``) had 19

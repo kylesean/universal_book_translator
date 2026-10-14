@@ -8,7 +8,7 @@ import json
 import logging
 import random
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -1491,7 +1491,12 @@ async def _build_draft_runtime(
     # every check while the correct Chinese draft was rejected as an omission,
     # and the repair shipped the English source instead.
     document_source = "\n".join(
-        block.source_text or "" for block in ledger.get_all_blocks(actual_job_id)
+        block.source_text or ""
+        # Off-loop: chapter streaming calls this once per chapter, and a
+        # 20k-block book's ``get_all_blocks`` is a ~0.6s synchronous SQLite read
+        # that would otherwise stall the event loop (SSE, queue heartbeat) once
+        # per chapter — ~24s of blocking across a 40-chapter book.
+        for block in await asyncio.to_thread(ledger.get_all_blocks, actual_job_id)
     )
     active_fast_pass.set_document_context(document_source)
     batch_active = bool(config.batch_enabled) and (router.supports_batch_api)
@@ -1580,7 +1585,7 @@ async def run_draft_stage(
     services: RunServices,
     terminology: Terminology,
     chapter_id: str | None = None,
-) -> AsyncIterator[TranslationProgressEvent]:
+) -> AsyncGenerator[TranslationProgressEvent, None]:
     """Execute streaming drafted translation across keyset pagination batches."""
     assembly = await _build_draft_runtime(ctx, services, terminology)
     processor = assembly.processor

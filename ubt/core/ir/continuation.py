@@ -240,8 +240,8 @@ def fuse_continuation_blocks(blocks: Sequence[IRBlock]) -> list[IRBlock]:
     page break or column break), they are merged into a single semantic element
     so that translation, QE, and validators process the unbroken paragraph as a
     whole. The resulting block carries a CompositeSpan containing all physical
-    boxes in reading order, enabling BreakageSolver to flow the translation at
-    render time.
+    boxes in reading order, so the element's geometry still names every box it
+    came from.
     """
     materialized = list(blocks)
     runs = find_continuation_runs(materialized)

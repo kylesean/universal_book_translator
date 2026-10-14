@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
@@ -117,14 +116,6 @@ def group_lines_to_paragraphs(
     if current:
         groups.append(current)
     return groups
-
-
-@dataclass(frozen=True)
-class VlmEvidence:
-    """One measured member line re-entering render pairing."""
-
-    text: str
-    box: tuple[float, float, float, float]
 
 
 def transcribe_page_to_blocks(

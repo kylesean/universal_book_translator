@@ -9,6 +9,8 @@ usage errors and must exit 2 before any work starts.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from typer.testing import CliRunner
 
@@ -64,3 +66,38 @@ def test_a_valid_window_passes_validation_and_reaches_the_input_check() -> None:
     assert result.exit_code == 2
     assert "Input file not found" in _output(result)
     assert "invalid --pages" not in _output(result)
+
+
+def test_refuse_existing_output_catches_suffixless_and_mono_dir(tmp_path: Path) -> None:
+    """The overwrite guard must see every name the run could write.
+
+    Reported defect: a suffix-less ``-o out/delivery`` resolves to
+    ``out/delivery.md`` at delivery time, but the guard checked ``out/delivery``
+    (which never exists) and let a second run silently replace the first
+    delivery. A directory's *monolingual* derived name was missed for the same
+    reason (only the bilingual name was checked).
+    """
+    import typer
+
+    from ubt.cli.commands.translate import _refuse_existing_output
+
+    root = Path(str(tmp_path))
+    inp = root / "book.md"
+    inp.write_text("x", encoding="utf-8")
+
+    # Suffix-less explicit output: the .md file is the real deliverable.
+    (root / "delivery.md").write_text("previous run", encoding="utf-8")
+    with pytest.raises(typer.BadParameter, match="already exists"):
+        _refuse_existing_output(root / "delivery", fresh=False, input_path=inp)
+
+    # A directory whose MONOLINGUAL name exists must also be refused.
+    out_dir = root / "out"
+    out_dir.mkdir()
+    (out_dir / "book_mono.md").write_text("previous mono", encoding="utf-8")
+    with pytest.raises(typer.BadParameter, match="already exists"):
+        _refuse_existing_output(out_dir, fresh=False, input_path=inp)
+
+    # --fresh still authorizes it.
+    assert (
+        _refuse_existing_output(root / "delivery", fresh=True, input_path=inp) == root / "delivery"
+    )

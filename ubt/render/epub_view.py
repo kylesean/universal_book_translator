@@ -3,8 +3,9 @@
 It reuses :func:`ubt.render.html_view.render_fragment` for the XHTML body, so the
 HTML and EPUB views lower blocks identically, and wraps it in a minimal, valid
 EPUB 3 container (``mimetype`` stored first, OPF metadata, a nav document, one
-content document). As with the HTML view it is a *plain* view: the AST does not
-model inline structure, so paragraphs are text-only.
+content document). As with the HTML view it shares the block lowering
+(:func:`ubt.render.html_view.render_fragment`), so styled runs ship as XHTML
+``<strong>``/``<em>``/``<sup>`` and colour spans in both views.
 """
 
 from __future__ import annotations

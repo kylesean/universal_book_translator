@@ -6,7 +6,7 @@ import logging
 from typing import Any
 
 from ubt.core.exceptions import ModelProviderError
-from ubt.core.router.transports.base import BaseTransport, retry_after_seconds
+from ubt.core.router.transports.base import BaseTransport, raise_for_status
 
 logger = logging.getLogger(__name__)
 
@@ -195,20 +195,7 @@ class GeminiTransport(BaseTransport):
                 client, url, payload, response, (_heal_drop_thinking,)
             )
 
-        if response.status_code == 429:
-            raise ModelProviderError(
-                f"Rate limit exceeded (HTTP 429): {response.text[:500]}",
-                details={
-                    "status_code": 429,
-                    "retry_after": retry_after_seconds(response.headers),
-                    "body": response.text[:2000],
-                },
-            )
-        if response.status_code != 200:
-            raise ModelProviderError(
-                f"Model API error ({response.status_code}): {response.text[:500]}",
-                details={"status_code": response.status_code, "body": response.text[:2000]},
-            )
+        raise_for_status(response)
 
         data = response.json()
         # Record usage before judging the response: a safety block arrives as a

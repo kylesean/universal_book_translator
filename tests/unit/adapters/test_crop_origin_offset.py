@@ -101,3 +101,47 @@ def test_crop_block_pil_uses_the_real_mediabox_origin(tmp_path: Path) -> None:
             )
     finally:
         visual_scalpel._PAGE_CACHE = None
+
+
+def _page_with_cropbox(path: Path, box: tuple[float, float, float, float]) -> Path:
+    """Set a one-page PDF's /CropBox to *box* (leaving its /MediaBox as written)."""
+    reader = PdfReader(str(path))
+    writer = PdfWriter()
+    writer.add_page(reader.pages[0])
+    writer.pages[0][NameObject("/CropBox")] = ArrayObject([FloatObject(v) for v in box])
+    with path.open("wb") as handle:
+        writer.write(handle)
+    return path
+
+
+def test_crop_uses_the_cropbox_not_the_mediabox(tmp_path: Path) -> None:
+    """A cropped page must be cropped in the CropBox frame, not the MediaBox.
+
+    pdfium/pdf_oxide rasterize the page's CropBox. On a page whose CropBox is
+    smaller than its MediaBox (print/imposed PDFs), measuring the raster by the
+    MediaBox made every y coordinate wrong: a box in the visible area cropped a
+    blank strip *below* the 500px-tall raster (fed to the repair VLM, and by the
+    figure-asset fallback, written into the delivered PDF). The page is filled
+    green, so a correct crop of the visible area is pure green while the old
+    MediaBox frame pulls in out-of-bounds (black) rows.
+    """
+    from ubt.adapters.pdf import visual_scalpel
+
+    pdf_path = tmp_path / "cropped.pdf"
+    write_text_pdf(pdf_path, [("ABCDEF",)], width=600.0, height=800.0, background=(0, 200, 0))
+    _page_with_cropbox(pdf_path, (0.0, 0.0, 600.0, 500.0))
+
+    visual_scalpel._PAGE_CACHE = None
+    try:
+        img = visual_scalpel.crop_block_pil(
+            pdf_path, 1, (0.0, 0.0, 600.0, 500.0), dpi=72, bleed_pt=0.0
+        )
+    finally:
+        visual_scalpel._PAGE_CACHE = None
+
+    assert img.size == (600, 500)
+    # A pixel near the bottom-left of the visible CropBox is pure background
+    # green. A MediaBox-framed crop is shifted up ~300px and would return the
+    # black out-of-bounds padding here instead.
+    probe = img.convert("RGB").getpixel((5, 495))
+    assert probe == (0, 255, 0), probe

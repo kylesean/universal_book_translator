@@ -409,7 +409,7 @@ def _recommend_route(
         confidence, basis = 0.5, "仅前5页采样启发式"
 
     # There is no render-engine recommendation: every PDF renders through the
-    # single semantic reflow renderer, so the engine is not a user choice.
+    # single renderer, so the engine is not a user choice.
     dual_mode = "mono" if academic or math_heavy else "dual"
     preset = "publication" if (math_heavy or academic) else "standard"
     profile = (

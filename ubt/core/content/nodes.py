@@ -14,6 +14,7 @@ The node types here make those two dispositions first-class and checkable.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import Annotated, Literal
 
@@ -149,6 +150,25 @@ class AssetNode(BaseModel):
     descriptor: AssetDescriptor
     block_type: str = ""
     flow_id: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class ReconstructionRecord:
+    """A renderer's verdict on one rebuilt non-text asset.
+
+    The render side channel: a table whose translated grid kept the source
+    grid's shape is ``verified`` (a real RECONSTRUCTED asset), a grid that
+    shattered it is ``corrupt``, and one delivered as its *source* grid is
+    neither (a fallback, reported UNVERIFIED). ``content.adapt`` reads these to
+    set ``AssetDescriptor.verified``/``corrupt`` — the two fields that were
+    hardcoded ``False``, which made the contract's RECONSTRUCTED branch and both
+    ``ASSET_*_RECONSTRUCTION`` violation kinds unreachable.
+    """
+
+    block_id: str
+    verified: bool
+    corrupt: bool
+    reason: str = ""
 
 
 ContentNode = Annotated[TextNode | AssetNode, Field(discriminator="kind")]

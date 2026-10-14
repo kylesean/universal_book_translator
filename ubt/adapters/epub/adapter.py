@@ -15,14 +15,14 @@ from typing import Any
 from urllib.parse import unquote
 
 from bs4 import BeautifulSoup, Tag
-from bs4.element import AttributeValueList, NavigableString
+from bs4.element import NavigableString
 
 from ubt.adapters.base import (
     BILINGUAL_TARGET_CLASS,
     BaseDocumentAdapter,
     decode_markup,
-    parse_pipe_table_cells,
 )
+from ubt.adapters.dom_inject import inject_translated_block
 from ubt.adapters.unresolved import failure_note, is_unresolved
 from ubt.analyze.assemble import number
 from ubt.analyze.reader_html import walk_markup_elements
@@ -43,12 +43,11 @@ from ubt.core.ir.models import (
     BookManifest,
     ChapterIR,
     ChapterMeta,
-    FlowID,
     IRBlock,
 )
 from ubt.core.ir.serializer import compute_file_sha256_cached
 from ubt.core.zip_safety import ZipReadBudget, read_member
-from ubt.model.ast import ListItem, Table, TextElement
+from ubt.model.ast import TextElement
 
 logger = logging.getLogger(__name__)
 
@@ -195,15 +194,6 @@ BILINGUAL_CSS = """
 """
 
 
-def is_leaf_block(tag: Tag, block_names: set[str]) -> bool:
-    """True if tag does not contain any nested sub-blocks.
-
-    Uses the same ``block_names`` set as the caller so a wrapper tag is not
-    mined twice (e.g. a ``<div>`` around ``<pre>`` as both CODE and NARRATIVE).
-    """
-    return tag.find(list(block_names)) is None
-
-
 #: Inline children a monolingual rewrite must not lose. Replacing a leaf's text
 #: with the translation must not ``clear()`` the element, which would silently
 #: delete inline images, footnote/cross-reference anchors, ``<br>`` breaks and
@@ -285,33 +275,6 @@ def wrap_nested_direct_blocks(soup: BeautifulSoup) -> None:
             tag.append(p)
             for node in current_run:
                 p.append(node.extract())
-
-
-def _get_class_str(tag: Tag) -> str:
-    """Safely extract class attribute from a Tag as a lowercase space-delimited string."""
-    raw = tag.get("class")
-    if isinstance(raw, list):
-        return " ".join(str(c) for c in raw).lower()
-    return str(raw).lower() if raw else ""
-
-
-def determine_flow_id(tag: Tag) -> FlowID:
-    """Heuristically assign semantic FlowID based on parent hierarchy and class names."""
-    parent_classes = " ".join([_get_class_str(p) for p in tag.parents if isinstance(p, Tag)])
-
-    tag_class = _get_class_str(tag)
-    combined_classes = f"{parent_classes} {tag_class}"
-
-    if any(k in combined_classes for k in ("footnote", "endnote", "fn-")):
-        return FlowID.FOOTNOTE
-    if any(k in combined_classes for k in ("sidebar", "aside", "callout", "box")):
-        return FlowID.SIDEBAR_ASIDE
-    if tag.name == "figcaption" or "caption" in combined_classes:
-        return FlowID.CAPTION
-    if tag.name in ("td", "th") or any(p.name in ("td", "th") for p in tag.parents):
-        return FlowID.TABLE_GRID
-
-    return FlowID.MAIN_STORY
 
 
 def _toc_label_text(text: str) -> str:
@@ -638,31 +601,6 @@ class EPUBAdapter(BaseDocumentAdapter):
                         blocks=chapter_blocks,
                     )
 
-    async def render_blocks(
-        self,
-        manifest: BookManifest,
-        blocks: list[IRBlock],
-        target_lang: str,
-        output_path: Path,
-        bilingual_mode: str | None = None,
-        **kwargs: Any,
-    ) -> Path:
-        """Inject bilingual translation nodes into original DOM (ledger-free).
-
-        DOM parsing and the zip rewrite are synchronous CPU + file IO; run them
-        off the event loop so a concurrent job/task is not stalled for the whole
-        document.
-        """
-        return await asyncio.to_thread(
-            self._render_blocks_sync,
-            manifest,
-            blocks,
-            target_lang,
-            output_path,
-            bilingual_mode,
-            **kwargs,
-        )
-
     def _render_blocks_sync(
         self,
         manifest: BookManifest,
@@ -908,124 +846,18 @@ class EPUBAdapter(BaseDocumentAdapter):
             if note:
                 target_text = f"{note}\n\n{target_text}"
 
-            if isinstance(elem, Table) and isinstance(dom_node, Tag):
-                rows = parse_pipe_table_cells(target_text)
-                if rows:
-                    if is_monolingual:
-                        dom_trs = dom_node.find_all("tr")
-                        if len(dom_trs) == len(rows):
-                            for r_idx, tr in enumerate(dom_trs):
-                                cells = tr.find_all(["th", "td"])
-                                for c_idx, cell in enumerate(cells):
-                                    if c_idx < len(rows[r_idx]):
-                                        cell.string = rows[r_idx][c_idx]
-                        else:
-                            new_table = soup.new_tag("table")
-                            if dom_node.get("class"):
-                                new_table["class"] = dom_node["class"]
-                            for row in rows:
-                                tr = soup.new_tag("tr")
-                                for cell_text in row:
-                                    td = soup.new_tag("td")
-                                    td.string = cell_text
-                                    tr.append(td)
-                                new_table.append(tr)
-                            dom_node.replace_with(new_table)
-                    else:
-                        new_table = soup.new_tag("table")
-                        source_classes = list(dom_node.get("class") or [])
-                        new_table["class"] = AttributeValueList(
-                            source_classes + [BILINGUAL_TARGET_CLASS]
-                        )
-                        for row in rows:
-                            tr = soup.new_tag("tr")
-                            for cell_text in row:
-                                td = soup.new_tag("td")
-                                td.string = cell_text
-                                tr.append(td)
-                            new_table.append(tr)
-                        dom_node.insert_after(new_table)
-                injected_count += 1
-                continue
-
-            if isinstance(dom_node, Tag):
-                if isinstance(elem, ListItem):
-                    if is_monolingual:
-                        preserved_inline = take_preserved_inline_children(dom_node)
-                        dom_node.clear()
-                        dom_node.append(
-                            BeautifulSoup(sanitize_html_fragment(target_text), "html.parser")
-                        )
-                        for node in preserved_inline:
-                            dom_node.append(node)
-                    else:
-                        target_tag = soup.new_tag("div")
-                        target_tag["class"] = AttributeValueList([BILINGUAL_TARGET_CLASS])
-                        target_tag.append(
-                            BeautifulSoup(sanitize_html_fragment(target_text), "html.parser")
-                        )
-                        dom_node.append(target_tag)
-                    injected_count += 1
-                else:
-                    if is_monolingual:
-                        paras = [p.strip() for p in target_text.split("\n\n") if p.strip()] or [
-                            target_text
-                        ]
-                        preserved_inline = take_preserved_inline_children(dom_node)
-                        dom_node.clear()
-                        last_node: Tag = dom_node
-                        for i, p_text in enumerate(paras):
-                            sanitized = sanitize_html_fragment(p_text)
-                            container = dom_node if i == 0 else soup.new_tag(dom_node.name)
-                            parsed_fragment = BeautifulSoup(sanitized, "html.parser")
-                            for child in list(parsed_fragment.contents):
-                                container.append(child)
-                            if i > 0:
-                                last_node.insert_after(container)
-                            last_node = container
-                        for node in preserved_inline:
-                            dom_node.append(node)
-                        injected_count += len(paras)
-                    else:
-                        raw_classes = dom_node.get("class")
-                        if isinstance(raw_classes, list):
-                            target_classes = list(raw_classes) + [BILINGUAL_TARGET_CLASS]
-                        elif raw_classes:
-                            target_classes = str(raw_classes).split() + [BILINGUAL_TARGET_CLASS]
-                        else:
-                            target_classes = [BILINGUAL_TARGET_CLASS]
-
-                        paras = [p.strip() for p in target_text.split("\n\n") if p.strip()] or [
-                            target_text
-                        ]
-                        last_node = dom_node
-                        for p_text in paras:
-                            sanitized = sanitize_html_fragment(p_text)
-                            new_tag = soup.new_tag(dom_node.name)
-                            new_tag["class"] = AttributeValueList(target_classes)
-                            parsed_fragment = BeautifulSoup(sanitized, "html.parser")
-                            for child in list(parsed_fragment.contents):
-                                new_tag.append(child)
-                            last_node.insert_after(new_tag)
-                            last_node = new_tag
-                            injected_count += 1
-            elif isinstance(dom_node, list) and dom_node:
-                # A bare text-run block (text sitting directly inside
-                # <blockquote>/<figure>/<details>): extraction counted it, so
-                # injection must too, or the chapter ships untranslated even
-                # though the block was translated and billed.
-                if is_monolingual:
-                    dom_node[0].replace_with(BeautifulSoup(target_text, "html.parser"))
-                    for rem in dom_node[1:]:
-                        rem.extract()
-                else:
-                    target_tag = soup.new_tag("p")
-                    target_tag["class"] = AttributeValueList([BILINGUAL_TARGET_CLASS])
-                    target_tag.append(
-                        BeautifulSoup(sanitize_html_fragment(target_text), "html.parser")
-                    )
-                    dom_node[-1].insert_after(target_tag)
-                injected_count += 1
+            # The shared injection engine (HTML's twin loop lived here until the
+            # two drifted apart in sanitization and counting). The target text
+            # carries an unresolved note already; sanitize once here, the way
+            # the HTML adapter does, so both formats escape identically.
+            injected_count += inject_translated_block(
+                soup,
+                elem,
+                dom_node,
+                sanitize_html_fragment(target_text),
+                is_monolingual=is_monolingual,
+                target_css_class=BILINGUAL_TARGET_CLASS,
+            )
 
         if injected_count > 0:
             # Inject styling into <head>. The stylesheet ships once

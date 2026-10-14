@@ -1,6 +1,6 @@
 r"""Typst *markup* escaping (the non-math half of the render boundary).
 
-The semantic reflow renderer and ``ubt/render/table_compiler.py`` both need
+The renderer and ``ubt/render/table_compiler.py`` both need
 identical escaping, so it lives here rather than in the PDF adapter.
 
 Two functions:
@@ -21,6 +21,11 @@ import re
 from ubt.core.cleaners.html_sanitizer import strip_html_mark_tags
 
 _LINE_START_MARKUP_RE = re.compile(r"(?m)^([ \t]*)(=|\+|-|/|\d+\.)(?=\s|$)")
+
+#: A maximal run of two or more slashes. Replaced by joining the run's slashes
+#: with a zero-width space, so ``//`` can never survive to open a Typst comment
+#: (see :func:`typst_escape`). A single slash is left alone.
+_SLASH_RUN_RE = re.compile(r"/{2,}")
 
 
 def escape_line_start_markup(text: str) -> str:
@@ -64,5 +69,14 @@ def typst_escape(text: str) -> str:
     # [#text[...]] content, swallowing the closing brackets and failing the
     # whole compile. A zero-width space breaks the comment token
     # while rendering invisibly (URLs stay copyable modulo one ZWSP).
+    #
+    # A maximal-run replace, not ``str.replace``: ``str.replace`` is
+    # non-overlapping and single-pass, so a run of 3 slashes became ``/\u200b//``
+    # and a run of 4 became ``/\u200b//\u200b/`` \u2014 both still contain a literal ``//``.
+    # Typst then reads ``//`` as a line comment, silently discarding the rest
+    # of the line (a ``/// <summary>`` doc comment vanished; inside a table
+    # cell the leftover made the whole document fail to compile). Joining the
+    # run's slashes with a ZWSP puts one between *every* pair, so no ``//``
+    # survives whatever the run length.
     escaped = escape_line_start_markup("".join(out))
-    return escaped.replace("//", "/\u200b/")
+    return _SLASH_RUN_RE.sub(lambda m: "\u200b".join(m.group(0)), escaped)

@@ -7,7 +7,7 @@ The adapter orchestrates three extracted modules:
   fallback, textless-page VLM tiering, page-kind profiling);
 - :mod:`ubt.adapters.pdf.docling_blocks` — pure block shaping;
 - :mod:`ubt.adapters.pdf.docling_render` — IRBlocks → delivered artifact
-  (Typst publication reflow, bilingual per-block pairing, diagrams).
+  (Typst typesetting, bilingual per-block pairing, diagrams).
 
 It keeps the module-level ``_docling_symbols`` / ``_has_accelerator`` import
 seams and the tested private-method surface as thin delegates so existing
@@ -320,9 +320,23 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
             from ubt.adapters.pdf.analysis_cache import cached_blocks, docling_identity
 
             # The Docling pass is the run's heaviest step; cache it on the exact
-            # inputs (file, page range, enrichment policy, parser code) via the content-addressed
-            # cache layer. The enrichment flag is output-bearing, so it is in the key.
+            # inputs (file, page range, enrichment policy, parser code) via the
+            # content-addressed cache layer.
             enrich = self._resolve_formula_enrichment(path)
+            if enrich:
+                # A *requested* enrichment is deliberately not cached in this
+                # outer block layer. Docling's ladder degrades inside
+                # ``extract_with_docling`` (VLM OOM -> CPU, or enrichment failure
+                # -> plain extraction); the degraded blocks carry the same
+                # ``enrich=True`` key as a healthy run, so caching them here made
+                # the degradation permanent — a later ``--formula-enrichment on``
+                # run read the degraded blocks and never retried, and ``--fresh``
+                # (which clears the Docling conversion cache, not this one) did
+                # not help either. The inner conversion cache is keyed on the
+                # *effective* options (``docling_cache_key`` folds the mutated
+                # ``do_formula_enrichment``/device in), so it still dedupes the
+                # expensive conversion; only the cheap block-shaping re-runs.
+                return self._extract_with_docling(path, page_range)
             return cached_blocks(
                 self.analysis_cache,
                 path=path,

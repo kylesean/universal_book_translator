@@ -92,3 +92,48 @@ def test_delete_rejects_malformed_job_id(tmp_path: Path) -> None:
     # the request reaches the route and is refused by validate_job_id (400).
     res = client.delete("/jobs/bad.id", headers=_AUTH)
     assert res.status_code == 400
+
+
+def test_delete_does_not_touch_a_shared_service_database(tmp_path: Path) -> None:
+    """A job id that names a service file must not delete that file.
+
+    ``validate_job_id`` constrains the charset, not the meaning: ``tm`` and
+    ``job_queue`` are legal ids whose ledgers would collide with the shared
+    translation memory (``db_dir/tm.sqlite``) and the live queue database
+    (``db_dir/job_queue.sqlite``). The delete route used to glob-unlink
+    ``db_dir/{id}.sqlite*`` unconditionally, so ``DELETE /jobs/tm`` destroyed
+    every human_pe pair and ``DELETE /jobs/job_queue`` destroyed the queue the
+    API held open. Only a file that is verifiably a job ledger (a ``job_meta``
+    row for this id) may be removed.
+    """
+    config = UBTConfig(
+        db_dir=tmp_path / "db",
+        allowed_dirs=str(tmp_path),
+        service_api_key=SecretStr(_API_KEY),
+    )
+    config.db_dir.mkdir(parents=True, exist_ok=True)
+    # A real deployment's shared files, with NO job of that id ever created.
+    tm = config.db_dir / "tm.sqlite"
+    tm.write_bytes(b"real translation memory")
+    queue = config.db_dir / "job_queue.sqlite"
+    queue.write_bytes(b"real job queue")
+    backup = config.db_dir / "backup_2026.sqlite"
+    backup.write_bytes(b"operator backup")
+
+    client = TestClient(create_app(config))
+    for service_id in ("tm", "job_queue", "backup_2026"):
+        res = client.delete(f"/jobs/{service_id}", headers=_AUTH)
+        assert res.status_code == 404, (service_id, res.status_code)
+
+    assert tm.exists() and tm.read_bytes() == b"real translation memory"
+    assert queue.exists() and queue.read_bytes() == b"real job queue"
+    assert backup.exists()
+
+
+def test_delete_still_removes_a_verified_job_ledger(tmp_path: Path) -> None:
+    """The guard must not stop a real terminal job's ledger from being deleted."""
+    config = _seed(tmp_path)
+    client = TestClient(create_app(config))
+    res = client.delete(f"/jobs/{_JOB}", headers=_AUTH)
+    assert res.status_code == 200
+    assert not (config.db_dir / f"{_JOB}.sqlite").exists()

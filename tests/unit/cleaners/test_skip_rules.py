@@ -187,6 +187,65 @@ def test_narrative_prose_overrides_a_bibliography_shape(text: str) -> None:
     assert classify_skip(text) is None
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        # The roadmap's measured case: URL + year, but the sentence is prose.
+        "The tool was released in 2024; see https://example.com/docs for details.",
+        "See the docs at https://example.com/guide published in 2021.",
+        "The 2024 survey (https://example.org) covers this well.",
+        "In 2023 we published our code at https://github.com/foo/bar.",
+        "Our implementation is available at https://github.com/foo/bar since 2023.",
+    ],
+)
+def test_prose_containing_a_url_and_year_is_not_a_bibliography_entry(text: str) -> None:
+    """A URL is a citation cue only in a citation *shape*, not on its own.
+
+    ``_BIB_VENUE_RE`` listed ``https?://`` as a venue, so ``venue_hit`` was true
+    for any link and the URL tier reduced to "contains a URL + a year" — an
+    ordinary sentence shipped untranslated. The tier now needs a leading author,
+    ``et al.``, an "In <Venue>", or an explicit "Retrieved from"/"[Online]".
+    """
+    assert classify_skip(text) is None
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # Surname-first author + "Retrieved from".
+        "Wang, Y. (2017). Some title. Retrieved from https://example.com/paper.pdf",
+        # Initial-first authors + URL.
+        "Y. Zhang, L. Wang. A study. https://arxiv.org/abs/2001.00001",
+        # [Online] marker.
+        "Foo. [Online]. Available: https://example.com/x",
+        # Full-name author list + URL.
+        "John Yang, Carlos Jimenez. SWE-bench. 2024. https://swebench.com",
+    ],
+)
+def test_real_url_bearing_references_are_still_skipped(text: str) -> None:
+    """Tightening the URL tier must not stop catching real online references."""
+    assert classify_skip(text) == BIB
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # Two Markdown emphasis spans are not a symbol legend.
+        "This **important** step and **that** step must be followed.",
+        "Use **foo** and **bar** to configure it.",
+        "The **first** and **second** options are best.",
+    ],
+)
+def test_markdown_emphasis_is_not_a_bibliographic_identity(text: str) -> None:
+    """``**bold**`` is not a footnote dagger cluster.
+
+    The referential-marker regex matched the standalone ``*`` of Markdown
+    emphasis, so two bold spans read as a symbol legend and the whole line
+    shipped verbatim.
+    """
+    assert classify_skip(text) is None
+
+
 def test_inline_citation_prose_is_not_a_bibliography_entry() -> None:
     # "et al." in an in-text citation cannot authenticate the et-al tier by
     # itself: body prose cites "(Wang et al., 2023)" constantly, and counting

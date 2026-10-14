@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator
-from contextlib import suppress
+from collections.abc import AsyncGenerator
+from contextlib import aclosing, suppress
 from typing import Any
 
 from ubt.core.engine.events import EventType, TranslationProgressEvent
@@ -28,7 +28,7 @@ async def run_chapter_streaming_pipeline(
     services: RunServices,
     terminology: Terminology,
     scoring: Scoring,
-) -> AsyncIterator[TranslationProgressEvent]:
+) -> AsyncGenerator[TranslationProgressEvent, None]:
     """Execute streaming pipelined chapter processing across stages.
 
     Decouples the book-wide monolithic stage barriers (all-draft -> all-qe -> all-repair)
@@ -60,7 +60,6 @@ async def run_chapter_streaming_pipeline(
         async for event in run_repair_stage(ctx, services, terminology, scoring):
             yield event
         return
-
     queue_size = getattr(ctx.config, "chapter_streaming_queue_size", 2)
     qe_queue: asyncio.Queue[ChapterMeta | None] = asyncio.Queue(maxsize=max(1, int(queue_size)))
     event_queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=500)
@@ -75,10 +74,17 @@ async def run_chapter_streaming_pipeline(
                     ch.spine_index,
                     ch.chapter_id,
                 )
-                async for event in run_draft_stage(
-                    ctx, services, terminology, chapter_id=ch.chapter_id
-                ):
-                    await event_queue.put(event)
+                # ``aclosing`` owns the per-chapter stage generator so its
+                # ``finally`` (the checkpoint flusher's ``close``, which persists
+                # the batch's drafted blocks) runs *now* on a lost lease or
+                # cancel, not at GC after the pipeline's ledger teardown. A bare
+                # ``async for`` left the generator unclosed on cancellation, so
+                # up to ``ledger_flush_batch_size`` paid checkpoints were lost.
+                async with aclosing(
+                    run_draft_stage(ctx, services, terminology, chapter_id=ch.chapter_id)
+                ) as stage_events:
+                    async for event in stage_events:
+                        await event_queue.put(event)
                 await qe_queue.put(ch)
             await qe_queue.put(None)
         except BaseException:
@@ -108,16 +114,23 @@ async def run_chapter_streaming_pipeline(
                     ch.chapter_id,
                 )
                 if c_text_enabled:
-                    async for event in run_c_text_stage(ctx, services, chapter_id=ch.chapter_id):
+                    async with aclosing(
+                        run_c_text_stage(ctx, services, chapter_id=ch.chapter_id)
+                    ) as stage_events:
+                        async for event in stage_events:
+                            await event_queue.put(event)
+                async with aclosing(
+                    run_quality_gate_stage(
+                        ctx, services, terminology, scoring, chapter_id=ch.chapter_id
+                    )
+                ) as stage_events:
+                    async for event in stage_events:
                         await event_queue.put(event)
-                async for event in run_quality_gate_stage(
-                    ctx, services, terminology, scoring, chapter_id=ch.chapter_id
-                ):
-                    await event_queue.put(event)
-                async for event in run_repair_stage(
-                    ctx, services, terminology, scoring, chapter_id=ch.chapter_id
-                ):
-                    await event_queue.put(event)
+                async with aclosing(
+                    run_repair_stage(ctx, services, terminology, scoring, chapter_id=ch.chapter_id)
+                ) as stage_events:
+                    async for event in stage_events:
+                        await event_queue.put(event)
 
                 # Emit CHAPTER_COMPLETED milestone event
                 chapter_done_event = await ctx.create_event(

@@ -21,8 +21,21 @@ from ubt.core.qe.score_policy import qe_scored_values
 # The placeholder mask order has exactly one owner (``PlaceholderEngine``); the
 # report re-masks through it rather than restating the order, so a change to the
 # order cannot leave the report measuring a pipeline other than the one that ran.
-# The engine is named in ``ubt.segment``, so core reaches it only through the port.
-_PLACEHOLDER_ENGINE = placeholder_engine()
+# The engine is named in ``ubt.segment``, so core reaches it only through the
+# port — resolved *lazily* on first use. Resolving at import time ran the SPI
+# lookup the moment anything imported ``ubt.core.engine``, dragging the whole
+# adapters layer (34 modules, ~0.26s) into every core import and defeating the
+# reason the ports indirection exists.
+_PLACEHOLDER_ENGINE: Any = None
+
+
+def _placeholder_engine() -> Any:
+    """The shared ``PlaceholderEngine``, resolved through the port on first use."""
+    global _PLACEHOLDER_ENGINE
+    if _PLACEHOLDER_ENGINE is None:
+        _PLACEHOLDER_ENGINE = placeholder_engine()
+    return _PLACEHOLDER_ENGINE
+
 
 #: Bump when QualityReport's serialized shape changes so downstream consumers
 #: can validate schema compatibility.
@@ -597,7 +610,7 @@ def compute_placeholder_metrics(blocks: list[Any]) -> ReportPlaceholderMetrics:
         source = block.source_text or ""
         if not source:
             continue
-        masked = _PLACEHOLDER_ENGINE.mask(source)
+        masked = _placeholder_engine().mask(source)
         # Count every masked span type, not just math: code/citation
         # corruption is MQM-Critical, so omitting it left retention at 1.0.
         masked_count = (

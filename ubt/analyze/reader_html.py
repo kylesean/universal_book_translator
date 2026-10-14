@@ -74,7 +74,7 @@ _CONTAINERS = frozenset(
 
 def decode_bytes(raw: bytes) -> str:
     """Decode a markup byte string (BOM / declared encoding first)."""
-    from ubt.adapters.base import decode_markup
+    from ubt.core.text_decode import decode_markup
 
     return decode_markup(raw)
 

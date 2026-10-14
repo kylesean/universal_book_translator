@@ -128,6 +128,8 @@ class DocumentAdapter(Protocol):
     def last_render_skips(self) -> list[tuple[str, str]]: ...
     @property
     def last_render_flags(self) -> list[tuple[str, str]]: ...
+    @property
+    def last_render_reconstructions(self) -> list[Any]: ...
 
 
 VisualGateRunnerFn = Callable[..., Any]
@@ -290,6 +292,23 @@ def get_last_render_flags(adapter: Any) -> list[tuple[str, str]]:
         ):
             flags.append((entry[0], entry[1]))
     return flags
+
+
+def get_last_render_reconstructions(adapter: Any) -> list[Any]:
+    """Return the adapter's last-render per-asset reconstruction verdicts.
+
+    Adapters declare ``last_render_reconstructions`` as part of
+    :class:`DocumentAdapter`. This helper provides safe access, dropping
+    malformed entries (anything that is not a
+    :class:`ubt.core.content.nodes.ReconstructionRecord`) so an inspection
+    issue cannot disrupt the render pipeline.
+    """
+    from ubt.core.content.nodes import ReconstructionRecord
+
+    raw = getattr(adapter, "last_render_reconstructions", None)
+    if not isinstance(raw, list):
+        return []
+    return [entry for entry in raw if isinstance(entry, ReconstructionRecord)]
 
 
 def probe_pdf_pages(input_path: Path) -> tuple[int, int]:

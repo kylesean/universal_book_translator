@@ -120,6 +120,72 @@ def parse_markdown_table(
     return headers, rows
 
 
+@dataclass(frozen=True, slots=True)
+class TableReconstruction:
+    """The structural outcome of rebuilding a table grid for the page.
+
+    ``ok`` is the *verified* verdict the delivery contract needs to record a
+    non-text asset as ``RECONSTRUCTED``: the rebuild kept the source grid's
+    shape (header count and row count) so the table is a real, interpreted
+    reconstruction rather than an opaque crop. ``ok=False`` with a non-empty
+    ``reason`` is a corrupt reconstruction (a shattered grid), which the
+    contract reports as an ERROR.
+    """
+
+    ok: bool
+    reason: str = ""
+    rows: int = 0
+    cols: int = 0
+
+
+def verify_table_reconstruction(source_markup: str, target_markup: str) -> TableReconstruction:
+    """Verify that ``target_markup`` rebuilt ``source_markup`` without shattering.
+
+    The rendered table is a *reconstruction*: the source grid is parsed and
+    re-emitted as a Typst ``#table``, so the only thing worth proving is that the
+    shape survived — a translated grid that dropped or gained a column renders as
+    a broken frame, and one that lost a row silently drops a line of data.
+
+    Returns ``ok=False`` (a *corrupt* reconstruction) when the source grid is a
+    real table but the target's shape disagrees with it. A source grid that is
+    not a parseable pipe table is not a reconstruction at all — the caller only
+    reaches here for a target that parsed — so it is reported unverified, not
+    corrupt, and must not raise a false ERROR.
+    """
+    source = parse_markdown_table(source_markup, escape=False)
+    target = parse_markdown_table(target_markup, escape=False)
+    if target is None:
+        # The caller renders the target only when it parsed; reaching here means
+        # the grid is not a strict pipe table, so it cannot be verified.
+        return TableReconstruction(ok=False, reason="target_not_a_pipe_table")
+    target_headers, target_rows = target
+    if source is None:
+        return TableReconstruction(
+            ok=False,
+            reason="source_not_a_pipe_table",
+            rows=len(target_rows) + 1,
+            cols=len(target_headers),
+        )
+    source_headers, source_rows = source
+    cols = len(source_headers)
+    rows = len(source_rows) + 1  # header row + body rows
+    if len(target_headers) != cols:
+        return TableReconstruction(
+            ok=False,
+            reason=f"column_count_mismatch:{cols}->{len(target_headers)}",
+            rows=rows,
+            cols=cols,
+        )
+    if len(target_rows) != len(source_rows):
+        return TableReconstruction(
+            ok=False,
+            reason=f"row_count_mismatch:{len(source_rows)}->{len(target_rows)}",
+            rows=rows,
+            cols=cols,
+        )
+    return TableReconstruction(ok=True, rows=rows, cols=cols)
+
+
 def probe_table_complexity(markup: str, bbox: Any | None = None) -> TableComplexity:
     """Assess whether a table can be safely overlaid in-place without clipping or overflow."""
     text_lower = markup.lower()
@@ -277,8 +343,10 @@ def render_table_appendix_typst(
 
 __all__ = [
     "TableComplexity",
+    "TableReconstruction",
     "markdown_table_to_typst",
     "parse_markdown_table",
     "probe_table_complexity",
     "render_table_appendix_typst",
+    "verify_table_reconstruction",
 ]

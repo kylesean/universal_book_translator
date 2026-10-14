@@ -1,11 +1,8 @@
 """Shared LaTeX-command → Typst-symbol vocabulary (the render single source).
 
-The one remaining converter is the LaTeX→Typst transpiler, which
-renders through :data:`INLINE_SYMBOLS`. The historical display-block reflow
-converter (``typst_math``) was retired with the unified ``LayerCompositor``, so
-its ``DISPLAY_SYMBOLS`` table is gone too.
+The LaTeX→Typst transpiler renders through :data:`INLINE_SYMBOLS`.
 
-The inline table is assembled from layers so a value fix lands once:
+The table is assembled from layers so a value fix lands once:
 
 - :data:`_SHARED`             — the common command vocabulary.
 - :data:`_DISPLAY_ONLY`       — the wider general/display command set; the
@@ -70,9 +67,8 @@ _SHARED: dict[str, str] = {
     "vartheta": "theta.alt",
 }
 
-# General/display command vocabulary. The retired display converter owned it;
-# the inline table still admits it (see INLINE_SYMBOLS) because paragraph-level
-# context math uses the same commands.
+# General/display command vocabulary. The inline table admits it (see
+# INLINE_SYMBOLS) because paragraph-level context math uses the same commands.
 _DISPLAY_ONLY: dict[str, str] = {
     "Leftarrow": "<=",
     "Leftrightarrow": "<=>",

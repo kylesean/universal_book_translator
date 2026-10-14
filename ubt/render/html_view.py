@@ -3,8 +3,10 @@
 It lowers the run's blocks to semantic HTML, using each block's delivered text:
 the translation where one was placed, the source slice where the block was kept.
 A block's HTML tag follows its typed element, so a heading becomes ``<h2>``, a
-list item ``<li>``, and so on. It is a *plain* view -- the AST does not model
-inline structure (links, emphasis), so paragraphs become text-only ``<p>``.
+list item ``<li>``, and so on. Styled runs (``StyleMeta.inline_runs`` /
+``target_runs``) are re-applied as ``<strong>``/``<em>``/``<sup>``/colour
+spans -- see :func:`render_fragment`; a paragraph is text-only only when its
+source had no recorded styles.
 """
 
 from __future__ import annotations
@@ -27,6 +29,7 @@ from ubt.model.ast import (
     Paragraph,
     Table,
 )
+from ubt.render.inline_spans import SpanStyle, block_runs, styled_chunks
 from ubt.render.outputs import Composition, Placement
 
 _TAIL = "</body>\n</html>\n"
@@ -90,6 +93,25 @@ def _render_element(element: Element, body: str) -> str:
     return f"<p>{body}</p>"
 
 
+def _html_style_wrap(segment: str, style: SpanStyle) -> str:
+    """Wrap an escaped segment in the HTML its source style calls for.
+
+    The HTML twin of the renderer's ``_wrap_style``: same inputs, same
+    precedence (superscript innermost), a ``<span style>`` carrying the colour.
+    Applied after escaping, so the injected tags are never escaped.
+    """
+    start, _end, bold, italic, superscript, color_hex = style
+    if superscript:
+        segment = f"<sup>{segment}</sup>"
+    if italic:
+        segment = f"<em>{segment}</em>"
+    if bold:
+        segment = f"<strong>{segment}</strong>"
+    if color_hex:
+        segment = f'<span style="color:{html.escape(color_hex)}">{segment}</span>'
+    return segment
+
+
 def render_fragment(
     blocks: Sequence[IRBlock],
     translations: Mapping[str, str],
@@ -97,13 +119,29 @@ def render_fragment(
     """The element HTML and every placement, without the document wrapper.
 
     Shared by the HTML view and the EPUB view, so both lower blocks the same way.
+
+    A block's styled runs (:data:`StyleMeta.inline_runs` for the source spans
+    the probe recorded, ``target_runs`` for the model's bold markers) are
+    located in the delivered text and wrapped: a heading or paragraph then keeps
+    the emphasis and colour its source had, where an ``html.escape`` of the
+    whole text dropped every one. A run that survives only after the target's
+    CJK normalization still locates (tolerant matching); one the translation
+    rewrote draws plain, the same contract the Typst renderer documents.
     """
     parts: list[str] = []
     placements: list[Placement] = []
     list_open = False
     for block in sorted(blocks, key=lambda b: b.spine_index):
         element = block.element
-        body = html.escape(element_text(block, translations))
+        text = element_text(block, translations)
+        styled = styled_chunks(text, block_runs(block))
+        if len(styled) == 1 and styled[0][1] is None:
+            body = html.escape(text)
+        else:
+            body = "".join(
+                html.escape(chunk) if style is None else _html_style_wrap(html.escape(chunk), style)
+                for chunk, style in styled
+            )
         if isinstance(element, ListItem):
             if not list_open:
                 parts.append("<ul>")

@@ -195,15 +195,21 @@ def validate_job_id(job_id: str) -> str:
     return clean_id
 
 
-def _tenant_from_header(raw: str | None) -> str:
+def _tenant_from_header(raw: str | None, *, trust: bool = False) -> str:
     """Resolve the queue tenant from ``X-UBT-Tenant`` (single-tenant by default).
 
     Enterprise/on-prem deployments leave it unset (every job is ``default``);
-    a SaaS gateway may forward an authenticated tenant id in the header. This is
-    an isolation boundary against tenant starvation, not access control: the API
-    key grants access to the whole service.
+    a SaaS gateway may forward an authenticated tenant id in the header.
+
+    The header is *client-forgeable*: any caller can send ``X-UBT-Tenant: other``
+    and, when honored, read or cancel another tenant's job. So it is only read
+    when the operator explicitly declares a trusted front proxy sets it
+    (``trust=True``, from ``UBT_TRUST_TENANT_HEADER``); otherwise every request is
+    the single ``default`` tenant and a forged header is ignored. This keeps the
+    isolation boundary honest for the common (loopback, keyed, single-tenant)
+    deployment while the multi-tenant SaaS path stays available behind the flag.
     """
-    if raw is None:
+    if raw is None or not trust:
         return "default"
     cleaned = raw.strip()
     if not cleaned:

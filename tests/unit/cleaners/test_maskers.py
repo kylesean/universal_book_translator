@@ -317,3 +317,46 @@ def test_citation_masker_array_subscript_coexistence_is_clean() -> None:
         assert report.clean, f"Failed on: {text!r}, report: {report}"
         assert report.text == text
         assert report.duplicated == []
+
+
+def test_truncated_checksum_is_not_clean_and_leaves_no_debris() -> None:
+    """A token whose checksum the model truncated must fail closed, not half-restore.
+
+    The masker emits a 3-char checksum (``⟦MATH_MASK_0001-d42⟧``); a model can
+    truncate it (``-d4``). The fuzzy pattern's checksum group used to require
+    exactly three chars, so it matched only the token's *index*, restored the
+    span, and left the ``-d4⟧`` tail as literal text in the delivered draft —
+    with every integrity bucket empty, so the block counted ``clean`` and a
+    quality gate reported "Flawless". The pattern now accepts a 1-3 char suffix,
+    so a truncated token matches whole and is seen as present-but-wrong.
+    """
+    masker = MathMasker()
+    masked, mapping = masker.mask("In 46 trials the energy $E = mc^2$ held.")
+    token = next(iter(mapping))
+    assert token.endswith("⟧") and len(token.split("-")[-1]) == 4  # 3 chars + ⟧
+    truncated = masked.replace(token, token[:-2] + "⟧")  # drop one checksum char
+
+    report = masker.unmask_checked(truncated, mapping)
+
+    assert not report.clean
+    assert report.mismatched, "a truncated checksum is present-but-wrong, not absent"
+    # The token is left intact (residue), not half-restored into ``...$E=mc^2$-d4⟧``.
+    assert token[:-2] + "⟧" in report.text
+
+
+def test_full_and_bare_checksum_tokens_still_restore() -> None:
+    """The tighter pattern must not regress the two faithful-echo spellings."""
+    masker = MathMasker()
+    masked, mapping = masker.mask("The formula $E=mc^2$ is famous.")
+    token = next(iter(mapping))
+
+    full = masker.unmask_checked(masked, mapping)
+    assert full.clean and full.text == "The formula $E=mc^2$ is famous."
+
+    # A checksum-less echo (bare index) is still restored for math
+    # (``checksumless_restores=True``), reported as unverified only.
+    bare = masked.replace(token, token.split("-")[0] + "⟧")
+    bare_report = masker.unmask_checked(bare, mapping)
+    assert bare_report.clean
+    assert bare_report.text == "The formula $E=mc^2$ is famous."
+    assert bare_report.unverified == [1]

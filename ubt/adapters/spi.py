@@ -55,10 +55,9 @@ def _classify_pdf_structure(input_path: Path) -> Any:
 
 
 def _inspect_pdf_route_plan(input_path: Path) -> Any:
-    from ubt.adapters.pdf.engine_selector import PROFILE_CACHE_DIR
     from ubt.adapters.pdf.engine_selector import inspect_pdf_route_plan as _plan
 
-    return _plan(input_path, cache_dir=PROFILE_CACHE_DIR)
+    return _plan(input_path)
 
 
 def _profile_pdf_pages(input_path: Path) -> list[Any]:

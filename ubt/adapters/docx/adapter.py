@@ -345,26 +345,6 @@ class DOCXAdapter(BaseDocumentAdapter):
                     p = cell.add_paragraph()
                     cls._populate_paragraph_runs(p, cell_target, None, target_lang=target_lang)
 
-    async def render_blocks(
-        self,
-        manifest: BookManifest,
-        blocks: list[IRBlock],
-        target_lang: str,
-        output_path: Path,
-        bilingual_mode: str | None = None,
-        **kwargs: Any,
-    ) -> Path:
-        """Re-open the source document and inject translated paragraphs and tables."""
-        return await asyncio.to_thread(
-            self._render_blocks_sync,
-            manifest,
-            blocks,
-            target_lang,
-            output_path,
-            bilingual_mode,
-            **kwargs,
-        )
-
     def _render_blocks_sync(
         self,
         manifest: BookManifest,

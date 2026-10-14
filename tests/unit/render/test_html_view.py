@@ -110,3 +110,108 @@ def test_a_quarantined_block_shows_source_not_the_marker(tmp_path: Path) -> None
     assert "<p>The body of the matter.</p>" in text
     assert "待人工审校" not in text
     assert "ubt-blocked-human" not in text
+
+
+# --------------------------------------------------------------------------- #
+# Styled runs ship as markup, not dropped by the escape
+# --------------------------------------------------------------------------- #
+
+
+def _styled_block(block_id: str, text: str, **run_kwargs: object) -> IRBlock:
+    """A paragraph whose target carries one styled run over ``run_kwargs``."""
+    from ubt.core.ir.models import InlineRun, StyleMeta
+
+    run = InlineRun(text=text, **run_kwargs)  # type: ignore[arg-type]
+    return IRBlock(
+        element=Paragraph(id=block_id, spine_index=1, span=Span(page=1), text="src"),
+        target_text=f"The {text} stays styled.",
+        style=StyleMeta(inline_runs=(run,)),
+    )
+
+
+def test_a_bold_source_run_ships_as_strong_in_the_html_view(tmp_path: Path) -> None:
+    """``html.escape`` of the whole text used to flatten every styled run.
+
+    The probe records ``StyleMeta.inline_runs`` (a bold span, a coloured
+    citation); the view must locate each run in the delivered text and wrap it,
+    exactly as the Typst renderer does with ``#strong``.
+    """
+    blocks = [_styled_block("b1", "key phrase", bold=True)]
+    translations = {b.id: b.target_text or "" for b in blocks}
+    out = tmp_path / "view.html"
+    compose_html(blocks, translations, out)
+    text = out.read_text(encoding="utf-8")
+
+    assert "<strong>key phrase</strong>" in text
+    assert "The <strong>key phrase</strong> stays styled." in text
+
+
+def test_colour_and_superscript_runs_ship_as_html_styles(tmp_path: Path) -> None:
+    blocks = [
+        _styled_block("c1", "link text", color_hex="#1a4fd6"),
+        _styled_block("s1", "†", superscript=True),
+    ]
+    translations = {b.id: b.target_text or "" for b in blocks}
+    out = tmp_path / "view.html"
+    compose_html(blocks, translations, out)
+    text = out.read_text(encoding="utf-8")
+
+    assert '<span style="color:#1a4fd6">link text</span>' in text
+    assert "<sup>†</sup>" in text
+
+
+def test_an_ital_run_ships_as_em_and_a_rewritten_run_stays_plain(tmp_path: Path) -> None:
+    from ubt.core.ir.models import InlineRun, StyleMeta
+
+    blocks = [
+        IRBlock(
+            element=Paragraph(id="i1", spine_index=1, span=Span(page=1), text="src"),
+            target_text="The term stays styled.",
+            style=StyleMeta(inline_runs=(InlineRun(text="term", italic=True),)),
+        ),
+        # The translation rewrote this span: it finds no match and draws plain.
+        IRBlock(
+            element=Paragraph(id="gone", spine_index=2, span=Span(page=1), text="src"),
+            target_text="The rewritten wording.",
+            style=StyleMeta(inline_runs=(InlineRun(text="vanished span", bold=True),)),
+        ),
+    ]
+    translations = {b.id: b.target_text or "" for b in blocks}
+    out = tmp_path / "view.html"
+    compose_html(blocks, translations, out)
+    text = out.read_text(encoding="utf-8")
+
+    assert "<em>term</em>" in text
+    assert "<strong>" not in text.split("</p>")[1]
+
+
+def test_the_epub_view_carries_the_same_strong_markup(tmp_path: Path) -> None:
+    blocks = [_styled_block("b1", "key phrase", bold=True)]
+    translations = {b.id: b.target_text or "" for b in blocks}
+    out = tmp_path / "view.epub"
+    compose_epub(blocks, translations, out, title="doc")
+
+    with zipfile.ZipFile(out) as archive:
+        xhtml = archive.read("OEBPS/text.xhtml").decode("utf-8")
+    assert "<strong>key phrase</strong>" in xhtml
+
+
+def test_a_run_surviving_only_after_cjk_normalization_still_locates(tmp_path: Path) -> None:
+    """The target's CJK pass inserts a space the draft-time run text lacks.
+
+    The tolerant matcher folds whitespace, so the run must still be found and
+    wrapped rather than drawn plain.
+    """
+    from ubt.core.ir.models import InlineRun, StyleMeta
+
+    block = IRBlock(
+        element=Paragraph(id="cjk", spine_index=1, span=Span(page=1), text="src"),
+        target_text="关键 短语 位于此处。",  # run text has no space
+        style=StyleMeta(inline_runs=(InlineRun(text="关键短语", bold=True),)),
+    )
+    translations = {block.id: block.target_text or ""}
+    out = tmp_path / "view.html"
+    compose_html([block], translations, out)
+    text = out.read_text(encoding="utf-8")
+
+    assert "<strong>关键 短语</strong>" in text
