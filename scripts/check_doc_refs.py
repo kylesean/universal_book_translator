@@ -83,6 +83,12 @@ _KNOWN_FOREIGN_BARE_NAMES = frozenset(
     }
 )
 
+#: Subdirectories of ``docs/`` that hold frozen audit/planning records rather
+#: than living documentation. Their ``path:line`` citations are pinned to the
+#: snapshot they describe (an archived review names the HEAD it audited), so
+#: drifting from the current tree is expected and must not fail the check.
+_ARCHIVE_SUBDIRS = ("archive",)
+
 
 def _resolve(ref_file: str) -> Path | None:
     if Path(ref_file).is_file():
@@ -116,6 +122,8 @@ def check(docs_dir: Path) -> list[str]:
         return [f"docs directory not found: {docs_dir}"]
 
     for doc in sorted(docs_dir.rglob("*.md")):
+        if doc.parent.name in _ARCHIVE_SUBDIRS:
+            continue
         for lineno, line in enumerate(doc.read_text(encoding="utf-8").splitlines(), 1):
             if any(marker in line for marker in _DRAFT_MARKERS):
                 continue
