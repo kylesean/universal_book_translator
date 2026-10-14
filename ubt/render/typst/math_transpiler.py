@@ -78,6 +78,10 @@ _TYPST_MATH_WORDS = frozenset(_LATEX_CMD_MAP.values()) | {
     # instead of a bold variable.
     "bold",
     "italic",
+    # Emitted by the \sqrt[n]{x} -> root(n, x) pre-pass: same failure mode as
+    # bold/italic above — the quoter quoted the function name into
+    # ``#"root" (3, x)`` and the PDF carried the literal word "root".
+    "root",
     "sin",
     "cos",
     "tan",
@@ -351,13 +355,29 @@ def _convert_sqrts(text: str) -> str:
             pos = i + 5
             while pos < len(text) and text[pos].isspace():
                 pos += 1
+            # Optional LaTeX root degree: \sqrt[3]{x} / \sqrt[n]{x+1}. Left
+            # alone the bracket group sailed through and the deliverable
+            # printed the literal text ``sqrt[3]{x}`` (the compile gate sees
+            # no backslash, so it passes — zero signal). Typst spells the
+            # nth root ``root(n, x)``.
+            degree: str | None = None
+            if pos < len(text) and text[pos] == "[":
+                close = text.find("]", pos + 1)
+                if close != -1 and "[" not in text[pos + 1 : close]:
+                    degree = text[pos + 1 : close].strip()
+                    pos = close + 1
+                    while pos < len(text) and text[pos].isspace():
+                        pos += 1
             arg_res = _extract_braced_chunk(text, pos)
             if arg_res is not None:
                 arg_content, after_arg = arg_res
                 rec_arg = _convert_sqrts(arg_content)
                 if out and (out[-1].isalnum() or out[-1] in "_^"):
                     out.append(" ")
-                out.append(f"sqrt({rec_arg})")
+                if degree:
+                    out.append(f"root({_convert_sqrts(degree)}, {rec_arg})")
+                else:
+                    out.append(f"sqrt({rec_arg})")
                 i = after_arg
                 continue
         out.append(text[i])
@@ -390,6 +410,11 @@ def typstify_math(body: str) -> str | None:
     if body.replace(r"\#", "").count("#") or '"' in body or "//" in body.replace(" ", ""):
         return None
     body = _normalize_latex_spacing(body)
+    # LaTeX's ``\|`` is the double-vertical-bar NORM delimiter (``\Vert``):
+    # left unmapped it slipped past the ``\\([a-zA-Z]+)`` command regex and
+    # rendered as Typst's single bar, silently halving every norm in the book
+    # (measured: ``\|y - X\beta\|_2^2`` printed ``|y − Xβ|₂²``).
+    body = body.replace(r"\|", r"\Vert ")
     body = _DOUBLE_BACKSLASH_CMD_RE.sub(r"\\\1", body)
     body = body.replace("≔", ":=").replace("⊧", " models ")
     # Separate adjacent Greek characters (e.g. σγ from 𝜎𝛾) so Typst doesn't
@@ -672,6 +697,41 @@ _LATEX_TO_UNICODE_FALLBACK: dict[str, str] = {
     "angle": "∠",
     "perp": "⊥",
     "parallel": "∥",
+    # Symbols with a direct Unicode spelling that were missing entirely (the
+    # fallback used to leak the command name for every one of these).
+    "otimes": "⊗",
+    "oplus": "⊕",
+    "ominus": "⊖",
+    "odot": "⊙",
+    "ast": "∗",
+    "star": "⋆",
+    "circ": "∘",
+    "bullet": "•",
+    "dagger": "†",
+    "ddagger": "‡",
+    "prime": "′",
+    "cdots": "⋯",
+    "ldots": "…",
+    "vdots": "⋮",
+    "ddots": "⋱",
+    "dotsb": "…",
+    "dots": "…",
+    "implies": "⇒",
+    "impliedby": "⇐",
+    "iff": "⟺",
+    "lvert": "|",
+    "rvert": "|",
+    "lVert": "‖",
+    "rVert": "‖",
+    "vert": "|",
+    "Vert": "‖",
+    "mid": "∣",
+    "langle": "⟨",
+    "rangle": "⟩",
+    "lbrace": "{",
+    "rbrace": "}",
+    "lbrack": "[",
+    "rbrack": "]",
 }
 
 
@@ -721,7 +781,10 @@ def clean_math_fallback_text(content: str) -> str:
 
     Guarantees that raw LaTeX command names (e.g. \\frac, \\phi, \\gamma, \\sum)
     and backslashes NEVER leak into rendered deliverables when Typst math
-    compilation fails.
+    compilation fails: every mapped command degrades to its Unicode spelling,
+    structure commands (\\frac, \\underline, \\begin{...}) are unwrapped to
+    their argument content, and any command left unrecognised degrades to a
+    neutral ``⟨math⟩`` placeholder rather than the command name.
     """
     text = content.strip()
     for opener, closer in (("$$", "$$"), (r"\[", r"\]"), (r"\(", r"\)")):
@@ -739,10 +802,39 @@ def clean_math_fallback_text(content: str) -> str:
     text = _convert_fractions_to_slash(text)
     text = re.sub(r"\\(?:text|mathrm|mathbf|mathit|textbf|textit)\{([^{}]*)\}", r"\1", text)
     text = re.sub(r"\\sqrt\{([^{}]*)\}", r"√(\1)", text)
+    # nth roots: \sqrt[3]{x} -> √[3](x) — the degree is information, keep it.
+    text = re.sub(r"\\sqrt\[([^\[\]]*)\]\{([^{}]*)\}", r"√[\1](\2)", text)
+    # Two-argument structure BEFORE the one-argument shell-stripper below
+    # would eat the first brace pair and strand the second as ``1{2}``:
+    # \tfrac{1}{2} -> (1)/(2), the same slash shape
+    # _convert_fractions_to_slash produces for \frac.
+    text = re.sub(r"\\(?:tfrac|dfrac|cfrac)\{([^{}]*)\}\s*\{([^{}]*)\}", r"(\1)/(\2)", text)
+    # Structure commands: keep the argument, drop the shell. ``\underline{x}``
+    # used to print the literal ``underline{x}`` — the guarantee in this
+    # docstring was false for 169 of the 241 table commands.
+    text = re.sub(
+        r"\\(?:binom|underline|overline|widehat|widetilde"
+        r"|overbrace|underbrace|overrightarrow|mathbf|mathit|mathbb|mathcal"
+        r"|mathfrak|boldsymbol|bm|displaystyle|operatorname|limits)\{([^{}]*)\}",
+        r"\1",
+        text,
+    )
+    # Array environments: \begin{...} & \end{...} — drop the wrappers, keep
+    # rows readable (cell & cell; \\ separates rows as a line break).
+    text = re.sub(r"\\(?:begin|end)\{[^{}]*\}", " ", text)
+    text = text.replace(" & ", ", ").replace("&", ", ")
+    text = text.replace("\\\\", "; ")
+    # Delimiter-size modifiers carry no content and are not in the symbol
+    # table, so they used to degrade to the ``⟨math⟩`` placeholder
+    # (``a ⟨math⟩( x ⟨math⟩)``). Drop them before the generic pass.
+    text = re.sub(r"\\(?:big|Big|bigg|Bigg|bigl|bigr|Bigl|Bigr|left|right)\b\s*", " ", text)
 
     def _sub_sym(m: re.Match[str]) -> str:
         name = m.group(1)
-        return _LATEX_TO_UNICODE_FALLBACK.get(name, name)
+        if name in _LATEX_TO_UNICODE_FALLBACK:
+            return _LATEX_TO_UNICODE_FALLBACK[name]
+        # Unmapped command: a neutral placeholder, never the command name.
+        return "⟨math⟩"
 
     text = re.sub(r"\\([a-zA-Z]+)", _sub_sym, text)
     text = text.replace(r"\{", "{").replace(r"\}", "}").replace("\\", "")

@@ -225,7 +225,12 @@ _INLINE_ONLY: dict[str, str] = {
     "longleftarrow": "<--",
     "longrightarrow": "-->",
     "ltimes": "times.l",
-    "mid": "mid",
+    # ``mid`` renders as the upright letters "mid" in Typst (verified: the PDF
+    # text layer carries "mid", not the ∣ glyph); ``divides`` is the real
+    # relation glyph. Conditional probability ``p(x \mid y)`` is the common
+    # LaTeX spelling, so the wrong mapping printed "p(x mid y)" on paper with
+    # zero signal — the probe only answers "does it compile".
+    "mid": "divides",
     "multimap": "arrow.r.long.bar",
     "ngeq": "gt.eq.not",
     "nleq": "lt.eq.not",

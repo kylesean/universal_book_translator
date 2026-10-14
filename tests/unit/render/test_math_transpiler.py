@@ -241,6 +241,23 @@ def test_a_bare_hash_is_still_rejected() -> None:
     assert typstify_math('x " y') is None
 
 
+def test_latex_command_names_never_reach_the_page_verbatim() -> None:
+    r"""The three zero-signal misprints the 2026-10-14 review measured.
+
+    Each of these *compiled* (so every probe/gate stayed green) while printing
+    wrong content: ``\mid`` as the letters "mid", ``\|`` as a single bar, and
+    ``\sqrt[3]{x}`` as the literal text ``sqrt[3]{x}``. The assertions here
+    check the emitted Typst body — "it compiles" is exactly the oracle that
+    failed.
+    """
+    assert typstify_math(r"p(x \mid y)") == "p(x divides y)"
+    assert typstify_math(r"\|y - X\beta\|_2^2") == ("bar.v.double y - X beta bar.v.double _2^2")
+    assert typstify_math(r"\sqrt[3]{x}") == "root(3, x)"
+    assert typstify_math(r"\sqrt[n]{x+1}") == "root(n, x+1)"
+    # The plain root must be untouched by the degree branch.
+    assert typstify_math(r"\sqrt{x}") == "sqrt(x)"
+
+
 def test_a_cjk_label_with_an_ascii_word_is_not_requoted() -> None:
     r"""`\text{总 token 数}` is one label; its inner word must not be quoted again.
 

@@ -63,11 +63,37 @@ def test_uncompilable_math_does_not_leak_latex_into_the_page() -> None:
 
 def test_an_unconvertible_formula_degrades_to_unicode_not_latex() -> None:
     # The case the fallback exists for: a command the transpiler does not know
-    # cannot become math, and must not become LaTeX source either.
+    # cannot become math, and must not become LaTeX source or a command name
+    # either — it degrades to the neutral ``⟨math⟩`` placeholder.
     rendered = render_prose(r"公式：$\unknowncmd{x} + \phi$。")
-    # ``\{`` is Typst's escape for a literal brace, so the visible text is
-    # "unknowncmd{x}" — the command name without its backslash, which is the
-    # point: no LaTeX syntax survives, only the word.
     assert "\\unknowncmd" not in rendered
-    assert r"unknowncmd\{x\}" in rendered
+    assert "unknowncmd" not in rendered, "the command name itself must not ship"
+    assert "⟨math⟩" in rendered
     assert "ϕ" in rendered
+
+
+def test_fallback_never_leaks_a_command_name_for_structure_commands() -> None:
+    r"""The 2026-10-14 review measured 169 of 241 table commands leaking their
+    names on the fallback path (``begin{cases}``, ``underline{x}``,
+    ``tfrac{1}{2}``, ``otimes``...). The fallback must degrade every one of
+    them to readable text: structure shells unwrap to their content, known
+    symbols map to Unicode, and anything unmapped becomes the neutral
+    ``⟨math⟩`` placeholder — never the command name.
+    """
+    cases = clean_math_fallback_text(r"\begin{cases} x & y \\ z & w \end{cases}")
+    assert "begin" not in cases and "end" not in cases
+    assert cases == "x, y ; z, w"
+
+    underline = clean_math_fallback_text(r"\underline{x} + \tfrac{1}{2}")
+    assert "underline" not in underline and "tfrac" not in underline
+    assert underline == "x + (1)/(2)"
+
+    assert clean_math_fallback_text(r"\otimes \ast \cdots") == "⊗ ∗ ⋯"
+
+    sized = clean_math_fallback_text(r"a \big( x \big)")
+    assert "big" not in sized
+    assert sized == "a ( x )"
+
+    unknown = clean_math_fallback_text(r"\unknowncmd{x}")
+    assert "unknowncmd" not in unknown
+    assert "⟨math⟩" in unknown
