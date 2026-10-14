@@ -203,10 +203,15 @@ export function QualityGateView() {
   // the only literal the engine ever writes is the LAYOUT_TRADEOFF_ADVISORY
   // string, so the screen must surface whatever status/warning the report
   // carries rather than testing for a sentinel the engine never produces.
-  // The gate decision itself stays what it always was — failed blocks.
+  // The gate decision itself is the shared three-state verdict the backend
+  // computes (job_options.delivery_verdict_from_summary — the same rule the
+  // CLI banner applies), falling back to failed-blocks-only for reports
+  // served before the field existed.
   const deliveryStatus: string | null = report?.delivery_status ?? null
   const deliveryWarning: string | null = report?.delivery_warning ?? null
-  const isPassed = failedBlocks === 0
+  const verdict: string | null = report?.delivery_verdict ?? null
+  const isPassed = verdict ? verdict === 'passed' : failedBlocks === 0
+  const isWarning = verdict === 'warning'
   const fidelityScore = Math.round((summary.pass_rate ?? 0) * 1000) / 10
 
   const pct = (value: number | undefined, digits = 1) =>
@@ -489,8 +494,11 @@ export function QualityGateView() {
               <span className="text-sm font-bold text-[var(--ink-primary)]">
                 {isPassed ? t.quality.decisionReady : t.quality.decisionBlocked}
               </span>
-              <Badge variant={isPassed ? 'success' : 'destructive'} dot>
-                {isPassed ? 'PASS' : 'BLOCKED'}
+              <Badge
+                variant={isPassed ? 'success' : isWarning ? 'warning' : 'destructive'}
+                dot
+              >
+                {isPassed ? 'PASS' : isWarning ? 'WARNING' : 'BLOCKED'}
               </Badge>
             </div>
             <p className="text-xs text-[var(--ink-secondary)] mt-0.5">

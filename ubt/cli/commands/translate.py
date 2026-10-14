@@ -23,6 +23,7 @@ from ubt.core.config import (
 from ubt.core.job_options import (
     RUN_REPORT_KINDS,
     deliverable_candidates,
+    delivery_verdict_from_summary,
     profile_name_is_valid,
     sidecar_path,
 )
@@ -175,24 +176,22 @@ def _refuse_existing_output(
 def _delivery_verdict(summary: dict[str, Any]) -> tuple[str, str]:
     """The three-state delivery verdict from a quality-report summary.
 
+    Thin CLI wrapper over the shared authority
+    :func:`ubt.core.job_options.delivery_verdict_from_summary` — the web
+    quality gate and the status surface consume the same rule, so four
+    facades answer "is this delivered" identically.
+
     Returns ``(state, message)`` where ``state`` is ``"passed"``,
     ``"warning"``, or ``"blocked"`` -- the PASSED / WARNING / BLOCKED
     vocabulary of the operator console (``docs/UBT_OPERATOR_CONSOLE_PRD.md``).
     The artifact is delivered in all three cases; the state only says whether
     the reader will meet untranslated source.
-
-    A quarantined (``blocked_human``) or failed block ships its *source*, so the
-    delivery is materially incomplete -- BLOCKED. A ``needs_human`` block still
-    ships its translation and is only queued for review -- WARNING. Anything
-    else is PASSED. This replaces the old banner, which only looked at
-    ``completed_blocks`` and so printed green success with 20 untranslated
-    blocks on the page.
     """
     failed = int(summary.get("failed_blocks", 0) or 0)
     blocked = int(summary.get("blocked_human_blocks", 0) or 0)
     needs_human = int(summary.get("needs_human_blocks", 0) or 0)
-    completed = int(summary.get("completed_blocks", 0) or 0)
-    if failed or blocked:
+    state = delivery_verdict_from_summary(summary)
+    if state == "blocked" and (failed or blocked):
         return (
             "blocked",
             _ui_msg(
@@ -203,7 +202,7 @@ def _delivery_verdict(summary: dict[str, Any]) -> tuple[str, str]:
                 "— 发布前请查看质量报告",
             ),
         )
-    if not completed:
+    if state == "blocked":
         return (
             "blocked",
             _ui_msg(
@@ -211,7 +210,7 @@ def _delivery_verdict(summary: dict[str, Any]) -> tuple[str, str]:
                 "⚠ 0 块通过自动质检 — 请查看质量报告后再交付",
             ),
         )
-    if needs_human:
+    if state == "warning":
         return (
             "warning",
             _ui_msg(
@@ -871,6 +870,29 @@ def translate(
             )
     except typer.Exit:
         raise
+    except KeyboardInterrupt:
+        # Click would print a bare "Aborted!" and exit 1. The checkpoints are
+        # on disk and the job is resumable, but only if the operator knows the
+        # id — say so instead of leaving them to re-run (and re-pay) from
+        # scratch. The id line itself is printed at JOB_STARTED.
+        if json_output:
+            print(json.dumps({"status": "cancelled", "error": "interrupted by user"}))
+        else:
+            console.print(
+                _ui_msg(
+                    "\n[yellow]Interrupted — completed blocks are checkpointed to the ledger.[/]",
+                    "\n[yellow]已中断 — 已完成的块已写入账本检查点。[/]",
+                )
+            )
+            console.print(
+                _ui_msg(
+                    "  [dim]Resume with: [bold]ubt translate <input> --job-id <id>[/] "
+                    "(the Job ID line above lists it; `ubt status` also lists recent jobs).[/]",
+                    "  [dim]续跑：[bold]ubt translate <input> --job-id <id>[/]"
+                    "（即上方 Job ID 行；`ubt status` 也会列出最近的 job）。[/]",
+                )
+            )
+        raise typer.Exit(code=130) from None
     except PermissionError as exc:
         if json_output:
             print(json.dumps({"status": "failed", "error": str(exc)}))

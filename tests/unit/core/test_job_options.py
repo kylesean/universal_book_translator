@@ -2,7 +2,13 @@ from pathlib import Path
 
 import pytest
 
-from ubt.core.job_options import clean_source_stem, default_output_path, resolve_target_output
+from ubt.core.job_options import (
+    clean_source_stem,
+    default_output_path,
+    delivery_verdict_from_blocks,
+    delivery_verdict_from_summary,
+    resolve_target_output,
+)
 
 pytestmark = pytest.mark.fast
 
@@ -133,3 +139,62 @@ def test_prior_output_of_reads_both_record_shapes(tmp_path: Path) -> None:
         assert parsed is not None and parsed.output_path == str(tmp_path / "o.md")
     assert prior_output_of(None) is None
     assert prior_output_of(object()) is None
+
+
+def test_delivery_verdict_is_the_single_three_state_rule() -> None:
+    """The rule four facades share: failed/blocked = BLOCKED, needs_human =
+    WARNING, else PASSED; zero completed is BLOCKED.
+
+    Before this lived in one place the CLI banner and the web quality gate
+    disagreed: the gate read ``failed == 0`` and announced PRODUCTION READY
+    over a delivery the CLI called BLOCKED (quarantined blocks shipping
+    source) — 2026-10-14 review, H3.
+    """
+    # Quarantined blocks ship source: BLOCKED even with zero failed.
+    assert (
+        delivery_verdict_from_blocks(
+            failed_blocks=0, blocked_human_blocks=20, needs_human_blocks=0, completed_blocks=310
+        )
+        == "blocked"
+    )
+    # Failed blocks are BLOCKED.
+    assert (
+        delivery_verdict_from_blocks(
+            failed_blocks=3, blocked_human_blocks=0, needs_human_blocks=0, completed_blocks=300
+        )
+        == "blocked"
+    )
+    # Needs-human still ships its translation: WARNING only.
+    assert (
+        delivery_verdict_from_blocks(
+            failed_blocks=0, blocked_human_blocks=0, needs_human_blocks=5, completed_blocks=310
+        )
+        == "warning"
+    )
+    # Nothing completed through QA: BLOCKED (even with needs_human pending).
+    assert (
+        delivery_verdict_from_blocks(
+            failed_blocks=0, blocked_human_blocks=0, needs_human_blocks=12, completed_blocks=0
+        )
+        == "blocked"
+    )
+    # Clean run: PASSED.
+    assert (
+        delivery_verdict_from_blocks(
+            failed_blocks=0, blocked_human_blocks=0, needs_human_blocks=0, completed_blocks=310
+        )
+        == "passed"
+    )
+
+
+def test_delivery_verdict_from_summary_maps_report_keys() -> None:
+    """The quality-report summary shape (``*_blocks`` keys) maps identically."""
+    assert (
+        delivery_verdict_from_summary(
+            {"completed_blocks": 310, "blocked_human_blocks": 20, "needs_human_blocks": 20}
+        )
+        == "blocked"
+    )
+    assert delivery_verdict_from_summary({"completed_blocks": 310}) == "passed"
+    # Missing keys read as zero, not as an error.
+    assert delivery_verdict_from_summary({}) == "blocked"

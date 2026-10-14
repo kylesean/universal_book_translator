@@ -234,6 +234,16 @@ def _note_progress(
         )
 
     now_str = datetime.now().strftime("%H:%M:%S")
+    if event.event_type is EventType.JOB_STARTED:
+        # The job id is the resume handle (status / verify / --job-id): without
+        # printing it, Ctrl-C after 20 paid minutes left the operator no way
+        # to reach the checkpoints. Announce it once, prominently. (Quiet mode
+        # never reaches here: _note_progress is a no-op without a progress
+        # bar, and --json consumers read the job id from their own plumbing.)
+        progress.console.print(
+            f"[bold cyan]Job ID:[/] [bold]{event.job_id}[/]  "
+            f"[dim](resume with: ubt translate <input> --job-id {event.job_id})[/]"
+        )
     progress.console.print(
         f"[dim]{now_str}[/] [bold green]{event.event_type.value.upper()}[/] "
         f"[{done}/{event.total_blocks if event.total_blocks > 0 else '?'}] "

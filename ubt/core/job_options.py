@@ -525,3 +525,49 @@ def artifact_and_report_paths(
     quality = sidecar_path(output, "quality_report.json")
     visual = sidecar_path(output, "visual_report.json")
     return output, (quality if quality.exists() else None), (visual if visual.exists() else None)
+
+
+#: The three-state delivery verdict, shared by every facade.
+#:
+#: The artifact is delivered in all three states; the state only says whether
+#: the reader will meet untranslated source. ``blocked`` — a quarantined
+#: (``blocked_human``) or failed block ships its *source*: the delivery is
+#: materially incomplete. ``warning`` — a ``needs_human`` block still ships
+#: its translation and is only queued for review. ``passed`` — nothing
+#: outstanding. Before this lived in one place, the CLI banner read the
+#: summary while the web quality gate read ``failed == 0``, and the console
+#: announced "PRODUCTION READY" over blocks the CLI called BLOCKED.
+DeliveryVerdictState = Literal["passed", "warning", "blocked"]
+
+
+def delivery_verdict_from_blocks(
+    *,
+    failed_blocks: int,
+    blocked_human_blocks: int,
+    needs_human_blocks: int,
+    completed_blocks: int,
+) -> DeliveryVerdictState:
+    """Classify a delivery from block counters (the single authoritative rule).
+
+    Counters come from either a quality-report summary (``failed_blocks`` /
+    ``blocked_human_blocks`` / ``needs_human_blocks`` / ``completed_blocks``)
+    or a ledger stats snapshot (``failed`` / ``blocked_human`` /
+    ``needs_human`` / ``completed``) — callers map their own keys.
+    """
+    if failed_blocks or blocked_human_blocks:
+        return "blocked"
+    if not completed_blocks:
+        return "blocked"
+    if needs_human_blocks:
+        return "warning"
+    return "passed"
+
+
+def delivery_verdict_from_summary(summary: Mapping[str, Any]) -> DeliveryVerdictState:
+    """The verdict for a quality-report summary dict (the CLI's input shape)."""
+    return delivery_verdict_from_blocks(
+        failed_blocks=int(summary.get("failed_blocks", 0) or 0),
+        blocked_human_blocks=int(summary.get("blocked_human_blocks", 0) or 0),
+        needs_human_blocks=int(summary.get("needs_human_blocks", 0) or 0),
+        completed_blocks=int(summary.get("completed_blocks", 0) or 0),
+    )

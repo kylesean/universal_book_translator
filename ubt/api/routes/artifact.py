@@ -20,6 +20,7 @@ from ubt.api.routes.shared import (
 from ubt.api.scope import ApiScope
 from ubt.api.security import resolve_secure_path, validate_job_id
 from ubt.core.engine.ledger import SQLiteJobLedger
+from ubt.core.job_options import delivery_verdict_from_summary
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +78,15 @@ def register_artifact_routes(api_app: FastAPI, scope: ApiScope) -> None:
             report_path = resolve_secure_path(report_file, must_exist=True, config=app_config)
             content = await asyncio.to_thread(report_path.read_text, encoding="utf-8")
             report_data: dict[str, Any] = json.loads(content)
-            return JSONResponse(content=public_report(report_data))
+            payload = public_report(report_data)
+            # The shared three-state verdict (CLI banner reads the same rule):
+            # the web gate used to derive PASS from ``failed == 0`` alone, so a
+            # delivery the CLI calls BLOCKED (quarantined blocks shipping
+            # source) read "PRODUCTION READY" here.
+            summary = report_data.get("summary")
+            if isinstance(summary, dict):
+                payload["delivery_verdict"] = delivery_verdict_from_summary(summary)
+            return JSONResponse(content=payload)
         except HTTPException:
             raise
         except (ValueError, FileNotFoundError) as err:
