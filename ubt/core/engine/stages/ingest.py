@@ -6,6 +6,7 @@ import asyncio
 import logging
 import re
 from collections.abc import AsyncIterator, Sequence
+from typing import Any
 
 from ubt.core.cleaners.lnds_pruner import LNDSPageCleaner, dedup_duplicate_blocks
 from ubt.core.cleaners.skip_rules import classify_skip
@@ -160,8 +161,63 @@ def _guard_selected_pages(
 _RUN_IDENTITY_KEY = "run_identity"
 
 
+#: Gate knobs: they decide what the export stage is willing to SHIP rather
+#: than what gets drafted, so they are not part of the engine signature (a
+#: job-id change would strand a paid ledger mid-run for a threshold tweak).
+#: Instead the resume path records them per run and WARNS on a mismatch: a
+#: terminal block is never re-evaluated by a stricter resume threshold, and
+#: without the warning the operator believed a ``--qe-threshold 0.9`` re-run
+#: was re-grading the book when in fact 0 blocks were re-read.
+_GATE_KNOB_FIELDS: tuple[str, ...] = (
+    "qe_threshold",
+    "qe_engine",
+    "export_min_completion_ratio",
+    "strict_contract",
+    "consistency_enforce",
+)
+
+_GATE_KNOB_KEY = "gate_knobs"
+
+
 def _run_identity(profile_name: str, engine_sig: str, mock_run: bool) -> dict[str, object]:
     return {"profile_name": profile_name, "engine_signature": engine_sig, "mock_run": mock_run}
+
+
+def _gate_knob_snapshot(config: Any) -> dict[str, object]:
+    """The gate knobs this run would apply, for the resume-mismatch warning."""
+    return {name: getattr(config, name, None) for name in _GATE_KNOB_FIELDS}
+
+
+def _warn_gate_knob_drift(ledger: SQLiteJobLedger, job_id: str, config: Any) -> None:
+    """Record this run's gate knobs; WARN when a resume changed them.
+
+    Gate knobs (``qe_threshold``, ``qe_engine``, ``export_min_completion_ratio``,
+    ``strict_contract``, ``consistency_enforce``) decide what the export stage
+    is willing to SHIP. They deliberately stay out of the engine signature —
+    hard-refusing a threshold tweak would strand a paid ledger — but terminal
+    blocks are never re-evaluated by a stricter resume: every stage reads only
+    the statuses it owns (the quality gate claims ``drafted`` blocks, triage
+    reads ``repair_pending``/``failed``), so a resume that raised its
+    ``--qe-threshold`` re-graded 0 blocks while the report's config snapshot
+    recorded the new value as if it had applied. The warning says so up front.
+    """
+    requested = _gate_knob_snapshot(config)
+    stored = ledger.get_job_metadata_value(job_id, _GATE_KNOB_KEY)
+    ledger.set_job_metadata_value(job_id, _GATE_KNOB_KEY, requested)
+    if not isinstance(stored, dict):
+        return  # first run, or a ledger from before this record existed
+    if stored != requested:
+        changed = {
+            k: f"{stored.get(k)!r} -> {v!r}" for k, v in requested.items() if stored.get(k) != v
+        }
+        logger.warning(
+            "Job %s: gate knobs changed on resume: %s. Existing terminal blocks "
+            "are NOT re-evaluated (only pending/drafted/repair-pending blocks "
+            "pass through the gates again). To re-grade completed work, use a "
+            "new --job-id (or --fresh to discard the ledger).",
+            job_id,
+            "; ".join(f"{k}: {v}" for k, v in changed.items()),
+        )
 
 
 def _record_run_identity(
@@ -294,6 +350,7 @@ async def run_ingest_stage(
             _guard_chapter_window, ledger, actual_job_id, start_chapter, max_chapters
         )
         await asyncio.to_thread(_guard_selected_pages, ledger, actual_job_id, selected_pages)
+        await asyncio.to_thread(_warn_gate_knob_drift, ledger, actual_job_id, ctx.config)
         await asyncio.to_thread(
             _guard_run_identity, ledger, actual_job_id, profile_name, engine_sig, mock_run
         )
