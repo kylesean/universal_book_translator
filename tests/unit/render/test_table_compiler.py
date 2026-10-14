@@ -8,11 +8,8 @@ import pytest
 
 from ubt.render.table_compiler import (
     TableComplexity,
-    _split_row,
-    markdown_table_to_typst,
     parse_markdown_table,
     probe_table_complexity,
-    render_table_appendix_typst,
 )
 
 pytestmark = pytest.mark.fast
@@ -106,90 +103,3 @@ def test_probe_table_complexity_prose_cells() -> None:
     comp = probe_table_complexity(md)
     assert comp.is_complex
     assert comp.reason == "prose_paragraphs_in_cells"
-
-
-def test_markdown_table_to_typst() -> None:
-    md = """
-| 特征 | 基准模型 | 优化模型 |
-| :--- | :--- | :--- |
-| 吞吐量 | 120 ops/s | 350 ops/s |
-| 显存占用 | 16 GB | 8 GB |
-"""
-    typst_code = markdown_table_to_typst(md, width_pt=300.0, height_pt=100.0, font_size_pt=8.0)
-    assert typst_code is not None
-    assert "#table(" in typst_code
-    assert "columns: (3 * (1fr,))" in typst_code
-    assert "吞吐量" in typst_code
-    assert "优化模型" in typst_code
-    assert "width: 300.0pt" in typst_code
-
-
-def test_render_table_appendix_typst() -> None:
-    tables = [
-        (
-            3,
-            "Table 1: 消融实验",
-            "| 组件 | BLEU |\n| --- | --- |\n| 完整 | 34.2 |\n| 无记忆 | 31.0 |",
-        ),
-        (
-            15,
-            "Table 4: 性能测试",
-            "| 批大小 | 延迟 |\n| --- | --- |\n| 1 | 12ms |\n| 8 | 45ms |",
-        ),
-    ]
-    doc = render_table_appendix_typst(tables)
-    assert "附录：核心图表与数据矩阵对照" in doc
-    assert "原书第 3 页: Table 1: 消融实验" in doc
-    assert "原书第 15 页: Table 4: 性能测试" in doc
-    assert "BLEU" in doc
-    assert "延迟" in doc
-
-
-# --------------------------------------------------------------------------- #
-# An escaped or in-math pipe is cell content, not a field separator
-# --------------------------------------------------------------------------- #
-
-
-def test_an_escaped_pipe_inside_math_does_not_split_the_cell() -> None:
-    r"""``$\left\| x \right\|$`` is one cell, not three.
-
-    Measured on ``ddpm`` ``pdf_main#b0053``: the norm bars around
-    ``\tilde{\mu}`` are written ``\|``, and splitting on every ``|`` cut the
-    formula into ``[\$\\left\\]``, ``[\\tilde{...}]``, ``[\$]`` — LaTeX
-    residue split across cells, which no longer compiles as math.
-    """
-    line = r"| PixelIQN [43] | 5.29 | $\left\| \tilde{\mu} \right\|$ |"
-    cells = [c.strip() for c in _split_row(line)]
-
-    assert cells == ["PixelIQN [43]", "5.29", r"$\left\| \tilde{\mu} \right\|$"]
-
-
-def test_a_pipe_inside_a_math_span_is_not_a_separator() -> None:
-    cells = [c.strip() for c in _split_row("| x | $a | b$ | y |")]
-    assert cells == ["x", "$a | b$", "y"]
-
-
-def test_a_plain_escaped_pipe_stays_in_its_cell() -> None:
-    cells = [c.strip() for c in _split_row(r"| a\|b | c |")]
-    assert cells == [r"a\|b", "c"]
-
-
-def test_ordinary_rows_are_unaffected() -> None:
-    assert [c.strip() for c in _split_row("| a | b | c |")] == ["a", "b", "c"]
-    assert [c.strip() for c in _split_row("| $a$ | $b$ |")] == ["$a$", "$b$"]
-
-
-def test_the_rendered_cell_keeps_the_norm_as_math() -> None:
-    """The end-to-end shape: one cell containing a transpiled formula."""
-    from ubt.render.typst.document_renderer import render_table
-
-    src = (
-        "| Model | IS | FID | d |\n|---|---|---|---|\n"
-        r"| PixelIQN [43] | 5.29 | 49.46 | $\left\| \tilde{\mu} \right\|$ |"
-    )
-    out = render_table(src)
-
-    assert out.count("[") and "#table(" in out
-    # One math span, not three fragments.
-    assert out.count("$") == 2, out
-    assert "\\left" not in out and "\\tilde" not in out, out

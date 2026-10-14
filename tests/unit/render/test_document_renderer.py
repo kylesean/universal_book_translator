@@ -703,9 +703,9 @@ def test_a_table_cell_without_math_is_escaped_once() -> None:
 def test_parse_markdown_table_can_return_raw_cells() -> None:
     """The escape contract is explicit, because two callers need different things.
 
-    ``markdown_table_to_typst`` interpolates cells raw, so it needs escaping.
-    The publication renderer runs cells through ``render_prose`` (which owns
-    escaping and math), so it needs the raw text.
+    A caller that interpolates cells raw needs escaping; the publication
+    renderer runs cells through ``render_prose`` (which owns escaping and math),
+    so it needs the raw text.
     """
     from ubt.render.table_compiler import parse_markdown_table
 

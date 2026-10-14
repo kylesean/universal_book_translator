@@ -1045,7 +1045,8 @@ def _write_table_appendix(
             f"- **Document**: `{rendered_path.name}`",
             f"- **收录图表数**: {len(appendix_tables)}",
             "",
-            "以下图表为正文中因物理版面紧凑而保留原貌的复杂图表完整译文：",
+            "以下为本次交付中判定为复杂版式的图表完整译文（正文已内联重排；"
+            "本附录供对照核校与复制取用）：",
             "",
         ]
         for page, label, target in appendix_tables:

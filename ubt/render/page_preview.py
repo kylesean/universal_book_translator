@@ -96,7 +96,13 @@ def render_page_preview(
     # it a malformed formula that the real renderer would degrade to readable
     # text instead reaches this compile verbatim and fails the *whole* preview
     # (503), so the workbench could not show a page the deliverable renders fine.
-    renderer = TypstDocumentRenderer(bilingual=bilingual, math_gate=TypstMathProbe().check)
+    # One probe instance: ``check_many`` pre-warms the same cache ``check`` reads.
+    math_probe = TypstMathProbe()
+    renderer = TypstDocumentRenderer(
+        bilingual=bilingual,
+        math_gate=math_probe.check,
+        math_gate_many=math_probe.check_many,
+    )
     source, _stats = renderer.build_source(page_blocks, build_dir, target_lang)
     typ_path = build_dir / "main.typ"
     typ_path.write_text(source, encoding="utf-8")

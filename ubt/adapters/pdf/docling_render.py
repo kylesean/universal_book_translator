@@ -118,12 +118,16 @@ class DoclingRenderStrategy:
         # such body fails the *whole* document at the compile below. The probe
         # catches those at the point of emission, where the span degrades to
         # readable Unicode instead, so a single malformed formula costs one
-        # formula rather than every page. It compiles a handful of cached
-        # probes; the same Typst the document is compiled with is used.
+        # formula rather than every page. ``check_many`` pre-resolves the whole
+        # document's bodies in one invocation (a 300-formula book paid ~3.5
+        # minutes of per-body Typst startups before this); ``check`` still
+        # answers any body the pre-warm did not see.
+        math_probe = TypstMathProbe()
         renderer = TypstDocumentRenderer(
             assets_root=assets_root,
             bilingual=bilingual,
-            math_gate=TypstMathProbe().check,
+            math_gate=math_probe.check,
+            math_gate_many=math_probe.check_many,
             # Language-resolved font stack, user override first. Without this
             # the preamble hard-coded Latin+CJK-SC: a Japanese target
             # typeset kanji with Simplified-Chinese glyphs and the

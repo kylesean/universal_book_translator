@@ -73,13 +73,13 @@ def parse_markdown_table(
 
     Returns None if markup does not look like a recognizable Markdown table.
 
-    ``escape=True`` (the default) Typst-escapes every cell, which is what the
-    callers that interpolate cells **raw** into ``[...]`` need (see
-    :func:`markdown_table_to_typst`). A caller that runs each cell through the
-    prose renderer instead must pass ``escape=False``: that renderer owns
-    escaping *and* math transpilation, so a pre-escaped ``\\$`` would be escaped
-    a second time into ``\\\\$`` — inside a content block ``\\\\`` is a line break,
-    so the cell's math delimiter never closes and the compile fails.
+    ``escape=True`` (the default) Typst-escapes every cell, which is what a
+    caller that interpolates cells **raw** into ``[...]`` needs. A caller that
+    runs each cell through the prose renderer instead must pass
+    ``escape=False``: that renderer owns escaping *and* math transpilation, so a
+    pre-escaped ``\\$`` would be escaped a second time into ``\\\\$`` — inside a
+    content block ``\\\\`` is a line break, so the cell's math delimiter never
+    closes and the compile fails.
 
     Rows shorter than the header are padded with empty cells and rows longer
     than it are truncated, so the grid the renderer emits is always
@@ -312,102 +312,11 @@ def probe_table_complexity(markup: str, bbox: Any | None = None) -> TableComplex
     return TableComplexity(is_complex=False, reason="simple_grid", rows=total_rows, cols=cols)
 
 
-def markdown_table_to_typst(
-    markup: str,
-    *,
-    width_pt: float | None = None,
-    height_pt: float | None = None,
-    font_size_pt: float = 7.5,
-    font_line: str = "",
-    stroke_color: str = "luma(120)",
-    fill_header: bool = True,
-) -> str | None:
-    """Compile Markdown table markup into Typst code."""
-    parsed = parse_markdown_table(markup)
-    if parsed is None:
-        return None
-
-    headers, rows = parsed
-    cols = len(headers)
-    if cols == 0:
-        return None
-
-    fill_rule = "(col, row) => if row == 0 { luma(240) } else { none }" if fill_header else "none"
-    col_spec = f"({cols} * (1fr,))"
-
-    table_lines: list[str] = [
-        "#table(",
-        f"  columns: {col_spec},",
-        "  inset: 2.2pt,",
-        f"  stroke: 0.35pt + {stroke_color},",
-        f"  fill: {fill_rule},",
-        "  align: (col, row) => if row == 0 { center + horizon } else { left + horizon },",
-    ]
-    # Header cells
-    for h in headers:
-        table_lines.append(f'  [#text(weight: "bold")[{h}]],')
-    # Body cells
-    for r in rows:
-        for c in r:
-            table_lines.append(f"  [{c}],")
-    table_lines.append(")")
-    table_code = "\n".join(table_lines)
-
-    if width_pt is not None and height_pt is not None:
-        return (
-            f"#set page(width: {width_pt}pt, height: {height_pt}pt, margin: 1pt)\n"
-            f'#set text(size: {font_size_pt}pt{font_line}, top-edge: "ascender", bottom-edge: "descender")\n'
-            f"#box(width: {width_pt}pt, height: {height_pt}pt, clip: true)[\n"
-            f"  #align(center + horizon)[\n"
-            f"    {table_code}\n"
-            f"  ]\n"
-            f"]\n"
-        )
-
-    return f"#set text(size: {font_size_pt}pt{font_line})\n{table_code}\n"
-
-
-def render_table_appendix_typst(
-    tables: list[tuple[int, str, str]],
-    *,
-    font_line: str = "",
-) -> str:
-    """Generate a complete standalone Typst document for translated table appendix pages."""
-    typst_parts = [
-        '#set page(paper: "a4", margin: (x: 2cm, y: 2.5cm))',
-        f"#set text(size: 8.5pt{font_line})",
-        '#align(center)[#text(size: 16pt, weight: "bold")[附录：核心图表与数据矩阵对照]]',
-        "#v(0.6cm)",
-        "#align(center)[#text(size: 9pt, fill: luma(100))[（本附录收录正文中因原始版面紧凑而保留原貌的全部复杂图表完整译文）]]",
-        "#v(1cm)",
-    ]
-
-    for page_num, label, markup in tables:
-        rendered = markdown_table_to_typst(
-            markup,
-            font_size_pt=8.0,
-            font_line=font_line,
-        )
-        if rendered is None:
-            # Fallback to plain monospace / text if table parsing failed
-            rendered = f"```\n{markup}\n```"
-
-        typst_parts.append(
-            f"== 图表对照（原书第 {page_num} 页: {typst_escape(label)}）\n"
-            f"#v(2mm)\n"
-            f"{rendered}\n"
-            f"#v(8mm)\n"
-        )
-
-    return "\n".join(typst_parts)
-
-
 __all__ = [
     "TableComplexity",
     "TableReconstruction",
-    "markdown_table_to_typst",
+    "count_table_cells",
     "parse_markdown_table",
     "probe_table_complexity",
-    "render_table_appendix_typst",
     "verify_table_reconstruction",
 ]

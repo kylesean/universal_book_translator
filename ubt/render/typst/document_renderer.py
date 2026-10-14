@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import re
 import shutil
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -585,6 +586,7 @@ class TypstDocumentRenderer:
         figure_width: str = "88%",
         bilingual: bool = False,
         math_gate: Callable[[str], bool] | None = None,
+        math_gate_many: Callable[[Iterable[str]], None] | None = None,
         font_stack: Sequence[str] | None = None,
     ) -> None:
         self.assets_root = Path(assets_root) if assets_root is not None else None
@@ -599,6 +601,12 @@ class TypstDocumentRenderer:
         #: publish caller passes a ``TypstMathProbe``; a test that only inspects
         #: the emitted source leaves it ``None`` and pays no compiler.
         self._math_gate = math_gate
+        #: Bulk pre-warm for the same cache ``_math_gate`` reads
+        #: (``TypstMathProbe.check_many``): one Typst invocation for the whole
+        #: document's not-yet-known bodies instead of one per body — measured
+        #: 10 distinct bodies: 6.8s per-body vs 0.7s batched. ``None`` (tests,
+        #: or a gate without a batch API) keeps the per-body path.
+        self._math_gate_many = math_gate_many
         self.stats = ReflowStats()
         #: ``(block_id, reason)`` for blocks this render could not place, drained
         #: by the PDF adapter into its ``last_render_skips`` channel so the
@@ -623,6 +631,46 @@ class TypstDocumentRenderer:
     def _prose(self, text: str, runs: Sequence[InlineRun] = ()) -> str:
         """``render_prose`` bound to this renderer's compile gate."""
         return render_prose(text, runs, is_math_ok=self._math_gate)
+
+    def _prewarm_math_gate(self, blocks: Sequence[IRBlock]) -> None:
+        """Resolve every not-yet-known math body in one batched probe.
+
+        ``build_source`` renders block by block, and each formula's gate call
+        would otherwise pay a full Typst invocation (~0.7s): a 300-formula book
+        spent ~3.5 minutes of process startups on a job whose whole compile is
+        seconds. ``check_many`` lays the pending bodies out as one document and
+        bisects on failure, so the same verdicts land in the same cache with a
+        handful of invocations. Bodies are collected from exactly the two
+        places that gate: a text block's ``$…$`` spans and a formula block's
+        body.
+        """
+        if self._math_gate_many is None or self._math_gate is None:
+            return
+        bodies: list[str] = []
+        for block in blocks:
+            block_type = str(getattr(block.block_type, "value", block.block_type) or "")
+            if block_type == "formula":
+                text = _block_text(block)
+                if text:
+                    converted = typstify_math(strip_math_delimiters(text))
+                    if converted:
+                        bodies.append(converted)
+                continue
+            text = _block_text(block) if block_type not in ("image", "table") else ""
+            if not text:
+                continue
+            for span in _MATH_SPAN_RE.finditer(text):
+                part = span.group(0)
+                if not _is_math_span(part):
+                    continue
+                inner = part[2:-2] if part.startswith("$$") else part[1:-1]
+                if has_sentinel(inner):
+                    continue
+                converted = typstify_math(inner)
+                if converted:
+                    bodies.append(converted)
+        if bodies:
+            self._math_gate_many(bodies)
 
     def _maybe_pair(
         self, block: IRBlock, rendered: str, *, source_markup: str | None = None
@@ -693,6 +741,7 @@ class TypstDocumentRenderer:
         """
         self.stats = ReflowStats()
         build_dir.mkdir(parents=True, exist_ok=True)
+        self._prewarm_math_gate(blocks)
         body: list[str] = []
         pending: _Figure | None = None
 
