@@ -497,7 +497,17 @@ export function QualityGateView() {
               {isPassed ? t.quality.allPassedDesc : t.quality.blockedDesc}
             </p>
             <div className="text-xs font-mono text-[var(--ink-muted)] mt-1.5">
-              pass rate {pct(summary.pass_rate)} · avg QE {Number(score.avg_qe ?? 0).toFixed(3)}
+              pass rate {pct(summary.pass_rate)} ·{' '}
+              {score.qe_measured ? (
+                <span>avg QE {Number(score.avg_qe ?? 0).toFixed(3)}</span>
+              ) : (
+                <span
+                  className="uppercase"
+                  title="No semantic scoring ran (heuristic QE engine); avg-QE fields are placeholders"
+                >
+                  QE not measured
+                </span>
+              )}
             </div>
           </div>
         </div>

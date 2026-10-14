@@ -223,6 +223,19 @@ def _delivery_verdict(summary: dict[str, Any]) -> tuple[str, str]:
     return "passed", ""
 
 
+def _qe_measured_from_report(report_data: dict[str, Any]) -> bool:
+    """Whether the quality report says any block was actually QE-scored.
+
+    Under the default heuristic engine nothing is scored and the report's
+    avg-QE fields are 0.0 sentinels; the CLI banner and JSON carry this flag
+    so an unmeasured run is never read as a measured zero.
+    """
+    metrics = report_data.get("score_metrics", {})
+    if not isinstance(metrics, dict):
+        return False
+    return bool(metrics.get("qe_measured", False))
+
+
 def _report_degrades_bilingual_delivery(report_data: dict[str, Any]) -> bool:
     """Whether the quality report says the delivery is not a bilingual document.
 
@@ -777,17 +790,22 @@ def translate(
                     )
                 raise typer.Exit(code=1)
         # Delivery verdict: an exported artifact with quarantined or failed
-        # blocks must not be announced as an unqualified success. The summary is
-        # read once, before either output path, so JSON and the banner agree.
+        # blocks must not be announced as an unqualified success. The summary
+        # and score metrics are read once, before either output path, so JSON
+        # and the banner agree.
         summary: dict[str, Any] = {}
         if report_path.exists():
             try:
-                summary = (
-                    json.loads(report_path.read_text(encoding="utf-8")).get("summary", {}) or {}
-                )
+                report_root = json.loads(report_path.read_text(encoding="utf-8"))
+                summary = report_root.get("summary", {}) or {}
+                report_data = report_root
             except (OSError, json.JSONDecodeError):
                 summary = {}
         verdict, verdict_msg = _delivery_verdict(summary) if summary else ("passed", "")
+        # Was any block actually scored? Under the default heuristic QE engine
+        # nothing is, and the avg-QE line then reads a 0.0 sentinel — say so
+        # instead of letting "avg QE 0.000" masquerade as a measured zero.
+        qe_measured = _qe_measured_from_report(report_data)
         if json_output:
             print(
                 json.dumps(
@@ -798,6 +816,7 @@ def translate(
                         "delivery_verdict": verdict,
                         "blocked_human_blocks": int(summary.get("blocked_human_blocks", 0) or 0),
                         "needs_human_blocks": int(summary.get("needs_human_blocks", 0) or 0),
+                        "qe_measured": qe_measured,
                         "output_file": str(result_path),
                         "companion_file": str(companions[0]) if companions else None,
                         "companion_files": [str(p) for p in companions],
@@ -827,6 +846,17 @@ def translate(
         else:
             console.print("\n[bold]✓ Translation completed[/] [yellow](with warnings)[/]")
         console.print(f"  [cyan]{doc_label}[/] [link=file://{result_path}]{result_path}[/]")
+        if not qe_measured and report_path.exists():
+            console.print(
+                _ui_msg(
+                    "  [dim]Quality: not machine-scored this run (heuristic QE engine; "
+                    "avg-QE figures in the report are placeholders). "
+                    "Set UBT_QE_ENGINE=comet or UBT_QE_JUDGE_ENABLED=true to measure.[/]",
+                    "  [dim]质量：本次运行未做机器评分（启发式 QE 引擎，报告中的 avg-QE "
+                    "为占位值）。设置 UBT_QE_ENGINE=comet 或 UBT_QE_JUDGE_ENABLED=true "
+                    "以启用测量。[/]",
+                )
+            )
         for companion in companions:
             console.print(
                 f"  [green]Companion Artifact:[/] [link=file://{companion}]{companion}[/]"

@@ -54,3 +54,20 @@ def test_an_empty_summary_does_not_crash() -> None:
     # shape anyway so a partial report cannot raise inside the success path.
     state, _ = _delivery_verdict({})
     assert state == "blocked"
+
+
+def test_qe_measured_flag_is_read_from_the_report() -> None:
+    """The CLI banner/JSON must distinguish unmeasured from measured-zero.
+
+    Under the default heuristic engine no block is scored and the report's
+    avg-QE fields are 0.0 sentinels; without the flag the end line read like a
+    failing score (2026-10-14 review W1-4).
+    """
+    from ubt.cli.commands.translate import _qe_measured_from_report
+
+    assert _qe_measured_from_report({}) is False
+    assert _qe_measured_from_report({"score_metrics": {}}) is False
+    assert _qe_measured_from_report({"score_metrics": {"qe_measured": False}}) is False
+    assert _qe_measured_from_report({"score_metrics": {"qe_measured": True}}) is True
+    # A malformed score_metrics must not raise.
+    assert _qe_measured_from_report({"score_metrics": "garbage"}) is False
