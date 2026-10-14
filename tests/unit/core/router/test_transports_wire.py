@@ -659,3 +659,193 @@ async def test_anthropic_length_stop_reason_maps_to_finish_length() -> None:
     )
     _, finish = await t.generate_with_finish_reason("hi")
     assert finish == "length"
+
+
+# --------------------------------------------------------------------------- #
+# OpenAI Chat Completions — the batch API (the 50%-discount path).
+#
+# The batch leg was 23% covered: every branch below decides what a paid batch
+# run bills and what it delivers, and the failure paths clean up a remote file
+# (a leak there accumulates storage on the provider account).
+# --------------------------------------------------------------------------- #
+
+
+def _batch_transport(handler: Callable[[httpx.Request], httpx.Response]) -> tuple[Any, _Recorder]:
+    rec = _Recorder(handler)
+    t = OpenAIChatTransport(
+        api_key="sk-test",
+        base_url="https://api.example.com/v1",
+        default_model="m-1",
+        transport=rec.transport,
+    )
+    return t, rec
+
+
+async def test_create_batch_job_uploads_then_creates_and_returns_the_id() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/files"):
+            return httpx.Response(200, json={"id": "file-1"})
+        return httpx.Response(200, json={"id": "batch-1"})
+
+    t, rec = _batch_transport(handler)
+    batch_id = await t.create_batch_job([{"custom_id": "b1", "method": "POST"}])
+    assert batch_id == "batch-1"
+    # The upload carried the JSONL body and the batch purpose.
+    assert rec.requests[0].url.path.endswith("/files")
+    assert b'"custom_id": "b1"' in rec.requests[0].content or b'"custom_id":"b1"' in (
+        rec.requests[0].content
+    )
+    # The create named the uploaded file and the chat endpoint.
+    create_body = rec.bodies[1]
+    assert create_body["input_file_id"] == "file-1"
+    assert create_body["endpoint"] == "/v1/chat/completions"
+
+
+async def test_an_empty_batch_is_refused_before_any_request() -> None:
+    t, rec = _batch_transport(lambda request: httpx.Response(200, json={}))
+    with pytest.raises(ModelProviderError, match="empty batch"):
+        await t.create_batch_job([])
+    assert rec.requests == []
+
+
+async def test_a_failed_batch_create_deletes_the_uploaded_file() -> None:
+    """A remote file left behind accumulates storage on the account."""
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(f"{request.method} {request.url.path}")
+        if request.method == "POST" and request.url.path.endswith("/files"):
+            return httpx.Response(200, json={"id": "file-9"})
+        if request.method == "DELETE":
+            return httpx.Response(200, json={})
+        return httpx.Response(500, text="boom")
+
+    t, _rec = _batch_transport(handler)
+    with pytest.raises(ModelProviderError, match="Batch creation failed"):
+        await t.create_batch_job([{"custom_id": "b1"}])
+    assert "DELETE /v1/files/file-9" in seen
+
+
+async def test_a_batch_without_an_id_deletes_the_uploaded_file() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path.endswith("/files"):
+            return httpx.Response(200, json={"id": "file-9"})
+        if request.method == "DELETE":
+            return httpx.Response(200, json={})
+        return httpx.Response(200, json={})  # no id in the batch create
+
+    t, _rec = _batch_transport(handler)
+    with pytest.raises(ModelProviderError, match="returned no id"):
+        await t.create_batch_job([{"custom_id": "b1"}])
+
+
+async def test_fetch_batch_results_reads_the_output_file_and_bills_the_usage() -> None:
+    output_line = json.dumps(
+        {
+            "custom_id": "b1",
+            "response": {
+                "status_code": 200,
+                "body": {
+                    "model": "m-1",
+                    "choices": [{"message": {"content": "译文"}}],
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+                },
+            },
+        }
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/batches/batch-1"):
+            return httpx.Response(
+                200,
+                json={"status": "completed", "output_file_id": "out-1"},
+            )
+        return httpx.Response(200, text=output_line)
+
+    t, _rec = _batch_transport(handler)
+    results = await t.fetch_batch_results("batch-1")
+    assert results["b1"]["content"] == "译文"
+    assert results["b1"]["error"] is None
+
+
+async def test_a_failed_batch_raises_with_the_provider_error_body() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"status": "failed", "errors": {"message": "quota exhausted"}},
+        )
+
+    t, _rec = _batch_transport(handler)
+    with pytest.raises(ModelProviderError, match="quota exhausted"):
+        await t.fetch_batch_results("batch-1")
+
+
+async def test_an_incomplete_batch_is_refused_not_read_as_empty() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"status": "in_progress"})
+
+    t, _rec = _batch_transport(handler)
+    with pytest.raises(ModelProviderError, match="not completed"):
+        await t.fetch_batch_results("batch-1")
+
+
+async def test_a_batch_line_with_null_content_is_an_error_not_a_draft() -> None:
+    """A content-filter refusal must not ship as the translation.
+
+    Falling back to ``reasoning_content`` would put the model's chain of
+    thought on the page; the line is recorded as an error instead.
+    """
+    output_line = json.dumps(
+        {
+            "custom_id": "b1",
+            "response": {
+                "status_code": 200,
+                "body": {
+                    "model": "m-1",
+                    "choices": [{"message": {"content": None}}],
+                    "usage": {"prompt_tokens": 3, "completion_tokens": 1},
+                },
+            },
+        }
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/batches/batch-1"):
+            return httpx.Response(200, json={"status": "completed", "output_file_id": "out-1"})
+        return httpx.Response(200, text=output_line)
+
+    t, _rec = _batch_transport(handler)
+    results = await t.fetch_batch_results("batch-1")
+    assert results["b1"]["content"] is None
+    assert results["b1"]["error"] and "content" in str(results["b1"]["error"]).lower()
+
+
+async def test_a_malformed_batch_line_is_skipped_not_fatal() -> None:
+    output = "\n".join(
+        [
+            "not json at all",
+            json.dumps({"custom_id": "b1", "response": {"status_code": 200, "body": {}}}),
+        ]
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/batches/batch-1"):
+            return httpx.Response(200, json={"status": "completed", "output_file_id": "out-1"})
+        return httpx.Response(200, text=output)
+
+    t, _rec = _batch_transport(handler)
+    results = await t.fetch_batch_results("batch-1")
+    # The good line survived; the malformed one did not abort the read.
+    assert "b1" in results
+
+
+async def test_cancel_batch_job_posts_the_cancel() -> None:
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(f"{request.method} {request.url.path}")
+        return httpx.Response(200, json={"status": "cancelling"})
+
+    t, _rec = _batch_transport(handler)
+    await t.cancel_batch_job("batch-1")
+    assert "POST /v1/batches/batch-1/cancel" in seen
