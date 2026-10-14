@@ -4,7 +4,6 @@ import asyncio
 import contextlib
 import json
 import logging
-import os
 from pathlib import Path
 from typing import Annotated, Any, NoReturn
 
@@ -13,6 +12,7 @@ from rich.console import Console
 from rich.markup import escape
 from rich.panel import Panel
 
+from ubt.cli.ui import ui_msg
 from ubt.core.config import (
     ApiMode,
     DualMode,
@@ -30,10 +30,9 @@ from ubt.core.job_options import (
 from ubt.core.log_config import setup_logging
 from ubt.core.presets import Preset
 
-
-def _ui_msg(en: str, zh: str) -> str:
-    """Return English CLI copy by default, or Chinese when UBT_UI_LANG=zh."""
-    return zh if os.environ.get("UBT_UI_LANG", "en").strip().lower().startswith("zh") else en
+#: The shared language switch (ubt.cli.ui owns the UBT_UI_LANG rule; assess and
+#: translate both read it here rather than each keeping a copy).
+_ui_msg = ui_msg
 
 
 console = Console()

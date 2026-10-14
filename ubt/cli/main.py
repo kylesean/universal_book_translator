@@ -200,6 +200,29 @@ async def _run_translation(
     return final_output
 
 
+def _event_label(event_type: EventType) -> str:
+    """Operator-readable name for a lifecycle event.
+
+    The raw enum (``DRAFT_BATCH_COMPLETED``) went straight to the console, so
+    an operator watched SCREAMING_CONSTANTS instead of reading what happened.
+    Unknown members fall back to the enum value so a new event still shows.
+    """
+    return {
+        EventType.JOB_STARTED: "Starting pipeline",
+        EventType.PREPROCESSING_DONE: "Preprocessing done",
+        EventType.BIBLE_EXTRACTED: "Term bible extracted",
+        EventType.DRAFT_BATCH_COMPLETED: "Drafting batch done",
+        EventType.MTQE_EVALUATED: "Quality evaluated",
+        EventType.REPAIR_BATCH_COMPLETED: "Repair batch done",
+        EventType.TRIAGE_COMPLETED: "Triage done",
+        EventType.CTEXT_COMPLETED: "Context pass done",
+        EventType.CHAPTER_COMPLETED: "Chapter complete",
+        EventType.MODE_ADVISED: "Output mode advised",
+        EventType.EXPORT_COMPLETED: "Document rendered",
+        EventType.PIPELINE_FAILED: "Pipeline failed",
+    }.get(event_type, event_type.value)
+
+
 def _note_progress(
     progress: Progress | None, task_id: Any, event: TranslationProgressEvent
 ) -> None:
@@ -230,7 +253,7 @@ def _note_progress(
             task_id,
             total=event.total_blocks,
             completed=bar_done,
-            description=f"[bold green]{event.event_type.value.upper()}[/] [dim]({done}/{event.total_blocks})[/]",
+            description=f"[bold green]{_event_label(event.event_type)}[/] [dim]({done}/{event.total_blocks})[/]",
         )
 
     now_str = datetime.now().strftime("%H:%M:%S")
@@ -245,7 +268,7 @@ def _note_progress(
             f"[dim](resume with: ubt translate <input> --job-id {event.job_id})[/]"
         )
     progress.console.print(
-        f"[dim]{now_str}[/] [bold green]{event.event_type.value.upper()}[/] "
+        f"[dim]{now_str}[/] [bold green]{_event_label(event.event_type)}[/] "
         f"[{done}/{event.total_blocks if event.total_blocks > 0 else '?'}] "
         f"{event.message}"
     )
