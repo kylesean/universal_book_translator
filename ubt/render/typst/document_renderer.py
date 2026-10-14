@@ -515,8 +515,7 @@ class TypstDocumentRenderer:
     #: Base page setup, shared by every target language.
     _PAGE_SETUP = '#set page(paper: "a4", margin: (x: 2.2cm, y: 2.4cm), numbering: "1")'
 
-    @staticmethod
-    def preamble(target_lang: str = "zh") -> str:
+    def preamble(self, target_lang: str = "zh") -> str:
         """The Typst preamble for ``target_lang``.
 
         The language and text direction are derived from the target, not
@@ -526,30 +525,44 @@ class TypstDocumentRenderer:
         direction declared — the text stays in logical order.
 
         Kept as one function so the template is auditable in one place instead
-        of being assembled from f-strings across the builder.
+        of being assembled from f-strings across the builder. Was a
+        ``@staticmethod``; the font stack is per-renderer state now, so it
+        reads ``self``.
         """
         from ubt.layout.theme import direction_for
 
         direction = direction_for(target_lang or "zh").value
         lang = (target_lang or "zh").replace("_", "-")
         rtl = "\n#set text(dir: rtl)" if direction == "rtl" else ""
+        # Font stack: language-resolved via language_profile (a ja/ko/ar target
+        # must not typeset with SC glyphs; zh/en resolve to the historical
+        # Latin-first stack, so default rendering is unchanged), with the
+        # renderer's explicit stack — the user's config.font_family override —
+        # leading when supplied. Headings reverse the order (CJK face first):
+        # a Latin heading is unchanged either way, a CJK one gets the real
+        # face instead of falling through to the Latin serif.
+        from ubt.core.language_profile import resolve_font_config
+
+        if self.font_stack:
+            stack: tuple[str, ...] = self.font_stack
+        else:
+            stack = tuple(resolve_font_config(lang).typst_fonts)
+        body = ", ".join(f'"{face}"' for face in stack)
+        cjk_first = ", ".join(f'"{face}"' for face in reversed(stack))
         return "\n".join(
             [
                 TypstDocumentRenderer._PAGE_SETUP,
-                f'#set text(font: ("Libertinus Serif", "Noto Serif CJK SC"), size: 10.5pt, lang: "{lang}")'
-                + rtl,
+                f'#set text(font: ({body}), size: 10.5pt, lang: "{lang}")' + rtl,
                 "#set par(justify: true, leading: 0.78em, spacing: 0.9em,"
                 " first-line-indent: (amount: 2em, all: true))",
                 "#show heading.where(level: 1): it => [",
                 "  #v(0.6em)",
-                '  #block(text(size: 15pt, weight: "bold",'
-                ' font: ("Noto Serif CJK SC", "Libertinus Serif"))[#it.body])',
+                f'  #block(text(size: 15pt, weight: "bold", font: ({cjk_first})))[#it.body]',
                 "  #v(0.3em)",
                 "]",
                 "#show heading.where(level: 2): it => [",
                 "  #v(0.4em)",
-                '  #block(text(size: 12pt, weight: "bold",'
-                ' font: ("Noto Serif CJK SC", "Libertinus Serif"))[#it.body])',
+                f'  #block(text(size: 12pt, weight: "bold", font: ({cjk_first})))[#it.body]',
                 "  #v(0.2em)",
                 "]",
                 "#show figure.caption: it => block(text(size: 9pt, fill: luma(60))[#it.body])",
@@ -563,10 +576,16 @@ class TypstDocumentRenderer:
         figure_width: str = "88%",
         bilingual: bool = False,
         math_gate: Callable[[str], bool] | None = None,
+        font_stack: Sequence[str] | None = None,
     ) -> None:
         self.assets_root = Path(assets_root) if assets_root is not None else None
         self.figure_width = figure_width
         self.bilingual = bilingual
+        #: Body/heading font stack for the preamble. ``None`` keeps the
+        #: historical hard-coded Latin+CJK-SC stack; the strategy passes the
+        #: language-resolved stack (``resolve_font_config(target_lang)``) so a
+        #: Japanese target stops typesetting with Simplified-Chinese glyphs.
+        self.font_stack: tuple[str, ...] | None = tuple(font_stack) if font_stack else None
         #: Compile gate for a converted math body (see ``render_prose``). The
         #: publish caller passes a ``TypstMathProbe``; a test that only inspects
         #: the emitted source leaves it ``None`` and pays no compiler.

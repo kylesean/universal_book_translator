@@ -121,7 +121,14 @@ class DoclingRenderStrategy:
         # formula rather than every page. It compiles a handful of cached
         # probes; the same Typst the document is compiled with is used.
         renderer = TypstDocumentRenderer(
-            assets_root=assets_root, bilingual=bilingual, math_gate=TypstMathProbe().check
+            assets_root=assets_root,
+            bilingual=bilingual,
+            math_gate=TypstMathProbe().check,
+            # Language-resolved font stack, user override first. Without this
+            # the preamble hard-coded Latin+CJK-SC: a Japanese target
+            # typeset kanji with Simplified-Chinese glyphs and the
+            # config.font_family knob was stored and never read.
+            font_stack=self._font_stack_for(target_lang),
         )
         source, stats = renderer.build_source(blocks, build_dir, target_lang)
         typ_path = build_dir / "main.typ"
@@ -156,6 +163,25 @@ class DoclingRenderStrategy:
         # and both ASSET_*_RECONSTRUCTION violation kinds were unreachable.
         self.last_render_reconstructions = list(renderer.table_reconstructions)
         return output_path
+
+    def _font_stack_for(self, target_lang: str) -> tuple[str, ...]:
+        """Body/heading font stack for the preamble, user override first.
+
+        ``language_profile.resolve_font_config`` supplies the per-language
+        stack (ja -> Noto Serif CJK JP, ko -> KR, ar -> Naskh, zh -> SC, ...);
+        ``config.font_family`` — the knob the preamble ignored for the whole
+        life of the field — replaces the first (body) face when set. The
+        language faces stay in the tail so missing glyphs still resolve.
+        """
+        from ubt.core.language_profile import resolve_font_config
+
+        stack = list(resolve_font_config(target_lang).typst_fonts)
+        override = self.font_family
+        if override:
+            override = override.strip().strip('"')
+            if override and override not in stack:
+                stack.insert(0, override)
+        return tuple(stack)
 
     def _assets_root(self, manifest: BookManifest) -> Path | None:
         """Directory holding the extracted figure assets for this job.

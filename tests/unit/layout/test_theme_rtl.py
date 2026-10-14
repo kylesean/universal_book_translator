@@ -64,11 +64,11 @@ def test_the_preamble_emits_the_rtl_direction_line_only_for_rtl() -> None:
     book got Chinese line-breaking and left-to-right layout on every page. The
     language and direction now come from the target.
     """
-    ltr = TypstDocumentRenderer.preamble("zh")
+    ltr = TypstDocumentRenderer().preamble("zh")
     assert 'lang: "zh"' in ltr
     assert "dir: rtl" not in ltr
 
-    rtl = TypstDocumentRenderer.preamble("ar")
+    rtl = TypstDocumentRenderer().preamble("ar")
     assert 'lang: "ar"' in rtl
     assert "dir: rtl" in rtl
 
@@ -76,4 +76,4 @@ def test_the_preamble_emits_the_rtl_direction_line_only_for_rtl() -> None:
 def test_the_preamble_uses_the_target_language_not_a_hardcoded_one() -> None:
     """Every target gets its own ``lang``: hyphenation and line-breaking follow it."""
     for lang in ("en", "ja", "de", "he"):
-        assert f'lang: "{lang}"' in TypstDocumentRenderer.preamble(lang)
+        assert f'lang: "{lang}"' in TypstDocumentRenderer().preamble(lang)
