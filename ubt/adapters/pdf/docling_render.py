@@ -196,6 +196,11 @@ class DoclingRenderStrategy:
         """
         self.last_render_skips = []
         self.last_render_flags = []
+        # Reset alongside the other two channels: the per-render verdicts are
+        # copied from the freshly built renderer below, but a second render on
+        # the same strategy must not report the first render's verdicts if it
+        # fails before that copy runs.
+        self.last_render_reconstructions = []
 
         out_path = Path(output_path)
         out_path.parent.mkdir(parents=True, exist_ok=True)

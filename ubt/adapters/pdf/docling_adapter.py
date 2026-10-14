@@ -123,6 +123,13 @@ class _PDFRenderStackMixin:
         )
         self.last_render_skips = list(self._renderer.last_render_skips)
         self.last_render_flags = list(self._renderer.last_render_flags)
+        # The per-asset reconstruction verdicts ride the same side channel
+        # (the strategy copies renderer.table_reconstructions after each
+        # render). Without this line the base property's lazy [] answered
+        # every export and the contract's RECONSTRUCTED (verified/corrupt)
+        # branch was unreachable again — the exact regression P0-6 fixed
+        # once already.
+        self.last_render_reconstructions = list(self._renderer.last_render_reconstructions)
         self.last_render_outcome = self._renderer.last_outcome
         return out_path
 

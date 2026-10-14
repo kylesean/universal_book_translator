@@ -80,6 +80,14 @@ def parse_markdown_table(
     escaping *and* math transpilation, so a pre-escaped ``\\$`` would be escaped
     a second time into ``\\\\$`` — inside a content block ``\\\\`` is a line break,
     so the cell's math delimiter never closes and the compile fails.
+
+    Rows shorter than the header are padded with empty cells and rows longer
+    than it are truncated, so the grid the renderer emits is always
+    rectangular. That normalization is lossy ON PURPOSE for rendering, which
+    is why :func:`verify_table_reconstruction` measures raw cell counts
+    (:func:`count_table_cells`) instead of the padded result: a translated row
+    that gained a cell must be a corrupt reconstruction, not silently
+    shortened.
     """
     lines = [line.strip() for line in markup.strip().splitlines() if line.strip()]
     table_lines = [line for line in lines if line.startswith("|") and line.endswith("|")]
@@ -120,6 +128,33 @@ def parse_markdown_table(
     return headers, rows
 
 
+def count_table_cells(markup: str) -> tuple[int, list[int]] | None:
+    """Raw cell counts of a Markdown grid: (header cell count, per-row counts).
+
+    The verification oracle: :func:`parse_markdown_table` pads/truncates rows
+    into a rectangular grid for rendering, so comparing its OUTPUT cannot see
+    a translated row that gained or lost a cell — the old shape check compared
+    two already-normalized grids and blessed a silently truncated row as
+    ``verified``. Counting the raw split instead sees the true shape.
+    """
+    lines = [line.strip() for line in markup.strip().splitlines() if line.strip()]
+    table_lines = [line for line in lines if line.startswith("|") and line.endswith("|")]
+    if len(table_lines) < 2:
+        return None
+
+    header_cells = len(_split_row(table_lines[0]))
+    sep_idx = -1
+    for idx in range(1, min(3, len(table_lines))):
+        cells = [c.strip() for c in _split_row(table_lines[idx])]
+        if cells and all(re.match(r"^:?-+:?$", c) for c in cells):
+            sep_idx = idx
+            break
+    if sep_idx == -1 or header_cells == 0:
+        return None
+    row_cells = [len(_split_row(line)) for line in table_lines[sep_idx + 1 :]]
+    return header_cells, row_cells
+
+
 @dataclass(frozen=True, slots=True)
 class TableReconstruction:
     """The structural outcome of rebuilding a table grid for the page.
@@ -146,13 +181,21 @@ def verify_table_reconstruction(source_markup: str, target_markup: str) -> Table
     shape survived — a translated grid that dropped or gained a column renders as
     a broken frame, and one that lost a row silently drops a line of data.
 
+    The comparison uses raw cell counts (:func:`count_table_cells`), not the
+    padded grids :func:`parse_markdown_table` renders from: both being
+    rectangular by construction, their shapes always agreed and a row the
+    model overfilled was silently truncated to the header width *and* blessed
+    ``verified`` (measured: ``| A | B | C |`` rebuilt as ``| 一 | 二 | 三 | 四 |``
+    reported ok=True while dropping the fourth cell). Shape now means the RAW
+    shape.
+
     Returns ``ok=False`` (a *corrupt* reconstruction) when the source grid is a
     real table but the target's shape disagrees with it. A source grid that is
     not a parseable pipe table is not a reconstruction at all — the caller only
     reaches here for a target that parsed — so it is reported unverified, not
     corrupt, and must not raise a false ERROR.
     """
-    source = parse_markdown_table(source_markup, escape=False)
+    source = count_table_cells(source_markup)
     target = parse_markdown_table(target_markup, escape=False)
     if target is None:
         # The caller renders the target only when it parsed; reaching here means
@@ -166,9 +209,9 @@ def verify_table_reconstruction(source_markup: str, target_markup: str) -> Table
             rows=len(target_rows) + 1,
             cols=len(target_headers),
         )
-    source_headers, source_rows = source
-    cols = len(source_headers)
-    rows = len(source_rows) + 1  # header row + body rows
+    source_header_cells, source_row_cells = source
+    cols = source_header_cells
+    rows = len(source_row_cells) + 1  # header row + body rows
     if len(target_headers) != cols:
         return TableReconstruction(
             ok=False,
@@ -176,13 +219,31 @@ def verify_table_reconstruction(source_markup: str, target_markup: str) -> Table
             rows=rows,
             cols=cols,
         )
-    if len(target_rows) != len(source_rows):
+    if len(target_rows) != len(source_row_cells):
         return TableReconstruction(
             ok=False,
-            reason=f"row_count_mismatch:{len(source_rows)}->{len(target_rows)}",
+            reason=f"row_count_mismatch:{len(source_row_cells)}->{len(target_rows)}",
             rows=rows,
             cols=cols,
         )
+    # Per-row RAW width: a row that gained a cell was truncated before this
+    # check ever saw it; compare what the target markup actually splits into.
+    target_counts = count_table_cells(target_markup)
+    if target_counts is not None:
+        _, target_row_cells = target_counts
+        # strict=False on purpose: a target with FEWER body rows is already a
+        # row_count_mismatch above; the zip only widens the check to rows the
+        # two grids share.
+        for idx, (src_n, tgt_n) in enumerate(
+            zip(source_row_cells, target_row_cells, strict=False), start=1
+        ):
+            if src_n != tgt_n:
+                return TableReconstruction(
+                    ok=False,
+                    reason=f"row_{idx}_cell_count_mismatch:{src_n}->{tgt_n}",
+                    rows=rows,
+                    cols=cols,
+                )
     return TableReconstruction(ok=True, rows=rows, cols=cols)
 
 

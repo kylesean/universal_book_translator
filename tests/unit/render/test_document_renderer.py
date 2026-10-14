@@ -945,6 +945,28 @@ def test_a_table_rebuild_that_dropped_a_column_is_corrupt(tmp_path: Path) -> Non
     assert "column_count_mismatch" in record.reason
 
 
+def test_a_table_row_that_gained_a_cell_is_corrupt_not_verified(tmp_path: Path) -> None:
+    r"""A translated row that OVERFILLED the grid is a corrupt reconstruction.
+
+    The old oracle compared the *parsed* grids, and :func:`parse_markdown_table`
+    pads/truncates rows into a rectangle before returning them — so a row the
+    model overfilled was silently truncated (``四`` dropped) AND the shape
+    check blessed the result ``verified``. The comparison now runs on raw cell
+    counts, so the extra cell is visible corruption.
+    """
+    source_grid = "| A | B | C |\n|---|---|---|\n| 1 | 2 | 3 |"
+    target_grid = "| 甲 | 乙 | 丙 |\n|---|---|---|\n| 一 | 二 | 三 | 四 |"
+    block = _block(BlockType.TABLE, block_id="tg", source=source_grid, target=target_grid)
+
+    renderer = TypstDocumentRenderer()
+    renderer.build_source([block], tmp_path / "build")
+
+    (record,) = renderer.table_reconstructions
+    assert record.corrupt is True
+    assert record.verified is False
+    assert "row_1_cell_count_mismatch:3->4" in record.reason
+
+
 def test_a_table_that_fell_back_to_source_is_unverified_not_corrupt(tmp_path: Path) -> None:
     """A fallback is a degradation, not a corruption — no false ERROR."""
     malformed_target = "模型 | Score |\n|---|---|\n| 甲 | 一 |"
