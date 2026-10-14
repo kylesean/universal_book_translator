@@ -8,7 +8,7 @@ import json
 import logging
 import random
 import re
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -1351,6 +1351,41 @@ class _DraftProcessor:
             raise critical_exc
 
 
+def _assert_no_stranded_pending(
+    ledger: SQLiteJobLedger, actual_job_id: str, batch: Sequence[IRBlock]
+) -> None:
+    """Fail loud if a fetched block is still ``pending`` after the batch flush.
+
+    The interactive loop claims blocks with a monotone keyset cursor
+    (``after_spine_index``/``after_block_id``): once a batch is consumed, the
+    cursor never returns. Every consumed block must therefore have left
+    ``pending`` — drafted, passed, failed, or requeued — or it is stranded
+    behind the cursor forever and only export's fail_non_terminal gate would
+    surface it, after the money was spent. One COUNT over the batch's ids.
+    """
+    if not batch:
+        return
+    placeholders = ",".join("?" * len(batch))
+    with ledger._get_conn() as conn:
+        row = conn.execute(
+            f"""
+            SELECT block_id FROM blocks
+            WHERE job_id = ? AND status = 'pending'
+              AND block_id IN ({placeholders})
+            LIMIT 3
+            """,
+            (actual_job_id, *[b.id for b in batch]),
+        ).fetchone()
+    if row is not None:
+        raise UBTError(
+            f"Draft batch left block {row['block_id']!r} pending after its writes "
+            f"were flushed (job {actual_job_id}). The keyset cursor has already "
+            "moved past it, so no later batch would revisit it. This is a "
+            "draft-stage bug: every fetched block must be checkpointed "
+            "(drafted / passed / failed / requeued) before the batch completes."
+        )
+
+
 def _persist_memory_state(
     ledger: SQLiteJobLedger,
     actual_job_id: str,
@@ -1770,6 +1805,15 @@ async def run_draft_stage(
                     )
 
             await flusher.flush_all()
+            # The stranded-block invariant: every block the loop FETCHED must
+            # have left ``pending`` by the time the batch's writes are flushed.
+            # Each early-exit path (TM hit, static skip, per-block failure)
+            # enqueues a checkpoint or a FAILED record; if a future path
+            # returns without one, the keyset cursor has already moved past
+            # the block, so it would sit pending-unvisited until export
+            # force-FAILED it — the cheapest place to catch that is here,
+            # fail-loud, one COUNT per batch.
+            _assert_no_stranded_pending(ledger, actual_job_id, batch)
             event = await create_event_fn(
                 EventType.DRAFT_BATCH_COMPLETED,
                 actual_job_id,
