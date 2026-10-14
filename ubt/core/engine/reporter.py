@@ -8,6 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
+from ubt.core.atomic import atomic_write_text
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.ir.models import BlockStatus, BlockType, BookManifest
 from ubt.core.ports import placeholder_engine
@@ -638,8 +639,14 @@ def compute_placeholder_metrics(blocks: list[Any]) -> ReportPlaceholderMetrics:
 
 
 def save_quality_report(report: QualityReport, report_path: Path | str) -> Path:
-    """Serialize QualityReport to JSON."""
+    """Serialize QualityReport to JSON.
+
+    Atomic like every other artifact companion (``ubt.core.atomic``'s docstring
+    promises "reports, contracts" never land half-written): the quality report
+    is the audit record a refused/failed delivery still needs, so a crash
+    mid-write must leave the previous report or nothing — not truncated JSON.
+    """
     out_file = Path(report_path)
     out_file.parent.mkdir(parents=True, exist_ok=True)
-    out_file.write_text(report.model_dump_json(indent=2), encoding="utf-8")
+    atomic_write_text(out_file, report.model_dump_json(indent=2), encoding="utf-8")
     return out_file

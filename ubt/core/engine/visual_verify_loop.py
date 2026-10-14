@@ -21,6 +21,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
+from ubt.core.atomic import atomic_write_text
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.exceptions import JobInterruptedError
 from ubt.core.ir.models import BlockStatus, BookManifest, IRBlock
@@ -225,7 +226,10 @@ class VisualVerifyLoop:
         }
         visual_report_path = sidecar_path(rendered_path, "visual_report.json")
         payload = json.dumps(report_dict, ensure_ascii=False, indent=2)
-        await asyncio.to_thread(visual_report_path.write_text, payload, encoding="utf-8")
+        # Atomic like the contract/spill/xliff companions: this file sits in
+        # the delivery directory and the API serves it verbatim, so a crash
+        # mid-write must not leave the frontend truncated JSON.
+        await asyncio.to_thread(atomic_write_text, visual_report_path, payload, encoding="utf-8")
 
         await asyncio.to_thread(self.ledger.record_visual_report, self.job_id, report_dict)
 
