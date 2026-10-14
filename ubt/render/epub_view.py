@@ -11,6 +11,7 @@ content document). As with the HTML view it shares the block lowering
 from __future__ import annotations
 
 import html
+import mimetypes
 import zipfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -45,8 +46,19 @@ def _dir_attr(direction: str) -> str:
     return f' dir="{html.escape(direction)}"' if direction and direction != "ltr" else ""
 
 
-def _opf(identifier: str, title: str, lang: str, direction: str = "ltr") -> str:
+def _opf(
+    identifier: str,
+    title: str,
+    lang: str,
+    direction: str = "ltr",
+    images: tuple[str, ...] = (),
+) -> str:
     progression = "rtl" if direction == "rtl" else "ltr"
+    image_items = "".join(
+        f'    <item id="img{index}" href="{html.escape(href)}" '
+        f'media-type="{html.escape(mimetypes.guess_type(href)[0] or "image/png")}"/>\n'
+        for index, href in enumerate(images, start=1)
+    )
     return (
         '<?xml version="1.0" encoding="utf-8"?>\n'
         '<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid">\n'
@@ -58,6 +70,7 @@ def _opf(identifier: str, title: str, lang: str, direction: str = "ltr") -> str:
         "  <manifest>\n"
         '    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>\n'
         '    <item id="text" href="text.xhtml" media-type="application/xhtml+xml"/>\n'
+        f"{image_items}"
         "  </manifest>\n"
         f'  <spine page-progression-direction="{progression}">\n'
         '    <itemref idref="text"/>\n'
@@ -87,11 +100,35 @@ def compose_epub(
     ``lang``/``direction`` describe the target language; an RTL target sets
     ``dir="rtl"`` on the content documents and ``page-progression-direction`` on
     the spine, so a reading system turns pages right-to-left.
+
+    Figures are packaged: each resolvable asset is copied into ``OEBPS/images/``
+    (deduplicated by content), listed in the OPF manifest, and referenced by the
+    content document's ``<img src>``. The old package dropped them entirely —
+    the reading system showed an empty box where every figure belonged.
     """
-    fragment, placements = render_fragment(blocks, translations)
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
     identifier = f"urn:ubt:{doc_id or 'document'}"
+
+    # Resolve + collect assets during lowering; the resolver also assigns the
+    # in-package href, so render_fragment stays storage-agnostic.
+    packaged: dict[str, bytes] = {}  # href -> bytes (insertion order = dedupe order)
+
+    def _resolve_asset(asset: str) -> str | None:
+        if not asset:
+            return None
+        candidate = Path(asset)
+        if not candidate.is_absolute() or not candidate.exists():
+            return None
+        data = candidate.read_bytes()
+        for href, existing in packaged.items():
+            if existing == data:
+                return href
+        href = f"images/{len(packaged) + 1:04d}{candidate.suffix.lower() or '.png'}"
+        packaged[href] = data
+        return href
+
+    fragment, placements = render_fragment(blocks, translations, asset_resolver=_resolve_asset)
 
     with atomic_write_path(output) as tmp_path, zipfile.ZipFile(tmp_path, "w") as archive:
         # The OCF spec requires ``mimetype`` first and uncompressed.
@@ -99,8 +136,12 @@ def compose_epub(
         info.compress_type = zipfile.ZIP_STORED
         archive.writestr(info, "application/epub+zip")
         archive.writestr("META-INF/container.xml", _CONTAINER)
-        archive.writestr("OEBPS/content.opf", _opf(identifier, title, lang, direction))
+        archive.writestr(
+            "OEBPS/content.opf", _opf(identifier, title, lang, direction, tuple(packaged))
+        )
         archive.writestr("OEBPS/nav.xhtml", _nav(title, lang, direction))
+        for href, data in packaged.items():
+            archive.writestr(f"OEBPS/{href}", data)
         xhtml = (
             _XHTML_HEAD.format(lang=lang, title=html.escape(title), dir_attr=_dir_attr(direction))
             + fragment

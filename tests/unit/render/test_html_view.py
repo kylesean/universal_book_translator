@@ -215,3 +215,155 @@ def test_a_run_surviving_only_after_cjk_normalization_still_locates(tmp_path: Pa
     text = out.read_text(encoding="utf-8")
 
     assert "<strong>关键 短语</strong>" in text
+
+
+def test_a_table_grid_lowers_to_a_real_table(tmp_path: Path) -> None:
+    r"""The view used to wrap the delivered grid in ``<pre class="table">``.
+
+    A table block's delivered text is a Markdown pipe grid; a screen reader read
+    the pipes and the text reflowed as code. It now parses through the renderer's
+    own parser into a semantic table (2026-10-14 review, W3-7).
+    """
+    from ubt.model.ast import Table
+
+    block = IRBlock(
+        element=Table(
+            id="t1",
+            spine_index=1,
+            span=Span(page=1),
+            markup="| Model | Score |\n|---|---|\n| A | 1 |\n| B | 2 |",
+        )
+    )
+    out = tmp_path / "view.html"
+    compose_html([block], {}, out)
+    text = out.read_text(encoding="utf-8")
+
+    assert "<table>" in text
+    assert "<th>Model</th><th>Score</th>" in text
+    assert "<td>A</td><td>1</td>" in text
+    assert "<td>B</td><td>2</td>" in text
+    assert '<pre class="table">' not in text
+
+
+def test_an_unparseable_table_grid_stays_a_pre_not_dropped(tmp_path: Path) -> None:
+    """A grid the renderer would also have to fall back on keeps the pre form."""
+    from ubt.model.ast import Table
+
+    block = IRBlock(
+        element=Table(id="t2", spine_index=1, span=Span(page=1), markup="not a table at all")
+    )
+    out = tmp_path / "view.html"
+    compose_html([block], {}, out)
+    text = out.read_text(encoding="utf-8")
+
+    assert '<pre class="table">not a table at all</pre>' in text
+    assert "<table>" not in text
+
+
+def test_a_formula_block_degrades_to_readable_unicode_not_latex(tmp_path: Path) -> None:
+    r"""A formula block's delivered text is its LaTeX (never model-retyped).
+
+    Raw ``\frac{a}{b}`` in a web view is markup soup; the transpiler's own
+    fallback turns it into the readable form the PDF would have drawn had the
+    formula degraded there — the same guarantee the render path gives.
+    """
+    from ubt.model.ast import Formula
+
+    block = IRBlock(
+        element=Formula(
+            id="f1", spine_index=1, span=Span(page=1), source=r"\frac{a}{b} \le \sum_i x_i"
+        )
+    )
+    out = tmp_path / "view.html"
+    compose_html([block], {}, out)
+    text = out.read_text(encoding="utf-8")
+
+    assert "\\frac" not in text
+    assert "a/b ≤ ∑_i x_i" in text
+
+
+def test_a_figure_with_a_resolvable_asset_ships_an_img(tmp_path: Path) -> None:
+    """The figure was an empty ``<figure data-asset>`` box; it now carries the
+    image (data URI in HTML so the single file stays portable)."""
+    from ubt.model.ast import Figure
+
+    asset = tmp_path / "fig.png"
+    asset.write_bytes(b"\x89PNG\r\n\x1a\nfake")
+    block = IRBlock(element=Figure(id="g1", spine_index=1, span=Span(page=1), asset_id=str(asset)))
+    out = tmp_path / "view.html"
+    compose_html([block], {}, out)
+    text = out.read_text(encoding="utf-8")
+
+    assert '<img src="data:image/png;base64,' in text
+    # The delivered file must not carry the host path.
+    assert str(tmp_path) not in text
+    assert 'data-asset="fig.png"' in text
+
+
+def test_a_figure_with_a_missing_asset_degrades_to_a_labelled_placeholder(
+    tmp_path: Path,
+) -> None:
+    from ubt.model.ast import Figure
+
+    block = IRBlock(
+        element=Figure(
+            id="g2", spine_index=1, span=Span(page=1), asset_id="/nonexistent/pic_p1_1.png"
+        )
+    )
+    out = tmp_path / "view.html"
+    compose_html([block], {}, out)
+    text = out.read_text(encoding="utf-8")
+
+    assert "figure-missing" in text
+    assert "[figure: pic_p1_1.png]" in text
+    assert "/nonexistent" not in text
+
+
+def test_the_epub_packages_figures_with_manifest_entries(tmp_path: Path) -> None:
+    """The EPUB dropped every figure; now each resolvable asset is packaged,
+    listed in the OPF manifest, and referenced by the content document."""
+    from ubt.model.ast import Figure
+
+    first = tmp_path / "a.png"
+    first.write_bytes(b"AAA")
+    second = tmp_path / "b.png"
+    second.write_bytes(b"BBB")
+    blocks = [
+        IRBlock(element=Figure(id="g1", spine_index=1, span=Span(page=1), asset_id=str(first))),
+        IRBlock(element=Figure(id="g2", spine_index=2, span=Span(page=1), asset_id=str(second))),
+    ]
+    out = tmp_path / "view.epub"
+    compose_epub(blocks, {}, out, title="doc")
+
+    with zipfile.ZipFile(out) as archive:
+        names = archive.namelist()
+        assert "OEBPS/images/0001.png" in names
+        assert "OEBPS/images/0002.png" in names
+        assert archive.read("OEBPS/images/0001.png") == b"AAA"
+        opf = archive.read("OEBPS/content.opf").decode("utf-8")
+        assert 'href="images/0001.png" media-type="image/png"' in opf
+        assert 'href="images/0002.png" media-type="image/png"' in opf
+        xhtml = archive.read("OEBPS/text.xhtml").decode("utf-8")
+        assert '<img src="images/0001.png"' in xhtml
+        assert '<img src="images/0002.png"' in xhtml
+
+
+def test_the_epub_deduplicates_identical_figure_bytes(tmp_path: Path) -> None:
+    from ubt.model.ast import Figure
+
+    first = tmp_path / "a.png"
+    first.write_bytes(b"SAME")
+    second = tmp_path / "b.png"
+    second.write_bytes(b"SAME")
+    blocks = [
+        IRBlock(element=Figure(id="g1", spine_index=1, span=Span(page=1), asset_id=str(first))),
+        IRBlock(element=Figure(id="g2", spine_index=2, span=Span(page=1), asset_id=str(second))),
+    ]
+    out = tmp_path / "view.epub"
+    compose_epub(blocks, {}, out, title="doc")
+
+    with zipfile.ZipFile(out) as archive:
+        images = [n for n in archive.namelist() if n.startswith("OEBPS/images/")]
+        assert images == ["OEBPS/images/0001.png"]
+        xhtml = archive.read("OEBPS/text.xhtml").decode("utf-8")
+        assert xhtml.count('src="images/0001.png"') == 2
