@@ -59,6 +59,8 @@ export interface TranslationDictionary {
     notPriced: string
     formatUnknown: string
     budgetCeiling: string
+    budgetUnlimited: string
+    budgetExceedsQuote: string
     preflightTitle: string
     preflightSubtitle: string
     waitingFile: string
@@ -86,6 +88,7 @@ export interface TranslationDictionary {
     advancedOptionsSubtitle: string
     advancedOptionsTag: string
     domainProfile: string
+    domainAuto: string
     domainGeneral: string
     domainTextbook: string
     domainPaper: string
@@ -102,6 +105,9 @@ export interface TranslationDictionary {
     glossaryPath: string
     glossaryPathPlaceholder: string
     glossaryPathHelp: string
+    rehearsalLabel: string
+    rehearsalHelp: string
+    rehearsalActiveWarning: string
     engineRecommended: string
     sliceSampleQuickBtn: string
     localFreeLabel: string

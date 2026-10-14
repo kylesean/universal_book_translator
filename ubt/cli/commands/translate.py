@@ -606,17 +606,12 @@ def translate(
     ] = False,
 ) -> None:
     """Translate an entire book end-to-end with 4-layer defense and live dual dashboard."""
-    if profile == "auto":
-        if input_path.exists():
-            from ubt.core.archetype import analyze_archetype, infer_profile_from_archetype
+    # ``--profile auto`` probes the document (paper/fiction/semiconductor/…);
+    # the shared resolver is the same one every other surface goes through, so
+    # the CLI no longer owns the only copy of this rule.
+    from ubt.core.job_options import resolve_profile_name as _resolve_profile
 
-            try:
-                arch = analyze_archetype(input_path)
-                profile = infer_profile_from_archetype(arch, path=input_path)
-            except Exception:
-                profile = "general"
-        else:
-            profile = "general"
+    profile = _resolve_profile(profile, input_path)
 
     # The shared job-request surface (ubt.core.job_options): keys are
     # UBTConfig field names (plus the ``glossary`` alias), ``None`` means

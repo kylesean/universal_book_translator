@@ -198,3 +198,29 @@ def test_delivery_verdict_from_summary_maps_report_keys() -> None:
     assert delivery_verdict_from_summary({"completed_blocks": 310}) == "passed"
     # Missing keys read as zero, not as an error.
     assert delivery_verdict_from_summary({}) == "blocked"
+
+
+def test_resolve_profile_name_handles_auto_everywhere() -> None:
+    """``auto`` used to be CLI-only; the other surfaces silently got an empty glossary.
+
+    ``ubt translate --profile auto`` probed the document, while REST/MCP/Web
+    passing the same string fell through to ``seed_entries_for_profile("auto")``
+    — an unknown directory, so the run started with no seed glossary and no
+    error. The shared resolver now runs at ``run_kwargs_from_request``, the one
+    point every surface passes through (2026-10-14 review, W4-1).
+    """
+    from ubt.core.job_options import resolve_profile_name, run_kwargs_from_request
+
+    # Explicit names pass through unchanged.
+    assert resolve_profile_name("paper") == "paper"
+    assert resolve_profile_name("semiconductor") == "semiconductor"
+    # No path to probe (or an unreadable one): the CLI's old fallback.
+    assert resolve_profile_name("auto") == "general"
+    assert resolve_profile_name("auto", "/nonexistent/x.pdf") == "general"
+    # Missing/empty falls back to the engine default.
+    assert resolve_profile_name(None) == "general"
+    assert resolve_profile_name("") == "general"
+    # The shared extraction point resolves it for every facade.
+    kwargs = run_kwargs_from_request({"profile": "auto", "input_path": "/nonexistent/x.pdf"})
+    assert kwargs["profile_name"] == "general"
+    assert run_kwargs_from_request({"profile": "paper"})["profile_name"] == "paper"

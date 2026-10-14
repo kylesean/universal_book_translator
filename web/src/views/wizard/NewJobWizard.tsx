@@ -96,15 +96,16 @@ export function NewJobWizard() {
 
   const [targetLang, setTargetLang] = useState('zh')
   const [sourceLang, setSourceLang] = useState('en')
-  const [preset, setPreset] = useState<'publication' | 'standard' | 'preview' | 'fast'>('publication')
-  const [budgetUsd, setBudgetUsd] = useState<number>(10.0)
+  const [preset, setPreset] = useState<'publication' | 'standard' | 'preview' | 'fast' | null>(null)
+  const [budgetUsd, setBudgetUsd] = useState<number | null>(null)
 
   // Advanced compiler & layout options
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false)
-  const [domainProfile, setDomainProfile] = useState('general')
+  const [domainProfile, setDomainProfile] = useState('auto')
   const [dualMode, setDualMode] = useState<'auto' | 'dual' | 'mono'>('auto')
   const [pageRange, setPageRange] = useState('')
   const [glossaryPath, setGlossaryPath] = useState('')
+  const [dryRun, setDryRun] = useState(false)
 
   const [isAssessing, setIsAssessing] = useState(false)
   const [isReassessing, setIsReassessing] = useState(false)
@@ -142,7 +143,7 @@ export function NewJobWizard() {
       }
       setAssessError(null)
 
-      const activePreset = opts?.overridePreset ?? preset
+      const activePreset = opts?.overridePreset ?? preset ?? undefined
       const activePages = opts?.overridePages !== undefined ? opts.overridePages : pageRange
       const activeTarget = opts?.overrideTarget ?? targetLang
       const activeSource = opts?.overrideSource ?? sourceLang
@@ -171,7 +172,7 @@ export function NewJobWizard() {
           }
           if (!hasUserSelectedDomainRef.current && res.route?.recommended_profile) {
             const recDom = res.route.recommended_profile.toLowerCase()
-            if (['general', 'textbook', 'paper', 'fiction', 'humanities', 'semiconductor'].includes(recDom)) {
+            if (['auto', 'general', 'textbook', 'paper', 'fiction', 'humanities', 'semiconductor'].includes(recDom)) {
               setDomainProfile(recDom)
             }
           }
@@ -204,7 +205,7 @@ export function NewJobWizard() {
     if (lastAssessedFileRef.current === filePath.trim()) {
       const timer = setTimeout(() => {
         void runAssess(filePath, {
-          overridePreset: preset,
+          overridePreset: preset ?? undefined,
           overridePages: pageRange,
           overrideTarget: targetLang,
           overrideSource: sourceLang,
@@ -271,7 +272,7 @@ export function NewJobWizard() {
         pages: pageRange.trim() ? pageRange.trim() : null,
         glossary: glossaryPath.trim() ? glossaryPath.trim() : null,
         priority: 0,
-        dry_run: false,
+        dry_run: dryRun,
         budget_usd: budgetUsd,
       })
       navigate(`/jobs/${res.job_id}`)
@@ -538,19 +539,35 @@ export function NewJobWizard() {
                 <span className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
                   {t.wizard.budgetCeiling}
                 </span>
-                <span className="font-mono text-xs font-bold text-[#15803d]">
-                  ${budgetUsd.toFixed(2)} USD (HARD FUSE)
+                <span
+                  className={`font-mono text-xs font-bold ${
+                    budgetUsd === null ? 'text-[var(--ink-muted)]' : 'text-[#15803d]'
+                  }`}
+                >
+                  {budgetUsd === null
+                    ? t.wizard.budgetUnlimited
+                    : `$${budgetUsd.toFixed(2)} USD (HARD FUSE)`}
                 </span>
               </div>
               <input
                 type="range"
-                min="1"
+                min="0"
                 max="50"
                 step="1"
-                value={budgetUsd}
-                onChange={(e) => setBudgetUsd(parseFloat(e.target.value))}
+                value={budgetUsd ?? 0}
+                onChange={(e) => {
+                  const next = parseFloat(e.target.value)
+                  setBudgetUsd(next === 0 ? null : next)
+                }}
                 className="w-full h-1.5 bg-[var(--paper-border)] rounded-lg appearance-none cursor-pointer accent-[var(--ink-primary)]"
               />
+              {budgetUsd !== null &&
+                assessment?.cost.total_cost_usd != null &&
+                assessment.cost.total_cost_usd > budgetUsd && (
+                  <div className="mt-1.5 text-xs text-[#b45309]">
+                    {t.wizard.budgetExceedsQuote} (${assessment.cost.total_cost_usd.toFixed(2)})
+                  </div>
+                )}
             </div>
 
             {/* Advanced Compiler & Layout Options Drawer */}
@@ -593,6 +610,7 @@ export function NewJobWizard() {
                         }}
                         className="w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs font-medium"
                       >
+                        <option value="auto">{t.wizard.domainAuto}</option>
                         <option value="general">{t.wizard.domainGeneral}</option>
                         <option value="textbook">{t.wizard.domainTextbook}</option>
                         <option value="paper">{t.wizard.domainPaper}</option>
@@ -664,6 +682,31 @@ export function NewJobWizard() {
                     <p className="text-xs text-[var(--ink-muted)] mt-1">
                       {t.wizard.glossaryPathHelp}
                     </p>
+                  </div>
+
+                  {/* Rehearsal: zero-token dry run through the same pipeline */}
+                  <div className="pt-3 border-t border-[var(--paper-border)]">
+                    <label className="flex items-start gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={dryRun}
+                        onChange={(e) => setDryRun(e.target.checked)}
+                        className="mt-0.5 h-3.5 w-3.5 rounded border-[var(--paper-border)] accent-[var(--ink-primary)] cursor-pointer"
+                      />
+                      <span>
+                        <span className="text-xs font-semibold text-[var(--ink-primary)]">
+                          {t.wizard.rehearsalLabel}
+                        </span>
+                        <span className="block text-xs text-[var(--ink-muted)] mt-0.5">
+                          {t.wizard.rehearsalHelp}
+                        </span>
+                      </span>
+                    </label>
+                    {dryRun && (
+                      <div className="mt-2 rounded-[5px] border border-[#b45309]/30 bg-[#b45309]/5 p-2 text-xs text-[#b45309]">
+                        {t.wizard.rehearsalActiveWarning}
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

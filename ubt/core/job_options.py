@@ -111,6 +111,34 @@ def profile_name_is_valid(profile: str) -> bool:
     return bool(profile) and PROFILE_NAME_RE.fullmatch(profile) is not None
 
 
+def resolve_profile_name(profile: str | None, input_path: str | Path | None = None) -> str:
+    """Resolve ``auto`` to a concrete domain profile, once, for every surface.
+
+    ``auto`` used to be a CLI-only convenience: ``ubt translate --profile auto``
+    probed the document and picked ``paper``/``fiction``/``semiconductor``/…,
+    while REST/MCP/Web passing the same string fell through to
+    ``seed_entries_for_profile("auto")`` — an unknown directory, so the run
+    silently started with an empty seed glossary and no error. The probe
+    (``analyze_archetype`` + ``infer_profile_from_archetype``) is cheap and
+    never raises; a missing/unreadable file resolves to ``general``, matching
+    the CLI's old fallback.
+    """
+    name = (profile or "").strip() or "general"
+    if name.lower() != "auto":
+        return name
+    if input_path is None:
+        return "general"
+    path = Path(input_path)
+    if not path.exists():
+        return "general"
+    try:
+        from ubt.core.archetype import analyze_archetype, infer_profile_from_archetype
+
+        return infer_profile_from_archetype(analyze_archetype(path), path=path)
+    except Exception:  # the probe must never fail a job submission
+        return "general"
+
+
 # Request keys whose name differs from the UBTConfig field they set.
 _REQUEST_KEY_ALIASES: dict[str, str] = {"glossary": "glossary_path"}
 
@@ -247,15 +275,21 @@ def apply_config_overrides(base: UBTConfig, overrides: Mapping[str, Any]) -> UBT
 def run_kwargs_from_request(request: Mapping[str, Any]) -> dict[str, Any]:
     """Extract the ``PipelineOrchestrator.run`` keys a request carries.
 
-    ``profile`` is the request's name for the run's ``profile_name``.
-    ``start_chapter``/``max_chapters`` ride along here too, ensuring chapter-window
-    arguments pass correctly across CLI, API, MCP, and queue submission boundaries.
-    Keys the request does not carry stay absent so ``run()``'s own defaults apply.
+    ``profile`` is the request's name for the run's ``profile_name``, resolved
+    through :func:`resolve_profile_name` so ``auto`` probes the document here —
+    at the one point every surface (CLI, API, MCP, queue) passes through —
+    instead of being a CLI-only convenience that silently became an empty
+    glossary on the other three. ``start_chapter``/``max_chapters`` ride along
+    too, ensuring chapter-window arguments pass correctly across every
+    submission boundary. Keys the request does not carry stay absent so
+    ``run()``'s own defaults apply.
     """
     kwargs: dict[str, Any] = {
         "target_lang": request.get("target_lang", "zh"),
         "source_lang": request.get("source_lang", "en"),
-        "profile_name": request.get("profile", "general"),
+        "profile_name": resolve_profile_name(
+            request.get("profile", "general"), request.get("input_path")
+        ),
         "job_id": request.get("job_id"),
     }
     start = request.get("start_chapter")
