@@ -453,17 +453,19 @@ class PipelineOrchestrator:
             )
 
     def _runtime_qe_runner(self, source_lang: str, target_lang: str) -> BaseQERunner:
-        """Bind the default QE runner to the run's language pair.
+        """Bind the run's language pair for the QE runner.
 
-        Injected runners are the caller's responsibility and pass through
-        unchanged. Without this, the heuristic runner would keep its
-        construction-time ZH/EN ``FastPassFilter`` and score every non-ZH
-        repair candidate with the wrong script-density threshold.
+        Injected runners pass through ``with_languages`` too: every runner's
+        implementation returns the same instance when the pair already
+        matches, and a fresh/rebound instance otherwise — so a shared runner
+        (the API's one instance, concurrent jobs) never scores another job
+        with this job's language-pair-dependent thresholds, and an injected
+        SubprocessQERunner no longer keeps its construction-time en→zh
+        heuristic for every pair.
         """
+        # Fresh run, fresh residency attempt (the API shares one runner).
         if self._qe_runner_explicit:
-            # Fresh run, fresh residency attempt (the API shares one runner).
             self.qe_runner.reset_residency()
-            return self.qe_runner
         return self.qe_runner.with_languages(source_lang=source_lang, target_lang=target_lang)
 
     def _runtime_repair_loop(self, qe_runner: BaseQERunner) -> RepairLoop:

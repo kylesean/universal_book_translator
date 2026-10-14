@@ -17,6 +17,7 @@ quality gate refuses to auto-pass via ``STRUCTURAL_DEFECT_MARKERS``.
 """
 
 import asyncio
+import copy
 import json
 import logging
 import os
@@ -216,11 +217,22 @@ class SubprocessQERunner(BaseQERunner):
         self._neural_unavailable = False
 
     def with_languages(self, source_lang: str, target_lang: str) -> "SubprocessQERunner":
-        """Bind the language pair for the in-process fallback heuristic."""
-        if (self._source_lang, self._target_lang) != (source_lang, target_lang):
-            self._source_lang, self._target_lang = source_lang, target_lang
-            self._heuristic = None
-        return self
+        """Bind the language pair for the in-process fallback heuristic.
+
+        Returns a NEW instance when the pair differs: this runner is shared
+        across concurrent jobs (the API holds one), and mutating
+        ``self._source_lang`` in place let job B's rebind leak into job A's
+        in-flight scoring mid-run. Same pair returns self, the shared cheap
+        path every caller with a matching pair takes.
+        """
+        if (self._source_lang, self._target_lang) == (source_lang, target_lang):
+            return self
+        rebound = copy.copy(self)
+        rebound._source_lang = source_lang
+        rebound._target_lang = target_lang
+        # The old instance may hold a heuristic built for the OLD pair.
+        rebound._heuristic = None
+        return rebound
 
     def with_glossary(self, glossary: list[dict[str, Any]] | None) -> "SubprocessQERunner":
         """Bind the run's glossary for the in-process fallback heuristic.
