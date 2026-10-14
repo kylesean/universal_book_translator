@@ -508,3 +508,132 @@ class JobStatusResponse(ProgressSnapshot):
     # billed translation — surfaced so a keyless server can never report a mock
     # run as a finished delivery without saying so.
     rehearsal: bool = False
+
+
+# --------------------------------------------------------------------------- #
+# Response models for the workbench/asset endpoints.
+#
+# These routes returned bare JSONResponse dicts, so the OpenAPI schema could
+# not describe them and the web client typed the payloads as Record<string,
+# any> — the frontend then re-declared each field by hand and could not tell
+# when the server changed one. Declaring the shapes here makes the generated
+# types the contract (2026-10-14 review, W4-5).
+# --------------------------------------------------------------------------- #
+
+
+class SegmentItem(BaseModel):
+    """One finalized block as the workbench grid shows it.
+
+    Mirrors :func:`ubt.api.review.serialize_segment`; that function is the
+    runtime owner, this is the published shape.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    block_id: str
+    spine_index: int
+    page: int | None = None
+    block_type: str
+    status: str
+    source_text: str
+    target_text: str
+    mtqe_score: float | None = None
+    error_flags: list[str] = Field(default_factory=list)
+    issues: list[str] = Field(default_factory=list)
+    human_verified: bool = False
+    tm_hit: bool = False
+    repair_rounds: int = 0
+    glossary_hits: list[str] = Field(default_factory=list)
+    mqm_severity: str | None = None
+    mqm_spans: list[dict[str, Any]] = Field(default_factory=list)
+    provenance: dict[str, Any] = Field(default_factory=dict)
+
+
+class SegmentListResponse(BaseModel):
+    """A page of segments plus the filtered total."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    job_id: str
+    total: int
+    segments: list[SegmentItem]
+
+
+class IssueCountsResponse(BaseModel):
+    """The fault ribbon: counts by issue kind and by blocking status."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    job_id: str
+    counts: dict[str, int]
+    status: dict[str, int]
+    total_issues: int
+    term_drift: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class DeliverableItem(BaseModel):
+    """One file a finished job actually left on disk."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    key: str
+    label: str
+    filename: str
+    size_bytes: int
+    media_type: str
+
+
+class DeliverableListResponse(BaseModel):
+    """The deliverables endpoint's payload."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    job_id: str
+    deliverables: list[DeliverableItem]
+
+
+class GlossaryResponse(BaseModel):
+    """The shared glossary's current contents."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    path: str
+    terms: list[dict[str, str]]
+
+
+class GlossaryDeleteResponse(GlossaryResponse):
+    """A delete also reports whether the source was present."""
+
+    removed: bool
+
+
+class GlossaryConflictsResponse(BaseModel):
+    """Sources with more than one configured target rendering."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    conflicts: list[dict[str, Any]]
+
+
+class TMEntryItem(BaseModel):
+    """One translation-memory row as the console lists it."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: int
+    src_lang: str
+    tgt_lang: str
+    source_text: str
+    target_text: str
+    provenance: str
+    domain: str
+    use_count: int
+
+
+class TMListResponse(BaseModel):
+    """A page of the shared translation memory."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    total: int
+    entries: list[TMEntryItem]

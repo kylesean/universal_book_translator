@@ -11,7 +11,12 @@ from typing import Any
 from fastapi import FastAPI, Header, HTTPException, Query, status
 from fastapi.responses import JSONResponse, Response
 
-from ubt.api.models import SegmentEditRequest, TermPropagationRequest
+from ubt.api.models import (
+    IssueCountsResponse,
+    SegmentEditRequest,
+    SegmentListResponse,
+    TermPropagationRequest,
+)
 from ubt.api.review import (
     ISSUE_KINDS,
     ReviewBlockNotFound,
@@ -51,7 +56,7 @@ def register_review_routes(api_app: FastAPI, scope: ApiScope) -> None:
     _managed_dir = scope.managed_dir
 
     # -- L3 Review Workbench (segments + fault ribbon + human edit) -----------
-    @api_app.get("/jobs/{job_id}/segments", tags=["Jobs"])
+    @api_app.get("/jobs/{job_id}/segments", response_model=SegmentListResponse, tags=["Jobs"])
     async def list_segments(
         job_id: str,
         status_filter: str | None = Query(default=None, alias="status"),
@@ -90,7 +95,7 @@ def register_review_routes(api_app: FastAPI, scope: ApiScope) -> None:
             }
         )
 
-    @api_app.get("/jobs/{job_id}/issues", tags=["Jobs"])
+    @api_app.get("/jobs/{job_id}/issues", response_model=IssueCountsResponse, tags=["Jobs"])
     async def list_issues(
         job_id: str, x_ubt_tenant: str | None = Header(default=None)
     ) -> JSONResponse:

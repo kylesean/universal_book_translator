@@ -11,6 +11,7 @@ from typing import Any
 from fastapi import FastAPI, Header, HTTPException, status
 from fastapi.responses import FileResponse, JSONResponse
 
+from ubt.api.models import DeliverableListResponse
 from ubt.api.routes.shared import (
     DELIVERABLE_LABELS,
     cross_tenant_404,
@@ -215,6 +216,7 @@ def register_artifact_routes(api_app: FastAPI, scope: ApiScope) -> None:
 
     @api_app.get(
         "/jobs/{job_id}/deliverables",
+        response_model=DeliverableListResponse,
         tags=["Jobs"],
     )
     async def list_deliverables(

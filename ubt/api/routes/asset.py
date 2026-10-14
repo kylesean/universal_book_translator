@@ -21,9 +21,13 @@ from ubt.api.assets import (
     remove_glossary_term,
 )
 from ubt.api.models import (
+    GlossaryConflictsResponse,
+    GlossaryDeleteResponse,
+    GlossaryResponse,
     GlossaryTermRequest,
     TMevictRequest,
     TMImportRequest,
+    TMListResponse,
 )
 from ubt.api.routes.shared import UNPROCESSABLE_ENTITY
 from ubt.api.scope import ApiScope
@@ -100,7 +104,7 @@ def register_asset_routes(api_app: FastAPI, scope: ApiScope) -> None:
             ) from exc
         return profile
 
-    @api_app.get("/assets/glossary", tags=["Assets"])
+    @api_app.get("/assets/glossary", response_model=GlossaryResponse, tags=["Assets"])
     async def get_glossary() -> JSONResponse:
         path = _resolved_glossary_path()
         try:
@@ -109,7 +113,7 @@ def register_asset_routes(api_app: FastAPI, scope: ApiScope) -> None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
         return JSONResponse({"path": path.name, "terms": terms})
 
-    @api_app.post("/assets/glossary", tags=["Assets"])
+    @api_app.post("/assets/glossary", response_model=GlossaryResponse, tags=["Assets"])
     async def upsert_glossary_term(req: GlossaryTermRequest) -> JSONResponse:
         if not req.target.strip():
             raise HTTPException(
@@ -124,7 +128,7 @@ def register_asset_routes(api_app: FastAPI, scope: ApiScope) -> None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
         return JSONResponse({"path": path.name, "terms": terms})
 
-    @api_app.delete("/assets/glossary", tags=["Assets"])
+    @api_app.delete("/assets/glossary", response_model=GlossaryDeleteResponse, tags=["Assets"])
     async def delete_glossary_term(source: str) -> JSONResponse:
         path = _resolved_glossary_path()
         try:
@@ -134,7 +138,11 @@ def register_asset_routes(api_app: FastAPI, scope: ApiScope) -> None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
         return JSONResponse({"path": path.name, "removed": removed, "terms": terms})
 
-    @api_app.get("/assets/glossary/conflicts", tags=["Assets"])
+    @api_app.get(
+        "/assets/glossary/conflicts",
+        response_model=GlossaryConflictsResponse,
+        tags=["Assets"],
+    )
     async def get_glossary_conflicts() -> JSONResponse:
         """Sources configured with more than one target rendering (PRD §4.4.2)."""
         path = _resolved_glossary_path()
@@ -144,7 +152,7 @@ def register_asset_routes(api_app: FastAPI, scope: ApiScope) -> None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
         return JSONResponse({"conflicts": detect_glossary_conflicts(terms)})
 
-    @api_app.get("/assets/tm", tags=["Assets"])
+    @api_app.get("/assets/tm", response_model=TMListResponse, tags=["Assets"])
     async def get_translation_memory(
         limit: int = 200,
         offset: int = 0,

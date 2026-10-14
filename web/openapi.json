@@ -1471,7 +1471,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/DeliverableListResponse"
+                }
               }
             }
           },
@@ -1710,7 +1712,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SegmentListResponse"
+                }
               }
             }
           },
@@ -1799,7 +1803,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/IssueCountsResponse"
+                }
               }
             }
           },
@@ -2626,7 +2632,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/GlossaryResponse"
+                }
               }
             }
           },
@@ -2697,7 +2705,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/GlossaryResponse"
+                }
               }
             }
           },
@@ -2767,7 +2777,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/GlossaryDeleteResponse"
+                }
               }
             }
           },
@@ -2831,7 +2843,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/GlossaryConflictsResponse"
+                }
               }
             }
           },
@@ -2946,7 +2960,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/TMListResponse"
+                }
               }
             }
           },
@@ -3516,6 +3532,62 @@
         ],
         "title": "Body_upload_source_document_jobs_upload_post"
       },
+      "DeliverableItem": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "filename": {
+            "type": "string",
+            "title": "Filename"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "title": "Size Bytes"
+          },
+          "media_type": {
+            "type": "string",
+            "title": "Media Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "label",
+          "filename",
+          "size_bytes",
+          "media_type"
+        ],
+        "title": "DeliverableItem",
+        "description": "One file a finished job actually left on disk."
+      },
+      "DeliverableListResponse": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "title": "Job Id"
+          },
+          "deliverables": {
+            "items": {
+              "$ref": "#/components/schemas/DeliverableItem"
+            },
+            "type": "array",
+            "title": "Deliverables"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id",
+          "deliverables"
+        ],
+        "title": "DeliverableListResponse",
+        "description": "The deliverables endpoint's payload."
+      },
       "ExtractionStrategy": {
         "type": "string",
         "enum": [
@@ -3526,6 +3598,79 @@
         ],
         "title": "ExtractionStrategy",
         "description": "Output extraction strategy."
+      },
+      "GlossaryConflictsResponse": {
+        "properties": {
+          "conflicts": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Conflicts"
+          }
+        },
+        "type": "object",
+        "required": [
+          "conflicts"
+        ],
+        "title": "GlossaryConflictsResponse",
+        "description": "Sources with more than one configured target rendering."
+      },
+      "GlossaryDeleteResponse": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "terms": {
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Terms"
+          },
+          "removed": {
+            "type": "boolean",
+            "title": "Removed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "terms",
+          "removed"
+        ],
+        "title": "GlossaryDeleteResponse",
+        "description": "A delete also reports whether the source was present."
+      },
+      "GlossaryResponse": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "terms": {
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Terms"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "terms"
+        ],
+        "title": "GlossaryResponse",
+        "description": "The shared glossary's current contents."
       },
       "GlossaryTermRequest": {
         "properties": {
@@ -3562,6 +3707,49 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "IssueCountsResponse": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "title": "Job Id"
+          },
+          "counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Counts"
+          },
+          "status": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Status"
+          },
+          "total_issues": {
+            "type": "integer",
+            "title": "Total Issues"
+          },
+          "term_drift": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Term Drift"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id",
+          "counts",
+          "status",
+          "total_issues"
+        ],
+        "title": "IssueCountsResponse",
+        "description": "The fault ribbon: counts by issue kind and by blocking status."
       },
       "JobAssessRequest": {
         "properties": {
@@ -4552,6 +4740,154 @@
         "title": "SegmentEditRequest",
         "description": "A human post-edit of one block's target text (L3 workbench)."
       },
+      "SegmentItem": {
+        "properties": {
+          "block_id": {
+            "type": "string",
+            "title": "Block Id"
+          },
+          "spine_index": {
+            "type": "integer",
+            "title": "Spine Index"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page"
+          },
+          "block_type": {
+            "type": "string",
+            "title": "Block Type"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "source_text": {
+            "type": "string",
+            "title": "Source Text"
+          },
+          "target_text": {
+            "type": "string",
+            "title": "Target Text"
+          },
+          "mtqe_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mtqe Score"
+          },
+          "error_flags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Error Flags"
+          },
+          "issues": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Issues"
+          },
+          "human_verified": {
+            "type": "boolean",
+            "title": "Human Verified",
+            "default": false
+          },
+          "tm_hit": {
+            "type": "boolean",
+            "title": "Tm Hit",
+            "default": false
+          },
+          "repair_rounds": {
+            "type": "integer",
+            "title": "Repair Rounds",
+            "default": 0
+          },
+          "glossary_hits": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Glossary Hits"
+          },
+          "mqm_severity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mqm Severity"
+          },
+          "mqm_spans": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Mqm Spans"
+          },
+          "provenance": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Provenance"
+          }
+        },
+        "type": "object",
+        "required": [
+          "block_id",
+          "spine_index",
+          "block_type",
+          "status",
+          "source_text",
+          "target_text"
+        ],
+        "title": "SegmentItem",
+        "description": "One finalized block as the workbench grid shows it.\n\nMirrors :func:`ubt.api.review.serialize_segment`; that function is the\nruntime owner, this is the published shape."
+      },
+      "SegmentListResponse": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "title": "Job Id"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "segments": {
+            "items": {
+              "$ref": "#/components/schemas/SegmentItem"
+            },
+            "type": "array",
+            "title": "Segments"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id",
+          "total",
+          "segments"
+        ],
+        "title": "SegmentListResponse",
+        "description": "A page of segments plus the filtered total."
+      },
       "SystemInfoResponse": {
         "properties": {
           "version": {
@@ -4640,6 +4976,55 @@
         "title": "SystemInfoResponse",
         "description": "The console's security-boundary panel: where this server is reachable and\nwhat it is allowed to touch."
       },
+      "TMEntryItem": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "src_lang": {
+            "type": "string",
+            "title": "Src Lang"
+          },
+          "tgt_lang": {
+            "type": "string",
+            "title": "Tgt Lang"
+          },
+          "source_text": {
+            "type": "string",
+            "title": "Source Text"
+          },
+          "target_text": {
+            "type": "string",
+            "title": "Target Text"
+          },
+          "provenance": {
+            "type": "string",
+            "title": "Provenance"
+          },
+          "domain": {
+            "type": "string",
+            "title": "Domain"
+          },
+          "use_count": {
+            "type": "integer",
+            "title": "Use Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "src_lang",
+          "tgt_lang",
+          "source_text",
+          "target_text",
+          "provenance",
+          "domain",
+          "use_count"
+        ],
+        "title": "TMEntryItem",
+        "description": "One translation-memory row as the console lists it."
+      },
       "TMImportRequest": {
         "properties": {
           "format": {
@@ -4690,6 +5075,28 @@
         ],
         "title": "TMImportRequest",
         "description": "Import translation-memory pairs from a TMX or JSON payload (L4 assets)."
+      },
+      "TMListResponse": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/TMEntryItem"
+            },
+            "type": "array",
+            "title": "Entries"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "entries"
+        ],
+        "title": "TMListResponse",
+        "description": "A page of the shared translation memory."
       },
       "TMevictRequest": {
         "properties": {

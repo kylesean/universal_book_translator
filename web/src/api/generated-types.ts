@@ -857,11 +857,73 @@ export interface components {
             file: string;
         };
         /**
+         * DeliverableItem
+         * @description One file a finished job actually left on disk.
+         */
+        DeliverableItem: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Filename */
+            filename: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Media Type */
+            media_type: string;
+        };
+        /**
+         * DeliverableListResponse
+         * @description The deliverables endpoint's payload.
+         */
+        DeliverableListResponse: {
+            /** Job Id */
+            job_id: string;
+            /** Deliverables */
+            deliverables: components["schemas"]["DeliverableItem"][];
+        };
+        /**
          * ExtractionStrategy
          * @description Output extraction strategy.
          * @enum {string}
          */
         ExtractionStrategy: "xml_tag" | "raw" | "cp" | "auto";
+        /**
+         * GlossaryConflictsResponse
+         * @description Sources with more than one configured target rendering.
+         */
+        GlossaryConflictsResponse: {
+            /** Conflicts */
+            conflicts: {
+                [key: string]: unknown;
+            }[];
+        };
+        /**
+         * GlossaryDeleteResponse
+         * @description A delete also reports whether the source was present.
+         */
+        GlossaryDeleteResponse: {
+            /** Path */
+            path: string;
+            /** Terms */
+            terms: {
+                [key: string]: string;
+            }[];
+            /** Removed */
+            removed: boolean;
+        };
+        /**
+         * GlossaryResponse
+         * @description The shared glossary's current contents.
+         */
+        GlossaryResponse: {
+            /** Path */
+            path: string;
+            /** Terms */
+            terms: {
+                [key: string]: string;
+            }[];
+        };
         /**
          * GlossaryTermRequest
          * @description One glossary term to add to (or remove from) the configured glossary file.
@@ -883,6 +945,28 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /**
+         * IssueCountsResponse
+         * @description The fault ribbon: counts by issue kind and by blocking status.
+         */
+        IssueCountsResponse: {
+            /** Job Id */
+            job_id: string;
+            /** Counts */
+            counts: {
+                [key: string]: number;
+            };
+            /** Status */
+            status: {
+                [key: string]: number;
+            };
+            /** Total Issues */
+            total_issues: number;
+            /** Term Drift */
+            term_drift?: {
+                [key: string]: unknown;
+            }[];
         };
         /**
          * JobAssessRequest
@@ -1387,6 +1471,74 @@ export interface components {
             target_text: string;
         };
         /**
+         * SegmentItem
+         * @description One finalized block as the workbench grid shows it.
+         *
+         *     Mirrors :func:`ubt.api.review.serialize_segment`; that function is the
+         *     runtime owner, this is the published shape.
+         */
+        SegmentItem: {
+            /** Block Id */
+            block_id: string;
+            /** Spine Index */
+            spine_index: number;
+            /** Page */
+            page?: number | null;
+            /** Block Type */
+            block_type: string;
+            /** Status */
+            status: string;
+            /** Source Text */
+            source_text: string;
+            /** Target Text */
+            target_text: string;
+            /** Mtqe Score */
+            mtqe_score?: number | null;
+            /** Error Flags */
+            error_flags?: string[];
+            /** Issues */
+            issues?: string[];
+            /**
+             * Human Verified
+             * @default false
+             */
+            human_verified: boolean;
+            /**
+             * Tm Hit
+             * @default false
+             */
+            tm_hit: boolean;
+            /**
+             * Repair Rounds
+             * @default 0
+             */
+            repair_rounds: number;
+            /** Glossary Hits */
+            glossary_hits?: string[];
+            /** Mqm Severity */
+            mqm_severity?: string | null;
+            /** Mqm Spans */
+            mqm_spans?: {
+                [key: string]: unknown;
+            }[];
+            /** Provenance */
+            provenance?: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * SegmentListResponse
+         * @description A page of segments plus the filtered total.
+         */
+        SegmentListResponse: {
+            /** Job Id */
+            job_id: string;
+            /** Total */
+            total: number;
+            /** Segments */
+            segments: components["schemas"]["SegmentItem"][];
+        };
+        /**
          * SystemInfoResponse
          * @description The console's security-boundary panel: where this server is reachable and
          *     what it is allowed to touch.
@@ -1438,6 +1590,28 @@ export interface components {
             wal_status?: string | null;
         };
         /**
+         * TMEntryItem
+         * @description One translation-memory row as the console lists it.
+         */
+        TMEntryItem: {
+            /** Id */
+            id: number;
+            /** Src Lang */
+            src_lang: string;
+            /** Tgt Lang */
+            tgt_lang: string;
+            /** Source Text */
+            source_text: string;
+            /** Target Text */
+            target_text: string;
+            /** Provenance */
+            provenance: string;
+            /** Domain */
+            domain: string;
+            /** Use Count */
+            use_count: number;
+        };
+        /**
          * TMImportRequest
          * @description Import translation-memory pairs from a TMX or JSON payload (L4 assets).
          */
@@ -1470,6 +1644,16 @@ export interface components {
              * @enum {string}
              */
             provenance: "machine" | "human_pe";
+        };
+        /**
+         * TMListResponse
+         * @description A page of the shared translation memory.
+         */
+        TMListResponse: {
+            /** Total */
+            total: number;
+            /** Entries */
+            entries: components["schemas"]["TMEntryItem"][];
         };
         /**
          * TMevictRequest
@@ -2163,7 +2347,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["DeliverableListResponse"];
                 };
             };
             /** @description Validation Error */
@@ -2241,7 +2425,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["SegmentListResponse"];
                 };
             };
             /** @description Validation Error */
@@ -2277,7 +2461,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["IssueCountsResponse"];
                 };
             };
             /** @description Validation Error */
@@ -2613,7 +2797,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["GlossaryResponse"];
                 };
             };
             /** @description Validation Error */
@@ -2650,7 +2834,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["GlossaryResponse"];
                 };
             };
             /** @description Validation Error */
@@ -2685,7 +2869,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["GlossaryDeleteResponse"];
                 };
             };
             /** @description Validation Error */
@@ -2718,7 +2902,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["GlossaryConflictsResponse"];
                 };
             };
             /** @description Validation Error */
@@ -2756,7 +2940,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["TMListResponse"];
                 };
             };
             /** @description Validation Error */
