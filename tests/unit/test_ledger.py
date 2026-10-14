@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -923,3 +924,18 @@ def test_migration_v14_is_idempotent_on_reopen(tmp_path: Path) -> None:
         assert ledger.get_job_status("nonexistent") is None
     finally:
         ledger.close()
+
+
+def test_ledger_staleness_helper(tmp_path: Path) -> None:
+    """The MCP disk fallback's staleness guard: fresh mtime is live, old is stale."""
+    from ubt.mcp.server import _LEDGER_STALENESS_S, _ledger_is_stale
+
+    ledger = tmp_path / "job_x.sqlite"
+    ledger.write_bytes(b"x")
+    assert _ledger_is_stale(ledger) is False
+
+    old = time.time() - _LEDGER_STALENESS_S - 10.0
+    import os
+
+    os.utime(ledger, (old, old))
+    assert _ledger_is_stale(ledger) is True

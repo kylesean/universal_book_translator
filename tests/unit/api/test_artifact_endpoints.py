@@ -214,3 +214,37 @@ def test_a_bad_job_id_is_refused_before_any_lookup(tmp_path: Path) -> None:
     client = TestClient(create_app(_config(tmp_path)))
     res = client.get("/jobs/..%2Fetc/report", headers=_AUTH)
     assert res.status_code in (400, 404, 422)
+
+
+def test_in_flight_download_and_report_return_409(tmp_path: Path) -> None:
+    """Verify in-flight polling of /download and /report returns HTTP 409 Conflict instead of 400."""
+    config = UBTConfig(
+        provider="openai",
+        api_key=SecretStr("test-provider-key"),
+        service_api_key=SecretStr(_API_KEY),
+        db_dir=tmp_path / "ledgers",
+        allowed_dirs=str(tmp_path),
+    )
+    app = create_app(config=config)
+    client = TestClient(app)
+
+    # Submit a job
+    input_file = tmp_path / "test.md"
+    input_file.write_text("# Chapter 1\nHello", encoding="utf-8")
+
+    res = client.post(
+        "/jobs/submit",
+        json={"input_path": str(input_file), "job_id": "test-inflight-409"},
+        headers=_AUTH,
+    )
+    assert res.status_code == 202
+
+    # Polling download before file is ready must return 409 Conflict
+    dl_res = client.get("/jobs/test-inflight-409/download", headers=_AUTH)
+    assert dl_res.status_code == 409
+    assert "not ready" in dl_res.json()["detail"]
+
+    # Polling report before report is generated must return 409 Conflict
+    rep_res = client.get("/jobs/test-inflight-409/report", headers=_AUTH)
+    assert rep_res.status_code == 409
+    assert "not yet generated" in rep_res.json()["detail"]

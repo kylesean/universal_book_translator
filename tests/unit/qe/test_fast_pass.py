@@ -594,3 +594,19 @@ def test_length_ratio_is_cjk_weighted_not_raw() -> None:
     )
     assert not truncated.passed
     assert "truncated" in truncated.reason
+
+
+def test_fast_pass_escaped_pipe_handling() -> None:
+    r"""Verify table checker does not treat escaped pipes \| as cell separators."""
+    # Row with 3 columns, middle column contains escaped pipe
+    row = r"| Col 1 | Col \| 2 | Col 3 |"
+    assert grid_columns(row) == 3
+
+    # Multi-row markdown grid shape
+    text = (
+        r"| Col 1 | Col \| 2 | Col 3 |" + "\n"
+        r"|---|---|---|" + "\n"
+        r"| A | B \| C | D |"
+    )
+    shape = markdown_grid_shape(text)
+    assert shape == [3, 3, 3]

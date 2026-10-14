@@ -163,17 +163,14 @@ _ACTIVITY_NAMED = re.compile(
     r"(_fixes?|_regressions?|_round\d+|_phase\d+)(_|$)|(_\d{4}_\d{2}_\d{2})$"
 )
 
-#: Pre-existing activity-named files, grandfathered so the gate can land without
-#: a risky mass move. Each pins real behavior across several modules; the cases
-#: belong in those modules' canonical files, but relocating 24 tests is a
-#: separate, reviewable change. The gate blocks *new* offenders meanwhile, and
-#: shrinking this set is the intended direction.
+#: A pre-existing activity-named file, grandfathered so the gate can land without
+#: a risky mass move. It pins real behavior across several modules; the cases
+#: belong in those modules' canonical files, but relocating them is a separate,
+#: reviewable change. The gate blocks *new* offenders meanwhile, and shrinking
+#: this set is the intended direction.
 _GRANDFATHERED_ACTIVITY_FILES = frozenset(
     {
         "tests/unit/test_adversarial_redteam_fixes.py",
-        "tests/unit/test_round3_p2_fixes.py",
-        "tests/unit/test_round3_review_fixes.py",
-        "tests/unit/test_round4_review_fixes.py",
     }
 )
 

@@ -17,17 +17,20 @@ Two defects in the durable queue / worker terminal path:
 
 from __future__ import annotations
 
+import asyncio
 import stat
 import sys
 from collections.abc import AsyncGenerator
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
 from ubt.core.config import UBTConfig
-from ubt.core.engine.events import TranslationProgressEvent
+from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.job_queue import JobQueue, JobStatus, QueuedJob
 from ubt.core.engine.job_worker import JobWorker
+from ubt.core.exceptions import LedgerError
 
 pytestmark = pytest.mark.fast
 
@@ -121,3 +124,69 @@ async def test_a_failed_first_attempt_persists_an_empty_snapshot_safely(tmp_path
     assert final is not None
     assert final.status is JobStatus.FAILED
     assert final.progress == {}
+
+
+@pytest.mark.asyncio
+async def test_job_worker_execute_terminal_failure_isolation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify JobWorker.execute isolates terminal queue write failure and does not crash slot."""
+    config = UBTConfig(provider="mock")
+    queue = JobQueue(tmp_path / "test_queue.db")
+    job = queue.enqueue("test-job-fail", {"input_path": "book.epub"})
+
+    # Complete raises LedgerError (e.g. transient SQLite error during terminal status update)
+    monkeypatch.setattr(
+        queue, "complete", MagicMock(side_effect=LedgerError("Database disk I/O error"))
+    )
+
+    async def failing_event_source(
+        job: QueuedJob, cfg: UBTConfig, cancel_token: asyncio.Event | None = None
+    ) -> AsyncGenerator[TranslationProgressEvent, None]:
+        raise RuntimeError("LLM synthesis failure")
+        if False:
+            yield TranslationProgressEvent(job_id=job.job_id, stage="done")
+
+    worker = JobWorker(
+        queue=queue,
+        config=config,
+        worker_id="test-w1",
+        event_source=failing_event_source,
+    )
+    res = await worker.execute(job)
+    # execute handles the exception cleanly without bubbling up to crash the worker process
+    assert res is True
+    assert worker.failed_jobs == 1
+
+
+@pytest.mark.asyncio
+async def test_job_worker_cancellation_race_at_stream_end(tmp_path: Path) -> None:
+    config = UBTConfig(provider="openai")
+    queue = JobQueue(tmp_path / "test_queue.db")
+    queue.enqueue("test-job-cancel-race", {"input_path": "book.epub"})
+    claimed = queue.claim(worker_id="test-w1")
+    assert claimed is not None
+
+    async def finishing_event_source(
+        j: QueuedJob, cfg: UBTConfig, cancel_token: asyncio.Event | None = None
+    ) -> AsyncGenerator[TranslationProgressEvent, None]:
+        # User requested cancel right as events finished
+        queue.request_cancel(j.job_id)
+        yield TranslationProgressEvent(
+            job_id=j.job_id,
+            event_type=EventType.EXPORT_COMPLETED,
+            total_blocks=1,
+            completed_blocks=1,
+        )
+
+    worker = JobWorker(
+        queue=queue,
+        config=config,
+        worker_id="test-w1",
+        event_source=finishing_event_source,
+    )
+    res = await worker.execute(claimed)
+    assert res is True
+    final_job = queue.get(claimed.job_id)
+    assert final_job is not None
+    assert final_job.status == JobStatus.CANCELLED

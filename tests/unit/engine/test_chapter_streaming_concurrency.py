@@ -11,7 +11,7 @@ import pytest
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.facts import Scoring, Terminology
 from ubt.core.engine.stage_context import StageContext
-from ubt.core.engine.stages.chapter_streaming import run_chapter_streaming_pipeline
+from ubt.core.engine.stages.chapter_streaming import _DONE, run_chapter_streaming_pipeline
 from ubt.core.ir.models import BookManifest, ChapterMeta
 
 pytestmark = pytest.mark.fast
@@ -203,3 +203,28 @@ async def test_a_cancelled_stream_drains_the_per_chapter_generators(
     # Give the worker tasks a tick to unwind after the closure.
     await asyncio.sleep(0.05)
     assert "c1" in closed, "the in-flight chapter's stage generator was not drained"
+
+
+@pytest.mark.asyncio
+async def test_chapter_streaming_event_queue_backpressure() -> None:
+    """Verify supervisor waits for event_queue space when putting _DONE rather than dropping it."""
+    event_queue: asyncio.Queue[object] = asyncio.Queue(maxsize=1)
+    # Fill event queue to simulate saturation
+    await event_queue.put("pre-existing-event")
+
+    # In a background task, read one event after a small delay
+    async def drain_event() -> None:
+        await asyncio.sleep(0.05)
+        await event_queue.get()
+        event_queue.task_done()
+
+    drain_task = asyncio.create_task(drain_event())
+
+    # Simulated supervisor putting _DONE with backpressure
+    put_done_coro = event_queue.put(_DONE)
+    await asyncio.wait_for(put_done_coro, timeout=1.0)
+    await drain_task
+
+    # Queue should now have _DONE
+    item = await event_queue.get()
+    assert item is _DONE

@@ -18,7 +18,9 @@ import pytest
 from ubt.adapters.docx.adapter import DOCXAdapter
 from ubt.adapters.epub.adapter import EPUBAdapter
 from ubt.adapters.html.adapter import HTMLAdapter
+from ubt.adapters.markdown.adapter import _format_markdown_block
 from ubt.core.ir.models import IRBlock
+from ubt.model.ast import Heading, ListItem, Span
 
 pytestmark = pytest.mark.fast
 
@@ -217,3 +219,37 @@ def test_epub_natural_sort_orders_embedded_numbers_numerically() -> None:
     assert sorted(names, key=_natural_sort_key) == ["ch1.xhtml", "ch2.xhtml", "ch10.xhtml"]
     # A plain lexicographic sort would put ch10 before ch2.
     assert sorted(names) != sorted(names, key=_natural_sort_key)
+
+
+def test_markdown_adapter_heading_level_preservation() -> None:
+    """Verify MarkdownAdapter preserves heading levels from AST element even if raw_content has no '#'."""
+    h = Heading(id="h1", spine_index=0, span=Span(), text="Chapter Three", level=3)
+    block = IRBlock.from_element(h)
+    block.target_text = "第三章"
+    formatted = _format_markdown_block(block, "第三章")
+    assert formatted == "### 第三章"
+
+
+def test_markdown_adapter_list_item_preservation() -> None:
+    """Verify MarkdownAdapter preserves list markers and ordinals."""
+    # Unordered list item
+    li_unordered = ListItem(
+        id="li1",
+        spine_index=0,
+        span=Span(),
+        text="First point",
+        marker="- ",
+    )
+    block_u = IRBlock.from_element(li_unordered)
+    assert _format_markdown_block(block_u, "第一点") == "- 第一点"
+
+    # Ordered list item
+    li_ordered = ListItem(
+        id="li2",
+        spine_index=0,
+        span=Span(),
+        text="Second point",
+        marker="2. ",
+    )
+    block_o = IRBlock.from_element(li_ordered)
+    assert _format_markdown_block(block_o, "第二点") == "2. 第二点"

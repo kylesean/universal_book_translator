@@ -849,3 +849,53 @@ async def test_cancel_batch_job_posts_the_cancel() -> None:
     t, _rec = _batch_transport(handler)
     await t.cancel_batch_job("batch-1")
     assert "POST /v1/batches/batch-1/cancel" in seen
+
+
+@pytest.mark.asyncio
+async def test_transport_client_timeout_is_split() -> None:
+    """Connect/pool phases fail fast; only read/write get the full api_timeout.
+
+    A single-float timeout pinned a pool slot for the full 180s on a dead
+    endpoint before the connect phase gave up.
+    """
+    transport = OpenAIChatTransport(
+        api_key="k", base_url="https://api.example.com/v1", timeout=180.0
+    )
+    client = transport._get_client()
+    assert client.timeout.connect == 10.0
+    assert client.timeout.read == 180.0
+    assert client.timeout.write == 180.0
+    assert client.timeout.pool == 180.0
+    await transport.aclose()
+
+
+async def test_provider_shared_client_splits_connect_timeout() -> None:
+    """The provider's shared client must keep the fast connect timeout.
+
+    A bare ``timeout=self._timeout`` here silently overrode every transport's
+    own ``connect=10s`` (``BaseTransport._get_client`` returns the injected
+    client unchanged), pinning a pool slot for the full api_timeout on a dead
+    endpoint.
+    """
+    from ubt.core.router.provider import OpenAICompatibleProvider
+
+    provider = OpenAICompatibleProvider(api_key="k", timeout=180.0)
+    client = provider._shared_client
+    assert client.timeout.connect == 10.0
+    assert client.timeout.read == 180.0
+    assert client.timeout.write == 180.0
+    assert client.timeout.pool == 180.0
+    await client.aclose()
+
+
+def test_retry_after_ms_is_converted_to_seconds() -> None:
+    """A ``Retry-After-Ms`` header is milliseconds; the router sleeps seconds.
+
+    Passing ``20000`` through verbatim made a 429 retry sleep ~5.5 hours.
+    """
+    from ubt.core.router.transports.base import retry_after_seconds
+
+    assert retry_after_seconds(httpx.Headers({"retry-after": "20"})) == "20"
+    assert retry_after_seconds(httpx.Headers({"retry-after-ms": "20000"})) == "20.0"
+    assert retry_after_seconds(httpx.Headers({})) is None
+    assert retry_after_seconds(httpx.Headers({"retry-after-ms": "abc"})) is None

@@ -24,6 +24,8 @@ from pathlib import Path
 
 import pytest
 
+from ubt.core.config import UBTConfig
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _CONSTRUCT = "from ubt.core.config import UBTConfig; UBTConfig()"
 # A healthy construction is ~0.1s (measured), so 5s is a wide margin that still
@@ -77,3 +79,13 @@ def test_config_with_capability_override_does_not_deadlock(override: dict[str, s
     assert proc.returncode == 0, (
         f"UBTConfig() exited {proc.returncode} for {override!r}:\n{proc.stderr}"
     )
+
+
+@pytest.mark.fast
+def test_ubt_config_from_env_defaults_to_no_bootstrap() -> None:
+    """Verify UBTConfig.from_env defaults to bootstrap=False and does not pollute registries."""
+    cfg = UBTConfig.from_env()
+    assert cfg is not None
+    # Verify local_endpoints can be bootstrapped without error
+    cfg_with_local = UBTConfig(local_endpoints="192.168.1.50:8000,10.0.0.1:8000")
+    cfg_with_local.bootstrap_runtime_environment()

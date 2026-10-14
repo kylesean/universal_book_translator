@@ -159,3 +159,18 @@ def test_normalize_cjk_spacing_never_rewrites_protected_spans() -> None:
     out = normalize_cjk_spacing(text, "zh")
     assert "`中文 中文`" in out
     assert "你好世界" in out
+
+
+def test_cjk_spacing_formula_and_html_protection() -> None:
+    """Verify LaTeX math environments and HTML tags are protected from pangu spacing insertion."""
+    text = "这是公式\\(x = 1\\)测试。"
+    cleaned = apply_pangu_spacing(text)
+    assert "\\(x = 1\\)" in cleaned
+
+    text2 = "爱因斯坦提出\\[ E = mc^2 \\]公式。"
+    cleaned2 = apply_pangu_spacing(text2)
+    assert "\\[ E = mc^2 \\]" in cleaned2
+
+    text3 = "这是<code>int a = 1;</code>代码。"
+    cleaned3 = apply_pangu_spacing(text3)
+    assert "<code>int a = 1;</code>" in cleaned3

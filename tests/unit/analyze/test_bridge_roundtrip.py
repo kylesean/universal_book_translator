@@ -149,3 +149,9 @@ def test_block_type_and_flow_projection_matches_the_ir_vocabulary() -> None:
     assert by_id["c1"].skip_translate is True
     assert by_id["cap1"].flow_id is FlowID.MAIN_STORY  # region, not flow, carries it
     assert by_id["fn1"].flow_id is FlowID.FOOTNOTE
+
+
+def test_caption_region_kind_default() -> None:
+    """Verify Caption AST element defaults to RegionKind.CAPTION."""
+    c = Caption(id="c1", spine_index=0, span=Span(), text="Photo of the author")
+    assert c.region == RegionKind.CAPTION

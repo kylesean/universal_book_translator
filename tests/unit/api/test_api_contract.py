@@ -16,9 +16,10 @@ zero-token rehearsal, which is itself one of the pinned contracts).
 from __future__ import annotations
 
 import time
-from collections.abc import Iterator
+from collections.abc import AsyncGenerator, Iterator
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 from fastapi import HTTPException
@@ -26,11 +27,12 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from ubt.api.app import create_app
-from ubt.api.manager import JobManager
+from ubt.api.manager import JobManager, JobRecord
 from ubt.api.models import JobSubmitRequest
 from ubt.api.security import _require_api_key_gate, resolve_secure_path, session_cookie_value
 from ubt.core.config import UBTConfig
 from ubt.core.engine.job_queue import JobStatus
+from ubt.core.exceptions import BudgetExceededError
 from ubt.core.job_options import resolve_target_output
 
 _API_KEY = "test-key-contract"
@@ -785,3 +787,55 @@ def test_is_own_prior_output_directory_licenses_only_the_derived_deliverable(
     # A different file in that directory is NOT.
     victim = books / "someone_elses_manuscript.md"
     assert _is_own_prior_output("job-1", victim, queue, manager) is False
+
+
+@pytest.mark.asyncio
+async def test_job_manager_safe_error_formatting(tmp_path: Path) -> None:
+    """Verify safe domain errors (e.g. BudgetExceededError) are exposed directly while generic ones are masked."""
+    manager = JobManager()
+    dummy_input = tmp_path / "dummy.md"
+    dummy_input.write_text("hello", encoding="utf-8")
+    req = JobSubmitRequest(input_path=str(dummy_input))
+    record = JobRecord("test-err-fmt", req)
+    base_config = UBTConfig(
+        provider="openai",
+        api_key=SecretStr("test-provider-key"),
+        service_api_key=SecretStr(_API_KEY),
+    )
+
+    # 1. BudgetExceededError should be directly readable in record.error
+    with patch("ubt.core.engine.job_runner.PipelineOrchestrator") as mock_orch_cls:
+
+        async def mock_run_budget(*args: object, **kwargs: object) -> AsyncGenerator[Any, None]:
+            raise BudgetExceededError("Budget cap of $5.00 exceeded")
+            if False:
+                yield None
+
+        mock_orch_cls.return_value.run = mock_run_budget
+        await manager.execute_job(record, base_config)
+
+    assert record.status == "failed"
+    assert record.error == "BudgetExceededError: Budget cap of $5.00 exceeded"
+
+    # 2. Sensitive internal exceptions must be masked to prevent data/credential leaks
+    with patch("ubt.core.engine.job_runner.PipelineOrchestrator") as mock_orch_cls:
+
+        async def mock_run_secret(*args: object, **kwargs: object) -> AsyncGenerator[Any, None]:
+            raise RuntimeError("Internal DB host 10.0.0.5 connection refused password=secret")
+            if False:
+                yield None
+
+        mock_orch_cls.return_value.run = mock_run_secret
+        await manager.execute_job(record, base_config)
+
+    assert "password=secret" not in (record.error or "")
+    assert record.error == f"RuntimeError (see server logs; job_id={record.job_id})"
+
+
+def test_job_submit_request_accepts_pdf_engine() -> None:
+    """Verify JobSubmitRequest validates and accepts pdf_engine."""
+    req = JobSubmitRequest(input_path="book.pdf", pdf_engine="pdfium")
+    assert req.pdf_engine == "pdfium"
+
+    req_auto = JobSubmitRequest(input_path="book.pdf", pdf_engine="auto")
+    assert req_auto.pdf_engine == "auto"

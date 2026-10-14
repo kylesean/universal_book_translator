@@ -22,13 +22,15 @@ network, no limiter wall-clock waits (the limiter is a pass-through stub).
 
 from __future__ import annotations
 
+import sqlite3
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
 
 from ubt.core.exceptions import BudgetExceededError, ModelProviderError
 from ubt.core.router.rate_limiter import AdaptiveTokenBucket
-from ubt.core.router.router import ModelRouter
+from ubt.core.router.router import ModelRouter, classify_provider_error
 
 pytestmark = pytest.mark.fast
 
@@ -269,3 +271,51 @@ def test_a_router_without_an_injected_limiter_builds_one_for_a_real_provider() -
     mock_router = ModelRouter(provider=MockModelProvider(), draft_model="m")
     # NullRateLimiter subclasses AdaptiveTokenBucket, so the exact type decides.
     assert type(mock_router.rate_limiter) is not AdaptiveTokenBucket
+
+
+def test_adaptive_token_bucket_smoothed_aimd() -> None:
+    """Verify AdaptiveTokenBucket increases capacity smoothly without massive step jumps."""
+    bucket = AdaptiveTokenBucket(initial_rpm=60, max_rpm=120)
+    assert bucket.capacity == 60.0
+
+    # 1 success should add a fraction (1 / 60), not +1.0
+    bucket.report_success()
+    assert 60.0 < bucket.capacity < 60.1
+    assert bucket._waiters == 0
+
+
+def test_router_quota_exhausted_fail_fast() -> None:
+    """Verify router treats 429 quota exhaustion as chain fail-fast instead of retrying all tiers."""
+    err = ModelProviderError(
+        "Rate limited",
+        details={
+            "status_code": 429,
+            "body": '{"error": {"message": "You exceeded your current quota, please check your plan and billing details.", "type": "insufficient_quota"}}',
+        },
+    )
+    action = classify_provider_error(err)
+    assert action.retryable is False
+    assert action.top_up_hint is True
+    assert action.reason == "quota_exhausted"
+
+
+def test_sqlite_shared_bucket_climbs_like_the_in_process_one(tmp_path: Path) -> None:
+    """The shared bucket must use the same additive-increase law (1/capacity).
+
+    A flat +1.0 let N workers reporting concurrently multiply the climb and
+    defeat the shared rate ceiling the bucket exists to enforce.
+    """
+    from ubt.core.router.rate_limiter import SqliteTokenBucket
+
+    path = tmp_path / "limiter.sqlite"
+    bucket = SqliteTokenBucket(path, initial_rpm=60, max_rpm=120)
+    bucket.report_success()
+
+    row = (
+        sqlite3.connect(path)
+        .execute("SELECT rpm_capacity FROM token_bucket WHERE key LIKE 'global@60rpm/%'")
+        .fetchone()
+    )
+    assert row is not None
+    # One success adds 1/60, not 1.0 — same law as AdaptiveTokenBucket.
+    assert 60.0 < row[0] < 60.1
