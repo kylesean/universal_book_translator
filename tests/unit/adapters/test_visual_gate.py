@@ -16,6 +16,7 @@ import pytest
 from PIL import Image, ImageDraw
 
 from ubt.adapters.pdf.visual_gate import (
+    VisualFinding,
     _ArtifactBBox,
     _ArtifactBox,
     text_occlusion_findings,
@@ -136,3 +137,111 @@ def test_pdf_struct_page_rotation(tmp_path: Path) -> None:
 
     rots = page_rotations(out)
     assert rots == {1: 0, 2: 90}
+
+
+# --------------------------------------------------------------------------- #
+# The gate's decision logic (pure; no PDF, no rendering).
+#
+# These were the uncovered 2/3 of the module: the pixel helpers had tests, but
+# the functions that decide whether an artifact may SHIP did not. Each branch
+# below is a delivery decision (2026-10-14 review, W5-3).
+# --------------------------------------------------------------------------- #
+
+
+def _finding(severity: str, code: str = "some_defect") -> VisualFinding:
+    return VisualFinding(severity=severity, code=code, message="m")
+
+
+def test_the_blocking_gate_returns_critical_only_when_enabled_and_short() -> None:
+    from ubt.adapters.pdf.visual_gate import blocking_gate_tripped
+
+    findings = [_finding("critical"), _finding("major"), _finding("info")]
+    tripped = blocking_gate_tripped(findings, total_pages=10, enabled=True)
+    assert [f.severity for f in tripped] == ["critical"]
+    # Disabled: the gate never blocks, even with criticals.
+    assert blocking_gate_tripped(findings, total_pages=10, enabled=False) == []
+
+
+def test_a_long_document_never_blocks() -> None:
+    """Long books fail OPEN (warn-only): the page window is the opt-in bound."""
+    from ubt.adapters.pdf.visual_gate import blocking_gate_tripped
+    from ubt.core.policy.layout_policy import QA_FULL_GATE_MAX_PAGES
+
+    findings = [_finding("critical")]
+    assert (
+        blocking_gate_tripped(findings, total_pages=QA_FULL_GATE_MAX_PAGES + 1, enabled=True) == []
+    )
+
+
+def test_zero_pages_means_not_measured_and_does_not_block() -> None:
+    from ubt.adapters.pdf.visual_gate import blocking_gate_tripped
+
+    assert blocking_gate_tripped([_finding("critical")], total_pages=0, enabled=True) == []
+
+
+def test_an_unreadable_artifact_fails_closed_even_when_disabled() -> None:
+    """``total_pages < 0`` is the pdf_page_count sentinel: nobody can read it.
+
+    The gate must not report passed=True on an artifact it could not measure,
+    regardless of the opt-in switch or the page window.
+    """
+    from ubt.adapters.pdf.visual_gate import blocking_gate_tripped
+
+    findings = [_finding("critical"), _finding("major")]
+    tripped = blocking_gate_tripped(findings, total_pages=-1, enabled=False)
+    assert [f.severity for f in tripped] == ["critical"]
+
+
+def test_a_missing_target_language_fails_closed_even_when_disabled() -> None:
+    """An artifact carrying none of the commissioned language is unshippable."""
+    from ubt.adapters.pdf.visual_gate import blocking_gate_tripped
+
+    absent = _finding("critical", code="target_language_absent")
+    tripped = blocking_gate_tripped([absent], total_pages=999, enabled=False)
+    assert tripped == [absent]
+    # A crashed gate is the same class: "unknown" must not read as a pass.
+    crashed = _finding("critical", code="visual_gate_crashed")
+    assert blocking_gate_tripped([crashed], total_pages=999, enabled=False) == [crashed]
+
+
+def test_a_sparse_target_language_major_fails_closed() -> None:
+    from ubt.adapters.pdf.visual_gate import blocking_gate_tripped
+
+    sparse = _finding("major", code="target_language_sparse")
+    assert blocking_gate_tripped([sparse], total_pages=999, enabled=False) == [sparse]
+    # A different major stays warn-only.
+    other = _finding("major", code="something_else")
+    assert blocking_gate_tripped([other], total_pages=999, enabled=False) == []
+
+
+def test_the_adaptive_budget_floors_short_books_and_caps_long_ones() -> None:
+    from ubt.adapters.pdf.visual_gate import adaptive_sample_budget
+
+    # Disabled / degenerate.
+    assert adaptive_sample_budget(0, 6) == 0
+    assert adaptive_sample_budget(10, 0) == 0
+    # Short books get full inspection (configured is a floor, not a ceiling).
+    assert adaptive_sample_budget(8, 6) == 8
+    assert adaptive_sample_budget(8, 100) == 8
+    # A long book gets a fixed anchor set, at least the configured floor.
+    long_budget = adaptive_sample_budget(900, 6)
+    assert long_budget >= 6
+    assert long_budget == adaptive_sample_budget(901, 6)  # constant past the band
+
+
+def test_the_sample_puts_flagged_pages_first_and_covers_the_anchors() -> None:
+    from ubt.adapters.pdf.visual_gate import select_sample_pages
+
+    # Degenerate inputs.
+    assert select_sample_pages(0, [1], 5) == []
+    assert select_sample_pages(10, [1], 0) == []
+    # Flagged pages win, out-of-range flags are dropped.
+    assert select_sample_pages(10, [3, 7, 99, 0], 2) == [3, 7]
+    # More flags than budget: the earliest flags fill it.
+    assert select_sample_pages(10, [5, 1, 9], 2) == [1, 5]
+    # A long book with no flags covers cover/TOC/tail.
+    sample = select_sample_pages(500, [], 5)
+    assert {1, 2, 500}.issubset(set(sample))
+    assert len(sample) <= 5
+    # Every returned page is inside the document.
+    assert all(1 <= page <= 500 for page in sample)
