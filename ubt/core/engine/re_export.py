@@ -145,7 +145,12 @@ def _build_services(
     adaptive_policy = AdaptivePolicy(
         fast_lane_bible=False,
         visual_blocking=config.visual_blocking_gate_enabled,
-        deterministic_glossary=False,
+        # Same source of truth as the original run's export: when the config
+        # opts the long route into deterministic glossary enforcement, a
+        # re-export must enforce it too — the old hard False produced a
+        # second, weaker delivery from the same ledger (enforced_spans N -> 0)
+        # with nothing flagging the difference.
+        deterministic_glossary=config.deterministic_glossary_long_route,
         reason="re-export (render-only; no route probe)",
     )
     return RunServices(

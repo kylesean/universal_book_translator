@@ -19,8 +19,7 @@ so the whole mitigation is *open the document per call*; both callers run
 under ``asyncio.to_thread`` and each renders one page per document open.
 
 DPI parity: ``render_page(dpi=N)`` is assumed to mean the same scale as
-``pdftoppm -r N`` (both N dots per 72pt inch). Frozen as verified by the
-size criterion in ``scripts/oxide_render_ab.py``; ``svg_diagram``'s
+``pdftoppm -r N`` (both N dots per 72pt inch). ``svg_diagram``'s
 ``bbox * dpi/72`` crop math silently depends on it.
 """
 

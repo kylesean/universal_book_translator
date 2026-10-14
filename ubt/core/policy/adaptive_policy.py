@@ -50,17 +50,24 @@ def resolve_adaptive_policy(
     del manifest  # kept in the signature: policy is a function of the document
     is_short = route_decision.mode == "short"
     # ``deterministic_glossary`` is the export-time literal term enforcement
-    # layer, and it is short-route only: on a whole book an Aho-Corasick
-    # substring swap can splice across word boundaries, so the book route leans
-    # on the bible + QE defenses instead. There is no config switch to force it
-    # on for books.
+    # layer. Short-route by default; ``deterministic_glossary_long_route``
+    # opts a whole book in (the enforcer's word-boundary, protected-span,
+    # approved-compound and jieba fail-closed guards make the old
+    # "Aho-Corasick splices across word boundaries" concern a measurable
+    # claim rather than a premise — enable after an on/off comparison on
+    # your own corpus).
     return AdaptivePolicy(
         fast_lane_bible=is_short,
         visual_blocking=is_short or config.visual_blocking_gate_enabled,
-        deterministic_glossary=is_short,
+        deterministic_glossary=is_short or config.deterministic_glossary_long_route,
         reason=(
             f"Canonical frozen-math publication pipeline ({route_decision.pages}pp"
             + (", fast-lane seed bible" if is_short else "")
+            + (
+                ", deterministic glossary (config opt-in)"
+                if config.deterministic_glossary_long_route
+                else ""
+            )
             + ")"
         ),
     )

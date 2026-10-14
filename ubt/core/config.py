@@ -556,6 +556,16 @@ class UBTConfig(BaseSettings):
     # CRITICAL visual findings are detected; default false keeps the visual report
     # + NEEDS_HUMAN quarantine without blocking long doc delivery.
     visual_blocking_gate_enabled: bool = False
+    # -- deterministic glossary enforcement on the long route ----------------
+    # The export-time literal term substitution (word-boundary + protected-span
+    # + compound + jieba fail-closed guards, see glossary_enforcer.py) is
+    # short-route only by default: the long route leans on the bible + QE
+    # defenses. The old "Aho-Corasick splices across word boundaries" concern
+    # predates those guards; run the on/off comparison on your own corpus
+    # (term_precision vs quarantine rate) before enabling it for books.
+    # Re-export reads the same flag, so a re-render enforces what the original
+    # run enforced instead of silently dropping the layer.
+    deterministic_glossary_long_route: bool = False
     # -- export coverage gate (fail-closed) --------------------------------
     # Share of blocks that must carry a target before export may render.
     # Without it, a run in which every block failed still produced a finished
