@@ -469,6 +469,15 @@ def _keeps_source(block: IRBlock) -> bool:
     disagree about what was supposed to be translated. A bibliography entry or
     an author affiliation is kept verbatim on purpose; re-rendering it through
     the target-text path would silently undo that decision.
+
+    Deliberately NOT ``ubt.core.content.adapt.kept_in_source``: that predicate
+    answers a different question ("does the delivery have no translation for
+    this block?", so ``BLOCKED_HUMAN`` and fail-closed render-skips count), and
+    the renderer must treat a quarantined block differently — it renders the
+    rejected *draft* (fail-open) rather than the source, which is the whole
+    point of ``_block_text``'s draft fallback. Merging the two would either
+    quarantine every rejected-but-translated block or ship the ``<mark>``
+    marker; both are wrong. Keep them apart, cross-referenced.
     """
     if block.policy_translate is False:
         return True

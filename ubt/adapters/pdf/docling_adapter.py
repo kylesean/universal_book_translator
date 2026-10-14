@@ -78,6 +78,24 @@ class _PDFRenderStackMixin:
     last_render_outcome: RenderOutcome | None
     _renderer: DoclingRenderStrategy
     _font_family: str | None
+    #: Engine hooks ``parse_stream`` calls; each adapter class provides them.
+    ocr_mode: str | None
+    ocr_endpoint: str | None
+    ocr_api_key: str | None
+    ocr_model: str | None
+    allow_page_upload: bool
+
+    async def extract_manifest(self, input_path: Path) -> BookManifest:
+        raise NotImplementedError
+
+    def _extract_blocks_sync(
+        self, path: Path, page_range: tuple[int, int] | None = None
+    ) -> list[IRBlock]:
+        raise NotImplementedError
+
+    @staticmethod
+    def _annotate_page_kinds(path: Path, blocks: list[IRBlock]) -> dict[int, str]:
+        raise NotImplementedError
 
     def _init_render_stack(
         self,
@@ -138,6 +156,122 @@ class _PDFRenderStackMixin:
 
         blocks = extract_with_oxide(path)
         return fuse_continuation_blocks(blocks)
+
+    async def _post_extract_blocks(
+        self,
+        path: Path,
+        blocks: list[IRBlock],
+        page_range: tuple[int, int] | None,
+    ) -> list[IRBlock]:
+        """Engine-specific per-chunk enrichment; default is a no-op.
+
+        Async so an override can off-load blocking work: Docling's textless-page
+        VLM fallback (default OFF via ``UBT_VLM_SCAN_FALLBACK``) does network
+        IO and runs in a thread; pdfium's native reader has no such pass.
+        """
+        return blocks
+
+    def _evict_after_chunk(self, blocks: list[IRBlock], chapter_ir: ChapterIR) -> None:
+        """Out-of-core eviction after a chunk is consumed (both engines).
+
+        Explicitly reclaim AST objects and line caches; ``gc.collect()`` forces
+        the collection rather than waiting for a generation threshold, which is
+        what keeps RSS flat across a long book. Identical for both engines —
+        the hook exists so an engine with different eviction needs can override
+        it, not because the two differ today.
+        """
+        del blocks
+        del chapter_ir
+        gc.collect()
+
+    async def parse_stream(
+        self, input_path: Path, pages: set[int] | None = None
+    ) -> AsyncIterator[ChapterIR]:
+        """Stream PDF contents as structured ChapterIR partitions.
+
+        Partitions long PDFs into out-of-core page chunks (e.g. 50 pages)
+        to bound resident memory (RSS) to O(1) during full document ingest.
+        AST objects and line caches are evicted between chunks.
+
+        Shared by both PDF engines: the loop below is identical for Docling and
+        pdfium (2026-10-14 review, W3-8 — the two copies had drifted 83% byte
+        for byte). The per-engine differences live in the two hooks above:
+        extraction (``_extract_blocks_sync``), post-extract enrichment
+        (``_post_extract_blocks``), page-kind annotation
+        (``_annotate_page_kinds``) and eviction (``_evict_after_chunk``).
+        """
+        path = Path(input_path)
+        manifest = await self.extract_manifest(path)
+        chunk_size = get_pdf_page_chunk_size()
+
+        total_pages = int(manifest.metadata.get("page_count", 0))
+        if total_pages <= 0:
+            try:
+                from ubt.adapters.pdf.short_doc import probe_pdf_pages
+
+                total_pages, _ = probe_pdf_pages(path)
+            except Exception:
+                total_pages = 0
+
+        page_chunks = compute_pdf_page_chunks(total_pages, pages=pages, chunk_size=chunk_size)
+        loop = asyncio.get_running_loop()
+        global_block_idx = 1
+
+        for chunk_idx, chunk_pages in enumerate(page_chunks):
+            chunk_range: tuple[int, int] | None = (
+                (min(chunk_pages), max(chunk_pages)) if chunk_pages else None
+            )
+
+            chapter_meta = (
+                manifest.chapters[chunk_idx]
+                if chunk_idx < len(manifest.chapters)
+                else ChapterMeta(
+                    chapter_id=f"c{chunk_idx + 1:04d}",
+                    title=f"Pages {chunk_range[0]}-{chunk_range[1]}" if chunk_range else "Main",
+                    spine_index=chunk_idx + 1,
+                    source_file=path.name,
+                )
+            )
+
+            blocks = await loop.run_in_executor(None, self._extract_blocks_sync, path, chunk_range)
+
+            # Filter blocks to requested pages if non-contiguous inside chunk
+            if pages and chunk_pages:
+                chunk_set = set(chunk_pages)
+                blocks = [b for b in blocks if b.bbox is None or b.bbox.page in chunk_set]
+
+            blocks = await self._post_extract_blocks(path, blocks, chunk_range)
+
+            # Re-key block IDs and spine indices so they are globally unique and monotonic across chunks
+            if len(page_chunks) > 1:
+                for b in blocks:
+                    b.set_id(f"pdf_main#b{global_block_idx:04d}")
+                    b.set_spine_index(global_block_idx)
+                    global_block_idx += 1
+            else:
+                global_block_idx += len(blocks)
+
+            # Per-page profile kinds ride into block provenance (render routing)
+            page_kinds = await loop.run_in_executor(None, self._annotate_page_kinds, path, blocks)
+
+            metadata: dict[str, Any] = {}
+            if page_kinds:
+                metadata["page_kinds"] = page_kinds
+            if chunk_range:
+                metadata["page_range"] = list(chunk_range)
+
+            chapter_ir = ChapterIR(
+                doc_id=manifest.doc_id,
+                chapter_id=chapter_meta.chapter_id,
+                title=chapter_meta.title,
+                spine_index=chapter_meta.spine_index,
+                blocks=blocks,
+                metadata=metadata,
+            )
+            yield chapter_ir
+
+            # Out-of-core memory eviction: explicitly reclaim AST objects and line caches
+            self._evict_after_chunk(blocks, chapter_ir)
 
 
 class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
@@ -219,105 +353,29 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
             parser_extract_manifest, input_path, is_docling_installed=self.is_docling_installed()
         )
 
-    async def parse_stream(
-        self, input_path: Path, pages: set[int] | None = None
-    ) -> AsyncIterator[ChapterIR]:
-        """Stream PDF contents as structured ChapterIR partitions.
-
-        Partitions long PDFs into out-of-core page chunks (e.g. 50 pages)
-        to bound resident memory (RSS) to O(1) during full document ingest.
-        AST objects and line caches are evicted between chunks.
-        """
-        path = Path(input_path)
-        manifest = await self.extract_manifest(path)
-        chunk_size = get_pdf_page_chunk_size()
-
-        total_pages = int(manifest.metadata.get("page_count", 0))
-        if total_pages <= 0:
-            try:
-                from ubt.adapters.pdf.short_doc import probe_pdf_pages
-
-                total_pages, _ = probe_pdf_pages(path)
-            except Exception:
-                total_pages = 0
-
-        page_chunks = compute_pdf_page_chunks(total_pages, pages=pages, chunk_size=chunk_size)
-        loop = asyncio.get_running_loop()
-        global_block_idx = 1
-
-        for chunk_idx, chunk_pages in enumerate(page_chunks):
-            chunk_range: tuple[int, int] | None = (
-                (min(chunk_pages), max(chunk_pages)) if chunk_pages else None
-            )
-
-            chapter_meta = (
-                manifest.chapters[chunk_idx]
-                if chunk_idx < len(manifest.chapters)
-                else ChapterMeta(
-                    chapter_id=f"c{chunk_idx + 1:04d}",
-                    title=f"Pages {chunk_range[0]}-{chunk_range[1]}" if chunk_range else "Main",
-                    spine_index=chunk_idx + 1,
-                    source_file=path.name,
-                )
-            )
-
-            blocks = await loop.run_in_executor(None, self._extract_blocks_sync, path, chunk_range)
-
-            # Filter blocks to requested pages if non-contiguous inside chunk
-            if pages and chunk_pages:
-                chunk_set = set(chunk_pages)
-                blocks = [b for b in blocks if b.bbox is None or b.bbox.page in chunk_set]
-
-            # Textless-page VLM fallback (default OFF via UBT_VLM_SCAN_FALLBACK).
-            blocks = await asyncio.to_thread(
-                self._vlm_fallback_missing_pages,
-                path,
-                blocks,
-                self.ocr_mode,
-                self.ocr_endpoint,
-                self.ocr_api_key,
-                self.ocr_model,
-                chunk_range,
-                self.allow_page_upload,
-            )
-
-            # Re-key block IDs and spine indices so they are globally unique and monotonic across chunks
-            if len(page_chunks) > 1:
-                for b in blocks:
-                    b.set_id(f"pdf_main#b{global_block_idx:04d}")
-                    b.set_spine_index(global_block_idx)
-                    global_block_idx += 1
-            else:
-                global_block_idx += len(blocks)
-
-            # Per-page profile kinds ride into block provenance (render routing)
-            page_kinds = await loop.run_in_executor(None, self._annotate_page_kinds, path, blocks)
-
-            metadata: dict[str, Any] = {}
-            if page_kinds:
-                metadata["page_kinds"] = page_kinds
-            if chunk_range:
-                metadata["page_range"] = list(chunk_range)
-
-            chapter_ir = ChapterIR(
-                doc_id=manifest.doc_id,
-                chapter_id=chapter_meta.chapter_id,
-                title=chapter_meta.title,
-                spine_index=chapter_meta.spine_index,
-                blocks=blocks,
-                metadata=metadata,
-            )
-            yield chapter_ir
-
-            # Out-of-core memory eviction: explicitly reclaim AST objects and line caches
-            del blocks
-            del chapter_ir
-            gc.collect()
-
     @staticmethod
     def _annotate_page_kinds(path: Path, blocks: list[IRBlock]) -> dict[int, str]:
         """Stamp per-page provenance onto blocks (delegates to docling_parser)."""
         return annotate_page_kinds(path, blocks)
+
+    async def _post_extract_blocks(
+        self,
+        path: Path,
+        blocks: list[IRBlock],
+        page_range: tuple[int, int] | None,
+    ) -> list[IRBlock]:
+        """Textless-page VLM fallback (default OFF via UBT_VLM_SCAN_FALLBACK)."""
+        return await asyncio.to_thread(
+            self._vlm_fallback_missing_pages,
+            path,
+            blocks,
+            self.ocr_mode,
+            self.ocr_endpoint,
+            self.ocr_api_key,
+            self.ocr_model,
+            page_range,
+            self.allow_page_upload,
+        )
 
     def _extract_blocks_sync(
         self, path: Path, page_range: tuple[int, int] | None = None

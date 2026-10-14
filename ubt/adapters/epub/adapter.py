@@ -194,37 +194,6 @@ BILINGUAL_CSS = """
 """
 
 
-#: Inline children a monolingual rewrite must not lose. Replacing a leaf's text
-#: with the translation must not ``clear()`` the element, which would silently
-#: delete inline images, footnote/cross-reference anchors, ``<br>`` breaks and
-#: embedded math, losing every figure and breaking every footnote link.
-#: DOCX already preserves graphic runs and hyperlinks; these are the HTML/EPUB
-#: counterparts.
-_PRESERVED_INLINE_TAGS = frozenset(
-    {"img", "svg", "picture", "source", "video", "audio", "br", "hr", "math", "object", "a"}
-)
-
-
-def take_preserved_inline_children(leaf: Tag) -> list[Tag]:
-    """Detach and return inline descendants a monolingual rewrite must keep.
-
-    Collected from the whole subtree (a footnote reference is the standard
-    ``<sup><a href="#fn1">1</a></sup>`` shape — a direct-children scan drops it
-    with its href/id when the leaf is cleared). Only the outermost preserved
-    tags are taken: their subtrees ride along, so nothing is duplicated.
-    The nodes are detached (kept alive) so the caller can ``clear()`` the leaf
-    and re-append them after the translation.
-    """
-    preserved = [
-        c
-        for c in leaf.find_all(list(_PRESERVED_INLINE_TAGS))
-        if not any(p.name in _PRESERVED_INLINE_TAGS for p in c.parents)
-    ]
-    for node in preserved:
-        node.extract()
-    return preserved
-
-
 def wrap_nested_direct_blocks(soup: BeautifulSoup) -> None:
     """Wrap direct inline runs in container elements that also have block children into <p> tags.
 
