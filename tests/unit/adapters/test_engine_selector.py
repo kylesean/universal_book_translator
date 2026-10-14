@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from ubt.adapters.pdf.engine_selector import inspect_pdf_route_plan, select_pdf_engine
+from ubt.adapters.pdf.engine_selector import inspect_pdf_route_plan
 from ubt.core.policy.layout_policy import PROBE_MIN_SIGNAL_PAGES, PROBE_SAMPLE_FRACTIONS
 
 pytestmark = pytest.mark.fast
@@ -67,10 +67,10 @@ def test_probe_routes_every_document_to_docling(tmp_path: Path) -> None:
     plan = inspect_pdf_route_plan(pdf)
     assert not plan.has_formulas
     assert not plan.has_multicolumn
-    # The signals are still reported honestly (a caller may show them)…
+    # The signals are reported honestly (assess shows them to the operator)…
+    assert plan.has_scan is False
+    # …and the engine is the fixed lossless policy.
     assert plan.primary_engine == "docling"
-    # …but every document routes to the lossless engine.
-    assert select_pdf_engine(pdf) == "docling"
 
 
 def test_probe_routes_two_column_to_docling(tmp_path: Path) -> None:

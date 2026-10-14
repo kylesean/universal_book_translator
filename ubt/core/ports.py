@@ -358,22 +358,30 @@ class PdfStructureFacts:
 def classify_pdf_structure(input_path: Path) -> PdfStructureFacts:
     """Census the document's pages once and return the routing signals.
 
+    Reads the CACHED per-page profile (:func:`profile_pdf`, keyed on profiler
+    version + path + size + mtime) instead of re-running an uncached census —
+    the old path re-read the whole document here AND again inside the parser's
+    ``annotate_page_kinds`` (measured: three full reads per job, ~1.7s each on
+    a 15-page/6MB paper). One shared cache means ingest and routing pay once.
+
     Degrades to "no signal" (all-False / 0.0) when the census fails: a broken
     probe must lower the routing to the lossless default, not kill the run.
     """
     import logging
 
+    from ubt.adapters.pdf.engine_selector import PROFILE_CACHE_DIR
     from ubt.adapters.pdf.page_profiler import (
-        classify_page,
-        collect_page_facts,
         majority_flags,
+        profile_pdf,
         structural_page_shares,
     )
 
     try:
-        facts = collect_page_facts(input_path)
-        has_scan, formula_heavy = majority_flags([classify_page(f) for f in facts])
-        multicolumn_share, structural_share = structural_page_shares(facts)
+        profiles = profile_pdf(input_path, cache_dir=PROFILE_CACHE_DIR)
+        if not profiles:
+            return PdfStructureFacts(False, False, 0.0, 0.0)
+        has_scan, formula_heavy = majority_flags([p.kind for p in profiles])
+        multicolumn_share, structural_share = structural_page_shares([p.facts for p in profiles])
         return PdfStructureFacts(
             has_scan=has_scan,
             formula_heavy=formula_heavy,

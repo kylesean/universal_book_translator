@@ -98,19 +98,17 @@ def _probe_page_vector_ops(page: Any) -> int:
 def inspect_pdf_route_plan(
     pdf_path: Path,
 ) -> PDFRoutePlan:
-    """Inspect sampled pages to build a decoupled layout and engine routing plan.
+    """Sample pages for the assess signals (scan / formula / multicolumn / vector).
 
-    Decouples narrative prose routing from specialized component routing:
-    - Pure single-column born-digital text routes to the fast pdfium backend;
-    - Formula-dense pages or multi-column layouts route to docling;
-    - Vector-heavy diagram pages are reported via ``has_vector_diagrams``.
-
-    The probe samples a handful of pages and is not memoized here: the
-    per-page profile cache (:func:`ubt.adapters.pdf.page_profiler.profile_pdf`
-    with ``PROFILE_CACHE_DIR``) is where the expensive full-document profile is
-    keyed. This function used to carry a ``cache_dir`` parameter that nothing
-    read, so the comment above implied a cache this path never had.
-
+    This is NOT a routing decision anymore: ``auto`` takes the lossless docling
+    engine unconditionally (see the long comment at the return — measured on the
+    reference corpus, every document carried structure the pdfium reader cannot
+    represent, and the cheap signals read zero exactly on vector-drawn
+    figures). The probe's consumers are the assess report, which shows the
+    operator what the document contains, and the explicit-``pdfium`` escape
+    hatch's warning in the adapter factory. Keeping the two statements apart is
+    deliberate: the sample is real evidence about the document, the engine
+    choice above it is a fixed policy with its reasoning attached.
     """
     default_docling = PDFRoutePlan(
         primary_engine="docling",
@@ -171,16 +169,18 @@ def inspect_pdf_route_plan(
             has_multicolumn = multicolumn_pages >= PROBE_MIN_SIGNAL_PAGES
             if formula_pages and not has_formulas:
                 logger.debug(
-                    "PDF engine probe: %d/%d sampled pages show formula debris in '%s' "
-                    "(below the signal bar; not routing to docling)",
+                    "PDF probe: %d/%d sampled pages show formula debris in '%s' "
+                    "(below the signal bar; assess reports the document, routing "
+                    "does not use it)",
                     formula_pages,
                     len(page_indices),
                     pdf_path.name,
                 )
             if multicolumn_pages and not has_multicolumn:
                 logger.debug(
-                    "PDF engine probe: %d/%d sampled pages show a right-column edge in '%s' "
-                    "(below the signal bar; not routing to docling)",
+                    "PDF probe: %d/%d sampled pages show a right-column edge in '%s' "
+                    "(below the signal bar; assess reports the document, routing "
+                    "does not use it)",
                     multicolumn_pages,
                     len(page_indices),
                     pdf_path.name,
@@ -235,13 +235,14 @@ def inspect_pdf_route_plan(
             # paper docling costs 4.2s against pdfium's 0.8s — under 1% of a run
             # that then spends minutes translating 811 blocks.
             #
-            # So ``auto`` takes the lossless engine. ``pdfium`` remains a real
-            # opt-in (``--pdf-engine pdfium``, the ``preview``/``fast`` presets)
-            # for a document known to be prose only; the probe still runs there
-            # to warn about what it would miss.
-            needs_docling = True
+            # So ``auto`` takes the lossless engine — unconditionally. The
+            # sampled signals above are evidence ABOUT the document (the
+            # assess report shows them), not a vote on the engine. ``pdfium``
+            # remains a real opt-in (``--pdf-engine pdfium``, the
+            # ``preview``/``fast`` presets) for a document known to be prose
+            # only; the factory warns about what it would miss.
             return PDFRoutePlan(
-                primary_engine="docling" if needs_docling else "pdfium",
+                primary_engine="docling",
                 has_scan=scanned_detected,
                 has_vector_diagrams=has_vector_diagrams,
                 has_formulas=has_formulas,
@@ -251,20 +252,8 @@ def inspect_pdf_route_plan(
             pdf.close()
     except Exception as exc:
         logger.debug(
-            "PDF engine probe failed on '%s'; defaulting to docling: %s",
+            "PDF probe failed on '%s'; assess signals unavailable: %s",
             pdf_path.name,
             exc,
         )
         return default_docling
-
-
-def select_pdf_engine(pdf_path: Path) -> str:
-    """Return ``'pdfium'`` for clean single-column born-digital PDFs, else ``'docling'``.
-
-    Any probe failure (unreadable file, missing pypdfium2) conservatively
-    defaults to the Docling mainline engine. This samples a handful of pages
-    only: building the full per-page ingest plan here would profile the
-    whole document — twice, since the adapter factory calls this from both
-    its resolution paths — for data the caller does not consume.
-    """
-    return inspect_pdf_route_plan(pdf_path).primary_engine

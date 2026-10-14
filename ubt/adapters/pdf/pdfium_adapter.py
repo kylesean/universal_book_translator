@@ -18,10 +18,12 @@ pipeline's ``IRBlock`` contract. No flow repair runs on this path -- the
 reader's output is already typed. (The plain-text pdf_oxide fallback, which has
 no such model, still repairs its flow.)
 
-Routing: ``UBT_PDF_ENGINE=auto`` picks this engine for clean single-column
-born-digital PDFs (see :mod:`ubt.adapters.pdf.engine_selector`); scans and
-multi-column layouts stay on Docling. ``UBT_PDF_ENGINE=pdfium`` forces the
-fast path explicitly.
+Routing: ``UBT_PDF_ENGINE=auto`` does NOT pick this engine — auto is the
+lossless docling mainline unconditionally (its reader cannot represent
+tables, figures or formulas, and the rebuilt PDF has no source canvas to
+hide that). This engine is an explicit opt-in (``UBT_PDF_ENGINE=pdfium``)
+for a document known to be prose only; the adapter factory warns about
+what the probe cannot rule out.
 """
 
 from __future__ import annotations

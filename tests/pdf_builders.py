@@ -8,8 +8,8 @@ adapter; the real-document gate stays in the ``slow`` corpus harnesses
 (``tests/integration/test_corpus_acceptance.py``).
 
 Only single-column, born-digital pages with a standard Type1 font are produced.
-That keeps the engine probe deterministic -- ``pdf_engine="auto"`` routes these
-to the pure-runtime pdfium adapter and never the optional Docling extra -- so a
+Tests that exercise the pdfium engine pass ``pdf_engine="pdfium"`` explicitly
+(``auto`` is the lossless docling mainline and needs the optional extra), so a
 consumer can run in the ``fast`` tier with no OCR/VLM/typst toolchain.
 
 This module is test-only: ``pypdf`` is a dev dependency and is imported lazily by
