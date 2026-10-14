@@ -32,6 +32,7 @@ from ubt.core.exceptions import (
     JobInterruptedError,
     LeaseLostError,
     LedgerWriterLockConflictError,
+    public_job_error,
 )
 from ubt.core.job_options import (
     apply_config_overrides,
@@ -450,9 +451,12 @@ class JobWorker:
                     status=JobStatus.FAILED,
                     # Never echo ``str(exc)``: provider error bodies and parse
                     # failures can carry source book text or host paths. The full
-                    # detail is logged above; the client gets the class + job id
-                    # (same product guarantee the embedded API manager applies).
-                    error=f"{type(exc).__name__} (see server logs; job_id={job.job_id})",
+                    # detail is logged above; the operator gets the class + job
+                    # id, except for the safe actionable domain errors (budget,
+                    # format, queue depth) whose message names the fix — the
+                    # SAME surface the embedded API manager shows (shared
+                    # public_job_error; its inline copy predated it).
+                    error=public_job_error(exc, job.job_id),
                     # Preserve the prior attempt's snapshot when this one died
                     # before its first event (see the COMPLETED write above).
                     progress=progress or None,

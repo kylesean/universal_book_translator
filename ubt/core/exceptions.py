@@ -107,3 +107,28 @@ class RenderBlocksNotImplementedError(NotImplementedError):
     not accidentally swallow unrelated ``NotImplementedError`` exceptions
     raised within an adapter's internal execution path.
     """
+
+
+#: Domain errors whose message is written to be SHOWN to the operator: each
+#: names the knob to turn or the step to take (raise the budget, drop
+#: --pages, drain the queue). Everything else may echo provider bodies or
+#: host paths, so only its class name surfaces.
+ACTIONABLE_ERROR_TYPES: tuple[type[Exception], ...] = (
+    BudgetExceededError,
+    UnsupportedDocumentFormatError,
+    QueueDepthExceededError,
+)
+
+
+def public_job_error(exc: Exception, job_id: str) -> str:
+    """The one message a job terminal record shows the operator.
+
+    Shared by the queue worker and the API's embedded manager so a budget
+    exhaustion says \"raise the cap and resume with the same job id\" on both
+    paths instead of the worker folding it into
+    ``BudgetExceededError (see server logs)``. Full detail is always logged
+    by the caller; this is the display surface only.
+    """
+    if isinstance(exc, ACTIONABLE_ERROR_TYPES):
+        return f"{type(exc).__name__}: {exc}"
+    return f"{type(exc).__name__} (see server logs; job_id={job_id})"

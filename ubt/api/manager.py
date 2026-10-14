@@ -17,10 +17,8 @@ from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.pipeline import PipelineOrchestrator
 from ubt.core.engine.progress import ProgressSnapshot, persist_progress_metadata
 from ubt.core.exceptions import (
-    BudgetExceededError,
-    QueueDepthExceededError,
     ServerCapacityError,
-    UnsupportedDocumentFormatError,
+    public_job_error,
 )
 from ubt.core.job_options import (
     apply_config_overrides,
@@ -229,14 +227,9 @@ class JobManager:
             # Do not echo raw generic exceptions: provider error bodies and parse
             # failures can contain source book text or host paths. Safe domain
             # errors (budget, format) are actionable and safe to display directly.
+            # Same rule the queue worker applies (public_job_error is shared).
             logger.exception("Job %s failed: %s", record.job_id, exc)
-            if isinstance(
-                exc,
-                (BudgetExceededError, UnsupportedDocumentFormatError, QueueDepthExceededError),
-            ):
-                record.error = f"{type(exc).__name__}: {exc}"
-            else:
-                record.error = f"{type(exc).__name__} (see server logs; job_id={record.job_id})"
+            record.error = public_job_error(exc, record.job_id)
         finally:
             # Broadcast termination sentinel (non-blocking)
             for sub_q in list(record.subscribers):
