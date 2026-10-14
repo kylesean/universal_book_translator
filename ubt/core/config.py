@@ -67,6 +67,14 @@ QeEngine = Literal["heuristic", "comet", "cometkiwi", "neural", "subprocess", "t
 #: pick from the document's structure.
 DualMode = Literal["mono", "dual", "auto"]
 
+#: What the export stage does when a block's text cannot be placed (a layout
+#: spill). ``error`` fails the delivery contract; the other three downgrade it
+#: to a warning and write the overflow companion. ``source_kept_warn`` is the
+#: same behaviour as ``warn`` under a name that says what the warning is
+#: about (a block shipped its source); it exists because the export stage's
+#: contract check distinguishes the two reasons in its own vocabulary.
+SpillPolicy = Literal["error", "warn", "appendix", "source_kept_warn"]
+
 #: Accelerator device Docling uses for its layout/table/formula models.
 #: ``auto`` (default) keeps Docling's own probe: CUDA when a GPU is present.
 #: ``cpu`` keeps Docling off the GPU entirely — the escape hatch for a local
@@ -698,9 +706,11 @@ class UBTConfig(BaseSettings):
     # - 'warn': graceful degradation, space failures are downgraded to WARNING with audit note
     # - 'appendix': graceful degradation, writes an overflow companion (*_spill_appendix.json & .md)
     #   listing all displaced text blocks, and downgrades contract violation to WARNING.
-    spill_policy: str = Field(
+    # - 'source_kept_warn': same behaviour as 'warn', named for the warning it
+    #   concerns (a block that shipped its source text).
+    spill_policy: SpillPolicy = Field(
         default="error",
-        description="Layout spill policy ('error', 'warn', 'appendix').",
+        description=("Layout spill policy ('error', 'warn', 'appendix', 'source_kept_warn')."),
     )
 
     # -- Table rendering strategy for PDF ----------------------------------------
