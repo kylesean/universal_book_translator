@@ -15,7 +15,7 @@ from ubt.core.atomic import atomic_write_text
 from ubt.core.cleaners.cjk_spacing import normalize_publishing_cjk
 from ubt.core.config import DualMode
 from ubt.core.engine.events import EventType, TranslationProgressEvent
-from ubt.core.engine.ledger import SQLiteJobLedger
+from ubt.core.engine.ledger import NON_TERMINAL_STATUSES, SQLiteJobLedger
 from ubt.core.engine.reporter import (
     QualityReport,
     ReportEntityConsistency,
@@ -393,7 +393,7 @@ def _terminology_and_structure_pass(
 
 
 async def _force_stale_blocks_terminal(
-    ledger: SQLiteJobLedger, actual_job_id: str
+    ledger: SQLiteJobLedger, actual_job_id: str, *, claims_finality: bool = True
 ) -> list[IRBlock]:
     """Fail every still-non-terminal block, then return the job's blocks.
 
@@ -401,7 +401,37 @@ async def _force_stale_blocks_terminal(
     Rendering them as-is would ship untranslated source while the job reports
     "completed"; forcing FAILED first surfaces them in stats, the quality
     report, and logs.
+
+    ``claims_finality=False`` (re-export) flips the contract: a re-export must
+    not rewrite another run's in-flight blocks to FAILED — its only legitimate
+    input is an already-terminal book. Non-terminal blocks are a hard error
+    there, so the stale state stays exactly as the interrupted run left it
+    (resume still sees ``pending``/``drafted`` rows to requeue).
     """
+    if not claims_finality:
+        placeholders = ",".join("?" * len(NON_TERMINAL_STATUSES))
+        stale_ids: list[str] = []
+        with ledger._get_conn() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT block_id FROM blocks
+                WHERE job_id = ? AND status IN ({placeholders})
+                LIMIT 11
+                """,
+                (actual_job_id, *NON_TERMINAL_STATUSES),
+            ).fetchall()
+            stale_ids = [str(row["block_id"]) for row in rows]
+        if stale_ids:
+            sample = ", ".join(stale_ids[:10])
+            raise IntegrityViolationError(
+                f"Re-export blocked for job {actual_job_id}: "
+                f"{len(stale_ids)} block(s) are still non-terminal ({sample}). "
+                "A re-export renders only an already-final book — it must not "
+                "force another run's in-flight blocks to FAILED. Resume the job "
+                "instead, and re-export once every block is terminal."
+            )
+        final_blocks: list[IRBlock] = await asyncio.to_thread(ledger.get_all_blocks, actual_job_id)
+        return final_blocks
     stale_block_ids = await asyncio.to_thread(
         ledger.fail_non_terminal_blocks,
         actual_job_id,
@@ -414,7 +444,7 @@ async def _force_stale_blocks_terminal(
             actual_job_id,
             ", ".join(stale_block_ids[:10]),
         )
-    final_blocks: list[IRBlock] = await asyncio.to_thread(ledger.get_all_blocks, actual_job_id)
+    final_blocks = await asyncio.to_thread(ledger.get_all_blocks, actual_job_id)
     return final_blocks
 
 
@@ -1321,8 +1351,16 @@ async def run_export_stage(
     services: RunServices,
     render: RenderPlan,
     terminology: Terminology,
+    *,
+    claims_finality: bool = True,
 ) -> AsyncIterator[TranslationProgressEvent]:
-    """Perform integrity checks, apply glossary enforcement (opt-in), and render output document."""
+    """Perform integrity checks, apply glossary enforcement (opt-in), and render output document.
+
+    ``claims_finality`` (default True) is the full run's contract: stale
+    non-terminal blocks are forced FAILED and the job is finalized
+    ``completed``. A re-export passes False — it renders an already-final book
+    without owning any block's fate or the job's terminal status.
+    """
     ledger = ctx.ledger
     actual_job_id = ctx.job_id
     # NOTE: the run's usage snapshot is deliberately taken at the very end of
@@ -1349,7 +1387,9 @@ async def run_export_stage(
     min_completion_ratio = ctx.config.export_min_completion_ratio
     deterministic_glossary_enforce = services.adaptive_policy.deterministic_glossary
     ctx.check_cancelled()
-    final_blocks = await _force_stale_blocks_terminal(ledger, actual_job_id)
+    final_blocks = await _force_stale_blocks_terminal(
+        ledger, actual_job_id, claims_finality=claims_finality
+    )
     _check_completion_ratio(actual_job_id, final_blocks, min_completion_ratio)
 
     glossary_enforcer = (
@@ -1531,7 +1571,8 @@ async def run_export_stage(
         rehearsal=ctx.is_mock_run,
     )
 
-    await asyncio.to_thread(ledger.finalize_job, actual_job_id, status="completed")
+    if claims_finality:
+        await asyncio.to_thread(ledger.finalize_job, actual_job_id, status="completed")
 
     dual_suffix = f" | Complementary artifact: {secondary_path}" if secondary_path else ""
     # What the artifact actually is: the renderer's outcome when it rendered,

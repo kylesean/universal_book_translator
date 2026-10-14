@@ -29,6 +29,7 @@ from ubt.api.scope import ApiScope
 from ubt.api.security import resolve_secure_path, validate_job_id
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.re_export import ReExportError, re_export_job
+from ubt.core.exceptions import LedgerWriterLockConflictError
 from ubt.render.page_preview import (
     PagePreviewUnavailable,
     render_page_preview,
@@ -211,6 +212,11 @@ def register_review_routes(api_app: FastAPI, scope: ApiScope) -> None:
                 qe_runner=scope.manager.qe_runner,
             )
         except ReExportError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        except LedgerWriterLockConflictError as exc:
+            # Another writer (a running resume, an interactive edit) holds the
+            # job. Same 409 semantics as the pre-check above, but now it also
+            # covers CLI-started runs the queue cannot see.
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
         return JSONResponse(
             {

@@ -31,6 +31,7 @@ from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.stage_context import StageContext
 from ubt.core.engine.stages.bible import _BIBLE_CACHE_KEY
 from ubt.core.engine.stages.export import run_export_stage
+from ubt.core.engine.writer_lock import LedgerWriterLock
 from ubt.core.ir.models import BookManifest, ChapterMeta
 from ubt.core.ir.render_plan import RenderPlan
 from ubt.core.ports import resolve_adapter
@@ -231,11 +232,20 @@ async def re_export_job(
     so the re-export shares the one rate-limit bucket.
 
     Raises :class:`ReExportError` when the job has no ledger, no source document,
-    or no resolvable output path.
+    or no resolvable output path. Raises
+    :class:`ubt.core.exceptions.LedgerWriterLockConflictError` when another
+    writer (a running resume, an interactive edit) holds the job's lock — the
+    same single-writer invariant a live run and ``apply_human_edit`` observe.
     """
     if not db_path.exists():
         raise ReExportError(f"no ledger for job {job_id}")
     ledger = SQLiteJobLedger(db_path)
+    # Same invariant as apply_human_edit: an interactive re-render cannot race
+    # a concurrent resume. Without this, a re-export forced another run's
+    # in-flight blocks to FAILED (they are already terminal-block-checked now)
+    # and rewrote the job status behind the running owner's back.
+    lock = LedgerWriterLock(db_path, job_id)
+    lock.acquire()
     try:
         # Resolve every precondition BEFORE building collaborators: building the
         # router needs a configured provider, and a job with no source or no
@@ -281,7 +291,11 @@ async def re_export_job(
         )
         terminal: TranslationProgressEvent | None = None
         async for event in run_export_stage(
-            ctx, services, render_plan, _terminology_from_ledger(ledger, job_id)
+            ctx,
+            services,
+            render_plan,
+            _terminology_from_ledger(ledger, job_id),
+            claims_finality=False,
         ):
             if event.event_type is EventType.EXPORT_COMPLETED:
                 terminal = event
@@ -289,4 +303,5 @@ async def re_export_job(
             raise ReExportError(f"re-export of {job_id} produced no artifact")
         return terminal
     finally:
+        lock.release()
         ledger.close()
