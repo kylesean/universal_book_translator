@@ -8,11 +8,10 @@ an edge compiles and passes a smoke test, then breaks the moment the adapter is
 loaded for a different format, and it made the "parallel representation"
 criticism true (the reader depended on the adapter rather than the reverse).
 
-The decode helpers live in the leaf :mod:`ubt.core.text_decode` now. This test
-pins that: the only ``ubt.adapters`` import permitted anywhere under
-``ubt/analyze`` is the PDF reader's documented *geometry* seam (``textgeom`` /
-``pdfium_gate``), where the adapter supplies raw line boxes and the reader owns
-structure -- stated in ``reader_pdf``'s own docstring.
+The decode helpers live in the leaf :mod:`ubt.core.text_decode` now. The PDF
+geometry seam this test used to whitelist is gone too: the reader moved to
+``ubt.adapters.pdf.reader_pdf``. This test pins the unconditional invariant:
+NO ``ubt.adapters`` import anywhere under ``ubt/analyze``.
 
 Pure-AST: imports are parsed, never executed, so it cannot be fooled by an
 import side effect and costs milliseconds.
@@ -47,21 +46,13 @@ def _known_modules() -> set[str]:
 
 _KNOWN_MODULES = _known_modules()
 
-#: Adapter modules a reader may import, each with the reason it is not an
-#: inversion. Matched exactly, so adding the package ``ubt.adapters.pdf`` does
-#: not silently admit ``ubt.adapters.pdf.docling_parser``.
-_ALLOWED_ADAPTER_EDGES: frozenset[str] = frozenset(
-    {
-        # PDF geometry: the adapter harvests raw line boxes (``extract_lines``)
-        # and the pdfium gate serialises the C calls; the reader owns reading
-        # order, grouping and heading detection over that geometry. Documented
-        # in ``reader_pdf``'s module docstring. The bare package name is allowed
-        # because ``from ubt.adapters.pdf import textgeom`` names the package.
-        "ubt.adapters.pdf",
-        "ubt.adapters.pdf.textgeom",
-        "ubt.adapters.pdf.pdfium_gate",
-    }
-)
+#: There are NO allowed ``ubt.analyze -> ubt.adapters`` edges. The one
+#: documented seam this set used to cover (the PDF reader importing
+#: ``textgeom``/``pdfium_gate``) is gone: the reader moved to its only
+#: production consumer's layer (``ubt.adapters.pdf.reader_pdf``), so the
+#: invariant is now unconditional — any new edge here is an inversion, not
+#: an exception to negotiate.
+_ALLOWED_ADAPTER_EDGES: frozenset[str] = frozenset()
 
 
 def _adapter_imports(path: Path) -> list[tuple[int, str]]:

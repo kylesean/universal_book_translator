@@ -6,11 +6,11 @@ reuses the Docling mainline delivery pipeline (Typst publication
 reconstruction) so only the extraction leg differs.
 
 Note this path cannot represent tables, figures or formulas (see
-``ubt.analyze.reader_pdf``), so it is only lossless for a document that has
+``ubt.adapters.pdf.reader_pdf``), so it is only lossless for a document that has
 none. ``auto`` therefore never selects it — it is an explicit opt-in for
 prose-only inputs.
 
-Extraction is the native reader (:mod:`ubt.analyze.reader_pdf`): it owns
+Extraction is the native reader (:mod:`ubt.adapters.pdf.reader_pdf`): it owns
 reading order, paragraph grouping, heading detection and page furniture
 (chrome, listings, math debris) from the page's real typography and geometry,
 and emits a typed ``Document``, which the bridge projects back into the
@@ -66,7 +66,7 @@ def extract_blocks_with_pdfium(
 ) -> list[IRBlock]:
     """Read a born-digital PDF into typed blocks via the native reader.
 
-    The reader (:mod:`ubt.analyze.reader_pdf`) owns reading order, paragraph
+    The reader (:mod:`ubt.adapters.pdf.reader_pdf`) owns reading order, paragraph
     grouping and heading detection -- one documented rule set over the page's
     real typography -- and emits a typed ``Document``; this projects that back
     into the pipeline's ``IRBlock`` contract. The blocks are re-numbered into
@@ -80,7 +80,7 @@ def extract_blocks_with_pdfium(
     re-run reuses it. ``None`` computes straight through.
     """
     from ubt.adapters.pdf.analysis_cache import cached_blocks
-    from ubt.analyze.reader_pdf import read_pdf_blocks
+    from ubt.adapters.pdf.reader_pdf import read_pdf_blocks
 
     def _read() -> list[IRBlock]:
         pages: range | None = None

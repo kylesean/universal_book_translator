@@ -213,7 +213,7 @@ def inspect_pdf_route_plan(
 
             # A PDF target is *rebuilt* from the IR, so a block the extractor
             # cannot represent is content the reader loses. The pdfium path
-            # (``ubt/analyze/reader_pdf``) emits only headings, paragraphs, list
+            # (``ubt/adapters/pdf/reader_pdf``) emits only headings, paragraphs, list
             # items and code — no tables, no figures, no formulas. A source-layer
             # canvas would have kept an unextracted table visible in the original
             # language; a rebuilt document has no canvas, so the same omission is

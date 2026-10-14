@@ -21,8 +21,8 @@ from pathlib import Path
 import pytest
 from pdf_builders import PAGE_WIDTH, write_text_pdf, write_toc_pdf
 
+from ubt.adapters.pdf.reader_pdf import read_pdf
 from ubt.analyze.bridge import blocks_from_document
-from ubt.analyze.reader_pdf import read_pdf
 from ubt.analyze.structure import pdf_list_marker
 from ubt.core.ir.models import BlockType, IRBlock
 

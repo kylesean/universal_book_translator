@@ -51,7 +51,7 @@ def _reader_identity() -> str:
     ``textgeom`` fix would be invisible on every cached re-run.
     """
     return _module_identity(
-        "ubt.analyze.reader_pdf",
+        "ubt.adapters.pdf.reader_pdf",
         "ubt.analyze.structure",
         "ubt.analyze.normalize",
         "ubt.adapters.pdf.textgeom",

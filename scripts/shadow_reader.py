@@ -21,8 +21,8 @@ import json
 from collections import Counter
 from pathlib import Path
 
+from ubt.adapters.pdf.reader_pdf import read_pdf
 from ubt.analyze.bridge import blocks_from_document, document_from_blocks
-from ubt.analyze.reader_pdf import read_pdf
 from ubt.core.ir.models import IRBlock
 from ubt.model.ast import Document as DocumentModel
 from ubt.model.ast import ElementT, Figure, Formula, Table, TextElement

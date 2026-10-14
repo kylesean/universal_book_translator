@@ -14,7 +14,7 @@ readers (``read_html``/``read_epub``/``read_docx``) followed once they could
 also supply real spans (page/anchor/char offsets) and the AST could carry what
 they uniquely have (table grids, figure assets, provenance).
 
-Deliberately synchronous, like :func:`ubt.analyze.reader_pdf.read_pdf`: the only
+Deliberately synchronous, like :func:`ubt.adapters.pdf.reader_pdf.read_pdf`: the only
 IO is one file read, and the line loop is pure.
 """
 
