@@ -38,6 +38,18 @@ def test_docling_identity_covers_the_math_pruner() -> None:
     assert _file_identity(lnds_pruner) in docling_identity()
 
 
+def test_docling_identity_covers_the_toc_synthesis() -> None:
+    """The TOC rows are synthesized (and sorted) in ``docling_outline``.
+
+    ``_toc_sort_key``/``_extract_outline_only_blocks`` live there, not in the
+    parser, so a tie-break fix delivered the pre-fix contents order on every
+    cached re-run — the ``4.1`` above ``4`` regression on arXiv 2101.03961.
+    """
+    import ubt.adapters.pdf.docling_outline as outline
+
+    assert _file_identity(outline) in docling_identity()
+
+
 def test_the_docling_cache_dir_is_under_the_shared_cache_root() -> None:
     """P2-6: the Docling cache must not be CWD-relative.
 

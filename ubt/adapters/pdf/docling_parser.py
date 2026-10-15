@@ -19,6 +19,8 @@ from typing import TYPE_CHECKING, Any, cast
 
 from ubt.adapters.pdf.docling_blocks import (
     chrome_key,
+    code_text_layer_is_lossy,
+    crop_lossy_code_asset,
     is_inside_picture,
     is_repeat_handle,
     merge_table_continuation_fragments,
@@ -79,6 +81,17 @@ if TYPE_CHECKING:
     from docling.document_converter import DocumentConverter
 
 logger = logging.getLogger(__name__)
+
+
+def _figure_asset_dpi_tag() -> str:
+    """The delivered-crop DPI tag, read lazily.
+
+    Asset filenames carry the resolution they were cut at, so raising the DPI
+    cuts new files instead of replaying old ones from the sha-keyed asset dir.
+    """
+    from ubt.adapters.pdf.visual_scalpel import FIGURE_ASSET_DPI_TAG
+
+    return FIGURE_ASSET_DPI_TAG
 
 
 def extract_manifest(path: Path, *, is_docling_installed: bool) -> BookManifest:
@@ -486,6 +499,14 @@ def extract_with_docling(
     options.do_formula_enrichment = enrich
     options.generate_picture_images = True
     options.images_scale = 2.0
+    # Delivered figure/formula/code assets do NOT come from this scale: the
+    # conversion cache strips picture payloads on write, so on every cached
+    # re-ingest ``item.image`` is None and the asset is re-cut from the source
+    # page by the visual scalpel (``FIGURE_ASSET_DPI``, 300). Raising this scale
+    # instead was measured on the reference corpus: it multiplied the page
+    # rasters Docling retains across a conversion (``keep_images`` stays on
+    # whenever picture images are requested) from ~0.8 GB to ~4 GB peak RSS
+    # while changing no delivered pixel — the scalpel fallback dominated.
     # Whether Docling's layout/table/formula models touch the GPU is a separate
     # decision from whether Docling runs. ``auto`` (the default) leaves Docling's
     # own probe in charge; ``cpu`` keeps it off the card so a local LLM sharing
@@ -781,8 +802,17 @@ def map_iterated_items(
                 # alone is undone on the next sort and the delivered contents
                 # still opened on "2.1". Ids are rebuilt from the new position
                 # too, so they stay consistent with the index they encode.
+                #
+                # The renumber starts *after* the blocks already emitted (the
+                # title page, authors, abstract and footnotes), never at 1:
+                # those slots are taken, and the ledger's
+                # ``ON CONFLICT(job_id, block_id) DO UPDATE`` made the clash
+                # silent — the TOC rows *overwrote* the front matter, so the
+                # delivered PDF opened on the contents page with no title,
+                # authors or abstract anywhere in it.
+                base = len(blocks)
                 ordered_toc = sorted(toc_blocks, key=_toc_sort_key)
-                for new_index, block in enumerate(ordered_toc, start=1):
+                for new_index, block in enumerate(ordered_toc, start=base + 1):
                     block.set_spine_index(new_index)
                     block.set_id(f"pdf_main#b{new_index:04d}")
                 blocks.extend(ordered_toc)
@@ -791,7 +821,12 @@ def map_iterated_items(
         if label == DocItemLabel.PICTURE:
             prov = item.prov[0] if getattr(item, "prov", None) else None
             page_no = getattr(prov, "page_no", 0) if prov else 0
-            asset_path = assets_dir / f"pic_p{page_no}_{len(blocks) + 1}.png"
+            # The DPI tag in the name makes a crop-resolution change cut new
+            # files instead of replaying the old ones from the sha-keyed dir
+            # (see FIGURE_ASSET_DPI_TAG in visual_scalpel).
+            asset_path = (
+                assets_dir / f"pic_p{page_no}_{len(blocks) + 1}.{_figure_asset_dpi_tag()}.png"
+            )
 
             img = getattr(item, "image", None)
             if img is None and hasattr(item, "get_image"):
@@ -829,9 +864,16 @@ def map_iterated_items(
                 and page_no >= 1
             ):
                 try:
-                    from ubt.adapters.pdf.visual_scalpel import crop_block_pil
+                    from ubt.adapters.pdf.visual_scalpel import (
+                        FIGURE_ASSET_DPI,
+                        crop_block_pil,
+                    )
 
-                    cropped = crop_block_pil(pdf_path, page_no, item_bbox)
+                    # A delivered figure is zoomed and printed, so its crop is
+                    # cut at print resolution (300), not the VLM-read 150: the
+                    # source figures here are vector drawings, and this crop is
+                    # the only raster that will ever exist for them.
+                    cropped = crop_block_pil(pdf_path, page_no, item_bbox, dpi=FIGURE_ASSET_DPI)
                     if getattr(cropped, "width", 0) >= 50 and getattr(cropped, "height", 0) >= 40:
                         assets_dir.mkdir(parents=True, exist_ok=True)
                         cropped.save(asset_path)
@@ -876,6 +918,18 @@ def map_iterated_items(
             block_type, flow_id, skip = BlockType.TABLE, FlowID.TABLE_GRID, False
         elif label == DocItemLabel.CODE:
             text = (getattr(item, "text", "") or "").strip()
+            # A listing whose text layer lost its line structure (Docling
+            # collapses listing lines; the source PDF may draw the identifier
+            # underscores as vector rules) is unreadable as code when typeset.
+            # Crop the region — the same recovery the unreadable-formula branch
+            # below already applies — instead of shipping a wrapped prose blob.
+            if code_text_layer_is_lossy(text):
+                code_asset = crop_lossy_code_asset(
+                    item, assets_dir, pdf_path, len(blocks) + 1, text
+                )
+                if code_asset is not None:
+                    blocks.append(code_asset)
+                    continue
             block_type, flow_id, skip = BlockType.CODE, FlowID.MAIN_STORY, True
         elif label == DocItemLabel.FORMULA:
             text = (getattr(item, "text", "") or "").strip()

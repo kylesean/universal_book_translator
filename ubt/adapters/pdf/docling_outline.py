@@ -256,6 +256,17 @@ def _extract_outline_only_blocks(
     return out
 
 
+def _figure_asset_dpi_tag() -> str:
+    """The delivered-crop DPI tag, read lazily (the module's docling-import pattern).
+
+    Asset filenames carry the resolution they were cut at, so raising the DPI
+    cuts new files instead of replaying old ones from the sha-keyed asset dir.
+    """
+    from ubt.adapters.pdf.visual_scalpel import FIGURE_ASSET_DPI_TAG
+
+    return FIGURE_ASSET_DPI_TAG
+
+
 def _crop_formula_asset(
     item: Any,
     assets_dir: Path,
@@ -263,7 +274,6 @@ def _crop_formula_asset(
     ordinal: int,
 ) -> IRBlock | None:
     """Recover a formula Docling could not read by cropping its source region.
-
     A display equation the extractor left as a bare ``$$`` is content, not
     markup: the renderer rebuilds the page from the IR and has
     no source canvas to preserve, so without this the equation simply vanishes.
@@ -295,12 +305,14 @@ def _crop_formula_asset(
         # A degenerate box is a stray glyph, not an equation; cropping it would
         # add noise to the page.
         return None
-    asset_path = assets_dir / f"formula_p{page_no}_{ordinal:04d}.png"
+    asset_path = assets_dir / f"formula_p{page_no}_{ordinal:04d}.{_figure_asset_dpi_tag()}.png"
     try:
-        from ubt.adapters.pdf.visual_scalpel import crop_block_pil
+        from ubt.adapters.pdf.visual_scalpel import FIGURE_ASSET_DPI, crop_block_pil
 
         assets_dir.mkdir(parents=True, exist_ok=True)
-        cropped = crop_block_pil(pdf_path, page_no, bbox)
+        # Delivered at print resolution: this crop is the equation's only
+        # raster (the same contract as figure assets — see FIGURE_ASSET_DPI).
+        cropped = crop_block_pil(pdf_path, page_no, bbox, dpi=FIGURE_ASSET_DPI)
         if getattr(cropped, "width", 0) < 8 or getattr(cropped, "height", 0) < 6:
             return None
         cropped.save(asset_path)

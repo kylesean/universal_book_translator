@@ -1,17 +1,26 @@
-"""The merged table of contents must read in destination-page order.
+"""The merged table of contents must not overwrite the blocks it follows.
 
-Docling's TOC pass and the PDF's bookmark tree are two partial views of the same
-list: Docling reads the sub-section rows with their geometry, the bookmarks carry
-the top-level chapters it drops. Merging them additively put every chapter after
-every section, so the delivered contents opened on "2.1" and printed chapter 1
-below its own sub-sections.
+Two regressions, one collision shape:
+
+* ``cb2286a`` renumbered the TOC rows from spine 1 so every downstream
+  ``spine_index`` sort would keep the destination-page order. But the front
+  matter (title, authors, abstract, footnotes) had already been emitted with
+  those very ids, and the ledger's ``ON CONFLICT(job_id, block_id) DO UPDATE``
+  let the TOC rows *overwrite* them block-for-block: the delivered PDF opened
+  on the contents page with no title page at all.
+* Renaming the ids is not enough — the rows must also keep their position in
+  the reading order (the printed TOC is page 2, after the front matter), so
+  the renumber starts at ``len(blocks) + 1``.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from ubt.adapters.pdf.docling_parser import _toc_sort_key
+from ubt.adapters.pdf.docling_outline import _toc_sort_key
+from ubt.adapters.pdf.docling_parser import map_iterated_items
 from ubt.core.ir.models import BlockProvenance, BlockType, IRBlock, make_element
 
 pytestmark = pytest.mark.fast
@@ -111,3 +120,84 @@ def test_an_unparseable_page_sorts_last() -> None:
     rows = [_row("Broken", "", 0), _row("1 Introduction", "3", 1)]
     ordered = [b.source_text for b in sorted(rows, key=_toc_sort_key)]
     assert ordered == ["1 Introduction", "Broken"]
+
+
+# --------------------------------------------------------------------------
+# The id collision: renumbered TOC rows must never reuse a taken id.
+# --------------------------------------------------------------------------
+
+
+class _FakeProv:
+    def __init__(self, page_no: int) -> None:
+        self.page_no = page_no
+        self.bbox = None
+
+
+class _FakeItem:
+    """A minimal DOCUMENT_INDEX stand-in (the mapping only reads these attrs)."""
+
+    label = "document_index"
+
+    def __init__(self) -> None:
+        self.prov = [_FakeProv(2)]
+
+
+class _FakeDocItem:
+    def __init__(self, label: str, text: str, page_no: int) -> None:
+        self.label = label
+        self.text = text
+        self.prov = [_FakeProv(page_no)]
+
+
+def _items_with_front_matter_then_toc() -> tuple[list[tuple[object, int]], object]:
+    """A document whose first page (title/abstract) precedes the TOC item."""
+
+    class _Doc:
+        pass
+
+    doc = _Doc()
+    items: list[tuple[object, int]] = [
+        (_FakeDocItem("text", "The Greatest Paper", 1), 0),
+        (_FakeDocItem("text", "In deep learning, models reuse parameters.", 1), 0),
+        (_FakeItem(), 0),
+    ]
+    return items, doc
+
+
+def test_toc_renumbering_never_collides_with_the_blocks_it_follows(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The whole regression in one assertion: unique ids with front matter first."""
+    items, doc = _items_with_front_matter_then_toc()
+
+    # _extract_document_index_blocks needs a real PDF; stub it to return rows
+    # in the (destination, insertion) shape the real merge produces: the
+    # section read first, then the chapter that contains it.
+    def fake_index(
+        item: object, pdf_path: object, cache: dict[int, list[object]], start_index: int
+    ) -> list[IRBlock]:
+        return [
+            _row("4.1 Fine-Tuning", "14", start_index),
+            _row("4 Downstream Results", "14", start_index + 1),
+        ]
+
+    import ubt.adapters.pdf.docling_parser as dp
+
+    monkeypatch.setattr(dp, "_extract_document_index_blocks", fake_index)
+    monkeypatch.setattr(dp, "_extract_outline_only_blocks", lambda *a, **k: [])
+
+    blocks = map_iterated_items(items, doc, tmp_path / "toc-assets", pdf_path=None)
+
+    ids = [b.id for b in blocks]
+    assert len(ids) == len(set(ids)), f"colliding ids: {ids}"
+    # The front matter keeps ids 1..2 and the TOC rows are renumbered after it.
+    assert blocks[0].id == "pdf_main#b0001"
+    assert blocks[0].source_text == "The Greatest Paper"
+    assert blocks[1].id == "pdf_main#b0002"
+    # The chapter still sorts above its own section (the destination-page order
+    # cb2286a was after), now at the ids that follow the front matter.
+    toc = [b for b in blocks if b.provenance.toc_entry]
+    assert [b.source_text for b in toc] == ["4 Downstream Results", "4.1 Fine-Tuning"]
+    assert toc[0].id == "pdf_main#b0003"
+    assert toc[1].id == "pdf_main#b0004"

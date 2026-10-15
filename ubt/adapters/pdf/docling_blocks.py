@@ -13,10 +13,11 @@ from __future__ import annotations
 
 import logging
 import re
+from pathlib import Path
 from typing import Any
 
 from ubt.analyze.structure import looks_like_debris, looks_like_listing
-from ubt.core.ir.models import BlockType, BoundingBox, IRBlock
+from ubt.core.ir.models import BlockType, BoundingBox, FlowID, IRBlock, make_element
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,106 @@ _TOC_LEADER_LINE_RE = re.compile(
     r"^(?P<title>.+?)\s*(?:(?:\.\s*){3,}|[·…⋯]{2,})\s*(?P<page>[0-9ivxlcdmIVXLCDM]+)\s*$"
 )
 _TOC_SPACE_LINE_RE = re.compile(r"^(?P<title>.+?)\s+(?P<page>[0-9ivxlcdmIVXLCDM]+)\s*$")
+
+#: A code listing Docling collapsed to ONE line is not renderable code. Docling
+#: joins a listing's lines into a single space-separated stream, and the source
+#: PDF frequently draws the identifier underscores as vector rules that no text
+#: layer contains (the arXiv 2101.03961 pseudocode: ``load_balance_loss``
+#: extracts as ``load balance loss``). Typesetting that blob as prose loses the
+#: line structure and every underscore — the listing is unreadable as code.
+#: The threshold is low on purpose: a real listing of any size carries line
+#: breaks in any faithful text layer.
+_CODE_LOSSY_MIN_CHARS = 120
+
+
+def _figure_asset_dpi_tag() -> str:
+    """The delivered-crop DPI tag, read lazily.
+
+    Asset filenames carry the resolution they were cut at, so raising the DPI
+    cuts new files instead of replaying old ones from the sha-keyed asset dir.
+    """
+    from ubt.adapters.pdf.visual_scalpel import FIGURE_ASSET_DPI_TAG
+
+    return FIGURE_ASSET_DPI_TAG
+
+
+def code_text_layer_is_lossy(text: str) -> bool:
+    """True when a ``code`` block's extracted text cannot be typeset as code.
+
+    The extractor's signal is structural, not a guess about fonts: a listing
+    longer than :data:`_CODE_LOSSY_MIN_CHARS` with no line break has had its
+    line structure destroyed upstream, so the only faithful representation is
+    a crop of the source region.
+    """
+    body = (text or "").strip()
+    return len(body) >= _CODE_LOSSY_MIN_CHARS and "\n" not in body
+
+
+def crop_lossy_code_asset(
+    item: Any,
+    assets_dir: Path,
+    pdf_path: Path | None,
+    ordinal: int,
+    text: str,
+) -> IRBlock | None:
+    """Recover a line-structure-destroyed code listing by cropping its region.
+
+    The same contract as the unreadable-formula crop: the renderer rebuilds the
+    page from the IR and has no source canvas, so a listing whose text layer
+    lost its line structure would otherwise be delivered as one wrapped prose
+    paragraph. The crop becomes an IMAGE block, which the renderer already
+    places and the delivery contract already counts.
+
+    Returns ``None`` when the region cannot be cropped (no source PDF, no
+    bbox, or a degenerate region), so the caller keeps the text block — an
+    imperfect listing still beats a hole on the page.
+    """
+    if pdf_path is None or not pdf_path.exists():
+        return None
+    prov = item.prov[0] if getattr(item, "prov", None) else None
+    if prov is None or getattr(prov, "bbox", None) is None:
+        return None
+    page_no = int(getattr(prov, "page_no", 0) or 0)
+    if page_no < 1:
+        return None
+    b = prov.bbox
+    bbox = BoundingBox(
+        page=page_no,
+        x0=float(getattr(b, "l", 0.0)),
+        y0=float(getattr(b, "b", 0.0)),
+        x1=float(getattr(b, "r", 0.0)),
+        y1=float(getattr(b, "t", 0.0)),
+    )
+    if bbox.x1 - bbox.x0 < 60 or bbox.y1 - bbox.y0 < 24:
+        # Too small to be a listing: a one-line fragment is better kept as text.
+        return None
+    asset_path = assets_dir / f"code_p{page_no}_{ordinal:04d}.{_figure_asset_dpi_tag()}.png"
+    try:
+        from ubt.adapters.pdf.visual_scalpel import FIGURE_ASSET_DPI, crop_block_pil
+
+        assets_dir.mkdir(parents=True, exist_ok=True)
+        # Delivered at print resolution (see FIGURE_ASSET_DPI): the listing's
+        # underscores are drawn as vector rules in the source, so the crop is
+        # the only place they exist.
+        cropped = crop_block_pil(pdf_path, page_no, bbox, dpi=FIGURE_ASSET_DPI)
+        if getattr(cropped, "width", 0) < 60 or getattr(cropped, "height", 0) < 24:
+            return None
+        cropped.save(asset_path)
+    except Exception as exc:
+        logger.debug("Code crop failed for page %d: %s", page_no, exc)
+        return None
+    return IRBlock(
+        element=make_element(
+            id=f"pdf_main#cde_{ordinal:04d}",
+            spine_index=ordinal,
+            block_type=BlockType.IMAGE,
+            flow_id=FlowID.MAIN_STORY,
+            source_text=str(asset_path),
+            bbox=bbox,
+            skip_translate=True,
+        ),
+        target_text=str(asset_path),
+    )
 
 
 def parse_toc_entry_line(line_text: str) -> tuple[str, str, bool] | None:

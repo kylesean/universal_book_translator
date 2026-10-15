@@ -81,9 +81,34 @@ NON_TERMINAL_STATUSES: tuple[str, ...] = tuple(
 
 
 def _upsert_blocks_batch(cursor: sqlite3.Cursor, job_id: str, blocks: Sequence[IRBlock]) -> None:
-    """Batch upsert IRBlock entities into the blocks table using ON CONFLICT update."""
+    """Batch upsert IRBlock entities into the blocks table using ON CONFLICT update.
+
+    One *append* must carry unique ids: a duplicate within the batch means the
+    extractor produced colliding ids, and the ``ON CONFLICT`` below would
+    silently keep whichever row happened to be written last. That is how a TOC
+    renumbering bug shipped a PDF with no title page — the contents rows
+    overwrote the front matter block-for-block with no error anywhere. Refusing
+    here turns that class of parse defect into a loud failure at ingest.
+    (Across appends, re-upserting a known id is the supported resume path and
+    stays allowed.)
+    """
     if not blocks:
         return
+    seen_ids: set[str] = set()
+    duplicates: set[str] = set()
+    for b in blocks:
+        if b.id in seen_ids:
+            duplicates.add(b.id)
+        seen_ids.add(b.id)
+    if duplicates:
+        sample = ", ".join(sorted(duplicates)[:5])
+        raise LedgerError(
+            f"duplicate block id(s) in one append for job '{job_id}': {sample}"
+            + (f" (+{len(duplicates) - 5} more)" if len(duplicates) > 5 else "")
+            + ". The extractor assigned the same id to different content; "
+            "fix the id assignment before translating (a silent overwrite would drop blocks).",
+            details={"job_id": job_id, "duplicate_ids": sorted(duplicates)},
+        )
     blocks_data = [
         (
             b.id,

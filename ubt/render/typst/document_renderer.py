@@ -514,6 +514,21 @@ def _heading_level(block: IRBlock) -> int:
     return min(level, 6)
 
 
+def _raw_block_markup(text: str) -> str:
+    """Typeset a code listing as a monospace block that keeps its line breaks.
+
+    A markup newline folds into a space and prose escaping would leave the
+    listing set in the body face, so the listing is passed to Typst ``raw`` as
+    a plain *string* (``raw("...")``): inside that string literal nothing can
+    enter markup or code mode, so every ``#``, ``"``, ``;``, ``\\`` and
+    newline in the listing stays literal. The only character that must be
+    escaped is the double quote itself, so the payload cannot terminate the
+    string early.
+    """
+    payload = text.replace("\\", "\\\\").replace('"', '\\"')
+    return f'#block(fill: luma(245), inset: 8pt, radius: 4pt, width: 100%)[#raw("{payload}")]'
+
+
 class TypstDocumentRenderer:
     """Build a Typst document from IRBlocks and compile it to PDF.
 
@@ -928,6 +943,20 @@ class TypstDocumentRenderer:
                         # stage flags the block and the contract sees the gap
                         # instead of a silently shorter document.
                         self.last_render_skips.append((block.id, "math_unrenderable"))
+                continue
+
+            # A code listing the extractor kept as text (short, or its line
+            # structure survived) is typeset as code, not prose: Typst folds a
+            # markup newline into a space, so the old prose path delivered a
+            # listing as one justified paragraph with no line structure and no
+            # monospace face. ``raw`` is a string argument, so nothing in the
+            # listing can enter code mode (a ``#`` or ``;`` stays literal).
+            if block_type == "code":
+                flush_figure()
+                kept = (block.source_text or "").strip()
+                if kept:
+                    body.append(_raw_block_markup(kept))
+                    self.stats.blocks_rendered += 1
                 continue
 
             # A block the policy deliberately keeps in the source language (a

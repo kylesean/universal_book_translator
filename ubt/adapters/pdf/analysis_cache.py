@@ -78,11 +78,16 @@ def docling_identity() -> str:
     the pdfium probes it reads, while ``ubt.core.ir.models`` carries the payload's
     shape. A change to any of them must invalidate the cached blocks -- keying
     only the first two served stale blocks whose ``inline_runs`` were empty.
+    ``docling_outline`` owns the TOC synthesis and its destination-page sort
+    (``_toc_sort_key``), so a change there left the delivered contents in the
+    pre-fix order whenever the block cache hit -- exactly what happened to the
+    ``4 Downstream Results`` / ``4.1 Fine-Tuning`` tie-break fix.
     """
     return _module_identity(
         "ubt.adapters.pdf.docling_parser",
         "ubt.adapters.pdf.docling_blocks",
         "ubt.adapters.pdf.docling_crosscheck",
+        "ubt.adapters.pdf.docling_outline",
         "ubt.adapters.pdf.textgeom",
         "ubt.core.ir.models",
         # The parser post-processes every title/body through

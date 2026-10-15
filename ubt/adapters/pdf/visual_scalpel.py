@@ -27,6 +27,22 @@ logger = logging.getLogger(__name__)
 DEFAULT_SCALPEL_DPI: int = 150
 DEFAULT_BLEED_PT: float = 4.0
 
+#: Resolution for *delivered* figure/formula/code crops (the PNGs the rebuilt
+#: page places). The VLM path above reads a crop once to answer a prompt, but a
+#: delivered asset is zoomed and printed: source figures in born-digital papers
+#: are vector drawings, so the crop is the only raster that will ever exist and
+#: it must meet the 300 DPI print standard. At the old 150 DPI every figure in
+#: the reference corpus landed at ~150 ppi as placed — visibly soft on zoom.
+#: Memory is bounded: the page raster cache holds exactly one page (~24 MB at
+#: this DPI) and is replaced as the walk advances.
+FIGURE_ASSET_DPI: int = 300
+#: Tag folded into delivered asset filenames. The asset dir is keyed by the
+#: source file's sha alone, so an old-DPI crop with the same name would be
+#: reused forever by the ``not asset_path.exists()`` guards; naming the DPI in
+#: the file makes a resolution change cut new files instead of replaying old
+#: ones (and leaves the old files harmless).
+FIGURE_ASSET_DPI_TAG = f"dpi{FIGURE_ASSET_DPI}"
+
 
 def _compute_crop_coords(
     bbox: BoundingBox | tuple[float, float, float, float],
