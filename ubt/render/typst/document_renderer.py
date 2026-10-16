@@ -615,13 +615,21 @@ def render_table(markup: str, *, is_math_ok: Callable[[str], bool] | None = None
     # per line. Weight each column by its longest cell (header included), with a
     # floor so a short numeric column still gets room; ``1fr`` weights are
     # relative, so the table stays the text width.
+    #
+    # A CJK glyph is about twice the advance width of a Latin digit, so it
+    # counts double: a four-character header (``文本编辑``) is as wide as eight
+    # Latin characters, and weighing it as four under-sized the column until the
+    # header stacked one glyph per line.
+    def _display_width(text: str) -> int:
+        return sum(2 if ord(c) > 0x2E80 else 1 for c in text)
+
     weights = []
     for col in range(columns):
         longest = 0
         for values in (headers, *rows):
             if col < len(values):
                 for part in re.split(r"<br\s*/?>", values[col]):
-                    longest = max(longest, len(part.strip()))
+                    longest = max(longest, _display_width(part.strip()))
         weights.append(max(longest, _TABLE_COL_MIN_WEIGHT))
     column_spec = "(" + ", ".join(f"{w}fr" for w in weights) + ")"
 
