@@ -9,6 +9,8 @@ contradicted the reorder-tolerant unmask fix. HYBRID is the default strategy.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from ubt.core.router.capabilities import PromptStrategy
@@ -38,7 +40,7 @@ def _system(prompt: tuple[str, str]) -> str:
     "builder",
     [build_rich_draft_prompt, build_macro_chunk_draft_prompt, build_hybrid_draft_prompt],
 )
-def test_prompts_carry_no_negative_rules(builder) -> None:
+def test_prompts_carry_no_negative_rules(builder: Any) -> None:
     # The macro builder takes a list of (id, text) blocks; the others a string.
     if builder is build_macro_chunk_draft_prompt:
         system, _user = builder([("b1", "Hello world.")], target_lang="zh")

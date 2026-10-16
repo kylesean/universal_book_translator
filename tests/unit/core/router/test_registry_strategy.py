@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from ubt.core.router.capabilities import ModelProfile, PromptStrategy
+from ubt.core.router.provider import MockModelProvider
 from ubt.core.router.registry import ModelCapabilityRegistry
 from ubt.core.router.router import ModelRouter
 
@@ -45,14 +46,9 @@ def test_unknown_and_heuristic_models_resolve_to_hybrid() -> None:
     assert registry.resolve("my-totally-unknown-llm").prompt_strategy == PromptStrategy.HYBRID
 
 
-class _DummyProvider:
-    is_mock = True
-
-    async def generate_with_finish_reason(self, **kwargs: object) -> tuple[str, str | None]:
-        return "translation", "stop"
-
-    async def generate(self, prompt: str, **kwargs: object) -> str:
-        return "translation"
+def _DummyProvider() -> MockModelProvider:
+    """A mock provider: ``build_draft_prompt`` never calls it, it only needs the type."""
+    return MockModelProvider()
 
 
 def test_router_build_draft_prompt_uses_hybrid() -> None:
