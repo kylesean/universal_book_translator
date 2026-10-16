@@ -360,3 +360,79 @@ def test_typst_renderer_compiles_both_single_and_dual_columns(tmp_path: Path) ->
 
         ok, stderr = _compile_typst(source)
         assert ok, f"Typst compile failed for columns={cols}: {stderr}"
+
+
+# --------------------------------------------------------------------------- #
+# Table of contents: TOC rows must render as a TOC (title + page number), never
+# as orphaned section headings. Regression for the near-empty page a paper's
+# TOC produced when every toc_entry block took the #heading path.
+# --------------------------------------------------------------------------- #
+
+
+def _toc_block(bid: str, title: str, page: str) -> IRBlock:
+    from ubt.core.ir.models import BlockProvenance, make_element
+
+    element = make_element(id=bid, spine_index=1, block_type=BlockType.HEADING, source_text=title)
+    return IRBlock(
+        element=element,
+        target_text=title,
+        provenance=BlockProvenance(toc_entry=True, toc_page=page),
+    )
+
+
+def _heading_block(bid: str, text: str) -> IRBlock:
+    from ubt.core.ir.models import make_element
+
+    element = make_element(id=bid, spine_index=1, block_type=BlockType.HEADING, source_text=text)
+    return IRBlock(element=element, target_text=text)
+
+
+def _para_block(bid: str, text: str) -> IRBlock:
+    from ubt.core.ir.models import make_element
+
+    element = make_element(id=bid, spine_index=1, block_type=BlockType.NARRATIVE, source_text=text)
+    return IRBlock(element=element, target_text=text)
+
+
+def test_toc_entries_group_into_runs() -> None:
+    from ubt.render.typst.document_renderer import _group_toc_runs
+
+    blocks = [
+        _toc_block("t1", "1 引言", "3"),
+        _toc_block("t2", "2 切换 Transformer", "4"),
+        _heading_block("h1", "1 引言"),
+        _toc_block("t3", "3 扩展特性", "11"),
+    ]
+    runs = _group_toc_runs(blocks)
+    assert [[b.id for b in run] for run in runs] == [["t1", "t2"], ["t3"]]
+
+
+def test_toc_rows_do_not_become_section_headings(tmp_path: Path) -> None:
+    """The defect: TOC rows rendered as ``#heading`` (orphaned, empty page)."""
+    renderer = TypstDocumentRenderer(layout_template="academic", columns=1, paper_title="Paper")
+    blocks = [
+        _toc_block("t1", "6 相关工作", "24"),
+        _toc_block("t2", "7 讨论", "25"),
+        _toc_block("t3", "8 未来工作", "26"),
+        _heading_block("h1", "1 引言"),
+    ]
+    source, _ = renderer.build_source(blocks, tmp_path / "b", target_lang="zh")
+    # The TOC is one block carrying the entries and their page numbers ...
+    assert "目录" in source
+    assert "6 相关工作" in source and "24" in source
+    # ... and the three TOC rows did NOT take the heading path. Only the one
+    # genuine section heading remains.
+    assert source.count("#heading(level: 1)") == 1
+
+
+def test_toc_renders_and_compiles(tmp_path: Path) -> None:
+    renderer = TypstDocumentRenderer(layout_template="academic", columns=1, paper_title="Paper")
+    blocks = [
+        _toc_block("t1", "1 引言", "3"),
+        _toc_block("t2", "2 切换 Transformer", "4"),
+        _toc_block("t3", "2.1 稀疏路由的简化", "5"),
+        _para_block("p1", "这是正文。"),
+    ]
+    source, _ = renderer.build_source(blocks, tmp_path / "b", target_lang="zh")
+    ok, stderr = _compile_typst(source)
+    assert ok, f"Typst compile failed for a TOC document: {stderr}"

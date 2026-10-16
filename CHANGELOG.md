@@ -122,6 +122,15 @@ Pre-1.0, no tags yet. Everything below is in the current tree.
 
 ### Fixed
 
+- A table of contents now renders **as a table of contents**, not as a run of
+  section headings. The PDF reader pairs each TOC title with its page number and
+  tags the block (`provenance.toc_entry` / `toc_page`), but the renderer never
+  read the tag, so every TOC row took the `#heading` path: the paper's contents
+  became orphaned section headings with no body (a near-empty page) and the
+  recovered page numbers were dropped. The renderer now groups each run of
+  consecutive `toc_entry` blocks into one full-width TOC block — a `目录` heading
+  with dot-leadered `title … page` rows — which also keeps the contents out of
+  the body columns.
 - The delivered-artifact check no longer reports a **false `[FAIL]`** for a
   heading the renderer deliberately drops as running page chrome (an arXiv or
   journal stamp, a submission date). The renderer omits those headings so the

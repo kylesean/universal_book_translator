@@ -161,6 +161,72 @@ def escape_markup(text: str) -> str:
     return typst_escape(text)
 
 
+def is_toc_entry(block: IRBlock) -> bool:
+    """Whether the extractor tagged this block as a table-of-contents row.
+
+    The PDF reader pairs a TOC title with its right-margin page number and
+    records ``provenance.toc_entry`` (+ ``toc_page``) so a table of contents is
+    not scattered into translated titles plus a run of bare page-number blocks.
+    The renderer must read that flag: left unread, every TOC row renders as an
+    ordinary ``#heading`` — inventing section headings that have no body (an
+    orphaned, near-empty page) and dropping the page numbers the reader worked
+    to recover.
+    """
+    return bool(block.provenance.toc_entry)
+
+
+def _group_toc_runs(blocks: Sequence[IRBlock]) -> list[list[IRBlock]]:
+    """Group consecutive ``toc_entry`` blocks into one run each.
+
+    A single TOC is a *run* of adjacent entries; a document may have more than
+    one (a front TOC and an appendix listing), so each maximal run becomes its
+    own table. A lone tagged row (a false positive) is still a run of one and is
+    rendered compactly rather than promoted to a section heading.
+    """
+    runs: list[list[IRBlock]] = []
+    current: list[IRBlock] = []
+    for block in blocks:
+        if is_toc_entry(block):
+            current.append(block)
+        elif current:
+            runs.append(current)
+            current = []
+    if current:
+        runs.append(current)
+    return runs
+
+
+def render_toc(entries: Sequence[tuple[str, str]]) -> str:
+    """A table of contents: a heading plus one dot-leader row per entry.
+
+    ``entries`` are ``(title, page)`` pairs, title already delivered (translated
+    or kept) and page the reader's recorded source-pagination destination. The
+    whole thing is one full-width block so it neither flows into the body
+    columns nor is mistaken for a run of section headings — both were the
+    visible defect when TOC rows were emitted as ``#heading``s.
+
+    Typst has no built-in dot leader, so each row is a two-cell grid (title
+    left, page right) carrying a dotted bottom border.
+    """
+    lines = ["#block(width: 100%)[", '  #text(size: 13pt, weight: "bold")[目录]', "  #v(0.6em)"]
+    lines.append("  #grid(")
+    lines.append("    columns: (1fr),")
+    lines.append("    row-gutter: 0.25em,")
+    lines.append('    stroke: (bottom: (paint: luma(150), thickness: 0.4pt, dash: "dotted")),')
+    lines.append("    align: (left + horizon),")
+    for title, page in entries:
+        body = escape_markup(title.strip())
+        number = escape_markup(page.strip())
+        lines.append(
+            "    [#grid(columns: (1fr, auto), align: (left + horizon, right + horizon), "
+            f"[#text(size: 10pt)[{body}]], [#text(size: 10pt)[{number}]])],"
+        )
+    lines.append("  )")
+    lines.append("  #v(1.0em)")
+    lines.append("]")
+    return "\n".join(lines)
+
+
 def render_prose(
     text: str,
     runs: Sequence[InlineRun] = (),
@@ -818,8 +884,29 @@ class TypstDocumentRenderer:
             body.append(self._figure_markup(pending, build_dir))
             pending = None
 
+        # Table of contents: the reader records ``toc_entry`` per row so the TOC
+        # is not scattered into headings-without-body plus bare page numbers.
+        # Group each run of consecutive TOC rows into one full-width block (with
+        # the recovered page numbers) and mark them consumed, so they never take
+        # the ``#heading`` path below — the defect this fixes emitted every TOC
+        # row as a section heading on a near-empty page, dropping the numbers.
+        toc_consumed: set[str] = set()
+        for entry_blocks in _group_toc_runs(blocks):
+            title_page: list[tuple[str, str]] = []
+            for blk in entry_blocks:
+                title = _block_text(blk).strip()
+                page = str(blk.provenance.toc_page or "").strip()
+                if title:
+                    title_page.append((title, page))
+                toc_consumed.add(blk.id)
+                self.stats.blocks_rendered += 1
+            if title_page:
+                body.append(render_toc(title_page))
+
         for block in blocks:
             self.stats.blocks_seen += 1
+            if block.id in toc_consumed:
+                continue
             block_type = str(getattr(block.block_type, "value", block.block_type) or "")
 
             # A block whose delivered text still carries a pipeline sentinel
