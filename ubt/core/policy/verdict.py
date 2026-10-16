@@ -15,7 +15,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from ubt.core.ir.models import IRBlock
+from ubt.core.ir.models import FlowID, IRBlock
 from ubt.core.policy.layout_policy import (
     BYTE_WORD_RE,
     HEXDUMP_MIN_SHARE,
@@ -93,9 +93,15 @@ def judge_block(block: IRBlock, *, translate_chrome: bool = False) -> Verdict:
     if block.skip_translate or block.block_type in NON_TEXT_BLOCK_TYPES:
         return Verdict(False, "verdict:non_text")
     # Rule 5: chrome regions never enter translation (page numbers
-    # never do, even under the chrome opt-in).
-    if block.region in {RegionKind.HEADER, RegionKind.FOOTER, RegionKind.PAGE_NUMBER} and (
-        not translate_chrome or block.region is RegionKind.PAGE_NUMBER
+    # never do, even under the chrome opt-in). EXCEPT a FOOTNOTE-flow block: a
+    # footnote is author content the reader needs, and the extractor routes it
+    # through the footer region (Docling labels a bottom-of-page footnote
+    # PAGE_FOOTER). Without this exemption a one-off footnote paragraph shipped
+    # untranslated (measured on arXiv 2606.23344).
+    if (
+        block.region in {RegionKind.HEADER, RegionKind.FOOTER, RegionKind.PAGE_NUMBER}
+        and block.flow_id is not FlowID.FOOTNOTE
+        and (not translate_chrome or block.region is RegionKind.PAGE_NUMBER)
     ):
         return Verdict(False, "verdict:chrome")
     # Rule 6: identifier-only blocks (bare URL / DOI / ISBN).

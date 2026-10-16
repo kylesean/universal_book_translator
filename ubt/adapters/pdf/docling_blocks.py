@@ -226,6 +226,14 @@ def split_prov_spans(item: Any) -> tuple[str, str, BoundingBox | None] | None:
         return None
     if len(tail.split()) < 5:
         return None
+    # A head that does not *end* a sentence means the tail continues it, not a
+    # caption: "…we evaluate RT-" + "DocLayout using downstream benchmarks."
+    # is one paragraph split across the page break (measured on arXiv
+    # 2606.23344, where the fragment then absorbed the neighbouring table's
+    # content in translation). Only a head that ends cleanly is split; a head
+    # with a dangling hyphen or no terminal punctuation keeps the item whole.
+    if not head.endswith((".", "!", "?", "。")):
+        return None
     prov_bbox = getattr(last, "bbox", None)
     tail_bbox = None
     if prov_bbox is not None:

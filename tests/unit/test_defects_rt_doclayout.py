@@ -255,3 +255,55 @@ def test_a_small_logo_keeps_its_own_width() -> None:
     assert "width: 121pt" in small
     wide = renderer._figure_markup(_Figure(asset=str(tmp / "logo.png"), width_pt=524.0), tmp)
     assert "width: 88%" in wide
+
+
+# --------------------------------------------------------------------------- #
+# Cross-page span split: a paragraph continuation is not a caption
+# --------------------------------------------------------------------------- #
+
+
+class _Prov:
+    def __init__(self, page_no: int, charspan: tuple[int, int]) -> None:
+        self.page_no = page_no
+        self.charspan = charspan
+        self.bbox = None
+
+
+class _Item:
+    def __init__(self, text: str, provs: list[_Prov]) -> None:
+        self.text = text
+        self.prov = provs
+
+
+def test_a_page_break_that_mid_sentence_is_not_split() -> None:
+    """``…we evaluate RT-`` + ``DocLayout using…`` is one paragraph.
+
+    The tail test (capital + terminal punctuation) passed, so the split fired —
+    and the detached fragment then absorbed the neighbouring table's content in
+    translation, shipping a table where a sentence belonged (arXiv 2606.23344).
+    A head that does not end a sentence keeps the item whole.
+    """
+    from ubt.adapters.pdf.docling_blocks import split_prov_spans
+
+    text = (
+        "Due to the lack of standardized evaluation metrics we evaluate RT-"
+        "DocLayout using downstream document parsing benchmarks."
+    )
+    head_len = len("Due to the lack of standardized evaluation metrics we evaluate RT-")
+    item = _Item(text, [_Prov(8, (0, head_len)), _Prov(9, (head_len, len(text)))])
+    assert split_prov_spans(item) is None
+
+
+def test_a_cross_page_caption_is_still_split() -> None:
+    """A head that ends a sentence followed by a caption body still splits."""
+    from ubt.adapters.pdf.docling_blocks import split_prov_spans
+
+    head = "The dataset is described below."
+    tail = "Table 1 shows the comparison across all systems."
+    text = head + tail
+    item = _Item(text, [_Prov(3, (0, len(head))), _Prov(4, (len(head), len(text)))])
+    result = split_prov_spans(item)
+    assert result is not None
+    got_head, got_tail, _bbox = result
+    assert got_head == head
+    assert got_tail == tail
