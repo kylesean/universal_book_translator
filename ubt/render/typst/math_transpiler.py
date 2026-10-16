@@ -492,16 +492,36 @@ def typstify_math(body: str) -> str | None:
     body = body.replace(r"\#", " hash ")
 
     # Convert math accents \hat{a} -> hat(a), \hat a -> hat(a), etc.
-    for _ in range(3):
-        t1 = _ACCENT_CMD_RE.sub(
-            lambda m: f"{_ACCENT_FN_MAP.get(m.group(1), m.group(1))}({m.group(2)})", body
-        )
-        t2 = _ACCENT_BARE_CMD_RE.sub(
-            lambda m: f"{_ACCENT_FN_MAP.get(m.group(1), m.group(1))}({m.group(2)})", t1
-        )
-        if t2 == body:
+    # A bare accent whose operand became a Typst function call (\hat\mathcal{T}
+    # -> \hat cal(T), the font pass above rewrote it) must take the *whole* call.
+    # The single-character form below would otherwise steal the call's first
+    # letter: ``hat(c)al(T)`` — a silent mis-render.
+    _accent_names = "hat|tilde|vec|bar|overline|dot|ddot"
+
+    def _accent_call(match: re.Match[str]) -> str:
+        return f"{_ACCENT_FN_MAP.get(match.group(1), match.group(1))}({match.group(2)})"
+
+    _accent_call_re = re.compile(
+        rf"\\({_accent_names})\s*((?:bb|frak|cal|bold|italic)\((?:[^()]|\([^()]*\))*\))"
+    )
+    # A bare accent whose operand is another LaTeX command takes that whole
+    # command as its argument: LaTeX's ``\hat\alpha`` accents alpha, so the
+    # command must survive *inside* the call (``hat(\alpha)``) and be
+    # substituted normally afterwards. Left alone it produced None.
+    _accent_over_cmd_re = re.compile(rf"\\({_accent_names})\s*(\\[a-zA-Z]+)")
+
+    def _accent_over_cmd(match: re.Match[str]) -> str:
+        name = _ACCENT_FN_MAP.get(match.group(1), match.group(1))
+        return f"{name}({match.group(2)})"
+
+    for _ in range(4):
+        previous = body
+        body = _accent_call_re.sub(_accent_call, body)
+        body = _accent_over_cmd_re.sub(_accent_over_cmd, body)
+        body = _ACCENT_CMD_RE.sub(_accent_call, body)
+        body = _ACCENT_BARE_CMD_RE.sub(_accent_call, body)
+        if body == previous:
             break
-        body = t2
 
     # A ``\text{...}`` label that contains CJK is emitted already quoted, because
     # the word-run quoter below would otherwise split it on its ASCII words. It

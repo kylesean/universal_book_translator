@@ -84,6 +84,29 @@ def test_font_command_does_not_fuse_with_a_preceding_command() -> None:
     assert typstify_math(r"i \in \mathcal{T}") == "i in cal(T)"
 
 
+def test_accent_takes_the_whole_operand_not_its_first_letter() -> None:
+    """`\\hat\\mathcal{T}` accented a bare `c`: `hat(c)al(T)`, a silent mis-render.
+
+    LaTeX's `\\hat` takes the next *token*; once `\\mathcal{T}` became the Typst
+    call `cal(T)`, the single-character bare-accent form matched only its first
+    letter. The accent must wrap the whole call.
+    """
+    assert typstify_math(r"\hat\mathcal{T}") == "hat(cal(T))"
+    assert typstify_math(r"\vec\mathcal{X}") == "vec(cal(X))"
+    assert typstify_math(r"\bar\mathbb{R}") == "overline(bb(R))"
+    # A braced operand keeps working, and so does the single-character form.
+    assert typstify_math(r"\hat{\mathcal{T}}") == "hat(cal(T))"
+    assert typstify_math(r"\hat x") == "hat(x)"
+
+
+def test_accent_over_a_command_keeps_the_command() -> None:
+    """`\\hat\\alpha` used to fail closed (None); LaTeX accents the whole command."""
+    assert typstify_math(r"\hat\alpha") == "hat(alpha)"
+    # `\hat` takes exactly one token, so the second command stays a sibling.
+    assert typstify_math(r"\hat\alpha\beta") == "hat(alpha)beta"
+    assert typstify_math(r"\hat\max") == "hat(max)"
+
+
 def test_a_single_unknown_operator_does_not_kill_the_formula() -> None:
     """`\\arg` alone cost a whole display formula before the operator rescue."""
     result = typstify_math(r"\arg \max p ( x )")
