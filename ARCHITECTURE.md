@@ -129,11 +129,16 @@ greppable.
 block writes, batch-API partitions). The database is SQLite in WAL mode under
 `db_dir` (default `.ubt/ledgers`).
 
-- `ledger_base.py` owns the schema and `TARGET_SCHEMA_VERSION` (14). Migrations
-  are idempotent `PRAGMA user_version` steps; a guard at the end refuses to
-  start if the landed version is not exactly the target, and a second check
-  verifies `_REQUIRED_BLOCK_COLUMNS` are all present, so a schema mismatch fails
-  at open rather than inside `_row_to_block`.
+- `ledger_base.py` owns the flattened baseline schema and `SCHEMA_VERSION`
+  (1000; `TARGET_SCHEMA_VERSION` is retained as an alias). Fresh databases are
+  created directly from `_SCHEMA_SQL` and stamped with `1000`. The retired
+  14-step incremental migration ladder was removed: an existing database from
+  an older build without `--fresh` is refused with clear instructions rather than
+  migrated in place, avoiding the risk of corrupting the run's only copy of
+  translated blocks. When `--fresh` is specified, the old tables are dropped
+  and the baseline is recreated cleanly. A startup check verifies
+  `_REQUIRED_BLOCK_COLUMNS` are all present so a malformed database fails at
+  open rather than inside `_row_to_block`.
 - `ledger_mixins.py` owns the writes: `init_job_from_manifest`, `append_chapter`,
   `fetch_pending_blocks`, `save_checkpoint` / `save_checkpoints_batch`,
   `finalize_job`, the reset paths, and the batch-API partition.
@@ -151,14 +156,15 @@ overwrites a `completed` one. A real completion *may* supersede an earlier
 
 ### The writer lock
 
-There is no per-block worker lease in the ledger schema (migration 7 dropped
-it), so a **job-level** guard is what stops two processes running the same
-`job_id` at once. `ubt/core/engine/writer_lock.py` takes an exclusive,
-non-blocking advisory lock on `<db_path>.writer.lock` for the lifetime of a run
-and records the holder pid. A contention errno becomes
-`LedgerWriterLockConflictError`; any other errno (a filesystem that cannot lock
-at all, e.g. NFS) becomes a hard `RuntimeError`, because requeueing forever
-behind an unobtainable lock is worse than failing loudly.
+There is no per-block worker lease in the ledger schema, so a **job-level** guard
+is what stops two processes running the same `job_id` at once.
+`ubt/core/engine/writer_lock.py` takes an exclusive, expiring lease stored in the
+`job_locks` table inside the ledger SQLite database (`(job_id, owner_pid,
+owner_token, lease_expires_at, acquired_at)`), replacing the obsolete
+`.writer.lock` file-offset lock that failed on NFS, overlayfs, and container
+filesystems. The lease duration defaults to 300 seconds (`DEFAULT_LEASE_SECONDS`);
+contention raises `LedgerWriterLockConflictError` with holder details. A crashed
+process's expired lease is reclaimed atomically via `UPDATE`.
 
 Every writer takes the lock. `ubt/api/review.py`'s `apply_human_edit` is the
 canonical example of the pattern: acquire, refuse with a typed conflict if

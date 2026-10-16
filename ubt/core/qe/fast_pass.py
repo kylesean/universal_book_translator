@@ -17,6 +17,7 @@ from ubt.core.language_profile import (
     ZH,
     LanguagePairPolicy,
     LanguageProfile,
+    foreign_script_chars,
     get_pair_policy,
     is_rtl_lang,
 )
@@ -1352,6 +1353,26 @@ class FastPassFilter:
                 )
         else:
             target_ratio = 1.0
+
+        # 6a-bis. Foreign-script cross-talk. The density gate above proves enough
+        # target script is present; it cannot see a word in a script the target
+        # never uses. A Chinese block carrying a Korean word ("遵循查询기반范式"
+        # — the model emitted 기반 for "query-based") measured CJK density 0.82,
+        # sailing through every ratio gate. Chinese never uses Hangul or Kana
+        # and Korean never uses Kana, so a single character is already an error.
+        foreign = foreign_script_chars(tgt_clean, target_code=self.profile.code)
+        if foreign:
+            sample = "".join(dict.fromkeys(foreign))[:8]
+            return FastPassDecision(
+                passed=False,
+                reason=(
+                    f"Foreign-script text in a {self.profile.name} target: "
+                    f"{sample!r} is not {self.profile.name} — render the whole "
+                    f"passage in {self.profile.name} (no other script's words)"
+                ),
+                target_ratio=target_ratio,
+                length_ratio=length_ratio,
+            )
 
         # 6b. Same-script lexical identity. The script classes above cannot
         # separate a Latin->Latin pair, so the pair policy's function-word gate

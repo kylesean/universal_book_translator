@@ -574,7 +574,15 @@ def render_table(markup: str, *, is_math_ok: Callable[[str], bool] | None = None
         padded = list(values) + [""] * (columns - len(values))
         rendered = []
         for value in padded:
-            text = render_prose(value.strip(), is_math_ok=is_math_ok)
+            # ``<br>`` is the in-cell line break (Markdown has none, and Docling
+            # stacks a wrapped cell's lines): split before prose rendering so
+            # each line is escaped and math-transpiled on its own, then join with
+            # Typst's markup line break. Rendering the whole value first would
+            # escape the ``<`` and print a literal ``<br>``.
+            text = "\\\n".join(
+                render_prose(part.strip(), is_math_ok=is_math_ok)
+                for part in re.split(r"<br\s*/?>", value.strip())
+            )
             rendered.append(f"[*{text}*]" if header and text else f"[{text}]")
         return ", ".join(rendered)
 

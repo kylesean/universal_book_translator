@@ -112,6 +112,35 @@ def hebrew_script_ratio(text: str) -> float:
     return count / total
 
 
+def foreign_script_chars(text: str, *, target_code: str) -> str:
+    """Characters in ``text`` written in a script the target language never uses.
+
+    The identity gates above measure whether *enough* target script is present;
+    they cannot see a run of the WRONG script that rides alongside it. A Chinese
+    target containing a Korean word ("查询기반" for "query-based") keeps its CJK
+    density high — measured 0.82 — so every ratio gate passes and the word ships.
+    This is the complement: a small, exact set of characters the target must not
+    contain, returned so the caller can name them in the repair instruction.
+
+    Only scripts that are *unambiguously* foreign to the target are listed, and
+    only for targets whose own script is not Latin (a Latin target legitimately
+    carries Latin). Hangul and Kana never occur in Chinese; Chinese ideographs
+    never occur in Korean. Kana is admitted for Japanese and Hangul for Korean.
+    """
+    if target_code in ("zh",):
+        # Chinese uses no Hangul and no Kana; both are pure model cross-talk.
+        return "".join(
+            c
+            for c in text
+            if (0xAC00 <= ord(c) <= 0xD7A3 or 0x1100 <= ord(c) <= 0x11FF)
+            or (0x3040 <= ord(c) <= 0x30FF)
+        )
+    if target_code == "ko":
+        # Korean uses Hangul and Hanja; Kana is the cross-talk signal.
+        return "".join(c for c in text if 0x3040 <= ord(c) <= 0x30FF)
+    return ""
+
+
 @dataclass(frozen=True, slots=True)
 class LanguageProfile:
     """Per-target-language policy consumed by FastPassFilter and friends."""

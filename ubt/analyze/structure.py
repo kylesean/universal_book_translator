@@ -32,16 +32,28 @@ def is_bare_page_number(text: str) -> bool:
 # --------------------------------------------------------------------------- #
 #: Unambiguous program/algorithm syntax. Deliberately narrow: a false positive
 #: silently stops a real paragraph from being translated, so only forms that do
-#: not occur in running prose qualify. A listed line almost always carries an
-#: assignment arrow or a definition/call keyword; weaker hints ("for ... (",
-#: "obj.method(") were removed because prose ("for the number ... (No deadlock.)")
-#: matched them and was silently kept untranslated.
+#: not occur in running prose qualify.
+#:
+#: Two forms here are *anchored to a call/keyword shape* rather than left loose,
+#: because the loose spelling fired on prose and equations (measured on the
+#: PaddleOCR layout paper, where two full paragraphs leaked untranslated):
+#:
+#: * ``class`` must be followed by a Capitalised identifier and its
+#:   ``:``/``(`` — the loose ``\bclass\s+\w+\s*[:\(]`` matched the sentence
+#:   "…focal loss … to address **class imbalance:**", a two-word prose phrase;
+#: * ``else``/``elif``/``repeat``/``until`` must carry a trailing line number
+#:   *and* stand at a statement boundary — a bare ``else 1`` matched the maths
+#:   "if t = 1 **else 1** − σ(z)" inside a running paragraph.
 _LISTING_FORMS = re.compile(
     r"←|⟵|↤|▷"  # assignment / dataflow / comment markers
     r"|\bawait\s+\w[\w.]*\s*\("  # await call(...)
-    r"|\bdef\s+\w+\s*\(|\bclass\s+\w+\s*[:\(]|\bfunction\s+\w+\s*\("
+    r"|\bdef\s+[A-Za-z_]\w*\s*\("  # def name(...) — a real function signature
+    r"|\bclass\s+[A-Z]\w*\s*[:\(]"  # class Name: / class Name( — a real class
+    r"|\bfunction\s+[A-Za-z_]\w*\s*\("
     r"|\bfrom\s+[\w.]+\s+import\b"
-    r"|\b(?:else|elif|repeat|until)\s+\d{1,3}\b"  # bare statement + line number
+    # A statement keyword with a line number, at a line start or after a
+    # separator — never mid-sentence prose/equation.
+    r"|(?:^|[\n;{])\s*(?:else|elif|repeat|until)\s+\d{1,3}\b"
 )
 _LISTING_MAX_CHARS = 400
 

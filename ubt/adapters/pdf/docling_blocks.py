@@ -352,7 +352,17 @@ def table_to_markdown(table_item: Any, doc: Any = None) -> str:
                                     covered_coords.add((r + dr, c + dc))
 
                     raw_text = getattr(cell, "text", "") or ""
-                    clean_text = " ".join(raw_text.split()).replace("|", r"\|")
+                    # Keep a cell's internal line breaks. Docling emits one text
+                    # line per wrapped visual row inside a cell, and collapsing
+                    # them to spaces fused a stacked column into one blob: the
+                    # benchmark table's "Recognition Method" column (four model
+                    # names stacked) became "MonkeyOCR [27] MinerU2.5 [5]
+                    # Dolphin-v2 [28] PaddleOCR-VL…" in a single cell, and the
+                    # whole table rendered unreadable. Markdown has no in-cell
+                    # newline, so use ``<br>`` (the renderer splits on it).
+                    clean_text = "<br>".join(
+                        " ".join(line.split()) for line in raw_text.splitlines() if line.strip()
+                    ).replace("|", r"\|")
                     row_cells.append(clean_text)
             rows.append(row_cells)
 

@@ -245,6 +245,11 @@ _ORDERED_MARKER_MIN_RUN = 2
 #: Ordered-marker shapes (numbered ``(1)`` / ``1.`` / ``1)``, lettered ``a.`` /
 #: ``(a)``, CJK ``一、``). Bullets are deliberately excluded: Docling already
 #: types real bullet lists, so a bullet match here is more likely a symbol.
+#: Floor for a one-off page footer to count as a footnote paragraph rather than
+#: chrome (see ``_is_prose_footer``). A page number or running title is far below.
+_FOOTER_PROSE_MIN_CHARS = 80
+_FOOTER_PROSE_MIN_WORDS = 12
+
 _ORDERED_MARKER_RE = re.compile(
     r"^(?:"
     r"[（(]?[0-9０-９]{1,3}(?:[.．][0-9０-９]{1,3})*[.．、)）]"
@@ -325,6 +330,28 @@ def restore_ordered_markers(blocks: list[IRBlock]) -> list[IRBlock]:
                 out[position] = _as_list_item(out[position], marker, text)
         index = cursor
     return out
+
+
+def _is_prose_footer(text: str) -> bool:
+    """Whether a one-off page footer is a footnote paragraph, not chrome.
+
+    A footer is prose the author wrote when it reads like a sentence: several
+    words AND sentence punctuation/length. A page number, a running title, a
+    copyright strip or an arXiv stamp is short and carries none of that, so it
+    stays skipped. Kept precision-first — a false positive would translate a
+    watermark into the wrong language.
+    """
+    body = (text or "").strip()
+    if len(body) < _FOOTER_PROSE_MIN_CHARS:
+        return False
+    if len(body.split()) < _FOOTER_PROSE_MIN_WORDS:
+        return False
+    # A footnote reads as one or more sentences: it ends in sentence punctuation
+    # OR contains an internal sentence boundary (". " / "。"). A bare label, DOI
+    # or copyright strip carries neither.
+    if body.endswith((".", "。", "：", ":")):
+        return True
+    return ". " in body or "。" in body
 
 
 def _line_in_box(rect: tuple[float, float, float, float], box: BoundingBox) -> bool:
@@ -934,7 +961,16 @@ def map_iterated_items(
             text = (getattr(item, "text", "") or "").strip()
             if not text or footer_counts.get(chrome_key(text), 0) > 3 or text.isdigit():
                 continue
-            block_type, flow_id, skip = BlockType.NARRATIVE, FlowID.FOOTNOTE, True
+            # A repeating footer is chrome; a *one-off* footer that reads as a
+            # sentence is a footnote paragraph the author wrote, and leaving it
+            # in the source language leaks English into the deliverable
+            # (measured on the PaddleOCR layout paper: the "RT-DocLayout is
+            # released under the name PP-DocLayoutV3 …" footnote shipped
+            # untranslated). Chrome stays skipped; prose is translated.
+            if _is_prose_footer(text):
+                block_type, flow_id, skip = BlockType.NARRATIVE, FlowID.FOOTNOTE, False
+            else:
+                block_type, flow_id, skip = BlockType.NARRATIVE, FlowID.FOOTNOTE, True
             region = RegionKind.FOOTER
         elif label == DocItemLabel.TABLE:
             text = table_to_markdown(item, doc)

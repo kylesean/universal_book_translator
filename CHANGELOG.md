@@ -11,7 +11,7 @@ Pre-1.0, no tags yet. Everything below is in the current tree.
 
 ### Changed
 
-- The ledger schema is a **single flat baseline** (`SCHEMA_VERSION = 1`). The
+- The ledger schema is a **single flat baseline** (`SCHEMA_VERSION = 1000`). The
   historical 14-step incremental migration ladder was removed; a fresh database
   is created directly with the final shape (composite `(job_id, block_id)`
   primary key, no dead columns). A database written by an older build is

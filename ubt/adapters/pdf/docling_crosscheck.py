@@ -841,9 +841,10 @@ def repair_inline_math_with_lines(blocks: Sequence[IRBlock], pdf_path: Path) -> 
         repaired = reinsert_inline_math(text, witness)
         if repaired is None:
             continue
+        restored_count = sum(1 for token in _witness_tokens(witness) if _is_math_token(token))
         logger.info(
             "Restored %d inline math token(s) in block %s from the page's pdfium lines",
-            len(repaired.split()) - len(text.split()),
+            restored_count,
             block.id,
         )
         block.set_source_text(repaired)
