@@ -307,3 +307,36 @@ def test_a_cross_page_caption_is_still_split() -> None:
     got_head, got_tail, _bbox = result
     assert got_head == head
     assert got_tail == tail
+
+
+# --------------------------------------------------------------------------- #
+# Stacked table cell: Docling fuses several visual rows into one cell
+# --------------------------------------------------------------------------- #
+
+
+def test_a_stacked_citation_cell_splits_into_rows() -> None:
+    """``MonkeyOCR [27] MinerU2.5 [5]`` is two rows, not one cell."""
+    from ubt.adapters.pdf.docling_blocks import _split_stacked_cell
+
+    assert _split_stacked_cell("MonkeyOCR [27] MinerU2.5 [5]") == [
+        "MonkeyOCR [27]",
+        "MinerU2.5 [5]",
+    ]
+    assert _split_stacked_cell("0.169 0.177 0.178") == ["0.169", "0.177", "0.178"]
+    assert _split_stacked_cell("85.10 85.73") == ["85.10", "85.73"]
+
+
+def test_prose_with_two_citations_is_not_split() -> None:
+    """A sentence citing two works is prose, not a name stack."""
+    from ubt.adapters.pdf.docling_blocks import _split_stacked_cell
+
+    assert _split_stacked_cell("SigLIP [12] and CLIP [13]") is None
+    assert _split_stacked_cell("Ours [7] and Baseline [8]") is None
+
+
+def test_a_single_value_cell_is_left_alone() -> None:
+    from ubt.adapters.pdf.docling_blocks import _split_stacked_cell
+
+    assert _split_stacked_cell("Dolphin-v2 [28]") is None
+    assert _split_stacked_cell("Layout Analysis") is None
+    assert _split_stacked_cell("85.10") is None

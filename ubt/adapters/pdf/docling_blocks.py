@@ -322,6 +322,42 @@ def is_inside_picture(
     return False
 
 
+#: A connective word inside a citation run means the cell is prose (a sentence
+#: citing two works), not a stack of names. Keeps ``_split_stacked_cell`` from
+#: tearing "SigLIP [12] and CLIP [13]" apart.
+_STACKED_CONNECTIVE_RE = re.compile(
+    r"\b(?:and|or|to|of|in|for|with|using|via|by|on|at|as|et|al)\b", re.IGNORECASE
+)
+_NUMBER_RE = re.compile(r"-?\d+(?:\.\d+)?")
+_CITATION_RE = re.compile(r"\[[^\]]*\d[^\]]*\]")
+
+
+def _split_stacked_cell(text: str) -> list[str] | None:
+    """Split a cell Docling fused from several visual rows, or ``None``.
+
+    Two shapes, both unambiguous:
+
+    * a run of citation-terminated names — each piece carries ``[n]`` and no
+      connective word ("MonkeyOCR [27] MinerU2.5 [5]");
+    * a run of pure numbers ("0.169 0.177 0.178").
+
+    Anything else (prose with citations, a single value, a name with a space)
+    returns ``None`` so the cell is left exactly as Docling gave it.
+    """
+    body = (text or "").strip()
+    if not body:
+        return None
+    if len(_CITATION_RE.findall(body)) >= 2 and not _STACKED_CONNECTIVE_RE.search(body):
+        pieces = re.split(r"(?<=\])\s+(?=\S)", body)
+        if len(pieces) >= 2 and all(_CITATION_RE.search(p) for p in pieces):
+            return pieces
+        return None
+    tokens = body.split()
+    if len(tokens) >= 2 and all(_NUMBER_RE.fullmatch(tok) for tok in tokens):
+        return tokens
+    return None
+
+
 def table_to_markdown(table_item: Any, doc: Any = None) -> str:
     """Render a Docling TableItem as markdown with proper merged/colspan cell handling.
 
@@ -368,9 +404,23 @@ def table_to_markdown(table_item: Any, doc: Any = None) -> str:
                     # Dolphin-v2 [28] PaddleOCR-VL…" in a single cell, and the
                     # whole table rendered unreadable. Markdown has no in-cell
                     # newline, so use ``<br>`` (the renderer splits on it).
-                    clean_text = "<br>".join(
+                    lines = [
                         " ".join(line.split()) for line in raw_text.splitlines() if line.strip()
-                    ).replace("|", r"\|")
+                    ]
+                    # Docling sometimes merges *several* visual rows into one
+                    # cell WITHOUT a newline, joining them with spaces — the
+                    # benchmark table's first row held "MonkeyOCR [27] MinerU2.5
+                    # [5]" and "85.10 85.73" in cells that should be two rows
+                    # each. Split such a cell back into its stacked values. Kept
+                    # conservative: only a run of citation-terminated names
+                    # (each piece carries ``[n]``, no connective word) or a run
+                    # of pure numbers, so real prose ("SigLIP [12] and CLIP
+                    # [13]") is never touched.
+                    if len(lines) == 1:
+                        stacked = _split_stacked_cell(lines[0])
+                        if stacked is not None:
+                            lines = stacked
+                    clean_text = "<br>".join(lines).replace("|", r"\|")
                     row_cells.append(clean_text)
             rows.append(row_cells)
 
