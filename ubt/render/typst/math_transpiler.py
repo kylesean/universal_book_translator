@@ -467,7 +467,21 @@ def typstify_math(body: str) -> str | None:
         "bm": "bold",
         "mathit": "italic",
     }
-    body = _FONT_STYLE_CMD_RE.sub(lambda m: f"{_font_fn[m.group(1)]}({m.group(2)})", body)
+
+    def _font_style(match: re.Match[str]) -> str:
+        # ``\in\mathcal{T}`` (unspaced, and the common compact spelling) would
+        # otherwise fuse: the match starts right after ``\in``, so emitting
+        # ``cal(T)`` with no separator produced ``\incal`` — an unknown command
+        # that failed the whole formula closed. Keep a space when a command or
+        # a word character runs into the call. A separator before a bare
+        # letter subscript (``x^2``) or an opening delimiter is harmless.
+        call = f"{_font_fn[match.group(1)]}({match.group(2)})"
+        start = match.start()
+        if start > 0 and (body[start - 1] == "\\" or body[start - 1].isalnum()):
+            return " " + call
+        return call
+
+    body = _FONT_STYLE_CMD_RE.sub(_font_style, body)
 
     # Convert \frac{a}{b} -> frac(a, b) and \sqrt{a} -> sqrt(a) with balanced brace support
     body = _convert_fractions(body)

@@ -69,6 +69,21 @@ def test_docling_spaced_commands_are_normalized() -> None:
     assert typstify_math(r"\mathcal { T }") == "cal(T)"
 
 
+def test_font_command_does_not_fuse_with_a_preceding_command() -> None:
+    """An unspaced `\\in\\mathcal{T}` must not become the unknown `\\incal`.
+
+    The font-style rewrite turns `\\mathcal{T}` into `cal(T)`, so an immediately
+    preceding command ran into it (`\\in` + `cal` -> `\\incal`) and the whole
+    formula failed closed to readable Unicode. Compact LaTeX has no space there.
+    """
+    assert typstify_math(r"i\in\mathcal{T}") == "i in cal(T)"
+    assert typstify_math(r"\sum_{i\in\mathcal{T}} p_i(x) E_i(x)") is not None
+    # A letter before the font command must keep its own spacing too.
+    assert typstify_math(r"x\mathcal{Y}") == "x cal(Y)"
+    # And the already-spaced spelling keeps working.
+    assert typstify_math(r"i \in \mathcal{T}") == "i in cal(T)"
+
+
 def test_a_single_unknown_operator_does_not_kill_the_formula() -> None:
     """`\\arg` alone cost a whole display formula before the operator rescue."""
     result = typstify_math(r"\arg \max p ( x )")
