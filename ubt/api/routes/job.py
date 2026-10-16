@@ -720,10 +720,10 @@ def register_job_routes(
 
         def _remove() -> tuple[bool, bool]:
             # Only a verified job ledger is unlinked, and only then are its
-            # sidecars (the glob is literal: ``-shm``/``-wal``/``.writer.lock``)
-            # removed with it. A file that merely shares the id's name — a
-            # shared ``tm.sqlite``, the ``job_queue.sqlite``, an operator's
-            # ``backup_2026.sqlite`` — is left untouched.
+            # sidecars (the glob is literal: ``-shm``/``-wal``) removed with it.
+            # A file that merely shares the id's name — a shared ``tm.sqlite``,
+            # the ``job_queue.sqlite``, an operator's ``backup_2026.sqlite`` —
+            # is left untouched.
             ledger_gone = False
             if _is_verified_job_ledger():
                 for path in sorted(app_config.db_dir.glob(f"{valid_id}.sqlite*")):

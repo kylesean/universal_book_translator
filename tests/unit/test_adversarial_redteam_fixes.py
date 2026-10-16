@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -93,16 +93,18 @@ async def test_sqlite_token_bucket_close_safety(tmp_path: Path) -> None:
     await bucket.acquire(estimated_tokens=500)
 
 
-def test_writer_lock_fail_closed_on_missing_platform_module(tmp_path: Path) -> None:
-    """Verify that writer lock raises RuntimeError when platform file-locking is unavailable."""
-    db_path = tmp_path / "job.db"
+def test_writer_lock_fails_loudly_on_an_unusable_ledger_path(tmp_path: Path) -> None:
+    """The SQLite-backed lock must surface an I/O failure, not silently succeed.
+
+    The old file-offset lock raised when the platform could not lock a file at
+    all; with the lock now living inside the ledger DB, the equivalent failure is
+    an unusable database path. Either way, a job must never run without the
+    single-writer guarantee.
+    """
+    blocker = tmp_path / "blocker"
+    blocker.write_text("not a directory", encoding="utf-8")
+    db_path = blocker / "job.db"  # parent is a file, so the dir cannot be made
     lock = LedgerWriterLock(db_path, "job-fail-closed")
 
-    with (
-        patch(
-            "ubt.core.engine.writer_lock._try_exclusive_lock",
-            side_effect=ImportError("No locking module"),
-        ),
-        pytest.raises(RuntimeError, match="platform file-locking module is unavailable"),
-    ):
+    with pytest.raises((sqlite3.OperationalError, NotADirectoryError, OSError)):
         lock.acquire()

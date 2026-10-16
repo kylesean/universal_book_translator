@@ -4,8 +4,8 @@ Ledgers, translation memory and API/CLI logs store the full source *and* target 
 every paragraph of an unpublished book, and SQLite plus ``RotatingFileHandler``
 both create their files with ``0666 & ~umask`` — i.e. ``0644`` under a normal
 umask, world-readable on any shared host, CI runner or multi-user GPU box. The
-writer lock already asks for ``0o600`` (``engine/writer_lock.py``); this module
-applies the same rule to the files that actually hold the text.
+single-writer guard now lives in the ledger's own SQLite file (``job_locks``); this
+module applies the owner-only rule to the files that actually hold the text.
 
 Everything here is best-effort and never raises: a filesystem that refuses the
 chmod (foreign mount, read-only ACL) must not fail a translation run.

@@ -1,9 +1,17 @@
-"""SQLite WAL ledger foundation: connection, transactions, schema migrations.
+"""SQLite WAL ledger foundation: connection, transactions, schema.
 
-Holds the connection/transaction/migration core (:class:`LedgerBase`)
-plus module-level constants and helpers shared by domain mixins in
+Holds the connection/transaction core (:class:`LedgerBase`) plus module-level
+constants and helpers shared by domain mixins in
 :mod:`ubt.core.engine.ledger_mixins`. Public classes and helpers remain
 importable from the :mod:`ubt.core.engine.ledger` facade.
+
+Schema policy: a **single flat baseline**. The historical 14-step incremental
+migration ladder (v2..v14) was collapsed into one authoritative
+``_SCHEMA_SQL`` that creates the final shape directly, with the composite
+``(job_id, block_id)`` primary key and no dead columns. A database written by
+an older build (``user_version`` below :data:`SCHEMA_VERSION`) is not migrated
+in place: it is refused with instructions, because silently rewriting a
+half-migrated legacy file is the exact data-loss shape the ladder used to risk.
 """
 
 import json
@@ -31,7 +39,97 @@ from ubt.core.ir.models import (
 from ubt.model.ast import Confidence, RegionKind
 from ubt.model.span import CompositeSpan, boxes_from_provenance
 
-TARGET_SCHEMA_VERSION = 14
+#: The single, flattened schema version. Bumped only when ``_SCHEMA_SQL``
+#: changes; there is no longer a migration ladder behind it.
+#:
+#: Deliberately a high sentinel, not ``1``: the retired ladder stamped real
+#: databases with ``user_version`` 1..14, so ``1`` would collide with the old
+#: ladder's first rung and a genuine legacy file could pass the "already at the
+#: baseline" check. A value the old code could never have written makes the
+#: fresh/legacy discrimination unambiguous.
+SCHEMA_VERSION = 1000
+
+#: Backwards-compatible alias. Older callers/modules import
+#: ``TARGET_SCHEMA_VERSION``; it now names the flat baseline.
+TARGET_SCHEMA_VERSION = SCHEMA_VERSION
+
+#: The authoritative schema. Fresh databases are created from this directly;
+#: it is the *only* definition of the tables (no incremental ALTERs).
+_SCHEMA_SQL = """
+    CREATE TABLE IF NOT EXISTS job_meta (
+        job_id TEXT PRIMARY KEY,
+        doc_id TEXT NOT NULL,
+        source_path TEXT NOT NULL,
+        target_lang TEXT NOT NULL,
+        total_blocks INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        metadata_json TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS blocks (
+        block_id TEXT NOT NULL,
+        job_id TEXT NOT NULL,
+        flow_id TEXT NOT NULL,
+        spine_index INTEGER NOT NULL,
+        block_type TEXT NOT NULL DEFAULT 'narrative',
+        bbox_json TEXT,
+        style_json TEXT,
+        source_text TEXT NOT NULL,
+        draft_text TEXT,
+        target_text TEXT,
+        status TEXT NOT NULL,
+        skip_translate INTEGER DEFAULT 0,
+        glossary_hits_json TEXT,
+        mtqe_score REAL,
+        repair_rounds INTEGER DEFAULT 0,
+        error_flags_json TEXT,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        tm_hit INTEGER DEFAULT 0,
+        mqm_severity TEXT DEFAULT NULL,
+        mqm_spans_json TEXT DEFAULT NULL,
+        layout_role TEXT DEFAULT NULL,
+        policy_translate INTEGER DEFAULT NULL,
+        policy_reason TEXT DEFAULT NULL,
+        provenance_json TEXT DEFAULT NULL,
+        level INTEGER DEFAULT NULL,
+        marker TEXT DEFAULT NULL,
+        confidence TEXT DEFAULT NULL,
+        decorative INTEGER DEFAULT NULL,
+        span_chars_json TEXT DEFAULT NULL,
+        PRIMARY KEY (job_id, block_id),
+        FOREIGN KEY(job_id) REFERENCES job_meta(job_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS batch_jobs (
+        batch_id TEXT PRIMARY KEY,
+        job_id TEXT NOT NULL,
+        idempotency_key TEXT NOT NULL,
+        status TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- Cross-process single-writer guard, replacing the old msvcrt/fcntl
+    -- file-offset lock (which could not work on NFS/K8s PVCs and crashed under
+    -- Docker PID 1). One row per job; ``owner_pid`` + ``lease_expires_at`` let a
+    -- crashed writer's lock be reclaimed instead of wedging the job forever.
+    CREATE TABLE IF NOT EXISTS job_locks (
+        job_id TEXT PRIMARY KEY,
+        owner_pid INTEGER NOT NULL,
+        owner_token TEXT NOT NULL,
+        lease_expires_at REAL NOT NULL,
+        acquired_at REAL NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_block_status ON blocks(job_id, status);
+    CREATE INDEX IF NOT EXISTS idx_block_flow ON blocks(job_id, flow_id, spine_index);
+    CREATE INDEX IF NOT EXISTS idx_batch_jobs_idem ON batch_jobs(idempotency_key, status);
+    CREATE INDEX IF NOT EXISTS idx_blocks_job_mtqe ON blocks(job_id, mtqe_score);
+    CREATE INDEX IF NOT EXISTS idx_blocks_pending ON blocks(job_id, status, spine_index, block_id);
+    CREATE INDEX IF NOT EXISTS idx_blocks_rollup ON blocks(job_id, skip_translate, mtqe_score, status);
+"""
 
 # Every column ``_row_to_block`` reads by name. Kept as a literal (not derived
 # from the CREATE statement) to guarantee all required schema fields are verified
@@ -377,382 +475,72 @@ class LedgerBase:
         self.close()
 
     def _init_db_with_migrations(self) -> None:
-        """Idempotently initialize schema and run PRAGMA user_version schema migrations."""
+        """Create the flat baseline schema, or refuse a legacy database.
+
+        Fresh databases are created from :data:`_SCHEMA_SQL` and stamped
+        ``user_version = SCHEMA_VERSION``. A database from an older build
+        (``user_version`` above 0 but below the baseline, or at the retired
+        14-step ladder's version) is refused with instructions rather than
+        migrated in place: silently rewriting a half-migrated legacy file is the
+        data-loss shape the old ladder risked, and the ledger holds a run's only
+        copy of its translations.
+
+        The method name is kept for call-site stability even though there are no
+        longer any incremental migrations.
+        """
         with self._get_conn() as conn:
-            cursor = conn.execute("PRAGMA user_version;")
-            current_version: int = cursor.fetchone()[0]
+            current_version: int = conn.execute("PRAGMA user_version;").fetchone()[0]
+
+            if current_version == SCHEMA_VERSION:
+                # Already at the flat baseline; verify the columns are actually
+                # present (a version stamp is not evidence the schema is right).
+                self._verify_block_columns(conn, current_version)
+                return
 
             if current_version == 0:
-                conn.executescript("""
-                    CREATE TABLE IF NOT EXISTS job_meta (
-                        job_id TEXT PRIMARY KEY,
-                        doc_id TEXT NOT NULL,
-                        source_path TEXT NOT NULL,
-                        target_lang TEXT NOT NULL,
-                        total_blocks INTEGER NOT NULL,
-                        status TEXT NOT NULL,
-                        metadata_json TEXT,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    );
-
-                    CREATE TABLE IF NOT EXISTS blocks (
-                        block_id TEXT NOT NULL,
-                        job_id TEXT NOT NULL,
-                        flow_id TEXT NOT NULL,
-                        spine_index INTEGER NOT NULL,
-                        block_type TEXT NOT NULL DEFAULT 'narrative',
-                        bbox_json TEXT,
-                        style_json TEXT,
-                        source_text TEXT NOT NULL,
-                        draft_text TEXT,
-                        target_text TEXT,
-                        status TEXT NOT NULL,
-                        skip_translate INTEGER DEFAULT 0,
-                        glossary_hits_json TEXT,
-                        mtqe_score REAL,
-                        repair_rounds INTEGER DEFAULT 0,
-                        error_flags_json TEXT,
-                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        tm_hit INTEGER DEFAULT 0,
-                        mqm_severity TEXT DEFAULT NULL,
-                        mqm_spans_json TEXT DEFAULT NULL,
-                        layout_role TEXT DEFAULT NULL,
-                        policy_translate INTEGER DEFAULT NULL,
-                        policy_reason TEXT DEFAULT NULL,
-                        provenance_json TEXT DEFAULT NULL,
-                        level INTEGER DEFAULT NULL,
-                        marker TEXT DEFAULT NULL,
-                        confidence TEXT DEFAULT NULL,
-                        decorative INTEGER DEFAULT NULL,
-                        span_chars_json TEXT DEFAULT NULL,
-                        PRIMARY KEY (job_id, block_id),
-                        FOREIGN KEY(job_id) REFERENCES job_meta(job_id)
-                    );
-
-                    CREATE TABLE IF NOT EXISTS batch_jobs (
-                        batch_id TEXT PRIMARY KEY,
-                        job_id TEXT NOT NULL,
-                        idempotency_key TEXT NOT NULL,
-                        status TEXT NOT NULL,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    );
-
-                    CREATE INDEX IF NOT EXISTS idx_block_status ON blocks(job_id, status);
-                    CREATE INDEX IF NOT EXISTS idx_block_flow ON blocks(job_id, flow_id, spine_index);
-                    CREATE INDEX IF NOT EXISTS idx_batch_jobs_idem ON batch_jobs(idempotency_key, status);
-                    CREATE INDEX IF NOT EXISTS idx_blocks_job_mtqe ON blocks(job_id, mtqe_score);
-                    CREATE INDEX IF NOT EXISTS idx_blocks_pending ON blocks(job_id, status, spine_index, block_id);
-                    CREATE INDEX IF NOT EXISTS idx_blocks_rollup ON blocks(job_id, skip_translate, mtqe_score, status);
-                    PRAGMA user_version = 14;
-                """)
-                current_version = TARGET_SCHEMA_VERSION
-
-            def _block_cols() -> set[str]:
-                return {
-                    str(row["name"])
-                    for row in conn.execute("PRAGMA table_info(blocks);").fetchall()
-                }
-
-            def _table_exists(name: str) -> bool:
-                return (
-                    conn.execute(
-                        "SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?;", (name,)
-                    ).fetchone()
-                    is not None
-                )
-
-            # Migration to Version 2: Add worker lease columns and claim index
-            if current_version < 2:
-                cols = _block_cols()
-                if "owner_id" not in cols:
-                    conn.execute("ALTER TABLE blocks ADD COLUMN owner_id TEXT DEFAULT NULL;")
-                if "lease_expires_at" not in cols:
-                    conn.execute(
-                        "ALTER TABLE blocks ADD COLUMN lease_expires_at REAL DEFAULT NULL;"
-                    )
-                conn.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_block_claim "
-                    "ON blocks(job_id, status, lease_expires_at, spine_index);"
-                )
-                conn.execute("PRAGMA user_version = 2;")
-
-            # Migration to Version 3: Translation Memory provenance column
-            # (exact TM hits skip the LLM and are auditable)
-            if current_version < 3:
-                cols = _block_cols()
-                if "tm_hit" not in cols:
-                    conn.execute("ALTER TABLE blocks ADD COLUMN tm_hit INTEGER DEFAULT 0;")
-                conn.execute("PRAGMA user_version = 3;")
-
-            # Migration to Version 4: MQM severity triage columns
-            # (severity tier + serialized spans survive restarts and feed
-            # the human PE queue exporters)
-            if current_version < 4:
-                cols = _block_cols()
-                if "mqm_severity" not in cols:
-                    conn.execute("ALTER TABLE blocks ADD COLUMN mqm_severity TEXT DEFAULT NULL;")
-                if "mqm_spans_json" not in cols:
-                    conn.execute("ALTER TABLE blocks ADD COLUMN mqm_spans_json TEXT DEFAULT NULL;")
-                conn.execute("PRAGMA user_version = 4;")
-
-            # Migration to Version 5: document-v1 contract columns
-            # role layers + policy verdict + provenance survive restarts so
-            # render routing and verdict audits work post-resume)
-            if current_version < 5:
-                cols = _block_cols()
-                for name, decl in (
-                    ("layout_role", "TEXT DEFAULT NULL"),
-                    ("semantic_role", "TEXT DEFAULT NULL"),
-                    ("structure_role", "TEXT DEFAULT NULL"),
-                    ("policy_translate", "INTEGER DEFAULT NULL"),
-                    ("policy_reason", "TEXT DEFAULT NULL"),
-                    ("provenance_json", "TEXT DEFAULT NULL"),
-                ):
-                    if name not in cols:
-                        conn.execute(f"ALTER TABLE blocks ADD COLUMN {name} {decl};")
-                conn.execute("PRAGMA user_version = 5;")
-
-            # Migration to Version 6: Batch API job persistence (
-            # batch_id survives restarts, idempotency key = sha1 over the
-            # submitted custom_id set prevents duplicate-billed resubmits)
-            if current_version < 6:
-                conn.executescript("""
-                    CREATE TABLE IF NOT EXISTS batch_jobs (
-                        batch_id TEXT PRIMARY KEY,
-                        job_id TEXT NOT NULL,
-                        idempotency_key TEXT NOT NULL,
-                        status TEXT NOT NULL,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    );
-
-                    CREATE INDEX IF NOT EXISTS idx_batch_jobs_idem
-                        ON batch_jobs(idempotency_key, status);
-                    PRAGMA user_version = 6;
-                """)
-
-            # Migration to Version 7: drop the unused worker-lease columns.
-            # The single-process engine drains work through
-            # ``fetch_pending_blocks`` and claims no block-level lease; rows
-            # stranded in 'claimed' by an interrupted run go back to
-            # 'pending' so they are re-drafted.
-            if current_version < 7:
-                columns = {
-                    str(row["name"])
-                    for row in conn.execute("PRAGMA table_info(blocks);").fetchall()
-                }
-                conn.execute("UPDATE blocks SET status = 'pending' WHERE status = 'claimed';")
-                conn.execute("DROP INDEX IF EXISTS idx_block_claim;")
-                if "owner_id" in columns:
-                    conn.execute("ALTER TABLE blocks DROP COLUMN owner_id;")
-                if "lease_expires_at" in columns:
-                    conn.execute("ALTER TABLE blocks DROP COLUMN lease_expires_at;")
-                conn.execute("PRAGMA user_version = 7;")
-
-            # Migration to Version 8: composite index on (job_id, mtqe_score) for distribution queries
-            if current_version < 8:
-                columns = {
-                    str(row["name"])
-                    for row in conn.execute("PRAGMA table_info(blocks);").fetchall()
-                }
-                if "mtqe_score" in columns:
-                    conn.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_blocks_job_mtqe ON blocks(job_id, mtqe_score);"
-                    )
-                conn.execute("PRAGMA user_version = 8;")
-
-            # Migration to Version 9: composite index for the draft keyset
-            # pagination. ``fetch_pending_blocks`` filters (job_id, status) and
-            # orders/seek on (spine_index, block_id); without this the batch
-            # loop re-scanned and re-sorted all remaining pending rows every
-            # batch (O(N^2/batch_limit) on a 10k-block book).
-            if current_version < 9:
-                conn.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_blocks_pending "
-                    "ON blocks(job_id, status, spine_index, block_id);"
-                )
-                conn.execute("PRAGMA user_version = 9;")
-
-            # Migration to Version 10: covering index for get_job_stats. The
-            # aggregates (COUNT/SUM over status, AVG over the QE-scored
-            # population) live in one SELECT whose columns sit AFTER the text
-            # columns in the row layout, so every progress event walked the
-            # whole book's overflow chain — O(book bytes) per event, 35 ms on a
-            # 20k-block ledger. The index carries all
-            # four referenced columns, making both stats queries index-only.
-            if current_version < 10:
-                conn.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_blocks_rollup "
-                    "ON blocks(job_id, skip_translate, mtqe_score, status);"
-                )
-                conn.execute("PRAGMA user_version = 10;")
-
-            # Migration to Version 11: composite primary key (job_id, block_id).
-            # ``block_id`` is content-derived (``ch_001#b0001``), so two jobs over
-            # the same document produce identical block ids. With block_id as the
-            # sole PRIMARY KEY, ingesting the second job's blocks overwrote the
-            # first job's rows and left it with none of its own. SQLite cannot
-            # alter a primary key, so the table is rebuilt (create-copy-drop-
-            # rename); every block_id-keyed write is now scoped by job_id.
-            if current_version < 11:
-                has_v10 = _table_exists("blocks_v10")
-                has_blocks = _table_exists("blocks")
-                if not has_v10 and has_blocks:
-                    conn.execute("ALTER TABLE blocks RENAME TO blocks_v10;")
-                elif has_v10 and has_blocks:
-                    conn.execute("DROP TABLE blocks;")
-                conn.executescript("""
-                    CREATE TABLE blocks (
-                        block_id TEXT NOT NULL,
-                        job_id TEXT NOT NULL,
-                        flow_id TEXT NOT NULL,
-                        spine_index INTEGER NOT NULL,
-                        block_type TEXT NOT NULL DEFAULT 'narrative',
-                        bbox_json TEXT,
-                        style_json TEXT,
-                        source_text TEXT NOT NULL,
-                        draft_text TEXT,
-                        target_text TEXT,
-                        status TEXT NOT NULL,
-                        skip_translate INTEGER DEFAULT 0,
-                        glossary_hits_json TEXT,
-                        mtqe_score REAL,
-                        repair_rounds INTEGER DEFAULT 0,
-                        error_flags_json TEXT,
-                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        tm_hit INTEGER DEFAULT 0,
-                        mqm_severity TEXT DEFAULT NULL,
-                        mqm_spans_json TEXT DEFAULT NULL,
-                        layout_role TEXT DEFAULT NULL,
-                        semantic_role TEXT DEFAULT NULL,
-                        structure_role TEXT DEFAULT NULL,
-                        policy_translate INTEGER DEFAULT NULL,
-                        policy_reason TEXT DEFAULT NULL,
-                        provenance_json TEXT DEFAULT NULL,
-                        PRIMARY KEY (job_id, block_id),
-                        FOREIGN KEY(job_id) REFERENCES job_meta(job_id)
-                    );
-                    INSERT INTO blocks (
-                        block_id, job_id, flow_id, spine_index, block_type,
-                        bbox_json, style_json, source_text, draft_text, target_text,
-                        status, skip_translate, glossary_hits_json, mtqe_score,
-                        repair_rounds, error_flags_json, updated_at, tm_hit,
-                        mqm_severity, mqm_spans_json, layout_role, semantic_role,
-                        structure_role, policy_translate, policy_reason, provenance_json
-                    )
-                    SELECT
-                        block_id, job_id,
-                        COALESCE(flow_id, 'main_story'),
-                        COALESCE(spine_index, 0),
-                        COALESCE(block_type, 'narrative'),
-                        bbox_json, style_json,
-                        COALESCE(source_text, ''),
-                        draft_text, target_text, status,
-                        COALESCE(skip_translate, 0),
-                        glossary_hits_json, mtqe_score,
-                        COALESCE(repair_rounds, 0),
-                        error_flags_json, updated_at,
-                        COALESCE(tm_hit, 0),
-                        mqm_severity, mqm_spans_json, layout_role, semantic_role,
-                        structure_role, policy_translate, policy_reason, provenance_json
-                    FROM blocks_v10;
-                    DROP TABLE blocks_v10;
-                    CREATE INDEX IF NOT EXISTS idx_block_status ON blocks(job_id, status);
-                    CREATE INDEX IF NOT EXISTS idx_block_flow ON blocks(job_id, flow_id, spine_index);
-                    CREATE INDEX IF NOT EXISTS idx_blocks_job_mtqe ON blocks(job_id, mtqe_score);
-                    CREATE INDEX IF NOT EXISTS idx_blocks_pending ON blocks(job_id, status, spine_index, block_id);
-                    CREATE INDEX IF NOT EXISTS idx_blocks_rollup ON blocks(job_id, skip_translate, mtqe_score, status);
-                    PRAGMA user_version = 11;
-                """)
-
-            # Migration to Version 12: drop the semantic/structure role columns.
-            # ``structure_role`` is a property of ``block_type`` (never read back
-            # since single source of truth unification), and the semantic axis was never set to anything but
-            # its default, so both columns are dead weight. ``layout_role``
-            # stays: it is the extractor's finding and cannot be derived.
-            if current_version < 12:
-                columns = {
-                    str(row["name"])
-                    for row in conn.execute("PRAGMA table_info(blocks);").fetchall()
-                }
-                if "semantic_role" in columns:
-                    conn.execute("ALTER TABLE blocks DROP COLUMN semantic_role;")
-                if "structure_role" in columns:
-                    conn.execute("ALTER TABLE blocks DROP COLUMN structure_role;")
-                conn.execute("PRAGMA user_version = 12;")
-
-            # Migration to Version 13: persist the typed element's structural
-            # fields. ``level`` (heading depth), ``marker`` (list bullet),
-            # ``confidence`` and ``decorative`` live on the element but had no
-            # column, so ``_row_to_block`` re-materialized every block from
-            # ``make_element`` defaults: a resumed ``### Section`` came back as
-            # ``# Section`` and every list lost its bullet (the renderers read
-            # ``getattr(element, "level", 1)`` and saw the default).
-            if current_version < 13:
-                columns = {
-                    str(row["name"])
-                    for row in conn.execute("PRAGMA table_info(blocks);").fetchall()
-                }
-                for name, decl in (
-                    ("level", "INTEGER DEFAULT NULL"),
-                    ("marker", "TEXT DEFAULT NULL"),
-                    ("confidence", "TEXT DEFAULT NULL"),
-                    ("decorative", "INTEGER DEFAULT NULL"),
-                ):
-                    if name not in columns:
-                        conn.execute(f"ALTER TABLE blocks ADD COLUMN {name} {decl};")
-                conn.execute("PRAGMA user_version = 13;")
-
-            # Migration to Version 14: persist the element's ``Span.chars``
-            # (canonical character range). The span is stored *through* the
-            # element, but only its bbox/page survived (``bbox_json`` and the
-            # provenance box chain); the char range had no column, so every
-            # block re-materialized on resume lost it. ``source_slice`` then fell
-            # back to the coarser carried text, and a re-export after a resume
-            # could not slice the canonical stream the reader had stamped --
-            # exactly why the original export matched but the resumed one did not.
-            # Nullable: a format with no canonical stream (or a block written by
-            # an older build) simply keeps ``None`` and falls back as before.
-            if current_version < 14:
-                columns = {
-                    str(row["name"])
-                    for row in conn.execute("PRAGMA table_info(blocks);").fetchall()
-                }
-                if "span_chars_json" not in columns:
-                    conn.execute("ALTER TABLE blocks ADD COLUMN span_chars_json TEXT DEFAULT NULL;")
-                conn.execute("PRAGMA user_version = 14;")
-
-            # Guard against TARGET_SCHEMA_VERSION drift: migrations above must
-            # land exactly on the declared target, otherwise future restarts
-            # silently skip new migrations.
-            final_version: int = conn.execute("PRAGMA user_version;").fetchone()[0]
-            if final_version != TARGET_SCHEMA_VERSION:
+                # Fresh (or fully empty) database: create the final shape
+                # directly. ``executescript`` implicitly commits, so the stamp is
+                # written alongside the DDL.
+                conn.executescript(_SCHEMA_SQL)
+                conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION};")
+            else:
+                # A legacy (ladder-migrated) database. Refuse rather than
+                # silently downgrade or half-migrate: the operator chooses.
                 raise LedgerError(
-                    f"Ledger schema version mismatch: db={final_version} "
-                    f"target={TARGET_SCHEMA_VERSION}",
+                    f"Ledger at {self.db_path} uses schema version {current_version}, "
+                    f"but this build ships the flattened baseline version "
+                    f"{SCHEMA_VERSION}. Incremental migration was removed, and "
+                    "rewriting a legacy ledger in place risks the run's only copy "
+                    "of its translations. Start a fresh job (a new --job-id or the "
+                    "file removed) to use the new schema, or restore a backup if "
+                    "you need the old data with an older build.",
                     details={
-                        "db_version": final_version,
-                        "target": TARGET_SCHEMA_VERSION,
+                        "db_version": current_version,
+                        "baseline_version": SCHEMA_VERSION,
                     },
                 )
 
-            # The version stamp alone is not evidence the schema is right. Existing
-            # tables may have skipped migrations or created with incomplete columns.
-            # Check the actual columns so the mismatch fails here, not later
-            # inside ``_row_to_block``.
-            columns = {
-                str(row["name"]) for row in conn.execute("PRAGMA table_info(blocks);").fetchall()
-            }
-            missing = sorted(_REQUIRED_BLOCK_COLUMNS - columns)
-            if missing:
-                raise LedgerError(
-                    f"Ledger at {self.db_path} predates this schema and cannot be "
-                    f"migrated: blocks is missing {', '.join(missing)}. Delete the "
-                    f"file to start fresh, or restore a backup of it.",
-                    details={"missing_columns": missing, "db_version": final_version},
-                )
+            self._verify_block_columns(conn, SCHEMA_VERSION)
+
+    def _verify_block_columns(self, conn: sqlite3.Connection, version: int) -> None:
+        """Fail loudly if the ``blocks`` table is missing a column we read.
+
+        The version stamp alone is not evidence the schema is right: a table
+        created by a hand-edited file or a partial write can be at the baseline
+        version with columns missing. Checking here fails at startup instead of
+        deep inside ``_row_to_block``.
+        """
+        columns = {
+            str(row["name"]) for row in conn.execute("PRAGMA table_info(blocks);").fetchall()
+        }
+        missing = sorted(_REQUIRED_BLOCK_COLUMNS - columns)
+        if missing:
+            raise LedgerError(
+                f"Ledger at {self.db_path} is missing required blocks columns: "
+                f"{', '.join(missing)}. The file is corrupt or was written by an "
+                "incompatible build. Delete it to start fresh, or restore a backup.",
+                details={"missing_columns": missing, "db_version": version},
+            )
 
     def _block_scope(self, conn: sqlite3.Connection, job_id: str | None) -> str | None:
         """Resolve the job that scopes a block_id-keyed write.

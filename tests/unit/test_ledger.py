@@ -705,94 +705,87 @@ def test_finalize_batch_job_records_a_paid_batch_whose_sentinel_was_reclaimed(
     assert rows == {"batch-a": "submitted", "batch-b": "submitted"}
 
 
-def test_migration_v2_crash_recovery(tmp_path: Path) -> None:
-    db_file = tmp_path / "v1_interrupted.db"
+def test_a_legacy_ledger_is_refused_not_silently_migrated(tmp_path: Path) -> None:
+    """A pre-baseline ledger must be refused with guidance, never rewritten.
+
+    Incremental migration was removed in favour of a single flat baseline. A
+    database from an older build must fail loudly: migrating it in place would
+    risk the run's only copy of its translations, and silently stamping it as
+    the new baseline would let ``_row_to_block`` read a schema it does not have.
+    """
+    db_file = tmp_path / "legacy.db"
     conn = sqlite3.connect(db_file)
     conn.executescript("""
         CREATE TABLE job_meta (job_id TEXT PRIMARY KEY);
-        CREATE TABLE blocks (
-            block_id TEXT PRIMARY KEY,
-            job_id TEXT NOT NULL,
-            flow_id TEXT NOT NULL DEFAULT 'main_story',
-            spine_index INTEGER NOT NULL DEFAULT 0,
-            block_type TEXT NOT NULL DEFAULT 'narrative',
-            bbox_json TEXT,
-            style_json TEXT,
-            source_text TEXT NOT NULL,
-            draft_text TEXT,
-            target_text TEXT,
-            status TEXT NOT NULL,
-            skip_translate INTEGER DEFAULT 0,
-            glossary_hits_json TEXT,
-            mtqe_score REAL,
-            repair_rounds INTEGER DEFAULT 0,
-            error_flags_json TEXT,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        PRAGMA user_version = 1;
-    """)
-    # Simulate crash after owner_id added in v2
-    conn.execute("ALTER TABLE blocks ADD COLUMN owner_id TEXT DEFAULT NULL;")
-    conn.commit()
-    conn.close()
-
-    # Re-open with SQLiteJobLedger; it must finish migration without error
-    ledger = SQLiteJobLedger(db_file)
-    ledger.close()
-
-    conn = sqlite3.connect(db_file)
-    assert conn.execute("PRAGMA user_version;").fetchone()[0] == TARGET_SCHEMA_VERSION
-    conn.close()
-
-
-def test_migration_v11_crash_recovery(tmp_path: Path) -> None:
-    db_file = tmp_path / "v10_interrupted.db"
-    conn = sqlite3.connect(db_file)
-    conn.executescript("""
-        CREATE TABLE job_meta (job_id TEXT PRIMARY KEY);
-        CREATE TABLE blocks (
-            block_id TEXT PRIMARY KEY,
-            job_id TEXT NOT NULL,
-            flow_id TEXT NOT NULL DEFAULT 'main_story',
-            spine_index INTEGER NOT NULL DEFAULT 0,
-            block_type TEXT NOT NULL DEFAULT 'narrative',
-            bbox_json TEXT,
-            style_json TEXT,
-            source_text TEXT NOT NULL,
-            draft_text TEXT,
-            target_text TEXT,
-            status TEXT NOT NULL,
-            skip_translate INTEGER DEFAULT 0,
-            glossary_hits_json TEXT,
-            mtqe_score REAL,
-            repair_rounds INTEGER DEFAULT 0,
-            error_flags_json TEXT,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            tm_hit INTEGER DEFAULT 0,
-            mqm_severity TEXT,
-            mqm_spans_json TEXT,
-            layout_role TEXT,
-            semantic_role TEXT,
-            structure_role TEXT,
-            policy_translate INTEGER,
-            policy_reason TEXT,
-            provenance_json TEXT
-        );
-        CREATE TABLE batch_jobs (batch_id TEXT PRIMARY KEY);
+        CREATE TABLE blocks (block_id TEXT PRIMARY KEY, job_id TEXT NOT NULL,
+            source_text TEXT NOT NULL, status TEXT NOT NULL);
         PRAGMA user_version = 10;
     """)
-    # Simulate crash after rename to blocks_v10
-    conn.execute("ALTER TABLE blocks RENAME TO blocks_v10;")
     conn.commit()
     conn.close()
 
-    # Re-open with SQLiteJobLedger; it must finish migration without error
+    with pytest.raises(LedgerError) as excinfo:
+        SQLiteJobLedger(db_file)
+    assert "flattened baseline" in str(excinfo.value)
+    assert excinfo.value.details["db_version"] == 10
+    assert excinfo.value.details["baseline_version"] == TARGET_SCHEMA_VERSION
+    # The file is untouched: still at its old version.
+    conn = sqlite3.connect(db_file)
+    assert conn.execute("PRAGMA user_version;").fetchone()[0] == 10
+    conn.close()
+
+
+def test_a_fresh_ledger_lands_on_the_flat_baseline_version(ledger: SQLiteJobLedger) -> None:
+    with ledger._get_conn() as conn:
+        assert conn.execute("PRAGMA user_version;").fetchone()[0] == TARGET_SCHEMA_VERSION
+
+
+def test_a_file_missing_a_required_column_is_refused(tmp_path: Path) -> None:
+    """A file stamped at the baseline but missing a column fails at startup."""
+    db_file = tmp_path / "broken.db"
+    conn = sqlite3.connect(db_file)
+    conn.executescript(f"""
+        CREATE TABLE job_meta (job_id TEXT PRIMARY KEY);
+        CREATE TABLE blocks (block_id TEXT PRIMARY KEY, job_id TEXT NOT NULL);
+        PRAGMA user_version = {TARGET_SCHEMA_VERSION};
+    """)
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(LedgerError) as excinfo:
+        SQLiteJobLedger(db_file)
+    assert "missing required blocks columns" in str(excinfo.value)
+
+
+def test_the_baseline_is_idempotent_on_reopen(tmp_path: Path) -> None:
+    """Re-opening a baseline ledger must not re-create tables or raise."""
+    db_file = tmp_path / "baseline.db"
     ledger = SQLiteJobLedger(db_file)
     ledger.close()
+    ledger = SQLiteJobLedger(db_file)
+    try:
+        assert ledger.get_job_status("nonexistent") is None
+    finally:
+        ledger.close()
 
-    conn = sqlite3.connect(db_file)
-    assert conn.execute("PRAGMA user_version;").fetchone()[0] == TARGET_SCHEMA_VERSION
-    conn.close()
+
+def test_a_fresh_baseline_has_the_composite_primary_key_and_no_dead_columns(
+    ledger: SQLiteJobLedger,
+) -> None:
+    """The flattened schema ships the final shape directly (no ALTER ladder)."""
+    with ledger._get_conn() as conn:
+        sql = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='blocks';"
+        ).fetchone()[0]
+        cols = {str(r["name"]) for r in conn.execute("PRAGMA table_info(blocks);").fetchall()}
+    assert "PRIMARY KEY (job_id, block_id)" in sql
+    # Dead columns the ladder used to add then drop are absent from the baseline.
+    assert "semantic_role" not in cols
+    assert "structure_role" not in cols
+    assert "owner_id" not in cols
+    assert "lease_expires_at" not in cols
+    # Live columns are present.
+    assert {"span_chars_json", "level", "marker", "provenance_json"} <= cols
 
 
 def test_get_job_stats_reports_whether_qe_measured_anything(ledger: SQLiteJobLedger) -> None:
@@ -820,110 +813,6 @@ def test_get_job_stats_reports_whether_qe_measured_anything(ledger: SQLiteJobLed
     stats = ledger.get_job_stats("job")
     assert stats["qe_measured"] is True
     assert stats["avg_qe_score"] == 0.87
-
-
-def test_migration_v13_to_v14_preserves_data_and_adds_span_chars(tmp_path: Path) -> None:
-    """The v13->v14 step is an ADD COLUMN; the existing rows must survive it.
-
-    v14 added ``span_chars_json`` (the canonical-stream slice a resumed run
-    needs to re-slice a block's target). The migration tests above pin crash
-    *recovery* for v2/v11, but nothing pinned that the v13 upgrade keeps the
-    rows it upgrades — an ALTER that recreated the table, or a migration that
-    ran before the data existed, would have shipped silently.
-    """
-    db_file = tmp_path / "v13.db"
-    conn = sqlite3.connect(db_file)
-    conn.executescript("""
-        CREATE TABLE job_meta (
-            job_id TEXT PRIMARY KEY,
-            doc_id TEXT,
-            source_path TEXT,
-            target_lang TEXT,
-            total_blocks INTEGER DEFAULT 0,
-            status TEXT,
-            metadata_json TEXT
-        );
-        CREATE TABLE blocks (
-            block_id TEXT NOT NULL,
-            job_id TEXT NOT NULL,
-            flow_id TEXT NOT NULL DEFAULT 'main_story',
-            spine_index INTEGER NOT NULL DEFAULT 0,
-            block_type TEXT NOT NULL DEFAULT 'narrative',
-            bbox_json TEXT,
-            style_json TEXT,
-            source_text TEXT NOT NULL,
-            draft_text TEXT,
-            target_text TEXT,
-            status TEXT NOT NULL,
-            skip_translate INTEGER DEFAULT 0,
-            glossary_hits_json TEXT,
-            mtqe_score REAL,
-            repair_rounds INTEGER DEFAULT 0,
-            error_flags_json TEXT,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            tm_hit INTEGER DEFAULT 0,
-            mqm_severity TEXT,
-            mqm_spans_json TEXT,
-            layout_role TEXT,
-            policy_translate INTEGER,
-            policy_reason TEXT,
-            provenance_json TEXT,
-            level INTEGER,
-            marker TEXT,
-            confidence TEXT,
-            decorative INTEGER,
-            PRIMARY KEY (job_id, block_id)
-        );
-        CREATE TABLE batch_jobs (
-            batch_id TEXT PRIMARY KEY,
-            job_id TEXT NOT NULL,
-            idempotency_key TEXT NOT NULL,
-            status TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        INSERT INTO job_meta (job_id, doc_id, source_path, target_lang, total_blocks, status)
-        VALUES ('jobv13', 'docv13', 'book.pdf', 'zh', 1, 'completed');
-        INSERT INTO blocks (block_id, job_id, source_text, target_text, status)
-        VALUES ('b001', 'jobv13', 'Source sentence.', '译文句子。', 'mtqe_passed');
-        PRAGMA user_version = 13;
-    """)
-    conn.commit()
-    conn.close()
-
-    ledger = SQLiteJobLedger(db_file)
-    try:
-        assert ledger.get_job_status("jobv13") == "completed"
-        block = ledger.get_block("b001", "jobv13")
-        assert block is not None
-        assert block.source_text == "Source sentence."
-        assert block.target_text == "译文句子。"
-        assert block.status is BlockStatus.MTQE_PASSED
-        # The new column exists and defaults to NULL for the pre-migration row
-        # (it feeds ``element.span.chars`` when present).
-        assert block.element.span.chars is None
-    finally:
-        ledger.close()
-
-    conn = sqlite3.connect(db_file)
-    assert conn.execute("PRAGMA user_version;").fetchone()[0] == TARGET_SCHEMA_VERSION
-    cols = {str(r[1]) for r in conn.execute("PRAGMA table_info(blocks);").fetchall()}
-    assert "span_chars_json" in cols
-    conn.close()
-
-
-def test_migration_v14_is_idempotent_on_reopen(tmp_path: Path) -> None:
-    """A v14 ledger must not re-run the ADD COLUMN (it would raise on the dup)."""
-    db_file = tmp_path / "v14.db"
-    ledger = SQLiteJobLedger(db_file)
-    ledger.close()
-    # Re-open: the version check short-circuits, so nothing tries to add the
-    # column a second time.
-    ledger = SQLiteJobLedger(db_file)
-    try:
-        assert ledger.get_job_status("nonexistent") is None
-    finally:
-        ledger.close()
 
 
 def test_ledger_staleness_helper(tmp_path: Path) -> None:

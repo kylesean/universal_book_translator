@@ -6,7 +6,7 @@ import asyncio
 import logging
 import re
 from collections.abc import AsyncGenerator, Callable
-from contextlib import aclosing
+from contextlib import aclosing, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -49,8 +49,8 @@ from ubt.core.ports import (
     resolve_adapter,
 )
 from ubt.core.qe.base import BaseQERunner
-from ubt.core.qe.comet_runner import HeuristicQERunner, SubprocessQERunner
 from ubt.core.qe.fast_pass import FastPassFilter
+from ubt.core.qe.heuristic import HeuristicQERunner
 from ubt.core.router.pricing import price_is_known
 from ubt.core.router.provider import create_model_provider
 from ubt.core.router.rate_limiter import AdaptiveTokenBucket
@@ -289,6 +289,7 @@ class PipelineOrchestrator:
                 # Share the process-wide registry so runtime profile
                 # registration (API /model-profiles) actually reaches jobs.
                 registry=get_default_registry(),
+                request_timeout=self.config.api_timeout,
             )
         else:
             self.router = router
@@ -314,18 +315,11 @@ class PipelineOrchestrator:
 
         if qe_runner is not None:
             self.qe_runner: BaseQERunner = qe_runner
-        elif self.config.qe_engine in ("comet", "cometkiwi", "neural", "subprocess"):
-            import sys
-
-            from ubt.core.config import packaged_comet_script
-
-            script = self.config.comet_script_path or packaged_comet_script()
-            self.qe_runner = SubprocessQERunner(
-                python_bin=Path(sys.executable),
-                script_path=script,
-                model_name=self.config.comet_model,
-            )
         else:
+            # The neural CometKiwi subprocess runner (CC-BY-NC-SA weights) was
+            # retired for commercial-license compliance. The heuristic runner is
+            # the zero-token Tier-1 default; a heavier judge is opt-in via
+            # ``qe_engine=tiered`` (L3 gray-zone LLM rescoring) below.
             self.qe_runner = HeuristicQERunner()
         # L3 gray-zone judge: wrap heuristic with suspect-only LLM rescoring.
         # Explicit opt-in (UBT_QE_JUDGE_ENABLED); ``qe_engine=tiered`` alone
@@ -614,6 +608,22 @@ class PipelineOrchestrator:
             active_block_id=active_block_id,
             artifact_path=artifact_path,
         )
+
+    async def _renew_writer_lock(self, writer_lock: LedgerWriterLock) -> None:
+        """Keep the writer-lock lease fresh for the life of the run.
+
+        The lock is an *expiring* lease so a crashed writer can be reclaimed; a
+        real book run lasts longer than one lease window, so the holder must
+        renew or a second process could take the job over mid-run. Runs until
+        cancelled (the caller cancels it once the stage generator finishes).
+        """
+        interval = max(1.0, writer_lock.lease_seconds / 3.0)
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                await asyncio.to_thread(writer_lock.renew)
+            except Exception as exc:  # a transient renew failure must not kill the run
+                logger.debug("Writer-lock renewal failed: %s", exc)
 
     async def _run_finalize_hook(
         self, event: TranslationProgressEvent, ledger: SQLiteJobLedger
@@ -956,6 +966,16 @@ class PipelineOrchestrator:
                 c_text=self.config.c_text_enabled,
                 consistency=self.config.consistency_enforce != "off",
             )
+            # Renew the writer-lock lease for the life of the run: the lock is an
+            # *expiring* lease (so a crashed writer can be reclaimed), and a real
+            # book translation routinely runs longer than the lease window. Left
+            # unrenewed, the lease would expire mid-run and a second process could
+            # take over the job — both would then draft and pay the provider, and
+            # their checkpoints would interleave. The renewer touches the row every
+            # ``renew_interval`` seconds, well inside the lease window.
+            renew_task = asyncio.create_task(
+                self._renew_writer_lock(writer_lock), name=f"renew-lock:{actual_job_id}"
+            )
             # ``aclosing`` owns the stage generator: its own ``finally`` (stage
             # teardown, checkpoint flush) must run *here*, inside the try, so it
             # finishes before this method's ``finally`` closes the ledger and
@@ -975,6 +995,9 @@ class PipelineOrchestrator:
             ) as stage_events:
                 async for event in stage_events:
                     yield event
+            renew_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await renew_task
 
         except GeneratorExit:
             # Consumer closed the generator early (job_worker's ``aclosing`` on a

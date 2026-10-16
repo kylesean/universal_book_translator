@@ -1,21 +1,29 @@
-"""Job-level single-writer lock over a ledger file (stdlib-only, cross-platform).
+"""Job-level single-writer lock, backed by the ledger's own SQLite database.
 
-There is no per-block worker lease in the ledger schema, so a job-level
-guard is the only thing standing between two processes running the same
-``job_id`` simultaneously: both fetch the same pending blocks, both pay the
-provider, and their checkpoints overwrite one another. The
-orchestrator holds an exclusive, non-blocking lock next to the ledger DB
-for the lifetime of a run; read-only tools (status/inspect/MCP fallback
-reads) never take it.
+Two processes running the same ``job_id`` both fetch the same pending blocks,
+both pay the provider, and their checkpoints overwrite one another — so a
+job-level mutual-exclusion guard is required. This guard lives in a
+``job_locks`` table **inside the ledger database**, not in a separate lock file
+with ``msvcrt``/``fcntl`` byte offsets:
+
+* an advisory file lock cannot be taken at all on NFS/overlayfs/K8s PVCs
+  (``EOPNOTSUPP``) and behaves differently under Docker PID 1, so the old
+  file-offset lock either wedged or misreported contention there;
+* SQLite already serializes writers through its own WAL + transaction locks, so
+  a table row is the natural place to hold "who owns this job right now".
+
+The lock is an **expiring lease**: a row records the owner pid and an expiry, so
+a crashed process that never released its lock does not wedge the job forever —
+a later run reclaims an expired lease by an atomic ``UPDATE``. Acquisition and
+renewal are single statements, so they are safe under concurrent processes.
 """
 
 from __future__ import annotations
 
-import errno
 import logging
 import os
-import sys
-from contextlib import suppress
+import sqlite3
+import time
 from pathlib import Path
 from typing import Any
 
@@ -24,125 +32,146 @@ from ubt.core.fs_perms import ensure_private_dir
 
 logger = logging.getLogger(__name__)
 
-#: errno values that mean "the lock is held by someone else", as opposed to a
-#: real failure to lock at all. ``fcntl.flock`` raises ``EAGAIN``/``EWOULDBLOCK``
-#: on contention; ``msvcrt.locking`` raises ``EACCES`` (and sometimes
-#: ``EDEADLK``). Anything else (``EOPNOTSUPP`` on NFS/overlayfs, ``EBADF``,
-#: ``EINVAL``) is not contention and must not be reported as "already being
-#: written": doing so made the worker requeue the same job forever and
-#: ``run_until_idle`` never return.
-_LOCK_BUSY_ERRNOS = frozenset(
-    {errno.EACCES, errno.EAGAIN, errno.EWOULDBLOCK, errno.EDEADLK, errno.EBUSY}
-)
-
-#: Byte offset the Windows lock is taken at, deliberately past the holder pid.
-#:
-#: ``msvcrt.locking`` locks ``count`` bytes from the handle's *current position*,
-#: and the CRT enforces that against other handles in the same process. Locking at
-#: byte 0 therefore blocked the one thing the lock file is there for: reading the
-#: holder pid (both the test's assertion and ``_read_holder_pid``, which names the
-#: competing process in the busy message) raised PermissionError and was swallowed,
-#: so a locked job on Windows reported "already being written" without the pid.
-#: ``fcntl.flock`` locks the whole file and ignores position, so POSIX is
-#: unaffected by where the byte sits.
-_LOCK_BYTE_OFFSET = 1024
-
-
-def _try_exclusive_lock(fd: int) -> None:
-    """Take the advisory exclusive lock non-blockingly; raise OSError if busy."""
-    if sys.platform == "win32":
-        import msvcrt
-
-        os.lseek(fd, _LOCK_BYTE_OFFSET, os.SEEK_SET)
-        msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
-    else:
-        import fcntl
-
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-
-
-def _unlock(fd: int) -> None:
-    if sys.platform == "win32":
-        import msvcrt
-
-        with suppress(OSError):
-            os.lseek(fd, _LOCK_BYTE_OFFSET, os.SEEK_SET)
-            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
-        return
-    import fcntl
-
-    fcntl.flock(fd, fcntl.LOCK_UN)
+#: How long a lease is valid before another process may reclaim it. Long enough
+#: to cover a normal run's lifetime between renewals, short enough that a crashed
+#: writer does not wedge the job for long.
+DEFAULT_LEASE_SECONDS = 300.0
 
 
 class LedgerWriterLock:
-    """Exclusive advisory lock on ``<db_path>.writer.lock`` for one job.
+    """Exclusive single-writer guard for one job, stored in ``job_locks``.
 
-    ``acquire()`` raises :class:`LedgerError` when another process already
-    holds it; ``release()`` is idempotent.
+    ``acquire()`` raises :class:`LedgerWriterLockConflictError` when another
+    live process already holds the job; ``release()`` is idempotent. The
+    interface is unchanged from the file-lock implementation so every call site
+    (pipeline, worker, API, MCP, CLI, re-export) keeps working.
     """
 
-    def __init__(self, db_path: Path, job_id: str) -> None:
-        self.lock_path = Path(str(db_path) + ".writer.lock")
+    def __init__(
+        self,
+        db_path: Path,
+        job_id: str,
+        *,
+        lease_seconds: float = DEFAULT_LEASE_SECONDS,
+    ) -> None:
+        self.db_path = Path(db_path)
         self.job_id = job_id
-        self._fd: int | None = None
+        self.lease_seconds = lease_seconds
+        self._held = False
+        self._pid = os.getpid()
+        #: Per-instance owner token. Distinguishes two ``LedgerWriterLock``
+        #: instances in the *same* process (which share a pid): the same
+        #: instance re-acquires idempotently, a second instance conflicts.
+        self._token = f"{self._pid}:{id(self)}:{time.time_ns()}"
+
+    def _connect(self) -> sqlite3.Connection:
+        # The lock is taken before the ledger creates its file on a fresh run,
+        # so the directory may not exist yet. Create it owner-only, matching the
+        # ledger's own policy (the lock row lives inside a file that also carries
+        # the manuscript).
+        ensure_private_dir(self.db_path.parent)
+        # A short busy timeout: the row write is a single statement, and under
+        # WAL a concurrent reader never blocks it. The timeout only covers
+        # another writer's brief transaction.
+        conn = sqlite3.connect(str(self.db_path), timeout=10.0, isolation_level=None)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA busy_timeout = 10000;")
+        return conn
+
+    def _table_exists(self, conn: sqlite3.Connection) -> bool:
+        return (
+            conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='job_locks';"
+            ).fetchone()
+            is not None
+        )
 
     def acquire(self) -> None:
-        if self._fd is not None:
+        if self._held:
             return
-        # ensure_private_dir, not a bare mkdir: on a fresh run the lock is
-        # created BEFORE the ledger, so a plain mkdir left db_dir at umask
-        # permissions and ensure_private_dir then saw it as "pre-existing"
-        # and skipped the 0700 — the job-ledger directory shipped world-
-        # browsable. A directory someone else created keeps its mode.
-        ensure_private_dir(self.lock_path.parent)
-        fd = os.open(self.lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+        now = time.time()
+        expires = now + self.lease_seconds
+        conn = self._connect()
         try:
-            _try_exclusive_lock(fd)
-        except OSError as exc:
-            os.close(fd)
-            if exc.errno not in _LOCK_BUSY_ERRNOS:
-                # Not contention: the filesystem cannot lock at all (NFS /
-                # overlayfs EOPNOTSUPP, a bad fd, ...). Report it as a hard
-                # failure so the job fails loudly instead of being requeued
-                # forever behind a lock that can never be taken.
-                raise RuntimeError(
-                    f"Cannot acquire writer lock for job '{self.job_id}' at "
-                    f"{self.lock_path}: {exc.strerror or exc} (errno {exc.errno}). "
-                    "The filesystem does not support advisory file locking, so "
-                    "single-writer safety cannot be guaranteed."
-                ) from exc
-            holder = self._read_holder_pid()
-            raise LedgerWriterLockConflictError(
-                f"Job {self.job_id} is already being written by another process"
-                + (f" (pid {holder})" if holder else "")
-                + ": refusing to run it twice — a second writer would pay the "
-                "provider again for blocks the first is drafting and overwrite "
-                "its checkpoints. Wait for the running job, or pick a distinct "
-                "--job-id.",
-                details={"job_id": self.job_id, "holder_pid": holder},
-            ) from exc
-        except ImportError as exc:  # pragma: no cover - exotic platforms
-            os.close(fd)
-            raise RuntimeError(
-                f"Cannot acquire writer lock for job '{self.job_id}': platform file-locking "
-                "module is unavailable. Single-writer safety cannot be guaranteed."
-            ) from exc
-        with suppress(OSError):
-            # Back to byte 0: _try_exclusive_lock left the handle positioned at the
-            # lock byte, and the pid has to land where _read_holder_pid looks.
-            os.lseek(fd, 0, os.SEEK_SET)
-            os.truncate(fd, 0)
-            os.write(fd, str(os.getpid()).encode("ascii"))
-        self._fd = fd
+            if not self._table_exists(conn):
+                # The ledger has not created its schema yet (a lock is taken
+                # before the first run on a fresh db in some call paths). Create
+                # just this table; the ledger's own init is idempotent and adds
+                # nothing conflicting.
+                conn.execute(
+                    "CREATE TABLE IF NOT EXISTS job_locks ("
+                    "job_id TEXT PRIMARY KEY, owner_pid INTEGER NOT NULL, "
+                    "owner_token TEXT NOT NULL, lease_expires_at REAL NOT NULL, "
+                    "acquired_at REAL NOT NULL);"
+                )
+            # Atomic claim: insert a fresh row, or take over a row whose lease
+            # has expired, or renew our own instance. Any of these is one
+            # statement, so two processes (or two instances) racing cannot both
+            # win. Ownership is the per-instance token, not the pid: two
+            # instances in one process share a pid and must still exclude.
+            cur = conn.execute(
+                """
+                INSERT INTO job_locks
+                    (job_id, owner_pid, owner_token, lease_expires_at, acquired_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(job_id) DO UPDATE SET
+                    owner_pid = excluded.owner_pid,
+                    owner_token = excluded.owner_token,
+                    lease_expires_at = excluded.lease_expires_at,
+                    acquired_at = excluded.acquired_at
+                WHERE job_locks.lease_expires_at < ? OR job_locks.owner_token = ?
+                """,
+                (self.job_id, self._pid, self._token, expires, now, now, self._token),
+            )
+            if cur.rowcount == 0:
+                holder = conn.execute(
+                    "SELECT owner_pid FROM job_locks WHERE job_id = ?", (self.job_id,)
+                ).fetchone()
+                holder_pid = int(holder["owner_pid"]) if holder else None
+                raise LedgerWriterLockConflictError(
+                    f"Job {self.job_id} is already being written by another process"
+                    + (f" (pid {holder_pid})" if holder_pid else "")
+                    + ": refusing to run it twice — a second writer would pay the "
+                    "provider again for blocks the first is drafting and overwrite "
+                    "its checkpoints. Wait for the running job, or pick a distinct "
+                    "--job-id.",
+                    details={"job_id": self.job_id, "holder_pid": holder_pid},
+                )
+            self._held = True
+        finally:
+            conn.close()
+
+    def renew(self) -> None:
+        """Extend this process's lease; a no-op when it is not the holder."""
+        if not self._held:
+            return
+        conn = self._connect()
+        try:
+            conn.execute(
+                "UPDATE job_locks SET lease_expires_at = ? WHERE job_id = ? AND owner_token = ?",
+                (time.time() + self.lease_seconds, self.job_id, self._token),
+            )
+        finally:
+            conn.close()
 
     def release(self) -> None:
-        if self._fd is None:
+        if not self._held:
             return
-        fd, self._fd = self._fd, None
-        with suppress(OSError):
-            _unlock(fd)
-        with suppress(OSError):
-            os.close(fd)
+        self._held = False
+        try:
+            conn = self._connect()
+        except sqlite3.Error:
+            return
+        try:
+            if self._table_exists(conn):
+                conn.execute(
+                    "DELETE FROM job_locks WHERE job_id = ? AND owner_token = ?",
+                    (self.job_id, self._token),
+                )
+        except sqlite3.Error:  # pragma: no cover - release must never raise
+            logger.debug("writer-lock release failed for job %s", self.job_id)
+        finally:
+            conn.close()
 
     def __enter__(self) -> LedgerWriterLock:
         self.acquire()
@@ -153,9 +182,3 @@ class LedgerWriterLock:
 
     def __del__(self) -> None:
         self.release()
-
-    def _read_holder_pid(self) -> int | None:
-        with suppress(OSError, ValueError):
-            text = self.lock_path.read_text(encoding="ascii").strip()
-            return int(text) if text else None
-        return None

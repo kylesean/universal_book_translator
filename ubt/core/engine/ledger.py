@@ -1,4 +1,4 @@
-"""SQLite WAL-based atomic transactional job ledger with keyset pagination, schema migrations, and cross-process job mutual exclusion (see engine/writer_lock.py).
+"""SQLite WAL-based atomic transactional job ledger with keyset pagination, a flat baseline schema, and cross-process job mutual exclusion (see engine/writer_lock.py).
 
 Facade module assembling the ledger subsystem:
 - :mod:`ubt.core.engine.ledger_base`: connection, transaction, and schema migrations.

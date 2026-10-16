@@ -3,7 +3,7 @@
 The queue list is a durable scan of ``db_dir`` ledgers, so a finished job
 stays visible until its ledger is removed. These tests pin that deletion
 removes exactly the ledger family (``.sqlite`` + ``-shm``/``-wal``/
-``.writer.lock``) and the per-job deliverable directory, leaves sibling jobs
+``.sqlite-wal``) and the per-job deliverable directory, leaves sibling jobs
 and the translation memory untouched, refuses a job that has not reached a
 terminal status, and answers 404 for an unknown id.
 """
@@ -54,7 +54,9 @@ def _seed(tmp_path: Path, *, status: JobStatus = JobStatus.COMPLETED) -> UBTConf
 def test_delete_removes_ledger_family_and_outputs(tmp_path: Path) -> None:
     config = _seed(tmp_path)
     client = TestClient(create_app(config))
-    (config.db_dir / f"{_JOB}.sqlite.writer.lock").write_bytes(b"")
+    # A leftover WAL sidecar (the lock now lives inside the ledger DB, so this
+    # is the realistic sibling a crash leaves behind).
+    (config.db_dir / f"{_JOB}.sqlite-wal").write_bytes(b"")
 
     res = client.delete(f"/jobs/{_JOB}", headers=_AUTH)
     assert res.status_code == 200
@@ -65,7 +67,7 @@ def test_delete_removes_ledger_family_and_outputs(tmp_path: Path) -> None:
     }
 
     assert not (config.db_dir / f"{_JOB}.sqlite").exists()
-    assert not (config.db_dir / f"{_JOB}.sqlite.writer.lock").exists()
+    assert not (config.db_dir / f"{_JOB}.sqlite-wal").exists()
     assert not (config.db_dir / "outputs" / _JOB).exists()
     # Siblings and the outputs root itself survive.
     assert (config.db_dir / f"{_SIBLING}.sqlite").exists()
