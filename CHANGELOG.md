@@ -9,8 +9,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Pre-1.0, no tags yet. Everything below is in the current tree.
 
+### Changed
+
+- The ledger schema is a **single flat baseline** (`SCHEMA_VERSION = 1`). The
+  historical 14-step incremental migration ladder was removed; a fresh database
+  is created directly with the final shape (composite `(job_id, block_id)`
+  primary key, no dead columns). A database written by an older build is
+  **refused with instructions** rather than migrated in place — silently
+  rewriting a half-migrated legacy ledger risked the run's only copy of its
+  translations.
+- The single-writer guard is now a **SQLite-backed lease** (`job_locks` table),
+  replacing the `msvcrt`/`fcntl` file-offset lock on a separate `.writer.lock`
+  file. The old lock could not be taken on NFS/overlayfs/K8s PVCs and behaved
+  differently under Docker PID 1; the table lock works everywhere the ledger
+  does, and its expiring lease lets a crashed writer be reclaimed instead of
+  wedging the job forever.
+- The QE rehearsal exemption is an **explicit run flag** (`rehearsal=True`
+  threaded from the mock/dry-run context), not a `REHEARSAL_MARKER` substring in
+  the target text. A real translation that happens to contain the marker now
+  faces the full gate; a rehearsal still passes every structural invariant.
+- The neural **CometKiwi QE runner was removed** (`comet_runner.py`,
+  `comet_score_ipc.py`), completing the commercial-license cut for the
+  CC-BY-NC-SA weights. `SubprocessQERunner`, its resident-subprocess machinery,
+  and the `comet_model` / `comet_script_path` config knobs are gone; the
+  zero-token `HeuristicQERunner` / `MockQERunner` moved to
+  `ubt/core/qe/heuristic.py`. A config still naming `qe_engine=comet|cometkiwi|
+  neural|subprocess` normalizes to `heuristic` with a warning instead of
+  crashing.
+- HTTP timeouts are a **forced per-phase split** on every provider client:
+  `connect=15s`, `write=15s`, `pool=30s`, and `read = max(120s, api_timeout)`.
+  A single-float timeout could pin a pool slot for the whole `api_timeout` on a
+  dead endpoint.
+- The **Anthropic Message Batches** and **Gemini `:batchGenerateContent`** APIs
+  are implemented alongside the OpenAI-compatible batch path, so a book run gets
+  the provider's official batch discount whichever protocol is selected. The
+  provider now routes batch calls to the transport for the active `api_mode`
+  instead of always delegating to the chat transport.
+- The rich/macro draft prompts drop the "pink elephant" negative rules
+  (anti-passive-voice, OCR-denoising) and the "placeholders keep their original
+  relative order" constraint that contradicted the reorder-tolerant unmask, in
+  favour of positive register guidance.
+- The HTML reading console ships KaTeX **rendering** (the auto-render JS, not
+  just the stylesheet), a light/dark **theme toggle**, and emits formula blocks
+  as `.math-tex` spans carrying their LaTeX. The companion is now written
+  bilingual by default, so its three read modes (target-only / stacked /
+  side-by-side) are actually reachable.
+- Chapter-level long-context drafting is the **default** (`macro_chunk_size`
+  default 8, was 1): consecutive blocks are packed up to a section boundary and
+  sent as one `<block id=...>` request instead of one call per block. The dry-run
+  echo provider emits the macro envelope so rehearsals exercise the same path.
+
 ### Added
 
+- Academic two-column Typst template is now **reachable at runtime**: the run's
+  genre profile is stamped onto the manifest at ingest (`genre_profile`) and the
+  page profiler's `page_kinds` feed `is_academic_document`, so an academic
+  document selects the two-column layout with a floating full-width title
+  banner and dynamic header — previously the dispatch key was never produced and
+  the branch was dead code.
+- A recorded-fixture layer (`tests/cassettes.py`, built on `httpx.MockTransport,
+  no new dependency) so transport-level tests replay real recorded responses;
+  a missing cassette fails loudly instead of letting a test pass vacuously.
 - One PDF render path: the document is rebuilt from the IR and laid out by
   Typst, replacing the overlay engine that drew translated fragments back onto
   the source page. Tables are re-typeset with translated headers, math is
@@ -40,6 +99,37 @@ Pre-1.0, no tags yet. Everything below is in the current tree.
   ship a broken package silently.
 - Two hygiene guards in the fast tier: a module nobody imports fails the push,
   and a comment or docstring pointing at a deleted file or symbol fails.
+
+### Fixed
+
+- The writer-lock lease is **renewed for the life of the run**. The lock is an
+  expiring lease; a real book run outlives one window, so without renewal a
+  second process could take the job over mid-run and both would bill the
+  provider. The pipeline now runs a renewer task alongside the stages.
+- A **blank-corner matrix** keeps its empty leading cell (`mat(, b; c, d)`); the
+  earlier lead-empty prune ate a legitimate cell because pylatexenc already
+  consumes the `array` column spec. An **unstarred** `matrix`/`array` position
+  argument (`[r]`) is now stripped like the starred variants.
+- The HTML formula span carries its **delimited LaTeX as content** (what KaTeX
+  auto-render parses) with the readable Unicode fallback in the tooltip — the
+  first cut put them the other way round, so KaTeX had nothing to typeset.
+- The AST math transpiler now runs **after** LaTeX normalization, so the spaced
+  Docling dialect (`\begin { pmatrix }`) reaches it instead of failing closed to
+  plain text; a leaf chunk it cannot represent fails the whole formula closed (to
+  readable Unicode) instead of emitting raw LaTeX that fails the Typst compile
+  and loses the entire document; and environment arguments (`alignedat{2}`,
+  `pmatrix*[r]`) and the `array` leading spec cell no longer leak into the
+  emitted math.
+
+### Notes / known limitations
+
+- Prompt-cache reuse: the static-prefix prompt topology is implemented and the
+  run's cache-hit rate is **measured and reported** (`cache_hit_rate`), but the
+  RFC's ">85% reuse" is a *design target*, not an enforced guarantee — it is
+  provider-dependent (only the Anthropic transport reads cache usage today) and
+  no gate asserts it.
+- `ubt/render/epub_view.py` is a generic re-render *companion*; the **in-place**
+  EPUB/DOCX injection lives in the format adapters (`adapters/epub`, `adapters/docx`).
 
 ### Changed
 
