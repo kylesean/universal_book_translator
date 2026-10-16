@@ -123,6 +123,9 @@ class DoclingRenderStrategy:
         # minutes of per-body Typst startups before this); ``check`` still
         # answers any body the pre-warm did not see.
         math_probe = TypstMathProbe()
+        from ubt.render.typst.academic import is_academic_document
+
+        is_academic = is_academic_document(manifest)
         renderer = TypstDocumentRenderer(
             assets_root=assets_root,
             bilingual=bilingual,
@@ -133,6 +136,9 @@ class DoclingRenderStrategy:
             # typeset kanji with Simplified-Chinese glyphs and the
             # config.font_family knob was stored and never read.
             font_stack=self._font_stack_for(target_lang),
+            layout_template="academic" if is_academic else "book",
+            paper_title=manifest.title if is_academic else "",
+            abstract=manifest.metadata.get("abstract", "") if is_academic else "",
         )
         source, stats = renderer.build_source(blocks, build_dir, target_lang)
         typ_path = build_dir / "main.typ"

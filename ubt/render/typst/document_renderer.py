@@ -554,6 +554,15 @@ class TypstDocumentRenderer:
         ``@staticmethod``; the font stack is per-renderer state now, so it
         reads ``self``.
         """
+        if getattr(self, "layout_template", "book") == "academic":
+            from ubt.render.typst.academic import academic_preamble
+
+            return academic_preamble(
+                target_lang=target_lang,
+                font_stack=self.font_stack,
+                paper_title=getattr(self, "paper_title", ""),
+            )
+
         from ubt.layout.theme import direction_for
 
         direction = direction_for(target_lang or "zh").value
@@ -603,10 +612,16 @@ class TypstDocumentRenderer:
         math_gate: Callable[[str], bool] | None = None,
         math_gate_many: Callable[[Iterable[str]], None] | None = None,
         font_stack: Sequence[str] | None = None,
+        layout_template: str = "book",
+        paper_title: str = "",
+        abstract: str = "",
     ) -> None:
         self.assets_root = Path(assets_root) if assets_root is not None else None
         self.figure_width = figure_width
         self.bilingual = bilingual
+        self.layout_template = layout_template
+        self.paper_title = paper_title
+        self.abstract = abstract
         #: Body/heading font stack for the preamble. ``None`` keeps the
         #: historical hard-coded Latin+CJK-SC stack; the strategy passes the
         #: language-resolved stack (``resolve_font_config(target_lang)``) so a
@@ -758,6 +773,17 @@ class TypstDocumentRenderer:
         build_dir.mkdir(parents=True, exist_ok=True)
         self._prewarm_math_gate(blocks)
         body: list[str] = []
+        if getattr(self, "layout_template", "book") == "academic" and getattr(
+            self, "paper_title", ""
+        ):
+            from ubt.render.typst.academic import academic_title_banner
+
+            banner = academic_title_banner(
+                title=self.paper_title,
+                abstract=getattr(self, "abstract", ""),
+            )
+            if banner:
+                body.append(banner)
         pending: _Figure | None = None
 
         def flush_figure() -> None:

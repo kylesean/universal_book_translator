@@ -320,6 +320,14 @@ async def run_ingest_stage(
     # Coerce to JSON-safe scalars: the identity is persisted, and a test (or a
     # duck-typed caller) may hand in a non-serializable stand-in.
     profile_name = str(ctx.profile_name)
+    # Bridge the genre profile onto the manifest so the renderer can route to
+    # the academic two-column template. The profile is a run decision that
+    # already flows through the pipeline and the ledger, but nothing carried it
+    # onto the manifest — so ``is_academic_document`` (which reads the manifest)
+    # always answered False and the two-column branch was unreachable. An
+    # explicit value on the manifest (e.g. from a caller or a resume) wins.
+    if not manifest.metadata.get("genre_profile"):
+        manifest.metadata["genre_profile"] = profile_name
     engine_sig = engine_signature(ctx.config)
     mock_run = bool(ctx.is_mock_run)
     if selected_pages and not getattr(adapter, "supports_page_selection", True):
