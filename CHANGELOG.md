@@ -76,6 +76,17 @@ Pre-1.0, no tags yet. Everything below is in the current tree.
   count. Unset aligns to the source; set 1 or 2 to override (e.g. `--columns 1`
   for comfortable single-column reading of a two-column paper, or `--columns 2`
   to force two columns for print).
+- The page profiler's **multi-column detector no longer counts page furniture
+  as a right column**. A rotated margin stamp (the arXiv/JMLR watermark running
+  vertically down the page edge) is emitted as one near-square glyph per rect,
+  which `column_right_share` counted as a right-column segment — reporting
+  `right_row_share` ≈ 0.44 on body pages and `multicolumn_page_share` = 0.225 on
+  a paper whose body is plainly **one** column. That false signal then drove the
+  renderer to lay the delivery out in two columns. Two guards fix it: narrow
+  (furniture-sized) fragments never form a segment, and a right-started segment
+  only counts when its row also carries left-column text. A genuine two-column
+  document scores unchanged (verified 0.83 before and after); the real
+  single-column paper drops from 0.225 to 0.0.
 - A recorded-fixture layer (`tests/cassettes.py`, built on `httpx.MockTransport,
   no new dependency) so transport-level tests replay real recorded responses;
   a missing cassette fails loudly instead of letting a test pass vacuously.

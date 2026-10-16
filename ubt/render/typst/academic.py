@@ -13,13 +13,14 @@ from ubt.layout.theme import direction_for
 from ubt.render.typst.document_renderer import escape_markup
 
 #: Minimum share of pages the profiler must flag multi-column before the
-#: renderer treats the source as two-column. Deliberately low: a two-column
-#: paper's front matter, references, and full-width figure pages are all
-#: single-column, so its page share sits well under one half (the JMLR Switch
-#: Transformer paper measures 0.225). The profiler's own per-page bar is
-#: ``PROBE_COLUMN_SHARE`` (0.25); this is the document-level share above which a
-#: real two-column body is unambiguous while a stray figure page is not.
-_MULTICOLUMN_SHARE_FLOOR = 0.15
+#: renderer treats the source as two-column. A genuine two-column document has
+#: most of its body pages laid out in columns, so it measures well above this;
+#: a single-column document now measures ~0.0 (before the page-profiler fix it
+#: falsely measured 0.225 on a single-column paper, which is why this floor was
+#: briefly set very low — with the false positives gone the bar is a real
+#: majority again). Front matter, references, and full-width figure pages are
+#: single-column, so the bar is a bare majority, not an absolute.
+_MULTICOLUMN_SHARE_FLOOR = 0.5
 
 
 def is_academic_document(manifest_or_meta: Any) -> bool:
@@ -152,16 +153,13 @@ def _has_multicolumn_evidence(source: Any) -> bool:
     edge), which is the codebase's own notion of "this is a multi-column
     document".
 
-    The share fallback deliberately uses a **low** bar. A paper's front matter
+    The share fallback requires a real majority of pages. A paper's front matter
     (title, TOC, author block), its references, and its full-width figure/table
-    pages are all single-column, so a genuinely two-column paper's page share
-    sits well under one half — the real JMLR Switch Transformer paper measures
-    0.225 while its body is unmistakably two-column. Demanding ``>= 0.5`` here
-    flattened exactly those papers to a single column, the failure this whole
-    function exists to prevent. The profiler flags a page multi-column at
-    ``right_row_share > PROBE_COLUMN_SHARE`` (0.25), so any paper whose body is
-    two-column clears a modest share; a book with one stray two-column figure
-    page does not.
+    pages are single-column, so the body must dominate for the document to count
+    as two-column. An earlier cut set this bar very low to work around a page
+    profiler that mis-measured single-column papers (a rotated margin stamp read
+    as a right column, scoring 0.225); with that fixed, a single-column document
+    measures ~0.0 and the bar is a plain majority again.
     """
     if not isinstance(source, Mapping):
         return False

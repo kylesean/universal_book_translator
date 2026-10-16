@@ -101,7 +101,8 @@ def test_resolve_document_columns_fidelity_first() -> None:
     assert resolve_document_columns(manifest_single) == 1
 
     # 2. Physical multi-column evidence in the source -> 2. This is where the
-    #    profiler actually records it: run.route_decision, not metadata.
+    #    profiler actually records it: run.route_decision, not metadata. A real
+    #    two-column document flags most body pages, so its share is well past half.
     manifest_multi_share = BookManifest(
         doc_id="d3",
         source_path="acm_paper.pdf",
@@ -110,7 +111,7 @@ def test_resolve_document_columns_fidelity_first() -> None:
     )
     manifest_multi_share.run.route_decision = {
         "mode": "long",
-        "multicolumn_page_share": 0.225,
+        "multicolumn_page_share": 0.72,
     }
     assert resolve_document_columns(manifest_multi_share) == 2
 
@@ -124,15 +125,27 @@ def test_resolve_document_columns_fidelity_first() -> None:
     manifest_multi_flag.run.route_decision = {"has_multicolumn": True}
     assert resolve_document_columns(manifest_multi_flag) == 2
 
-    # A single stray multi-column figure page is NOT a two-column document.
+    # A minority of multi-column pages (front matter, references, a couple of
+    # full-width figure pages) is NOT a two-column document. This is the shape a
+    # single-column paper takes once the profiler's margin-stamp false positive
+    # is gone — measured 0.225 before, 0.0 after.
     manifest_noise = BookManifest(
         doc_id="d6",
         source_path="book.pdf",
         title="Book",
         metadata={"genre_profile": "general"},
     )
-    manifest_noise.run.route_decision = {"multicolumn_page_share": 0.05}
+    manifest_noise.run.route_decision = {"multicolumn_page_share": 0.225}
     assert resolve_document_columns(manifest_noise) == 1
+
+    manifest_mostly_single = BookManifest(
+        doc_id="d7",
+        source_path="single.pdf",
+        title="Single Column",
+        metadata={"genre_profile": "paper"},
+    )
+    manifest_mostly_single.run.route_decision = {"multicolumn_page_share": 0.05}
+    assert resolve_document_columns(manifest_mostly_single) == 1
 
     # 3. Explicit user override (--columns) takes top priority, on the run.
     manifest_override_dual = BookManifest(
@@ -158,10 +171,17 @@ def test_resolve_document_columns_fidelity_first() -> None:
 def test_resolve_document_columns_reads_the_real_manifest_shape() -> None:
     """Regression: the real manifest records multi-column under ``run.route_decision``.
 
-    The first cut read only ``manifest.metadata``, where the profiler's
-    ``multicolumn_page_share`` is never written, so every real two-column paper
-    resolved to 1 and was silently flattened — the exact 版面坍塌 the template
-    exists to prevent. This exercises the shape the pipeline actually produces.
+    Two defects are pinned here together, because they masked each other:
+
+    1. The first cut read only ``manifest.metadata``, where the profiler's
+       ``multicolumn_page_share`` is never written (it lives under
+       ``run.route_decision``), so the wiring never saw the signal at all.
+    2. The profiler itself mis-measured single-column papers: a rotated margin
+       stamp read as a right column and scored 0.225 on the arXiv Switch
+       Transformer paper, whose body is one column.
+
+    With (1) fixed the signal is read; with (2) fixed the real paper measures 0.0
+    and correctly stays single-column. This uses the shape the pipeline produces.
     """
     manifest = BookManifest(
         doc_id="real",
@@ -173,12 +193,18 @@ def test_resolve_document_columns_reads_the_real_manifest_shape() -> None:
     manifest.run.route_decision = {
         "mode": "long",
         "pages": 40,
-        "multicolumn_page_share": 0.225,
+        # Measured 0.0 on the real single-column paper after the stamp fix
+        # (was a false 0.225 before it).
+        "multicolumn_page_share": 0.0,
         "structural_page_share": 0.3,
     }
-    assert resolve_document_columns(manifest) == 2, (
-        "a real two-column paper must resolve to two columns from run.route_decision"
+    assert resolve_document_columns(manifest) == 1, (
+        "a single-column paper must stay single-column — --profile never forces two"
     )
+
+    # The same shape for a genuinely two-column source flips to two.
+    manifest.run.route_decision = {"mode": "long", "multicolumn_page_share": 0.83}
+    assert resolve_document_columns(manifest) == 2
 
 
 def _block(bid: str, block_type: BlockType, source: str, target: str) -> IRBlock:

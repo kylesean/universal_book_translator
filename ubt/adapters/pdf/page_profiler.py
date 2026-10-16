@@ -65,32 +65,68 @@ def _group_rows(rects: list[Rect]) -> list[list[Rect]]:
     return rows
 
 
+#: A rotated margin stamp (an arXiv/journal watermark running vertically down
+#: the page edge) reads as one glyph per rect: a near-square fragment at most a
+#: few glyphs wide. A real text line is far wider. Fragments at or below this
+#: width (points) are treated as margin furniture and never counted as a column
+#: segment — without this every single-column page with a side stamp scored as
+#: multi-column, and ``multicolumn_page_share`` reported 0.225 on a paper whose
+#: body is plainly one column (the arXiv Switch Transformer paper).
+_FURNITURE_MAX_FRAGMENT_PT = 24.0
+
+
 def column_right_share(rects: list[Rect], width: float) -> float:
-    """Share of text segments starting right of the column edge ratio.
+    """Share of text rows whose right column carries a genuine line of text.
 
     ``count_rects`` fragments a justified line every few glyphs, so judging
     each fragment's left edge flags every dense single-column page as
     multi-column. Fragments merge back into rows by vertical overlap, rows
     split at column-gutter-sized gaps, and only whole segments — the units a
     layout actually positions — are judged.
+
+    Two guards keep page furniture out of the count, because a false "right
+    column" here propagates all the way to a wrongly two-column delivery:
+
+    * **Narrow fragments are dropped.** A rotated side stamp (arXiv/journal
+      watermark, running vertically down the margin) is emitted as one glyph
+      per rect — near-square, a few points wide. Such a fragment is never a
+      column segment; only fragments wider than
+      :data:`_FURNITURE_MAX_FRAGMENT_PT` are eligible. Stamps without this
+      guard made single-column papers score right_row_share ≈ 0.44.
+    * **A right-started segment only counts when the same row also carries
+      left-column text.** Real two-column text sets a left line and a right
+      line at the same vertical band; a page whose only off-centre content is
+      marginalia has no such pairing. Requiring both halves on the row is the
+      structural difference between a gutter and a stray glyph.
     """
     if not rects or width <= 0:
         return 0.0
     gap = PROBE_COLUMN_GAP_RATIO * width
+    edge_x = PROBE_COLUMN_EDGE_RATIO * width
     segments = 0
     right_started = 0
     for row in _group_rows(sorted(rects, key=lambda r: (-r[3], r[0]))):
         ordered = sorted(row, key=lambda r: r[0])
+        # Split the row into gutter-separated segments; near-square furniture
+        # fragments are excluded before any of this so a stamp cannot seed a
+        # segment (nor pad an existing one).
+        segs: list[tuple[float, float]] = []
         left, edge = ordered[0][0], ordered[0][2]
         for frag_left, _bottom, frag_right, _top in ordered[1:]:
             if frag_left - edge > gap:
-                segments += 1
-                right_started += left > PROBE_COLUMN_EDGE_RATIO * width
+                segs.append((left, edge))
                 left, edge = frag_left, frag_right
             else:
                 edge = max(edge, frag_right)
-        segments += 1
-        right_started += left > PROBE_COLUMN_EDGE_RATIO * width
+        segs.append((left, edge))
+
+        wide = [(lo, hi) for lo, hi in segs if hi - lo > _FURNITURE_MAX_FRAGMENT_PT]
+        if not wide:
+            continue
+        has_left = any(lo <= edge_x for lo, _hi in wide)
+        for lo, _hi in wide:
+            segments += 1
+            right_started += bool(lo > edge_x and has_left)
     return right_started / segments if segments else 0.0
 
 
