@@ -189,3 +189,98 @@ def test_a_rehearsal_heading_is_found_in_an_artifact_without_the_marker() -> Non
     expected = _expected(block, translations)
     assert expected == "The Attention Machine"
     assert _present(expected, frozenset(_tokenize("The Attention Machine"))) is True
+
+
+# --------------------------------------------------------------------------- #
+# Dropped page furniture: the audit must not demand a realization the
+# renderer deliberately omits. Regression for the false
+# "[FAIL] artifact carries 280/281 (missing: pdf_main#b0003)" on a submission-date
+# heading the renderer drops as running chrome.
+# --------------------------------------------------------------------------- #
+
+
+def _heading(block_id: str, text: str) -> IRBlock:
+    element = make_element(
+        id=block_id,
+        spine_index=1,
+        block_type=BlockType.HEADING,
+        source_text=text,
+    )
+    return IRBlock(element=element)
+
+
+def test_chrome_heading_is_dropped_page_furniture() -> None:
+    from ubt.render.typst.document_renderer import dropped_page_furniture
+
+    # The exact block that produced the false FAIL on the paper run.
+    assert dropped_page_furniture(_heading("b3", "Submitted 8/21; Revised 3/22; Published 4/22"))
+    assert dropped_page_furniture(_heading("b1", "arXiv:2101.03961v3 [cs.LG] 16 Jun 2022"))
+    assert dropped_page_furniture(_heading("b2", "Journal of Machine Learning Research 23 (2022)"))
+
+
+def test_a_real_heading_is_not_page_furniture() -> None:
+    from ubt.render.typst.document_renderer import dropped_page_furniture
+
+    assert not dropped_page_furniture(_heading("b4", "Switch Transformers"))
+    assert not dropped_page_furniture(_heading("b9", "Abstract"))
+
+
+def test_a_kept_in_source_non_heading_is_not_page_furniture() -> None:
+    """A bibliography entry is kept verbatim but still placed, so not furniture."""
+    from ubt.render.typst.document_renderer import dropped_page_furniture
+
+    element = make_element(
+        id="bib1",
+        spine_index=1,
+        block_type=BlockType.NARRATIVE,
+        source_text="Submitted 8/21; Revised 3/22; Published 4/22",
+        skip_translate=True,
+    )
+    assert not dropped_page_furniture(IRBlock(element=element))
+
+
+def test_check_artifact_skips_dropped_furniture(tmp_path: Path) -> None:
+    """A dropped chrome heading is not a text claim; a normal heading still is."""
+    from ubt.adapters.pdf.artifact_text import check_artifact
+
+    # A minimal one-page PDF whose text is only "Hello world".
+    pdf = tmp_path / "art.pdf"
+    _write_one_line_pdf(pdf, "Hello world")
+
+    blocks = [
+        _heading("chrome", "Submitted 8/21; Revised 3/22; Published 4/22"),
+        _heading("real", "Hello world"),
+    ]
+    report = check_artifact(blocks, {}, pdf)
+
+    # The furniture block was excluded from the claim set entirely.
+    assert report.total == 1
+    assert [c.element_id for c in report.checks] == ["real"]
+    assert report.passed
+
+
+def _write_one_line_pdf(path: Path, text: str) -> None:
+    """Write a minimal, valid one-page PDF carrying ``text`` (no external deps)."""
+    content = f"BT /F1 24 Tf 72 700 Td ({text}) Tj ET".encode("latin-1")
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+        b"/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+        b"<< /Length %d >>\nstream\n" % len(content) + content + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for i, obj in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += f"{i} 0 obj\n".encode() + obj + b"\nendobj\n"
+    xref = len(out)
+    out += f"xref\n0 {len(objects) + 1}\n".encode()
+    out += b"0000000000 65535 f \n"
+    for off in offsets[1:]:
+        out += f"{off:010d} 00000 n \n".encode()
+    out += (
+        f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n"
+    ).encode()
+    path.write_bytes(bytes(out))

@@ -102,6 +102,14 @@ Pre-1.0, no tags yet. Everything below is in the current tree.
 
 ### Fixed
 
+- The delivered-artifact check no longer reports a **false `[FAIL]`** for a
+  heading the renderer deliberately drops as running page chrome (an arXiv or
+  journal stamp, a submission date). The renderer omits those headings so the
+  document opens on its title, but the check still demanded their realization —
+  a `--profile paper` run reported `artifact carries 280/281` with a bogus
+  `missing` id. The drop decision is now a named predicate the renderer owns
+  (`dropped_page_furniture`) and the check asks of it, so the audit can never
+  again disagree with what the renderer is right not to place.
 - ``--fresh`` can now restart a job whose ledger file is a legacy schema. The
   run opens the ledger before `--fresh`'s row reset, so the flattened-baseline
   refusal fired first and there was no way forward without hand-deleting the

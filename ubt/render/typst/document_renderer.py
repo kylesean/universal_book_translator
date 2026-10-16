@@ -129,6 +129,27 @@ _CHROME_HEADING_RE = re.compile(
 )
 
 
+def dropped_page_furniture(block: IRBlock) -> bool:
+    """Whether the renderer deliberately omits this block from the artifact.
+
+    The single owner of that decision: a heading the renderer recognizes as
+    running chrome (an arXiv/journal stamp, a submission date) is dropped so the
+    document opens on its title (see ``build_source``). The delivered-artifact
+    check must ask *this* function rather than re-test the pattern, or an audit
+    would demand a realization the renderer is right not to place — the shape
+    that reported a false ``[FAIL] artifact carries 280/281`` on a page-furniture
+    heading.
+
+    Kept narrow on purpose: only the chrome-heading drop counts. A block merely
+    *kept in the source* (a bibliography entry, an affiliation) is still placed
+    verbatim and must still appear, so it is not furniture.
+    """
+    if str(getattr(block.block_type, "value", block.block_type) or "") != "heading":
+        return False
+    text = _block_text(block)
+    return bool(_CHROME_HEADING_RE.match(text))
+
+
 def escape_markup(text: str) -> str:
     """Escape a run of prose for Typst markup.
 
@@ -817,7 +838,7 @@ class TypstDocumentRenderer:
 
             if block_type == "heading":
                 text = _block_text(block)
-                if _CHROME_HEADING_RE.match(text):
+                if dropped_page_furniture(block):
                     continue
                 flush_figure()
                 level = _heading_level(block)

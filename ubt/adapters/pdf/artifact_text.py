@@ -159,11 +159,21 @@ def check_artifact(
     ``translations`` is the run's ``element id -> placed target`` map; a text
     block with a placed target is expected to show it, one kept in the source its
     source. Assets are not text claims and are skipped.
+
+    A heading the renderer deliberately drops as running chrome (an arXiv or
+    journal stamp, a submission date) is skipped too: the audit must not demand a
+    realization the renderer is right not to place. The drop decision is asked of
+    its single owner (:func:`ubt.render.typst.document_renderer.dropped_page_furniture`),
+    imported lazily so the adapters→render edge stays off the runtime import graph.
     """
+    from ubt.render.typst.document_renderer import dropped_page_furniture
+
     text = artifact_tokens(Path(artifact_pdf))
     checks: list[ElementCheck] = []
     for block in blocks:
         if block.block_type in (BlockType.FORMULA, BlockType.TABLE, BlockType.IMAGE):
+            continue
+        if dropped_page_furniture(block):
             continue
         expected = _normalize(_expected(block, translations))
         checks.append(
