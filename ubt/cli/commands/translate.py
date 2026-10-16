@@ -319,6 +319,16 @@ def translate(
             "humanities, semiconductor); 'auto' infers from document archetype",
         ),
     ] = "auto",
+    columns: Annotated[
+        int | None,
+        typer.Option(
+            "--columns",
+            help="Physical column count for a reflowed PDF: 1 (single) or 2 (dual). "
+            "Default (unset) aligns to the source layout — a two-column paper stays "
+            "two-column, a single-column one stays single-column. This is the layout "
+            "switch; --profile only styles the text and never forces a column count.",
+        ),
+    ] = None,
     glossary: Annotated[
         Path | None,
         typer.Option(
@@ -622,6 +632,7 @@ def translate(
         "source_lang": source_lang,
         "profile": profile,
         "job_id": job_id,
+        "layout_columns": columns,
         "start_chapter": start_chapter,
         "max_chapters": max_chapters,
         "draft_model": draft_model,
@@ -697,6 +708,8 @@ def translate(
         _usage_error(f"--start-chapter must be >= 1 (got {start_chapter})", json_output)
     if max_chapters is not None and max_chapters < 1:
         _usage_error(f"--max-chapters must be >= 1 (got {max_chapters})", json_output)
+    if columns is not None and columns not in (1, 2):
+        _usage_error(f"--columns must be 1 or 2 (got {columns})", json_output)
     if pages is not None:
         try:
             parse_page_ranges(pages)

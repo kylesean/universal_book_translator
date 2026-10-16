@@ -123,9 +123,10 @@ class DoclingRenderStrategy:
         # minutes of per-body Typst startups before this); ``check`` still
         # answers any body the pre-warm did not see.
         math_probe = TypstMathProbe()
-        from ubt.render.typst.academic import is_academic_document
+        from ubt.render.typst.academic import is_academic_document, resolve_document_columns
 
         is_academic = is_academic_document(manifest)
+        columns = resolve_document_columns(manifest)
         renderer = TypstDocumentRenderer(
             assets_root=assets_root,
             bilingual=bilingual,
@@ -137,6 +138,7 @@ class DoclingRenderStrategy:
             # config.font_family knob was stored and never read.
             font_stack=self._font_stack_for(target_lang),
             layout_template="academic" if is_academic else "book",
+            columns=columns,
             paper_title=manifest.title if is_academic else "",
             abstract=manifest.metadata.get("abstract", "") if is_academic else "",
         )

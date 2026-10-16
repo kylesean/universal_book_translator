@@ -1,4 +1,4 @@
-"""Unit tests for the academic two-column Typst template."""
+"""Unit tests for the academic Typst template (single and dual column)."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from ubt.render.typst.academic import (
     academic_preamble,
     academic_title_banner,
     is_academic_document,
+    resolve_document_columns,
 )
 from ubt.render.typst.document_renderer import TypstDocumentRenderer
 
@@ -56,16 +57,6 @@ def test_is_academic_document() -> None:
     )
     assert is_academic_document(manifest_paper)
 
-    manifest_cols = BookManifest(
-        doc_id="d2",
-        source_path="survey.pdf",
-        title="Survey",
-        metadata={"columns": 2},
-    )
-    assert is_academic_document(manifest_cols)
-
-    # The two signals the runtime actually produces: the genre profile stamped
-    # at ingest and the page profiler's per-page layout classification.
     manifest_profile = BookManifest(
         doc_id="d4",
         source_path="paper.pdf",
@@ -74,20 +65,13 @@ def test_is_academic_document() -> None:
     )
     assert is_academic_document(manifest_profile)
 
-    manifest_pages = BookManifest(
+    manifest_thesis = BookManifest(
         doc_id="d5",
-        source_path="paper.pdf",
-        title="A Paper",
-        metadata={
-            "page_kinds": {
-                1: "mixed_complex",
-                2: "mixed_complex",
-                3: "mixed_complex",
-                4: "editable_text",
-            }
-        },
+        source_path="thesis.pdf",
+        title="Ph.D. Thesis",
+        metadata={"doc_type": "thesis"},
     )
-    assert is_academic_document(manifest_pages)
+    assert is_academic_document(manifest_thesis)
 
     manifest_book = BookManifest(
         doc_id="d3",
@@ -96,8 +80,105 @@ def test_is_academic_document() -> None:
         metadata={"genre_profile": "novel", "page_kinds": {1: "editable_text"}},
     )
     assert not is_academic_document(manifest_book)
-
     assert not is_academic_document(None)
+
+
+def test_resolve_document_columns_fidelity_first() -> None:
+    """Document columns mirror the source: multi-column evidence -> 2, else 1.
+
+    The signal is the route decision's physical multi-column finding (where the
+    profiler actually writes it), and the only thing that outranks it is an
+    explicit ``--columns`` override on the run.
+    """
+    # 1. Single-column paper/report/thesis defaults to 1 (never forced to 2 just
+    #    because the genre profile is academic — the profile styles text, not layout).
+    manifest_single = BookManifest(
+        doc_id="d1",
+        source_path="neurips_paper.pdf",
+        title="NeurIPS Single Column",
+        metadata={"genre_profile": "academic"},
+    )
+    assert resolve_document_columns(manifest_single) == 1
+
+    # 2. Physical multi-column evidence in the source -> 2. This is where the
+    #    profiler actually records it: run.route_decision, not metadata.
+    manifest_multi_share = BookManifest(
+        doc_id="d3",
+        source_path="acm_paper.pdf",
+        title="ACM Dual Column",
+        metadata={"genre_profile": "paper"},
+    )
+    manifest_multi_share.run.route_decision = {
+        "mode": "long",
+        "multicolumn_page_share": 0.225,
+    }
+    assert resolve_document_columns(manifest_multi_share) == 2
+
+    # A pre-reduced boolean is trusted directly.
+    manifest_multi_flag = BookManifest(
+        doc_id="d2",
+        source_path="ieee_paper.pdf",
+        title="IEEE Dual Column",
+        metadata={"genre_profile": "academic"},
+    )
+    manifest_multi_flag.run.route_decision = {"has_multicolumn": True}
+    assert resolve_document_columns(manifest_multi_flag) == 2
+
+    # A single stray multi-column figure page is NOT a two-column document.
+    manifest_noise = BookManifest(
+        doc_id="d6",
+        source_path="book.pdf",
+        title="Book",
+        metadata={"genre_profile": "general"},
+    )
+    manifest_noise.run.route_decision = {"multicolumn_page_share": 0.05}
+    assert resolve_document_columns(manifest_noise) == 1
+
+    # 3. Explicit user override (--columns) takes top priority, on the run.
+    manifest_override_dual = BookManifest(
+        doc_id="d4",
+        source_path="single_paper.pdf",
+        title="Paper",
+        metadata={"genre_profile": "academic"},
+    )
+    manifest_override_dual.run.layout_columns = 2
+    assert resolve_document_columns(manifest_override_dual) == 2
+
+    manifest_override_single = BookManifest(
+        doc_id="d5",
+        source_path="dual_paper.pdf",
+        title="Paper",
+        metadata={"genre_profile": "paper"},
+    )
+    manifest_override_single.run.route_decision = {"has_multicolumn": True}
+    manifest_override_single.run.layout_columns = 1
+    assert resolve_document_columns(manifest_override_single) == 1
+
+
+def test_resolve_document_columns_reads_the_real_manifest_shape() -> None:
+    """Regression: the real manifest records multi-column under ``run.route_decision``.
+
+    The first cut read only ``manifest.metadata``, where the profiler's
+    ``multicolumn_page_share`` is never written, so every real two-column paper
+    resolved to 1 and was silently flattened — the exact 版面坍塌 the template
+    exists to prevent. This exercises the shape the pipeline actually produces.
+    """
+    manifest = BookManifest(
+        doc_id="real",
+        source_path="2101.03961v3.pdf",
+        title="Switch Transformers",
+        # Only the genre profile is stamped onto metadata — no column keys here.
+        metadata={"genre_profile": "paper"},
+    )
+    manifest.run.route_decision = {
+        "mode": "long",
+        "pages": 40,
+        "multicolumn_page_share": 0.225,
+        "structural_page_share": 0.3,
+    }
+    assert resolve_document_columns(manifest) == 2, (
+        "a real two-column paper must resolve to two columns from run.route_decision"
+    )
 
 
 def _block(bid: str, block_type: BlockType, source: str, target: str) -> IRBlock:
@@ -109,15 +190,8 @@ def _block(bid: str, block_type: BlockType, source: str, target: str) -> IRBlock
     )
 
 
-def test_the_publish_path_dispatches_the_academic_template(tmp_path: Path) -> None:
-    """A manifest carrying an academic genre profile must render two-column.
-
-    This drives the *real* dispatch (``DoclingRenderStrategy._render_publish_sync``
-    -> ``is_academic_document`` -> ``academic_preamble``), not a hand-injected
-    ``layout_template``. The earlier version of this file passed ``layout_template``
-    straight to the constructor, so it passed while the runtime path was
-    unreachable (nothing produced the metadata key the dispatch read).
-    """
+def test_single_column_academic_paper_renders_clean_single_column(tmp_path: Path) -> None:
+    """A single-column academic paper (arXiv, NeurIPS, thesis) MUST render as single-column."""
     import asyncio
 
     from ubt.adapters.pdf.docling_render import DoclingRenderStrategy
@@ -126,7 +200,7 @@ def test_the_publish_path_dispatches_the_academic_template(tmp_path: Path) -> No
         doc_id="d",
         title="Attention Is All You Need",
         source_path="paper.pdf",
-        metadata={"genre_profile": "academic"},
+        metadata={"genre_profile": "academic"},  # single-column by default
     )
     blocks = [
         _block("b1", BlockType.NARRATIVE, "We present the Transformer.", "我们提出 Transformer。"),
@@ -138,91 +212,125 @@ def test_the_publish_path_dispatches_the_academic_template(tmp_path: Path) -> No
     )
     assert out.exists() and out.stat().st_size > 0
     typ = (tmp_path / f".{out.stem}_typst" / "main.typ").read_text(encoding="utf-8")
-    assert "columns: 2" in typ, "academic profile did not select the two-column template"
-    assert "place(top" in typ, "academic title banner missing"
+    assert "columns: 1" in typ, "single-column paper was unexpectedly forced to two columns"
+    assert "columns: 2" not in typ
+    assert "size: 10.5pt" in typ
+    assert "Attention Is All You Need" in typ
 
 
-def test_a_novel_stays_single_column(tmp_path: Path) -> None:
-    """The academic branch must not capture a plain book."""
+def test_dual_column_academic_paper_renders_dual_column(tmp_path: Path) -> None:
+    """A paper with multi-column source (or user override) renders dual-column IEEE style."""
     import asyncio
 
     from ubt.adapters.pdf.docling_render import DoclingRenderStrategy
 
     manifest = BookManifest(
-        doc_id="d",
-        title="A Novel",
-        source_path="book.pdf",
-        metadata={"genre_profile": "novel", "page_kinds": {1: "editable_text"}},
+        doc_id="d_ieee",
+        title="IEEE Dual Column Paper",
+        source_path="ieee.pdf",
+        metadata={"genre_profile": "paper"},
     )
-    blocks = [_block("b1", BlockType.NARRATIVE, "Once upon a time.", "从前。")]
-    out = tmp_path / "book.pdf"
+    # The real multi-column signal: the profiler's finding on the route decision.
+    manifest.run.route_decision = {"mode": "long", "multicolumn_page_share": 0.6}
+    blocks = [
+        _block("b1", BlockType.NARRATIVE, "Measurements were taken.", "进行了测量。"),
+    ]
+    out = tmp_path / "ieee.pdf"
     strategy = DoclingRenderStrategy()
     asyncio.run(
         strategy.render_blocks(manifest=manifest, blocks=blocks, target_lang="zh", output_path=out)
     )
+    assert out.exists() and out.stat().st_size > 0
     typ = (tmp_path / f".{out.stem}_typst" / "main.typ").read_text(encoding="utf-8")
-    assert "columns: 2" not in typ
+    assert "columns: 2" in typ
+    assert "size: 9.5pt" in typ
+    assert 'scope: "parent"' in typ
 
 
 def test_academic_preamble_structure() -> None:
-    preamble = academic_preamble(target_lang="zh", paper_title="Test Paper")
-    assert "columns: 2" in preamble
-    assert "margin: (x: 1.8cm, y: 2.0cm)" in preamble
-    assert "size: 9.5pt" in preamble
-    assert "header: context" in preamble
-    assert "Test Paper" in preamble
+    # Single column mode
+    preamble_single = academic_preamble(target_lang="zh", paper_title="Test Paper", columns=1)
+    assert "columns: 1" in preamble_single
+    assert "margin: (x: 2.5cm, y: 2.5cm)" in preamble_single
+    assert "size: 10.5pt" in preamble_single
+    assert "Test Paper" in preamble_single
+
+    # Dual column mode
+    preamble_dual = academic_preamble(target_lang="zh", paper_title="Test Paper", columns=2)
+    assert "columns: 2" in preamble_dual
+    assert "margin: (x: 1.8cm, y: 2.0cm)" in preamble_dual
+    assert "size: 9.5pt" in preamble_dual
+    assert "Test Paper" in preamble_dual
 
 
 def test_academic_title_banner() -> None:
-    banner = academic_title_banner(
-        title="Attention Is All You Need",
-        abstract="We present the Transformer architecture.",
-        authors=["Ashish Vaswani", "Noam Shazeer"],
+    banner_single = academic_title_banner(
+        title="Single Column Title",
+        abstract="Single column abstract.",
+        authors=["Author One"],
+        columns=1,
     )
-    assert 'scope: "parent"' in banner
-    assert "Attention Is All You Need" in banner
-    assert "Ashish Vaswani" in banner
-    assert "We present the Transformer architecture." in banner
+    assert "block(width: 100%" in banner_single
+    assert "Single Column Title" in banner_single
+
+    banner_dual = academic_title_banner(
+        title="Dual Column Title",
+        abstract="Dual column abstract.",
+        authors=["Author One"],
+        columns=2,
+    )
+    assert 'scope: "parent"' in banner_dual
+    assert "Dual Column Title" in banner_dual
 
 
-def test_typst_renderer_with_academic_template(tmp_path: Path) -> None:
+def test_typst_renderer_compiles_both_single_and_dual_columns(tmp_path: Path) -> None:
     from ubt.core.ir.models import make_element
 
-    renderer = TypstDocumentRenderer(
-        layout_template="academic",
-        paper_title="Attention Is All You Need",
-        abstract="The dominant sequence transduction models are based on complex recurrent or convolutional neural networks.",
-    )
+    for cols in (1, 2):
+        renderer = TypstDocumentRenderer(
+            layout_template="academic",
+            columns=cols,
+            paper_title="Attention Is All You Need",
+            abstract="The dominant sequence transduction models are based on complex neural networks.",
+        )
 
-    el1 = make_element(
-        id="b1", spine_index=0, block_type=BlockType.HEADING, source_text="1. Introduction", level=1
-    )
-    el2 = make_element(
-        id="b2",
-        spine_index=1,
-        block_type=BlockType.NARRATIVE,
-        source_text="Recurrent models typically factor computation along the symbol positions.",
-    )
-    el3 = make_element(
-        id="b3",
-        spine_index=2,
-        block_type=BlockType.FORMULA,
-        source_text=r"p_{i}(x) = \frac{e^{h(x)_i}}{\sum_j^N e^{h(x)_j}}",
-    )
+        el1 = make_element(
+            id="b1",
+            spine_index=0,
+            block_type=BlockType.HEADING,
+            source_text="1. Introduction",
+            level=1,
+        )
+        el2 = make_element(
+            id="b2",
+            spine_index=0,
+            block_type=BlockType.NARRATIVE,
+            source_text="Recurrent models compute factorizations.",
+        )
+        el3 = make_element(
+            id="b3",
+            spine_index=0,
+            block_type=BlockType.FORMULA,
+            source_text=r"\begin{pmatrix} a & b \\ c & d \end{pmatrix}",
+        )
 
-    blocks = [
-        IRBlock(element=el1, target_text="1. 引言"),
-        IRBlock(
-            element=el2, target_text="循环模型通常沿着输入和输出序列的符号位置进行计算因子分解。"
-        ),
-        IRBlock(element=el3, target_text=r"p_{i}(x) = \frac{e^{h(x)_i}}{\sum_j^N e^{h(x)_j}}"),
-    ]
+        blocks = [
+            IRBlock(element=el1, target_text="1. 引言"),
+            IRBlock(element=el2, target_text="循环模型通常沿着序列进行计算。"),
+            IRBlock(
+                element=el3,
+                target_text=r"\begin{pmatrix} a & b \\ c & d \end{pmatrix}",
+            ),
+        ]
 
-    source, stats = renderer.build_source(blocks, tmp_path, target_lang="zh")
-    assert "columns: 2" in source
-    assert "Attention Is All You Need" in source
-    assert "引言" in source
-    assert stats.blocks_rendered == 3
+        build_dir = tmp_path / f"academic_test_col_{cols}"
+        source, _ = renderer.build_source(blocks, build_dir, target_lang="zh")
+        if cols == 1:
+            assert "columns: 1" in source
+            assert "size: 10.5pt" in source
+        else:
+            assert "columns: 2" in source
+            assert "size: 9.5pt" in source
 
-    ok, err = _compile_typst(source)
-    assert ok, f"Typst failed to compile academic document: {err}"
+        ok, stderr = _compile_typst(source)
+        assert ok, f"Typst compile failed for columns={cols}: {stderr}"

@@ -1314,6 +1314,11 @@ export interface components {
              * @description Chapter-window length (run-only key)
              */
             max_chapters?: number | null;
+            /**
+             * Layout Columns
+             * @description Physical column count for a reflowed PDF (1 single, 2 dual). Unset aligns to the source layout; --profile never forces a column count.
+             */
+            layout_columns?: number | null;
         };
         /**
          * JobSubmitResponse

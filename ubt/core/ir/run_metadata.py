@@ -69,6 +69,13 @@ class RunMetadata(BaseModel):
     # --- Extraction / formula policy --------------------------------------
     selected_pages: list[int] | None = None
 
+    #: Explicit column override from ``--columns``/``UBT_LAYOUT_COLUMNS`` (1 or 2).
+    #: ``None`` means "align to the source"; the renderer then reads the physical
+    #: multi-column evidence in :attr:`route_decision`. A user override is a run
+    #: decision, so it lives here — not in ``manifest.metadata`` (see that field's
+    #: docstring).
+    layout_columns: int | None = None
+
     # --- Delivery verdict -------------------------------------------------
     delivery_status: str | None = None
     delivery_warning: str | None = None

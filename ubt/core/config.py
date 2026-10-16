@@ -653,6 +653,13 @@ class UBTConfig(BaseSettings):
     # Default 'auto' allows the advisory layout stage to inspect document signals
     # and automatically adopt monolingual when layout is heavily structured/discouraged.
     dual_mode: DualMode = "auto"
+    # Physical column count for a reflowed PDF (1 or 2). ``None`` (default) aligns
+    # the delivered layout to the *source* — a two-column paper stays two-column,
+    # a single-column one stays single-column. Set 1 or 2 to override explicitly
+    # (`--columns`, `UBT_LAYOUT_COLUMNS`). This is a *layout* decision, distinct
+    # from ``--profile`` (which only informs the prompt/glossary that the text is
+    # academic) — the profile must never force a column count.
+    layout_columns: int | None = None
     # Also render the complementary artifact (mono when primary is dual and
     # vice versa), BabelDOC no-dual/no-mono style.
     emit_both: bool = False

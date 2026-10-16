@@ -839,6 +839,10 @@ class PipelineOrchestrator:
                 )
             manifest.run.route_decision = route_decision.to_dict()
             manifest.run.route_mode = route_decision.mode
+            # Explicit ``--columns`` override (a run decision, so it rides on
+            # ``run``). ``None`` keeps the default: align the delivered layout to
+            # the source's own column count, read from the route decision above.
+            manifest.run.layout_columns = self.config.layout_columns
             manifest.run.config_snapshot = {
                 "draft_model": self.config.draft_model,
                 "repair_model": self.config.repair_model,

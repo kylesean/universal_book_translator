@@ -582,6 +582,7 @@ class TypstDocumentRenderer:
                 target_lang=target_lang,
                 font_stack=self.font_stack,
                 paper_title=getattr(self, "paper_title", ""),
+                columns=getattr(self, "columns", 1),
             )
 
         from ubt.layout.theme import direction_for
@@ -634,6 +635,7 @@ class TypstDocumentRenderer:
         math_gate_many: Callable[[Iterable[str]], None] | None = None,
         font_stack: Sequence[str] | None = None,
         layout_template: str = "book",
+        columns: int = 1,
         paper_title: str = "",
         abstract: str = "",
     ) -> None:
@@ -641,6 +643,7 @@ class TypstDocumentRenderer:
         self.figure_width = figure_width
         self.bilingual = bilingual
         self.layout_template = layout_template
+        self.columns = columns
         self.paper_title = paper_title
         self.abstract = abstract
         #: Body/heading font stack for the preamble. ``None`` keeps the
@@ -802,6 +805,7 @@ class TypstDocumentRenderer:
             banner = academic_title_banner(
                 title=self.paper_title,
                 abstract=getattr(self, "abstract", ""),
+                columns=getattr(self, "columns", 1),
             )
             if banner:
                 body.append(banner)

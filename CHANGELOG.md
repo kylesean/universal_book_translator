@@ -61,12 +61,21 @@ Pre-1.0, no tags yet. Everything below is in the current tree.
 
 ### Added
 
-- Academic two-column Typst template is now **reachable at runtime**: the run's
-  genre profile is stamped onto the manifest at ingest (`genre_profile`) and the
-  page profiler's `page_kinds` feed `is_academic_document`, so an academic
-  document selects the two-column layout with a floating full-width title
-  banner and dynamic header — previously the dispatch key was never produced and
-  the branch was dead code.
+- Academic Typst template is now **reachable at runtime**, and its **column
+  count mirrors the source** instead of being hardcoded: the run's genre profile
+  is stamped onto the manifest at ingest (`genre_profile`) and selects the
+  academic styling (title/abstract banner, dynamic header). The physical column
+  count is resolved independently by `resolve_document_columns` from the page
+  profiler's multi-column finding (`run.route_decision.multicolumn_page_share`),
+  so a two-column paper stays two-column and a **single-column paper stays
+  single-column** — `--profile` styles the *text* and never forces a column
+  count (previously an academic profile forced two columns, and a missing
+  dispatch key made the whole branch dead code).
+- `--columns 1|2` (CLI), `layout_columns` (REST `JobSubmitRequest`), and
+  `UBT_LAYOUT_COLUMNS` (env) give explicit control over the reflowed column
+  count. Unset aligns to the source; set 1 or 2 to override (e.g. `--columns 1`
+  for comfortable single-column reading of a two-column paper, or `--columns 2`
+  to force two columns for print).
 - A recorded-fixture layer (`tests/cassettes.py`, built on `httpx.MockTransport,
   no new dependency) so transport-level tests replay real recorded responses;
   a missing cassette fails loudly instead of letting a test pass vacuously.

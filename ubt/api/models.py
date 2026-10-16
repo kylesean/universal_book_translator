@@ -189,6 +189,13 @@ class JobSubmitRequest(BaseModel):
     max_chapters: int | None = Field(
         default=None, ge=1, description="Chapter-window length (run-only key)"
     )
+    layout_columns: int | None = Field(
+        default=None,
+        description=(
+            "Physical column count for a reflowed PDF (1 single, 2 dual). Unset "
+            "aligns to the source layout; --profile never forces a column count."
+        ),
+    )
     # Reject unknown fields to fail fast on typos and prevent unwanted parameter injection.
     model_config = ConfigDict(extra="forbid")
 
@@ -196,6 +203,13 @@ class JobSubmitRequest(BaseModel):
     @classmethod
     def _validate_target_lang(cls, value: str) -> str:
         return _require_supported_target_lang(value)
+
+    @field_validator("layout_columns")
+    @classmethod
+    def _validate_layout_columns(cls, value: int | None) -> int | None:
+        if value is not None and value not in (1, 2):
+            raise ValueError("layout_columns must be 1 or 2")
+        return value
 
 
 class JobAssessRequest(BaseModel):

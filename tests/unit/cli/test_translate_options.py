@@ -68,6 +68,21 @@ def test_a_valid_window_passes_validation_and_reaches_the_input_check() -> None:
     assert "invalid --pages" not in _output(result)
 
 
+@pytest.mark.parametrize("value", ["0", "3", "-1"])
+def test_invalid_columns_is_rejected(value: str) -> None:
+    result = runner.invoke(app, ["translate", "book.pdf", "--columns", value])
+    assert result.exit_code == 2
+    assert "--columns must be 1 or 2" in _output(result)
+
+
+def test_valid_columns_passes_validation_and_reaches_the_input_check() -> None:
+    # --columns 1/2 must clear the guard and fall through to the missing-input check.
+    result = runner.invoke(app, ["translate", "definitely-missing.pdf", "--columns", "2"])
+    assert result.exit_code == 2
+    assert "Input file not found" in _output(result)
+    assert "--columns must be" not in _output(result)
+
+
 def test_refuse_existing_output_catches_suffixless_and_mono_dir(tmp_path: Path) -> None:
     """The overwrite guard must see every name the run could write.
 

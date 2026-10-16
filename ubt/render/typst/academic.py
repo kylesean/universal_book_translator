@@ -1,6 +1,6 @@
 """Academic paper layout template and formatting for Typst rendering.
 
-Provides two-column academic layout, full-width title/abstract banner,
+Provides academic paper layout (single or dual column), title/abstract banner,
 floating full-width figures/tables, and academic typography rules.
 """
 
@@ -12,16 +12,25 @@ from typing import Any
 from ubt.layout.theme import direction_for
 from ubt.render.typst.document_renderer import escape_markup
 
+#: Minimum share of pages the profiler must flag multi-column before the
+#: renderer treats the source as two-column. Deliberately low: a two-column
+#: paper's front matter, references, and full-width figure pages are all
+#: single-column, so its page share sits well under one half (the JMLR Switch
+#: Transformer paper measures 0.225). The profiler's own per-page bar is
+#: ``PROBE_COLUMN_SHARE`` (0.25); this is the document-level share above which a
+#: real two-column body is unambiguous while a stray figure page is not.
+_MULTICOLUMN_SHARE_FLOOR = 0.15
+
 
 def is_academic_document(manifest_or_meta: Any) -> bool:
-    """Whether a document manifest or metadata dictionary designates an academic paper.
+    """Whether a document manifest or metadata indicates academic content styling.
 
-    The signal is resolved from the *manifest*, which now carries both the run's
-    genre profile (stamped at ingest as ``metadata["genre_profile"]``) and the
-    per-page layout classification (``metadata["page_kinds"]`` from the page
-    profiler). Before this the predicate read only ``doc_type``/``columns`` keys
-    that no producer ever wrote, so it returned ``False`` on every real run and
-    the two-column branch was unreachable.
+    Signals that the document should use the academic template (title/abstract
+    styling, academic headings, academic headers/page numbers).
+
+    NOTE: This does NOT determine column count. Column count is resolved
+    independently by `resolve_document_columns` based on the physical source
+    layout and explicit user overrides.
     """
     if manifest_or_meta is None:
         return False
@@ -48,43 +57,132 @@ def is_academic_document(manifest_or_meta: Any) -> bool:
     ):
         return True
 
-    if meta.get("columns") == 2 or meta.get("academic") is True:
+    if meta.get("academic") is True or meta.get("is_academic") is True:
         return True
 
-    # Genre profile, stamped at ingest from the run's ``--profile``. The values
-    # are the academic-leaning profile names (mirrors ``draft.ACADEMIC_PROFILES``).
     profile = meta.get("genre_profile")
-    if profile and str(profile).lower() in (
-        "academic",
-        "textbook",
-        "paper",
-        "technical",
-        "scientific",
-        "journal",
-        "thesis",
-    ):
+    return bool(
+        profile
+        and str(profile).lower()
+        in (
+            "academic",
+            "paper",
+            "scientific",
+            "journal",
+            "thesis",
+        )
+    )
+
+
+def resolve_document_columns(manifest_or_meta: Any) -> int:
+    """Resolve the physical column count for rendering (1 or 2).
+
+    Fidelity first: the delivered layout mirrors the *source*, and only an
+    explicit user override departs from it. The precedence is
+
+    1. **Explicit user override** — ``manifest.run.layout_columns`` (from
+       ``--columns`` / ``UBT_LAYOUT_COLUMNS``). This is a run decision, so it
+       lives on ``run``, and it wins over everything.
+    2. **Physical multi-column evidence in the source** — the PDF page profiler's
+       finding, carried on ``manifest.run.route_decision`` as
+       ``multicolumn_page_share`` (and ``has_multicolumn`` where a caller already
+       reduced it to a bool). A document laid out in two columns keeps two
+       columns; this is the whole point of the academic template.
+    3. **Metadata keys** (``has_multicolumn`` / ``is_multicolumn`` /
+       ``multicolumn_page_share`` / ``columns``) — for callers that hand this a
+       plain metadata mapping rather than a manifest.
+    4. **Default: single column.** A single-column paper, thesis, report, or
+       textbook is never forced into two columns, and a paper with no measured
+       multi-column evidence is not assumed to be two-column just because its
+       genre profile is academic. ``--profile`` styles the *text*; it does not
+       decide the *layout*.
+
+    The previous cut read only ``manifest.metadata``, where the profiler's
+    ``multicolumn_page_share`` is never written (it lives under
+    ``run.route_decision``), so the function returned 1 on every real two-column
+    paper and silently flattened it to a single column — the exact
+    "版面坍塌" the template exists to prevent.
+    """
+    if manifest_or_meta is None:
+        return 1
+
+    meta: Mapping[str, Any] = {}
+    run: Any = None
+    if isinstance(manifest_or_meta, Mapping):
+        meta = manifest_or_meta
+    else:
+        if hasattr(manifest_or_meta, "metadata") and isinstance(manifest_or_meta.metadata, Mapping):
+            meta = manifest_or_meta.metadata
+        run = getattr(manifest_or_meta, "run", None)
+
+    # 1. Explicit user override (run decision; also accepted on the mapping form).
+    override = getattr(run, "layout_columns", None) if run is not None else None
+    if override is None:
+        override = meta.get("layout_columns")
+    if override is not None:
+        try:
+            col_int = int(override)
+            if col_int in (1, 2):
+                return col_int
+        except (ValueError, TypeError):
+            pass
+
+    # 2. Physical multi-column evidence, wherever the run recorded it.
+    route = getattr(run, "route_decision", None) if run is not None else None
+    if not isinstance(route, Mapping):
+        route = meta.get("route_decision")
+    if _has_multicolumn_evidence(route):
+        return 2
+
+    # 3. Metadata keys (the mapping form; some producers flatten them here).
+    if _has_multicolumn_evidence(meta):
+        return 2
+
+    # 4. Default to single column (fidelity first).
+    return 1
+
+
+def _has_multicolumn_evidence(source: Any) -> bool:
+    """Whether a route-decision/metadata mapping shows a two-column source.
+
+    Accepts either a pre-reduced boolean (``has_multicolumn`` / ``is_multicolumn``)
+    or the profiler's ``multicolumn_page_share``. The boolean is preferred when
+    present: it is the engine selector's deliberate verdict (``multicolumn_pages
+    >= PROBE_MIN_SIGNAL_PAGES``, a handful of sampled pages showing a right-column
+    edge), which is the codebase's own notion of "this is a multi-column
+    document".
+
+    The share fallback deliberately uses a **low** bar. A paper's front matter
+    (title, TOC, author block), its references, and its full-width figure/table
+    pages are all single-column, so a genuinely two-column paper's page share
+    sits well under one half — the real JMLR Switch Transformer paper measures
+    0.225 while its body is unmistakably two-column. Demanding ``>= 0.5`` here
+    flattened exactly those papers to a single column, the failure this whole
+    function exists to prevent. The profiler flags a page multi-column at
+    ``right_row_share > PROBE_COLUMN_SHARE`` (0.25), so any paper whose body is
+    two-column clears a modest share; a book with one stray two-column figure
+    page does not.
+    """
+    if not isinstance(source, Mapping):
+        return False
+    if source.get("has_multicolumn") is True or source.get("is_multicolumn") is True:
         return True
-
-    # Page-layout fallback: a document whose pages are predominantly
-    # multi-column/complex (the page profiler's ``MIXED_COMPLEX``) is a paper
-    # body, even when no profile was named. Require a clear majority so a book
-    # with a handful of two-column figure pages stays on the book template.
-    page_kinds = meta.get("page_kinds")
-    if isinstance(page_kinds, Mapping) and page_kinds:
-        kinds = [str(v).lower() for v in page_kinds.values()]
-        complex_share = sum(1 for k in kinds if k == "mixed_complex") / len(kinds)
-        if complex_share >= 0.5:
-            return True
-
-    return False
+    share = source.get("multicolumn_page_share")
+    if share is None:
+        return False
+    try:
+        return float(share) >= _MULTICOLUMN_SHARE_FLOOR
+    except (ValueError, TypeError):
+        return False
 
 
 def academic_preamble(
     target_lang: str = "zh",
     font_stack: Sequence[str] | None = None,
     paper_title: str = "",
+    columns: int = 1,
 ) -> str:
-    """Generate the Typst preamble for a two-column academic paper."""
+    """Generate the Typst preamble for an academic paper (single or dual column)."""
     direction = direction_for(target_lang or "zh").value
     lang = (target_lang or "zh").replace("_", "-")
     rtl = "\n#set text(dir: rtl)" if direction == "rtl" else ""
@@ -125,16 +223,26 @@ def academic_preamble(
             "  },"
         )
 
+    is_dual = columns == 2
+    col_str = "  columns: 2," if is_dual else "  columns: 1,"
+    margin_str = "  margin: (x: 1.8cm, y: 2.0cm)," if is_dual else "  margin: (x: 2.5cm, y: 2.5cm),"
+    font_size = "9.5pt" if is_dual else "10.5pt"
+    par_rules = (
+        "#set par(justify: true, leading: 0.65em, spacing: 0.75em, first-line-indent: (amount: 1.5em, all: true))"
+        if is_dual
+        else "#set par(justify: true, leading: 0.75em, spacing: 0.85em, first-line-indent: (amount: 2.0em, all: true))"
+    )
+
     lines = [
         "#set page(",
         '  paper: "a4",',
-        "  columns: 2,",
-        "  margin: (x: 1.8cm, y: 2.0cm),",
+        col_str,
+        margin_str,
         header_block,
         '  numbering: "1",',
         ")",
-        f'#set text(font: ({body_fonts}), size: 9.5pt, lang: "{lang}"){rtl}',
-        "#set par(justify: true, leading: 0.65em, spacing: 0.75em, first-line-indent: (amount: 1.5em, all: true))",
+        f'#set text(font: ({body_fonts}), size: {font_size}, lang: "{lang}"){rtl}',
+        par_rules,
         "#show heading.where(level: 1): it => [",
         "  #v(0.5em)",
         f'  #block(text(size: 13pt, weight: "bold", font: ({cjk_first}))[#it.body])',
@@ -154,19 +262,28 @@ def academic_title_banner(
     title: str,
     abstract: str = "",
     authors: Sequence[str] = (),
+    columns: int = 1,
 ) -> str:
-    """Emit a full-width title, author, and abstract block for page 1 of an academic paper."""
+    """Emit a title, author, and abstract block for an academic paper."""
     if not title:
         return ""
 
     escaped_title = escape_markup(title)
     authors_str = ", ".join(escape_markup(a) for a in authors) if authors else ""
 
-    parts: list[str] = [
-        '#place(top, scope: "parent", float: true)[',
-        "  #align(center)[",
-        f'    #text(size: 16pt, weight: "bold")[{escaped_title}]\\',
-    ]
+    parts: list[str] = []
+    is_dual = columns == 2
+    if is_dual:
+        parts.append('#place(top, scope: "parent", float: true)[')
+    else:
+        parts.append("#block(width: 100%)[")
+
+    parts.extend(
+        [
+            "  #align(center)[",
+            f'    #text(size: 16pt, weight: "bold")[{escaped_title}]\\',
+        ]
+    )
 
     if authors_str:
         parts.append(f'    #v(0.3em)#text(size: 10pt, style: "italic")[{authors_str}]\\')
