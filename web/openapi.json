@@ -4651,7 +4651,7 @@
           "prompt_strategy": {
             "$ref": "#/components/schemas/PromptStrategy",
             "description": "Prompt assembly strategy (RICH, MINIMAL, HYBRID).",
-            "default": "rich"
+            "default": "hybrid"
           },
           "extraction_strategy": {
             "$ref": "#/components/schemas/ExtractionStrategy",

@@ -40,7 +40,7 @@ class ModelCapabilityRegistry:
         self._profiles = [
             ModelProfile(
                 model_pattern="o1",
-                prompt_strategy=PromptStrategy.RICH,
+                prompt_strategy=PromptStrategy.HYBRID,
                 extraction_strategy=ExtractionStrategy.AUTO,
                 supports_reasoning_effort=True,
                 supports_system_prompt=False,
@@ -49,7 +49,7 @@ class ModelCapabilityRegistry:
             ),
             ModelProfile(
                 model_pattern="o3",
-                prompt_strategy=PromptStrategy.RICH,
+                prompt_strategy=PromptStrategy.HYBRID,
                 extraction_strategy=ExtractionStrategy.AUTO,
                 supports_reasoning_effort=True,
                 supports_system_prompt=True,
@@ -58,7 +58,7 @@ class ModelCapabilityRegistry:
             ),
             ModelProfile(
                 model_pattern="o4",
-                prompt_strategy=PromptStrategy.RICH,
+                prompt_strategy=PromptStrategy.HYBRID,
                 extraction_strategy=ExtractionStrategy.AUTO,
                 supports_reasoning_effort=True,
                 supports_system_prompt=True,
@@ -67,7 +67,7 @@ class ModelCapabilityRegistry:
             ),
             ModelProfile(
                 model_pattern="claude-3-7",
-                prompt_strategy=PromptStrategy.RICH,
+                prompt_strategy=PromptStrategy.HYBRID,
                 extraction_strategy=ExtractionStrategy.AUTO,
                 supports_reasoning_effort=True,
                 supports_system_prompt=True,
@@ -76,7 +76,7 @@ class ModelCapabilityRegistry:
             ),
             ModelProfile(
                 model_pattern="claude",
-                prompt_strategy=PromptStrategy.RICH,
+                prompt_strategy=PromptStrategy.HYBRID,
                 extraction_strategy=ExtractionStrategy.AUTO,
                 supports_reasoning_effort=False,
                 supports_system_prompt=True,
@@ -85,7 +85,7 @@ class ModelCapabilityRegistry:
             ),
             ModelProfile(
                 model_pattern="qwen",
-                prompt_strategy=PromptStrategy.RICH,
+                prompt_strategy=PromptStrategy.HYBRID,
                 extraction_strategy=ExtractionStrategy.AUTO,
                 supports_reasoning_effort=True,
                 supports_system_prompt=True,
@@ -94,7 +94,7 @@ class ModelCapabilityRegistry:
             ),
             ModelProfile(
                 model_pattern="muse-spark",
-                prompt_strategy=PromptStrategy.RICH,
+                prompt_strategy=PromptStrategy.HYBRID,
                 extraction_strategy=ExtractionStrategy.AUTO,
                 supports_reasoning_effort=True,
                 supports_system_prompt=True,
@@ -103,7 +103,7 @@ class ModelCapabilityRegistry:
             ),
             ModelProfile(
                 model_pattern="deepseek-reasoner",
-                prompt_strategy=PromptStrategy.RICH,
+                prompt_strategy=PromptStrategy.HYBRID,
                 extraction_strategy=ExtractionStrategy.AUTO,
                 supports_reasoning_effort=True,
                 supports_system_prompt=True,
@@ -112,7 +112,7 @@ class ModelCapabilityRegistry:
             ),
             ModelProfile(
                 model_pattern="deepseek-r1",
-                prompt_strategy=PromptStrategy.RICH,
+                prompt_strategy=PromptStrategy.HYBRID,
                 extraction_strategy=ExtractionStrategy.AUTO,
                 supports_reasoning_effort=True,
                 supports_system_prompt=True,
@@ -121,7 +121,7 @@ class ModelCapabilityRegistry:
             ),
             ModelProfile(
                 model_pattern="reasoning",
-                prompt_strategy=PromptStrategy.RICH,
+                prompt_strategy=PromptStrategy.HYBRID,
                 extraction_strategy=ExtractionStrategy.AUTO,
                 supports_reasoning_effort=True,
                 supports_system_prompt=True,
@@ -130,7 +130,7 @@ class ModelCapabilityRegistry:
             ),
             ModelProfile(
                 model_pattern="reasoner",
-                prompt_strategy=PromptStrategy.RICH,
+                prompt_strategy=PromptStrategy.HYBRID,
                 extraction_strategy=ExtractionStrategy.AUTO,
                 supports_reasoning_effort=True,
                 supports_system_prompt=True,
@@ -139,7 +139,7 @@ class ModelCapabilityRegistry:
             ),
             ModelProfile(
                 model_pattern="deepseek",
-                prompt_strategy=PromptStrategy.RICH,
+                prompt_strategy=PromptStrategy.HYBRID,
                 extraction_strategy=ExtractionStrategy.AUTO,
                 supports_reasoning_effort=True,
                 supports_system_prompt=True,
@@ -148,7 +148,7 @@ class ModelCapabilityRegistry:
             ),
             ModelProfile(
                 model_pattern="flash",
-                prompt_strategy=PromptStrategy.RICH,
+                prompt_strategy=PromptStrategy.HYBRID,
                 extraction_strategy=ExtractionStrategy.AUTO,
                 supports_reasoning_effort=True,
                 supports_system_prompt=True,
@@ -157,7 +157,7 @@ class ModelCapabilityRegistry:
             ),
             ModelProfile(
                 model_pattern="pro",
-                prompt_strategy=PromptStrategy.RICH,
+                prompt_strategy=PromptStrategy.HYBRID,
                 extraction_strategy=ExtractionStrategy.AUTO,
                 supports_reasoning_effort=True,
                 supports_system_prompt=True,
@@ -280,7 +280,7 @@ class ModelCapabilityRegistry:
         ):
             return ModelProfile(
                 model_pattern=name_lower,
-                prompt_strategy=PromptStrategy.RICH,
+                prompt_strategy=PromptStrategy.HYBRID,
                 extraction_strategy=ExtractionStrategy.AUTO,
                 supports_reasoning_effort=True,
                 supports_system_prompt=True,
@@ -288,10 +288,10 @@ class ModelCapabilityRegistry:
                 display_name=f"Heuristic Reasoning ({model_name or 'unspecified'})",
             )
 
-        # Unknown model safe fallback: rich prompt + auto extraction, no assumed reasoning_effort
+        # Unknown model safe fallback: hybrid prompt + auto extraction, no assumed reasoning_effort
         return ModelProfile(
             model_pattern="*",
-            prompt_strategy=PromptStrategy.RICH,
+            prompt_strategy=PromptStrategy.HYBRID,
             extraction_strategy=ExtractionStrategy.AUTO,
             supports_reasoning_effort=False,
             supports_system_prompt=True,

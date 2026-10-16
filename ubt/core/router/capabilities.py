@@ -39,7 +39,7 @@ class ModelProfile(BaseModel):
 
     # Capability strategies
     prompt_strategy: PromptStrategy = Field(
-        default=PromptStrategy.RICH,
+        default=PromptStrategy.HYBRID,
         description="Prompt assembly strategy (RICH, MINIMAL, HYBRID).",
     )
     extraction_strategy: ExtractionStrategy = Field(

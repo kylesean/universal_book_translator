@@ -1402,7 +1402,7 @@ export interface components {
             model_pattern: string;
             /**
              * @description Prompt assembly strategy (RICH, MINIMAL, HYBRID).
-             * @default rich
+             * @default hybrid
              */
             prompt_strategy: components["schemas"]["PromptStrategy"];
             /**
