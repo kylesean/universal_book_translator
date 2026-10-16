@@ -11,9 +11,9 @@ from ubt.core.exceptions import MTQEEvaluationError
 from ubt.core.ir.models import BlockStatus, IRBlock
 from ubt.core.memory.cjk_matcher import count_term_in_text
 from ubt.core.qe.base import BaseQERunner
-from ubt.core.qe.comet_runner import glossary_violation_flag
 from ubt.core.qe.defect_taxonomy import has_structural_defect
 from ubt.core.qe.fast_pass import FastPassFilter
+from ubt.core.qe.heuristic import glossary_violation_flag
 from ubt.core.validators.consistency import GlossaryConsistencyValidator
 
 logger = logging.getLogger(__name__)
@@ -25,6 +25,7 @@ def _fast_pass_screen(
     fast_pass: FastPassFilter,
     glossary_validator: GlossaryConsistencyValidator | None,
     glossary_terms: list[str] | None = None,
+    rehearsal: bool = False,
 ) -> tuple[list[IRBlock], list[dict[str, Any]]]:
     """Split drafted blocks into auto-passes and scoring candidates.
 
@@ -49,6 +50,7 @@ def _fast_pass_screen(
             b.target_text or "",
             block_type=b.block_type,
             skip_translate=b.skip_translate,
+            rehearsal=rehearsal,
         )
         # Terminology runs before the verdict. Verbatim ships are exempt
         # (the export stage skips them too: substituting terms into a kept
@@ -187,6 +189,7 @@ async def run_quality_gate_stage(
         fast_pass=fast_pass,
         glossary_validator=glossary_validator,
         glossary_terms=glossary_terms,
+        rehearsal=bool(getattr(ctx, "is_mock_run", False)),
     )
 
     # Audit a sample of FastPass passes when the runner supports it

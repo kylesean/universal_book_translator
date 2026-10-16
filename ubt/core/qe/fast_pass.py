@@ -685,11 +685,6 @@ def is_near_verbatim_echo(
         return False
     if target_is_rtl and len(_RTL_SCRIPT_RE.findall(target_text)) >= _NEAR_ECHO_CJK_EXEMPT:
         return False
-    if REHEARSAL_MARKER in target_text:
-        # A ``--dry-run`` echo is an intentional rehearsal artifact, not an
-        # untranslated book: its QE is mocked precisely so the plumbing can be
-        # exercised end to end.
-        return False
     src_masked = _ECHO_MASK_RE.sub(" ", source_text)
     tgt_masked = _ECHO_MASK_RE.sub(" ", target_text)
     # The quoted-span mask exists so a faithfully preserved quotation does not
@@ -887,10 +882,15 @@ class FastPassFilter:
         *,
         block_type: Any = None,
         skip_translate: bool = False,
+        rehearsal: bool = False,
     ) -> FastPassDecision:
         """Validate 0-token deterministic structural integrity: no empty text, no prompt leaks,
 
         no verbatim source echo, no repetitive loop hallucinations, and lossless HTML tag delta.
+
+        ``rehearsal`` skips only the *untranslated-echo* checks: a ``--dry-run``
+        echo is source-identical by construction, and every other invariant
+        (empty, prompt artifact, residue) still applies.
         """
         src_clean = source_text.strip()
         tgt_clean = target_text.strip()
@@ -919,7 +919,13 @@ class FastPassFilter:
             )
 
         # 1b. Verbatim echo. The reason doubles as the repair instruction.
-        if not skip_translate and _is_prose and is_verbatim_echo(src_clean, tgt_clean):
+        # Skipped for a rehearsal run: its echo is source-identical on purpose.
+        if (
+            not rehearsal
+            and not skip_translate
+            and _is_prose
+            and is_verbatim_echo(src_clean, tgt_clean)
+        ):
             return FastPassDecision(
                 passed=False,
                 reason=f"{ECHO_MARKER}{_ECHO_REPAIR_HINT}",
@@ -927,7 +933,8 @@ class FastPassFilter:
                 length_ratio=1.0,
             )
         if (
-            not skip_translate
+            not rehearsal
+            and not skip_translate
             and _is_prose
             and src_clean != tgt_clean
             and is_near_verbatim_echo(
@@ -1177,25 +1184,34 @@ class FastPassFilter:
         *,
         block_type: Any = None,
         skip_translate: bool = False,
+        rehearsal: bool = False,
     ) -> FastPassDecision:
-        """Evaluate whether a translated block qualifies for direct fast-pass release."""
-        if REHEARSAL_MARKER in target_text:
-            # ``--dry-run`` echo: the rehearsal exists to prove the plumbing
-            # reaches a rendered artifact, so its synthetic (untranslated) text
-            # must not be held to the deterministic QE gates — otherwise the
-            # zero-token end-to-end check quarantines every real-length paragraph
-            # and exercises none of the repair/render path it is meant to test.
-            return FastPassDecision(
-                passed=True,
-                reason="rehearsal echo (dry-run): deterministic QE bypassed",
-                target_ratio=1.0,
-                length_ratio=1.0,
-            )
+        # 1. Structural invariants must hold unconditionally, even during rehearsals.
+        # A rehearsal skips only the untranslated-echo checks (its source-identical
+        # echo is intentional); empty text, prompt-artifact residue, HTML delta and
+        # every other structural gate still apply.
         structural = self.validate_structural_invariants(
-            source_text, target_text, block_type=block_type, skip_translate=skip_translate
+            source_text,
+            target_text,
+            block_type=block_type,
+            skip_translate=skip_translate,
+            rehearsal=rehearsal,
         )
         if not structural.passed:
             return structural
+
+        if rehearsal:
+            # The remaining checks are *language* heuristics (length ratio,
+            # script density, numeric ratio) that a deliberately untranslated
+            # rehearsal echo cannot satisfy. Keyed on the explicit run flag, not
+            # on a marker appearing in the text, so a real translation that
+            # happens to contain the marker still faces the full gate.
+            return FastPassDecision(
+                passed=True,
+                reason="rehearsal run: language heuristics skipped, structural invariants verified",
+                target_ratio=1.0,
+                length_ratio=1.0,
+            )
 
         src_clean = source_text.strip()
         tgt_clean = target_text.strip()

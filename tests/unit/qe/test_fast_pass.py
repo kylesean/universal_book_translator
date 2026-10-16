@@ -94,10 +94,24 @@ def test_an_identical_latin_pair_is_a_near_echo() -> None:
     assert is_near_verbatim_echo(_ECHO, _ECHO, target_is_cjk=False) is True
 
 
-def test_a_rehearsal_marker_is_not_a_near_echo() -> None:
-    # A --dry-run echo is an intentional rehearsal artifact, not a defect.
+def test_a_rehearsal_marker_alone_does_not_exempt_a_near_echo() -> None:
+    # The marker is NOT a gate bypass: a target that echoes its source (with or
+    # without the marker) is still an echo. The rehearsal exemption is an
+    # explicit run flag (``evaluate(rehearsal=True)``), not a text substring, so
+    # a real translation that happens to contain the marker still faces the gate.
     target = f"{REHEARSAL_MARKER} {_ECHO}"
-    assert is_near_verbatim_echo(_ECHO, target, target_is_cjk=False) is False
+    assert is_near_verbatim_echo(_ECHO, target, target_is_cjk=False) is True
+
+
+def test_the_rehearsal_exemption_is_an_explicit_flag_not_a_substring() -> None:
+    # A real (non-rehearsal) run whose text merely contains the marker string
+    # must still be gated: the exempt path is ``rehearsal=True``.
+    gate = FastPassFilter()
+    echo_text = f"{REHEARSAL_MARKER} {_ECHO}"
+    # Not marked as a rehearsal: the echo is rejected.
+    assert gate.evaluate(_ECHO, echo_text, block_type=None).passed is False
+    # Marked as a rehearsal: the language heuristics are skipped.
+    assert gate.evaluate(_ECHO, echo_text, block_type=None, rehearsal=True).passed is True
 
 
 def test_a_cjk_target_for_a_different_script_source_is_exempt() -> None:
