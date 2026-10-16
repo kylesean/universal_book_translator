@@ -129,10 +129,11 @@ class UnmaskReport:
         it in ``mutated``, so a citation's ``clean`` is False in that case.
         Callers must not assume ``unverified`` implies a pass.
 
-        "Reordered" tokens (checksums intact, but the spans appear in a
-        different order than in the masked source) do fail closed: the text is
-        not corrupt character-for-character, yet a protected span moved, which
-        only a re-draft can undo.
+        "Reordered" tokens: natural syntactic reordering between languages (e.g.
+        English relative clauses vs. Chinese pre-nominal modifiers) moves
+        placeholders legitimately. As long as every token restored intact
+        without loss, mutation, or duplication, reordering is tracked for metrics
+        and audit reporting but does not fail the clean property.
 
         "Duplicated" tokens (the draft also emitted the protected span's
         original text alongside its intact token, so restoration printed it
@@ -140,13 +141,7 @@ class UnmaskReport:
         character-perfect, yet the published text would repeat a protected
         citation/formula/code span. Only a re-draft can remove the stray copy.
         """
-        return (
-            not self.missing
-            and not self.mismatched
-            and not self.mutated
-            and not self.reordered
-            and not self.duplicated
-        )
+        return not self.missing and not self.mismatched and not self.mutated and not self.duplicated
 
 
 @functools.lru_cache(maxsize=48)

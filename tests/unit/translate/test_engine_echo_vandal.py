@@ -99,3 +99,20 @@ async def test_a_vandal_provider_is_fail_closed() -> None:
             assert segment.qa is not None and segment.qa.flags, element_id
         else:
             assert segment.state is SegmentState.TRANSLATED, element_id
+
+
+async def test_reordered_placeholders_resolve_clean() -> None:
+    engine = _engine()
+    text = "We compare method $A$ with parameter $B$."
+    masked = engine.mask(text)
+    tokens = list(masked.placeholders)
+    assert len(tokens) == 2
+    # Simulate legitimate grammatical reordering
+    reordered_raw = (
+        masked.text.replace(tokens[0].token, "@@@")
+        .replace(tokens[1].token, tokens[0].token)
+        .replace("@@@", tokens[1].token)
+    )
+    resolved = engine.resolve(reordered_raw, masked)
+    assert resolved.dirty == ()
+    assert "$B$" in resolved.text and "$A$" in resolved.text

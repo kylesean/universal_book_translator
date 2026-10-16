@@ -122,9 +122,9 @@ def test_swapped_tokens_are_reordered() -> None:
     first, second = list(mapping)
     swapped = masked.replace(first, "@@").replace(second, first).replace("@@", second)
     report = masker.unmask_checked(swapped, mapping)
-    # Both spans restore intact, but they moved -- only the order check sees it.
+    # Both spans restore intact and moved: reordering is tracked for metrics but is clean.
     assert report.reordered == [1, 2]
-    assert not report.clean
+    assert report.clean
     assert report.text == "A $y$ B $x$ C"
 
 
@@ -294,9 +294,9 @@ def test_find_reordered_reports_both_sides_of_an_inversion() -> None:
     assert find_reordered([1, 2], [9, 1, 2]) == []  # unknown index skipped
 
 
-def test_unmask_report_clean_ignores_unverified_but_not_reordered_or_duplicated() -> None:
+def test_unmask_report_clean_allows_reordered_and_unverified() -> None:
     assert UnmaskReport(text="x", unverified=[1]).clean
-    assert not UnmaskReport(text="x", reordered=[1]).clean
+    assert UnmaskReport(text="x", reordered=[1]).clean
     assert not UnmaskReport(text="x", duplicated=[1]).clean
     assert not UnmaskReport(text="x", missing=[1]).clean
     assert not UnmaskReport(text="x", mismatched=[1]).clean
