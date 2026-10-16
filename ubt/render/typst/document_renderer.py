@@ -637,6 +637,7 @@ def render_table(markup: str, *, is_math_ok: Callable[[str], bool] | None = None
         "#table(",
         f"  columns: {column_spec},",
         "  inset: 5pt,",
+        "  column-gutter: 0.7em,",
         "  align: (col, row) => if row == 0 { center + horizon } else { left + horizon },",
         "  stroke: none,",
         "  table.header(",
