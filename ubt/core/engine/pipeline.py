@@ -866,7 +866,7 @@ class PipelineOrchestrator:
             writer_lock.acquire()
 
             # Staged execution lifecycle with guaranteed resource cleanup and failure handling.
-            ledger = SQLiteJobLedger(db_path)
+            ledger = SQLiteJobLedger(db_path, fresh=bool(self.config.fresh))
             if self.config.tm_enabled:
                 self.config.db_dir.mkdir(parents=True, exist_ok=True)
                 tm = TranslationMemory(self.config.db_dir / "tm.sqlite")

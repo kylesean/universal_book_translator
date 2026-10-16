@@ -334,10 +334,22 @@ class LedgerBase:
     public class is :class:`ubt.core.engine.ledger.SQLiteJobLedger`.
     """
 
-    def __init__(self, db_path: Path, timeout: float = 30.0, *, read_only: bool = False) -> None:
+    def __init__(
+        self,
+        db_path: Path,
+        timeout: float = 30.0,
+        *,
+        read_only: bool = False,
+        fresh: bool = False,
+    ) -> None:
         self.db_path = db_path
         self.timeout = timeout
         self.read_only = read_only
+        # ``--fresh`` means "discard this job's prior state and start over". A
+        # ledger file written by an older build is reset to the baseline rather
+        # than refused, which is exactly what the operator asked for; without the
+        # flag an old schema is refused (never silently migrated).
+        self._fresh = fresh
         if not read_only:
             # Only a directory UBT itself creates is tightened to owner-only;
             # an existing user-chosen db_dir keeps its mode (see ensure_private_dir).
@@ -503,17 +515,33 @@ class LedgerBase:
                 # written alongside the DDL.
                 conn.executescript(_SCHEMA_SQL)
                 conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION};")
+            elif self._fresh:
+                # ``--fresh`` explicitly discards the job's prior state, so a
+                # legacy schema is reset to the baseline instead of refused —
+                # that is the operator's stated intent. Drop every table this
+                # build owns (a stale ladder could have left extra columns/tables)
+                # and recreate the flat baseline. This is the *only* path that
+                # rewrites an old ledger, and only because the user asked to.
+                self._reset_to_baseline(conn)
+                logger.warning(
+                    "Reset ledger %s from schema version %s to the baseline "
+                    "(version %s) for this --fresh run.",
+                    self.db_path,
+                    current_version,
+                    SCHEMA_VERSION,
+                )
             else:
-                # A legacy (ladder-migrated) database. Refuse rather than
-                # silently downgrade or half-migrate: the operator chooses.
+                # A legacy (ladder-migrated) database without --fresh. Refuse
+                # rather than silently downgrade or half-migrate: the operator
+                # chooses (a new --job-id, or --fresh to discard and restart).
                 raise LedgerError(
                     f"Ledger at {self.db_path} uses schema version {current_version}, "
                     f"but this build ships the flattened baseline version "
                     f"{SCHEMA_VERSION}. Incremental migration was removed, and "
                     "rewriting a legacy ledger in place risks the run's only copy "
-                    "of its translations. Start a fresh job (a new --job-id or the "
-                    "file removed) to use the new schema, or restore a backup if "
-                    "you need the old data with an older build.",
+                    "of its translations. Start a fresh job (a new --job-id, or "
+                    "re-run with --fresh to discard this ledger and restart), or "
+                    "restore a backup if you need the old data with an older build.",
                     details={
                         "db_version": current_version,
                         "baseline_version": SCHEMA_VERSION,
@@ -521,6 +549,18 @@ class LedgerBase:
                 )
 
             self._verify_block_columns(conn, SCHEMA_VERSION)
+
+    def _reset_to_baseline(self, conn: sqlite3.Connection) -> None:
+        """Drop this build's tables and recreate the flat baseline schema.
+
+        Only reached under ``--fresh``. Drops only the tables UBT owns so an
+        unrelated table in the same file is untouched, then recreates the
+        baseline and stamps it.
+        """
+        for table in ("blocks", "job_meta", "batch_jobs", "job_locks", "blocks_v10", "blocks_v11"):
+            conn.execute(f"DROP TABLE IF EXISTS {table};")
+        conn.executescript(_SCHEMA_SQL)
+        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION};")
 
     def _verify_block_columns(self, conn: sqlite3.Connection, version: int) -> None:
         """Fail loudly if the ``blocks`` table is missing a column we read.

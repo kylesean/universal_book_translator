@@ -828,3 +828,36 @@ def test_ledger_staleness_helper(tmp_path: Path) -> None:
 
     os.utime(ledger, (old, old))
     assert _ledger_is_stale(ledger) is True
+
+
+def test_fresh_resets_a_legacy_ledger_instead_of_refusing(tmp_path: Path) -> None:
+    """``--fresh`` must be able to restart a job whose ledger is a legacy schema.
+
+    The run path opens the ledger *before* ``--fresh``'s row reset runs, so a
+    legacy file was refused with no way forward — testing the tool became
+    impossible without hand-deleting the file. ``fresh=True`` resets it to the
+    flat baseline (the operator explicitly asked to discard prior state).
+    """
+    db_file = tmp_path / "legacy.db"
+    conn = sqlite3.connect(db_file)
+    conn.executescript("""
+        CREATE TABLE job_meta (job_id TEXT PRIMARY KEY);
+        CREATE TABLE blocks (block_id TEXT PRIMARY KEY, job_id TEXT NOT NULL,
+            source_text TEXT NOT NULL, status TEXT NOT NULL);
+        PRAGMA user_version = 14;
+    """)
+    conn.commit()
+    conn.close()
+
+    # Without --fresh: refused.
+    with pytest.raises(LedgerError):
+        SQLiteJobLedger(db_file)
+
+    # With --fresh: reset to the baseline and usable.
+    ledger = SQLiteJobLedger(db_file, fresh=True)
+    try:
+        with ledger._get_conn() as c:
+            assert c.execute("PRAGMA user_version;").fetchone()[0] == TARGET_SCHEMA_VERSION
+        assert ledger.get_job_status("nope") is None
+    finally:
+        ledger.close()

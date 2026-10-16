@@ -102,6 +102,12 @@ Pre-1.0, no tags yet. Everything below is in the current tree.
 
 ### Fixed
 
+- ``--fresh`` can now restart a job whose ledger file is a legacy schema. The
+  run opens the ledger before `--fresh`'s row reset, so the flattened-baseline
+  refusal fired first and there was no way forward without hand-deleting the
+  file — testing the tool became impossible. Under `--fresh` an old-schema
+  ledger is now reset to the baseline (the operator explicitly asked to discard
+  prior state); without the flag it is still refused, never silently migrated.
 - The writer-lock lease is **renewed for the life of the run**. The lock is an
   expiring lease; a real book run outlives one window, so without renewal a
   second process could take the job over mid-run and both would bill the
