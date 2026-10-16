@@ -15,11 +15,11 @@ from pydantic import SecretStr
 
 from ubt.core.router.transports.anthropic import AnthropicMessagesTransport
 from ubt.core.router.transports.base import (
-    _CONNECT_TIMEOUT_S,
     BaseTransport,
     _extract_cached_tokens,
     _usage_sink,
     attach_usage_sink,
+    build_timeout,
     new_usage_totals,
     record_external_usage,
     sanitize_thought_output,
@@ -318,16 +318,11 @@ class OpenAICompatibleProvider(BaseModelProvider):
         # so all transports share the HTTP keep-alive connection pool.
         self._owned_client = client is None
         self._shared_client = client or httpx.AsyncClient(
-            # Connect/pool fail fast; only read/write deserve the full api_timeout.
+            # Per-phase timeout (fail fast on connect/write/pool, long read).
             # A bare float here would silently override the transports' own
-            # connect=10s and pin a pool slot for the whole api_timeout on a dead
-            # endpoint (see BaseTransport._get_client).
-            timeout=httpx.Timeout(
-                connect=_CONNECT_TIMEOUT_S,
-                read=self._timeout,
-                write=self._timeout,
-                pool=self._timeout,
-            ),
+            # split and pin a pool slot for the whole api_timeout on a dead
+            # endpoint (see BaseTransport._get_client / build_timeout).
+            timeout=build_timeout(self._timeout),
             transport=self._transport,
             limits=self._limits,
         )
@@ -519,26 +514,37 @@ class OpenAICompatibleProvider(BaseModelProvider):
         )
 
     # ------------------------------------------------------------------
-    # Batch API (delegated to OpenAIChatTransport)
+    # Batch API (delegated to the transport for the selected protocol)
     # ------------------------------------------------------------------
+    #: Which transport owns the Batch API for each wire protocol. Every protocol
+    #: now has a batch implementation (OpenAI-compatible /files+/batches,
+    #: Anthropic Message Batches, Gemini :batchGenerateContent), so a book run
+    #: gets the provider's official discount whichever protocol is selected.
+    def _batch_transport(self) -> BaseTransport:
+        return {
+            "openai-chat": self._chat_transport,
+            "anthropic": self._anthropic_transport,
+            "gemini": self._gemini_transport,
+        }.get(self._api_mode, self._chat_transport)
+
     @property
     def supports_batch_api(self) -> bool:
-        return self._chat_transport.supports_batch_api if self._api_mode == "openai-chat" else False
+        return self._batch_transport().supports_batch_api
 
     async def create_batch_job(self, requests: list[dict[str, Any]]) -> str:
-        return await self._chat_transport.create_batch_job(requests)
+        return await self._batch_transport().create_batch_job(requests)
 
     async def get_batch_job(self, batch_id: str) -> dict[str, Any]:
-        return await self._chat_transport.get_batch_job(batch_id)
+        return await self._batch_transport().get_batch_job(batch_id)
 
     async def fetch_batch_results(self, batch_id: str) -> dict[str, dict[str, Any]]:
-        return await self._chat_transport.fetch_batch_results(batch_id)
+        return await self._batch_transport().fetch_batch_results(batch_id)
 
     async def cleanup_batch_files(self, batch_id: str) -> None:
-        await self._chat_transport.cleanup_batch_files(batch_id)
+        await self._batch_transport().cleanup_batch_files(batch_id)
 
     async def cancel_batch_job(self, batch_id: str) -> None:
-        await self._chat_transport.cancel_batch_job(batch_id)
+        await self._batch_transport().cancel_batch_job(batch_id)
 
 
 def create_model_provider(

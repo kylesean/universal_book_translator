@@ -111,9 +111,11 @@ class ModelRouter:
         backoff_cooldown_sec: float = 3.0,
         repair_provider: BaseModelProvider | None = None,
         cancel_token: asyncio.Event | None = None,
+        request_timeout: float = 120.0,
     ) -> None:
         self.provider = provider
         self.repair_provider = repair_provider or provider
+        self.request_timeout = request_timeout
         # Master gate for shipping rendered PAGE IMAGES of the book to model
         # endpoints (visual-scalpel repair, VLM judge passthrough). Text
         # prompts stay unaffected. Off unless the caller (the pipeline, from
@@ -322,7 +324,7 @@ class ModelRouter:
         else:
             profile = ModelProfile(
                 model_pattern="*",
-                prompt_strategy=PromptStrategy.RICH,
+                prompt_strategy=PromptStrategy.HYBRID,
                 extraction_strategy=ExtractionStrategy.AUTO,
                 supports_reasoning_effort=False,
                 supports_system_prompt=True,
@@ -735,33 +737,46 @@ class ModelRouter:
             active_provider = self._provider_for(model, is_repair=is_repair)
             try:
                 try:
-                    result, finish_reason = await active_provider.generate_with_finish_reason(
-                        prompt=effective_user_prompt,
-                        system_prompt=effective_system_prompt,
-                        model=model,
-                        temperature=effective_temp,
-                        max_tokens=max_tokens,
-                        reasoning_effort=effective_effort,
-                    )
-                except TypeError as type_err:
-                    # Only retry when the provider signature genuinely lacks the
-                    # reasoning_effort parameter: requiring both the keyword name
-                    # and "unexpected keyword argument" keeps an unrelated
-                    # TypeError raised inside provider code from being swallowed.
-                    signature_missing = (
-                        "reasoning_effort" in str(type_err)
-                        and "unexpected keyword argument" in str(type_err).lower()
-                    )
-                    if signature_missing:
-                        result, finish_reason = await active_provider.generate_with_finish_reason(
-                            prompt=effective_user_prompt,
-                            system_prompt=effective_system_prompt,
-                            model=model,
-                            temperature=effective_temp,
-                            max_tokens=max_tokens,
-                        )
+
+                    async def _invoke_provider(
+                        prov: BaseModelProvider = active_provider,
+                    ) -> tuple[str, str | None]:
+                        try:
+                            return await prov.generate_with_finish_reason(
+                                prompt=effective_user_prompt,
+                                system_prompt=effective_system_prompt,
+                                model=model,
+                                temperature=effective_temp,
+                                max_tokens=max_tokens,
+                                reasoning_effort=effective_effort,
+                            )
+                        except TypeError as type_err:
+                            signature_missing = (
+                                "reasoning_effort" in str(type_err)
+                                and "unexpected keyword argument" in str(type_err).lower()
+                            )
+                            if signature_missing:
+                                return await prov.generate_with_finish_reason(
+                                    prompt=effective_user_prompt,
+                                    system_prompt=effective_system_prompt,
+                                    model=model,
+                                    temperature=effective_temp,
+                                    max_tokens=max_tokens,
+                                )
+                            raise
+
+                    if self.request_timeout and self.request_timeout > 0:
+                        try:
+                            result, finish_reason = await asyncio.wait_for(
+                                _invoke_provider(), timeout=self.request_timeout
+                            )
+                        except TimeoutError as timeout_err:
+                            raise ModelProviderError(
+                                f"Model request timed out after {self.request_timeout}s for model {model}",
+                                details={"status_code": 408, "timeout": self.request_timeout},
+                            ) from timeout_err
                     else:
-                        raise
+                        result, finish_reason = await _invoke_provider()
                 except ModelProviderError as gateway_exc:
                     # Gateway dropped a declared self-hosted model (401/404
                     # "model not supported"): one localhost retry before the outer
@@ -903,12 +918,23 @@ class ModelRouter:
                 prompt_tokens = _estimate_prompt_tokens(system_prompt, continuation_prompt)
                 await self.rate_limiter.acquire(estimated_tokens=prompt_tokens * 2)
                 active_provider = self._provider_for(model, is_repair=is_repair)
-                continuation, finish_reason = await active_provider.generate_with_finish_reason(
-                    prompt=continuation_prompt,
-                    system_prompt=system_prompt,
-                    model=model,
-                    temperature=temperature,
-                )
+                if self.request_timeout and self.request_timeout > 0:
+                    continuation, finish_reason = await asyncio.wait_for(
+                        active_provider.generate_with_finish_reason(
+                            prompt=continuation_prompt,
+                            system_prompt=system_prompt,
+                            model=model,
+                            temperature=temperature,
+                        ),
+                        timeout=self.request_timeout,
+                    )
+                else:
+                    continuation, finish_reason = await active_provider.generate_with_finish_reason(
+                        prompt=continuation_prompt,
+                        system_prompt=system_prompt,
+                        model=model,
+                        temperature=temperature,
+                    )
                 try:
                     if hasattr(self.rate_limiter, "report_success_async"):
                         await self.rate_limiter.report_success_async()

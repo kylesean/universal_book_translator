@@ -853,38 +853,48 @@ async def test_cancel_batch_job_posts_the_cancel() -> None:
 
 @pytest.mark.asyncio
 async def test_transport_client_timeout_is_split() -> None:
-    """Connect/pool phases fail fast; only read/write get the full api_timeout.
+    """Connect/write/pool fail fast; read gets the long window (api_timeout wins).
 
-    A single-float timeout pinned a pool slot for the full 180s on a dead
-    endpoint before the connect phase gave up.
+    The forced split is connect=15, read=max(120, api_timeout), write=15,
+    pool=30. A single-float timeout used to pin a pool slot for the full 180s on
+    a dead endpoint before the connect phase gave up.
     """
     transport = OpenAIChatTransport(
         api_key="k", base_url="https://api.example.com/v1", timeout=180.0
     )
     client = transport._get_client()
-    assert client.timeout.connect == 10.0
-    assert client.timeout.read == 180.0
-    assert client.timeout.write == 180.0
-    assert client.timeout.pool == 180.0
+    assert client.timeout.connect == 15.0
+    assert client.timeout.read == 180.0  # api_timeout(180) > default read(120)
+    assert client.timeout.write == 15.0
+    assert client.timeout.pool == 30.0
+    await transport.aclose()
+
+
+@pytest.mark.asyncio
+async def test_transport_client_read_defaults_when_api_timeout_is_small() -> None:
+    transport = OpenAIChatTransport(
+        api_key="k", base_url="https://api.example.com/v1", timeout=30.0
+    )
+    client = transport._get_client()
+    assert client.timeout.read == 120.0  # default floor beats a small api_timeout
     await transport.aclose()
 
 
 async def test_provider_shared_client_splits_connect_timeout() -> None:
-    """The provider's shared client must keep the fast connect timeout.
+    """The provider's shared client must keep the fast per-phase split.
 
     A bare ``timeout=self._timeout`` here silently overrode every transport's
-    own ``connect=10s`` (``BaseTransport._get_client`` returns the injected
-    client unchanged), pinning a pool slot for the full api_timeout on a dead
-    endpoint.
+    own split (``BaseTransport._get_client`` returns the injected client
+    unchanged), pinning a pool slot for the full api_timeout on a dead endpoint.
     """
     from ubt.core.router.provider import OpenAICompatibleProvider
 
     provider = OpenAICompatibleProvider(api_key="k", timeout=180.0)
     client = provider._shared_client
-    assert client.timeout.connect == 10.0
-    assert client.timeout.read == 180.0
-    assert client.timeout.write == 180.0
-    assert client.timeout.pool == 180.0
+    assert client.timeout.connect == 15.0
+    assert client.timeout.read == 180.0  # api_timeout wins over the 120 default
+    assert client.timeout.write == 15.0
+    assert client.timeout.pool == 30.0
     await client.aclose()
 
 

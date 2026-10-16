@@ -18,10 +18,35 @@ from ubt.core.router.registry import get_default_registry
 
 logger = logging.getLogger(__name__)
 
-# Connect/pool phases fail fast; only the read/write phases deserve the full
-# api_timeout (180s default). A single-float timeout pinned a pool slot for
-# three minutes on a dead endpoint before failing.
-_CONNECT_TIMEOUT_S = 10.0
+#: Per-phase HTTP timeouts. Connect/write/pool fail fast (a dead endpoint or a
+#: stalled upload should not pin a pool slot), while ``read`` carries the long
+#: window a large LLM completion needs. These are the values the pipeline
+#: forces on every provider client; ``read`` falls back to the configured
+#: ``api_timeout`` only when that is *larger*, so an operator raising the read
+#: budget is honoured while a bare float can no longer disable the split.
+_CONNECT_TIMEOUT_S = 15.0
+_WRITE_TIMEOUT_S = 15.0
+_POOL_TIMEOUT_S = 30.0
+#: Default read window; the configured ``api_timeout`` overrides it upward.
+_READ_TIMEOUT_S = 120.0
+
+
+def build_timeout(api_timeout: float | None = None) -> httpx.Timeout:
+    """The forced per-phase timeout for every provider HTTP client.
+
+    ``connect``/``write``/``pool`` are fixed (fail fast); ``read`` is the larger
+    of the default and the configured API timeout, so a long generation is not
+    cut off while a dead endpoint still fails in seconds.
+    """
+    read = _READ_TIMEOUT_S
+    if api_timeout is not None and api_timeout > read:
+        read = float(api_timeout)
+    return httpx.Timeout(
+        connect=_CONNECT_TIMEOUT_S,
+        read=read,
+        write=_WRITE_TIMEOUT_S,
+        pool=_POOL_TIMEOUT_S,
+    )
 
 
 def retry_after_seconds(headers: httpx.Headers) -> str | None:
@@ -393,12 +418,8 @@ class BaseTransport(ABC):
     def _get_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(
-                timeout=httpx.Timeout(
-                    connect=_CONNECT_TIMEOUT_S,
-                    read=self._timeout,
-                    write=self._timeout,
-                    pool=self._timeout,
-                ),
+                # Per-phase timeout: fail fast on connect/write/pool, long read.
+                timeout=build_timeout(self._timeout),
                 transport=self._transport,
                 limits=self._limits,
             )
