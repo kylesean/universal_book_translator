@@ -76,6 +76,12 @@ def _config(tmp_path: Path, *, dual_mode: str = "dual") -> UBTConfig:
     return UBTConfig().model_copy(
         update={
             "db_dir": tmp_path / "ledgers",
+            # Hermetic content-addressed cache: the default ``.ubt/cache`` is
+            # shared across runs, so a stale entry from a prior run replayed its
+            # draft and masked a real regression (a fresh macro-chunk path looked
+            # like it produced bare source). Pinning it under ``tmp_path`` makes
+            # every rehearsal deterministic.
+            "cache_dir": tmp_path / "cache",
             "ocr_mode": "off",
             "allow_page_upload": False,
             "visual_judge_enabled": False,

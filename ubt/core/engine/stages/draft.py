@@ -37,9 +37,9 @@ from ubt.core.memory.tm import (
     compute_tm_context,
     format_few_shot_reference,
 )
-from ubt.core.qe.comet_runner import glossary_violation_flag
 from ubt.core.qe.defect_taxonomy import DRAFTING_ERROR_PREFIX, NON_RETRYABLE_DRAFT_PREFIX
 from ubt.core.qe.fast_pass import FastPassFilter
+from ubt.core.qe.heuristic import glossary_violation_flag
 from ubt.core.router.router import (
     BatchDraftRequest,
     BatchTranslationError,
@@ -288,7 +288,9 @@ class DraftPolicy:
     rolling_enabled: bool
     fail_fast_threshold: int = 6
     batch_delete_files: bool = True
-    macro_chunk_size: int = 5
+    #: Kept equal to ``UBTConfig.macro_chunk_size``'s default so a DraftPolicy
+    #: built without the config kwarg does not silently disagree with production.
+    macro_chunk_size: int = 8
 
 
 @dataclass
@@ -623,10 +625,12 @@ class _DraftProcessor:
                 final_draft = trimmed
 
         error_flags: list[str] = list(block.error_flags)
-        # One rule for all four maskers: a restore that is not clean (missing /
-        # mismatched / mutated / reordered / duplicated span) means the target
-        # is not trustworthy. Record the evidence on the block instead of
-        # shipping it.
+        # A restore that is not clean (missing / mismatched / mutated /
+        # duplicated span) means the target is not trustworthy; record the
+        # evidence on the block instead of shipping it. A *reordered* restore is
+        # NOT dirty (natural cross-language reordering moves placeholders
+        # legitimately — see ``UnmaskReport.clean``); it is carried in the report
+        # for audit only.
         for label, report in result.dirty:
             detail = (
                 f"{label} missing={report.missing} "

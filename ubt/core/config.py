@@ -566,10 +566,13 @@ class UBTConfig(BaseSettings):
     max_concurrency: int = Field(default=10, gt=0)
     batch_limit: int = Field(default=30, gt=0)
     macro_chunk_size: int = Field(
-        default=1,
+        default=8,
         ge=1,
         le=30,
-        description="Number of consecutive micro-blocks packed into a single LLM draft request (1 = single block)",
+        description="Number of consecutive micro-blocks packed into a single LLM draft request. "
+        ">1 enables the chapter-level long-context path (blocks packed up to a section "
+        "boundary, transmitted as <block id=...> markup for one long generation); "
+        "1 = one request per block (the legacy micro-window).",
     )
     prompt_caching_enabled: bool = Field(
         default=True,

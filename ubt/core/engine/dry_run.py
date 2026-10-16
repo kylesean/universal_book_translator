@@ -13,8 +13,8 @@ from typing import Any
 
 from ubt.core.config import UBTConfig
 from ubt.core.engine.pipeline import PipelineOrchestrator
-from ubt.core.qe.comet_runner import MockQERunner
 from ubt.core.qe.fast_pass import REHEARSAL_MARKER as _DRY_RUN_PREFIX
+from ubt.core.qe.heuristic import MockQERunner
 from ubt.core.router.prompts import draft_source_from_prompt
 from ubt.core.router.provider import MockModelProvider
 from ubt.core.router.rate_limiter import AdaptiveTokenBucket
@@ -42,7 +42,27 @@ class DryRunModelProvider(MockModelProvider):
         max_tokens: int | None = None,
         reasoning_effort: str | None = None,
     ) -> str:
-        src = draft_source_from_prompt(prompt)
+        # The chapter-level (macro) path sends several blocks in one prompt
+        # wrapped in ``<block id="...">`` markup and expects the same structure
+        # back. Echo each block behind the marker inside the XML envelope, or the
+        # macro extractor finds nothing and every block ships empty.
+        if "<blocks>" in prompt and "<block id=" in prompt:
+            import re
+
+            matches = re.findall(
+                r'<\s*block\s+id=["\'](.*?)["\']\s*>([\s\S]*?)<\s*/\s*block\s*>', prompt
+            )
+            if matches:
+                items = []
+                for bid, bsrc in matches:
+                    body = self._echo(str(bsrc))
+                    items.append(f'<block id="{bid}">{body}</block>')
+                return "<blocks>\n" + "\n".join(items) + "\n</blocks>"
+
+        return self._echo(draft_source_from_prompt(prompt))
+
+    @staticmethod
+    def _echo(src: str) -> str:
         if src.startswith("#"):
             # Keep the markdown heading sigil attached, or the renderer
             # loses the block's level and the rehearsal stops resembling a book.
