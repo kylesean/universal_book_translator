@@ -116,9 +116,27 @@ def _math_spans(text: str) -> list[tuple[int, int]]:
 #: A caption's opening marker (``Figure 1:``, ``图 1：``, ``Table 3.``). Used to
 #: recognise the paragraph that belongs to the preceding figure.
 _CAPTION_RE = re.compile(
-    r"^\s*(?:Figure|Fig\.?|Table|Listing|Algorithm|图|表|附图|附表)\s*[\d.]+\s*[:：.]",
+    # ``Figure 1:`` / ``Fig. 2.`` / ``Table 3`` / ``图 1 |`` — the delimiter is a
+    # colon, period, or the vertical bar the translators emit
+    # (``图 1 | <caption text>``). Missing the bar meant a translated caption
+    # failed this match, and one just over the length cap then rendered as a
+    # standalone paragraph — the image and its caption split across pages on the
+    # PaddleOCR paper.
+    r"^\s*(?:Figure|Fig\.?|Table|Listing|Algorithm|图|表|附图|附表)\s*[\d.]+\s*[:：.|｜]",
     re.IGNORECASE,
 )
+
+#: Figures narrower than this (in PDF points) render at their own physical width
+#: rather than the page-spanning default. A4 text width is ~470pt, so anything
+#: below it that is *small* (a logo at ~121pt) keeps its size; a wider figure
+#: falls through to the ``figure_width`` cap.
+_FIGURE_NATIVE_MAX_PT = 300.0
+
+#: Longest *unlabelled* paragraph that still binds as a figure's caption. A
+#: labelled caption ("图 1 | …") binds at any length; this only catches the
+#: caption whose label the extractor dropped, and must stay short enough not to
+#: swallow a body paragraph directly under an image.
+_PENDING_CAPTION_MAX_CHARS = 320
 
 #: A heading that is really running chrome (an arXiv stamp, a journal line, a
 #: submission date). Kept out of the body so the document opens on its title.
@@ -611,6 +629,11 @@ class _Figure:
 
     asset: str
     caption: str = ""
+    #: The source bbox's width in PDF points, when known. Used to keep a small
+    #: graphic (a logo, a signature) at its own size instead of stretching it to
+    #: the page width — measured on the PaddleOCR paper, whose 121pt-wide
+    #: PaddleOCR logo was blown up to 88% of an A4 page.
+    width_pt: float | None = None
 
 
 @dataclass(slots=True)
@@ -1095,7 +1118,11 @@ class TypstDocumentRenderer:
                 asset = str(getattr(block.element, "asset_id", None) or "") or (
                     block.source_text or ""
                 )
-                pending = _Figure(asset=asset.strip())
+                bbox = block.bbox
+                pending = _Figure(
+                    asset=asset.strip(),
+                    width_pt=(bbox.x1 - bbox.x0) if bbox is not None else None,
+                )
                 continue
 
             if block_type == "table":
@@ -1261,7 +1288,12 @@ class TypstDocumentRenderer:
             if not text:
                 continue
             if pending is not None:
-                if _CAPTION_RE.match(text) or len(text) <= 300:
+                # A ``Figure N …`` / ``表 N …`` label binds regardless of length:
+                # a long caption is still a caption, and an explicit label is a
+                # far stronger signal than the length heuristic. The heuristic
+                # stays for an *unlabelled* short paragraph directly under an
+                # image (a caption the extractor stripped the "Figure N" from).
+                if _CAPTION_RE.match(text) or len(text) <= _PENDING_CAPTION_MAX_CHARS:
                     pending.caption = text
                     flush_figure()
                     continue
@@ -1301,14 +1333,22 @@ class TypstDocumentRenderer:
             self.stats.assets_copied += 1
         self.stats.figures += 1
         self.stats.blocks_rendered += 1
+        # A graphic renders at its own physical width when that is narrower than
+        # the text block, and at the default cap otherwise. Sizing everything to
+        # ``figure_width`` stretched a 121pt logo to 420pt (3.5x) and distorted
+        # its aspect; a wide figure still fills the column. The threshold keeps a
+        # full-width figure on the cap and lets a small mark stay small.
+        width = self.figure_width
+        if figure.width_pt is not None and 0 < figure.width_pt < _FIGURE_NATIVE_MAX_PT:
+            width = f"{figure.width_pt:.0f}pt"
         if figure.caption:
             return (
                 "#figure(\n"
-                f'  image("{target.name}", width: {self.figure_width}),\n'
+                f'  image("{target.name}", width: {width}),\n'
                 f"  caption: [{self._prose(figure.caption)}],\n"
                 "  numbering: none,\n)"
             )
-        return f'#figure(image("{target.name}", width: {self.figure_width}), numbering: none)'
+        return f'#figure(image("{target.name}", width: {width}), numbering: none)'
 
     def _resolve_asset(self, asset: str) -> Path | None:
         """Absolute path of an extracted asset, or ``None`` when unresolvable."""

@@ -195,3 +195,63 @@ def test_a_stacked_table_cell_keeps_its_line_breaks() -> None:
     assert "MonkeyOCR [27]<br>MinerU2.5 [5]<br>Dolphin-v2 [28]" in md
     # The stack is not fused into one space-joined run.
     assert "MonkeyOCR [27] MinerU2.5 [5]" not in md
+
+
+# --------------------------------------------------------------------------- #
+# Figure caption binding and native figure width
+# --------------------------------------------------------------------------- #
+
+
+def test_a_translated_figure_caption_binds_to_its_image() -> None:
+    """``图 1 | …`` is a caption, not a standalone paragraph.
+
+    The delimiter regex accepted only ``:``/``.``, so the translator's ``|``
+    form missed it; the caption (301 chars) then also cleared the length cap,
+    and the image and its caption rendered on separate pages.
+    """
+    from ubt.render.typst.document_renderer import _CAPTION_RE
+
+    caption = (
+        "图 1 | RT-DocLayout 的性能与鲁棒性。我们的方法在文档布局分析领域取得了新的当前最优水平。"
+        * 3
+    )
+    assert _CAPTION_RE.match(caption)
+    assert _CAPTION_RE.match("Figure 1 | Performance and Robustness")
+
+    from pathlib import Path
+
+    from ubt.core.ir.models import BlockType, IRBlock, make_element
+    from ubt.render.typst.document_renderer import TypstDocumentRenderer
+
+    def img(bid: str) -> IRBlock:
+        el = make_element(id=bid, spine_index=1, block_type=BlockType.IMAGE, source_text="logo.png")
+        return IRBlock(element=el)
+
+    def para(bid: str, text: str) -> IRBlock:
+        el = make_element(id=bid, spine_index=1, block_type=BlockType.NARRATIVE, source_text=text)
+        return IRBlock(element=el, target_text=text)
+
+    tmp = Path("/tmp/opencode/ubt_caption_test")
+    tmp.mkdir(parents=True, exist_ok=True)
+    (tmp / "logo.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    renderer = TypstDocumentRenderer(assets_root=tmp)
+    source, _ = renderer.build_source([img("i1"), para("p1", caption)], tmp / "b", target_lang="zh")
+    # The caption is inside the figure, not a stray paragraph after it.
+    assert "caption: [" in source
+
+
+def test_a_small_logo_keeps_its_own_width() -> None:
+    """A 121pt logo must not be blown up to 88% of the page (this shipped)."""
+    from pathlib import Path
+
+    from ubt.render.typst.document_renderer import TypstDocumentRenderer, _Figure
+
+    tmp = Path("/tmp/opencode/ubt_caption_test")
+    tmp.mkdir(parents=True, exist_ok=True)
+    (tmp / "logo.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    renderer = TypstDocumentRenderer(assets_root=tmp)
+
+    small = renderer._figure_markup(_Figure(asset=str(tmp / "logo.png"), width_pt=121.0), tmp)
+    assert "width: 121pt" in small
+    wide = renderer._figure_markup(_Figure(asset=str(tmp / "logo.png"), width_pt=524.0), tmp)
+    assert "width: 88%" in wide
