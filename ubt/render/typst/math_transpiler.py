@@ -24,6 +24,10 @@ import re
 import unicodedata
 
 from ubt.core.math_symbols import INLINE_SYMBOLS
+from ubt.render.typst.math_ast_transpiler import (
+    has_latex_environments,
+    transpile_latex_ast,
+)
 
 #: A bare number is not math worth converting (``$5`` is currency).
 _BARE_NUMBER_RE = re.compile(r"^\d[\d,.]*$")
@@ -72,6 +76,9 @@ _LATEX_CMD_MAP = INLINE_SYMBOLS
 _TYPST_MATH_WORDS = frozenset(_LATEX_CMD_MAP.values()) | {
     "bb",
     "frak",
+    "mat",
+    "cases",
+    "delim",
     # Emitted by the font-style mapping for ``\mathbf``/``\mathit``. Without
     # these the word-run quoter below turns them into literal text
     # (``#"bold" (W)``), so the formula renders the *name* of the function
@@ -409,7 +416,19 @@ def typstify_math(body: str) -> str | None:
     # that turns it into Typst's ``hash`` glyph could run.
     if body.replace(r"\#", "").count("#") or '"' in body or "//" in body.replace(" ", ""):
         return None
+
     body = _normalize_latex_spacing(body)
+
+    # The AST path runs AFTER normalization: the extractors emit a spaced
+    # dialect (``\begin { pmatrix }``), so gating on the raw body let the real
+    # Docling spelling slip past the environment check and fail closed with
+    # ``None`` — the matrix then rendered as plain text. Normalizing first makes
+    # the gate and the AST see the same, canonical ``\begin{pmatrix}`` shape.
+    if has_latex_environments(body):
+        ast_res = transpile_latex_ast(body, leaf_transpiler=typstify_math)
+        if ast_res is not None:
+            return ast_res
+
     # LaTeX's ``\|`` is the double-vertical-bar NORM delimiter (``\Vert``):
     # left unmapped it slipped past the ``\\([a-zA-Z]+)`` command regex and
     # rendered as Typst's single bar, silently halving every norm in the book
