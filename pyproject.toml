@@ -132,7 +132,7 @@ mcp = [
     "mcp>=2.0.0",
 ]
 pdf = [
-    "docling>=2.0.0",
+    "docling>=2.136.0",
 ]
 # Classical detector OCR (CPU-capable, bundled ONNX models).
 ocr = [
@@ -146,7 +146,7 @@ ocr = [
 ]
 # Academic pipeline suite (Docling + Classical detector OCR + ONNX runtime).
 academic = [
-    "docling>=2.0.0",
+    "docling>=2.136.0",
     "rapidocr>=3.9.0",
     "onnxruntime>=1.29.0",
     "numpy>=1.26.0",

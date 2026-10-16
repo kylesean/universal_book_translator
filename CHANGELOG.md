@@ -58,6 +58,17 @@ Pre-1.0, no tags yet. Everything below is in the current tree.
   default 8, was 1): consecutive blocks are packed up to a section boundary and
   sent as one `<block id=...>` request instead of one call per block. The dry-run
   echo provider emits the macro envelope so rehearsals exercise the same path.
+- **Docling ≥ 2.136** is now the floor for the `pdf` / `academic` extras. The
+  formula VLM (CodeFormulaV2) crops each equation with an `expansion_factor`
+  margin, and its 0.18 default reaches into the equation number and the
+  neighbouring prose line on a tight academic layout, so the model transcribes
+  that text into the LaTeX. Docling's own preset API now accepts the margin and
+  a repetition guard; the parser sets both through it
+  (`expansion_factor=UBT_FORMULA_CROP_MARGIN`, default `0.08`, plus
+  `stop_on_repetition=True`). Only engaged when `formula_enrichment=on`; the
+  default screenshot path is unaffected, and the conversion cache key already
+  folds in the pipeline options, so a margin change or a version bump
+  re-converts instead of replaying a stale entry.
 
 ### Added
 

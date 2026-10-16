@@ -754,6 +754,15 @@ class UBTConfig(BaseSettings):
     # Docling math formula enrichment (CodeFormulaV2 VLM): 'auto' (GPU probe with graceful
     # degradation), 'on' (force VLM), or 'off' (bypass VLM for fast ingest).
     formula_enrichment: FormulaEnrichment = "auto"
+    # Crop margin (fraction of the formula bbox width/height added on each side)
+    # used when the VLM reads a formula. Docling's own default is 0.18, which
+    # on a tight academic layout reaches into the equation number and the
+    # neighbouring prose line: the model then transcribes that text into the
+    # LaTeX (``expansion_factor``, docling#4548). 0.08 keeps the crop around the
+    # equation while staying clear of the surrounding block. Only meaningful when
+    # ``formula_enrichment`` is ``on``: the default screenshot path never crops
+    # with a margin, so this does not affect it.
+    formula_crop_margin: float = Field(default=0.08, ge=0.0, le=0.5)
 
     # -- Page range filter -----------------------------------------------------
     pages: str | None = Field(

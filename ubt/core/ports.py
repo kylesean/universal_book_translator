@@ -65,6 +65,11 @@ class AdapterRuntimeConfig:
     #: environment-only setting quote one model and pay for another.
     ocr_model: str
     formula_enrichment: str
+    #: Crop margin (fraction of the formula bbox) Docling expands on each side
+    #: before the formula VLM reads it. Carried here so the adapter reads the
+    #: resolved config value instead of hardcoding the parser's default: one knob,
+    #: one source. Only consulted when ``formula_enrichment`` resolves to on.
+    formula_crop_margin: float
     #: Accelerator device Docling uses (``auto`` / ``cpu`` / ``cuda``). Carried
     #: here so the adapter reads the resolved config value instead of the
     #: parser re-deriving it: one knob, one source.

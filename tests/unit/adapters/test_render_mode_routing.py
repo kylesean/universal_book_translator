@@ -37,6 +37,7 @@ def _runtime_config(**overrides: object) -> AdapterRuntimeConfig:
         "ocr_model": "",
         "formula_enrichment": "off",
         "docling_device": "cpu",
+        "formula_crop_margin": 0.08,
         "font_family": None,
         "allow_page_upload": False,
     }

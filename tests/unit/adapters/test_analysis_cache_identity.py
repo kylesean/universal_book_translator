@@ -89,6 +89,7 @@ def test_a_requested_enrichment_is_not_served_from_the_block_cache(tmp_path: Pat
             ocr_model="",
             formula_enrichment="on",
             docling_device="cpu",
+            formula_crop_margin=0.08,
             font_family=None,
             allow_page_upload=False,
             cache_dir=str(tmp_path / "cache"),

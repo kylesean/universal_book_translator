@@ -734,6 +734,7 @@ class PipelineOrchestrator:
                 ocr_model=self.config.ocr_model,
                 formula_enrichment=self.config.formula_enrichment,
                 docling_device=self.config.docling_device,
+                formula_crop_margin=self.config.formula_crop_margin,
                 font_family=self.config.font_family,
                 allow_page_upload=self.config.allow_page_upload,
                 cache_dir=str(self.config.cache_dir) if self.config.cache_enabled else "",

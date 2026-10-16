@@ -52,6 +52,7 @@ def test_runtime_config_carries_device_to_adapter() -> None:
         ocr_model="",
         formula_enrichment="auto",
         docling_device="cpu",
+        formula_crop_margin=0.08,
         font_family=None,
         allow_page_upload=False,
     )
@@ -92,7 +93,7 @@ def test_cpu_device_pins_docling_pipeline_options(tmp_path: Path) -> None:
         tmp_path / "page.pdf", [["Hello world test page content here"] * 3 for _ in range(3)]
     )
     symbols = da._docling_symbols()
-    _input_format, _options_cls, converter_cls, _format_cls = symbols
+    _input_format, _options_cls, converter_cls, _format_cls, _code_formula_cls = symbols
     seen: dict[str, object] = {}
     original_init = converter_cls.__init__
 

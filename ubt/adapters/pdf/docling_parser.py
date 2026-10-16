@@ -483,13 +483,20 @@ def extract_with_docling(
     path: Path,
     page_range: tuple[int, int] | None,
     *,
-    symbols: Callable[[], tuple[Any, Any, Any, Any]],
+    symbols: Callable[[], tuple[Any, Any, Any, Any, Any]],
     enrich: bool,
     device: str = "auto",
+    formula_crop_margin: float = 0.08,
 ) -> list[IRBlock]:
     """Extract structured blocks using IBM Docling in strict reading order."""
     configure_hf_environment(enrich=enrich)
-    input_format, pipeline_options_cls, converter_cls, format_option_cls = symbols()
+    (
+        input_format,
+        pipeline_options_cls,
+        converter_cls,
+        format_option_cls,
+        code_formula_options_cls,
+    ) = symbols()
     # Docling is now imported: make its pypdfium2 access share PDFIUM_LOCK.
     _ensure_docling_pdfium_lock()
 
@@ -497,6 +504,20 @@ def extract_with_docling(
     # Born-digital academic PDFs: OCR off (fast, no false positives);
     options.do_ocr = False
     options.do_formula_enrichment = enrich
+    if enrich:
+        # Docling crops each formula with an ``expansion_factor`` margin before
+        # the VLM reads it, defaulting to 0.18 of the bbox on every side. On a
+        # tight academic layout that reaches into the equation number and the
+        # neighbouring prose line, so the model transcribes *that* text into the
+        # LaTeX. Docling's own guidance is to lower the margin (and stop
+        # repetition loops); both are first-class preset options (docling#4548).
+        # ``stop_on_repetition`` also trims the filler a too-tight crop can
+        # provoke, so a smaller margin does not trade one artifact for another.
+        options.code_formula_options = code_formula_options_cls.from_preset(
+            "codeformulav2",
+            expansion_factor=formula_crop_margin,
+            stop_on_repetition=True,
+        )
     options.generate_picture_images = True
     options.images_scale = 2.0
     # Delivered figure/formula/code assets do NOT come from this scale: the

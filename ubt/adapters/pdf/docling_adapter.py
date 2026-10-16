@@ -50,18 +50,31 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _docling_symbols() -> tuple[Any, Any, Any, Any]:
+def _docling_symbols() -> tuple[Any, Any, Any, Any, Any]:
     """Import hook for the Docling converter symbols (seam for tests).
 
     Importing ``docling`` pulls heavy native dependencies (torch/transformers);
     tests stub this hook instead of swapping ``sys.modules`` entries for the
     real packages, avoiding unsafe sys.modules manipulation of native dependencies.
+
+    ``CodeFormulaVlmOptions`` is returned so the parser can tune the formula
+    crop margin through Docling's own preset API (docling#4548) instead of
+    hardcoding it: the preset is what its documentation recommends.
     """
     from docling.datamodel.base_models import InputFormat
-    from docling.datamodel.pipeline_options import PdfPipelineOptions
+    from docling.datamodel.pipeline_options import (
+        CodeFormulaVlmOptions,
+        PdfPipelineOptions,
+    )
     from docling.document_converter import DocumentConverter, PdfFormatOption
 
-    return InputFormat, PdfPipelineOptions, DocumentConverter, PdfFormatOption
+    return (
+        InputFormat,
+        PdfPipelineOptions,
+        DocumentConverter,
+        PdfFormatOption,
+        CodeFormulaVlmOptions,
+    )
 
 
 class _PDFRenderStackMixin:
@@ -289,6 +302,7 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
         ocr_model: str | None = None,
         formula_enrichment: str = "auto",
         docling_device: str = "auto",
+        formula_crop_margin: float = 0.08,
         font_family: str | None = None,
         allow_page_upload: bool = False,
     ) -> None:
@@ -299,6 +313,7 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
         self.ocr_model = ocr_model
         self.formula_enrichment = formula_enrichment
         self.docling_device = docling_device
+        self.formula_crop_margin = formula_crop_margin
         self.allow_page_upload = allow_page_upload
 
     def apply_config(self, runtime_config: AdapterRuntimeConfig) -> None:
@@ -317,6 +332,7 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
         if runtime_config.ocr_model:
             self.ocr_model = runtime_config.ocr_model
         self.formula_enrichment = runtime_config.formula_enrichment
+        self.formula_crop_margin = runtime_config.formula_crop_margin
         # Whether Docling touches the GPU is a separate decision from whether it
         # runs at all: a local LLM on the same card needs Docling on CPU.
         self.docling_device = runtime_config.docling_device
@@ -485,6 +501,7 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
             symbols=_docling_symbols,
             enrich=self._resolve_formula_enrichment(path),
             device=self.docling_device,
+            formula_crop_margin=self.formula_crop_margin,
         )
         # Docling glues a heading's section number to the wrong end
         # ("3.1 Guidance Space" -> "Guidance Space 3.1"); the page's own pdfium
