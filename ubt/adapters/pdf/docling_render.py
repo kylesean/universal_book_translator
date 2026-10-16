@@ -49,6 +49,9 @@ class DoclingRenderStrategy:
         font_family: str | None = None,
     ) -> None:
         self.font_family = font_family
+        #: ``auto`` | ``on`` | ``off`` for placing a recovered table of contents.
+        #: Set from the resolved config by the adapter (``apply_config``).
+        self.toc_mode = "auto"
         # Render skip side channel: plain (block_id, reason) pairs
         # from the most recent render_blocks call. Reset every render.
         self.last_render_skips: list[tuple[str, str]] = []
@@ -141,6 +144,7 @@ class DoclingRenderStrategy:
             columns=columns,
             paper_title=manifest.title if is_academic else "",
             abstract=manifest.metadata.get("abstract", "") if is_academic else "",
+            toc_mode=getattr(self, "toc_mode", "auto"),
         )
         source, stats = renderer.build_source(blocks, build_dir, target_lang)
         typ_path = build_dir / "main.typ"

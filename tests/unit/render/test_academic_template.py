@@ -407,9 +407,73 @@ def test_toc_entries_group_into_runs() -> None:
     assert [[b.id for b in run] for run in runs] == [["t1", "t2"], ["t3"]]
 
 
+def test_a_paper_places_no_recovered_toc_by_default(tmp_path: Path) -> None:
+    """A paper carries no TOC by convention, and the recovered run is the
+    source's section list with source page numbers — so ``auto`` omits it."""
+    renderer = TypstDocumentRenderer(layout_template="academic", columns=1, paper_title="Paper")
+    blocks = [
+        _toc_block("t1", "6 相关工作", "24"),
+        _toc_block("t2", "7 讨论", "25"),
+        _heading_block("h1", "1 引言"),
+    ]
+    source, _ = renderer.build_source(blocks, tmp_path / "b", target_lang="zh")
+    assert "目录" not in source
+    # The TOC rows are still consumed (never promoted to headings); the one
+    # genuine section heading is the only heading emitted.
+    assert source.count("#heading(level: 1)") == 1
+
+
+def test_a_book_places_its_recovered_toc_after_the_front_matter(tmp_path: Path) -> None:
+    """Placement is fixed: title banner first, then the TOC, then the body.
+
+    The source may spell the section list before the title block; the renderer
+    must not reproduce that order.
+    """
+    renderer = TypstDocumentRenderer(
+        layout_template="academic", columns=1, paper_title="P", toc_mode="on"
+    )
+    blocks = [
+        _toc_block("t1", "1 引言", "3"),
+        _toc_block("t2", "2 方法", "4"),
+        _heading_block("h1", "1 引言"),
+        _para_block("p1", "正文。"),
+    ]
+    source, _ = renderer.build_source(blocks, tmp_path / "b", target_lang="zh")
+    # The title banner opens the document, the TOC follows it.
+    assert source.index("P") < source.index("目录")
+    # And the TOC precedes the first body heading.
+    assert source.index("目录") < source.index("#heading(level: 1)")
+
+
+def test_toc_mode_on_forces_it_for_a_paper(tmp_path: Path) -> None:
+    renderer = TypstDocumentRenderer(
+        layout_template="academic", columns=1, paper_title="P", toc_mode="on"
+    )
+    blocks = [_toc_block("t1", "1 引言", "3"), _heading_block("h1", "1 引言")]
+    source, _ = renderer.build_source(blocks, tmp_path / "b", target_lang="zh")
+    assert "目录" in source
+
+
+def test_toc_mode_off_suppresses_a_book_toc(tmp_path: Path) -> None:
+    renderer = TypstDocumentRenderer(layout_template="book", toc_mode="off")
+    blocks = [_toc_block("t1", "Chapter One", "3"), _para_block("p1", "Body.")]
+    source, _ = renderer.build_source(blocks, tmp_path / "b", target_lang="zh")
+    assert "目录" not in source
+
+
+def test_no_toc_is_ever_invented(tmp_path: Path) -> None:
+    """No recovered TOC rows means no TOC, even under ``on``."""
+    renderer = TypstDocumentRenderer(layout_template="book", toc_mode="on")
+    blocks = [_heading_block("h1", "Chapter One"), _para_block("p1", "Body.")]
+    source, _ = renderer.build_source(blocks, tmp_path / "b", target_lang="zh")
+    assert "目录" not in source
+
+
 def test_toc_rows_do_not_become_section_headings(tmp_path: Path) -> None:
     """The defect: TOC rows rendered as ``#heading`` (orphaned, empty page)."""
-    renderer = TypstDocumentRenderer(layout_template="academic", columns=1, paper_title="Paper")
+    renderer = TypstDocumentRenderer(
+        layout_template="academic", columns=1, paper_title="Paper", toc_mode="on"
+    )
     blocks = [
         _toc_block("t1", "6 相关工作", "24"),
         _toc_block("t2", "7 讨论", "25"),
@@ -426,7 +490,9 @@ def test_toc_rows_do_not_become_section_headings(tmp_path: Path) -> None:
 
 
 def test_toc_renders_and_compiles(tmp_path: Path) -> None:
-    renderer = TypstDocumentRenderer(layout_template="academic", columns=1, paper_title="Paper")
+    renderer = TypstDocumentRenderer(
+        layout_template="academic", columns=1, paper_title="Paper", toc_mode="on"
+    )
     blocks = [
         _toc_block("t1", "1 引言", "3"),
         _toc_block("t2", "2 切换 Transformer", "4"),

@@ -53,6 +53,7 @@ def test_runtime_config_carries_device_to_adapter() -> None:
         formula_enrichment="auto",
         docling_device="cpu",
         formula_crop_margin=0.08,
+        toc_mode="auto",
         font_family=None,
         allow_page_upload=False,
     )

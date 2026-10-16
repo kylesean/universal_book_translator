@@ -137,6 +137,7 @@ def test_crop_margin_reaches_the_adapter() -> None:
             formula_enrichment="on",
             docling_device="cpu",
             formula_crop_margin=0.07,
+            toc_mode="auto",
             font_family=None,
             allow_page_upload=False,
         )

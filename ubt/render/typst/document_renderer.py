@@ -196,8 +196,28 @@ def _group_toc_runs(blocks: Sequence[IRBlock]) -> list[list[IRBlock]]:
     return runs
 
 
+def resolve_toc_mode(mode: str, *, layout_template: str, has_toc: bool) -> bool:
+    """Whether to place the recovered table of contents.
+
+    ``auto`` follows the document kind: a paper carries no TOC by convention,
+    and the run a PDF reader picks up is the source's section list with the
+    *source* page numbers — which the reflowed deliverable does not reproduce,
+    so placing it is worse than omitting it. ``on`` forces it (the reader may
+    have recovered a real TOC and the caller wants it), ``off`` suppresses it.
+    A document with no recovered TOC rows never gets an invented one.
+    """
+    if not has_toc:
+        return False
+    normalized = str(mode or "auto").strip().lower()
+    if normalized in ("off", "false", "0"):
+        return False
+    if normalized in ("on", "true", "1"):
+        return True
+    return layout_template != "academic"
+
+
 def render_toc(entries: Sequence[tuple[str, str]]) -> str:
-    """A table of contents: a heading plus one dot-leader row per entry.
+    """A table of contents: a heading plus one dot-leadered row per entry.
 
     ``entries`` are ``(title, page)`` pairs, title already delivered (translated
     or kept) and page the reader's recorded source-pagination destination. The
@@ -205,25 +225,45 @@ def render_toc(entries: Sequence[tuple[str, str]]) -> str:
     columns nor is mistaken for a run of section headings — both were the
     visible defect when TOC rows were emitted as ``#heading``s.
 
-    Typst has no built-in dot leader, so each row is a two-cell grid (title
-    left, page right) carrying a dotted bottom border.
+    Typst has no built-in dot leader, so each row is a three-cell grid — title,
+    a fill-dotted spacer, page — with a generous row gutter and a two-step size
+    hierarchy, so a long entry list reads as a list rather than a wall of text.
     """
-    lines = ["#block(width: 100%)[", '  #text(size: 13pt, weight: "bold")[目录]', "  #v(0.6em)"]
-    lines.append("  #grid(")
-    lines.append("    columns: (1fr),")
-    lines.append("    row-gutter: 0.25em,")
-    lines.append('    stroke: (bottom: (paint: luma(150), thickness: 0.4pt, dash: "dotted")),')
-    lines.append("    align: (left + horizon),")
+    #: An entry title may already carry a section number ("2.1 …"); the indented
+    #: look for a numbered subsection is left to the title itself rather than
+    #: re-derived here (the reader's number is the source's own, not ours).
+    lines = [
+        "#block(width: 100%, above: 0.6em, below: 1.4em)[",
+        '  #text(size: 14pt, weight: "bold")[目录]',
+        "  #v(0.9em)",
+        "  #grid(",
+        "    columns: (1fr),",
+        "    row-gutter: 0.6em,",
+        "    align: left,",
+    ]
     for title, page in entries:
         body = escape_markup(title.strip())
         number = escape_markup(page.strip())
+        # Each row is a nested ``grid`` call. The outer ``#grid(...)`` puts its
+        # arguments in *code* mode, so the row is a bare ``grid(...)`` (no ``#``)
+        # whose cells are content arguments; ``box`` builds the dot leader and
+        # ``repeat`` fills the spacer with dots.
         lines.append(
-            "    [#grid(columns: (1fr, auto), align: (left + horizon, right + horizon), "
-            f"[#text(size: 10pt)[{body}]], [#text(size: 10pt)[{number}]])],"
+            "    grid("
+            "columns: (auto, 1fr, auto), column-gutter: 0.55em, "
+            "align: (left + horizon, left + horizon, right + horizon), "
+            f"text(size: 10.5pt)[{body}], "
+            "box(width: 100%, height: 0.75em, baseline: 0.35em, "
+            "repeat[#text(fill: luma(195))[.]]), "
+            f"text(size: 10.5pt)[{number}],"
+            "),"
         )
-    lines.append("  )")
-    lines.append("  #v(1.0em)")
-    lines.append("]")
+    lines.extend(
+        [
+            "  )",
+            "]",
+        ]
+    )
     return "\n".join(lines)
 
 
@@ -704,6 +744,7 @@ class TypstDocumentRenderer:
         columns: int = 1,
         paper_title: str = "",
         abstract: str = "",
+        toc_mode: str = "auto",
     ) -> None:
         self.assets_root = Path(assets_root) if assets_root is not None else None
         self.figure_width = figure_width
@@ -712,6 +753,10 @@ class TypstDocumentRenderer:
         self.columns = columns
         self.paper_title = paper_title
         self.abstract = abstract
+        #: ``auto`` | ``on`` | ``off`` for placing a recovered table of contents.
+        #: ``auto`` is none for a paper (by convention) and one for a book that
+        #: carries TOC rows; see :func:`resolve_toc_mode`.
+        self.toc_mode = toc_mode
         #: Body/heading font stack for the preamble. ``None`` keeps the
         #: historical hard-coded Latin+CJK-SC stack; the strategy passes the
         #: language-resolved stack (``resolve_font_config(target_lang)``) so a
@@ -863,6 +908,38 @@ class TypstDocumentRenderer:
         build_dir.mkdir(parents=True, exist_ok=True)
         self._prewarm_math_gate(blocks)
         body: list[str] = []
+
+        # Table of contents: the reader records ``toc_entry`` per row so the TOC
+        # is not scattered into headings-without-body plus bare page numbers.
+        # Group each run of consecutive TOC rows into one full-width block (with
+        # the recovered page numbers) and mark them consumed, so they never take
+        # the ``#heading`` path below — the defect this fixes emitted every TOC
+        # row as a section heading on a near-empty page, dropping the numbers.
+        #
+        # Placement is *fixed*, not source order: a TOC belongs after the title
+        # page and before the body. Emitting it where the reader happened to see
+        # it put it on the opening page, above the title banner, when the source
+        # spelled the section list before the title block.
+        toc_consumed: set[str] = set()
+        toc_chunks: list[str] = []
+        for entry_blocks in _group_toc_runs(blocks):
+            title_page: list[tuple[str, str]] = []
+            for blk in entry_blocks:
+                title = _block_text(blk).strip()
+                page = str(blk.provenance.toc_page or "").strip()
+                if title:
+                    title_page.append((title, page))
+                toc_consumed.add(blk.id)
+                self.stats.blocks_rendered += 1
+            if title_page:
+                toc_chunks.append(render_toc(title_page))
+        if resolve_toc_mode(
+            getattr(self, "toc_mode", "auto"),
+            layout_template=getattr(self, "layout_template", "book"),
+            has_toc=bool(toc_chunks),
+        ):
+            body.extend(toc_chunks)
+
         if getattr(self, "layout_template", "book") == "academic" and getattr(
             self, "paper_title", ""
         ):
@@ -874,7 +951,8 @@ class TypstDocumentRenderer:
                 columns=getattr(self, "columns", 1),
             )
             if banner:
-                body.append(banner)
+                # The banner *precedes* the TOC: a paper opens on its title.
+                body.insert(0, banner)
         pending: _Figure | None = None
 
         def flush_figure() -> None:
@@ -883,25 +961,6 @@ class TypstDocumentRenderer:
                 return
             body.append(self._figure_markup(pending, build_dir))
             pending = None
-
-        # Table of contents: the reader records ``toc_entry`` per row so the TOC
-        # is not scattered into headings-without-body plus bare page numbers.
-        # Group each run of consecutive TOC rows into one full-width block (with
-        # the recovered page numbers) and mark them consumed, so they never take
-        # the ``#heading`` path below — the defect this fixes emitted every TOC
-        # row as a section heading on a near-empty page, dropping the numbers.
-        toc_consumed: set[str] = set()
-        for entry_blocks in _group_toc_runs(blocks):
-            title_page: list[tuple[str, str]] = []
-            for blk in entry_blocks:
-                title = _block_text(blk).strip()
-                page = str(blk.provenance.toc_page or "").strip()
-                if title:
-                    title_page.append((title, page))
-                toc_consumed.add(blk.id)
-                self.stats.blocks_rendered += 1
-            if title_page:
-                body.append(render_toc(title_page))
 
         for block in blocks:
             self.stats.blocks_seen += 1

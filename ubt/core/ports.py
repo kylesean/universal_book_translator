@@ -70,6 +70,10 @@ class AdapterRuntimeConfig:
     #: resolved config value instead of hardcoding the parser's default: one knob,
     #: one source. Only consulted when ``formula_enrichment`` resolves to on.
     formula_crop_margin: float
+    #: ``auto`` | ``on`` | ``off`` for placing a recovered table of contents.
+    #: Carried here so the render strategy reads the resolved config value; the
+    #: default (``auto``) places none for a paper and one for a book that has one.
+    toc_mode: str
     #: Accelerator device Docling uses (``auto`` / ``cpu`` / ``cuda``). Carried
     #: here so the adapter reads the resolved config value instead of the
     #: parser re-deriving it: one knob, one source.

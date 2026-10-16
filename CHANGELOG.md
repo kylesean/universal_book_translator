@@ -69,6 +69,17 @@ Pre-1.0, no tags yet. Everything below is in the current tree.
   default screenshot path is unaffected, and the conversion cache key already
   folds in the pipeline options, so a margin change or a version bump
   re-converts instead of replaying a stale entry.
+- A recovered **table of contents** is now placed at a **fixed position** —
+  after the title page and before the body — instead of wherever the reader
+  happened to see it. On a paper whose source spelled its section list before
+  the title block, the TOC was emitted on the opening page *above* the title,
+  which is not where a TOC belongs. And a paper now carries **no TOC by
+  default** (`UBT_TOC=auto`): a paper has none by convention, and the run a PDF
+  reader picks up is the source's section list with the *source* page numbers,
+  which the reflowed deliverable does not reproduce. `UBT_TOC=on` forces it,
+  `off` suppresses it; a TOC the reader never recovered is never invented.
+  Its typography was rebuilt too — real dot leaders, a generous row gutter, and
+  a two-step size hierarchy replace the cramped two-column rows.
 
 ### Added
 

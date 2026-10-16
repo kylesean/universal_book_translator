@@ -106,6 +106,7 @@ PromptStrategyName = Literal["auto", "minimal", "hybrid", "rich"]
 OcrMode = Literal["auto", "sidecar", "cloud", "vlm", "rapidocr", "off"]
 ExecMode = Literal["auto", "short", "long"]
 FormulaEnrichment = Literal["auto", "on", "off"]
+TocMode = Literal["auto", "on", "off"]
 #: Table handling for PDF. ``auto`` translates every table (complex ones also
 #: get a translated appendix companion); ``appendix`` always writes the
 #: companion; ``skip`` never translates tables. ``overlay`` is not a value:
@@ -763,6 +764,14 @@ class UBTConfig(BaseSettings):
     # ``formula_enrichment`` is ``on``: the default screenshot path never crops
     # with a margin, so this does not affect it.
     formula_crop_margin: float = Field(default=0.08, ge=0.0, le=0.5)
+    # Whether to place a table of contents recovered from the source.
+    # Academic papers (``genre_profile=paper``) carry no TOC by convention, and
+    # the one a PDF reader picks up is often a run of section titles with the
+    # *source* page numbers, which the rebuilt (reflowed) document does not
+    # preserve — so the default is ``auto``: none for a paper, one for a book
+    # that actually has it. ``on`` forces it, ``off`` suppresses it. Only a TOC
+    # the reader actually recovered is ever placed; this never invents one.
+    toc_mode: TocMode = "auto"
 
     # -- Page range filter -----------------------------------------------------
     pages: str | None = Field(
@@ -826,6 +835,7 @@ class UBTConfig(BaseSettings):
         "prompt_strategy",
         "exec_mode",
         "formula_enrichment",
+        "toc_mode",
         "spill_policy",
         "table_render_mode",
         "env",
