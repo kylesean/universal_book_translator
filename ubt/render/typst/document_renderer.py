@@ -138,6 +138,11 @@ _FIGURE_NATIVE_MAX_PT = 300.0
 #: swallow a body paragraph directly under an image.
 _PENDING_CAPTION_MAX_CHARS = 320
 
+#: Smallest share (in characters) a table column keeps when widths are derived
+#: from content. Stops a short numeric column (``FPS``, ``3B``) from collapsing
+#: to zero beside a long text column, while still letting the text column lead.
+_TABLE_COL_MIN_WEIGHT = 6
+
 #: A heading that is really running chrome (an arXiv stamp, a journal line, a
 #: submission date). Kept out of the body so the document opens on its title.
 _CHROME_HEADING_RE = re.compile(
@@ -604,9 +609,25 @@ def render_table(markup: str, *, is_math_ok: Callable[[str], bool] | None = None
             rendered.append(f"[*{text}*]" if header and text else f"[{text}]")
         return ", ".join(rendered)
 
+    # Column widths follow content, not an even split. A 9-column benchmark
+    # table with an even split crushed the "识别方法" column (wrapped
+    # "MonkeyOCR [27]" onto three lines) and squeezed "公式 CDM↑" into one glyph
+    # per line. Weight each column by its longest cell (header included), with a
+    # floor so a short numeric column still gets room; ``1fr`` weights are
+    # relative, so the table stays the text width.
+    weights = []
+    for col in range(columns):
+        longest = 0
+        for values in (headers, *rows):
+            if col < len(values):
+                for part in re.split(r"<br\s*/?>", values[col]):
+                    longest = max(longest, len(part.strip()))
+        weights.append(max(longest, _TABLE_COL_MIN_WEIGHT))
+    column_spec = "(" + ", ".join(f"{w}fr" for w in weights) + ")"
+
     lines = [
         "#table(",
-        f"  columns: {columns},",
+        f"  columns: {column_spec},",
         "  inset: 5pt,",
         "  align: (col, row) => if row == 0 { center + horizon } else { left + horizon },",
         "  stroke: none,",

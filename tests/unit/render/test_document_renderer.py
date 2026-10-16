@@ -203,6 +203,22 @@ def test_a_table_is_rebuilt_with_translated_headers(tmp_path: Path) -> None:
     assert "[*Model*]" in out
 
 
+def test_table_columns_are_weighted_by_content() -> None:
+    """An even split crushes a long text column beside short numeric ones.
+
+    Measured on the PaddleOCR benchmark table: 9 even columns wrapped
+    "MonkeyOCR [27]" onto three lines and squeezed "公式 CDM↑" to one glyph per
+    line. Widths now follow the longest cell per column.
+    """
+    markup = (
+        "| Layout Analysis | Params | FPS | RecognitionMethod |\n"
+        "|---|---|---|---|\n"
+        "| DocLayout-YOLO [14] | 20M | 107.4 | MonkeyOCR [27] MinerU2.5 [5] |"
+    )
+    out = render_table(markup)
+    assert "columns: (19fr, 6fr, 6fr, 28fr)" in out
+
+
 def test_a_formula_block_is_typeset_as_math(tmp_path: Path) -> None:
     """A formula block is skip-translate but must NOT be pasted as source."""
     blocks = [
