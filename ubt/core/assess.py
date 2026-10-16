@@ -539,13 +539,9 @@ def _build_cost(
         # repair line. When rerank *is* on, each of the k candidates carries
         # its own source span and emits its own completion, so both prompt and
         # completion sides scale with k.
-        rerank_on = config.rerank_k > 1 and config.qe_engine in (
-            "comet",
-            "cometkiwi",
-            "neural",
-            "subprocess",
-        )
-        rerank_mult = config.rerank_k if rerank_on else 1
+        # With the neural QE scorer retired there is no engine that ranks
+        # candidates, so rerank is never on.
+        rerank_mult = 1
         repair_calls = repair_blocks * rerank_mult
         repair_tokens = (
             math.ceil((estimated_tokens * repair_blocks) / billable_blocks)

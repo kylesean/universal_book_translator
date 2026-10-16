@@ -21,8 +21,8 @@ from ubt.core.engine.stage_context import StageContext
 from ubt.core.exceptions import BudgetExceededError, JobInterruptedError
 from ubt.core.ir.models import BlockStatus
 from ubt.core.memory.glossary_table import build_chunk_glossary_table
-from ubt.core.qe.comet_runner import GLOSSARY_VIOLATION_MARKER
 from ubt.core.qe.consistency_enforce import ConsistencyTask, plan_consistency_tasks
+from ubt.core.qe.heuristic import GLOSSARY_VIOLATION_MARKER
 from ubt.core.qe.term_metrics import evaluate_terms
 from ubt.core.validators.consistency import GlossaryConsistencyValidator
 

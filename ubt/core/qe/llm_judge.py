@@ -28,7 +28,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from ubt.core.qe.base import BaseQERunner
-from ubt.core.qe.comet_runner import (
+from ubt.core.qe.heuristic import (
     QE_SCORE_PASS,
     QE_SCORE_STRUCTURAL_OTHER,
     HeuristicQERunner,

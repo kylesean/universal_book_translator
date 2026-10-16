@@ -9,7 +9,7 @@ consumer:
   terminology metrics *and* the consistency stage's repair planner;
 * :class:`ubt.core.validators.span_repair.MQMSpanAnnotator` — the terminology
   section of the span annotator;
-* :func:`ubt.core.qe.comet_runner.glossary_violation_flag` — a thin wrapper
+* :func:`ubt.core.qe.heuristic.glossary_violation_flag` — a thin wrapper
   over the validator;
 * and the read-only scan inside the rewriter itself.
 

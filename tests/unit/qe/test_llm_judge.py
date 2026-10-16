@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from ubt.core.qe.comet_runner import (
+from ubt.core.qe.heuristic import (
     QE_SCORE_PASS,
     QE_SCORE_STRUCTURAL_OTHER,
     HeuristicQERunner,

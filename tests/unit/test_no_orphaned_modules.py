@@ -53,12 +53,10 @@ _LIVE_IMPORT_ROOTS = ("ubt", "scripts", "tests")
 _PRODUCTION_IMPORT_ROOTS = ("ubt", "scripts")
 
 #: Modules reached only through a string, never an import: subprocess entry
-#: points launched as ``python -m ...`` or as a script path. Each must name why
-#: it cannot be imported statically.
+#: points launched as ``python -m ...``. Each must name why it cannot be
+#: imported statically.
 _DYNAMIC_ENTRY_POINTS: frozenset[str] = frozenset(
     {
-        # Launched by ``SubprocessQERunner`` as ``python <script> --serve``.
-        "ubt.core.qe.comet_score_ipc",
         # Launched as ``python -m ubt.adapters.pdf.vlm.drivers.deepseek_worker``.
         "ubt.adapters.pdf.vlm.drivers.deepseek_worker",
     }

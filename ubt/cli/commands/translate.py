@@ -844,9 +844,9 @@ def translate(
                 _ui_msg(
                     "  [dim]Quality: not machine-scored this run (heuristic QE engine; "
                     "avg-QE figures in the report are placeholders). "
-                    "Set UBT_QE_ENGINE=comet or UBT_QE_JUDGE_ENABLED=true to measure.[/]",
+                    "Set UBT_QE_JUDGE_ENABLED=true (with UBT_QE_ENGINE=tiered) to measure.[/]",
                     "  [dim]质量：本次运行未做机器评分（启发式 QE 引擎，报告中的 avg-QE "
-                    "为占位值）。设置 UBT_QE_ENGINE=comet 或 UBT_QE_JUDGE_ENABLED=true "
+                    "为占位值）。设置 UBT_QE_JUDGE_ENABLED=true（配合 UBT_QE_ENGINE=tiered）"
                     "以启用测量。[/]",
                 )
             )

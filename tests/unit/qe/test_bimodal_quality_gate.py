@@ -14,7 +14,7 @@ import pytest
 
 from ubt.core.engine.repair_loop import RepairLoop
 from ubt.core.ir.models import BlockStatus, IRBlock
-from ubt.core.qe.comet_runner import HeuristicQERunner
+from ubt.core.qe.heuristic import HeuristicQERunner
 from ubt.model.ast import Paragraph
 from ubt.model.span import Span
 

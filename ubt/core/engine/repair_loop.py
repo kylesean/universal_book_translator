@@ -7,9 +7,9 @@ from typing import Any
 from ubt.core.exceptions import MTQEEvaluationError
 from ubt.core.ir.models import BlockStatus, IRBlock
 from ubt.core.qe.base import BaseQERunner
-from ubt.core.qe.comet_runner import GLOSSARY_VIOLATION_MARKER
 from ubt.core.qe.defect_taxonomy import is_format_only
 from ubt.core.qe.fast_pass import FastPassFilter
+from ubt.core.qe.heuristic import GLOSSARY_VIOLATION_MARKER
 from ubt.core.router.router import ModelRouter
 from ubt.core.validators.span_repair import MQMSpanAnnotator, SpanRepairSplicer
 

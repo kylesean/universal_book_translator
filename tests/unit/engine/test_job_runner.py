@@ -20,7 +20,7 @@ from ubt.core.engine.dry_run import DryRunModelProvider
 from ubt.core.engine.events import TranslationProgressEvent
 from ubt.core.engine.job_runner import build_job_orchestrator, resolve_job_paths
 from ubt.core.engine.ledger import SQLiteJobLedger
-from ubt.core.qe.comet_runner import MockQERunner
+from ubt.core.qe.heuristic import MockQERunner
 
 pytestmark = pytest.mark.fast
 

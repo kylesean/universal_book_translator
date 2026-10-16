@@ -57,9 +57,9 @@ ApiMode = Literal["openai-chat", "openai-responses", "anthropic-messages", "gemi
 PdfEngine = str
 # "heuristic" emits a discrete defect-class proxy (12 fixed bands),
 # NOT a calibrated quality score — see QE_DEFECT_CLASS_LEGEND in
-# ubt/core/qe/comet_runner.py. Calibrated numbers require a neural runner
-# ("comet"/"subprocess") or the tiered mix.
-QeEngine = Literal["heuristic", "comet", "cometkiwi", "neural", "subprocess", "tiered"]
+# ubt/core/qe/heuristic.py. A calibrated neural score (CometKiwi) was retired
+# for commercial-license compliance; the tiered mix adds an opt-in LLM judge.
+QeEngine = Literal["heuristic", "tiered"]
 #: What the reader receives: target only, or source beside target.
 #: ``dual`` is a single layout — each block's source line above its translation —
 #: because the renderer rebuilds the page and a page-zip against the
@@ -138,23 +138,6 @@ def _default_api_key() -> SecretStr:
     ``api_key`` field.
     """
     return SecretStr(MOCK_API_KEY)
-
-
-def packaged_comet_script() -> Path:
-    """Absolute path to the packaged CometKiwi scorer, independent of cwd.
-
-    The scorer ships inside ``ubt/`` so ``packages=["ubt"]`` carries it into
-    the wheel. The historical probe was ``Path("scripts/comet_score_ipc.py")``
-    — relative to the *current working directory* — which resolves to ``None``
-    for every installed user (a wheel has no ``scripts/``), silently downgrading
-    neural QE to the heuristic scorer.
-    """
-    return Path(__file__).resolve().parent / "qe" / "comet_score_ipc.py"
-
-
-def _default_comet_script() -> Path | None:
-    candidate = packaged_comet_script()
-    return candidate if candidate.exists() else None
 
 
 _MAX_PAGE_RANGE = 100_000
@@ -449,8 +432,6 @@ class UBTConfig(BaseSettings):
     consistency_enforce: Literal["off", "report", "repair"] = "off"
     consistency_max_repairs: int = Field(default=50, ge=0)
     qe_engine: QeEngine = "heuristic"
-    comet_model: str = "Unbabel/wmt22-cometkiwi-da"
-    comet_script_path: Path | None = Field(default_factory=_default_comet_script)
 
     # -- L3 LLM-as-Judge (suspect-only gray-zone rescoring, off by default) --
     qe_judge_enabled: bool = False
@@ -804,13 +785,16 @@ class UBTConfig(BaseSettings):
     # bootstraps under a lock that a UBTConfig built there must not re-enter.
 
     # -- QE engine normalization --------------------------------------------------
-    # Canonical QE engines are heuristic | subprocess | tiered.
-    # Alias names comet / cometkiwi / neural all map to "external subprocess scorer"
-    # and normalize to subprocess.
+    # Canonical QE engines are heuristic | tiered. The retired neural names
+    # (comet / cometkiwi / neural / subprocess) are accepted for backward
+    # compatibility and normalize to the heuristic runner with a warning: the
+    # CC-BY-NC-SA CometKiwi weights were removed for commercial-license
+    # compliance, and a config that asked for them must not crash.
     _QE_LEGACY_ALIASES: ClassVar[dict[str, str]] = {
-        "comet": "subprocess",
-        "cometkiwi": "subprocess",
-        "neural": "subprocess",
+        "comet": "heuristic",
+        "cometkiwi": "heuristic",
+        "neural": "heuristic",
+        "subprocess": "heuristic",
     }
 
     @field_validator(
@@ -842,8 +826,10 @@ class UBTConfig(BaseSettings):
             lowered = value.strip().lower()
             if lowered in cls._QE_LEGACY_ALIASES:
                 logger.warning(
-                    "qe_engine=%r is deprecated; normalized to 'subprocess' "
-                    "(same external scorer, no behavior change)",
+                    "qe_engine=%r is retired (the neural CometKiwi scorer was "
+                    "removed for commercial-license compliance); normalized to "
+                    "'heuristic'. Use 'tiered' with UBT_QE_JUDGE_ENABLED=true for "
+                    "an LLM-judge gray-zone rescore.",
                     value,
                 )
                 return cls._QE_LEGACY_ALIASES[lowered]
@@ -881,17 +867,17 @@ class UBTConfig(BaseSettings):
                 "consistency_enforce='repair' requires consistency_max_repairs > 0; "
                 "use 'report' to detect drift without re-translating."
             )
-        # Best-of-n rerank ranks candidates by a neural QE score. The heuristic
-        # runner emits discrete defect-class bands with nothing to rank, and
-        # the tiered runner scores through the same heuristic leg, so
-        # RepairLoop disables reranking for both; surface the no-op instead of
+        # Best-of-n rerank ranks candidates by a calibrated QE score. The
+        # heuristic runner emits discrete defect-class bands with nothing to
+        # rank, and the tiered runner scores through the same heuristic leg, so
+        # with the neural scorer retired there is no engine that can rank;
+        # RepairLoop disables reranking, so surface the no-op instead of
         # silently spending a draft per extra candidate.
-        if self.rerank_k > 1 and self.qe_engine in ("heuristic", "tiered"):
+        if self.rerank_k > 1:
             logger.warning(
-                "rerank_k=%d has no effect with qe_engine='%s' (no calibrated "
-                "score to rank candidates); set a neural qe_engine or rerank_k=1.",
+                "rerank_k=%d has no effect (no calibrated QE score to rank "
+                "candidates after the neural scorer was retired); use rerank_k=1.",
                 self.rerank_k,
-                self.qe_engine,
             )
         # If draft_model was explicitly configured (via env or constructor or copy)
         # and repair_model was NOT explicitly configured, sync repair_model to draft_model.

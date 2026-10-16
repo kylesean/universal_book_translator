@@ -516,19 +516,7 @@ def collect_checks(config: UBTConfig, *, probe: bool = False) -> list[_Check]:
 
     # -- quality ------------------------------------------------------------
     group = _GROUPS[2]
-    if config.qe_engine == "subprocess":
-        script = config.comet_script_path
-        if script is not None and script.exists():
-            record("QE (neural)", "OK", f"scoring script: {script}")
-        else:
-            record(
-                "QE (neural)",
-                "FAIL",
-                f"scoring script missing: {script}",
-                fix="point UBT_COMET_SCRIPT_PATH at the scoring script, or set "
-                "UBT_QE_ENGINE=tiered/heuristic",
-            )
-    elif config.qe_engine == "tiered":
+    if config.qe_engine == "tiered":
         judge = config.qe_judge_model or config.repair_model
         record(
             "QE (tiered)",

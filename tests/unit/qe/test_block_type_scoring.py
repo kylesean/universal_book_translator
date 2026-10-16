@@ -20,7 +20,7 @@ import pytest
 from ubt.core.engine.stages.quality_gate import _audit_pass_sample
 from ubt.core.ir.models import BlockType, IRBlock
 from ubt.core.qe.base import BaseQERunner
-from ubt.core.qe.comet_runner import (
+from ubt.core.qe.heuristic import (
     QE_SCORE_FABRICATED,
     QE_SCORE_SCRIPT_DENSITY,
     HeuristicQERunner,

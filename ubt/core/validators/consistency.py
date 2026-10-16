@@ -1423,7 +1423,7 @@ class GlossaryConsistencyValidator(ContentValidator):
 
     def validate(self, original: str | None, translated: str | None) -> ValidationResult:
         # Deferred import, not top-level: ``ubt.core.qe``'s package __init__
-        # pulls in comet_runner and fast_pass, both of which import THIS
+        # pulls in the heuristic runner and fast_pass, both of which import THIS
         # module — a module-level ``from ubt.core.qe.term_drift import ...``
         # would make the validators-first import order (what every test module
         # and most callers use) die on a partially-initialized ImportError. At

@@ -2,45 +2,44 @@
 
 Two halves (2026-10-14 review, W2-2):
 
-1. ``SubprocessQERunner.with_languages`` used to mutate ``self`` in place —
-   the API holds ONE runner for concurrent jobs, so job B's rebind leaked
-   into job A's in-flight scoring. It now returns a rebound copy.
+1. ``with_languages`` used to mutate ``self`` in place — the API holds ONE
+   runner for concurrent jobs, so job B's rebind leaked into job A's in-flight
+   scoring. It now returns a rebound copy.
 2. ``PipelineOrchestrator._runtime_qe_runner`` passed an INJECTED runner
-   through unchanged, so an injected subprocess runner scored every pair
-   with its construction-time en→zh heuristic thresholds. It now runs
-   every runner through ``with_languages`` (same-instance when the pair
-   already matches, so the shared path stays cheap).
+   through unchanged, so an injected runner scored every pair with its
+   construction-time en→zh thresholds. It now runs every runner through
+   ``with_languages`` (same-instance when the pair already matches, so the
+   shared path stays cheap).
+
+The concrete runner under test is the heuristic one; the neural subprocess
+runner these tests originally used was retired for license compliance.
 """
 
 from __future__ import annotations
-
-from pathlib import Path
 
 import pytest
 
 from ubt.core.config import UBTConfig
 from ubt.core.engine.pipeline import PipelineOrchestrator
-from ubt.core.qe.comet_runner import SubprocessQERunner
+from ubt.core.qe.heuristic import HeuristicQERunner
 
 pytestmark = pytest.mark.fast
 
 
-def _runner() -> SubprocessQERunner:
-    return SubprocessQERunner(
-        python_bin=Path("/usr/bin/false"), script_path=Path("/nonexistent/scorer.py")
-    )
+def _runner() -> HeuristicQERunner:
+    return HeuristicQERunner(source_lang="en", target_lang="zh")
 
 
-def test_subprocess_runner_with_languages_returns_a_copy_not_self() -> None:
+def test_runner_with_languages_returns_a_copy_not_self() -> None:
     shared = _runner()  # construction-time en -> zh
     rebound = shared.with_languages("en", "ja")
     assert rebound is not shared
-    assert (rebound._source_lang, rebound._target_lang) == ("en", "ja")
+    assert (rebound.source_lang, rebound.target_lang) == ("en", "ja")
     # The shared instance keeps its own binding — no leak.
-    assert (shared._source_lang, shared._target_lang) == ("en", "zh")
+    assert (shared.source_lang, shared.target_lang) == ("en", "zh")
 
 
-def test_subprocess_runner_same_pair_returns_self() -> None:
+def test_runner_same_pair_returns_self() -> None:
     shared = _runner()  # en -> zh
     assert shared.with_languages("en", "zh") is shared
 
@@ -57,10 +56,10 @@ def test_pipeline_binds_an_injected_runner_to_the_run_pair() -> None:
     bound = orchestrator._runtime_qe_runner("en", "ja")
     # The copy keeps the concrete class (a rebind must not degrade it to the
     # base runner) and carries the requested pair.
-    assert isinstance(bound, SubprocessQERunner)
+    assert isinstance(bound, HeuristicQERunner)
     # The shared instance is untouched; the run gets a bound copy.
-    assert (runner._source_lang, runner._target_lang) == ("en", "zh")
-    assert (bound._source_lang, bound._target_lang) == ("en", "ja")
+    assert (runner.source_lang, runner.target_lang) == ("en", "zh")
+    assert (bound.source_lang, bound.target_lang) == ("en", "ja")
     # Same pair as construction: the shared instance itself (cheap path).
     same = orchestrator._runtime_qe_runner("en", "zh")
     assert same is runner

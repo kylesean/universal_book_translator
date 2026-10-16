@@ -69,6 +69,7 @@ dependencies = [
     "python-docx>=1.1.0",
     "pillow>=12.3.0",
     "pikepdf>=10.13.0.post1",
+    "pylatexenc>=2.10",
     # Last-resort charset detection for source files with neither a BOM nor a
     # declared encoding (GBK/Shift-JIS Markdown, .txt). See adapters/base.py
     # decode_markup; without it those bytes decode to U+FFFD before any sniffer
@@ -96,10 +97,9 @@ dev = [
     # Anti-hang: pairs with the `--timeout=600` in [tool.pytest.ini_options].
     # Without it a single wedged test can sit until the runner's own wall-clock
     # cap (6h on GitHub Actions). 600s rather than 300s: the deterministic tier
-    # is seconds (slowest baseline e2e ≈ 1.4s), but the
-    # slow-marked live neural-QE cases inherit addopts whenever addopts is not
-    # overridden, and a CometKiwi subprocess has already blown a 300s budget on
-    # this project before.
+    # is seconds (slowest baseline e2e ≈ 1.4s), but the slow-marked live tiers
+    # inherit addopts whenever addopts is not overridden, and a heavyweight
+    # scorer subprocess has already blown a 300s budget on this project before.
     # Anyone running the live tiers should pass `-o addopts=""`, which clears
     # the timeout along with the marker filter (it replaces addopts wholesale).
     "pytest-timeout>=2.3,<3.0",
@@ -165,14 +165,10 @@ academic = [
 #                 easydict einops matplotlib
 #
 # The driver raises a clear ModuleNotFoundError naming the missing package.
-# Reference-free COMET-Kiwi QE. setuptools<81 keeps the
-# pkg_resources shim that unbabel-comet 2.2.7's torchmetrics still imports;
-# drop the pin when comet moves off torchmetrics 0.x.
-qe = [
-    "unbabel-comet>=2.2.0",
-    "setuptools<81",
-]
-
+# QE dependency note: Neural CometKiwi (CC-BY-NC-SA-4.0 non-commercial) has been
+# retired from default extras to ensure 100% commercial license compliance.
+# The default qe_engine is zero-dependency "heuristic", and LLM-as-a-judge
+# routes through standard provider transports.
 [dependency-groups]
 dev = [
     "pytest-xdist>=3.8.0",
@@ -254,9 +250,6 @@ module = [
     "rapidocr.*",
     "rapidocr_onnxruntime.*",
     "onnxruntime.*",
-    # The packaged CometKiwi scorer (ubt/core/qe/comet_score_ipc.py) imports
-    # `comet` lazily; the neural-QE extra is absent from the dev env.
-    "comet.*",
 ]
 ignore_missing_imports = true
 
@@ -294,7 +287,7 @@ python_files = ["test_*.py"]
 # `--timeout=600` (pytest-timeout, dev extra) caps any single test: a hang fails
 # in 10 minutes instead of sitting until the runner's wall-clock cap. It rides
 # in addopts, so `-o addopts=""` also clears it — that is deliberate, and is how
-# the multi-minute live tiers (local MT + CometKiwi) are meant to be run.
+# the multi-minute live tiers (local MT + heavyweight scoring) are meant to be run.
 addopts = "-m 'not slow and not legacy_drift' --timeout=600"
 markers = [
     "network: marks tests that require network access (e.g. Docling HuggingFace model downloads)",

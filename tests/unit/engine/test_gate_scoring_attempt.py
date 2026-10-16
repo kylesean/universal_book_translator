@@ -1,15 +1,16 @@
-"""P2-5: a COMET subprocess runner must actually be *used* by the gate.
+"""P2-5: a scoring runner must actually be *used* by the gate.
 
-``SubprocessQERunner.is_calibrated()`` is False until its first batch answers
-``engine="neural"`` — an honest "not yet proven". The quality gate tested
-``is_calibrated()`` *before* deciding whether to score, so the first call was
-never made and every block was stamped ``mtqe_score=None`` for the life of the
-run: a neural-capable install behaved exactly like a heuristic one.
+A runner's ``is_calibrated()`` is False until its first batch answers (an honest
+"not yet proven"). The quality gate tested ``is_calibrated()`` *before* deciding
+whether to score, so the first call was never made and every block was stamped
+``mtqe_score=None`` for the life of the run. The neural subprocess runner this
+originally described was retired for license compliance, but the split it pins
+is engine-agnostic and still correct.
 
 The fix splits the two questions: ``may_be_calibrated()`` ("is a scoring call
 worth attempting") gates the call, and ``is_calibrated()`` (the settled verdict)
 decides whether the returned numbers are trusted. A runner that answers
-non-neural still yields ``None`` scores, so a torch-less subprocess is unchanged.
+non-calibrated still yields ``None`` scores.
 """
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ pytestmark = pytest.mark.fast
 
 
 class _SubprocessLikeRunner(BaseQERunner):
-    """Mirrors SubprocessQERunner's calibration protocol without a subprocess."""
+    """A calibration-protocol runner without the retired neural subprocess."""
 
     def __init__(self, *, neural: bool) -> None:
         self._requested_neural = neural

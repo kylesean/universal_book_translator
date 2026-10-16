@@ -43,7 +43,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from ubt.core.config import UBTConfig, require_api_key  # noqa: E402
 from ubt.core.engine.pipeline import PipelineOrchestrator  # noqa: E402
-from ubt.core.qe.comet_runner import MockQERunner  # noqa: E402
+from ubt.core.qe.heuristic import MockQERunner  # noqa: E402
 from ubt.core.router.provider import OpenAICompatibleProvider  # noqa: E402
 from ubt.core.router.rate_limiter import AdaptiveTokenBucket  # noqa: E402
 from ubt.core.router.router import ModelRouter  # noqa: E402
