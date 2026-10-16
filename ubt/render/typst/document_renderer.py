@@ -128,6 +128,19 @@ _CHROME_HEADING_RE = re.compile(
     re.IGNORECASE,
 )
 
+#: A running head of author names in caps ("FEDUS, ZOPH AND SHAZEER") — the
+#: JMLR/arXiv convention of repeating the paper's authors on every page. Matched
+#: case-**sensitively**, and only over a *comma-separated* list of 2-4 short
+#: all-caps words (optionally closed by "AND <NAME>"), so a genuine section
+#: heading can never match — not a one-word all-caps heading ("EXPERIMENTS"),
+#: not a title-case one, and not a sentence. The translated spelling
+#: ("Fedus、Zoph与Shazeer") is caught through the source text in
+#: :func:`dropped_page_furniture`.
+_CHROME_AUTHOR_HEAD_RE = re.compile(
+    r"^[A-Z][A-Z'’\-]{1,19}(?:, [A-Z][A-Z'’\-]{1,19})+"
+    r"(?:,? AND [A-Z][A-Z'’\-]{1,19})?$"
+)
+
 
 def dropped_page_furniture(block: IRBlock) -> bool:
     """Whether the renderer deliberately omits this block from the artifact.
@@ -146,8 +159,18 @@ def dropped_page_furniture(block: IRBlock) -> bool:
     """
     if str(getattr(block.block_type, "value", block.block_type) or "") != "heading":
         return False
-    text = _block_text(block)
-    return bool(_CHROME_HEADING_RE.match(text))
+    if _CHROME_HEADING_RE.match(_block_text(block)):
+        return True
+    # The chrome is matched on the SOURCE text too: a translated heading no
+    # longer spells like the stamp it came from — "FEDUS, ZOPH AND SHAZEER"
+    # arrived as "Fedus、Zoph与Shazeer", which the delivered-text pattern never
+    # caught, so the running header survived and opened the body on the paper's
+    # author line. The source text is the stable fingerprint of what the block
+    # *was*; the all-caps author-head shape (case-sensitive) keeps this narrow.
+    source = (block.source_text or "").strip()
+    return bool(source) and bool(
+        _CHROME_HEADING_RE.match(source) or _CHROME_AUTHOR_HEAD_RE.match(source)
+    )
 
 
 def escape_markup(text: str) -> str:

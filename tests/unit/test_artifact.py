@@ -199,14 +199,14 @@ def test_a_rehearsal_heading_is_found_in_an_artifact_without_the_marker() -> Non
 # --------------------------------------------------------------------------- #
 
 
-def _heading(block_id: str, text: str) -> IRBlock:
+def _heading(block_id: str, text: str, *, source_text: str | None = None) -> IRBlock:
     element = make_element(
         id=block_id,
         spine_index=1,
         block_type=BlockType.HEADING,
-        source_text=text,
+        source_text=source_text if source_text is not None else text,
     )
-    return IRBlock(element=element)
+    return IRBlock(element=element, target_text=text)
 
 
 def test_chrome_heading_is_dropped_page_furniture() -> None:
@@ -216,6 +216,26 @@ def test_chrome_heading_is_dropped_page_furniture() -> None:
     assert dropped_page_furniture(_heading("b3", "Submitted 8/21; Revised 3/22; Published 4/22"))
     assert dropped_page_furniture(_heading("b1", "arXiv:2101.03961v3 [cs.LG] 16 Jun 2022"))
     assert dropped_page_furniture(_heading("b2", "Journal of Machine Learning Research 23 (2022)"))
+
+
+def test_a_running_author_head_is_furniture_through_its_source_text() -> None:
+    """The all-caps author running head is chrome even when translated.
+
+    "FEDUS, ZOPH AND SHAZEER" arrived as "Fedus、Zoph与Shazeer", which the
+    delivered-text pattern never caught: the header survived and opened the
+    body on the paper's author line. The source text is the fingerprint.
+    """
+    from ubt.render.typst.document_renderer import dropped_page_furniture
+
+    head = _heading("b7", "Fedus、Zoph与Shazeer", source_text="FEDUS, ZOPH AND SHAZEER")
+    assert dropped_page_furniture(head)
+    assert dropped_page_furniture(_heading("b8", "FEDUS, ZOPH AND SHAZEER"))
+
+    # Genuine headings never match, in any capitalization.
+    for text in ("1 引言", "相关工作", "Abstract", "INTRODUCTION AND RELATED WORK"):
+        assert not dropped_page_furniture(_heading(f"keep-{text}", text)), text
+    # A one-word all-caps heading is a heading, not an author list.
+    assert not dropped_page_furniture(_heading("caps", "EXPERIMENTS"))
 
 
 def test_a_real_heading_is_not_page_furniture() -> None:
