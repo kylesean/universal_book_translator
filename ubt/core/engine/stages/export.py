@@ -1137,6 +1137,10 @@ def _write_html_view(
             path,
             lang=ctx.target_lang or "en",
             direction=direction_for(ctx.target_lang or "en").value,
+            # Bilingual by default: the companion's whole point is the
+            # three-mode reading console (target-only / stacked / side-by-side),
+            # and without this the toolbar and paired rows were never emitted.
+            bilingual=True,
         )
         logger.info("HTML view for job %s: %s", ctx.job_id, path.name)
         return path

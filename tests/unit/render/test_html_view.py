@@ -260,12 +260,13 @@ def test_an_unparseable_table_grid_stays_a_pre_not_dropped(tmp_path: Path) -> No
     assert "<table>" not in text
 
 
-def test_a_formula_block_degrades_to_readable_unicode_not_latex(tmp_path: Path) -> None:
-    r"""A formula block's delivered text is its LaTeX (never model-retyped).
+def test_a_formula_block_carries_latex_and_a_readable_fallback(tmp_path: Path) -> None:
+    r"""A formula span's content is delimited LaTeX; the readable form is the tooltip.
 
-    Raw ``\frac{a}{b}`` in a web view is markup soup; the transpiler's own
-    fallback turns it into the readable form the PDF would have drawn had the
-    formula degraded there — the same guarantee the render path gives.
+    KaTeX auto-render parses the element's text content, so it must be the LaTeX
+    (``$$\frac{a}{b} \le \sum_i x_i$$``). The readable Unicode fallback — the form
+    the PDF would draw — rides the ``title``/``aria-label`` for when the CDN is
+    unreachable or the reader hovers.
     """
     from ubt.model.ast import Formula
 
@@ -278,7 +279,10 @@ def test_a_formula_block_degrades_to_readable_unicode_not_latex(tmp_path: Path) 
     compose_html([block], {}, out)
     text = out.read_text(encoding="utf-8")
 
-    assert "\\frac" not in text
+    assert '<span class="math-tex"' in text
+    # The span content is the delimited LaTeX KaTeX typesets.
+    assert "\\frac{a}{b}" in text
+    # The readable fallback is carried as the tooltip.
     assert "a/b ≤ ∑_i x_i" in text
 
 
