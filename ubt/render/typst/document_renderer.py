@@ -141,6 +141,19 @@ _CHROME_AUTHOR_HEAD_RE = re.compile(
     r"(?:,? AND [A-Z][A-Z'’\-]{1,19})?$"
 )
 
+#: The same running head as the reader lifts it from page 2 onward, where JMLR
+#: sets it in *title case* ("Fedus, Zoph and Shazeer" → 译文 "Fedus、Zoph 和
+#: Shazeer"): capitalized surname(s), comma-separated, closed by "and". The
+#: connector accepts the translated forms (和/与/、) so the delivered text
+#: matches too. Paired with a small font (see ``dropped_page_furniture``) — a
+#: genuine heading is never set smaller than the body — this cannot catch a
+#: real section heading ("Ross and White", a section ON someone, is larger and
+#: rarely stands alone as a heading).
+_CHROME_AUTHOR_HEAD_TITLE_RE = re.compile(
+    r"^[A-Z][a-z'’\-]{1,19}(?:[、,] ?[A-Z][a-z'’\-]{1,19})+"
+    r"(?: ?(?:and|和|与|、) ?[A-Z][a-z'’\-]{1,19})?$"
+)
+
 
 def dropped_page_furniture(block: IRBlock) -> bool:
     """Whether the renderer deliberately omits this block from the artifact.
@@ -168,9 +181,20 @@ def dropped_page_furniture(block: IRBlock) -> bool:
     # author line. The source text is the stable fingerprint of what the block
     # *was*; the all-caps author-head shape (case-sensitive) keeps this narrow.
     source = (block.source_text or "").strip()
-    return bool(source) and bool(
-        _CHROME_HEADING_RE.match(source) or _CHROME_AUTHOR_HEAD_RE.match(source)
-    )
+    if _CHROME_HEADING_RE.match(source) or _CHROME_AUTHOR_HEAD_RE.match(source):
+        return True
+    # The title-case running head ("Fedus, Zoph and Shazeer", page 2 onward) is
+    # distinguished from a genuine section heading by its *size*: JMLR sets it
+    # below the body size, and no real heading is set below the body. The size
+    # lives on the element (0/None = unknown → keep, fail closed to placing).
+    delivered = _block_text(block)
+    for text in (delivered, source):
+        if not _CHROME_AUTHOR_HEAD_TITLE_RE.match(text):
+            continue
+        size = getattr(block.element, "font_size", None)
+        if not size or size < 11.0:
+            return True
+    return False
 
 
 def escape_markup(text: str) -> str:

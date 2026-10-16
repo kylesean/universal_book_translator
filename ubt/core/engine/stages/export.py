@@ -84,11 +84,9 @@ def _is_mono(value: object) -> bool:
 async def _render_adapter_output(
     adapter: DocumentAdapter,
     manifest: BookManifest,
-    ledger: SQLiteJobLedger,
     blocks: list[IRBlock],
     target_lang: str,
     output_path: Path,
-    job_id: str | None = None,
     bilingual_mode: str | None = None,
     render_plan: RenderPlan | None = None,
 ) -> Path:
@@ -524,7 +522,6 @@ def _partition_render_skip_counts(
 async def _apply_render_skip_ledger_pass(
     ctx: StageContext,
     adapter: DocumentAdapter,
-    manifest: BookManifest,
     final_blocks: list[IRBlock],
 ) -> None:
     """Land fail-closed render skips (and length-policy flips) on the ledger.
@@ -822,11 +819,9 @@ async def _render_complementary_artifact(
             secondary_path = await _render_adapter_output(
                 adapter=adapter,
                 manifest=manifest,
-                ledger=ctx.ledger,
                 blocks=final_blocks,
                 target_lang=ctx.target_lang,
                 output_path=candidate,
-                job_id=ctx.job_id,
                 bilingual_mode=secondary_render,
                 render_plan=render,
             )
@@ -1473,18 +1468,16 @@ async def run_export_stage(
     rendered_path = await _render_adapter_output(
         adapter=adapter,
         manifest=manifest,
-        ledger=ledger,
         blocks=final_blocks,
         target_lang=target_lang,
         output_path=target_output,
-        job_id=actual_job_id,
         bilingual_mode=effective_bilingual_mode,
         render_plan=render,
     )
 
     # Render skip pass-through + length conservation, before the report is
     # built (see _apply_render_skip_ledger_pass).
-    await _apply_render_skip_ledger_pass(ctx, adapter, manifest, final_blocks)
+    await _apply_render_skip_ledger_pass(ctx, adapter, final_blocks)
     _check_completion_ratio(actual_job_id, final_blocks, min_completion_ratio)
 
     # Clean up any stale quality/metrics reports from prior runs so that

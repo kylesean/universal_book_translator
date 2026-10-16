@@ -60,7 +60,6 @@ async def test_apply_render_skip_ledger_pass_preserves_flipped_status(tmp_path: 
     await _apply_render_skip_ledger_pass(
         ctx=ctx,
         adapter=cast("Any", FakeAdapter()),
-        manifest=cast("Any", ctx.manifest),
         final_blocks=[block_b1],
     )
 

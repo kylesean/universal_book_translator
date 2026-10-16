@@ -208,8 +208,8 @@ async def run_quality_gate_stage(
         await asyncio.to_thread(ledger.save_checkpoints_batch, passed_updates)
 
     if suspicious_blocks:
-        # ``may_be_calibrated`` (not ``is_calibrated``): a SubprocessQERunner
-        # reports uncalibrated until its *first* batch answers, so gating the
+        # ``may_be_calibrated`` (not ``is_calibrated``): a dynamic or deferred
+        # runner reports uncalibrated until its *first* batch answers, so gating the
         # scoring call on ``is_calibrated`` meant the first call was never made
         # and every block got ``mtqe_score=None`` forever. Ask whether a call is
         # worth attempting, make it, then read the settled verdict.

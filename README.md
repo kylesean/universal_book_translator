@@ -18,8 +18,8 @@ pip install universal-book-translator          # users
 pip install 'universal-book-translator[mcp]'   # users who want the MCP server
 ```
 
-Extras: `pdf` (Docling), `ocr` / `academic` (RapidOCR + ONNX runtime), `qe`
-(CometKiwi), `mcp` (the MCP server). PDF output needs the `typst` compiler on
+Extras: `pdf` (Docling), `ocr` / `academic` (RapidOCR + ONNX runtime), `mcp`
+(the MCP server). PDF output needs the `typst` compiler on
 `PATH` — a PDF job fails at the render stage without it. `ubt doctor` checks the
 key, the ledger directory, Typst and CJK fonts, and says what breaks.
 

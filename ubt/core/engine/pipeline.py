@@ -454,8 +454,8 @@ class PipelineOrchestrator:
         matches, and a fresh/rebound instance otherwise — so a shared runner
         (the API's one instance, concurrent jobs) never scores another job
         with this job's language-pair-dependent thresholds, and an injected
-        SubprocessQERunner no longer keeps its construction-time en→zh
-        heuristic for every pair.
+        runner no longer keeps its construction-time en→zh
+        state for every pair.
         """
         # Fresh run, fresh residency attempt (the API shares one runner).
         if self._qe_runner_explicit:

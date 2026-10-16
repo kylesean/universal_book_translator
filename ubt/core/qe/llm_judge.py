@@ -2,9 +2,7 @@
 
 Industry mapping (2026 consensus):
 - L1 rules/heuristic, full volume: ``FastPassFilter`` + ``HeuristicQERunner``.
-- L2 learned QE small model, full volume / routing: ``SubprocessQERunner``
-  (CometKiwi, optional, heavy dep).
-- L3 LLM judge, selected pairs only: this module. Only the pairs a second
+- L2/L3 LLM judge, selected suspect pairs only: this module. Only the pairs a second
   opinion can actually inform get one cheap LLM call (score-only, ~20 output
   tokens, temperature 0). Deterministic span annotation for repair stays
   rule-based (``MQMSpanAnnotator``) — the judge only decides routing, not spans.

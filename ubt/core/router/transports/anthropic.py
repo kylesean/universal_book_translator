@@ -240,34 +240,6 @@ class AnthropicMessagesTransport(BaseTransport):
         base = f"{self._base_url}" if self._base_url.endswith("/v1") else f"{self._base_url}/v1"
         return "/".join([base, "messages", "batches", *parts])
 
-    def _messages_payload(
-        self,
-        prompt: str,
-        system_prompt: str | None,
-        max_tokens: int | None,
-        temperature: float | None,
-    ) -> dict[str, Any]:
-        """Build a ``/v1/messages`` body, shared by batch and interactive paths."""
-        payload: dict[str, Any] = {
-            "model": self._default_model,
-            "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": max_tokens or 4096,
-        }
-        if system_prompt:
-            if self._prompt_caching:
-                payload["system"] = [
-                    {
-                        "type": "text",
-                        "text": system_prompt,
-                        "cache_control": {"type": "ephemeral"},
-                    }
-                ]
-            else:
-                payload["system"] = system_prompt
-        if temperature is not None:
-            payload["temperature"] = temperature
-        return payload
-
     async def create_batch_job(self, requests: list[dict[str, Any]]) -> str:
         """Submit a Message Batch; return its id.
 

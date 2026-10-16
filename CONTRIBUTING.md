@@ -19,7 +19,7 @@ The `dev` extra is what the gates need: pytest, pytest-xdist, pytest-cov,
 pytest-timeout, mypy, ruff, pre-commit, `mcp` (so the type gate can check the
 MCP server) and `pypdf` (the independent PDF writer the fixtures use). Other
 extras exist and are deliberately absent from the dev environment: `pdf`
-(Docling), `ocr` / `academic` (RapidOCR + ONNX runtime), `qe` (CometKiwi).
+(Docling), `ocr` / `academic` (RapidOCR + ONNX runtime).
 Install the one you need, e.g. `uv sync --extra dev --extra pdf`; `mypy` is
 configured to tolerate their absence, so the default gate stays green without
 them.
@@ -98,8 +98,8 @@ uv run pytest -o addopts="" -q        # everything; also clears --timeout
 ```
 
 `-o addopts=""` replaces `addopts` wholesale, so it clears both the marker filter
-and `--timeout=600`. That is deliberate: it is how the multi-minute live tiers
-(local MT, CometKiwi) are meant to be run.
+and `--timeout=600`. That is deliberate: it is how multi-minute live runs
+(e.g. large live model sweeps) are meant to be run.
 
 CI installs Typst and runs the slow tier for real: roughly 21 cases must run, 8
 skip and 6 parameterized cases collapse to zero. Three groups skip there on

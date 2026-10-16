@@ -26,7 +26,7 @@ class BaseQERunner(ABC):
         table as prose and rejects repairs the prose rules should not touch.
         Neural runners ignore the key.
         """
-        pass
+        raise NotImplementedError
 
     async def score(self, src: str, mt: str, block_type: object | None = None) -> float:
         """Score a single (src, mt) pair returning a float score (0.0~1.0)."""
@@ -39,7 +39,7 @@ class BaseQERunner(ABC):
     def with_languages(self, source_lang: str, target_lang: str) -> BaseQERunner:
         """Return a runner bound to the given language pair.
 
-        Language-agnostic runners (subprocess/neural) return themselves; the
+        Language-agnostic runners return themselves; the
         heuristic runner rebuilds its ``FastPassFilter`` so per-run language
         thresholds are never shared across concurrent runs.
         """
@@ -65,9 +65,8 @@ class BaseQERunner(ABC):
         heuristic runner emits discrete defect classes (see
         ``QE_DEFECT_CLASS_LEGEND``) — a tie among candidates that all cleared
         the same gate would be broken at random and presented as a measured
-        preference. Runners that cannot prove they scored with their neural
-        model (e.g. a COMET subprocess whose weights failed to import and fell
-        back to the heuristic) must flip this to ``False``.
+        preference. Runners that cannot prove their calibrated
+        model scored must flip this to ``False``.
         """
         return True
 
@@ -75,8 +74,8 @@ class BaseQERunner(ABC):
         """Whether it is worth *attempting* a scoring call to find out.
 
         Distinguishes "cannot score" from "has not proven it scored yet". A
-        ``SubprocessQERunner`` reports ``is_calibrated() == False`` until its
-        first batch answers ``engine="neural"``, so a caller that gates the
+        deferred runner may report ``is_calibrated() == False`` until its
+        first batch answers, so a caller that gates the
         scoring call on ``is_calibrated()`` would never make that first call —
         the runner stayed permanently uncalibrated and every block got
         ``mtqe_score=None``. Such runners override this to ``True`` so the gate
@@ -89,11 +88,11 @@ class BaseQERunner(ABC):
     def reset_residency(self) -> None:
         """Drop latched "fall back to the slow path" state at the start of a run.
 
-        A runner that keeps a heavy model process alive (the COMET subprocess)
-        latches the resident path off after a protocol desync. That latch is
-        per-run state, but the API keeps one runner per process across jobs: a
-        fresh run deserves a fresh attempt instead of inheriting the previous
-        job's degradation. No-op for runners with nothing resident.
+        A runner that keeps resident state latches the resident path off after
+        a protocol desync. That latch is per-run state, but the API keeps one
+        runner per process across jobs: a fresh run deserves a fresh attempt
+        instead of inheriting the previous job's degradation. No-op for runners
+        with nothing resident.
         """
         return None
 

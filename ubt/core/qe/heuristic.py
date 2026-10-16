@@ -119,8 +119,8 @@ class HeuristicQERunner(BaseQERunner):
     the score is a **discrete defect-class proxy** (see
     ``QE_DEFECT_CLASS_LEGEND``), not a calibrated quality estimate — there
     are only twelve reachable values and the gaps between them are
-    meaningless. Use it for routing/repair triggering; use the L2
-    ``SubprocessQERunner`` (CometKiwi) when an actual quality number is
+    meaningless. Use it for routing/repair triggering; use the tiered
+    LLM judge (``LLMJudgeQERunner``) when an assessment of gray-zone candidates is
     needed.
 
     When constructed with the run's ``glossary``, a target that drops or

@@ -102,6 +102,7 @@ def render_page_preview(
         bilingual=bilingual,
         math_gate=math_probe.check,
         math_gate_many=math_probe.check_many,
+        font_stack=(font,) if font else None,
     )
     source, _stats = renderer.build_source(page_blocks, build_dir, target_lang)
     typ_path = build_dir / "main.typ"
