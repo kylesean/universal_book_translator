@@ -163,15 +163,17 @@ def resolve_formula_enrichment(
     # * crop the source region (``_crop_formula_asset``) — instant, and the
     #   reader gets the author's own equation, glyph for glyph;
     # * run the VLM math OCR — 15-60s *per formula* on CPU, and its LaTeX is a
-    #   model's transcription, which can be wrong in ways a crop cannot.
+    #   model's transcription, which can be wrong in ways a crop cannot. The
+    #   crop margin is now tuned (``formula_crop_margin``), which removes the
+    #   neighbouring-text pollution, but the model still mis-reads some symbols
+    #   (e.g. "expert" -> ``\exp``), so a faithful crop stays the safe default.
     #
     # So ``auto`` takes the crop: faithful and affordable. ``on`` forces the VLM
-    # for a caller who wants scalable vector math and accepts the cost. A
-    # formula-dense document never short-circuits this choice.
+    # for a caller who wants scalable vector math and accepts the cost.
     logger.info(
         "Docling formula enrichment set to False (auto: unreadable formulas are "
         "recovered by cropping the source region, which is exact and instant; "
-        "use --formula-enrichment on to transcribe them with the VLM instead)"
+        "set UBT_FORMULA_ENRICHMENT=on to transcribe them with the VLM instead)"
     )
     return False
 

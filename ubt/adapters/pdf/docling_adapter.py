@@ -410,7 +410,7 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
                 # ``extract_with_docling`` (VLM OOM -> CPU, or enrichment failure
                 # -> plain extraction); the degraded blocks carry the same
                 # ``enrich=True`` key as a healthy run, so caching them here made
-                # the degradation permanent — a later ``--formula-enrichment on``
+                # the degradation permanent — a later ``UBT_FORMULA_ENRICHMENT=on``
                 # run read the degraded blocks and never retried, and ``--fresh``
                 # (which clears the Docling conversion cache, not this one) did
                 # not help either. The inner conversion cache is keyed on the
