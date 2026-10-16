@@ -561,6 +561,25 @@ def typstify_math(body: str) -> str | None:
                 else ""
             )
             return f"{pre}\0{rep}\0{post}"
+        # Dynamic fallback for simple alphabetical operator/function names (e.g. \sinc, \relu, \sign, \poly)
+        # Emits the identifier so the word-run quoter turns it into a valid Typst string operator #"name".
+        # Parameterized commands (followed by '{') stay fail-closed so they degrade cleanly.
+        if name.isalpha() and 2 <= len(name) <= 15:
+            rem = marked[match.end() :].lstrip()
+            if not rem.startswith("{"):
+                start = match.start()
+                end = match.end()
+                pre = (
+                    " "
+                    if (start > 0 and (marked[start - 1].isalnum() or marked[start - 1] == "\0"))
+                    else ""
+                )
+                post = (
+                    " "
+                    if (end < len(marked) and (marked[end].isalnum() or marked[end] == "\0"))
+                    else ""
+                )
+                return f"{pre}\0{name}\0{post}"
         raise _UnknownCommand(name)
 
     try:

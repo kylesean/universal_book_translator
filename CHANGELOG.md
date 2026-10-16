@@ -74,9 +74,9 @@ Pre-1.0, no tags yet. Everything below is in the current tree.
   happened to see it. On a paper whose source spelled its section list before
   the title block, the TOC was emitted on the opening page *above* the title,
   which is not where a TOC belongs. And a paper now carries **no TOC by
-  default** (`UBT_TOC=auto`): a paper has none by convention, and the run a PDF
+  default** (`UBT_TOC_MODE=auto`): a paper has none by convention, and the run a PDF
   reader picks up is the source's section list with the *source* page numbers,
-  which the reflowed deliverable does not reproduce. `UBT_TOC=on` forces it,
+  which the reflowed deliverable does not reproduce. `UBT_TOC_MODE=on` forces it,
   `off` suppresses it; a TOC the reader never recovered is never invented.
   Its typography was rebuilt too — real dot leaders, a generous row gutter, and
   a two-step size hierarchy replace the cramped two-column rows.

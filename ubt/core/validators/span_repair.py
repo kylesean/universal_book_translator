@@ -284,7 +284,7 @@ class SpanRepairSplicer:
         re.DOTALL | re.IGNORECASE,
     )
     _FINAL_TRANSLATION_PATTERN = re.compile(
-        r"<final_translation>(.*?)</final_translation>",
+        r"<(?:final_translation|translation)>(.*?)</(?:final_translation|translation)>",
         re.DOTALL | re.IGNORECASE,
     )
 

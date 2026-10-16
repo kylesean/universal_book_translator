@@ -224,6 +224,9 @@ def test_splicer_without_spans_extracts_final_translation() -> None:
     assert SpanRepairSplicer().splice_repairs(
         "draft", [], "<final_translation>  hi  </final_translation>"
     ) == ("hi", False)
+    assert SpanRepairSplicer().splice_repairs(
+        "draft", [], "<translation>  hi from translation tag  </translation>"
+    ) == ("hi from translation tag", False)
 
 
 def test_splicer_without_spans_falls_back_to_raw_output() -> None:

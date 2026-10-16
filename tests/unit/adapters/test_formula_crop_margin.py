@@ -159,3 +159,16 @@ def test_crop_margin_reads_env() -> None:
 
     with patch.dict(os.environ, {"UBT_FORMULA_CROP_MARGIN": "0.12"}):
         assert UBTConfig.from_env().formula_crop_margin == 0.12
+
+
+def test_toc_mode_default_and_env() -> None:
+    from unittest.mock import patch
+
+    from ubt.core.config import UBTConfig
+
+    os.environ.pop("UBT_TOC_MODE", None)
+    assert UBTConfig.from_env().toc_mode == "auto"
+    with patch.dict(os.environ, {"UBT_TOC_MODE": "on"}):
+        assert UBTConfig.from_env().toc_mode == "on"
+    with patch.dict(os.environ, {"UBT_TOC_MODE": "off"}):
+        assert UBTConfig.from_env().toc_mode == "off"

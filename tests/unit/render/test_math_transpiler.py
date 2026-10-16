@@ -347,3 +347,16 @@ def test_a_script_with_an_operand_is_untouched() -> None:
     assert typstify_math("x^2") == "x^2"
     assert typstify_math("x_i") == "x_i"
     assert typstify_math("a^{}") == "a^()"
+
+
+def test_argmax_argmin_preserve_semantics() -> None:
+    """\\argmax and \\argmin must render 'arg max' and 'arg min', not just 'arg'."""
+    assert typstify_math(r"\argmax_{x} f(x)") == "arg max_(x) f(x)"
+    assert typstify_math(r"\argmin_{\theta} \mathcal{L}(\theta)") == "arg min_(theta) cal(L)(theta)"
+
+
+def test_unmapped_operator_dynamic_fallback() -> None:
+    """Unmapped operators like \\tr, \\diag, \\sinc fallback to quoted Typst string operators."""
+    assert typstify_math(r"\tr(A)") == '#"tr" (A)'
+    assert typstify_math(r"\diag(v)") == '#"diag" (v)'
+    assert typstify_math(r"\sinc(x)") == '#"sinc" (x)'

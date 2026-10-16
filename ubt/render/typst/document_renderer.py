@@ -175,24 +175,39 @@ def is_toc_entry(block: IRBlock) -> bool:
     return bool(block.provenance.toc_entry)
 
 
-def _group_toc_runs(blocks: Sequence[IRBlock]) -> list[list[IRBlock]]:
-    """Group consecutive ``toc_entry`` blocks into one run each.
+#: Headings that name a table of contents rather than a section. Matched on the
+#: whole text (a genuine section is never called just "Contents"), in any of the
+#: languages the deliverable may spell it in.
+_TOC_TITLE_TEXTS = frozenset({"contents", "table of contents", "目录", "目錄", "目次"})
+
+
+def _is_toc_heading_text(text: str) -> bool:
+    """Whether a heading's text names the table of contents itself."""
+    return text.strip().lower() in _TOC_TITLE_TEXTS
+
+
+def _group_toc_runs(blocks: Sequence[IRBlock]) -> list[tuple[int, list[IRBlock]]]:
+    """Group consecutive ``toc_entry`` blocks into ``(start, run)`` pairs.
 
     A single TOC is a *run* of adjacent entries; a document may have more than
     one (a front TOC and an appendix listing), so each maximal run becomes its
     own table. A lone tagged row (a false positive) is still a run of one and is
-    rendered compactly rather than promoted to a section heading.
+    rendered compactly rather than promoted to a section heading. The start
+    index lets the caller look *backwards* for the run's introducing heading.
     """
-    runs: list[list[IRBlock]] = []
+    runs: list[tuple[int, list[IRBlock]]] = []
     current: list[IRBlock] = []
-    for block in blocks:
+    start = 0
+    for index, block in enumerate(blocks):
         if is_toc_entry(block):
+            if not current:
+                start = index
             current.append(block)
         elif current:
-            runs.append(current)
+            runs.append((start, current))
             current = []
     if current:
-        runs.append(current)
+        runs.append((start, current))
     return runs
 
 
@@ -522,9 +537,12 @@ def render_table(markup: str, *, is_math_ok: Callable[[str], bool] | None = None
         "  inset: 5pt,",
         "  align: (col, row) => if row == 0 { center + horizon } else { left + horizon },",
         "  stroke: none,",
-        "  table.hline(stroke: 1.1pt),",
-        f"  {cells(headers, header=True)},",
-        "  table.hline(stroke: 0.5pt),",
+        "  table.header(",
+        "    repeat: true,",
+        "    table.hline(stroke: 1.1pt),",
+        f"    {cells(headers, header=True)},",
+        "    table.hline(stroke: 0.5pt),",
+        "  ),",
     ]
     for row in rows:
         lines.append(f"  {cells(row, header=False)},")
@@ -922,7 +940,7 @@ class TypstDocumentRenderer:
         # spelled the section list before the title block.
         toc_consumed: set[str] = set()
         toc_chunks: list[str] = []
-        for entry_blocks in _group_toc_runs(blocks):
+        for run_start, entry_blocks in _group_toc_runs(blocks):
             title_page: list[tuple[str, str]] = []
             for blk in entry_blocks:
                 title = _block_text(blk).strip()
@@ -933,6 +951,19 @@ class TypstDocumentRenderer:
                 self.stats.blocks_rendered += 1
             if title_page:
                 toc_chunks.append(render_toc(title_page))
+            # The TOC's own heading ("Contents") is page furniture, not a
+            # section: its entries were consumed above, so emitting it leaves an
+            # orphan heading with no body. Consume the heading that introduces
+            # the run — the nearest preceding block, allowing nothing between it
+            # and the rows (a paragraph there means the heading titles prose).
+            for earlier in reversed(blocks[:run_start]):
+                if earlier.id in toc_consumed:
+                    continue
+                if str(getattr(earlier.block_type, "value", earlier.block_type) or "") != "heading":
+                    break
+                if _is_toc_heading_text(_block_text(earlier)):
+                    toc_consumed.add(earlier.id)
+                break
         if resolve_toc_mode(
             getattr(self, "toc_mode", "auto"),
             layout_template=getattr(self, "layout_template", "book"),

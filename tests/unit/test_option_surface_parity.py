@@ -46,6 +46,8 @@ _INTERNAL_KNOBS = (
     "qe_engine",
     "table_render_mode",
     "formula_enrichment",
+    "formula_crop_margin",
+    "toc_mode",
     "formula_render",
     "formula_mode",
     "math_backend",

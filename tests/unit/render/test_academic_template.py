@@ -404,7 +404,34 @@ def test_toc_entries_group_into_runs() -> None:
         _toc_block("t3", "3 扩展特性", "11"),
     ]
     runs = _group_toc_runs(blocks)
-    assert [[b.id for b in run] for run in runs] == [["t1", "t2"], ["t3"]]
+    assert [[b.id for b in run] for _, run in runs] == [["t1", "t2"], ["t3"]]
+    # The start indices let a caller walk backwards to the run's heading.
+    assert [start for start, _ in runs] == [0, 3]
+
+
+def test_toc_introducing_heading_is_consumed(tmp_path: Path) -> None:
+    """``Contents`` titles the run below it, not a section of the paper.
+
+    Its entries are consumed as TOC rows, so emitting the heading left an
+    orphan ``目录`` on the page with nothing under it (measured on the
+    reference paper, whose Contents is a level-1 heading on page 2).
+    """
+    renderer = TypstDocumentRenderer(
+        layout_template="academic", columns=1, paper_title="Paper", toc_mode="on"
+    )
+    blocks = [
+        _heading_block("h0", "Contents"),
+        _toc_block("t1", "1 引言", "3"),
+        _toc_block("t2", "2 切换 Transformer", "4"),
+        _heading_block("h1", "1 引言"),
+    ]
+    source, _ = renderer.build_source(blocks, tmp_path / "b", target_lang="zh")
+    # The heading "Contents" is consumed with its run — no orphan heading. The
+    # word 目录 appears only as the rendered TOC's own title, never as a
+    # heading; and the only section heading is the genuine one.
+    assert "#heading(level: 1)[目录]" not in source
+    assert source.count("#heading(level: 1)") == 1
+    assert source.count("目录") == 1  # the TOC's own title
 
 
 def test_a_paper_places_no_recovered_toc_by_default(tmp_path: Path) -> None:
