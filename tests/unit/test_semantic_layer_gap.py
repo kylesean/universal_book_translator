@@ -344,3 +344,132 @@ def test_a_good_block_is_not_demoted() -> None:
 def test_an_unguided_runner_never_promises_calibration() -> None:
     """A plain heuristic runner is never asked to score (nothing to keep)."""
     assert HeuristicQERunner().may_be_calibrated() is False
+
+
+# --------------------------------------------------------------------------- #
+# Standardised judge configuration: a provider block, not a bespoke endpoint
+# --------------------------------------------------------------------------- #
+
+
+def test_a_judge_provider_block_is_a_first_class_setting() -> None:
+    """`qe_judge_provider` names a [providers.*] block, like `repair_provider`.
+
+    Pointing at a block rather than repeating an endpoint keeps this standard:
+    every user already knows how to declare a provider, and credentials resolve
+    through the registry's own rules (``${VAR}`` expansion, ``UBT_LLM_API_KEY``)
+    instead of a second, private mechanism invented for the judge.
+    """
+    from ubt.core.providers import PROVIDER_ALLOWED_KEYS
+
+    assert "qe_judge_provider" in PROVIDER_ALLOWED_KEYS
+    # Same shape as the knob it mirrors.
+    assert "repair_provider" in PROVIDER_ALLOWED_KEYS
+
+
+def test_a_judge_provider_block_resolves_like_any_other(tmp_path: Any) -> None:
+    """The registry parses it with no judge-specific code."""
+    from ubt.core.providers import load_provider_block
+
+    config = tmp_path / "config.toml"
+    config.write_text(
+        "[providers.qe-judge]\n"
+        'base_url = "https://judge.example/v1"\n'
+        'api_mode = "openai-responses"\n'
+        'api_key = "${JUDGE_KEY}"\n'
+        'repair_model = "some-strong-model"\n',
+        encoding="utf-8",
+    )
+    fields = load_provider_block("qe-judge", custom_path=config)
+    assert fields["base_url"] == "https://judge.example/v1"
+    assert fields["api_mode"] == "openai-responses"
+    assert fields["repair_model"] == "some-strong-model"
+
+
+def test_no_judge_endpoint_means_the_translation_provider_answers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A user with one endpoint configured gets exactly today's behaviour."""
+    from ubt.core.config import UBTConfig
+
+    for name in ("UBT_QE_JUDGE_PROVIDER", "UBT_QE_JUDGE_BASE_URL"):
+        monkeypatch.delenv(name, raising=False)
+    cfg = UBTConfig()
+    assert cfg.qe_judge_provider is None
+    assert cfg.qe_judge_base_url is None
+
+
+def test_an_unknown_judge_provider_fails_loudly() -> None:
+    """A typo must not silently fall back to the translator's model.
+
+    Falling back would run the judge on exactly the model that cannot do the job
+    (measured: a 4B scores a translation that dropped a word at 100/100), and the
+    report would still say the semantic gate ran.
+    """
+    from ubt.core.providers import ProviderNotFoundError, load_layer
+
+    with pytest.raises(ProviderNotFoundError):
+        load_layer("no-such-judge-provider")
+
+
+# --------------------------------------------------------------------------- #
+# A config file must be able to describe the quality policy
+# --------------------------------------------------------------------------- #
+
+
+def test_defaults_may_enable_the_semantic_judge(tmp_path: Any) -> None:
+    """The [defaults] block is documented as the config baseline.
+
+    It accepted only provider-shaped keys, so turning the judge on was possible
+    from the CLI and from the environment but **not from a config file** — the
+    one surface a user is told to edit. A policy that can only be expressed
+    through exported variables is not standard configuration.
+    """
+    from ubt.core.providers import load_defaults_block
+
+    config = tmp_path / "config.toml"
+    config.write_text(
+        "[defaults]\n"
+        'qe_engine = "tiered"\n'
+        "qe_judge_enabled = true\n"
+        "qe_judge_pass_sample = 0.15\n"
+        "qe_judge_sentences = true\n"
+        'qe_judge_provider = "my-judge"\n'
+        "qe_threshold = 0.8\n",
+        encoding="utf-8",
+    )
+    fields = load_defaults_block(custom_path=config)
+    assert fields["qe_engine"] == "tiered"
+    assert fields["qe_judge_enabled"] is True
+    assert fields["qe_judge_pass_sample"] == 0.15
+    assert fields["qe_judge_provider"] == "my-judge"
+    assert fields["qe_threshold"] == 0.8
+
+
+def test_a_secret_is_still_rejected_in_defaults(tmp_path: Any) -> None:
+    """Widening the list must not open it to the inbound service key."""
+    from ubt.core.providers import ProviderConfigError, load_defaults_block
+
+    config = tmp_path / "config.toml"
+    config.write_text('[defaults]\nservice_api_key = "nope"\n', encoding="utf-8")
+    with pytest.raises(ProviderConfigError):
+        load_defaults_block(custom_path=config)
+
+
+def test_a_judge_provider_naming_nothing_fails_loudly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A typo must not silently judge with the translator's model.
+
+    Falling back would run the judge on exactly the model that cannot do the job
+    and the report would still say the semantic gate ran.
+    """
+    from ubt.core.config import UBTConfig
+    from ubt.core.providers import ProviderNotFoundError
+
+    monkeypatch.setenv("UBT_QE_JUDGE_PROVIDER", "no-such-provider")
+    cfg = UBTConfig()
+    assert cfg.qe_judge_provider == "no-such-provider"
+    with pytest.raises(ProviderNotFoundError):
+        from ubt.core.providers import load_layer
+
+        load_layer("no-such-provider")

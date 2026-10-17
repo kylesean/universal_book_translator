@@ -268,6 +268,19 @@ class UBTConfig(BaseSettings):
     api_mode: ApiMode = "openai-chat"
     provider: str | None = Field(default=None, validation_alias="UBT_PROVIDER")
     repair_provider: str | None = Field(default=None, validation_alias="UBT_REPAIR_PROVIDER")
+    #: Name of a ``[providers.<name>]`` block that answers QE judge calls.
+    #:
+    #: The judge is a different job from translating and is often better served
+    #: by a different model — and by a *hosted* one, since a local model large
+    #: enough to notice a dropped noun is slow (measured: 35-85 s per block on a
+    #: local 27B against 1.6-3.5 s for a hosted model on the same decisions).
+    #:
+    #: Pointing at a provider block rather than repeating an endpoint keeps this
+    #: standardised: every user already knows how to declare one, credentials
+    #: resolve the same way (``${VAR}`` expansion, ``UBT_LLM_API_KEY``), and
+    #: nothing machine-specific has to live in the shipped config. Unset means
+    #: the judge uses the translation provider.
+    qe_judge_provider: str | None = Field(default=None, validation_alias="UBT_QE_JUDGE_PROVIDER")
     is_free: bool = False
     cost_per_mtok: tuple[float, float] | None = None
     capability_profile: str | None = None

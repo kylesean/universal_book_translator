@@ -72,12 +72,30 @@ PROVIDER_ALLOWED_KEYS = frozenset(
         "supports_reasoning_effort",
         "reasoning_dialect",
         "repair_provider",
+        "qe_judge_provider",
         "ocr_api_key",
         # Run-level, not provider-level, but a real ``UBTConfig`` field: the CLI
         # (``--db-dir``) and ``UBT_DB_DIR`` both set it, so the ``[defaults]``
         # block (documented as the config baseline) must accept it too or the
         # same key is settable on every surface except the config file.
         "db_dir",
+        # Run-level quality-gate knobs. Same reasoning as ``db_dir``: the
+        # ``[defaults]`` block is documented as the config baseline, so a user
+        # who wants the semantic judge on must be able to say so in a file
+        # rather than only through an exported environment variable. These are
+        # plain ``UBTConfig`` fields, not secrets, and not provider endpoints.
+        "qe_engine",
+        "qe_judge_enabled",
+        "qe_judge_pass_sample",
+        "qe_judge_sentences",
+        "qe_judge_model",
+        "qe_judge_gray_low",
+        "qe_judge_gray_high",
+        "qe_judge_allow_upgrade",
+        # Threshold and repair budget, so a config file can describe a whole
+        # quality policy instead of scattering it across the CLI and the env.
+        "qe_threshold",
+        "max_repair_rounds",
     }
 )
 

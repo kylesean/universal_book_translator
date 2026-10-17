@@ -453,41 +453,68 @@ class PipelineOrchestrator:
             )
 
     def _build_judge_fn(self, judge_model: str) -> JudgeFn:
-        """The judge's completion call, on its own endpoint when one is configured.
+        """The judge's completion call, resolved in a standard way.
 
-        The judge is often best served by a different model than the translator,
-        and sometimes by a different process entirely (a hosted API, a second
-        local server). ``qe_judge_base_url`` picks that endpoint and gets its own
-        provider, so credentials, wire protocol and headers belong to the judge
-        alone — routing a hosted judge through the translation provider's client
-        would send it that gateway's model names and headers.
+        Three sources, in this order — each one something a user already knows
+        how to write:
 
-        With no ``qe_judge_base_url`` the main router answers, which keeps an
-        existing single-endpoint configuration working unchanged.
+        1. ``qe_judge_provider`` — the name of a ``[providers.<name>]`` block.
+           Preferred, because it reuses the registry's own credential handling
+           (``${VAR}`` expansion, ``UBT_LLM_API_KEY``), wire-protocol selection
+           and header rules instead of duplicating them here.
+        2. explicit ``qe_judge_base_url`` / ``qe_judge_api_key`` /
+           ``qe_judge_api_mode`` — for a judge endpoint that is not declared as
+           a provider (one-off, or a key that only lives in the environment).
+        3. nothing set — the main router answers, so an existing single-endpoint
+           configuration keeps working unchanged.
+
+        The judge may run somewhere other than the translator on purpose: a model
+        large enough to notice a dropped noun is slow locally (measured 35-85 s
+        per block on a 27B) and quick hosted (1.6-3.5 s for the same decisions).
 
         A self-hosted judge has no price in ``prices.toml``, so its spend cannot
         be attributed; it is billed at zero like every other self-hosted call.
         """
-        if not self.config.qe_judge_base_url:
+        if self.config.qe_judge_provider:
+            from ubt.core.providers import load_layer
+            from ubt.core.router.provider import create_model_provider
+
+            fields = load_layer(self.config.qe_judge_provider)
+            if not fields:
+                raise ValueError(
+                    f"qe_judge_provider={self.config.qe_judge_provider!r} names no "
+                    "[providers.*] block. Declare one in ubt.toml or "
+                    f"~/.config/ubt/config.toml, or unset UBT_QE_JUDGE_PROVIDER."
+                )
+            judge_provider = create_model_provider(
+                api_key=str(fields.get("api_key") or self.config.api_key.get_secret_value()),
+                base_url=str(fields.get("base_url", self.config.base_url)),
+                default_model=str(fields.get("repair_model") or judge_model),
+                api_mode=str(fields.get("api_mode", self.config.api_mode)),
+                timeout=float(fields.get("api_timeout", self.config.api_timeout)),
+                extra_headers=dict(fields.get("extra_headers") or {}),
+            )
+            judge_model = str(fields.get("repair_model") or judge_model)
+        elif self.config.qe_judge_base_url:
+            from ubt.core.router.provider import create_model_provider
+
+            judge_provider = create_model_provider(
+                api_key=self.config.qe_judge_api_key or self.config.api_key,
+                base_url=self.config.qe_judge_base_url,
+                default_model=judge_model,
+                # ApiMode is a Literal of wire-protocol strings, not an enum.
+                api_mode=str(self.config.qe_judge_api_mode or self.config.api_mode),
+                timeout=self.config.api_timeout,
+                # Headers belong to the endpoint they were configured for; reuse
+                # them only when the judge shares the translator's endpoint.
+                extra_headers=(
+                    dict(self.config.extra_headers)
+                    if self.config.qe_judge_base_url == self.config.base_url
+                    else {}
+                ),
+            )
+        else:
             return self.router.complete_raw
-
-        from ubt.core.router.provider import create_model_provider
-
-        judge_provider = create_model_provider(
-            api_key=self.config.qe_judge_api_key or self.config.api_key,
-            base_url=self.config.qe_judge_base_url,
-            default_model=judge_model,
-            # ApiMode is a Literal of wire-protocol strings, not an enum.
-            api_mode=str(self.config.qe_judge_api_mode or self.config.api_mode),
-            timeout=self.config.api_timeout,
-            # Headers belong to the endpoint they were configured for; reuse them
-            # only when the judge shares the translator's endpoint.
-            extra_headers=(
-                dict(self.config.extra_headers)
-                if self.config.qe_judge_base_url == self.config.base_url
-                else {}
-            ),
-        )
 
         async def _judge_complete(
             *,
