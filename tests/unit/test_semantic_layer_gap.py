@@ -505,3 +505,126 @@ def test_a_judge_provider_block_supplies_its_own_model_name(tmp_path: Any) -> No
     # The block's own model, not the caller's fallback.
     assert fields["repair_model"] == "judge-model-name"
     assert fields["repair_model"] != "gemma4-e4b"
+
+
+# --------------------------------------------------------------------------- #
+# The audit must judge translations, not asset paths
+# --------------------------------------------------------------------------- #
+
+
+def _block(block_id: str, block_type: Any, source: str, target: str, *, skip: bool) -> Any:
+    from ubt.core.ir.models import FlowID, IRBlock, make_element
+
+    block = IRBlock(
+        element=make_element(
+            id=block_id,
+            spine_index=1,
+            block_type=block_type,
+            flow_id=FlowID.MAIN_STORY,
+            source_text=source,
+        )
+    )
+    block.target_text = target
+    block.skip_translate = skip
+    return block
+
+
+def test_an_asset_path_is_not_judged() -> None:
+    """A cache path on both sides is not a translation, and scoring it is noise.
+
+    Measured on arXiv 2606.23344: four img_*/fml_* blocks reached the judge with
+    a file path as both source and target. The judge scored them 1.0 — four calls
+    spent to learn nothing, and a "pass" that means nothing.
+    """
+    from ubt.core.engine.stages.quality_gate import _is_unscorable
+    from ubt.core.ir.models import BlockType
+
+    path = "/home/kyle/.cache/ubt/docling_cache/assets/6331259d7f49aa708.png"
+    assert _is_unscorable(_block("img_1", BlockType.IMAGE, path, path, skip=True)) is True
+
+
+def test_a_verbatim_kept_block_is_not_judged() -> None:
+    """A bibliography entry is deliberately source-only; a low score there is wrong."""
+    from ubt.core.engine.stages.quality_gate import _is_unscorable
+    from ubt.core.ir.models import BlockType
+
+    assert (
+        _is_unscorable(
+            _block(
+                "b1",
+                BlockType.NARRATIVE,
+                "Cheng Cui, Tingquan Gao, Xueqing Wang",
+                "Cheng Cui, Tingquan Gao, Xueqing Wang",
+                skip=True,
+            )
+        )
+        is True
+    )
+
+
+def test_real_translations_are_still_judged() -> None:
+    """The near miss: the filter must not silence the blocks it exists for."""
+    from ubt.core.engine.stages.quality_gate import _is_unscorable
+    from ubt.core.ir.models import BlockType
+
+    assert (
+        _is_unscorable(
+            _block(
+                "b15",
+                BlockType.NARRATIVE,
+                "current methodologies follow two suboptimal paths",
+                "当前方法通常沿两条次优路径展开",
+                skip=False,
+            )
+        )
+        is False
+    )
+    # ...and a heading with a translated title is judged too.
+    assert (
+        _is_unscorable(
+            _block(
+                "b69",
+                BlockType.HEADING,
+                "3.4. Physical Spatial Aware Data Augmentation",
+                "3.4. 物理空间感知数据增强",
+                skip=False,
+            )
+        )
+        is False
+    )
+
+
+def test_the_audit_skips_unscorable_blocks_before_calling_the_judge() -> None:
+    """No judge call should be spent on a block with nothing to judge."""
+    import asyncio
+
+    from ubt.core.engine.stages.quality_gate import _audit_pass_sample
+    from ubt.core.ir.models import BlockType
+    from ubt.core.qe.heuristic import HeuristicQERunner
+    from ubt.core.qe.llm_judge import LLMJudgeQERunner, TieredQERunner
+
+    calls: list[str] = []
+
+    async def judge_fn(**kwargs: Any) -> str:
+        calls.append(kwargs["user_prompt"])
+        return "score: 30"
+
+    tier = TieredQERunner(
+        heuristic=HeuristicQERunner(),
+        judge=LLMJudgeQERunner(judge_fn=judge_fn, compare_sentences=False),
+        pass_sample=1.0,
+    )
+    path = "/tmp/assets/x.png"
+    blocks = [
+        _block("img_1", BlockType.IMAGE, path, path, skip=True),
+        _block(
+            "b1",
+            BlockType.NARRATIVE,
+            "the weights are publicly available",
+            "权重可获取",
+            skip=False,
+        ),
+    ]
+    demoted = asyncio.run(_audit_pass_sample(tier, blocks, 0.75))
+    assert [b.id for b in demoted] == ["b1"]
+    assert len(calls) == 1  # the asset spent no call

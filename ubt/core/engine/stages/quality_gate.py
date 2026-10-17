@@ -114,20 +114,70 @@ async def _audit_pass_sample(
     passes, they are scored here and any below-threshold block is routed back
     into repair. A plain heuristic/COMET runner has no ``pass_sample``, so
     the default configuration is unchanged.
+
+    Blocks that carry no prose are skipped before scoring. Measured on arXiv
+    2606.23344: four asset blocks (``img_*``/``fml_*``) reached the judge with a
+    *file path* as both source and target. There is no translation to judge, and
+    the judge's opinion of a path is noise — it scored them 1.0, spending four
+    calls and reporting a meaningless pass. Images, formulas and verbatim-skipped
+    blocks are excluded here rather than trusted to score themselves well.
     """
     if getattr(qe_runner, "pass_sample", 0.0) <= 0.0 or not blocks:
         return []
+    scorable = [b for b in blocks if not _is_unscorable(b)]
+    if not scorable:
+        return []
     pairs = [
         {"src": b.source_text, "mt": b.target_text or "", "block_type": str(b.block_type)}
-        for b in blocks
+        for b in scorable
     ]
     scores = await qe_runner.score_pairs(pairs)
-    if len(scores) != len(blocks):
+    if len(scores) != len(scorable):
         raise MTQEEvaluationError(
-            f"QE runner returned {len(scores)} score(s) for {len(blocks)} pass-sample block(s)",
-            details={"expected": len(blocks), "got": len(scores)},
+            f"QE runner returned {len(scores)} score(s) for {len(scorable)} pass-sample block(s)",
+            details={"expected": len(scorable), "got": len(scores)},
         )
-    return [b for b, score in zip(blocks, scores, strict=True) if score < threshold]
+    return [b for b, score in zip(scorable, scores, strict=True) if score < threshold]
+
+
+#: Block types whose text is not a translation the judge can read. Assets are
+#: paths; a figure/equation is placed as an image. Tables and prose are NOT here:
+#: their text is content the reader actually reads.
+_UNSCORABLE_BLOCK_TYPES = frozenset({"figure", "equation"})
+
+
+def _is_unscorable(block: IRBlock) -> bool:
+    """Whether judging this block's target against its source would mean nothing.
+
+    Two shapes qualify, and both were measured on a real run:
+
+    * an **asset block** — its text is a cache path (``…/assets/6331…png``), so
+      source and target are identical paths and the judge scores them 1.0;
+    * a **verbatim-skipped block** — a bibliography entry or an author list the
+      pipeline deliberately keeps in the source language, so a low score there
+      would ask repair to "fix" a correct decision.
+
+    Tables and prose are scored: their text is content the reader reads.
+    """
+    if block.skip_translate:
+        return True
+    block_type = str(getattr(block, "block_type", "") or "")
+    if block_type in _UNSCORABLE_BLOCK_TYPES:
+        return True
+    source = (block.source_text or "").strip()
+    target = (block.target_text or "").strip()
+    # An asset path is the same string on both sides and points at a file.
+    return bool(source) and source == target and _looks_like_asset_path(source)
+
+
+def _looks_like_asset_path(text: str) -> bool:
+    """Whether a block's text is a generated asset path rather than prose."""
+    if len(text) > 512 or "\n" in text:
+        return False
+    lowered = text.lower()
+    if not lowered.endswith((".png", ".jpg", ".jpeg", ".webp", ".svg", ".pdf")):
+        return False
+    return "/assets/" in lowered or "\\assets\\" in lowered
 
 
 async def run_quality_gate_stage(
