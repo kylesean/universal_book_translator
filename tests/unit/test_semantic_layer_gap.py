@@ -634,3 +634,64 @@ def test_the_audit_skips_unscorable_blocks_before_calling_the_judge() -> None:
     assert [b.id for b in demoted] == ["b1"]
     assert [b.id for b in scored] == ["b1"]
     assert len(calls) == 1  # the asset spent no call
+
+
+# --------------------------------------------------------------------------- #
+# The glossary and the omission gate must not contradict each other
+# --------------------------------------------------------------------------- #
+
+
+def test_glossary_is_pushed_into_the_omission_gate() -> None:
+    """A term the glossary renders must not then be demanded as an identifier.
+
+    The draft stage teaches its own FastPassFilter the glossary (see
+    ``draft.py``), but the quality gate scores through the *runner's* filter,
+    which was never told. Measured on arXiv 2606.23344 b0006: the glossary asks
+    ``state-of-the-art -> 当前最先进的``, the repair obeyed it and wrote
+    ``当前最先进的准确性``, and the omission gate reported "identifier term(s)
+    missing from target: ['SOTA']" and capped a correct repair at 0.35.
+    """
+    from ubt.core.qe.heuristic import HeuristicQERunner
+
+    glossary = [{"source": "state-of-the-art", "translation": "当前最先进的"}]
+    unbound = HeuristicQERunner()
+    assert unbound.fast_pass.omission_gate._glossary_surfaces == []
+
+    bound = unbound.with_glossary(glossary)
+    assert bound.fast_pass.omission_gate._glossary_surfaces == [
+        ("state-of-the-art", "当前最先进的")
+    ]
+
+
+def test_an_alias_lets_the_omission_gate_accept_a_rendered_abbreviation() -> None:
+    """The abbreviation is the term-sheet gap, and an alias closes it.
+
+    The mechanism was already there (``_glossary_verifies``); what was missing
+    was the connection between the two gates. With ``SOTA`` listed as an alias of
+    the entry, the same block passes.
+    """
+    from ubt.core.qe.heuristic import HeuristicQERunner
+
+    source = (
+        "Extensive experiments demonstrate that RT-DocLayout achieves SOTA accuracy "
+        "while maintaining real-time inference efficiency."
+    )
+    target = "大量实验表明，RT-DocLayout 在保持实时推理效率的同时实现了当前最先进的准确性。"
+    glossary = [{"source": "state-of-the-art", "translation": "当前最先进的", "aliases": ["SOTA"]}]
+    gate = HeuristicQERunner().with_glossary(glossary).fast_pass.omission_gate
+    assert gate.evaluate(source, target).passed is True
+
+
+def test_the_message_points_at_the_fix_when_a_glossary_is_bound() -> None:
+    """An omission caused by an abbreviation must not read as a translation bug."""
+    from ubt.core.qe.heuristic import HeuristicQERunner
+
+    # Two identifier terms are needed before the recall floor engages.
+    source = "The method achieves SOTA accuracy and RT-DocLayout efficiency."
+    target = "该方法实现了当前最先进的准确性以及 RT-DocLayout 的效率。"
+    glossary = [{"source": "state-of-the-art", "translation": "当前最先进的"}]
+    decision = (
+        HeuristicQERunner().with_glossary(glossary).fast_pass.omission_gate.evaluate(source, target)
+    )
+    assert decision.passed is False
+    assert "alias" in decision.reason

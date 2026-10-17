@@ -157,14 +157,26 @@ class HeuristicQERunner(BaseQERunner):
         The orchestrator constructs the runner before the glossary exists;
         this rebinds it so the repair loop's re-score sees a term violation
         instead of passing the repaired text at 0.92.
+
+        The omission gate inside :attr:`fast_pass` is taught the same glossary.
+        The draft stage does this for its own filter, but the quality gate scores
+        through *this* runner's filter, which had never been told — so the two
+        gates contradicted each other in the gate path even though the draft
+        path was correct. Measured on arXiv 2606.23344 b0006: the glossary asks
+        ``state-of-the-art -> 当前最先进的``, the repair obeyed it and wrote
+        ``当前最先进的准确性``, and the omission gate then reported "identifier
+        term(s) missing from target: ['SOTA']" and capped a correct repair at
+        0.35 — the very failure the draft stage's comment describes.
         """
         if not glossary or glossary is self._glossary:
             return self
-        return HeuristicQERunner(
+        bound = HeuristicQERunner(
             target_lang=self.target_lang,
             source_lang=self.source_lang,
             glossary=glossary,
         )
+        bound.fast_pass.set_glossary(glossary)
+        return bound
 
     def is_glossary_aware(self) -> bool:
         """True once a glossary is bound, so a term violation caps the score."""

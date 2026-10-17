@@ -540,6 +540,21 @@ class OmissionGate:
                 passed=False,
                 reason=(
                     f"Omission suspected: identifier term(s) missing from target: {missing_terms}"
+                    + (
+                        # Tell the operator what to change. The common case is an
+                        # abbreviation standing for a glossary entry that was
+                        # correctly rendered: the glossary asks for
+                        # ``state-of-the-art -> 当前最先进的`` and the source says
+                        # ``SOTA``, which no surface match connects. That is a
+                        # term-sheet gap (add ``SOTA`` as an alias), not a
+                        # translation defect, and without the hint the message
+                        # reads as one.
+                        " — if a term above is an abbreviation of a glossary entry"
+                        " (e.g. SOTA for state-of-the-art), list it as an alias"
+                        " in that entry"
+                        if self._glossary_surfaces
+                        else ""
+                    )
                 ),
                 metrics=metrics,
             )
