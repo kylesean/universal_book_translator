@@ -330,6 +330,17 @@ async def run_bible_stage(
         except Exception as exc:
             logger.warning("Abbreviation translation backfill failed: %s", exc)
             backfilled_count = 0
+        # Fold again, now that the mined entries carry renderings.
+        #
+        # The merge above runs before backfill, when a mined entry still has
+        # ``translation=""``, and a concept can only be *contradictory* once both
+        # sides have a rendering — so the fold never fired for the exact case it
+        # exists for. Measured on arXiv 2606.23344: the LLM skeleton supplied
+        # ``state-of-the-art (SOTA) -> 当前最优（SOTA）`` while the miner supplied
+        # ``state-of-the-art -> ""``, backfill filled the latter with
+        # ``当前最先进的``, and the two survived as separate enforced rules, so
+        # b0002 scored 0.25 for correctly writing 当前最优（SOTA）.
+        merged_entries = merge_bible_entries(merged_entries)
 
     bible = BookBible(
         doc_id=manifest.doc_id,

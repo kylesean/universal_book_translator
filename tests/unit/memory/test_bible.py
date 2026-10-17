@@ -342,3 +342,34 @@ def test_distinct_concepts_are_not_merged_by_the_fold() -> None:
 def test_merge_does_not_invent_admitted_variants_for_a_single_entry() -> None:
     merged = merge_bible_entries([BibleEntry(source="Foo", translation="甲")])
     assert merged[0].inflected_variants == []
+
+
+def test_the_concept_fold_runs_again_after_backfill_fills_a_mined_entry() -> None:
+    """The fold only sees a contradiction once BOTH sides carry a rendering.
+
+    Ordering defect, measured on arXiv 2606.23344: the LLM skeleton supplied
+    ``state-of-the-art (SOTA) -> 当前最优（SOTA）`` while the miner supplied
+    ``state-of-the-art -> ""``. The single merge pass ran before backfill filled
+    the empty side, so there was no contradiction to fold yet, and the two rules
+    survived into the glossary — where they fought over every block.
+    """
+    from ubt.core.memory.bible import merge_bible_entries
+
+    # State at the first merge pass: the mined side is still untranslated.
+    before_backfill = merge_bible_entries(
+        [
+            BibleEntry(source="state-of-the-art", translation="", aliases=["SOTA"]),
+            BibleEntry(source="state-of-the-art (SOTA)", translation="当前最优（SOTA）"),
+        ]
+    )
+    assert len(before_backfill) == 2  # nothing to fold yet
+
+    # Backfill fills the mined entry, then the stage merges again.
+    filled = [
+        before_backfill[0].model_copy(update={"translation": "当前最先进的"}),
+        before_backfill[1],
+    ]
+    after_backfill = merge_bible_entries(filled)
+    assert len(after_backfill) == 1
+    assert after_backfill[0].translation == "当前最先进的"
+    assert "当前最优（SOTA）" in after_backfill[0].inflected_variants
