@@ -208,7 +208,15 @@ def select_terms_for_chunk(
 
 
 def format_terms_markdown_table(terms: list[dict[str, Any]]) -> str:
-    """Format terms as a 3-column markdown table: 原文 | 别名 | 译文."""
+    """Format terms as a markdown table: 原文 | 别名 | 译文 (+ 备用译法 when any).
+
+    A fourth column appears **only** when some entry carries admitted variants —
+    the case where one concept legitimately has more than one approved rendering
+    (:func:`ubt.core.memory.bible.merge_bible_entries` folds those in). Emitting
+    it unconditionally would change the table for every document and invalidate
+    the TM context hash that is derived from these exact bytes, so the vocabulary
+    only widens where the terminology actually needs it.
+    """
     if not terms:
         return ""
 
@@ -216,11 +224,22 @@ def format_terms_markdown_table(terms: list[dict[str, Any]]) -> str:
         s = " ".join(str(val or "").split())
         return s.replace("|", "\\|")
 
-    rows = ["| 原文 | 别名 | 译文 |", "| :--- | :--- | :--- |"]
-    for t in terms:
+    admitted_rows = [[v for v in t.get("inflected_variants") or [] if v] for t in terms]
+    with_admitted = any(admitted_rows)
+
+    if with_admitted:
+        rows = ["| 原文 | 别名 | 译文 | 备用译法（同样合格） |", "| :--- | :--- | :--- | :--- |"]
+    else:
+        rows = ["| 原文 | 别名 | 译文 |", "| :--- | :--- | :--- |"]
+
+    for t, admitted in zip(terms, admitted_rows, strict=True):
         src = _clean(t.get("source", ""))
         aliases = ", ".join(_clean(a) for a in t.get("aliases", []) if a)
         tgt = _clean(t.get("translation", t.get("target", "")))
-        rows.append(f"| {src} | {aliases} | {tgt} |")
+        if with_admitted:
+            alt = ", ".join(_clean(v) for v in admitted)
+            rows.append(f"| {src} | {aliases} | {tgt} | {alt} |")
+        else:
+            rows.append(f"| {src} | {aliases} | {tgt} |")
 
     return "\n".join(rows)

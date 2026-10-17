@@ -1,8 +1,12 @@
+import logging
+import re
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from ubt.core.memory.cjk_matcher import contains_cjk
+
+logger = logging.getLogger(__name__)
 
 
 class BibleEntry(BaseModel):
@@ -13,6 +17,14 @@ class BibleEntry(BaseModel):
     source: str
     translation: str
     aliases: list[str] = Field(default_factory=list)
+    #: Alternate *approved* renderings of the same concept: morphological
+    #: variants (``current optimal`` / ``currently optimal``) and admitted
+    #: synonyms. They are accepted where they appear and never rewritten, but
+    #: ``translation`` stays the preferred form the draft is steered to. This is
+    #: the terminology-management ``admitted term`` slot next to the
+    #: ``preferred term``; :func:`merge_bible_entries` fills it when two entries
+    #: for one concept disagree about the rendering.
+    inflected_variants: list[str] = Field(default_factory=list)
     kind: str = "term"  # person, place, term
     frequency: int = 0  # Global attest count driving top-N ranking
 
@@ -115,8 +127,67 @@ def clean_bible_entry(
     return BibleEntry(source=src, translation=tr, aliases=cleaned_aliases, kind=kind)
 
 
+def _concat_key(source: str) -> str:
+    """Concept key that ignores spacing and hyphenation: ``state of the art``."""
+    return re.sub(r"[\s\-_]+", "", source).casefold()
+
+
+#: A trailing strict-uppercase acronym parenthetical: ``Foo (BAR)``.
+_TRAILING_ACRONYM_RE = re.compile(r"^(?P<base>.+?)\s*\(\s*(?P<acronym>[A-Z][A-Z0-9]{1,9})\s*\)\s*$")
+
+
+def concept_key(source: str) -> str:
+    """The concept an entry names, with an author-attested acronym folded in.
+
+    Terminology management keeps ONE record per concept: a preferred term plus
+    its admitted synonyms and abbreviations. The pipeline had been treating
+    "Full Expansion (ACRONYM)" as a *second* concept whenever it arrived from a
+    different channel than the bare expansion, which is how one document ended
+    up carrying both ``state-of-the-art -> 当前最先进的`` and
+    ``state-of-the-art (SOTA) -> 当前最优（SOTA）``. Each entry then judged the
+    other's correct rendering as drift, so no translation could satisfy both:
+
+      * b0002 wrote 当前最优（SOTA）, which the first entry called drift (0.25)
+      * b0006 wrote 当前最先进的, which the second entry called drift (0.35)
+
+    Folding the acronym requires that it actually spells the base — the same
+    word-initial rule the abbreviation miner uses — so ``Transformer (XL)`` and
+    ``GPT (4)`` stay distinct concepts while ``state-of-the-art (SOTA)`` collapses
+    onto ``state-of-the-art``.
+    """
+    from ubt.core.memory.abbreviation_miner import _find_expansion_for
+
+    text = source.strip()
+    match = _TRAILING_ACRONYM_RE.match(text)
+    if match:
+        base = match.group("base").strip()
+        acronym = match.group("acronym")
+        # ``_find_expansion_for`` wants the words *preceding* the acronym and
+        # returns the tightest suffix that spells it; requiring it to cover the
+        # whole base keeps "Attention (MHA)" a separate concept.
+        if base and _find_expansion_for(acronym, base + " ") is not None:
+            return _concat_key(base)
+    return _concat_key(text)
+
+
 def merge_bible_entries(entries: list[BibleEntry]) -> list[BibleEntry]:
-    """Merge entries by source.lower(): first translation wins, aliases unioned, max frequency."""
+    """Merge entries by concept: preferred rendering wins, others become admitted.
+
+    Two axes, in order:
+
+    1. **Same source surface** (case-insensitive): first translation wins, aliases
+       union, max frequency — the historical behaviour.
+    2. **Same concept** (:func:`concept_key`): one entry survives and the other's
+       rendering becomes an admitted variant on it. Before this, a document could
+       carry two contradictory rules for one concept and the gate enforced both,
+       which no translation can satisfy (see :func:`concept_key`).
+
+    The surviving rendering is the one the *document* attests more: frequency
+    first, then the shorter source surface (the bare expansion is the preferred
+    term; ``Foo (BAR)`` is its attestation), then input order. A rendering that
+    disagrees is never discarded — it is recorded as an admitted variant, so the
+    text already written under it keeps passing and the enforcer leaves it alone.
+    """
     merged: dict[str, dict[str, Any]] = {}
     for e in entries:
         key = e.source.lower()
@@ -125,23 +196,89 @@ def merge_bible_entries(entries: list[BibleEntry]) -> list[BibleEntry]:
                 "source": e.source,
                 "translation": e.translation,
                 "aliases": set(e.aliases),
+                "inflected_variants": set(e.inflected_variants),
                 "kind": e.kind,
                 "frequency": e.frequency,
+                "order": len(merged),
             }
         else:
             merged[key]["aliases"] |= set(e.aliases)
+            merged[key]["inflected_variants"] |= set(e.inflected_variants)
             if not merged[key]["translation"] and e.translation:
                 merged[key]["translation"] = e.translation
             merged[key]["frequency"] = max(int(merged[key]["frequency"]), e.frequency)
 
+    # Pass 2: fold entries that name the same concept through an attested acronym.
+    by_concept: dict[str, list[dict[str, Any]]] = {}
+    for record in merged.values():
+        by_concept.setdefault(concept_key(str(record["source"])), []).append(record)
+
+    for group in by_concept.values():
+        if len(group) < 2:
+            continue
+        rendered = [r for r in group if str(r["translation"]).strip()]
+        if len(rendered) < 2:
+            continue
+        # Preferred term = the bare expansion. ``Foo (BAR)`` is an *attestation*
+        # of the concept, not a term to steer a draft towards — a rendering that
+        # embeds "（SOTA）" in every sentence is the wrong thing to prefer across
+        # the document, even when the miner happened to see it more often.
+        # Frequency then breaks ties between equally bare surfaces.
+        winner = min(
+            rendered,
+            key=lambda r: (
+                1 if _TRAILING_ACRONYM_RE.match(str(r["source"])) else 0,
+                -int(r["frequency"]),
+                len(str(r["source"])),
+                int(r["order"]),
+            ),
+        )
+        for loser in group:
+            if loser is winner:
+                continue
+            # Every distinct rendering the loser carried is admitted on the
+            # winner, and the loser's source surfaces become aliases so the
+            # concept is still recognised in text that spells it the long way.
+            losing_translation = str(loser["translation"]).strip()
+            if losing_translation and losing_translation != winner["translation"]:
+                if losing_translation not in winner["inflected_variants"]:
+                    winner["inflected_variants"].add(losing_translation)
+                logger.info(
+                    "Terminology: %r has two renderings (%r preferred, %r admitted); "
+                    "keeping both so neither reads as drift",
+                    winner["source"],
+                    winner["translation"],
+                    losing_translation,
+                )
+            winner["aliases"] |= {str(loser["source"])} | set(loser["aliases"])
+            # The loser's admitted renderings are target-side forms, not source
+            # surfaces: merging them into ``aliases`` would teach the source
+            # scan to look for Chinese in English text. They join the winner's
+            # admitted set instead.
+            for admitted in loser["inflected_variants"]:
+                if admitted and admitted != winner["translation"]:
+                    winner["inflected_variants"].add(admitted)
+            winner["frequency"] = max(int(winner["frequency"]), int(loser["frequency"]))
+            merged.pop(str(loser["source"]).lower(), None)
+
+    # A concept's own source surface and preferred rendering are never aliases
+    # or admitted variants of itself.
     result: list[BibleEntry] = []
     for key in sorted(merged):
         m = merged[key]
+        own = {str(m["source"]).casefold()}
+        aliases = sorted(a for a in m["aliases"] if a and a.casefold() not in own)
+        admitted = sorted(
+            v
+            for v in m["inflected_variants"]
+            if v and v != m["translation"] and v.casefold() not in {a.casefold() for a in aliases}
+        )
         result.append(
             BibleEntry(
                 source=m["source"],
                 translation=m["translation"],
-                aliases=sorted(m["aliases"]),
+                aliases=aliases,
+                inflected_variants=admitted,
                 kind=m["kind"],
                 frequency=int(m["frequency"]),
             )

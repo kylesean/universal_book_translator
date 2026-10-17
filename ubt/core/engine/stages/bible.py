@@ -13,7 +13,13 @@ from ubt.core.engine.stage_context import StageContext
 from ubt.core.ir.models import IRBlock
 from ubt.core.memory.abbreviation_backfill import backfill_abbreviation_translations
 from ubt.core.memory.abbreviation_miner import mine_abbreviations_stream
-from ubt.core.memory.bible import BibleEntry, BookBible, clean_bible_entry, merge_bible_entries
+from ubt.core.memory.bible import (
+    BibleEntry,
+    BookBible,
+    clean_bible_entry,
+    concept_key,
+    merge_bible_entries,
+)
 from ubt.core.memory.character_miner import mine_characters_stream
 from ubt.core.memory.seed_glossary import load_external_glossary, seed_entries_for_profile
 from ubt.core.memory.tm import PROMPT_VERSION
@@ -63,6 +69,41 @@ def _split_bible_entries(
         e.model_dump() for e in entries if not e.translation and e.kind not in ("person", "place")
     ]
     return glossary, abbreviations
+
+
+def _flag_conflicting_renderings(glossary: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Log concept groups whose renderings survive as separate enforced rules.
+
+    :func:`merge_bible_entries` folds an *attested* acronym pair onto one concept.
+    What it cannot fold is a genuine contradiction — two entries for one source
+    surface that reached the bible through different channels and disagree about
+    the rendering, e.g. a user glossary saying "Foo -> 甲" beside a mined seed
+    saying "Foo -> 乙". The historical merge keeps the first translation and
+    silently drops the second, so the gate enforces one rule while a draft that
+    followed the other reads as drift, and the block can never pass.
+
+    This does not resolve such a conflict (which rendering is right is the
+    operator's call, not the pipeline's). It makes the situation visible, because
+    the failure it produces is otherwise indistinguishable from a bad translation.
+    """
+    by_concept: dict[str, set[str]] = {}
+    for entry in glossary:
+        source = str(entry.get("source", "")).strip()
+        rendering = str(entry.get("translation", "")).strip()
+        if not source or not rendering:
+            continue
+        by_concept.setdefault(concept_key(source), set()).add(rendering)
+    for key, renderings in sorted(by_concept.items()):
+        if len(renderings) > 1:
+            logger.warning(
+                "Terminology: concept %r has %d enforced renderings %s. A draft can "
+                "only satisfy one, so blocks using the other will read as drift. "
+                "Add an alias/admitted variant or remove the duplicate entry.",
+                key,
+                len(renderings),
+                sorted(renderings),
+            )
+    return glossary
 
 
 async def run_bible_stage(
@@ -178,6 +219,7 @@ async def run_bible_stage(
         # returning the payload would discard them, so the pipeline would
         # enforce the previous run's renderings.
         glossary_dicts, abbreviation_entries = _split_bible_entries(bible.glossary)
+        _flag_conflicting_renderings(glossary_dicts)
         logger.info(
             "Reusing cached translation bible for %s (%d translated, %d pending entries)",
             actual_job_id,
@@ -295,6 +337,7 @@ async def run_bible_stage(
         glossary=merged_entries,
     )
     glossary_dicts, abbreviation_entries = _split_bible_entries(bible.glossary)
+    _flag_conflicting_renderings(glossary_dicts)
 
     await asyncio.to_thread(
         ledger.set_job_metadata_value,

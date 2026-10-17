@@ -264,3 +264,37 @@ def test_a_key_shared_between_a_source_and_an_alias_keeps_both_terms() -> None:
     result = _ids(select_terms_for_chunk(terms, "neural networks", top_n=0))
     assert "src" in result
     assert "alias" in result
+
+
+def test_the_table_keeps_three_columns_until_a_term_has_admitted_variants() -> None:
+    """The fourth column is opt-in, so the TM context hash is unaffected.
+
+    The sheet's exact bytes are hashed into the TM context (see
+    ``glossary_table``); widening every document's table to carry an empty
+    column would invalidate every cached translation for no gain.
+    """
+    plain = format_terms_markdown_table([{"source": "x", "translation": "y"}])
+    assert "备用译法" not in plain
+    # Three columns => four cell separators per row, on every row.
+    assert {line.count("|") for line in plain.splitlines()} == {4}
+
+    widened = format_terms_markdown_table(
+        [{"source": "x", "translation": "y", "inflected_variants": ["z"]}]
+    )
+    assert "| x |  | y | z |" in widened
+
+
+def test_an_admitted_variant_is_rendered_as_a_second_approved_rendering() -> None:
+    from ubt.core.memory.cjk_matcher import format_terms_markdown_table as fmt
+
+    table = fmt(
+        [
+            {
+                "source": "state-of-the-art",
+                "translation": "当前最先进的",
+                "inflected_variants": ["当前最优（SOTA）"],
+            }
+        ]
+    )
+    assert "备用译法" in table
+    assert "当前最优（SOTA）" in table

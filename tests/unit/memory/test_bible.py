@@ -229,3 +229,116 @@ def test_the_space_normalized_entry_still_catches_a_real_drift() -> None:
     assert not validator.validate(
         "Is Switch Transformer better?", "Switch Transformer 性能更好"
     ).is_valid
+
+
+# --------------------------------------------------------------------------- #
+# Concept-level merging: one concept, one entry, every approved rendering kept
+#
+# Measured on arXiv 2606.23344: the bible carried BOTH
+#   state-of-the-art -> 当前最先进的          (aliases: SOTA)
+#   state-of-the-art (SOTA) -> 当前最优（SOTA）
+# The first came from the abbreviation miner + backfill, the second from the
+# LLM skeleton extractor. Each judged the other's correct rendering as drift, so
+# no translation could satisfy both: b0002 wrote 当前最优（SOTA） and scored 0.25,
+# b0006 wrote 当前最先进的 and scored 0.35. Both were correct.
+# --------------------------------------------------------------------------- #
+
+
+def test_an_attested_acronym_folds_onto_its_expansion() -> None:
+    from ubt.core.memory.bible import concept_key
+
+    assert concept_key("state-of-the-art (SOTA)") == concept_key("state-of-the-art")
+    assert concept_key("Long Short-Term Memory (LSTM)") == concept_key("Long Short-Term Memory")
+    assert concept_key("Parameter-Efficient Fine-Tuning (PEFT)") == concept_key(
+        "Parameter-Efficient Fine-Tuning"
+    )
+
+
+def test_a_parenthetical_that_does_not_spell_its_base_stays_a_separate_concept() -> None:
+    """The fold must be earned by the initials, not by the shape.
+
+    ``Transformer (XL)`` and ``GPT (4)`` are not acronym attestations; folding
+    them would silently merge unrelated terms.
+    """
+    from ubt.core.memory.bible import concept_key
+
+    assert concept_key("Transformer (XL)") != concept_key("Transformer")
+    assert concept_key("GPT (4)") != concept_key("GPT")
+
+
+def test_two_renderings_of_one_concept_become_preferred_plus_admitted() -> None:
+    merged = merge_bible_entries(
+        [
+            BibleEntry(source="state-of-the-art", translation="当前最先进的", aliases=["SOTA"]),
+            BibleEntry(
+                source="state-of-the-art (SOTA)", translation="当前最优（SOTA）", frequency=1
+            ),
+        ]
+    )
+    assert len(merged) == 1
+    entry = merged[0]
+    # The bare expansion is the preferred term even though the attestation was
+    # seen more often: steering every sentence to embed "（SOTA）" is wrong.
+    assert entry.source == "state-of-the-art"
+    assert entry.translation == "当前最先进的"
+    assert "当前最优（SOTA）" in entry.inflected_variants
+    assert "state-of-the-art (SOTA)" in entry.aliases
+
+
+def test_a_merged_concept_accepts_both_rendering_in_the_gate() -> None:
+    """The end the merge exists for: neither rendering may read as drift."""
+    from ubt.core.qe.term_drift import detect_term_drift
+
+    glossary = [
+        e.model_dump()
+        for e in merge_bible_entries(
+            [
+                BibleEntry(source="state-of-the-art", translation="当前最先进的", aliases=["SOTA"]),
+                BibleEntry(
+                    source="state-of-the-art (SOTA)", translation="当前最优（SOTA）", frequency=1
+                ),
+            ]
+        )
+    ]
+    source = "RT-DocLayout achieves state-of-the-art (SOTA) performance across benchmarks."
+    for target in (
+        "RT-DocLayout 在多个基准上达到了当前最优（SOTA）性能。",
+        "RT-DocLayout 在多个基准上实现了当前最先进的性能。",
+    ):
+        (finding,) = detect_term_drift(source, target, glossary)
+        assert finding.drifted is False, target
+
+
+def test_an_admitted_rendering_is_never_rewritten_by_the_enforcer() -> None:
+    """Admitted means accepted in place, not accepted-then-replaced."""
+    from ubt.core.validators.glossary_enforcer import DeterministicGlossaryEnforcer
+
+    glossary = [
+        e.model_dump()
+        for e in merge_bible_entries(
+            [
+                BibleEntry(source="state-of-the-art", translation="当前最先进的", aliases=["SOTA"]),
+                BibleEntry(source="state-of-the-art (SOTA)", translation="当前最优（SOTA）"),
+            ]
+        )
+    ]
+    enforcer = DeterministicGlossaryEnforcer(glossary)
+    target = "该方法达到了当前最优（SOTA）性能。"
+    corrected, applied, _ = enforcer.enforce_audited(target)
+    assert corrected == target
+    assert applied == []
+
+
+def test_distinct_concepts_are_not_merged_by_the_fold() -> None:
+    merged = merge_bible_entries(
+        [
+            BibleEntry(source="attention", translation="注意力"),
+            BibleEntry(source="Transformer (XL)", translation="变换器（XL）"),
+        ]
+    )
+    assert len(merged) == 2
+
+
+def test_merge_does_not_invent_admitted_variants_for_a_single_entry() -> None:
+    merged = merge_bible_entries([BibleEntry(source="Foo", translation="甲")])
+    assert merged[0].inflected_variants == []
