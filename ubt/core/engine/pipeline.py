@@ -343,7 +343,6 @@ class PipelineOrchestrator:
             self.qe_runner = TieredQERunner(
                 heuristic=self.qe_runner,
                 judge=judge,
-                allow_upgrade=self.config.qe_judge_allow_upgrade,
                 pass_sample=self.config.qe_judge_pass_sample,
             )
         self.repair_loop: RepairLoop = repair_loop or RepairLoop(

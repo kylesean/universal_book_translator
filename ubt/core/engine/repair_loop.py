@@ -10,6 +10,7 @@ from ubt.core.qe.base import BaseQERunner
 from ubt.core.qe.defect_taxonomy import classify_defect, is_format_only
 from ubt.core.qe.fast_pass import FastPassFilter
 from ubt.core.qe.heuristic import GLOSSARY_VIOLATION_MARKER
+from ubt.core.qe.score_policy import shippable_threshold
 from ubt.core.router.router import ModelRouter
 from ubt.core.validators.span_repair import MQMSpanAnnotator, SpanRepairSplicer
 
@@ -69,11 +70,10 @@ class RepairLoop:
         # extra rounds beyond the standard circuit breaker before a block is
         # declared BLOCKED_HUMAN.
         self.escalation_extra_rounds = escalation_extra_rounds
-        # Shippable bar for a circuit-breaker exit. Floored at 0.5 so a
-        # deliberately low qe_threshold cannot promote a barely-passable draft,
-        # but it tracks the configured threshold upward so repair and triage
-        # never disagree about what "shippable" means.
-        self.terminal_pass_floor = max(0.5, qe_threshold)
+        # Shippable bar for a circuit-breaker exit. One shared rule
+        # (``score_policy.shippable_threshold``) so repair and triage cannot
+        # disagree about what "shippable" means.
+        self.terminal_pass_floor = shippable_threshold(qe_threshold)
         # Best-of-n repair candidates (MBR-lite). 1 = single candidate;
         # >1 samples and keeps the best structurally valid one, ranked by a
         # neural QE score.

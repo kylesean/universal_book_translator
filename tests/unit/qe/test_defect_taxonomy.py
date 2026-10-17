@@ -315,3 +315,61 @@ def test_the_repair_selector_uses_the_shared_decision() -> None:
     candidates = [deterministic, semantic, clean]
     selected = loop.select_repair_candidates(candidates)
     assert [b.id for b in selected] == ["det"]
+
+
+# --------------------------------------------------------------------------- #
+# One "shippable" rule
+#
+# ``max(0.5, qe_threshold)`` appeared four times — triage's auto-pass, the
+# repair stage's standalone finalizer, and two circuit-breaker exits. Four
+# copies of the most consequential threshold in the pipeline.
+# --------------------------------------------------------------------------- #
+
+
+def test_the_shippable_bar_tracks_the_threshold_but_never_drops_below_the_floor() -> None:
+    from ubt.core.qe.score_policy import SHIPPABLE_FLOOR, shippable_threshold
+
+    # Above the floor: the operator's setting is honoured.
+    assert shippable_threshold(0.9) == 0.9
+    assert shippable_threshold(0.75) == 0.75
+    # At or below it: the floor holds, so a low setting cannot promote a draft
+    # the deterministic gates rejected (their classes sit at or below 0.70).
+    assert shippable_threshold(0.2) == SHIPPABLE_FLOOR
+    assert shippable_threshold(0.5) == SHIPPABLE_FLOOR
+
+
+def test_a_block_with_a_defect_flag_is_never_shippable() -> None:
+    """A favourable score is not evidence the defect was fixed."""
+    from ubt.core.qe.score_policy import is_shippable
+
+    assert is_shippable(0.99, 0.75, ["Numeric fidelity failure"]) is False
+    assert is_shippable(0.99, 0.75, []) is True
+    assert is_shippable(None, 0.75, []) is False
+    assert is_shippable(0.55, 0.75, []) is False
+
+
+def test_the_judge_cannot_raise_a_score_over_the_pass_line() -> None:
+    """There is no upgrade switch: a judge opinion may only lower.
+
+    ``qe_judge_allow_upgrade`` used to let a favourable verdict lift a real
+    STRUCTURAL_OTHER failure (0.70) over the line, releasing a draft on an
+    opinion alone. The knob is gone.
+    """
+    import asyncio
+
+    from ubt.core.qe.heuristic import QE_SCORE_STRUCTURAL_OTHER, HeuristicQERunner
+    from ubt.core.qe.llm_judge import LLMJudgeQERunner, TieredQERunner
+
+    class _FixedHeuristic(HeuristicQERunner):
+        async def score_pairs(self, pairs: list[dict[str, str]]) -> list[float]:
+            return [QE_SCORE_STRUCTURAL_OTHER for _ in pairs]
+
+    async def judge_fn(**_kwargs: Any) -> str:
+        return "score: 95"
+
+    tiered = TieredQERunner(
+        heuristic=_FixedHeuristic(),
+        judge=LLMJudgeQERunner(judge_fn=judge_fn),
+    )
+    scores = asyncio.run(tiered.score_pairs([{"src": "a", "mt": "b"}]))
+    assert scores == [QE_SCORE_STRUCTURAL_OTHER]

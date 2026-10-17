@@ -54,6 +54,7 @@ from ubt.core.qe.defect_taxonomy import (
     has_structural_defect,
     is_transient_lifecycle_only,
 )
+from ubt.core.qe.score_policy import is_shippable
 from ubt.core.validators.span_repair import max_severity, span_to_dict
 
 logger = logging.getLogger(__name__)
@@ -396,11 +397,10 @@ async def run_triage_stage(
             )
             continue
 
-        # Minor: auto-pass when the QE score is shippable, otherwise keep the
-        # draft for human review (never silently ship low-score output). The
-        # floor tracks the run's qe_threshold so tightening it (e.g. 0.9 with
-        # a neural judge) actually holds triage to the same bar.
-        if (cand.mtqe_score or 0.0) >= max(0.5, qe_threshold):
+        # Minor: auto-pass when the block is shippable, otherwise keep the draft
+        # for human review. One shared rule (``is_shippable``) so triage, repair
+        # and the repair loop cannot disagree about the bar.
+        if is_shippable(cand.mtqe_score, qe_threshold, list(cand.error_flags)):
             counters["auto_passed"] += 1
             updates.append(
                 {

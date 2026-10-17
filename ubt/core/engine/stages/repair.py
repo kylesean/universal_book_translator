@@ -16,6 +16,7 @@ from ubt.core.exceptions import BudgetExceededError, JobInterruptedError
 from ubt.core.ir.models import BlockStatus, IRBlock
 from ubt.core.memory.glossary_table import build_chunk_glossary_table
 from ubt.core.qe.defect_taxonomy import REPAIR_ERROR_PREFIX
+from ubt.core.qe.score_policy import is_shippable
 
 logger = logging.getLogger(__name__)
 
@@ -186,13 +187,11 @@ async def run_repair_stage(
     # still finalize unresolved blocks.
     if repair_pending_blocks and not defer_unresolved_to_triage:
         terminal_updates: list[dict[str, Any]] = []
-        # Same "shippable" floor as the repair loop's terminal pass decision:
-        # a configured qe_threshold above 0.5 must not be short-circuited here.
-        pass_floor = max(0.5, ctx.config.qe_threshold)
+        # Same shared "shippable" rule as triage and the repair loop.
         for b in repair_pending_blocks:
             final_status = (
                 BlockStatus.MTQE_PASSED
-                if (b.mtqe_score or 0.0) >= pass_floor
+                if is_shippable(b.mtqe_score, ctx.config.qe_threshold, list(b.error_flags))
                 else BlockStatus.FAILED
             )
             raw_text = b.target_text or b.draft_text or ""

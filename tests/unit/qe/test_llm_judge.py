@@ -99,12 +99,9 @@ async def test_tiered_qe_runner_gray_zone_routing() -> None:
         async def score_pairs(self, pairs: list[dict[str, str]]) -> list[float]:
             return [QE_SCORE_STRUCTURAL_OTHER]
 
-    tiered_mocked = TieredQERunner(
-        heuristic=FakeHeuristic(),
-        judge=judge,
-        allow_upgrade=True,
-    )
+    tiered_mocked = TieredQERunner(heuristic=FakeHeuristic(), judge=judge)
     judged_scores = await tiered_mocked.score_pairs([{"src": "text", "mt": "text"}])
     assert tiered_mocked.judge_calls == 1
-    # Upgrade allowed: adopts judge's 0.85
-    assert judged_scores == [0.85]
+    # The judge may only LOWER. A favourable verdict (0.85) cannot raise a real
+    # structural failure over the pass line, so the heuristic value stands.
+    assert judged_scores == [QE_SCORE_STRUCTURAL_OTHER]

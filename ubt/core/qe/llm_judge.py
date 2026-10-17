@@ -116,10 +116,11 @@ def _normalize(score: float) -> float:
     The prompt asks for a 0-100 score, so any value at or above 1 is a
     percentage. The boundary value 1 is genuinely ambiguous — "1 out of 100"
     or the fraction "1.0" (perfect) — and a judge explicitly told to answer
-    0-100 means the former, so it is read as 1%. Treating it as perfect let a
-    near-failing ambiguous block auto-pass under ``qe_judge_allow_upgrade``.
-    Strictly fractional replies in (0, 1) (e.g. 0.95, 0.73) are still read as
-    fractions, since models occasionally answer on the 0-1 scale regardless.
+    0-100 means the former, so it is read as 1%. Reading it as perfect would
+    score a failing block 1.0, which the tier then cannot lower to anything
+    meaningful. Strictly fractional replies in (0, 1) (e.g. 0.95, 0.73) are
+    still read as fractions, since models occasionally answer on the 0-1 scale
+    regardless.
     """
     if score >= 1.0:
         score = score / 100.0
@@ -345,12 +346,10 @@ class TieredQERunner(BaseQERunner):
         self,
         heuristic: HeuristicQERunner,
         judge: LLMJudgeQERunner | None = None,
-        allow_upgrade: bool = False,
         pass_sample: float = 0.0,
     ) -> None:
         self.heuristic = heuristic
         self.judge = judge
-        self.allow_upgrade = allow_upgrade
         self.pass_sample = min(1.0, max(0.0, pass_sample))
         self.judge_calls = 0
         # Count of ambiguous pairs where the judge produced no usable score
@@ -443,7 +442,6 @@ class TieredQERunner(BaseQERunner):
         rebound = TieredQERunner(
             heuristic=heuristic,
             judge=judge,
-            allow_upgrade=self.allow_upgrade,
             pass_sample=self.pass_sample,
         )
         # Counters are per-run ROI observability, and the pipeline rebinds the
@@ -469,7 +467,6 @@ class TieredQERunner(BaseQERunner):
         rebound = TieredQERunner(
             heuristic=heuristic,
             judge=self.judge,
-            allow_upgrade=self.allow_upgrade,
             pass_sample=self.pass_sample,
         )
         rebound.judge_calls = self.judge_calls
@@ -500,9 +497,12 @@ class TieredQERunner(BaseQERunner):
                 # Score rather than silently adopting a fallback.
                 self.judge_errors += 1
                 continue
-            if self.allow_upgrade:
-                merged[i] = s
-            else:
-                # Conservative mode: the judge may only LOWER the heuristic score
-                merged[i] = min(base[i], s)
+            # The judge may only LOWER a score. A judge verdict is a
+            # probabilistic opinion, so it can legitimately say "this is worse
+            # than the invariants suggest" but never "this is better": letting
+            # it raise a block over the pass line would release a draft on an
+            # opinion alone, which is the one thing this gate exists to prevent.
+            # (``qe_judge_allow_upgrade`` used to permit exactly that and could
+            # lift a real STRUCTURAL_OTHER failure to a pass; it is gone.)
+            merged[i] = min(base[i], s)
         return merged

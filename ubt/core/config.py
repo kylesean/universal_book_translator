@@ -471,10 +471,12 @@ class UBTConfig(BaseSettings):
             "quality; 0 (default) keeps the judge on ambiguous classes only."
         ),
     )
-    qe_judge_allow_upgrade: bool = Field(
-        default=False,
-        description="Allow LLM Judge to upgrade gray-zone scores above threshold when justified (default: False, conservative lower-only).",
-    )
+    #: The judge may only LOWER a score — there is no "allow upgrade" switch.
+    #: A judge verdict is a probabilistic opinion: it can say "this is worse than
+    #: the invariants suggest", which is useful, but never "this is better",
+    #: because that would release a draft on an opinion alone. The removed
+    #: ``qe_judge_allow_upgrade`` could lift a real STRUCTURAL_OTHER failure over
+    #: the pass line, which is precisely what the gate exists to prevent.
     # -- Independent judge endpoint -------------------------------------------
     # The judge is often best served by a different (larger) model than the one
     # doing the translating, and differently again by a hosted API rather than
