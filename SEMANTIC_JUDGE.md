@@ -56,11 +56,36 @@ what is absent.
 
 ### 2. Sampling must be on, or the judge never runs
 
-`TieredQERunner` consults the judge for gray-band scores (0.70–0.80) and for a
-**sampled share of clean passes** — and that share defaults to `0.0`. A
-compressed translation scores 0.92, so with the default it never reaches the
-judge at all, even with `qe_judge_enabled = true`. `qe_judge_pass_sample = 0.15`
-judges roughly one clean block in seven.
+`TieredQERunner` consults the judge for the **ambiguous class** — a heuristic
+rejection that no specific classifier could name (the `STRUCTURAL_OTHER` band,
+0.70) — and for a **sampled share of clean passes**, and that share defaults to
+`0.0`. A compressed translation scores 0.92, so with the default it never reaches
+the judge at all, even with `qe_judge_enabled = true`.
+`qe_judge_pass_sample = 0.15` judges roughly one clean block in seven.
+
+There is deliberately no "score band" setting. An earlier version had
+`qe_judge_gray_low`/`_high` defining a range to judge; with the heuristic engine
+it was inert (the twelve emitted values are discrete, and the only one inside the
+default band was already in the ambiguous class), so it was removed rather than
+left looking tunable.
+
+### 2b. What a judge verdict can and cannot do
+
+A judge verdict never triggers an automatic rewrite. The routing rule is one
+function (`defect_taxonomy.classify_defect`) with three outcomes:
+
+| outcome | meaning | what happens |
+| --- | --- | --- |
+| `PASS` | nothing deterministic failed, score clears the line | ships |
+| `DETERMINISTIC_DEFECT` | a named invariant failed (numeric loss, dropped term, markup corruption, empty target) | repaired |
+| `SEMANTIC_DOUBT` | only the judge objected | human queue |
+
+The asymmetry is intentional. Repairing a dropped number is **verifiable**: the
+same check that rejected the draft judges the fix, so the loop can tell whether
+it helped. Repairing "the judge found this awkward" is not — the judge carries
+its own noise, so a rewrite cannot be shown to be better, only different. Blocks
+in that class go to a human instead of spending tokens on an unmeasurable change.
+
 
 ### 3. Comparison is per sentence
 
