@@ -335,6 +335,17 @@ def job_status(
                 "sampled_pages": visual.get("sampled_pages", []),
                 "major_critical": majors,
             }
+        # Terminology conflicts: concepts the glossary gave more than one
+        # rendering. An unresolved one explains a cluster of low scores that no
+        # translation fix can clear, so it belongs in the operator's status view
+        # rather than only in the run log.
+        raw_conflicts = ledger.get_job_metadata_value(job_id, "terminology_conflicts")
+        conflicts: list[dict[str, Any]] = (
+            [c for c in raw_conflicts if isinstance(c, dict)]
+            if isinstance(raw_conflicts, list)
+            else []
+        )
+        unresolved_conflicts = [c for c in conflicts if not c.get("resolved")]
         if json_output:
             print(
                 json.dumps(
@@ -350,6 +361,8 @@ def job_status(
                         "avg_qe_score": float(stats.get("avg_qe_score", 0.0)),
                         "bottom_15_avg_qe": float(stats.get("bottom_15_avg_qe", 0.0)),
                         "visual": visual_summary,
+                        "terminology_conflicts": conflicts,
+                        "unresolved_terminology_conflicts": len(unresolved_conflicts),
                     }
                 )
             )
@@ -386,7 +399,45 @@ def job_status(
         else:
             table.add_row("Visual Gate", "n/a (no visual report recorded)")
 
+        if conflicts:
+            table.add_row(
+                "Terminology Conflicts",
+                f"{len(conflicts)} concept(s), {len(unresolved_conflicts)} unresolved",
+            )
+
         console.print(table)
+
+        if unresolved_conflicts:
+            # Not a score line: a paragraph explaining why a reader should not
+            # treat these blocks as translation failures.
+            lines: list[str] = []
+            for conflict in unresolved_conflicts:
+                losers = ", ".join(
+                    str(s.get("rendering", ""))
+                    for s in conflict.get("superseded", [])
+                    if isinstance(s, dict)
+                )
+                lines.append(
+                    f"[bold]{escape(str(conflict.get('concept', '')))}[/] is enforced as "
+                    f"[green]{escape(str(conflict.get('preferred', '')))}[/] "
+                    f"but also appears as [yellow]{escape(losers)}[/]"
+                )
+            console.print(
+                Panel(
+                    "\n".join(lines)
+                    + "\n\nA translation can only satisfy one rendering, so blocks using "
+                    "another read as terminology drift no matter how well they are "
+                    "translated. Keep one entry, or list the rejected rendering as an "
+                    "admitted variant in the glossary.",
+                    title="[yellow]Unresolved terminology conflicts[/]",
+                    border_style="yellow",
+                )
+            )
+        elif conflicts:
+            console.print(
+                f"[dim]{len(conflicts)} terminology conflict(s) auto-resolved by "
+                f"precedence; both renderings are accepted.[/]"
+            )
     finally:
         ledger.close()
 

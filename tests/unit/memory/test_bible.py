@@ -373,3 +373,113 @@ def test_the_concept_fold_runs_again_after_backfill_fills_a_mined_entry() -> Non
     assert len(after_backfill) == 1
     assert after_backfill[0].translation == "当前最先进的"
     assert "当前最优（SOTA）" in after_backfill[0].inflected_variants
+
+
+# --------------------------------------------------------------------------- #
+# Terminology conflicts: record the decision, never hide it
+#
+# A conflict is two renderings for one concept. The merge resolves it by
+# PRECEDENCE (user glossary > seed, bare expansion > acronym attestation) — not
+# by meaning — so the choice is recorded for review. This replaces an earlier
+# check that scanned the MERGED glossary, which by construction holds one
+# rendering per concept, so it could never fire.
+# --------------------------------------------------------------------------- #
+
+
+def test_an_acronym_fold_is_recorded_as_resolved() -> None:
+    from ubt.core.memory.bible import detect_terminology_conflicts
+
+    conflicts = detect_terminology_conflicts(
+        [
+            BibleEntry(source="state-of-the-art", translation="当前最先进的", aliases=["SOTA"]),
+            BibleEntry(source="state-of-the-art (SOTA)", translation="当前最优（SOTA）"),
+        ]
+    )
+    assert len(conflicts) == 1
+    conflict = conflicts[0]
+    assert conflict.preferred == "当前最先进的"
+    assert conflict.superseded == (("当前最优（SOTA）", "state-of-the-art (SOTA)"),)
+    # The loser becomes an admitted variant, so delivery is unaffected.
+    assert conflict.resolved is True
+
+
+def test_one_surface_with_two_renderings_is_unresolved() -> None:
+    """No fold is possible: one rendering wins and the other is enforced against."""
+    from ubt.core.memory.bible import detect_terminology_conflicts
+
+    conflicts = detect_terminology_conflicts(
+        [
+            BibleEntry(source="Foo", translation="甲", frequency=10_000),
+            BibleEntry(source="Foo", translation="乙"),
+        ]
+    )
+    assert len(conflicts) == 1
+    assert conflicts[0].preferred == "甲"
+    assert conflicts[0].resolved is False
+    assert conflicts[0].superseded == (("乙", "Foo"),)
+
+
+def test_the_conflict_scan_would_be_empty_after_the_merge() -> None:
+    """Pin the ordering defect: this check must run BEFORE merge, not after.
+
+    The earlier version scanned the merged glossary and therefore reported
+    nothing on the document it was written for (arXiv 2606.23344, two renderings
+    of ``state-of-the-art``). If this assertion ever starts failing because the
+    merged output carries two renderings, the merge itself has regressed.
+    """
+    from ubt.core.memory.bible import detect_terminology_conflicts
+
+    entries = [
+        BibleEntry(source="state-of-the-art", translation="当前最先进的", aliases=["SOTA"]),
+        BibleEntry(source="state-of-the-art (SOTA)", translation="当前最优（SOTA）"),
+    ]
+    assert len(detect_terminology_conflicts(entries)) == 1
+    assert detect_terminology_conflicts(merge_bible_entries(entries)) == []
+
+
+def test_no_conflict_when_every_concept_has_one_rendering() -> None:
+    from ubt.core.memory.bible import detect_terminology_conflicts
+
+    assert (
+        detect_terminology_conflicts(
+            [
+                BibleEntry(source="attention", translation="注意力"),
+                BibleEntry(source="Transformer", translation="变换器"),
+            ]
+        )
+        == []
+    )
+
+
+def test_untranslated_entries_do_not_count_as_conflicts() -> None:
+    """A mined entry awaiting backfill has no rendering to disagree with."""
+    from ubt.core.memory.bible import detect_terminology_conflicts
+
+    assert (
+        detect_terminology_conflicts(
+            [
+                BibleEntry(source="state-of-the-art", translation="当前最先进的"),
+                BibleEntry(source="state-of-the-art (SOTA)", translation=""),
+            ]
+        )
+        == []
+    )
+
+
+def test_a_conflict_serializes_for_the_report_and_status() -> None:
+    from ubt.core.memory.bible import detect_terminology_conflicts
+
+    (conflict,) = detect_terminology_conflicts(
+        [
+            BibleEntry(source="Foo", translation="甲"),
+            BibleEntry(source="Foo", translation="乙"),
+        ]
+    )
+    payload = conflict.as_dict()
+    assert payload == {
+        "concept": "foo",
+        "preferred": "甲",
+        "preferred_source": "Foo",
+        "superseded": [{"rendering": "乙", "source": "Foo"}],
+        "resolved": False,
+    }

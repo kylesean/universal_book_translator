@@ -1,6 +1,7 @@
 """Standardized book translation quality report generator."""
 
 import ast
+import logging
 import re
 from datetime import UTC, datetime
 from pathlib import Path
@@ -27,6 +28,8 @@ from ubt.core.qe.score_policy import qe_scored_values
 # lookup the moment anything imported ``ubt.core.engine``, dragging the whole
 # adapters layer (34 modules, ~0.26s) into every core import and defeating the
 # reason the ports indirection exists.
+logger = logging.getLogger(__name__)
+
 _PLACEHOLDER_ENGINE: Any = None
 
 
@@ -174,6 +177,31 @@ class ReportTerminologyMetrics(BaseModel):
     term_recall: float = 0.0
 
 
+class ReportTerminologyConflict(BaseModel):
+    """One concept the glossary gave more than one rendering.
+
+    The pipeline resolves these by precedence, not by meaning — so it records
+    the decision rather than hiding it. ``resolved`` False means delivery is
+    affected: the losing rendering is still enforced against, so any block that
+    used it reads as terminology drift no matter how good the translation is.
+    That is a run configuration problem, not a translation defect, and it is
+    otherwise indistinguishable from one in the score distribution.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    concept: str
+    #: The rendering the pipeline kept (the "preferred term").
+    preferred: str
+    #: The entry whose provenance won — a user glossary or a mined seed.
+    preferred_source: str
+    #: Renderings that lost, each with the source surface that carried it.
+    superseded: list[dict[str, str]] = Field(default_factory=list)
+    #: True when the losers became admitted variants (both renderings accepted).
+    #: False when the loser is still enforced against (operator decision needed).
+    resolved: bool = False
+
+
 class ReportEntityConsistency(BaseModel):
     """Document-level terminology drift, aggregated per source term.
 
@@ -211,6 +239,11 @@ class QualityReport(BaseModel):
     score_metrics: ReportScoreMetrics
     repair_breakdown: ReportRepairBreakdown
     terminology: ReportTerminologyMetrics = Field(default_factory=ReportTerminologyMetrics)
+    #: Concepts the glossary gave more than one rendering, with which one the
+    #: pipeline preferred. Empty when terminology was unambiguous (the normal
+    #: case). A non-empty list with any ``resolved=False`` explains a cluster of
+    #: low scores that is not a translation problem.
+    terminology_conflicts: list[ReportTerminologyConflict] = Field(default_factory=list)
     entity_consistency: ReportEntityConsistency = Field(default_factory=ReportEntityConsistency)
     placeholder: ReportPlaceholderMetrics = Field(
         default_factory=lambda: ReportPlaceholderMetrics(
@@ -443,6 +476,20 @@ def build_quality_report(
     raw_qe_src = ledger.get_job_metadata_value(job_id, "qe_score_source")
     qe_score_source = str(raw_qe_src) if isinstance(raw_qe_src, str) and raw_qe_src else None
 
+    # Terminology conflicts the bible stage recorded. Read defensively: an older
+    # ledger has no such key, and a malformed entry must not break the report
+    # that is the audit record for a delivery.
+    terminology_conflicts: list[ReportTerminologyConflict] = []
+    raw_conflicts = ledger.get_job_metadata_value(job_id, "terminology_conflicts")
+    if isinstance(raw_conflicts, list):
+        for item in raw_conflicts:
+            if not isinstance(item, dict) or not item.get("concept"):
+                continue
+            try:
+                terminology_conflicts.append(ReportTerminologyConflict.model_validate(item))
+            except Exception as exc:  # noqa: BLE001 - a report must still be written
+                logger.debug("Skipping malformed terminology conflict %r: %s", item, exc)
+
     def _metadata_counter(name: str) -> int:
         raw = ledger.get_job_metadata_value(job_id, name)
         try:
@@ -481,6 +528,7 @@ def build_quality_report(
             qe_measured=bool(scored),
         ),
         terminology=terminology_metrics or ReportTerminologyMetrics(),
+        terminology_conflicts=terminology_conflicts,
         entity_consistency=entity_consistency or ReportEntityConsistency(),
         repair_breakdown=ReportRepairBreakdown(
             direct_pass_count=direct_pass,

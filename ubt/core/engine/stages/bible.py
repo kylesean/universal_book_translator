@@ -16,8 +16,9 @@ from ubt.core.memory.abbreviation_miner import mine_abbreviations_stream
 from ubt.core.memory.bible import (
     BibleEntry,
     BookBible,
+    TerminologyConflict,
     clean_bible_entry,
-    concept_key,
+    detect_terminology_conflicts,
     merge_bible_entries,
 )
 from ubt.core.memory.character_miner import mine_characters_stream
@@ -71,39 +72,51 @@ def _split_bible_entries(
     return glossary, abbreviations
 
 
-def _flag_conflicting_renderings(glossary: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Log concept groups whose renderings survive as separate enforced rules.
+def _record_terminology_conflicts(
+    ledger: Any,
+    job_id: str,
+    entries: list[BibleEntry],
+) -> list[TerminologyConflict]:
+    """Detect, log, and persist terminology conflicts for the report and ``ubt status``.
 
-    :func:`merge_bible_entries` folds an *attested* acronym pair onto one concept.
-    What it cannot fold is a genuine contradiction — two entries for one source
-    surface that reached the bible through different channels and disagree about
-    the rendering, e.g. a user glossary saying "Foo -> 甲" beside a mined seed
-    saying "Foo -> 乙". The historical merge keeps the first translation and
-    silently drops the second, so the gate enforces one rule while a draft that
-    followed the other reads as drift, and the block can never pass.
+    Must be called on the **unmerged** entries: :func:`merge_bible_entries` keeps
+    one rendering per concept by construction, so scanning its output can never
+    find a conflict. An earlier check did exactly that and was unreachable — it
+    reported nothing on the document it was written for.
 
-    This does not resolve such a conflict (which rendering is right is the
-    operator's call, not the pipeline's). It makes the situation visible, because
-    the failure it produces is otherwise indistinguishable from a bad translation.
+    The unresolved ones are also warned about, because they change what the
+    operator can expect: a run whose glossary enforces two renderings of one
+    concept will leave blocks below the pass line no matter how well they are
+    translated, and without this record that is indistinguishable from a
+    translation defect.
     """
-    by_concept: dict[str, set[str]] = {}
-    for entry in glossary:
-        source = str(entry.get("source", "")).strip()
-        rendering = str(entry.get("translation", "")).strip()
-        if not source or not rendering:
-            continue
-        by_concept.setdefault(concept_key(source), set()).add(rendering)
-    for key, renderings in sorted(by_concept.items()):
-        if len(renderings) > 1:
-            logger.warning(
-                "Terminology: concept %r has %d enforced renderings %s. A draft can "
-                "only satisfy one, so blocks using the other will read as drift. "
-                "Add an alias/admitted variant or remove the duplicate entry.",
-                key,
-                len(renderings),
-                sorted(renderings),
-            )
-    return glossary
+    conflicts = detect_terminology_conflicts(entries)
+    unresolved = [c for c in conflicts if not c.resolved]
+    for conflict in unresolved:
+        logger.warning(
+            "Terminology conflict: %r is enforced as %r but also appears as %s. "
+            "A translation can only satisfy one, so blocks using the other will "
+            "read as terminology drift. Keep one entry, or add the rejected "
+            "rendering as an admitted variant (inflected_variants) in the glossary.",
+            conflict.concept,
+            conflict.preferred,
+            ", ".join(f"{r!r} (from {s!r})" for r, s in conflict.superseded),
+        )
+    if conflicts:
+        logger.info(
+            "Terminology: %d concept(s) carried more than one rendering "
+            "(%d auto-resolved by precedence, %d need an operator decision)",
+            len(conflicts),
+            len(conflicts) - len(unresolved),
+            len(unresolved),
+        )
+    try:
+        ledger.set_job_metadata_value(
+            job_id, "terminology_conflicts", [c.as_dict() for c in conflicts]
+        )
+    except Exception as exc:  # noqa: BLE001 - never fail a run over a report field
+        logger.debug("Could not persist terminology conflicts for %s: %s", job_id, exc)
+    return conflicts
 
 
 async def run_bible_stage(
@@ -208,6 +221,9 @@ async def run_bible_stage(
         cached_entries = [BibleEntry.model_validate(d) for d in cached_glossary]
         cached_entries += [BibleEntry.model_validate(d) for d in cached_abbreviations]
         bible_entries.extend(cached_entries)
+        # Record conflicts on the UNMERGED list: the merge is what resolves
+        # them, so a scan of its output can never see one.
+        await asyncio.to_thread(_record_terminology_conflicts, ledger, actual_job_id, bible_entries)
         merged_entries = merge_bible_entries(bible_entries)
         bible = BookBible(
             doc_id=manifest.doc_id,
@@ -219,7 +235,6 @@ async def run_bible_stage(
         # returning the payload would discard them, so the pipeline would
         # enforce the previous run's renderings.
         glossary_dicts, abbreviation_entries = _split_bible_entries(bible.glossary)
-        _flag_conflicting_renderings(glossary_dicts)
         logger.info(
             "Reusing cached translation bible for %s (%d translated, %d pending entries)",
             actual_job_id,
@@ -340,7 +355,18 @@ async def run_bible_stage(
         # ``state-of-the-art -> ""``, backfill filled the latter with
         # ``当前最先进的``, and the two survived as separate enforced rules, so
         # b0002 scored 0.25 for correctly writing 当前最优（SOTA）.
+        #
+        # Detect BEFORE this merge, on the list it is about to resolve: the
+        # merged output carries one rendering per concept by construction, so a
+        # scan after it finds nothing (that unreachable check shipped once).
+        await asyncio.to_thread(
+            _record_terminology_conflicts, ledger, actual_job_id, merged_entries
+        )
         merged_entries = merge_bible_entries(merged_entries)
+    else:
+        # No backfill ran, so no second merge will run either: the first merge
+        # above already resolved everything, and detection has to happen here.
+        await asyncio.to_thread(_record_terminology_conflicts, ledger, actual_job_id, bible_entries)
 
     bible = BookBible(
         doc_id=manifest.doc_id,
@@ -348,7 +374,6 @@ async def run_bible_stage(
         glossary=merged_entries,
     )
     glossary_dicts, abbreviation_entries = _split_bible_entries(bible.glossary)
-    _flag_conflicting_renderings(glossary_dicts)
 
     await asyncio.to_thread(
         ledger.set_job_metadata_value,

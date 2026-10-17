@@ -1,5 +1,6 @@
 import logging
 import re
+from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -168,6 +169,108 @@ def concept_key(source: str) -> str:
         if base and _find_expansion_for(acronym, base + " ") is not None:
             return _concat_key(base)
     return _concat_key(text)
+
+
+@dataclass(frozen=True)
+class TerminologyConflict:
+    """Renderings that disagreed for one concept, and which one won.
+
+    A record is produced only where the pipeline had to *pick* — two entries for
+    one concept with different translations and no way to tell which is right.
+    :func:`merge_bible_entries` resolves it by precedence (a user glossary
+    outranks a mined seed, an attested bare expansion outranks its acronym form),
+    and the losing renderings are kept as admitted variants so text already
+    written under them keeps passing. This type records the decision so the
+    operator can review it, because the pipeline is choosing on *provenance*,
+    not on meaning — and provenance can be wrong.
+
+    ``resolved`` says whether the losers are still accepted somewhere:
+    ``True`` means they became admitted variants (delivery is unaffected),
+    ``False`` means the losing rendering is enforced against — a user glossary
+    and a profile seed naming different Chinese for the same English term.
+    Neither side is a translation defect; the run is self-contradictory, and the
+    operator has to pick one.
+    """
+
+    concept: str
+    preferred: str
+    preferred_source: str
+    superseded: tuple[tuple[str, str], ...]  # (rendering, its entry's source)
+    resolved: bool
+
+    def as_dict(self) -> dict[str, Any]:
+        """JSON-ready shape for the quality report and ``ubt status``."""
+        return {
+            "concept": self.concept,
+            "preferred": self.preferred,
+            "preferred_source": self.preferred_source,
+            "superseded": [{"rendering": r, "source": s} for r, s in self.superseded],
+            "resolved": self.resolved,
+        }
+
+
+def detect_terminology_conflicts(entries: list[BibleEntry]) -> list[TerminologyConflict]:
+    """Find concepts carrying more than one rendering BEFORE the merge resolves them.
+
+    This has to run on the *unmerged* entries: :func:`merge_bible_entries` keeps
+    one translation per concept by construction, so a scan of its output can
+    never find a conflict. An earlier version of this check did exactly that and
+    was unreachable code — it reported nothing on the very document it was
+    written for (arXiv 2606.23344, which carried two renderings of
+    ``state-of-the-art``).
+
+    ``resolved`` mirrors what the merge will actually do, so the record predicts
+    the delivery rather than merely noting that two entries existed:
+
+    * entries that differ only by an attested acronym (``Foo`` vs ``Foo (BAR)``)
+      fold, and the loser's rendering becomes an admitted variant → resolved;
+    * the same source surface carrying two renderings cannot fold — one has to
+      win and the other is enforced against → unresolved.
+    """
+
+    # Group by concept, keeping which source surface carried each rendering.
+    by_concept: dict[str, dict[str, str]] = {}  # concept -> {rendering: source}
+    surfaces: dict[str, set[str]] = {}  # concept -> distinct source surfaces
+    for entry in entries:
+        source = entry.source.strip()
+        rendering = entry.translation.strip()
+        if not source or not rendering:
+            continue
+        key = concept_key(source)
+        by_concept.setdefault(key, {}).setdefault(rendering, source)
+        surfaces.setdefault(key, set()).add(source.casefold())
+
+    conflicts: list[TerminologyConflict] = []
+    for key, renderings in sorted(by_concept.items()):
+        if len(renderings) < 2:
+            continue
+        # The merge prefers the bare expansion: an acronym-attested surface is
+        # an attestation of the concept, not the term to steer a draft towards.
+        preferred_rendering, preferred_source = min(
+            renderings.items(),
+            key=lambda item: (
+                1 if _TRAILING_ACRONYM_RE.match(item[1].strip()) else 0,
+                len(item[1]),
+            ),
+        )
+        superseded = tuple(
+            (rendering, source)
+            for rendering, source in renderings.items()
+            if rendering != preferred_rendering
+        )
+        # A fold only happens when the surfaces differ; identical surfaces with
+        # different renderings are a genuine contradiction.
+        foldable = len(surfaces.get(key, ())) > 1
+        conflicts.append(
+            TerminologyConflict(
+                concept=key,
+                preferred=preferred_rendering,
+                preferred_source=preferred_source,
+                superseded=superseded,
+                resolved=foldable,
+            )
+        )
+    return conflicts
 
 
 def merge_bible_entries(entries: list[BibleEntry]) -> list[BibleEntry]:
