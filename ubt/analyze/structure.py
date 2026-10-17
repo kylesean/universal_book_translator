@@ -168,6 +168,11 @@ def is_list_prefix(text: str) -> bool:
 #: numbers (a TOC title) match whole.
 _PDF_ORDERED_MARKER_RE = re.compile(
     r"^\s*([（(]?[0-9０-９]{1,3}(?:[.．][0-9０-９]{1,3})*[.．、)）]"
+    # A bracketed citation number: "[12] Author, Title." — the shape every
+    # academic reference list uses. Without it the number is dropped at
+    # extraction and the delivered bibliography loses its numbering (measured on
+    # arXiv 2609.20519: the source carries 108 markers, the ledger kept none).
+    r"|\[[0-9０-９]{1,3}\]"
     r"|[（(]?[a-zA-ZＡ-Ｚａ-ｚ][.．)）]"
     r"|[一二三四五六七八九十百]+[、.．)）])\s+"
 )

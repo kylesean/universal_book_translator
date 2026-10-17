@@ -250,6 +250,12 @@ _ORDERED_MARKER_MIN_RUN = 2
 _FOOTER_PROSE_MIN_CHARS = 80
 _FOOTER_PROSE_MIN_WORDS = 12
 
+#: How much of a reference entry's text to match against the page's own text
+#: layer when recovering the ``[n]`` Docling dropped. 40 characters is well past
+#: the point where two entries in one bibliography can share a prefix (they start
+#: with different author names) and short enough to tolerate a re-wrapped line.
+_REFERENCE_PREFIX_CHARS = 40
+
 _ORDERED_MARKER_RE = re.compile(
     r"^(?:"
     r"[（(]?[0-9０-９]{1,3}(?:[.．][0-9０-９]{1,3})*[.．、)）]"
@@ -352,6 +358,57 @@ def _is_prose_footer(text: str) -> bool:
     if body.endswith((".", "。", "：", ":")):
         return True
     return ". " in body or "。" in body
+
+
+def _recover_reference_marker(text: str, page_text: str) -> str | None:
+    """The bracketed number Docling dropped from a reference entry, or ``None``.
+
+    Docling types a reference as a ``list_item`` but leaves ``marker`` empty and
+    strips the number out of ``text``: on arXiv 2609.20519 the source carries 108
+    citation markers, every ``[n]`` prefix survives in the page's own text layer,
+    and the extraction kept none of them — the delivered bibliography lost its
+    numbering.
+
+    Recovered by *text prefix*, not by coordinates: the page text holds
+    ``[1] Mark Chen, Jerry Tworek, …`` while Docling's item holds
+    ``Mark Chen, Jerry Tworek, …``. A prefix match cannot confuse two entries
+    (unlike a bbox match, whose coordinate systems did not line up in testing and
+    would have silently numbered the wrong paragraphs).
+    """
+    head = " ".join((text or "").split())[:_REFERENCE_PREFIX_CHARS]
+    if not head or not page_text:
+        return None
+    # Compare on a whitespace-collapsed haystack so a line break *inside a word*
+    # ("Da\nvid") still matches: the page's text layer wraps mid-word where
+    # Docling's text has no break at all, and a pure regex over the raw text
+    # misses those entries (measured: 52/54 recovered with this, vs 1/57 for a
+    # raw-text regex).
+    collapsed = " ".join(page_text.split())
+    pattern = r"(\[\d{1,3}\])\s*" + re.escape(head)
+    match = re.search(pattern, collapsed)
+    return match.group(1) if match else None
+
+
+def _iter_pdf_page_texts(pdf_path: Path, first: int, last: int) -> list[str]:
+    """Text of pages ``first..last`` (1-based, clamped), unreadable pages as ``""``."""
+    out: list[str] = []
+    try:
+        import pypdfium2 as pdfium
+
+        with PDFIUM_LOCK:
+            pdf = pdfium.PdfDocument(str(pdf_path))
+            try:
+                total = len(pdf)
+                for page_no in range(max(1, first), min(total, last) + 1):
+                    try:
+                        out.append(pdf[page_no - 1].get_textpage().get_text_range())
+                    except Exception:  # noqa: BLE001 - one bad page must not lose the rest
+                        out.append("")
+            finally:
+                pdf.close()
+    except Exception as exc:  # noqa: BLE001 - recovery is best-effort
+        logger.debug("reference-marker recovery: %s unreadable (%s)", pdf_path, exc)
+    return out
 
 
 def _line_in_box(rect: tuple[float, float, float, float], box: BoundingBox) -> bool:
@@ -811,6 +868,22 @@ def map_iterated_items(
     last_kept_label: Any = None
     last_kept_page: int | None = None
     page_lines_cache: dict[int, list[Any]] = {}
+    #: Text of every page, loaded once when the first reference entry appears.
+    #: Docling's ``prov.page_no`` for a reference entry is not reliable (measured
+    #: on arXiv 2609.20519: entries stamped page 12 have their text on another
+    #: page, and the list runs past the document's page count), so recovery
+    #: searches the whole document's text layer rather than the stamped page.
+    _reference_pages: list[str] | None = None
+
+    def _reference_text() -> str:
+        nonlocal _reference_pages
+        if _reference_pages is None:
+            if pdf_path is None:
+                _reference_pages = []
+            else:
+                _reference_pages = _iter_pdf_page_texts(pdf_path, 1, 1 << 20)
+        return "\n".join(_reference_pages)
+
     for item, _level in items:
         label = item.label
 
@@ -1020,6 +1093,16 @@ def map_iterated_items(
         elif label == DocItemLabel.LIST_ITEM:
             text = (getattr(item, "text", "") or "").strip()
             block_type, flow_id, skip = BlockType.LIST_ITEM, FlowID.MAIN_STORY, False
+            # Docling leaves ``marker`` empty and strips the ``[n]`` off a
+            # reference entry, so the delivered bibliography loses its numbering
+            # (measured on arXiv 2609.20519: 108 markers in the source, none in
+            # the ledger). Put it back from the page's own text layer before the
+            # entry is typed, so the number travels with the text through
+            # translation and rendering.
+            if pdf_path is not None:
+                marker = _recover_reference_marker(text, _reference_text())
+                if marker:
+                    text = f"{marker} {text}"
         else:
             # text / paragraph / reference / form fields → narrative
             text = (getattr(item, "text", "") or "").strip()

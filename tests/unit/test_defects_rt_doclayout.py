@@ -340,3 +340,48 @@ def test_a_single_value_cell_is_left_alone() -> None:
     assert _split_stacked_cell("Dolphin-v2 [28]") is None
     assert _split_stacked_cell("Layout Analysis") is None
     assert _split_stacked_cell("85.10") is None
+
+
+# --------------------------------------------------------------------------- #
+# Reference numbering: Docling strips the [n] off a reference entry
+# --------------------------------------------------------------------------- #
+
+
+def test_a_dropped_reference_number_is_recovered_from_the_page_text() -> None:
+    """``[1] Mark Chen, …`` — the number Docling leaves out of ``text``.
+
+    Measured on arXiv 2609.20519: the source page carries 108 markers, every
+    ``[n]`` prefix sits immediately before the entry in the page's own text
+    layer, and Docling's ``list_item`` arrives with an empty ``marker`` and the
+    number already stripped. The delivered bibliography lost its numbering.
+    """
+    from ubt.adapters.pdf.docling_parser import _recover_reference_marker
+
+    page = "[1] Mark Chen, Jerry Tworek, Heewoo Jun.\n[2] John Yang, Carlos Jimenez."
+    assert _recover_reference_marker("Mark Chen, Jerry Tworek, Heewoo Jun.", page) == "[1]"
+    assert _recover_reference_marker("John Yang, Carlos Jimenez.", page) == "[2]"
+
+
+def test_recovery_tolerates_a_re_wrapped_line() -> None:
+    """The page text may break a line between words; Docling's text has a space.
+
+    Measured shape: the page layer wraps at the margin, so an entry reads
+    "…Michalewski,\nDavid Dohan." while Docling carries the same words separated
+    by spaces. Collapsing whitespace on both sides is what made the difference
+    between 1/57 and 52/54 recovered on the reference list.
+    """
+    from ubt.adapters.pdf.docling_parser import _recover_reference_marker
+
+    page = "[7] Maarten Bosma, Henryk Michalewski,\nDavid Dohan."
+    assert (
+        _recover_reference_marker("Maarten Bosma, Henryk Michalewski, David Dohan.", page) == "[7]"
+    )
+
+
+def test_recovery_returns_none_when_the_entry_is_not_numbered() -> None:
+    """A body bullet has no [n]; recovery must not invent one."""
+    from ubt.adapters.pdf.docling_parser import _recover_reference_marker
+
+    page = "• Breadth expands hypothesis coverage.\n[1] Mark Chen, Jerry Tworek."
+    assert _recover_reference_marker("Breadth expands hypothesis coverage.", page) is None
+    assert _recover_reference_marker("Completely unrelated entry text here.", page) is None
