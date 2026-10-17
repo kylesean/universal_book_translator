@@ -385,3 +385,22 @@ def test_recovery_returns_none_when_the_entry_is_not_numbered() -> None:
     page = "• Breadth expands hypothesis coverage.\n[1] Mark Chen, Jerry Tworek."
     assert _recover_reference_marker("Breadth expands hypothesis coverage.", page) is None
     assert _recover_reference_marker("Completely unrelated entry text here.", page) is None
+
+
+def test_recovery_handles_an_organisation_name_without_its_space() -> None:
+    """Docling drops the space inside an org name: "Axiom Math" -> "AxiomMath"."""
+    from ubt.adapters.pdf.docling_parser import _recover_reference_marker
+
+    page = "[38] Axiom Math. AxiomProver at IMO 2026. https://example.org"
+    assert _recover_reference_marker("AxiomMath. AxiomProver at IMO 2026.", page) == "[38]"
+
+
+def test_recovery_handles_typographic_apostrophes() -> None:
+    """The page layer uses ’ where Docling's text has '."""
+    from ubt.adapters.pdf.docling_parser import _recover_reference_marker
+
+    page = "[28] Anthropic. Anthropic\u2019s original performance take-home."
+    assert (
+        _recover_reference_marker("Anthropic. Anthropic's original performance take-home.", page)
+        == "[28]"
+    )

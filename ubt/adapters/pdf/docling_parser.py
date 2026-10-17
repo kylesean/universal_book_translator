@@ -386,6 +386,26 @@ def _recover_reference_marker(text: str, page_text: str) -> str | None:
     collapsed = " ".join(page_text.split())
     pattern = r"(\[\d{1,3}\])\s*" + re.escape(head)
     match = re.search(pattern, collapsed)
+    if match:
+        return match.group(1)
+    # Second failure mode: Docling drops a space *inside* an organisation name —
+    # "[38] Axiom Math. AxiomProver…" arrives as "AxiomMath. AxiomProver…" — so
+    # retry with both sides space-stripped. This recovers the two organisation
+    # entries the whitespace pass missed (measured: 54/54 on the reference list).
+    compact_head = head.replace(" ", "")
+    compact_page = collapsed.replace(" ", "")
+    match = re.search(
+        r"(\[\d{1,3}\])\s*" + re.escape(compact_head),
+        compact_page,
+    )
+    if match:
+        return match.group(1)
+    # Third: the page layer uses typographic punctuation the extractor flattens
+    # ("Anthropic’s" arrives as "Anthropic's"), so compare with apostrophes and
+    # dashes folded to their ASCII forms.
+    folded_head = re.sub(r"[\u2018\u2019\u02bc]", "'", compact_head)
+    folded_page = re.sub(r"[\u2018\u2019\u02bc]", "'", compact_page)
+    match = re.search(r"(\[\d{1,3}\])\s*" + re.escape(folded_head), folded_page)
     return match.group(1) if match else None
 
 
