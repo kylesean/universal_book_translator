@@ -440,11 +440,45 @@ def _only_as_label(
             span_start <= start and end <= span_end for span_start, span_end in target_protected
         ):
             continue
-        before_ok = target_text[:start].rstrip().endswith(("|", "+"))
-        after_ok = target_text[end:].lstrip().startswith(("|", "+"))
-        if not (before_ok or after_ok):
-            return False
+        if _is_label_occurrence(target_text, start, end):
+            continue
+        return False
     return True
+
+
+def _is_label_occurrence(text: str, start: int, end: int) -> bool:
+    """Whether a token sits inside a label rather than in running prose.
+
+    Measured shapes (arXiv 2606.23344): a table cell (``| bbox+mask |``), a
+    ``+``-joined identifier (``bbox+mask``), and a set written as a brace group
+    (``{cls, bbox, giou, mask, dice, order}``). Each names something in the
+    source's own notation — translating a member would break the mapping to the
+    values beside it.
+    """
+    raw_before = text[:start]
+    before = raw_before.rstrip()
+    after = text[end:].lstrip()
+    if before.endswith(("|", "+")) or after.startswith(("|", "+")):
+        return True
+    # A subscript or joining glyph immediately before the token with no space:
+    # the source's ``\lambda_{mask}`` flattens to ``𝜆mask``. Prose never runs a
+    # letter straight into a symbol this way ("the mask" has a space).
+    if raw_before and not raw_before[-1].isspace() and not raw_before[-1].isascii():
+        return True
+    # A brace or subscript group: the token is a member of a set, not prose.
+    opener = max(before.rfind("{"), before.rfind("["), before.rfind("("))
+    if opener < 0:
+        return False
+    closer = {"{": "}", "[": "]", "(": ")"}[before[opener]]
+    if closer not in text[end:]:
+        return False
+    # Everything between the opener and the token must be label material: a
+    # sentence punctuation mark or a CJK glyph means this is prose that happens
+    # to sit after a bracket, not a set.
+    between = text[opener + 1 : start]
+    if any(ch in between for ch in "。，；！？"):
+        return False
+    return not any("\u4e00" <= ch <= "\u9fff" for ch in between)
 
 
 def detect_target_term_violations(
