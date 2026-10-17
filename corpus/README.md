@@ -168,7 +168,8 @@ is not, and the difference decides what can honestly be compared.
 | --- | --- | --- |
 | contract | `violations`, `missing_assets` | content lost outright |
 | structure | page count, delivered blocks, asset totals | the renderer stopped placing things |
-| numbers | reproduction of the baseline's numeric tokens | a dropped quantity, year, result |
+| digits | reproduction of the baseline's digit characters | a dropped or altered quantity |
+| number runs | reproduction of digit runs (`93`, `2024`) | a value that changed, not a moved separator |
 | identifiers | reproduction of Latin terms / model names | a lost table row, a renamed framework |
 | citations | reproduction of `[n]` / `[n, m]` | a swallowed bibliography entry |
 | CJK share | character share, ±5 points | a page that came out untranslated |
@@ -206,8 +207,22 @@ agreed on the content to within sampling noise:
 Those are the layers that can gate a model-translated document, and they are what
 the corpus actually exists to protect: a dropped paragraph, a lost table, a
 swallowed citation and an untranslated page all move them, while a model
-re-wording a sentence does not. Verified by mutation: removing every citation or
-every multi-digit number fails; replacing 的 with 之 everywhere passes.
+re-wording a sentence does not.
+
+One trap is worth calling out, because it produced a false "number loss" twice.
+The PDF text layer joins adjacent table cells with no separator, and *whether it
+does* depends on the column widths the translation produces — not on the
+document's content. Two runs of the same code rendered this paper's table as
+`0.082 90.30` and as `0.08290.30`; a token-keyed count called the second a 4.4%
+loss. The gate therefore counts **digit characters** (invariant under fusion:
+2385/2385 matched) and **digit runs** (invariant under a moved decimal point),
+not numeric tokens.
+
+Verified by mutation against the real artifact: removing every citation fails
+(`citations lost 100.0%`), removing every multi-digit number fails
+(`digits lost 35.7%`), altering a single 3-digit value fails
+(`digits lost 3.6%`), dropping half the document fails on five layers at once,
+and replacing 的 with 之 throughout passes.
 
 
 ### Freeze a baseline

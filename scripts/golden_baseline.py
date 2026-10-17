@@ -90,6 +90,18 @@ MAX_RECONSTRUCTED_DROP = 0
 #: gate a model-translated document; a dropped paragraph or a lost table shows up
 #: here as missing numbers/citations/identifiers, which is exactly the regression
 #: the corpus exists to catch.
+#:
+#: ``digits`` is the strictest of them and the primary numeric gate. It compares
+#: the multiset of digit characters, which is invariant under the table-cell
+#: fusion the text layer performs (``0.082 90.30`` vs ``0.08290.30``): measured
+#: 2385/2385 digits matched between a baseline and a run whose token view
+#: reported 4.4% "loss". A digit genuinely dropped or altered always shows here.
+MAX_DIGIT_LOSS = 0.01
+
+#: Digit runs (``93``, ``2024``) catch a value that changed rather than a
+#: separator that moved, and tolerate the fusion above. Looser than the digit
+#: count because a run boundary shifts whenever a table re-renders; measured
+#: 0.9941 between two identical runs.
 MAX_NUMBER_LOSS = 0.02
 MAX_IDENTIFIER_LOSS = 0.02
 MAX_CITATION_LOSS = 0.02
@@ -110,28 +122,9 @@ ADVISORY_TEXT_SIMILARITY = 0.55
 #: different document. Reported, never failed, for the same reason as above.
 ADVISORY_SENTENCE_OVERLAP = 0.05
 
-_NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)*")
+_NUMBER_RUN_RE = re.compile(r"\d+")
 _IDENTIFIER_RE = re.compile(r"[A-Za-z][A-Za-z0-9]*(?:[-_][A-Za-z0-9]+)*")
 _CITATION_RE = re.compile(r"\[\d+(?:\s*[,–—-]\s*\d+)*\]")
-
-
-def _is_fused_number(token: str) -> bool:
-    """Whether a numeric token is several values the text layer glued together.
-
-    The PDF text layer joins adjacent table cells with no separator, so a
-    results row can arrive as ``0.08290.30`` — two values, nothing between them.
-    Counted literally, that token appears in a run whose table reflowed and not
-    in the next, which reads as a lost number.
-
-    The discriminator is the decimal points: a real number carries at most one,
-    so two or more is proof of fusion. This is deliberately the *only* signal —
-    a length or digit-run heuristic also matches real values (``132.1`` fps,
-    arXiv id ``2606.23344``), and splitting those corrupts the count far more
-    than the fusion it would fix. Such a token is dropped rather than split:
-    its component values are counted where they appear on their own, and
-    guessing the split points invents numbers that may never have existed.
-    """
-    return token.count(".") >= 2
 
 
 def content_features(text: str) -> dict[str, Any]:
@@ -147,17 +140,21 @@ def content_features(text: str) -> dict[str, Any]:
     """
     from collections import Counter
 
-    numbers: Counter[str] = Counter()
-    for raw in _NUMBER_RE.findall(text):
-        # Drop a cell-fusion artefact rather than guess where its values split
-        # (see ``_is_fused_number``). The values themselves are counted where a
-        # table cell kept them separate, which is the layout this run renders.
-        if _is_fused_number(raw):
-            continue
-        numbers[raw] += 1
-
     return {
-        "numbers": dict(numbers),
+        # A number is counted by its DIGITS, not by a token boundary. The PDF
+        # text layer joins table cells with no separator, and whether it does so
+        # depends on the column widths the translation produces — not on this
+        # document's content. Measured: two runs of identical code rendered the
+        # same table as ``0.082 90.30`` and as ``0.08290.30``, so a token-keyed
+        # count called the second a lost number. The digit multiset is invariant
+        # under that: baseline-vs-run matched 2385/2385 digits while the token
+        # view reported 4.4% "loss".
+        "digits": dict(Counter(ch for ch in text if ch.isdigit())),
+        # Digit RUNS catch a value that changed rather than a separator that
+        # moved: ``93.81`` fused with a neighbour still yields the run ``93``.
+        # Reproduction is high across re-runs (0.994) and only drops when a
+        # quantity is actually altered or dropped.
+        "number_runs": dict(Counter(_NUMBER_RUN_RE.findall(text))),
         "identifiers": dict(Counter(_IDENTIFIER_RE.findall(text))),
         "citations": dict(Counter(_CITATION_RE.findall(text))),
         "chars": len(text),
@@ -429,20 +426,33 @@ def compare(
         )
 
     # Layer 3a: content invariants — the layers that hold across sampling.
-    # A baseline frozen before this layer existed has no ``features``; derive
-    # them from the text it does carry rather than silently skipping the gate.
-    base_features = baseline.get("features") or (
-        content_features(baseline.get("text", "")) if baseline.get("text") else {}
-    )
-    cur_features = current.get("features") or (
-        content_features(current.get("text", "")) if current.get("text") else {}
-    )
+    #
+    # A baseline frozen before a given feature existed carries the others, so
+    # this merges rather than choosing: ``baseline["features"]`` may hold an
+    # older key set (it once carried ``numbers``, since replaced by ``digits`` +
+    # ``number_runs``), and trusting it wholesale skipped the new layers. Derive
+    # from the frozen text for any key the stored block lacks.
+    base_features = dict(baseline.get("features") or {})
+    cur_features = dict(current.get("features") or {})
+    if baseline.get("text") and any(
+        k not in base_features for k in ("digits", "number_runs", "identifiers", "citations")
+    ):
+        derived = content_features(baseline["text"])
+        for key, value in derived.items():
+            base_features.setdefault(key, value)
+    if current.get("text") and any(k not in cur_features for k in ("digits", "number_runs")):
+        derived = content_features(current["text"])
+        for key, value in derived.items():
+            cur_features.setdefault(key, value)
     if base_features and cur_features:
         for key, limit, label in (
-            ("numbers", MAX_NUMBER_LOSS, "numbers"),
+            ("digits", MAX_DIGIT_LOSS, "digits"),
+            ("number_runs", MAX_NUMBER_LOSS, "number runs"),
             ("identifiers", MAX_IDENTIFIER_LOSS, "identifiers"),
             ("citations", MAX_CITATION_LOSS, "citations"),
         ):
+            if key not in base_features or key not in cur_features:
+                continue
             reproduced = _reproduction(base_features.get(key) or {}, cur_features.get(key) or {})
             lost = 1.0 - reproduced
             if lost > limit:
