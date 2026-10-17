@@ -509,8 +509,10 @@ def _is_exempt_repetition(src_clean: str, tgt_clean: str, m: re.Match[str]) -> b
 # Japanese kanji clear the Chinese density bar), so an untouched paragraph would
 # otherwise clear every gate and be released as MTQE_PASSED.
 _ECHO_MIN_LEN = 16
+#: A word longer than this reads as a coined technical name ("OmniDocBench"),
+#: not as prose a translator would render. See :func:`_has_translatable_prose`.
+_IDENTIFIER_NAME_LEN = 11
 _ECHO_FORMATTING_ONLY_RE = re.compile(r"^[`#*_\s0-9.|\-:=]+$")
-_ECHO_WORD_RE = re.compile(r"[^\W\d_]{4}")
 _ECHO_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9'\-]{2,}")
 # Math, inline code, URLs, email addresses and quoted spans are contractually
 # verbatim in any translation (the echo repair hint itself tells the model to
@@ -590,18 +592,59 @@ def _has_prompt_artifact(text: str) -> bool:
     return bool(_PROMPT_ARTIFACT_RE.search(text))
 
 
+#: Matches a CamelCase run: an internal lower-to-upper transition with a
+#: lowercase letter on both sides ("OmniDocBench" has "iD" and "cB").
+_INTERNAL_CAMEL_RE = re.compile(r"[a-z][A-Z]")
+
+
+def _has_translatable_prose(src: str) -> bool:
+    """Whether ``src`` contains a word a translator would actually render.
+
+    An echo verdict says "the model did not translate this". That is only
+    meaningful if there was something to translate, and a word *count* cannot
+    answer it: one long identifier is one word. Measured on arXiv 2606.23344,
+    the headings ``4.2.1. OmniDocBench v1.5`` and ``4.2.2. Real5-OmniDocBench``
+    are a section number plus a model name, where returning the source verbatim
+    is correct — and both were rejected as untranslated echoes, sent to repair,
+    and left for a human, because ``OmniDocBench`` alone cleared the old
+    16-character and one-word floor. (``3. Proposed Approach`` cleared it too, so
+    the gate was never measuring what it claimed.)
+
+    The rule below treats a run as an identifier when it is CamelCase, all caps,
+    carries a digit, or is long enough to be a coined technical name rather than
+    a word; anything else is prose.
+    """
+    for match in _ECHO_TOKEN_RE.finditer(src):
+        token = match.group(0)
+        if len(token) < 4:
+            continue
+        if _INTERNAL_CAMEL_RE.search(token):
+            continue
+        if token.isupper():
+            continue
+        if any(ch.isdigit() for ch in token):
+            continue
+        if len(token) > _IDENTIFIER_NAME_LEN:
+            continue
+        return True
+    return False
+
+
 def is_verbatim_echo(source_text: str, target_text: str) -> bool:
     """True when the target repeats the source with no translation attempt.
 
     Short and wordless blocks are exempt: page numbers, labels (``Fig. 3``),
-    DOIs and formatting-only runs legitimately survive the trip unchanged.
+    DOIs and formatting-only runs legitimately survive the trip unchanged. So is
+    a block whose only words are identifiers — ``4.2.1. OmniDocBench v1.5`` has
+    nothing to translate, and calling it an echo left it for a human on every
+    run (see :func:`_has_translatable_prose`).
     """
     src = source_text.strip()
     if not src or src != target_text.strip():
         return False
     if len(src) < _ECHO_MIN_LEN or _ECHO_FORMATTING_ONLY_RE.match(src):
         return False
-    return bool(_ECHO_WORD_RE.search(src))
+    return _has_translatable_prose(src)
 
 
 #: Rehearsal marker emitted by ``--dry-run``'s echo provider. A rehearsal is

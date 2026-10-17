@@ -451,3 +451,58 @@ def test_a_leak_is_reported_even_when_the_rendering_is_present() -> None:
     glossary = [{"source": "edge computing", "translation": "边缘计算"}]
     violations = detect_target_term_violations("边缘计算（edge computing）", glossary)
     assert [v.kind for v in violations] == ["leak"]
+
+
+# --------------------------------------------------------------------------- #
+# Two more false positives from the same delivery
+# --------------------------------------------------------------------------- #
+
+
+def test_a_triangle_is_not_a_number() -> None:
+    """上三角 (upper triangular) must not become 上3角 under the numeric view.
+
+    Measured: the block "其中 𝑃 表示有效上三角元素对（不含对角线）" was rejected
+    with "Unauthorized numeric tokens: ['3']". 角 was listed as a measure word,
+    so the numeral normaliser rewrote the 三 of 三角 (triangle) into 3 and the
+    invention gate saw a fabricated number in a correct translation. 分/度/面/步
+    were already excluded for the same reason; 角 joins them.
+    """
+    from ubt.core.validators.consistency import normalize_for_numeric_matching
+
+    assert normalize_for_numeric_matching("有效上三角元素对") == "有效上三角元素对"
+    assert "3" not in normalize_for_numeric_matching("三角矩阵与上三角部分")
+
+
+def test_real_quantities_still_fold() -> None:
+    """The fix must not blunt the normaliser it lives in."""
+    from ubt.core.validators.consistency import normalize_for_numeric_matching
+
+    assert normalize_for_numeric_matching("五项") == "5项"
+    assert normalize_for_numeric_matching("第七章") == "第7章"
+    assert normalize_for_numeric_matching("三次迭代") == "3次迭代"
+    assert normalize_for_numeric_matching("两倍") == "2倍"
+
+
+def test_a_heading_of_pure_identifiers_is_not_an_echo() -> None:
+    """There was nothing to translate, so keeping the source is not a failure.
+
+    Measured: "4.2.1. OmniDocBench v1.5" and "4.2.2. Real5-OmniDocBench" were
+    both rejected as untranslated echoes, repaired, and left for a human on
+    every run. A section number plus a model name has no prose in it.
+    """
+    from ubt.core.qe.fast_pass import is_verbatim_echo
+
+    assert not is_verbatim_echo("4.2.1. OmniDocBench v1.5", "4.2.1. OmniDocBench v1.5")
+    assert not is_verbatim_echo("4.2.2. Real5-OmniDocBench", "4.2.2. Real5-OmniDocBench")
+    assert not is_verbatim_echo("PP-DocLayoutV3", "PP-DocLayoutV3")
+
+
+def test_an_untranslated_heading_is_still_an_echo() -> None:
+    """The near miss: a heading that DOES contain prose must still be caught."""
+    from ubt.core.qe.fast_pass import is_verbatim_echo
+
+    assert is_verbatim_echo("3. Proposed Approach", "3. Proposed Approach")
+    assert is_verbatim_echo(
+        "This paper proposes a new method for layout analysis.",
+        "This paper proposes a new method for layout analysis.",
+    )

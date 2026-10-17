@@ -108,7 +108,10 @@ CJK_PUNCT_CHARS = frozenset("，。、；：？！「」『』（）【】《》
 # Deliberately conservative: only unambiguous units and counters. Excluded on
 # purpose because they form very common idioms with a numeral prefix that are
 # NOT numbers — 分 (十分 = "very"), 度 (一度 = "formerly"), 面 (一面…一面…),
-# 步 (进一步 = "further"), 部 (一部分 = "a portion"). Adding any of them here
+# 步 (进一步 = "further"), 部 (一部分 = "a portion"), and 角 (三角 = "triangle",
+# 一角 = "a corner" — measured on arXiv 2606.23344: 上三角元素对 became 上3角
+# 元素对 under the numeric view, so the invention gate reported a fabricated
+# ``3`` and left a correct translation for a human). Adding any of them here
 # would reintroduce exactly the fabricated-digit failure this set exists to
 # prevent. 万/亿 are included because they are magnitude suffixes of a numeral
 # run ('二十万' -> '20万', which the digit check then expands).
@@ -161,7 +164,6 @@ CN_MEASURE_WORDS = (
     "升",
     "毫升",
     "元",
-    "角",
     "美元",
     "欧元",
     "万元",
