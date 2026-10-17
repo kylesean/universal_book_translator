@@ -224,3 +224,77 @@ def test_resolve_profile_name_handles_auto_everywhere() -> None:
     kwargs = run_kwargs_from_request({"profile": "auto", "input_path": "/nonexistent/x.pdf"})
     assert kwargs["profile_name"] == "general"
     assert run_kwargs_from_request({"profile": "paper"})["profile_name"] == "paper"
+
+
+# --------------------------------------------------------------------------- #
+# A --pages run must not share a filename with the full document
+#
+# Measured during a gate audit: a `--pages 1-6` smoke test wrote its 2-page
+# result over the 14-page delivery in the default directory. The next baseline
+# check read a two-page document as a 91% content loss, and the run that
+# produced it was correct — the name lied about what it was.
+# --------------------------------------------------------------------------- #
+
+
+def test_a_full_run_carries_no_page_scope() -> None:
+    from ubt.core.job_options import page_scope_label
+
+    assert page_scope_label(None) == ""
+    assert page_scope_label(set()) == ""
+    assert default_output_path(Path("book.pdf"), monolingual=True).name == "book_mono.pdf"
+
+
+def test_a_partial_run_names_the_pages_it_covers() -> None:
+    from ubt.core.job_options import page_scope_label
+
+    assert page_scope_label({1, 2, 3, 4, 5, 6}) == "p1-6"
+    assert page_scope_label({1, 3, 5}) == "p1,3,5"
+    assert page_scope_label({1, 2, 7, 8, 9}) == "p1-2,7-9"
+    name = default_output_path(Path("book.pdf"), monolingual=True, pages={1, 2, 3, 4, 5, 6}).name
+    assert name == "book_mono_p1-6.pdf"
+
+
+def test_a_partial_run_never_shares_the_full_document_name() -> None:
+    """The defect: both runs resolved to the same path."""
+    inp = Path("/tmp/2606.23344v1.pdf")
+    full = default_output_path(inp, monolingual=True)
+    partial = default_output_path(inp, monolingual=True, pages=set(range(1, 7)))
+    assert full.name != partial.name
+    assert partial.stem.endswith("_p1-6")
+
+
+def test_a_huge_scattered_selection_stays_bounded_and_distinct() -> None:
+    """Two different page sets must never collide on a shortened label.
+
+    A truncated list would give ``p1,3,5,...`` the same name for two different
+    selections, which is exactly the overwrite this exists to prevent.
+    """
+    from ubt.core.job_options import page_scope_label
+
+    wide_a = page_scope_label(set(range(1, 400, 2)))
+    wide_b = page_scope_label(set(range(2, 400, 2)))
+    assert wide_a != wide_b
+    assert len(wide_a) <= 48 and len(wide_b) <= 48
+    assert wide_a.startswith("p")
+
+
+def test_the_guard_looks_for_the_scoped_name(tmp_path: Path) -> None:
+    """An existing partial deliverable is guarded; the full one is not its target."""
+    from ubt.core.job_options import deliverable_candidates
+
+    inp = tmp_path / "book.pdf"
+    inp.write_text("x")
+    scoped = {c.name for c in deliverable_candidates(tmp_path, inp, pages={1, 2, 3})}
+    assert scoped == {"book_bilingual_p1-3.pdf", "book_mono_p1-3.pdf"}
+    unscoped = {c.name for c in deliverable_candidates(tmp_path, inp)}
+    assert scoped.isdisjoint(unscoped)
+
+
+def test_an_explicit_output_is_never_decorated(tmp_path: Path) -> None:
+    """``-o`` names the file; adding a scope marker would deliver elsewhere."""
+    from ubt.core.job_options import resolve_target_output
+
+    inp = tmp_path / "book.pdf"
+    inp.write_text("x")
+    target = resolve_target_output(tmp_path / "chosen.pdf", inp, monolingual=True, pages={1, 2, 3})
+    assert target.name == "chosen.pdf"

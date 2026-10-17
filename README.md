@@ -66,6 +66,11 @@ Other useful commands: `ubt assess book.pdf` for a
 zero-token quote, `ubt status <job-id>` for checkpoint statistics, and
 `ubt verify <artifact>` to re-reconcile a delivery.
 
+A run restricted with `--pages 1-6` gets that scope in its default filename
+(`book_mono_p1-6.pdf`) instead of the full document's name. Sampling a few pages
+to check a gate therefore cannot overwrite the complete delivery — an explicit
+`-o` is always used exactly as given.
+
 ### Operator console
 
 ```bash

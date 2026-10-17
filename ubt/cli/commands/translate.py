@@ -125,7 +125,11 @@ def _same_file(left: Path, right: Path) -> bool:
 
 
 def _refuse_existing_output(
-    output: Path | None, *, fresh: bool | None, input_path: Path
+    output: Path | None,
+    *,
+    fresh: bool | None,
+    input_path: Path,
+    pages: str | None = None,
 ) -> Path | None:
     """Mirror the API 409 / MCP ToolError overwrite guard on the CLI surface.
 
@@ -136,7 +140,20 @@ def _refuse_existing_output(
     run could actually write — so a suffix-less ``-o out/delivery`` (which
     resolves to ``out/delivery.md``) and the monolingual name inside a
     directory are both guarded, not just the bilingual one.
+
+    ``pages`` must be the run's own page selection: a ``--pages`` run writes a
+    scope-suffixed default name, and guarding the unscoped one would both
+    protect a file this run will not touch and miss the one it will.
     """
+    from ubt.core.config import parse_page_ranges
+
+    try:
+        page_set = parse_page_ranges(pages)
+    except ValueError:
+        # The range is validated later, with a better message; the guard must
+        # not be the thing that reports it.
+        page_set = None
+
     if output is not None and _same_file(output, input_path):
         raise typer.BadParameter(
             f"output path equals the input document; refusing to overwrite it: {output}"
@@ -146,7 +163,7 @@ def _refuse_existing_output(
         # both default names here — a second run without --fresh must fail
         # loudly instead of overwriting the first delivery.
         if not fresh:
-            for candidate in deliverable_candidates(None, input_path):
+            for candidate in deliverable_candidates(None, input_path, pages=page_set):
                 if candidate.exists():
                     raise typer.BadParameter(
                         f"default output already exists; refusing to overwrite it: {candidate} "
@@ -163,7 +180,7 @@ def _refuse_existing_output(
                 + ", ".join(escape(p.name) for p in removed)
             )
         return output
-    for candidate in deliverable_candidates(output, input_path):
+    for candidate in deliverable_candidates(output, input_path, pages=page_set):
         if candidate.exists():
             raise typer.BadParameter(
                 f"output path already exists; refusing to overwrite it: {candidate} "
@@ -742,7 +759,7 @@ def translate(
                 border_style="yellow" if dry_run else "cyan",
             )
         )
-    output = _refuse_existing_output(output, fresh=fresh, input_path=input_path)
+    output = _refuse_existing_output(output, fresh=fresh, input_path=input_path, pages=pages)
     try:
         run_fn = _get_run_translation()
         result_path = asyncio.run(

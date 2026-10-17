@@ -1442,8 +1442,14 @@ async def run_export_stage(
     # gets the honest ``_mono`` default name; an explicit -o is respected as
     # given.
     is_monolingual_output = _is_mono(render.effective_dual_mode or render.bilingual_mode)
+    # The page scope must reach the default name: a --pages run otherwise
+    # writes the full document's filename and silently replaces a complete
+    # delivery with a partial one. An explicit -o is left exactly as given.
     target_output = resolve_target_output(
-        output_path, input_path, monolingual=is_monolingual_output
+        output_path,
+        input_path,
+        monolingual=is_monolingual_output,
+        pages=ctx.config.get_selected_pages(),
     )
     target_output.parent.mkdir(parents=True, exist_ok=True)
 

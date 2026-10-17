@@ -12,9 +12,10 @@ sandboxing (API) and path normalization (CLI/MCP).
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, get_args
@@ -339,6 +340,11 @@ def default_output_dir_for_scan() -> Path:
 
 _UPLOAD_PREFIX_RE = re.compile(r"^\d{8}-\d{6}-[0-9a-fA-F]{8}-")
 
+#: Longest page-scope token allowed in a filename before falling back to a
+#: digested form. Well under every common filesystem's 255-byte name limit even
+#: after the stem and label are prepended.
+_MAX_PAGE_LABEL_LEN = 48
+
 
 def clean_source_stem(path: Path | str) -> str:
     """Strip server-side upload deduplication prefixes (e.g. 20261007-055316-84614c7e-)
@@ -347,17 +353,67 @@ def clean_source_stem(path: Path | str) -> str:
     return _UPLOAD_PREFIX_RE.sub("", stem)
 
 
-def default_output_path(input_path: Path | str, *, monolingual: bool = False) -> Path:
+def page_scope_label(pages: Iterable[int] | None) -> str:
+    """A filename-safe token naming which pages a partial run covered.
+
+    Empty when the run covers the whole document. A partial run must never share
+    a filename with a full one: measured repeatedly during a gate audit, a
+    ``--pages 1-6`` smoke test wrote its 2-page result over the 14-page delivery
+    in the default directory, and the next baseline check read a two-page
+    document as a 91% content loss. The run was correct; the name lied about
+    what it was.
+
+    Contiguous runs render as a range (``p1-6``); anything else lists its groups
+    (``p1-2,7``) so the label stays recognisable. The label is bounded — a run
+    over hundreds of scattered pages would otherwise produce a filename no
+    filesystem accepts — and falls back to a digested form in that case, so two
+    different page sets can never collide on the same name.
+    """
+    if not pages:
+        return ""
+    ordered = sorted(set(pages))
+    if not ordered:
+        return ""
+    # Group consecutive pages into inclusive ranges.
+    groups: list[tuple[int, int]] = []
+    start = prev = ordered[0]
+    for page in ordered[1:]:
+        if page == prev + 1:
+            prev = page
+            continue
+        groups.append((start, prev))
+        start = prev = page
+    groups.append((start, prev))
+
+    rendered = ",".join(f"{a}" if a == b else f"{a}-{b}" for a, b in groups)
+    label = f"p{rendered}"
+    if len(label) <= _MAX_PAGE_LABEL_LEN:
+        return label
+    # Too many groups to spell out. Keep it deterministic AND collision-free:
+    # a truncated list would give two different page sets the same filename.
+    digest = hashlib.sha256(rendered.encode("utf-8")).hexdigest()[:10]
+    return f"p{len(ordered)}pp-{digest}"
+
+
+def default_output_path(
+    input_path: Path | str, *, monolingual: bool = False, pages: Iterable[int] | None = None
+) -> Path:
     """Where a run with no ``-o`` writes its deliverable.
 
     A monolingual (rigid) primary is named ``<stem>_mono`` rather than
     ``<stem>_bilingual`` so the file name does not promise a bilingual document
     whose content is target-only.
+
+    A run restricted with ``--pages`` carries that scope in the name
+    (``<stem>_mono_p1-6.pdf``), so a smoke test can never overwrite the full
+    delivery it was sampling from. See :func:`page_scope_label`.
     """
     source = Path(input_path)
     label = "mono" if monolingual else "bilingual"
     stem = clean_source_stem(source)
-    return default_output_dir() / f"{stem}_{label}{source.suffix}"
+    scope = page_scope_label(pages)
+    suffix = f"_{scope}" if scope else ""
+    return default_output_dir() / f"{stem}_{label}{suffix}{source.suffix}"
 
 
 def resolve_target_output(
@@ -365,23 +421,31 @@ def resolve_target_output(
     input_path: Path | str,
     *,
     monolingual: bool = False,
+    pages: Iterable[int] | None = None,
 ) -> Path:
     """Normalize user-supplied output path or derive default deliverable path.
 
-    - None -> <documents>/UBT/<stem>_bilingual<suffix> (``_mono`` when monolingual)
+    - None -> <documents>/UBT/<stem>_bilingual<suffix> (``_mono`` when monolingual),
+      with the page scope in the name when the run is restricted (``_p1-6``)
     - Directory (existing or ending with / or \\) -> <dir>/<stem>_bilingual<suffix>
-      (``_mono`` when monolingual)
+      (``_mono`` when monolingual), same page-scope rule
     - Path without extension -> <path><input_suffix>
     - Path with extension -> <path> as-is (an explicit name is always respected)
+
+    An explicit ``-o`` is never decorated: the caller named the file, so the
+    scope marker would only make the delivered path differ from what they asked
+    for.
     """
     inp = Path(input_path)
     if output_path is None:
-        return default_output_path(inp, monolingual=monolingual)
+        return default_output_path(inp, monolingual=monolingual, pages=pages)
     out = Path(output_path)
     if out.is_dir() or str(output_path).endswith(("/", "\\")):
         label = "mono" if monolingual else "bilingual"
         stem = clean_source_stem(inp)
-        return out / f"{stem}_{label}{inp.suffix}"
+        scope = page_scope_label(pages)
+        suffix = f"_{scope}" if scope else ""
+        return out / f"{stem}_{label}{suffix}{inp.suffix}"
     if not out.suffix and inp.suffix:
         return out.with_suffix(inp.suffix)
     return out
@@ -421,7 +485,12 @@ def prior_output_of(prior: object) -> PriorOutput | None:
     return PriorOutput(output_path=str(out), input_path=str(inp))
 
 
-def deliverable_candidates(output: Path | str | None, input_path: Path | str) -> tuple[Path, ...]:
+def deliverable_candidates(
+    output: Path | str | None,
+    input_path: Path | str,
+    *,
+    pages: Iterable[int] | None = None,
+) -> tuple[Path, ...]:
     """Every file a run could write for this output/input pair.
 
     An output given as a **directory** (or ``None`` for the default) resolves to
@@ -431,11 +500,15 @@ def deliverable_candidates(output: Path | str | None, input_path: Path | str) ->
     the CLI checked only the bilingual name for a directory and so let a
     monolingual re-run replace the previous delivery. A file-shaped output
     resolves to exactly one path.
+
+    ``pages`` narrows the derived names to the run's page scope. It must be the
+    same set the run will use, or the guard protects a name the run will not
+    write (and misses the one it will).
     """
     if output is None:
         return (
-            default_output_path(input_path, monolingual=False),
-            default_output_path(input_path, monolingual=True),
+            default_output_path(input_path, monolingual=False, pages=pages),
+            default_output_path(input_path, monolingual=True, pages=pages),
         )
     out = Path(output)
     # Pass the *original* to ``resolve_target_output``: it decides "directory"
@@ -443,8 +516,8 @@ def deliverable_candidates(output: Path | str | None, input_path: Path | str) ->
     # the value is a ``Path`` (``Path("out/")`` renders as ``out``).
     if out.is_dir() or str(output).endswith(("/", "\\")):
         return (
-            resolve_target_output(output, input_path, monolingual=False),
-            resolve_target_output(output, input_path, monolingual=True),
+            resolve_target_output(output, input_path, monolingual=False, pages=pages),
+            resolve_target_output(output, input_path, monolingual=True, pages=pages),
         )
     return (resolve_target_output(output, input_path),)
 
