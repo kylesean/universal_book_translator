@@ -360,6 +360,67 @@ def _is_prose_footer(text: str) -> bool:
     return ". " in body or "。" in body
 
 
+def _table_reader_enabled() -> bool:
+    """Whether the opt-in vision table reader is configured."""
+    from ubt.adapters.pdf import table_reader
+
+    return table_reader.enabled()
+
+
+def _read_table_cells(item: Any, pdf_path: Path | None, docling_markdown: str) -> str | None:
+    """Docling's table with its data cells re-read from the page image, or ``None``.
+
+    The crop is Docling's own table bbox — the reader is a region reader, and
+    feeding it a page collapses several tables into one (measured). The header
+    row and the column count stay Docling's: the reader misreads header text,
+    and the header is what translation and the leak metric key on.
+    """
+    if pdf_path is None or not pdf_path.exists():
+        return None
+    prov = item.prov[0] if getattr(item, "prov", None) else None
+    if prov is None or getattr(prov, "bbox", None) is None:
+        return None
+    page_no = int(getattr(prov, "page_no", 0) or 0)
+    if page_no < 1:
+        return None
+    b = prov.bbox
+    bbox = BoundingBox(
+        page=page_no,
+        x0=float(getattr(b, "l", 0.0)),
+        y0=float(getattr(b, "b", 0.0)),
+        x1=float(getattr(b, "r", 0.0)),
+        y1=float(getattr(b, "t", 0.0)),
+    )
+    if bbox.x1 - bbox.x0 < 24 or bbox.y1 - bbox.y0 < 16:
+        # Too small to be a table; cropping it would send noise to the model.
+        return None
+    try:
+        from ubt.adapters.pdf import table_reader
+        from ubt.adapters.pdf.visual_scalpel import FIGURE_ASSET_DPI, crop_block_pil
+
+        image = crop_block_pil(pdf_path, page_no, bbox, dpi=FIGURE_ASSET_DPI)
+    except Exception as exc:  # noqa: BLE001 - no crop means no upgrade
+        logger.debug("table crop failed on page %s: %s", page_no, exc)
+        return None
+    read = table_reader.read_table_image_sync(image)
+    if read is None:
+        return None
+    docling_rows = [
+        [cell.strip() for cell in line.strip().strip("|").split("|")]
+        for line in docling_markdown.splitlines()
+        if line.strip().startswith("|") and "---" not in line
+    ]
+    merged = table_reader.merge_with_docling(docling_rows, read)
+    if merged is None:
+        return None
+    header, _, _ = docling_markdown.partition("\n|---")
+    separator = "|" + "|".join("---" for _ in merged[0]) + "|"
+    body = "\n".join("| " + " | ".join(row) + " |" for row in merged)
+    if header:
+        return f"{header}\n{separator}\n{body}"
+    return f"{separator}\n{body}"
+
+
 def _recover_reference_marker(text: str, page_text: str) -> str | None:
     """The bracketed number Docling dropped from a reference entry, or ``None``.
 
@@ -1067,6 +1128,14 @@ def map_iterated_items(
             region = RegionKind.FOOTER
         elif label == DocItemLabel.TABLE:
             text = table_to_markdown(item, doc)
+            # A vision reader can recover the data cells Docling fuses (measured:
+            # 144/144 exact, against a column of stacked names returned as one
+            # blob). It is opt-in, needs a running service, and can only upgrade:
+            # any failure, or any disagreement about the shape, keeps Docling's
+            # table untouched. See ``table_reader`` for why the header stays
+            # Docling's.
+            if _table_reader_enabled():
+                text = _read_table_cells(item, pdf_path, text) or text
             block_type, flow_id, skip = BlockType.TABLE, FlowID.TABLE_GRID, False
         elif label == DocItemLabel.CODE:
             text = (getattr(item, "text", "") or "").strip()
