@@ -56,16 +56,108 @@ VISUAL_SAMPLE_PAGES = 3
 #: SSIM below this is a visual regression. 0.985 is tight enough to catch a
 #: figure that moved or a table that reflowed (measured: an unchanged page is
 #: 1.000, a page with one moved block ~0.93–0.97).
+#:
+#: This only holds for a *deterministic* artifact. On a document translated by a
+#: real model the text itself changes between runs, so the raster changes too:
+#: measured on arXiv 2606.23344, two runs of identical code differed at
+#: SSIM 0.64 / 0.23 / 0.23 on the three sampled pages — 30x below this floor,
+#: while the baseline-vs-run gap was the same size (0.63 / 0.25 / …). The visual
+#: layer therefore cannot gate a model-translated case; it gates the
+#: deterministic (``--dry-run``) cases, where the render really is reproducible.
 MIN_SSIM = 0.985
 
 #: Allowed drift in the text layer, as a share of the baseline's characters.
 #: Prose gets re-ordered by a translation change; a content regression (a
 #: dropped paragraph, a lost table) moves this far more.
+#:
+#: Also only meaningful for a deterministic artifact. Two identical runs of a
+#: model-translated document share just 0.83 word-sequence similarity, so a 2%
+#: budget flags every run and a 20% budget would stop flagging anything. The
+#: model-translated cases are gated by the *content invariants* below instead,
+#: which are stable across sampling (measured A-vs-B: numbers 0.9987,
+#: identifiers 0.9912, citations 1.0000).
 MAX_TEXT_DIFF_SHARE = 0.02
 
 #: Allowed drop in reconstructed-asset coverage. A repair raises it; nothing in
 #: the pipeline should lower it, so the ratchet is zero.
 MAX_RECONSTRUCTED_DROP = 0
+
+#: Content invariants: facts a translation must carry regardless of how it words
+#: them. Measured across two independent runs of the same code (arXiv
+#: 2606.23344), reproduction drops by at most 0.88% for identifiers and 0.13%
+#: for numbers, and not at all for citations — three orders of magnitude more
+#: stable than the word sequence, which moves 17%. These are the layers that can
+#: gate a model-translated document; a dropped paragraph or a lost table shows up
+#: here as missing numbers/citations/identifiers, which is exactly the regression
+#: the corpus exists to catch.
+MAX_NUMBER_LOSS = 0.02
+MAX_IDENTIFIER_LOSS = 0.02
+MAX_CITATION_LOSS = 0.02
+
+#: CJK share may move a little when a re-translation picks different words, but
+#: it collapses toward zero on an untranslated page.
+MAX_CJK_RATIO_SHIFT = 0.05
+
+#: Word-sequence similarity below this is reported as ADVISORY only: it cannot
+#: distinguish a regression from sampling, so it never fails a run. Set below the
+#: measured same-code floor (0.83) with room for a differently-worded but correct
+#: translation; it catches gross divergence (a page swapped for another's text)
+#: without flagging mere rewording.
+ADVISORY_TEXT_SIMILARITY = 0.55
+
+#: A run that shares no exact sentence with the baseline is suspicious even when
+#: its content invariants hold — it may be a wholesale re-translation or a
+#: different document. Reported, never failed, for the same reason as above.
+ADVISORY_SENTENCE_OVERLAP = 0.05
+
+_NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)*")
+_IDENTIFIER_RE = re.compile(r"[A-Za-z][A-Za-z0-9]*(?:[-_][A-Za-z0-9]+)*")
+_CITATION_RE = re.compile(r"\[\d+(?:\s*[,–—-]\s*\d+)*\]")
+
+
+def content_features(text: str) -> dict[str, Any]:
+    """The facts a translation must carry, independent of how it words them.
+
+    Word sequence is a poor regression signal for a model-translated document:
+    two runs of identical code share only 0.83 of it, because the model re-words
+    freely. What does *not* move is the content — the numbers, the identifiers,
+    the citations. Measured across two such runs (arXiv 2606.23344): numbers
+    0.9987, identifiers 0.9912, citations 1.0000, against 0.8305 for the sequence.
+    A dropped paragraph, a lost table row or a swallowed bibliography entry shows
+    up here immediately; rewording does not.
+    """
+    from collections import Counter
+
+    return {
+        "numbers": dict(Counter(_NUMBER_RE.findall(text))),
+        "identifiers": dict(Counter(_IDENTIFIER_RE.findall(text))),
+        "citations": dict(Counter(_CITATION_RE.findall(text))),
+        "chars": len(text),
+        "cjk": sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff"),
+    }
+
+
+def _reproduction(reference: dict[str, int], current: dict[str, int]) -> float:
+    """Share of the baseline's occurrences that survive in ``current``.
+
+    Counted per token, capped at the baseline count, so a duplicated occurrence
+    cannot mask a dropped one elsewhere.
+    """
+    total = sum(reference.values())
+    if total == 0:
+        return 1.0
+    kept = sum(min(count, current.get(token, 0)) for token, count in reference.items())
+    return kept / total
+
+
+def _deterministic(case: dict[str, Any]) -> bool:
+    """Whether this case's artifact is reproducible byte-for-byte.
+
+    ``--dry-run`` echoes the source, so its render really is stable and the
+    byte-level layers (word sequence, SSIM) are meaningful. A case translated by
+    a model is not stable and must be judged on content invariants instead.
+    """
+    return bool(case.get("deterministic"))
 
 
 def _find_artifact(directory: Path, case: dict[str, Any]) -> Path | None:
@@ -239,12 +331,21 @@ def snapshot(artifacts: Path, case: dict[str, Any]) -> dict[str, Any] | None:
         },
         "text": text,
         "text_chars": len(text),
+        "features": content_features(text),
         "visual": {"pages": pages, "rasters": rasters, "unavailable": visual_missing},
     }
 
 
-def compare(baseline: dict[str, Any], current: dict[str, Any]) -> list[str]:
-    """Regressions of ``current`` against ``baseline`` (empty means clean)."""
+def compare(
+    baseline: dict[str, Any], current: dict[str, Any], *, deterministic: bool = True
+) -> list[str]:
+    """Regressions of ``current`` against ``baseline`` (empty means clean).
+
+    ``deterministic`` says whether the artifact is reproducible byte-for-byte
+    (see :func:`_deterministic`). It selects which layers are gates: a
+    model-translated document is judged on content invariants, because its word
+    sequence and raster both move between runs of identical code.
+    """
     problems: list[str] = []
 
     base_struct = baseline.get("structure", {})
@@ -285,10 +386,12 @@ def compare(baseline: dict[str, Any], current: dict[str, Any]) -> list[str]:
     if isinstance(base_pages, int) and isinstance(cur_pages, int) and cur_pages < base_pages:
         problems.append(f"page count dropped {base_pages} -> {cur_pages}")
 
-    # Layer 3: visible text. A character-count drop is checked FIRST and
-    # directly: a lost page or an empty render is the regression that matters,
-    # and SequenceMatcher on a truncated text still reports a high similarity
-    # when the cut is a small share of a long document.
+    # Layer 3: visible text.
+    #
+    # A character-count drop is checked FIRST and directly: a lost page or an
+    # empty render is the regression that matters, and SequenceMatcher on a
+    # truncated text still reports a high similarity when the cut is a small
+    # share of a long document.
     base_chars = baseline.get("text_chars") or 0
     cur_chars = current.get("text_chars") or 0
     if base_chars and cur_chars < base_chars * (1.0 - MAX_TEXT_DIFF_SHARE):
@@ -297,30 +400,92 @@ def compare(baseline: dict[str, Any], current: dict[str, Any]) -> list[str]:
             f"(-{1 - cur_chars / base_chars:.1%}, limit {MAX_TEXT_DIFF_SHARE:.0%})"
         )
 
+    # Layer 3a: content invariants — the layers that hold across sampling.
+    # A baseline frozen before this layer existed has no ``features``; derive
+    # them from the text it does carry rather than silently skipping the gate.
+    base_features = baseline.get("features") or (
+        content_features(baseline.get("text", "")) if baseline.get("text") else {}
+    )
+    cur_features = current.get("features") or (
+        content_features(current.get("text", "")) if current.get("text") else {}
+    )
+    if base_features and cur_features:
+        for key, limit, label in (
+            ("numbers", MAX_NUMBER_LOSS, "numbers"),
+            ("identifiers", MAX_IDENTIFIER_LOSS, "identifiers"),
+            ("citations", MAX_CITATION_LOSS, "citations"),
+        ):
+            reproduced = _reproduction(base_features.get(key) or {}, cur_features.get(key) or {})
+            lost = 1.0 - reproduced
+            if lost > limit:
+                problems.append(
+                    f"{label} lost {lost:.1%} of the baseline's occurrences (limit {limit:.0%})"
+                )
+        # CJK share collapsing means a page came out untranslated (or in the
+        # wrong language); a small shift is just different word choice.
+        base_cjk, base_n = base_features.get("cjk", 0), base_features.get("chars", 0) or 0
+        cur_cjk, cur_n = cur_features.get("cjk", 0), cur_features.get("chars", 0) or 0
+        if base_n and cur_n:
+            base_ratio, cur_ratio = base_cjk / base_n, cur_cjk / cur_n
+            if abs(cur_ratio - base_ratio) > MAX_CJK_RATIO_SHIFT:
+                problems.append(
+                    f"CJK share moved {base_ratio:.1%} -> {cur_ratio:.1%} "
+                    f"(limit {MAX_CJK_RATIO_SHIFT:.0%}, suggests untranslated text)"
+                )
+
+    # Layer 3b: word sequence — advisory for a model-translated case, a real
+    # gate for a deterministic one. See MAX_TEXT_DIFF_SHARE.
     base_text = baseline.get("text", "")
     cur_text = current.get("text", "")
+    notes: list[str] = []
     if base_text != cur_text:
         import difflib
 
         ratio = difflib.SequenceMatcher(None, base_text, cur_text).ratio()
         changed = 1.0 - ratio
-        if changed > MAX_TEXT_DIFF_SHARE:
-            problems.append(f"visible text changed {changed:.1%} (limit {MAX_TEXT_DIFF_SHARE:.0%})")
+        if deterministic:
+            if changed > MAX_TEXT_DIFF_SHARE:
+                problems.append(
+                    f"visible text changed {changed:.1%} (limit {MAX_TEXT_DIFF_SHARE:.0%})"
+                )
+        elif changed > 0:
+            # Cannot distinguish a regression from sampling: report, never fail.
+            if ratio < ADVISORY_TEXT_SIMILARITY:
+                notes.append(
+                    f"visible text diverged {changed:.1%} from the baseline "
+                    f"(similarity {ratio:.2f}); too far to compare word-for-word — "
+                    f"content invariants above are the gate"
+                )
+            else:
+                notes.append(
+                    f"visible text differs {changed:.1%} (similarity {ratio:.2f}); "
+                    f"expected when a model re-words, not evidence of a regression"
+                )
 
-    # Layer 4: visual.
+    # Layer 4: visual. Only meaningful where the render is reproducible.
     base_visual = baseline.get("visual", {}).get("rasters", {})
     cur_visual = current.get("visual", {}).get("rasters", {})
 
-    for page, encoded in base_visual.items():
-        if page not in cur_visual:
-            problems.append(f"page {page}: no raster to compare (was sampled before)")
-            continue
-        score = _ssim(base64.b64decode(encoded), base64.b64decode(cur_visual[page]))
-        if score is None:
-            continue
-        if score < MIN_SSIM:
-            problems.append(f"page {page}: visual drift (SSIM {score:.3f} < {MIN_SSIM})")
+    if deterministic:
+        for page, encoded in base_visual.items():
+            if page not in cur_visual:
+                problems.append(f"page {page}: no raster to compare (was sampled before)")
+                continue
+            score = _ssim(base64.b64decode(encoded), base64.b64decode(cur_visual[page]))
+            if score is None:
+                continue
+            if score < MIN_SSIM:
+                problems.append(f"page {page}: visual drift (SSIM {score:.3f} < {MIN_SSIM})")
+    else:
+        missing = [p for p in base_visual if p not in cur_visual]
+        if missing:
+            notes.append(
+                f"no raster for page(s) {', '.join(missing)}; visual layer skipped "
+                f"(a model-translated render is not reproducible — measured same-code "
+                f"SSIM 0.23–0.64, far below the {MIN_SSIM} floor)"
+            )
 
+    current["_notes"] = notes
     return problems
 
 
@@ -378,7 +543,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[skip]   {case_id}: no frozen baseline (run --accept first)")
             continue
         baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
-        problems = compare(baseline, current)
+        problems = compare(baseline, current, deterministic=_deterministic(case))
         if problems:
             failures += 1
             report["cases"][case_id] = {"status": "regressed", "problems": problems}
@@ -386,8 +551,11 @@ def main(argv: list[str] | None = None) -> int:
             for problem in problems:
                 print(f"           - {problem}")
         else:
-            report["cases"][case_id] = {"status": "ok"}
+            notes = current.get("_notes") or []
+            report["cases"][case_id] = {"status": "ok", "notes": notes}
             print(f"[ok]     {case_id}")
+            for note in notes:
+                print(f"           ~ {note}")
 
     report["failures"] = failures
     report["skipped"] = skipped

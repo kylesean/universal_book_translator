@@ -158,15 +158,57 @@ than the version we accepted", because the numbers are recomputed every run and
 nothing is frozen. A fix that repairs one defect while regressing three others
 passes every existing gate.
 
-`scripts/golden_baseline.py` closes that gap over the same `cases.json`, in four
-layers:
+`scripts/golden_baseline.py` closes that gap over the same `cases.json`. It has
+two sets of layers, because a baseline artifact is either **reproducible** or it
+is not, and the difference decides what can honestly be compared.
+
+**Content invariants** — these gate every case:
 
 | layer | what it compares | catches |
 | --- | --- | --- |
 | contract | `violations`, `missing_assets` | content lost outright |
 | structure | page count, delivered blocks, asset totals | the renderer stopped placing things |
-| visible text | the PDF's own text layer, whitespace-normalised | same counters, different words |
+| numbers | reproduction of the baseline's numeric tokens | a dropped quantity, year, result |
+| identifiers | reproduction of Latin terms / model names | a lost table row, a renamed framework |
+| citations | reproduction of `[n]` / `[n, m]` | a swallowed bibliography entry |
+| CJK share | character share, ±5 points | a page that came out untranslated |
+
+**Byte-level layers** — these gate only cases marked `"deterministic": true`
+(e.g. a `--dry-run` echo, whose render really is reproducible):
+
+| layer | what it compares | catches |
+| --- | --- | --- |
+| visible text | the PDF's own text layer, word sequence | same counters, different words |
 | visual | SSIM over 3 sampled pages | same words, different layout |
+
+### Why the split exists (measured)
+
+The byte-level layers were originally applied to every case. On a document
+translated by a real model they do not measure the code — they measure sampling.
+Two runs of **identical** code over arXiv 2606.23344 produced:
+
+| comparison | result |
+| --- | --- |
+| word-sequence similarity, run A vs run B | **0.83** |
+| word-sequence similarity, run vs frozen baseline | 0.85 (limit 0.98) |
+| SSIM on the 3 sampled pages, run A vs run B | **0.23 / 0.64 / 0.23** (limit 0.985) |
+
+So the word layer flagged every run, and a 20% text budget that would have
+stopped flagging also would have stopped detecting anything. The same two runs
+agreed on the content to within sampling noise:
+
+| invariant | run A vs run B | noise |
+| --- | --- | --- |
+| citations | 1.0000 | 0 |
+| numbers | 0.9987 | 0.13% |
+| identifiers | 0.9912 | 0.88% |
+
+Those are the layers that can gate a model-translated document, and they are what
+the corpus actually exists to protect: a dropped paragraph, a lost table, a
+swallowed citation and an untranslated page all move them, while a model
+re-wording a sentence does not. Verified by mutation: removing every citation or
+every multi-digit number fails; replacing 的 with 之 everywhere passes.
+
 
 ### Freeze a baseline
 

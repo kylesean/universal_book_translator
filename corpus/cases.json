@@ -11,7 +11,8 @@
     "max_source_kept": 3,
     "min_accounted_ratio": 0.9,
     "min_delivered_ratio": 0.55
-   }
+   },
+   "deterministic": false
   },
   {
    "id": "paper-2608",
@@ -23,7 +24,8 @@
     "max_source_kept": 10,
     "min_accounted_ratio": 0.9,
     "min_delivered_ratio": 0.57
-   }
+   },
+   "deterministic": false
   },
   {
    "id": "paper-2609-22978",
@@ -35,7 +37,8 @@
     "max_source_kept": 0,
     "min_accounted_ratio": 0.85,
     "min_delivered_ratio": 0.66
-   }
+   },
+   "deterministic": false
   },
   {
    "id": "book-chapter-3",
@@ -47,7 +50,8 @@
     "max_source_kept": 0,
     "min_accounted_ratio": 0.9,
     "min_delivered_ratio": 0.6
-   }
+   },
+   "deterministic": false
   },
   {
    "id": "twocol-paper-2606",
@@ -59,7 +63,8 @@
     "max_source_kept": 0,
     "min_accounted_ratio": 0.9,
     "min_delivered_ratio": 0.66
-   }
+   },
+   "deterministic": false
   }
  ]
 }

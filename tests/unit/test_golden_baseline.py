@@ -157,3 +157,129 @@ def test_page_sample_spreads_across_the_document() -> None:
     assert sampled[0] == 1
     assert len(sampled) == 3
     assert sampled[-1] > 30
+
+
+# --------------------------------------------------------------------------- #
+# Model-translated cases: content invariants instead of byte equality
+#
+# A case delivered by a real model is not reproducible. Measured on arXiv
+# 2606.23344, two runs of IDENTICAL code share 0.83 of their word sequence and
+# score SSIM 0.23-0.64 on the sampled pages — far below the 0.985 floor. So the
+# byte-level layers, applied to such a case, flag every run and detect nothing.
+# What does hold is the content: numbers 0.9987, identifiers 0.9912, citations
+# 1.0000 across those same two runs.
+# --------------------------------------------------------------------------- #
+
+
+def _model_baseline() -> dict[str, Any]:
+    from scripts.golden_baseline import content_features
+
+    text = (
+        "RT-DocLayout 在 2024 年达到 92.5% 的准确率，超过 Mask R-CNN [8] 与 "
+        "DiT [4, 11]。模型仅需 33M 参数，训练于 1000 个批次。"
+    ) * 4
+    base = _baseline()
+    base["text"] = text
+    base["text_chars"] = len(text)
+    base["features"] = content_features(text)
+    return base
+
+
+def test_a_model_translated_case_is_clean_against_itself() -> None:
+    base = _model_baseline()
+    assert compare(base, base, deterministic=False) == []
+
+
+def test_rewording_a_model_translated_case_is_not_a_regression() -> None:
+    """The whole point: different words, same content, must pass."""
+    from scripts.golden_baseline import content_features
+
+    base = _model_baseline()
+    current = _model_baseline()
+    current["text"] = base["text"].replace("准确率", "精确度").replace("模型", "该模型")
+    current["text_chars"] = len(current["text"])
+    current["features"] = content_features(current["text"])
+    assert compare(base, current, deterministic=False) == []
+
+
+def test_losing_the_citations_is_a_regression() -> None:
+    import re
+
+    from scripts.golden_baseline import content_features
+
+    base = _model_baseline()
+    current = _model_baseline()
+    stripped = re.sub(r"\[\d+(?:\s*[,–—-]\s*\d+)*\]", "", base["text"])
+    current["text"] = stripped
+    current["text_chars"] = len(stripped)
+    current["features"] = content_features(stripped)
+    problems = compare(base, current, deterministic=False)
+    assert any("citations lost" in p for p in problems), problems
+
+
+def test_losing_the_numbers_is_a_regression() -> None:
+    import re
+
+    from scripts.golden_baseline import content_features
+
+    base = _model_baseline()
+    current = _model_baseline()
+    stripped = re.sub(r"\d+(?:[.,]\d+)*", "", base["text"])
+    current["text"] = stripped
+    current["text_chars"] = len(stripped)
+    current["features"] = content_features(stripped)
+    problems = compare(base, current, deterministic=False)
+    assert any("numbers lost" in p for p in problems), problems
+
+
+def test_losing_the_identifiers_is_a_regression() -> None:
+    from scripts.golden_baseline import content_features
+
+    base = _model_baseline()
+    current = _model_baseline()
+    stripped = base["text"].replace("Mask R-CNN", "掩码模型").replace("DiT", "扩散")
+    current["text"] = stripped
+    current["text_chars"] = len(stripped)
+    current["features"] = content_features(stripped)
+    problems = compare(base, current, deterministic=False)
+    assert any("identifiers lost" in p for p in problems), problems
+
+
+def test_an_untranslated_page_moves_the_cjk_share() -> None:
+    from scripts.golden_baseline import content_features
+
+    base = _model_baseline()
+    current = _model_baseline()
+    english = "This page came out in the source language and was never translated. " * 10
+    current["text"] = english
+    current["text_chars"] = len(english)
+    current["features"] = content_features(english)
+    problems = compare(base, current, deterministic=False)
+    assert any("CJK share" in p for p in problems), problems
+
+
+def test_a_deterministic_case_still_gates_on_the_word_sequence() -> None:
+    """The strict layers stay strict where the artifact really is reproducible."""
+    base = _model_baseline()
+    current = _model_baseline()
+    current["text"] = base["text"].replace("准确率", "精确度") * 1
+    current["text_chars"] = len(current["text"])
+    assert compare(base, current, deterministic=True) != []
+    assert compare(base, current, deterministic=False) == []
+
+
+def test_a_baseline_frozen_without_features_still_gets_the_content_gate() -> None:
+    """An older baseline has no ``features``; derive them, do not skip the layer."""
+    base = _model_baseline()
+    base.pop("features")
+    current = _model_baseline()
+    import re
+
+    from scripts.golden_baseline import content_features
+
+    stripped = re.sub(r"\[\d+(?:\s*[,–—-]\s*\d+)*\]", "", current["text"])
+    current["text"] = stripped
+    current["text_chars"] = len(stripped)
+    current["features"] = content_features(stripped)
+    problems = compare(base, current, deterministic=False)
+    assert any("citations lost" in p for p in problems), problems
