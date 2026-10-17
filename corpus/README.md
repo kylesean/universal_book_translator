@@ -148,3 +148,76 @@ with an unaccounted text node or a missing asset fails even with no `expect`.
 Add a case whenever a bug is found; the case is the regression test. Prefer a
 `document` case (the gate runs the pipeline) over a frozen `artifact` one, so the
 case keeps probing the current engine rather than yesterday's output.
+
+---
+
+## Golden baseline: did this change make the document *worse*?
+
+The contract answers "is this document complete". It cannot answer "is it worse
+than the version we accepted", because the numbers are recomputed every run and
+nothing is frozen. A fix that repairs one defect while regressing three others
+passes every existing gate.
+
+`scripts/golden_baseline.py` closes that gap over the same `cases.json`, in four
+layers:
+
+| layer | what it compares | catches |
+| --- | --- | --- |
+| contract | `violations`, `missing_assets` | content lost outright |
+| structure | page count, delivered blocks, asset totals | the renderer stopped placing things |
+| visible text | the PDF's own text layer, whitespace-normalised | same counters, different words |
+| visual | SSIM over 3 sampled pages | same words, different layout |
+
+### Freeze a baseline
+
+Review the artifacts first — the baseline accepts whatever it is given.
+
+```bash
+uv run python scripts/golden_baseline.py --accept --artifacts ~/Documents/UBT
+```
+
+Writes `corpus/baseline/<case-id>/baseline.json` (structure + text + base64 page
+rasters). These are **checked in**: they are small (a few MB) and they *are* the
+accepted state.
+
+### Check against it
+
+```bash
+uv run python scripts/golden_baseline.py --check --artifacts ~/Documents/UBT
+uv run python scripts/golden_baseline.py --check --artifacts ~/Documents/UBT --cases paper-2608
+```
+
+Exit code 1 on any regression. Typical run over four documents is ~40s
+(the sampled pages are rasterised at 110 DPI).
+
+### Reading the report
+
+```
+[FAIL]   twocol-paper-2609
+           - page count dropped 15 -> 14
+           - visible text shrank 129171 -> 127424 chars (-1.4%, limit 2%)
+```
+
+### Why the page count is its own ratchet
+
+One missing page of a 15-page paper is only 1.35% of its characters, which sat
+under the text-share limit and passed in testing. A lost page is an absolute
+signal and is checked as one.
+
+### Why an asset *mix* change is allowed
+
+A repair that turns a source crop into real math moves one asset from
+`preserved_assets` to `reconstructed_assets` with the total unchanged. That is
+the goal, not a regression, so only the **total** and the reconstructed
+**coverage** are ratchets.
+
+### When to re-freeze
+
+Re-run `--accept` only after reviewing the new artifacts by eye. A re-freeze
+without review turns the gate into a rubber stamp, which is worse than no gate.
+
+### Not in pre-push
+
+The baseline needs delivered PDFs, which are not committed. Run it manually
+after a change that touches extraction or rendering, and before publishing a
+deliverable.
