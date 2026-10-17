@@ -61,7 +61,12 @@ repos:
       # statements, i.e. it guarded nothing.)
       - id: pytest-fast
         name: pytest -m fast (with coverage floor)
-        entry: uv run pytest -m fast -q -n auto --dist=loadscope --cov=ubt --cov-report=term:skip-covered --cov-fail-under=70
+        # ALL_PROXY is cleared: httpx honours it for every outbound client the
+        # suite exercises, and a `socks5h://` value without the `socksio` package
+        # makes seven unrelated tests fail with an ImportError that looks like a
+        # regression. A developer behind a SOCKS proxy should not be blocked from
+        # pushing by their proxy's presence.
+        entry: env -u ALL_PROXY -u all_proxy uv run pytest -m fast -q -n auto --dist=loadscope --cov=ubt --cov-report=term:skip-covered --cov-fail-under=70
         language: system
         pass_filenames: false
         always_run: true
