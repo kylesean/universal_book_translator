@@ -521,6 +521,52 @@ def _canon_value(value: Decimal) -> str:
 _CN_UNIT_PREFIX_SUFFIXES = frozenset("克米字帕瓦赫秒升欧伏安焦卡吨牛贝特巴")
 
 
+#: A count written with a thousands suffix: "over 38k samples", "5K tokens",
+#: "20M parameters", "1.5B views". The suffix states the magnitude, so the
+#: *value* is 38000 even though the digits are 38 — and the numeric check is
+#: textual, so it could only ever look for '38' in the translation. A
+#: translation that writes the quantity out ("3.8 万份") states exactly the same
+#: number and was rejected for dropping 38 (measured on arXiv 2606.23344).
+#: Guarded so an identifier is never read as a count: no letter before the
+#: digits ("PP-DocLayout_plus-L" has none after a digit, so it never matches),
+#: and no word character at all after the suffix ("38kb" is kilobytes, not
+#: 38000 of something).
+_COUNT_SUFFIX_RE = re.compile(
+    r"(?<![A-Za-z0-9_.])(?P<num>\d+(?:\.\d+)?)(?P<sfx>[kKmM])(?![A-Za-z0-9_])"
+)
+_COUNT_SUFFIX_FACTORS: dict[str, Decimal] = {"k": Decimal(1000), "m": Decimal(1000000)}
+
+#: The sign of a scientific exponent: ``10 -4``, ``10^-3``, ``× 10 − 6``.
+#: Measured on arXiv 2606.23344: the source writes the exponent flat
+#: ("2 × 10 -4") and a translation writes it as a superscript (``2 × 10⁻⁴``)
+#: with no minus character at all, so the "a dropped minus changes the fact"
+#: rule accused a correct translation of dropping a sign that was never a
+#: subtraction. Only a ``10`` immediately before the sign qualifies.
+_SCIENTIFIC_EXPONENT_RE = re.compile(r"(?:^|[^0-9.])10\s*\^?[-−]\s*$")
+
+
+def _is_scientific_exponent(text: str, digit_start: int) -> bool:
+    """Whether a sign immediately before ``digit_start`` belongs to a power of ten."""
+    # The slice ends at the sign itself: it must not include the digits being
+    # examined, or the "``10`` then sign then end" shape never matches.
+    return bool(_SCIENTIFIC_EXPONENT_RE.search(text[max(0, digit_start - 24) : digit_start]))
+
+
+def _count_suffix_values(text: str) -> dict[str, set[str]]:
+    """Map each count-with-suffix token to the value it denotes ('38k' -> '38000')."""
+    out: dict[str, set[str]] = {}
+    for match in _COUNT_SUFFIX_RE.finditer(text):
+        factor = _COUNT_SUFFIX_FACTORS[match.group("sfx").lower()]
+        try:
+            value = Decimal(match.group("num")) * factor
+        except Exception:
+            continue
+        token = canonicalize_numeric_token(match.group("num"))
+        if token:
+            out.setdefault(token, set()).add(_canon_value(value))
+    return out
+
+
 def _scale_map(text: str) -> dict[str, set[str]]:
     """Map each unit-scaled number's textual form to the values it may denote here."""
     out: dict[str, set[str]] = {}
@@ -1157,14 +1203,30 @@ class NumericConsistencyValidator(ContentValidator):
                         values
                     )
         src_nums.discard("")
+        # A count written with a thousands suffix — "over 38k samples",
+        # "20M parameters" — states 38000, which the TEXTUAL check cannot
+        # express: the source token is '38' and no amount of reading it yields
+        # '3.8'. Without this map the translation is rejected for "Missing
+        # numeric tokens: ['38']" whenever it writes the quantity out
+        # ("3.8 万份") instead of copying the suffix — measured on arXiv
+        # 2606.23344, word for word (38000 either way). The map is consulted
+        # only where a source token is otherwise unaccounted for, so it can
+        # only ever *authorize* a translation that states the same magnitude.
+        scaled_source_values = _count_suffix_values(src_view)
         # A digit run immediately preceded by a minus sign is a negative
         # quantity; the sign is part of the fact, so a dropped '−' must fail
         # even though the digits survive. Hyphenated words ('epoch-5', 'tier-1')
-        # are not negative quantities.
+        # are not negative quantities. A scientific exponent is not one either:
+        # "2 × 10 -4" is 2×10⁻⁴, not "2×10 minus 4", and the translation writes
+        # the superscript form (²×10⁻⁴) which has no minus to preserve. Measured
+        # on arXiv 2606.23344: b0090 was rejected for a dropped minus that never
+        # existed in the source's meaning.
         negative_tokens: set[str] = set()
         for match in _NUM.finditer(src_view):
             if match.start() > 0 and src_view[match.start() - 1] in "-−":
                 if match.start() > 1 and src_view[match.start() - 2].isalpha():
+                    continue
+                if _is_scientific_exponent(src_view, match.start()):
                     continue
                 canon = canonicalize_numeric_token(match.group(0))
                 if canon:
@@ -1367,6 +1429,13 @@ class NumericConsistencyValidator(ContentValidator):
                 lost_numbers.append(num)
                 continue
             if _bare_satisfied(num):
+                continue
+            # The count-suffix reading, tried only here so it can never loosen
+            # the text check itself: "38k" in the source is satisfied by a
+            # target that states 38000 in any written form (measured word for
+            # word on arXiv 2606.23344: "3.8 万份").
+            suffix_values = scaled_source_values.get(num) or set()
+            if suffix_values and suffix_values & tgt_values:
                 continue
             lost_numbers.append(num)
 

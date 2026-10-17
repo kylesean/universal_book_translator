@@ -506,3 +506,73 @@ def test_an_untranslated_heading_is_still_an_echo() -> None:
         "This paper proposes a new method for layout analysis.",
         "This paper proposes a new method for layout analysis.",
     )
+
+
+# --------------------------------------------------------------------------- #
+# Numeric fidelity: two correct translations accused of dropping numbers
+# --------------------------------------------------------------------------- #
+
+
+def test_a_count_suffix_may_be_written_out_in_full() -> None:
+    """ "over 38k samples" == "3.8 万份样本" — the same number, spelled differently.
+
+    Measured on arXiv 2606.23344: the check is textual, so it looked for '38'
+    and found '3.8'. The suffix states the magnitude, so the value is 38000 on
+    both sides.
+    """
+    from ubt.core.validators.consistency import NumericConsistencyValidator
+
+    validator = NumericConsistencyValidator()
+    assert validator.validate(
+        "we scaled our training corpus to over 38k high-quality document samples.",
+        "我们将训练语料库扩展至超过 3.8 万份高质量文档样本。",
+    ).is_valid
+    # The suffix itself surviving is accepted too.
+    assert validator.validate("over 38k samples", "超过 38k 个样本").is_valid
+
+
+def test_a_count_suffix_is_not_an_identifier_or_a_unit() -> None:
+    """The near miss: only a real count gets the magnitude reading."""
+    from ubt.core.validators.consistency import _count_suffix_values
+
+    assert _count_suffix_values("PP-DocLayout_plus-L") == {}
+    assert _count_suffix_values("a 38kb file") == {}
+    assert _count_suffix_values("over 38k samples") == {"38": {"38000"}}
+
+
+def test_dropping_a_count_is_still_a_failure() -> None:
+    """Authorizing 38000 must not authorize dropping the quantity."""
+    from ubt.core.validators.consistency import NumericConsistencyValidator
+
+    assert (
+        not NumericConsistencyValidator()
+        .validate(
+            "we scaled our corpus to over 38k samples.",
+            "我们扩大了训练语料库。",
+        )
+        .is_valid
+    )
+
+
+def test_a_scientific_exponent_is_not_a_subtraction() -> None:
+    """2 × 10 -4 == 2 × 10⁻⁴; the superscript form has no minus to preserve.
+
+    Measured on arXiv 2606.23344: the flat exponent in the source made the
+    "dropped minus sign changes the fact" rule reject a correct translation
+    that rendered the same number as a superscript.
+    """
+    from ubt.core.validators.consistency import NumericConsistencyValidator, _is_scientific_exponent
+
+    assert _is_scientific_exponent("2 × 10 -4 to", 8) is True
+    assert _is_scientific_exponent("2 × 10^-4", 8) is True
+    # A real subtraction stays a subtraction.
+    assert _is_scientific_exponent("a range of -4 to 5", 12) is False
+    assert _is_scientific_exponent("impact: -4%", 9) is False
+
+    validator = NumericConsistencyValidator()
+    assert validator.validate(
+        "The learning rate is set to a constant 2 × 10 -4 to ensure stable convergence.",
+        "学习率固定为 2 × 10⁻⁴，以确保稳定收敛。",
+    ).is_valid
+    # A genuinely dropped minus is still caught.
+    assert not validator.validate("the temperature is -4 degrees", "温度是 4 度").is_valid
