@@ -99,10 +99,12 @@ MAX_RECONSTRUCTED_DROP = 0
 MAX_DIGIT_LOSS = 0.01
 
 #: Digit runs (``93``, ``2024``) catch a value that changed rather than a
-#: separator that moved, and tolerate the fusion above. Looser than the digit
-#: count because a run boundary shifts whenever a table re-renders; measured
-#: 0.9941 between two identical runs.
-MAX_NUMBER_LOSS = 0.02
+#: separator that moved. They are **less** stable than the digit count, because a
+#: run boundary shifts whenever a table re-renders: measured between two runs of
+#: IDENTICAL code on arXiv 2606.23344, 4.12% of runs did not reproduce (digits
+#: 0.00%, citations 0.00%, identifiers 0.62% on the same pair). The limit has to
+#: clear that noise floor or the layer reports a regression on every re-run.
+MAX_NUMBER_RUN_LOSS = 0.06
 MAX_IDENTIFIER_LOSS = 0.02
 MAX_CITATION_LOSS = 0.02
 
@@ -125,6 +127,30 @@ ADVISORY_SENTENCE_OVERLAP = 0.05
 _NUMBER_RUN_RE = re.compile(r"\d+")
 _IDENTIFIER_RE = re.compile(r"[A-Za-z][A-Za-z0-9]*(?:[-_][A-Za-z0-9]+)*")
 _CITATION_RE = re.compile(r"\[\d+(?:\s*[,–—-]\s*\d+)*\]")
+
+#: A bare all-caps token of 2-3 letters: ``RO``, ``DA``. Short enough that it is
+#: usually a table column label an author set in capitals (``Reading Order |
+#: Detection Accuracy`` abbreviated to ``RO | DA``) rather than a model name.
+#: From the text alone the two are indistinguishable, and the difference matters:
+#: a column label is *supposed* to be translated, so counting it as a lost
+#: identifier reports a regression on a correct translation. Measured on arXiv
+#: 2606.23344: ``RO`` and ``DA`` alone were 13 of 33 "missing" identifiers (2.24%
+#: against a 2% limit) on a run whose only difference was translating them.
+#:
+#: The cutoff is 3, not 4: four-letter acronyms are routinely real model or
+#: method names (``LSTM``, ``UDOP``, ``BERT``) and excluding them would blind the
+#: layer to a dropped one. A genuine 2-3 letter acronym that does get translated
+#: is a rare, small loss compared with the false regression this removes.
+_SHORT_CAPS_RE = re.compile(r"^[A-Z]{2,3}$")
+
+
+def _count_identifiers(text: str) -> dict[str, int]:
+    """Identifier occurrences, excluding labels that are legitimately translated."""
+    from collections import Counter
+
+    return dict(
+        Counter(token for token in _IDENTIFIER_RE.findall(text) if not _SHORT_CAPS_RE.match(token))
+    )
 
 
 def content_features(text: str) -> dict[str, Any]:
@@ -152,10 +178,10 @@ def content_features(text: str) -> dict[str, Any]:
         "digits": dict(Counter(ch for ch in text if ch.isdigit())),
         # Digit RUNS catch a value that changed rather than a separator that
         # moved: ``93.81`` fused with a neighbour still yields the run ``93``.
-        # Reproduction is high across re-runs (0.994) and only drops when a
-        # quantity is actually altered or dropped.
+        # Reproduction across re-runs is ~0.96 (a table re-render moves run
+        # boundaries), so this layer's limit reflects that noise.
         "number_runs": dict(Counter(_NUMBER_RUN_RE.findall(text))),
-        "identifiers": dict(Counter(_IDENTIFIER_RE.findall(text))),
+        "identifiers": _count_identifiers(text),
         "citations": dict(Counter(_CITATION_RE.findall(text))),
         "chars": len(text),
         "cjk": sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff"),
@@ -447,7 +473,7 @@ def compare(
     if base_features and cur_features:
         for key, limit, label in (
             ("digits", MAX_DIGIT_LOSS, "digits"),
-            ("number_runs", MAX_NUMBER_LOSS, "number runs"),
+            ("number_runs", MAX_NUMBER_RUN_LOSS, "number runs"),
             ("identifiers", MAX_IDENTIFIER_LOSS, "identifiers"),
             ("citations", MAX_CITATION_LOSS, "citations"),
         ):

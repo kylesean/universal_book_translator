@@ -310,3 +310,32 @@ def test_a_baseline_frozen_without_features_still_gets_the_content_gate() -> Non
     current["features"] = content_features(stripped)
     problems = compare(base, current, deterministic=False)
     assert any("citations lost" in p for p in problems), problems
+
+
+def test_a_translatable_column_label_is_not_a_lost_identifier() -> None:
+    """``RO`` / ``DA`` are table column headers, and headers get translated.
+
+    Measured on arXiv 2606.23344: a run whose only difference was rendering
+    ``Reading Order | Detection Accuracy`` as Chinese lost 13 of 33 identifiers
+    (2.24% against a 2% limit) — a regression report for a correct translation.
+    A bare 2-3 letter all-caps token is indistinguishable from a real acronym, so
+    it is not counted; four letters and up are (``LSTM``, ``UDOP``, ``BERT`` are
+    routinely real model names, and a dropped one must still be caught).
+    """
+    from scripts.golden_baseline import content_features
+
+    assert "RO" not in content_features("RO ↓ O↑ DA")["identifiers"]
+    assert "DA" not in content_features("RO ↓ O↑ DA")["identifiers"]
+    for real in ("LSTM", "UDOP", "BERT", "RT-DocLayout", "PP-DocLayoutV2"):
+        assert real in content_features(real)["identifiers"], real
+
+
+def test_a_dropped_model_name_is_still_a_regression() -> None:
+    """The exclusion above must not blind the layer to a real identifier."""
+    from scripts.golden_baseline import content_features
+
+    before = content_features("RT-DocLayout achieves this")
+    after = content_features("该方法 achieves this")
+    from scripts.golden_baseline import _reproduction
+
+    assert _reproduction(before["identifiers"], after["identifiers"]) < 1.0
