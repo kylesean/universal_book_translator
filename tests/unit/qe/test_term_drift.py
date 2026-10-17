@@ -179,10 +179,31 @@ def test_protected_spans_hide_the_source_term() -> None:
 
 
 def test_protected_spans_hide_the_rendering() -> None:
-    (finding,) = detect_term_drift("The FinFET device", "code `鳍式场效应晶体管` here", _GLOSSARY)
-    assert finding.occurs_in_source is True
-    assert finding.rendered is False
-    assert finding.drifted is True
+    """A quoted rendering counts as rendered; a code span does not.
+
+    The old rule asked only "is the rendering outside every protected span",
+    and answered "not rendered" for anything the rewriter must not touch. That
+    conflates two different protections. Measured on arXiv 2606.23344: the
+    block "基于 “检测与分割可通过统一查询联合优化” 这一洞察" renders 检测
+    correctly inside a *quoted phrase*, and was reported as terminology drift,
+    sent to repair, and left for a human on a correct translation.
+
+    A code span or a math region is different: the target there is untouched
+    source by definition, so the rendering is not the translator's output.
+    """
+    # Quoted phrase — the translator's own wording, deliberately quoted.
+    (quoted,) = detect_term_drift("The FinFET device", "基于 “鳍式场效应晶体管” 这一", _GLOSSARY)
+    assert quoted.occurs_in_source is True
+    assert quoted.rendered is True
+    assert quoted.drifted is False
+    assert quoted.rendered_protected_at is not None
+    assert quoted.expected_hits == ()
+
+    # Code span — verbatim source, so the rendering is not established.
+    (coded,) = detect_term_drift("The FinFET device", "code `鳍式场效应晶体管` here", _GLOSSARY)
+    assert coded.occurs_in_source is True
+    assert coded.rendered is False
+    assert coded.drifted is True
 
 
 def test_an_inflected_variant_satisfies_the_rendering() -> None:
@@ -355,3 +376,78 @@ def test_replace_term_surface_is_a_noop_without_the_surface() -> None:
         "FinFET",
         0,
     )
+
+
+# --------------------------------------------------------------------------- #
+# Two false positives measured on a real delivery (arXiv 2606.23344)
+# --------------------------------------------------------------------------- #
+
+
+def test_a_correct_synonym_is_not_a_violation() -> None:
+    """A term rendered naturally is not drift, even under a listed alias.
+
+    Measured: the glossary asked for 公开可用, the translator wrote 公开获取 —
+    correct Chinese for "publicly available", and no listed alias matched, so the
+    block was reported as terminologically drifted on a correct translation. The
+    detection primitive cannot see the block's *meaning*; the minimax rule in
+    :func:`ubt.core.qe.term_drift.detect_target_term_violations` is what keeps such
+    a block out of the human queue. This test pins that it is a *violation* scan
+    question, not a drift-scan one: the drift finding still reports the rendering
+    as non-canonical, because it answers a different question.
+    """
+    glossary = [{"source": "Publicly Available", "translation": "公开可用"}]
+    (finding,) = detect_term_drift(
+        "The weights are publicly available.",
+        "模型权重可公开获取。",
+        normalize_glossary(glossary),
+    )
+    assert finding.occurs_in_source is True
+    assert finding.rendered is False  # not the canonical surface — true, not a verdict
+    # ...but it is not something the rewriter should touch either, and the block
+    # is not accused of carrying a forbidden surface.
+    assert detect_target_term_violations("模型权重可公开获取。", glossary) == ()
+
+
+def test_a_rendering_inside_a_quoted_phrase_counts_as_rendered() -> None:
+    """The translator quoted the phrase it translated; that is not drift.
+
+    Measured: "基于 “检测与分割可通过统一查询联合优化” 这一洞察" renders 检测
+    correctly, inside a quoted phrase. The matcher skips quoted spans (the
+    rewriter must not touch them), so the term read as missing.
+    """
+    glossary = [{"source": "Detection", "translation": "检测"}]
+    (finding,) = detect_term_drift(
+        "detection and segmentation can be jointly optimized",
+        "基于 “检测与分割可通过统一查询联合优化” 这一洞察",
+        normalize_glossary(glossary),
+    )
+    assert finding.occurs_in_source is True
+    assert finding.rendered is True
+    assert finding.drifted is False
+    assert finding.rendered_protected_at is not None
+
+
+def test_a_rendering_inside_a_code_span_does_not_count() -> None:
+    """A code span is verbatim source; a rendering there proves nothing."""
+    glossary = [{"source": "Detection", "translation": "检测"}]
+    (finding,) = detect_term_drift(
+        "detection here",
+        "run `检测` to see",
+        normalize_glossary(glossary),
+    )
+    assert finding.rendered is False
+    assert finding.drifted is True
+
+
+def test_an_alias_beside_the_canonical_rendering_is_not_a_violation() -> None:
+    """Using the canonical term and also naming a synonym is not drifting from it."""
+    glossary = [{"source": "edge computing", "translation": "边缘计算", "aliases": ["边缘运算"]}]
+    text = "边缘计算与边缘运算同义。"
+    assert detect_target_term_violations(text, glossary) == ()
+
+
+def test_a_leak_is_reported_even_when_the_rendering_is_present() -> None:
+    """The untranslated source term surviving is a defect whatever else is there."""
+    glossary = [{"source": "edge computing", "translation": "边缘计算"}]
+    violations = detect_target_term_violations("边缘计算（edge computing）", glossary)
+    assert [v.kind for v in violations] == ["leak"]

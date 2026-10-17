@@ -37,6 +37,7 @@ repair never flags a surface the exporter would refuse to touch.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, cast
@@ -46,6 +47,25 @@ from ubt.core.validators.glossary_enforcer import extract_protected_spans, find_
 #: Pre-extracted structural spans of one text (HTML/math/URL/masker regions),
 #: see :func:`ubt.core.validators.glossary_enforcer.extract_protected_spans`.
 ProtectedSpans = list[tuple[int, int]]
+
+#: The delimiters whose protected span holds text the translator *produced*:
+#: a quoted phrase is the translator's own wording, deliberately quoted, while a
+#: code span or a math region is source reproduced verbatim. Kept in step with the
+#: quotation patterns of ``glossary_enforcer._PROTECTED_SPAN_PATTERNS`` — this is
+#: the same set, re-applied here to classify a span the extractor only recorded as
+#: an interval.
+_QUOTED_SPAN_RE = re.compile(
+    "|".join(
+        (
+            r"“[^“”\n]{1,200}”",  # “typographic double”
+            r"‘[^‘’\n]{1,200}’",  # ‘typographic single’
+            r"「[^「」\n]{1,200}」",  # 「CJK corner」
+            r"『[^『』\n]{1,200}』",  # 『CJK white corner』
+            r"«[^«»\n]{1,200}»",  # «guillemets»
+            r'(?<![A-Za-z0-9])"[^"\n]{1,200}"',  # "straight double"
+        )
+    )
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +115,11 @@ class TermDriftFinding:
     matched_surface: str
     source_hits: tuple[tuple[int, int], ...]
     expected_hits: tuple[tuple[int, int], ...]
+    #: When the canonical rendering occurs only inside protected spans (a
+    #: quoted phrase, math), the first such span start; ``None`` otherwise.
+    #: Such a block is not drifted: the translator *did* render the term, the
+    #: target just quotes it.
+    rendered_protected_at: int | None = None
 
     @property
     def occurs_in_source(self) -> bool:
@@ -104,12 +129,12 @@ class TermDriftFinding:
     @property
     def rendered(self) -> bool:
         """Whether the target carries the canonical rendering (only meaningful when :attr:`occurs_in_source`)."""
-        return bool(self.expected_hits)
+        return bool(self.expected_hits) or self.rendered_protected_at is not None
 
     @property
     def drifted(self) -> bool:
         """Source carries the term, target does not render it canonically."""
-        return self.occurs_in_source and not self.expected_hits
+        return self.occurs_in_source and not self.rendered
 
 
 @dataclass(frozen=True, slots=True)
@@ -222,6 +247,7 @@ def detect_term_drift(
                 break
 
         expected_hits: tuple[tuple[int, int], ...] = ()
+        rendered_protected_at: int | None = None
         if source_hits:
             hits = list(
                 find_term_occurrences(
@@ -244,6 +270,19 @@ def detect_term_drift(
                     if var_hits:
                         hits.extend(var_hits)
             expected_hits = tuple(hits)
+            if not hits:
+                # A rendering that sits only inside a protected span is a
+                # *quoted* rendering — the translator translated the sentence and
+                # kept the phrase in quotes ("基于 “检测与分割…” 这一洞察").
+                # Protected spans exist so the rewriter leaves them alone, not so
+                # the gate declares the term missing; the two must agree, or a
+                # correct block is repaired and left for a human (measured on
+                # arXiv 2606.23344).
+                rendered_protected_at = _protected_rendering(
+                    target_text,
+                    (term.expected, *term.inflected_variants),
+                    target_protected,
+                )
 
         findings.append(
             TermDriftFinding(
@@ -253,9 +292,75 @@ def detect_term_drift(
                 matched_surface=matched,
                 source_hits=source_hits,
                 expected_hits=expected_hits,
+                rendered_protected_at=rendered_protected_at,
             )
         )
     return tuple(findings)
+
+
+def _protected_rendering(
+    target_text: str,
+    surfaces: tuple[str, ...],
+    target_protected: ProtectedSpans,
+) -> int | None:
+    """Start offset of the first surface found inside a *quoted* protected span, or ``None``.
+
+    Protected spans exist so the rewriter does not touch them, and
+    ``find_term_occurrences`` therefore skips them. "Not enforced" and "not
+    rendered" are different questions:
+
+    * **Quotation** protects text the translator *did* produce (``…“检测与分割
+      可通过统一查询联合优化”这一洞察…`` — the term is rendered, the phrase is
+      quoted). The term counts as rendered. Measured on arXiv 2606.23344: this
+      block was reported as terminology drift, repaired, and left
+      ``NEEDS_HUMAN`` on a correct translation.
+    * **Code, math, URLs** protect text reproduced verbatim from the source by
+      definition, so a rendering there is not the translator's output and proves
+      nothing. The term still counts as missing.
+
+    The distinction is made by the delimiters, which are the only thing that says
+    which kind of span it is; ``ProtectedSpans`` carries no marker.
+    """
+    for surface in surfaces:
+        if not surface:
+            continue
+        start = target_text.find(surface)
+        while start >= 0:
+            end = start + len(surface)
+            for span_start, span_end in target_protected:
+                if span_start <= start and end <= span_end:
+                    if _QUOTED_SPAN_RE.match(target_text, span_start):
+                        return start
+                    break
+            start = target_text.find(surface, start + 1)
+    return None
+
+
+def _renders_canonical(
+    target_text: str,
+    expected: str,
+    inflected_variants: tuple[str, ...],
+    target_protected: ProtectedSpans,
+) -> bool:
+    """Whether the target carries the canonical rendering (or a listed inflection).
+
+    Uses exactly the matcher :func:`detect_term_drift` uses, so the violation
+    scan and the drift scan cannot disagree about the same block: the same
+    protected spans, the same case folding, and the same allowance for a space
+    the CJK/Latin boundary inserts (``边缘 计算`` for ``边缘计算``). A rendering
+    inside a protected span counts — see :func:`_protected_rendering`.
+    """
+    surfaces = (expected, *inflected_variants)
+    for surface in surfaces:
+        if find_term_occurrences(
+            target_text,
+            surface,
+            target_protected,
+            case_insensitive=True,
+            allow_cjk_latin_space=True,
+        ):
+            return True
+    return _protected_rendering(target_text, surfaces, target_protected) is not None
 
 
 def detect_target_term_violations(
@@ -272,6 +377,17 @@ def detect_target_term_violations(
       the target;
     * ``leak`` — the untranslated source term (>2 chars, distinct from the
       rendering) sitting in the target.
+
+    A block that already renders the canonical form is not reported for
+    ``alias``: an alias next to the canonical term is the translator *using* the
+    preferred wording and also naming a synonym, not drifting from it. The
+    alias scan cannot tell the two apart on its own — it matches surfaces — so
+    without this check it reported every block that contains both, and each hit
+    routed the block through repair and left it ``NEEDS_HUMAN`` with a
+    mistranslation-implying flag on a correct translation (measured on arXiv
+    2606.23344: three of six hand-reviewed blocks were exactly this). ``leak``
+    is still reported: the source term surviving in the target is a defect
+    whatever else the block says.
 
     Matching is case-sensitive on purpose: the rewriter replaces exact
     surfaces only, so a span the repair model is asked to fix must be a span
@@ -294,20 +410,27 @@ def detect_target_term_violations(
     violations: list[TargetTermViolation] = []
     for term in terms:
         approved_target = {term.expected, *term.inflected_variants}
-        for alias in term.aliases:
-            if alias in approved_target or alias in globally_approved:
-                continue
-            hits = tuple(find_term_occurrences(target_text, alias, target_protected))
-            if hits:
-                violations.append(
-                    TargetTermViolation(
-                        source=term.source,
-                        expected=term.expected,
-                        surface=alias,
-                        kind="alias",
-                        hits=hits,
+        # Whether this block already uses the canonical wording. Decided once
+        # per entry (not per alias) because it is a property of the block's
+        # translation, and it gates the alias scan only.
+        rendered = _renders_canonical(
+            target_text, term.expected, term.inflected_variants, target_protected
+        )
+        if not rendered:
+            for alias in term.aliases:
+                if alias in approved_target or alias in globally_approved:
+                    continue
+                hits = tuple(find_term_occurrences(target_text, alias, target_protected))
+                if hits:
+                    violations.append(
+                        TargetTermViolation(
+                            source=term.source,
+                            expected=term.expected,
+                            surface=alias,
+                            kind="alias",
+                            hits=hits,
+                        )
                     )
-                )
         if (
             term.source not in approved_target
             and term.source not in globally_approved
