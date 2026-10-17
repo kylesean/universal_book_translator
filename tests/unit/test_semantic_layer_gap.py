@@ -246,3 +246,101 @@ def test_the_judge_falls_back_to_the_translation_endpoint(monkeypatch: pytest.Mo
     assert cfg.qe_judge_base_url is None
     assert cfg.qe_judge_api_mode is None
     assert cfg.qe_judge_sentences is True
+
+
+# --------------------------------------------------------------------------- #
+# The closed loop: a judge verdict must reach repair, not be discarded
+# --------------------------------------------------------------------------- #
+
+
+def test_a_judge_verdict_survives_the_calibration_check() -> None:
+    """`is_calibrated()` is conservative for repair; the gate used it wrongly.
+
+    The gate read ``is_calibrated()`` to decide whether to keep the scores it had
+    just computed. ``TieredQERunner`` answers it conservatively (so repair keeps
+    its uncalibrated lifecycle), which meant every judge verdict was discarded:
+    measured on arXiv 2606.23344, the judge said 0.78 for a block that had
+    dropped a word and the gate stored ``None`` — the block could not reach
+    repair on the judgement it had just been given.
+    """
+    import asyncio
+
+    async def judge_fn(**kwargs: Any) -> str:
+        return "score: 78"
+
+    tier = TieredQERunner(
+        heuristic=HeuristicQERunner(),
+        judge=LLMJudgeQERunner(judge_fn=judge_fn),
+        pass_sample=1.0,
+    )
+    assert tier.judged_this_run is False  # nothing judged yet
+    asyncio.run(tier.score_pairs([{"src": "A. B.", "mt": "甲。乙。"}]))
+    assert tier.judged_this_run is True
+    # ...and the conservative answer that repair relies on is unchanged.
+    assert tier.is_calibrated() is False
+
+
+def test_a_judge_verdict_below_the_line_demotes_a_passing_block() -> None:
+    """A block that cleared every zero-token gate still goes to repair.
+
+    This is the whole point of the semantic layer: FastPass passed this block,
+    the judge scored it 0.78, and the pass-sample audit must hand it back.
+    """
+    import asyncio
+
+    from ubt.core.engine.stages.quality_gate import _audit_pass_sample
+    from ubt.core.ir.models import BlockType, FlowID, IRBlock, make_element
+
+    async def judge_fn(**kwargs: Any) -> str:
+        return "score: 78"
+
+    tier = TieredQERunner(
+        heuristic=HeuristicQERunner(),
+        judge=LLMJudgeQERunner(judge_fn=judge_fn),
+        pass_sample=1.0,
+    )
+    block = IRBlock(
+        element=make_element(
+            id="t#b1",
+            spine_index=1,
+            block_type=BlockType.NARRATIVE,
+            flow_id=FlowID.MAIN_STORY,
+            source_text="The weights are publicly available.",
+        )
+    )
+    block.target_text = "权重可获取。"
+    demoted = asyncio.run(_audit_pass_sample(tier, [block], 0.80))
+    assert [b.id for b in demoted] == ["t#b1"]
+
+
+def test_a_good_block_is_not_demoted() -> None:
+    """The near miss: the audit must not send every block to repair."""
+    import asyncio
+
+    from ubt.core.engine.stages.quality_gate import _audit_pass_sample
+    from ubt.core.ir.models import BlockType, FlowID, IRBlock, make_element
+
+    async def judge_fn(**kwargs: Any) -> str:
+        return "score: 95"
+
+    tier = TieredQERunner(
+        heuristic=HeuristicQERunner(),
+        judge=LLMJudgeQERunner(judge_fn=judge_fn),
+        pass_sample=1.0,
+    )
+    block = IRBlock(
+        element=make_element(
+            id="t#b2",
+            spine_index=2,
+            block_type=BlockType.NARRATIVE,
+            flow_id=FlowID.MAIN_STORY,
+            source_text="The weights are publicly available.",
+        )
+    )
+    block.target_text = "权重公开可用。"
+    assert asyncio.run(_audit_pass_sample(tier, [block], 0.80)) == []
+
+
+def test_an_unguided_runner_never_promises_calibration() -> None:
+    """A plain heuristic runner is never asked to score (nothing to keep)."""
+    assert HeuristicQERunner().may_be_calibrated() is False

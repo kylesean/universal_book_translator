@@ -361,6 +361,10 @@ class TieredQERunner(BaseQERunner):
         # (call failure / unparsable). The heuristic score is kept for those
         # Pairs; this counter makes the silent fallback observable.
         self.judge_errors = 0
+        #: Whether the judge returned a usable opinion this run. ``is_calibrated``
+        #: reads it to say "these numbers are graded judgements, keep them" —
+        #: without it the quality gate discarded every judge verdict.
+        self._judged_any = False
 
     def _needs_judge(self, score: float, src: str) -> bool:
         """Whether this pair is worth a paid second opinion."""
@@ -389,8 +393,38 @@ class TieredQERunner(BaseQERunner):
         the heuristic's flat 0.92 without ever reaching it — best-of-n rerank
         would pick between heuristic bands and present the pick as measured.
         Same delegation shape as :meth:`is_glossary_aware`.
+
+        Kept conservative on purpose: ``RepairLoop`` reads this to decide which
+        repair lifecycle to run, and widening it would change repair behaviour
+        rather than the reporting of a score. A judge verdict is kept by the
+        quality gate through :attr:`judged_this_run` instead.
         """
         return self.heuristic.is_calibrated()
+
+    @property
+    def judged_this_run(self) -> bool:
+        """Whether a judge opinion was actually obtained this run.
+
+        The quality gate reads ``is_calibrated()`` to decide whether to keep the
+        scores it computed, and ``TieredQERunner`` answers it conservatively —
+        so every judge verdict was discarded: measured on arXiv 2606.23344, the
+        judge said 0.78 for a block that had dropped a word and the gate stored
+        ``None`` instead, leaving the block unable to reach repair on the score
+        it had just been given.
+
+        This says only "these numbers are judgement, not one of twelve discrete
+        bands" — enough to keep them and route a block by them, not enough to
+        rank candidates against each other.
+        """
+        return self._judged_any
+
+    def may_be_calibrated(self) -> bool:
+        """A tier has a judge worth calling even though the heuristic does not.
+
+        ``HeuristicQERunner`` leaves this False so the gate never asks it; a tier
+        must ask, or ``pass_sample`` and the judge would never run at all.
+        """
+        return True
 
     def with_languages(self, source_lang: str, target_lang: str) -> TieredQERunner:
         heuristic = self.heuristic.with_languages(source_lang, target_lang)
@@ -453,6 +487,7 @@ class TieredQERunner(BaseQERunner):
         subset = [pairs[i] for i in gray_idx]
         judged = await self.judge.score_pairs(subset)
         self.judge_calls += len(subset)
+        self._judged_any = True
         merged = list(base)
         for i, s in zip(gray_idx, judged, strict=True):
             if s == _JUDGE_NO_OPINION:

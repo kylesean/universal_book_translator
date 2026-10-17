@@ -230,7 +230,15 @@ async def run_quality_gate_stage(
         # The authoritative verdict after any scoring attempt: a subprocess that
         # answered with its heuristic fallback is still uncalibrated, and its
         # discrete bands must not become pseudo-scores.
-        if attempt and runner.is_calibrated():
+        #
+        # A judge opinion is different from a heuristic band: it is a graded
+        # answer, so it is kept even though ``is_calibrated`` stays False. Without
+        # this, every verdict the judge produced was thrown away — measured on
+        # arXiv 2606.23344, a judge scored 0.78 for a block that had dropped a
+        # word and the gate stored ``None``, so the block could not reach repair
+        # on the judgement it had just been given.
+        judged = bool(getattr(runner, "judged_this_run", False))
+        if attempt and (runner.is_calibrated() or judged):
             scores: list[float | None] = [float(s) for s in raw_scores]
         else:
             # Bi-modal Gate Track 1: Structural Integrity.
