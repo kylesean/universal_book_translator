@@ -43,8 +43,15 @@ def _cases() -> dict[str, dict[str, Any]]:
 
 CASES = _cases()
 
+#: Blocks that are NOT false positives: the translation really does lose
+#: meaning, and the zero-token gates cannot see it (both score a clean pass).
+#: They are excluded from the pass check below and asserted separately.
+SEMANTIC_DEFECTS = frozenset(
+    block_id for block_id, case in CASES.items() if case.get("_defect") == "semantic-loss"
+)
 
-@pytest.mark.parametrize("block_id", sorted(CASES))
+
+@pytest.mark.parametrize("block_id", sorted(set(CASES) - SEMANTIC_DEFECTS))
 def test_a_correct_translation_is_not_flagged_by_any_gate(block_id: str) -> None:
     """The block must clear every gate that once rejected it.
 

@@ -6,13 +6,15 @@
    "block_id": "pdf_main#b0010",
    "block_type": "narrative",
    "source_text": "RT-DocLayout is released in PaddleOCR under the name PP-DocLayoutV3. RT-DocLayout is the name used in this academic publication, while PP-DocLayoutV3 is the name adopted in the PaddleOCR open-source project. The model weights are publicly available at https://huggingface.co/PaddlePaddle/PP-DocLayoutV3",
-   "target_text": "RT-DocLayout 已在 PaddleOCR 中以 PP-DocLayoutV3 的名称发布。RT-DocLayout 是本文学术出版物中使用的名称，而 PP-DocLayoutV3 则是 PaddleOCR 开源项目中采用的名称。模型权重可在 https://huggingface.co/PaddlePaddle/PP-DocLayoutV3获取。"
+   "target_text": "RT-DocLayout 已作为 PP-DocLayoutV3 发布在 PaddleOCR 项目中。RT-DocLayout 为本文学术出版物使用的名称，而 PP-DocLayoutV3 则是 PaddleOCR 开源项目采用的名称。模型权重可在 https://huggingface.co/PaddlePaddle/PP-DocLayoutV3 获取。",
+   "_defect": "semantic-loss"
   },
   {
    "block_id": "pdf_main#b0015",
    "block_type": "narrative",
    "source_text": "Current methodologies typically follow two suboptimal paths. First, cascaded pipelines attempt to reconstruct reading order by stacking a layout detector with secondary relationship models (e.g., GNNs [1] or heuristic sorting [2]). Such systems are inherently fragile, as detection errors propagate through the stages, and the lack of end-to-end integration prevents the model from capturing the synergistic dependencies between layout and topology. Second, large-scale pre-trained Transformers and VLMs (e.g., LayoutLMv3 [3], DiT [4], MinerU [5], Dolphin [6]) have achieved impressive results but remain computationally expensive. Moreover, these models primarily rely on coarse-grained bounding boxes, which fail to provide the pixel-level masks necessary to isolate layout elements in warped, curved, or tilted documents. This lack of geometric precision often leads to content interference from background noise or adjacent elements, limiting the fidelity of downstream parsing.",
-   "target_text": "现有方法通常遵循两条次优路径。其一，级联式流程试图通过叠加布局检测器与辅助关系模型（例如 GNNs [1] 或启发式排序 [2]）来重建阅读顺序。此类系统本质上脆弱，因为检测错误会逐级传递，且缺乏端到端集成，导致模型无法捕捉布局与拓扑结构之间的协同依赖关系。其二，大规模预训练 Transformer 与视觉语言模型（例如 LayoutLMv3 [3]、DiT [4]、MinerU [5]、Dolphin [6]）虽取得了令人瞩目的成果，但计算成本依然高昂。此外，这些模型主要依赖粗粒度边界框，无法提供像素级掩码以在扭曲、弯曲或倾斜的文档中精确隔离布局元素。这种几何精度的缺失常常导致背景噪声或相邻元素的干扰，从而限制下游解析的准确性。"
+   "target_text": "现有方法通常沿两条次优路径展开。其一，级联式流程试图通过叠加布局检测器与辅助关系模型（例如 GNNs [1] 或启发式排序 [2]）来重建阅读顺序。这类系统本质上脆弱，因为检测错误会逐级传播，且缺乏端到端集成，导致模型无法捕捉布局与拓扑结构之间的协同依赖关系。其二，大规模预训练 Transformer 与视觉语言模型（例如 LayoutLMv3 [3]、DiT [4]、MinerU [5]、Dolphin [6]）虽取得了令人瞩目的成果，但计算成本依然高昂。此外，这些模型主要依赖粗粒度的边界框，无法提供像素级掩码以在扭曲、弯曲或倾斜的文档中精准隔离布局元素。这种几何精度的缺失往往导致背景噪声或相邻元素的干扰，从而限制下游解析的准确性。",
+   "_defect": "semantic-loss"
   },
   {
    "block_id": "pdf_main#b0029",

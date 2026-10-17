@@ -52,7 +52,21 @@ JUDGE_SYSTEM_PROMPT = (
     "You are a translation quality estimator. Score the translation 0-100 "
     "(100 = perfect, 0 = unusable). Consider adequacy, fluency, terminology "
     "consistency, and numeric fidelity. Reply with exactly one line: "
-    "`score: <number>`. No explanation."
+    "`score: <number>`. No explanation.\n"
+    "\n"
+    "Adequacy is judged clause by clause against the source, not by how "
+    "fluent the target reads. Fluent compression still loses content: ask "
+    "whether every meaningful element of the source — each noun, modifier, "
+    "quantifier and relation — has a counterpart in the translation. Two "
+    "losses are easy to miss because the result reads well, and both are "
+    "severe:\n"
+    "  * a noun or modifier dropped while the sentence stays grammatical "
+    '("publicly available" -> "获取" loses 公开; "content interference '
+    'from background noise" -> "背景噪声的干扰" loses 内容);\n'
+    "  * a phrase reduced to a shorter equivalent that no longer states what "
+    "the source said.\n"
+    "Score a translation that drops source content in proportion to what is "
+    "lost, even when every remaining word is correct."
 )
 
 _SCORE_RE = re.compile(
