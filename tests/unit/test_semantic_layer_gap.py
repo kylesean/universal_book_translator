@@ -309,8 +309,9 @@ def test_a_judge_verdict_below_the_line_demotes_a_passing_block() -> None:
         )
     )
     block.target_text = "权重可获取。"
-    demoted = asyncio.run(_audit_pass_sample(tier, [block], 0.80))
+    demoted, scored = asyncio.run(_audit_pass_sample(tier, [block], 0.80))
     assert [b.id for b in demoted] == ["t#b1"]
+    assert [b.id for b in scored] == ["t#b1"]
 
 
 def test_a_good_block_is_not_demoted() -> None:
@@ -338,7 +339,11 @@ def test_a_good_block_is_not_demoted() -> None:
         )
     )
     block.target_text = "权重公开可用。"
-    assert asyncio.run(_audit_pass_sample(tier, [block], 0.80)) == []
+    demoted, scored = asyncio.run(_audit_pass_sample(tier, [block], 0.80))
+    assert demoted == []
+    # ...but the measurement is kept, so the block is not "unmeasured".
+    # The tier keeps min(heuristic, judge): 0.92 is the heuristic band.
+    assert [b.mtqe_score for b in scored] == [pytest.approx(0.92)]
 
 
 def test_an_unguided_runner_never_promises_calibration() -> None:
@@ -625,6 +630,7 @@ def test_the_audit_skips_unscorable_blocks_before_calling_the_judge() -> None:
             skip=False,
         ),
     ]
-    demoted = asyncio.run(_audit_pass_sample(tier, blocks, 0.75))
+    demoted, scored = asyncio.run(_audit_pass_sample(tier, blocks, 0.75))
     assert [b.id for b in demoted] == ["b1"]
+    assert [b.id for b in scored] == ["b1"]
     assert len(calls) == 1  # the asset spent no call

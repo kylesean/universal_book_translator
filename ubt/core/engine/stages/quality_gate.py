@@ -105,8 +105,8 @@ async def _audit_pass_sample(
     qe_runner: BaseQERunner,
     blocks: list[IRBlock],
     threshold: float,
-) -> list[IRBlock]:
-    """FastPass-passing blocks whose sampled QE score falls below ``threshold``.
+) -> tuple[list[IRBlock], list[IRBlock]]:
+    """Score a sample of FastPass passes; split into (below the line, scored).
 
     A FastPass-passing block written straight to ``MTQE_PASSED`` would be
     invisible to the ``pass_sample`` mechanism meant to audit a fraction of clean
@@ -114,6 +114,12 @@ async def _audit_pass_sample(
     passes, they are scored here and any below-threshold block is routed back
     into repair. A plain heuristic/COMET runner has no ``pass_sample``, so
     the default configuration is unchanged.
+
+    Both halves are returned. Reporting only the demoted ones meant a block the
+    judge scored *above* the line kept ``mtqe_score=None``, so the ledger could
+    not distinguish "measured and good" from "never measured" — measured on a
+    4-page run, 28 of 34 passing prose blocks looked unmeasured while the judge
+    had in fact scored them.
 
     Blocks that carry no prose are skipped before scoring. Measured on arXiv
     2606.23344: four asset blocks (``img_*``/``fml_*``) reached the judge with a
@@ -123,10 +129,10 @@ async def _audit_pass_sample(
     blocks are excluded here rather than trusted to score themselves well.
     """
     if getattr(qe_runner, "pass_sample", 0.0) <= 0.0 or not blocks:
-        return []
+        return [], []
     scorable = [b for b in blocks if not _is_unscorable(b)]
     if not scorable:
-        return []
+        return [], []
     pairs = [
         {"src": b.source_text, "mt": b.target_text or "", "block_type": str(b.block_type)}
         for b in scorable
@@ -137,7 +143,14 @@ async def _audit_pass_sample(
             f"QE runner returned {len(scores)} score(s) for {len(scorable)} pass-sample block(s)",
             details={"expected": len(scorable), "got": len(scores)},
         )
-    return [b for b, score in zip(scorable, scores, strict=True) if score < threshold]
+    scored: list[IRBlock] = []
+    demoted: list[IRBlock] = []
+    for block, score in zip(scorable, scores, strict=True):
+        block.mtqe_score = float(score)
+        scored.append(block)
+        if score < threshold:
+            demoted.append(block)
+    return demoted, scored
 
 
 #: Block types whose text is not a translation the judge can read. Assets are
@@ -245,14 +258,30 @@ async def run_quality_gate_stage(
     # Audit a sample of FastPass passes when the runner supports it
     # (``pass_sample`` > 0, i.e. TieredQERunner), so a clean-but-wrong block the
     # judge lowers is routed to repair instead of shipping as MTQE_PASSED.
+    #
+    # The audit *scores* every sampled block, but only the ones below the line
+    # were acted on: a block the judge scored 0.82 was left with
+    # ``mtqe_score=None`` in the ledger. Measured on a 4-page run: 28 of 34
+    # passing prose blocks had no score at all, so the report could not show a
+    # distribution and "how good is this delivery" was unanswerable. The scores
+    # are now carried back for every sampled block.
     if passed_updates:
         by_id = {b.id: b for b in drafted_blocks}
         pass_blocks = [by_id[u["block_id"]] for u in passed_updates if u["block_id"] in by_id]
-        demoted = await _audit_pass_sample(qe_runner, pass_blocks, ctx.config.qe_threshold)
+        audited = await _audit_pass_sample(qe_runner, pass_blocks, ctx.config.qe_threshold)
+        demoted, scored = audited
         if demoted:
             demoted_ids = {b.id for b in demoted}
             passed_updates = [u for u in passed_updates if u["block_id"] not in demoted_ids]
             suspicious_blocks.extend(demoted)
+        if scored:
+            # Record what the audit measured for the blocks it let through, so a
+            # passing block is not indistinguishable from an unmeasured one.
+            scored_ids = {b.id: b.mtqe_score for b in scored}
+            for update in passed_updates:
+                score = scored_ids.get(update["block_id"])
+                if score is not None:
+                    update["mtqe_score"] = score
 
     if passed_updates:
         await asyncio.to_thread(ledger.save_checkpoints_batch, passed_updates)
