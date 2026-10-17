@@ -221,3 +221,11 @@ without review turns the gate into a rubber stamp, which is worse than no gate.
 The baseline needs delivered PDFs, which are not committed. Run it manually
 after a change that touches extraction or rendering, and before publishing a
 deliverable.
+
+### The case that found the gate defects
+
+`twocol-paper-2606` (arXiv 2606.23344) is not just another paper: every gate
+false positive and both semantic losses fixed in the 2026-10 audit were found on
+it. It is in the corpus so that a change to a gate — or to the extractor feeding
+it — is measured against the document that exposed the problem, not only against
+documents that already passed.
