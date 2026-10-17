@@ -332,8 +332,9 @@ class PipelineOrchestrator:
         if self.config.qe_judge_enabled and isinstance(self.qe_runner, HeuristicQERunner):
             from ubt.core.qe.llm_judge import LLMJudgeQERunner, TieredQERunner
 
-            judge_model = self.config.qe_judge_model or self.config.repair_model
-            judge_fn = self._build_judge_fn(judge_model)
+            judge_fn, judge_model = self._build_judge_fn(
+                self.config.qe_judge_model or self.config.repair_model
+            )
             judge = LLMJudgeQERunner(
                 judge_fn=judge_fn,
                 model=judge_model,
@@ -452,7 +453,7 @@ class PipelineOrchestrator:
                 "Models reached through a self-hosted endpoint are exempt (they cost $0)."
             )
 
-    def _build_judge_fn(self, judge_model: str) -> JudgeFn:
+    def _build_judge_fn(self, judge_model: str) -> tuple[JudgeFn, str]:
         """The judge's completion call, resolved in a standard way.
 
         Three sources, in this order — each one something a user already knows
@@ -471,6 +472,14 @@ class PipelineOrchestrator:
         The judge may run somewhere other than the translator on purpose: a model
         large enough to notice a dropped noun is slow locally (measured 35-85 s
         per block on a 27B) and quick hosted (1.6-3.5 s for the same decisions).
+
+        Returns the callable **and the model name it resolves to**, because a
+        provider block carries its own model. Returning only the callable left
+        the caller passing the translation provider's ``repair_model`` as an
+        override — a name the judge's endpoint has never heard of. Measured: a
+        local name (``gemma4-e4b``) sent to a different gateway answered
+        ``404 no such model`` on every judge call, twelve times in a run, and
+        the report read "not machine-scored" with no indication why.
 
         A self-hosted judge has no price in ``prices.toml``, so its spend cannot
         be attributed; it is billed at zero like every other self-hosted call.
@@ -514,7 +523,7 @@ class PipelineOrchestrator:
                 ),
             )
         else:
-            return self.router.complete_raw
+            return self.router.complete_raw, judge_model
 
         async def _judge_complete(
             *,
@@ -530,7 +539,7 @@ class PipelineOrchestrator:
                 temperature=temperature,
             )
 
-        return _judge_complete
+        return _judge_complete, judge_model
 
     def _runtime_qe_runner(self, source_lang: str, target_lang: str) -> BaseQERunner:
         """Bind the run's language pair for the QE runner.

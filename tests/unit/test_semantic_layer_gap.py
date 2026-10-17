@@ -473,3 +473,35 @@ def test_a_judge_provider_naming_nothing_fails_loudly(
         from ubt.core.providers import load_layer
 
         load_layer("no-such-provider")
+
+
+# --------------------------------------------------------------------------- #
+# The judge must use the model its own endpoint knows
+# --------------------------------------------------------------------------- #
+
+
+def test_a_judge_provider_block_supplies_its_own_model_name(tmp_path: Any) -> None:
+    """The judge's model comes from ITS provider block, not the translator's.
+
+    Measured: a run sent the translation provider's repair model (``gemma4-e4b``,
+    which lives on one local gateway) to a *different* gateway that answered
+    ``404 no such model`` twelve times. ``_build_judge_fn`` resolved the right
+    name internally but returned only the callable, so the caller kept passing
+    the old name as an override and every call failed.
+
+    This test pins the contract that made that possible: the resolver returns the
+    model name along with the callable.
+    """
+    from ubt.core.providers import load_provider_block
+
+    config = tmp_path / "config.toml"
+    config.write_text(
+        "[providers.my-judge]\n"
+        'base_url = "https://judge.example/v1"\n'
+        'repair_model = "judge-model-name"\n',
+        encoding="utf-8",
+    )
+    fields = load_provider_block("my-judge", custom_path=config)
+    # The block's own model, not the caller's fallback.
+    assert fields["repair_model"] == "judge-model-name"
+    assert fields["repair_model"] != "gemma4-e4b"

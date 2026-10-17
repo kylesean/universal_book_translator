@@ -853,16 +853,45 @@ def translate(
             console.print("\n[bold]✓ Translation completed[/] [yellow](with warnings)[/]")
         console.print(f"  [cyan]{doc_label}[/] [link=file://{result_path}]{result_path}[/]")
         if not qe_measured and report_path.exists():
-            console.print(
-                _ui_msg(
-                    "  [dim]Quality: not machine-scored this run (heuristic QE engine; "
-                    "avg-QE figures in the report are placeholders). "
-                    "Set UBT_QE_JUDGE_ENABLED=true (with UBT_QE_ENGINE=tiered) to measure.[/]",
-                    "  [dim]质量：本次运行未做机器评分（启发式 QE 引擎，报告中的 avg-QE "
-                    "为占位值）。设置 UBT_QE_JUDGE_ENABLED=true（配合 UBT_QE_ENGINE=tiered）"
-                    "以启用测量。[/]",
+            # Three different reasons produce an unscored run, and telling the
+            # operator to enable something they already enabled is worse than
+            # saying nothing: it hides a real failure behind a config hint.
+            judge_calls = int(report_data.get("score_metrics", {}).get("qe_judge_calls") or 0)
+            judge_errors = int(report_data.get("score_metrics", {}).get("qe_judge_errors") or 0)
+            if judge_calls and judge_errors >= judge_calls:
+                console.print(
+                    _ui_msg(
+                        f"  [yellow]Quality: the judge was called {judge_calls} time(s) "
+                        f"and every call failed[/] [dim]— the scores fall back to the "
+                        "heuristic. Check the judge endpoint's credentials, model name "
+                        "and reachability (see SEMANTIC_JUDGE.md).[/]",
+                        f"  [yellow]质量：judge 被调用 {judge_calls} 次，全部失败[/] "
+                        "[dim]— 分数退回启发式。检查 judge 端点的凭证、模型名与可达性"
+                        "（见 SEMANTIC_JUDGE.md）。[/]",
+                    )
                 )
-            )
+            elif judge_calls:
+                console.print(
+                    _ui_msg(
+                        "  [dim]Quality: sampled audit only — no judged block scored below "
+                        f"the line ({judge_calls} call(s), {judge_errors} failed). "
+                        "Raise qe_judge_pass_sample for wider coverage.[/]",
+                        "  [dim]质量：仅抽样审计 — 没有被判定的块低于阈值"
+                        f"（调用 {judge_calls} 次，失败 {judge_errors} 次）。"
+                        "提高 qe_judge_pass_sample 可扩大覆盖。[/]",
+                    )
+                )
+            else:
+                console.print(
+                    _ui_msg(
+                        "  [dim]Quality: not machine-scored this run (heuristic QE engine; "
+                        "avg-QE figures in the report are placeholders). "
+                        "Set UBT_QE_JUDGE_ENABLED=true (with UBT_QE_ENGINE=tiered) to measure.[/]",
+                        "  [dim]质量：本次运行未做机器评分（启发式 QE 引擎，报告中的 avg-QE "
+                        "为占位值）。设置 UBT_QE_JUDGE_ENABLED=true（配合 UBT_QE_ENGINE=tiered）"
+                        "以启用测量。[/]",
+                    )
+                )
         for companion in companions:
             console.print(
                 f"  [green]Companion Artifact:[/] [link=file://{companion}]{companion}[/]"
