@@ -217,6 +217,38 @@ def test_losing_the_citations_is_a_regression() -> None:
     assert any("citations lost" in p for p in problems), problems
 
 
+def test_a_fused_table_cell_is_not_read_as_a_number() -> None:
+    """The text layer glues adjacent table cells together: ``0.08290.30``.
+
+    That token exists in one run's table and not the next (a reflow, a different
+    row order), so counting it literally reported a lost number on a document
+    whose numbers were all present — measured on arXiv 2606.23344 as a 5.2%
+    "loss" against a 2% limit.
+
+    Two decimal points prove fusion (a real number has at most one), and the
+    split points cannot be recovered — ``0.08290.30`` could be ``0.082``+``90.30``
+    or ``0.0829``+``0.30``. So a fused token is dropped rather than guessed at;
+    its component values are counted wherever a cell kept them separate.
+    """
+    from scripts.golden_baseline import _is_fused_number
+
+    assert _is_fused_number("0.08290.30") is True
+    assert _is_fused_number("0.74984.440.72088.350.74488.900.747") is True
+    # Real values must survive, including the ones a length heuristic would eat.
+    for value in ("132.1", "2606.23344", "93.81", "0.082", "2024", "3300", "1.5"):
+        assert _is_fused_number(value) is False, value
+
+
+def test_a_fused_cell_never_reaches_the_feature_counts() -> None:
+    from scripts.golden_baseline import content_features
+
+    fused = content_features("结果达到 93.81 与 0.08290.30 的水平，引用 [2]。")
+    assert "0.08290.30" not in fused["numbers"]
+    # The values that *are* separable in the text still count.
+    assert fused["numbers"]["93.81"] == 1
+    assert fused["numbers"]["2"] == 1
+
+
 def test_losing_the_numbers_is_a_regression() -> None:
     import re
 

@@ -115,6 +115,25 @@ _IDENTIFIER_RE = re.compile(r"[A-Za-z][A-Za-z0-9]*(?:[-_][A-Za-z0-9]+)*")
 _CITATION_RE = re.compile(r"\[\d+(?:\s*[,–—-]\s*\d+)*\]")
 
 
+def _is_fused_number(token: str) -> bool:
+    """Whether a numeric token is several values the text layer glued together.
+
+    The PDF text layer joins adjacent table cells with no separator, so a
+    results row can arrive as ``0.08290.30`` — two values, nothing between them.
+    Counted literally, that token appears in a run whose table reflowed and not
+    in the next, which reads as a lost number.
+
+    The discriminator is the decimal points: a real number carries at most one,
+    so two or more is proof of fusion. This is deliberately the *only* signal —
+    a length or digit-run heuristic also matches real values (``132.1`` fps,
+    arXiv id ``2606.23344``), and splitting those corrupts the count far more
+    than the fusion it would fix. Such a token is dropped rather than split:
+    its component values are counted where they appear on their own, and
+    guessing the split points invents numbers that may never have existed.
+    """
+    return token.count(".") >= 2
+
+
 def content_features(text: str) -> dict[str, Any]:
     """The facts a translation must carry, independent of how it words them.
 
@@ -128,8 +147,17 @@ def content_features(text: str) -> dict[str, Any]:
     """
     from collections import Counter
 
+    numbers: Counter[str] = Counter()
+    for raw in _NUMBER_RE.findall(text):
+        # Drop a cell-fusion artefact rather than guess where its values split
+        # (see ``_is_fused_number``). The values themselves are counted where a
+        # table cell kept them separate, which is the layout this run renders.
+        if _is_fused_number(raw):
+            continue
+        numbers[raw] += 1
+
     return {
-        "numbers": dict(Counter(_NUMBER_RE.findall(text))),
+        "numbers": dict(numbers),
         "identifiers": dict(Counter(_IDENTIFIER_RE.findall(text))),
         "citations": dict(Counter(_CITATION_RE.findall(text))),
         "chars": len(text),
