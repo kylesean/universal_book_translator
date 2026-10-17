@@ -521,7 +521,7 @@ def collect_checks(config: UBTConfig, *, probe: bool = False) -> list[_Check]:
         record(
             "QE (tiered)",
             "OK",
-            f"gray zone [{config.qe_judge_gray_low}, {config.qe_judge_gray_high}], judge={judge}",
+            f"ambiguous-class + {config.qe_judge_pass_sample:.0%} pass sample, judge={judge}",
         )
     else:
         record("QE (heuristic)", "OK", "zero-token rule scoring")

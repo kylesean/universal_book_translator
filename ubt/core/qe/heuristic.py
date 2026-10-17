@@ -26,6 +26,14 @@ from ubt.core.validators.consistency import GlossaryConsistencyValidator
 # Single source of truth: the named constants below feed BOTH
 # this legend and ``HeuristicQERunner.score_from_decision_reason`` so the two
 # can never drift apart.
+#
+# IMPORTANT: these numbers are DIAGNOSTIC LABELS, not routing weights. The
+# pipeline decides what to do with a block from its ``error_flags`` (see
+# :func:`ubt.core.qe.defect_taxonomy.classify_defect`) and, for the terminal
+# call, from ``qe_threshold``. The numeric value exists so a report can sort and
+# display a distribution; it never selects a repair candidate on its own. An
+# earlier design read these as severity weights and grew a second decision
+# surface (``threshold * 0.8``) that no configuration could meaningfully move.
 QE_SCORE_PASS = 0.92
 QE_SCORE_STRUCTURAL_OTHER = 0.70
 QE_SCORE_LENGTH = 0.60
@@ -44,6 +52,20 @@ QE_SCORE_EMPTY = 0.0
 #: gate's existing ``has_structural_defect`` check keeps such a block out of
 #: auto-pass even when a neural runner returns a high score.
 GLOSSARY_VIOLATION_MARKER = "Glossary term violation"
+
+#: The three outcomes the pipeline actually has, and the only three a consumer
+#: should branch on. Everything else is a label on a report.
+#:
+#: ``PASS``                  — no deterministic invariant failed; ship it.
+#: ``DETERMINISTIC_DEFECT``  — a named, re-checkable invariant failed (numeric
+#:                             loss, dropped term, markup corruption, empty
+#:                             target). Repair is *verifiable*: re-running the
+#:                             same check decides whether the repair worked.
+#: ``SEMANTIC_DOUBT``        — only a probabilistic judge disliked it. Repair is
+#:                             *not* verifiable (the judge has its own noise), so
+#:                             the block goes to a human queue instead of an
+#:                             automatic rewrite.
+DEFECT_OUTCOMES: tuple[str, ...] = ("PASS", "DETERMINISTIC_DEFECT", "SEMANTIC_DOUBT")
 
 QE_DEFECT_CLASS_LEGEND: tuple[tuple[float, str], ...] = (
     (QE_SCORE_PASS, "pass — no deterministic invariant failed (NOT a quality estimate)"),

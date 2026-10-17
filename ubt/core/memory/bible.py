@@ -133,8 +133,23 @@ def _concat_key(source: str) -> str:
     return re.sub(r"[\s\-_]+", "", source).casefold()
 
 
-#: A trailing strict-uppercase acronym parenthetical: ``Foo (BAR)``.
-_TRAILING_ACRONYM_RE = re.compile(r"^(?P<base>.+?)\s*\(\s*(?P<acronym>[A-Z][A-Z0-9]{1,9})\s*\)\s*$")
+#: An acronym attestation inside a term, with optional material after it:
+#: ``Foo (BAR)``, ``Foo (BAR) performance``, ``Foo (BAR)-based``.
+#:
+#: The trailing-only form was too narrow and let a real duplicate through:
+#: measured on arXiv 2606.23344, the LLM extractor supplied
+#: ``state-of-the-art (SOTA) performance -> 当前最优（SOTA）性能`` beside the mined
+#: ``state-of-the-art -> 当前最先进的``. The acronym sat mid-string, the fold
+#: declined, and the two entries fought exactly like the trailing case did
+#: (b0002 went to 0.25 with ``repair_structural_failure`` after two rounds).
+_ACRONYM_ATTESTATION_RE = re.compile(
+    r"^(?P<base>.+?)\s*\(\s*(?P<acronym>[A-Z][A-Z0-9]{1,9})\s*\)(?P<tail>.*)$"
+)
+
+
+def _is_acronym_attested(source: str) -> bool:
+    """Whether the source carries a parenthetical acronym the fold can use."""
+    return _ACRONYM_ATTESTATION_RE.match(source.strip()) is not None
 
 
 def concept_key(source: str) -> str:
@@ -155,11 +170,16 @@ def concept_key(source: str) -> str:
     word-initial rule the abbreviation miner uses — so ``Transformer (XL)`` and
     ``GPT (4)`` stay distinct concepts while ``state-of-the-art (SOTA)`` collapses
     onto ``state-of-the-art``.
+
+    The acronym may sit mid-term with material after it
+    (``state-of-the-art (SOTA) performance``): that is the same concept with a
+    qualifier, and declining it left a live duplicate that cost two repair
+    rounds and a human-queue verdict on a correct translation.
     """
     from ubt.core.memory.abbreviation_miner import _find_expansion_for
 
     text = source.strip()
-    match = _TRAILING_ACRONYM_RE.match(text)
+    match = _ACRONYM_ATTESTATION_RE.match(text)
     if match:
         base = match.group("base").strip()
         acronym = match.group("acronym")
@@ -249,7 +269,7 @@ def detect_terminology_conflicts(entries: list[BibleEntry]) -> list[TerminologyC
         preferred_rendering, preferred_source = min(
             renderings.items(),
             key=lambda item: (
-                1 if _TRAILING_ACRONYM_RE.match(item[1].strip()) else 0,
+                1 if _is_acronym_attested(item[1]) else 0,
                 len(item[1]),
             ),
         )
@@ -330,7 +350,7 @@ def merge_bible_entries(entries: list[BibleEntry]) -> list[BibleEntry]:
         winner = min(
             rendered,
             key=lambda r: (
-                1 if _TRAILING_ACRONYM_RE.match(str(r["source"])) else 0,
+                1 if _is_acronym_attested(str(r["source"])) else 0,
                 -int(r["frequency"]),
                 len(str(r["source"])),
                 int(r["order"]),

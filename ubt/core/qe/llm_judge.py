@@ -1,4 +1,4 @@
-"""L3 LLM-as-Judge QE (suspect-only) + tiered gray-zone routing.
+"""L3 LLM-as-Judge QE (suspect-only) + tiered routing.
 
 Industry mapping (2026 consensus):
 - L1 rules/heuristic, full volume: ``FastPassFilter`` + ``HeuristicQERunner``.
@@ -8,7 +8,7 @@ Industry mapping (2026 consensus):
   rule-based (``MQMSpanAnnotator``) — the judge only decides routing, not spans.
 
 ROI: with the default configuration the judge sees only the single unclassified
-structural class the heuristic emits (the gray band [0.70, 0.80) contains exactly
+structural class the heuristic emits (the ambiguous class contains exactly
 one reachable score), so the paid pass is a fraction of blocks, not a quality
 audit of them. ``UBT_QE_JUDGE_PASS_SAMPLE`` opts into auditing a sample of clean
 passes, which is the one place the heuristic genuinely cannot tell a good
@@ -117,7 +117,7 @@ def _normalize(score: float) -> float:
     percentage. The boundary value 1 is genuinely ambiguous — "1 out of 100"
     or the fraction "1.0" (perfect) — and a judge explicitly told to answer
     0-100 means the former, so it is read as 1%. Treating it as perfect let a
-    near-failing gray-zone block auto-pass under ``qe_judge_allow_upgrade``.
+    near-failing ambiguous block auto-pass under ``qe_judge_allow_upgrade``.
     Strictly fractional replies in (0, 1) (e.g. 0.95, 0.73) are still read as
     fractions, since models occasionally answer on the 0-1 scale regardless.
     """
@@ -330,12 +330,12 @@ class TieredQERunner(BaseQERunner):
     class. Two groups get the judge:
 
     * the unclassified structural class (and anything else inside the configured
-      gray band) — by definition ambiguous;
+      ambiguous class) — by definition ambiguous;
     * a sample of clean passes (``pass_sample``), because "no deterministic
       invariant failed" is explicitly not a quality estimate — a faithful,
       fluent and a merely well-formed translation both score 0.92.
 
-    Everything below the gray band is a hard defect (leaked prompt, dropped
+    Everything below it is a hard defect (leaked prompt, dropped
     number, omission, broken formula) that routes to repair on its own flag; a
     judge cannot un-drop a number, so those pairs cost tokens for nothing.
     ``judge_calls`` records how many pairs actually hit the LLM (ROI observability).
@@ -345,19 +345,15 @@ class TieredQERunner(BaseQERunner):
         self,
         heuristic: HeuristicQERunner,
         judge: LLMJudgeQERunner | None = None,
-        gray_low: float = 0.7,
-        gray_high: float = 0.8,
         allow_upgrade: bool = False,
         pass_sample: float = 0.0,
     ) -> None:
         self.heuristic = heuristic
         self.judge = judge
-        self.gray_low = gray_low
-        self.gray_high = gray_high
         self.allow_upgrade = allow_upgrade
         self.pass_sample = min(1.0, max(0.0, pass_sample))
         self.judge_calls = 0
-        # Count of gray-zone pairs where the judge produced no usable score
+        # Count of ambiguous pairs where the judge produced no usable score
         # (call failure / unparsable). The heuristic score is kept for those
         # Pairs; this counter makes the silent fallback observable.
         self.judge_errors = 0
@@ -367,8 +363,21 @@ class TieredQERunner(BaseQERunner):
         self._judged_any = False
 
     def _needs_judge(self, score: float, src: str) -> bool:
-        """Whether this pair is worth a paid second opinion."""
-        if score in JUDGED_CLASSES or self.gray_low <= score < self.gray_high:
+        """Whether this pair is worth a paid second opinion.
+
+        Two cases only:
+
+        * the heuristic rejected the block but no specific classifier matched
+          (``JUDGED_CLASSES``) — the one deterministic verdict that is genuinely
+          ambiguous, so a second opinion can separate "a real defect we cannot
+          name" from "a rule with a false positive";
+        * a stable sample of clean passes (``pass_sample``), because "no
+          deterministic invariant failed" is not the same as "good".
+
+        A numeric-fidelity failure is deliberately never sent: the judge cannot
+        un-drop a number, so its opinion could only whitewash a real defect.
+        """
+        if score in JUDGED_CLASSES:
             return True
         if self.pass_sample <= 0.0 or score != QE_SCORE_PASS:
             return False
@@ -380,7 +389,7 @@ class TieredQERunner(BaseQERunner):
         """True when the underlying heuristic can see terminology drift.
 
         The judge never scores terminology, so the tier is only glossary-aware
-        through its heuristic leg — which caps a violation below the gray band
+        through its heuristic leg — which caps a violation below the ambiguous class
         and therefore keeps the judge from ever seeing it.
         """
         return self.heuristic.is_glossary_aware()
@@ -434,8 +443,6 @@ class TieredQERunner(BaseQERunner):
         rebound = TieredQERunner(
             heuristic=heuristic,
             judge=judge,
-            gray_low=self.gray_low,
-            gray_high=self.gray_high,
             allow_upgrade=self.allow_upgrade,
             pass_sample=self.pass_sample,
         )
@@ -462,8 +469,6 @@ class TieredQERunner(BaseQERunner):
         rebound = TieredQERunner(
             heuristic=heuristic,
             judge=self.judge,
-            gray_low=self.gray_low,
-            gray_high=self.gray_high,
             allow_upgrade=self.allow_upgrade,
             pass_sample=self.pass_sample,
         )
@@ -477,19 +482,19 @@ class TieredQERunner(BaseQERunner):
         base = await self.heuristic.score_pairs(pairs)
         if self.judge is None:
             return base
-        gray_idx = [
+        ambiguous_idx = [
             i
             for i, (s, p) in enumerate(zip(base, pairs, strict=True))
             if self._needs_judge(s, p.get("src", ""))
         ]
-        if not gray_idx:
+        if not ambiguous_idx:
             return base
-        subset = [pairs[i] for i in gray_idx]
+        subset = [pairs[i] for i in ambiguous_idx]
         judged = await self.judge.score_pairs(subset)
         self.judge_calls += len(subset)
         self._judged_any = True
         merged = list(base)
-        for i, s in zip(gray_idx, judged, strict=True):
+        for i, s in zip(ambiguous_idx, judged, strict=True):
             if s == _JUDGE_NO_OPINION:
                 # Judge failed for this pair: preserve the original heuristic
                 # Score rather than silently adopting a fallback.

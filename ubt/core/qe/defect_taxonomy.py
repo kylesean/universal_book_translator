@@ -262,3 +262,64 @@ def has_triage_verdict(flags: Iterable[str]) -> bool:
     """True when any flag is a triage verdict (permanent quarantine)."""
     materialized = list(flags)
     return any(verdict in materialized for verdict in TRIAGE_VERDICT_FLAGS)
+
+
+# --------------------------------------------------------------------------- #
+# The one decision surface
+#
+# Before this, "should this block be repaired automatically?" was answered in
+# two places that could not see each other: the quality gate routed every
+# FastPass failure to REPAIR_PENDING, and the repair loop re-decided with
+# ``error_flags or score < threshold * 0.8``. Because every block reaching the
+# second check already carried a flag, the score clause was effectively dead —
+# and the ``* 0.8`` constant was a hidden second pass line that no documented
+# knob controlled. Both are gone; this function is the answer.
+# --------------------------------------------------------------------------- #
+
+#: Flags that only a *probabilistic* judge can produce. A block whose flags are
+#: all in this set is in SEMANTIC_DOUBT: nothing deterministic failed, so a
+#: repair cannot be verified against the check that triggered it.
+SEMANTIC_ONLY_MARKERS: tuple[str, ...] = (
+    "judge",
+    "Semantic",
+    "semantic",
+)
+
+
+def classify_defect(flags: Iterable[str], *, score: float | None, threshold: float) -> str:
+    """The pipeline's only routing decision for a scored block.
+
+    Returns one of :data:`~ubt.core.qe.heuristic.DEFECT_OUTCOMES`:
+
+    ``PASS``
+        Nothing deterministic failed and the score clears ``threshold``.
+    ``DETERMINISTIC_DEFECT``
+        A named invariant failed (or the score is below ``threshold`` with no
+        semantic-only explanation). Automatic repair is legitimate here because
+        the same check that rejected the draft will judge the repair.
+    ``SEMANTIC_DOUBT``
+        The only reason to doubt this block is a probabilistic judge. Automatic
+        repair is *not* legitimate: the judge has its own noise, so a rewrite
+        cannot be shown to have helped. Route to a human queue.
+
+    The distinction is the whole point of the simplification. Repairing a
+    dropped number is verifiable; repairing "the judge thought this read
+    awkwardly" is not, and doing it anyway spends tokens to move text around
+    with no evidence of improvement.
+    """
+    materialized = [flag for flag in flags if flag]
+    if not materialized and (score is None or score >= threshold):
+        return "PASS"
+    # Any deterministic marker outranks a semantic one: a block that dropped a
+    # number is a deterministic defect even if the judge also disliked it.
+    if has_critical_defect(materialized) or has_structural_defect(materialized):
+        return "DETERMINISTIC_DEFECT"
+    if materialized and all(
+        any(marker in flag for marker in SEMANTIC_ONLY_MARKERS) for flag in materialized
+    ):
+        return "SEMANTIC_DOUBT"
+    if score is not None and score < threshold:
+        # Below the line with no deterministic explanation: the score is the
+        # only evidence, and a score is a judgement. Treat it as doubt.
+        return "SEMANTIC_DOUBT"
+    return "PASS"

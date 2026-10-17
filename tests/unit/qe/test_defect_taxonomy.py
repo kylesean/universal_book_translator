@@ -19,6 +19,8 @@ triage and the resume path. The load-bearing facts pinned here:
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from ubt.core.qe.defect_taxonomy import (
@@ -219,3 +221,97 @@ def test_triage_verdicts_are_matched_exactly() -> None:
 def test_the_critical_table_is_a_subset_of_the_structural_table() -> None:
     structural = set(STRUCTURAL_DEFECT_MARKERS)
     assert set(CRITICAL_DEFECT_MARKERS) <= structural
+
+
+# --------------------------------------------------------------------------- #
+# The single routing decision
+#
+# Before this, "repair automatically?" was answered twice: the quality gate
+# routed every FastPass failure to REPAIR_PENDING, and the repair loop re-decided
+# with ``error_flags or score < threshold * 0.8``. Every block reaching the
+# second check already carried a flag, so the score clause was dead and the
+# ``* 0.8`` constant was a second pass line no documented knob controlled.
+# --------------------------------------------------------------------------- #
+
+
+def test_a_clean_block_passes() -> None:
+    from ubt.core.qe.defect_taxonomy import classify_defect
+
+    assert classify_defect([], score=0.92, threshold=0.75) == "PASS"
+    assert classify_defect([], score=None, threshold=0.75) == "PASS"
+
+
+def test_a_named_invariant_failure_is_repairable() -> None:
+    """Repair is verifiable: the same check that rejected it will judge the fix."""
+    from ubt.core.qe.defect_taxonomy import classify_defect
+
+    assert (
+        classify_defect(["Numeric fidelity failure: missing ['33']"], score=0.55, threshold=0.75)
+        == "DETERMINISTIC_DEFECT"
+    )
+    assert (
+        classify_defect(
+            ["Omission suspected: identifier term(s) missing"], score=0.35, threshold=0.75
+        )
+        == "DETERMINISTIC_DEFECT"
+    )
+
+
+def test_a_judge_opinion_alone_is_not_repairable() -> None:
+    """A rewrite cannot be verified against the judgement that asked for it."""
+    from ubt.core.qe.defect_taxonomy import classify_defect
+
+    assert classify_defect(["judge: semantic loss"], score=0.55, threshold=0.75) == "SEMANTIC_DOUBT"
+    assert classify_defect([], score=0.55, threshold=0.75) == "SEMANTIC_DOUBT"
+
+
+def test_a_deterministic_marker_outranks_a_semantic_one() -> None:
+    """A dropped number is a deterministic defect even if the judge also objected."""
+    from ubt.core.qe.defect_taxonomy import classify_defect
+
+    outcome = classify_defect(
+        ["judge: awkward phrasing", "Numeric fidelity failure: missing ['7']"],
+        score=0.55,
+        threshold=0.75,
+    )
+    assert outcome == "DETERMINISTIC_DEFECT"
+
+
+def test_a_flagged_block_is_never_released_by_a_high_score() -> None:
+    """The score cannot whitewash a named defect."""
+    from ubt.core.qe.defect_taxonomy import classify_defect
+
+    assert (
+        classify_defect(["Numeric fidelity failure: ..."], score=0.99, threshold=0.75)
+        == "DETERMINISTIC_DEFECT"
+    )
+
+
+def test_the_repair_selector_uses_the_shared_decision() -> None:
+    """The repair loop must not carry its own second pass line."""
+    from unittest.mock import MagicMock
+
+    from ubt.core.engine.repair_loop import RepairLoop
+    from ubt.core.ir.models import BlockStatus
+    from ubt.core.qe.heuristic import HeuristicQERunner
+
+    loop = RepairLoop(qe_runner=HeuristicQERunner(), router=MagicMock(), qe_threshold=0.75)
+
+    def block(bid: str, flags: list[str], score: float | None) -> Any:
+        b = MagicMock()
+        b.id = bid
+        b.error_flags = flags
+        b.mtqe_score = score
+        b.skip_translate = False
+        b.is_finalized = False
+        b.repair_rounds = 0
+        b.status = BlockStatus.REPAIR_PENDING
+        return b
+
+    deterministic = block("det", ["Numeric fidelity failure"], 0.55)
+    semantic = block("sem", ["judge: semantic loss"], 0.55)
+    clean = block("ok", [], 0.92)
+
+    candidates = [deterministic, semantic, clean]
+    selected = loop.select_repair_candidates(candidates)
+    assert [b.id for b in selected] == ["det"]

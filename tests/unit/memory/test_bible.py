@@ -483,3 +483,39 @@ def test_a_conflict_serializes_for_the_report_and_status() -> None:
         "superseded": [{"rendering": "乙", "source": "Foo"}],
         "resolved": False,
     }
+
+
+def test_an_acronym_attestation_mid_term_also_folds() -> None:
+    """The acronym need not be the last token.
+
+    Measured on arXiv 2606.23344 (a real run, not a fixture): the LLM skeleton
+    extractor supplied ``state-of-the-art (SOTA) performance ->
+    当前最优（SOTA）性能`` beside the mined ``state-of-the-art -> 当前最先进的``.
+    The fold required the acronym to END the string, declined this one, and the
+    two entries fought exactly as the trailing case did — b0002 went to 0.25
+    with ``repair_structural_failure`` after two rounds and landed in the human
+    queue, on a translation that was correct.
+    """
+    from ubt.core.memory.bible import concept_key
+
+    assert concept_key("state-of-the-art (SOTA) performance") == concept_key("state-of-the-art")
+
+    merged = merge_bible_entries(
+        [
+            BibleEntry(source="state-of-the-art", translation="当前最先进的", aliases=["SOTA"]),
+            BibleEntry(
+                source="state-of-the-art (SOTA) performance", translation="当前最优（SOTA）性能"
+            ),
+        ]
+    )
+    assert len(merged) == 1
+    assert merged[0].translation == "当前最先进的"
+    assert "当前最优（SOTA）性能" in merged[0].inflected_variants
+
+
+def test_a_mid_term_parenthetical_that_does_not_spell_the_base_stays_separate() -> None:
+    """Widening the fold must not swallow unrelated qualifiers."""
+    from ubt.core.memory.bible import concept_key
+
+    assert concept_key("Transformer (XL) model") != concept_key("Transformer")
+    assert concept_key("Attention (MHA) head") != concept_key("Attention")

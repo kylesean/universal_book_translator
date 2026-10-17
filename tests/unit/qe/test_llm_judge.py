@@ -85,7 +85,7 @@ async def test_tiered_qe_runner_gray_zone_routing() -> None:
     mock_judge_fn = AsyncMock(return_value="score: 85")
     judge = LLMJudgeQERunner(judge_fn=mock_judge_fn)
 
-    tiered = TieredQERunner(heuristic=heuristic, judge=judge, gray_low=0.7, gray_high=0.8)
+    tiered = TieredQERunner(heuristic=heuristic, judge=judge)
 
     # Clean translation that passes heuristic cleanly does not trigger judge (pass_sample=0)
     scores = await tiered.score_pairs(
@@ -102,8 +102,6 @@ async def test_tiered_qe_runner_gray_zone_routing() -> None:
     tiered_mocked = TieredQERunner(
         heuristic=FakeHeuristic(),
         judge=judge,
-        gray_low=0.7,
-        gray_high=0.8,
         allow_upgrade=True,
     )
     judged_scores = await tiered_mocked.score_pairs([{"src": "text", "mt": "text"}])

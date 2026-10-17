@@ -89,8 +89,6 @@ PROVIDER_ALLOWED_KEYS = frozenset(
         "qe_judge_pass_sample",
         "qe_judge_sentences",
         "qe_judge_model",
-        "qe_judge_gray_low",
-        "qe_judge_gray_high",
         "qe_judge_allow_upgrade",
         # Threshold and repair budget, so a config file can describe a whole
         # quality policy instead of scattering it across the CLI and the env.

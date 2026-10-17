@@ -447,16 +447,19 @@ class UBTConfig(BaseSettings):
     consistency_max_repairs: int = Field(default=50, ge=0)
     qe_engine: QeEngine = "heuristic"
 
-    # -- L3 LLM-as-Judge (suspect-only gray-zone rescoring, off by default) --
+    # -- L3 LLM-as-Judge (suspect-only rescoring, off by default) ------------
     qe_judge_enabled: bool = False
     qe_judge_model: str | None = None
-    # Gray zone is the band sent to the (paid) LLM judge. The lower bound is
-    # Kept high so the judge only reviews scores *near the
-    # pass line* — it must never re-score clearly-failed blocks (e.g. a
-    # numeric-fidelity 0.55 washed up to 0.9), which would silently whitewash
-    # real defects. The judge may only LOWER a score (see TieredQERunner).
-    qe_judge_gray_low: float = Field(default=0.7, ge=0.0, le=1.0)
-    qe_judge_gray_high: float = Field(default=0.8, ge=0.0, le=1.0)
+    #: The judge is asked about blocks whose deterministic verdict is
+    #: *ambiguous* — the ``STRUCTURAL_OTHER`` class (a rejection with no specific
+    #: classifier) — plus, when ``pass_sample > 0``, a stable sample of clean
+    #: passes. There used to be two more knobs here, ``qe_judge_gray_low`` and
+    #: ``qe_judge_gray_high``, defining a score band to send to the judge. With
+    #: the heuristic engine they were inert: it emits twelve discrete values, the
+    #: band was ``[0.7, 0.8)``, and the only reachable value inside it (0.70) was
+    #: already in the ambiguous set. A configuration surface that cannot change
+    #: behaviour is worse than none — it invites tuning that silently does
+    #: nothing — so the band is gone and the rule is stated here in one line.
     qe_judge_pass_sample: float = Field(
         default=0.0,
         ge=0.0,
@@ -939,11 +942,6 @@ class UBTConfig(BaseSettings):
             self.rate_limit_max_tpm = self.rate_limit_tpm
         if self.offline_batch_enabled and not self.batch_enabled:
             object.__setattr__(self, "batch_enabled", True)
-        if not self.qe_judge_gray_low < self.qe_judge_gray_high:
-            raise ValueError(
-                "UBT_QE_JUDGE_GRAY_LOW must be < UBT_QE_JUDGE_GRAY_HIGH "
-                f"(got {self.qe_judge_gray_low} >= {self.qe_judge_gray_high})"
-            )
         # Repair mode with a zero budget plans drift repairs and then discards
         # every one (plan_consistency_tasks caps to max_repairs): the stage
         # returns before re-translating a block, so the setting reads "on"

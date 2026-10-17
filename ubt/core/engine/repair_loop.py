@@ -7,7 +7,7 @@ from typing import Any
 from ubt.core.exceptions import MTQEEvaluationError
 from ubt.core.ir.models import BlockStatus, IRBlock
 from ubt.core.qe.base import BaseQERunner
-from ubt.core.qe.defect_taxonomy import is_format_only
+from ubt.core.qe.defect_taxonomy import classify_defect, is_format_only
 from ubt.core.qe.fast_pass import FastPassFilter
 from ubt.core.qe.heuristic import GLOSSARY_VIOLATION_MARKER
 from ubt.core.router.router import ModelRouter
@@ -110,7 +110,20 @@ class RepairLoop:
         )
 
     def select_repair_candidates(self, blocks: list[IRBlock]) -> list[IRBlock]:
-        """Select blocks eligible for repair, capped strictly to bottom 15% and defect flags."""
+        """Blocks whose repair is *verifiable*: a deterministic invariant failed.
+
+        There used to be a second pass line here (``score < threshold * 0.8``)
+        beside the gate's own. It could not fire: every block reaching this
+        method already carried ``error_flags`` from the quality gate, so the
+        ``or`` short-circuited on the first clause and the score was never
+        consulted. The constant only looked like a knob.
+
+        Now the decision is :func:`~ubt.core.qe.defect_taxonomy.classify_defect`,
+        the same one the gate uses, so "why was this repaired" has a single
+        answer. A SEMANTIC_DOUBT block is deliberately excluded: only a
+        probabilistic judge objected, and re-running that judge on a rewrite
+        cannot show the rewrite helped.
+        """
         eligible: list[IRBlock] = []
         for b in blocks:
             if b.skip_translate or b.is_finalized:
@@ -122,29 +135,14 @@ class RepairLoop:
         if not eligible:
             return []
 
-        # Find scored blocks
-        scored = [b for b in eligible if b.mtqe_score is not None]
-        if not scored:
-            # If none scored, select blocks with error flags or REPAIR_PENDING
-            unscored_candidates = [
-                b for b in eligible if b.error_flags or b.status == BlockStatus.REPAIR_PENDING
-            ]
-            for c in unscored_candidates:
-                c.status = BlockStatus.REPAIR_PENDING
-            return unscored_candidates
-
         candidates: list[IRBlock] = []
         for b in eligible:
-            score = b.mtqe_score or 0.0
-            # A block is repaired when it carries a defect flag (the quality gate
-            # only flags what FastPass could not auto-pass) or its score is
-            # clearly below the pass line. The bottom-percentile cap is not a
-            # selector: every REPAIR_PENDING block already carries a flag, so a
-            # ``has_defects`` guard is always true and a lowest-ids set would
-            # never change the selection. ``bottom_percentile`` stays a
-            # constructor knob (the assess fan-out reads the config) but does not
-            # select here.
-            if b.error_flags or score < self.qe_threshold * 0.8:
+            outcome = classify_defect(
+                b.error_flags,
+                score=b.mtqe_score,
+                threshold=self.qe_threshold,
+            )
+            if outcome == "DETERMINISTIC_DEFECT":
                 b.status = BlockStatus.REPAIR_PENDING
                 candidates.append(b)
 

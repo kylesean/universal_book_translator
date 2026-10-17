@@ -343,8 +343,6 @@ class PipelineOrchestrator:
             self.qe_runner = TieredQERunner(
                 heuristic=self.qe_runner,
                 judge=judge,
-                gray_low=self.config.qe_judge_gray_low,
-                gray_high=self.config.qe_judge_gray_high,
                 allow_upgrade=self.config.qe_judge_allow_upgrade,
                 pass_sample=self.config.qe_judge_pass_sample,
             )
