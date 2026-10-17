@@ -576,3 +576,61 @@ def test_a_scientific_exponent_is_not_a_subtraction() -> None:
     ).is_valid
     # A genuinely dropped minus is still caught.
     assert not validator.validate("the temperature is -4 degrees", "温度是 4 度").is_valid
+
+
+# --------------------------------------------------------------------------- #
+# A term that only ever appears as a label
+# --------------------------------------------------------------------------- #
+
+
+def test_a_term_kept_only_as_a_table_label_is_not_drift() -> None:
+    """``bbox+mask`` is a label the source wrote; translating it breaks the row.
+
+    Measured on arXiv 2606.23344 (b0099): the glossary asks Mask -> 掩码 and the
+    term occurs four times in the source, every time as the cell ``bbox+mask``.
+    The translation renders every prose cell around it (Scan -> 扫描, Warp ->
+    形变) and keeps the four labels verbatim, and the gate counted that as four
+    missed renderings.
+    """
+    glossary = [{"source": "Mask", "translation": "掩码"}]
+    source = "| bbox+mask | XYCut | 93.81 |\n| bbox+mask | Decoupled | 93.87 |"
+    target = "| bbox+mask | XYCut | 93.81 |\n| bbox+mask | 解耦 | 93.87 |"
+    (finding,) = detect_term_drift(source, target, normalize_glossary(glossary))
+    assert finding.occurs_in_source is True
+    assert finding.kept_as_label is True
+    assert finding.drifted is False
+
+
+def test_a_term_in_a_formula_is_not_drift() -> None:
+    """``\\lambda_{\\text{mask}}`` is reproduced verbatim; it is not a miss.
+
+    Measured on b0049, where every occurrence of mask sat inside a math span and
+    the block's only prose was translated around it.
+    """
+    glossary = [{"source": "Mask", "translation": "掩码"}]
+    source = "weights are set as $\\lambda_{mask} = 5$ and $K = \\{cls, bbox, mask\\}$"
+    target = "权重设定为 $\\lambda_{\\text{mask}} = 5$ 且 $K = \\{\\text{cls, bbox, mask}\\}$"
+    (finding,) = detect_term_drift(source, target, normalize_glossary(glossary))
+    assert finding.drifted is False
+
+
+def test_an_untranslated_prose_term_is_still_drift() -> None:
+    """The near miss that must keep working: prose occurrences are not labels."""
+    glossary = [{"source": "Mask", "translation": "掩码"}]
+    assert (
+        detect_term_drift(
+            "The mask head predicts masks for every query.",
+            "头部为每个查询预测结果。",
+            normalize_glossary(glossary),
+        )[0].drifted
+        is True
+    )
+    # ...and a bare occurrence in running prose is not excused as a label either.
+    assert (
+        detect_term_drift(
+            "See the mask section for details.",
+            "详情参见 mask 一节。",
+            normalize_glossary(glossary),
+        )[0].drifted
+        is True
+    )

@@ -120,6 +120,10 @@ class TermDriftFinding:
     #: Such a block is not drifted: the translator *did* render the term, the
     #: target just quotes it.
     rendered_protected_at: int | None = None
+    #: When the term occurs only as a source label the target kept verbatim
+    #: (a table cell, an equation token), ``True``. Not drifted: there was no
+    #: prose to translate it in.
+    kept_as_label: bool = False
 
     @property
     def occurs_in_source(self) -> bool:
@@ -129,7 +133,9 @@ class TermDriftFinding:
     @property
     def rendered(self) -> bool:
         """Whether the target carries the canonical rendering (only meaningful when :attr:`occurs_in_source`)."""
-        return bool(self.expected_hits) or self.rendered_protected_at is not None
+        return (
+            bool(self.expected_hits) or self.rendered_protected_at is not None or self.kept_as_label
+        )
 
     @property
     def drifted(self) -> bool:
@@ -248,6 +254,7 @@ def detect_term_drift(
 
         expected_hits: tuple[tuple[int, int], ...] = ()
         rendered_protected_at: int | None = None
+        kept_as_label = False
         if source_hits:
             hits = list(
                 find_term_occurrences(
@@ -283,6 +290,19 @@ def detect_term_drift(
                     (term.expected, *term.inflected_variants),
                     target_protected,
                 )
+                # ...or the block has no prose to carry a translation at all:
+                # every occurrence is a label or a formula token kept verbatim
+                # ("bbox+mask" in a table row, \lambda_{\text{mask}} in an
+                # equation). Those are reproduced by contract, so their absence
+                # is not a missed rendering (measured: b0099 and b0049).
+                if rendered_protected_at is None:
+                    kept_as_label = _only_as_label(
+                        source_text,
+                        target_text,
+                        term.source_surfaces,
+                        source_protected,
+                        target_protected,
+                    )
 
         findings.append(
             TermDriftFinding(
@@ -293,6 +313,7 @@ def detect_term_drift(
                 source_hits=source_hits,
                 expected_hits=expected_hits,
                 rendered_protected_at=rendered_protected_at,
+                kept_as_label=kept_as_label,
             )
         )
     return tuple(findings)
@@ -348,7 +369,7 @@ def _renders_canonical(
     scan and the drift scan cannot disagree about the same block: the same
     protected spans, the same case folding, and the same allowance for a space
     the CJK/Latin boundary inserts (``边缘 计算`` for ``边缘计算``). A rendering
-    inside a protected span counts — see :func:`_protected_rendering`.
+    inside a *quoted* protected span counts — see :func:`_protected_rendering`.
     """
     surfaces = (expected, *inflected_variants)
     for surface in surfaces:
@@ -361,6 +382,69 @@ def _renders_canonical(
         ):
             return True
     return _protected_rendering(target_text, surfaces, target_protected) is not None
+
+
+def _is_label_surface(surface: str) -> bool:
+    """Whether a source surface is a label rather than a prose word.
+
+    A table cell or equation token (``bbox+mask``, ``\\lambda_{mask}``) names a
+    thing in the source's own notation; translating it would break the mapping to
+    the values beside it. Prose ("the mask head") must be rendered. The test is
+    the shape: a lone lowercase word, or one carrying punctuation, is a label;
+    anything with a space or an internal capital is prose or a name.
+    """
+    if " " in surface:
+        return False
+    return bool(re.search(r"[^A-Za-z0-9]", surface)) or surface.islower()
+
+
+def _only_as_label(
+    source_text: str,
+    target_text: str,
+    source_surfaces: tuple[str, ...],
+    source_protected: ProtectedSpans,
+    target_protected: ProtectedSpans,
+) -> bool:
+    """Whether the term occurs in the target only as labels the source also had.
+
+    Measured on arXiv 2606.23344 (block b0099): the glossary asks for
+    ``Mask -> 掩码`` and the term occurs four times in the source, every time as
+    the table cell ``bbox+mask``. The translation renders every prose cell around
+    it (``Scan -> 扫描``, ``Warp -> 形变``) and keeps the four labels verbatim,
+    which is correct — a translated label would no longer line up with the values
+    in its row. The drift check counted the four verbatim labels as four missed
+    renderings and left a fully translated table for a human.
+
+    Conditions, so a genuine miss is never excused: the matched source surface is
+    label-shaped (a lone lowercase word, or one carrying punctuation), the target
+    still carries that word, and every target occurrence is either inside a
+    protected span or one of the same labels (adjacent to a ``|`` cell or a ``+``
+    join). Case is folded because a table cell is written lower-case in the
+    source (``mask``) while the glossary records the capitalised form (``Mask``).
+    """
+    matched = ""
+    for surface in source_surfaces:
+        if find_term_occurrences(source_text, surface, source_protected, case_insensitive=True):
+            matched = surface
+            break
+    if not matched or not _is_label_surface(matched.lower()):
+        return False
+    label = re.compile(
+        r"(?<![A-Za-z])" + re.escape(matched.lower()) + r"(?![A-Za-z])", re.IGNORECASE
+    )
+    hits = [(m.start(), m.end()) for m in label.finditer(target_text)]
+    if not hits:
+        return False
+    for start, end in hits:
+        if any(
+            span_start <= start and end <= span_end for span_start, span_end in target_protected
+        ):
+            continue
+        before_ok = target_text[:start].rstrip().endswith(("|", "+"))
+        after_ok = target_text[end:].lstrip().startswith(("|", "+"))
+        if not (before_ok or after_ok):
+            return False
+    return True
 
 
 def detect_target_term_violations(
