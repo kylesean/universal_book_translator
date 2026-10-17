@@ -172,3 +172,59 @@ def test_an_untranslated_table_still_fails_the_density_gate() -> None:
     decision = FastPassFilter().evaluate(src, src, block_type="table")
     assert not decision.passed
     assert "script density" in decision.reason
+
+
+# --- the real defect the URL bug hid ------------------------------------------ #
+
+
+def test_a_url_terminates_at_a_cjk_glyph() -> None:
+    """A word glued to a link is not part of the link.
+
+    Measured on arXiv 2606.23344 (b0010): the translation wrote
+    "…/PP-DocLayoutV3获取。" and every URL pattern in the codebase used "not
+    whitespace", so 获取 became part of the URL. That single character had three
+    downstream effects: the Pangu spacer was blocked from separating it, the
+    glossary scan could not see that 公开 had been dropped, and the density
+    residue lost a word the translator wrote.
+    """
+    from ubt.core.cleaners.cjk_spacing import normalize_publishing_cjk
+    from ubt.core.qe.fast_pass import _URL_RE
+    from ubt.core.validators.glossary_enforcer import extract_protected_spans
+
+    text = "模型权重可在 https://huggingface.co/PaddlePaddle/PP-DocLayoutV3获取。"
+    url = "https://huggingface.co/PaddlePaddle/PP-DocLayoutV3"
+
+    assert _URL_RE.findall(text) == [url]
+    assert [text[s:e] for s, e in extract_protected_spans(text)] == [url]
+    # ...and the spacer can now do its job.
+    assert normalize_publishing_cjk(text) == f"模型权重可在 {url} 获取。"
+
+
+def test_a_url_path_is_still_read_whole() -> None:
+    """The near miss: only CJK ends a URL, nothing else does."""
+    from ubt.core.qe.fast_pass import _URL_RE
+
+    for url in (
+        "https://huggingface.co/PaddlePaddle/PP-DocLayoutV3",
+        "https://arxiv.org/abs/2606.23344v1",
+        "https://example.org/a_b-c~d/e?x=1&y=2#frag",
+        "https://example.org/path_with_underscores/file.tar.gz",
+    ):
+        assert _URL_RE.findall(f"see {url} for details") == [url]
+
+
+def test_the_url_swallowed_word_is_now_caught_as_a_lost_term() -> None:
+    """With the boundary fixed, b0010's defect is visible instead of hidden.
+
+    The block was delivered as correct while its text read "…/PP-DocLayoutV3
+    获取。" — "publicly available" had become "obtain". Before the boundary fix
+    the term scan could not see the missing 公开 at all.
+    """
+    from ubt.core.validators.consistency import GlossaryConsistencyValidator
+
+    case = CASES["pdf_main#b0010"]
+    assert "公开" not in case["target_text"]
+    result = GlossaryConsistencyValidator(
+        [{"source": "Publicly Available", "translation": "公开可用"}]
+    ).validate(case["source_text"], case["target_text"])
+    assert not result.is_valid

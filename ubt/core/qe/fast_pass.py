@@ -11,7 +11,7 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
-from ubt.core.cjk_ranges import CJK_SCRIPT_CLASS, HAN_UNIFIED_CLASS
+from ubt.core.cjk_ranges import CJK_BMP_CLASS, CJK_SCRIPT_CLASS, HAN_UNIFIED_CLASS
 from ubt.core.cleaners.math_masker import extract_math_spans
 from ubt.core.language_profile import (
     ZH,
@@ -126,7 +126,13 @@ _LINE_LETTER_RE = re.compile(r"[^\W\d_]")
 # URLs survive translation verbatim, so they are stripped before script-density
 # measurement (same rationale as HTML tags). Bare domains without a scheme or
 # www. prefix are left in place: indistinguishable from ordinary latin tokens.
-_URL_RE = re.compile(r"https?://[^\s<>\"]+|www\.[^\s<>\"]+", re.IGNORECASE)
+# A CJK glyph terminates a URL: a translation that runs the next word straight
+# into the link ("…/PP-DocLayoutV3获取。") must not have that word counted as
+# part of the URL, or the density residue loses text the translator wrote.
+_URL_RE = re.compile(
+    r"https?://[^\s<>\"" + CJK_BMP_CLASS + r"]+|www\.[^\s<>\"" + CJK_BMP_CLASS + r"]+",
+    re.IGNORECASE,
+)
 _EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 # Untranslatable residue stripped before script-density measurement.
 # Citation markers, markdown table structure, numerals and isolated

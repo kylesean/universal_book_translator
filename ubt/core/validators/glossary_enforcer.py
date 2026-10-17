@@ -18,7 +18,7 @@ try:
 except ImportError:
     _HAS_AHOCORASICK = False
 
-from ubt.core.cjk_ranges import CJK_RANGES, contains_cjk, is_cjk_char
+from ubt.core.cjk_ranges import CJK_BMP_CLASS, CJK_RANGES, contains_cjk, is_cjk_char
 from ubt.core.cleaners.inline_math import inline_math_spans
 
 __all__ = ["CJK_RANGES", "contains_cjk", "is_cjk_char"]
@@ -86,7 +86,13 @@ _PROTECTED_SPAN_PATTERNS = (
     re.compile(r"```[\s\S]*?```"),  # Fenced code blocks ```...```
     re.compile(r"~~~[\s\S]*?~~~"),  # Tilde fenced code blocks ~~~...~~~
     re.compile(r"`[^`\n]+`"),  # Inline code `...`
-    re.compile(r"https?://[^\s<>'\"\)\]]+"),  # Standalone URLs
+    # Standalone URLs. A CJK glyph TERMINATES the URL: measured on arXiv
+    # 2606.23344, the translation ran the next word straight into the link
+    # ("…/PP-DocLayoutV3获取。") and the old "not whitespace" class swallowed it,
+    # so the span protected 获取 from every downstream rule — the Pangu spacer
+    # could not put a space before it, and the glossary scan could not see that
+    # 公开 had been dropped.
+    re.compile(r"https?://[^\s<>'\"\)\]" + CJK_BMP_CLASS + r"]+"),  # Standalone URLs
     re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}"),  # Email addresses
     re.compile(r"\$\$[\s\S]*?\$\$"),  # Display math $$...$$
     re.compile(r"\\\[[\s\S]*?\\\]"),  # LaTeX display \[...\]
