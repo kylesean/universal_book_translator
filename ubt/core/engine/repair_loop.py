@@ -392,12 +392,26 @@ class RepairLoop:
             if valid_tier1:
                 t1_chosen_text, _, t1_chosen_flags = valid_tier1[0]
                 block.target_text = t1_chosen_text
-                block.mtqe_score = None
+                # Measure the repaired text instead of clearing the score. A
+                # ``None`` here is not "cleared" downstream: the checkpoint SQL
+                # uses ``COALESCE(?, mtqe_score)`` so that an omitted key
+                # preserves the stored value, and an explicit ``None`` binds the
+                # same way. Measured on a 6-page run: b0022 was scored 0.55,
+                # repaired into a correct translation that measures 0.92, and the
+                # ledger still said 0.55 — the repair looked like it changed
+                # nothing, and the next run's selection started from the score
+                # that had already been fixed.
+                block.mtqe_score = await self.qe_runner.score(
+                    block.source_text, t1_chosen_text, block_type=block.block_type
+                )
                 block.error_flags = list(t1_chosen_flags) + _residual_defect_flags(t1_chosen_text)
             elif valid_tier2:
                 t2_chosen_text, _, t2_chosen_flags = valid_tier2[0]
                 block.target_text = t2_chosen_text
-                block.mtqe_score = None
+                # Same reason as the tier1 branch above: measure, do not clear.
+                block.mtqe_score = await self.qe_runner.score(
+                    block.source_text, t2_chosen_text, block_type=block.block_type
+                )
                 block.error_flags = list(t2_chosen_flags) + _residual_defect_flags(t2_chosen_text)
             else:
                 all_fallback = tier1_candidates + tier2_candidates
@@ -407,7 +421,11 @@ class RepairLoop:
                     else ["repair_structural_failure: no repair candidate"]
                 )
                 block.target_text = draft_text
-                block.mtqe_score = None
+                # No candidate survived, so the text is unchanged and the score
+                # that sent it here still describes it — leave it as it is.
+                # (Clearing it never worked anyway: the checkpoint binds NULL
+                # through ``COALESCE(?, mtqe_score)``, which keeps the stored
+                # value.)
                 merged = list(block.error_flags)
                 for flag in fallback_flags:
                     if flag not in merged:

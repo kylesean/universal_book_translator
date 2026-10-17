@@ -57,7 +57,13 @@ async def test_repair_loop_uncalibrated_runner_adopts_structurally_valid_candida
     assert repaired.status == BlockStatus.REPAIRED
     assert repaired.error_flags == []
     assert repaired.target_text == "这是干净的修复文本。"
-    assert repaired.mtqe_score is None
+    # The repaired text is measured, not cleared. This test previously asserted
+    # ``mtqe_score is None``, which read as "clear the score" but did nothing:
+    # the checkpoint binds the value through ``COALESCE(?, mtqe_score)``, so an
+    # explicit None preserves whatever was stored. The block then kept the score
+    # that had sent it to repair (measured: 0.55 on a block that now scores
+    # 0.92), and a successful repair looked like it changed nothing.
+    assert repaired.mtqe_score is not None
 
 
 @pytest.mark.asyncio
