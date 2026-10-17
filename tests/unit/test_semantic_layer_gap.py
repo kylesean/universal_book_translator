@@ -126,9 +126,123 @@ async def test_a_judge_that_sees_the_loss_lowers_the_score() -> None:
     case = _semantic_defect_cases()[0]
 
     async def judge_fn(**kwargs: Any) -> str:
-        assert case["source_text"] in kwargs["user_prompt"]
+        # Sentence comparison sends one sentence per call, so the whole block is
+        # no longer in any single prompt; what must be there is some of it.
+        assert kwargs["user_prompt"].strip()
         return "score: 55"
 
     runner = LLMJudgeQERunner(judge_fn=judge_fn).with_languages("en", "zh")
     scores = await runner.score_pairs([{"src": case["source_text"], "mt": case["target_text"]}])
     assert scores[0] == pytest.approx(0.55)
+
+
+# --------------------------------------------------------------------------- #
+# Sentence-granularity: a block score dilutes a one-word loss
+# --------------------------------------------------------------------------- #
+
+
+def test_sentences_split_on_cjk_punctuation_without_a_space() -> None:
+    """Chinese puts no space after 。 — requiring one left the whole block whole."""
+    from ubt.core.qe.llm_judge import split_sentences
+
+    assert split_sentences("这是第一句。这是第二句！这是第三句？") == [
+        "这是第一句。",
+        "这是第二句！",
+        "这是第三句？",
+    ]
+
+
+def test_sentences_do_not_split_at_decimals_or_abbreviations() -> None:
+    """The near miss: a wrong split would compare unrelated sentences."""
+    from ubt.core.qe.llm_judge import split_sentences
+
+    assert split_sentences("The rate is 0.85. See Fig. 3. Done.") == [
+        "The rate is 0.85.",
+        "See Fig. 3. Done.",
+    ]
+    assert split_sentences("The result is 0.85 higher.") == ["The result is 0.85 higher."]
+
+
+def test_a_block_score_is_the_worst_sentence() -> None:
+    """A gate asks whether anything is wrong, not what the average is.
+
+    Measured: the b0010 defect scored 0.85 against the whole block and below
+    0.50 when the clause it corrupts is judged alone. Taking the minimum is what
+    turns a diluted deduction into a detection.
+    """
+    import asyncio
+
+    async def judge_fn(**kwargs: Any) -> str:
+        # Nine good sentences and one bad one.
+        return "score: 95" if "publicly" not in kwargs["user_prompt"] else "score: 40"
+
+    runner = LLMJudgeQERunner(judge_fn=judge_fn, compare_sentences=True)
+    src = (
+        ". ".join(f"Sentence {i} is fine" for i in range(9))
+        + ". The weights are publicly available."
+    )
+    mt = ". ".join(f"第{i}句没问题" for i in range(9)) + "。权重可获取。"
+    scores = asyncio.run(runner.score_pairs([{"src": src, "mt": mt}]))
+    assert scores[0] == pytest.approx(0.40)
+
+
+def test_a_misaligned_pair_falls_back_instead_of_inventing_a_defect() -> None:
+    """If the two sides split differently, positional pairing would be wrong."""
+    import asyncio
+
+    calls: list[str] = []
+
+    async def judge_fn(**kwargs: Any) -> str:
+        calls.append(kwargs["user_prompt"])
+        return "score: 30"
+
+    runner = LLMJudgeQERunner(judge_fn=judge_fn, compare_sentences=True)
+    # Three source sentences, one target sentence: cannot be aligned.
+    asyncio.run(runner.score_pairs([{"src": "A one. B two. C three.", "mt": "一句话。"}]))
+    assert len(calls) == 1  # whole-block fallback, not three mispaired calls
+
+
+def test_sentence_comparison_can_be_switched_off() -> None:
+    import asyncio
+
+    calls: list[str] = []
+
+    async def judge_fn(**kwargs: Any) -> str:
+        calls.append(kwargs["user_prompt"])
+        return "score: 90"
+
+    runner = LLMJudgeQERunner(judge_fn=judge_fn, compare_sentences=False)
+    asyncio.run(runner.score_pairs([{"src": "A one. B two.", "mt": "一。二。"}]))
+    assert len(calls) == 1
+
+
+def test_the_judge_endpoint_is_configurable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The judge may run on a hosted API while translation stays local."""
+    from ubt.core.config import UBTConfig
+
+    monkeypatch.setenv("UBT_QE_JUDGE_BASE_URL", "https://judge.example/v1")
+    monkeypatch.setenv("UBT_QE_JUDGE_MODEL", "some-strong-model")
+    monkeypatch.setenv("UBT_QE_JUDGE_API_MODE", "openai-responses")
+    monkeypatch.setenv("UBT_QE_JUDGE_SENTENCES", "true")
+    cfg = UBTConfig()
+    assert cfg.qe_judge_base_url == "https://judge.example/v1"
+    assert cfg.qe_judge_model == "some-strong-model"
+    assert cfg.qe_judge_api_mode == "openai-responses"
+    assert cfg.qe_judge_sentences is True
+
+
+def test_the_judge_falls_back_to_the_translation_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An existing single-endpoint configuration must keep working unchanged."""
+    from ubt.core.config import UBTConfig
+
+    monkeypatch.setenv("UBT_BASE_URL", "http://127.0.0.1:9090/v1")
+    for name in (
+        "UBT_QE_JUDGE_BASE_URL",
+        "UBT_QE_JUDGE_API_MODE",
+        "UBT_QE_JUDGE_API_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    cfg = UBTConfig()
+    assert cfg.qe_judge_base_url is None
+    assert cfg.qe_judge_api_mode is None
+    assert cfg.qe_judge_sentences is True

@@ -9,7 +9,7 @@ from collections.abc import AsyncGenerator, Callable
 from contextlib import aclosing, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ubt.cache.dirs import cache_root
 from ubt.core.config import UBTConfig
@@ -53,6 +53,9 @@ from ubt.core.qe.fast_pass import FastPassFilter
 from ubt.core.qe.heuristic import HeuristicQERunner
 from ubt.core.router.pricing import price_is_known
 from ubt.core.router.provider import create_model_provider
+
+if TYPE_CHECKING:
+    from ubt.core.qe.llm_judge import JudgeFn
 from ubt.core.router.rate_limiter import AdaptiveTokenBucket
 from ubt.core.router.registry import get_default_registry
 from ubt.core.router.router import ModelRouter, set_run_cancel_token
@@ -329,9 +332,12 @@ class PipelineOrchestrator:
         if self.config.qe_judge_enabled and isinstance(self.qe_runner, HeuristicQERunner):
             from ubt.core.qe.llm_judge import LLMJudgeQERunner, TieredQERunner
 
+            judge_model = self.config.qe_judge_model or self.config.repair_model
+            judge_fn = self._build_judge_fn(judge_model)
             judge = LLMJudgeQERunner(
-                judge_fn=self.router.complete_raw,
-                model=self.config.qe_judge_model or self.config.repair_model,
+                judge_fn=judge_fn,
+                model=judge_model,
+                compare_sentences=self.config.qe_judge_sentences,
             )
             self.qe_runner = TieredQERunner(
                 heuristic=self.qe_runner,
@@ -445,6 +451,59 @@ class PipelineOrchestrator:
                 "UBT_ALLOW_UNPRICED_BUDGET=1 to run uncapped-by-warning anyway. "
                 "Models reached through a self-hosted endpoint are exempt (they cost $0)."
             )
+
+    def _build_judge_fn(self, judge_model: str) -> JudgeFn:
+        """The judge's completion call, on its own endpoint when one is configured.
+
+        The judge is often best served by a different model than the translator,
+        and sometimes by a different process entirely (a hosted API, a second
+        local server). ``qe_judge_base_url`` picks that endpoint and gets its own
+        provider, so credentials, wire protocol and headers belong to the judge
+        alone — routing a hosted judge through the translation provider's client
+        would send it that gateway's model names and headers.
+
+        With no ``qe_judge_base_url`` the main router answers, which keeps an
+        existing single-endpoint configuration working unchanged.
+
+        A self-hosted judge has no price in ``prices.toml``, so its spend cannot
+        be attributed; it is billed at zero like every other self-hosted call.
+        """
+        if not self.config.qe_judge_base_url:
+            return self.router.complete_raw
+
+        from ubt.core.router.provider import create_model_provider
+
+        judge_provider = create_model_provider(
+            api_key=self.config.qe_judge_api_key or self.config.api_key,
+            base_url=self.config.qe_judge_base_url,
+            default_model=judge_model,
+            # ApiMode is a Literal of wire-protocol strings, not an enum.
+            api_mode=str(self.config.qe_judge_api_mode or self.config.api_mode),
+            timeout=self.config.api_timeout,
+            # Headers belong to the endpoint they were configured for; reuse them
+            # only when the judge shares the translator's endpoint.
+            extra_headers=(
+                dict(self.config.extra_headers)
+                if self.config.qe_judge_base_url == self.config.base_url
+                else {}
+            ),
+        )
+
+        async def _judge_complete(
+            *,
+            system_prompt: str,
+            user_prompt: str,
+            temperature: float = 0.0,
+            model: str | None = None,
+        ) -> str:
+            return await judge_provider.generate(
+                prompt=user_prompt,
+                system_prompt=system_prompt,
+                model=model or judge_model,
+                temperature=temperature,
+            )
+
+        return _judge_complete
 
     def _runtime_qe_runner(self, source_lang: str, target_lang: str) -> BaseQERunner:
         """Bind the run's language pair for the QE runner.

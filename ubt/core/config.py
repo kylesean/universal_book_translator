@@ -459,6 +459,50 @@ class UBTConfig(BaseSettings):
         default=False,
         description="Allow LLM Judge to upgrade gray-zone scores above threshold when justified (default: False, conservative lower-only).",
     )
+    # -- Independent judge endpoint -------------------------------------------
+    # The judge is often best served by a different (larger) model than the one
+    # doing the translating, and differently again by a hosted API rather than
+    # the local gateway. Measured on arXiv 2606.23344: the local 4B judge scores a
+    # translation that drops "publicly" at 100/100, and the local 27B needs a
+    # specific rubric to separate it — so "whatever the repair model is" is not a
+    # safe default for a quality gate.
+    #
+    # All four are optional; each falls back to the main provider's value, so an
+    # existing configuration keeps working unchanged.
+    qe_judge_base_url: str | None = Field(
+        default=None,
+        validation_alias="UBT_QE_JUDGE_BASE_URL",
+        description=(
+            "Endpoint for judge calls, when the judge runs somewhere other than the "
+            "translation provider (a hosted API, a second local server). Defaults to "
+            "base_url."
+        ),
+    )
+    qe_judge_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias="UBT_QE_JUDGE_API_KEY",
+        description="Credential for qe_judge_base_url. Defaults to the main api_key.",
+    )
+    qe_judge_api_mode: ApiMode | None = Field(
+        default=None,
+        validation_alias="UBT_QE_JUDGE_API_MODE",
+        description=(
+            "Wire protocol for the judge endpoint (openai-chat, openai-responses, "
+            "anthropic, gemini). Defaults to the main api_mode; set it when the "
+            "judge endpoint speaks a different protocol than the translation one."
+        ),
+    )
+    qe_judge_sentences: bool = Field(
+        default=True,
+        validation_alias="UBT_QE_JUDGE_SENTENCES",
+        description=(
+            "Compare each source sentence against its target sentence instead of "
+            "scoring the whole block. A one-word loss diluted across a long block "
+            "reads as a small proportional deduction (measured: the same defect "
+            "scored 0.85 block-level, below 0.50 sentence-level), so a block-level "
+            "score cannot express 'this clause is wrong'."
+        ),
+    )
 
     # -- Post-render visual gate (T0/T1 deterministic always safe; T2 VLM sampled) --
     visual_gate_enabled: bool = True

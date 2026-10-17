@@ -126,6 +126,72 @@ def _normalize(score: float) -> float:
     return min(1.0, max(0.0, score))
 
 
+#: Sentence end: CJK terminal punctuation splits with or without a following
+#: space (Chinese prose puts none), while a Latin terminal needs whitespace —
+#: otherwise "0.85" splits at the decimal point and "Fig. 3" at the
+#: abbreviation. Only ``.`` ``!`` ``?`` ``。`` ``！`` ``？`` are terminals.
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[。！？])[\"'”’）)\]]*\s*|(?<=[.!?])[\"'”’）)\]]*\s+")
+
+#: Abbreviations whose trailing period never ends a sentence. Lower-case only:
+#: the split itself is case-sensitive where it matters.
+_SENTENCE_ABBREVIATIONS = frozenset(
+    {
+        "fig",
+        "figs",
+        "eq",
+        "eqs",
+        "sec",
+        "al",
+        "e.g",
+        "i.e",
+        "etc",
+        "vs",
+        "cf",
+        "no",
+        "resp",
+        "approx",
+        "ref",
+        "refs",
+        "tab",
+        "pp",
+        "vol",
+    }
+)
+
+
+def split_sentences(text: str) -> list[str]:
+    """Split a paragraph into sentences, tolerant of the shapes these documents use.
+
+    Used to align a source sentence with its translation. The pairing is
+    positional, so a split that is even slightly wrong would compare one
+    sentence's source against another's target and *invent* a defect — worse
+    than not checking. The rules are therefore conservative: a break needs
+    terminal punctuation followed by whitespace, and the word before the period
+    must not be a known abbreviation (``Fig. 3``) or a bare numeral (``0.85``).
+    When the two sides end up with different sentence counts the caller falls
+    back to whole-block scoring rather than trusting a misaligned pair.
+    """
+    text = (text or "").strip()
+    if not text:
+        return []
+    pieces = _SENTENCE_SPLIT_RE.split(text)
+    out: list[str] = []
+    buffer = ""
+    for piece in pieces:
+        candidate = f"{buffer} {piece}".strip() if buffer else piece.strip()
+        if not candidate:
+            continue
+        last_word = re.split(r"[\s(\"']", candidate.rstrip(".!?。！？\"'”’）)]"))[-1].lower()
+        if last_word in _SENTENCE_ABBREVIATIONS or last_word.isdigit():
+            buffer = candidate
+            continue
+        out.append(candidate)
+        buffer = ""
+    if buffer:
+        out.append(buffer)
+    return out
+
+
 def build_judge_prompts(
     src: str, mt: str, target_lang: str = "zh", source_lang: str = "en"
 ) -> tuple[str, str]:
@@ -152,6 +218,7 @@ class LLMJudgeQERunner(BaseQERunner):
         source_lang: str = "en",
         temperature: float = 0.0,
         max_concurrency: int = 5,
+        compare_sentences: bool = True,
     ) -> None:
         self._judge_fn = judge_fn
         self._model = model
@@ -159,6 +226,7 @@ class LLMJudgeQERunner(BaseQERunner):
         self._source_lang = source_lang
         self._temperature = temperature
         self._max_concurrency = max_concurrency
+        self._compare_sentences = compare_sentences
         self._sem = asyncio.Semaphore(max_concurrency)
 
     def with_languages(self, source_lang: str, target_lang: str) -> LLMJudgeQERunner:
@@ -176,13 +244,63 @@ class LLMJudgeQERunner(BaseQERunner):
             source_lang=source_lang,
             temperature=self._temperature,
             max_concurrency=self._max_concurrency,
+            compare_sentences=self._compare_sentences,
         )
 
     def is_calibrated(self) -> bool:
         """LLM opinions are not calibrated enough to rank repair candidates."""
         return False
 
+    async def score_pairs(self, pairs: list[dict[str, str]]) -> list[float]:
+        if not pairs:
+            return []
+        results = await asyncio.gather(
+            *[self._score_one(p.get("src", ""), p.get("mt", "")) for p in pairs]
+        )
+        return list(results)
+
     async def _score_one(self, src: str, mt: str) -> float:
+        if not self._compare_sentences:
+            return await self._score_whole(src, mt)
+        return await self._score_by_sentence(src, mt)
+
+    async def _score_by_sentence(self, src: str, mt: str) -> float:
+        """Score a block by scoring its sentences, keeping the worst.
+
+        A whole-block score dilutes a one-word loss: the same defect measured
+        0.85 against a 790-character block and below 0.50 when the clause it
+        corrupts is scored on its own, because one wrong clause out of ten reads
+        as a small proportional deduction. A quality gate is not asking for the
+        average — it is asking whether anything in this block is wrong — so the
+        block takes its **minimum** sentence score.
+
+        The pairing is positional within the block: the translator works
+        sentence by sentence, so sentence *i* of the source corresponds to
+        sentence *i* of the target. When the two sides have different sentence
+        counts (a merged or split sentence), the pairing cannot be trusted and
+        the block falls back to a single whole-block call rather than scoring a
+        misaligned pair, which would invent a defect.
+        """
+        src_sentences = split_sentences(src)
+        mt_sentences = split_sentences(mt)
+        if not src_sentences or len(src_sentences) != len(mt_sentences):
+            return await self._score_whole(src, mt)
+        if len(src_sentences) == 1:
+            return await self._score_whole(src, mt)
+        scores = await asyncio.gather(
+            *[
+                self._score_whole(src_sentence, mt_sentence)
+                for src_sentence, mt_sentence in zip(src_sentences, mt_sentences, strict=True)
+            ]
+        )
+        # A sentence the judge could not score (call failure) contributes no
+        # opinion; if none could be scored, the block has no opinion either.
+        usable = [score for score in scores if score != _JUDGE_NO_OPINION]
+        if not usable:
+            return _JUDGE_NO_OPINION
+        return min(usable)
+
+    async def _score_whole(self, src: str, mt: str) -> float:
         system, user = build_judge_prompts(src, mt, self._target_lang, self._source_lang)
         try:
             async with self._sem:
@@ -202,14 +320,6 @@ class LLMJudgeQERunner(BaseQERunner):
             logger.warning("LLM judge unparsable reply %.80r, preserving heuristic score", raw)
             return _JUDGE_NO_OPINION
         return round(parsed, 4)
-
-    async def score_pairs(self, pairs: list[dict[str, str]]) -> list[float]:
-        if not pairs:
-            return []
-        results = await asyncio.gather(
-            *[self._score_one(p.get("src", ""), p.get("mt", "")) for p in pairs]
-        )
-        return list(results)
 
 
 class TieredQERunner(BaseQERunner):
