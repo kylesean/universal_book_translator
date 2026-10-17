@@ -1341,15 +1341,25 @@ class FastPassFilter:
         residue = _TABLE_SEP_RE.sub("", residue)
         residue = _DIGIT_RE.sub("", residue)
         residue = _ISOLATED_LETTER_RE.sub("", residue)
-        preserved = {
-            m.group(0) for m in _VERBATIM_TERM_RE.finditer(src_clean) if len(m.group(0)) >= 2
-        }
         # One rule for prose and tables alike: strip only identifier-shaped
         # carry-overs (PagedAttention, MHA, GQA-8). Ordinary Latin words left
         # untranslated stay in the residue, so an untouched table fails here
         # for the same reason untouched prose does. Stripping every
         # source-verbatim term instead (not just identifier-shaped ones) would
         # make an entire untranslated table read as empty residue (ratio 1.0).
+        #
+        # A term that *contains* a digit is special: digits are already gone
+        # from the residue by now, so the term as written ("Real5-OmniDocBench")
+        # no longer matches what the residue holds ("Real-OmniDocBench") and the
+        # remainder was counted as untranslated text. Measured on arXiv
+        # 2606.23344: the heading 4.2.2. Real5-OmniDocBench was rejected for
+        # "script density 0.00" while its digit-free sibling 4.2.1. passed.
+        # Only the digit-stripped spelling is added for such a term — never for
+        # an ordinary word, or the residue the density gate depends on would be
+        # erased (``T5-Base`` must keep leaving ``Base`` behind).
+        preserved = {
+            m.group(0) for m in _VERBATIM_TERM_RE.finditer(src_clean) if len(m.group(0)) >= 2
+        }
         for term in preserved:
             if is_verbatim_carryover(term) or (
                 len(term) >= 3
@@ -1364,6 +1374,8 @@ class FastPassFilter:
                 sing = singular_variant(term)
                 if sing is not None:
                     residue = _strip_verbatim_term(residue, sing)
+                if is_verbatim_carryover(term):
+                    residue = _strip_verbatim_term(residue, _DIGIT_RE.sub("", term))
         # Language identity lives in letters: punctuation carries no script
         # signal and only dilutes the ratio (decimal points, parens, slashes
         # dominate tables and formulas).
