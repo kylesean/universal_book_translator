@@ -59,7 +59,10 @@ selected — the same book with `--dry-run --profile paper` becomes
 `job_da4c06edac50_zh_mock_prpaper`. Copy the whole id, not the prefix. Resume is
 the default: re-running with the same `--job-id` picks up from the ledger's
 checkpoints instead of re-paying for finished blocks, and `--fresh` discards the
-ledger and re-ingests. Other useful commands: `ubt assess book.pdf` for a
+ledger and re-ingests. `--fresh` keeps `tm.sqlite` (the cross-job translation
+memory) and any external glossary: those are assets, not job state, so a re-run
+starts from a clean ledger but still benefits from what earlier runs learned.
+Other useful commands: `ubt assess book.pdf` for a
 zero-token quote, `ubt status <job-id>` for checkpoint statistics, and
 `ubt verify <artifact>` to re-reconcile a delivery.
 
