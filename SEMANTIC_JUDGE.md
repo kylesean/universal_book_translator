@@ -33,6 +33,17 @@ api_key = "${JUDGE_API_KEY}"     # expands from the environment; never commit a 
 repair_model = "some-capable-model"
 ```
 
+A whole quality policy fits in the same `[defaults]` block, so it can live in a
+file instead of a shell script:
+
+```toml
+[defaults]
+qe_threshold = 0.80              # the bar a block must clear to ship unreviewed
+max_repair_rounds = 2
+consistency_enforce = "report"   # off | report | repair (terminology drift)
+consistency_max_repairs = 25
+```
+
 Three things about this are easy to get wrong, and each one was measured:
 
 ### 1. The judge needs a capable model
