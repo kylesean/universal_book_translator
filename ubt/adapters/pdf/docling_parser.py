@@ -13,7 +13,9 @@ import dataclasses
 import logging
 import os
 import re
+import subprocess
 from collections.abc import Callable
+from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -81,6 +83,14 @@ if TYPE_CHECKING:
     from docling.document_converter import DocumentConverter
 
 logger = logging.getLogger(__name__)
+
+#: Headroom Docling's layout/table models need before its first converter can be
+#: built. The models themselves are small; the cost is a CUDA context plus
+#: fragmentation, and a co-resident LLM server grows its own allocation at load
+#: time. Measured on this project's reference machine: with 0.06 GiB free,
+#: Docling OOM'd on a 20 MiB request *after* paying for converter
+#: initialisation, then re-ran the whole conversion on CPU.
+_DOCLING_MIN_FREE_VRAM_GIB: float = 2.0
 
 
 def _figure_asset_dpi_tag() -> str:
@@ -646,6 +656,90 @@ def type_docling_blocks(blocks: list[IRBlock]) -> list[IRBlock]:
     return blocks
 
 
+def _free_vram_gib() -> float | None:
+    """Free GPU memory in GiB, or ``None`` when no usable CUDA device exists.
+
+    Deliberately uses the driver's figure (``torch.cuda.mem_get_info``) rather
+    than the allocator's: the question is how much room the whole card has, and
+    an LLM server in another process holds most of it.
+    """
+    try:
+        import torch
+    except ImportError:
+        return None
+    try:
+        if not torch.cuda.is_available():
+            return None
+        free, _total = torch.cuda.mem_get_info()
+        return float(free) / (1024**3)
+    except Exception:
+        return None
+
+
+def _docling_vram_verdict(device: str) -> tuple[str, str | None]:
+    """Decide where Docling should run, and why if it is not the default.
+
+    Returns ``(device, note)``; ``note`` is ``None`` when the caller's request
+    stands. Docling's layout/table models need well under 2 GiB, but the process
+    also pays for CUDA context and fragmentation, and a co-resident LLM server
+    expands its own allocation at load time. On this machine a local
+    ``llama-server`` held 9.28 GiB while swapping models, so Docling's first
+    attempt OOM'd after initialising a converter -- then fell back to CPU and
+    re-ran the conversion, discarding everything that had been set up.
+
+    Only ``auto`` is overridden. An operator who pinned ``cpu`` or ``cuda`` has
+    made a decision this probe must not second-guess.
+    """
+    if device != "auto":
+        return device, None
+    free = _free_vram_gib()
+    if free is None:
+        return device, None
+    if free < _DOCLING_MIN_FREE_VRAM_GIB:
+        return (
+            "cpu",
+            f"only {free:.2f} GiB of GPU memory is free (Docling needs about "
+            f"{_DOCLING_MIN_FREE_VRAM_GIB:.1f} GiB of headroom); using CPU for extraction"
+            + _vram_hint(),
+        )
+    return device, None
+
+
+def _vram_hint() -> str:
+    """Name the processes holding the card, when the query tool can tell us.
+
+    A number alone ("0.06 GiB free") leaves the operator guessing what to close;
+    ``nvidia-smi`` already knows.
+    """
+    try:
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-compute-apps=pid,process_name,used_memory",
+                "--format=csv,noheader",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    rows = [row.strip() for row in result.stdout.splitlines() if row.strip()]
+    if not rows:
+        return ""
+    # Largest holders first: that is the one worth closing.
+    parsed: list[tuple[int, str]] = []
+    for row in rows:
+        pid, name, usage = (part.strip() for part in row.split(",", 2))
+        with suppress(ValueError):
+            parsed.append((int(usage.split()[0]), f"pid {pid} {name.split('/')[-1]}"))
+    if not parsed:
+        return ""
+    top = sorted(parsed, reverse=True)[:2]
+    return "; largest holders: " + ", ".join(f"{label} ({mb} MiB)" for mb, label in top)
+
+
 def extract_with_docling(
     path: Path,
     page_range: tuple[int, int] | None,
@@ -702,6 +796,14 @@ def extract_with_docling(
     # docs/guides/PDF_ENGINE_ROUTING_REDESIGN.md §L4). The device is part of the
     # conversion cache key below, so a CPU and a CUDA conversion never alias.
     device = (device or "auto").strip().lower()
+    # Decide the device BEFORE any converter is built. Without this the code
+    # below discovers the shortage the expensive way: it initialises Docling on
+    # cuda, hits OOM on the first allocation, tears the converter down, and
+    # re-runs the conversion on CPU -- paying twice and dropping whatever the
+    # first attempt had produced.
+    device, vram_note = _docling_vram_verdict(device)
+    if vram_note:
+        logger.warning("Docling device auto-selected 'cpu': %s", vram_note)
     if device in ("cpu", "cuda"):
         options.accelerator_options.device = device
         logger.info("Docling accelerator device pinned to '%s' for '%s'", device, path.name)
@@ -845,7 +947,10 @@ def extract_with_docling(
                             or "out of memory" in str(inner_exc).lower()
                         ):
                             logger.warning(
-                                "Docling accelerator failed (%s); falling back to CPU", inner_exc
+                                "Docling accelerator failed (%s); falling back to CPU for this "
+                                "conversion, which will be several times slower. %s",
+                                inner_exc,
+                                _vram_hint() or "Set UBT_DOCLING_DEVICE=cpu to skip this probe.",
                             )
                             options.accelerator_options.device = "cpu"
                             _cleanup_docling_converter(converter)
@@ -854,7 +959,12 @@ def extract_with_docling(
                         else:
                             raise
                 elif "cuda" in str(exc).lower() or "out of memory" in str(exc).lower():
-                    logger.warning("Docling accelerator failed (%s); falling back to CPU", exc)
+                    logger.warning(
+                        "Docling accelerator failed (%s); falling back to CPU for this "
+                        "conversion, which will be several times slower. %s",
+                        exc,
+                        _vram_hint() or "Set UBT_DOCLING_DEVICE=cpu to skip this probe.",
+                    )
                     options.accelerator_options.device = "cpu"
                     _cleanup_docling_converter(converter)
                     converter = _make_converter(options)

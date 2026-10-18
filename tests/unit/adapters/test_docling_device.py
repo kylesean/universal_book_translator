@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -119,3 +120,68 @@ def test_cpu_device_pins_docling_pipeline_options(tmp_path: Path) -> None:
         converter_cls.__init__ = original_init
 
     assert seen.get("device") == "cpu"
+
+
+# --------------------------------------------------------------------------- #
+# VRAM pre-flight
+#
+# A local LLM server sharing the card can hold 9+ GiB while it swaps models. The
+# old path discovered the shortage the expensive way: initialise Docling on cuda,
+# OOM on the first 20 MiB allocation, tear the converter down, and re-run the
+# whole conversion on CPU -- paying twice and discarding whatever the first
+# attempt produced. On an 83-page document that is minutes of wasted work.
+# --------------------------------------------------------------------------- #
+
+
+def test_a_crowded_card_is_detected_before_the_converter_is_built() -> None:
+    from ubt.adapters.pdf.docling_parser import _docling_vram_verdict
+
+    with patch("ubt.adapters.pdf.docling_parser._free_vram_gib", return_value=0.06):
+        device, note = _docling_vram_verdict("auto")
+    assert device == "cpu"
+    assert note is not None
+    # The number alone leaves the operator guessing what to close.
+    assert "0.06 GiB" in note
+
+
+def test_a_roomy_card_keeps_docling_on_its_own_probe() -> None:
+    from ubt.adapters.pdf.docling_parser import _docling_vram_verdict
+
+    with patch("ubt.adapters.pdf.docling_parser._free_vram_gib", return_value=6.0):
+        assert _docling_vram_verdict("auto") == ("auto", None)
+
+
+@pytest.mark.parametrize("pinned", ["cpu", "cuda"])
+def test_an_explicit_device_is_never_overridden(pinned: str) -> None:
+    """An operator who pinned a device has made the decision already."""
+    from ubt.adapters.pdf.docling_parser import _docling_vram_verdict
+
+    with patch("ubt.adapters.pdf.docling_parser._free_vram_gib", return_value=0.01):
+        assert _docling_vram_verdict(pinned) == (pinned, None)
+
+
+def test_no_cuda_device_leaves_the_request_alone() -> None:
+    from ubt.adapters.pdf.docling_parser import _docling_vram_verdict
+
+    with patch("ubt.adapters.pdf.docling_parser._free_vram_gib", return_value=None):
+        assert _docling_vram_verdict("auto") == ("auto", None)
+
+
+def test_the_note_names_the_processes_holding_the_card() -> None:
+    from ubt.adapters.pdf.docling_parser import _vram_hint
+
+    fake = SimpleNamespace(
+        stdout="431065, /usr/local/bin/llama-server, 6616 MiB\n430649, python3, 748 MiB\n",
+        returncode=0,
+    )
+    with patch("ubt.adapters.pdf.docling_parser.subprocess.run", return_value=fake):
+        hint = _vram_hint()
+    assert "llama-server" in hint
+    assert "6616 MiB" in hint
+
+
+def test_an_unavailable_nvidia_smi_is_not_fatal() -> None:
+    from ubt.adapters.pdf.docling_parser import _vram_hint
+
+    with patch("ubt.adapters.pdf.docling_parser.subprocess.run", side_effect=OSError):
+        assert _vram_hint() == ""
