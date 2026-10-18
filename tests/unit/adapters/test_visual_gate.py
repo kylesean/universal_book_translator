@@ -246,3 +246,31 @@ def test_the_sample_puts_flagged_pages_first_and_covers_the_anchors() -> None:
     assert len(sample) <= 5
     # Every returned page is inside the document.
     assert all(1 <= page <= 500 for page in sample)
+
+
+# --------------------------------------------------------------------------- #
+# A skipped tier must not read as "verified clean"
+#
+# The VLM judge is opt-in, so a default run always ends with vlm_checked == 0 and
+# the old report said only `passed: false, skipped_reason: "vlm judge disabled"`.
+# That invites the reader to conclude the visual check failed, when the
+# geometry/pixel tiers ran and the semantic tier was never asked (measured: the
+# ATC'25 report was read exactly that way).
+# --------------------------------------------------------------------------- #
+
+
+def test_the_report_names_the_tiers_that_ran_and_the_one_that_did_not() -> None:
+    from ubt.adapters.pdf.visual_gate import _tier_coverage
+
+    default_run = _tier_coverage((), ["vlm judge disabled"])
+    assert "geometry" in default_run
+    assert "pixel" in default_run
+    assert "not run: vlm" in default_run
+
+
+def test_a_run_with_the_vlm_judge_reports_three_tiers() -> None:
+    from ubt.adapters.pdf.visual_gate import _tier_coverage
+
+    full = _tier_coverage((1, 2), [])
+    assert "vlm" in full
+    assert "not run" not in full

@@ -294,6 +294,12 @@ class QualityReport(BaseModel):
     # off or no suspicious blocks reached the tiered runner).
     qe_judge_calls: int = 0
     qe_judge_errors: int = 0
+    #: One line saying whether the semantic tier actually informed these scores.
+    #: ``score_metrics`` cannot say this: `avg_qe 0.88` reads the same whether the
+    #: judge scored 21 blocks or failed all 21 and the heuristic answered alone
+    #: (measured: a job with 27 calls / 27 errors still reported a clean-looking
+    #: distribution). None = the judge was not requested at all.
+    qe_semantic_coverage: str | None = None
     # Delivery suitability audit flag: a short machine-readable reason when the
     # delivery is degraded (set by the stages that detect it). None = normal.
     delivery_status: str | None = None
@@ -497,6 +503,26 @@ def build_quality_report(
         except (TypeError, ValueError):
             return 0
 
+    def _semantic_coverage(calls: int, errors: int) -> str | None:
+        """Whether the paid semantic tier actually informed the scores.
+
+        ``score_metrics`` cannot express this: `avg_qe 0.88` reads identically
+        whether the judge scored the blocks or failed every call and the
+        heuristic answered alone. A job with 27 calls and 27 errors still showed
+        a clean-looking distribution, so the failure was invisible to anyone
+        reading only the summary.
+        """
+        if calls == 0:
+            return None
+        if errors >= calls:
+            return (
+                f"semantic tier unavailable: all {calls} judge call(s) failed, so every "
+                "score is the deterministic heuristic alone"
+            )
+        if errors:
+            return f"semantic tier partial: {calls - errors}/{calls} judge call(s) succeeded"
+        return f"semantic tier complete: {calls} judge call(s) succeeded"
+
     return QualityReport(
         job_id=job_id,
         doc_id=manifest.doc_id,
@@ -555,6 +581,9 @@ def build_quality_report(
         qe_score_source=qe_score_source,
         qe_judge_calls=_metadata_counter("qe_judge_calls"),
         qe_judge_errors=_metadata_counter("qe_judge_errors"),
+        qe_semantic_coverage=_semantic_coverage(
+            _metadata_counter("qe_judge_calls"), _metadata_counter("qe_judge_errors")
+        ),
         delivery_status=manifest.run.delivery_status,
         delivery_warning=manifest.run.delivery_warning,
         delivery_contract=delivery_contract,

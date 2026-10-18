@@ -765,6 +765,24 @@ def text_occlusion_findings(
     return findings
 
 
+def _tier_coverage(vlm_pages: Sequence[int], skip_notes: Sequence[str]) -> str:
+    """State which gate tiers actually ran, and which were skipped.
+
+    The VLM judge is opt-in, so a default run always has ``vlm_checked == 0``.
+    A report carrying only ``passed: false, skipped_reason: "vlm judge disabled"``
+    invites the reader to conclude the visual check failed, when in fact the
+    geometry and pixel tiers ran and the semantic tier was never asked. This
+    line makes the distinction explicit and is part of every report.
+    """
+    ran = ["geometry", "pixel"]
+    if vlm_pages:
+        ran.append("vlm")
+    coverage = f"tiers run: {', '.join(ran)}"
+    if "vlm" not in ran:
+        coverage += " (not run: vlm)"
+    return coverage
+
+
 async def run_visual_gate(
     pdf_path: Path,
     blocks: Sequence[object] = (),
@@ -905,6 +923,7 @@ async def run_visual_gate(
         elif vlm_judge is None:
             skip_notes.append("vlm judge disabled")
     passed = not any(f.severity in ("major", "critical") for f in findings)
+    coverage = _tier_coverage(vlm_pages, skip_notes)
     stats: dict[str, str | int | float] = {
         "total_pages": total,
         "sampled": len(sampled),
@@ -922,6 +941,6 @@ async def run_visual_gate(
         findings=tuple(findings),
         sampled_pages=tuple(sampled),
         vlm_pages=tuple(vlm_pages),
-        skipped_reason="; ".join(skip_notes) if skip_notes else None,
+        skipped_reason="; ".join([*skip_notes, coverage]) if skip_notes else coverage,
         stats=stats,
     )
