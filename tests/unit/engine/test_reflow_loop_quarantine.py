@@ -340,3 +340,71 @@ def test_a_crashed_parity_probe_is_recorded_not_swallowed(
 
     assert "parity_probe_crashed" in _finding_codes(gate)
     assert gate.passed is True, "an unmeasured probe is advisory, not a delivery block"
+
+
+# --------------------------------------------------------------------------- #
+# A block-scoped finding must not quarantine the whole page
+#
+# `blocks_out_of_bounds_findings` reported the offending block id inside its
+# MESSAGE while leaving `page` as the only structured field, so the consumer
+# could only quarantine an entire page for one misplaced rectangle. On the
+# ATC'25 paper two rectangles overran the mediabox by ~60pt and 13 blocks with
+# verified translations (score 0.92) were held for human review.
+# --------------------------------------------------------------------------- #
+
+
+def test_a_block_scoped_finding_quarantines_only_that_block(tmp_path: Path) -> None:
+    blocks = [_block("b1", 3), _block("b2", 3), _block("b3", 3)]
+    gate = VisualGateResult(
+        passed=False,
+        findings=(
+            VisualFinding(
+                severity="major",
+                code="block_out_of_bounds",
+                message="Block b2 exceeds page 3 mediabox",
+                page=3,
+                block_id="b2",
+            ),
+        ),
+    )
+    _run(_loop(tmp_path, _RecordingLedger(), gate), tmp_path, blocks)
+    assert [b.id for b in blocks if b.status is BlockStatus.NEEDS_HUMAN] == ["b2"]
+
+
+def test_an_artifact_rect_id_falls_back_to_page_scope(tmp_path: Path) -> None:
+    """T1 reads pdfium rects (``p3:rect327``), which match no IR block.
+
+    Treating such an id as a block key would match nothing AND suppress the page
+    fallback, silently dropping a real clipped-text defect — worse than
+    over-quarantining. The page rule must still apply.
+    """
+    blocks = [_block("b1", 3), _block("b2", 3)]
+    gate = VisualGateResult(
+        passed=False,
+        findings=(
+            VisualFinding(
+                severity="major",
+                code="block_out_of_bounds",
+                message="Block p3:rect327 exceeds page 3 mediabox",
+                page=3,
+                block_id="p3:rect327",
+            ),
+        ),
+    )
+    _run(_loop(tmp_path, _RecordingLedger(), gate), tmp_path, blocks)
+    assert [b.id for b in blocks if b.status is BlockStatus.NEEDS_HUMAN] == ["b1", "b2"]
+
+
+def test_a_page_scoped_finding_still_quarantines_the_page(tmp_path: Path) -> None:
+    """A blank page or a VLM FAIL implicates every block on it."""
+    blocks = [_block("b1", 5), _block("b2", 5), _block("b3", 6)]
+    gate = VisualGateResult(
+        passed=False,
+        findings=(
+            VisualFinding(
+                severity="critical", code="blank_page", message="Page 5 renders blank", page=5
+            ),
+        ),
+    )
+    _run(_loop(tmp_path, _RecordingLedger(), gate), tmp_path, blocks)
+    assert [b.id for b in blocks if b.status is BlockStatus.NEEDS_HUMAN] == ["b1", "b2"]

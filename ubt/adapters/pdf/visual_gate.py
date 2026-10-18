@@ -106,12 +106,22 @@ VlmJudgeFn = Callable[[list[str], str], Awaitable[str]]
 
 @dataclass(frozen=True)
 class VisualFinding:
-    """One visual QA observation (warning-grade, never blocks export)."""
+    """One visual QA observation (warning-grade, never blocks export).
+
+    ``block_id`` names the block a finding is *about*, when the check knows it.
+    ``blocks_out_of_bounds_findings`` already reported the offending block id in
+    its message while leaving ``page`` as the only structured field, so the
+    consumer could only quarantine an entire page for one misplaced rectangle —
+    a page-level box overrun punished 13 perfectly good translations on the
+    ATC'25 run. A finding without a ``block_id`` is genuinely page-scoped (blank
+    page, VLM verdict) and still quarantines the page.
+    """
 
     severity: Severity
     code: str
     message: str
     page: int | None = None
+    block_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -357,6 +367,10 @@ def blocks_out_of_bounds_findings(
                         f"{page} mediabox {bx1 - bx0:.0f}x{by1 - by0:.0f}pt"
                     ),
                     page=page,
+                    # The check is about THIS block's rectangle: the page's other
+                    # blocks are not implicated, so the consumer must not
+                    # quarantine them for it.
+                    block_id=str(getattr(block, "id", "") or "") or None,
                 )
             )
     return findings

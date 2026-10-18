@@ -123,27 +123,57 @@ class VisualVerifyLoop:
             raise JobInterruptedError(f"Job {self.job_id} cancelled before visual gate evaluation")
         gate = await self._evaluate_gate(rendered_path, blocks)
 
-        # If the gate reports major or critical findings, quarantine the blocks
-        # on the failing pages directly.
+        # If the gate reports major or critical findings, quarantine what each
+        # finding is actually ABOUT. A finding that names a block implicates only
+        # that block; only a genuinely page-scoped finding (blank page, VLM
+        # verdict on the rendered image, overlap) falls back to the whole page.
+        #
+        # Quarantining the page for a block-level defect marked 13 correct
+        # translations (score 0.92, verified content) as NEEDS_HUMAN on the
+        # ATC'25 run because two rectangles overran the mediabox by >5pt.
         bad_after = [
             f for f in gate.findings if getattr(f, "severity", "") in ("major", "critical")
         ]
         if bad_after:
-            failing_pages = {f.page for f in bad_after if getattr(f, "page", None) is not None}
+            # A finding's ``block_id`` is only usable for block-level routing when
+            # it names an IR block. The T1 geometry checks default to the
+            # ARTIFACT's own pdfium text rects (``p3:rect327``), which have no
+            # counterpart in the IR -- so their ids must not be trusted as block
+            # keys, or nothing would ever match and the finding would be dropped
+            # entirely (worse than over-quarantining).
+            ir_ids = {b.id for b in blocks}
+            named_ids = {
+                bid
+                for f in bad_after
+                if (bid := getattr(f, "block_id", None)) is not None and bid in ir_ids
+            }
+            page_scoped = [
+                f
+                for f in bad_after
+                if getattr(f, "block_id", None) not in named_ids
+                and getattr(f, "page", None) is not None
+            ]
+            failing_pages = {f.page for f in page_scoped}
             quarantined: list[dict[str, Any]] = []
             preserved = (BlockStatus.FAILED, BlockStatus.BLOCKED_HUMAN)
             for b in blocks:
                 if b.skip_translate or b.status in preserved:
                     continue
                 page = b.bbox.page if b.bbox is not None else None
-                if page is not None and page in failing_pages:
+                hit_by_id = b.id in named_ids
+                hit_by_page = page is not None and page in failing_pages
+                if hit_by_id or hit_by_page:
                     b.status = BlockStatus.NEEDS_HUMAN
                     codes = [
                         getattr(f, "code", "defect")
                         for f in bad_after
-                        if getattr(f, "page", None) == page
+                        if getattr(f, "block_id", None) == b.id
+                        or (
+                            getattr(f, "block_id", None) not in named_ids
+                            and getattr(f, "page", None) == page
+                        )
                     ]
-                    flag = f"visual_gate_failed:{','.join(codes)}"
+                    flag = f"visual_gate_failed:{','.join(dict.fromkeys(codes))}"
                     if flag not in b.error_flags:
                         b.error_flags.append(flag)
                     quarantined.append(
@@ -156,8 +186,10 @@ class VisualVerifyLoop:
             if quarantined:
                 await asyncio.to_thread(self.ledger.save_checkpoints_batch, quarantined)
                 logger.warning(
-                    "VisualVerifyLoop: %d block(s) quarantined as NEEDS_HUMAN across pages %s for job %s",
+                    "VisualVerifyLoop: %d block(s) quarantined as NEEDS_HUMAN "
+                    "(%d block-scoped, pages %s page-scoped) for job %s",
                     len(quarantined),
+                    len(named_ids),
                     sorted(failing_pages),
                     self.job_id,
                 )
