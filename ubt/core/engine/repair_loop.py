@@ -109,7 +109,7 @@ class RepairLoop:
             new_score >= self.qe_threshold and old_score < self.qe_threshold
         )
 
-    def _try_deterministic_glossary(
+    async def _try_deterministic_glossary(
         self,
         block: IRBlock,
         draft_text: str,
@@ -160,9 +160,24 @@ class RepairLoop:
         block.target_text = enforced
         block.error_flags = []
         block.status = BlockStatus.REPAIRED
+        # Re-score, do not inherit. The stored score is the one the *defect*
+        # earned (0.25 for a drift block), and leaving it on a block now marked
+        # REPAIRED reports a repaired block as nearly failing: the ATC'25 run
+        # finished with 14 repaired blocks all still reading 0.25, which made
+        # `min_qe` look like a quality failure. The heuristic is exactly the
+        # same judge that produced the pass band, so this is the closed loop, not
+        # a second opinion. The caller's `_adoptable`/terminal checks then see
+        # the repaired score and route the block on it.
+        try:
+            block.mtqe_score = await self.qe_runner.score(
+                block.source_text or "", enforced, block.block_type
+            )
+        except Exception as exc:  # scoring must never undo a verified repair
+            logger.debug("Re-score after deterministic repair failed for %s: %s", block.id, exc)
         logger.info(
-            "Block %s repaired deterministically (glossary drift); no model call needed",
+            "Block %s repaired deterministically (glossary drift); score %.2f, no model call",
             block.id,
+            block.mtqe_score if block.mtqe_score is not None else -1.0,
         )
         return block
 
@@ -267,7 +282,7 @@ class RepairLoop:
         # with the remaining flags, so this can only remove work, never add a
         # defect.
         if glossary_entries:
-            resolved = self._try_deterministic_glossary(
+            resolved = await self._try_deterministic_glossary(
                 block, draft_text, glossary_entries, target_lang
             )
             if resolved is not None:

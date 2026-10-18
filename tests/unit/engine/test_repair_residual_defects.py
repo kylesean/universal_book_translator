@@ -157,46 +157,60 @@ def _pending(draft: str, flags: list[str]) -> IRBlock:
 
 
 def _bare_loop() -> RepairLoop:
-    # The deterministic pre-repair reads no instance state, so a bare instance
-    # keeps the test free of router/QE construction.
-    return RepairLoop.__new__(RepairLoop)
+    """A loop carrying only the deterministic QE runner the pre-repair needs."""
+    from ubt.core.qe.heuristic import HeuristicQERunner
+
+    loop = RepairLoop.__new__(RepairLoop)
+    loop.qe_runner = HeuristicQERunner()
+    return loop
+
+
+def _try(block: IRBlock) -> IRBlock | None:
+    import asyncio
+
+    return asyncio.run(
+        _bare_loop()._try_deterministic_glossary(block, block.draft_text or "", _GLOSSARY, "zh")
+    )
 
 
 def test_glossary_drift_is_fixed_without_calling_the_model() -> None:
     block = _pending("我们提出了 framekernel。", [_DRIFT])
-    result = _bare_loop()._try_deterministic_glossary(
-        block, block.draft_text or "", _GLOSSARY, "zh"
-    )
+    result = _try(block)
     assert result is not None
     # The enforcer applies the CJK/Latin spacing rule, so the substituted term
-    # is padded: 我们提出了 帧内核。 — the drift is gone either way.
+    # may be padded: 我们提出了 帧内核。 — the drift is gone either way.
     assert "framekernel" not in (result.target_text or "")
     assert "帧内核" in (result.target_text or "")
     assert result.status is BlockStatus.REPAIRED
     assert result.error_flags == []
 
 
+def test_a_deterministic_repair_is_re_scored_not_inherited() -> None:
+    """The stored score belongs to the DEFECT, not to the repaired text.
+
+    Leaving it produced 14 blocks reading `repaired` at score 0.25, which made
+    `min_qe` look like a quality failure on the ATC'25 delivery.
+    """
+    block = _pending("我们提出了 framekernel。", [_DRIFT])
+    block.mtqe_score = 0.25  # the score the drift earned
+    result = _try(block)
+    assert result is not None
+    assert result.mtqe_score is not None
+    assert result.mtqe_score > 0.25, "the repaired text kept the defect's score"
+
+
 def test_a_drift_that_leaves_another_defect_still_reaches_the_model() -> None:
     """Only a full resolution may skip the paid repair."""
     block = _pending("我们提出了 framekernel。", [_DRIFT, "Omission suspected: verbatim residue"])
-    assert (
-        _bare_loop()._try_deterministic_glossary(block, block.draft_text or "", _GLOSSARY, "zh")
-        is None
-    )
+    assert _try(block) is None
 
 
 def test_a_triage_verdict_is_never_cleared_by_the_enforcer() -> None:
     """`needs_human_review` is a permanent verdict, not a repairable flag."""
     block = _pending("我们提出了 framekernel。", [_DRIFT, "needs_human_review"])
-    assert (
-        _bare_loop()._try_deterministic_glossary(block, block.draft_text or "", _GLOSSARY, "zh")
-        is None
-    )
+    assert _try(block) is None
 
 
 def test_an_already_canonical_draft_is_not_a_repair() -> None:
     block = _pending("我们提出了帧内核。", [_DRIFT])
-    assert (
-        _bare_loop()._try_deterministic_glossary(block, block.draft_text or "", _GLOSSARY, "zh")
-        is None
-    )
+    assert _try(block) is None
