@@ -22,10 +22,32 @@ from ubt.core.cleaners.html_sanitizer import strip_html_mark_tags
 
 _LINE_START_MARKUP_RE = re.compile(r"(?m)^([ \t]*)(=|\+|-|/|\d+\.)(?=\s|$)")
 
-#: A maximal run of two or more slashes. Replaced by joining the run's slashes
-#: with a zero-width space, so ``//`` can never survive to open a Typst comment
-#: (see :func:`typst_escape`). A single slash is left alone.
+#: A maximal run of two or more slashes. Escaped as ``\/`` between them, so
+#: ``//`` can never survive to open a Typst comment (see :func:`typst_escape`).
+#: A single slash is left alone.
 _SLASH_RUN_RE = re.compile(r"/{2,}")
+
+
+def _escape_slash_run(m: re.Match[str]) -> str:
+    r"""Escape every slash in a run: ``//`` -> ``\/\/``.
+
+    Typst reads ``//`` as a line comment even inside ``[#text[...]]``, swallowing
+    the closing brackets and failing the compile; ``///`` lost a whole doc
+    comment, and inside a table cell the leftover broke the document.
+
+    The previous fix joined the run's slashes with a zero-width space. That
+    breaks the comment token, but a ZWSP is a real character in the PDF's text
+    layer: every ``https://`` in a delivered file came out as ``https:/\u200b/``,
+    so the URL could not be found by search or pasted into a browser. Measured on
+    a 22-page paper: 77 such URLs, zero of them searchable.
+
+    A backslash escape is invisible in the text layer *and* blocks the comment.
+    Escaping each slash individually -- not joining them with an inserted
+    character -- is what keeps the round-trip exact: ``//`` must become
+    ``\/\/`` (four characters for two), never ``/\//`` (which still contains a
+    literal ``//`` and unescapes to three slashes).
+    """
+    return "".join("\\/" for _ in m.group(0))
 
 
 def escape_line_start_markup(text: str) -> str:
@@ -65,18 +87,12 @@ def typst_escape(text: str) -> str:
             out.append('\\"')
         else:
             out.append(ch)
-    # `//` opens a Typst line comment even inside
-    # [#text[...]] content, swallowing the closing brackets and failing the
-    # whole compile. A zero-width space breaks the comment token
-    # while rendering invisibly (URLs stay copyable modulo one ZWSP).
+    # `//` opens a Typst line comment even inside [#text[...]] content,
+    # swallowing the closing brackets and failing the whole compile. Escape it.
     #
     # A maximal-run replace, not ``str.replace``: ``str.replace`` is
-    # non-overlapping and single-pass, so a run of 3 slashes became ``/\u200b//``
-    # and a run of 4 became ``/\u200b//\u200b/`` \u2014 both still contain a literal ``//``.
-    # Typst then reads ``//`` as a line comment, silently discarding the rest
-    # of the line (a ``/// <summary>`` doc comment vanished; inside a table
-    # cell the leftover made the whole document fail to compile). Joining the
-    # run's slashes with a ZWSP puts one between *every* pair, so no ``//``
-    # survives whatever the run length.
+    # non-overlapping and single-pass, so a run of 3 slashes kept a literal
+    # ``//`` and Typst still read it as a comment. Escaping *every* slash in the
+    # run means no ``//`` survives whatever the run length.
     escaped = escape_line_start_markup("".join(out))
-    return _SLASH_RUN_RE.sub(lambda m: "\u200b".join(m.group(0)), escaped)
+    return _SLASH_RUN_RE.sub(_escape_slash_run, escaped)

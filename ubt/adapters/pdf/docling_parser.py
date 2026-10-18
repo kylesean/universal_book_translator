@@ -803,7 +803,13 @@ def extract_with_docling(
     # first attempt had produced.
     device, vram_note = _docling_vram_verdict(device)
     if vram_note:
-        logger.warning("Docling device auto-selected 'cpu': %s", vram_note)
+        # Say explicitly that earlier "Accelerator device: 'cuda:0'" lines from
+        # Docling's own import-time probe do not apply: the converter is pinned
+        # to cpu below, so a reader scanning for the device would otherwise
+        # conclude the run used the GPU.
+        logger.warning(
+            "Docling device auto-selected 'cpu' (overrides Docling's own probe): %s", vram_note
+        )
     if device in ("cpu", "cuda"):
         options.accelerator_options.device = device
         logger.info("Docling accelerator device pinned to '%s' for '%s'", device, path.name)
