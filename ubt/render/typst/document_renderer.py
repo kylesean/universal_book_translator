@@ -565,66 +565,47 @@ def _wrap_style(
     return segment
 
 
-#: Zero-width space: a break opportunity that renders as nothing, so the
-#: extracted text and the page image are unaffected by inserting one.
-_ZWSP = "\u200b"
+#: Table body text size, as a fraction of the document body size.
+#:
+#: A Typst ``table`` sized in ``fr`` still cannot shrink a cell below its widest
+#: *unbreakable* run. ``(7fr, 46fr, 43fr)`` inside a two-column paper's ~232pt
+#: text column could not fit
+#: ``// lib/devices/tpm: MmioAddr::new(base,len)``, so the cell overran the
+#: column and its text drew on top of the neighbouring one (``p3:rect327``
+#: reached 652.9pt on a 595.3pt page; ``p6:rect232`` reached 658.8pt).
+#:
+#: Shrinking the body is the lossless fix. The first attempt inserted
+#: zero-width spaces at code boundaries, which did fit -- but a ZWSP is a real
+#: character in the PDF's text layer, so the delivered file carried 67 of them
+#: and ``MmioAddr::new`` could no longer be found by search or copied into an
+#: editor. Typography must not corrupt the text it typesets.
+#:
+#: Measured on the ATC'25 table in a 232pt column: 288.3pt at 9.5pt (overflow),
+#: 271.7pt at 8pt, 260.6pt at 7pt.
+_TABLE_TEXT_SCALE: str = "0.84"
 
-#: A cell shorter than this cannot plausibly overflow a narrow column at 9.5pt,
-#: so it is left untouched (breaking it would only hurt code readability).
-_NO_BREAK_MIN_LEN = 24
+#: Widest unbreakable run (in display columns, CJK counting 2) at which the
+#: table body shrinks. Calibrated against Typst in a 232pt container (a
+#: two-column paper's text column, 282pt right edge): a run of 22 characters
+#: already reaches 244pt because the cell also pays insets and gutters, so 22 is
+#: the point where a wide cell starts eating the neighbouring column. Tables
+#: below it keep the document size; shrinking all of them would restyle the 61
+#: correct tables to rescue the 36 that overflow.
+_TABLE_SHRINK_TRIGGER: int = 22
 
-#: A run of non-space characters at least this long may need help: at 9.5pt a
-#: 16-character identifier is already ~70pt, a third of a two-column text width.
-_BREAK_TOKEN_MIN_LEN = 14
-
-#: Punctuation a reader already parses as a boundary, tried in this order so a
-#: break lands where the code's own structure suggests.
-_BREAK_AFTER: tuple[str, ...] = ("::", "/", ":", "_", ".")
-
-
-def _break_opportunities(text: str) -> str:
-    """Insert zero-width break points inside long unbreakable tokens.
-
-    A Typst ``table`` sized in ``fr`` still cannot shrink a cell below its
-    widest *unbreakable* run: ``(7fr, 46fr, 43fr)`` inside a two-column paper's
-    ~232pt text column could not fit
-    ``// lib/devices/tpm: MmioAddr::new(base,len)``, so the cell overran the
-    column and the row's text drew on top of the neighbouring column
-    (``p3:rect327`` reached 652.9pt on a 595.3pt page). Measured on the ATC'25
-    paper: the same table fits after break points (288.3pt -> 275.4pt in a
-    232pt column).
-
-    Only runs that contain no space are touched: Chinese prose already wraps
-    between characters, and breaking a space-separated phrase would let Typst
-    split ordinary words. A zero-width space renders as nothing, so the
-    extracted text and the page image are unchanged -- only the line breaking
-    can differ.
-
-    Short tokens are left alone: inserting breaks into every identifier would
-    wreck the readability of code that already fits.
-    """
-    # A run of non-space characters long enough to plausibly exceed a narrow
-    # column at 9.5pt. Below this, breaking would hurt more than help.
-    if len(text) < _NO_BREAK_MIN_LEN:
-        return text
-
-    def _insert(match: re.Match[str]) -> str:
-        token = match.group(0)
-        if len(token) < _BREAK_TOKEN_MIN_LEN:
-            return token
-        # Prefer punctuation a reader already parses as a boundary, so the
-        # break lands where the code's own structure suggests.
-        for sep in _BREAK_AFTER:
-            if sep in token:
-                return token.replace(sep, sep + _ZWSP)
-        # Otherwise break a long alphanumeric run at its midpoint.
-        middle = len(token) // 2
-        return token[:middle] + _ZWSP + token[middle:]
-
-    return re.sub(r"[^\s\u3000]+", _insert, text)
+#: Column count at which a table cannot fit a two-column page's text width at
+#: the document size, whatever its cell contents: 232pt / 10 columns leaves ~23pt
+#: per column, less than three Latin characters plus the gutter. Such a table is
+#: a whole-page exhibit and must be typeset smaller to survive.
+_TABLE_MAX_COMFORTABLE_COLUMNS: int = 8
 
 
-def render_table(markup: str, *, is_math_ok: Callable[[str], bool] | None = None) -> str:
+def render_table(
+    markup: str,
+    *,
+    is_math_ok: Callable[[str], bool] | None = None,
+    page_columns: int = 1,
+) -> str:
     """Render a Markdown table as a Typst ``#table`` with a three-line frame.
 
     Rebuilt from the IR rather than drawn over the source: a source-layer table
@@ -662,7 +643,7 @@ def render_table(markup: str, *, is_math_ok: Callable[[str], bool] | None = None
             # Typst's markup line break. Rendering the whole value first would
             # escape the ``<`` and print a literal ``<br>``.
             text = "\\\n".join(
-                _break_opportunities(render_prose(part.strip(), is_math_ok=is_math_ok))
+                render_prose(part.strip(), is_math_ok=is_math_ok)
                 for part in re.split(r"<br\s*/?>", value.strip())
             )
             rendered.append(f"[*{text}*]" if header and text else f"[{text}]")
@@ -682,33 +663,70 @@ def render_table(markup: str, *, is_math_ok: Callable[[str], bool] | None = None
     def _display_width(text: str) -> int:
         return sum(2 if ord(c) > 0x2E80 else 1 for c in text)
 
+    def _longest_unbreakable(text: str) -> int:
+        """Width of the widest run Typst cannot break, in display columns.
+
+        A space is a break opportunity, and so is every CJK boundary; anything
+        else (an identifier, a URL, a call expression) has to fit its column
+        whole. This is the quantity that decides whether a table can overflow.
+        """
+        runs = re.findall(r"[^\s\u3000]+", text)
+        return max((_display_width(run) for run in runs), default=0)
+
     weights = []
+    widest_unbreakable = 0
     for col in range(columns):
         longest = 0
         for values in (headers, *rows):
             if col < len(values):
                 for part in re.split(r"<br\s*/?>", values[col]):
                     longest = max(longest, _display_width(part.strip()))
+                    widest_unbreakable = max(widest_unbreakable, _longest_unbreakable(part))
         weights.append(max(longest, _TABLE_COL_MIN_WEIGHT))
     column_spec = "(" + ", ".join(f"{w}fr" for w in weights) + ")"
 
-    lines = [
-        "#table(",
-        f"  columns: {column_spec},",
-        "  inset: 5pt,",
-        "  column-gutter: 0.7em,",
-        "  align: (col, row) => if row == 0 { center + horizon } else { left + horizon },",
-        "  stroke: none,",
-        "  table.header(",
-        "    repeat: true,",
-        "    table.hline(stroke: 1.1pt),",
-        f"    {cells(headers, header=True)},",
-        "    table.hline(stroke: 0.5pt),",
-        "  ),",
+    # How much room does this table actually have?
+    #
+    # A two-column paper gives it ~232pt. A table with many columns or a long
+    # unbreakable run cannot fit that, and shrinking the font barely helps
+    # (measured: 0.84em -> 0.62em moved a 10-column table from 291.7pt to
+    # 286.6pt, still over the 282pt edge -- the columns are simply too narrow).
+    # The correct lever is to let the table span the full page width, which is
+    # what a wide exhibit is for. `#place(..., scope: "parent", float: true)`
+    # does exactly that and measures 535.1pt against the page's 545pt edge.
+    too_wide = (
+        widest_unbreakable >= _TABLE_SHRINK_TRIGGER or columns >= _TABLE_MAX_COMFORTABLE_COLUMNS
+    )
+    full_page = page_columns > 1 and too_wide
+    shrink = too_wide and not full_page
+
+    indent = "  " if full_page else "    "
+    if full_page:
+        lines = ['#place(top + center, scope: "parent", float: true, rect(width: 98%)[']
+        lines.append("  #table(")
+    else:
+        lines = ["["]
+        if shrink:
+            lines.append(f"  #set text(size: {_TABLE_TEXT_SCALE}em)")
+        lines.append("  #table(")
+    lines += [
+        f"{indent}columns: {column_spec},",
+        f"{indent}inset: 5pt,",
+        f"{indent}column-gutter: 0.7em,",
+        f"{indent}align: (col, row) => if row == 0 {{ center + horizon }} else {{ left + horizon }},",
+        f"{indent}stroke: none,",
+        f"{indent}table.header(",
+        f"{indent}  repeat: true,",
+        f"{indent}  table.hline(stroke: 1.1pt),",
+        f"{indent}  {cells(headers, header=True)},",
+        f"{indent}  table.hline(stroke: 0.5pt),",
+        f"{indent}),",
     ]
     for row in rows:
-        lines.append(f"  {cells(row, header=False)},")
-    lines += ["  table.hline(stroke: 1.1pt),", ")"]
+        lines.append(f"{indent}{cells(row, header=False)},")
+    lines.append(f"{indent}table.hline(stroke: 1.1pt),")
+    lines.append(f"{indent})")
+    lines.append("])" if full_page else "]")
     return "\n".join(lines)
 
 
@@ -812,6 +830,16 @@ def _unwrap_mark(text: str) -> str:
     return body[:closing]
 
 
+def _is_any_mark(text: str) -> bool:
+    """Whether the text starts with any ``<mark>`` wrapper at all.
+
+    Used as a last-resort guard: a wrapper the pipeline does not recognise must
+    still not reach the page as literal markup. The known classes are handled
+    by name (quarantine vs failed draft); this catches the rest.
+    """
+    return _MARK_RE.match(text) is not None
+
+
 def _is_placeholder(text: str) -> bool:
     """Whether this text is a quarantine marker rather than block content.
 
@@ -877,11 +905,17 @@ def _block_text(block: IRBlock) -> str:
     target = (block.target_text or "").strip()
     if target and not _is_placeholder(target):
         # A failed-draft wrapper is stripped, not skipped: the text inside is
-        # the translation the reader should get.
-        return _unwrap_mark(target).strip() if _is_failed_draft(target) else target
+        # the translation the reader should get. An unrecognised wrapper is
+        # stripped too -- pipeline markup must never reach the page as literal
+        # text, whatever class an older or newer build wrote.
+        if _is_failed_draft(target) or _is_any_mark(target):
+            return _unwrap_mark(target).strip()
+        return target
     draft = (block.draft_text or "").strip()
     if draft and not _is_placeholder(draft):
-        return _unwrap_mark(draft).strip() if _is_failed_draft(draft) else draft
+        if _is_failed_draft(draft) or _is_any_mark(draft):
+            return _unwrap_mark(draft).strip()
+        return draft
     return (block.source_text or "").strip()
 
 
@@ -1287,9 +1321,14 @@ class TypstDocumentRenderer:
                 # fallback when the target grid does not parse, and the source
                 # half of a bilingual pair.
                 source_text = (block.source_text or "").strip()
-                source_markup = render_table(source_text, is_math_ok=self._math_gate) or None
+                source_markup = (
+                    render_table(source_text, is_math_ok=self._math_gate, page_columns=self.columns)
+                    or None
+                )
                 target_text = _block_text(block)
-                markup = render_table(target_text, is_math_ok=self._math_gate)
+                markup = render_table(
+                    target_text, is_math_ok=self._math_gate, page_columns=self.columns
+                )
                 fell_back = False
                 if not markup:
                     # The model's translated grid is not a strict pipe table

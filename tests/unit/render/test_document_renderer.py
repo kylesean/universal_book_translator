@@ -1142,46 +1142,19 @@ def test_unwrapping_keeps_a_body_containing_its_own_markup() -> None:
 # UNBREAKABLE run. On the ATC'25 paper `(7fr, 46fr, 43fr)` inside a two-column
 # page's ~232pt text column could not fit
 # `// lib/devices/tpm: MmioAddr::new(base,len)`; the cell overran the column and
-# the row drew on top of the neighbouring one (p3:rect327 reached 652.9pt on a
-# 595.3pt page). Measured: the same table fits after break points, 288.3 ->
-# 275.4pt.
+# its text drew on top of the neighbouring one (p3:rect327 reached 652.9pt on a
+# 595.3pt page).
+#
+# The fix shrinks the table body. The first attempt inserted zero-width spaces
+# at code boundaries: it fit, but a ZWSP is a real character in the PDF text
+# layer, so the delivery carried 67 of them and `MmioAddr::new` could no longer
+# be found by search or copied into an editor. These tests pin the property that
+# matters -- the typeset text is byte-identical to what was translated.
 # --------------------------------------------------------------------------- #
 
 
-def test_a_long_code_run_gets_break_points() -> None:
-    from ubt.render.typst.document_renderer import _break_opportunities
-
-    out = _break_opportunities("// lib/devices/tpm: MmioAddr::new(base,len)")
-    assert "\u200b" in out, "no break opportunity was inserted"
-    # The visible text is unchanged: a zero-width space renders as nothing.
-    assert out.replace("\u200b", "") == "// lib/devices/tpm: MmioAddr::new(base,len)"
-
-
-def test_breaks_land_on_code_structure_not_mid_identifier() -> None:
-    from ubt.render.typst.document_renderer import _break_opportunities
-
-    out = _break_opportunities("ptr::read_volatile(addr)")
-    # `::` is a boundary the reader already parses, so the break goes there.
-    assert "::\u200b" in out
-
-
-def test_short_cells_are_left_verbatim() -> None:
-    """Breaking a token that already fits only hurts readability."""
-    from ubt.render.typst.document_renderer import _break_opportunities
-
-    for text in ("Boundary check", "Slab::new()", "0.85"):
-        assert _break_opportunities(text) == text
-
-
-def test_cjk_prose_is_not_broken_by_token_rules() -> None:
-    """Chinese already wraps between characters; no ZWSP belongs in it."""
-    from ubt.render.typst.document_renderer import _break_opportunities
-
-    text = "不安全代码块中的资源访问与资源获取"
-    assert _break_opportunities(text) == text
-
-
-def test_a_rendered_table_carries_the_break_points() -> None:
+def test_a_rendered_table_carries_no_inserted_break_characters() -> None:
+    """Typography must not corrupt the text it typesets."""
     from ubt.render.typst.document_renderer import render_table
 
     markup = (
@@ -1191,4 +1164,39 @@ def test_a_rendered_table_carries_the_break_points() -> None:
         "| // lib/devices/tpm: MmioAddr::new(base,len) |\n"
     )
     out = render_table(markup)
-    assert "\u200b" in out
+    # A `//` in code is protected with a ZWSP upstream; what must NOT appear is
+    # one inside an identifier the reader would search for.
+    assert "MmioAddr::\u200bnew" not in out
+    assert "read\u200b_volatile" not in out
+    assert "MmioAddr::new(base,len)" in out
+
+
+def test_a_table_with_a_wide_unbreakable_run_is_typeset_smaller() -> None:
+    """The lossless lever for a column that cannot shrink enough."""
+    from ubt.render.typst.document_renderer import _TABLE_TEXT_SCALE, render_table
+
+    out = render_table(
+        "| | A | B |\n|---|---|---|\n| R | // lib/devices/tpm: MmioAddr::new(base,len) | x |\n"
+    )
+    assert f"#set text(size: {_TABLE_TEXT_SCALE}em)" in out
+
+
+def test_a_table_that_already_fits_keeps_the_document_size() -> None:
+    """Shrinking every table would restyle the 62% that were never at risk."""
+    from ubt.render.typst.document_renderer import render_table
+
+    for markup in (
+        "| a | b |\n|---|---|\n| 1 | 2 |\n",
+        "| 模块 | 测试数 |\n|---|---|\n| dma | 12 |\n",
+    ):
+        assert "#set text(size:" not in render_table(markup)
+
+
+def test_the_size_override_is_scoped_to_the_table() -> None:
+    """`#set` inside a content block must not leak into the document body."""
+    from ubt.render.typst.document_renderer import render_table
+
+    out = render_table("| a | b |\n|---|---|\n| 1 | 2 |\n")
+    body = out.strip()
+    assert body.startswith("[")
+    assert body.endswith("]")
