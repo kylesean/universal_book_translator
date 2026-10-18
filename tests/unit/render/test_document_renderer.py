@@ -1061,3 +1061,75 @@ def test_a_leaked_sentinel_flags_its_own_block(tmp_path: Path) -> None:
     assert stats.sentinels_leaked == 1, stats
     assert ("leaky", "sentinel_leaked") in renderer.last_render_flags
     assert ("clean", "sentinel_leaked") not in renderer.last_render_flags
+
+
+# --------------------------------------------------------------------------- #
+# The two <mark> wrappers mean opposite things
+#
+# `ubt-blocked-human` is a quarantine marker carrying the SOURCE: rendering it
+# would put pipeline HTML on the page. `ubt-failed-draft` carries a REAL draft
+# whose repair CALL failed (provider 5xx); the translation itself is fine.
+#
+# Collapsing them into one "is a <mark>, so skip it" check made the renderer
+# fall back to `draft_text`, which predates glossary enforcement. On the ATC'25
+# paper that shipped 22 occurrences of `framekernel` in the artifact while the
+# ledger -- correctly rewritten to 帧内核 by the export stage -- said otherwise,
+# and discarded every repair that had actually landed before the 5xx.
+# --------------------------------------------------------------------------- #
+
+
+def _block_with(*, target: str | None, draft: str | None = None) -> IRBlock:
+    return _block(BlockType.NARRATIVE, target=target, draft=draft)
+
+
+def test_a_failed_repair_still_renders_its_translation() -> None:
+    """A repair 5xx is a provider failure, not a verdict on the draft."""
+    from ubt.render.typst.document_renderer import _block_text
+
+    block = _block_with(
+        target=(
+            '<mark class="ubt-failed-draft" title="Repair error: Model API error (500)">'
+            "我们提出了帧内核。</mark>"
+        ),
+        draft="我们提出了 framekernel。",
+    )
+    rendered = _block_text(block)
+    # The wrapped translation wins over the pre-enforcement draft.
+    assert rendered == "我们提出了帧内核。"
+    assert "<mark" not in rendered
+    assert "Repair error" not in rendered
+    assert "title=" not in rendered
+
+
+def test_a_quarantine_marker_falls_back_to_the_draft() -> None:
+    """`ubt-blocked-human` carries the SOURCE, so the draft is what the reader gets."""
+    from ubt.render.typst.document_renderer import _block_text
+
+    block = _block_with(
+        target=(
+            '<mark class="ubt-blocked-human" title="MQM Critical unresolved">'
+            "【待人工审校 | Human review required】We propose framekernel.</mark>"
+        ),
+        draft="我们提出了帧内核。",
+    )
+    assert _block_text(block) == "我们提出了帧内核。"
+
+
+def test_only_the_quarantine_wrapper_counts_as_a_placeholder() -> None:
+    from ubt.render.typst.document_renderer import _is_placeholder
+
+    assert _is_placeholder('<mark class="ubt-blocked-human" title="x">src</mark>') is True
+    assert _is_placeholder('<mark class="ubt-failed-draft" title="x">译文</mark>') is False
+    assert _is_placeholder("plain prose") is False
+    # A stray literal tag in prose is not a wrapper.
+    assert _is_placeholder("use the <mark> element") is False
+
+
+def test_unwrapping_keeps_a_body_containing_its_own_markup() -> None:
+    """Only the outer wrapper is stripped; inner markup is the block's content."""
+    from ubt.render.typst.document_renderer import _unwrap_mark
+
+    wrapped = '<mark class="ubt-failed-draft" title="t">a <b>bold</b> b</mark>'
+    assert _unwrap_mark(wrapped) == "a <b>bold</b> b"
+    # No closing tag: not a wrapper, so nothing is truncated.
+    assert _unwrap_mark('<mark class="x">unclosed') == '<mark class="x">unclosed'

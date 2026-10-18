@@ -705,14 +705,73 @@ class ReflowStats:
     assets_missing: list[str] = field(default_factory=list)
 
 
-#: The quarantine placeholder the triage stage writes into ``target_text``
-#: (``<mark class="ubt-blocked-human" …>``). It is markup about the block, not
-#: the block's content, so it must never reach the rendered page.
-_PLACEHOLDER_RE = re.compile(r"^\s*<mark\b", re.IGNORECASE)
+#: Marks a QUARANTINE placeholder: ``triage._blocked_human_target`` writes the
+#: *source text* under this wrapper when a critical defect could not be repaired.
+#: It is markup about the block, not the block's content, so it must never reach
+#: the rendered page.
+_BLOCKED_HUMAN_CLASS = "ubt-blocked-human"
+
+#: Marks a FAILED REPAIR: ``repair._record_failure`` wraps the draft that was
+#: already paid for when the repair call itself failed (provider 5xx, timeout).
+#: The wrapped text is a REAL translation and is what the reader should get —
+#: only the repair attempt failed. Collapsing this with the quarantine wrapper
+#: discarded the translation and fell back to ``draft_text``, which is the
+#: pre-glossary-enforcement draft: the delivery then shipped ``framekernel``
+#: while the ledger (correctly rewritten to 帧内核) said otherwise, and an
+#: entire repair round's worth of improvement was thrown away.
+_FAILED_DRAFT_CLASS = "ubt-failed-draft"
+
+#: Any ``<mark>`` wrapper the pipeline writes around a target. Kept as the
+#: general form for callers that only need "this is a wrapper, not prose".
+_MARK_RE = re.compile(r"^\s*<mark\b([^>]*)>", re.IGNORECASE)
+_CLASS_ATTR_RE = re.compile(r'class\s*=\s*["\']([^"\']*)["\']', re.IGNORECASE)
+
+
+def _mark_class(text: str) -> str | None:
+    """The ``class`` of a leading ``<mark>`` wrapper, or ``None`` if unwrapped."""
+    match = _MARK_RE.match(text)
+    if match is None:
+        return None
+    class_match = _CLASS_ATTR_RE.search(match.group(1))
+    return class_match.group(1) if class_match else ""
+
+
+def _unwrap_mark(text: str) -> str:
+    """The content inside a leading ``<mark …>`` … ``</mark>`` wrapper.
+
+    Only the pipeline's own wrappers are unwrapped; anything else (a stray
+    literal ``</mark>`` in prose that happened to start with ``<mark``) is
+    returned unchanged rather than truncated.
+    """
+    match = _MARK_RE.match(text)
+    if match is None:
+        return text
+    body = text[match.end() :]
+    closing = body.rfind("</mark>")
+    if closing == -1:
+        return text
+    return body[:closing]
 
 
 def _is_placeholder(text: str) -> bool:
-    return bool(_PLACEHOLDER_RE.match(text))
+    """Whether this text is a quarantine marker rather than block content.
+
+    Deliberately narrow: ONLY ``ubt-blocked-human`` is a placeholder. A
+    ``ubt-failed-draft`` wrapper carries the draft that the reader should see,
+    and treating it as a placeholder is what silently reverted the delivered
+    text to the un-enforced draft.
+    """
+    return _mark_class(text) == _BLOCKED_HUMAN_CLASS
+
+
+def _is_failed_draft(text: str) -> bool:
+    """Whether this is a REAL draft whose repair call failed (not a quarantine).
+
+    The distinction matters downstream: a failed-draft wrapper should be
+    rendered (with the wrapper stripped), while a quarantine marker must not
+    reach the page at all.
+    """
+    return _mark_class(text) == _FAILED_DRAFT_CLASS
 
 
 def _keeps_source(block: IRBlock) -> bool:
@@ -741,21 +800,29 @@ def _keeps_source(block: IRBlock) -> bool:
 def _block_text(block: IRBlock) -> str:
     """The text to render for a block: its translation, else its source.
 
-    A quarantined block (``BLOCKED_HUMAN``) carries a ``<mark>`` placeholder as
-    its ``target_text``, not a translation, so it is skipped: rendering it would
-    put the quarantine HTML on the page. The *draft* is used instead when it
-    exists — the draft is real translated prose that a false-positive gate
-    rejected, and shipping it is the whole point of the fail-open rule.
+    Two wrappers can arrive in ``target_text`` and they mean opposite things:
+
+    - ``ubt-blocked-human`` (quarantine): the SOURCE under a marker. Rendering
+      it would put the quarantine HTML on the page, so fall back to the draft —
+      that is real translated prose a false-positive gate rejected.
+    - ``ubt-failed-draft``: a real draft whose *repair call* failed (provider
+      5xx). The wrapped text IS the translation and must be rendered with the
+      wrapper stripped. Treating it as a quarantine marker discarded the
+      translation and served ``draft_text`` instead, which predates glossary
+      enforcement -- the artifact then disagreed with the ledger that had been
+      correctly rewritten.
 
     A block with no target and no draft is *not* silently dropped — the reader
     gets the source sentence.
     """
     target = (block.target_text or "").strip()
     if target and not _is_placeholder(target):
-        return target
+        # A failed-draft wrapper is stripped, not skipped: the text inside is
+        # the translation the reader should get.
+        return _unwrap_mark(target).strip() if _is_failed_draft(target) else target
     draft = (block.draft_text or "").strip()
     if draft and not _is_placeholder(draft):
-        return draft
+        return _unwrap_mark(draft).strip() if _is_failed_draft(draft) else draft
     return (block.source_text or "").strip()
 
 
