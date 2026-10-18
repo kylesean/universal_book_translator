@@ -1193,10 +1193,81 @@ def test_a_table_that_already_fits_keeps_the_document_size() -> None:
 
 
 def test_the_size_override_is_scoped_to_the_table() -> None:
-    """`#set` inside a content block must not leak into the document body."""
+    """`#set` inside a content block must not leak into the document body.
+
+    The assertion is on the *opening* token: ``#[`` opens a content block in
+    markup mode, where a bare ``[`` is just a text character. The bare form used
+    to be emitted, so ``#set text(size: 0.84em)`` applied to everything after the
+    table and each shrunken table multiplied the rest of the document by 0.84 --
+    a 17-table paper ended at 0.53pt type, which is what a delivered 22-page file
+    measured. The old test asserted the broken shape (``startswith("[")``), so it
+    stayed green while the whole document shrank.
+    """
     from ubt.render.typst.document_renderer import render_table
 
-    out = render_table("| a | b |\n|---|---|\n| 1 | 2 |\n")
+    # A table wide enough to trigger the size override, so the scoping is real.
+    markup = "| " + " | ".join("x" * 30 for _ in range(3)) + " |\n|---|---|---|\n"
+    out = render_table(markup, page_columns=1)
     body = out.strip()
-    assert body.startswith("[")
+    assert body.startswith("#[")
     assert body.endswith("]")
+    # No stray bracket survives as typeset text either: the content block is the
+    # only place ``[`` may appear at the very start.
+    assert "#set text(size: 0.84em)" in body
+
+
+def test_a_shrunken_table_does_not_resize_the_prose_after_it() -> None:
+    """The defect measured end-to-end: the leak compounded across tables.
+
+    Compiles a document with two shrunken tables and checks that the paragraphs
+    before, between, and after them are all typeset at the document size. This is
+    the property that failed in the delivered 22-page file, where the last page's
+    type had shrunk to 0.49pt -- a size no reader can use.
+    """
+    pytest.importorskip("pypdfium2")
+    import subprocess
+    import tempfile
+
+    from ubt.render.typst.document_renderer import render_table
+
+    markup = "| " + " | ".join("y" * 30 for _ in range(3)) + " |\n|---|---|---|\n"
+    table = render_table(markup, page_columns=1)
+    source = "\n\n".join(
+        [
+            "#set page(width: 420pt, height: 900pt, margin: 20pt)",
+            "#set text(size: 10pt)",
+            "BEFORE the table.",
+            table,
+            "BETWEEN the tables.",
+            table,
+            "AFTER the tables.",
+        ]
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        typ = Path(tmp) / "main.typ"
+        pdf = Path(tmp) / "main.pdf"
+        typ.write_text(source, encoding="utf-8")
+        result = subprocess.run(
+            ["typst", "compile", str(typ), str(pdf)],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if result.returncode != 0:
+            pytest.skip(f"typst unavailable: {result.stderr[:200]}")
+        import pypdfium2 as pdfium
+
+        doc = pdfium.PdfDocument(str(pdf))
+        page = doc[0]
+        textpage = page.get_textpage()
+        heights: dict[str, float] = {}
+        for index in range(textpage.count_rects(0, -1)):
+            rect = textpage.get_rect(index)
+            chunk = textpage.get_text_bounded(*rect)
+            for label in ("BEFORE", "BETWEEN", "AFTER"):
+                if chunk.strip() == label or chunk.startswith(label):
+                    heights.setdefault(label, round(rect[3] - rect[1], 2))
+        doc.close()
+    assert heights.keys() >= {"BEFORE", "BETWEEN", "AFTER"}, heights
+    # All three are document-size text: the tables are contained.
+    assert len(set(heights.values())) == 1, heights

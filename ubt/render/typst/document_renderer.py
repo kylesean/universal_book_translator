@@ -705,7 +705,16 @@ def render_table(
         lines = ['#place(top + center, scope: "parent", float: true, rect(width: 98%)[']
         lines.append("  #table(")
     else:
-        lines = ["["]
+        # ``#[`` opens a *content block*; a bare ``[`` is ordinary text in markup
+        # mode. The bare form did not scope anything: ``#set text(size: 0.84em)``
+        # inside it leaked into the rest of the document, and the ``[``/``]``
+        # themselves were typeset as literal characters. The leak compounded --
+        # each shrunken table multiplied every following paragraph's size by
+        # 0.84 -- so a paper with 17 such tables ended at 10.5 * 0.84**17 =
+        # 0.53pt, which is exactly what the delivered 22-page file measured
+        # (0.49pt on the last page). Nothing was lost by the page count: the
+        # whole document had been shrunk to fit.
+        lines = ["#["]
         if shrink:
             lines.append(f"  #set text(size: {_TABLE_TEXT_SCALE}em)")
         lines.append("  #table(")
