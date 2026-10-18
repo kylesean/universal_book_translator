@@ -121,3 +121,82 @@ async def test_residual_check_adds_no_flag_on_a_clean_candidate() -> None:
 
     assert result.error_flags == []
     assert result.status is BlockStatus.REPAIRED
+
+
+# --------------------------------------------------------------------------- #
+# Glossary drift is repaired deterministically, before the paid model
+#
+# The enforcer substitutes an untranslated source term for its canonical
+# rendering at zero token cost, and the same validator that flagged the drift
+# verifies the result -- the "one rule both rejects and accepts" property that
+# makes a repair checkable. On the ATC'25 run all 13 glossary candidates went to
+# the paid model instead, every call 500'd, and all 13 were quarantined as
+# NEEDS_HUMAN while the export stage fixed the same drift deterministically.
+# --------------------------------------------------------------------------- #
+
+_GLOSSARY: list[dict[str, Any]] = [
+    {"source": "framekernel", "translation": "帧内核", "aliases": [], "inflected_variants": []}
+]
+_DRIFT = "Glossary term violation: Glossary terms drifted: ['framekernel -> 帧内核']"
+
+
+def _pending(draft: str, flags: list[str]) -> IRBlock:
+    block = IRBlock(
+        element=make_element(
+            id="b1",
+            spine_index=1,
+            block_type=BlockType.NARRATIVE,
+            source_text="We propose framekernel.",
+        )
+    )
+    block.target_text = draft
+    block.draft_text = draft
+    block.error_flags = list(flags)
+    block.status = BlockStatus.REPAIR_PENDING
+    return block
+
+
+def _bare_loop() -> RepairLoop:
+    # The deterministic pre-repair reads no instance state, so a bare instance
+    # keeps the test free of router/QE construction.
+    return RepairLoop.__new__(RepairLoop)
+
+
+def test_glossary_drift_is_fixed_without_calling_the_model() -> None:
+    block = _pending("我们提出了 framekernel。", [_DRIFT])
+    result = _bare_loop()._try_deterministic_glossary(
+        block, block.draft_text or "", _GLOSSARY, "zh"
+    )
+    assert result is not None
+    # The enforcer applies the CJK/Latin spacing rule, so the substituted term
+    # is padded: 我们提出了 帧内核。 — the drift is gone either way.
+    assert "framekernel" not in (result.target_text or "")
+    assert "帧内核" in (result.target_text or "")
+    assert result.status is BlockStatus.REPAIRED
+    assert result.error_flags == []
+
+
+def test_a_drift_that_leaves_another_defect_still_reaches_the_model() -> None:
+    """Only a full resolution may skip the paid repair."""
+    block = _pending("我们提出了 framekernel。", [_DRIFT, "Omission suspected: verbatim residue"])
+    assert (
+        _bare_loop()._try_deterministic_glossary(block, block.draft_text or "", _GLOSSARY, "zh")
+        is None
+    )
+
+
+def test_a_triage_verdict_is_never_cleared_by_the_enforcer() -> None:
+    """`needs_human_review` is a permanent verdict, not a repairable flag."""
+    block = _pending("我们提出了 framekernel。", [_DRIFT, "needs_human_review"])
+    assert (
+        _bare_loop()._try_deterministic_glossary(block, block.draft_text or "", _GLOSSARY, "zh")
+        is None
+    )
+
+
+def test_an_already_canonical_draft_is_not_a_repair() -> None:
+    block = _pending("我们提出了帧内核。", [_DRIFT])
+    assert (
+        _bare_loop()._try_deterministic_glossary(block, block.draft_text or "", _GLOSSARY, "zh")
+        is None
+    )

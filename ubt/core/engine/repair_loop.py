@@ -109,6 +109,63 @@ class RepairLoop:
             new_score >= self.qe_threshold and old_score < self.qe_threshold
         )
 
+    def _try_deterministic_glossary(
+        self,
+        block: IRBlock,
+        draft_text: str,
+        glossary_entries: list[dict[str, Any]],
+        target_lang: str = "zh",
+    ) -> IRBlock | None:
+        """Fix glossary drift mechanically; return the block when nothing is left.
+
+        Returns ``None`` when the draft still carries a defect the enforcer
+        cannot resolve, so the caller falls through to the paid repair with the
+        remaining flags intact.
+
+        The acceptance test is the SAME validator that produced the flag
+        (``GlossaryConsistencyValidator``), not the enforcer's own report: an
+        enforcer that rewrote a span but left a different term drifted must not
+        be able to declare itself successful. That closed loop -- reject and
+        accept by one rule -- is what makes this repair verifiable and what an
+        LLM rewrite cannot offer.
+        """
+        from ubt.core.validators.consistency import GlossaryConsistencyValidator
+        from ubt.core.validators.glossary_enforcer import DeterministicGlossaryEnforcer
+
+        try:
+            enforcer = DeterministicGlossaryEnforcer(
+                glossary=glossary_entries, target_lang=target_lang
+            )
+            enforced, _records, _quarantined = enforcer.enforce_audited(draft_text)
+        except Exception as exc:  # an enforcer bug must not block the repair path
+            logger.debug("Deterministic glossary pre-repair skipped for %s: %s", block.id, exc)
+            return None
+        if enforced == draft_text:
+            return None
+
+        validator = GlossaryConsistencyValidator(glossary=glossary_entries)
+        if not validator.validate(block.source_text or "", enforced).is_valid:
+            return None
+
+        # Only the drift flags are cleared; anything else (omission, numeric)
+        # still needs the model, so its presence keeps the block in repair.
+        remaining = [
+            flag
+            for flag in block.error_flags
+            if "Glossary term violation" not in flag and not flag.startswith("glossary_")
+        ]
+        if remaining:
+            return None
+
+        block.target_text = enforced
+        block.error_flags = []
+        block.status = BlockStatus.REPAIRED
+        logger.info(
+            "Block %s repaired deterministically (glossary drift); no model call needed",
+            block.id,
+        )
+        return block
+
     def select_repair_candidates(self, blocks: list[IRBlock]) -> list[IRBlock]:
         """Blocks whose repair is *verifiable*: a deterministic invariant failed.
 
@@ -192,6 +249,29 @@ class RepairLoop:
         block.repair_rounds += 1
 
         draft_text = block.target_text or block.draft_text or ""
+
+        # Deterministic pre-repair: a glossary DRIFT is mechanically fixable.
+        #
+        # `DeterministicGlossaryEnforcer` substitutes an untranslated source term
+        # for its canonical rendering at zero token cost, and the same validator
+        # that flagged the drift verifies the result -- that is exactly the
+        # "a deterministic invariant both rejects and accepts" property that
+        # makes a repair checkable. Sending it to the paid model instead is both
+        # wasteful and fragile: on the ATC'25 run every one of the 13 glossary
+        # candidates went to repair, all 13 calls 500'd on the local model, and
+        # all 13 were quarantined as NEEDS_HUMAN -- while the export stage then
+        # fixed the same drift deterministically anyway.
+        #
+        # The enforcer runs FIRST and, when it resolves every flag, the model is
+        # not called at all. Partial resolution still falls through to the model
+        # with the remaining flags, so this can only remove work, never add a
+        # defect.
+        if glossary_entries:
+            resolved = self._try_deterministic_glossary(
+                block, draft_text, glossary_entries, target_lang
+            )
+            if resolved is not None:
+                return resolved
 
         # Dynamic Test-Time Compute Allocation (2026 EACL):
         # Format-only defects bypass expensive CoT to avoid overthinking & hallucinations;
