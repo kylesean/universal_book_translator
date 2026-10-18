@@ -9,6 +9,12 @@ Design (warn-only, ROI-first):
   pikepdf mediabox dimensions). Falls back to the IR source bboxes only when
   the artifact yields no text, and records ``artifact_unverified`` so an
   unmeasured layout is never reported as a clean pass.
+- T1.5 type-size audit, zero model tokens, every page: the median and the
+  share of non-whitespace glyphs below 5pt. This is the only tier that sees a
+  whole-document collapse — a leaked ``#set text`` shrank a delivered 83-page
+  paper to 22 pages with type down to 0.49pt while every structural check
+  passed (no text lost, no overflow, no blank page). ``type_illegible`` is
+  fail-closed in ``blocking_gate_tripped``.
 - Pixel confirmation + T2 VLM are *optional*: page PNGs are rendered
   in-process by ``pdf_oxide`` (base dependency; no poppler ``pdftoppm``
   subprocess) and inspected with Pillow. PyMuPDF is deliberately NOT used
@@ -38,6 +44,7 @@ import base64
 import logging
 import shutil
 import tempfile
+import unicodedata
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -78,11 +85,61 @@ _ALWAYS_FAIL_CLOSED_MAJORS = frozenset(
         "target_language_sparse",
     }
 )
+#: DELIVERY-BREAKING TYPE COLLAPSE. ``type_illegible`` means a page's median
+#: content glyph renders under 4pt -- physically unreadable, so it fails closed
+#: regardless of the opt-in blocking gate and of the page-count window, on the
+#: same reasoning as ``target_language_sparse``.
+#:
+#: ``type_collapsed`` (a majority of one page's glyphs tiny, median still
+#: readable) stays a MAJOR that only blocks under the opt-in gate: it can be a
+#: legitimately small table, and warning is the honest posture.
+_ALWAYS_FAIL_CLOSED_TYPE_CODES = frozenset({"type_illegible"})
 BLANK_TEXT_THRESHOLD_CHARS = 20
 OVERLAP_IOU_THRESHOLD = 0.6
 MIN_OVERLAP_AREA_PT2 = 500.0
 OUT_OF_BOUNDS_TOLERANCE_PT = 5.0
 DEFAULT_DPI = 110
+
+# -- type-size audit -------------------------------------------------------
+#
+# A page set at ~0.5pt is not a style preference: the text is physically
+# unreadable and the reader receives a document they cannot use. The delivered
+# 83-page paper (2609.00006v1) shipped at 22 pages with 10 of 22 below 4pt and
+# the last page at 0.49pt, because a table's ``#set text`` leaked and compounded
+# by 0.84 per table. Every structural check passed: no text lost, nothing
+# overflowed, no page blank. Only measuring glyph size sees it.
+#
+# Two measurement traps were cleared by running this over the corpus's 13
+# delivered files, and both would have produced false failures:
+#
+# 1. ``FPDFText_GetFontSize`` is NOT the rendered size. It reports the font's
+#    state size, which a text matrix can scale: ``chapter-3_mono.pdf`` reports
+#    exactly 1.00pt on seven pages whose glyphs actually render at ~5.8pt.
+#    The audit therefore measures each text rect's height instead.
+# 2. A rect's height is the glyph's *ink* height, and punctuation ink is short.
+#    A TOC leader ``.`` measures 1.29pt on a perfectly good page (book_mono p3,
+#    confirmed by rendering it). Only letters, digits and ideographs are counted.
+#
+# After both exclusions the healthy/broken separation is wide:
+#
+#     broken 2609.00006v1 (22p):  worst median 0.49pt, 98% of glyphs < 4pt
+#     healthy chapter-3       :  worst median 5.80pt, 17% of glyphs < 4pt
+#     healthy book (296p)     :  worst median 5.35pt,  3% of glyphs < 4pt
+#     healthy atc25 / 2610    :  worst median 7.32pt,  0% of glyphs < 4pt
+#
+# No legible convention sets body text below 5pt (footnote minima are ~6-7pt),
+# so 4pt is a floor with no legitimate use beneath it.
+TYPE_ILLEGIBLE_PT = 4.0
+#: Share of a page's content glyphs under ``TYPE_ILLEGIBLE_PT`` that makes the
+#: page collapsed. Highest healthy reading in the corpus is 17%, the broken file
+#: reads 98%; 50% sits in the middle of that gap.
+TYPE_COLLAPSED_FRACTION = 0.5
+#: Below this many content *characters* a page has too little text to judge (a
+#: figure page with one caption word). Counted in characters, not rects: tiny
+#: type merges hundreds of characters into a couple of rects, so a rect-count
+#: floor skipped exactly the pages this audit exists for.
+TYPE_AUDIT_MIN_GLYPHS = 20
+
 # Pillow pixel heuristics (white-paper academic PDFs only).
 BLANK_MEAN_THRESHOLD = 250.0
 BLANK_STD_THRESHOLD = 6.0
@@ -275,6 +332,133 @@ def artifact_text_boxes(pdf_path: Path, pages: Sequence[int]) -> list[_ArtifactB
                 )
             )
     return boxes
+
+
+def _is_content_char(char: str) -> bool:
+    """Letters, digits and ideographs -- not punctuation, space or symbols.
+
+    Punctuation is excluded because a rect reports *ink* height, and a period's
+    ink is short: a TOC leader measures 1.29pt on a page whose body is 9pt. A
+    symbol (``$``, ``∗``) is likewise not a measure of the text size.
+    """
+    if char.isspace():
+        return False
+    return unicodedata.category(char)[0] in ("L", "N")
+
+
+def type_size_findings(
+    pdf_path: Path,
+    pages: Sequence[int],
+    *,
+    illegible_pt: float = TYPE_ILLEGIBLE_PT,
+    collapsed_fraction: float = TYPE_COLLAPSED_FRACTION,
+) -> list[VisualFinding]:
+    """Flag pages whose typeset text is physically too small to read.
+
+    This is the check that was missing when an 83-page paper was delivered at 22
+    pages with type down to 0.49pt. Every other tier passed: the character count
+    was intact (no text lost), the geometry boxes were inside the mediabox (no
+    overflow), and no page was blank. A layout can satisfy all of those while
+    rendering type a reader cannot see, so size has to be measured directly.
+
+    Size comes from each text rect's height, never from
+    ``FPDFText_GetFontSize`` (see the constants' comment: that call reports a
+    state size a text matrix can scale, and it reads 1.00pt on healthy pages of
+    ``chapter-3_mono.pdf``). Only content characters count, so a TOC's leader
+    dots and a caption's punctuation cannot decide a page's verdict.
+
+    Two signatures are reported, both page-scoped:
+
+    * ``type_illegible`` -- the page's *median* content glyph is under the
+      floor. The page as a whole is set too small.
+    * ``type_collapsed`` -- a majority of the page's content glyphs are under
+      the floor while the median is not; the page mixes readable prose with a
+      collapsed region, which is how a leaked ``#set`` looks mid-document.
+
+    Pages with fewer than ``TYPE_AUDIT_MIN_GLYPHS`` content characters are
+    skipped: a figure-only page with one caption cannot support a verdict.
+    """
+    try:
+        import pypdfium2 as pdfium
+    except ImportError:  # pragma: no cover - base dependency, but never fatal
+        logger.debug("Visual gate: pypdfium2 unavailable; type-size audit skipped")
+        return []
+
+    findings: list[VisualFinding] = []
+    try:
+        doc = pdfium.PdfDocument(str(pdf_path))
+    except Exception as exc:
+        logger.debug("Visual gate: cannot open %s for type audit: %s", pdf_path, exc)
+        return []
+    try:
+        for page_no in pages:
+            if not 1 <= page_no <= len(doc):
+                continue
+            try:
+                page = doc[page_no - 1]
+                try:
+                    textpage = page.get_textpage()
+                    try:
+                        heights: list[float] = []
+                        glyph_count = 0
+                        rect_count = textpage.count_rects(0, -1)
+                        for index in range(rect_count):
+                            rect = textpage.get_rect(index)
+                            text = textpage.get_text_bounded(*rect)
+                            content = sum(1 for char in text if _is_content_char(char))
+                            if content == 0:
+                                # Leader dots, rules, punctuation-only runs.
+                                continue
+                            glyph_count += content
+                            height = float(rect[3]) - float(rect[1])
+                            if height > 0:
+                                heights.append(height)
+                    finally:
+                        textpage.close()
+                finally:
+                    page.close()
+            except Exception as exc:
+                logger.debug("Visual gate: type audit failed for page %d: %s", page_no, exc)
+                continue
+            # Count *characters*, not rects. Extremely small type collapses many
+            # characters into a couple of rects, so a rect-count floor let the
+            # worst pages -- the ones this audit exists for -- be skipped: a
+            # 0.5pt paragraph arrives as 2 rects holding 160 characters.
+            if glyph_count < TYPE_AUDIT_MIN_GLYPHS or not heights:
+                continue
+            heights.sort()
+            median = heights[len(heights) // 2]
+            tiny_share = sum(1 for height in heights if height < illegible_pt) / len(heights)
+            if median < illegible_pt:
+                findings.append(
+                    VisualFinding(
+                        severity="critical",
+                        code="type_illegible",
+                        message=(
+                            f"Page {page_no} is typeset at a median glyph height of "
+                            f"{median:.2f}pt (floor {illegible_pt:.0f}pt; "
+                            f"{glyph_count} characters): the text cannot be read"
+                        ),
+                        page=page_no,
+                    )
+                )
+            elif tiny_share >= collapsed_fraction:
+                findings.append(
+                    VisualFinding(
+                        severity="major",
+                        code="type_collapsed",
+                        message=(
+                            f"Page {page_no} has {tiny_share:.0%} of its "
+                            f"{glyph_count} characters below "
+                            f"{illegible_pt:.0f}pt (median {median:.2f}pt): "
+                            "a region of the page collapsed"
+                        ),
+                        page=page_no,
+                    )
+                )
+    finally:
+        doc.close()
+    return findings
 
 
 def blank_page_candidates(pdf_path: Path, min_chars: int = BLANK_TEXT_THRESHOLD_CHARS) -> list[int]:
@@ -650,6 +834,10 @@ def blocking_gate_tripped(
             getattr(f, "code", "") in _ALWAYS_FAIL_CLOSED_MAJORS
             and getattr(f, "severity", "") == "major"
         )
+        # An illegible page is a broken artifact, not a style preference: every
+        # other tier can pass while the reader cannot read the page (measured:
+        # 10 of 22 pages below 4pt with zero text lost).
+        or getattr(f, "code", "") in _ALWAYS_FAIL_CLOSED_TYPE_CODES
     ]
     if always_fail:
         return always_fail
@@ -774,7 +962,7 @@ def _tier_coverage(vlm_pages: Sequence[int], skip_notes: Sequence[str]) -> str:
     geometry and pixel tiers ran and the semantic tier was never asked. This
     line makes the distinction explicit and is part of every report.
     """
-    ran = ["geometry", "pixel"]
+    ran = ["geometry", "type", "pixel"]
     if vlm_pages:
         ran.append("vlm")
     coverage = f"tiers run: {', '.join(ran)}"
@@ -840,6 +1028,12 @@ async def run_visual_gate(
     artifact_boxes = await asyncio.to_thread(artifact_text_boxes, pdf_path, geometry_pages)
     bounds = await asyncio.to_thread(page_bounds, pdf_path)
     rotations = await asyncio.to_thread(page_rotations, pdf_path)
+    # Type size is checked on every page, not a sample: unlike raster/VLM tiers it
+    # costs one pdfium char walk per page (no rendering, no tokens), and the
+    # failure it catches is silent in every other tier.
+    findings.extend(
+        await asyncio.to_thread(type_size_findings, pdf_path, list(range(1, total + 1)))
+    )
     if artifact_boxes:
         findings.extend(block_overlap_findings(artifact_boxes))
         findings.extend(blocks_out_of_bounds_findings(artifact_boxes, bounds))
@@ -935,6 +1129,10 @@ async def run_visual_gate(
         # proxy available before raster/VLM inspection.
         "overlap_pairs": sum(f.code == "block_overlap" for f in findings),
         "truncation_count": sum(f.code == "block_out_of_bounds" for f in findings),
+        # Type size is the tier that catches a whole-document collapse, which no
+        # structural check sees. Keep its counts in the report beside the others.
+        "type_illegible_pages": sum(f.code == "type_illegible" for f in findings),
+        "type_collapsed_pages": sum(f.code == "type_collapsed" for f in findings),
     }
     return VisualGateResult(
         passed=passed,

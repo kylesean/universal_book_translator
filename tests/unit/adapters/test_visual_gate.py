@@ -274,3 +274,145 @@ def test_a_run_with_the_vlm_judge_reports_three_tiers() -> None:
     full = _tier_coverage((1, 2), [])
     assert "vlm" in full
     assert "not run" not in full
+
+
+# --------------------------------------------------------------------------- #
+# Type-size audit
+#
+# The tier that catches a whole-document collapse. It was added after an 83-page
+# paper shipped at 22 pages with 10 pages below 4pt and the last at 0.49pt: every
+# structural check passed (no text lost, no overflow, no blank page), so nothing
+# else in the gate could see it.
+#
+# The audit's two measurement traps were found by running it over the corpus's 13
+# delivered files, and these tests pin both:
+#   * FPDFText_GetFontSize is a state size a text matrix can scale (chapter-3
+#     reports 1.00pt while rendering ~5.8pt), so height is measured instead;
+#   * a rect's height is ink height, and punctuation ink is short (a TOC leader
+#     measures 1.29pt on a healthy page), so only letters/digits count.
+# --------------------------------------------------------------------------- #
+
+
+def _typst_pdf(tmp_path: Path, body: str, *, size: str = "10pt") -> Path:
+    """Compile a one-page Typst document at ``size`` into ``tmp_path``."""
+    import shutil
+    import subprocess
+
+    typst = shutil.which("typst")
+    if typst is None:
+        pytest.skip("typst is not installed")
+    source = tmp_path / "main.typ"
+    pdf = tmp_path / "main.pdf"
+    source.write_text(
+        f"#set page(width: 420pt, height: 600pt, margin: 20pt)\n#set text(size: {size})\n{body}\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [typst, "compile", str(source), str(pdf)],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    if result.returncode != 0:  # pragma: no cover - environment failure
+        pytest.skip(f"typst failed: {result.stderr[:200]}")
+    return pdf
+
+
+def test_a_page_set_too_small_is_reported_as_illegible(tmp_path: Path) -> None:
+    """The delivered-defect shape: body text rendered at a fraction of a point."""
+    from ubt.adapters.pdf.visual_gate import type_size_findings
+
+    pdf = _typst_pdf(tmp_path, "The quick brown fox jumps over the lazy dog. " * 40, size="0.5pt")
+    findings = type_size_findings(pdf, [1])
+    assert [f.code for f in findings] == ["type_illegible"]
+    assert findings[0].severity == "critical"
+    assert findings[0].page == 1
+
+
+def test_a_normally_set_page_passes(tmp_path: Path) -> None:
+    from ubt.adapters.pdf.visual_gate import type_size_findings
+
+    pdf = _typst_pdf(tmp_path, "The quick brown fox jumps over the lazy dog. " * 40)
+    assert type_size_findings(pdf, [1]) == []
+
+
+def test_a_table_of_contents_leader_dots_do_not_fail_the_page(tmp_path: Path) -> None:
+    """book_mono p3 was a false positive: leader dots measure 1.29pt of ink.
+
+    The audit must judge the page by its letters, not by its punctuation, or
+    every book with a table of contents refuses export.
+    """
+    from ubt.adapters.pdf.visual_gate import type_size_findings
+
+    body = "\n".join(f"#h(1fr) Chapter {i} #h(1fr) {i}" for i in range(30))
+    pdf = _typst_pdf(tmp_path, body)
+    assert type_size_findings(pdf, [1]) == []
+
+
+def test_six_point_type_is_small_but_legible(tmp_path: Path) -> None:
+    """The corpus's densest healthy pages render at ~5.4-5.8pt and must pass.
+
+    ``book_mono`` and ``chapter-3`` sit there (footnote-heavy technical books).
+    4pt is chosen as the floor precisely so those stay legal while the 0.49pt
+    collapse does not.
+    """
+    from ubt.adapters.pdf.visual_gate import type_size_findings
+
+    pdf = _typst_pdf(tmp_path, "The quick brown fox jumps over the lazy dog. " * 40, size="6pt")
+    assert type_size_findings(pdf, [1]) == []
+
+
+def test_a_matrix_scaled_font_is_measured_by_rendered_height(tmp_path: Path) -> None:
+    """chapter-3_mono.pdf reports 1.00pt via GetFontSize while rendering at 5.8pt.
+
+    A ``#scale``-transformed run keeps a nominal font size that is unrelated to
+    its rendered size. Measuring heights rather than the reported size is what
+    keeps this healthy page out of the fail-closed path.
+    """
+    from ubt.adapters.pdf.visual_gate import type_size_findings
+
+    body = "#scale(x: 90%, y: 90%)[The quick brown fox jumps over the lazy dog. " * 40 + "]"
+    pdf = _typst_pdf(tmp_path, body)
+    assert type_size_findings(pdf, [1]) == []
+
+
+def test_the_illegible_code_fails_closed_with_the_blocking_gate_off() -> None:
+    """A page nobody can read must not ship because an opt-in flag is off.
+
+    ``blocking_gate_tripped`` normally returns [] when ``enabled`` is False and
+    the document is long. Type illegibility joins the small set of codes that
+    ignore both conditions, alongside an unreadable PDF.
+    """
+    from ubt.adapters.pdf.visual_gate import blocking_gate_tripped
+
+    finding = VisualFinding(
+        severity="critical",
+        code="type_illegible",
+        message="Page 3 is typeset at a median glyph height of 0.49pt",
+        page=3,
+    )
+    for enabled in (False, True):
+        tripped = blocking_gate_tripped([finding], total_pages=400, enabled=enabled)
+        assert [f.code for f in tripped] == ["type_illegible"]
+
+
+def test_a_collapsed_region_warns_but_does_not_fail_closed() -> None:
+    """A small table can legitimately be tiny; only a majority collapse warns.
+
+    ``type_collapsed`` is a MAJOR, so it blocks under the opt-in gate and stays a
+    warning otherwise -- unlike ``type_illegible``, which is about the page as a
+    whole.
+    """
+    from ubt.adapters.pdf.visual_gate import blocking_gate_tripped
+
+    finding = VisualFinding(
+        severity="major",
+        code="type_collapsed",
+        message="Page 7 has 80% of its glyphs below 4pt",
+        page=7,
+    )
+    assert blocking_gate_tripped([finding], total_pages=400, enabled=False) == []
+    # A LONG document only blocks on CRITICAL findings even with the opt-in gate
+    # on (the window is QA_FULL_GATE_MAX_PAGES); this is the existing contract,
+    # not a property of the type codes.
+    assert blocking_gate_tripped([finding], total_pages=400, enabled=True) == []
