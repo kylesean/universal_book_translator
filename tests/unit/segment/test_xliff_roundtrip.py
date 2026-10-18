@@ -198,3 +198,150 @@ def test_to_xliff_emits_job_id_note_and_pe_import_reads_it(tmp_path: Path) -> No
     revisions = parse_xliff_revisions(xliff_file)
     assert revisions.job_ids == {"job_xyz_123"}
     assert revisions.revisions["block_001"] == "运行 ⟦CODE_MASK_0001-abc⟧ 之前。"
+
+
+# --------------------------------------------------------------------------- #
+# The reviewer's queue
+#
+# The routing was correct and the interchange format threw it away: every block
+# a human needed to see was emitted in a state that hid it. These pin the three
+# states a reviewer must be able to tell apart, and the evidence behind them.
+# --------------------------------------------------------------------------- #
+
+
+def test_the_three_review_states_are_distinguishable() -> None:
+    """A reviewer must be able to answer "which of these do I work on?".
+
+    Three blocks ship in three genuinely different conditions, and each needs a
+    different XLIFF state:
+
+    - clean: passed, nothing to do (``translated``/``reviewed``)
+    - needs_human: a draft is delivered and should be post-edited
+    - blocked_human: NO draft shipped (source only), so it still needs translating
+
+    ``needs_human`` used to emit ``translated`` -- identical to a clean block, so
+    a reviewer opening a 1000-block file could not find the handful that mattered.
+    ``blocked_human`` emitted ``needs-review-translation``, which claims a
+    translation exists to review when the target is the source under a marker.
+    """
+    from types import SimpleNamespace
+    from typing import cast
+
+    from ubt.core.ir.models import BlockStatus
+
+    states = {
+        status.value: _block_state(status).value
+        for status in (
+            BlockStatus.MTQE_PASSED,
+            BlockStatus.NEEDS_HUMAN,
+            BlockStatus.BLOCKED_HUMAN,
+        )
+    }
+    assert states["mtqe_passed"] == "verified"
+    assert states["needs_human"] == "needs_review"
+    assert states["blocked_human"] == "blocked"
+    # The whole point: three distinct values, not one collapsed pair.
+    assert len(set(states.values())) == 3
+
+    # And each survives the trip through XLIFF as its own state string.
+    for status in (BlockStatus.MTQE_PASSED, BlockStatus.NEEDS_HUMAN, BlockStatus.BLOCKED_HUMAN):
+        state = _block_state(status)
+        xml = to_xliff(
+            [Segment(id="b1", source="src", target="tgt", state=state)],
+            src_lang="en",
+            trg_lang="zh",
+        )
+        (back,) = from_xliff(xml).segments
+        assert back.state is state, f"{status.value} did not round-trip"
+    _ = cast("object", SimpleNamespace)
+
+
+def test_needs_review_and_blocked_are_not_the_same_xliff_state() -> None:
+    """The two states that used to be confused now read differently on the wire."""
+    review_xml = to_xliff(
+        [Segment(id="a", source="s", target="t", state=SegmentState.NEEDS_REVIEW)],
+        src_lang="en",
+        trg_lang="zh",
+    )
+    blocked_xml = to_xliff(
+        [Segment(id="b", source="s", state=SegmentState.BLOCKED)],
+        src_lang="en",
+        trg_lang="zh",
+    )
+    assert 'state="needs-review-translation"' in review_xml
+    assert 'state="needs-translation"' in blocked_xml
+    assert "needs-review-translation" not in blocked_xml
+
+
+def test_a_flagged_block_carries_its_reason_into_the_xliff() -> None:
+    """The state says "look here"; the notes say "because of this".
+
+    Without the reason a reviewer's queue is a list of opaque block ids, and the
+    ledger already holds the evidence -- it was simply never projected into the
+    one file the reviewer opens.
+    """
+    from ubt.model.segment import QA
+
+    segment = Segment(
+        id="b0042",
+        source="Euler wrote $e^{i\\pi}+1=0$.",
+        placeholders=(Placeholder(token="MATH_1", kind="math", original="$e^{i\\pi}+1=0$"),),
+        target="欧拉写下了 MATH_1。",
+        state=SegmentState.NEEDS_REVIEW,
+        qa=QA(
+            score=0.55,
+            severity="major",
+            flags=("Glossary term violation", "Omission suspected"),
+        ),
+    )
+    xml = to_xliff([segment], src_lang="en", trg_lang="zh", original="book.md")
+    assert 'category="ubt-mtqe-score"' in xml
+    assert 'category="ubt-mqm-severity"' in xml
+    assert 'category="ubt-error-flag"' in xml
+    assert "0.55" in xml
+    assert "Omission suspected" in xml
+
+    # And it all comes back -- the verdict is not a one-way annotation.
+    (back,) = from_xliff(xml).segments
+    assert back.qa is not None
+    assert back.qa.score == 0.55
+    assert back.qa.severity == "major"
+    assert back.qa.flags == ("Glossary term violation", "Omission suspected")
+
+
+def test_a_clean_block_carries_no_qa_note() -> None:
+    """``None`` means "never flagged", which is not the same as "scored zero".
+
+    Emitting ``ubt-mtqe-score: 0.0`` for an unscored block would read as a
+    genuine zero to anything that parses the file.
+    """
+    xml = to_xliff(
+        [Segment(id="clean", source="s", target="t", state=SegmentState.VERIFIED)],
+        src_lang="en",
+        trg_lang="zh",
+    )
+    assert "ubt-mtqe-score" not in xml
+    assert "ubt-error-flag" not in xml
+    (back,) = from_xliff(xml).segments
+    assert back.qa is None
+
+
+def test_a_malformed_qa_note_does_not_make_the_file_unreadable() -> None:
+    """QA notes are advisory metadata; a bad one must not sink the import.
+
+    A hand-edited or third-party-tool XLIFF may carry anything in a note. The
+    translation text is the payload -- it must survive regardless.
+    """
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<xliff xmlns="urn:oasis:names:tc:xliff:document:2.1" version="2.1"'
+        ' srcLang="en" trgLang="zh"><file id="f1">'
+        '<unit id="b1"><notes><note category="ubt-mtqe-score">not-a-number</note>'
+        '</notes><segment id="s1" state="translated">'
+        "<source>hello</source><target>你好</target></segment></unit>"
+        "</file></xliff>"
+    )
+    (back,) = from_xliff(xml).segments
+    assert back.target == "你好"
+    assert back.qa is not None
+    assert back.qa.score is None  # dropped, not crashed

@@ -795,6 +795,19 @@ def markdown_grid_shape(text: str) -> list[int]:
     return shape
 
 
+def _grid_label(shape: list[int]) -> str:
+    """Describe a uniform grid shape the way a reviewer reads it: rows x columns.
+
+    ``markdown_grid_shape`` returns one ``column count`` per row and guarantees
+    every entry is equal (a ragged run is not a table). Printing that list
+    verbatim, as the mismatch message used to, reads as "the column count keeps
+    changing" when the real difference is how many rows there are.
+    """
+    rows = len(shape)
+    columns = shape[0] if shape else 0
+    return f"a {rows}-row x {columns}-column grid"
+
+
 @dataclass(frozen=True, slots=True)
 class FastPassDecision:
     """Decision outcome of 0-token fast pass filter."""
@@ -1097,21 +1110,27 @@ class FastPassFilter:
                 return FastPassDecision(
                     passed=False,
                     reason=(
-                        "Table dropped: the source held a "
-                        f"{src_grid}-row/column grid but the target has none — "
+                        "Table dropped: the source held "
+                        f"{_grid_label(src_grid)} but the target has none — "
                         "translate the table in place instead of flattening it to prose"
                     ),
                     target_ratio=0.0,
                     length_ratio=0.0,
                 )
             if src_grid != tgt_grid:
+                # Both shapes are uniform by construction (``markdown_grid_shape``
+                # returns [] for a ragged grid), so a difference is always the ROW
+                # count: the column count is identical on both sides. The message
+                # used to print the raw per-row list and call it "columns", which
+                # told a reviewer the column count was oscillating when a row had
+                # actually been dropped.
                 return FastPassDecision(
                     passed=False,
                     reason=(
-                        "Table grid mismatch: the source rows hold "
-                        f"{src_grid} columns, the target holds {tgt_grid} — keep "
-                        "the row and column count identical and translate only "
-                        "the text inside each cell"
+                        f"Table grid mismatch: the source is {_grid_label(src_grid)}, "
+                        f"the target is {_grid_label(tgt_grid)} — keep the row and "
+                        "column count identical and translate only the text inside "
+                        "each cell"
                     ),
                     target_ratio=0.0,
                     length_ratio=0.0,

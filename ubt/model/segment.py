@@ -23,6 +23,7 @@ class SegmentState(StrEnum):
 
     NEW = "new"  # not translated yet
     TRANSLATED = "translated"  # a draft exists
+    NEEDS_REVIEW = "needs_review"  # draft shipped, human post-editing required
     VERIFIED = "verified"  # draft passed quality estimation
     FINAL = "final"  # released (repaired or human-accepted)
     BLOCKED = "blocked"  # must not ship machine output (critical defect)

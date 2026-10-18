@@ -624,3 +624,42 @@ def test_fast_pass_escaped_pipe_handling() -> None:
     )
     shape = markdown_grid_shape(text)
     assert shape == [3, 3, 3]
+
+
+# --------------------------------------------------------------------------- #
+# The mismatch message must say what actually differs
+#
+# ``markdown_grid_shape`` returns one column count per row and guarantees they
+# are all equal. The message printed that list verbatim and called it
+# "columns", so a dropped ROW read as an oscillating COLUMN count — and this
+# string is carried into the reviewer's XLIFF notes, where it is the only
+# explanation they get for why a block was flagged.
+# --------------------------------------------------------------------------- #
+
+
+def test_the_grid_label_counts_rows_and_columns_separately() -> None:
+    from ubt.core.qe.fast_pass import _grid_label
+
+    assert _grid_label([5, 5, 5]) == "a 3-row x 5-column grid"
+    assert _grid_label([2]) == "a 1-row x 2-column grid"
+    assert _grid_label([]) == "a 0-row x 0-column grid"
+
+
+@pytest.mark.asyncio
+async def test_a_dropped_table_row_is_reported_as_a_row_difference() -> None:
+    """The real case: 11 rows in, 10 out, both 5 columns wide."""
+    from ubt.core.qe.fast_pass import FastPassFilter
+
+    header = "| a | b | c | d | e |"
+    sep = "| --- | --- | --- | --- | --- |"
+    row = "| 1 | 2 | 3 | 4 | 5 |"
+    source = "\n".join([header, sep, *[row] * 9])  # 11 pipe rows
+    target = "\n".join([header, sep, *[row] * 8])  # 10 pipe rows
+
+    decision = FastPassFilter().evaluate(source, target, block_type="table")
+    assert decision.passed is False
+    assert "Table grid mismatch" in decision.reason
+    # Both sides are 5 columns; only the row count differs, and the message must
+    # say so instead of printing the per-row list as if it were the column count.
+    assert "11-row x 5-column" in decision.reason
+    assert "10-row x 5-column" in decision.reason

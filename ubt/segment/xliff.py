@@ -11,8 +11,16 @@ The two hard mappings:
   element whose ``dataRef`` is the token (the round-trip key) and whose text is
   the original span (what a translator sees). Restoring on import puts the token
   back, so the bijection is exact.
-- **State -> ``state``.** The five kernel states map onto five distinct XLIFF
-  states, so a round-trip cannot collapse them.
+- **State -> ``state``.** Each kernel state maps to its own XLIFF state, so a
+  round-trip cannot collapse them. The distinction that matters most is
+  ``NEEDS_REVIEW`` (a draft shipped, post-edit it) versus ``BLOCKED`` (nothing
+  shipped; the unit still needs translating) -- these were once both emitted as
+  states that hid them, and they are the two blocks a reviewer is looking for.
+
+A QA verdict travels as canonical ``<notes>`` (XLIFF 2.1's own extension point,
+not a private element): ``ubt-mtqe-score``, ``ubt-mqm-severity`` and one
+``ubt-error-flag`` per flag. Notes are advisory -- the import stays lenient
+about them -- but they turn a queue of ids into a queue a reviewer can work.
 
 The document is built with unqualified tags and a single ``xmlns`` on the root,
 and parsed by *local name*. This is deliberate: ElementTree's default-namespace
@@ -28,17 +36,31 @@ from dataclasses import dataclass
 from xml.etree import ElementTree as ET
 
 from ubt.core.xml_safety import parse_xml
-from ubt.model.segment import Placeholder, Segment, SegmentState
+from ubt.model.segment import QA, Placeholder, Segment, SegmentState
 
 NS = "urn:oasis:names:tc:xliff:document:2.1"
 
-#: KERNEL state -> XLIFF state (five distinct values, so the map is invertible).
+#: KERNEL state -> XLIFF state (distinct values, so the map is invertible).
+#:
+#: ``NEEDS_REVIEW`` and ``BLOCKED`` look similar and are opposites in practice,
+#: which is why they need separate states rather than sharing ``translated``:
+#:
+#: - ``NEEDS_REVIEW`` -- a real draft shipped, and a human should post-edit it.
+#: - ``BLOCKED`` -- no translation shipped; the target carries the source under
+#:   a quarantine marker, so the unit still needs translating.
+#:
+#: Both used to collapse: ``needs_human`` was emitted as ``translated`` (so a
+#: reviewer could not find it among a thousand clean blocks) while
+#: ``blocked_human`` was emitted as ``needs-review-translation`` (implying a
+#: translation existed to review when none had shipped). The routing was right
+#: and the interchange format threw the routing away.
 _STATE_OUT: dict[SegmentState, str] = {
     SegmentState.NEW: "initial",
     SegmentState.TRANSLATED: "translated",
+    SegmentState.NEEDS_REVIEW: "needs-review-translation",
     SegmentState.VERIFIED: "reviewed",
     SegmentState.FINAL: "final",
-    SegmentState.BLOCKED: "needs-review-translation",
+    SegmentState.BLOCKED: "needs-translation",
 }
 _STATE_IN: dict[str, SegmentState] = {value: key for key, value in _STATE_OUT.items()}
 
@@ -67,6 +89,26 @@ class XliffDocument:
     trg_lang: str
     original: str
     segments: tuple[Segment, ...]
+
+
+def _qa_note_values(qa: QA) -> list[tuple[str, str]]:
+    """The ``(category, text)`` notes that describe one QA verdict.
+
+    Only fields that carry information are emitted. A note reading
+    ``ubt-mtqe-score: 0.0`` for an unscored block would be indistinguishable
+    from a real score of zero, so an absent value emits no note at all.
+
+    One note per flag rather than a joined list: a CAT tool displays notes
+    separately, and a reviewer scanning for "which defect" should not have to
+    split on a delimiter whose format is ours alone.
+    """
+    notes: list[tuple[str, str]] = []
+    if qa.score is not None:
+        notes.append(("ubt-mtqe-score", f"{qa.score:.2f}"))
+    if qa.severity:
+        notes.append(("ubt-mqm-severity", qa.severity))
+    notes.extend(("ubt-error-flag", flag) for flag in qa.flags)
+    return notes
 
 
 def _local(tag: str) -> str:
@@ -142,6 +184,46 @@ def _read_inline(element: ET.Element, placeholders: dict[str, Placeholder]) -> s
     return "".join(parts)
 
 
+def _read_qa(unit: ET.Element) -> QA | None:
+    """Rebuild the QA verdict from a unit's ``ubt-*`` notes.
+
+    Returns ``None`` when the unit carries no QA note, matching
+    :func:`ubt.segment.document._block_qa`: an absent verdict and an empty one
+    are different facts and must not collapse into the same value.
+
+    The parser is deliberately lenient about which notes exist (a hand-edited or
+    third-party document may carry only a score) but strict about the payload:
+    a score that is not a number is dropped rather than crashing the import. QA
+    notes are advisory metadata; a malformed one must not make a translation
+    file unreadable.
+    """
+    score: float | None = None
+    severity: str | None = None
+    flags: list[str] = []
+    found = False
+    for notes_el in (child for child in unit if _local_name(child.tag) == "notes"):
+        for note in notes_el:
+            if _local_name(note.tag) != "note":
+                continue
+            category = note.get("category") or ""
+            text = (note.text or "").strip()
+            if category == "ubt-mtqe-score" and text:
+                found = True
+                try:
+                    score = float(text)
+                except ValueError:
+                    score = None
+            elif category == "ubt-mqm-severity" and text:
+                found = True
+                severity = text
+            elif category == "ubt-error-flag" and text:
+                found = True
+                flags.append(text)
+    if not found:
+        return None
+    return QA(score=score, severity=severity, flags=tuple(flags))
+
+
 def to_xliff(
     segments: tuple[Segment, ...] | list[Segment],
     *,
@@ -167,6 +249,14 @@ def to_xliff(
             notes_el = ET.SubElement(unit, "notes")
             note_el = ET.SubElement(notes_el, "note", {"category": "ubt-job-id"})
             note_el.text = xml_safe(seg_job)
+        # What the QA verdict was, next to the text it applies to. The state
+        # says a block needs attention; these say why, which is the difference
+        # between a queue a reviewer can work and a list of opaque ids.
+        if segment.qa is not None:
+            qa_notes = ET.SubElement(unit, "notes")
+            for category, value in _qa_note_values(segment.qa):
+                qa_note = ET.SubElement(qa_notes, "note", {"category": category})
+                qa_note.text = xml_safe(value)
         seg_el = ET.SubElement(unit, "segment", {"id": "s1", "state": _STATE_OUT[segment.state]})
         _emit_inline(ET.SubElement(seg_el, "source"), segment.source, segment.placeholders)
         if segment.target is not None:
@@ -209,6 +299,7 @@ def from_xliff(text: str) -> XliffDocument:
                 placeholders=tuple(placeholders.values()),
                 target=target,
                 state=_STATE_IN.get(seg_el.get("state") or "", SegmentState.NEW),
+                qa=_read_qa(unit),
             )
         )
     return XliffDocument(
