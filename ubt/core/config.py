@@ -435,15 +435,24 @@ class UBTConfig(BaseSettings):
     max_repair_rounds: int = Field(default=2, ge=0)
     bottom_percentile: float = Field(default=0.15, ge=0.0, le=1.0)
     # Best-of-n repair candidates (MBR-lite). 1 = single candidate (default);
-    # >1 samples k repairs per repair candidate and keeps the best by a neural
-    # QE score. Only meaningful with a neural qe_engine (COMET-Kiwi/tiered);
-    # the heuristic runner cannot rank.
+    # >1 samples k repairs per repair candidate and keeps the best by a
+    # *calibrated* QE score.
+    #:
+    #: INERT with every shipped engine. Neither the heuristic nor the tiered
+    #: runner reports ``is_calibrated()`` — the first emits twelve discrete
+    #: defect classes with nothing to rank between, the second scores through the
+    #: same heuristic leg — so ``RepairLoop._rerank_enabled`` is always False and
+    #: setting this above 1 only logs a warning. It stays as the contract a
+    #: future calibrated runner would satisfy; do not treat it as a knob.
     rerank_k: int = Field(default=1, ge=1, le=5)
     # Document-level terminology consistency enforcement, run after repair.
     # "off"    = detect + report only (default; no extra LLM spend)
     # "report" = plan the targeted re-translations and log them, still no spend
     # "repair" = run the constrained re-translations (bounded by the cap below)
     consistency_enforce: Literal["off", "report", "repair"] = "off"
+    #: Budget for "repair" mode. Zero with ``consistency_enforce="repair"`` is
+    #: rejected: the stage would plan drift repairs and then discard every one,
+    #: reading "on" while being a guaranteed no-op.
     consistency_max_repairs: int = Field(default=50, ge=0)
     qe_engine: QeEngine = "heuristic"
 

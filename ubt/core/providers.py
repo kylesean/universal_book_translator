@@ -93,6 +93,13 @@ PROVIDER_ALLOWED_KEYS = frozenset(
         # quality policy instead of scattering it across the CLI and the env.
         "qe_threshold",
         "max_repair_rounds",
+        # Document-level terminology consistency. Set through the config file
+        # only — it is a policy decision ("re-translate drifted terms, up to N"),
+        # not a per-run experiment. Without these two, a user could not turn the
+        # feature on from a file at all: the values exist on ``UBTConfig`` and are
+        # read by the stage, but no documented surface could set them.
+        "consistency_enforce",
+        "consistency_max_repairs",
     }
 )
 

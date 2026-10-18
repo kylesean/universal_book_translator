@@ -20,3 +20,42 @@ def test_db_dir_is_allowed_in_a_toml_block() -> None:
 def test_an_unknown_key_is_still_rejected() -> None:
     with pytest.raises(ProviderConfigError):
         _validate_block("[defaults]", {"not_a_real_field": "x"})
+
+
+def test_a_config_file_can_describe_the_whole_quality_policy() -> None:
+    """Every knob a quality policy needs must be settable from a file.
+
+    ``consistency_enforce`` / ``consistency_max_repairs`` were readable by the
+    stage but offered on no documented surface: a user could not turn the
+    feature on from a config file at all, only by exporting an environment
+    variable the docs do not mention.
+    """
+    policy = {
+        "qe_threshold": 0.85,
+        "max_repair_rounds": 3,
+        "consistency_enforce": "report",
+        "consistency_max_repairs": 25,
+        "qe_judge_sentences": True,
+        "qe_judge_pass_sample": 0.15,
+        "qe_judge_provider": "my-judge",
+    }
+    assert _validate_block("[defaults]", policy) == policy
+
+
+def test_the_removed_judge_knobs_are_now_rejected() -> None:
+    """A dead knob must fail loudly, not be silently accepted.
+
+    ``qe_judge_gray_low``/``_high`` were inert (the heuristic emits twelve
+    discrete values and the only one in the default band was already judged), and
+    ``qe_judge_allow_upgrade`` let an opinion lift a real failure over the pass
+    line. All three are gone; a config still carrying one should say so rather
+    than quietly doing nothing.
+    """
+    for key in (
+        "qe_judge_gray_low",
+        "qe_judge_gray_high",
+        "qe_judge_allow_upgrade",
+    ):
+        assert key not in PROVIDER_ALLOWED_KEYS
+        with pytest.raises(ProviderConfigError):
+            _validate_block("[defaults]", {key: 0.5})
