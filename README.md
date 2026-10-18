@@ -121,6 +121,33 @@ be translated reaches the 0.55 target; the whole-document ratio is lower
 because the bibliography is deliberately kept in the source language and
 counted in the denominator.
 
+### Visual gate
+
+Every export runs a zero-token gate over the rendered PDF and writes
+`{stem}_visual_report.json` beside the deliverable. Tiers, in the order they
+run: `geometry` (line overlap, out-of-bounds), `type` (glyph size), `pixel`
+(blank page, black blocks), and optionally `vlm`. The report's `skipped_reason`
+names the tiers that ran and the ones that did not, so a missing tier is never
+mistaken for a pass.
+
+The `type` tier exists because a layout can lose every structural check while
+being unreadable. An 83-page paper was once delivered at 22 pages with 10 pages
+below 4pt and the last at 0.49pt: all 137k characters were present, nothing
+overflowed, and no page was blank. It measures each page's rendered glyph
+heights (letters, digits and ideographs only — punctuation ink is short, and a
+TOC's leader dots measure 1.29pt on a healthy page) and reports:
+
+- `type_illegible` — the page's median glyph is under 4pt. **Fails closed**,
+  even with the opt-in blocking gate off and outside the short-document window:
+  a document nobody can read is broken, not styled differently.
+- `type_collapsed` — a majority of one page's glyphs are under 4pt while the
+  median is readable. A `major`, so a legitimately small table warns instead of
+  blocking.
+
+Sizes come from rendered rect heights, not `FPDFText_GetFontSize`: that returns
+a font *state* size which a text matrix can scale (one healthy file in the
+corpus reports 1.00pt on pages that render at ~5.8pt).
+
 ## Known limits
 
 Measured against the current implementation, not aspirational:
