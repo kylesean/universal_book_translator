@@ -27,6 +27,11 @@ _RESPONSE_LINE = re.compile(
 
 _STRIP_QUOTES = "《》〈〉「」『』\"'“”"
 
+#: Shortest all-caps token treated as a technical acronym that must survive into
+#: its rendering. Two-letter initialisms (WM, CU) are conventionally expanded in
+#: Chinese, so they are deliberately below this bar.
+_ACRONYM_KEEP_MIN_LEN = 3
+
 
 def build_backfill_prompt(entries: list[dict[str, Any]], target_lang: str) -> tuple[str, str]:
     """Build the single bulk terminology-curating prompt for a batch of entries."""
@@ -68,6 +73,22 @@ def _clean_translation(raw: str, acronym: str) -> str | None:
     if tr.lower() == acronym.lower():
         return None  # model echoed the acronym instead of translating
     if "\n" in tr or "=" in tr:
+        return None
+    # Rule 2 of the prompt: "Acronym items: keep the acronym itself unchanged
+    # (Latin letters) inside the translation." The model breaks it — the ATC'25
+    # run rendered IOMMU as 输入/输出内存管理单元, dropping the acronym — and every
+    # downstream reader then saw an expanded phrase where the paper writes the
+    # token: 19 occurrences in prose, and a table column that no longer fit
+    # ("Aster. no IOMMU(s)" became "Aster.（禁用输入/输出内存管理单元，秒）").
+    #
+    # The rule is acceptance criteria, not advice, so it is enforced here.
+    #
+    # Scope: only multi-letter all-caps tokens. A two-letter initialism like
+    # ``WM`` (Working Memory → 工作记忆) is *conventionally* expanded in Chinese
+    # and the model's rendering is right, so rejecting it would be the mirror
+    # error. The three-plus-letter all-caps form is the technical-acronym shape
+    # (IOMMU, TCP, MMIO, DMA) that readers expect to see verbatim.
+    if len(acronym) >= _ACRONYM_KEEP_MIN_LEN and acronym.isupper() and acronym not in tr:
         return None
     return tr
 

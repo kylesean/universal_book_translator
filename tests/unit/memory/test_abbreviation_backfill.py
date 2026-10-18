@@ -248,3 +248,34 @@ def test_max_batch_constant() -> None:
 
 def test_max_translation_chars_constant() -> None:
     assert _MAX_TRANSLATION_CHARS == 80
+
+
+# --------------------------------------------------------------------------- #
+# A technical acronym must survive into its rendering
+#
+# The prompt states this as rule 2 ("keep the acronym itself unchanged"), but the
+# model broke it on the ATC'25 paper: IOMMU came back as 输入/输出内存管理单元. The
+# code accepted it, so 19 prose occurrences were expanded and a table column that
+# used to read "Aster. no IOMMU(s)" became "Aster.（禁用输入/输出内存管理单元，秒）" --
+# too wide for its column. A stated acceptance criterion the parser ignores is
+# not a criterion.
+# --------------------------------------------------------------------------- #
+
+
+def test_a_rendering_that_drops_a_technical_acronym_is_rejected() -> None:
+    assert _clean_translation("输入/输出内存管理单元", "IOMMU") is None
+
+
+def test_a_rendering_that_keeps_the_acronym_is_accepted() -> None:
+    assert _clean_translation("输入/输出内存管理单元（IOMMU）", "IOMMU") is not None
+    assert _clean_translation("IOMMU", "IOMMU") is None  # a bare echo is still not a translation
+
+
+def test_a_two_letter_initialism_may_still_be_expanded() -> None:
+    """The convention differs by length: WM -> 工作记忆 is correct Chinese."""
+    assert _clean_translation("工作记忆", "WM") == "工作记忆"
+
+
+def test_a_mixed_case_token_is_not_held_to_the_rule() -> None:
+    """Only the all-caps technical shape is enforced (Rust, Theseus keep their form)."""
+    assert _clean_translation("铁锈", "RUST") is None
