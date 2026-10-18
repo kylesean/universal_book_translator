@@ -565,6 +565,65 @@ def _wrap_style(
     return segment
 
 
+#: Zero-width space: a break opportunity that renders as nothing, so the
+#: extracted text and the page image are unaffected by inserting one.
+_ZWSP = "\u200b"
+
+#: A cell shorter than this cannot plausibly overflow a narrow column at 9.5pt,
+#: so it is left untouched (breaking it would only hurt code readability).
+_NO_BREAK_MIN_LEN = 24
+
+#: A run of non-space characters at least this long may need help: at 9.5pt a
+#: 16-character identifier is already ~70pt, a third of a two-column text width.
+_BREAK_TOKEN_MIN_LEN = 14
+
+#: Punctuation a reader already parses as a boundary, tried in this order so a
+#: break lands where the code's own structure suggests.
+_BREAK_AFTER: tuple[str, ...] = ("::", "/", ":", "_", ".")
+
+
+def _break_opportunities(text: str) -> str:
+    """Insert zero-width break points inside long unbreakable tokens.
+
+    A Typst ``table`` sized in ``fr`` still cannot shrink a cell below its
+    widest *unbreakable* run: ``(7fr, 46fr, 43fr)`` inside a two-column paper's
+    ~232pt text column could not fit
+    ``// lib/devices/tpm: MmioAddr::new(base,len)``, so the cell overran the
+    column and the row's text drew on top of the neighbouring column
+    (``p3:rect327`` reached 652.9pt on a 595.3pt page). Measured on the ATC'25
+    paper: the same table fits after break points (288.3pt -> 275.4pt in a
+    232pt column).
+
+    Only runs that contain no space are touched: Chinese prose already wraps
+    between characters, and breaking a space-separated phrase would let Typst
+    split ordinary words. A zero-width space renders as nothing, so the
+    extracted text and the page image are unchanged -- only the line breaking
+    can differ.
+
+    Short tokens are left alone: inserting breaks into every identifier would
+    wreck the readability of code that already fits.
+    """
+    # A run of non-space characters long enough to plausibly exceed a narrow
+    # column at 9.5pt. Below this, breaking would hurt more than help.
+    if len(text) < _NO_BREAK_MIN_LEN:
+        return text
+
+    def _insert(match: re.Match[str]) -> str:
+        token = match.group(0)
+        if len(token) < _BREAK_TOKEN_MIN_LEN:
+            return token
+        # Prefer punctuation a reader already parses as a boundary, so the
+        # break lands where the code's own structure suggests.
+        for sep in _BREAK_AFTER:
+            if sep in token:
+                return token.replace(sep, sep + _ZWSP)
+        # Otherwise break a long alphanumeric run at its midpoint.
+        middle = len(token) // 2
+        return token[:middle] + _ZWSP + token[middle:]
+
+    return re.sub(r"[^\s\u3000]+", _insert, text)
+
+
 def render_table(markup: str, *, is_math_ok: Callable[[str], bool] | None = None) -> str:
     """Render a Markdown table as a Typst ``#table`` with a three-line frame.
 
@@ -603,7 +662,7 @@ def render_table(markup: str, *, is_math_ok: Callable[[str], bool] | None = None
             # Typst's markup line break. Rendering the whole value first would
             # escape the ``<`` and print a literal ``<br>``.
             text = "\\\n".join(
-                render_prose(part.strip(), is_math_ok=is_math_ok)
+                _break_opportunities(render_prose(part.strip(), is_math_ok=is_math_ok))
                 for part in re.split(r"<br\s*/?>", value.strip())
             )
             rendered.append(f"[*{text}*]" if header and text else f"[{text}]")

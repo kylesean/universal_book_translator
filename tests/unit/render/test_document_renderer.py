@@ -1133,3 +1133,62 @@ def test_unwrapping_keeps_a_body_containing_its_own_markup() -> None:
     assert _unwrap_mark(wrapped) == "a <b>bold</b> b"
     # No closing tag: not a wrapper, so nothing is truncated.
     assert _unwrap_mark('<mark class="x">unclosed') == '<mark class="x">unclosed'
+
+
+# --------------------------------------------------------------------------- #
+# A wide code cell must not overrun a narrow column
+#
+# A Typst `table` sized in `fr` still cannot shrink a cell below its widest
+# UNBREAKABLE run. On the ATC'25 paper `(7fr, 46fr, 43fr)` inside a two-column
+# page's ~232pt text column could not fit
+# `// lib/devices/tpm: MmioAddr::new(base,len)`; the cell overran the column and
+# the row drew on top of the neighbouring one (p3:rect327 reached 652.9pt on a
+# 595.3pt page). Measured: the same table fits after break points, 288.3 ->
+# 275.4pt.
+# --------------------------------------------------------------------------- #
+
+
+def test_a_long_code_run_gets_break_points() -> None:
+    from ubt.render.typst.document_renderer import _break_opportunities
+
+    out = _break_opportunities("// lib/devices/tpm: MmioAddr::new(base,len)")
+    assert "\u200b" in out, "no break opportunity was inserted"
+    # The visible text is unchanged: a zero-width space renders as nothing.
+    assert out.replace("\u200b", "") == "// lib/devices/tpm: MmioAddr::new(base,len)"
+
+
+def test_breaks_land_on_code_structure_not_mid_identifier() -> None:
+    from ubt.render.typst.document_renderer import _break_opportunities
+
+    out = _break_opportunities("ptr::read_volatile(addr)")
+    # `::` is a boundary the reader already parses, so the break goes there.
+    assert "::\u200b" in out
+
+
+def test_short_cells_are_left_verbatim() -> None:
+    """Breaking a token that already fits only hurts readability."""
+    from ubt.render.typst.document_renderer import _break_opportunities
+
+    for text in ("Boundary check", "Slab::new()", "0.85"):
+        assert _break_opportunities(text) == text
+
+
+def test_cjk_prose_is_not_broken_by_token_rules() -> None:
+    """Chinese already wraps between characters; no ZWSP belongs in it."""
+    from ubt.render.typst.document_renderer import _break_opportunities
+
+    text = "不安全代码块中的资源访问与资源获取"
+    assert _break_opportunities(text) == text
+
+
+def test_a_rendered_table_carries_the_break_points() -> None:
+    from ubt.render.typst.document_renderer import render_table
+
+    markup = (
+        "| | Access | Acquire |\n"
+        "|---|---|---|\n"
+        "| RedLeaf | // lib/devices/ixgbe: ptr::read_volatile(addr) "
+        "| // lib/devices/tpm: MmioAddr::new(base,len) |\n"
+    )
+    out = render_table(markup)
+    assert "\u200b" in out
