@@ -1042,3 +1042,56 @@ def test_the_bundle_ships_more_than_one_js_chunk() -> None:
     assert len(js) > 5, f"expected per-route chunks, found only: {js}"
     entry = [n for n in js if n.startswith("index-")]
     assert len(entry) == 1, f"expected exactly one entry chunk, found: {entry}"
+
+
+def test_the_wizard_offers_every_engine_ocr_mode() -> None:
+    """The console must not be narrower than ``OcrMode``.
+
+    ``--ocr`` and the REST ``ocr_mode`` field existed from the start, but the
+    wizard exposed no OCR control at all — so an operator reading a
+    FONT_RESIDUE_RISK warning ("enable the OCR pre-check") had no way to act on
+    that advice from the console. A mode the engine dropped would 422 every
+    submission; a mode the engine added would stay unreachable.
+    """
+    import typing
+
+    from ubt.core.config import OcrMode
+
+    if not _WIZARD_SRC.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+    source = _WIZARD_SRC.read_text(encoding="utf-8")
+
+    offered = set(re.findall(r'<option value="(\w+)">\{t\.wizard\.ocrMode', source))
+    engine = set(typing.get_args(OcrMode))
+    assert offered, "the wizard has no OCR mode select"
+    # 'auto' is the sentinel the wizard submits as null, so it is offered but is
+    # also a legal engine value.
+    assert offered == engine, (
+        f"wizard/engine OCR mode mismatch: only-wizard={sorted(offered - engine)}, "
+        f"only-engine={sorted(engine - offered)}"
+    )
+
+
+def test_the_wizard_marks_ocr_modes_that_need_page_egress() -> None:
+    """``cloud`` and ``vlm`` ship page images off the machine.
+
+    The engine refuses both unless ``UBT_ALLOW_PAGE_UPLOAD=true``. Surfacing
+    that at selection time is the difference between a clear refusal and a
+    submit-time error the operator has to decode.
+    """
+    if not _WIZARD_SRC.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+    source = _WIZARD_SRC.read_text(encoding="utf-8")
+    assert re.search(r"ocrNeedsEgress\s*=\s*ocrMode === 'cloud' \|\| ocrMode === 'vlm'", source)
+    assert "ocrModeEgressWarning" in source
+
+
+def test_the_wizard_sends_ocr_mode_within_the_api_enum() -> None:
+    """``ocr_mode`` must reach the API as null or a legal ``OcrMode`` value."""
+    from ubt.api.models import JobSubmitRequest
+
+    if not _WIZARD_SRC.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+    source = _WIZARD_SRC.read_text(encoding="utf-8")
+    assert re.search(r"ocr_mode:\s*ocrMode === 'auto' \? null : ocrMode", source)
+    assert "ocr_mode" in JobSubmitRequest.model_fields

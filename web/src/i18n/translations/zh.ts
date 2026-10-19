@@ -170,6 +170,17 @@ export const zh: TranslationDictionary = {
     translateChromeAuto: '跟随引擎默认',
     translateChromeOn: '翻译页眉页脚',
     translateChromeOff: '保留原文页眉页脚',
+    ocrMode: 'OCR 引擎',
+    ocrModeHelp:
+      '用于读取扫描页与字体损坏页。自动：本地 sidecar → 本地 rapidocr → 云端（最后且需出网许可）。',
+    ocrModeEgressWarning:
+      '此模式会把整页图像上传到外部服务，需设置 UBT_ALLOW_PAGE_UPLOAD=true，否则作业会被拒绝。',
+    ocrModeAuto: '跟随引擎默认 (Auto)',
+    ocrModeRapidocr: '本地 rapidocr（免费，不联网）',
+    ocrModeSidecar: 'Docker sidecar（本地 HTTP 服务）',
+    ocrModeCloud: '云端 OCR（需出网许可）',
+    ocrModeVlm: '视觉大模型（需出网许可）',
+    ocrModeOff: '关闭 OCR',
     pageFilter: '页码切片试跑 (Pages Filter)',
     pageFilterPlaceholder: '例如: 1-10 或 1,3,5 (留空表示全书)',
     pageFilterHelp: '仅编译指定页码范围，适用于大部头图书快速打样与排版验证',

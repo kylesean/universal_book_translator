@@ -115,6 +115,10 @@ export function NewJobWizard() {
   // the source. The engine accepts only 1 or 2, so the sentinel never reaches it.
   const [layoutColumns, setLayoutColumns] = useState<'auto' | '1' | '2'>('auto')
   const [translateChrome, setTranslateChrome] = useState<'auto' | 'on' | 'off'>('auto')
+  // 'auto' submits as null so the operator's UBT_OCR_MODE still applies.
+  const [ocrMode, setOcrMode] = useState<
+    'auto' | 'rapidocr' | 'sidecar' | 'cloud' | 'vlm' | 'off'
+  >('auto')
   const [pageRange, setPageRange] = useState('')
   const [glossaryPath, setGlossaryPath] = useState('')
   const [dryRun, setDryRun] = useState(false)
@@ -293,6 +297,15 @@ export function NewJobWizard() {
    * keeps the failure visible at the field instead of at the API boundary.
    */
   const budgetInvalid = budgetUsd === null && budgetInput.trim() !== ''
+  /**
+   * OCR modes that ship rendered page images off this machine.
+   *
+   * The engine refuses these unless UBT_ALLOW_PAGE_UPLOAD=true, so picking
+   * one here without that flag is a submit-time error rather than a silent
+   * privacy change. 'auto' can also reach the cloud, but only as a last
+   * resort after local engines fail, and it warns in the log.
+   */
+  const ocrNeedsEgress = ocrMode === 'cloud' || ocrMode === 'vlm'
 
   const handleSubmit = async () => {
     if (!filePath.trim() || isSubmitting || glossaryError || budgetInvalid) return
@@ -310,6 +323,8 @@ export function NewJobWizard() {
         layout_columns: layoutColumns === 'auto' ? null : Number(layoutColumns),
         // null = follow UBTConfig's operator default, not a hard-coded false.
         translate_chrome: translateChrome === 'auto' ? null : translateChrome === 'on',
+        // null = follow UBT_OCR_MODE / config default.
+        ocr_mode: ocrMode === 'auto' ? null : ocrMode,
         pages: pageRange.trim() ? pageRange.trim() : null,
         glossary: glossaryPath.trim() ? glossaryPath.trim() : null,
         priority: 0,
@@ -786,6 +801,40 @@ export function NewJobWizard() {
                       </select>
                       <p className="text-xs text-[var(--ink-muted)] mt-1 leading-relaxed">
                         {t.wizard.translateChromeHelp}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Row 2b: OCR engine.
+                      Reachable from the CLI (--ocr) and REST (ocr_mode) since
+                      the beginning, but not from the console — so the operator
+                      reading a FONT_RESIDUE_RISK warning had no way to act on
+                      its own advice. 'auto' is the engine default and is left
+                      as the null sentinel so an operator's UBT_OCR_MODE still
+                      wins. */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 items-start">
+                    <div>
+                      <label className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] block mb-1 font-semibold">
+                        {t.wizard.ocrMode}
+                      </label>
+                      <select
+                        value={ocrMode}
+                        onChange={(e) => setOcrMode(e.target.value as any)}
+                        className="w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs font-medium"
+                      >
+                        <option value="auto">{t.wizard.ocrModeAuto}</option>
+                        <option value="rapidocr">{t.wizard.ocrModeRapidocr}</option>
+                        <option value="sidecar">{t.wizard.ocrModeSidecar}</option>
+                        <option value="cloud">{t.wizard.ocrModeCloud}</option>
+                        <option value="vlm">{t.wizard.ocrModeVlm}</option>
+                        <option value="off">{t.wizard.ocrModeOff}</option>
+                      </select>
+                      <p
+                        className={`text-xs mt-1 leading-relaxed ${
+                          ocrNeedsEgress ? 'text-[#b45309]' : 'text-[var(--ink-muted)]'
+                        }`}
+                      >
+                        {ocrNeedsEgress ? t.wizard.ocrModeEgressWarning : t.wizard.ocrModeHelp}
                       </p>
                     </div>
                   </div>

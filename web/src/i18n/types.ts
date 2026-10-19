@@ -132,6 +132,15 @@ export interface TranslationDictionary {
     translateChromeAuto: string
     translateChromeOn: string
     translateChromeOff: string
+    ocrMode: string
+    ocrModeHelp: string
+    ocrModeEgressWarning: string
+    ocrModeAuto: string
+    ocrModeRapidocr: string
+    ocrModeSidecar: string
+    ocrModeCloud: string
+    ocrModeVlm: string
+    ocrModeOff: string
     pageFilter: string
     pageFilterPlaceholder: string
     pageFilterHelp: string

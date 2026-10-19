@@ -191,6 +191,17 @@ export const en: TranslationDictionary = {
     translateChromeAuto: 'Follow engine default',
     translateChromeOn: 'Translate page furniture',
     translateChromeOff: 'Keep source page furniture',
+    ocrMode: 'OCR engine',
+    ocrModeHelp:
+      'Reads scanned pages and font-damaged pages. Auto: local sidecar → local rapidocr → cloud (last, and only with page-egress permission).',
+    ocrModeEgressWarning:
+      'This mode uploads whole page images to an external service. It requires UBT_ALLOW_PAGE_UPLOAD=true, or the job is refused.',
+    ocrModeAuto: 'Follow engine default (Auto)',
+    ocrModeRapidocr: 'Local rapidocr (free, offline)',
+    ocrModeSidecar: 'Docker sidecar (local HTTP service)',
+    ocrModeCloud: 'Cloud OCR (needs egress permission)',
+    ocrModeVlm: 'Vision model (needs egress permission)',
+    ocrModeOff: 'OCR off',
     pageFilter: 'Page Range Filter (Pages)',
     pageFilterPlaceholder: 'e.g. 1-10 or 1,3,5 (leave blank for entire book)',
     pageFilterHelp: 'Only compile specified pages for fast layout proofing and sampling',
