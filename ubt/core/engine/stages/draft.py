@@ -53,8 +53,25 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+#: Profiles that suppress the rolling chapter summary.
+#:
+#: These are the profiles whose documents are read section-by-section (a paper,
+#: a textbook, a technical report), where a running prose summary of the
+#: previous chapter buys nothing and costs a call per chapter. Narrative
+#: profiles (``general``, ``fiction``) keep it.
+#:
+#: ``humanities`` is included even though ``--profile auto`` cannot currently
+#: select it: ``infer_profile_from_archetype`` has a branch for it, but
+#: ``detect_domain`` only ever returns a key of ``DOMAIN_PATTERNS``, and
+#: ``humanities`` is not one — so that branch is unreachable today. An operator
+#: can still pass ``--profile humanities`` by hand, and a humanities document is
+#: argued section-by-section the way a paper is, so the classification must
+#: match. Leaving it out meant the explicit and inferred paths would disagree
+#: the moment the missing domain keyword is added. ``assess.py`` imports this
+#: set to price the rollup, so a change here keeps the quote and the engine in
+#: step by construction.
 ACADEMIC_PROFILES = frozenset(
-    {"academic", "textbook", "paper", "technical", "nonfiction", "non-fiction"}
+    {"academic", "textbook", "paper", "technical", "nonfiction", "non-fiction", "humanities"}
 )
 _SKIPPED_TYPES = frozenset({BlockType.IMAGE, BlockType.FORMULA})
 
