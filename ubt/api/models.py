@@ -381,6 +381,15 @@ class JobSummary(BaseModel):
     created_at: str | None = None
     updated_at: str | None = None
     has_output: bool
+    #: True when the job ran on the echo provider (``--dry-run``, or an API
+    #: server with no LLM key). Its artifact is ``[模拟翻译]`` source text, so a
+    #: queue row that does not say so reads exactly like a real delivery — the
+    #: console listed rehearsals and real runs side by side with no distinction.
+    rehearsal: bool = False
+    #: The page scope of a ``--pages`` run (e.g. ``"1-6"``), else ``None``. A
+    #: sample run and a full delivery were otherwise indistinguishable in the
+    #: queue.
+    page_scope: str | None = None
 
 
 class JobListResponse(BaseModel):
@@ -522,6 +531,10 @@ class JobStatusResponse(ProgressSnapshot):
     # billed translation — surfaced so a keyless server can never report a mock
     # run as a finished delivery without saying so.
     rehearsal: bool = False
+    # The run's page selection ("1-6"), or None for a whole-book run. The list
+    # endpoint carried this but the detail endpoint did not, so a --pages
+    # fragment looked identical to a full delivery once the operator opened it.
+    page_scope: str | None = None
 
 
 # --------------------------------------------------------------------------- #

@@ -215,6 +215,23 @@ class JobQueue:
         self.close()
 
     # -- retention ------------------------------------------------------------
+    def delete(self, job_id: str) -> bool:
+        """Drop one queue row. Returns whether a row was removed.
+
+        Deleting a job from the console used to remove only the ledger, sidecars
+        and output directory; the ``job_queue`` row survived, so the job kept
+        appearing in ``/jobs`` as COMPLETED with a download that 409'd. Worse,
+        re-submitting the same id hit ``enqueue``'s "already completed" branch
+        and returned the dead row untouched — the job silently never ran again.
+
+        Callers must check the row is terminal first. This is the last step of
+        history deletion, not a stop button: a running job's row is the lease
+        that keeps a second worker from claiming it.
+        """
+        with self._get_conn() as conn:
+            cursor = conn.execute("DELETE FROM job_queue WHERE job_id = ?", (job_id,))
+            return int(cursor.rowcount) > 0
+
     def prune_terminal(self, *, keep: int | None = None) -> int:
         """Delete terminal rows beyond the newest ``keep``; returns rows removed.
 

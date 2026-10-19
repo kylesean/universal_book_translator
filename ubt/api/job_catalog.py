@@ -11,7 +11,8 @@ manager) are overlaid with their in-memory progress, which is fresher than the
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -48,6 +49,8 @@ def summarize_job(db_path: Path) -> dict[str, Any] | None:
             return None
         cost = ledger.get_job_metadata_value(job_id, "estimated_cost_usd")
         output_file = ledger.get_job_metadata_value(job_id, "output_file")
+        identity = ledger.get_job_metadata_value(job_id, "run_identity")
+        selected_pages = ledger.get_job_metadata_value(job_id, "selected_pages")
     except Exception as exc:  # no job_meta table -> not a job ledger
         logger.debug("job catalog: %s is not a job ledger: %s", db_path, exc)
         return None
@@ -79,7 +82,76 @@ def summarize_job(db_path: Path) -> dict[str, Any] | None:
         "created_at": snapshot.get("created_at"),
         "updated_at": snapshot.get("updated_at"),
         "has_output": bool(output_file),
+        # A queue row that says nothing about the run's nature reads exactly
+        # like a real delivery: a rehearsal ships ``[模拟翻译]`` echo text and a
+        # ``--pages`` run ships a fragment, and both used to look identical to a
+        # full run in the console's list.
+        "rehearsal": bool(isinstance(identity, dict) and identity.get("mock_run")),
+        "page_scope": page_scope_label(selected_pages),
     }
+
+
+def page_scope_label(pages: Any) -> str | None:
+    """``[1, 2, 3, 5]`` -> ``"1-3,5"``; ``None`` when the run was the whole book."""
+    if not isinstance(pages, list) or not pages:
+        return None
+    numbers = sorted({int(p) for p in pages if isinstance(p, (int, float))})
+    if not numbers:
+        return None
+    groups: list[str] = []
+    start = prev = numbers[0]
+    for value in numbers[1:]:
+        if value == prev + 1:
+            prev = value
+            continue
+        groups.append(f"{start}-{prev}" if prev > start else str(start))
+        start = prev = value
+    groups.append(f"{start}-{prev}" if prev > start else str(start))
+    return ",".join(groups)
+
+
+def summarize_queued_job(job: Any) -> dict[str, Any]:
+    """A ``/jobs`` row for a queue entry that has no ledger yet.
+
+    ``/jobs`` used to list only ``db_dir/*.sqlite``, and a queued job has no
+    ledger until a worker claims it (the ingest stage creates the database).
+    Submitting ten jobs therefore left the console showing nothing — or only the
+    one that had started — while ``/status`` for the same ids reported "queued,
+    position 5". Operators read an empty list as "my submissions were lost" and
+    re-submitted, producing duplicates and duplicate spend.
+
+    Shape mirrors :func:`summarize_job` so the client needs one row type.
+    """
+    payload = getattr(job, "payload", None) or {}
+    progress = getattr(job, "progress", None) or {}
+    input_path = str(payload.get("input_path") or "")
+    return {
+        "job_id": str(job.job_id),
+        "file_name": Path(input_path).name,
+        "target_lang": str(payload.get("target_lang") or ""),
+        "status": job.status.value,
+        "total_blocks": 0,
+        "completed_blocks": 0,
+        "failed_blocks": 0,
+        "needs_human_blocks": 0,
+        "progress_percent": 0.0,
+        "estimated_cost_usd": None,
+        "created_at": _isoformat(getattr(job, "enqueued_at", None)),
+        "updated_at": _isoformat(getattr(job, "enqueued_at", None)),
+        "has_output": bool(progress.get("output_file")),
+        "rehearsal": bool(payload.get("dry_run", False)),
+        "page_scope": page_scope_label(payload.get("pages")),
+    }
+
+
+def _isoformat(timestamp: float | None) -> str | None:
+    """Queue rows store epoch seconds; the catalog reports ISO-8601 strings."""
+    if timestamp is None:
+        return None
+    try:
+        return datetime.fromtimestamp(float(timestamp), UTC).isoformat()
+    except (ValueError, OSError, TypeError):
+        return None
 
 
 def list_job_summaries(
@@ -87,24 +159,40 @@ def list_job_summaries(
     *,
     live: Mapping[str, Mapping[str, Any]] | None = None,
     limit: int = 200,
+    queued: Iterable[Any] = (),
 ) -> list[dict[str, Any]]:
     """Summaries of every job ledger in ``db_dir``, newest first.
 
     ``live`` maps a job id to an override dict (status + progress fields read
     from the manager's in-memory record), which wins over the on-disk values for
     a job that is still running.
-    """
-    if not db_dir.is_dir():
-        return []
 
+    ``queued`` adds queue rows that have no ledger yet (see
+    :func:`summarize_queued_job`), so a job is visible from the moment it is
+    accepted rather than from the moment a worker starts it.
+    """
     summaries: list[dict[str, Any]] = []
-    for path in db_dir.glob("*.sqlite"):
-        if not is_job_ledger_stem(path.stem):
+    seen: set[str] = set()
+    if db_dir.is_dir():
+        for path in db_dir.glob("*.sqlite"):
+            if not is_job_ledger_stem(path.stem):
+                continue
+            summary = summarize_job(path)
+            if summary is None:
+                continue
+            seen.add(str(summary["job_id"]))
+            override = (live or {}).get(summary["job_id"])
+            if override:
+                summary.update({k: v for k, v in override.items() if v is not None})
+            summaries.append(summary)
+
+    for job in queued:
+        job_id = str(getattr(job, "job_id", "") or "")
+        if not job_id or job_id in seen:
             continue
-        summary = summarize_job(path)
-        if summary is None:
-            continue
-        override = (live or {}).get(summary["job_id"])
+        seen.add(job_id)
+        summary = summarize_queued_job(job)
+        override = (live or {}).get(job_id)
         if override:
             summary.update({k: v for k, v in override.items() if v is not None})
         summaries.append(summary)

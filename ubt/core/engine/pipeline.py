@@ -1,4 +1,15 @@
-"""Six-stage end-to-end translation pipeline orchestrator."""
+"""End-to-end translation pipeline orchestrator (resources and run lifecycle).
+
+This module owns a run's *resources*: the writer-lock lease, the ledger, the
+adapter, the router and the per-run collaborators. :mod:`ubt.core.engine.plan`
+owns *what runs in what order* -- it invokes 14 stages, from ingest through
+export.
+
+The "six-stage" label this docstring used to carry described an earlier shape of
+the plan and outlived it by nine stages; it is removed rather than corrected to
+another number, because the order belongs to ``plan.py`` and a count here can
+only drift again.
+"""
 
 from __future__ import annotations
 
@@ -25,11 +36,12 @@ from ubt.core.engine.stages import (
     run_tm_writeback_stage,
 )
 from ubt.core.engine.usage import JobBill, bill_job_run, budget_violation
-from ubt.core.engine.writer_lock import LedgerWriterLock
+from ubt.core.engine.writer_lock import LedgerWriterLock, keep_lease_fresh
 from ubt.core.exceptions import (
     BudgetExceededError,
     DocumentParseError,
     JobInterruptedError,
+    LedgerWriterLeaseLostError,
     UBTError,
     UnsupportedDocumentFormatError,
 )
@@ -78,6 +90,7 @@ def derive_job_id(
     mock_run: bool = False,
     profile_name: str = "general",
     engine_signature: str = "",
+    source_lang: str = "en",
 ) -> str:
     """Ledger job id derived from the run's full identity.
 
@@ -99,6 +112,14 @@ def derive_job_id(
     provider's drafts are not translations, and without this a simulated run
     left ``mtqe_passed`` rows behind that the next real run resumed, exported
     and reported as success without a single API call.
+
+    ``source_lang`` namespaces it only when it is NOT the default ``en``: a
+    mistyped ``-s`` was persisted in ``job_meta`` but never compared on resume,
+    so correcting it and re-running printed "Translation Completed Successfully"
+    over the previous run's translations — every ``mtqe_passed`` row was
+    exported untouched. The non-default suffix keeps every existing ledger
+    resumable (they were all created with the default), while a corrected
+    source language starts its own ledger instead of replaying the wrong one.
     """
     base = f"job_{doc_id[:12]}_{target_lang}"
     suffixes: list[str] = []
@@ -113,6 +134,9 @@ def derive_job_id(
         suffixes.append(f"pr{re.sub(r'[^A-Za-z0-9]', '', profile_name.strip())}")
     if engine_signature:
         suffixes.append(f"eng{re.sub(r'[^A-Za-z0-9]', '', engine_signature)}")
+    normalized_source = (source_lang or "en").strip().lower().replace("_", "-")
+    if normalized_source and normalized_source != "en":
+        suffixes.append(f"src{re.sub(r'[^A-Za-z0-9]', '', normalized_source)}")
     return f"{base}_{'_'.join(suffixes)}" if suffixes else base
 
 
@@ -300,6 +324,17 @@ class PipelineOrchestrator:
         # Completion hook the orchestrator invokes *inside* its writer-lock block
         # to ensure all post-completion writes remain under the single-writer guard.
         self.finalize_job = finalize_job
+
+        #: Set by the lease-renewal task when another process reclaimed this
+        #: run's writer lease. Read by :meth:`run` after the stage plan ends, so
+        #: a stalled-then-reclaimed run reports why it stopped instead of
+        #: finalizing itself as a success over the new owner's ledger.
+        self._lease_lost_reason: str | None = None
+        #: Event the detached renewal task sets on lease loss. Kept separate
+        #: from the caller's ``cancel_token`` so a reclaim never reads as a user
+        #: cancellation and — unlike the cancel token, which the REST embedding
+        #: path never passes — is always wired.
+        self._lease_lost_event: asyncio.Event | None = None
 
         # The per-run protective collaborators (maskers, cleaner, neighbor
         # builder, HTML validator) are owned by StageContext, which builds a
@@ -704,18 +739,31 @@ class PipelineOrchestrator:
     async def _renew_writer_lock(self, writer_lock: LedgerWriterLock) -> None:
         """Keep the writer-lock lease fresh for the life of the run.
 
-        The lock is an *expiring* lease so a crashed writer can be reclaimed; a
-        real book run lasts longer than one lease window, so the holder must
-        renew or a second process could take the job over mid-run. Runs until
-        cancelled (the caller cancels it once the stage generator finishes).
+        Delegates to :func:`ubt.core.engine.writer_lock.keep_lease_fresh` — the
+        one renewal implementation, shared with ``re_export_job`` so the two
+        cannot drift about the renewal interval or the lost-lease rule.
+
+        A *lost* lease is different from a transient renewal failure and must
+        stop the run. The renewal task is detached from the stage generator, so
+        there is no return value to inspect: it records the loss on the
+        orchestrator and sets the run's dedicated ``lease_lost`` event, which
+        every stage checks at its next boundary through
+        ``StageContext.check_cancelled``. Continuing would put two writers on one
+        ledger (both paying the provider, both overwriting checkpoints), and the
+        work already paid for is durable — the reclaiming process resumes from it.
+
+        The signal is *not* the cancel token: a lost lease must not read as a user
+        cancellation, and the REST embedding path passes no ``cancel_token`` at
+        all (only the queue worker does), so a token-based signal fired on some
+        paths and did nothing on others.
         """
-        interval = max(1.0, writer_lock.lease_seconds / 3.0)
-        while True:
-            await asyncio.sleep(interval)
-            try:
-                await asyncio.to_thread(writer_lock.renew)
-            except Exception as exc:  # a transient renew failure must not kill the run
-                logger.debug("Writer-lock renewal failed: %s", exc)
+
+        def _record_loss(reason: str) -> None:
+            self._lease_lost_reason = reason
+            if self._lease_lost_event is not None:
+                self._lease_lost_event.set()
+
+        await keep_lease_fresh(writer_lock, on_lost=_record_loss)
 
     async def _run_finalize_hook(
         self, event: TranslationProgressEvent, ledger: SQLiteJobLedger
@@ -860,6 +908,7 @@ class PipelineOrchestrator:
                 mock_run=self._is_mock_run,
                 profile_name=profile_name,
                 engine_signature=engine_signature(self.config),
+                source_lang=source_lang,
             )
         self._billing_sessions[actual_job_id] = run_session
         return _RunPreparation(
@@ -912,6 +961,12 @@ class PipelineOrchestrator:
         # let job B's run() overwrite job A's token — cancelling B then aborted
         # A's backoff, and cancelling A could not interrupt A's own sleep.
         set_run_cancel_token(cancel_token)
+        # The renewal task signals a lost lease through its own event; reset the
+        # per-run flags so a reused orchestrator cannot inherit a previous run's
+        # verdict. A fresh Event per run is required: the old one may already be
+        # set from a previous run whose lease was reclaimed.
+        self._lease_lost_event = asyncio.Event()
+        self._lease_lost_reason = None
         ledger: SQLiteJobLedger | None = None
         tm: TranslationMemory | None = None
         writer_lock: LedgerWriterLock | None = None
@@ -1029,6 +1084,10 @@ class PipelineOrchestrator:
                     run_session, actual_job_id, ledger, raise_on_budget=False
                 ),
                 cancel_token=cancel_token,
+                # Separate stop channel: fires when another process reclaims this
+                # run's writer lease. Present on every path, including the REST
+                # embedding path that passes no ``cancel_token``.
+                lease_lost=self._lease_lost_event,
             )
             logger.info(
                 "Adaptive execution policy for %s: %s",
@@ -1081,21 +1140,39 @@ class PipelineOrchestrator:
             # only when the outer one was GC'd — after the lock release — and
             # its writes silently reopened the closed ledger (see
             # ``LedgerBase._get_conn``).
-            async with aclosing(
-                run_stages(
-                    ctx,
-                    gates,
-                    facts,
-                    services,
-                    blocks=blocks,
-                    on_export_completed=_on_export_completed,
-                )
-            ) as stage_events:
-                async for event in stage_events:
-                    yield event
-            renew_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await renew_task
+            #
+            # The renewal task is stopped in this block's own ``finally``, not
+            # after the loop: every ``except`` arm below re-raises, so cancelling
+            # after the ``async for`` leaked one never-ending task per failed or
+            # cancelled job in the long-lived API/worker process. Once the lock
+            # is released ``renew()`` returns silently (``_held`` is False), so
+            # the loop never self-terminates — it would hold the whole
+            # orchestrator alive for the life of the process.
+            try:
+                async with aclosing(
+                    run_stages(
+                        ctx,
+                        gates,
+                        facts,
+                        services,
+                        blocks=blocks,
+                        on_export_completed=_on_export_completed,
+                    )
+                ) as stage_events:
+                    async for event in stage_events:
+                        yield event
+                # The renewal task is detached from the stage generator, so a
+                # lease lost mid-run may surface here rather than as a stage
+                # exception. The stages stop at their next boundary check; this is
+                # the one place that can turn that into the operator-facing
+                # reason. Without it a reclaimed run would finalize itself as a
+                # success over a ledger another process now owns.
+                if self._lease_lost_reason is not None:
+                    raise LedgerWriterLeaseLostError(self._lease_lost_reason)
+            finally:
+                renew_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await renew_task
 
         except GeneratorExit:
             # Consumer closed the generator early (job_worker's ``aclosing`` on a

@@ -406,6 +406,23 @@ async def run_ingest_stage(
                     "Use a different --job-id, re-run with the original target "
                     "language, or add --fresh to restart the job."
                 )
+            # Same guard for the source language, which used to be written to
+            # ``job_meta`` and never compared. A mistyped ``-s`` therefore
+            # resumed the old ledger and exported the previous translations
+            # unchanged while reporting success. Derived job ids now carry a
+            # non-default source language (``derive_job_id``); this covers the
+            # explicit ``--job-id`` path and ledgers written before that rule.
+            stored_source = await asyncio.to_thread(
+                ledger.get_job_metadata_value, actual_job_id, "source_lang"
+            )
+            requested_source = (source_lang or "").strip().lower().replace("_", "-")
+            if stored_source and requested_source and str(stored_source) != requested_source:
+                raise DocumentParseError(
+                    f"Job {actual_job_id} was ingested with source language "
+                    f"'{stored_source}' but is being resumed with '{requested_source}'. "
+                    "Use a different --job-id, re-run with the original source "
+                    "language, or add --fresh to restart the job."
+                )
             # Change-detection is only meaningful when both sides carry a real
             # hash. The "unavailable" sentinel (hash failed at ingest) means we
             # cannot compare, so resume proceeds without clearing or raising —

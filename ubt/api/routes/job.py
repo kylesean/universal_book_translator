@@ -22,7 +22,7 @@ from fastapi import (
 )
 from fastapi.responses import FileResponse, JSONResponse
 
-from ubt.api.job_catalog import list_job_summaries, summarize_job
+from ubt.api.job_catalog import list_job_summaries, page_scope_label, summarize_job
 from ubt.api.models import (
     JobAssessRequest,
     JobAssessResponse,
@@ -46,6 +46,7 @@ from ubt.core.config import MOCK_API_KEY
 from ubt.core.engine.job_queue import TERMINAL_JOB_STATUSES, JobStatus
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.progress import ProgressSnapshot
+from ubt.core.engine.writer_lock import LedgerWriterLock
 from ubt.core.exceptions import (
     BudgetExceededError,
     DocumentParseError,
@@ -64,6 +65,25 @@ from ubt.core.router.router import ModelRouter
 background_tasks: set[asyncio.Task[None]] = set()
 
 logger = logging.getLogger(__name__)
+
+
+def _ledger_is_rehearsal(ledger: Any, job_id: str) -> bool:
+    """Whether this job ran on the echo provider, read from its own ledger.
+
+    ``run_identity.mock_run`` is recorded by the ingest stage on every run, so
+    the ledger answers for a job no process currently tracks. A missing or
+    malformed record means "not a rehearsal": every pre-identity ledger is a
+    real run, and defaulting the other way would badge real deliveries as
+    rehearsals.
+    """
+    identity = ledger.get_job_metadata_value(job_id, "run_identity")
+    return bool(isinstance(identity, dict) and identity.get("mock_run"))
+
+
+def _ledger_page_scope(ledger: Any, job_id: str) -> str | None:
+    """The run's page scope (``"1-6"``) from the ledger, or ``None`` for a full run."""
+    return page_scope_label(ledger.get_job_metadata_value(job_id, "selected_pages"))
+
 
 #: The console's built index.html: the SPA shell the browser-navigation branch
 #: of ``GET /jobs`` serves. Resolved from the package root (``ubt/api/static``),
@@ -471,8 +491,16 @@ def register_job_routes(
             return overrides
 
         def _catalog() -> list[dict[str, Any]]:
+            # Queue rows first: a job submitted but not yet claimed has no ledger,
+            # and listing only ledgers made a queue of ten look like an empty
+            # console until a worker started. ``list_job_summaries`` merges these
+            # by job_id and prefers the ledger's own numbers where both exist.
+            pending = job_queue.list_jobs(limit=min(max(limit, 1), 1000)) if job_queue else []
             return list_job_summaries(
-                app_config.db_dir, live=_live_overrides(), limit=min(max(limit, 1), 1000)
+                app_config.db_dir,
+                live=_live_overrides(),
+                limit=min(max(limit, 1), 1000),
+                queued=pending,
             )
 
         summaries = await asyncio.to_thread(_catalog)
@@ -524,7 +552,6 @@ def register_job_routes(
                 if db_path.exists():
                     import time
 
-                    from ubt.core.engine.writer_lock import LedgerWriterLock
                     from ubt.core.exceptions import LedgerWriterLockConflictError
 
                     # The pipeline holds the job-level writer lock for the whole
@@ -742,8 +769,14 @@ def register_job_routes(
             return ledger_gone, outputs_gone
 
         ledger_gone, outputs_gone = await asyncio.to_thread(_remove)
+        # Drop the queue row too. Leaving it makes the job reappear in /jobs as
+        # COMPLETED with a download that no longer resolves, and makes re-submitting
+        # the same id a no-op ("already completed") that never runs again.
+        queued_gone = False
+        if job_queue is not None:
+            queued_gone = bool(await asyncio.to_thread(job_queue.delete, valid_id))
         manager.forget_job(valid_id)
-        if not ledger_gone and not outputs_gone and record is None:
+        if not ledger_gone and not outputs_gone and not queued_gone and record is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Job not found: {valid_id}",
@@ -763,6 +796,34 @@ def register_job_routes(
         valid_id = validate_job_id(job_id)
         if not _tenant_allows(valid_id, scope.tenant_from_header(x_ubt_tenant)):
             raise cross_tenant_404(valid_id)
+
+        def _ledger_facts() -> tuple[bool | None, str | None]:
+            """``(rehearsal, page_scope)`` from the job's ledger, once it exists.
+
+            The ledger is written by the process that actually ran the job, so
+            it answers the "was this a rehearsal / a fragment?" question
+            authoritatively. The queue row's payload records only what the API
+            *requested*: a keyless API auto-sets ``dry_run`` while a keyed worker
+            runs the job for real, and the API also explicitly defers to the
+            worker (``rehearsal_auto``). Reporting the payload made ``/status``
+            disagree with ``/jobs``, which reads the ledger. ``None`` means "no
+            ledger yet" — the caller falls back to the request.
+            """
+            db_path = app_config.db_dir / f"{valid_id}.sqlite"
+            if not db_path.exists():
+                return None, None
+            try:
+                with SQLiteJobLedger(db_path, read_only=True) as ledger:
+                    return (
+                        _ledger_is_rehearsal(ledger, valid_id),
+                        _ledger_page_scope(ledger, valid_id),
+                    )
+            except Exception as exc:
+                logger.debug("Ledger facts unavailable for job %s: %s", valid_id, exc)
+                return None, None
+
+        ledger_rehearsal, ledger_page_scope = _ledger_facts()
+
         if job_queue is not None:
             job = job_queue.get(valid_id)
             if job is not None:
@@ -773,7 +834,14 @@ def register_job_routes(
                     created_at=datetime.fromtimestamp(job.enqueued_at, UTC),
                     error=job.error,
                     queue_position=job_queue.queue_position(valid_id),
-                    rehearsal=bool(job.payload.get("dry_run", False)),
+                    # Before the first ledger write (still queued) the request is
+                    # the only evidence; afterwards the run's own record wins.
+                    rehearsal=(
+                        bool(job.payload.get("dry_run", False))
+                        if ledger_rehearsal is None
+                        else ledger_rehearsal
+                    ),
+                    page_scope=ledger_page_scope,
                 )
         record = manager.get_job(valid_id)
         if record:
@@ -783,7 +851,10 @@ def register_job_routes(
                 status=record.status,
                 created_at=record.created_at,
                 error=record.error,
-                rehearsal=record.request.dry_run,
+                rehearsal=(
+                    record.request.dry_run if ledger_rehearsal is None else ledger_rehearsal
+                ),
+                page_scope=ledger_page_scope,
             )
 
         # Fallback: inspect persisted SQLite ledger on disk
@@ -814,17 +885,40 @@ def register_job_routes(
                             # move again. Reporting "initialized" forever keeps
                             # every polling client waiting on a job that no
                             # longer exists.
-                            status_value = JobStatus.FAILED
-                            error_note = (
-                                "Job was interrupted before it reached a terminal "
-                                "state (the server restarted); re-run it to resume."
-                            )
+                            #
+                            # But a non-terminal row is NOT evidence of a crash:
+                            # the CLI and the API share ``.ubt/ledgers``, so a
+                            # ``ubt translate`` running in another terminal is a
+                            # perfectly live writer of exactly this ledger.
+                            # Declaring it FAILED ("the server restarted") told the
+                            # operator to re-run a job that was working, and
+                            # following that advice collides with the writer lock
+                            # or pays the provider twice. Ask the lease instead:
+                            # a live holder means running, an expired or missing
+                            # one means the writer is gone.
+                            holder = LedgerWriterLock.lease_holder(db_path, valid_id)
+                            if holder is None:
+                                status_value = JobStatus.FAILED
+                                error_note = (
+                                    "Job was interrupted before it reached a terminal "
+                                    "state (the server restarted); re-run it to resume."
+                                )
+                            else:
+                                status_value = JobStatus.RUNNING
                         return JobStatusResponse(
                             **public_progress(progress.model_dump()),
                             job_id=str(snap["job_id"]),
                             status=status_value,
                             created_at=created_dt,
                             error=error_note,
+                            # The ledger is the authority on what this run actually
+                            # was. ``run_identity.mock_run`` is written by the
+                            # ingest stage on every run, so a rehearsal reads as a
+                            # rehearsal from any process; this branch used to leave
+                            # ``rehearsal`` at its False default and a CLI
+                            # rehearsal showed up as a real delivery.
+                            rehearsal=_ledger_is_rehearsal(ledger, valid_id),
+                            page_scope=_ledger_page_scope(ledger, valid_id),
                         )
             except Exception as exc:
                 logger.exception("Failed to inspect ledger on disk for job %s: %s", valid_id, exc)
