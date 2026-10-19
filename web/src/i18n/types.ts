@@ -81,6 +81,9 @@ export interface TranslationDictionary {
     sourceChars: string
     chapters: string
     mathDensity: string
+    /** Distinguishes the text-level density from the layout-level formula count. */
+    mathDensityTextOnly: string
+    mathDensityWithObjects: string
     estTime: string
     confidence: string
     probeWarnings: string

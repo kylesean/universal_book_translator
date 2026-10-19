@@ -84,6 +84,10 @@ export const zh: TranslationDictionary = {
     sourceChars: '源文字符数',
     chapters: '章节数',
     mathDensity: '公式密集度',
+    // 「密集度」来自采样文本的数学符号密度；has_formulas 来自逐页版面对象普查。
+    // 两者可以同时成立（文本里公式多、但没有可抽取的公式对象），也可以相反。
+    mathDensityTextOnly: '文本符号密度；未检出可抽取的公式版面对象',
+    mathDensityWithObjects: '文本符号密度；已检出公式版面对象',
     estTime: '预估编译耗时',
     confidence: '路由置信度',
     probeWarnings: '体检告警',
@@ -106,7 +110,7 @@ export const zh: TranslationDictionary = {
       SCANNED_PAGES_DOMINANT:
         '文档以扫描/图像页为主，译文依赖视觉转写，成本与时延显著上升；建议先做 OCR 预检。',
       FONT_RESIDUE_RISK:
-        '字体编码损伤：{confirmed_pages} 页确认存在字符乱码（共 {residue_chars} 个残字符），部分文字可能不可恢复，{remedy}。',
+        '字体编码损伤：{confirmed_pages} 页确认存在字符乱码（共 {residue_chars} 个残字符），部分文字可能不可恢复，{remedy}。此问题源于字体编码（非扫描质量），与「扫描件位图比例」无关。',
       FORMULA_HEAVY_NEEDS_ENRICHMENT:
         '文档公式密集但视觉公式增强已关闭（--preset preview 的常见取舍），公式转写质量可能受限。',
       PATHOLOGICAL_PAGE_RISK:

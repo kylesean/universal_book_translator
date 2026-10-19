@@ -827,9 +827,31 @@ export function NewJobWizard() {
                   UPDATING...
                 </Badge>
               ) : assessment ? (
-                <Badge variant="success" dot>
-                  {t.common.ready}
-                </Badge>
+                <div className="flex items-center gap-2 shrink-0">
+                  {/* One provenance badge for the whole panel, not one per row.
+                      Every scale figure below (chars, tokens, blocks, cost) comes
+                      from the same assess call, so they share one source. The
+                      silent re-assess on a preset change runs with deep=false,
+                      which turns an exact block count into a sampled estimate;
+                      marking each row separately said the same thing four times
+                      and still left the user wondering why the character count
+                      moved. */}
+                  <Badge
+                    variant="outline"
+                    className={`text-xs font-mono ${
+                      assessment.cost.billable_blocks_is_exact
+                        ? 'text-[#15803d] border-[#15803d]/30'
+                        : 'text-[#b45309] border-[#b45309]/30'
+                    }`}
+                  >
+                    {assessment.cost.billable_blocks_is_exact
+                      ? t.wizard.estimateExact
+                      : t.wizard.estimateApproximate}
+                  </Badge>
+                  <Badge variant="success" dot>
+                    {t.common.ready}
+                  </Badge>
+                </div>
               ) : (
                 <Badge variant="outline">{t.common.idle}</Badge>
               )}
@@ -884,14 +906,28 @@ export function NewJobWizard() {
                       {assessment.document.source_chars.toLocaleString()}
                     </span>
                   </div>
-                  <div className="py-2.5 flex items-center justify-between">
-                    <span className="text-[var(--ink-secondary)]">{t.wizard.mathDensity}</span>
-                    <span
-                      className={`font-mono font-bold ${
-                        assessment.document.has_formulas ? 'text-[#b45309]' : 'text-[#15803d]'
-                      }`}
-                    >
-                      {assessment.document.math_density}
+                  <div className="py-2.5 flex items-start justify-between gap-3">
+                    <span className="text-[var(--ink-secondary)] shrink-0">
+                      {t.wizard.mathDensity}
+                    </span>
+                    <span className="text-right">
+                      <span
+                        className={`font-mono font-bold ${
+                          assessment.document.has_formulas ? 'text-[#b45309]' : 'text-[#15803d]'
+                        }`}
+                      >
+                        {assessment.document.math_density}
+                      </span>
+                      {/* "high" and "no formula objects" are both true and not a
+                          contradiction: the density comes from a text sample,
+                          while has_formulas comes from the per-page layout
+                          census. Saying which is which stops the pair reading
+                          as a bug. */}
+                      <span className="block text-xs font-normal text-[var(--ink-muted)] leading-relaxed">
+                        {assessment.document.has_formulas
+                          ? t.wizard.mathDensityWithObjects
+                          : t.wizard.mathDensityTextOnly}
+                      </span>
                     </span>
                   </div>
                   <div className="py-2.5 flex items-center justify-between">
@@ -915,22 +951,6 @@ export function NewJobWizard() {
                     <span className="text-[var(--ink-secondary)]">{t.wizard.estTokens}</span>
                     <span className="font-mono font-bold text-[var(--ink-primary)]">
                       {assessment.document.estimated_tokens.toLocaleString()}
-                      {/* A silent re-assess runs with deep=false, so the block
-                          count drops back to an estimate while the panel keeps
-                          showing a number that looks equally authoritative. */}
-                      <span
-                        className={`ml-1.5 text-xs font-normal ${
-                          assessment.cost.billable_blocks_is_exact
-                            ? 'text-[#15803d]'
-                            : 'text-[var(--ink-muted)]'
-                        }`}
-                      >
-                        (
-                        {assessment.cost.billable_blocks_is_exact
-                          ? t.wizard.estimateExact
-                          : t.wizard.estimateApproximate}
-                        )
-                      </span>
                     </span>
                   </div>
                   <div className="py-2.5 flex items-center justify-between">

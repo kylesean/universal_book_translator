@@ -809,3 +809,82 @@ def test_wizard_sends_layout_columns_within_the_api_range() -> None:
     # The wizard maps its 'auto' sentinel to null before submitting.
     assert re.search(r"layout_columns:\s*layoutColumns === 'auto' \? null", source)
     assert "layout_columns" in JobSubmitRequest.model_fields
+
+
+# --- the pre-flight panel must not show contradictory numbers ----------------
+
+_WIZARD_SRC = _REPO_ROOT / "web" / "src" / "views" / "wizard" / "NewJobWizard.tsx"
+
+
+def test_the_estimate_provenance_badge_is_panel_level_not_per_row() -> None:
+    """One provenance marker for the whole panel.
+
+    A silent re-assess (any preset/pages/language tweak) runs with
+    ``deep=false``, which replaces the exact block count with a sampled
+    estimate. The character count moves with it — 33,968 exact vs 47,698
+    sampled on corpus/documents/chapter-3.pdf, a 40% swing — so marking only
+    the token row left the user with two contradictory scale figures and no
+    explanation. Every scale figure comes from the same assess call, so the
+    marker belongs on the panel header.
+    """
+    if not _WIZARD_SRC.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+    source = _WIZARD_SRC.read_text(encoding="utf-8")
+
+    # The badge is rendered from the header block, above the metric rows.
+    header_end = source.index("preflightTitle")
+    metrics_start = source.index("sourceChars")
+    assert header_end < metrics_start, "unexpected panel layout"
+
+    header_block = source[header_end:metrics_start]
+    assert "billable_blocks_is_exact" in header_block, (
+        "the estimate-provenance badge is not in the panel header"
+    )
+
+    # And it must not be repeated inside the metric rows.
+    metrics_block = source[metrics_start : source.index("probeWarnings")]
+    assert "estimateExact" not in metrics_block, (
+        "the estimate marker is repeated per row; it belongs on the panel header only"
+    )
+
+
+def test_the_formula_density_row_explains_text_vs_layout() -> None:
+    """``math_density`` and ``has_formulas`` are measured from different things.
+
+    ``math_density`` is a text-sample symbol density; ``has_formulas`` is the
+    per-page layout census. corpus/documents/chapter-3.pdf reports
+    ``math_density=high`` with ``has_formulas=False`` — both true, but the pair
+    reads as a contradiction without a caption.
+    """
+    from ubt.api.models import AssessDocumentFacts
+
+    assert "math_density" in AssessDocumentFacts.model_fields
+    assert "has_formulas" in AssessDocumentFacts.model_fields
+
+    if not _WIZARD_SRC.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+    source = _WIZARD_SRC.read_text(encoding="utf-8")
+    assert "mathDensityWithObjects" in source
+    assert "mathDensityTextOnly" in source
+
+
+def test_font_residue_warning_says_it_is_not_a_scan_defect() -> None:
+    """A 0% scanned share next to a 20-page garble warning needs a bridge.
+
+    ``FONT_RESIDUE_RISK`` comes from font-encoding damage, so it fires on a
+    perfectly born-digital PDF. Rendered next to ``scan_page_share=0%`` the
+    pair looked like a bug; both locales now say the two are unrelated.
+    """
+    if not _EN_TS.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+
+    for path, needles in (
+        (_EN_TS, ("font-encoding", "scan-quality")),
+        (_EN_TS.parent / "zh.ts", ("字体编码", "扫描质量")),
+    ):
+        text = path.read_text(encoding="utf-8")
+        block = re.search(r"FONT_RESIDUE_RISK:\s*\n?\s*'([^']*)'", text)
+        assert block, f"{path.name} has no FONT_RESIDUE_RISK copy"
+        copy = block.group(1)
+        for needle in needles:
+            assert needle in copy, f"{path.name} FONT_RESIDUE_RISK lost {needle!r}"
