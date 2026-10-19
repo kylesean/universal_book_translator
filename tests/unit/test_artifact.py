@@ -210,7 +210,9 @@ def _heading(block_id: str, text: str, *, source_text: str | None = None) -> IRB
 
 
 def test_chrome_heading_is_dropped_page_furniture() -> None:
-    from ubt.render.typst.document_renderer import dropped_page_furniture
+    # Defined in delivered_text; the renderer only re-exports it for
+    # existing callers, and mypy --strict rejects that indirection.
+    from ubt.render.delivered_text import dropped_page_furniture
 
     # The exact block that produced the false FAIL on the paper run.
     assert dropped_page_furniture(_heading("b3", "Submitted 8/21; Revised 3/22; Published 4/22"))
@@ -225,7 +227,9 @@ def test_a_running_author_head_is_furniture_through_its_source_text() -> None:
     delivered-text pattern never caught: the header survived and opened the
     body on the paper's author line. The source text is the fingerprint.
     """
-    from ubt.render.typst.document_renderer import dropped_page_furniture
+    # Defined in delivered_text; the renderer only re-exports it for
+    # existing callers, and mypy --strict rejects that indirection.
+    from ubt.render.delivered_text import dropped_page_furniture
 
     head = _heading("b7", "Fedus、Zoph与Shazeer", source_text="FEDUS, ZOPH AND SHAZEER")
     assert dropped_page_furniture(head)
@@ -239,7 +243,9 @@ def test_a_running_author_head_is_furniture_through_its_source_text() -> None:
 
 
 def test_a_real_heading_is_not_page_furniture() -> None:
-    from ubt.render.typst.document_renderer import dropped_page_furniture
+    # Defined in delivered_text; the renderer only re-exports it for
+    # existing callers, and mypy --strict rejects that indirection.
+    from ubt.render.delivered_text import dropped_page_furniture
 
     assert not dropped_page_furniture(_heading("b4", "Switch Transformers"))
     assert not dropped_page_furniture(_heading("b9", "Abstract"))
@@ -247,7 +253,9 @@ def test_a_real_heading_is_not_page_furniture() -> None:
 
 def test_a_kept_in_source_non_heading_is_not_page_furniture() -> None:
     """A bibliography entry is kept verbatim but still placed, so not furniture."""
-    from ubt.render.typst.document_renderer import dropped_page_furniture
+    # Defined in delivered_text; the renderer only re-exports it for
+    # existing callers, and mypy --strict rejects that indirection.
+    from ubt.render.delivered_text import dropped_page_furniture
 
     element = make_element(
         id="bib1",

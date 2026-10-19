@@ -229,7 +229,10 @@ def test_the_export_stage_writes_the_canonical_terminology_marker() -> None:
     from unittest.mock import MagicMock
 
     from ubt.core.qe.heuristic import GLOSSARY_VIOLATION_MARKER, glossary_violation_flag
-    from ubt.core.validators.consistency import ValidationResult
+
+    # Defined in validators.base; consistency only imports it, so reaching
+    # it through that module is what mypy --strict flags.
+    from ubt.core.validators.base import ValidationResult
 
     validator = MagicMock()
     validator.validate.return_value = ValidationResult.failure(

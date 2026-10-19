@@ -238,12 +238,15 @@ def test_a_markdown_blockquote_marker_never_reaches_the_text(tmp_path: Path) -> 
     texts = [getattr(el, "text", "") for el in elements]
     assert texts[0] == "引用的句子\n第二行"
     assert not any(text.strip().startswith(">") for text in texts), texts
-    # Structure inside the quote survives.
+    # Structure inside the quote survives. ``elements`` is a union of every
+    # element type and only some carry ``text``, so the type is asserted first
+    # and the attribute read through ``getattr`` (mypy --strict rejects a bare
+    # ``elements[1].text`` on the union).
     assert type(elements[1]).__name__ == "Heading"
-    assert elements[1].text == "引用里的标题"
+    assert getattr(elements[1], "text", None) == "引用里的标题"
     assert type(elements[2]).__name__ == "ListItem"
-    assert elements[2].text == "引用里的列表"
-    assert elements[3].text == "普通段落。"
+    assert getattr(elements[2], "text", None) == "引用里的列表"
+    assert getattr(elements[3], "text", None) == "普通段落。"
 
 
 def test_nested_and_spaced_blockquote_markers_are_stripped(tmp_path: Path) -> None:
@@ -252,7 +255,7 @@ def test_nested_and_spaced_blockquote_markers_are_stripped(tmp_path: Path) -> No
     path = tmp_path / "nested.md"
     path.write_text("> > deep quote\n>\t tabbed quote\n", encoding="utf-8")
     elements = read_md(path).elements
-    text = elements[0].text
+    text = getattr(elements[0], "text", "")
     assert "deep quote" in text and "tabbed quote" in text
     assert ">" not in text
 

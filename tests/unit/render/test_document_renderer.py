@@ -1135,7 +1135,10 @@ def test_a_quarantine_marker_falls_back_to_the_draft() -> None:
 
 
 def test_only_the_quarantine_wrapper_counts_as_a_placeholder() -> None:
-    from ubt.render.typst.document_renderer import _is_placeholder
+    # Imported from its defining module, not the renderer's compatibility
+    # re-export: mypy --strict rejects reaching a symbol through a module
+    # that merely re-exports it (no explicit `as` in __all__).
+    from ubt.render.delivered_text import is_placeholder as _is_placeholder
 
     assert _is_placeholder('<mark class="ubt-blocked-human" title="x">src</mark>') is True
     assert _is_placeholder('<mark class="ubt-failed-draft" title="x">译文</mark>') is False
@@ -1146,7 +1149,7 @@ def test_only_the_quarantine_wrapper_counts_as_a_placeholder() -> None:
 
 def test_unwrapping_keeps_a_body_containing_its_own_markup() -> None:
     """Only the outer wrapper is stripped; inner markup is the block's content."""
-    from ubt.render.typst.document_renderer import _unwrap_mark
+    from ubt.render.delivered_text import unwrap_mark as _unwrap_mark
 
     wrapped = '<mark class="ubt-failed-draft" title="t">a <b>bold</b> b</mark>'
     assert _unwrap_mark(wrapped) == "a <b>bold</b> b"
