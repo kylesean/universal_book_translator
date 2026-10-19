@@ -99,20 +99,21 @@ _PROTECTED_SPAN_PATTERNS = (
     re.compile(r"\\\([\s\S]*?\\\)"),  # LaTeX inline \(...\)
     re.compile(r"\\begin\{[a-zA-Z*]+\}[\s\S]*?\\end\{[a-zA-Z*]+\}"),  # LaTeX environments
     re.compile(r"\]\([^\)\n]+\)"),  # Markdown link targets ](url)
-    re.compile(r"⟦[^⟧]*⟧"),  # Masker tokens (checksum is lowercase hex + hyphen)
-    # Paired quotation. A quoted span is a citation of the original wording -- a
-    # product name, an identifier, a title -- so rewriting it is the Chinglish
-    # the enforcer exists to prevent, not the drift it exists to fix
-    # (该组件名为 "Data Loader" must keep the name it names). Delimiters are
-    # matched as explicit pairs, never as one character class, so a closing
-    # quote can never open a span. The straight double quote opens a span only
-    # when no Latin letter or digit precedes it: 10" is an inch mark, and
-    # treating it as an opener swallowed the text up to the next real quote.
-    # Spans are single-line and length-capped; an over-long or unbalanced quote
-    # protects nothing, which fails toward enforcement. The straight single
-    # quote is absent on purpose: ' is overwhelmingly an apostrophe in the
-    # contractions and possessives that fill English prose, and a pattern that
-    # pairs any two of them would shield spans that no one wrote as quotes.
+    re.compile(r"⟦[^⟧]*⟧"),  # Masker tokens (checksum is lowercase hex + hyphen
+)
+
+#: Quoted spans: a citation of the original wording (a product name, an
+#: identifier, a title). Kept in their own tuple because two callers need
+#: different answers:
+#:
+#: - the glossary enforcer must never rewrite a term inside a quote (see below);
+#: - the CJK spacing cleaner must *never* treat a quote as a code-like shield.
+#:   A quoted run is ordinary prose that happens to sit between quotes: inside
+#:   it ``你好， 世界`` keeps its stray space (the cleaner skipped every rule
+#:   between the delimiters) and outside it the cleaner added a space that was
+#:   never there (``这是“X”模型`` became ``这是 “X” 模型``). Novels and essays are
+#:   mostly dialogue, i.e. mostly quoted prose, so that was the common case.
+_QUOTED_SPAN_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"“[^“”\n]{1,200}”"),  # “typographic double”
     re.compile(r"‘[^‘’\n]{1,200}’"),  # ‘typographic single’
     re.compile(r"「[^「」\n]{1,200}」"),  # 「CJK corner」
@@ -123,20 +124,22 @@ _PROTECTED_SPAN_PATTERNS = (
 
 
 def extract_protected_spans(text: str) -> list[tuple[int, int]]:
-    """Find intervals in text (HTML tags, code, LaTeX math, URLs, quotes) to shield from glossary substitutions.
+    """Intervals to shield from glossary substitution: code, math, tags, URLs, **and quotes**."""
+    return _extract(text, include_quotes=True)
 
-    Inline ``$...$`` is matched through the shared, currency-aware
-    :func:`~ubt.core.cleaners.inline_math.inline_math_spans`: a naive
-    ``\\$[^\\$\\n]+\\$`` paired ``"$5 and $10"`` into one "math" span and
-    shielded every term between the two dollars from enforcement.
 
-    Paired quotation is protected for the same reason code is: a quoted span
-    points at the original wording, so substituting a term inside it corrupts a
-    deliberate citation rather than fixing drift. See
-    :data:`_PROTECTED_SPAN_PATTERNS` for the delimiter rules.
+def extract_code_like_spans(text: str) -> list[tuple[int, int]]:
+    """Intervals to shield from typographic rewrites: code, math, tags, URLs.
+
+    Deliberately excludes quotes: see :data:`_QUOTED_SPAN_PATTERNS`.
     """
+    return _extract(text, include_quotes=False)
+
+
+def _extract(text: str, *, include_quotes: bool) -> list[tuple[int, int]]:
     spans: list[tuple[int, int]] = []
-    for patt in _PROTECTED_SPAN_PATTERNS:
+    patterns = (*_PROTECTED_SPAN_PATTERNS, *(_QUOTED_SPAN_PATTERNS if include_quotes else ()))
+    for patt in patterns:
         for m in patt.finditer(text):
             spans.append((m.start(), m.end()))
     spans.extend(inline_math_spans(text))

@@ -174,3 +174,50 @@ def test_cjk_spacing_formula_and_html_protection() -> None:
     text3 = "这是<code>int a = 1;</code>代码。"
     cleaned3 = apply_pangu_spacing(text3)
     assert "<code>int a = 1;</code>" in cleaned3
+
+
+def test_quoted_prose_is_cleaned_like_any_other_prose() -> None:
+    """A quotation is prose, not a code-like shield.
+
+    The cleaner reused the glossary enforcer's protected spans, which include
+    paired quotes. Inside a quoted span every spacing rule was skipped (so
+    ``你好， 世界`` kept its stray space), and outside it the cleaner added a
+    space on both sides of the "protected" span that the text never had
+    (``这是“X”模型`` became ``这是 “X” 模型``). Dialogue-heavy books are mostly
+    quoted prose, so this was the common case, not an edge.
+    """
+    from ubt.core.cleaners.cjk_spacing import normalize_publishing_cjk as normalize
+
+    # No space invented outside the delimiters.
+    assert normalize("文中称之为“Transformer”模型。") == "文中称之为“Transformer”模型。"
+    assert normalize("他说：“好。”然后离开。") == "他说：“好。”然后离开。"
+    # Stray space inside the delimiters is removed, like anywhere else.
+    assert normalize("他说：“这是一个模型， 很好。”然后离开了。") == (
+        "他说：“这是一个模型，很好。”然后离开了。"
+    )
+    assert normalize("他问“你 好 吗”。") == "他问“你好吗”。"
+
+    # Code and math ARE still shielded: their bytes must not be rewritten.
+    assert normalize("这是 `code` 与 $x$ 的例子。") == "这是 `code` 与 $x$ 的例子。"
+    assert normalize("用 `a  b` 表示。") == "用 `a  b` 表示。"
+
+
+def test_the_glossary_enforcer_still_shields_quoted_terms() -> None:
+    """The two span sets serve different callers and must stay apart.
+
+    Dropping quotes from the *cleaner* must not drop them from the enforcer: a
+    term inside a deliberate quotation is a citation of the original wording,
+    and substituting it there is the Chinglish the enforcer exists to prevent.
+    """
+    from ubt.core.validators.glossary_enforcer import (
+        extract_code_like_spans,
+        extract_protected_spans,
+    )
+
+    text = "该组件名为“Data Loader”，见 `code` 与 $x$。"
+    quoted = [text[a:b] for a, b in extract_protected_spans(text)]
+    code_like = [text[a:b] for a, b in extract_code_like_spans(text)]
+
+    assert any(span.startswith("“") for span in quoted), "enforcer shields the quote"
+    assert not any(span.startswith("“") for span in code_like), "cleaner must not"
+    assert any(span.startswith("`") for span in code_like), "code stays shielded in both"

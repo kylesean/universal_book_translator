@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import functools
 import posixpath
+import re
 import zipfile
 from pathlib import Path
 from urllib.parse import unquote
@@ -44,8 +45,61 @@ def _opf_path(zf: zipfile.ZipFile, budget: ZipReadBudget | None = None) -> str:
     return str(rootfile.get("full-path"))
 
 
-def _spine(zf: zipfile.ZipFile, opf_path: str, budget: ZipReadBudget | None = None) -> list[str]:
-    """The XHTML member paths of the spine, in reading order."""
+#: Spine members that are reading matter. An OPF manifest may also list stylesheets,
+#: fonts and the navigation document; only these are chapters.
+_SPINE_MEMBER_SUFFIXES = (".xhtml", ".html", ".htm", ".xml")
+
+
+def nav_item_ids(root: object) -> set[str]:
+    """The manifest ids of the package's own navigation documents.
+
+    EPUB3 declares ``properties="nav"``; EPUB2 lists the NCX by media type. They
+    are metadata, not reading matter: mining ``nav.xhtml`` turned every
+    table-of-contents entry into a block that was sent to the model (paid
+    twice) and then re-injected as a dead ``<li>`` bullet beside the real,
+    already-translated link.
+    """
+    ids: set[str] = set()
+    for item in root.findall(f".//{{{_OPF_NS}}}manifest/{{{_OPF_NS}}}item"):  # type: ignore[attr-defined]
+        item_id = item.get("id")
+        if not item_id:
+            continue
+        properties = str(item.get("properties") or "").split()
+        media_type = str(item.get("media-type") or "")
+        if "nav" in properties or media_type in {
+            "application/x-dtbncx+xml",
+            "application/x-dtbook+xml",
+        }:
+            ids.add(str(item_id))
+    return ids
+
+
+def spine_chapters(
+    zf: zipfile.ZipFile,
+    opf_path: str,
+    budget: ZipReadBudget | None = None,
+) -> list[str]:
+    """The reading-order XHTML member paths of the spine.
+
+    The single implementation of the spine rule, shared with the EPUB adapter.
+    The two used to be separate: this one had none of the adapter's
+    navigation-document filtering or duplicate collapsing, so the same minimal
+    EPUB produced three pages through ``read_epub`` (the nav document counted as
+    prose) and two chapters through the adapter.
+
+    Rules, each of which was a fixed bug in one of the two copies:
+
+    * OPF hrefs are percent-encoded (``text%20ch1.xhtml``); joining the raw value
+      makes the archive lookup fail and the chapter vanish silently;
+    * a relative href (``../OEBPS/x.xhtml``) is resolved against the OPF's own
+      directory;
+    * the navigation document is skipped (:func:`nav_item_ids`);
+    * a spine that repeats a member contributes it once — a second chapter for
+      the same file clones identical blocks (paid twice) that the renderer can
+      never both inject;
+    * with no usable spine at all, fall back to the archive's HTML members in
+      natural order, still skipping anything whose name says "toc".
+    """
     base = posixpath.dirname(opf_path)
     opf = read_member(zf, opf_path, budget)
     if opf is None:
@@ -55,16 +109,41 @@ def _spine(zf: zipfile.ZipFile, opf_path: str, budget: ZipReadBudget | None = No
     for item in root.findall(f".//{{{_OPF_NS}}}manifest/{{{_OPF_NS}}}item"):
         item_id, href = item.get("id"), item.get("href")
         if item_id and href:
-            manifest[item_id] = href
+            manifest[str(item_id)] = posixpath.normpath(
+                posixpath.join(base, unquote(str(href))) if base else unquote(str(href))
+            )
+    skip = nav_item_ids(root)
+
     spine: list[str] = []
+    seen: set[str] = set()
     for itemref in root.findall(f".//{{{_OPF_NS}}}spine/{{{_OPF_NS}}}itemref"):
-        href = manifest.get(itemref.get("idref") or "")
-        if href:
-            # OPF hrefs are percent-encoded (common with %20 or non-ASCII
-            # member names); joining the raw value makes the archive lookup
-            # KeyError and the chapter silently vanish from the document.
-            spine.append(posixpath.normpath(posixpath.join(base, unquote(href))))
-    return spine
+        idref = str(itemref.get("idref") or "")
+        if not idref or idref in skip:
+            continue
+        member = manifest.get(idref)
+        if not member or not member.lower().endswith(_SPINE_MEMBER_SUFFIXES):
+            continue
+        if member in seen:
+            continue
+        seen.add(member)
+        spine.append(member)
+    if spine:
+        return spine
+
+    # No usable spine: the archive's own HTML members, in natural order.
+    return sorted(
+        (
+            name
+            for name in zf.namelist()
+            if name.lower().endswith((".xhtml", ".html", ".htm")) and "toc" not in name.lower()
+        ),
+        key=_natural_sort_key,
+    )
+
+
+def _natural_sort_key(name: str) -> tuple[object, ...]:
+    """Sort ``ch2`` before ``ch10``: split digit runs out as integers."""
+    return tuple(int(part) if part.isdigit() else part.lower() for part in re.split(r"(\d+)", name))
 
 
 def _resolve_asset(src: str, item_path: str) -> str:
@@ -84,7 +163,7 @@ def read_epub(path: str | Path, *, doc_id: str | None = None) -> Document:
     out = []
     with zipfile.ZipFile(epub_path) as zf:
         budget = ZipReadBudget()
-        spine = _spine(zf, _opf_path(zf, budget), budget)
+        spine = spine_chapters(zf, _opf_path(zf, budget), budget)
         for index, item_path in enumerate(spine):
             raw = read_member(zf, item_path, budget)
             if raw is None:

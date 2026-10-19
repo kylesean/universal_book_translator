@@ -54,7 +54,7 @@ from ubt.core.qe.defect_taxonomy import (
     has_structural_defect,
     is_transient_lifecycle_only,
 )
-from ubt.core.qe.score_policy import is_shippable
+from ubt.core.qe.score_policy import shippable_threshold
 from ubt.core.validators.span_repair import max_severity, span_to_dict
 
 logger = logging.getLogger(__name__)
@@ -107,6 +107,16 @@ def _flags_severity(flags: list[str]) -> str:
     if has_structural_defect(flags):
         return "major"
     return "minor"
+
+
+def _minor_may_auto_pass(score: float | None, qe_threshold: float) -> bool:
+    """Whether a Minor block clears the shippable score bar.
+
+    The score half of :func:`ubt.core.qe.score_policy.is_shippable`, without its
+    flag condition. See the Minor branch in the triage loop for why the flag
+    half made that branch unreachable rather than conservative.
+    """
+    return (score or 0.0) >= shippable_threshold(qe_threshold)
 
 
 def _needs_human_flags(block: IRBlock) -> list[str]:
@@ -397,10 +407,25 @@ async def run_triage_stage(
             )
             continue
 
-        # Minor: auto-pass when the block is shippable, otherwise keep the draft
-        # for human review. One shared rule (``is_shippable``) so triage, repair
-        # and the repair loop cannot disagree about the bar.
-        if is_shippable(cand.mtqe_score, qe_threshold, list(cand.error_flags)):
+        # Minor: auto-pass when the score permits, otherwise keep the draft for
+        # human review.
+        #
+        # The bar here is the *score*, not ``is_shippable``. ``is_shippable``
+        # also requires an empty flag list, and that made this branch
+        # unreachable: a block with no flags and a sufficient score was already
+        # set ``REPAIRED`` by the repair loop, so it never became a triage
+        # candidate (candidates are REPAIR_PENDING plus repair-path FAILED); a
+        # flagged minor candidate failed the flag half. Every run therefore
+        # reported "0 auto-passed" while the module docstring promised
+        # "Minor -> auto-pass when the QE score permits", and operators
+        # over-estimated the human queue.
+        #
+        # A minor block reaching triage is by definition *not* critical and
+        # *not* structural (``_flags_severity`` returned "minor"), so its
+        # remaining flags are advisory classes the score already priced in —
+        # exactly the case the docstring describes. Reaching the score bar is
+        # the whole decision.
+        if _minor_may_auto_pass(cand.mtqe_score, qe_threshold):
             counters["auto_passed"] += 1
             updates.append(
                 {

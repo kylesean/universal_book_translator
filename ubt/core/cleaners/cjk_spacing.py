@@ -20,7 +20,7 @@ from __future__ import annotations
 import re
 
 from ubt.core.cjk_ranges import CJK_BMP_CLASS
-from ubt.core.validators.glossary_enforcer import extract_protected_spans
+from ubt.core.validators.glossary_enforcer import extract_code_like_spans
 
 _CJK = CJK_BMP_CLASS
 _CJK_PUNCT = r"，。；：、？！（）》”’】…—「『～·《“‘【〈〔［｛"
@@ -80,10 +80,19 @@ def _merge_intervals(intervals: list[tuple[int, int]]) -> list[tuple[int, int]]:
 def _split_protected(text: str) -> list[str]:
     """Split text into alternating [unprotected, protected, ...] segments.
 
-    Guards code blocks, code spans, maskers, LaTeX math, HTML tags, and genuine inline math,
-    preventing spacing corruption inside syntactic tokens.
+    Guards code blocks, code spans, maskers, LaTeX math, HTML tags, and genuine
+    inline math, preventing spacing corruption inside syntactic tokens.
+
+    Quoted spans are deliberately NOT protected here, even though the glossary
+    enforcer protects them. The two rewrites want opposite things: the enforcer
+    must not rewrite a term inside a quotation, but a quotation is ordinary
+    prose for *spacing* purposes. Treating it as a shield meant the cleaner
+    skipped every rule between the delimiters (``他说“你好， 世界”`` kept the
+    stray space) and then added a space on both sides of the span that was never
+    in the text (``这是“X”模型`` became ``这是 “X” 模型``). Dialogue-heavy prose is
+    mostly quoted, so the common case was the broken one.
     """
-    intervals = _merge_intervals(extract_protected_spans(text))
+    intervals = _merge_intervals(extract_code_like_spans(text))
     if not intervals:
         return [text]
     parts: list[str] = []

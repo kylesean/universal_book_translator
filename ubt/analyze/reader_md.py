@@ -20,6 +20,7 @@ IO is one file read, and the line loop is pure.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -53,6 +54,20 @@ def _decode(path: Path) -> str:
     from ubt.core.text_decode import decode_markup
 
     return decode_markup(path.read_bytes())
+
+
+#: One or more leading blockquote markers, with the single optional space that
+#: CommonMark allows after each ("``> > quoted``" is a quote inside a quote).
+_BLOCKQUOTE_MARKER_RE = re.compile(r"^(?:[ \t]*>[ \t]?)+")
+
+
+def _strip_blockquote_marker(line: str) -> str:
+    """Remove leading ``>`` blockquote markers from one source line.
+
+    Keeps the prose and nothing else: the element union has no quote type, so
+    the marker could only reach the page as literal text.
+    """
+    return _BLOCKQUOTE_MARKER_RE.sub("", line, count=1)
 
 
 def read_md(path: str | Path, *, doc_id: str | None = None, plain_text: bool = False) -> Document:
@@ -164,6 +179,12 @@ def read_md(path: str | Path, *, doc_id: str | None = None, plain_text: bool = F
         )
 
     for line in _decode(md_path).split("\n"):
+        # Strip a blockquote marker BEFORE any structural branch, so a heading or
+        # list inside a quote is still recognised as one. The marker itself has
+        # no element type, so it would otherwise reach the page (and the model)
+        # as a literal `>`.
+        if not plain_text:
+            line = _strip_blockquote_marker(line)
         stripped = line.strip()
 
         if plain_text:
@@ -241,6 +262,16 @@ def read_md(path: str | Path, *, doc_id: str | None = None, plain_text: bool = F
         if not stripped:
             flush_paragraph()
         else:
+            # Blockquote (`> quoted`): strip the marker and keep the prose.
+            #
+            # There is no quote element in the closed element union, and the
+            # renderers lower a paragraph as a paragraph, so the faithful
+            # minimum is to translate the *content*: sending the `> ` prefix to
+            # the model put a stray angle bracket in the target text, and the
+            # delivered paragraph then carried a marker that no renderer
+            # understood. Structure inside the quote (a heading, a list, a
+            # fence) is still recognised, because the marker is removed before
+            # those branches run.
             paragraph.append(line)
 
     flush_paragraph()

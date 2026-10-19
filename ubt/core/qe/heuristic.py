@@ -160,6 +160,9 @@ class HeuristicQERunner(BaseQERunner):
         self.source_lang = source_lang
         self.fast_pass = FastPassFilter(source_lang=source_lang, target_lang=target_lang)
         self._glossary = glossary or None
+        #: The run's source text, once the gate binds it (see
+        #: :meth:`with_document_context`). Empty means "not bound yet".
+        self._document_text: str = ""
         self._glossary_validator = (
             GlossaryConsistencyValidator(glossary=glossary) if glossary else None
         )
@@ -167,11 +170,16 @@ class HeuristicQERunner(BaseQERunner):
     def with_languages(self, source_lang: str, target_lang: str) -> "HeuristicQERunner":
         if (self.source_lang, self.target_lang) == (source_lang, target_lang):
             return self
-        return HeuristicQERunner(
+        rebound = HeuristicQERunner(
             target_lang=target_lang,
             source_lang=source_lang,
             glossary=self._glossary,
         )
+        # Carry the bound context across a language rebind, like the glossary:
+        # a runner that forgot it would reproduce the inner/outer gate split.
+        if self._document_text:
+            rebound.with_document_context(self._document_text)
+        return rebound
 
     def with_glossary(self, glossary: list[dict[str, Any]] | None) -> "HeuristicQERunner":
         """Bind the run's enforced terminology once the bible stage has it.
@@ -198,7 +206,35 @@ class HeuristicQERunner(BaseQERunner):
             glossary=glossary,
         )
         bound.fast_pass.set_glossary(glossary)
+        # Re-bind the document context this runner may already carry: rebinding
+        # the glossary must not silently drop it (the quality gate calls this
+        # before scoring, so the two would disagree again).
+        if self._document_text:
+            bound.fast_pass.set_document_context(self._document_text)
+            bound._document_text = self._document_text
         return bound
+
+    def with_document_context(self, document_text: str) -> "HeuristicQERunner":
+        """Teach the omission gate the run's source text, as the draft stage does.
+
+        The draft stage binds ``set_document_context`` onto its own filter, and
+        the gate screens blocks with the *external* filter, but ``score_pairs``
+        runs through this runner's internal ``fast_pass`` -- which was told the
+        glossary and never the document. An uppercase table header, an
+        abbreviation expanded elsewhere in the book, or any identifier the
+        source states once then refers to by another form was judged "missing
+        from target" by the inner gate while the outer one accepted the block.
+        Measured: a block that passed the gate came back at 0.35 from
+        ``score_pairs``, and ``is_shippable`` saw the wrong number.
+
+        Idempotent, and returns ``self`` (the runner is rebound in place by the
+        gate, which holds the reference).
+        """
+        if not document_text or document_text == self._document_text:
+            return self
+        self._document_text = document_text
+        self.fast_pass.set_document_context(document_text)
+        return self
 
     def is_glossary_aware(self) -> bool:
         """True once a glossary is bound, so a term violation caps the score."""

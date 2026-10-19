@@ -213,3 +213,135 @@ def test_docx_vertically_merged_cell_is_emitted_once(tmp_path: Path) -> None:
     assert markup.count("Header") == 1
     assert "| Header | r0 |" in markup
     assert "|  | r1 |" in markup
+
+
+def test_a_markdown_blockquote_marker_never_reaches_the_text(tmp_path: Path) -> None:
+    """`>` is Markdown syntax, not prose.
+
+    Every other Markdown construct had a structural branch; a blockquote fell
+    through to ``paragraph.append(line)``, so "> quoted" was sent to the model
+    with its marker. The target then carried a stray angle bracket, and the
+    delivered paragraph had a callout the renderers never understood. The
+    element union has no quote type, so the faithful minimum is to translate the
+    content and drop the marker — including inside a quote, where a heading or
+    list must still be recognised.
+    """
+    from ubt.analyze.reader_md import read_md
+
+    path = tmp_path / "quoted.md"
+    path.write_text(
+        "> 引用的句子\n> 第二行\n\n> # 引用里的标题\n\n> - 引用里的列表\n\n普通段落。\n",
+        encoding="utf-8",
+    )
+    elements = read_md(path).elements
+
+    texts = [getattr(el, "text", "") for el in elements]
+    assert texts[0] == "引用的句子\n第二行"
+    assert not any(text.strip().startswith(">") for text in texts), texts
+    # Structure inside the quote survives.
+    assert type(elements[1]).__name__ == "Heading"
+    assert elements[1].text == "引用里的标题"
+    assert type(elements[2]).__name__ == "ListItem"
+    assert elements[2].text == "引用里的列表"
+    assert elements[3].text == "普通段落。"
+
+
+def test_nested_and_spaced_blockquote_markers_are_stripped(tmp_path: Path) -> None:
+    from ubt.analyze.reader_md import read_md
+
+    path = tmp_path / "nested.md"
+    path.write_text("> > deep quote\n>\t tabbed quote\n", encoding="utf-8")
+    elements = read_md(path).elements
+    text = elements[0].text
+    assert "deep quote" in text and "tabbed quote" in text
+    assert ">" not in text
+
+
+def _minimal_epub(path: Path, *, with_nav: bool = True, repeated: bool = False) -> Path:
+    """A minimal but valid EPUB 3 container, written by hand."""
+    import zipfile
+
+    nav_item = (
+        '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>'
+        if with_nav
+        else ""
+    )
+    nav_ref = '<itemref idref="nav"/>' if with_nav else ""
+    extra_ref = '<itemref idref="c1"/>' if repeated else ""
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("mimetype", "application/epub+zip")
+        archive.writestr(
+            "META-INF/container.xml",
+            '<?xml version="1.0"?><container '
+            'xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0">'
+            '<rootfiles><rootfile full-path="OEBPS/content.opf" '
+            'media-type="application/oebps-package+xml"/></rootfiles></container>',
+        )
+        archive.writestr(
+            "OEBPS/content.opf",
+            '<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0">'
+            '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>T</dc:title></metadata>'
+            "<manifest>"
+            '<item id="c1" href="ch1.xhtml" media-type="application/xhtml+xml"/>'
+            '<item id="c2" href="ch2.xhtml" media-type="application/xhtml+xml"/>'
+            f"{nav_item}"
+            "</manifest>"
+            f'<spine><itemref idref="c1"/><itemref idref="c2"/>{nav_ref}{extra_ref}</spine>'
+            "</package>",
+        )
+        archive.writestr(
+            "OEBPS/ch1.xhtml", "<html><body><p>Chapter one body text.</p></body></html>"
+        )
+        archive.writestr(
+            "OEBPS/ch2.xhtml", "<html><body><p>Chapter two body text.</p></body></html>"
+        )
+        if with_nav:
+            archive.writestr(
+                "OEBPS/nav.xhtml",
+                "<html><body><nav><ol><li>One</li><li>Two</li></ol></nav></body></html>",
+            )
+    return path
+
+
+def test_the_native_reader_and_the_adapter_agree_on_the_spine() -> None:
+    """One spine rule, not two.
+
+    The adapter's copy filtered the navigation document and collapsed repeated
+    spine members; the native reader's copy did neither. The same minimal EPUB
+    therefore produced three pages through ``read_epub`` — the nav document
+    counted as prose — and two chapters through the adapter. Both now call
+    ``spine_chapters``.
+    """
+    import asyncio
+    import tempfile
+    import zipfile
+
+    from ubt.adapters.epub.adapter import EPUBAdapter
+    from ubt.analyze.reader_epub import read_epub, spine_chapters
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = _minimal_epub(Path(tmp) / "nav.epub", with_nav=True)
+        # The reader sees exactly the two chapters.
+        assert len(read_epub(path).elements) == 2
+
+        # The adapter names exactly the same members, in the same order.
+        with zipfile.ZipFile(path) as archive:
+            shared = spine_chapters(archive, "OEBPS/content.opf")
+        manifest = asyncio.run(EPUBAdapter().extract_manifest(path))
+        assert [c.source_file for c in manifest.chapters] == shared
+        assert shared == ["OEBPS/ch1.xhtml", "OEBPS/ch2.xhtml"]
+        assert not any("nav" in member for member in shared), "the nav document is not prose"
+
+
+def test_a_repeated_spine_member_contributes_one_chapter() -> None:
+    """The same file twice would clone identical blocks and be paid twice."""
+    import tempfile
+    import zipfile
+
+    from ubt.analyze.reader_epub import spine_chapters
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = _minimal_epub(Path(tmp) / "dup.epub", with_nav=False, repeated=True)
+        with zipfile.ZipFile(path) as archive:
+            members = spine_chapters(archive, "OEBPS/content.opf")
+    assert members == ["OEBPS/ch1.xhtml", "OEBPS/ch2.xhtml"]

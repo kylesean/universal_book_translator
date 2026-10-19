@@ -663,3 +663,58 @@ async def test_a_dropped_table_row_is_reported_as_a_row_difference() -> None:
     # say so instead of printing the per-row list as if it were the column count.
     assert "11-row x 5-column" in decision.reason
     assert "10-row x 5-column" in decision.reason
+
+
+def test_an_article_led_title_is_not_read_as_a_dropped_appendix_letter() -> None:
+    """`A Survey of …` and `I Introduction` are prose, not labels.
+
+    The label regex accepted any capital as an appendix letter, so the English
+    article "A" and pronoun "I" were read as section labels: the ordinary title
+    "A Survey of Transformer Models" was flagged for dropping label 'A' and
+    "I Introduction" for dropping 'I'. Prose headings start that way constantly
+    and the false flag reached the quality report and the human queue.
+    """
+    for src, tgt in (
+        ("A Survey of Transformer Models", "Transformer 模型综述"),
+        ("A Survey of Large Language Models", "大语言模型综述"),
+        ("I Introduction", "引言"),
+        ("A New Approach to Retrieval", "一种新的检索方法"),
+    ):
+        decision = FastPassFilter().validate_structural_invariants(
+            source_text=src, target_text=tgt, block_type="heading"
+        )
+        assert decision.passed, (src, decision.reason)
+        assert "Heading label" not in decision.reason
+
+
+def test_a_real_bare_appendix_label_is_still_gated() -> None:
+    """The arXiv convention `C Encouraging Exploration …` must still be caught.
+
+    The regression above must not cost the case the gate exists for: a paper's
+    appendix letter orders the document and no other check sees it vanish.
+    """
+    decision = FastPassFilter().validate_structural_invariants(
+        source_text="C Encouraging Exploration Across Experts",
+        target_text="鼓励跨专家探索",
+        block_type="heading",
+    )
+    assert not decision.passed
+    assert "Heading label dropped" in decision.reason
+    assert "'C'" in decision.reason
+
+
+def test_a_dropped_heading_label_is_classified_as_a_deterministic_defect() -> None:
+    """The flag had no taxonomy branch, so it scored as "other structural" (0.70).
+
+    ``classify_defect`` fell through to a generic bucket, which a permissive QE
+    threshold could release and the report could not group. Registering the
+    marker makes it a first-class deterministic defect.
+    """
+    from ubt.core.qe.defect_taxonomy import classify_defect, has_structural_defect
+
+    flag = (
+        "Heading label dropped: the source heading is labelled 'B.' but the target "
+        "does not carry it"
+    )
+    assert has_structural_defect([flag])
+    assert classify_defect([flag], score=None, threshold=0.75) == "DETERMINISTIC_DEFECT"

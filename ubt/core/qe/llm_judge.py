@@ -220,8 +220,16 @@ class LLMJudgeQERunner(BaseQERunner):
         temperature: float = 0.0,
         max_concurrency: int = 5,
         compare_sentences: bool = True,
+        on_call: Callable[[], None] | None = None,
     ) -> None:
         self._judge_fn = judge_fn
+        #: Invoked once per *paid* model call, at the only place a call is
+        #: actually made (:meth:`_score_whole`). ``TieredQERunner`` counts
+        #: through this instead of guessing per block: with sentence-level
+        #: judging one 8-sentence block is eight calls, so the old
+        #: ``judge_calls += len(subset)`` under-reported both the quoted price
+        #: and the ROI reading by the sentence count.
+        self._on_call = on_call
         self._model = model
         self._target_lang = target_lang
         self._source_lang = source_lang
@@ -246,6 +254,7 @@ class LLMJudgeQERunner(BaseQERunner):
             temperature=self._temperature,
             max_concurrency=self._max_concurrency,
             compare_sentences=self._compare_sentences,
+            on_call=self._on_call,
         )
 
     def is_calibrated(self) -> bool:
@@ -303,6 +312,8 @@ class LLMJudgeQERunner(BaseQERunner):
 
     async def _score_whole(self, src: str, mt: str) -> float:
         system, user = build_judge_prompts(src, mt, self._target_lang, self._source_lang)
+        if self._on_call is not None:
+            self._on_call()
         try:
             async with self._sem:
                 kwargs: dict[str, Any] = {
@@ -360,6 +371,14 @@ class TieredQERunner(BaseQERunner):
         #: reads it to say "these numbers are graded judgements, keep them" —
         #: without it the quality gate discarded every judge verdict.
         self._judged_any = False
+        # Count every paid model call, not every block. Attached to the judge so
+        # a sentence-level block contributes its real number of calls.
+        if self.judge is not None:
+            self.judge._on_call = self._count_judge_call
+
+    def _count_judge_call(self) -> None:
+        """One paid judge call finished (or was attempted)."""
+        self.judge_calls += 1
 
     def _needs_judge(self, score: float, src: str) -> bool:
         """Whether this pair is worth a paid second opinion.
@@ -473,6 +492,28 @@ class TieredQERunner(BaseQERunner):
         rebound.judge_errors = self.judge_errors
         return rebound
 
+    def with_document_context(self, document_text: str) -> TieredQERunner:
+        """Forward the run's source text to the heuristic leg's omission gate.
+
+        The judge scores semantics; the omission gate that decides "was this
+        term dropped?" lives in the heuristic, so the context must reach it the
+        same way the glossary does. Without this a tiered run kept the
+        inner/outer gate split that already bit the heuristic path: the gate's
+        external filter knew the document, ``score_pairs`` did not.
+        """
+        heuristic = self.heuristic.with_document_context(document_text)
+        if heuristic is self.heuristic:
+            return self
+        rebound = TieredQERunner(
+            heuristic=heuristic,
+            judge=self.judge,
+            pass_sample=self.pass_sample,
+        )
+        rebound.judge_calls = self.judge_calls
+        rebound.judge_errors = self.judge_errors
+        rebound._judged_any = self._judged_any
+        return rebound
+
     async def score_pairs(self, pairs: list[dict[str, str]]) -> list[float]:
         if not pairs:
             return []
@@ -488,8 +529,17 @@ class TieredQERunner(BaseQERunner):
             return base
         subset = [pairs[i] for i in ambiguous_idx]
         judged = await self.judge.score_pairs(subset)
-        self.judge_calls += len(subset)
-        self._judged_any = True
+        # ``judge_calls`` is incremented by the judge itself, once per paid
+        # model call (see ``LLMJudgeQERunner._on_call``): a block is not a call.
+        #
+        # ``_judged_any`` means "the judge returned at least one usable opinion",
+        # not "a judge was asked". Setting it before inspecting the results made
+        # a wholly failed judge batch read as graded: the quality gate then kept
+        # the whole batch's heuristic bands as ``mtqe_score``, so blocks no judge
+        # had ever scored entered the reported distribution as 0.10-0.60
+        # "judgements". Also mark which blocks were actually judged, so the gate
+        # can keep only those.
+        self._judged_any = any(score != _JUDGE_NO_OPINION for score in judged)
         merged = list(base)
         for i, s in zip(ambiguous_idx, judged, strict=True):
             if s == _JUDGE_NO_OPINION:

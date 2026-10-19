@@ -75,6 +75,12 @@ STRUCTURAL_DEFECT_MARKERS: tuple[str, ...] = (
     # not a style note, so it is fatal here like the classes above; the export
     # stage's advisory copy of the same check runs too late to change anything.
     "Glossary term violation",
+    # A heading that dropped its section number or appendix letter breaks every
+    # cross-reference and is invisible to every other gate. The FastPass check
+    # emitted this reason with no classifier branch, so it scored as "other
+    # structural rejection" (0.70) and could be released by a permissive
+    # threshold, or silently dropped from the report's defect classes.
+    "Heading label dropped",
     # A translated table that lost or gained a column renders as a broken grid;
     # the emitter cannot recover the intended shape downstream.
     "Table grid mismatch",

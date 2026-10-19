@@ -71,6 +71,13 @@ REPAIR_DEFECT_FRACTION = 0.15
 # QE-judge fan-out: only gray-band blocks reach the LLM judge (subprocess/tiered
 # engines); a quarter of blocks is the gray-band width the thresholds allow.
 QE_GRAY_FRACTION = 0.25
+#: Assumed characters per judge *call* when the judge scores sentence by
+#: sentence (``qe_judge_sentences``, the default). The quote bills one call per
+#: sentence pair, so this converts the only figure assess has -- average block
+#: characters -- into a call count. Deliberately conservative (a long English
+#: sentence runs to ~120 characters): over-quoting a ceiling is recoverable,
+#: under-quoting is not.
+_ASSESS_JUDGE_SENTENCE_CHARS = 120
 # Vision-call heuristic: a page image is ~1024 tokens (router's own
 # reservation constant) plus the judge scaffolding; answers are short.
 _VLM_PROMPT_TOKENS = 1500
@@ -585,9 +592,20 @@ def _build_cost(
         config, "qe_judge_enabled", False
     )
     if judge_can_run and billable_blocks:
-        qe_calls = math.ceil(QE_GRAY_FRACTION * billable_blocks)
-        avg_tokens = avg_block_chars * 2 // 4  # judge sees source + target
-        # QE judge prompt is concise (~250 tokens instruction scaffolding), not the whole draft prompt prefix
+        judged_blocks = math.ceil(QE_GRAY_FRACTION * billable_blocks)
+        # A block is not a call. With ``qe_judge_sentences`` (the default) the
+        # judge scores each sentence pair separately, so an 8-sentence block is
+        # 8 paid requests; quoting one call per block under-estimated the judge
+        # line by roughly the sentence count. Estimate the multiplier from the
+        # only figure assess has -- average characters per block -- against a
+        # conservative sentence length, and price per *sentence* call.
+        per_call_chars = avg_block_chars
+        if getattr(config, "qe_judge_sentences", True):
+            per_call_chars = max(1, min(avg_block_chars, _ASSESS_JUDGE_SENTENCE_CHARS))
+        qe_calls = judged_blocks * max(1, math.ceil(avg_block_chars / per_call_chars))
+        avg_tokens = per_call_chars * 2 // 4  # judge sees source + target
+        # QE judge prompt is concise (~250 tokens instruction scaffolding), not
+        # the whole draft prompt prefix.
         qe_cost = _price_component(
             qe_model,
             qe_calls * (250 + avg_tokens),

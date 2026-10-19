@@ -381,9 +381,60 @@ def _is_prose_block(block_type: Any) -> bool:
 
 #: A heading's structural label at the front of the source text: a section
 #: number ("4", "4.1", "2.3.1", optionally trailing "."), an appendix letter
-#: ("A"..."Z", optionally trailing "."), or "Appendix C"-style word+letter.
-#: Prose never starts with one of these shapes followed by whitespace.
-_HEADING_LABEL_RE = re.compile(r"^(?P<num>\d+(?:\.\d+)+| Appendix [A-Z]|\d+|[A-Z])(?P<dot>\.?)\s+")
+#: *written as a label* ("A." / "B." — the dot is what distinguishes it from a
+#: one-letter word), or "Appendix C"-style word+letter.
+#:
+#: A bare capital letter is deliberately NOT a label. The old ``[A-Z]`` branch
+#: treated any word's initial as a section number, so the ordinary English
+#: article "A" and the pronoun "I" were read as appendix letters:
+#: "A Survey of Transformer Models" was flagged for dropping label 'A' and
+#: "I Introduction" for dropping 'I'. Prose headings start that way constantly,
+#: and the flag reached the quality report and the human queue.
+#:
+#: The two letters a dotted label must exclude are handled below: "A." and "I."
+#: are English sentence-initial abbreviations ("A. Smith", "I. Introduction" is
+#: rare enough to lose), while "B." … "Z." stay appendix letters.
+_HEADING_LABEL_RE = re.compile(
+    r"^(?P<num>\d+(?:\.\d+)+| Appendix [A-Z]|\d+|[B-HJ-Z]\.)(?P<dot>\.?)\s+"
+)
+
+#: A BARE capital letter used as an appendix label ("C Encouraging Exploration
+#: Across Experts"), as arXiv papers write them. Only ``C``..``Z`` and ``B`` are
+#: accepted: ``A`` and ``I`` are the English article and pronoun and start
+#: ordinary titles ("A Survey of …", "I Introduction"), which the label gate
+#: used to flag as a dropped appendix letter.
+_BARE_APPENDIX_LABEL_RE = re.compile(r"^(?P<num>[BC-HJ-Z])\s+(?P<rest>\S.*)$")
+
+#: Words that, when they follow a bare capital, mean the capital is an article
+#: rather than a label. "C Encouraging" / "B Preventing" are labels; "A Survey",
+#: "I Introduction", "A New Method" are prose. Kept small and literal: a wider
+#: list risks swallowing real one-letter labels, and the cost of a miss is one
+#: unflagged heading (the gate's previous behaviour for all of them).
+_BARE_LABEL_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "the",
+        "new",
+        "novel",
+        "simple",
+        "unified",
+        "general",
+        "gentle",
+        "brief",
+        "note",
+        "case",
+        "study",
+        "survey",
+        "review",
+        "tutorial",
+        "primer",
+        "guide",
+        "framework",
+        "taxonomy",
+        "comparison",
+    }
+)
 
 
 def _missing_heading_label(source_text: str, target_text: str) -> str | None:
@@ -395,11 +446,22 @@ def _missing_heading_label(source_text: str, target_text: str) -> str | None:
     reorder) counts as carried. ``None`` for an unlabelled source — there is
     nothing to preserve.
     """
-    m = _HEADING_LABEL_RE.match(source_text.strip())
+    stripped = source_text.strip()
+    m = _HEADING_LABEL_RE.match(stripped)
     if not m:
-        return None
+        # No dotted/numeric label. A bare capital is only a label when what
+        # follows it is a title word rather than an article-led phrase, so an
+        # ordinary title ("A Survey of …") is not read as a dropped appendix
+        # letter. See ``_BARE_LABEL_STOPWORDS``.
+        bare = _BARE_APPENDIX_LABEL_RE.match(stripped)
+        if bare is None:
+            return None
+        first_word = re.split(r"[\s,.:;\-]", bare.group("rest"), maxsplit=1)[0].lower()
+        if first_word in _BARE_LABEL_STOPWORDS:
+            return None
+        m = bare
     label = m.group("num")
-    if m.group("dot") and not label.endswith("."):
+    if "dot" in m.re.groupindex and m.group("dot") and not label.endswith("."):
         label += "."
     # Word-boundary search: a bare "4" must not match inside "4.1" or "14".
     escaped = re.escape(label)

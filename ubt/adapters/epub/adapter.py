@@ -25,6 +25,7 @@ from ubt.adapters.base import (
 from ubt.adapters.dom_inject import inject_translated_block
 from ubt.adapters.unresolved import failure_note, is_unresolved
 from ubt.analyze.assemble import number
+from ubt.analyze.reader_epub import spine_chapters
 from ubt.analyze.reader_html import walk_markup_elements
 from ubt.core.cleaners.dynamic_boilerplate import (
     BoilerplateFingerprint,
@@ -380,100 +381,23 @@ class EPUBAdapter(BaseDocumentAdapter):
                 creator_tag = opf_soup.find("dc:creator") or opf_soup.find("creator")
                 author = creator_tag.get_text().strip() if creator_tag else "Unknown"
 
-                # Extract spine items (reading order)
-                manifest_items: dict[str, str] = {}
-                #: ids of the package's own navigation documents (EPUB3
-                #: ``properties="nav"``, EPUB2 NCX). They are metadata, not
-                #: reading matter: mining nav.xhtml turned every table-of-contents
-                #: entry into a block that was sent to the model (paid twice) and
-                #: then re-injected as a dead ``<li>`` bullet next to the real,
-                #: already-bilingualized link.
-                nav_item_ids: set[str] = set()
-                for item in opf_soup.find_all("item"):
-                    item_id = item.get("id")
-                    href = item.get("href")
-                    properties = str(item.get("properties") or "").split()
-                    media_type = str(item.get("media-type") or "")
-                    if item_id and (
-                        "nav" in properties
-                        or media_type in {"application/x-dtbncx+xml", "application/x-dtbook+xml"}
-                    ):
-                        nav_item_ids.add(str(item_id))
-                    if item_id and href:
-                        item_id_str = str(item_id)
-                        # OPF hrefs are URL references: percent-escapes must be
-                        # decoded and relative segments resolved before the
-                        # path is used as a zip member name, or encoded/spelling
-                        # like "text%20ch1.xhtml" / "../OEBPS/x.xhtml" silently
-                        # drops whole chapters.
-                        href_str = unquote(str(href))
-                        # Normalize relative path to OPF directory
-                        base_dir = posixpath.dirname(opf_path)
-                        full_href = (
-                            posixpath.normpath(posixpath.join(base_dir, href_str))
-                            if base_dir
-                            else posixpath.normpath(href_str)
-                        )
-                        manifest_items[item_id_str] = full_href
-
-                chapters: list[ChapterMeta] = []
-                spine_tags = opf_soup.find_all("itemref")
-                spine_idx = 1
-                seen_source_files: set[str] = set()
-
-                for itemref in spine_tags:
-                    idref = itemref.get("idref")
-                    if not idref:
-                        continue
-                    idref_str = str(idref)
-                    if idref_str in nav_item_ids:
-                        continue
-                    file_href = manifest_items.get(idref_str)
-                    if file_href and file_href.lower().endswith(
-                        (".xhtml", ".html", ".htm", ".xml")
-                    ):
-                        # Anthologies legitimately repeat a spine item, but a
-                        # second ChapterMeta for the same file clones identical
-                        # blocks (paid twice to translate) that the renderer can
-                        # never both inject: the zip member is visited once and
-                        # the chapter lookup matches only the first clone.
-                        if file_href in seen_source_files:
-                            logger.info(
-                                "EPUB manifest: spine repeats %s; keeping the first occurrence only",
-                                file_href,
-                            )
-                            continue
-                        seen_source_files.add(file_href)
-                        chapters.append(
-                            ChapterMeta(
-                                chapter_id=f"ch_{spine_idx:03d}_{idref}",
-                                title=posixpath.basename(file_href),
-                                spine_index=spine_idx,
-                                source_file=file_href,
-                            )
-                        )
-                        spine_idx += 1
-
-                # If no spine items found, fallback to sorting html files directly
-                if not chapters:
-                    html_files = sorted(
-                        (
-                            n
-                            for n in zf.namelist()
-                            if n.lower().endswith((".xhtml", ".html", ".htm"))
-                            and "toc" not in n.lower()
-                        ),
-                        key=_natural_sort_key,
+                # Reading-order chapters, from the ONE spine implementation
+                # (``ubt.analyze.reader_epub.spine_chapters``). This used to be a
+                # second copy of the rule with navigation filtering and
+                # duplicate collapsing; the native reader's copy had neither, so
+                # the same minimal EPUB produced three pages through
+                # ``read_epub`` (nav document counted as prose) and two chapters
+                # here.
+                spine_files = spine_chapters(zf, opf_path, budget)
+                chapters: list[ChapterMeta] = [
+                    ChapterMeta(
+                        chapter_id=f"ch_{idx:03d}_{posixpath.basename(member)}",
+                        title=posixpath.basename(member),
+                        spine_index=idx,
+                        source_file=member,
                     )
-                    for idx, hf in enumerate(html_files, 1):
-                        chapters.append(
-                            ChapterMeta(
-                                chapter_id=f"ch_{idx:03d}",
-                                title=posixpath.basename(hf),
-                                spine_index=idx,
-                                source_file=hf,
-                            )
-                        )
+                    for idx, member in enumerate(spine_files, 1)
+                ]
 
                 metadata: dict[str, object] = {"author": author, "opf_path": opf_path}
 

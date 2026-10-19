@@ -214,3 +214,52 @@ def test_a_triage_verdict_is_never_cleared_by_the_enforcer() -> None:
 def test_an_already_canonical_draft_is_not_a_repair() -> None:
     block = _pending("我们提出了帧内核。", [_DRIFT])
     assert _try(block) is None
+
+
+def test_the_export_stage_writes_the_canonical_terminology_marker() -> None:
+    """Export-side drift must use the string the workbench groups on.
+
+    The export stage wrote its own ``"glossary_inconsistency: …"`` while every
+    QE producer wrote ``GLOSSARY_VIOLATION_MARKER`` (``"Glossary term
+    violation"``). The workbench groups issues by matching that marker, so a
+    term violation discovered at export reached no terminology ribbon, could not
+    be filtered, and never entered the PE queue — the reader's copy disagreed
+    with the ledger and nothing surfaced it.
+    """
+    from unittest.mock import MagicMock
+
+    from ubt.core.qe.heuristic import GLOSSARY_VIOLATION_MARKER, glossary_violation_flag
+    from ubt.core.validators.consistency import ValidationResult
+
+    validator = MagicMock()
+    validator.validate.return_value = ValidationResult.failure(
+        error_code="GLOSSARY_DRIFT",
+        message="Glossary terms drifted: [Transformer -> 变换器]",
+        suggested_action="RETRY",
+    )
+
+    flag = glossary_violation_flag("The Transformer model", "这个模型", validator)
+
+    assert flag is not None
+    assert flag.startswith(GLOSSARY_VIOLATION_MARKER), flag
+    # The workbench's own grouping rule (``ubt.api.review._ISSUE_MARKERS``).
+    assert any(marker in flag for marker in ("Glossary term violation",))
+    # The retired private string must not come back.
+    assert "glossary_inconsistency" not in flag
+
+
+def test_the_export_stage_does_not_mint_its_own_glossary_string() -> None:
+    """A structural pin: the export stage must not reintroduce a private marker."""
+    import inspect
+
+    from ubt.core.engine.stages import export as export_stage
+
+    # Check the code, not the comments: the remediation note above mentions the
+    # retired string on purpose.
+    source = inspect.getsource(export_stage)
+    code_lines = [line for line in source.splitlines() if not line.lstrip().startswith("#")]
+    code = "\n".join(code_lines)
+    assert "glossary_inconsistency" not in code, (
+        "export must emit the canonical marker via glossary_violation_flag"
+    )
+    assert "glossary_violation_flag" in code

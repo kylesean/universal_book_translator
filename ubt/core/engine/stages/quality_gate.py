@@ -237,6 +237,21 @@ async def run_quality_gate_stage(
         scoring.repair_loop = services.repair_loop_for(
             qe_runner, config=ctx.config, router=ctx.router
         )
+    # Teach the runner's own omission gate the run's source text, exactly as the
+    # draft stage does for its filter. Without this the gate screened blocks
+    # with a context-aware filter while ``score_pairs`` re-scored them with a
+    # context-free one, so an identifier the book states once (an uppercase
+    # table header, an alias defined elsewhere) was reported "omitted" on a
+    # block the gate had just accepted -- a correct block capped at 0.35.
+    bind_context = getattr(qe_runner, "with_document_context", None)
+    if not services.qe_runner_explicit and callable(bind_context):
+        document_source = "\n".join(
+            block.source_text or ""
+            for block in await asyncio.to_thread(ledger.get_all_blocks, actual_job_id)
+        )
+        if document_source.strip():
+            qe_runner = bind_context(document_source)
+            scoring.qe_runner = qe_runner
     drafted_blocks = await asyncio.to_thread(
         ledger.fetch_blocks_by_status, actual_job_id, BlockStatus.DRAFTED, chapter_id=chapter_id
     )

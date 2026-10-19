@@ -57,7 +57,10 @@ def test_a_quarantined_block_is_not_flagged_for_glossary_drift() -> None:
         source="The effect is large.", target=_QUARANTINE, status=BlockStatus.BLOCKED_HUMAN
     )
     (result,) = _run([block])
-    assert not any("glossary_inconsistency" in flag for flag in result.error_flags)
+    # The canonical marker, shared with every QE producer: the workbench groups
+    # issues by matching this substring, so a private export-only string was
+    # invisible there.
+    assert not any("Glossary term violation" in flag for flag in result.error_flags)
 
 
 def test_an_ordinary_block_is_still_flagged_for_glossary_drift() -> None:
@@ -65,4 +68,6 @@ def test_an_ordinary_block_is_still_flagged_for_glossary_drift() -> None:
         source="The effect is large.", target="效果很大。", status=BlockStatus.MTQE_PASSED
     )
     (result,) = _run([block])
-    assert any("glossary_inconsistency" in flag for flag in result.error_flags)
+    assert any("Glossary term violation" in flag for flag in result.error_flags)
+    # The retired private marker must not come back.
+    assert not any("glossary_inconsistency" in flag for flag in result.error_flags)

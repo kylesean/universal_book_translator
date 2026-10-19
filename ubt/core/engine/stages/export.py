@@ -330,9 +330,19 @@ def _terminology_and_structure_pass(
                 )
 
             if fb.status is not BlockStatus.BLOCKED_HUMAN:
-                glossary_res = glossary_validator.validate(fb.source_text, fb.target_text)
-                if not glossary_res.is_valid:
-                    flag = f"glossary_inconsistency: {glossary_res.message}"
+                # Use the canonical marker QE writes, not a private string. The
+                # export stage used to write "glossary_inconsistency: …" while
+                # the QE path wrote "Glossary term violation: …", and the
+                # workbench groups issues by matching the *latter* substring --
+                # so drift discovered here reached no ribbon, no filter and no
+                # PE queue row. One producer, one marker.
+                from ubt.core.qe.heuristic import glossary_violation_flag
+
+                canonical = glossary_violation_flag(
+                    fb.source_text, fb.target_text, glossary_validator
+                )
+                if canonical is not None:
+                    flag = canonical
                     if flag not in fb.error_flags:
                         fb.error_flags.append(flag)
                         modified_checkpoints.append(
@@ -1261,7 +1271,16 @@ async def _build_reports(
         estimate_cost_usd(
             usage,
             base_url=ctx.config.base_url,
-            endpoint_map=ctx.config.remote_billing_models(),
+            # The same attribution the budget preflight bills against (see
+            # ``pipeline._bill_run_usage``): the OCR-channel map merged with the
+            # router's per-model fallback endpoints. Passing only the former
+            # priced a model that a local fallback endpoint actually served at
+            # the primary endpoint's cloud rate, so the report and the budget
+            # quoted two different totals for one run.
+            endpoint_map={
+                **ctx.config.remote_billing_models(),
+                **(ctx.router.billing_endpoint_map() if ctx.router is not None else {}),
+            },
         )
         if usage
         else None
