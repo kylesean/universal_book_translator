@@ -216,7 +216,21 @@ def test_table_columns_are_weighted_by_content() -> None:
         "| DocLayout-YOLO [14] | 20M | 107.4 | MonkeyOCR [27] MinerU2.5 [5] |"
     )
     out = render_table(markup)
-    assert "columns: (19fr, 6fr, 6fr, 28fr)" in out
+    # Weights are measured em widths, not character counts, so the assertion is
+    # on the *ordering and relative share* the layout depends on: the long
+    # recognition column must lead, the numeric ones must stay comparable to
+    # each other, and the short ones must not collapse.
+    spec = next(line for line in out.splitlines() if "columns:" in line)
+    weights = [
+        float(part.removesuffix("fr")) for part in spec.split("(")[1].rstrip("),").split(",")
+    ]
+    assert len(weights) == 4
+    assert weights[3] > weights[0] > weights[1]
+    # Both short columns sit at or near the 3 em floor: "Params" is 6 Latin
+    # advances (3.3 em) so it clears the floor, while "FPS" is 3 advances and
+    # takes the floor itself. Neither may collapse toward zero.
+    assert 2.9 <= weights[1] <= 3.6
+    assert 2.9 <= weights[2] <= 3.6
 
 
 def test_a_formula_block_is_typeset_as_math(tmp_path: Path) -> None:
@@ -1172,13 +1186,50 @@ def test_a_rendered_table_carries_no_inserted_break_characters() -> None:
 
 
 def test_a_table_with_a_wide_unbreakable_run_is_typeset_smaller() -> None:
-    """The lossless lever for a column that cannot shrink enough."""
+    """The lossless lever for a column that cannot shrink enough.
+
+    The run has to genuinely exceed the space a column gets on the page it will
+    be typeset into -- 30 Latin characters at 10.5pt is ~175pt, more than a
+    three-column 453pt text block can give one cell. A shorter run that *does*
+    fit must keep the document size (see the next test): shrinking it would be
+    the old heuristic's mistake, which shrunk a table that measured 199pt wide
+    inside a 320pt column.
+    """
     from ubt.render.typst.document_renderer import _TABLE_TEXT_SCALE, render_table
 
     out = render_table(
-        "| | A | B |\n|---|---|---|\n| R | // lib/devices/tpm: MmioAddr::new(base,len) | x |\n"
+        "| | A | B |\n|---|---|---|\n"
+        "| R | // lib/devices/tpm: MmioAddr::new(base,len,flags)::from_parts | x |\n",
+        content_width_pt=453.55,
     )
     assert f"#set text(size: {_TABLE_TEXT_SCALE}em)" in out
+
+
+#: A page-wide text block (A4 less 1.8cm margins), the widest layout the
+#: renderer emits; a table that does not fit *this* genuinely cannot fit.
+_WIDE_PAGE_PT = 493.2
+
+#: A two-column page's text block: tight enough that a long identifier cannot fit
+#: a proportional share, which is the case that exposed the column-width defect.
+_NARROW_PAGE_PT = 219.5
+
+
+def test_a_table_that_fits_its_page_keeps_the_document_size() -> None:
+    """README's defect, restated as a property: a fitting run is not shrunk.
+
+    ``metadata.openclaw.requires`` is 26 Latin characters = 14.8 em = 155pt. It
+    overflowed because its column was given 105pt, not because the table needed
+    a smaller font: given a page-wide layout it fits. Shrinking here would hide
+    the real cause.
+    """
+    from ubt.render.typst.document_renderer import render_table
+
+    markup = (
+        "| 系统 | 说明 |\n|---|---|\n"
+        "| OpenClaw | agentskills.io 兼容；通过 metadata.openclaw.requires 控制 |\n"
+    )
+    out = render_table(markup, content_width_pt=_WIDE_PAGE_PT)
+    assert "#set text(size:" not in out
 
 
 def test_a_table_that_already_fits_keeps_the_document_size() -> None:
@@ -1271,3 +1322,73 @@ def test_a_shrunken_table_does_not_resize_the_prose_after_it() -> None:
     assert heights.keys() >= {"BEFORE", "BETWEEN", "AFTER"}, heights
     # All three are document-size text: the tables are contained.
     assert len(set(heights.values())) == 1, heights
+
+
+def test_an_identifier_column_sizes_to_its_content() -> None:
+    """A blocked identifier column must not be squeezed by a prose column.
+
+    Delivered defect: ``metadata.openclaw.requires`` (14.1 em) sat beside a CJK
+    prose column that claimed 99.5 em of the weight, so the identifier got 106pt
+    for a 148pt string and ran 39.8pt past the page edge. ``auto`` sizes that
+    column to the run instead.
+    """
+    from ubt.render.typst.document_renderer import render_table
+
+    markup = (
+        "| 系统 | 调用方式 | 规范/加载方式 |\n"
+        "|---|---|---|\n"
+        "| OpenClaw | 作为 XML 注入系统提示；/skills 斜杠命令列出可用技能 | "
+        "agentskills.io 兼容；通过 metadata.openclaw.requires（二进制文件、环境变量、"
+        "操作系统）进行控制；受管理的安装（Skill Workshop 批准流程） |\n"
+    )
+    out = render_table(markup, content_width_pt=_NARROW_PAGE_PT)
+    spec = next(line for line in out.splitlines() if "columns:" in line)
+    assert "auto" in spec, spec
+
+
+def test_a_prose_column_is_never_promoted_to_auto() -> None:
+    """``auto`` on a prose column swallows the table.
+
+    Measured: a 4-column table whose prose column was promoted reached x=684 on
+    a 595pt page and crushed its neighbour to 8pt -- one ideograph per line. A
+    run wider than ``_TABLE_AUTO_MAX_EM`` is prose that re-wraps, so it keeps a
+    fraction.
+    """
+    from ubt.render.typst.document_renderer import render_table
+
+    # Pure prose: no token long enough to need ``auto``. A paragraph containing
+    # SYSTEM_PROMPT_DYNAMIC_BOUNDARY is deliberately *not* used here -- that is a
+    # real 19.7 em identifier, and ``auto`` is the correct answer for it in a
+    # 219pt column (the next test asserts that directly).
+    long_prose = (
+        "12-15 个命名章节。静态前缀（身份、规则、工具）通过哈希缓存；"
+        "动态后缀（环境、内存、MCP）每次计算，边界标记将两者分离。"
+    )
+    markup = f"| 阶段 | Claude Code | Codex |\n|---|---|---|\n| 提示词组装 | {long_prose} | 25-30 个内置工具 |\n"
+    out = render_table(markup, content_width_pt=_NARROW_PAGE_PT)
+    spec = next(line for line in out.splitlines() if "columns:" in line)
+    assert "auto" not in spec, spec
+
+
+def test_cjk_punctuation_closes_an_unbreakable_run() -> None:
+    """``。IDENTIFIER`` is two tokens, not one.
+
+    The sentence-ending 。shares the U+3000..U+303F block with ideographs, so
+    testing the broader CJK class first glued the punctuation to the following
+    identifier. The observable consequence: the middle column in this table was
+    promoted to ``auto`` for a 20.4 em "run" that was really a 19.7 em
+    identifier plus a period. With the fix the column is still a candidate on
+    its own merits, but the punctuation no longer inflates the figure -- so a
+    table whose identifier is short is not promoted on punctuation alone.
+    """
+    from ubt.render.typst.document_renderer import render_table
+
+    # An identifier short enough to fit proportionally, preceded by a period.
+    # If the period glued on, the run would clear the 8 em promotion floor.
+    markup = (
+        "| 阶段 | Claude Code | Codex |\n|---|---|---|\n"
+        "| 结构 | 前缀缓存分离。BOUNDARY 将两者分开 | 25-30 个工具 |\n"
+    )
+    out = render_table(markup, content_width_pt=_WIDE_PAGE_PT)
+    spec = next(line for line in out.splitlines() if "columns:" in line)
+    assert "auto" not in spec, spec

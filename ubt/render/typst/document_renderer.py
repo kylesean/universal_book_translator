@@ -138,10 +138,13 @@ _FIGURE_NATIVE_MAX_PT = 300.0
 #: swallow a body paragraph directly under an image.
 _PENDING_CAPTION_MAX_CHARS = 320
 
-#: Smallest share (in characters) a table column keeps when widths are derived
-#: from content. Stops a short numeric column (``FPS``, ``3B``) from collapsing
-#: to zero beside a long text column, while still letting the text column lead.
-_TABLE_COL_MIN_WEIGHT = 6
+#: Smallest share (in em) a table column keeps when widths are derived from
+#: content. Stops a short column (``✓``, ``FPS``, ``3B``) from collapsing to zero
+#: beside a long text column, while still letting the text column lead.
+#:
+#: 3 em is the old floor restated: 6 counted characters were about 3.3 Latin
+#: advances or 3 ideographs, and a weight is now a measured em, not a count.
+_TABLE_COL_MIN_WEIGHT = 3.0
 
 #: A heading that is really running chrome (an arXiv stamp, a journal line, a
 #: submission date). Kept out of the body so the document opens on its title.
@@ -584,14 +587,48 @@ def _wrap_style(
 #: 271.7pt at 8pt, 260.6pt at 7pt.
 _TABLE_TEXT_SCALE: str = "0.84"
 
-#: Widest unbreakable run (in display columns, CJK counting 2) at which the
-#: table body shrinks. Calibrated against Typst in a 232pt container (a
-#: two-column paper's text column, 282pt right edge): a run of 22 characters
-#: already reaches 244pt because the cell also pays insets and gutters, so 22 is
-#: the point where a wide cell starts eating the neighbouring column. Tables
-#: below it keep the document size; shrinking all of them would restyle the 61
-#: correct tables to rescue the 36 that overflow.
-_TABLE_SHRINK_TRIGGER: int = 22
+#: Body size the renderer emits (``#set text(size: 10.5pt)``). The em-based
+#: table weights are expressed as fractions of this, so a weight of 1.0 means one
+#: body em -- 10.5pt at the document size.
+TABLE_BASE_PT: float = 10.5
+
+#: Text-block widths the renderer emits, in points, per page setup. A table's
+#: verdict is decided against the width it will actually be typeset into rather
+#: than against a magic run length: the old ``22 display columns`` trigger came
+#: from a hand measurement that the precise em widths contradict (22 Latin
+#: characters measure 12.5 em = 131pt, not the 244pt the comment claimed), and
+#: it shrank healthy tables while missing a real overflow.
+#:
+#: A4 is 595.28pt wide. Academic single-column uses ``margin x: 2.5cm`` (453.55pt
+#: of text), the dual/两栏 layout uses ``x: 1.8cm`` and splits the 493.2pt text
+#: block into two columns (219.5pt each, less the 12pt column gutter), and the
+#: book template uses ``x: 2.2cm`` (470.55pt).
+_PAGE_TEXT_WIDTH_PT: dict[str, float] = {
+    "academic_1col": 453.55,
+    "academic_2col": 219.5,
+    "book": 470.55,
+}
+#: Fallback when the caller does not say which layout it is rendering into.
+_TABLE_DEFAULT_TEXT_WIDTH_PT = _PAGE_TEXT_WIDTH_PT["academic_1col"]
+#: Cell inset (5pt each side) plus a column gutter (0.7em) and rounding slack.
+_TABLE_CELL_CHROME_PT = 10.0
+
+#: Unbreakable run width (in em) at which a column switches from a proportional
+#: ``fr`` width to ``auto``. Above this the column must size to its content or
+#: the run is clipped/pushed past the edge; below it a fraction is both safe and
+#: better, because ``fr`` keeps the table flush with the text block. 8 em is
+#: wider than any ordinary word in either script (``metadata`` is 4.7 em) and
+#: narrower than every identifier that actually overflowed (14.8 em).
+_TABLE_AUTO_COLUMN_EM: float = 8.0
+
+#: Upper bound (in em) for that promotion. Above it the run is prose that wraps,
+#: and ``auto`` on such a column sizes it to the whole cell -- a 4-column table
+#: reached x=684 on a 595pt page and squeezed its neighbour to 8pt (one
+#: ideograph per line). 30 em is wider than any identifier seen in the corpus
+#: (``model_auto_compact_token_limit`` is 30.4 em and is handled as prose, where
+#: it overflows *outside* tables) and narrower than a sentence.
+_TABLE_AUTO_MAX_EM: float = 30.0
+_TABLE_GUTTER_EM = 0.7
 
 #: Column count at which a table cannot fit a two-column page's text width at
 #: the document size, whatever its cell contents: 232pt / 10 columns leaves ~23pt
@@ -605,6 +642,7 @@ def render_table(
     *,
     is_math_ok: Callable[[str], bool] | None = None,
     page_columns: int = 1,
+    content_width_pt: float | None = None,
 ) -> str:
     """Render a Markdown table as a Typst ``#table`` with a three-line frame.
 
@@ -656,46 +694,229 @@ def render_table(
     # floor so a short numeric column still gets room; ``1fr`` weights are
     # relative, so the table stays the text width.
     #
-    # A CJK glyph is about twice the advance width of a Latin digit, so it
-    # counts double: a four-character header (``文本编辑``) is as wide as eight
-    # Latin characters, and weighing it as four under-sized the column until the
-    # header stacked one glyph per line.
-    def _display_width(text: str) -> int:
-        return sum(2 if ord(c) > 0x2E80 else 1 for c in text)
+    # The weight is MEASURED IN EM, not counted in characters. Counting was the
+    # defect behind a delivered table overflowing by 39.8pt: the column holding
+    # ``metadata.openclaw.requires`` was weighted by its 26 characters and given
+    # 105pt of room, while the identifier needs 125.03pt at the shrunk 8.82pt
+    # size. Typst cannot break an identifier, so the cell ran past the page edge.
+    #
+    # The per-class advances below were measured against the actual render fonts
+    # (Noto Serif CJK SC + Liberation Serif) at 10.5pt and are expressed as a
+    # fraction of the 10.5pt em so they hold at any size:
+    #
+    #     CJK ideograph      10.50pt = 1.000 em
+    #     CJK punctuation     5.25pt = 0.500 em
+    #     upper-case Latin    7.33pt = 0.698 em
+    #     lower-case Latin    5.85pt = 0.557 em
+    #     digit               5.76pt = 0.548 em
+    #     ASCII punctuation   3.82pt = 0.364 em
+    #     space               2.69pt = 0.256 em
+    #
+    # The old ``2 if ord(c) > 0x2E80 else 1`` put the CJK:Latin ratio at 2.0
+    # against a measured 1.79, but the larger error was the unit: one weight
+    # step renders as 0.85pt, so a column's weight was never a length at all.
+    _LATIN_LOWER_EM = 0.557
+    _LATIN_UPPER_EM = 0.698
+    _DIGIT_EM = 0.548
+    _CJK_EM = 1.0
+    _CJK_PUNCT_EM = 0.5
+    _ASCII_PUNCT_EM = 0.364
+    _SPACE_EM = 0.256
 
-    def _longest_unbreakable(text: str) -> int:
-        """Width of the widest run Typst cannot break, in display columns.
+    #: Unicode general categories whose members break between characters in
+    #: Typst. An ideograph is a break opportunity on its own; an ASCII letter is
+    #: not, which is why a URL or an identifier has to fit a column whole.
+    _BREAKABLE_RANGES = (
+        (0x2E80, 0x9FFF),  # CJK radicals .. CJK unified ideographs
+        (0xF900, 0xFAFF),  # CJK compatibility ideographs
+        (0xFF00, 0xFFEF),  # half/full-width forms (full-width punctuation)
+        (0x3000, 0x303F),  # CJK symbols and punctuation
+    )
 
-        A space is a break opportunity, and so is every CJK boundary; anything
-        else (an identifier, a URL, a call expression) has to fit its column
-        whole. This is the quantity that decides whether a table can overflow.
+    def _is_cjk(char: str) -> bool:
+        code = ord(char)
+        return any(low <= code <= high for low, high in _BREAKABLE_RANGES)
+
+    def _is_cjk_punct(char: str) -> bool:
+        """Full-width punctuation, which is its own break opportunity.
+
+        ``。SYSTEM_PROMPT_DYNAMIC_BOUNDARY`` is two tokens, not one: the sentence
+        ends and an identifier follows. Treating the run as unbreakable gave a
+        20.4 em "run" to a column whose real token is 20.4-1 = 19.4 em, and the
+        column was promoted to ``auto`` for a token that does not exist.
         """
-        runs = re.findall(r"[^\s\u3000]+", text)
-        return max((_display_width(run) for run in runs), default=0)
+        code = ord(char)
+        return 0x3000 <= code <= 0x303F or 0xFF01 <= code <= 0xFF65
 
-    weights = []
-    widest_unbreakable = 0
+    def _char_em(char: str) -> float:
+        """Measured advance of one character, as a fraction of the em."""
+        if char.isspace():
+            return _SPACE_EM
+        if _is_cjk(char):
+            # Full-width ideographs and the full-width punctuation forms share a
+            # 1em advance; the narrower CJK punctuation block does not.
+            return _CJK_EM if ord(char) >= 0x3040 else _CJK_PUNCT_EM
+        if char.isdigit():
+            return _DIGIT_EM
+        if "A" <= char <= "Z":
+            return _LATIN_UPPER_EM
+        if char.isalpha():
+            return _LATIN_LOWER_EM
+        return _ASCII_PUNCT_EM
+
+    def _text_em(text: str) -> float:
+        """Measured width of ``text`` in em."""
+        return sum(_char_em(char) for char in text)
+
+    def _longest_unbreakable(text: str) -> float:
+        """Width in em of the widest run Typst cannot break.
+
+        Three kinds of break opportunity, all verified against the compiler:
+
+        * a space;
+        * every CJK character -- Typst breaks between ideographs, so a CJK
+          phrase is never one run (treating it as one inflated a column's figure
+          from 27 to 89 em);
+        * a hyphen -- ``Mini-SWE-Agent`` renders as three lines in a 40pt box.
+
+        A dot is NOT a break opportunity: ``metadata.openclaw.requires`` renders
+        as one 126pt run inside a 40pt box, and ``agentskills.io`` as one 61pt
+        run. Those two are the strings that overflowed a delivered table.
+        """
+        widest = 0.0
+        run = 0.0
+        for char in text:
+            # CJK punctuation MUST be tested before ``_is_cjk``: 。and ，live in
+            # the U+3000..U+303F block that ``_is_cjk`` also covers, so testing
+            # the broader class first let ``。SYSTEM_PROMPT_DYNAMIC_BOUNDARY``
+            # stay one 20.4 em run and promoted a prose column to ``auto``.
+            if _is_cjk_punct(char):
+                widest = max(widest, run)
+                run = 0.0
+            elif char.isspace() or _is_cjk(char):
+                widest = max(widest, run)
+                run = _char_em(char) if not char.isspace() else 0.0
+            elif char in "-\u2010\u2011\u2013\u2014":
+                # Typst breaks after a hyphen and keeps it on the previous line.
+                run += _char_em(char)
+                widest = max(widest, run)
+                run = 0.0
+            else:
+                run += _char_em(char)
+        return max(widest, run)
+
+    weights: list[float] = []
+    widest_unbreakable = 0.0
     for col in range(columns):
-        longest = 0
+        longest = 0.0
         for values in (headers, *rows):
             if col < len(values):
                 for part in re.split(r"<br\s*/?>", values[col]):
-                    longest = max(longest, _display_width(part.strip()))
+                    longest = max(longest, _text_em(part.strip()))
                     widest_unbreakable = max(widest_unbreakable, _longest_unbreakable(part))
         weights.append(max(longest, _TABLE_COL_MIN_WEIGHT))
-    column_spec = "(" + ", ".join(f"{w}fr" for w in weights) + ")"
 
-    # How much room does this table actually have?
+    # A column whose cell holds an unbreakable run gets ``auto``, not a fraction.
     #
-    # A two-column paper gives it ~232pt. A table with many columns or a long
-    # unbreakable run cannot fit that, and shrinking the font barely helps
-    # (measured: 0.84em -> 0.62em moved a 10-column table from 291.7pt to
-    # 286.6pt, still over the 282pt edge -- the columns are simply too narrow).
-    # The correct lever is to let the table span the full page width, which is
-    # what a wide exhibit is for. `#place(..., scope: "parent", float: true)`
-    # does exactly that and measures 535.1pt against the page's 545pt edge.
+    # ``fr`` divides the width by *ratio*, and the ratio is set by the whole
+    # cell contents -- including long CJK paragraphs that wrap anyway. One row
+    # of the skills table has cells of 99.5 em and 68.2 em side by side, so the
+    # 14.8 em identifier ``metadata.openclaw.requires`` received 68.2/251.3 of
+    # the width: 106pt for a 130pt string, and the cell ran 39.8pt past the page
+    # edge. The paragraph column that displaced it re-wraps at any width, so the
+    # loss bought nothing.
+    #
+    # ``auto`` sizes a column to its content, so the run always fits. Only
+    # columns that actually contain a run longer than a short word need it; the
+    # rest keep proportional widths so the table still fills the text block.
+    # Measured: ``auto`` puts the identifier at 474.6pt inside a 480pt block
+    # instead of 121.2pt against a 111pt limit.
+    # A column gets ``auto`` only when the width a fraction would give it cannot
+    # hold its longest unbreakable run. The test is comparative, not absolute: an
+    # absolute em floor marked four of this table's five columns for ``auto``
+    # (their runs are long because CJK punctuation chains onto them), and four
+    # content-sized columns have no proportional slack left -- the identifier
+    # still ran past the edge.
+    #
+    # At most ONE column is promoted: the one with the largest shortfall. The
+    # others keep fractions, so the table still fills the text block.
+    table_width = content_width_pt if content_width_pt is not None else _TABLE_DEFAULT_TEXT_WIDTH_PT
+    inset_total = columns * _TABLE_CELL_CHROME_PT + (columns - 1) * _TABLE_GUTTER_EM * TABLE_BASE_PT
+    share_available = max(table_width - inset_total, 1.0)
+    total_weight = sum(weights) or 1.0
+    runs: list[float] = []
+    shortfalls: list[float] = []
+    for index, weight in enumerate(weights):
+        longest_run = 0.0
+        for values in (headers, *rows):
+            if index < len(values):
+                for part in re.split(r"<br\s*/?>", values[index]):
+                    longest_run = max(longest_run, _longest_unbreakable(part))
+        runs.append(longest_run)
+        proportional = weight / total_weight * share_available
+        shortfalls.append(longest_run * TABLE_BASE_PT - proportional)
+
+    # Promote the column whose *run itself* is the problem, measured in
+    # absolute terms. A shortfall alone is not enough: a narrow column holding a
+    # short word ("Mini-SWE-Agent" is 4.3 em once hyphens count as break points)
+    # also shows a shortfall against its proportional share, and promoting it
+    # would leave the genuinely blocked identifier unaddressed. The run has to
+    # be wider than a comfortable column before ``auto`` is the right answer.
+    # Promote a column to ``auto`` only when it holds a run that is BOTH
+    # unbreakable and short enough to be a single token -- an identifier, a
+    # path, a URL. Two failure modes bound this from either side:
+    #
+    # * Too few promotions: three columns of the skills table each held a blocked
+    #   run and each overflowed on its own, so promoting only the worst missed
+    #   two.
+    # * Too many: ``auto`` also means "size to the whole cell", and a cell of
+    #   long CJK prose then claims hundreds of points. Promoting such a column
+    #   pushed a 4-column table to x=684 on a 595pt page and crushed its
+    #   neighbour to 8pt -- an 8pt-wide column sets one ideograph per line.
+    #
+    # A run above ``_TABLE_AUTO_MAX_EM`` is prose that re-wraps, so its column
+    # keeps a fraction: the wrap costs nothing, while ``auto`` would let it
+    # swallow the table.
+    promoted = [
+        index
+        for index, run in enumerate(runs)
+        if shortfalls[index] > 0.0 and _TABLE_AUTO_COLUMN_EM <= run <= _TABLE_AUTO_MAX_EM
+    ]
+    column_parts: list[str] = []
+    for index, weight in enumerate(weights):
+        if index in promoted:
+            column_parts.append("auto")
+        else:
+            column_parts.append(f"{weight:.1f}fr")
+    column_spec = "(" + ", ".join(column_parts) + ")"
+
+    # Does this table fit the space it will be typeset into?
+    #
+    # Decided by measurement, not by a run-length heuristic. Two questions:
+    #
+    # 1. Does the widest *unbreakable* run fit a single column? A column cannot
+    #    be narrower than its longest unbreakable content, so if that run exceeds
+    #    the per-column share the table must be laid out differently -- this is
+    #    the check that catches ``metadata.openclaw.requires`` (14.8 em = 155pt,
+    #    which cannot fit a 105pt column and ran 39.8pt past the page edge).
+    # 2. Is the column count itself beyond what the width supports?
+    #
+    # A two-column page cannot widen one column, so the lever is to let the table
+    # span the full page (``#place(..., scope: "parent", float: true)`` measures
+    # 535.1pt against the page's 545pt edge). On a single-column page there is no
+    # room to gain, so the body shrinks instead.
+    width = content_width_pt if content_width_pt is not None else _TABLE_DEFAULT_TEXT_WIDTH_PT
+    gutter_pt = _TABLE_GUTTER_EM * TABLE_BASE_PT
+    # Space one column can claim: the table width less every cell's inset and
+    # every gutter between cells.
+    per_column_pt = (width - columns * _TABLE_CELL_CHROME_PT - (columns - 1) * gutter_pt) / max(
+        columns, 1
+    )
+    widest_unbreakable_pt = widest_unbreakable * TABLE_BASE_PT
     too_wide = (
-        widest_unbreakable >= _TABLE_SHRINK_TRIGGER or columns >= _TABLE_MAX_COMFORTABLE_COLUMNS
+        widest_unbreakable_pt > per_column_pt
+        or columns >= _TABLE_MAX_COMFORTABLE_COLUMNS
+        or sum(weights) * TABLE_BASE_PT > width
     )
     full_page = page_columns > 1 and too_wide
     shrink = too_wide and not full_page
@@ -961,6 +1182,21 @@ class TypstDocumentRenderer:
 
     #: Base page setup, shared by every target language.
     _PAGE_SETUP = '#set page(paper: "a4", margin: (x: 2.2cm, y: 2.4cm), numbering: "1")'
+
+    def _table_width_pt(self) -> float:
+        """Width the tables will be typeset into, from the layout actually used.
+
+        The verdict has to be taken against the real container: a table that
+        fits a two-column page's 219.5pt column and one that needs a 493pt
+        page-wide block are different questions, and answering both with one
+        constant is how the old heuristic mis-fired.
+        """
+        template = getattr(self, "layout_template", "book")
+        if template == "academic":
+            if getattr(self, "columns", 1) > 1:
+                return _PAGE_TEXT_WIDTH_PT["academic_2col"]
+            return _PAGE_TEXT_WIDTH_PT["academic_1col"]
+        return _PAGE_TEXT_WIDTH_PT["book"]
 
     def preamble(self, target_lang: str = "zh") -> str:
         """The Typst preamble for ``target_lang``.
@@ -1330,13 +1566,22 @@ class TypstDocumentRenderer:
                 # fallback when the target grid does not parse, and the source
                 # half of a bilingual pair.
                 source_text = (block.source_text or "").strip()
+                table_width = self._table_width_pt()
                 source_markup = (
-                    render_table(source_text, is_math_ok=self._math_gate, page_columns=self.columns)
+                    render_table(
+                        source_text,
+                        is_math_ok=self._math_gate,
+                        page_columns=self.columns,
+                        content_width_pt=table_width,
+                    )
                     or None
                 )
                 target_text = _block_text(block)
                 markup = render_table(
-                    target_text, is_math_ok=self._math_gate, page_columns=self.columns
+                    target_text,
+                    is_math_ok=self._math_gate,
+                    page_columns=self.columns,
+                    content_width_pt=table_width,
                 )
                 fell_back = False
                 if not markup:
