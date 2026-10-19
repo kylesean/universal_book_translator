@@ -3787,7 +3787,7 @@
                 "type": "null"
               }
             ],
-            "description": "Quality preset (publication, standard, preview)"
+            "description": "Quality preset (publication, standard, publication_math, preview, fast)"
           },
           "pages": {
             "anyOf": [
@@ -4188,7 +4188,7 @@
                 "type": "null"
               }
             ],
-            "description": "Quality preset (publication, standard, preview)"
+            "description": "Quality preset (publication, standard, publication_math, preview, fast)"
           },
           "pdf_engine": {
             "anyOf": [
@@ -4746,6 +4746,7 @@
         "enum": [
           "publication",
           "standard",
+          "publication_math",
           "preview",
           "fast"
         ],

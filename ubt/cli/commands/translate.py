@@ -365,7 +365,7 @@ def translate(
         Preset | None,
         typer.Option(
             "--preset",
-            help="Quality tier (prompt depth + formula care; never the engine): 'publication' (rich context + term bible + lossless ingest), 'standard' (model-adaptive prompts + lossless ingest), 'preview' (fast pdfium ingest path, formula source images), or 'fast' (fast pdfium ingest path, short chain). An explicit flag always beats the preset; without this option the engine defaults apply",
+            help="Quality tier (prompt depth + formula care; never the engine): 'publication' (rich context + term bible + lossless ingest), 'standard' (model-adaptive prompts + lossless ingest), 'publication_math' (rich prompts + VLM formula transcription to vector LaTeX; much slower), 'preview' (fast pdfium ingest path, formula source images), or 'fast' (fast pdfium ingest path, short chain). Note 'auto' formula enrichment crops the source region, so publication and standard render identical math. An explicit flag always beats the preset; without this option the engine defaults apply",
             show_default=False,
         ),
     ] = None,

@@ -79,7 +79,8 @@ class JobSubmitRequest(BaseModel):
     draft_model: str | None = Field(default=None, description="Override draft model tier")
     repair_model: str | None = Field(default=None, description="Override repair model tier")
     preset: Preset | None = Field(
-        default=None, description="Quality preset (publication, standard, preview)"
+        default=None,
+        description="Quality preset (publication, standard, publication_math, preview, fast)",
     )
     pdf_engine: PdfEngine | None = Field(
         default=None,
@@ -230,7 +231,8 @@ class JobAssessRequest(BaseModel):
         pattern=LANG_CODE_PATTERN,
     )
     preset: Preset | None = Field(
-        default=None, description="Quality preset (publication, standard, preview)"
+        default=None,
+        description="Quality preset (publication, standard, publication_math, preview, fast)",
     )
     pages: str | None = Field(default=None, description="Page range filter (e.g. 1-10)")
 

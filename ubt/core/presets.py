@@ -8,6 +8,15 @@ to typeset the result" are orthogonal decisions, and bundling them made
 The render engine is not settable at all: every PDF is rebuilt from the semantic
 IR by the Typst publication renderer.
 
+**Formula enrichment is not a quality gradient.** Only ``on`` runs the VLM math
+transcription; both ``auto`` and ``off`` end up cropping the source region
+(``resolve_formula_enrichment`` returns ``False`` for ``auto``, deliberately:
+a faithful crop is exact and instant, while the VLM's LaTeX is a model's
+transcription that can misread symbols). So ``publication`` and ``standard``
+render identical math — they differ only in prompt depth — and advertising
+"vector formula re-typesetting" for them was a promise no preset kept.
+:attr:`Preset.PUBLICATION_MATH` is the preset that actually pays for it.
+
 Shared by the advisor and the CLI ``--preset`` layer: the CLI
 resolves explicit flags over the preset bundle over the engine defaults.
 """
@@ -31,8 +40,18 @@ from ubt.core.config import (
 class Preset(StrEnum):
     """User-facing quality tiers."""
 
+    #: Rich prompts on the lossless engine. ``formula_enrichment`` stays ``auto``,
+    #: which resolves to the crop path — see the module docstring for why that is
+    #: a property of ``auto`` and not a downgrade.
     PUBLICATION = "publication"
+    #: Same ingest and formula policy as PUBLICATION; only the prompt depth
+    #: differs (model-adaptive rather than forced rich).
     STANDARD = "standard"
+    #: Rich prompts *and* ``formula_enrichment="on"``: the VLM transcribes each
+    #: formula to vector LaTeX instead of the source being cropped. Much slower
+    #: (roughly 15-60s per formula on CPU) and only worth it when the delivered
+    #: PDF must scale its math.
+    PUBLICATION_MATH = "publication_math"
     PREVIEW = "preview"
     FAST = "fast"
 
@@ -77,7 +96,7 @@ PRESETS: dict[Preset, PresetPolicy] = {
         key=Preset.PUBLICATION,
         label="出版级",
         tagline="最佳质量：高保真术语 ＋ 全上下文提示，对标印刷交付",
-        description="智能路由（长/短链自适应） · 数学公式矢量高保真 ＋ 逐条视觉见证 · 双语/单语全覆盖",
+        description="智能路由（长/短链自适应） · 强制富提示词 · 公式裁切源图保真 · 双语/单语全覆盖",
         exec_mode="auto",
         prompt_strategy="rich",
         formula_enrichment="auto",
@@ -90,10 +109,23 @@ PRESETS: dict[Preset, PresetPolicy] = {
         key=Preset.STANDARD,
         label="标准",
         tagline="质量与成本平衡：路由交给文档探测",
-        description="自动短/长链 · 模型自适应提示 · 公式引擎渲染＋逐条见证回退",
+        description="自动短/长链 · 模型自适应提示 · 公式裁切源图保真（与出版级同一公式策略）",
         exec_mode="auto",
         prompt_strategy="auto",
         formula_enrichment="auto",
+        qe_engine="heuristic",
+        table_render_mode="auto",
+        emit_both=False,
+        pdf_engine="auto",
+    ),
+    Preset.PUBLICATION_MATH: PresetPolicy(
+        key=Preset.PUBLICATION_MATH,
+        label="出版级（公式矢量）",
+        tagline="公式转为矢量 LaTeX，可无级缩放；以速度换保真",
+        description="富提示词 ＋ 视觉模型逐条转写公式（每条约 15-60 秒 CPU）· 其余同出版级",
+        exec_mode="auto",
+        prompt_strategy="rich",
+        formula_enrichment="on",
         qe_engine="heuristic",
         table_render_mode="auto",
         emit_both=False,
@@ -114,7 +146,7 @@ PRESETS: dict[Preset, PresetPolicy] = {
     ),
     Preset.FAST: PresetPolicy(
         key=Preset.FAST,
-        label="极速论文",
+        label="极速",
         tagline="极速开箱即用：零重型依赖，轻量几何抽取，短链快速翻译",
         description="快速路径（pdfium；扫描件无文本层，自动转 Docling）· 最小提示词 · 公式源图保真 · 零重型环境门槛",
         exec_mode="short",
