@@ -170,6 +170,8 @@ export const zh: TranslationDictionary = {
     translateChromeAuto: '跟随引擎默认',
     translateChromeOn: '翻译页眉页脚',
     translateChromeOff: '保留原文页眉页脚',
+    groupLayout: '版面与交付',
+    groupEngines: '解析与处理',
     ocrMode: 'OCR 引擎',
     ocrModeHelp:
       '用于读取扫描页与字体损坏页。自动：本地 sidecar → 本地 rapidocr → 云端（最后且需出网许可）。',

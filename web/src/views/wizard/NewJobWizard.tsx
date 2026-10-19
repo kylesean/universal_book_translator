@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
+import { InfoTip } from '@/components/ui/InfoTip'
 import { assessJob, submitJob, uploadSourceDocument, type JobAssessResponse } from '@/api/client'
 import { useI18n } from '@/i18n/useI18n'
 
@@ -515,13 +516,13 @@ export function NewJobWizard() {
             {/* Language Pair */}
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] block mb-1 font-semibold">
+                <label className="type-label block mb-1">
                   {t.wizard.sourceLang}
                 </label>
                 <select
                   value={sourceLang}
                   onChange={(e) => setSourceLang(e.target.value)}
-                  className="w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs font-medium"
+                  className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs"
                 >
                   {LANGUAGES.map((lang) => (
                     <option key={lang.code} value={lang.code}>
@@ -531,13 +532,13 @@ export function NewJobWizard() {
                 </select>
               </div>
               <div>
-                <label className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] block mb-1 font-semibold">
+                <label className="type-label block mb-1">
                   {t.wizard.targetLang}
                 </label>
                 <select
                   value={targetLang}
                   onChange={(e) => setTargetLang(e.target.value)}
-                  className="w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs font-medium"
+                  className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs"
                 >
                   {LANGUAGES.map((lang) => (
                     <option key={lang.code} value={lang.code}>
@@ -550,7 +551,7 @@ export function NewJobWizard() {
 
             {/* Presets List */}
             <div>
-              <label className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] block mb-2 font-semibold">
+              <label className="type-label block mb-2">
                 {t.wizard.presets}
               </label>
               <div className="space-y-2">
@@ -574,32 +575,28 @@ export function NewJobWizard() {
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span
-                            className={`text-xs ${
-                              isSelected
-                                ? 'font-bold text-[var(--ink-primary)]'
-                                : 'font-medium text-[var(--ink-primary)]'
+                            className={`type-value ${
+                              isSelected ? 'font-semibold' : 'font-medium'
                             }`}
                           >
                             {p.name}
                           </span>
                           {isRecommended && (
-                            <span className="inline-flex items-center text-xs font-mono font-medium text-[#15803d] bg-[#15803d]/10 px-1.5 py-0.5 rounded border border-[#15803d]/20">
+                            <span className="inline-flex items-center font-mono text-[10px] font-medium text-[#15803d] bg-[#15803d]/10 px-1.5 py-0.5 rounded border border-[#15803d]/20">
                               {t.wizard.engineRecommended}
                             </span>
                           )}
                           {p.slow && (
-                            <span className="inline-flex items-center text-xs font-mono font-medium text-[#b45309] bg-[#b45309]/10 px-1.5 py-0.5 rounded border border-[#b45309]/20">
+                            <span className="inline-flex items-center font-mono text-[10px] font-medium text-[#b45309] bg-[#b45309]/10 px-1.5 py-0.5 rounded border border-[#b45309]/20">
                               {t.wizard.presetSlowBadge}
                             </span>
                           )}
                         </div>
-                        <span className="font-mono text-xs text-[var(--ink-muted)] uppercase tracking-wider shrink-0">
+                        <span className="font-mono text-[10px] text-[var(--ink-muted)] uppercase tracking-wider shrink-0">
                           {p.badge}
                         </span>
                       </div>
-                      <div className="text-xs text-[var(--ink-secondary)] mt-1 leading-relaxed">
-                        {p.desc}
-                      </div>
+                      <div className="type-help mt-1">{p.desc}</div>
                     </div>
                   )
                 })}
@@ -615,9 +612,7 @@ export function NewJobWizard() {
                 instead of hidden at one end of a track. */}
             <div className="pt-2">
               <div className="flex items-center justify-between text-xs mb-1.5">
-                <span className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
-                  {t.wizard.budgetCeiling}
-                </span>
+                <span className="type-label">{t.wizard.budgetCeiling}</span>
                 <label className="flex items-center gap-1.5 cursor-pointer select-none">
                   <input
                     type="checkbox"
@@ -645,9 +640,7 @@ export function NewJobWizard() {
               </div>
 
               {budgetUsd === null ? (
-                <p className="text-xs text-[var(--ink-muted)] leading-relaxed">
-                  {t.wizard.budgetUnlimited}
-                </p>
+                <p className="type-help">{t.wizard.budgetUnlimited}</p>
               ) : (
                 <div>
                   <div className="relative">
@@ -676,16 +669,14 @@ export function NewJobWizard() {
                     />
                   </div>
                   {budgetInvalid ? (
-                    <p className="text-xs mt-1 text-[#b91c1c]">{t.wizard.budgetInvalid}</p>
+                    <p className="type-help mt-1 text-[#b91c1c]">{t.wizard.budgetInvalid}</p>
                   ) : assessment?.cost.total_cost_usd != null &&
                     assessment.cost.total_cost_usd > budgetUsd ? (
-                    <p className="text-xs mt-1 text-[#b45309]">
+                    <p className="type-help mt-1 text-[#b45309]">
                       {t.wizard.budgetExceedsQuote} (${assessment.cost.total_cost_usd.toFixed(2)})
                     </p>
                   ) : (
-                    <p className="text-xs mt-1 text-[var(--ink-muted)]">
-                      {t.wizard.budgetHelp}
-                    </p>
+                    <p className="type-help mt-1">{t.wizard.budgetHelp}</p>
                   )}
                 </div>
               )}
@@ -696,7 +687,7 @@ export function NewJobWizard() {
               <button
                 type="button"
                 onClick={() => setIsAdvancedOpen(!isAdvancedOpen)}
-                className="w-full flex items-center justify-between py-1 text-left text-xs font-semibold text-[var(--ink-primary)] hover:text-black transition-colors focus:outline-none group cursor-pointer"
+                className="w-full flex items-center justify-between py-1 text-left type-value font-semibold text-[var(--ink-primary)] hover:text-black transition-colors focus:outline-none group cursor-pointer"
               >
                 <div className="flex items-center gap-2">
                   <Sliders className="h-3.5 w-3.5 text-[var(--ink-secondary)] group-hover:text-[var(--ink-primary)]" />
@@ -711,25 +702,29 @@ export function NewJobWizard() {
                   <ChevronRight className="h-4 w-4 text-[var(--ink-muted)] group-hover:text-[var(--ink-primary)] transition-transform" />
                 )}
               </button>
-              <p className="text-xs text-[var(--ink-muted)] mt-0.5 mb-2 leading-relaxed">
-                {t.wizard.advancedOptionsSubtitle}
-              </p>
+              <p className="type-help mt-0.5 mb-2">{t.wizard.advancedOptionsSubtitle}</p>
 
               {isAdvancedOpen && (
                 <div className="space-y-4 pt-3 pb-1 border-t border-dashed border-[var(--paper-border)] mt-2">
+                  {/* Grouped by intent: "what the reader gets" vs "what reads
+                      the source". Seven flat controls with no headings made the
+                      drawer one undifferentiated block. */}
+                  <div className="type-group -mb-1">{t.wizard.groupLayout}</div>
+
                   {/* Row 1: Profile & Dual Mode */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 items-start">
                     <div>
-                      <label className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] block mb-1 font-semibold">
-                        {t.wizard.domainProfile}
-                      </label>
+                      <div className="flex items-center gap-1 mb-1">
+                        <label className="type-label">{t.wizard.domainProfile}</label>
+                        <InfoTip label={t.wizard.domainProfile}>{t.wizard.domainProfileHelp}</InfoTip>
+                      </div>
                       <select
                         value={domainProfile}
                         onChange={(e) => {
                           hasUserSelectedDomainRef.current = true
                           setDomainProfile(e.target.value)
                         }}
-                        className="w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs font-medium"
+                        className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs"
                       >
                         <option value="auto">{t.wizard.domainAuto}</option>
                         <option value="general">{t.wizard.domainGeneral}</option>
@@ -739,71 +734,68 @@ export function NewJobWizard() {
                         <option value="humanities">{t.wizard.domainHumanities}</option>
                         <option value="semiconductor">{t.wizard.domainSemiconductor}</option>
                       </select>
-                      <p className="text-xs text-[var(--ink-muted)] mt-1 leading-relaxed">
-                        {t.wizard.domainProfileHelp}
-                      </p>
                     </div>
 
                     <div>
-                      <label className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] block mb-1 font-semibold">
-                        {t.wizard.dualMode}
-                      </label>
+                      <div className="flex items-center gap-1 mb-1">
+                        <label className="type-label">{t.wizard.dualMode}</label>
+                        <InfoTip label={t.wizard.dualMode}>{t.wizard.dualModeHelp}</InfoTip>
+                      </div>
                       <select
                         value={dualMode}
                         onChange={(e) => {
                           hasUserSelectedDualModeRef.current = true
                           setDualMode(e.target.value as any)
                         }}
-                        className="w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs font-medium"
+                        className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs"
                       >
                         <option value="auto">{t.wizard.dualModeAuto}</option>
                         <option value="dual">{t.wizard.dualModeDual}</option>
                         <option value="mono">{t.wizard.dualModeMono}</option>
                       </select>
-                      <p className="text-xs text-[var(--ink-muted)] mt-1 leading-relaxed">
-                        {t.wizard.dualModeHelp}
-                      </p>
                     </div>
                   </div>
 
                   {/* Row 2: Layout columns & page furniture */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 items-start">
                     <div>
-                      <label className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] block mb-1 font-semibold">
-                        {t.wizard.layoutColumns}
-                      </label>
+                      <div className="flex items-center gap-1 mb-1">
+                        <label className="type-label">{t.wizard.layoutColumns}</label>
+                        <InfoTip label={t.wizard.layoutColumns}>
+                          {t.wizard.layoutColumnsHelp}
+                        </InfoTip>
+                      </div>
                       <select
                         value={layoutColumns}
                         onChange={(e) => setLayoutColumns(e.target.value as any)}
-                        className="w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs font-medium"
+                        className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs"
                       >
                         <option value="auto">{t.wizard.layoutColumnsAuto}</option>
                         <option value="1">{t.wizard.layoutColumnsOne}</option>
                         <option value="2">{t.wizard.layoutColumnsTwo}</option>
                       </select>
-                      <p className="text-xs text-[var(--ink-muted)] mt-1 leading-relaxed">
-                        {t.wizard.layoutColumnsHelp}
-                      </p>
                     </div>
 
                     <div>
-                      <label className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] block mb-1 font-semibold">
-                        {t.wizard.translateChrome}
-                      </label>
+                      <div className="flex items-center gap-1 mb-1">
+                        <label className="type-label">{t.wizard.translateChrome}</label>
+                        <InfoTip label={t.wizard.translateChrome}>
+                          {t.wizard.translateChromeHelp}
+                        </InfoTip>
+                      </div>
                       <select
                         value={translateChrome}
                         onChange={(e) => setTranslateChrome(e.target.value as any)}
-                        className="w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs font-medium"
+                        className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs"
                       >
                         <option value="auto">{t.wizard.translateChromeAuto}</option>
                         <option value="on">{t.wizard.translateChromeOn}</option>
                         <option value="off">{t.wizard.translateChromeOff}</option>
                       </select>
-                      <p className="text-xs text-[var(--ink-muted)] mt-1 leading-relaxed">
-                        {t.wizard.translateChromeHelp}
-                      </p>
                     </div>
                   </div>
+
+                  <div className="type-group -mb-1 pt-1">{t.wizard.groupEngines}</div>
 
                   {/* Row 2b: OCR engine.
                       Reachable from the CLI (--ocr) and REST (ocr_mode) since
@@ -812,84 +804,82 @@ export function NewJobWizard() {
                       its own advice. 'auto' is the engine default and is left
                       as the null sentinel so an operator's UBT_OCR_MODE still
                       wins. */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 items-start">
-                    <div>
-                      <label className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] block mb-1 font-semibold">
-                        {t.wizard.ocrMode}
-                      </label>
-                      <select
-                        value={ocrMode}
-                        onChange={(e) => setOcrMode(e.target.value as any)}
-                        className="w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs font-medium"
-                      >
-                        <option value="auto">{t.wizard.ocrModeAuto}</option>
-                        <option value="rapidocr">{t.wizard.ocrModeRapidocr}</option>
-                        <option value="sidecar">{t.wizard.ocrModeSidecar}</option>
-                        <option value="cloud">{t.wizard.ocrModeCloud}</option>
-                        <option value="vlm">{t.wizard.ocrModeVlm}</option>
-                        <option value="off">{t.wizard.ocrModeOff}</option>
-                      </select>
-                      <p
-                        className={`text-xs mt-1 leading-relaxed ${
-                          ocrNeedsEgress ? 'text-[#b45309]' : 'text-[var(--ink-muted)]'
-                        }`}
-                      >
-                        {ocrNeedsEgress ? t.wizard.ocrModeEgressWarning : t.wizard.ocrModeHelp}
-                      </p>
+                  <div>
+                    <div className="flex items-center gap-1 mb-1">
+                      <label className="type-label">{t.wizard.ocrMode}</label>
+                      <InfoTip label={t.wizard.ocrMode}>{t.wizard.ocrModeHelp}</InfoTip>
                     </div>
+                    <select
+                      value={ocrMode}
+                      onChange={(e) => setOcrMode(e.target.value as any)}
+                      className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs"
+                    >
+                      <option value="auto">{t.wizard.ocrModeAuto}</option>
+                      <option value="rapidocr">{t.wizard.ocrModeRapidocr}</option>
+                      <option value="sidecar">{t.wizard.ocrModeSidecar}</option>
+                      <option value="cloud">{t.wizard.ocrModeCloud}</option>
+                      <option value="vlm">{t.wizard.ocrModeVlm}</option>
+                      <option value="off">{t.wizard.ocrModeOff}</option>
+                    </select>
+                    {/* Dynamic, not static: only shown when the choice has a
+                        consequence the operator must know before submitting. */}
+                    {ocrNeedsEgress && (
+                      <p className="type-help mt-1 text-[#b45309]">
+                        {t.wizard.ocrModeEgressWarning}
+                      </p>
+                    )}
                   </div>
 
                   {/* Row 3: Pages Range Filter */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 items-start">
-                    <div>
-                      <div className="flex items-center justify-between mb-1">
-                        <label className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
-                          {t.wizard.pageFilter}
-                        </label>
-                        <button
-                          type="button"
-                          onClick={() => setPageRange('1-5')}
-                          className="text-xs font-mono text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] underline cursor-pointer"
-                        >
-                          {t.wizard.sliceSampleQuickBtn}
-                        </button>
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center gap-1">
+                        <label className="type-label">{t.wizard.pageFilter}</label>
+                        <InfoTip label={t.wizard.pageFilter}>
+                          {t.wizard.pageFilterHelp}
+                        </InfoTip>
                       </div>
-                      <input
-                        type="text"
-                        value={pageRange}
-                        onChange={(e) => setPageRange(e.target.value)}
-                        placeholder={t.wizard.pageFilterPlaceholder}
-                        className="w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs font-mono placeholder:text-[var(--ink-muted)]"
-                      />
-                      <p className="text-xs text-[var(--ink-muted)] mt-1">
-                        {t.wizard.pageFilterHelp}
-                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setPageRange('1-5')}
+                        className="type-help underline hover:text-[var(--ink-primary)] cursor-pointer"
+                      >
+                        {t.wizard.sliceSampleQuickBtn}
+                      </button>
                     </div>
+                    <input
+                      type="text"
+                      value={pageRange}
+                      onChange={(e) => setPageRange(e.target.value)}
+                      placeholder={t.wizard.pageFilterPlaceholder}
+                      className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 font-mono focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs placeholder:text-[var(--ink-muted)]"
+                    />
                   </div>
 
                   {/* Row 4: External Glossary Path */}
                   <div>
-                    <label className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] block mb-1 font-semibold">
-                      {t.wizard.glossaryPath}
-                    </label>
+                    <div className="flex items-center gap-1 mb-1">
+                      <label className="type-label">{t.wizard.glossaryPath}</label>
+                      <InfoTip label={t.wizard.glossaryPath}>
+                        {t.wizard.glossaryPathHelp}
+                      </InfoTip>
+                    </div>
                     <input
                       type="text"
                       value={glossaryPath}
                       onChange={(e) => setGlossaryPath(e.target.value)}
                       placeholder={t.wizard.glossaryPathPlaceholder}
-                      className={`w-full h-8 rounded-[5px] border bg-[var(--paper-surface)] px-2.5 text-xs text-[var(--ink-primary)] focus:outline-none shadow-2xs font-mono placeholder:text-[var(--ink-muted)] ${
+                      className={`type-value w-full h-8 rounded-[5px] border bg-[var(--paper-surface)] px-2.5 font-mono focus:outline-none shadow-2xs placeholder:text-[var(--ink-muted)] ${
                         glossaryError
                           ? 'border-[#b91c1c] focus:border-[#b91c1c]'
                           : 'border-[var(--paper-border)] focus:border-[var(--ink-primary)]'
                       }`}
                     />
-                    <p
-                      className={`text-xs mt-1 ${
-                        glossaryError ? 'text-[#b91c1c]' : 'text-[var(--ink-muted)]'
-                      }`}
-                    >
-                      {glossaryError ?? t.wizard.glossaryPathHelp}
-                    </p>
+                    {/* Only rendered when invalid — the format rules live in
+                        the InfoTip, so a valid path costs no vertical space. */}
+                    {glossaryError && (
+                      <p className="type-help mt-1 text-[#b91c1c]">{glossaryError}</p>
+                    )}
                   </div>
 
                   {/* Rehearsal: zero-token dry run through the same pipeline */}
@@ -902,16 +892,12 @@ export function NewJobWizard() {
                         className="mt-0.5 h-3.5 w-3.5 rounded border-[var(--paper-border)] accent-[var(--ink-primary)] cursor-pointer"
                       />
                       <span>
-                        <span className="text-xs font-semibold text-[var(--ink-primary)]">
-                          {t.wizard.rehearsalLabel}
-                        </span>
-                        <span className="block text-xs text-[var(--ink-muted)] mt-0.5">
-                          {t.wizard.rehearsalHelp}
-                        </span>
+                        <span className="type-value font-semibold">{t.wizard.rehearsalLabel}</span>
+                        <span className="type-help block mt-0.5">{t.wizard.rehearsalHelp}</span>
                       </span>
                     </label>
                     {dryRun && (
-                      <div className="mt-2 rounded-[5px] border border-[#b45309]/30 bg-[#b45309]/5 p-2 text-xs text-[#b45309]">
+                      <div className="mt-2 rounded-[5px] border border-[#b45309]/30 bg-[#b45309]/5 p-2 type-help text-[#b45309]">
                         {t.wizard.rehearsalActiveWarning}
                       </div>
                     )}
@@ -927,12 +913,10 @@ export function NewJobWizard() {
           <div className="p-5 space-y-5">
             <div className="flex items-center justify-between border-b border-[var(--paper-border)] pb-3">
               <div>
-                <h3 className="text-xs font-bold text-[var(--ink-primary)] tracking-tight">
+                <h3 className="type-value font-bold text-[var(--ink-primary)] tracking-tight">
                   {t.wizard.preflightTitle}
                 </h3>
-                <p className="text-xs text-[var(--ink-secondary)] mt-0.5">
-                  {t.wizard.preflightSubtitle}
-                </p>
+                <p className="type-help mt-0.5">{t.wizard.preflightSubtitle}</p>
               </div>
               {isReassessing ? (
                 <Badge variant="outline" className="animate-pulse text-xs font-mono">
@@ -992,9 +976,9 @@ export function NewJobWizard() {
                 )}
 
                 {/* Metric Rows — real nested assess fields */}
-                <div className="divide-y divide-[var(--paper-border)] text-xs">
+                <div className="divide-y divide-[var(--paper-border)]">
                   <div className="py-2.5 flex items-center justify-between">
-                    <span className="text-[var(--ink-secondary)]">{t.wizard.pageCount}</span>
+                    <span className="type-help">{t.wizard.pageCount}</span>
                     <span className="font-mono font-bold text-[var(--ink-primary)]">
                       {assessment.document.selected_pages != null ? (
                         <>
@@ -1014,7 +998,7 @@ export function NewJobWizard() {
                     </span>
                   </div>
                   <div className="py-2.5 flex items-center justify-between">
-                    <span className="text-[var(--ink-secondary)]">{t.wizard.sourceChars}</span>
+                    <span className="type-help">{t.wizard.sourceChars}</span>
                     <span className="font-mono font-bold text-[var(--ink-primary)]">
                       {assessment.document.source_chars.toLocaleString()}
                     </span>
@@ -1044,7 +1028,7 @@ export function NewJobWizard() {
                     </span>
                   </div>
                   <div className="py-2.5 flex items-center justify-between">
-                    <span className="text-[var(--ink-secondary)]">{t.wizard.scannedRatio}</span>
+                    <span className="type-help">{t.wizard.scannedRatio}</span>
                     <span
                       className={`font-mono font-bold ${
                         (assessment.document.scan_page_share ?? 0) > 0.2
@@ -1085,7 +1069,7 @@ export function NewJobWizard() {
                     </span>
                   </div>
                   <div className="py-2.5 flex items-center justify-between">
-                    <span className="text-[var(--ink-secondary)]">{t.wizard.estCost}</span>
+                    <span className="type-help">{t.wizard.estCost}</span>
                     <span className="font-mono font-bold">
                       {assessment.cost.total_cost_usd === null ||
                       assessment.cost.total_cost_usd === undefined ? (
@@ -1105,7 +1089,7 @@ export function NewJobWizard() {
                     </span>
                   </div>
                   <div className="py-2.5 flex items-center justify-between">
-                    <span className="text-[var(--ink-secondary)]">{t.wizard.estTime}</span>
+                    <span className="type-help">{t.wizard.estTime}</span>
                     <span className="font-mono font-bold text-[var(--ink-primary)]">
                       {formatDuration(assessment.runtime.est_seconds_low)} –{' '}
                       {formatDuration(assessment.runtime.est_seconds_high)}

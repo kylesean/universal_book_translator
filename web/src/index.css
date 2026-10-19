@@ -77,3 +77,50 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--paper-border-hover);
 }
+
+/* --- Type scale for dense operator forms -------------------------------
+   The wizard used a single size (text-xs, 12px) for labels, values, help and
+   badges — 72 occurrences, one visual level. With no size hierarchy the eye
+   has nothing to anchor on, so every row must be read rather than scanned,
+   which reads as "cramped" even at generous line spacing.
+
+   Three roles, deliberately close in size (11/13/15) so the page still feels
+   like one document rather than a dashboard:
+     label  — the field name; mono, uppercase, muted
+     value  — what the operator chose; the only thing at reading size
+     help   — explanations; smallest, muted
+   Line-height is loosened on `label` because uppercase mono at 11px with
+   tight leading turns into a grey bar. */
+.type-label {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  line-height: 1.4;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  font-weight: 600;
+}
+
+.type-value {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink-primary);
+}
+
+.type-help {
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--ink-muted);
+}
+
+/* Group heading inside the advanced drawer. The drawer holds seven controls
+   with no visible structure; this separates "how it is laid out" from "what
+   reads the pages" so a whole block can be skipped at a glance. */
+.type-group {
+  font-size: 11px;
+  line-height: 1.4;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-secondary);
+  font-weight: 600;
+}

@@ -191,6 +191,8 @@ export const en: TranslationDictionary = {
     translateChromeAuto: 'Follow engine default',
     translateChromeOn: 'Translate page furniture',
     translateChromeOff: 'Keep source page furniture',
+    groupLayout: 'Layout & delivery',
+    groupEngines: 'Reading & processing',
     ocrMode: 'OCR engine',
     ocrModeHelp:
       'Reads scanned pages and font-damaged pages. Auto: local sidecar → local rapidocr → cloud (last, and only with page-egress permission).',

@@ -132,6 +132,9 @@ export interface TranslationDictionary {
     translateChromeAuto: string
     translateChromeOn: string
     translateChromeOff: string
+    /** Headings that group the advanced drawer by intent. */
+    groupLayout: string
+    groupEngines: string
     ocrMode: string
     ocrModeHelp: string
     ocrModeEgressWarning: string
