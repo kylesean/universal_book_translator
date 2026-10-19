@@ -76,24 +76,28 @@ def code_text_layer_is_lossy(text: str) -> bool:
     return len(body) >= _CODE_LOSSY_MIN_CHARS and "\n" not in body
 
 
-def crop_lossy_code_asset(
+def crop_region_asset(
     item: Any,
     assets_dir: Path,
     pdf_path: Path | None,
     ordinal: int,
-    text: str,
+    *,
+    kind: str,
+    min_width_pt: float,
+    min_height_pt: float,
 ) -> IRBlock | None:
-    """Recover a line-structure-destroyed code listing by cropping its region.
+    """Crop one Docling item's source region to a PNG and return an IMAGE block.
 
-    The same contract as the unreadable-formula crop: the renderer rebuilds the
-    page from the IR and has no source canvas, so a listing whose text layer
-    lost its line structure would otherwise be delivered as one wrapped prose
-    paragraph. The crop becomes an IMAGE block, which the renderer already
-    places and the delivery contract already counts.
+    The shared implementation of the two crop recoveries (a code listing whose
+    line structure was destroyed upstream, an unreadable formula). They were two
+    65-line near-copies — normalized AST similarity 0.9956 — differing only in
+    the size floor, the asset name and the block-id prefix, which is exactly the
+    shape that drifts: a DPI or naming change made in one place silently left the
+    other behind.
 
     Returns ``None`` when the region cannot be cropped (no source PDF, no
-    bbox, or a degenerate region), so the caller keeps the text block — an
-    imperfect listing still beats a hole on the page.
+    provenance bbox, or a region smaller than ``min_width_pt`` ×
+    ``min_height_pt``), so the caller keeps whatever it had.
     """
     if pdf_path is None or not pdf_path.exists():
         return None
@@ -111,27 +115,29 @@ def crop_lossy_code_asset(
         x1=float(getattr(b, "r", 0.0)),
         y1=float(getattr(b, "t", 0.0)),
     )
-    if bbox.x1 - bbox.x0 < 60 or bbox.y1 - bbox.y0 < 24:
-        # Too small to be a listing: a one-line fragment is better kept as text.
+    if bbox.x1 - bbox.x0 < min_width_pt or bbox.y1 - bbox.y0 < min_height_pt:
         return None
-    asset_path = assets_dir / f"code_p{page_no}_{ordinal:04d}.{_figure_asset_dpi_tag()}.png"
+    prefix = _CROP_ASSET_PREFIXES[kind]
+    asset_path = assets_dir / f"{prefix}_p{page_no}_{ordinal:04d}.{_figure_asset_dpi_tag()}.png"
     try:
         from ubt.adapters.pdf.visual_scalpel import FIGURE_ASSET_DPI, crop_block_pil
 
         assets_dir.mkdir(parents=True, exist_ok=True)
-        # Delivered at print resolution (see FIGURE_ASSET_DPI): the listing's
-        # underscores are drawn as vector rules in the source, so the crop is
-        # the only place they exist.
+        # Delivered at print resolution (see FIGURE_ASSET_DPI): the crop is the
+        # only raster of this region — the renderer rebuilds the page from the IR
+        # and has no source canvas.
         cropped = crop_block_pil(pdf_path, page_no, bbox, dpi=FIGURE_ASSET_DPI)
-        if getattr(cropped, "width", 0) < 60 or getattr(cropped, "height", 0) < 24:
+        if getattr(cropped, "width", 0) < min_width_pt or getattr(cropped, "height", 0) < (
+            min_height_pt
+        ):
             return None
         cropped.save(asset_path)
     except Exception as exc:
-        logger.debug("Code crop failed for page %d: %s", page_no, exc)
+        logger.debug("%s crop failed for page %d: %s", kind, page_no, exc)
         return None
     return IRBlock(
         element=make_element(
-            id=f"pdf_main#cde_{ordinal:04d}",
+            id=f"pdf_main#{prefix}_{ordinal:04d}",
             spine_index=ordinal,
             block_type=BlockType.IMAGE,
             flow_id=FlowID.MAIN_STORY,
@@ -140,6 +146,40 @@ def crop_lossy_code_asset(
             skip_translate=True,
         ),
         target_text=str(asset_path),
+    )
+
+
+#: Asset-file prefix and block-id prefix per crop kind. These are the names
+#: earlier builds already wrote; changing one orphans the assets of every cached
+#: conversion, so they are named here rather than inlined.
+_CROP_ASSET_PREFIXES: dict[str, str] = {"code": "code", "formula": "formula"}
+
+
+def crop_lossy_code_asset(
+    item: Any,
+    assets_dir: Path,
+    pdf_path: Path | None,
+    ordinal: int,
+    text: str,
+) -> IRBlock | None:
+    """Recover a line-structure-destroyed code listing by cropping its region.
+
+    A listing whose text layer lost its line structure must be cropped rather
+    than delivered as one wrapped prose paragraph; the crop becomes an IMAGE
+    block, which the renderer places and the delivery contract already counts.
+
+    ``text`` is accepted for call-site symmetry with :func:`code_text_layer_is_lossy`
+    but is not read: the decision was already made by the caller, and the size
+    floor (60 × 24pt) is what rejects a one-line fragment.
+    """
+    return crop_region_asset(
+        item,
+        assets_dir,
+        pdf_path,
+        ordinal,
+        kind="code",
+        min_width_pt=60,
+        min_height_pt=24,
     )
 
 

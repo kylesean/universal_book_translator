@@ -165,8 +165,17 @@ class DoclingRenderStrategy:
         # ``renderer.last_render_skips`` carries the blocks the reflow could not
         # emit at all (a table whose target grid did not parse and whose source
         # grid did not either); the asset misses are added alongside.
+        #
+        # The misses are keyed by **block id**, which is the only key the export
+        # stage's skip channel understands. Recording the asset *path* here (as
+        # this did) matched no block, so a figure that fell back to its
+        # "[missing figure: …]" placeholder was invisible to the delivery
+        # contract: it reported ``missing_assets=0`` and no violation for a page
+        # whose picture was gone.
         self.last_render_skips = list(renderer.last_render_skips) + [
-            (asset, "asset_not_found") for asset in stats.assets_missing if asset
+            (block_id, "asset_not_found")
+            for block_id, asset in stats.assets_missing
+            if block_id and asset
         ]
         # The render-quality channel: blocks that were *drawn* but imperfectly
         # (a formula degraded to readable Unicode). Kept apart from the skips so
