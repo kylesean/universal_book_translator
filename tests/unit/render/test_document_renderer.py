@@ -216,21 +216,24 @@ def test_table_columns_are_weighted_by_content() -> None:
         "| DocLayout-YOLO [14] | 20M | 107.4 | MonkeyOCR [27] MinerU2.5 [5] |"
     )
     out = render_table(markup)
-    # Weights are measured em widths, not character counts, so the assertion is
-    # on the *ordering and relative share* the layout depends on: the long
-    # recognition column must lead, the numeric ones must stay comparable to
-    # each other, and the short ones must not collapse.
+    # Columns are emitted as absolute pt widths (a minmax-style allocation, see
+    # render_table): every column first gets the width its unbreakable run
+    # needs, then the leftover is shared by proportion. The assertion is on the
+    # shape of that allocation rather than on the internal weights.
     spec = next(line for line in out.splitlines() if "columns:" in line)
-    weights = [
-        float(part.removesuffix("fr")) for part in spec.split("(")[1].rstrip("),").split(",")
+    widths = [
+        float(part.strip().removesuffix("pt"))
+        for part in spec.split("(")[1].rstrip("),").split(",")
     ]
-    assert len(weights) == 4
-    assert weights[3] > weights[0] > weights[1]
-    # Both short columns sit at or near the 3 em floor: "Params" is 6 Latin
-    # advances (3.3 em) so it clears the floor, while "FPS" is 3 advances and
-    # takes the floor itself. Neither may collapse toward zero.
-    assert 2.9 <= weights[1] <= 3.6
-    assert 2.9 <= weights[2] <= 3.6
+    assert len(widths) == 4
+    assert all(w > 0 for w in widths)
+    # The recognition column carries "MonkeyOCR [27] MinerU2.5 [5]" and must lead.
+    assert widths[3] > widths[0]
+    # No column may collapse to a sliver.
+    assert min(widths) >= 10.0
+    # The allocation fills the text block it was given (453.55pt default, less
+    # the gutters and the safety margin).
+    assert 425.0 <= sum(widths) <= 455.0
 
 
 def test_a_formula_block_is_typeset_as_math(tmp_path: Path) -> None:
@@ -1324,13 +1327,13 @@ def test_a_shrunken_table_does_not_resize_the_prose_after_it() -> None:
     assert len(set(heights.values())) == 1, heights
 
 
-def test_an_identifier_column_sizes_to_its_content() -> None:
+def test_an_identifier_column_gets_room_for_its_run() -> None:
     """A blocked identifier column must not be squeezed by a prose column.
 
-    Delivered defect: ``metadata.openclaw.requires`` (14.1 em) sat beside a CJK
-    prose column that claimed 99.5 em of the weight, so the identifier got 106pt
-    for a 148pt string and ran 39.8pt past the page edge. ``auto`` sizes that
-    column to the run instead.
+    Delivered defect: ``metadata.openclaw.requires`` (14.1 em) sat beside CJK
+    prose columns that claimed most of the weight, so the identifier got a
+    column narrower than the string and ran 39.8pt past the page edge. The
+    allocation now gives every column at least the width of its unbreakable run.
     """
     from ubt.render.typst.document_renderer import render_table
 
@@ -1343,7 +1346,17 @@ def test_an_identifier_column_sizes_to_its_content() -> None:
     )
     out = render_table(markup, content_width_pt=_NARROW_PAGE_PT)
     spec = next(line for line in out.splitlines() if "columns:" in line)
-    assert "auto" in spec, spec
+    widths = [
+        float(part.strip().removesuffix("pt"))
+        for part in spec.split("(")[1].rstrip("),").split(",")
+    ]
+    # The identifier column must hold the run: 14.1 em at 10.5pt is ~148pt, minus
+    # whatever shrink the whole table needed (the emitted body size is in the
+    # spec's sibling ``#set text`` line). A column narrower than the string is
+    # the defect; its absolute width also has to leave room for the cell inset.
+    has_shrink = "#set text(size:" in out
+    factor = 0.84 if has_shrink else 1.0
+    assert widths[2] >= 148.0 * factor * 0.9, spec
 
 
 def test_a_prose_column_is_never_promoted_to_auto() -> None:

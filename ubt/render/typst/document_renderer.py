@@ -587,6 +587,24 @@ def _wrap_style(
 #: 271.7pt at 8pt, 260.6pt at 7pt.
 _TABLE_TEXT_SCALE: str = "0.84"
 
+#: Floor for the computed shrink factor. A table whose columns cannot fit even
+#: here is too wide for the page at any readable size; it is laid out at the
+#: floor and the visual gate reports the overflow rather than hiding it. 0.60
+#: gives a 6.3pt body -- small, but legible.
+_TABLE_MIN_TEXT_SCALE: float = 0.60
+
+#: How many lines a column's content may wrap to before the column counts as
+#: unreadably thin. This is the readability floor for a column whose only
+#: unbreakable run is short: a 7-character CJK header at 3 lines still reads as
+#: a label, at 7 lines it reads as a vertical strip.
+_TABLE_HEADER_LINES: float = 3.0
+
+#: Safety margin applied to the emitted column widths. Absorbs the 0.1pt
+#: rounding in the spec plus sub-point differences between the measured advances
+#: and Typst's own shaping. Measured case: a run needing 124.4pt in a 124.1pt
+#: column crossed the text-block edge by 0.3pt.
+_TABLE_WIDTH_SAFETY: float = 0.998
+
 #: Body size the renderer emits (``#set text(size: 10.5pt)``). The em-based
 #: table weights are expressed as fractions of this, so a weight of 1.0 means one
 #: body em -- 10.5pt at the document size.
@@ -612,23 +630,11 @@ _PAGE_TEXT_WIDTH_PT: dict[str, float] = {
 _TABLE_DEFAULT_TEXT_WIDTH_PT = _PAGE_TEXT_WIDTH_PT["academic_1col"]
 #: Cell inset (5pt each side) plus a column gutter (0.7em) and rounding slack.
 _TABLE_CELL_CHROME_PT = 10.0
-
-#: Unbreakable run width (in em) at which a column switches from a proportional
-#: ``fr`` width to ``auto``. Above this the column must size to its content or
-#: the run is clipped/pushed past the edge; below it a fraction is both safe and
-#: better, because ``fr`` keeps the table flush with the text block. 8 em is
-#: wider than any ordinary word in either script (``metadata`` is 4.7 em) and
-#: narrower than every identifier that actually overflowed (14.8 em).
-_TABLE_AUTO_COLUMN_EM: float = 8.0
-
-#: Upper bound (in em) for that promotion. Above it the run is prose that wraps,
-#: and ``auto`` on such a column sizes it to the whole cell -- a 4-column table
-#: reached x=684 on a 595pt page and squeezed its neighbour to 8pt (one
-#: ideograph per line). 30 em is wider than any identifier seen in the corpus
-#: (``model_auto_compact_token_limit`` is 30.4 em and is handled as prose, where
-#: it overflows *outside* tables) and narrower than a sentence.
-_TABLE_AUTO_MAX_EM: float = 30.0
 _TABLE_GUTTER_EM = 0.7
+
+#: Cell inset on each side, matching the emitted ``inset: 5pt``. A column's
+#: width is its content plus twice this.
+_TABLE_CELL_INSET_PT: float = 5.0
 
 #: Column count at which a table cannot fit a two-column page's text width at
 #: the document size, whatever its cell contents: 232pt / 10 columns leaves ~23pt
@@ -805,90 +811,110 @@ def render_table(
                 run += _char_em(char)
         return max(widest, run)
 
+    # Per-column measured demands: the whole cell (``weights``, for the
+    # proportional share) and the longest unbreakable run (``runs``, which sets a
+    # hard minimum because it cannot wrap).
     weights: list[float] = []
+    runs: list[float] = []
     widest_unbreakable = 0.0
     for col in range(columns):
         longest = 0.0
+        longest_run = 0.0
         for values in (headers, *rows):
             if col < len(values):
                 for part in re.split(r"<br\s*/?>", values[col]):
                     longest = max(longest, _text_em(part.strip()))
-                    widest_unbreakable = max(widest_unbreakable, _longest_unbreakable(part))
-        weights.append(max(longest, _TABLE_COL_MIN_WEIGHT))
-
-    # A column whose cell holds an unbreakable run gets ``auto``, not a fraction.
-    #
-    # ``fr`` divides the width by *ratio*, and the ratio is set by the whole
-    # cell contents -- including long CJK paragraphs that wrap anyway. One row
-    # of the skills table has cells of 99.5 em and 68.2 em side by side, so the
-    # 14.8 em identifier ``metadata.openclaw.requires`` received 68.2/251.3 of
-    # the width: 106pt for a 130pt string, and the cell ran 39.8pt past the page
-    # edge. The paragraph column that displaced it re-wraps at any width, so the
-    # loss bought nothing.
-    #
-    # ``auto`` sizes a column to its content, so the run always fits. Only
-    # columns that actually contain a run longer than a short word need it; the
-    # rest keep proportional widths so the table still fills the text block.
-    # Measured: ``auto`` puts the identifier at 474.6pt inside a 480pt block
-    # instead of 121.2pt against a 111pt limit.
-    # A column gets ``auto`` only when the width a fraction would give it cannot
-    # hold its longest unbreakable run. The test is comparative, not absolute: an
-    # absolute em floor marked four of this table's five columns for ``auto``
-    # (their runs are long because CJK punctuation chains onto them), and four
-    # content-sized columns have no proportional slack left -- the identifier
-    # still ran past the edge.
-    #
-    # At most ONE column is promoted: the one with the largest shortfall. The
-    # others keep fractions, so the table still fills the text block.
-    table_width = content_width_pt if content_width_pt is not None else _TABLE_DEFAULT_TEXT_WIDTH_PT
-    inset_total = columns * _TABLE_CELL_CHROME_PT + (columns - 1) * _TABLE_GUTTER_EM * TABLE_BASE_PT
-    share_available = max(table_width - inset_total, 1.0)
-    total_weight = sum(weights) or 1.0
-    runs: list[float] = []
-    shortfalls: list[float] = []
-    for index, weight in enumerate(weights):
-        longest_run = 0.0
-        for values in (headers, *rows):
-            if index < len(values):
-                for part in re.split(r"<br\s*/?>", values[index]):
                     longest_run = max(longest_run, _longest_unbreakable(part))
+        widest_unbreakable = max(widest_unbreakable, longest_run)
+        weights.append(max(longest, _TABLE_COL_MIN_WEIGHT))
         runs.append(longest_run)
-        proportional = weight / total_weight * share_available
-        shortfalls.append(longest_run * TABLE_BASE_PT - proportional)
 
-    # Promote the column whose *run itself* is the problem, measured in
-    # absolute terms. A shortfall alone is not enough: a narrow column holding a
-    # short word ("Mini-SWE-Agent" is 4.3 em once hyphens count as break points)
-    # also shows a shortfall against its proportional share, and promoting it
-    # would leave the genuinely blocked identifier unaddressed. The run has to
-    # be wider than a comfortable column before ``auto`` is the right answer.
-    # Promote a column to ``auto`` only when it holds a run that is BOTH
-    # unbreakable and short enough to be a single token -- an identifier, a
-    # path, a URL. Two failure modes bound this from either side:
+    width_pt = content_width_pt if content_width_pt is not None else _TABLE_DEFAULT_TEXT_WIDTH_PT
+    total_weight = sum(weights) or 1.0
+    # Only the gutters are taken out here: each column's own inset is folded
+    # into its minimum below, so deducting it twice would under-allocate.
+    share_available = max(
+        width_pt - (columns - 1) * _TABLE_GUTTER_EM * TABLE_BASE_PT,
+        1.0,
+    )
+
+    # Column widths are allocated the way CSS's ``minmax(min-content, 1fr)``
+    # does: every column first gets the width its longest unbreakable run needs,
+    # and only the leftover is shared by proportion.
     #
-    # * Too few promotions: three columns of the skills table each held a blocked
-    #   run and each overflowed on its own, so promoting only the worst missed
-    #   two.
-    # * Too many: ``auto`` also means "size to the whole cell", and a cell of
-    #   long CJK prose then claims hundreds of points. Promoting such a column
-    #   pushed a 4-column table to x=684 on a 595pt page and crushed its
-    #   neighbour to 8pt -- an 8pt-wide column sets one ideograph per line.
+    # Neither of Typst's own options can express that, and using one of them was
+    # the defect:
     #
-    # A run above ``_TABLE_AUTO_MAX_EM`` is prose that re-wraps, so its column
-    # keeps a fraction: the wrap costs nothing, while ``auto`` would let it
-    # swallow the table.
-    promoted = [
-        index
-        for index, run in enumerate(runs)
-        if shortfalls[index] > 0.0 and _TABLE_AUTO_COLUMN_EM <= run <= _TABLE_AUTO_MAX_EM
-    ]
-    column_parts: list[str] = []
-    for index, weight in enumerate(weights):
-        if index in promoted:
-            column_parts.append("auto")
-        else:
-            column_parts.append(f"{weight:.1f}fr")
-    column_spec = "(" + ", ".join(column_parts) + ")"
+    # * ``fr`` divides by ratio only. The ratio comes from whole-cell widths,
+    #   including CJK paragraphs that wrap anyway, so three paragraph columns
+    #   (68/99/68 em) took 94% of the width and left a token column 12.6pt for a
+    #   55.6pt run. The run cannot wrap, so it ran off the page -- measured
+    #   ``metadata.openclaw.requires`` at 39.8pt past the edge.
+    # * ``auto`` sizes a column to its WHOLE cell, so promoting a paragraph
+    #   column hands it the table: measured x=684 on a 595pt page and a
+    #   neighbour squeezed to 8pt (one ideograph per line).
+    #
+    # Allocating fixed pt widths here removes the guesswork: the renderer knows
+    # the container width and the measured advances, so it can solve the layout
+    # instead of asking Typst to approximate it.
+    def _alloc(scale: float) -> list[float]:
+        """Widths in pt: each column's minimum, then proportional slack.
+
+        A column's minimum is its unbreakable run. The *readability* floor --
+        the width a header needs to stop stacking one ideograph per line -- is
+        applied to the slack phase only, never to the fit test. Applying it to
+        the fit test is what would force a 5-column table down to 0.43 (a 4.5pt
+        body) just to widen a ``✓`` column, and no reader is served by an
+        unreadable table whose header happens to be three lines.
+
+        So: the run decides whether the table fits at all; the header floor
+        decides how the leftover is spent.
+        """
+        # A column's minimum is its run PLUS the cell inset on both sides: the
+        # run has to fit the *content* box, and the emitted column width is
+        # content + 2*inset. Omitting the inset here left a 120.9pt run in a
+        # 123.9pt column whose usable width was 113.9pt, and the string crossed
+        # the text-block edge by 5pt on a page that had room.
+        run_mins = [run * TABLE_BASE_PT * scale + 2 * _TABLE_CELL_INSET_PT for run in runs]
+        total_run_min = sum(run_mins)
+        if total_run_min >= share_available:
+            # Even the runs do not fit. Squeeze proportionally so the table
+            # stays inside the text block: a row that wraps more than intended
+            # is readable, a cell past the page edge is not.
+            return [m * share_available / total_run_min for m in run_mins]
+        # Give each column at least enough to keep its header readable before
+        # sharing the rest by proportion.
+        floor = [w / _TABLE_HEADER_LINES * TABLE_BASE_PT * scale for w in weights]
+        base = [max(m, f) for m, f in zip(run_mins, floor, strict=True)]
+        base_total = sum(base)
+        if base_total >= share_available:
+            return [b * share_available / base_total for b in base]
+        slack = share_available - base_total
+        return [b + slack * w / total_weight for b, w in zip(base, weights, strict=True)]
+
+    # Choose the largest scale at which every minimum still fits. 1.0 is the
+    # common case; a table whose columns cannot all fit shrinks just enough
+    # (measured on the skills table: minima total 466.5pt against 391.1pt of
+    # room, so 0.84 was 0.8pt short and 0.80 fits).
+    total_min_at_full = sum(run * TABLE_BASE_PT for run in runs)
+    required_scale = (
+        1.0 if total_min_at_full <= share_available else share_available / total_min_at_full
+    )
+    table_scale = max(required_scale, _TABLE_MIN_TEXT_SCALE) if required_scale < 1.0 else 1.0
+    widths = _alloc(table_scale)
+
+    # A table too wide even at the floor cannot be laid out at any readable size;
+    # report it so the visual gate sees the overflow instead of hiding it.
+    too_wide = required_scale < _TABLE_MIN_TEXT_SCALE
+    full_page = page_columns > 1 and too_wide
+    shrink = not full_page and table_scale < 1.0
+
+    # Reserve a hairline of slack: the widths are rounded to 0.1pt for the
+    # emitted spec, and a run that needs 124.4pt against a 124.1pt column
+    # overflowed by 0.3pt -- enough for ``metadata.openclaw.requires`` to cross
+    # the text-block edge. Scaling to 99.8% costs nothing a reader can see.
+    slack_ratio = _TABLE_WIDTH_SAFETY
+    column_spec = "(" + ", ".join(f"{w * slack_ratio:.1f}pt" for w in widths) + ")"
 
     # Does this table fit the space it will be typeset into?
     #
