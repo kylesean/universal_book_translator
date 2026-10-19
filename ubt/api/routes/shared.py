@@ -88,6 +88,12 @@ DELIVERABLE_LABELS: dict[str, tuple[str, str]] = {
     "primary": ("Translated document", "application/octet-stream"),
     "secondary": ("Complementary mono/dual document", "application/octet-stream"),
     "epub": ("Reflowable EPUB", "application/epub+zip"),
+    # The two companions the export stage writes by default. They were produced
+    # on every run but absent from this table, so the REST surface and the
+    # console could not list or download them: the CAT handoff file and the
+    # readable HTML view existed on disk and 404'd through the API.
+    "html": ("Readable HTML view", "text/html; charset=utf-8"),
+    "xliff": ("Translation-ready XLIFF 2.1", "application/xliff+xml"),
     "contract": ("Delivery contract (JSON)", "application/json"),
     "quality_report": ("Quality report (JSON)", "application/json"),
     "visual_report": ("Visual gate report (JSON)", "application/json"),
@@ -109,6 +115,8 @@ def deliverable_paths(output_file: str | Path) -> dict[str, Path]:
     paths: dict[str, Path] = {
         "primary": out,
         "epub": companion_path(out, ".epub"),
+        "html": companion_path(out, ".html"),
+        "xliff": companion_path(out, ".xliff"),
         "contract": sidecar_path(out, "contract.json"),
         "quality_report": sidecar_path(out, "quality_report.json"),
         "visual_report": sidecar_path(out, "visual_report.json"),

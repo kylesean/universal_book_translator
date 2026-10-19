@@ -290,9 +290,24 @@ def test_deliverable_paths_match_the_export_stage_naming(tmp_path: Path) -> None
     paths = _deliverable_paths(output)
     assert paths["primary"] == output
     assert paths["epub"] == companion_path(output, ".epub")
+    assert paths["html"] == companion_path(output, ".html")
+    assert paths["xliff"] == companion_path(output, ".xliff")
     assert paths["contract"] == sidecar_path(output, "contract.json")
     assert paths["quality_report"] == sidecar_path(output, "quality_report.json")
-    assert set(paths) <= set(DELIVERABLE_LABELS)
+    # Both directions. The old assertion only checked "every path key has a
+    # label", which is the direction that would KeyError — but it could not see
+    # a label with no producer, nor a default companion missing from the table.
+    # HTML and XLIFF are written on every run and were missing from both, so the
+    # console could not list or download them.
+    assert set(paths) <= set(DELIVERABLE_LABELS), "every produced path needs a label"
+    # ``secondary`` is conditional by design: it exists only when a mono/dual
+    # sibling was written, so it is exempt from the reverse direction. Every
+    # other label must have a producer path, or it is a download that can only
+    # 404.
+    _CONDITIONAL = {"secondary"}
+    assert set(DELIVERABLE_LABELS) - _CONDITIONAL <= set(paths), (
+        "every unconditional label must have a producer path"
+    )
 
 
 def test_glossary_helpers_roundtrip_a_json_file(tmp_path: Path) -> None:
