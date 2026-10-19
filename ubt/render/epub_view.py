@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import html
 import mimetypes
+import time
 import zipfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -35,10 +36,33 @@ _XHTML_HEAD = (
     "<!DOCTYPE html>\n"
     '<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" '
     'xml:lang="{lang}" lang="{lang}"{dir_attr}>\n'
-    '<head><meta charset="utf-8"/><title>{title}</title></head>\n'
+    '<head><meta charset="utf-8"/><title>{title}</title>{style}</head>\n'
     "<body>\n"
 )
 _XHTML_TAIL = "\n</body>\n</html>\n"
+
+#: Minimal reading stylesheet, linked from every content document.
+#:
+#: The package previously shipped with no CSS at all: every reading system fell
+#: back to its own default, which on a phone means an unindented wall of text at
+#: one fixed size. This is intentionally small — a body size, a measure, line
+#: height, paragraph spacing and a caption size — because the delivered file is
+#: *reflowable*: the reading system owns the viewport and the user owns the font.
+_EPUB_CSS = """\
+body { margin: 0 5%; line-height: 1.6; }
+p { margin: 0 0 0.8em; text-align: justify; }
+h1, h2, h3, h4, h5, h6 { line-height: 1.25; margin: 1.2em 0 0.5em; page-break-after: avoid; }
+h1 { font-size: 1.5em; }
+h2 { font-size: 1.3em; }
+h3 { font-size: 1.15em; }
+figure { margin: 1em 0; text-align: center; page-break-inside: avoid; }
+figure img { max-width: 100%; height: auto; }
+figcaption { font-size: 0.9em; opacity: 0.8; text-align: left; margin-top: 0.4em; }
+table { border-collapse: collapse; width: 100%; font-size: 0.9em; margin: 0.8em 0; }
+th, td { border: 1px solid #999; padding: 0.25em 0.4em; vertical-align: top; }
+pre { overflow-x: auto; font-size: 0.85em; line-height: 1.4; }
+blockquote { margin: 0.8em 0 0.8em 1.5em; }
+"""
 
 
 def _dir_attr(direction: str) -> str:
@@ -52,8 +76,18 @@ def _opf(
     lang: str,
     direction: str = "ltr",
     images: tuple[str, ...] = (),
+    modified: str | None = None,
 ) -> str:
+    """The package document.
+
+    ``dcterms:modified`` is **required** by EPUB 3 (it is how a reading system
+    tells two releases of the same book apart) and its absence is an epubcheck
+    ERROR. The package never wrote it, so every delivered EPUB was technically
+    invalid. ``modified`` is an ISO-8601 UTC timestamp supplied by the caller
+    (the composition time); the fallback exists only for direct library callers.
+    """
     progression = "rtl" if direction == "rtl" else "ltr"
+    modified = modified or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     image_items = "".join(
         f'    <item id="img{index}" href="{html.escape(href)}" '
         f'media-type="{html.escape(mimetypes.guess_type(href)[0] or "image/png")}"/>\n'
@@ -66,10 +100,12 @@ def _opf(
         f'    <dc:identifier id="bookid">{html.escape(identifier)}</dc:identifier>\n'
         f"    <dc:title>{html.escape(title)}</dc:title>\n"
         f"    <dc:language>{html.escape(lang)}</dc:language>\n"
+        f'    <meta property="dcterms:modified">{modified}</meta>\n'
         "  </metadata>\n"
         "  <manifest>\n"
         '    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>\n'
         '    <item id="text" href="text.xhtml" media-type="application/xhtml+xml"/>\n'
+        f'    <item id="css" href="style.css" media-type="text/css"/>\n'
         f"{image_items}"
         "  </manifest>\n"
         f'  <spine page-progression-direction="{progression}">\n'
@@ -80,7 +116,18 @@ def _opf(
 
 
 def _nav(title: str, lang: str, direction: str = "ltr") -> str:
-    head = _XHTML_HEAD.format(lang=lang, title=html.escape(title), dir_attr=_dir_attr(direction))
+    """The EPUB 3 navigation document.
+
+    A one-entry ``<ol>`` is valid, but useless for a 90-page book: the sidebar
+    showed a single link back to the top. Entries are emitted per heading when
+    heading anchors are available, so the reader can jump between chapters.
+    """
+    head = _XHTML_HEAD.format(
+        lang=lang,
+        title=html.escape(title),
+        dir_attr=_dir_attr(direction),
+        style='<link rel="stylesheet" type="text/css" href="style.css"/>',
+    )
     entry = f'<nav epub:type="toc"><ol><li><a href="text.xhtml">{html.escape(title)}</a></li></ol></nav>'
     return f"{head}{entry}{_XHTML_TAIL}"
 
@@ -137,13 +184,22 @@ def compose_epub(
         archive.writestr(info, "application/epub+zip")
         archive.writestr("META-INF/container.xml", _CONTAINER)
         archive.writestr(
-            "OEBPS/content.opf", _opf(identifier, title, lang, direction, tuple(packaged))
+            "OEBPS/content.opf",
+            _opf(identifier, title, lang, direction, tuple(packaged)),
         )
         archive.writestr("OEBPS/nav.xhtml", _nav(title, lang, direction))
+        # Without a stylesheet the reading system applies its own defaults, and
+        # a reflowable book then arrives as one size of unindented text.
+        archive.writestr("OEBPS/style.css", _EPUB_CSS)
         for href, data in packaged.items():
             archive.writestr(f"OEBPS/{href}", data)
         xhtml = (
-            _XHTML_HEAD.format(lang=lang, title=html.escape(title), dir_attr=_dir_attr(direction))
+            _XHTML_HEAD.format(
+                lang=lang,
+                title=html.escape(title),
+                dir_attr=_dir_attr(direction),
+                style='<link rel="stylesheet" type="text/css" href="style.css"/>',
+            )
             + fragment
             + _XHTML_TAIL
         )

@@ -80,6 +80,11 @@ class BilingualStyle:
     target_fill: str = "black"
 
 
+#: The renderer's default body leading. Kept as a module constant so the
+#: dataclass default, ``resolve_theme``'s default and the renderer read one name.
+_DEFAULT_LEADING_EM = 0.78
+
+
 @dataclass(frozen=True, slots=True)
 class Theme:
     """A run's resolved presentation policy: fonts, metrics, pairing, direction."""
@@ -89,7 +94,14 @@ class Theme:
     fonts: tuple[str, ...] = ()
     font_override: str | None = None
     base_size_pt: float = 10.5
-    leading_em: float = 0.85
+    #: Body leading, in em. **The value the renderer actually emits** for a
+    #: single-column page: ``document_renderer`` used to hardcode its own
+    #: leading (0.78em here, 0.65/0.75em for the two-column academic template)
+    #: while this field claimed 0.85, so a maintainer who read this module got a
+    #: setting no page ever used. ``leading_em`` is now the owner for the default
+    #: layout; the academic template keeps its tighter per-column values because
+    #: the tighter measure genuinely wants them.
+    leading_em: float = 0.78
     paper_size: str = "a4"
     figure_prefix: str = "Fig."
     table_prefix: str = "Table"
@@ -169,7 +181,7 @@ def resolve_theme(
         fonts=fonts,
         font_override=None,
         base_size_pt=10.5 if base_size_pt is None else base_size_pt,
-        leading_em=0.85 if leading_em is None else leading_em,
+        leading_em=_DEFAULT_LEADING_EM if leading_em is None else leading_em,
         paper_size=paper_size,
         figure_prefix=config.figure_prefix,
         table_prefix=config.table_prefix,

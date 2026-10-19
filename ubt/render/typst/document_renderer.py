@@ -34,6 +34,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ubt.core.content.nodes import ReconstructionRecord
+from ubt.layout.theme import Theme
+
+# The wrapper predicates are re-exported under their historical private names:
+# existing callers and tests import ``_unwrap_mark`` / ``_is_placeholder`` here.
+# The implementation lives in ``ubt.render.delivered_text`` so the companion
+# HTML/EPUB views share it (they previously had no wrapper handling at all).
+from ubt.render.delivered_text import delivered_text, dropped_page_furniture, is_toc_entry
+from ubt.render.delivered_text import is_placeholder as _is_placeholder
+from ubt.render.delivered_text import unwrap_mark as _unwrap_mark  # noqa: F401 -- re-exported
 from ubt.render.inline_spans import block_runs, locate_runs
 from ubt.render.table_compiler import parse_markdown_table, verify_table_reconstruction
 from ubt.render.typst.artifact_guard import find_sentinels, has_sentinel
@@ -126,11 +135,26 @@ _CAPTION_RE = re.compile(
     re.IGNORECASE,
 )
 
+#: Body leading for the default (single-column) layout, read from the Theme
+#: owner so a theme change actually reaches the page.
+_BODY_LEADING_EM = Theme().leading_em
+
 #: Figures narrower than this (in PDF points) render at their own physical width
 #: rather than the page-spanning default. A4 text width is ~470pt, so anything
 #: below it that is *small* (a logo at ~121pt) keeps its size; a wider figure
 #: falls through to the ``figure_width`` cap.
+#:
+#: The native width is emitted as a *percentage of the container*, not as an
+#: absolute ``pt`` length. Absolute points ignore the column: on the two-column
+#: academic template the body column measures 228.98pt (470.55pt text width,
+#: 1.2em gutter), so a 290pt figure ran ~61pt past its column and over the text
+#: beside it — Typst does not clip, it draws. Measuring against A4 text width
+#: instead (the old assumption of ~470pt) is what hid the overflow.
 _FIGURE_NATIVE_MAX_PT = 300.0
+
+#: A4 text width, the denominator for turning a source figure's point width into
+#: the container-relative width Typst actually needs.
+_FIGURE_REFERENCE_TEXT_WIDTH_PT = 470.55
 
 #: Longest *unlabelled* paragraph that still binds as a figure's caption. A
 #: labelled caption ("图 1 | …") binds at any length; this only catches the
@@ -146,82 +170,6 @@ _PENDING_CAPTION_MAX_CHARS = 320
 #: advances or 3 ideographs, and a weight is now a measured em, not a count.
 _TABLE_COL_MIN_WEIGHT = 3.0
 
-#: A heading that is really running chrome (an arXiv stamp, a journal line, a
-#: submission date). Kept out of the body so the document opens on its title.
-_CHROME_HEADING_RE = re.compile(
-    r"^(?:arXiv:|Journal of Machine Learning|Submitted \d|Preprint\b|"
-    r"Under review\b|Published \d|Revised \d)",
-    re.IGNORECASE,
-)
-
-#: A running head of author names in caps ("FEDUS, ZOPH AND SHAZEER") — the
-#: JMLR/arXiv convention of repeating the paper's authors on every page. Matched
-#: case-**sensitively**, and only over a *comma-separated* list of 2-4 short
-#: all-caps words (optionally closed by "AND <NAME>"), so a genuine section
-#: heading can never match — not a one-word all-caps heading ("EXPERIMENTS"),
-#: not a title-case one, and not a sentence. The translated spelling
-#: ("Fedus、Zoph与Shazeer") is caught through the source text in
-#: :func:`dropped_page_furniture`.
-_CHROME_AUTHOR_HEAD_RE = re.compile(
-    r"^[A-Z][A-Z'’\-]{1,19}(?:, [A-Z][A-Z'’\-]{1,19})+"
-    r"(?:,? AND [A-Z][A-Z'’\-]{1,19})?$"
-)
-
-#: The same running head as the reader lifts it from page 2 onward, where JMLR
-#: sets it in *title case* ("Fedus, Zoph and Shazeer" → 译文 "Fedus、Zoph 和
-#: Shazeer"): capitalized surname(s), comma-separated, closed by "and". The
-#: connector accepts the translated forms (和/与/、) so the delivered text
-#: matches too. Paired with a small font (see ``dropped_page_furniture``) — a
-#: genuine heading is never set smaller than the body — this cannot catch a
-#: real section heading ("Ross and White", a section ON someone, is larger and
-#: rarely stands alone as a heading).
-_CHROME_AUTHOR_HEAD_TITLE_RE = re.compile(
-    r"^[A-Z][a-z'’\-]{1,19}(?:[、,] ?[A-Z][a-z'’\-]{1,19})+"
-    r"(?: ?(?:and|和|与|、) ?[A-Z][a-z'’\-]{1,19})?$"
-)
-
-
-def dropped_page_furniture(block: IRBlock) -> bool:
-    """Whether the renderer deliberately omits this block from the artifact.
-
-    The single owner of that decision: a heading the renderer recognizes as
-    running chrome (an arXiv/journal stamp, a submission date) is dropped so the
-    document opens on its title (see ``build_source``). The delivered-artifact
-    check must ask *this* function rather than re-test the pattern, or an audit
-    would demand a realization the renderer is right not to place — the shape
-    that reported a false ``[FAIL] artifact carries 280/281`` on a page-furniture
-    heading.
-
-    Kept narrow on purpose: only the chrome-heading drop counts. A block merely
-    *kept in the source* (a bibliography entry, an affiliation) is still placed
-    verbatim and must still appear, so it is not furniture.
-    """
-    if str(getattr(block.block_type, "value", block.block_type) or "") != "heading":
-        return False
-    if _CHROME_HEADING_RE.match(_block_text(block)):
-        return True
-    # The chrome is matched on the SOURCE text too: a translated heading no
-    # longer spells like the stamp it came from — "FEDUS, ZOPH AND SHAZEER"
-    # arrived as "Fedus、Zoph与Shazeer", which the delivered-text pattern never
-    # caught, so the running header survived and opened the body on the paper's
-    # author line. The source text is the stable fingerprint of what the block
-    # *was*; the all-caps author-head shape (case-sensitive) keeps this narrow.
-    source = (block.source_text or "").strip()
-    if _CHROME_HEADING_RE.match(source) or _CHROME_AUTHOR_HEAD_RE.match(source):
-        return True
-    # The title-case running head ("Fedus, Zoph and Shazeer", page 2 onward) is
-    # distinguished from a genuine section heading by its *size*: JMLR sets it
-    # below the body size, and no real heading is set below the body. The size
-    # lives on the element (0/None = unknown → keep, fail closed to placing).
-    delivered = _block_text(block)
-    for text in (delivered, source):
-        if not _CHROME_AUTHOR_HEAD_TITLE_RE.match(text):
-            continue
-        size = getattr(block.element, "font_size", None)
-        if not size or size < 11.0:
-            return True
-    return False
-
 
 def escape_markup(text: str) -> str:
     """Escape a run of prose for Typst markup.
@@ -232,20 +180,6 @@ def escape_markup(text: str) -> str:
     failure that only shows on the document that contains it.
     """
     return typst_escape(text)
-
-
-def is_toc_entry(block: IRBlock) -> bool:
-    """Whether the extractor tagged this block as a table-of-contents row.
-
-    The PDF reader pairs a TOC title with its right-margin page number and
-    records ``provenance.toc_entry`` (+ ``toc_page``) so a table of contents is
-    not scattered into translated titles plus a run of bare page-number blocks.
-    The renderer must read that flag: left unread, every TOC row renders as an
-    ordinary ``#heading`` — inventing section headings that have no body (an
-    orphaned, near-empty page) and dropping the page numbers the reader worked
-    to recover.
-    """
-    return bool(block.provenance.toc_entry)
 
 
 #: Headings that name a table of contents rather than a section. Matched on the
@@ -583,6 +517,13 @@ def _wrap_style(
 #: and ``MmioAddr::new`` could no longer be found by search or copied into an
 #: editor. Typography must not corrupt the text it typesets.
 #:
+#: Default table body scale, used when a table's own measured minimum fits at
+#: full size but the *emitted* body is deliberately smaller than prose: a table
+#: set at 0.84em reads as tabular data rather than as a paragraph. The actual
+#: scale for a table that does not fit is computed per table (``table_scale``
+#: below) and emitted; this constant is only the "fits at a comfortable size"
+#: value, never the value for a table that had to shrink.
+#:
 #: Measured on the ATC'25 table in a 232pt column: 288.3pt at 9.5pt (overflow),
 #: 271.7pt at 8pt, 260.6pt at 7pt.
 _TABLE_TEXT_SCALE: str = "0.84"
@@ -598,6 +539,14 @@ _TABLE_MIN_TEXT_SCALE: float = 0.60
 #: unbreakable run is short: a 7-character CJK header at 3 lines still reads as
 #: a label, at 7 lines it reads as a vertical strip.
 _TABLE_HEADER_LINES: float = 3.0
+
+#: Smallest usable column width, in em, independent of what the cell happens to
+#: contain. A column narrower than one glyph stacks its header one ideograph per
+#: line and clips the body to a single character per row, which is what a
+#: delivered 9-column comparison table did (columns 3 and 6 had 6.7pt of usable
+#: width at a 10.5pt body). Applying it to the fit test -- not the slack phase --
+#: makes such a table shrink until every column can hold a character.
+_TABLE_MIN_COLUMN_EM: float = 1.0
 
 #: Safety margin applied to the emitted column widths. Absorbs the 0.1pt
 #: rounding in the spec plus sub-point differences between the measured advances
@@ -814,6 +763,14 @@ def render_table(
     # Per-column measured demands: the whole cell (``weights``, for the
     # proportional share) and the longest unbreakable run (``runs``, which sets a
     # hard minimum because it cannot wrap).
+    #
+    # ``runs`` is floored at one em. A column whose widest unbreakable run is a
+    # single ``✓`` or ``3`` used to declare a 1-glyph minimum, so a nine-column
+    # table could satisfy the fit test while giving that column 6.7pt of usable
+    # width -- less than one ideograph at 10.5pt -- and its CJK header then
+    # stacked one character per line. One glyph is the smallest *usable* column,
+    # not an optimisation, so it belongs in the fit test rather than in the
+    # slack phase: the table must shrink until every column can hold a glyph.
     weights: list[float] = []
     runs: list[float] = []
     widest_unbreakable = 0.0
@@ -827,7 +784,7 @@ def render_table(
                     longest_run = max(longest_run, _longest_unbreakable(part))
         widest_unbreakable = max(widest_unbreakable, longest_run)
         weights.append(max(longest, _TABLE_COL_MIN_WEIGHT))
-        runs.append(longest_run)
+        runs.append(max(longest_run, _TABLE_MIN_COLUMN_EM))
 
     width_pt = content_width_pt if content_width_pt is not None else _TABLE_DEFAULT_TEXT_WIDTH_PT
     total_weight = sum(weights) or 1.0
@@ -896,18 +853,31 @@ def render_table(
     # common case; a table whose columns cannot all fit shrinks just enough
     # (measured on the skills table: minima total 466.5pt against 391.1pt of
     # room, so 0.84 was 0.8pt short and 0.80 fits).
-    total_min_at_full = sum(run * TABLE_BASE_PT for run in runs)
+    #
+    # The insets are part of the budget, not an afterthought. ``_alloc`` builds
+    # each column's minimum as ``run * BASE * scale + 2 * inset``, so a scale
+    # derived from the runs alone is *always* a little too large, and ``_alloc``
+    # then falls into its squeeze branch and returns widths below the minimums
+    # it was asked to honour. Measured on 2609.00006v1's nine-column comparison
+    # table: the scale said "fits at 0.84", the squeeze then cut two columns to
+    # 16.7pt total, and with the 10pt cell inset that left 6.7pt of usable width
+    # for a CJK header -- one ideograph per line, for the whole table.
+    total_run_em = sum(runs)
+    inset_budget = 2 * _TABLE_CELL_INSET_PT * columns
     required_scale = (
-        1.0 if total_min_at_full <= share_available else share_available / total_min_at_full
+        1.0
+        if total_run_em * TABLE_BASE_PT + inset_budget <= share_available
+        else (share_available - inset_budget) / (total_run_em * TABLE_BASE_PT)
     )
+    required_scale = max(required_scale, 0.0)
     table_scale = max(required_scale, _TABLE_MIN_TEXT_SCALE) if required_scale < 1.0 else 1.0
     widths = _alloc(table_scale)
 
-    # A table too wide even at the floor cannot be laid out at any readable size;
-    # report it so the visual gate sees the overflow instead of hiding it.
-    too_wide = required_scale < _TABLE_MIN_TEXT_SCALE
-    full_page = page_columns > 1 and too_wide
-    shrink = not full_page and table_scale < 1.0
+    # (The scale-based ``too_wide`` / ``full_page`` / ``shrink`` trio that used to
+    # be computed here was dead: the run-length measurement below recomputes all
+    # three and nothing read the earlier values in between. Kept only where the
+    # measurement decides, so there is one answer rather than two to keep in
+    # sync.)
 
     # Reserve a hairline of slack: the widths are rounded to 0.1pt for the
     # emitted spec, and a run that needs 124.4pt against a 124.1pt column
@@ -948,6 +918,19 @@ def render_table(
     shrink = too_wide and not full_page
 
     indent = "  " if full_page else "    "
+    # The body scale the columns were actually sized for. ``_alloc(table_scale)``
+    # computes every column's minimum as ``run * TABLE_BASE_PT * table_scale``,
+    # so the text must be emitted at that same scale. Emitting the constant
+    # 0.84 instead was the bug that made a 9-column table render its header one
+    # ideograph per line: the columns were sized for a 0.60 body, the glyphs
+    # were set at 0.84, and every cell therefore needed ~40% more width than its
+    # column had (measured on 2609.00006v1 p11, whose columns 3 and 6 have
+    # 6.7pt of usable width -- less than one CJK glyph at 10.5pt).
+    #
+    # ``_TABLE_TEXT_SCALE`` remains the *comfortable* tabular size for a table
+    # that fits at full size; a table that had to shrink uses the computed
+    # factor, and never a value above it.
+    emitted_scale = min(table_scale, float(_TABLE_TEXT_SCALE))
     if full_page:
         lines = ['#place(top + center, scope: "parent", float: true, rect(width: 98%)[']
         lines.append("  #table(")
@@ -963,7 +946,7 @@ def render_table(
         # whole document had been shrunk to fit.
         lines = ["#["]
         if shrink:
-            lines.append(f"  #set text(size: {_TABLE_TEXT_SCALE}em)")
+            lines.append(f"  #set text(size: {emitted_scale:.2f}em)")
         lines.append("  #table(")
     lines += [
         f"{indent}columns: {column_spec},",
@@ -997,6 +980,11 @@ class _Figure:
     #: the page width — measured on the PaddleOCR paper, whose 121pt-wide
     #: PaddleOCR logo was blown up to 88% of an A4 page.
     width_pt: float | None = None
+    #: The IR block this figure came from. Carried so a missing asset is
+    #: attributed to its *block* in the skip channel (the export stage indexes
+    #: that channel by block id); without it the miss was recorded against an
+    #: asset path and no consumer could match it.
+    block_id: str = ""
 
 
 @dataclass(slots=True)
@@ -1035,86 +1023,21 @@ class ReflowStats:
     #: the quality report rather than absorbed silently.
     sentinels_leaked: int = 0
     assets_copied: int = 0
-    assets_missing: list[str] = field(default_factory=list)
+    #: ``(block_id, asset)`` for figures the renderer could not resolve. The
+    #: block id is what makes the miss reachable downstream: the export stage's
+    #: skip channel is keyed by block id, so an asset *path* there matches no
+    #: block and the delivery contract reported ``missing_assets=0`` for a page
+    #: whose figure had been replaced by a placeholder.
+    assets_missing: list[tuple[str, str]] = field(default_factory=list)
 
 
-#: Marks a QUARANTINE placeholder: ``triage._blocked_human_target`` writes the
-#: *source text* under this wrapper when a critical defect could not be repaired.
-#: It is markup about the block, not the block's content, so it must never reach
-#: the rendered page.
-_BLOCKED_HUMAN_CLASS = "ubt-blocked-human"
-
-#: Marks a FAILED REPAIR: ``repair._record_failure`` wraps the draft that was
-#: already paid for when the repair call itself failed (provider 5xx, timeout).
-#: The wrapped text is a REAL translation and is what the reader should get —
-#: only the repair attempt failed. Collapsing this with the quarantine wrapper
-#: discarded the translation and fell back to ``draft_text``, which is the
-#: pre-glossary-enforcement draft: the delivery then shipped ``framekernel``
-#: while the ledger (correctly rewritten to 帧内核) said otherwise, and an
-#: entire repair round's worth of improvement was thrown away.
-_FAILED_DRAFT_CLASS = "ubt-failed-draft"
-
-#: Any ``<mark>`` wrapper the pipeline writes around a target. Kept as the
-#: general form for callers that only need "this is a wrapper, not prose".
-_MARK_RE = re.compile(r"^\s*<mark\b([^>]*)>", re.IGNORECASE)
-_CLASS_ATTR_RE = re.compile(r'class\s*=\s*["\']([^"\']*)["\']', re.IGNORECASE)
-
-
-def _mark_class(text: str) -> str | None:
-    """The ``class`` of a leading ``<mark>`` wrapper, or ``None`` if unwrapped."""
-    match = _MARK_RE.match(text)
-    if match is None:
-        return None
-    class_match = _CLASS_ATTR_RE.search(match.group(1))
-    return class_match.group(1) if class_match else ""
-
-
-def _unwrap_mark(text: str) -> str:
-    """The content inside a leading ``<mark …>`` … ``</mark>`` wrapper.
-
-    Only the pipeline's own wrappers are unwrapped; anything else (a stray
-    literal ``</mark>`` in prose that happened to start with ``<mark``) is
-    returned unchanged rather than truncated.
-    """
-    match = _MARK_RE.match(text)
-    if match is None:
-        return text
-    body = text[match.end() :]
-    closing = body.rfind("</mark>")
-    if closing == -1:
-        return text
-    return body[:closing]
-
-
-def _is_any_mark(text: str) -> bool:
-    """Whether the text starts with any ``<mark>`` wrapper at all.
-
-    Used as a last-resort guard: a wrapper the pipeline does not recognise must
-    still not reach the page as literal markup. The known classes are handled
-    by name (quarantine vs failed draft); this catches the rest.
-    """
-    return _MARK_RE.match(text) is not None
-
-
-def _is_placeholder(text: str) -> bool:
-    """Whether this text is a quarantine marker rather than block content.
-
-    Deliberately narrow: ONLY ``ubt-blocked-human`` is a placeholder. A
-    ``ubt-failed-draft`` wrapper carries the draft that the reader should see,
-    and treating it as a placeholder is what silently reverted the delivered
-    text to the un-enforced draft.
-    """
-    return _mark_class(text) == _BLOCKED_HUMAN_CLASS
-
-
-def _is_failed_draft(text: str) -> bool:
-    """Whether this is a REAL draft whose repair call failed (not a quarantine).
-
-    The distinction matters downstream: a failed-draft wrapper should be
-    rendered (with the wrapper stripped), while a quarantine marker must not
-    reach the page at all.
-    """
-    return _mark_class(text) == _FAILED_DRAFT_CLASS
+#: The mark-wrapper predicates and the delivered-text rule now live in
+#: :mod:`ubt.render.delivered_text` so the companion HTML/EPUB views and this
+#: module cannot disagree about them: the HTML view took ``target_text``
+#: verbatim and shipped ``<mark class="ubt-failed-draft" title="…">`` (with the
+#: provider's exception text) to the reader as escaped markup, while this
+#: renderer stripped it. Re-exported here under the names the rest of this module
+#: already calls.
 
 
 def _keeps_source(block: IRBlock) -> bool:
@@ -1141,38 +1064,18 @@ def _keeps_source(block: IRBlock) -> bool:
 
 
 def _block_text(block: IRBlock) -> str:
-    """The text to render for a block: its translation, else its source.
+    """The text to render for a block: its translation, its draft, else its source.
 
-    Two wrappers can arrive in ``target_text`` and they mean opposite things:
+    Delegates to :func:`ubt.render.delivered_text.delivered_text` — the single
+    owner of the rule (wrapper stripping, quarantine fallback, draft fallback),
+    shared with the companion HTML and EPUB views. Both used to implement it
+    separately, and the HTML view implemented only the first half.
 
-    - ``ubt-blocked-human`` (quarantine): the SOURCE under a marker. Rendering
-      it would put the quarantine HTML on the page, so fall back to the draft —
-      that is real translated prose a false-positive gate rejected.
-    - ``ubt-failed-draft``: a real draft whose *repair call* failed (provider
-      5xx). The wrapped text IS the translation and must be rendered with the
-      wrapper stripped. Treating it as a quarantine marker discarded the
-      translation and served ``draft_text`` instead, which predates glossary
-      enforcement -- the artifact then disagreed with the ledger that had been
-      correctly rewritten.
-
-    A block with no target and no draft is *not* silently dropped — the reader
-    gets the source sentence.
+    Named ``_block_text`` for the module's internal callers and for the
+    cross-references in ``content.adapt`` / ``docling_crosscheck``; new code
+    outside this module should call ``delivered_text`` directly.
     """
-    target = (block.target_text or "").strip()
-    if target and not _is_placeholder(target):
-        # A failed-draft wrapper is stripped, not skipped: the text inside is
-        # the translation the reader should get. An unrecognised wrapper is
-        # stripped too -- pipeline markup must never reach the page as literal
-        # text, whatever class an older or newer build wrote.
-        if _is_failed_draft(target) or _is_any_mark(target):
-            return _unwrap_mark(target).strip()
-        return target
-    draft = (block.draft_text or "").strip()
-    if draft and not _is_placeholder(draft):
-        if _is_failed_draft(draft) or _is_any_mark(draft):
-            return _unwrap_mark(draft).strip()
-        return draft
-    return (block.source_text or "").strip()
+    return delivered_text(block)
 
 
 def _heading_level(block: IRBlock) -> int:
@@ -1272,7 +1175,10 @@ class TypstDocumentRenderer:
             [
                 TypstDocumentRenderer._PAGE_SETUP,
                 f'#set text(font: ({body}), size: 10.5pt, lang: "{lang}")' + rtl,
-                "#set par(justify: true, leading: 0.78em, spacing: 0.9em,"
+                # Leading comes from the Theme owner, not a literal here: this
+                # line and ``Theme.leading_em`` disagreed (0.78 vs 0.85), so a
+                # maintainer tuning the theme tuned nothing.
+                f"#set par(justify: true, leading: {_BODY_LEADING_EM}em, spacing: 0.9em,"
                 " first-line-indent: (amount: 2em, all: true))",
                 "#show heading.where(level: 1): it => [",
                 "  #v(0.6em)",
@@ -1583,6 +1489,7 @@ class TypstDocumentRenderer:
                 pending = _Figure(
                     asset=asset.strip(),
                     width_pt=(bbox.x1 - bbox.x0) if bbox is not None else None,
+                    block_id=block.id,
                 )
                 continue
 
@@ -1789,7 +1696,7 @@ class TypstDocumentRenderer:
         """The ``#figure(...)`` call for one image, with its caption if any."""
         resolved = self._resolve_asset(figure.asset)
         if resolved is None:
-            self.stats.assets_missing.append(figure.asset)
+            self.stats.assets_missing.append((figure.block_id, figure.asset))
             # A missing asset must not silently vanish from the page: leave a
             # visible placeholder so the gap is attributable. The caption is
             # rendered too — it is translated prose that the reader needs, and
@@ -1815,7 +1722,14 @@ class TypstDocumentRenderer:
         # full-width figure on the cap and lets a small mark stay small.
         width = self.figure_width
         if figure.width_pt is not None and 0 < figure.width_pt < _FIGURE_NATIVE_MAX_PT:
-            width = f"{figure.width_pt:.0f}pt"
+            # Relative to the container, so the same figure fits a single-column
+            # page (470.55pt) and a two-column one (228.98pt): Typst resolves
+            # "100%" against whatever the enclosing column is. An absolute "pt"
+            # width is laid out at that size no matter how narrow the column is,
+            # which is how a 290pt graphic crossed the gutter on the academic
+            # template.
+            ratio = min(figure.width_pt / _FIGURE_REFERENCE_TEXT_WIDTH_PT, 1.0) * 100.0
+            width = f"{ratio:.1f}%"
         if figure.caption:
             return (
                 "#figure(\n"

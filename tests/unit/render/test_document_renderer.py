@@ -842,7 +842,9 @@ def test_a_missing_figure_still_renders_its_caption(tmp_path: Path) -> None:
 
     assert "missing figure" in out
     assert "系统整体架构示意图" in out
-    assert stats.assets_missing == ["figures/gone.png"]
+    # ``(block_id, asset)``: the block id is what lets the export stage's
+    # block-keyed skip channel see the miss at all.
+    assert stats.assets_missing == [("f1", "figures/gone.png")]
 
 
 def test_a_missing_figure_without_a_caption_renders_only_the_placeholder(
@@ -1267,7 +1269,15 @@ def test_the_size_override_is_scoped_to_the_table() -> None:
     assert body.endswith("]")
     # No stray bracket survives as typeset text either: the content block is the
     # only place ``[`` may appear at the very start.
-    assert "#set text(size: 0.84em)" in body
+    #
+    # The *value* is the computed scale for this table, not the constant 0.84:
+    # emitting the constant while sizing the columns for a smaller body is what
+    # stacked a 9-column table's headers one ideograph per line.
+    assert "#set text(size: " in body
+    import re
+
+    emitted = float(re.search(r"#set text\(size: ([0-9.]+)em\)", body).group(1))  # type: ignore[union-attr]
+    assert emitted < 0.84, body
 
 
 def test_a_shrunken_table_does_not_resize_the_prose_after_it() -> None:
@@ -1405,3 +1415,37 @@ def test_cjk_punctuation_closes_an_unbreakable_run() -> None:
     out = render_table(markup, content_width_pt=_WIDE_PAGE_PT)
     spec = next(line for line in out.splitlines() if "columns:" in line)
     assert "auto" not in spec, spec
+
+
+def test_a_narrow_figure_is_sized_relative_to_its_column_not_in_points(
+    tmp_path: Path,
+) -> None:
+    """A figure must fit whichever column it lands in.
+
+    The width was emitted as an absolute ``pt`` length measured against A4 text
+    width (~470pt). On the two-column academic template the body column measures
+    228.98pt (470.55pt text, 1.2em gutter), so a 290pt figure was typeset at
+    290pt and ran ~61pt past the column, over the text beside it — Typst draws
+    rather than clips (measured by rendering: 290.5pt of ink in a 228.98pt
+    column). A container-relative width lets Typst fit both templates.
+    """
+    from ubt.render.typst.document_renderer import _Figure
+
+    asset = tmp_path / "wide.png"
+    asset.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
+    renderer = TypstDocumentRenderer()
+    build = tmp_path / "build"
+    build.mkdir()
+
+    narrow = renderer._figure_markup(_Figure(asset=str(asset), width_pt=290.0), build)
+    assert "width: 290pt" not in narrow, "an absolute width ignores the column"
+    # 290 / 470.55 = 61.6% of whatever container Typst lays the figure into.
+    assert "width: 61.6%" in narrow
+
+    # A genuinely small graphic keeps its small size, still container-relative.
+    logo = renderer._figure_markup(_Figure(asset=str(asset), width_pt=121.0), build)
+    assert "width: 25.7%" in logo
+
+    # No measured width: the existing cap applies, unchanged.
+    unknown = renderer._figure_markup(_Figure(asset=str(asset)), build)
+    assert f"width: {renderer.figure_width}" in unknown

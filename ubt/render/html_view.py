@@ -31,6 +31,7 @@ from ubt.model.ast import (
     Paragraph,
     Table,
 )
+from ubt.render.delivered_text import delivered_text, dropped_page_furniture, is_toc_entry
 from ubt.render.inline_spans import SpanStyle, block_runs, styled_chunks
 from ubt.render.outputs import Composition, Placement
 
@@ -337,11 +338,29 @@ def document_head(
 
 
 def element_text(block: IRBlock, translations: Mapping[str, str]) -> str:
-    """The text this block delivers: its placed translation, else its source."""
-    target = (translations.get(block.id) or block.target_text or "").strip()
-    if target and not _kept_in_source(block):
-        return target
-    return block.source_text or ""
+    """The text this block delivers: its placed translation, else its source.
+
+    A block the delivery keeps in the source shows its source — that is
+    :func:`_kept_in_source`'s contract (deliberate keep, fail-closed
+    render-skip, or a quarantined ``BLOCKED_HUMAN`` block).
+
+    Otherwise the text goes through
+    :func:`ubt.render.delivered_text.delivered_text`, the same rule the PDF
+    renderer uses, instead of taking ``target_text`` verbatim. Taking it verbatim
+    shipped pipeline markup straight to the reader: a
+    ``<mark class="ubt-failed-draft" title="REPAIR ERROR …">`` wrapper around a
+    real translation was escaped into the page together with the provider's
+    exception text, while the PDF showed the clean sentence.
+
+    The ``translations`` override wins when present: an interactive PE edit is
+    the most recent human decision, and it is plain text (no wrapper).
+    """
+    if _kept_in_source(block):
+        return block.source_text or ""
+    override = (translations.get(block.id) or "").strip()
+    if override:
+        return override
+    return delivered_text(block)
 
 
 def _kept_in_source(block: IRBlock) -> bool:
@@ -475,9 +494,41 @@ def render_fragment(
     parts: list[str] = []
     placements: list[Placement] = []
     list_open = False
+    toc_open = False
     for block in sorted(blocks, key=lambda b: b.spine_index):
         element = block.element
+        # The PDF renderer's two omissions apply here too. Both were decisions
+        # only that renderer made, so the companion views disagreed with it: a
+        # running head (an arXiv stamp, a journal author line) opened the HTML
+        # body as an <h1>, and a table-of-contents row became a real section
+        # heading with no body under it. One predicate each, shared.
+        if dropped_page_furniture(block):
+            continue
         text = element_text(block, translations)
+        if is_toc_entry(block):
+            # A TOC row is a reference, not a section: rendering it as a heading
+            # invented sections with no body (and an orphaned near-empty page in
+            # the PDF) and dropped the recovered page number. Lower it as a list
+            # item so the reader keeps the contents listing.
+            if list_open:
+                parts.append("</ul>")
+                list_open = False
+            if not toc_open:
+                parts.append('<ol class="ubt-toc">\n')
+                toc_open = True
+            parts.append(f'  <li class="ubt-toc-entry">{html.escape(text)}</li>\n')
+            placements.append(
+                Placement(
+                    block.id,
+                    element.span.page,
+                    drawn=True,
+                    detail="html:toc_entry",
+                )
+            )
+            continue
+        if toc_open:
+            parts.append("</ol>")
+            toc_open = False
         if isinstance(element, Formula):
             # Deliver the LaTeX inside a ``.math-tex`` span so KaTeX renders it
             # to real typeset math. KaTeX's auto-render parses the element's *text
@@ -547,6 +598,8 @@ def render_fragment(
                 detail=f"html:{element.kind}",
             )
         )
+    if toc_open:
+        parts.append("</ol>")
     if list_open:
         parts.append("</ul>")
     return "\n".join(parts), tuple(placements)

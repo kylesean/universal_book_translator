@@ -371,3 +371,82 @@ def test_the_epub_deduplicates_identical_figure_bytes(tmp_path: Path) -> None:
         assert images == ["OEBPS/images/0001.png"]
         xhtml = archive.read("OEBPS/text.xhtml").decode("utf-8")
         assert xhtml.count('src="images/0001.png"') == 2
+
+
+def test_a_failed_draft_wrapper_never_reaches_the_companion_views(tmp_path: Path) -> None:
+    """The HTML/EPUB views must strip the pipeline's <mark> wrappers, as the PDF does.
+
+    ``element_text`` used to return ``target_text`` verbatim, so a block whose
+    repair call failed shipped
+    ``&lt;mark class="ubt-failed-draft" title="REPAIR ERROR RuntimeError: …"&gt;``
+    — wrapper, exception text and all — as visible escaped markup, while the PDF
+    renderer showed the clean translated sentence for the same block.
+    """
+    blocks, translations = _blocks()
+    wrapped = (
+        '<mark class="ubt-failed-draft" title="REPAIR ERROR RuntimeError: boom">你好世界。</mark>'
+    )
+    blocks[1].target_text = wrapped
+    translations.pop(blocks[1].id, None)
+
+    assert element_text(blocks[1], {}) == "你好世界。"
+
+    out = tmp_path / "view.html"
+    compose_html(blocks, translations, out)
+    text = out.read_text(encoding="utf-8")
+    assert "你好世界。" in text
+    assert "ubt-failed-draft" not in text, "the wrapper class must not reach the page"
+    assert "RuntimeError" not in text, "the exception text must not reach the page"
+
+    epub = tmp_path / "view.epub"
+    compose_epub(blocks, translations, epub, title="doc")
+    with zipfile.ZipFile(epub) as archive:
+        body = archive.read("OEBPS/text.xhtml").decode("utf-8")
+    assert "ubt-failed-draft" not in body
+    assert "RuntimeError" not in body
+
+
+def test_toc_rows_and_running_heads_are_not_promoted_to_section_headings(tmp_path: Path) -> None:
+    """The companion views must apply the PDF renderer's two omissions.
+
+    A running head (an arXiv stamp or a journal author line) was emitted as an
+    ``<h1>`` opener, and every ``toc_entry`` row became a real section heading —
+    inventing sections with no body and dropping the recovered page numbers. Both
+    were decisions only ``document_renderer`` made.
+    """
+    from ubt.core.ir.models import BlockType, FlowID, make_element
+
+    stamp = IRBlock(
+        element=make_element(
+            id="stamp",
+            spine_index=0,
+            block_type=BlockType.HEADING,
+            flow_id=FlowID.MAIN_STORY,
+            source_text="arXiv:2101.03961v3 [cs.CL] 20 Jan 2021",
+            level=1,
+        ),
+        target_text="arXiv:2101.03961v3 [cs.CL] 20 Jan 2021",
+    )
+    toc_row = IRBlock(
+        element=make_element(
+            id="toc",
+            spine_index=2,
+            block_type=BlockType.HEADING,
+            flow_id=FlowID.MAIN_STORY,
+            source_text="1 Introduction",
+            level=1,
+        ),
+        target_text="1 引言",
+    )
+    toc_row.provenance.toc_entry = True
+
+    out = tmp_path / "view.html"
+    compose_html([stamp, *_blocks()[0], toc_row], {}, out)
+    text = out.read_text(encoding="utf-8")
+
+    assert "arXiv:2101.03961" not in text, "a running head must not open the HTML body"
+    assert '<ol class="ubt-toc">' in text, "TOC rows belong in a contents list"
+    assert '<li class="ubt-toc-entry">1 引言</li>' in text
+    assert "<h1>1 引言</h1>" not in text, "a TOC row is not a section heading"
+    assert text.count("<ol") == text.count("</ol>"), "the TOC list must be closed"
+    assert text.count("<ul") == text.count("</ul>"), "list tags must balance"

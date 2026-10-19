@@ -163,10 +163,10 @@ def check_artifact(
     A heading the renderer deliberately drops as running chrome (an arXiv or
     journal stamp, a submission date) is skipped too: the audit must not demand a
     realization the renderer is right not to place. The drop decision is asked of
-    its single owner (:func:`ubt.render.typst.document_renderer.dropped_page_furniture`),
+    its single owner (:func:`ubt.render.delivered_text.dropped_page_furniture`),
     imported lazily so the adapters→render edge stays off the runtime import graph.
     """
-    from ubt.render.typst.document_renderer import dropped_page_furniture
+    from ubt.render.delivered_text import dropped_page_furniture
 
     text = artifact_tokens(Path(artifact_pdf))
     checks: list[ElementCheck] = []

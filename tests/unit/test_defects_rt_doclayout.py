@@ -252,7 +252,12 @@ def test_a_small_logo_keeps_its_own_width() -> None:
     renderer = TypstDocumentRenderer(assets_root=tmp)
 
     small = renderer._figure_markup(_Figure(asset=str(tmp / "logo.png"), width_pt=121.0), tmp)
-    assert "width: 121pt" in small
+    # Container-relative, not absolute points: 121/470.55 = 25.7% of the column,
+    # so the logo stays small on BOTH a single-column and a two-column page.
+    # An absolute ``121pt`` was laid out at 121pt in a 228.98pt column too, which
+    # is how a 290pt figure ran past the gutter on the academic template.
+    assert "width: 25.7%" in small
+    # A figure wider than the native cap falls through to the page-wide default.
     wide = renderer._figure_markup(_Figure(asset=str(tmp / "logo.png"), width_pt=524.0), tmp)
     assert "width: 88%" in wide
 
