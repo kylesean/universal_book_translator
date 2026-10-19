@@ -965,3 +965,80 @@ def test_font_residue_warning_carries_the_at_risk_page_count() -> None:
     wizard = _WIZARD_SRC.read_text(encoding="utf-8")
     assert "at_risk_pages" in wizard
     assert "warningAtRiskClause" in wizard
+
+
+# --- the console bundle must stay split across routes ------------------------
+
+
+def test_every_screen_is_lazily_loaded() -> None:
+    """A static view import puts the whole console in the entry chunk.
+
+    Before the split, `App.tsx` imported all six screens statically, so the
+    entry bundle carried the wizard, mission control, the review workbench, the
+    quality gate, language assets and the doctor before any one of them
+    rendered. It crossed 500 kB and tripped Vite's size warning. Each screen is
+    now a `lazy()` import with its own chunk.
+
+    This is a source-level guard because the failure mode is silent: reverting
+    to a static import still builds, still type-checks, and only shows up as a
+    slower first paint.
+    """
+    app = _REPO_ROOT / "web" / "src" / "App.tsx"
+    if not app.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+    source = app.read_text(encoding="utf-8")
+
+    views = (
+        "NewJobWizard",
+        "MissionControl",
+        "QualityGateView",
+        "LanguageAssetsView",
+        "SystemDoctorView",
+        "ReviewWorkbench",
+    )
+    for view in views:
+        assert re.search(rf"const {view} = lazy\(", source), f"{view} is not lazy-loaded"
+        # A static `import { X } from '@/views/...'` would defeat the split.
+        assert not re.search(rf"^import \{{[^}}]*\b{view}\b", source, re.MULTILINE), (
+            f"{view} is also imported statically, which defeats code splitting"
+        )
+
+    # The Suspense boundary is what lets a lazy route render at all.
+    assert "<Suspense" in source
+    assert "RouteFallback" in source
+
+
+def test_the_shipped_bundle_has_no_chunk_over_vite_warning_size() -> None:
+    """The committed bundle must stay under the 500 kB warning threshold.
+
+    ``ubt/api/static`` is what a `pip install`ed release serves, so this checks
+    the artefact rather than the source. Skipped when the bundle is absent (a
+    source checkout without a build).
+    """
+    static_assets = _REPO_ROOT / "ubt" / "api" / "static" / "assets"
+    if not static_assets.exists():
+        pytest.skip("console bundle is not present in this checkout")
+
+    oversized = [
+        (path.name, path.stat().st_size)
+        for path in static_assets.glob("*.js")
+        if path.stat().st_size > 500 * 1024
+    ]
+    assert not oversized, f"chunks over the 500 kB Vite warning size: {oversized}"
+
+
+def test_the_bundle_ships_more_than_one_js_chunk() -> None:
+    """Proof the split actually produced separate chunks in the artefact.
+
+    A regression to static imports would collapse the bundle back to a single
+    ``index-*.js``; that still passes the size check on a small enough tree, so
+    the chunk count is asserted separately.
+    """
+    static_assets = _REPO_ROOT / "ubt" / "api" / "static" / "assets"
+    if not static_assets.exists():
+        pytest.skip("console bundle is not present in this checkout")
+
+    js = sorted(p.name for p in static_assets.glob("*.js"))
+    assert len(js) > 5, f"expected per-route chunks, found only: {js}"
+    entry = [n for n in js if n.startswith("index-")]
+    assert len(entry) == 1, f"expected exactly one entry chunk, found: {entry}"
