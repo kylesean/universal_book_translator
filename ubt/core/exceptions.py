@@ -87,6 +87,23 @@ class LedgerWriterLockConflictError(LedgerError):
     """Raised when an exclusive ledger writer lock cannot be acquired because another process holds it."""
 
 
+class LedgerWriterLeaseLostError(LedgerError):
+    """Raised when this process's writer lease was reclaimed by another writer.
+
+    A lease is an *expiring* claim: if this process stalls long enough for the
+    lease to lapse (a long GC pause, swap, a frozen container, an NFS hiccup),
+    another process legitimately takes the job over. Continuing to write would
+    then put two writers on one ledger — each paying the provider for the same
+    blocks and overwriting the other's checkpoints.
+
+    ``renew()`` used to return silently in that situation (it never checked
+    whether its ``UPDATE`` matched a row), so the stalled process resumed
+    writing as if it still owned the job. Raising turns the reclaim into a
+    stop, which is the only safe response: the work this process already paid
+    for is in the ledger, and the new owner will pick it up from there.
+    """
+
+
 class QueueDepthExceededError(UBTError):
     """Raised when ``JobQueue.enqueue`` would push the queue past its depth cap.
 
@@ -111,10 +128,18 @@ class RenderBlocksNotImplementedError(NotImplementedError):
 
 #: Domain errors whose message is written to be SHOWN to the operator: each
 #: names the knob to turn or the step to take (raise the budget, drop
-#: --pages, drain the queue). Everything else may echo provider bodies or
-#: host paths, so only its class name surfaces.
+#: --pages, drain the queue, install typst, enable OCR). Everything else may
+#: echo provider bodies or host paths, so only its class name surfaces.
+#:
+#: ``DocumentParseError`` and its subclass belong here for the same reason: the
+#: parser writes those messages *for the operator* ("every page lacks an
+#: extractable text layer … enable OCR", "input document does not exist", "PDF is
+#: password-protected"). Folding them into "(see server logs)" left a failed job
+#: showing only ``DocumentParseError`` — the operator could not tell a missing
+#: file from an encrypted PDF from a missing Typst binary.
 ACTIONABLE_ERROR_TYPES: tuple[type[Exception], ...] = (
     BudgetExceededError,
+    DocumentParseError,
     UnsupportedDocumentFormatError,
     QueueDepthExceededError,
 )

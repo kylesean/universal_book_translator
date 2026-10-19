@@ -42,7 +42,7 @@ from ubt.core.engine.events import (
     TranslationProgressEvent,
 )
 from ubt.core.engine.ledger import SQLiteJobLedger
-from ubt.core.exceptions import JobInterruptedError
+from ubt.core.exceptions import JobInterruptedError, LedgerWriterLeaseLostError
 from ubt.core.ir.models import BookManifest
 from ubt.core.ports import DocumentAdapter
 from ubt.core.router.router import ModelRouter
@@ -125,15 +125,28 @@ class StageContext:
     bill_run_usage: Callable[[], Awaitable[object]] = _noop_bill
     #: Cancellation token for cooperative early termination of long stages.
     cancel_token: asyncio.Event | None = None
+    #: Set when this run's writer lease was reclaimed by another process. A
+    #: *separate* channel from ``cancel_token`` on purpose: a lost lease is not
+    #: a user cancellation, and conflating them made a reclaimed job read
+    #: ``cancelled`` and refuse the new owner's ``finalize_job('completed')``.
+    #: ``check_cancelled`` stops on either, so a stage boundary does not have to
+    #: know which one fired.
+    lease_lost: asyncio.Event | None = None
 
     def check_cancelled(self) -> None:
-        """Raise JobInterruptedError if cooperative cancellation was signaled.
+        """Stop the run if the user cancelled it or another writer took the lease.
 
-        A *lost lease* is signalled separately (through ``JobWorker``'s lease
-        check between events), never through this token: conflating them made a
-        reclaimed job read ``cancelled`` and refuse the new owner's
-        ``finalize_job('completed')``.
+        Raises :class:`LedgerWriterLeaseLostError` for a reclaimed lease (the
+        operator-facing reason: the ledger now belongs to someone else) and
+        :class:`JobInterruptedError` for a cooperative cancellation. Both are
+        hard stops at the stage boundary: continuing after a reclaim means two
+        writers on one ledger, both paying the provider and overwriting each
+        other's checkpoints.
         """
+        if self.lease_lost is not None and self.lease_lost.is_set():
+            raise LedgerWriterLeaseLostError(
+                f"Job {self.job_id}: the writer lease was reclaimed by another process"
+            )
         if self.cancel_token is not None and self.cancel_token.is_set():
             raise JobInterruptedError(f"Job {self.job_id} cancelled cooperatively")
 

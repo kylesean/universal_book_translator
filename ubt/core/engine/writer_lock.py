@@ -20,14 +20,16 @@ renewal are single statements, so they are safe under concurrent processes.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import sqlite3
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from ubt.core.exceptions import LedgerWriterLockConflictError
+from ubt.core.exceptions import LedgerWriterLeaseLostError, LedgerWriterLockConflictError
 from ubt.core.fs_perms import ensure_private_dir
 
 logger = logging.getLogger(__name__)
@@ -142,17 +144,73 @@ class LedgerWriterLock:
             conn.close()
 
     def renew(self) -> None:
-        """Extend this process's lease; a no-op when it is not the holder."""
+        """Extend this process's lease.
+
+        Raises :class:`LedgerWriterLeaseLostError` when the lease no longer
+        belongs to this instance. The ``UPDATE`` is conditional on our token, so
+        a reclaimed lease updates zero rows — and returning quietly there was
+        the bug that let a stalled process keep writing a ledger another process
+        had already taken over (both paying the provider, both overwriting the
+        other's checkpoints). A reclaim is a stop, not a warning: the work this
+        process already paid for is durable in the ledger, and the new owner
+        continues from it.
+        """
         if not self._held:
             return
         conn = self._connect()
         try:
-            conn.execute(
+            cur = conn.execute(
                 "UPDATE job_locks SET lease_expires_at = ? WHERE job_id = ? AND owner_token = ?",
                 (time.time() + self.lease_seconds, self.job_id, self._token),
             )
+            if cur.rowcount == 0:
+                self._held = False
+                raise LedgerWriterLeaseLostError(
+                    f"Writer lease for job {self.job_id} was reclaimed by another "
+                    "process (this process stalled past its lease). Stopping rather "
+                    "than writing a ledger that now has a different owner; resume "
+                    "the job id to continue from the checkpoints already on disk."
+                )
         finally:
             conn.close()
+
+    @staticmethod
+    def lease_holder(db_path: Path, job_id: str) -> int | None:
+        """The pid holding a *live* lease for ``job_id``, or ``None``.
+
+        Read-only liveness probe for surfaces that must distinguish "a writer is
+        working on this" from "nothing owns it any more". The status endpoint
+        used to treat any non-terminal ledger row as crashed and report FAILED,
+        so opening a job that a CLI process was actively translating showed a
+        failure and invited the operator to re-run it — which then lost the
+        writer-lock race or paid twice.
+
+        An expired lease is not a live writer: it is exactly what a crashed
+        process leaves behind, and reporting it as running would be the opposite
+        error. Returns ``None`` on any read problem — the caller must not invent
+        a holder it cannot see.
+        """
+        try:
+            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        except sqlite3.Error:
+            return None
+        try:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT owner_pid, lease_expires_at FROM job_locks WHERE job_id = ?",
+                (job_id,),
+            ).fetchone()
+        except sqlite3.Error:
+            # No ``job_locks`` table (a ledger written by an older build) or a
+            # corrupt file: no evidence of a holder.
+            return None
+        finally:
+            conn.close()
+        if row is None:
+            return None
+        if float(row["lease_expires_at"]) <= time.time():
+            return None
+        return int(row["owner_pid"])
 
     def release(self) -> None:
         if not self._held:
@@ -182,3 +240,37 @@ class LedgerWriterLock:
 
     def __del__(self) -> None:
         self.release()
+
+
+async def keep_lease_fresh(
+    lock: LedgerWriterLock,
+    *,
+    on_lost: Callable[[str], None] | None = None,
+) -> None:
+    """Renew ``lock`` until cancelled, reporting a reclaim through ``on_lost``.
+
+    Every writer that holds a lease for longer than one window must call this —
+    a run and a re-export alike. It is one implementation on purpose: renewal
+    had been written only inside the pipeline, so ``re_export_job`` held an
+    unrenewed 300 s lease across a whole-book Typst render plus the visual gate,
+    and a page-heavy re-export could outlive the lease and be legally reclaimed
+    while both processes wrote the same ledger and output file.
+
+    Returns (does not raise) on lease loss: the caller owns the stop decision,
+    because the run's stages stop at their own boundary checks while a
+    re-export simply unwinds. ``on_lost`` receives the operator-facing reason.
+    A transient renew failure is logged and retried — a momentary SQLite
+    hiccup must not kill a multi-hour render.
+    """
+    interval = max(1.0, lock.lease_seconds / 3.0)
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            await asyncio.to_thread(lock.renew)
+        except LedgerWriterLeaseLostError as exc:
+            logger.error("Writer lease lost for job %s: %s", lock.job_id, exc)
+            if on_lost is not None:
+                on_lost(str(exc))
+            return
+        except Exception as exc:  # a transient renew failure must not kill the run
+            logger.debug("Writer-lock renewal failed: %s", exc)

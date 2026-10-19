@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -31,7 +32,7 @@ from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.stage_context import StageContext
 from ubt.core.engine.stages.bible import _BIBLE_CACHE_KEY
 from ubt.core.engine.stages.export import run_export_stage
-from ubt.core.engine.writer_lock import LedgerWriterLock
+from ubt.core.engine.writer_lock import LedgerWriterLock, keep_lease_fresh
 from ubt.core.ir.models import BookManifest, ChapterMeta
 from ubt.core.ir.render_plan import RenderPlan
 from ubt.core.ports import resolve_adapter
@@ -294,19 +295,42 @@ async def re_export_job(
             profile_name="general",
             create_event=_make_event_factory(ledger, job_id),
         )
-        terminal: TranslationProgressEvent | None = None
-        async for event in run_export_stage(
-            ctx,
-            services,
-            render_plan,
-            _terminology_from_ledger(ledger, job_id),
-            claims_finality=False,
-        ):
-            if event.event_type is EventType.EXPORT_COMPLETED:
-                terminal = event
-        if terminal is None:
-            raise ReExportError(f"re-export of {job_id} produced no artifact")
-        return terminal
+        # Renew the lease for the life of the re-export. A whole-book Typst render
+        # plus the visual gate routinely outlives the 300 s default lease, and
+        # without renewal another process may legally reclaim the job mid-render:
+        # both then write the same ledger and the same output file, the later
+        # writer silently winning. The live run has always renewed; a re-export
+        # is the same kind of long holder and must renew on the same rule.
+        lease_lost = asyncio.Event()
+        renew_task = asyncio.create_task(
+            keep_lease_fresh(lock, on_lost=lambda _reason: lease_lost.set()),
+            name=f"renew-lock:{job_id}",
+        )
+        try:
+            terminal: TranslationProgressEvent | None = None
+            async for event in run_export_stage(
+                ctx,
+                services,
+                render_plan,
+                _terminology_from_ledger(ledger, job_id),
+                claims_finality=False,
+            ):
+                if lease_lost.is_set():
+                    # Another writer owns the ledger now. Stop rather than write
+                    # over it; the report above is the operator's explanation.
+                    raise ReExportError(
+                        f"re-export of {job_id} stopped: the writer lease was "
+                        "reclaimed by another process"
+                    )
+                if event.event_type is EventType.EXPORT_COMPLETED:
+                    terminal = event
+            if terminal is None:
+                raise ReExportError(f"re-export of {job_id} produced no artifact")
+            return terminal
+        finally:
+            renew_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await renew_task
     finally:
         lock.release()
         ledger.close()
