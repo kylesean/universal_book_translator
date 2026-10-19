@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import pytest
@@ -207,3 +208,76 @@ def test_build_cost_disables_rolling_summary_for_page_slice() -> None:
         is_page_slice=True,
     )
     assert cost_slice.rollup_calls == 0
+
+
+# --- the warning must not overstate or understate the damage -----------------
+
+
+def test_the_warning_says_the_residue_count_is_a_lower_bound() -> None:
+    """``residue_chars`` counts six non-ASCII codepoints, so it is a floor.
+
+    The same misdecoding rewrites ASCII glyphs into other ASCII glyphs — on the
+    reference document ``$`` stands for a minus sign and ``%`` for a
+    multiplication sign (``cm$3`` for ``cm⁻³``, ``%1018`` for ``×10¹⁸``) — and
+    those are invisible to the confirm set by design, because they occur
+    legitimately in ordinary technical prose.
+
+    A reader who takes 275 as the total damage will under-scope the proofing
+    work, so the warning has to say it is a lower bound.
+    """
+    from ubt.adapters.pdf.extraction_witness import CONFIRM_CHARS
+
+    # The blind spot is structural: every confirm char is non-ASCII.
+    assert all(ord(ch) > 127 for ch in CONFIRM_CHARS), (
+        "an ASCII char entered CONFIRM_CHARS; it would fire on ordinary prose"
+    )
+    # And the characters that actually substitute for operators here are ASCII.
+    assert ord("$") < 128 and ord("%") < 128
+
+    source = Path("ubt/core/assess.py").read_text(encoding="utf-8")
+    block = re.search(r'"FONT_RESIDUE_RISK",\s*\n\s*"warn",\s*\n(.*?)\n\s*\{', source, re.S)
+    assert block, "could not locate the FONT_RESIDUE_RISK message"
+    message = block.group(1)
+    assert "下界" in message, "the warning no longer says the count is a lower bound"
+
+
+def test_the_warning_distinguishes_recoverable_from_lost_glyphs() -> None:
+    """``部分文字可能不可恢复`` was true but useless.
+
+    Brackets and equals signs survive a MacRoman remap and are recoverable by
+    rule; superscripts, subscripts and operators that landed on ASCII
+    codepoints are gone. The two cases need different handling, so the copy
+    names both instead of averaging them into "some text may be unrecoverable".
+    """
+    source = Path("ubt/core/assess.py").read_text(encoding="utf-8")
+    block = re.search(r'"FONT_RESIDUE_RISK",\s*\n\s*"warn",\s*\n(.*?)\n\s*\{', source, re.S)
+    assert block, "could not locate the FONT_RESIDUE_RISK message"
+    message = block.group(1)
+
+    assert "还原" in message, "the warning no longer mentions what is recoverable"
+    assert "永久丢失" in message, "the warning no longer mentions what is lost"
+    assert "部分文字可能不可恢复" not in message, (
+        "the old blanket phrasing is back; it collapses two distinct cases"
+    )
+
+
+def test_both_locales_carry_the_same_two_qualifiers() -> None:
+    """The console renders the i18n copy, not the engine's ``detail_zh``.
+
+    Fixing only the engine message would leave the console overstating it,
+    which is the surface the operator actually reads.
+    """
+    repo = Path(__file__).resolve().parents[3]
+    for name, needles in (
+        ("zh.ts", ("下界", "永久丢失")),
+        ("en.ts", ("lower bound", "lost for good")),
+    ):
+        path = repo / "web" / "src" / "i18n" / "translations" / name
+        if not path.exists():
+            pytest.skip("web/ frontend is not present in this checkout")
+        text = path.read_text(encoding="utf-8")
+        block = re.search(r"FONT_RESIDUE_RISK:\s*\n?\s*'([^']*)'", text)
+        assert block, f"{name} has no FONT_RESIDUE_RISK copy"
+        copy = block.group(1)
+        for needle in needles:
+            assert needle in copy, f"{name} lost {needle!r}"

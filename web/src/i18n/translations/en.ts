@@ -130,7 +130,7 @@ export const en: TranslationDictionary = {
       SCANNED_PAGES_DOMINANT:
         'The document is mostly scanned/image pages, so the translation depends on visual transcription and both cost and latency rise sharply. An OCR pre-check is advised.',
       FONT_RESIDUE_RISK:
-        'Font encoding damage: {confirmed_pages} page(s) confirmed with garbled characters ({residue_chars} residue chars in total). Some text may be unrecoverable — {remedy}. {at_risk_clause}This is a font-encoding defect, not a scan-quality one; the scanned-page share is unrelated.',
+        'Font encoding damage: {confirmed_pages} page(s) confirmed with garbled characters ({residue_chars} residue chars in total). Brackets and equals signs are recoverable by rule; superscripts, subscripts and operators are usually lost for good. That count is a lower bound — replacements within the ASCII range cannot be detected — {remedy}. {at_risk_clause}This is a font-encoding defect, not a scan-quality one; the scanned-page share is unrelated.',
       FORMULA_HEAVY_NEEDS_ENRICHMENT:
         'The document is formula-heavy but visual formula enrichment is off (a common trade-off of --preset preview); formula transcription quality may suffer.',
       PATHOLOGICAL_PAGE_RISK:

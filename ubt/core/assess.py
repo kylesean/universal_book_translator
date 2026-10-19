@@ -807,12 +807,20 @@ def _synthesize_warnings(
                 if at_risk > 0
                 else ""
             )
+            # The old copy said "部分文字可能不可恢复", which overstates it in
+            # both directions. Brackets and equals signs survive a MacRoman
+            # remap and are recoverable by rule; superscripts, subscripts and
+            # operators that landed on ASCII codepoints are not, and are not
+            # counted here either — ``residue_chars`` only sees six non-ASCII
+            # codepoints, so it is a floor. Say both, or an operator reading
+            # "275 residue chars" will take it as the whole damage.
             warnings.append(
                 AssessmentWarning(
                     "FONT_RESIDUE_RISK",
                     "warn",
                     f"字体编码损伤：{confirmed} 页确认存在字符乱码（共 {residue_chars} 个残字符），"
-                    f"部分文字可能不可恢复，{remedy}。"
+                    f"其中括号、等号等可由规则还原，上下标与运算符通常永久丢失；"
+                    f"该计数仅为下界（ASCII 范围的替换无法检出），{remedy}。"
                     + (f"{risk_clause}。" if risk_clause else ""),
                     {
                         "confirmed_pages": confirmed,

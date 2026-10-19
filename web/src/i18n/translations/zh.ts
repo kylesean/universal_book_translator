@@ -118,7 +118,7 @@ export const zh: TranslationDictionary = {
       SCANNED_PAGES_DOMINANT:
         '文档以扫描/图像页为主，译文依赖视觉转写，成本与时延显著上升；建议先做 OCR 预检。',
       FONT_RESIDUE_RISK:
-        '字体编码损伤：{confirmed_pages} 页确认存在字符乱码（共 {residue_chars} 个残字符），部分文字可能不可恢复，{remedy}。{at_risk_clause}此问题源于字体编码（非扫描质量），与「扫描件位图比例」无关。',
+        '字体编码损伤：{confirmed_pages} 页确认存在字符乱码（共 {residue_chars} 个残字符），其中括号、等号等可由规则还原，上下标与运算符通常永久丢失；该计数仅为下界（ASCII 范围的替换无法检出），{remedy}。{at_risk_clause}此问题源于字体编码（非扫描质量），与「扫描件位图比例」无关。',
       FORMULA_HEAVY_NEEDS_ENRICHMENT:
         '文档公式密集但视觉公式增强已关闭（--preset preview 的常见取舍），公式转写质量可能受限。',
       PATHOLOGICAL_PAGE_RISK:

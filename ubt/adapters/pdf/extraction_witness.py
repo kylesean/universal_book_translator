@@ -21,6 +21,17 @@ Findings are recorded as ``extraction_witness`` metadata and a
 stage and QE already surface flagged blocks to humans. Nothing here raises on
 suspect input — silent garbage that reaches the translator is what this
 witness exists to end, but a page being *risky* is not a page being wrong.
+
+**What this witness can and cannot see.** The confirm signal keys on six
+non-ASCII codepoints, so ``residue_chars`` is a *lower bound* on the damage,
+not a total. The same misdecoding also rewrites ASCII glyphs into other ASCII
+glyphs, and that is invisible here by construction: on the reference document
+``$`` stands where a minus sign belongs and ``%`` where a multiplication sign
+belongs (``cm$3`` for ``cm⁻³``, ``%1018`` for ``×10¹⁸``). Those characters are
+legal and common in technical prose — prices, percentages — so admitting them
+to the confirm set would trade the signal's precision for recall it cannot use.
+The consequence for callers: a page with zero hits is *not* proven clean, and a
+page's hit count is not its damage count.
 """
 
 from __future__ import annotations
@@ -41,6 +52,13 @@ logger = logging.getLogger(__name__)
 # MacRoman-fallback residue: codepoints a misdecoded math glyph lands on that
 # correct technical prose almost never contains (¼ as a standalone operator,
 # ð/Þ as brackets, ½/Œ/œ as large delimiters).
+#
+# This set is deliberately small and non-ASCII. The same damage also rewrites
+# ASCII glyphs into other ASCII glyphs ($ for a minus sign, % for a
+# multiplication sign on the reference document), but those characters appear
+# legitimately in ordinary technical text, so including them would make almost
+# every page "confirmed" and destroy the signal's precision. A count derived
+# from this set is therefore a floor: see the module docstring.
 CONFIRM_CHARS = frozenset("¼ðÞ½Œœ")
 
 
