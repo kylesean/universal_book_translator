@@ -14,7 +14,7 @@ import logging
 import os
 import re
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -48,8 +48,10 @@ from ubt.adapters.pdf.docling_outline import (  # noqa: F401 -- re-exported
     _extract_document_index_blocks,
     _extract_outline_only_blocks,
     _toc_sort_key,
+    assign_heading_levels_from_outline,
     read_pdf_outline_entries,
 )
+from ubt.adapters.pdf.encryption import reject_encrypted_pdf
 from ubt.adapters.pdf.page_chunking import compute_pdf_page_chunks, get_pdf_page_chunk_size
 from ubt.adapters.pdf.pdfium_gate import PDFIUM_LOCK
 from ubt.adapters.pdf.plain_text_extractor import pages_to_blocks
@@ -109,6 +111,11 @@ def extract_manifest(path: Path, *, is_docling_installed: bool) -> BookManifest:
     path = Path(path)
     if not path.exists():
         raise DocumentParseError(f"PDF file not found: {path}")
+
+    # Both PDF engines reach the manifest before parsing; intercepting a
+    # password-protected file here keeps Docling's ConversionError and the
+    # pdf_oxide decryption noise out of the operator-facing error.
+    reject_encrypted_pdf(path)
 
     doc_id = compute_file_sha256_cached(path)
     clean_title = clean_source_stem(path)
@@ -725,14 +732,27 @@ def _vram_hint() -> str:
         )
     except (OSError, subprocess.SubprocessError):
         return ""
+    if result.returncode != 0:
+        return ""
     rows = [row.strip() for row in result.stdout.splitlines() if row.strip()]
     if not rows:
         return ""
     # Largest holders first: that is the one worth closing.
+    #
+    # Every row is parsed defensively. ``nvidia-smi`` exits 0 on some hosts while
+    # printing a driver-failure banner ("NVIDIA-SMI has failed because it
+    # couldn't communicate with the NVIDIA driver…") to *stdout*; that line has
+    # no commas, so an unpacking assignment raised ``ValueError`` and crashed
+    # the extraction path on a machine whose only sin was having a broken
+    # driver. A hint is best-effort text for a log line — a row this function
+    # cannot read is skipped, never fatal.
     parsed: list[tuple[int, str]] = []
     for row in rows:
-        pid, name, usage = (part.strip() for part in row.split(",", 2))
-        with suppress(ValueError):
+        parts = [part.strip() for part in row.split(",", 2)]
+        if len(parts) != 3:
+            continue
+        pid, name, usage = parts
+        with suppress(ValueError, IndexError):
             parsed.append((int(usage.split()[0]), f"pid {pid} {name.split('/')[-1]}"))
     if not parsed:
         return ""
@@ -1449,9 +1469,22 @@ def map_iterated_items(
                 )
             )
 
-    return type_docling_blocks(
+    typed = type_docling_blocks(
         annotate_layout_metadata(drop_phantom_continuation_boxes(blocks), pdf_path)
     )
+    # Docling reports every heading at level 1 (verified on four cached
+    # conversions: 26, 53 and 73 headings, all level 1), so a rebuilt book
+    # typesets a chapter title and its 4.2.2 sub-subsection identically and the
+    # PDF outline comes out flat. The source PDF's bookmark tree declares the
+    # real depth; restore it here, before the blocks leave the adapter.
+    restored = assign_heading_levels_from_outline(pdf_path, typed)
+    if restored:
+        logger.info(
+            "Restored heading depth for %d heading(s) of '%s' from its PDF outline",
+            restored,
+            pdf_path.name if pdf_path is not None else "document",
+        )
+    return typed
 
 
 def drop_phantom_continuation_boxes(blocks: list[IRBlock]) -> list[IRBlock]:
@@ -1674,23 +1707,50 @@ def _has_text_content(blocks: list[IRBlock]) -> bool:
 
 
 def _reject_empty_book(
-    path: Path, blocks: list[IRBlock], ocr_mode: str | None = None
+    path: Path,
+    blocks: list[IRBlock],
+    ocr_mode: str | None = None,
+    *,
+    missing_pages: Sequence[int] = (),
+    total_pages: int | None = None,
 ) -> list[IRBlock]:
-    """Fail loudly when a parse produced zero content blocks.
+    """Fail loudly when a parse produced zero content blocks, or dropped pages.
 
     A PDF whose pages are all scanned images yields zero blocks whenever OCR
     is off (the default) or no driver is available; letting it through would
     make downstream stages "succeed" and export an empty book with every
     counter at zero — the classic silent-data-loss shape.
+
+    The *partial* case is the same failure in smaller proportion, and it used to
+    pass: ``_has_text_content`` returns True as soon as **one** block carries
+    text, so a 100-page book with 30 scanned pages and 70 text pages shipped with
+    30 pages silently absent whenever no OCR driver was available. The reader got
+    a shorter book than the one they asked for and every gate reported success.
+    ``missing_pages`` is the caller's own measurement (it already computes which
+    pages have no text layer), so this refuses instead of guessing, and the
+    message names the pages so the operator can enable OCR or drop them
+    deliberately.
     """
-    if _has_text_content(blocks):
-        return blocks
-    mode_note = f" (ocr_mode='{ocr_mode}')" if ocr_mode else ""
-    raise DocumentParseError(
-        f"No content could be parsed from '{path.name}': every page lacks an "
-        f"extractable text layer{mode_note}. Enable OCR (--ocr rapidocr, "
-        "a Docker OCR sidecar, or --ocr cloud) or set UBT_VLM_SCAN_FALLBACK=missing."
-    )
+    if not _has_text_content(blocks):
+        mode_note = f" (ocr_mode='{ocr_mode}')" if ocr_mode else ""
+        raise DocumentParseError(
+            f"No content could be parsed from '{path.name}': every page lacks an "
+            f"extractable text layer{mode_note}. Enable OCR (--ocr rapidocr, "
+            "a Docker OCR sidecar, or --ocr cloud) or set UBT_VLM_SCAN_FALLBACK=missing."
+        )
+    if missing_pages:
+        page_list = ", ".join(str(p) for p in sorted(missing_pages)[:12])
+        more = "" if len(missing_pages) <= 12 else f" (+{len(missing_pages) - 12} more)"
+        of_total = f" of {total_pages}" if total_pages else ""
+        mode_note = f" (ocr_mode='{ocr_mode}')" if ocr_mode else ""
+        raise DocumentParseError(
+            f"Only part of '{path.name}' could be read: {len(missing_pages)}{of_total} "
+            f"page(s) have no extractable text layer{mode_note} (pages {page_list}{more}). "
+            "Refusing to deliver a book with those pages missing. Enable OCR "
+            "(--ocr rapidocr, a Docker OCR sidecar, or --ocr cloud) to transcribe "
+            "them, or restrict the run to the pages that do have text with --pages."
+        )
+    return blocks
 
 
 # Circuit-breaker knobs for the paid transcription loop live in the policy
@@ -1742,6 +1802,75 @@ def _ocr_unavailable_hint(mode: str) -> str:
     )
 
 
+def _pages_covered_by_blocks(blocks: Sequence[IRBlock]) -> set[int]:
+    """Every page number a textual block actually came from.
+
+    Three sources, and all three are needed:
+
+    1. ``provenance.physical_boxes`` -- the full page chain of a block that spans
+       a page break. Docling emits ONE ``TextItem`` for a paragraph that runs
+       across pages, carrying one ``prov`` entry per page; the IR keeps that
+       chain in ``physical_boxes`` (and mirrors it in ``CompositeSpan``).
+    2. ``bbox.page`` -- a single-box block.
+    3. ``provenance.source_page`` -- a block Docling placed without a bbox.
+
+    Reading only (2) and (3) was the bug: ``bbox.page`` is the *first* page of a
+    fused continuation, so a four-page paragraph whose blocks Docling merged
+    covered page 1 and nothing else. ``_pages_without_text`` then reported pages
+    2-4 as having no text layer and the partial-read guard refused a book it had
+    in fact read completely — every crash/resume e2e failed for that reason.
+
+    IMAGE blocks are excluded on purpose: an image-only page has no text layer to
+    translate, which is exactly what OCR exists for.
+    """
+    covered: set[int] = set()
+    for block in blocks:
+        if block.block_type == BlockType.IMAGE:
+            continue
+        if not (block.source_text and block.source_text.strip()):
+            continue
+        for entry in block.provenance.physical_boxes or ():
+            page = entry.get("page") if isinstance(entry, dict) else None
+            if page:
+                covered.add(int(page))
+        if block.bbox is not None and block.bbox.page:
+            covered.add(block.bbox.page)
+        source_page = block.provenance.source_page
+        if source_page is not None:
+            covered.add(int(source_page))
+    return covered
+
+
+def _pages_without_text(
+    path: Path,
+    blocks: Sequence[IRBlock],
+    page_range: tuple[int, int] | None,
+) -> tuple[list[int], int]:
+    """Pages in scope that carry no textual block, and the document's page count.
+
+    "Textual" excludes IMAGE blocks on purpose: an image-only page has no text
+    layer to translate, which is exactly the page OCR exists for. Returns
+    ``([], 0)`` when the PDF cannot be opened — the caller then has no evidence
+    of a gap and must not invent one.
+    """
+    import pypdfium2 as pdfium
+
+    text_covered = _pages_covered_by_blocks(blocks)
+    with PDFIUM_LOCK:
+        try:
+            probe_doc = pdfium.PdfDocument(str(path))
+            try:
+                total = len(probe_doc)
+            finally:
+                probe_doc.close()
+        except Exception as exc:
+            logger.warning("Page-coverage probe: cannot open '%s': %s", path.name, exc)
+            return [], 0
+    first = page_range[0] if page_range else 1
+    last = min(page_range[1], total) if page_range else total
+    return [p for p in range(first, last + 1) if p not in text_covered], total
+
+
 def vlm_fallback_missing_pages(
     path: Path,
     blocks: list[IRBlock],
@@ -1774,21 +1903,27 @@ def vlm_fallback_missing_pages(
         ):
             mode = VlmFallbackMode.MISSING
         else:
-            return _reject_empty_book(path, blocks, ocr_mode=ocr_mode)
+            # No OCR channel will run. Refuse a *partial* read too: a book with
+            # some scanned pages used to pass this branch because one text block
+            # anywhere satisfied ``_has_text_content``, so those pages shipped
+            # silently absent from the delivered book.
+            missing, total = _pages_without_text(path, blocks, page_range)
+            return _reject_empty_book(
+                path,
+                blocks,
+                ocr_mode=ocr_mode,
+                missing_pages=missing,
+                total_pages=total,
+            )
 
     import pypdfium2 as pdfium
 
     # A page with only image blocks has no extractable text layer; pages with
-    # genuine textual blocks are covered, while image-only or empty pages require OCR.
-    text_covered: set[int] = set()
-    for block in blocks:
-        if block.block_type != BlockType.IMAGE and block.source_text and block.source_text.strip():
-            if block.bbox is not None:
-                text_covered.add(block.bbox.page)
-            else:
-                source_page = block.provenance.source_page
-                if source_page is not None:
-                    text_covered.add(int(source_page))
+    # genuine textual blocks are covered, while image-only or empty pages require
+    # OCR. Shared with the no-driver branch above so both measure coverage the
+    # same way -- including the full ``physical_boxes`` page chain of a block
+    # that spans a page break (see ``_pages_covered_by_blocks``).
+    text_covered = _pages_covered_by_blocks(blocks)
     with PDFIUM_LOCK:
         try:
             probe_doc = pdfium.PdfDocument(str(path))
@@ -1901,6 +2036,10 @@ def vlm_fallback_missing_pages(
 
     out: list[IRBlock] = []
     replaced_pages: set[int] = set()
+    #: Pages that had no text layer and that this pass did NOT succeed in
+    #: transcribing. Declared before the ``try`` so the completion guard below
+    #: can see it even when the pass raises mid-way.
+    still_missing: set[int] = set(missing)
 
     try:
         # Handle proofread replacements first. A VLM transcription only
@@ -2015,6 +2154,7 @@ def vlm_fallback_missing_pages(
                 )
                 continue
             if fresh:
+                still_missing.discard(page_no)
                 logger.info(
                     "VLM fallback: page %d of '%s' gained %d block(s)",
                     page_no,
@@ -2043,7 +2183,18 @@ def vlm_fallback_missing_pages(
     out.sort(key=lambda b: page_keys.get(id(b), b.bbox.page if b.bbox else _carry))
     for i, block in enumerate(out):
         block.set_spine_index(i + 1)
-    return _reject_empty_book(path, out)
+    # The OCR pass is over: refuse to hand back a book with pages it could not
+    # read. Without this the missing-page set was computed, used to decide what
+    # to bill, and then dropped — so a mixed text+scan book paid for every page
+    # the driver could not transcribe and still cleared every downstream gate as
+    # a complete delivery. The no-OCR branch above already passes the same
+    # evidence; both paths must reach the guard with it.
+    #
+    # Circuit-breaker bailout and per-page failures both land here: whatever is
+    # still in ``still_missing`` is content the reader will not get.
+    return _reject_empty_book(
+        path, out, ocr_mode=effective_mode, missing_pages=sorted(still_missing)
+    )
 
 
 #: Names this module still exports for its consumers: the cache seam moved to

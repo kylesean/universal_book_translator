@@ -142,16 +142,26 @@ class VisualVerifyLoop:
             # keys, or nothing would ever match and the finding would be dropped
             # entirely (worse than over-quarantining).
             ir_ids = {b.id for b in blocks}
-            named_ids = {
-                bid
-                for f in bad_after
-                if (bid := getattr(f, "block_id", None)) is not None and bid in ir_ids
-            }
+
+            def _finding_block_ids(finding: object) -> set[str]:
+                """Every IR block id a finding names.
+
+                A finding may name one block, or several when the defect is a
+                *relation* between blocks (``block_overlap`` reports both sides
+                comma-separated). Splitting here keeps the "only trust ids that
+                resolve to an IR block" rule: an artifact rect id (``p3:rect327``)
+                matches nothing and is ignored.
+                """
+                raw = getattr(finding, "block_id", None)
+                if not raw:
+                    return set()
+                return {part.strip() for part in str(raw).split(",") if part.strip()}
+
+            named_ids = {bid for f in bad_after for bid in _finding_block_ids(f) if bid in ir_ids}
             page_scoped = [
                 f
                 for f in bad_after
-                if getattr(f, "block_id", None) not in named_ids
-                and getattr(f, "page", None) is not None
+                if not (_finding_block_ids(f) & named_ids) and getattr(f, "page", None) is not None
             ]
             failing_pages = {f.page for f in page_scoped}
             quarantined: list[dict[str, Any]] = []

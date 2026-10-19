@@ -444,6 +444,15 @@ class IRBlock(BaseModel):
     def set_source_text(self, text: str) -> None:
         self.element = _with_element_source(self.element, text)
 
+    def set_heading_level(self, level: int) -> None:
+        """Set a heading's depth, clamped to the document range 1..6.
+
+        A no-op on a non-heading element: only :class:`Heading` carries a
+        ``level``, and every other element's dataclass would reject the keyword.
+        """
+        if isinstance(self.element, Heading):
+            self.element = _replace_element(self.element, level=min(6, max(1, int(level))))
+
     def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = True) -> Self:
         """A copy of the model, supporting updates to both execution state and structural element fields.
 

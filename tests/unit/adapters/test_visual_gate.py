@@ -262,8 +262,9 @@ def test_the_sample_puts_flagged_pages_first_and_covers_the_anchors() -> None:
 def test_the_report_names_the_tiers_that_ran_and_the_one_that_did_not() -> None:
     from ubt.adapters.pdf.visual_gate import _tier_coverage
 
-    default_run = _tier_coverage((), ["vlm judge disabled"])
+    default_run = _tier_coverage((), ["vlm judge disabled"], rendered_pages=5, sampled_pages=5)
     assert "geometry" in default_run
+    assert "type" in default_run
     assert "pixel" in default_run
     assert "not run: vlm" in default_run
 
@@ -271,9 +272,37 @@ def test_the_report_names_the_tiers_that_ran_and_the_one_that_did_not() -> None:
 def test_a_run_with_the_vlm_judge_reports_three_tiers() -> None:
     from ubt.adapters.pdf.visual_gate import _tier_coverage
 
-    full = _tier_coverage((1, 2), [])
+    full = _tier_coverage((1, 2), [], rendered_pages=5, sampled_pages=5)
     assert "vlm" in full
     assert "not run" not in full
+
+
+def test_a_report_never_claims_a_tier_that_did_not_run() -> None:
+    """The coverage line contradicted the skipped-reason in the same string.
+
+    ``ran`` was the hardcoded constant ``["geometry", "type", "pixel"]`` and
+    ``skip_notes`` was never read, so when every sampled page failed to render
+    the report still said "tiers run: geometry, type, pixel" beside "page render
+    failed (pdf_oxide); pixel checks skipped". With no findings, ``passed`` was
+    also True: a gate that inspected nothing reported success. Each tier is now
+    derived from what actually ran.
+    """
+    from ubt.adapters.pdf.visual_gate import _tier_coverage
+
+    nothing_rendered = _tier_coverage(
+        (),
+        ["page render failed (pdf_oxide); pixel checks skipped"],
+        rendered_pages=0,
+        sampled_pages=5,
+    )
+    assert "type" not in nothing_rendered.split("not run")[0], (
+        "the type tier needs a rendered page and must not be claimed"
+    )
+    assert "pixel" not in nothing_rendered.split("not run")[0]
+    assert "not run: type, pixel, vlm" in nothing_rendered
+    assert "0 of 5 sampled page(s) rendered" in nothing_rendered
+    # The geometry tier reads the PDF's own text rects, so it does still run.
+    assert "tiers run: geometry" in nothing_rendered
 
 
 # --------------------------------------------------------------------------- #

@@ -498,15 +498,26 @@ def block_overlap_findings(blocks: Sequence[object]) -> list[VisualFinding]:
         for i in range(len(capped)):
             for j in range(i + 1, len(capped)):
                 if box_iou(capped[i][1], capped[j][1]) >= OVERLAP_IOU_THRESHOLD:
+                    # Name the two blocks. Without an id the consumer can only
+                    # quarantine the whole page (``visual_verify_loop`` keeps a
+                    # finding block-scoped only when its id is an IR id), which
+                    # turned one colliding figure pair into a full page of human
+                    # review. Artifact rects carry ids like ``p3:rect327`` that
+                    # match no IR block, so this is an id only when the caller
+                    # passed IR blocks -- exactly what ``run_visual_gate`` now
+                    # does. Both ids are reported, comma-separated, so either the
+                    # first or the full pair resolves.
+                    overlapping = [capped[i][0], capped[j][0]]
                     findings.append(
                         VisualFinding(
                             severity="major",
                             code="block_overlap",
                             message=(
-                                f"Blocks {capped[i][0]} and {capped[j][0]} "
+                                f"Blocks {overlapping[0]} and {overlapping[1]} "
                                 f"overlap heavily (IoU>=0.6)"
                             ),
                             page=page,
+                            block_id=",".join(overlapping),
                         )
                     )
     return findings
@@ -953,21 +964,45 @@ def text_occlusion_findings(
     return findings
 
 
-def _tier_coverage(vlm_pages: Sequence[int], skip_notes: Sequence[str]) -> str:
+def _tier_coverage(
+    vlm_pages: Sequence[int],
+    skip_notes: Sequence[str],
+    *,
+    rendered_pages: int,
+    sampled_pages: int,
+) -> str:
     """State which gate tiers actually ran, and which were skipped.
 
     The VLM judge is opt-in, so a default run always has ``vlm_checked == 0``.
     A report carrying only ``passed: false, skipped_reason: "vlm judge disabled"``
     invites the reader to conclude the visual check failed, when in fact the
-    geometry and pixel tiers ran and the semantic tier was never asked. This
-    line makes the distinction explicit and is part of every report.
+    geometry and type tiers ran and the semantic tier was never asked. This line
+    makes the distinction explicit and is part of every report.
+
+    The list used to be the hardcoded constant ``["geometry", "type", "pixel"]``
+    that ignored ``skip_notes``, so a report whose own skipped-reason read
+    "page render failed (pdf_oxide); pixel checks skipped" also claimed, in the
+    same string, that the pixel tier had run. When *every* page failed to render
+    the findings were empty, ``passed`` was True, and the report was internally
+    contradictory. Each tier is now derived from what actually happened:
+
+    - ``geometry`` runs off the PDF's own text rects, so it needs no render;
+    - ``type`` measures glyph heights on the page, so it needs the render too;
+    - ``pixel`` inspects the raster;
+    - ``vlm`` only when pages were actually sent to the judge.
     """
-    ran = ["geometry", "type", "pixel"]
+    no_render = rendered_pages == 0
+    ran: list[str] = ["geometry"]
+    if not no_render:
+        ran.extend(["type", "pixel"])
     if vlm_pages:
         ran.append("vlm")
+    skipped = [tier for tier in ("type", "pixel", "vlm") if tier not in ran]
     coverage = f"tiers run: {', '.join(ran)}"
-    if "vlm" not in ran:
-        coverage += " (not run: vlm)"
+    if skipped:
+        coverage += f" (not run: {', '.join(skipped)})"
+    if no_render:
+        coverage += f"; raster tiers skipped: 0 of {sampled_pages} sampled page(s) rendered"
     return coverage
 
 
@@ -1035,7 +1070,21 @@ async def run_visual_gate(
         await asyncio.to_thread(type_size_findings, pdf_path, list(range(1, total + 1)))
     )
     if artifact_boxes:
-        findings.extend(block_overlap_findings(artifact_boxes))
+        # Overlap is attributed to IR blocks when the run has them. The artifact
+        # rects carry ids like ``p3:rect327`` that name no IR block, so
+        # ``visual_verify_loop`` -- which only accepts ``block_id in ir_ids`` --
+        # saw an unnamed finding and fell back to quarantining the whole page.
+        # One overlapping figure pair therefore sent a full page to human review
+        # instead of the two blocks that actually collide. The artifact rects
+        # stay in the picture as the no-IR fallback (a bare PDF check) and as the
+        # carrier for the media-box test, which is a property of the page.
+        # Only the OVERLAP check switches source. The out-of-bounds test stays on
+        # the artifact rects: those are measured in the page's own coordinate
+        # frame, while an IR ``bbox`` comes from the extractor and may use a
+        # different origin (Docling reports BOTTOMLEFT). Comparing an IR bbox
+        # against the MediaBox flagged a perfectly placed block as clipped.
+        overlap_source = list(blocks) if blocks else list(artifact_boxes)
+        findings.extend(block_overlap_findings(overlap_source))
         findings.extend(blocks_out_of_bounds_findings(artifact_boxes, bounds))
         if len(geometry_pages) < total:
             findings.append(
@@ -1117,7 +1166,12 @@ async def run_visual_gate(
         elif vlm_judge is None:
             skip_notes.append("vlm judge disabled")
     passed = not any(f.severity in ("major", "critical") for f in findings)
-    coverage = _tier_coverage(vlm_pages, skip_notes)
+    coverage = _tier_coverage(
+        vlm_pages,
+        skip_notes,
+        rendered_pages=len(pngs),
+        sampled_pages=len(sampled),
+    )
     stats: dict[str, str | int | float] = {
         "total_pages": total,
         "sampled": len(sampled),

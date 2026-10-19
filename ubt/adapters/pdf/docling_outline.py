@@ -267,6 +267,74 @@ def _figure_asset_dpi_tag() -> str:
     return FIGURE_ASSET_DPI_TAG
 
 
+def assign_heading_levels_from_outline(
+    pdf_path: Path | None,
+    blocks: list[IRBlock],
+) -> int:
+    """Restore heading depth from the source PDF's own bookmark tree.
+
+    Docling labels every heading ``section_header`` but reports them all at
+    ``level 1`` (verified on four cached conversions: 26, 53 and 73 headings,
+    every one at level 1), so a rebuilt book typesets a chapter title and its
+    4.2.2 sub-subsection identically and the PDF outline comes out flat -- a
+    114-entry sidebar with nothing collapsible. The source PDF *does* declare the
+    hierarchy in its bookmarks (the reference paper carries 109 entries at levels
+    0/1/2), and that declaration is what this reads.
+
+    Matching is by label when both sides carry one (``4.2`` / ``4.2.2`` at the
+    front of the title), then by normalized title. A heading with no outline
+    counterpart keeps ``level 1``: guessing from font size is exactly the
+    "heading calibrator" the outline reader exists to avoid.
+
+    Returns the number of headings whose level changed.
+    """
+    entries = read_pdf_outline_entries(pdf_path)
+    if not entries:
+        return 0
+    by_label: dict[str, int] = {}
+    by_title: dict[str, int] = {}
+    for level, title, _page in entries:
+        # Bookmark levels are 0-based, heading levels 1-based; clamp because a
+        # deeply nested bookmark (level 5+) has no Typst heading equivalent.
+        depth = min(6, max(1, level + 1))
+        by_title.setdefault(_normalize_heading_key(title), depth)
+        label_match = _TOC_LABEL_RE.match(title.strip())
+        if label_match:
+            by_label.setdefault(label_match.group(1), depth)
+
+    changed = 0
+    for block in blocks:
+        if block.block_type is not BlockType.HEADING:
+            continue
+        text = (block.source_text or "").strip()
+        if not text:
+            continue
+        block_depth: int | None = None
+        label_match = _TOC_LABEL_RE.match(text)
+        if label_match:
+            block_depth = by_label.get(label_match.group(1))
+        if block_depth is None:
+            block_depth = by_title.get(_normalize_heading_key(text))
+        if block_depth is None:
+            continue
+        if getattr(block.element, "level", 1) != block_depth:
+            block.set_heading_level(block_depth)
+            changed += 1
+    return changed
+
+
+def _normalize_heading_key(title: str) -> str:
+    """A heading title reduced to its comparable core.
+
+    Strips a leading section label, collapses whitespace, folds case, and drops
+    punctuation differences Docling introduces (the outline says
+    ``2 What Is a Harness?`` while the block may read ``2. What Is a Harness``).
+    """
+    stripped = _TOC_LABEL_RE.sub("", title.strip())
+    folded = re.sub(r"[\s\u00a0]+", " ", stripped).strip().lower()
+    return re.sub(r"[^\w\u4e00-\u9fff]+", "", folded)
+
+
 def _crop_formula_asset(
     item: Any,
     assets_dir: Path,
@@ -274,62 +342,27 @@ def _crop_formula_asset(
     ordinal: int,
 ) -> IRBlock | None:
     """Recover a formula Docling could not read by cropping its source region.
+
     A display equation the extractor left as a bare ``$$`` is content, not
-    markup: the renderer rebuilds the page from the IR and has
-    no source canvas to preserve, so without this the equation simply vanishes.
-    The crop becomes an IMAGE block, which the renderer already places and the
-    quality report already counts.
+    markup: the renderer rebuilds the page from the IR and has no source canvas,
+    so without this the equation simply vanishes. The crop becomes an IMAGE
+    block, which the renderer places and the quality report counts.
 
-    Returns ``None`` when the region cannot be cropped (no provenance, no bbox,
-    no source PDF, or a region too small to be an equation), so the caller keeps
-    the ``$$`` placeholder and the block stays visible as a known gap rather
-    than a silent one.
+    Delegates to :func:`ubt.adapters.pdf.docling_blocks.crop_region_asset` — the
+    single crop implementation, shared with the lossy-code recovery. The two were
+    65-line near-copies (normalized similarity 0.9956) differing only in the size
+    floor (8 × 6pt here, 60 × 24pt for code), the asset name and the id prefix.
     """
-    if pdf_path is None or not pdf_path.exists():
-        return None
-    prov = item.prov[0] if getattr(item, "prov", None) else None
-    if prov is None or getattr(prov, "bbox", None) is None:
-        return None
-    page_no = int(getattr(prov, "page_no", 0) or 0)
-    if page_no < 1:
-        return None
-    b = prov.bbox
-    bbox = BoundingBox(
-        page=page_no,
-        x0=float(getattr(b, "l", 0.0)),
-        y0=float(getattr(b, "b", 0.0)),
-        x1=float(getattr(b, "r", 0.0)),
-        y1=float(getattr(b, "t", 0.0)),
-    )
-    if bbox.x1 - bbox.x0 < 8 or bbox.y1 - bbox.y0 < 6:
-        # A degenerate box is a stray glyph, not an equation; cropping it would
-        # add noise to the page.
-        return None
-    asset_path = assets_dir / f"formula_p{page_no}_{ordinal:04d}.{_figure_asset_dpi_tag()}.png"
-    try:
-        from ubt.adapters.pdf.visual_scalpel import FIGURE_ASSET_DPI, crop_block_pil
+    from ubt.adapters.pdf.docling_blocks import crop_region_asset
 
-        assets_dir.mkdir(parents=True, exist_ok=True)
-        # Delivered at print resolution: this crop is the equation's only
-        # raster (the same contract as figure assets — see FIGURE_ASSET_DPI).
-        cropped = crop_block_pil(pdf_path, page_no, bbox, dpi=FIGURE_ASSET_DPI)
-        if getattr(cropped, "width", 0) < 8 or getattr(cropped, "height", 0) < 6:
-            return None
-        cropped.save(asset_path)
-    except Exception as exc:
-        logger.debug("Formula crop failed for page %d: %s", page_no, exc)
-        return None
-    return IRBlock(
-        element=make_element(
-            id=f"pdf_main#fml_{ordinal:04d}",
-            spine_index=ordinal,
-            block_type=BlockType.IMAGE,
-            flow_id=FlowID.MAIN_STORY,
-            source_text=str(asset_path),
-            bbox=bbox,
-            skip_translate=True,
-        ),
-        target_text=str(asset_path),
+    return crop_region_asset(
+        item,
+        assets_dir,
+        pdf_path,
+        ordinal,
+        kind="formula",
+        min_width_pt=8,
+        min_height_pt=6,
     )
 
 

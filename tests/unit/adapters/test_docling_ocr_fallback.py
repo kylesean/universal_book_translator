@@ -140,6 +140,85 @@ def test_vlm_fallback_auto_promotes_to_missing_for_textless_scans() -> None:
         assert "every page lacks an extractable text layer" in str(exc_info.value)
 
 
+def test_pages_the_ocr_driver_could_not_transcribe_are_refused_not_shipped() -> None:
+    """A mixed text+scan book must not ship as a complete delivery.
+
+    The OCR pass computed which pages had no text layer, used that set to decide
+    what to bill, and then dropped it: the completion guard was called with no
+    ``missing_pages``, so every page the driver failed on was silently absent
+    while the run cleared all downstream gates. The no-OCR branch already passed
+    this evidence; both paths must reach the guard with it.
+    """
+    book = _make_block(BlockType.NARRATIVE, "page one prose", page=1, spine_index=1)
+    scan_only = _make_block(BlockType.IMAGE, "scan.png", page=2, skip=True, spine_index=2)
+
+    # A vision-LLM driver reports no measured boxes, so it cannot supply geometry
+    # for a page that has none -- exactly the "--ocr vlm on a mixed book" case.
+    driver = MagicMock()
+    driver.measured_boxes = False
+    driver.engine = "vlm"
+
+    fake_pdf = MagicMock()
+    fake_pdf.__len__ = MagicMock(return_value=2)
+
+    with (
+        patch("pypdfium2.PdfDocument", return_value=fake_pdf),
+        patch.dict("os.environ", {"UBT_VLM_SCAN_FALLBACK": "missing"}),
+        patch(
+            "ubt.adapters.pdf.vlm.transcribe.get_driver",
+            return_value=driver,
+        ),
+        patch(
+            "ubt.adapters.pdf.vlm.registry.probe_effective_driver",
+            return_value=("vlm", driver),
+        ),
+        pytest.raises(DocumentParseError) as exc_info,
+    ):
+        vlm_fallback_missing_pages(
+            Path("mixed_book.pdf"),
+            [book, scan_only],
+            ocr_mode="vlm",
+            allow_page_upload=True,
+        )
+
+    message = str(exc_info.value)
+    assert "Only part of" in message
+    assert "page(s) have no extractable text layer" in message
+    assert "2" in message, "the unreadable page must be named"
+
+
+def test_a_block_spanning_a_page_break_covers_every_page_of_its_chain() -> None:
+    """Page coverage must read the whole ``physical_boxes`` chain, not just ``bbox``.
+
+    Docling emits ONE ``TextItem`` for a paragraph that runs across pages, with
+    one ``prov`` entry per page. The IR keeps that chain in ``physical_boxes``,
+    but ``bbox.page`` (and ``provenance.source_page``) name only the FIRST page.
+    Reading just those reported pages 2-4 as having no text layer, so the
+    partial-read guard refused a book it had in fact read completely — every
+    crash/resume e2e failed on the default engine for that reason.
+    """
+    from ubt.adapters.pdf.docling_parser import _pages_covered_by_blocks
+
+    fused = _make_block(BlockType.NARRATIVE, "a paragraph across four pages", page=1)
+    # The chain Docling actually produced for the e2e fixture.
+    fused.provenance.physical_boxes = [
+        {"page": page, "bbox": [54.0, 719.5, 606.9, 746.6]} for page in (1, 2, 3, 4)
+    ]
+    assert _pages_covered_by_blocks([fused]) == {1, 2, 3, 4}
+
+    # A single-box block still reports its own page.
+    single = _make_block(BlockType.NARRATIVE, "one page only", page=7)
+    assert _pages_covered_by_blocks([single]) == {7}
+
+    # An IMAGE block covers nothing: an image-only page has no text layer.
+    image = _make_block(BlockType.IMAGE, "scan.png", page=9, skip=True)
+    assert _pages_covered_by_blocks([image]) == set()
+
+    # A textless block covers nothing either.
+    blank = _make_block(BlockType.NARRATIVE, "   ", page=11)
+    assert _pages_covered_by_blocks([blank]) == set()
+
+
 # --------------------------------------------------------------------------- #
 # The egress gate: `allow_page_upload` is the only switch that permits page
 # images to leave the machine. `ocr_mode` selects a route, it does not

@@ -181,6 +181,65 @@ class RepairLoop:
         )
         return block
 
+    @staticmethod
+    def _flags_are_recheckable(error_flags: list[str]) -> bool:
+        """Whether a rewritten candidate can be *checked* against these flags.
+
+        True when at least one flag is produced by a deterministic check that
+        ``FastPassFilter.evaluate`` re-runs on any candidate: the repetition,
+        dropped-table, empty-target, echo and numeric-fidelity defects all have
+        an evaluator, so "no span" does not make them unverifiable -- the
+        annotation step simply has no *location* to point at, while the
+        acceptance step can still confirm or refute the defect by re-reading the
+        rewrite.
+
+        False when every flag is a lifecycle note with no evaluator (a bare
+        "repair failed" remark): there is nothing to compare a rewrite against,
+        so paying for one would replace a translation nobody objected to with
+        one nobody checked.
+        """
+        from ubt.core.qe.defect_taxonomy import (
+            REPAIR_ERROR_PREFIX,
+            STRUCTURAL_DEFECT_MARKERS,
+        )
+
+        # A provider/lifecycle failure ("Repair error: 500", "repair failed")
+        # also reads as structural in the taxonomy -- that is what keeps it out
+        # of the auto-pass path -- but it is *about the call*, not the text, so
+        # no candidate can be checked against it. Strip those first.
+        _LIFECYCLE = (REPAIR_ERROR_PREFIX, "repair_unverifiable", "repair_structural_failure")
+        quality_flags = [f for f in error_flags if not any(m in f for m in _LIFECYCLE)]
+        return any(
+            any(marker in flag for marker in STRUCTURAL_DEFECT_MARKERS) for flag in quality_flags
+        )
+
+    def _record_unrepairable_no_span(self, block: IRBlock, draft_text: str) -> None:
+        """Close a repair attempt the span annotator could not localise.
+
+        The draft is left exactly as it was: a whole-block rewrite cannot be
+        verified against a defect that names no location, so adopting one would
+        replace a translation nobody objected to on its text with one nobody
+        checked. The block lands terminal (FAILED) with an explicit flag instead
+        of a fabricated ``repaired``.
+        """
+        marker = (
+            "repair_unverifiable: the defect names no location in the draft, "
+            "so no model repair was attempted (a whole-block rewrite cannot be "
+            "verified against it)"
+        )
+        merged = list(block.error_flags)
+        if marker not in merged:
+            merged.append(marker)
+        if draft_text:
+            block.target_text = draft_text
+        block.error_flags = merged
+        block.status = BlockStatus.FAILED
+        logger.info(
+            "Block %s left un-repaired: no error span to verify a rewrite against (%s)",
+            block.id,
+            ", ".join(merged[:3]),
+        )
+
     def select_repair_candidates(self, blocks: list[IRBlock]) -> list[IRBlock]:
         """Blocks whose repair is *verifiable*: a deterministic invariant failed.
 
@@ -308,6 +367,34 @@ class RepairLoop:
             glossary_entries=glossary_entries,
         )
         has_spans = bool(error_spans)
+
+        # No span, no model call -- unless the defect is one a rewrite can
+        # actually be *checked* against.
+        #
+        # The span annotator only produces spans for defects it can locate in the
+        # draft text (a numeric token, a term surface, an HTML tag pair). Length,
+        # omission and repetition flags produce none, and with no span the
+        # candidate used to be adopted on structural soundness alone
+        # (``is_preserved`` short-circuited to True whenever ``error_spans`` was
+        # empty), i.e. the block was re-translated and whatever came back was
+        # accepted without any comparison to what it replaced.
+        #
+        # But "no span" is not the same as "unverifiable". The deterministic
+        # checks that *raise* these flags -- repetition, dropped tables, empty or
+        # echoed targets, numeric fidelity -- are the same ones
+        # ``FastPassFilter.evaluate`` runs, and the repair path re-runs it on
+        # every candidate via ``_structural_check``. A repetition or a dropped
+        # table is confirmed or refuted by re-reading the candidate, so refusing
+        # to even try left those blocks terminal FAILED with no retry path
+        # (``repair_unverifiable`` is not a transient prefix, so resume never
+        # picks them up either).
+        #
+        # Only when *every* remaining flag names no location and has no
+        # evaluator -- in practice a bare "repair failed" note -- is a rewrite
+        # genuinely uncheckable, and then we keep the draft and stop paying.
+        if not has_spans and not self._flags_are_recheckable(block.error_flags):
+            self._record_unrepairable_no_span(block, draft_text)
+            return block
 
         # L4 Visual Scalpel precision cropping for hard blocks (formula, table, low QE)
         image_b64: str | None = None
