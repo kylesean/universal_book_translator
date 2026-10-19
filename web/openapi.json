@@ -4093,6 +4093,17 @@
             "type": "boolean",
             "title": "Rehearsal",
             "default": false
+          },
+          "page_scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page Scope"
           }
         },
         "type": "object",
@@ -4607,6 +4618,22 @@
           "has_output": {
             "type": "boolean",
             "title": "Has Output"
+          },
+          "rehearsal": {
+            "type": "boolean",
+            "title": "Rehearsal",
+            "default": false
+          },
+          "page_scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page Scope"
           }
         },
         "type": "object",

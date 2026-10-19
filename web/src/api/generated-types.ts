@@ -1146,6 +1146,8 @@ export interface components {
              * @default false
              */
             rehearsal: boolean;
+            /** Page Scope */
+            page_scope?: string | null;
         };
         /**
          * JobSubmitRequest
@@ -1370,6 +1372,13 @@ export interface components {
             updated_at?: string | null;
             /** Has Output */
             has_output: boolean;
+            /**
+             * Rehearsal
+             * @default false
+             */
+            rehearsal: boolean;
+            /** Page Scope */
+            page_scope?: string | null;
         };
         /**
          * JobUploadResponse

@@ -139,3 +139,117 @@ def test_delete_still_removes_a_verified_job_ledger(tmp_path: Path) -> None:
     res = client.delete(f"/jobs/{_JOB}", headers=_AUTH)
     assert res.status_code == 200
     assert not (config.db_dir / f"{_JOB}.sqlite").exists()
+
+
+# --------------------------------------------------------------------------- #
+# The queue row is part of a job's history.
+# --------------------------------------------------------------------------- #
+
+
+def test_delete_also_drops_the_queue_row(tmp_path: Path) -> None:
+    """A surviving queue row made a deleted job reappear as COMPLETED.
+
+    ``DELETE`` removed the ledger, sidecars and output directory but never the
+    ``job_queue`` row, so ``/jobs`` kept listing the job with a download button
+    that resolved to a 409. Re-submitting the same id then hit ``enqueue``'s
+    "already completed" branch and returned the dead row — the job silently
+    never ran again.
+    """
+    from ubt.core.engine.job_queue import JobQueue
+
+    config = _seed(tmp_path)
+    # The app only builds a queue in queue mode; pass the same instance the app
+    # will use so the test observes the rows the running server does.
+    queue = JobQueue(config.db_dir / "job_queue.sqlite")
+    config = config.model_copy(update={"job_mode": "queue"})
+    try:
+        queue.enqueue(
+            _JOB,
+            {"input_path": str(tmp_path / "in.md"), "target_lang": "zh"},
+        )
+        # Drive it to a terminal state the way a worker does: claim, then complete.
+        claimed = queue.claim("worker-1")
+        assert claimed is not None and claimed.job_id == _JOB
+        assert queue.complete(_JOB, "worker-1", status=JobStatus.COMPLETED)
+        assert queue.get(_JOB) is not None
+
+        client = TestClient(create_app(config, queue=queue))
+        res = client.delete(f"/jobs/{_JOB}", headers=_AUTH)
+        assert res.status_code == 200, res.json()
+        assert queue.get(_JOB) is None, "the queue row must not outlive the job"
+    finally:
+        queue.close()
+
+
+def test_queue_rows_projection_lists_a_job_before_its_ledger_exists() -> None:
+    """``/jobs`` must show a queued job, which has no ledger until a worker claims it.
+
+    The list was a glob over ``db_dir/*.sqlite`` only, so submitting ten jobs left
+    the console empty while ``/status`` for the same ids reported a queue
+    position. Operators re-submitted, producing duplicates and duplicate spend.
+    """
+    from ubt.api.job_catalog import list_job_summaries, summarize_queued_job
+
+    class _Row:
+        job_id = "queued000001"
+        status = JobStatus.QUEUED
+        enqueued_at = 1_700_000_000.0
+        payload = {
+            "input_path": "/books/chapter-3.pdf",
+            "target_lang": "zh",
+            "pages": [1, 2, 3, 5],
+        }
+        progress: dict[str, object] = {}
+
+    row = summarize_queued_job(_Row())
+    assert row["job_id"] == "queued000001"
+    assert row["file_name"] == "chapter-3.pdf"
+    assert row["status"] == JobStatus.QUEUED.value
+    assert row["page_scope"] == "1-3,5"
+    assert row["has_output"] is False
+    # The absolute path must not leak into the summary (same rule as summaries
+    # read from a ledger).
+    assert "/books/" not in str(row)
+
+    # A ledger row for the same id wins, and the queued row fills the gap only.
+    empty_dir = __import__("tempfile").mkdtemp()
+    listed = list_job_summaries(__import__("pathlib").Path(empty_dir), queued=[_Row()])
+    assert [item["job_id"] for item in listed] == ["queued000001"]
+
+
+# --------------------------------------------------------------------------- #
+# /status must not invent a failure for a job someone is actively writing.
+# --------------------------------------------------------------------------- #
+
+
+def test_status_reports_running_while_a_live_writer_holds_the_lease(tmp_path: Path) -> None:
+    """A live lease means the job is running, not that "the server restarted".
+
+    Embedded mode has no startup reconcile, so any non-terminal ledger row used
+    to be rewritten to FAILED. The CLI and the API share ``db_dir``, so a
+    ``ubt translate`` running in another terminal was reported as failed — and
+    the suggested "re-run it" collides with the writer lock or pays twice.
+    """
+    from ubt.core.engine.writer_lock import LedgerWriterLock
+
+    config = _seed(tmp_path, status=JobStatus.RUNNING)
+    db_path = config.db_dir / f"{_JOB}.sqlite"
+
+    # A second process (the CLI) holds the writer lease for this ledger.
+    lock = LedgerWriterLock(db_path, _JOB)
+    lock.acquire()
+    try:
+        client = TestClient(create_app(config))
+        live = client.get(f"/jobs/{_JOB}/status", headers=_AUTH)
+        assert live.status_code == 200
+        assert live.json()["status"] == JobStatus.RUNNING.value, live.json()
+        assert live.json()["error"] is None
+    finally:
+        lock.release()
+
+    # Nobody holds the lease now: the row really is a crash leftover.
+    client = TestClient(create_app(config))
+    dead = client.get(f"/jobs/{_JOB}/status", headers=_AUTH)
+    assert dead.status_code == 200
+    assert dead.json()["status"] == JobStatus.FAILED.value, dead.json()
+    assert "server restarted" in (dead.json()["error"] or "")
