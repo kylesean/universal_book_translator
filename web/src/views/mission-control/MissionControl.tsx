@@ -9,6 +9,7 @@ import {
   RotateCcw,
   Download,
   Trash2,
+  AlertTriangle,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
@@ -66,6 +67,11 @@ export function MissionControl() {
   const [resuming, setResuming] = useState(false)
   const [downloading, setDownloading] = useState(false)
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
+  // The job's terminal error, as the engine phrased it for an operator. The
+  // status payload always carried it and the console never read it, so a
+  // failed job showed a red FAILED badge and nothing else — the operator had
+  // to open the server logs to learn why.
+  const [jobError, setJobError] = useState<string | null>(null)
 
   const logContainerRef = useRef<HTMLDivElement>(null)
 
@@ -100,6 +106,11 @@ export function MissionControl() {
       if (typeof res.total_blocks === 'number') setTotalBlocks(res.total_blocks)
       if (typeof res.estimated_cost_usd === 'number') setCostUsd(res.estimated_cost_usd)
       if (typeof res.current_avg_qe === 'number') setAvgQe(res.current_avg_qe)
+      // The engine already phrases a terminal error for the operator
+      // (`public_job_error` keeps the actionable types verbatim). Without this
+      // read, a failed job was a badge with no reason.
+      if (typeof res.error === 'string' && res.error.trim()) setJobError(res.error)
+      else if (res.status && String(res.status) !== 'failed') setJobError(null)
       // Queue mode reports where the job sits while it waits; the field was
       // always in the response and never rendered, so a queued job looked
       // identical to a stalled one.
@@ -369,6 +380,20 @@ export function MissionControl() {
         </div>
       </div>
 
+      {/* Terminal failure reason. The engine writes this message FOR an
+          operator (a missing Typst binary, an encrypted PDF, an exhausted
+          budget each name their own next step); the console used to show only
+          a red badge, which left "why did it fail" to the server logs. */}
+      {jobError && isFailed && (
+        <div className="rounded-lg border border-[#b91c1c]/30 bg-[#b91c1c]/5 px-3.5 py-2.5 text-xs text-[var(--ink-secondary)] flex items-start gap-2 shrink-0">
+          <AlertTriangle className="h-4 w-4 text-[#b91c1c] shrink-0 mt-0.5" />
+          <div className="space-y-0.5 min-w-0">
+            <div className="font-semibold text-[var(--ink-primary)]">{t.mission.failureReason}</div>
+            <p className="font-mono break-words leading-relaxed">{jobError}</p>
+          </div>
+        </div>
+      )}
+
       {/* Global Job Queue (PRD §4.2.1) — read from the durable ledgers so a
           restarted console still lists finished runs. */}
       <div className="rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] overflow-hidden shrink-0 shadow-2xs">
@@ -417,9 +442,24 @@ export function MissionControl() {
                       {job.file_name}
                     </td>
                     <td className="py-2 px-3">
-                      <Badge variant={statusVariant(job.status)} dot className="text-xs">
-                        {job.status.toUpperCase()}
-                      </Badge>
+                      <div className="flex items-center gap-1.5">
+                        <Badge variant={statusVariant(job.status)} dot className="text-xs">
+                          {job.status.toUpperCase()}
+                        </Badge>
+                        {/* A rehearsal ships echo text and a --pages run ships a
+                            fragment; both used to look like a full real run in
+                            this list. */}
+                        {job.rehearsal && (
+                          <Badge variant="outline" className="text-xs">
+                            {t.mission.rowRehearsal}
+                          </Badge>
+                        )}
+                        {job.page_scope && (
+                          <Badge variant="outline" className="text-xs font-mono">
+                            p{job.page_scope}
+                          </Badge>
+                        )}
+                      </div>
                     </td>
                     <td className="py-2 px-3 font-mono text-[var(--ink-primary)]">
                       {job.progress_percent.toFixed(1)}%

@@ -190,6 +190,8 @@ export const zh: TranslationDictionary = {
     autoScroll: '自动滚动',
     noMatch: '无匹配日志。',
     resumeCompile: '断点续跑',
+    rowRehearsal: '演练',
+    failureReason: '任务失败',
     resuming: '续跑中…',
     downloadPrimary: '下载译文',
     noDeliverables: '产物尚未就绪',
@@ -201,9 +203,11 @@ export const zh: TranslationDictionary = {
     subtitle: '工业级出版防线：数学公式严谨性、术语一致性、排版碰撞溢出及不可篡改存证。',
     noJobTitle: '暂无待审计的编译任务',
     noJobDesc: '请在任务大屏中选择一个已完成或正在编译的任务以查看形式化验证指标。',
+    rehearsalBadge: '演练任务 — 产出为回显文本，不是译文',
+    rehearsalBody:
+      '本次运行使用离线回显提供方（--dry-run）。产物是原文回显，下面所有检查按构造必然通过，因此该判定只代表管线跑通，不代表译文质量。',
     decisionReady: '出版就绪 (PRODUCTION READY)',
     decisionBlocked: '门禁阻断 (GATE BLOCKED)',
-    deliveryAdvisory: '交付提示',
     allPassedDesc: '已通过全部形式化防线验证。公式丢失率为 0%，术语一致性在出版容差范围内。',
     blockedDesc: '触发质检阻断：需在 L3 审校台人工后编排查确认后方可交付出版。',
     // 展示值实为 summary.pass_rate（已完成块 / 总块数），并非像素/版面保真度测量。

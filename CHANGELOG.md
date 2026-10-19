@@ -144,6 +144,13 @@ Pre-1.0, no tags yet. Everything below is in the current tree.
 
 ### Fixed
 
+- A **password-protected PDF** now fails `translate` with an actionable
+  `DocumentParseError` ("decrypt it before translating") instead of Docling's
+  raw `ConversionError` plus a burst of pdf_oxide `Decryption failed ... Not
+  authenticated` noise. The guard runs before engine routing and again at
+  manifest extraction, so Docling and pdfium share one message; `--profile auto`
+  skips the archetype probe for an encrypted file so the noise never starts.
+  `assess` keeps its existing Chinese refusal.
 - A table of contents now renders **as a table of contents**, not as a run of
   section headings. The PDF reader pairs each TOC title with its page number and
   tags the block (`provenance.toc_entry` / `toc_page`), but the renderer never

@@ -207,6 +207,8 @@ export const en: TranslationDictionary = {
     autoScroll: 'Auto-scroll',
     noMatch: 'No matching log lines.',
     resumeCompile: 'Resume',
+    rowRehearsal: 'dry run',
+    failureReason: 'Job failed',
     resuming: 'Resuming…',
     downloadPrimary: 'Download Translation',
     noDeliverables: 'Deliverables are not ready yet',
@@ -218,9 +220,11 @@ export const en: TranslationDictionary = {
     subtitle: 'Industrial-grade publication defense: mathematical integrity, lexical drift, collision gates, and cryptographic contract.',
     noJobTitle: 'No Job Selected for Audit',
     noJobDesc: 'Select a completed or running job from Mission Control to view formal verification results.',
+    rehearsalBadge: 'Rehearsal — echo text, not a translation',
+    rehearsalBody:
+      'This run used the offline echo provider (--dry-run). The artifact repeats the source and every check below passes by construction, so treat the verdict as a pipeline check, not a quality verdict.',
     decisionReady: 'PRODUCTION READY',
     decisionBlocked: 'GATE BLOCKED',
-    deliveryAdvisory: 'Delivery advisory',
     allPassedDesc: 'All formal checks passed. Formula dropout is 0%, terminology drift within tolerances.',
     blockedDesc: 'Gate blocked: manual post-editing review required before publication release.',
     // The number shown is ``summary.pass_rate`` = completed / total blocks.

@@ -158,6 +158,8 @@ export interface TranslationDictionary {
     autoScroll: string
     noMatch: string
     resumeCompile: string
+    failureReason: string
+    rowRehearsal: string
     resuming: string
     downloadPrimary: string
     noDeliverables: string
@@ -169,9 +171,10 @@ export interface TranslationDictionary {
     subtitle: string
     noJobTitle: string
     noJobDesc: string
+    rehearsalBadge: string
+    rehearsalBody: string
     decisionReady: string
     decisionBlocked: string
-    deliveryAdvisory: string
     allPassedDesc: string
     blockedDesc: string
     fidelityScore: string

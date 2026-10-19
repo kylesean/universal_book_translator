@@ -9,6 +9,7 @@ import {
   AlertTriangle,
   ChevronDown,
   ChevronRight,
+  Info,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
@@ -197,19 +198,17 @@ export function QualityGateView() {
   const config = report?.config_snapshot ?? {}
 
   const failedBlocks = summary.failed_blocks ?? 0
-  // ``delivery_status`` is set by the export stage's layout advisory whenever a
-  // formula-dense document is composed by the renderer
-  // (ubt/core/engine/stages/advisory.py). It is an *advisory*, not a gate stop:
-  // the only literal the engine ever writes is the LAYOUT_TRADEOFF_ADVISORY
-  // string, so the screen must surface whatever status/warning the report
-  // carries rather than testing for a sentinel the engine never produces.
-  // The gate decision itself is the shared three-state verdict the backend
-  // computes (job_options.delivery_verdict_from_summary — the same rule the
-  // CLI banner applies), falling back to failed-blocks-only for reports
-  // served before the field existed.
-  const deliveryStatus: string | null = report?.delivery_status ?? null
-  const deliveryWarning: string | null = report?.delivery_warning ?? null
+  // The gate decision is the shared three-state verdict the backend computes
+  // (`job_options.delivery_verdict_from_summary` — the same rule the CLI banner
+  // applies), falling back to failed-blocks-only for reports served before the
+  // field existed. Two report fields this screen used to read
+  // (`delivery_status` / `delivery_warning`) were removed: no engine code ever
+  // assigned them, so the advisory banner they fed could never appear.
   const verdict: string | null = report?.delivery_verdict ?? null
+  // A rehearsal's artifact is echo text, not a translation. Every structural
+  // gate passes it by construction, so without this flag the screen showed
+  // "PRODUCTION READY" over `[模拟翻译]` text.
+  const rehearsal: boolean = report?.rehearsal === true
   const isPassed = verdict ? verdict === 'passed' : failedBlocks === 0
   const isWarning = verdict === 'warning'
   const fidelityScore = Math.round((summary.pass_rate ?? 0) * 1000) / 10
@@ -462,19 +461,18 @@ export function QualityGateView() {
         </div>
       )}
 
-      {/* Delivery advisory (layout tradeoff on formula-dense documents). The
-          engine writes this on every render of a formula-dense book, so
-          the operator must see the tradeoff before trusting the artifact. */}
-      {deliveryStatus && (
-        <div className="p-3 rounded-lg border border-[#b45309]/30 bg-[#b45309]/5 text-xs flex items-start gap-2">
-          <AlertTriangle className="h-4 w-4 text-[#b45309] shrink-0 mt-0.5" />
+      {/* Rehearsal watermark. A dry run's artifact is the source text behind
+          `[模拟翻译]`, and every structural gate passes it by construction —
+          so without this banner the screen's "PRODUCTION READY / PASS" is a
+          statement about echo text. */}
+      {rehearsal && (
+        <div className="p-3 rounded-lg border border-[#1d4ed8]/30 bg-[#1d4ed8]/5 text-xs flex items-start gap-2">
+          <Info className="h-4 w-4 text-[#1d4ed8] shrink-0 mt-0.5" />
           <div className="space-y-1">
-            <div className="font-mono uppercase tracking-wider text-xs font-semibold text-[#b45309]">
-              {t.quality.deliveryAdvisory}
+            <div className="font-mono uppercase tracking-wider text-xs font-semibold text-[#1d4ed8]">
+              {t.quality.rehearsalBadge}
             </div>
-            <p className="text-[var(--ink-secondary)] leading-relaxed">
-              {deliveryWarning ?? deliveryStatus}
-            </p>
+            <p className="text-[var(--ink-secondary)] leading-relaxed">{t.quality.rehearsalBody}</p>
           </div>
         </div>
       )}
