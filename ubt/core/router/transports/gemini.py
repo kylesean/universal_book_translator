@@ -140,7 +140,9 @@ class GeminiTransport(BaseTransport):
             return "stop"
         return None
 
-    def _record_gemini_usage(self, target_model: str, data: dict[str, Any]) -> None:
+    def _record_gemini_usage(
+        self, target_model: str, data: dict[str, Any], *, batch: bool = False
+    ) -> None:
         usage = data.get("usageMetadata") or {}
         self._record_usage(
             target_model,
@@ -153,6 +155,7 @@ class GeminiTransport(BaseTransport):
                 + int(usage.get("thoughtsTokenCount", 0) or 0),
                 "prompt_cache_hit_tokens": int(usage.get("cachedContentTokenCount", 0) or 0),
             },
+            batch=batch,
             unmeasured=not usage,
         )
 
@@ -361,12 +364,22 @@ class GeminiTransport(BaseTransport):
                 results[custom_id] = {"content": None, "error": str(err["message"])}
                 continue
             body = entry.get("response") or {}
-            self._record_gemini_usage(str(body.get("modelVersion") or self._default_model), body)
+            self._record_gemini_usage(
+                str(body.get("modelVersion") or self._default_model), body, batch=True
+            )
             text = self._extract_text(body).strip()
             line_error: str | None = None
             if not text:
                 line_error = "Batch response has no text content"
-            elif self._finish_reason(body) in _LENGTH_REASONS:
+            # ``_finish_reason`` normalizes the wire's ``MAX_TOKENS`` to the
+            # protocol-neutral ``"length"``, so comparing against
+            # ``_LENGTH_REASONS`` (the raw wire vocabulary) was constant False:
+            # a response cut off by ``maxOutputTokens`` that still carried a
+            # partial sentence was finalized as a success, putting half a
+            # translation into the book with no error and no continuation. The
+            # batch path has no continuation loop, so the truncation must be
+            # reported as a line error for the caller to retry.
+            elif self._finish_reason(body) == "length":
                 line_error = "Batch response truncated at maxOutputTokens"
             results[custom_id] = {"content": text or None, "error": line_error}
         return results

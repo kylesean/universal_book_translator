@@ -366,17 +366,27 @@ class OpenAICompatibleProvider(BaseModelProvider):
             **shared_kw,
         )
 
+    def _transport_for(self, api_mode: str) -> BaseTransport:
+        """The transport that speaks ``api_mode``.
+
+        One table for both the interactive and the batch path: they must never
+        disagree about which protocol a name means, or a run drafts over one wire
+        and submits its batch over another. Keys are the ``ApiMode`` literal
+        values from :mod:`ubt.core.config` -- spelled out here rather than
+        imported to keep this module free of a config dependency (the router is
+        below config in the import order).
+        """
+        return {
+            "openai-responses": self._responses_transport,
+            "anthropic-messages": self._anthropic_transport,
+            "gemini-native": self._gemini_transport,
+        }.get(api_mode, self._chat_transport)
+
     def _select_transport(self) -> BaseTransport:
         # The protocol is fixed for the provider's lifetime. It takes no model:
         # a fallback chain that lands on another model family must not silently
         # change the wire mid-run.
-        if self._api_mode == "openai-responses":
-            return self._responses_transport
-        if self._api_mode == "anthropic-messages":
-            return self._anthropic_transport
-        if self._api_mode == "gemini-native":
-            return self._gemini_transport
-        return self._chat_transport
+        return self._transport_for(self._api_mode)
 
     def begin_usage_sink(self) -> dict[str, dict[str, int]]:
         """Start per-run usage attribution for this task."""
@@ -516,16 +526,25 @@ class OpenAICompatibleProvider(BaseModelProvider):
     # ------------------------------------------------------------------
     # Batch API (delegated to the transport for the selected protocol)
     # ------------------------------------------------------------------
-    #: Which transport owns the Batch API for each wire protocol. Every protocol
-    #: now has a batch implementation (OpenAI-compatible /files+/batches,
-    #: Anthropic Message Batches, Gemini :batchGenerateContent), so a book run
-    #: gets the provider's official discount whichever protocol is selected.
     def _batch_transport(self) -> BaseTransport:
-        return {
-            "openai-chat": self._chat_transport,
-            "anthropic": self._anthropic_transport,
-            "gemini": self._gemini_transport,
-        }.get(self._api_mode, self._chat_transport)
+        """The transport that owns the Batch API for this provider's protocol.
+
+        Every protocol has a batch implementation (OpenAI-compatible
+        /files+/batches, Anthropic Message Batches, Gemini
+        :batchGenerateContent), so a book run gets the provider's official
+        discount whichever protocol is selected.
+
+        Resolved through the same table as the interactive path
+        (:meth:`_transport_for`). It used to carry its own map keyed
+        ``"anthropic"`` / ``"gemini"`` -- names no ``ApiMode`` literal ever
+        holds -- so both keys were dead and every provider fell through to the
+        OpenAI chat transport. Selecting an Anthropic or Gemini preset with
+        ``batch_enabled`` then POSTed OpenAI's ``/files`` route at the other
+        vendor's host, 404'd, and silently fell back to full-price per-block
+        drafting: the batch discount was unreachable while the log carried one
+        warning line.
+        """
+        return self._transport_for(self._api_mode)
 
     @property
     def supports_batch_api(self) -> bool:

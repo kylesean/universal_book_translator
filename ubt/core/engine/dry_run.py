@@ -101,6 +101,23 @@ def create_dry_run_orchestrator(
     router = ModelRouter(
         provider=DryRunModelProvider(),
         rate_limiter=AdaptiveTokenBucket(initial_rpm=100_000, max_rpm=100_000),
+        # The rehearsal must exercise the *configured* prompt strategy, or it
+        # proves the plumbing of a run the operator never asked for: with
+        # ``prompt_strategy=minimal`` a real run sends a different prompt shape
+        # than the one the rehearsal rendered, and the rehearsal's "it works"
+        # says nothing about the run it is standing in for. The model tiers are
+        # passed for the same reason even though the echo provider ignores them
+        # -- routing them here keeps the two routers' surfaces identical, so a
+        # later change cannot make the rehearsal silently skip a tier.
+        draft_model=rehearsal_config.draft_model,
+        repair_model=rehearsal_config.repair_model,
+        draft_reasoning_effort=rehearsal_config.draft_reasoning_effort,
+        repair_reasoning_effort=rehearsal_config.repair_reasoning_effort,
+        fallback_models=rehearsal_config.fallback_models,
+        prompt_strategy_override=rehearsal_config.prompt_strategy,
+        # The rehearsal closes page-image egress above; the router's master gate
+        # must agree, or visual-scalpel repair would still try to upload pages.
+        allow_page_upload=False,
     )
     return PipelineOrchestrator(
         config=rehearsal_config,

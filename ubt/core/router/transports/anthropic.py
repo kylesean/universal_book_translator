@@ -23,6 +23,33 @@ logger = logging.getLogger(__name__)
 #: ``reasoning_effort`` -> Anthropic extended-thinking token budget.
 _REASONING_EFFORT_BUDGETS: dict[str, int] = {"low": 1024, "medium": 4096, "high": 8192}
 
+#: Default completion budget when the caller names none. The Messages API has no
+#: server-side default, so every request must carry one.
+_DEFAULT_MAX_TOKENS = 4096
+
+
+def _apply_max_tokens(params: dict[str, Any], requested: Any) -> dict[str, Any]:
+    """Set ``max_tokens`` on ``params``, defaulting exactly as the live path does."""
+    params["max_tokens"] = int(requested) if requested else _DEFAULT_MAX_TOKENS
+    return params
+
+
+def _apply_thinking(params: dict[str, Any], reasoning_effort: Any) -> dict[str, Any]:
+    """Translate ``reasoning_effort`` into an extended-thinking budget.
+
+    Anthropic expresses reasoning as a token budget, not an "effort" enum, and
+    requires ``max_tokens > budget_tokens`` while forbidding a custom temperature
+    alongside thinking. Shared by the interactive and batch paths so a
+    reasoning-tier batch item cannot ship without a budget big enough to hold it.
+    """
+    budget = _REASONING_EFFORT_BUDGETS.get(str(reasoning_effort or "").lower())
+    if budget is None:
+        return params
+    params["thinking"] = {"type": "enabled", "budget_tokens": budget}
+    params["max_tokens"] = max(int(params.get("max_tokens") or _DEFAULT_MAX_TOKENS), budget + 1024)
+    params.pop("temperature", None)
+    return params
+
 
 class AnthropicMessagesTransport(BaseTransport):
     """Transport for Anthropic Claude native Messages API (/v1/messages)."""
@@ -77,7 +104,7 @@ class AnthropicMessagesTransport(BaseTransport):
         payload: dict[str, Any] = {
             "model": target_model,
             "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": max_tokens or 4096,
+            **_apply_max_tokens({}, max_tokens),
         }
         if system_prompt:
             if self._prompt_caching:
@@ -92,18 +119,10 @@ class AnthropicMessagesTransport(BaseTransport):
                 payload["system"] = system_prompt
         if temperature is not None:
             payload["temperature"] = temperature
-        if reasoning_effort:
-            budget = _REASONING_EFFORT_BUDGETS.get(reasoning_effort.lower())
-            if budget is not None:
-                # Anthropic expresses reasoning as an extended-thinking token
-                # budget, not an "effort" enum, so the parameter is translated
-                # rather than dropped. Anthropic requires
-                # ``max_tokens > budget_tokens`` and forbids a custom temperature
-                # alongside thinking; the response parser reads only ``text``
-                # blocks, so the extra thinking block is ignored.
-                payload["thinking"] = {"type": "enabled", "budget_tokens": budget}
-                payload["max_tokens"] = max(int(payload["max_tokens"]), budget + 1024)
-                payload.pop("temperature", None)
+        # Anthropic requires ``max_tokens > budget_tokens`` and forbids a custom
+        # temperature alongside thinking; the response parser reads only ``text``
+        # blocks, so the extra thinking block is ignored.
+        _apply_thinking(payload, reasoning_effort)
 
         client = self._get_client()
         url = self._messages_url()
@@ -415,24 +434,33 @@ def _messages_params_from_request(req: dict[str, Any]) -> dict[str, Any]:
     if isinstance(body, dict) and isinstance(body.get("messages"), list):
         params: dict[str, Any] = {"model": body.get("model") or req.get("model") or ""}
         system_parts: list[str] = []
-        messages: list[dict[str, Any]] = []
+        messages: list[dict[str, str]] = []
         for msg in body["messages"]:
             role = str(msg.get("role") or "user")
             content = msg.get("content")
             if role == "system":
                 system_parts.append(str(content or ""))
             else:
-                messages.append({"role": role, "content": content})
+                messages.append({"role": role, "content": str(content or "")})
         params["messages"] = messages or [{"role": "user", "content": ""}]
         if system_parts:
             params["system"] = "\n\n".join(part for part in system_parts if part)
-        if body.get("max_tokens"):
-            params["max_tokens"] = body["max_tokens"]
+        # ``max_tokens`` is REQUIRED by the Messages API and has no server-side
+        # default. Copying it only when truthy meant a reasoning-tier request --
+        # which deliberately omits it and lets the thinking budget drive the
+        # value -- produced a batch item with no ``max_tokens`` at all, and the
+        # whole batch 400'd item by item. Apply the same default the interactive
+        # path uses, and let thinking raise it the same way.
+        _apply_max_tokens(params, body.get("max_tokens"))
         if body.get("temperature") is not None:
             params["temperature"] = body["temperature"]
+        _apply_thinking(params, body.get("reasoning_effort"))
         return params
-    return {
-        "model": req.get("model") or "",
-        "messages": [{"role": "user", "content": str(req.get("prompt") or "")}],
-        "max_tokens": req.get("max_tokens") or 4096,
-    }
+    return _apply_thinking(
+        {
+            "model": req.get("model") or "",
+            "messages": [{"role": "user", "content": str(req.get("prompt") or "")}],
+            **_apply_max_tokens({}, req.get("max_tokens")),
+        },
+        req.get("reasoning_effort"),
+    )

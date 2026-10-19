@@ -204,17 +204,176 @@ def test_gemini_empty_requests_rejected() -> None:
         asyncio.run(t.create_batch_job([]))
 
 
+def test_gemini_batch_flags_a_truncated_response_as_an_error() -> None:
+    """A response cut off by ``maxOutputTokens`` must not pass as a success.
+
+    ``_finish_reason`` normalizes the wire's ``MAX_TOKENS`` to ``"length"``, but
+    the batch collector compared the normalized value against the raw wire
+    vocabulary (``{"MAX_TOKENS"}``), so the test was constant False: a truncated
+    response that still carried a partial sentence was finalized as content and
+    half a translation entered the book. The batch path has no continuation
+    loop, so this error is the only retry signal.
+    """
+    calls: list[httpx.Request] = []
+    op = httpx.Response(
+        200,
+        json={
+            "name": "batches/t",
+            "done": True,
+            "response": {
+                "responses": [
+                    {
+                        "metadata": {"key": "c1"},
+                        "response": {
+                            "candidates": [
+                                {
+                                    "content": {"parts": [{"text": "半句译"}]},
+                                    "finishReason": "MAX_TOKENS",
+                                }
+                            ],
+                            "usageMetadata": {
+                                "promptTokenCount": 10,
+                                "candidatesTokenCount": 5,
+                            },
+                        },
+                    }
+                ]
+            },
+        },
+    )
+    t = _gemini(calls, {"/v1beta/batches/t": op})
+
+    import asyncio
+
+    results = asyncio.run(t.fetch_batch_results("batches/t"))
+    assert results["c1"]["error"] == "Batch response truncated at maxOutputTokens"
+
+
+def test_gemini_batch_usage_is_recorded_at_the_batch_rate() -> None:
+    """Batch tokens must land in ``batch_*_tokens``, or the report doubles the bill.
+
+    ``_record_gemini_usage`` had no ``batch`` parameter and the batch collector
+    never passed one, so every Gemini batch call was accumulated at full price:
+    the budget preflight burned through roughly twice as fast and the cost
+    report quoted the list price for a 50%-discounted bill. The Anthropic and
+    OpenAI-compatible transports already passed ``batch=True``.
+    """
+    calls: list[httpx.Request] = []
+    op = httpx.Response(
+        200,
+        json={
+            "name": "batches/u",
+            "done": True,
+            "response": {
+                "responses": [
+                    {
+                        "metadata": {"key": "c1"},
+                        "response": {
+                            "candidates": [
+                                {"content": {"parts": [{"text": "你好"}]}, "finishReason": "STOP"}
+                            ],
+                            "usageMetadata": {
+                                "promptTokenCount": 10,
+                                "candidatesTokenCount": 5,
+                            },
+                        },
+                    }
+                ]
+            },
+        },
+    )
+    t = _gemini(calls, {"/v1beta/batches/u": op})
+
+    import asyncio
+
+    asyncio.run(t.fetch_batch_results("batches/u"))
+    totals = dict(t._cumulative_totals)
+    assert totals["batch_prompt_tokens"] == 10
+    assert totals["batch_completion_tokens"] == 5
+
+
+def test_anthropic_batch_always_carries_max_tokens() -> None:
+    """The Messages API requires ``max_tokens``; batch items must never omit it.
+
+    The converter copied ``max_tokens`` only when truthy, so a reasoning-tier
+    request -- which deliberately omits it and lets the thinking budget drive the
+    value -- produced a batch item with no ``max_tokens`` at all and every item
+    400'd. Masked in practice by the batch-routing bug, which kept this transport
+    unreachable.
+    """
+    from ubt.core.router.transports.anthropic import _messages_params_from_request
+
+    body = {"messages": [{"role": "user", "content": "hi"}]}
+    plain = _messages_params_from_request({"model": "claude", "body": dict(body)})
+    assert plain["max_tokens"] == 4096
+
+    thinking = _messages_params_from_request(
+        {
+            "model": "claude",
+            "body": {**body, "reasoning_effort": "high", "temperature": 0.3},
+        }
+    )
+    assert thinking["thinking"] == {"type": "enabled", "budget_tokens": 8192}
+    # Anthropic requires max_tokens > budget_tokens, and forbids a custom
+    # temperature alongside thinking.
+    assert thinking["max_tokens"] > 8192
+    assert "temperature" not in thinking
+
+
+def test_anthropic_batch_and_interactive_agree_on_limits() -> None:
+    """One rule for both paths: the live call and the batch item cannot drift."""
+    from ubt.core.router.transports.anthropic import (
+        _apply_max_tokens,
+        _apply_thinking,
+        _messages_params_from_request,
+    )
+
+    for effort in (None, "low", "medium", "high"):
+        interactive = _apply_thinking(_apply_max_tokens({"model": "claude"}, None), effort)
+        batch = _messages_params_from_request(
+            {
+                "model": "claude",
+                "body": {
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "reasoning_effort": effort,
+                },
+            }
+        )
+        assert interactive["max_tokens"] == batch["max_tokens"]
+        assert interactive.get("thinking") == batch.get("thinking")
+
+
 # --------------------------------------------------------------------------- #
 # Provider routes batch to the selected protocol.
 # --------------------------------------------------------------------------- #
 
 
 def test_provider_batch_routing_follows_api_mode() -> None:
-    anthropic = OpenAICompatibleProvider(api_key="k", api_mode="anthropic")
-    gemini = OpenAICompatibleProvider(api_key="k", api_mode="gemini")
+    anthropic = OpenAICompatibleProvider(api_key="k", api_mode="anthropic-messages")
+    gemini = OpenAICompatibleProvider(api_key="k", api_mode="gemini-native")
     chat = OpenAICompatibleProvider(api_key="k", api_mode="openai-chat")
     assert isinstance(anthropic._batch_transport(), AnthropicMessagesTransport)
     assert isinstance(gemini._batch_transport(), GeminiTransport)
     assert isinstance(chat._batch_transport(), OpenAIChatTransport)
     # All three now advertise batch support.
     assert anthropic.supports_batch_api and gemini.supports_batch_api and chat.supports_batch_api
+
+
+def test_every_api_mode_batches_over_the_wire_it_drafts_over() -> None:
+    """Batch and interactive routing must never disagree.
+
+    The batch map used to be a second table keyed ``"anthropic"`` / ``"gemini"``
+    -- strings no ``ApiMode`` literal ever holds -- so both keys were dead and
+    every provider silently batched over the OpenAI chat transport. The test
+    above passed only because it built providers with those same unreachable
+    literals, which config validation rejects.
+    """
+    import typing
+
+    from ubt.core.config import ApiMode
+
+    for mode in typing.get_args(ApiMode):
+        provider = OpenAICompatibleProvider(api_key="k", api_mode=mode)
+        assert provider._batch_transport() is provider._select_transport(), (
+            f"{mode}: batch and interactive paths use different transports"
+        )
