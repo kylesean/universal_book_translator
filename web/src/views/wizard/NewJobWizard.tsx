@@ -96,13 +96,17 @@ export function NewJobWizard() {
 
   const [targetLang, setTargetLang] = useState('zh')
   const [sourceLang, setSourceLang] = useState('en')
-  const [preset, setPreset] = useState<'publication' | 'standard' | 'preview' | 'fast' | null>(null)
+  const [preset, setPreset] = useState<'publication' | 'standard' | 'publication_math' | 'preview' | 'fast' | null>(null)
   const [budgetUsd, setBudgetUsd] = useState<number | null>(null)
 
   // Advanced compiler & layout options
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false)
   const [domainProfile, setDomainProfile] = useState('auto')
   const [dualMode, setDualMode] = useState<'auto' | 'dual' | 'mono'>('auto')
+  // 'auto' submits as null, which lets the engine align the delivered layout to
+  // the source. The engine accepts only 1 or 2, so the sentinel never reaches it.
+  const [layoutColumns, setLayoutColumns] = useState<'auto' | '1' | '2'>('auto')
+  const [translateChrome, setTranslateChrome] = useState<'auto' | 'on' | 'off'>('auto')
   const [pageRange, setPageRange] = useState('')
   const [glossaryPath, setGlossaryPath] = useState('')
   const [dryRun, setDryRun] = useState(false)
@@ -126,7 +130,7 @@ export function NewJobWizard() {
     async (
       path: string,
       opts?: {
-        overridePreset?: 'publication' | 'standard' | 'preview' | 'fast'
+        overridePreset?: 'publication' | 'standard' | 'publication_math' | 'preview' | 'fast'
         overridePages?: string
         overrideTarget?: string
         overrideSource?: string
@@ -166,7 +170,7 @@ export function NewJobWizard() {
           lastAssessedFileRef.current = path.trim()
           if (!hasUserSelectedPresetRef.current && res.route?.recommended_preset) {
             const recP = res.route.recommended_preset.toLowerCase() as any
-            if (['publication', 'standard', 'preview', 'fast'].includes(recP)) {
+            if (['publication', 'standard', 'publication_math', 'preview', 'fast'].includes(recP)) {
               setPreset(recP)
             }
           }
@@ -257,8 +261,25 @@ export function NewJobWizard() {
     }
   }
 
+  /**
+   * Whether the glossary field would be silently ignored by the engine.
+   *
+   * ``load_external_glossary`` logs a warning and returns ``[]`` for a path that
+   * does not exist, so a typo'd path starts a full run with no glossary and no
+   * error. We cannot stat the server's filesystem from here, but we can reject
+   * the shapes that cannot possibly load: a relative path, or an extension the
+   * loader does not parse.
+   */
+  const glossaryError = (() => {
+    const p = glossaryPath.trim()
+    if (!p) return null
+    if (!p.startsWith('/')) return t.wizard.glossaryPathInvalid
+    if (!/\.(csv|tsv|json)$/i.test(p)) return t.wizard.glossaryPathInvalid
+    return null
+  })()
+
   const handleSubmit = async () => {
-    if (!filePath.trim() || isSubmitting) return
+    if (!filePath.trim() || isSubmitting || glossaryError) return
     setIsSubmitting(true)
     setSubmitError(null)
     try {
@@ -269,6 +290,10 @@ export function NewJobWizard() {
         profile: domainProfile,
         preset: preset,
         dual_mode: dualMode === 'auto' ? null : dualMode,
+        // null = "align to the source layout"; the engine rejects anything but 1/2.
+        layout_columns: layoutColumns === 'auto' ? null : Number(layoutColumns),
+        // null = follow UBTConfig's operator default, not a hard-coded false.
+        translate_chrome: translateChrome === 'auto' ? null : translateChrome === 'on',
         pages: pageRange.trim() ? pageRange.trim() : null,
         glossary: glossaryPath.trim() ? glossaryPath.trim() : null,
         priority: 0,
@@ -304,34 +329,46 @@ export function NewJobWizard() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [filePath, isSubmitting])
 
-  // The badge names the engine parameters the preset actually sets
-  // (ubt/core/presets.py). It deliberately does NOT name a model: a preset
-  // never picks one — the router does — so advertising "Claude 3.5" here was a
-  // promise the engine could not keep.
+  // The badge names the engine parameters that actually tell one preset apart
+  // from another (ubt/core/presets.py): the PDF parser and the prompt depth.
+  // It deliberately does NOT name a model (a preset never picks one — the
+  // router does) and does NOT claim a quality "gate" (a preset never changes
+  // one; presets.py says so in its header). It also does not claim formula
+  // vectorisation outside publication_math: ``auto`` formula enrichment crops
+  // the source region, so publication and standard render identical math.
   const presetOptions = [
     {
       id: 'publication' as const,
       name: t.wizard.presetPublication,
       desc: t.wizard.presetPublicationDesc,
-      gate: t.wizard.presetGateRich,
+      badge: t.wizard.presetBadgeRich,
     },
     {
       id: 'standard' as const,
       name: t.wizard.presetStandard,
       desc: t.wizard.presetStandardDesc,
-      gate: t.wizard.presetGateAdaptive,
+      badge: t.wizard.presetBadgeAdaptive,
+    },
+    {
+      id: 'publication_math' as const,
+      name: t.wizard.presetPublicationMath,
+      desc: t.wizard.presetPublicationMathDesc,
+      badge: t.wizard.presetBadgeVectorMath,
+      // The only preset that pays for VLM transcription; flagged so the cost
+      // jump is visible before submission rather than after.
+      slow: true,
     },
     {
       id: 'preview' as const,
       name: t.wizard.presetPreview,
       desc: t.wizard.presetPreviewDesc,
-      gate: t.wizard.presetGateFormulaImage,
+      badge: t.wizard.presetBadgeFormulaImage,
     },
     {
       id: 'fast' as const,
       name: t.wizard.presetFast,
       desc: t.wizard.presetFastDesc,
-      gate: t.wizard.presetGateShortChain,
+      badge: t.wizard.presetBadgeShortChain,
     },
   ]
 
@@ -503,8 +540,8 @@ export function NewJobWizard() {
                           : 'border-[var(--paper-border)] bg-[var(--paper-subsurface)] hover:bg-[var(--paper-surface)] hover:border-[var(--paper-border-hover)]'
                       }`}
                     >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span
                             className={`text-xs ${
                               isSelected
@@ -519,9 +556,14 @@ export function NewJobWizard() {
                               {t.wizard.engineRecommended}
                             </span>
                           )}
+                          {p.slow && (
+                            <span className="inline-flex items-center text-xs font-mono font-medium text-[#b45309] bg-[#b45309]/10 px-1.5 py-0.5 rounded border border-[#b45309]/20">
+                              {t.wizard.presetSlowBadge}
+                            </span>
+                          )}
                         </div>
-                        <span className="font-mono text-xs text-[var(--ink-muted)] uppercase tracking-wider">
-                          {p.gate}
+                        <span className="font-mono text-xs text-[var(--ink-muted)] uppercase tracking-wider shrink-0">
+                          {p.badge}
                         </span>
                       </div>
                       <div className="text-xs text-[var(--ink-secondary)] mt-1 leading-relaxed">
@@ -597,7 +639,7 @@ export function NewJobWizard() {
               {isAdvancedOpen && (
                 <div className="space-y-4 pt-3 pb-1 border-t border-dashed border-[var(--paper-border)] mt-2">
                   {/* Row 1: Profile & Dual Mode */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 items-start">
                     <div>
                       <label className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] block mb-1 font-semibold">
                         {t.wizard.domainProfile}
@@ -618,6 +660,9 @@ export function NewJobWizard() {
                         <option value="humanities">{t.wizard.domainHumanities}</option>
                         <option value="semiconductor">{t.wizard.domainSemiconductor}</option>
                       </select>
+                      <p className="text-xs text-[var(--ink-muted)] mt-1 leading-relaxed">
+                        {t.wizard.domainProfileHelp}
+                      </p>
                     </div>
 
                     <div>
@@ -636,11 +681,53 @@ export function NewJobWizard() {
                         <option value="dual">{t.wizard.dualModeDual}</option>
                         <option value="mono">{t.wizard.dualModeMono}</option>
                       </select>
+                      <p className="text-xs text-[var(--ink-muted)] mt-1 leading-relaxed">
+                        {t.wizard.dualModeHelp}
+                      </p>
                     </div>
                   </div>
 
-                  {/* Row 2: Pages Range Filter & Execution Mode */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  {/* Row 2: Layout columns & page furniture */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 items-start">
+                    <div>
+                      <label className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] block mb-1 font-semibold">
+                        {t.wizard.layoutColumns}
+                      </label>
+                      <select
+                        value={layoutColumns}
+                        onChange={(e) => setLayoutColumns(e.target.value as any)}
+                        className="w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs font-medium"
+                      >
+                        <option value="auto">{t.wizard.layoutColumnsAuto}</option>
+                        <option value="1">{t.wizard.layoutColumnsOne}</option>
+                        <option value="2">{t.wizard.layoutColumnsTwo}</option>
+                      </select>
+                      <p className="text-xs text-[var(--ink-muted)] mt-1 leading-relaxed">
+                        {t.wizard.layoutColumnsHelp}
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] block mb-1 font-semibold">
+                        {t.wizard.translateChrome}
+                      </label>
+                      <select
+                        value={translateChrome}
+                        onChange={(e) => setTranslateChrome(e.target.value as any)}
+                        className="w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs font-medium"
+                      >
+                        <option value="auto">{t.wizard.translateChromeAuto}</option>
+                        <option value="on">{t.wizard.translateChromeOn}</option>
+                        <option value="off">{t.wizard.translateChromeOff}</option>
+                      </select>
+                      <p className="text-xs text-[var(--ink-muted)] mt-1 leading-relaxed">
+                        {t.wizard.translateChromeHelp}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Row 3: Pages Range Filter */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 items-start">
                     <div>
                       <div className="flex items-center justify-between mb-1">
                         <label className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
@@ -677,10 +764,18 @@ export function NewJobWizard() {
                       value={glossaryPath}
                       onChange={(e) => setGlossaryPath(e.target.value)}
                       placeholder={t.wizard.glossaryPathPlaceholder}
-                      className="w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs font-mono placeholder:text-[var(--ink-muted)]"
+                      className={`w-full h-8 rounded-[5px] border bg-[var(--paper-surface)] px-2.5 text-xs text-[var(--ink-primary)] focus:outline-none shadow-2xs font-mono placeholder:text-[var(--ink-muted)] ${
+                        glossaryError
+                          ? 'border-[#b91c1c] focus:border-[#b91c1c]'
+                          : 'border-[var(--paper-border)] focus:border-[var(--ink-primary)]'
+                      }`}
                     />
-                    <p className="text-xs text-[var(--ink-muted)] mt-1">
-                      {t.wizard.glossaryPathHelp}
+                    <p
+                      className={`text-xs mt-1 ${
+                        glossaryError ? 'text-[#b91c1c]' : 'text-[var(--ink-muted)]'
+                      }`}
+                    >
+                      {glossaryError ?? t.wizard.glossaryPathHelp}
                     </p>
                   </div>
 
@@ -820,6 +915,22 @@ export function NewJobWizard() {
                     <span className="text-[var(--ink-secondary)]">{t.wizard.estTokens}</span>
                     <span className="font-mono font-bold text-[var(--ink-primary)]">
                       {assessment.document.estimated_tokens.toLocaleString()}
+                      {/* A silent re-assess runs with deep=false, so the block
+                          count drops back to an estimate while the panel keeps
+                          showing a number that looks equally authoritative. */}
+                      <span
+                        className={`ml-1.5 text-xs font-normal ${
+                          assessment.cost.billable_blocks_is_exact
+                            ? 'text-[#15803d]'
+                            : 'text-[var(--ink-muted)]'
+                        }`}
+                      >
+                        (
+                        {assessment.cost.billable_blocks_is_exact
+                          ? t.wizard.estimateExact
+                          : t.wizard.estimateApproximate}
+                        )
+                      </span>
                     </span>
                   </div>
                   <div className="py-2.5 flex items-center justify-between">
@@ -897,7 +1008,7 @@ export function NewJobWizard() {
             )}
             <Button
               onClick={handleSubmit}
-              disabled={!filePath.trim() || isSubmitting}
+              disabled={!filePath.trim() || isSubmitting || glossaryError !== null}
               variant="primary"
               className="w-full h-10 text-xs font-bold tracking-tight shadow-sm"
               shortcut="⌘⏎"

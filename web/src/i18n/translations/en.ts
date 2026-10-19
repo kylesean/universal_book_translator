@@ -47,28 +47,40 @@ export const en: TranslationDictionary = {
     // (ubt/core/presets.py): prompt depth, formula handling and exec mode.
     // Presets never pick a model or a render route — the router and the single
     // Typst renderer do — so the copy no longer claims either.
+    //
+    // Formula enrichment is NOT a quality gradient: only ``on`` runs the VLM, so
+    // ``publication`` and ``standard`` both crop the source region and render
+    // identical math. Only publication_math transcribes.
     presetPublication: 'Publication Grade',
     presetPublicationDesc:
-      'Rich context prompts and full-context term bible; vector formula re-render with per-item visual witness.',
+      'Forced rich prompts with full-context term bible; formulas kept as cropped source images with per-item visual witness.',
     presetStandard: 'Standard Balanced',
     presetStandardDesc:
-      'Model-adaptive prompts chosen by document probe; formula re-render with visual-witness fallback.',
+      'Model-adaptive prompts chosen by document probe; formulas cropped from source (same formula policy as Publication).',
+    presetPublicationMath: 'Publication Math',
+    presetPublicationMathDesc:
+      'Rich prompts plus the VLM transcribing each formula to scalable vector LaTeX (~15-60s per formula on CPU). Pick this only when the delivered math must scale.',
     presetFast: 'Fast Throughput',
     presetFastDesc:
       'Short-chain execution, minimal prompts, formula source images kept as-is. No heavy environment requirements.',
     presetPreview: 'Preview Draft',
     presetPreviewDesc:
       'Skips formula visual recognition and keeps formula source images, for structure and layout proofing.',
-    presetGateRich: 'RICH PROMPTS + FORMULA WITNESS',
-    presetGateAdaptive: 'ADAPTIVE PROMPTS + WITNESS',
-    presetGateFormulaImage: 'FORMULA SOURCE IMAGES',
-    presetGateShortChain: 'SHORT CHAIN + MINIMAL PROMPTS',
+    // The badge names only the engine parameters that tell a preset apart; a
+    // preset never changes a quality gate (ubt/core/presets.py says so), so
+    // "gate" copy here was advertising something the engine does not do.
+    presetBadgeRich: 'DOCLING · FORCED RICH PROMPTS',
+    presetBadgeAdaptive: 'DOCLING · ADAPTIVE PROMPTS',
+    presetBadgeVectorMath: 'DOCLING · VECTOR MATH',
+    presetBadgeFormulaImage: 'PDFIUM · MINIMAL PROMPTS',
+    presetBadgeShortChain: 'PDFIUM · SHORT CHAIN',
+    presetSlowBadge: 'SLOW PER FORMULA',
     walLedger: 'WAL LEDGER',
     notPriced: 'not priced',
     formatUnknown: 'FILE',
     budgetCeiling: 'Hard Budget Ceiling',
     budgetUnlimited: 'No cap (monitor spend in the quality report)',
-    budgetExceedsQuote: 'Cap is below the estimated quote — the run will stop early',
+    budgetExceedsQuote: 'Cap is below the estimated quote — the run may be refused before its first request',
     preflightTitle: 'Pre-flight Assessment Radar',
     preflightSubtitle: 'Zero-token structural analysis by engine assess module.',
     waitingFile: 'Drop manuscript or enter path to compute page census, formulas, and token quotes.',
@@ -134,26 +146,48 @@ export const en: TranslationDictionary = {
     warningRemedyOcr: 'enable the OCR pre-check or proof the damaged pages by hand',
     listSeparator: ', ',
     advancedOptionsTitle: 'Advanced Compiler & Layout Options',
-    advancedOptionsSubtitle: 'Fine-tune bilingual mode, domain profile, PDF render engine, and page slicing',
+    advancedOptionsSubtitle:
+      'Fine-tune columns and delivery mode, domain profile, page slicing and glossary mounting',
     advancedOptionsTag: 'Advanced Controls',
     domainProfile: 'Domain Profile',
+    // The profile's real effects are only three: the seed-glossary directory,
+    // the rolling-summary switch and the genre string in the prompt. Only
+    // ``semiconductor`` ships a glossary (ubt/resources/glossaries/).
+    domainProfileHelp:
+      'Drives the seed glossary, the rolling-summary switch and the prompt genre. Only Semiconductor ships a built-in glossary today.',
     domainAuto: 'Auto-detect (from the document)',
-    domainGeneral: 'General Literature & Non-fiction (General)',
-    domainTextbook: 'Textbook & Monograph (Textbook - Strict Math & Terms)',
-    domainPaper: 'Academic Paper (Paper - Dense Citations & Derivations)',
-    domainFiction: 'Fiction & Novels (Fiction - Literary Style & Cadence)',
-    domainHumanities: 'Humanities & Social Sciences (Philosophy & Culture)',
-    domainSemiconductor: 'Engineering & Tech (Semiconductor & Systems)',
+    domainGeneral: 'General (General)',
+    domainTextbook: 'Textbook (Textbook)',
+    domainPaper: 'Academic Paper (Paper)',
+    domainFiction: 'Fiction (Fiction)',
+    domainHumanities: 'Humanities (Humanities)',
+    domainSemiconductor: 'Semiconductor Engineering (Semiconductor)',
+    domainSeedAvailable: 'built-in glossary',
     dualMode: 'Delivery Mode',
-    dualModeAuto: 'Smart Auto (follows the document profile)',
-    dualModeDual: 'Bilingual (each source line above its translation)',
+    dualModeHelp:
+      'Smart Auto starts bilingual and lets the layout advisor step it down to target-only when the layout cannot pair cleanly.',
+    dualModeAuto: 'Smart Auto (starts bilingual, may step down to target-only)',
+    dualModeDual: 'Bilingual (each source line above its translation; warns but never downgrades)',
     dualModeMono: 'Target only (translation without the source)',
+    layoutColumns: 'Columns',
+    layoutColumnsHelp:
+      'Leave on Auto to mirror the source layout (a two-column paper stays two-column). An explicit value forces that count.',
+    layoutColumnsAuto: 'Mirror source (Auto)',
+    layoutColumnsOne: 'Single column (1)',
+    layoutColumnsTwo: 'Two columns (2)',
+    translateChrome: 'Running heads & footers',
+    translateChromeHelp: 'Whether to translate page furniture such as running heads and chapter titles.',
+    translateChromeAuto: 'Follow engine default',
+    translateChromeOn: 'Translate page furniture',
+    translateChromeOff: 'Keep source page furniture',
     pageFilter: 'Page Range Filter (Pages)',
     pageFilterPlaceholder: 'e.g. 1-10 or 1,3,5 (leave blank for entire book)',
     pageFilterHelp: 'Only compile specified pages for fast layout proofing and sampling',
     glossaryPath: 'External Glossary File (Path)',
     glossaryPathPlaceholder: 'e.g. /path/to/glossary.csv or .json (optional)',
-    glossaryPathHelp: 'Absolute path to external domain terminology (.csv / .tsv / .json)',
+    glossaryPathHelp:
+      'Absolute path to external domain terminology (.csv / .tsv / .json). A missing path is only logged and skipped, never an error.',
+    glossaryPathInvalid: 'Enter an absolute path (starting with /) ending in .csv, .tsv or .json.',
     rehearsalLabel: 'Rehearsal (zero-token dry run)',
     rehearsalHelp: 'Runs the full pipeline with an echo provider: proves the plumbing reaches a rendered artifact, spends nothing, and the result is not a translation.',
     rehearsalActiveWarning: 'Rehearsal mode: the output is echo text, NOT a translation. Use it to validate the pipeline, then re-submit with a real run.',
@@ -161,6 +195,8 @@ export const en: TranslationDictionary = {
     sliceSampleQuickBtn: 'Sample 1-5',
     localFreeLabel: 'Free (Local Model)',
     sliceTestingTag: 'Slice Test',
+    estimateExact: 'exact',
+    estimateApproximate: 'sampled estimate',
   },
   mission: {
     title: 'Mission Control',

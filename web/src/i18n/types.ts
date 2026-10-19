@@ -47,14 +47,20 @@ export interface TranslationDictionary {
     presetPublicationDesc: string
     presetStandard: string
     presetStandardDesc: string
+    presetPublicationMath: string
+    presetPublicationMathDesc: string
     presetFast: string
     presetFastDesc: string
     presetPreview: string
     presetPreviewDesc: string
-    presetGateRich: string
-    presetGateAdaptive: string
-    presetGateFormulaImage: string
-    presetGateShortChain: string
+    /** Badge on a preset card: the engine parameters that tell it apart. */
+    presetBadgeRich: string
+    presetBadgeAdaptive: string
+    presetBadgeVectorMath: string
+    presetBadgeFormulaImage: string
+    presetBadgeShortChain: string
+    /** Warning badge on the one preset that pays for VLM formula transcription. */
+    presetSlowBadge: string
     walLedger: string
     notPriced: string
     formatUnknown: string
@@ -88,6 +94,7 @@ export interface TranslationDictionary {
     advancedOptionsSubtitle: string
     advancedOptionsTag: string
     domainProfile: string
+    domainProfileHelp: string
     domainAuto: string
     domainGeneral: string
     domainTextbook: string
@@ -95,16 +102,29 @@ export interface TranslationDictionary {
     domainFiction: string
     domainHumanities: string
     domainSemiconductor: string
+    domainSeedAvailable: string
     dualMode: string
+    dualModeHelp: string
     dualModeAuto: string
     dualModeDual: string
     dualModeMono: string
+    layoutColumns: string
+    layoutColumnsHelp: string
+    layoutColumnsAuto: string
+    layoutColumnsOne: string
+    layoutColumnsTwo: string
+    translateChrome: string
+    translateChromeHelp: string
+    translateChromeAuto: string
+    translateChromeOn: string
+    translateChromeOff: string
     pageFilter: string
     pageFilterPlaceholder: string
     pageFilterHelp: string
     glossaryPath: string
     glossaryPathPlaceholder: string
     glossaryPathHelp: string
+    glossaryPathInvalid: string
     rehearsalLabel: string
     rehearsalHelp: string
     rehearsalActiveWarning: string
@@ -112,6 +132,8 @@ export interface TranslationDictionary {
     sliceSampleQuickBtn: string
     localFreeLabel: string
     sliceTestingTag: string
+    estimateExact: string
+    estimateApproximate: string
   }
   mission: {
     title: string
