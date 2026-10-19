@@ -132,3 +132,48 @@ jobs:
         env:
           PYTHONIOENCODING: "utf-8"
         run: uv run pytest -m slow -q
+
+  # The `gate` job installs `--extra dev`, which does NOT include the `pdf`
+  # extra (docling). Every PDF-path test there therefore ran on the pdfium
+  # engine only, and the default engine -- `auto`, which routes to docling
+  # unconditionally -- was never exercised by CI at all. The crash/resume e2e
+  # was red on the docling path while this pipeline stayed green.
+  #
+  # Separate job: docling pulls torch and a model download, which would double
+  # the fast tier's install for no benefit to it.
+  docling-engine:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39  # v3.2.4
+        with:
+          enable-cache: true
+
+      - name: Install Python + dev AND pdf extras
+        run: |
+          uv python install 3.12
+          uv sync --extra dev --extra pdf --locked
+
+      - name: Report the resolved engine
+        # A silent skip back to pdfium would make this job pass without testing
+        # anything, which is the exact failure mode it exists to prevent.
+        run: |
+          uv run python - <<'PY'
+          import importlib.util
+          assert importlib.util.find_spec("docling") is not None, (
+              "docling is not installed — the pdf extra did not resolve"
+          )
+          from ubt.adapters.pdf.engine_selector import inspect_pdf_route_plan
+          print("docling available; auto ->", inspect_pdf_route_plan.__name__)
+          PY
+
+      - name: Default-engine PDF tier (docling)
+        # The suite that previously could not run under the default engine.
+        env:
+          PYTHONIOENCODING: "utf-8"
+        run: >
+          uv run pytest -m fast -q -n auto --dist=loadscope
+          tests/unit/adapters/ tests/integration/

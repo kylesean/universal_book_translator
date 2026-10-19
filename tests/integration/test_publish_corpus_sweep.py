@@ -101,4 +101,13 @@ def test_a_real_document_extracts_and_publishes(case_id: str, tmp_path: Path) ->
     report = evaluate(out, None, None, None)
     # The whole point of the semantic path: one body size, not 44.
     assert report["p95_font_size_pt"] == pytest.approx(10.5, abs=0.5)
-    assert report["distinct_font_sizes"] <= 8
+    # The bound counts TABULAR sizes too, which are legitimately per-table now:
+    # a table whose measured minimum does not fit its column is set at its own
+    # computed scale (``emitted_scale``), so a paper with three or four
+    # differently-shaped wide tables contributes that many extra sizes (this one
+    # measures 10: body 10.5, headings 12/14/15, table bodies 6.30/6.51/6.82/8.40
+    # and 8.82/9.00). The property that matters -- the BODY is uniform, not the
+    # 44-size overlay -- is the ``p95`` assertion above. A ceiling low enough to
+    # forbid per-table scales would force every wide table back to one constant
+    # size, which is the ideograph-per-line defect the scale exists to fix.
+    assert report["distinct_font_sizes"] <= 12
