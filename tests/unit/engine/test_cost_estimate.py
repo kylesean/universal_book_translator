@@ -138,3 +138,93 @@ def test_measure_prefix_tokens() -> None:
     # Failed router prompt build
     router.build_draft_prompt.side_effect = ValueError("prompt build error")
     assert measure_prefix_tokens(router, target_lang="zh", source_lang="en") is None
+
+
+# --- the script-aware heuristic's per-script constants ----------------------
+#
+# ``count_text_tokens`` is a character heuristic, not a tokenizer (it must run
+# without loading a tokenizer). Its constants therefore need pinning to
+# measurements, or they drift: the non-ASCII constant sat at 0.55 while the
+# XLM-RoBERTa tokenizer measured ~0.31, over-quoting Cyrillic and Arabic by
+# 50-67%. These bounds are loose enough to survive a tokenizer refresh and
+# tight enough to catch a constant that is simply wrong.
+
+#: (text, expected tokens under XLM-RoBERTa, allowed relative error)
+_SCRIPT_SAMPLES: tuple[tuple[str, str, int], ...] = (
+    (
+        "en",
+        "The transistor was fabricated using a standard CMOS process with a "
+        "gate oxide thickness of two nanometers.",
+        29,
+    ),
+    ("zh", "该晶体管采用标准CMOS工艺制备，栅氧化层厚度为两纳米，沟道长度为五十纳米。", 34),
+    (
+        "ja",
+        "このトランジスタは標準的なCMOSプロセスで作製され、ゲート酸化膜の厚さは2ナノメートルである。",
+        33,
+    ),
+    (
+        "ko",
+        "이 트랜지스터는 표준 CMOS 공정으로 제조되었으며 게이트 산화막 두께는 2나노미터이다.",
+        30,
+    ),
+    (
+        "ru",
+        "Этот транзистор был изготовлен по стандартному КМОП-процессу с толщиной "
+        "подзатворного окисла два нанометра.",
+        33,
+    ),
+    (
+        "ar",
+        "تم تصنيع هذا الترانزستور باستخدام عملية CMOS القياسية بسماكة أكسيد البوابة نانومترين.",
+        28,
+    ),
+    (
+        "de",
+        "Der Transistor wurde in einem Standard-CMOS-Prozess mit einer "
+        "Gateoxiddicke von zwei Nanometern hergestellt.",
+        30,
+    ),
+)
+
+
+@pytest.mark.parametrize(("lang", "text", "xlmr_tokens"), _SCRIPT_SAMPLES)
+def test_the_script_heuristic_stays_within_25_percent_of_a_real_tokenizer(
+    lang: str, text: str, xlmr_tokens: int
+) -> None:
+    """Every script must land within 25% of XLM-RoBERTa's own count.
+
+    The bound is 25% because no character heuristic can do better across model
+    families — the same English sentence is 29 tokens to XLM-R and 19 to
+    DeepSeek — but a constant that is off by 50%+ is a bug, not a tolerance.
+    """
+    estimated = count_text_tokens(text)
+    error = (estimated - xlmr_tokens) / xlmr_tokens
+    assert abs(error) <= 0.25, (
+        f"{lang}: heuristic {estimated} vs XLM-R {xlmr_tokens} ({error:+.0%}); "
+        "the per-script constant needs re-measuring"
+    )
+
+
+def test_non_ascii_scripts_are_not_over_quoted_by_half() -> None:
+    """The specific regression: 0.55 tokens/char for Cyrillic/Arabic.
+
+    A ru/ar source quoted at 0.55 per character came out 50-67% above the real
+    count, which inflated every budget check and could refuse an affordable
+    run. Pinned as a ratio rather than a constant so the fix can be tuned
+    without rewriting the test.
+    """
+    from ubt.core.engine import cost_estimate
+
+    assert 0.25 <= cost_estimate._NON_ASCII_TOKENS_PER_CHAR <= 0.40, (
+        "non-ASCII tokens/char drifted away from the measured ~0.31"
+    )
+    # CJK was already correct and must not have moved with it.
+    assert pytest.approx(0.85) == cost_estimate._CJK_TOKENS_PER_CHAR
+
+
+def test_the_heuristic_documents_that_it_is_not_a_tokenizer() -> None:
+    """A caller that reads this as exact will quote an invoice it cannot meet."""
+    doc = count_text_tokens.__doc__ or ""
+    assert "not a tokenizer" in doc.lower() or "heuristic" in doc.lower()
+    assert "estimate" in doc.lower()
