@@ -68,7 +68,11 @@ export const zh: TranslationDictionary = {
     notPriced: '未定价',
     formatUnknown: '文件',
     budgetCeiling: '硬预算熔断红线',
-    budgetUnlimited: '不限（费用见质量报告）',
+    budgetUnlimited: '不设上限 — 费用仍记录在质量报告中，但不会拦截作业。',
+    budgetUnlimitedToggle: '不设上限',
+    budgetPlaceholder: '例如 25.00',
+    budgetHelp: '超出此金额时作业停止；已翻译的块保留在账本中，提高上限后重跑同一任务可续译。',
+    budgetInvalid: '请输入大于 0 的金额。',
     budgetExceedsQuote: '熔断线低于预估报价 — 作业可能在首个请求前即被拒绝启动',
     preflightTitle: '译前体检与评估报告 (Pre-flight Radar)',
     preflightSubtitle: '由引擎 Assess 模块直接执行的零消耗物理与版面探测。',
@@ -76,7 +80,11 @@ export const zh: TranslationDictionary = {
     assessBtn: '免消耗体检 (Assess)',
     startCompile: '开始编译书籍 (Compile)',
     compiling: '正在提交编译任务到引擎队列...',
-    estTokens: '预估消耗 Tokens',
+    estTokens: '预估消耗 Tokens（估算）',
+    tokensSource: '源文',
+    tokensPrompt: '提示',
+    tokensCompletion: '补全',
+    tokensEstimateNote: '按字符脚本启发式估算，非真实分词器；不同模型族相差 30-50%，实际以账单为准。',
     estCost: '预估费用 (USD)',
     pageCount: '全书总页数',
     recommendation: '引擎路由建议',
@@ -110,7 +118,7 @@ export const zh: TranslationDictionary = {
       SCANNED_PAGES_DOMINANT:
         '文档以扫描/图像页为主，译文依赖视觉转写，成本与时延显著上升；建议先做 OCR 预检。',
       FONT_RESIDUE_RISK:
-        '字体编码损伤：{confirmed_pages} 页确认存在字符乱码（共 {residue_chars} 个残字符），部分文字可能不可恢复，{remedy}。此问题源于字体编码（非扫描质量），与「扫描件位图比例」无关。',
+        '字体编码损伤：{confirmed_pages} 页确认存在字符乱码（共 {residue_chars} 个残字符），部分文字可能不可恢复，{remedy}。{at_risk_clause}此问题源于字体编码（非扫描质量），与「扫描件位图比例」无关。',
       FORMULA_HEAVY_NEEDS_ENRICHMENT:
         '文档公式密集但视觉公式增强已关闭（--preset preview 的常见取舍），公式转写质量可能受限。',
       PATHOLOGICAL_PAGE_RISK:
@@ -128,6 +136,7 @@ export const zh: TranslationDictionary = {
     },
     warningRemedyRescan: '建议重新扫描高分原件',
     warningRemedyOcr: '建议开启 OCR 预检增强或人工校对确认受损页',
+    warningAtRiskClause: '另有 {count} 页字体缺少 /ToUnicode 映射、存在风险但未确认乱码。',
     listSeparator: '、',
     advancedOptionsTitle: '高级排版与编译选项',
     advancedOptionsSubtitle: '微调分栏与交付形态、领域配置、页码切片与术语库挂载',

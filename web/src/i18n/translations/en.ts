@@ -79,7 +79,11 @@ export const en: TranslationDictionary = {
     notPriced: 'not priced',
     formatUnknown: 'FILE',
     budgetCeiling: 'Hard Budget Ceiling',
-    budgetUnlimited: 'No cap (monitor spend in the quality report)',
+    budgetUnlimited: 'No cap — spend is still recorded in the quality report, but nothing stops the run.',
+    budgetUnlimitedToggle: 'No cap',
+    budgetPlaceholder: 'e.g. 25.00',
+    budgetHelp: 'The run stops once cost passes this amount; translated blocks stay in the ledger, so raising the cap and rerunning the same job resumes.',
+    budgetInvalid: 'Enter an amount greater than 0.',
     budgetExceedsQuote: 'Cap is below the estimated quote — the run may be refused before its first request',
     preflightTitle: 'Pre-flight Assessment Radar',
     preflightSubtitle: 'Zero-token structural analysis by engine assess module.',
@@ -87,7 +91,11 @@ export const en: TranslationDictionary = {
     assessBtn: 'Run Pre-flight Assess',
     startCompile: 'Compile Book',
     compiling: 'Submitting job to engine...',
-    estTokens: 'Est. Tokens',
+    estTokens: 'Est. Tokens (estimated)',
+    tokensSource: 'source',
+    tokensPrompt: 'prompt',
+    tokensCompletion: 'completion',
+    tokensEstimateNote: 'Script-aware character heuristic, not a real tokenizer; model families differ by 30-50%, so treat the invoice as authoritative.',
     estCost: 'Est. Cost',
     pageCount: 'Page Count',
     recommendation: 'Engine Route Advisory',
@@ -122,7 +130,7 @@ export const en: TranslationDictionary = {
       SCANNED_PAGES_DOMINANT:
         'The document is mostly scanned/image pages, so the translation depends on visual transcription and both cost and latency rise sharply. An OCR pre-check is advised.',
       FONT_RESIDUE_RISK:
-        'Font encoding damage: {confirmed_pages} page(s) confirmed with garbled characters ({residue_chars} residue chars in total). Some text may be unrecoverable — {remedy}. This is a font-encoding defect, not a scan-quality one; the scanned-page share is unrelated.',
+        'Font encoding damage: {confirmed_pages} page(s) confirmed with garbled characters ({residue_chars} residue chars in total). Some text may be unrecoverable — {remedy}. {at_risk_clause}This is a font-encoding defect, not a scan-quality one; the scanned-page share is unrelated.',
       FORMULA_HEAVY_NEEDS_ENRICHMENT:
         'The document is formula-heavy but visual formula enrichment is off (a common trade-off of --preset preview); formula transcription quality may suffer.',
       PATHOLOGICAL_PAGE_RISK:
@@ -146,6 +154,7 @@ export const en: TranslationDictionary = {
     /** Remedy clause interpolated into the FONT_RESIDUE_RISK copy. */
     warningRemedyRescan: 'rescan a high-quality original',
     warningRemedyOcr: 'enable the OCR pre-check or proof the damaged pages by hand',
+    warningAtRiskClause: 'A further {count} page(s) use fonts with no /ToUnicode map — at risk, though no residue was confirmed. ',
     listSeparator: ', ',
     advancedOptionsTitle: 'Advanced Compiler & Layout Options',
     advancedOptionsSubtitle:

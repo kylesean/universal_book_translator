@@ -66,6 +66,10 @@ export interface TranslationDictionary {
     formatUnknown: string
     budgetCeiling: string
     budgetUnlimited: string
+    budgetUnlimitedToggle: string
+    budgetPlaceholder: string
+    budgetHelp: string
+    budgetInvalid: string
     budgetExceedsQuote: string
     preflightTitle: string
     preflightSubtitle: string
@@ -74,6 +78,11 @@ export interface TranslationDictionary {
     startCompile: string
     compiling: string
     estTokens: string
+    /** Breakdown labels under the total token estimate. */
+    tokensSource: string
+    tokensPrompt: string
+    tokensCompletion: string
+    tokensEstimateNote: string
     estCost: string
     pageCount: string
     recommendation: string
@@ -90,6 +99,8 @@ export interface TranslationDictionary {
     /** Pre-flight warning copy keyed by the engine's stable warning code. */
     warningCodes: Record<string, string>
     warningRemedyRescan: string
+    /** ``{count}`` is replaced with the at-risk page count. */
+    warningAtRiskClause: string
     warningRemedyOcr: string
     /** Separator for a warning param that is a list (e.g. unpriced model names). */
     listSeparator: string

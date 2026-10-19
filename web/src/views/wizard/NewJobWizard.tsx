@@ -55,9 +55,13 @@ function warningText(
   if (!template) return warning.detail_zh
   const params: Record<string, unknown> = { ...(warning.params ?? {}) }
   // FONT_RESIDUE_RISK interpolates a remedy clause, which the engine picks
-  // from a scanned / not-scanned branch.
+  // from a scanned / not-scanned branch, plus the at-risk page count when the
+  // witness found suspect pages it could not confirm.
   if (warning.code === 'FONT_RESIDUE_RISK') {
     params.remedy = params.is_scanned ? t.wizard.warningRemedyRescan : t.wizard.warningRemedyOcr
+    const atRisk = Number(params.at_risk_pages ?? 0)
+    params.at_risk_clause =
+      atRisk > 0 ? t.wizard.warningAtRiskClause.replace('{count}', String(atRisk)) : ''
   }
   return interpolate(template, params, t.wizard.listSeparator)
 }
@@ -98,6 +102,10 @@ export function NewJobWizard() {
   const [sourceLang, setSourceLang] = useState('en')
   const [preset, setPreset] = useState<'publication' | 'standard' | 'publication_math' | 'preview' | 'fast' | null>(null)
   const [budgetUsd, setBudgetUsd] = useState<number | null>(null)
+  // The raw field text is separate from ``budgetUsd``: while the user is
+  // mid-typing ("" or "0.") the numeric value is not yet usable, but the input
+  // must not snap back to a seeded default.
+  const [budgetInput, setBudgetInput] = useState('')
 
   // Advanced compiler & layout options
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false)
@@ -277,9 +285,17 @@ export function NewJobWizard() {
     if (!/\.(csv|tsv|json)$/i.test(p)) return t.wizard.glossaryPathInvalid
     return null
   })()
+  /**
+   * A cap is enabled but no usable positive number was entered.
+   *
+   * ``JobSubmitRequest.budget_usd`` is ``Field(gt=0)``, so sending 0 (or an
+   * empty field coerced to 0) is a 422 on every submission. Blocking it here
+   * keeps the failure visible at the field instead of at the API boundary.
+   */
+  const budgetInvalid = budgetUsd === null && budgetInput.trim() !== ''
 
   const handleSubmit = async () => {
-    if (!filePath.trim() || isSubmitting || glossaryError) return
+    if (!filePath.trim() || isSubmitting || glossaryError || budgetInvalid) return
     setIsSubmitting(true)
     setSubmitError(null)
     try {
@@ -575,41 +591,89 @@ export function NewJobWizard() {
               </div>
             </div>
 
-            {/* Budget Cap */}
+            {/* Budget Cap.
+                A slider could not express this: its range was 0-50 USD, so a
+                cloud run on a large book was uncappable, and 0 meant "no cap"
+                rather than "zero" — the exact opposite of what a user sliding
+                to the left intends. An explicit switch plus a numeric field
+                removes both traps, and keeps the default (no cap) visible
+                instead of hidden at one end of a track. */}
             <div className="pt-2">
               <div className="flex items-center justify-between text-xs mb-1.5">
                 <span className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
                   {t.wizard.budgetCeiling}
                 </span>
-                <span
-                  className={`font-mono text-xs font-bold ${
-                    budgetUsd === null ? 'text-[var(--ink-muted)]' : 'text-[#15803d]'
-                  }`}
-                >
-                  {budgetUsd === null
-                    ? t.wizard.budgetUnlimited
-                    : `$${budgetUsd.toFixed(2)} USD (HARD FUSE)`}
-                </span>
+                <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={budgetUsd === null}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        // "No cap": clear both the numeric value and the text.
+                        setBudgetUsd(null)
+                        setBudgetInput('')
+                        return
+                      }
+                      // Turning the cap on seeds a value so the field is never
+                      // enabled-but-empty, which would submit budget_usd=0 and
+                      // be rejected by the API's gt=0 bound.
+                      const seeded = 10
+                      setBudgetInput(String(seeded))
+                      setBudgetUsd(seeded)
+                    }}
+                    className="h-3.5 w-3.5 rounded border-[var(--paper-border)] accent-[var(--ink-primary)] cursor-pointer"
+                  />
+                  <span className="text-xs text-[var(--ink-secondary)]">
+                    {t.wizard.budgetUnlimitedToggle}
+                  </span>
+                </label>
               </div>
-              <input
-                type="range"
-                min="0"
-                max="50"
-                step="1"
-                value={budgetUsd ?? 0}
-                onChange={(e) => {
-                  const next = parseFloat(e.target.value)
-                  setBudgetUsd(next === 0 ? null : next)
-                }}
-                className="w-full h-1.5 bg-[var(--paper-border)] rounded-lg appearance-none cursor-pointer accent-[var(--ink-primary)]"
-              />
-              {budgetUsd !== null &&
-                assessment?.cost.total_cost_usd != null &&
-                assessment.cost.total_cost_usd > budgetUsd && (
-                  <div className="mt-1.5 text-xs text-[#b45309]">
-                    {t.wizard.budgetExceedsQuote} (${assessment.cost.total_cost_usd.toFixed(2)})
+
+              {budgetUsd === null ? (
+                <p className="text-xs text-[var(--ink-muted)] leading-relaxed">
+                  {t.wizard.budgetUnlimited}
+                </p>
+              ) : (
+                <div>
+                  <div className="relative">
+                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-mono text-[var(--ink-muted)]">
+                      $
+                    </span>
+                    <input
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      value={budgetInput}
+                      onChange={(e) => {
+                        const raw = e.target.value
+                        setBudgetInput(raw)
+                        const parsed = parseFloat(raw)
+                        // The API rejects budget_usd <= 0 (Field(gt=0)), so an
+                        // empty or non-positive entry must not reach it.
+                        setBudgetUsd(Number.isFinite(parsed) && parsed > 0 ? parsed : null)
+                      }}
+                      placeholder={t.wizard.budgetPlaceholder}
+                      className={`w-full h-8 rounded-[5px] border bg-[var(--paper-surface)] pl-6 pr-2.5 text-xs font-mono text-[var(--ink-primary)] focus:outline-none shadow-2xs ${
+                        budgetInvalid
+                          ? 'border-[#b91c1c] focus:border-[#b91c1c]'
+                          : 'border-[var(--paper-border)] focus:border-[var(--ink-primary)]'
+                      }`}
+                    />
                   </div>
-                )}
+                  {budgetInvalid ? (
+                    <p className="text-xs mt-1 text-[#b91c1c]">{t.wizard.budgetInvalid}</p>
+                  ) : assessment?.cost.total_cost_usd != null &&
+                    assessment.cost.total_cost_usd > budgetUsd ? (
+                    <p className="text-xs mt-1 text-[#b45309]">
+                      {t.wizard.budgetExceedsQuote} (${assessment.cost.total_cost_usd.toFixed(2)})
+                    </p>
+                  ) : (
+                    <p className="text-xs mt-1 text-[var(--ink-muted)]">
+                      {t.wizard.budgetHelp}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Advanced Compiler & Layout Options Drawer */}
@@ -947,10 +1011,28 @@ export function NewJobWizard() {
                           : 'no'}
                     </span>
                   </div>
-                  <div className="py-2.5 flex items-center justify-between">
-                    <span className="text-[var(--ink-secondary)]">{t.wizard.estTokens}</span>
-                    <span className="font-mono font-bold text-[var(--ink-primary)]">
-                      {assessment.document.estimated_tokens.toLocaleString()}
+                  <div className="py-2.5 flex items-start justify-between gap-3">
+                    <span className="text-[var(--ink-secondary)] shrink-0">
+                      {t.wizard.estTokens}
+                    </span>
+                    <span className="text-right">
+                      {/* ``estimated_tokens`` is the *source* size only. The
+                          engine bills prompt (prefix per call + source) and
+                          completion (source × pair fertility) separately, so
+                          showing the source figure alone under-quoted the real
+                          spend by ~2.6x on the reference document. Both
+                          components are already on the assess payload. */}
+                      <span className="font-mono font-bold text-[var(--ink-primary)]">
+                        {(assessment.cost.prompt_tokens + assessment.cost.completion_tokens).toLocaleString()}
+                      </span>
+                      <span className="block text-xs font-normal text-[var(--ink-muted)] leading-relaxed">
+                        {t.wizard.tokensSource}{' '}
+                        {assessment.document.estimated_tokens.toLocaleString()} ·{' '}
+                        {t.wizard.tokensPrompt}{' '}
+                        {assessment.cost.prompt_tokens.toLocaleString()} ·{' '}
+                        {t.wizard.tokensCompletion}{' '}
+                        {assessment.cost.completion_tokens.toLocaleString()}
+                      </span>
                     </span>
                   </div>
                   <div className="py-2.5 flex items-center justify-between">
@@ -992,6 +1074,13 @@ export function NewJobWizard() {
                       </span>
                     </span>
                   </div>
+
+                  {/* One disclaimer for the whole estimate block: the numbers
+                      above are a character heuristic, and no heuristic can be
+                      exact across model families. */}
+                  <p className="pt-2 text-xs text-[var(--ink-muted)] leading-relaxed border-t border-[var(--paper-border)]">
+                    {t.wizard.tokensEstimateNote}
+                  </p>
                 </div>
 
                 {assessment.warnings.length > 0 && (
@@ -1028,7 +1117,7 @@ export function NewJobWizard() {
             )}
             <Button
               onClick={handleSubmit}
-              disabled={!filePath.trim() || isSubmitting || glossaryError !== null}
+              disabled={!filePath.trim() || isSubmitting || glossaryError !== null || budgetInvalid}
               variant="primary"
               className="w-full h-10 text-xs font-bold tracking-tight shadow-sm"
               shortcut="⌘⏎"

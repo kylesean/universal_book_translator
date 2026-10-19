@@ -798,15 +798,26 @@ def _synthesize_warnings(
                 if is_scanned
                 else "建议开启 OCR 预检增强或人工校对确认受损页"
             )
+            # ``at_risk_pages`` is the recall half of the witness: pages whose
+            # fonts carry no /ToUnicode but where no residue was found. That is
+            # not proof of damage, yet it is the set most likely to be damaged,
+            # so quoting only the confirmed count hides the suspect set's size.
+            risk_clause = (
+                f"另有 {at_risk} 页字体缺少 /ToUnicode 映射、存在风险但未确认乱码"
+                if at_risk > 0
+                else ""
+            )
             warnings.append(
                 AssessmentWarning(
                     "FONT_RESIDUE_RISK",
                     "warn",
                     f"字体编码损伤：{confirmed} 页确认存在字符乱码（共 {residue_chars} 个残字符），"
-                    f"部分文字可能不可恢复，{remedy}。",
+                    f"部分文字可能不可恢复，{remedy}。"
+                    + (f"{risk_clause}。" if risk_clause else ""),
                     {
                         "confirmed_pages": confirmed,
                         "residue_chars": residue_chars,
+                        "at_risk_pages": at_risk,
                         "is_scanned": is_scanned,
                     },
                 )

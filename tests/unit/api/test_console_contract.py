@@ -888,3 +888,80 @@ def test_font_residue_warning_says_it_is_not_a_scan_defect() -> None:
         copy = block.group(1)
         for needle in needles:
             assert needle in copy, f"{path.name} FONT_RESIDUE_RISK lost {needle!r}"
+
+
+# --- the quote must not under-report tokens or hide the at-risk pages --------
+
+
+def test_the_wizard_shows_total_tokens_not_just_the_source_size() -> None:
+    """``estimated_tokens`` is the source size; the bill is prompt+completion.
+
+    On corpus/documents/chapter-3.pdf the payload carries
+    ``estimated_tokens=11,956`` while the real estimate is
+    ``prompt_tokens + completion_tokens = 32,013``. Labelling the source figure
+    "预估消耗 Tokens" under-quoted spend by ~2.7x, which is exactly the number
+    a user reads to decide whether to run.
+    """
+    from ubt.api.models import AssessCost, AssessDocumentFacts
+
+    assert "estimated_tokens" in AssessDocumentFacts.model_fields
+    assert "prompt_tokens" in AssessCost.model_fields
+    assert "completion_tokens" in AssessCost.model_fields
+
+    if not _WIZARD_SRC.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+    source = _WIZARD_SRC.read_text(encoding="utf-8")
+    assert "cost.prompt_tokens + assessment.cost.completion_tokens" in source, (
+        "the token row does not sum prompt+completion"
+    )
+    # And the label must admit it is an estimate: no character heuristic can be
+    # exact across model families (the same English sentence is 29 tokens to
+    # XLM-R and 19 to DeepSeek).
+    zh = (_EN_TS.parent / "zh.ts").read_text(encoding="utf-8")
+    assert "估算" in re.search(r"estTokens:\s*'([^']*)'", zh).group(1)  # type: ignore[union-attr]
+
+
+def test_the_budget_control_has_no_zero_means_unlimited_trap() -> None:
+    """The old slider mapped 0 to "no cap" and capped at $50.
+
+    Both were wrong: a user dragging to 0 to mean "spend nothing" got an
+    uncapped run, and a $50 ceiling cannot express a large cloud job's budget.
+    The control is now an explicit switch plus a numeric field, and the field
+    must never submit 0 because the API declares ``budget_usd: gt=0``.
+    """
+    from ubt.api.models import JobSubmitRequest
+
+    field = JobSubmitRequest.model_fields["budget_usd"]
+    assert field.metadata, "budget_usd lost its gt=0 bound"
+    assert any(getattr(m, "gt", None) == 0 for m in field.metadata), (
+        "budget_usd no longer rejects 0; the UI guard would be unnecessary"
+    )
+
+    if not _WIZARD_SRC.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+    source = _WIZARD_SRC.read_text(encoding="utf-8")
+    assert 'type="range"' not in source, "the budget slider is back"
+    assert "budgetUnlimitedToggle" in source
+    # An unusable entry blocks submission rather than sending 0.
+    assert "budgetInvalid" in source
+    assert "parsed > 0" in source
+
+
+def test_font_residue_warning_carries_the_at_risk_page_count() -> None:
+    """``at_risk_pages`` is the witness's recall half and was dropped.
+
+    The engine computed it (``wit.get("at_risk_pages")``) and only wrote it into
+    a free-text quality signal, so the console showed 20 confirmed pages and
+    hid the 5 suspects — the set an operator would want visually checked.
+    """
+    if not _ASSESS_PY.exists():
+        pytest.skip("engine source is not present in this checkout")
+    source = _ASSESS_PY.read_text(encoding="utf-8")
+    assert '"at_risk_pages": at_risk' in source, (
+        "FONT_RESIDUE_RISK no longer carries at_risk_pages in its params"
+    )
+    if not _WIZARD_SRC.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+    wizard = _WIZARD_SRC.read_text(encoding="utf-8")
+    assert "at_risk_pages" in wizard
+    assert "warningAtRiskClause" in wizard
