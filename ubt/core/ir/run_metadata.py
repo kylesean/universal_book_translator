@@ -77,8 +77,12 @@ class RunMetadata(BaseModel):
     layout_columns: int | None = None
 
     # --- Delivery verdict -------------------------------------------------
-    delivery_status: str | None = None
-    delivery_warning: str | None = None
+    # The verdict is computed, never stored: ``job_options.delivery_verdict_from_blocks``
+    # derives it from the block counters, and the CLI, REST and web console all
+    # call that one rule. Two fields used to sit here (``delivery_status`` /
+    # ``delivery_warning``) that no code ever assigned, so the report carried two
+    # permanent nulls and the quality screen rendered a banner that could never
+    # appear.
 
     def to_metadata_dict(self) -> dict[str, Any]:
         """Only the fields this run actually set, as JSON-native values.

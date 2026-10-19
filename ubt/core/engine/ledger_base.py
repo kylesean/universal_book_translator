@@ -556,8 +556,19 @@ class LedgerBase:
         Only reached under ``--fresh``. Drops only the tables UBT owns so an
         unrelated table in the same file is untouched, then recreates the
         baseline and stamps it.
+
+        ``job_locks`` is deliberately **not** dropped. The pipeline acquires the
+        writer lock *before* constructing this ledger (so the whole run, ingest
+        included, is under the guard), which means this reset runs while the
+        caller already holds a row in that table. Dropping it deleted the
+        caller's own lock: any second process could then acquire the same job
+        immediately and the two would write one ledger concurrently — each
+        paying the provider, each overwriting the other's checkpoints. The
+        table's shape is part of the baseline schema and is recreated by
+        ``_SCHEMA_SQL`` with ``IF NOT EXISTS``, so leaving the live row in place
+        keeps both the schema and the guard intact.
         """
-        for table in ("blocks", "job_meta", "batch_jobs", "job_locks", "blocks_v10", "blocks_v11"):
+        for table in ("blocks", "job_meta", "batch_jobs", "blocks_v10", "blocks_v11"):
             conn.execute(f"DROP TABLE IF EXISTS {table};")
         conn.executescript(_SCHEMA_SQL)
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION};")

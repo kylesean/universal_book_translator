@@ -300,10 +300,13 @@ class QualityReport(BaseModel):
     #: (measured: a job with 27 calls / 27 errors still reported a clean-looking
     #: distribution). None = the judge was not requested at all.
     qe_semantic_coverage: str | None = None
-    # Delivery suitability audit flag: a short machine-readable reason when the
-    # delivery is degraded (set by the stages that detect it). None = normal.
-    delivery_status: str | None = None
-    delivery_warning: str | None = None
+    #: True when this run was a zero-token rehearsal (echo provider). A
+    #: rehearsal's artifact is the *source text* behind a marker, not a
+    #: translation, and every structural gate passes it by construction — so a
+    #: report that does not say so is indistinguishable from a real delivery,
+    #: and the console showed one as "PRODUCTION READY". Read from the ledger's
+    #: own ``run_identity.mock_run``, which the ingest stage records every run.
+    rehearsal: bool = False
     #: Content/asset ledger reconciliation (ubt.core.content.contract). None for
     #: jobs that predate the contract layer. The standalone ``*.contract.json``
     #: holds the same structure; this is the embedded copy for one-stop audit.
@@ -334,6 +337,19 @@ def _percentile(values: list[float], p: float) -> float:
     d0 = values[f] * (c - k)
     d1 = values[c] * (k - f)
     return round(d0 + d1, 4)
+
+
+def _is_rehearsal_run(ledger: SQLiteJobLedger, job_id: str) -> bool:
+    """Whether this job ran on the echo provider (``--dry-run``).
+
+    The ingest stage records ``run_identity.mock_run`` on every run. Nothing
+    read it, so a rehearsal's quality report was byte-identical in shape to a
+    real one and the console rendered it as "PRODUCTION READY / PASS" — over
+    ``[模拟翻译]`` echo text. A missing or malformed record means "not a
+    rehearsal" (every pre-identity ledger is a real run).
+    """
+    identity = ledger.get_job_metadata_value(job_id, "run_identity")
+    return bool(isinstance(identity, dict) and identity.get("mock_run"))
 
 
 def build_quality_report(
@@ -584,8 +600,7 @@ def build_quality_report(
         qe_semantic_coverage=_semantic_coverage(
             _metadata_counter("qe_judge_calls"), _metadata_counter("qe_judge_errors")
         ),
-        delivery_status=manifest.run.delivery_status,
-        delivery_warning=manifest.run.delivery_warning,
+        rehearsal=_is_rehearsal_run(ledger, job_id),
         delivery_contract=delivery_contract,
     )
 

@@ -25,7 +25,7 @@ from ubt.core.config import (
     UBTConfig,
     env_var_names,
 )
-from ubt.core.exceptions import UBTError
+from ubt.core.exceptions import DocumentParseError, UBTError
 from ubt.core.presets import PRESET_ENGINE_FIELDS, Preset, resolve_engine_params
 
 #: Enum-typed request options and their accepted vocabulary, derived from the
@@ -122,7 +122,9 @@ def resolve_profile_name(profile: str | None, input_path: str | Path | None = No
     silently started with an empty seed glossary and no error. The probe
     (``analyze_archetype`` + ``infer_profile_from_archetype``) is cheap and
     never raises; a missing/unreadable file resolves to ``general``, matching
-    the CLI's old fallback.
+    the CLI's old fallback. A password-protected PDF skips the probe (it cannot
+    be translated); the adapter guard reports it later with the actionable
+    message.
     """
     name = (profile or "").strip() or "general"
     if name.lower() != "auto":
@@ -132,6 +134,17 @@ def resolve_profile_name(profile: str | None, input_path: str | Path | None = No
     path = Path(input_path)
     if not path.exists():
         return "general"
+    if path.suffix.lower() == ".pdf":
+        # The archetype probe samples the PDF with pdf_oxide, which logs a burst
+        # of "Decryption failed ... Not authenticated" on an encrypted file
+        # before the pipeline's adapter guard can refuse it. Skip the probe here;
+        # the adapter guard reports the encryption with its actionable message.
+        from ubt.adapters.pdf.encryption import reject_encrypted_pdf
+
+        try:
+            reject_encrypted_pdf(path)
+        except DocumentParseError:
+            return "general"
     try:
         from ubt.core.archetype import analyze_archetype, infer_profile_from_archetype
 

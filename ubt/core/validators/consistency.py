@@ -486,6 +486,17 @@ _COUNT_SCALE_FACTORS: dict[str, Decimal] = {
 }
 
 #: SI prefix symbols, case-sensitive (``M`` mega vs ``m`` milli).
+#:
+#: A unit spelling like ``km``/``kg``/``ms``/``MPa`` combines a prefix with a base
+#: unit. Its *expanded* value ("12 km" is 12000 m) is a legitimate way to state
+#: the same quantity, so the scale map keeps it as an **additional** reading --
+#: but it must never be a *requirement*: the reader is owed the number the source
+#: wrote (``12``), and ``12 公里`` is a correct translation. Reading the prefix as
+#: a mandatory magnitude made the gate report that translation as having LOST the
+#: number 12, and ``2nd ed.`` as losing 2 to "2 nano-d". The lost-number check
+#: therefore treats a unit-prefixed token as satisfied by either reading (see
+#: ``_unit_prefixed_numbers``), while a true magnitude word (``250万``,
+#: ``2.5 million``) must still be restated at its magnitude.
 _SI_SYMBOL_FACTORS: dict[str, Decimal] = {
     "T": Decimal(1_000_000_000_000),
     "G": Decimal(1_000_000_000),
@@ -497,6 +508,128 @@ _SI_SYMBOL_FACTORS: dict[str, Decimal] = {
     "n": Decimal("0.000000001"),
     "p": Decimal("0.000000000001"),
 }
+
+#: Unit symbols an SI prefix may actually precede. Anything else after the
+#: prefix letter is a word and must not be read as a magnitude: ``2nd``/``3rd``
+#: are ordinals, ``3 mol`` is a bare unit word (the regex already rejects a
+#: longer lowercase run, but the table is the second line of defence).
+_SI_UNIT_SYMBOLS: frozenset[str] = frozenset(
+    {
+        "m",
+        "g",
+        "s",
+        "A",
+        "K",
+        "N",
+        "J",
+        "W",
+        "V",
+        "F",
+        "H",
+        "C",
+        "T",
+        "L",
+        "B",
+        "b",
+        "Pa",
+        "Hz",
+        "Wb",
+        "lm",
+        "lx",
+        "Bq",
+        "Gy",
+        "Sv",
+        "kat",
+        "eV",
+        "Wh",
+        "bit",
+        "byte",
+        "bps",
+        "mol",
+        "rad",
+        "sr",
+        "bar",
+        "atm",
+        "Torr",
+        "Da",
+        "au",
+        "pc",
+        "yr",
+        "min",
+        "h",
+        "d",
+        "ohm",
+        "Ohm",
+    }
+)
+
+#: English ordinal suffixes. ``2nd``/``3rd``/``1st``/``4th`` are ordinals, not
+#: "2 nano-d": the digit is the *ordinal's* value and a target that writes
+#: ``第 2 版`` states exactly that value.
+_ORDINAL_SUFFIXES: frozenset[str] = frozenset({"st", "nd", "rd", "th"})
+
+#: Month names and their value. A target that writes ``7 月`` for ``July``
+#: states the month's number; without this map the gate called it an invented
+#: number. Only the *month* value is authorized -- a target that invents an
+#: unrelated 7 is still caught, because authorization is value-wise.
+_EN_MONTH_VALUES: dict[str, str] = {
+    "january": "1",
+    "february": "2",
+    "march": "3",
+    "april": "4",
+    "may": "5",
+    "june": "6",
+    "july": "7",
+    "august": "8",
+    "september": "9",
+    "october": "10",
+    "november": "11",
+    "december": "12",
+}
+
+#: Month names as whole words, case-insensitive. ``May`` is included on purpose:
+#: it is also a modal verb, but authorizing the value 5 can only ever *excuse* a
+#: target that writes 5, never invent one, so the collision is harmless here.
+_EN_MONTH_RE = re.compile(
+    r"\b(" + "|".join(_EN_MONTH_VALUES) + r")\b",
+    re.IGNORECASE,
+)
+
+#: Roman numerals and their value. ``World War II`` -> ``第二次世界大战`` states
+#: the value 2; ``Volume III`` -> ``第三卷`` states 3. The gate never read the
+#: source's roman numeral, so it called the target's Arabic digit invented.
+_ROMAN_VALUES: dict[str, str] = {
+    "I": "1",
+    "II": "2",
+    "III": "3",
+    "IV": "4",
+    "V": "5",
+    "VI": "6",
+    "VII": "7",
+    "VIII": "8",
+    "IX": "9",
+    "X": "10",
+    "XI": "11",
+    "XII": "12",
+    "XIII": "13",
+    "XIV": "14",
+    "XV": "15",
+    "XVI": "16",
+    "XVII": "17",
+    "XVIII": "18",
+    "XIX": "19",
+    "XX": "20",
+}
+
+#: A roman numeral standing alone as a word, with at least two characters or an
+#: explicit label before it (``Part II``, ``World War II``, ``Chapter IV``).
+#: A single ``I``/``V``/``X`` is deliberately excluded: it is far more often the
+#: pronoun or a variable than a numeral.
+_ROMAN_NUMERAL_RE = re.compile(
+    r"(?:\b(?:Part|Chapter|Section|Volume|Book|Act|Scene|Phase|Stage|World\s+War|"
+    r"Appendix|Article|Amendment|Series|Level|Tier|Class|Grade)\s+)?"
+    r"\b([IVX]{2,}|[IVX])\b(?!\s*[A-Za-z])"
+)
 
 
 def _to_decimal(token: str) -> Decimal | None:
@@ -568,23 +701,25 @@ def _count_suffix_values(text: str) -> dict[str, set[str]]:
 
 
 def _scale_map(text: str) -> dict[str, set[str]]:
-    """Map each unit-scaled number's textual form to the values it may denote here."""
+    """Map each *magnitude* number's textual form to the values it may denote.
+
+    A magnitude is a quantity whose written form changes the cardinal value:
+    ``250万`` / ``2.5 million`` / ``390K``. Those must be restated at their
+    magnitude — a target that writes ``250`` for ``250万`` dropped a factor of
+    10^4.
+
+    A **unit prefix is not a magnitude.** ``12 km`` states twelve; ``12000 m``
+    states the same distance, and so does ``12 公里``. Reading ``k`` as a
+    mandatory factor here made the gate report a correct ``12 公里`` as having
+    lost the number 12. Unit-prefixed spellings are collected separately by
+    :func:`_unit_prefix_map` and used only to *authorize* an expanded reading.
+    """
     out: dict[str, set[str]] = {}
     for match in _SCALE_ADJACENCY_RE.finditer(text):
-        raw = (
-            match.group("cn")
-            or match.group("en")
-            or match.group("si")
-            or match.group("sym")
-            or match.group("count")
-        )
-        unit = (
-            match.group("cn_unit")
-            or match.group("en_unit")
-            or match.group("si_unit")
-            or match.group("sym_unit")
-            or match.group("count_unit")
-        )
+        if match.group("sym") is not None or match.group("si") is not None:
+            continue  # a unit prefix; see _unit_prefix_map
+        raw = match.group("cn") or match.group("en") or match.group("count")
+        unit = match.group("cn_unit") or match.group("en_unit") or match.group("count_unit")
         if raw is None or unit is None:
             continue
         if match.group("cn_unit") is not None and unit in "千百":
@@ -594,8 +729,6 @@ def _scale_map(text: str) -> dict[str, set[str]]:
                 continue
         if match.group("count") is not None:
             factor = _COUNT_SCALE_FACTORS.get(unit)
-        elif match.group("sym") is not None:
-            factor = _SI_SYMBOL_FACTORS.get(unit[0])
         else:
             factor = _SCALE_FACTORS.get(unit.lower())
         value = _to_decimal(canonicalize_numeric_token(raw))
@@ -606,8 +739,45 @@ def _scale_map(text: str) -> dict[str, set[str]]:
     return out
 
 
+def _unit_prefix_map(text: str) -> dict[str, set[str]]:
+    """Values a *unit-prefixed* number may also denote (never required).
+
+    ``12 km`` also denotes 12000 (metres), ``2.5 MPa`` also denotes 2500000
+    (pascals). A translation is free to state either the written number or the
+    expanded one, so these readings only ever *authorize* a target value; the
+    written number stays the default requirement (see :func:`_scale_map`).
+
+    The prefix must precede a real unit symbol, so an ordinal (``2nd``), a
+    spelled word (``3 mol``) or a month (``July``) never becomes a magnitude.
+    """
+    out: dict[str, set[str]] = {}
+    for match in _SCALE_ADJACENCY_RE.finditer(text):
+        if match.group("sym") is not None:
+            unit = match.group("sym_unit")
+            raw = match.group("sym")
+        elif match.group("si") is not None:
+            unit = match.group("si_unit")
+            raw = match.group("si")
+        else:
+            continue
+        if raw is None or unit is None:
+            continue
+        if unit.lower() in _ORDINAL_SUFFIXES:
+            continue
+        tail = unit[1:] if match.group("sym") is not None else ""
+        if match.group("sym") is not None and tail not in _SI_UNIT_SYMBOLS:
+            continue
+        factor = _SI_SYMBOL_FACTORS.get(unit[0])
+        value = _to_decimal(canonicalize_numeric_token(raw))
+        if factor is None or value is None:
+            continue
+        key = canonicalize_numeric_token(raw)
+        out.setdefault(key, set()).add(_canon_value(value * factor))
+    return out
+
+
 def _denoted_values(text: str) -> set[str]:
-    """Every value this text states: bare numbers plus unit-scaled numbers."""
+    """Every value this text states: bare numbers, magnitudes, unit expansions."""
     values: set[str] = set()
     for token in _NUM.findall(text):
         value = _to_decimal(canonicalize_numeric_token(token))
@@ -615,18 +785,25 @@ def _denoted_values(text: str) -> set[str]:
             values.add(_canon_value(value))
     for targets in _scale_map(text).values():
         values |= targets
+    for targets in _unit_prefix_map(text).values():
+        values |= targets
     return values
 
 
 def scale_equivalent_values(text: str) -> dict[str, set[str]]:
-    """Public view of :func:`_scale_map`: number token -> values it may denote.
+    """Public view of :func:`_scale_map` + :func:`_unit_prefix_map`.
 
     A scale word restates a magnitude ("1.5 million" == "150万" == "1500000"),
-    so a correct rendering shares no raw digit string with the source. Consumers
-    outside the numeric validator (the omission gate's number metric and chrF
-    residue) need the same equivalence.
+    so a correct rendering shares no raw digit string with the source. A
+    unit-prefixed number carries the same equivalence ("2.5 MPa" also denotes
+    2500000), though that reading only ever *authorizes* a target value -- it is
+    never required. Consumers outside the numeric validator (the omission gate's
+    number metric and chrF residue) need both views.
     """
-    return _scale_map(text)
+    merged = {key: set(values) for key, values in _scale_map(text).items()}
+    for key, values in _unit_prefix_map(text).items():
+        merged.setdefault(key, set()).update(values)
+    return merged
 
 
 def denoted_numeric_values(text: str) -> set[str]:
@@ -1088,6 +1265,24 @@ def _invented_target_numbers(
         if token:
             authorized.add(token)
             authorized.add(_zero_fold(token))
+    # Month names and roman numerals state a *value* the target is entitled to
+    # write as a digit. ``July 2026`` -> ``2026 年 7 月`` and ``World War II`` ->
+    # ``第二次世界大战`` were both reported as inventing a number, because neither
+    # spelling contains a digit the ASCII extraction could see. Authorization is
+    # still value-wise from the source: the map only licenses the number that
+    # spelling denotes, so an unrelated invented 7 in the same block is caught.
+    for match in _EN_MONTH_RE.finditer(source_view):
+        authorized.add(_EN_MONTH_VALUES[match.group(1).lower()])
+    for match in _ROMAN_NUMERAL_RE.finditer(source_view):
+        roman_value = _ROMAN_VALUES.get(match.group(1))
+        if roman_value:
+            authorized.add(roman_value)
+            authorized.add(_zero_fold(roman_value))
+    # A unit-prefixed source number licenses its expanded value in the target:
+    # ``12 km`` -> ``12000 米`` states the same distance. The written number is
+    # already authorized through ``src_nums``.
+    for values in _unit_prefix_map(source_view).values():
+        authorized |= values
 
     tgt_scale_map = scale_equivalent_values(normalized_target)
     invented: list[str] = []
@@ -1323,6 +1518,9 @@ class NumericConsistencyValidator(ContentValidator):
         # Scale equivalence is computed once per pair: the values the source
         # states next to a scale word, and every value the target states.
         src_scales = _scale_map(src_view)
+        # Unit-prefixed numbers ("12 km", "2.5 MPa"): the expanded value is a
+        # second *authorized* reading, never a requirement.
+        src_prefixes = _unit_prefix_map(src_view)
         # Canonical digit runs that occur *bare* somewhere (not part of a scale
         # match). ``src_scales`` is keyed by the digits, so a bare '250' and a
         # scaled '250万' collapse to one key; without this set the loop below
@@ -1429,6 +1627,13 @@ class NumericConsistencyValidator(ContentValidator):
                 lost_numbers.append(num)
                 continue
             if _bare_satisfied(num):
+                continue
+            # A unit-prefixed source number (``12 km``, ``2.5 MPa``) is satisfied
+            # by the number it wrote *or* by the expanded value -- ``12 公里`` and
+            # ``12000 米`` are both faithful. This is an authorization, not a
+            # requirement: requiring the expansion is what reported a correct
+            # ``12 公里`` as having lost 12.
+            if (src_prefixes.get(num) or set()) & tgt_values:
                 continue
             # The count-suffix reading, tried only here so it can never loosen
             # the text check itself: "38k" in the source is satisfied by a
