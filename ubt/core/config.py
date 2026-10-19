@@ -343,20 +343,26 @@ class UBTConfig(BaseSettings):
     repair_reasoning_effort: str = "high"
 
     # -- PDF engine selection ------------------------------------------------
-    # ``auto`` probes the document and picks the engine that can actually read
-    # it: clean single-column born-digital PDFs take the fast pypdfium2 path,
-    # while multi-column / table / formula / vector-heavy / scanned documents go
-    # to docling for layout, table and formula fidelity. This is the default
-    # because it is the best *delivery* for an unconfigured user, not the
-    # fastest: measured on arXiv 2610.02185, pdfium splits the paper into 1801
-    # fragments (0 tables, title shattered into 15 pieces) where docling yields
-    # 350 structured blocks (19 tables, title intact), and the fragment storm
-    # then trips the numeric/structural validators into quarantining ~14% of the
+    # ``auto`` — the default — takes the lossless **docling** engine
+    # unconditionally. It does NOT route clean single-column PDFs to pypdfium2:
+    # that promise was retired after measurement showed every document in the
+    # reference corpus carried structure the pdfium reader cannot represent, and
+    # the cheap probe signals read zero exactly on vector-drawn figures. The
+    # engine choice is a fixed policy; the probe's output is *evidence about the
+    # document* (the assess report shows it), not a vote.
+    #
+    # Measured on arXiv 2610.02185: pdfium splits the paper into 1801 fragments
+    # (0 tables, title shattered into 15 pieces) where docling yields 350
+    # structured blocks (19 tables, title intact), and the fragment storm then
+    # trips the numeric/structural validators into quarantining ~14% of the
     # book. ``publication``/``standard`` presets also select ``auto``;
-    # ``preview``/``fast`` pin ``pdfium`` for speed, and ``--pdf-engine`` always
-    # wins. A scanned (text-less) PDF is a capability boundary, not a
-    # preference: pdfium extracts 0 blocks from one, so it always routes to
-    # docling. See docs/guides/PDF_ENGINE_ROUTING_REDESIGN.md.
+    # ``preview``/``fast`` pin ``pdfium`` (a real opt-in for prose-only input),
+    # and ``--pdf-engine`` always wins. A scanned (text-less) PDF is a capability
+    # boundary, not a preference: pdfium extracts 0 blocks from one.
+    #
+    # ``auto`` therefore requires the ``pdf`` extra; without docling it fails
+    # rather than silently degrading to pdfium. See
+    # docs/guides/PDF_ENGINE_ROUTING_REDESIGN.md.
     pdf_engine: PdfEngine = "auto"
 
     # -- Docling accelerator device -------------------------------------------

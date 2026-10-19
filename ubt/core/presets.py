@@ -51,11 +51,11 @@ class PresetPolicy:
     qe_engine: QeEngine
     table_render_mode: TableRenderMode
     emit_both: bool
-    #: PDF parser the preset selects. ``auto`` is quality-first probe routing
-    #: (scan / formula / multicolumn / vector-heavy -> docling); ``pdfium`` is
-    #: the fast path, which still escapes to docling for a scanned document
-    #: because pdfium cannot read one at all. An explicit ``--pdf-engine``
-    #: always beats this.
+    #: PDF parser the preset selects. ``auto`` is the lossless docling engine,
+    #: unconditionally (the probe reports what the document contains; it no
+    #: longer votes on the engine). ``pdfium`` is an explicit fast-path opt-in:
+    #: it still escapes to docling for a scanned document, because pdfium cannot
+    #: read one at all. An explicit ``--pdf-engine`` always beats this.
     pdf_engine: str
 
     def engine_overrides(self) -> dict[str, Any]:

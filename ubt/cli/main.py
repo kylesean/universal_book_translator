@@ -34,6 +34,7 @@ from ubt.core.config import (
 from ubt.core.engine.dry_run import create_dry_run_orchestrator
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.pipeline import PipelineOrchestrator
+from ubt.core.engine.progress import persist_progress_metadata
 from ubt.core.exceptions import UBTError
 from ubt.core.job_options import (
     JOB_ID_MAX_LEN,
@@ -163,10 +164,28 @@ async def _run_translation(
             "run with --dry-run for zero-token validation."
         )
 
+    # Persist the artifact triple (``output_file`` / ``report_file`` /
+    # ``visual_report_file``) into the job's ledger at completion.
+    #
+    # Without this hook the CLI left every one of its jobs with a null pointer:
+    # the console listed the job as completed at 100% and then answered 409
+    # "not ready" for ``/report``, ``/deliverables`` and the download. All 26
+    # real ledgers in this checkout carried no ``output_file`` for that reason.
+    # The API manager and the queue worker always wired this hook (through
+    # ``build_job_orchestrator``); the CLI constructed the orchestrator by hand
+    # and simply never passed it.
+    #
+    # The hook runs *inside* the orchestrator's writer-lock block, so this write
+    # carries the same single-writer guard as every stage write, and it receives
+    # the run's live ledger rather than a path (reopening the file by path would
+    # open a second connection outside the lock).
+    def _persist_artifact_pointer(event: TranslationProgressEvent, ledger: Any) -> None:
+        persist_progress_metadata(event, ledger, event.job_id)
+
     if dry_run:
-        orchestrator = create_dry_run_orchestrator(config)
+        orchestrator = create_dry_run_orchestrator(config, finalize_job=_persist_artifact_pointer)
     else:
-        orchestrator = PipelineOrchestrator(config=config)
+        orchestrator = PipelineOrchestrator(config=config, finalize_job=_persist_artifact_pointer)
 
     async def _drain() -> Path | None:
         final_output: Path | None = None

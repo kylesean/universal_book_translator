@@ -557,15 +557,18 @@ def collect_checks(config: UBTConfig, *, probe: bool = False) -> list[_Check]:
         )
     elif config.pdf_engine == "auto":
         if importlib.util.find_spec("docling") is not None:
-            record("PDF engine", "OK", "auto-select (pdfium fast path / docling layout)")
+            record("PDF engine", "OK", "auto = docling layout (unconditional)")
         else:
+            # ``auto`` is docling, full stop: it does not degrade to pdfium.
+            # The old text promised a silent fallback that no longer exists, so
+            # an operator without the extra was told ingest would merely be
+            # slower when in fact the job fails.
             record(
                 "PDF engine",
-                "WARN",
-                "auto routing needs docling for layout analysis but it is not "
-                "installed \u2014 complex PDFs silently degrade to the pypdfium2 fast path "
-                "and whole pages arrive as one untranslatable block",
-                fix="uv sync --extra pdf, or set UBT_PDF_ENGINE=pdfium to force the fast path",
+                "FAIL",
+                "auto selects docling, which is not installed \u2014 PDF jobs will "
+                "fail rather than fall back to pdfium",
+                fix="uv sync --extra pdf, or set UBT_PDF_ENGINE=pdfium to opt into the fast path",
             )
     elif is_pdf_engine_registered(config.pdf_engine):
         record("PDF engine", "OK", f"registered engine: {config.pdf_engine}")

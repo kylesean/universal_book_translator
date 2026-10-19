@@ -504,7 +504,7 @@ def translate(
         int | None,
         typer.Option(
             "--macro-chunk-size",
-            help="Number of consecutive micro-blocks to pack per LLM request (e.g. 5) for ultra-fast long documents (default: 1)",
+            help="Number of consecutive micro-blocks to pack per LLM request for ultra-fast long documents (default: 8; 1 = one request per block)",
             show_default=False,
         ),
     ] = None,

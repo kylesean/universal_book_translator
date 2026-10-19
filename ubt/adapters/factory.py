@@ -10,6 +10,7 @@ from ubt.adapters.epub.adapter import EPUBAdapter
 from ubt.adapters.html.adapter import HTMLAdapter
 from ubt.adapters.markdown.adapter import MarkdownAdapter
 from ubt.adapters.pdf.docling_adapter import DoclingPDFAdapter
+from ubt.adapters.pdf.encryption import reject_encrypted_pdf
 from ubt.adapters.pdf.engine_selector import inspect_pdf_route_plan
 from ubt.adapters.pdf.pdfium_adapter import PDFiumAdapter
 from ubt.core.exceptions import UnsupportedDocumentFormatError
@@ -71,6 +72,12 @@ def is_pdf_engine_registered(name: str) -> bool:
 
 
 def _resolve_pdf_adapter(pdf_engine: str, path: Path | None = None) -> BasePDFEngineAdapter:
+    # The routing probe opens the PDF with pdf_oxide; on an encrypted file that
+    # emits a burst of "Decryption failed ... Not authenticated" before the
+    # manifest guard can run. Refuse here, before anything touches the file.
+    if path is not None:
+        reject_encrypted_pdf(path)
+
     engine_key = pdf_engine.lower()
     if engine_key == "babeldoc":
         raise UnsupportedDocumentFormatError(
@@ -78,10 +85,10 @@ def _resolve_pdf_adapter(pdf_engine: str, path: Path | None = None) -> BasePDFEn
             "and upstream CLI contract incompatibility. Please use pdf_engine='docling' (MIT/Apache-2.0)."
         )
     if engine_key in ("auto", "pdfium"):
-        # ``auto`` is the quality-routing mode: the probe may send a document to
-        # docling on a fuzzy signal (formula debris, a right-column edge, a
-        # vector-heavy page) as well as on a scan. ``pdfium`` is the fast mode
-        # and the default: it stays on the fast path for every fuzzy signal, but
+        # ``auto`` is the lossless docling engine, unconditionally: the probe
+        # reports what the document contains, it does not vote on the engine.
+        # ``pdfium`` is an explicit fast-path opt-in: it stays on the fast path
+        # for every fuzzy signal, but
         # a scanned (text-less) document still escapes to docling — pdfium
         # extracts zero blocks from one, which is a capability boundary, not a
         # routing preference. See docs/guides/PDF_ENGINE_ROUTING_REDESIGN.md.
@@ -183,7 +190,7 @@ def get_adapter_for_path(
 
     Uses Docling + Typst + pdf_oxide for 100% permissive Zero-AGPL modern delivery.
     ``pdf_engine='auto'`` routes PDFs through the first-page heuristic
-    (born-digital single-column → pypdfium2 fast path, else Docling).
+    ``auto`` is Docling, unconditionally; ``pdfium`` is an explicit opt-in.
     """
     file_path = Path(path)
     suffix = file_path.suffix.lower()
