@@ -70,6 +70,26 @@ for f in sorted(Path("ubt/core").rglob("*.py")):
                 forbidden += 1
 print(f"  合计: {n}（验收：pipeline/segment/translate 三类 = 0）")
 
+# ``core`` is the domain layer: it must not import an adapter. Without this the
+# gate only watched the compiler packages, so any core module that reached for
+# ``ubt.adapters`` (docling, typst, playwright) passed CI green while dragging
+# those trees into the domain's import graph — the exact edge
+# ARCHITECTURE.md says is forbidden and claims is enforced.
+#
+# ``sys.modules`` lookups from a function body and ``TYPE_CHECKING`` imports do
+# not enter the runtime graph and are excluded by ``scan``.
+adapters_forbidden: list[tuple[str, int, str]] = []
+for f in sorted(Path("ubt/core").rglob("*.py")):
+    for ln, mod in scan(f)[0]:
+        if mod == "ubt.adapters" or mod.startswith("ubt.adapters."):
+            adapters_forbidden.append((str(f), ln, mod))
+if adapters_forbidden:
+    print("== 模块级 core→adapters（验收：0）==")
+    for f, ln, mod in adapters_forbidden:
+        print(f"  {f}:{ln} -> {mod}")
+else:
+    print("== 模块级 core→adapters（验收：0）: 0 ==")
+
 edges: dict[str, set[str]] = {}
 for f in Path("ubt").rglob("*.py"):
     src = pkg_of(f)
@@ -103,4 +123,6 @@ if render_violations:
 else:
     print("== render→adapters 模块级边（验收：0）: 0 ==")
 
-raise SystemExit(0 if forbidden == 0 and not cycle and not render_violations else 1)
+raise SystemExit(
+    0 if forbidden == 0 and not cycle and not render_violations and not adapters_forbidden else 1
+)

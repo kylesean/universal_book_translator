@@ -24,7 +24,9 @@ matters is the direction of the forbidden edges, stated per package below:
 | Package | Role |
 | --- | --- |
 | `ubt/model` | The leaf document AST: `Element`/`ElementT`, `Span`/`CompositeSpan`/`CanonicalSource`, and the translation-unit types (`Segment`, `Placeholder`). Pure data: it imports nothing from the rest of `ubt`. |
-| `ubt/core` | The domain: IR (`ubt/core/ir`), engine, policy, QE, validators, ledger, router, memory. |
+| `ubt/core` | The domain: IR (`ubt/core/ir`), engine, policy, QE, validators, ledger, router, memory. **May not** import `ubt.adapters` at module level; implementations reach it through `ubt/core/ports.py` (function-level lazy imports). |
+| `ubt/cache` | Content-addressed caches (`DiskCacheStore`, the Docling conversion cache's directory root) plus `ubt/cache/dirs.py`. Leaf-adjacent: it may import `ubt/core` leaves (`fs_perms`) and `ubt/core/engine/pipeline.py` imports `ubt/cache.dirs`, which makes `core` ↔ `cache` a package-level cycle. Tolerated because `fs_perms` is a leaf module with no reverse edge; do not deepen it. |
+| `ubt/layout` | Theme/direction helpers. `direction_for` is the only symbol production code reads (render and export); `Theme`/`resolve_theme` are exercised by tests alone — do not treat this package as the single source of truth for font stacks or leading until a renderer actually reads it. |
 | `ubt/analyze` | Format readers turning sources into the typed AST (`read_md`, `read_html`, `read_epub`, `read_docx`), plus the shared walkers, numbering and classifier rules the adapters call. It builds on `ubt/core`'s leaf helpers (`ubt/core/xml_safety`, `zip_safety`, `ir`) and **may not** import `ubt.adapters`. |
 | `ubt/adapters` | Format adapters (`ubt/adapters/factory.py`) plus the PDF engines and the render stack. |
 | `ubt/segment`, `ubt/translate` | The translation-unit layer: placeholder masking/restore and the engine that drives it. |
@@ -43,8 +45,11 @@ capability.
 - `scripts/dump_compiler_edges.py` is the acceptance tool. It exits non-zero if
   any module-level `ubt.core` import of `ubt.pipeline` / `ubt.segment` /
   `ubt.translate` exists (the inward edge to the leaf `ubt.model` is exempt by
-  design), if the `ubt.core.engine <-> ubt.pipeline` package cycle exists, or if
-  any `ubt.render -> ubt.adapters` module-level edge exists.
+  design), if the `ubt.core.engine <-> ubt.pipeline` package cycle exists, if
+  any `ubt.render -> ubt.adapters` module-level edge exists, or if **any**
+  module-level `ubt.core -> ubt.adapters` edge exists. The last check was
+  missing while this section already claimed the invariant was enforced: a core
+  module could import docling or typst and every gate stayed green.
 - `tests/unit/analyze/test_layering.py` pins the other direction: **no**
   `ubt.adapters` import anywhere under `ubt/analyze`. The allowed set is empty
   on purpose — any new edge there is an inversion, not a seam to negotiate.
