@@ -108,11 +108,18 @@ than a copy of the source layout.
 
 The reader-facing choice is `dual_mode` (`mono` / `dual` / `auto`, default
 `auto`): `dual` pairs each block's source line above its translation, `mono`
-delivers the target only, and `auto` lets the advisor pick from the document's
-structure. This is the only mode knob; effort and engine details are chosen by
-a **preset** (`publication` / `standard` / `preview` / `fast`), which selects
-the prompt depth, formula handling and parser. Presets never pick a model or a
-render route.
+delivers the target only, and `auto` starts bilingual and lets the advisor step
+it down to target-only when the layout cannot pair cleanly. This is the only
+mode knob; effort and engine details are chosen by a **preset**
+(`publication` / `standard` / `publication_math` / `preview` / `fast`), which
+selects the prompt depth, formula handling and parser. Presets never pick a
+model or a render route.
+
+Formula enrichment is not a quality gradient: only `publication_math` sets it
+to `on`, which runs the VLM math transcription to vector LaTeX (slow — roughly
+15–60 s per formula on CPU). Every other preset leaves it `auto`, which resolves
+to cropping the source region, so `publication` and `standard` render identical
+math and differ only in prompt depth.
 
 Measured on the reference paper (arXiv 2101.03961): distinct font sizes drop
 from 44 to 3–5, formula residue from 0.857 to 0.000, untranslated-block markers

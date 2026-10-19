@@ -721,3 +721,91 @@ def test_the_tenant_header_is_honored_when_the_operator_trusts_it(tmp_path: Path
     )
     assert scope.tenant_from_header("victim") == "victim"
     assert scope.tenant_allows("otherjob0001", scope.tenant_from_header("victim")) is True
+
+
+# --- preset copy must describe what the engine actually does -----------------
+
+
+def test_the_wizard_offers_exactly_the_engine_presets() -> None:
+    """A preset the engine dropped would 422 every submission; one it added would
+    be unreachable. Both directions are checked.
+
+    The wizard used to list four presets and hard-code their labels, while
+    ``ubt/core/presets.py`` owned the real table. Adding ``publication_math``
+    to the engine would have left it invisible in the console.
+    """
+    from ubt.core.presets import Preset
+
+    if not _WIZARD_TSX.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+    source = _WIZARD_TSX.read_text(encoding="utf-8")
+    offered = set(re.findall(r"id:\s*'([a-z_]+)'\s+as const", source))
+    assert offered, "parsed no preset ids from NewJobWizard.tsx"
+    assert offered == {p.value for p in Preset}, (
+        f"wizard/engine preset mismatch: only-wizard={sorted(offered - {p.value for p in Preset})}, "
+        f"only-engine={sorted({p.value for p in Preset} - offered)}"
+    )
+
+
+def test_the_wizard_does_not_promise_vector_formulas_outside_publication_math() -> None:
+    """Only ``formula_enrichment="on"`` runs the VLM transcription.
+
+    ``auto`` resolves to cropping the source region, so copy claiming "vector
+    formula re-render" or "公式矢量重排" for publication/standard described
+    behaviour no run produced. This pins the claim to the one preset that
+    actually pays for it.
+    """
+    from ubt.core.presets import PRESETS, Preset
+
+    if not _EN_TS.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+    vector_presets = {p for p, pol in PRESETS.items() if pol.formula_enrichment == "on"}
+
+    for path in (_EN_TS, _EN_TS.parent / "zh.ts"):
+        text = path.read_text(encoding="utf-8")
+        # Import inside the loop so a missing zh.ts is a visible skip, not a crash.
+        assert "vector" not in text.lower() or vector_presets, (
+            f"{path.name} promises vector formulas but no preset enables them"
+        )
+
+    # The wizard must key the "slow / vector" badge off the preset that has it.
+    wizard = _WIZARD_TSX.read_text(encoding="utf-8")
+    assert Preset.PUBLICATION_MATH.value in wizard
+
+
+def test_preset_badges_do_not_claim_a_quality_gate() -> None:
+    """A preset never changes a quality gate (see ``ubt/core/presets.py``).
+
+    The badge used to read "富提示词 ＋ 公式见证" / "RICH PROMPTS + FORMULA
+    WITNESS", borrowing the word "gate" from the export stage while setting no
+    gate at all. Badges now name the parser and prompt depth, which *are*
+    preset fields.
+    """
+    from ubt.core.presets import PRESETS
+
+    if not _EN_TS.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+    en = _EN_TS.read_text(encoding="utf-8")
+    badge_block = re.search(r"presetBadge\w+:\s*'([^']*)'", en)
+    assert badge_block, "en.ts has no presetBadge key"
+    for preset in PRESETS.values():
+        # Every preset declares both parameters the badges describe.
+        assert preset.pdf_engine in ("auto", "pdfium", "docling")
+        assert preset.prompt_strategy in ("auto", "minimal", "hybrid", "rich")
+
+
+def test_wizard_sends_layout_columns_within_the_api_range() -> None:
+    """``layout_columns`` accepts 1 or 2 or null; the wizard must not send 0/"".
+
+    An empty string or 0 would be a 422 for every job, the exact class of bug
+    the payload-key test above was written for.
+    """
+    from ubt.api.models import JobSubmitRequest
+
+    if not _WIZARD_TSX.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+    source = _WIZARD_TSX.read_text(encoding="utf-8")
+    assert "layout_columns" in source
+    # The wizard maps its 'auto' sentinel to null before submitting.
+    assert re.search(r"layout_columns:\s*layoutColumns === 'auto' \? null", source)
+    assert "layout_columns" in JobSubmitRequest.model_fields

@@ -64,3 +64,54 @@ def test_no_preset_leaves_the_engine_to_the_config_default() -> None:
 def test_every_preset_declares_an_engine() -> None:
     for preset, policy in PRESETS.items():
         assert policy.pdf_engine in ("auto", "pdfium", "docling"), preset
+
+
+def test_every_preset_key_matches_its_enum_member() -> None:
+    # ``PresetPolicy.key`` is what ``engine_overrides`` and the CLI layer read;
+    # a preset added to the enum but missing from the table (or keyed with a
+    # mismatched member) would silently resolve to no overrides at all.
+    assert set(PRESETS) == set(Preset)
+    for preset, policy in PRESETS.items():
+        assert policy.key == preset
+
+
+def test_publication_math_is_the_only_preset_that_transcribes_formulas() -> None:
+    # ``formula_enrichment="auto"`` resolves to False (crop the source region),
+    # so any copy promising "vector formula re-typesetting" for publication or
+    # standard describes behaviour no preset delivers. Only ``on`` runs the VLM.
+    vector = {p for p, pol in PRESETS.items() if pol.formula_enrichment == "on"}
+    assert vector == {Preset.PUBLICATION_MATH}
+
+    # And the pair that the old UI copy conflated must stay identical on math.
+    assert PRESETS[Preset.PUBLICATION].formula_enrichment == (
+        PRESETS[Preset.STANDARD].formula_enrichment
+    )
+
+
+def test_auto_formula_enrichment_resolves_to_the_crop_path() -> None:
+    # Pins the engine fact the preset copy depends on. If ``auto`` ever starts
+    # meaning "ask the VLM", the publication/standard copy above goes stale.
+    from ubt.adapters.pdf.docling_parser import resolve_formula_enrichment
+
+    assert resolve_formula_enrichment("auto", lambda: True) is False
+    assert resolve_formula_enrichment("auto", lambda: False) is False
+    assert resolve_formula_enrichment("on", lambda: False) is True
+
+
+def test_publication_math_only_changes_the_formula_policy() -> None:
+    # The preset must differ from publication in exactly one knob: otherwise its
+    # label ("publication, but vector math") would under-describe the change.
+    pub = PRESETS[Preset.PUBLICATION].engine_overrides()
+    math = PRESETS[Preset.PUBLICATION_MATH].engine_overrides()
+    differing = {k for k in pub if pub[k] != math[k]}
+    assert differing == {"formula_enrichment"}
+
+
+def test_each_preset_has_a_distinct_parameter_bundle() -> None:
+    # The wizard badges claim the presets are distinguishable; two presets that
+    # resolve to identical engine parameters would make the choice a no-op.
+    bundles: dict[tuple[tuple[str, object], ...], Preset] = {}
+    for preset, policy in PRESETS.items():
+        signature = tuple(sorted(policy.engine_overrides().items()))
+        assert signature not in bundles, f"{preset} duplicates {bundles[signature]}"
+        bundles[signature] = preset
