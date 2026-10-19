@@ -79,8 +79,22 @@ def docling_cache_key(
     digest = hashlib.sha256()
     digest.update(f"v{DOCLING_CACHE_VERSION}|{pdf_sha256}|{page_range}|".encode())
     digest.update(json.dumps(options.model_dump(mode="json"), sort_keys=True, default=str).encode())
+    # Physics/table structure do not come from ``docling`` alone: the layout and
+    # table models live in ``docling-ibm-models`` and the PDF reader in
+    # ``docling-parse``, both pinned only by RANGE in docling's metadata
+    # (``docling-parse<8.0.0,>=7.22.1``, ``docling-ibm-models<5,>=4.0.2``), so
+    # ``uv lock`` can move them without moving ``docling``. Keying on the
+    # distribution alone replayed a stale layout/table structure after an
+    # upgrade, and the operator had every reason to expect the new parser's
+    # fixes. All four are recorded; a package that is not installed contributes
+    # "unknown", which is stable within an environment.
     digest.update(
-        f"|docling={_package_version('docling')}|docling-core={_package_version('docling-core')}".encode()
+        (
+            f"|docling={_package_version('docling')}"
+            f"|docling-core={_package_version('docling-core')}"
+            f"|docling-parse={_package_version('docling-parse')}"
+            f"|docling-ibm-models={_package_version('docling-ibm-models')}"
+        ).encode()
     )
     return digest.hexdigest()[:32]
 
@@ -110,7 +124,20 @@ def _strip_picture_payloads(node: Any) -> Any:
 
 
 def read_docling_document(key: str, *, cache_dir: Path | None = None) -> Any | None:
-    """Return the cached DoclingDocument for ``key``, or None on any miss."""
+    """Return the cached DoclingDocument for ``key``, or None on any miss.
+
+    A *truncated* conversion is treated as a miss, not as a cached answer.
+
+    The cache exists so a re-ingest skips minutes of model work, and the key
+    covers the file bytes, the pipeline options and the Docling version — but it
+    cannot cover "the conversion silently returned a fraction of the document".
+    A bad entry that once held 6 text items for a 26-page PDF would then be
+    replayed on every later run, and each replay reported success with the same
+    six paragraphs. The write side already refuses a document with no pages;
+    this is the read side's matching check: a document whose pages carry no
+    text at all is not a usable conversion, and a caller with a real file will
+    convert again.
+    """
     target = (cache_dir or DOCLING_CACHE_DIR) / f"{key}.json.gz"
     try:
         # Stream the decompression into the parser: ``read_bytes`` +
@@ -120,11 +147,34 @@ def read_docling_document(key: str, *, cache_dir: Path | None = None) -> Any | N
             payload = json.load(fh)
         from docling_core.types.doc.document import DoclingDocument
 
-        return DoclingDocument.model_validate(payload)
+        document = DoclingDocument.model_validate(payload)
     except (OSError, ValueError, TypeError) as exc:
         if target.exists():
             logger.warning("Docling cache entry %s is unreadable (%s); re-converting", target, exc)
         return None
+    if not _conversion_has_usable_text(document):
+        logger.warning(
+            "Docling cache entry %s holds %d page(s) but no extracted text; "
+            "discarding it and re-converting rather than replaying a broken conversion.",
+            target,
+            len(getattr(document, "pages", {}) or {}),
+        )
+        return None
+    return document
+
+
+def _conversion_has_usable_text(document: Any) -> bool:
+    """Whether a cached conversion carries at least one text item.
+
+    A scanned book is a legitimate cache entry with no text (OCR happens later),
+    so the check cannot demand text on *most* pages. It demands at least one text
+    item somewhere: zero means the conversion pass itself failed to read the
+    file, which is the shape that must never be replayed.
+    """
+    texts = getattr(document, "texts", None)
+    if not texts:
+        return False
+    return any((getattr(item, "text", "") or "").strip() for item in texts)
 
 
 def write_docling_document(key: str, document: Any, *, cache_dir: Path | None = None) -> None:

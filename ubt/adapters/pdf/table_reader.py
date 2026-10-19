@@ -224,13 +224,46 @@ def read_table_image_sync(image: Any) -> Grid | None:
     if request is None:
         return None
     endpoint, payload, headers = request
+    body: object = None
     try:
         with httpx.Client(timeout=float(os.environ.get("UBT_OCR_TIMEOUT", "300"))) as client:
             response = client.post(endpoint, json=payload, headers=headers)
             response.raise_for_status()
             body = response.json()
-        content = str(body["choices"][0]["message"]["content"])
+        content = str(body["choices"][0]["message"]["content"])  # type: ignore[index]
     except Exception as exc:  # noqa: BLE001 - a failed upgrade keeps Docling's table
         logger.warning("table reader failed, keeping Docling's cells: %s", exc)
         return None
+    finally:
+        # Meter the call. This was the one paid channel that recorded nothing:
+        # the VLM OCR driver registers its usage (``cloud_driver``), a table
+        # crop did not, so the budget preflight, the cost report and the quality
+        # report all under-counted by every table re-read. ``measured=False``
+        # when the reply carries no usage: an unsized call must show as unknown
+        # rather than as a fake $0.00 (same rule ``cloud_driver`` follows).
+        _record_table_reader_usage(body)
     return parse_table_markup(content)
+
+
+def _record_table_reader_usage(body: object) -> None:
+    """Attribute this call's tokens to the run's usage sink, best-effort.
+
+    Never raises: metering is observability, and a vision read is already an
+    optional upgrade over Docling's cells.
+    """
+    try:
+        from ubt.core.router.provider import _extract_cached_tokens, record_external_usage
+
+        usage = body.get("usage") if isinstance(body, dict) else None
+        model = os.environ.get(MODEL_ENV_VAR, "").strip() or "table-reader"
+        if isinstance(usage, dict) and usage:
+            record_external_usage(
+                model,
+                prompt_tokens=int(usage.get("prompt_tokens", 0) or 0),
+                completion_tokens=int(usage.get("completion_tokens", 0) or 0),
+                cached_tokens=_extract_cached_tokens(usage),
+            )
+        else:
+            record_external_usage(model, measured=False)
+    except Exception as exc:  # meter failures must not affect extraction
+        logger.debug("table reader usage not recorded: %s", exc)
