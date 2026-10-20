@@ -7,7 +7,8 @@ the generic ``UBT_LLM_API_KEY`` environment variable or CLI flags.
 
 Search order for the config file:
 1. explicit path passed by the caller
-2. ``./ubt.toml``
+2. ``ubt.toml`` in the working directory, then in each parent directory
+   (so a run started from a subdirectory finds the project's own file)
 3. ``~/.config/ubt/config.toml``
 4. ``~/.ubt/config.toml``
 """
@@ -26,12 +27,6 @@ from typing import Any
 from ubt.core.exceptions import UBTError
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_CONFIG_LOCATIONS: tuple[Path, ...] = (
-    Path("ubt.toml"),
-    Path.home() / ".config" / "ubt" / "config.toml",
-    Path.home() / ".ubt" / "config.toml",
-)
 
 
 class ProviderNotFoundError(UBTError):
@@ -129,15 +124,43 @@ PROVIDER_ALLOWED_KEYS = frozenset(
 PROVIDER_FORBIDDEN_KEYS = frozenset({"service_api_key"})
 
 
+def _search_candidates() -> list[Path]:
+    """Every path ``find_config_file`` will try, in order, without stat-ing them.
+
+    Shared with :func:`config_search_summary` so the message shown when a lookup
+    fails lists exactly what was searched. A diagnostic that has to re-derive the
+    list will eventually disagree with the lookup.
+    """
+    candidates = [Path.cwd() / "ubt.toml"]
+    # Walk up from the working directory. A run started from a subdirectory —
+    # ``cd web && ubt console``, or any tool that invokes the CLI from inside the
+    # tree — otherwise missed the project's own ``ubt.toml`` and fell back to the
+    # built-in providers, so ``UBT_PROVIDER=my-local`` failed with "not found"
+    # while the file naming it sat one directory up. The walk stops at the
+    # filesystem root and never leaves the current tree.
+    for parent in Path.cwd().parents:
+        candidates.append(parent / "ubt.toml")
+    candidates.extend(
+        (Path.home() / ".config" / "ubt" / "config.toml", Path.home() / ".ubt" / "config.toml")
+    )
+    return candidates
+
+
 def find_config_file(custom_path: Path | str | None = None) -> Path | None:
-    """First existing config file in search order, or ``None`` when none exists."""
+    """First existing config file in search order, or ``None`` when none exists.
+
+    Order: the explicit path, then ``ubt.toml`` in the working directory, then
+    ``ubt.toml`` in each parent directory, then the two user-level locations. The
+    parent walk is what makes a run from a subdirectory find the project's own
+    configuration instead of silently falling back to the built-ins.
+    """
     if custom_path:
         p = Path(custom_path).expanduser().resolve()
         if p.is_file():
             return p
         raise FileNotFoundError(f"Configuration file not found: {custom_path}")
 
-    for candidate in DEFAULT_CONFIG_LOCATIONS:
+    for candidate in _search_candidates():
         try:
             resolved = candidate.expanduser().resolve()
             if resolved.is_file():
@@ -145,6 +168,17 @@ def find_config_file(custom_path: Path | str | None = None) -> Path | None:
         except (OSError, RuntimeError):
             continue
     return None
+
+
+def config_search_summary() -> str:
+    """The paths a failed lookup tried, for an error message.
+
+    The old message named only the provider and the built-ins, which reads as "you
+    never declared this" — misleading when the declaration exists in a file that
+    was not read. Listing the search path turns that into a one-line diagnosis.
+    """
+    tried = [str(c) for c in _search_candidates()]
+    return "searched: " + ", ".join(tried)
 
 
 def _expand_env_vars(val: Any) -> Any:
@@ -302,8 +336,20 @@ def load_provider_block(name: str, custom_path: Path | str | None = None) -> dic
 
     if name not in shipped and canonical_name not in shipped and user_block is None:
         available = list_providers(custom_path)
+        # Name the file that WAS read, or say none was found and list the search
+        # path. "Available providers: [...]" alone reads as "you never declared
+        # this", which is misleading when the declaration exists in a file the
+        # process did not open — the failure that produced this message was a run
+        # started from a subdirectory, before the search walked up.
+        source = find_config_file(custom_path)
+        if source is None:
+            where = f"no configuration file was found ({config_search_summary()})"
+        else:
+            where = f"the configuration file read was {source}"
         raise ProviderNotFoundError(
-            f"Provider '{name}' not found. Available providers: {available if available else 'none'}"
+            f"Provider '{name}' not found: {where}. "
+            f"Declared providers: {available if available else 'none'}. "
+            f"Add a [providers.{name}] block, or set UBT_PROVIDER to one of the above."
         )
 
     fields: dict[str, Any] = {}
