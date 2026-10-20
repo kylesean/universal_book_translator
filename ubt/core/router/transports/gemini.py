@@ -8,6 +8,7 @@ from typing import Any
 
 import httpx
 
+from ubt.core.config import MOCK_API_KEY
 from ubt.core.exceptions import ModelProviderError
 from ubt.core.router.transports.base import BaseTransport, raise_for_status
 
@@ -75,11 +76,12 @@ class GeminiTransport(BaseTransport):
 
     def _auth_headers(self) -> dict[str, str]:
         # The key travels in a header, not a ``?key=`` query string, so it
-        # cannot leak through URL logging.
-        headers = {
-            "x-goog-api-key": self._api_key,
-            "content-type": "application/json",
-        }
+        # cannot leak through URL logging. An unconfigured key (empty or the
+        # ``mock-key`` sentinel) is omitted rather than sent as a literal,
+        # matching ``BaseTransport._auth_headers``.
+        headers = {"content-type": "application/json"}
+        if self._api_key and self._api_key != MOCK_API_KEY:
+            headers["x-goog-api-key"] = self._api_key
         if self._extra_headers:
             headers.update(self._extra_headers)
         return headers

@@ -24,8 +24,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from ubt.core.config import MOCK_API_KEY, UBTConfig
-from ubt.core.providers import list_providers, load_provider_block
+from ubt.core.config import UBTConfig, credential_required, has_real_credential
+from ubt.core.providers import credential_resolution, list_providers, load_provider_block
+from ubt.core.router.pricing import endpoint_is_local
 from ubt.core.router.registry import FALLBACK_PATTERN, registry_from_config
 
 #: Provider-block fields the console may display. Everything else — most
@@ -64,6 +65,32 @@ def _safe_block(name: str) -> dict[str, Any]:
     # ``is_free`` is what tells the operator a run costs nothing; absent means
     # "not declared", which is not the same as "costs money".
     exposed.setdefault("is_free", False)
+    # Whether this block can authenticate, as a code rather than a sentence. The
+    # list rendered six rows with no hint that `opencode` — whose block names an
+    # unset ``${OPENCODE_API_KEY}`` — could not make a single call. A code lets
+    # the console say which export is missing instead of "no credential".
+    try:
+        state = credential_resolution(name)
+        # A loopback endpoint is not authenticated at all: llama.cpp, Ollama and
+        # llama-swap accept an empty bearer, and this machine's `local-gemma4`
+        # runs that way. Reporting "missing" for it would send the operator to
+        # fix a configuration that is already correct — the same false alarm the
+        # old `bool(raw)` check produced, just in the other direction.
+        local_endpoint = endpoint_is_local(block.get("base_url"))
+        exposed["credential_issue"] = (
+            "unresolved_variable"
+            if state["unresolved_vars"]
+            else (None if state["authenticates"] or local_endpoint else "missing")
+        )
+        # The variable *name* is deliberately not echoed here. This payload
+        # renders every provider at once, and a name like `OPENCODE_API_KEY` is
+        # one step closer to the credential than a code is; the guard in
+        # test_console_contract asserts exactly that. The actionable detail —
+        # *which* export is missing — lives on the single-provider endpoint the
+        # operator opens to fix it (`/system/providers/{name}`), where naming the
+        # variable is the whole point.
+    except Exception:  # a block that cannot be resolved is already "unavailable"
+        pass
     exposed["available"] = True
     return exposed
 
@@ -94,10 +121,14 @@ def describe_runtime_config(
         if resolved is None or resolved.model_pattern == FALLBACK_PATTERN
         else resolved.model_pattern
     )
-    # The same predicate ``/jobs/submit`` uses for its auto-rehearsal decision:
-    # a model id is required, and the credential must not be the placeholder.
-    raw_key = config.api_key.get_secret_value().strip()
-    can_translate = bool(draft_model) and bool(raw_key) and raw_key != MOCK_API_KEY
+    # The same predicate ``/jobs/submit`` uses for its auto-rehearsal decision: a
+    # model id is required, and either a real credential or a loopback endpoint.
+    # Testing only the credential reported ``can_translate: false`` for a working
+    # local model, so the wizard announced a rehearsal the submit endpoint would
+    # not actually have run.
+    can_translate = bool(draft_model) and (
+        has_real_credential(config) or not credential_required(config)
+    )
 
     active = {
         "provider": config.provider or "",

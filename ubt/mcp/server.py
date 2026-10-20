@@ -64,7 +64,7 @@ except ModuleNotFoundError as exc:  # pragma: no cover - install-shape guard
 from ubt.adapters import get_adapter_for_path
 from ubt.api.manager import JobManager
 from ubt.api.models import JobSubmitRequest
-from ubt.core.config import MOCK_API_KEY, UBTConfig
+from ubt.core.config import UBTConfig, credential_required, has_real_credential
 from ubt.core.config import parse_page_ranges as parse_page_ranges
 
 # Re-exported so the ceiling the server enforces is the number the registry
@@ -412,11 +412,13 @@ async def ubt_translate_book(
         base_config = apply_config_overrides(
             base_config, {"db_dir": str(_safe_output_path(db_dir))}
         )
-    # Rehearsal when asked, or when no key is configured: a keyless stdio server
-    # must label mock output instead of returning it as a delivery (same rule as
-    # the REST intake).
-    key = base_config.api_key.get_secret_value()
-    rehearsal = dry_run or not key or key == MOCK_API_KEY
+    # Rehearsal when asked, or when a *remote* endpoint has no credential: a
+    # keyless stdio server must label mock output instead of returning it as a
+    # delivery (same rule as the REST intake). A loopback endpoint needs no
+    # credential, so it is not a reason to rehearse.
+    rehearsal = dry_run or (
+        credential_required(base_config) and not has_real_credential(base_config)
+    )
     payload: dict[str, Any] = {
         "input_path": str(resolved),
         "output_path": output_path,
@@ -870,11 +872,14 @@ async def ubt_doctor() -> dict[str, Any]:
     def _record(name: str, status: str, detail: str = "") -> None:
         checks.append({"name": name, "status": status, "detail": detail})
 
-    key = config.api_key.get_secret_value()
-    if not key or key == MOCK_API_KEY:
-        _record("api_key", "FAIL", "set UBT_LLM_API_KEY or select a provider (UBT_PROVIDER)")
-    else:
+    if has_real_credential(config):
         _record("api_key", "OK", f"base={config.base_url}")
+    elif not credential_required(config):
+        # A local endpoint authenticates nothing; reporting FAIL here sent
+        # operators looking for a key that the endpoint never wanted.
+        _record("api_key", "OK", f"local endpoint, no credential needed: {config.base_url}")
+    else:
+        _record("api_key", "FAIL", "set UBT_LLM_API_KEY or select a provider (UBT_PROVIDER)")
     try:
         config.db_dir.mkdir(parents=True, exist_ok=True)
         probe = config.db_dir / ".ubt_doctor_probe"

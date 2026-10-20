@@ -28,8 +28,9 @@ from ubt.cli.commands.translate import translate
 from ubt.cli.commands.verify import verify_command
 from ubt.cli.commands.worker import worker_command
 from ubt.core.config import (
-    MOCK_API_KEY,
     UBTConfig,
+    credential_required,
+    has_real_credential,
 )
 from ubt.core.engine.dry_run import create_dry_run_orchestrator
 from ubt.core.engine.events import EventType, TranslationProgressEvent
@@ -151,17 +152,16 @@ async def _run_translation(
     # `sys.modules.get(...)._build_config` lookup was pure indirection.
     config = _build_config(overrides)
 
-    if not dry_run:
-        api_key_missing = not config.api_key.get_secret_value() or (
-            config.api_key.get_secret_value() == MOCK_API_KEY
-        )
-    else:
-        api_key_missing = False
-    if api_key_missing:
+    # A loopback endpoint needs no credential, so a keyless run against one is a
+    # real run rather than an error. Refusing here made `ubt translate` against a
+    # local llama.cpp/Ollama/llama-swap server impossible without exporting a
+    # dummy key that the server then had to tolerate.
+    if not dry_run and credential_required(config) and not has_real_credential(config):
         raise RuntimeError(
-            "No LLM credential is configured (empty or mock-key). Set "
-            "UBT_LLM_API_KEY, configure api_key in ubt.toml, or pass --api-key; "
-            "run with --dry-run for zero-token validation."
+            "No LLM credential is configured (empty or mock-key) for a remote endpoint. "
+            "Set UBT_LLM_API_KEY, configure api_key in ubt.toml, or pass --api-key; "
+            "run with --dry-run for zero-token validation. (A localhost endpoint needs "
+            "no credential.)"
         )
 
     # Persist the artifact triple (``output_file`` / ``report_file`` /

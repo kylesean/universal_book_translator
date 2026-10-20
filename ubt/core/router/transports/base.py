@@ -11,6 +11,7 @@ from typing import Any
 import httpx
 from pydantic import SecretStr
 
+from ubt.core.config import MOCK_API_KEY
 from ubt.core.exceptions import ModelProviderError
 from ubt.core.router.capabilities import ExtractionStrategy
 from ubt.core.router.extractor import TranslationOutputExtractor
@@ -412,14 +413,27 @@ class BaseTransport(ABC):
         return False
 
     def _auth_headers(self) -> dict[str, str]:
-        auth_val = self._api_key
-        if not auth_val.lower().startswith("bearer "):
-            auth_val = f"Bearer {auth_val}"
+        # A loopback endpoint authenticates nothing: llama.cpp, Ollama and
+        # llama-swap accept any bearer, and this project's own default config
+        # points at one with no credential at all. Sending ``Bearer mock-key``
+        # to it is not harmless — the operator's own config carries a comment
+        # about exactly that failure ("空值会产生非法请求头 'Bearer '（尾随空格），
+        # 请求在到达网关前就失败"). Omitting the header entirely is what a local
+        # server expects, and it is what makes a keyless local run possible.
+        #
+        # The sentinel is checked here as well as the empty string: ``UBTConfig``
+        # fills an unconfigured key with ``MOCK_API_KEY``, so "unconfigured"
+        # arrives as the literal string ``mock-key`` rather than as ``""``. A
+        # transport that only tested truthiness would put it on the wire.
         headers = {
-            "Authorization": auth_val,
             "Content-Type": "application/json",
             "User-Agent": "universal-book-translator/1.0",
         }
+        if self._api_key and self._api_key != MOCK_API_KEY:
+            auth_val = self._api_key
+            if not auth_val.lower().startswith("bearer "):
+                auth_val = f"Bearer {auth_val}"
+            headers["Authorization"] = auth_val
         if self._extra_headers:
             headers.update(self._extra_headers)
         return headers

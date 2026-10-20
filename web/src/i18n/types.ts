@@ -351,6 +351,11 @@ export interface TranslationDictionary {
     providerConfigHint: string
     credentialConfigured: string
     credentialMissing: string
+    credentialLocalEndpoint: string
+    credentialUnresolved: string
+    credentialUnresolvedVar: string
+    credentialShadowedByEnv: string
+    credentialEnvSupplied: string
     editProvider: string
     editingProvider: string
     cancel: string

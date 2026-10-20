@@ -753,6 +753,15 @@ class RuntimeProvider(BaseModel):
     draft_model: str | None = None
     repair_model: str | None = None
     is_free: bool = Field(default=False, description="Declared free (no billable spend)")
+    credential_issue: str | None = Field(
+        default=None,
+        description=(
+            "Why this provider cannot authenticate, as a stable code "
+            "('unresolved_variable' or 'missing'), or null when it can. The "
+            "variable name is not included: it belongs on the single-provider "
+            "endpoint the operator opens to fix it"
+        ),
+    )
     supports_temperature: bool | None = None
     supports_reasoning_effort: bool | None = None
     supports_system_prompt: bool | None = None
@@ -856,13 +865,54 @@ class ProviderDetailResponse(BaseModel):
     ``has_credential`` / ``credential_in_file`` are booleans on purpose: whether a
     key is configured decides whether the block can run at all, and a boolean is
     the most that may be revealed about it.
+
+    **"Configured" means "resolves", not "is written".** A block may carry
+    ``api_key = "${OPENCODE_API_KEY}"`` while that variable is unset; the loader
+    then hands the router an empty string and every call fails, so a form that
+    reported "credential set" for it promised an authentication the next job could
+    not perform. ``credential_issue`` names the two failure shapes by code, and
+    ``unresolved_vars`` says which exports are missing — names only, never values.
     """
 
     model_config = ConfigDict(extra="ignore")
 
     name: str
     declared: bool = Field(description="True when the operator declared it in [providers.*]")
-    has_credential: bool = Field(default=False, description="Whether any credential is configured")
+    has_credential: bool = Field(
+        default=False,
+        description=(
+            "Whether this block's own credential resolves to a non-empty value. "
+            "False for an unset ${VAR}: present in the file, unusable on the wire"
+        ),
+    )
+    authenticates: bool = Field(
+        default=False,
+        description=(
+            "Whether a call from this block can authenticate at all, counting "
+            "UBT_LLM_API_KEY. Distinct from has_credential: a keyless block on a "
+            "deployment that exports the generic variable does run"
+        ),
+    )
+    credential_issue: str | None = Field(
+        default=None,
+        description=(
+            "Stable code for why the credential is unusable: 'unresolved_variable' "
+            "when a ${VAR} reference has no value, 'missing' when nothing supplies "
+            "one, null when it resolves"
+        ),
+    )
+    unresolved_vars: list[str] = Field(
+        default_factory=list,
+        description="Names of ${VAR} references in the block that resolve to nothing",
+    )
+    credential_shadowed_by_env: bool = Field(
+        default=False,
+        description=(
+            "True when this block holds a usable credential that UBT_LLM_API_KEY "
+            "nevertheless outranks. A save is then inert until that variable is "
+            "unset, and the form must say so rather than promise the next job"
+        ),
+    )
     credential_hint: str | None = Field(
         default=None,
         description=(

@@ -181,6 +181,13 @@ def config_search_summary() -> str:
     return "searched: " + ", ".join(tried)
 
 
+#: ``${VAR}`` or ``${VAR:-default}``, the two forms :func:`_expand_env_vars`
+#: understands. Shared with :func:`credential_resolution` so "which variables does
+#: this value name" is answered by the same pattern that substitutes them — a
+#: second regex would drift the moment one of them is extended.
+_ENV_VAR_PATTERN = re.compile(r"\$\{([A-Za-z0-9_]+)(:-([^}]*))?\}")
+
+
 def _expand_env_vars(val: Any) -> Any:
     """Expand ``${VAR}`` / ``${VAR:-default}`` in a value, recursing into tables.
 
@@ -194,7 +201,7 @@ def _expand_env_vars(val: Any) -> Any:
             default = m.group(3) if m.group(2) else ""
             return os.environ.get(var, default)
 
-        return re.sub(r"\$\{([A-Za-z0-9_]+)(:-([^}]*))?\}", _repl, val)
+        return _ENV_VAR_PATTERN.sub(_repl, val)
     if isinstance(val, Mapping):
         return {str(k): _expand_env_vars(v) for k, v in val.items()}
     if isinstance(val, list):
@@ -364,6 +371,73 @@ def load_provider_block(name: str, custom_path: Path | str | None = None) -> dic
         validated = _validate_block(f"[providers.{name}]", user_block)
         fields.update(validated)
     return fields
+
+
+def credential_resolution(name: str, custom_path: Path | str | None = None) -> dict[str, Any]:
+    """How this block's credential resolves, without revealing it.
+
+    The console needs to answer one question the old check got wrong: *can this
+    block actually authenticate?* ``read_provider`` tested ``bool(raw)`` on the
+    merged block, which counts the literal text ``"${OPENCODE_API_KEY}"`` as a
+    credential — so a block whose variable is unset reported "credential set" while
+    the loader resolved it to ``""`` and every call would fail. A configured key is
+    not a usable key.
+
+    Three distinct states, because they need three different actions:
+
+    * ``literal`` — the block carries the secret itself. Usable.
+    * ``variable`` — the block names ``${VAR}``. Usable only when the variable is
+      set; ``unresolved_vars`` names the ones that are not, so the console can say
+      *which* export is missing rather than "no credential".
+    * ``none`` — the block names no credential at all. It may still authenticate
+      through ``UBT_LLM_API_KEY``, which is what ``shadowed_by_env`` reports.
+    """
+    block = load_provider_block(name, custom_path)
+    raw = block.get("api_key")
+    # ``load_provider_block`` has already run ``_expand_env_vars``, so ``raw`` is
+    # the post-expansion value: ``""`` for an unset variable, the default for
+    # ``${VAR:-default}``, the secret itself for a literal.
+    resolved = str(raw).strip() if raw is not None else ""
+    # The *unexpanded* text, to tell "literal secret" from "reference that
+    # resolved". Read from the file directly: ``block`` no longer holds it.
+    declared = (_read_toml(custom_path).get("providers") or {}).get(name) or {}
+    declared_raw = str(declared.get("api_key") or "")
+    named = [m.group(1) for m in _ENV_VAR_PATTERN.finditer(declared_raw)]
+    # A reference with a ``:-default`` resolves even when the variable is unset,
+    # so only an unset variable *without* a default is a failure.
+    unresolved = sorted(
+        {
+            m.group(1)
+            for m in _ENV_VAR_PATTERN.finditer(declared_raw)
+            if not os.environ.get(m.group(1)) and not m.group(2)
+        }
+    )
+    if not declared_raw:
+        kind = "none"
+    elif named:
+        kind = "variable"
+    else:
+        kind = "literal"
+    env_key = os.environ.get("UBT_LLM_API_KEY", "").strip()
+    return {
+        "kind": kind,
+        # Whether *this block's own* credential resolves. ``""`` is what the
+        # loader hands the router, and an empty bearer token fails before it
+        # leaves the process, so "present" is not the question worth answering.
+        "usable": bool(resolved),
+        "unresolved_vars": unresolved,
+        # ``UBT_LLM_API_KEY`` outranks every block, so a credential written into
+        # this one is inert while it is set. The console said "saved, effective on
+        # the next job" and the next job kept using the shell value. Only a block
+        # that *has* a key can be shadowed; when it has none the variable is
+        # supplying the credential rather than hiding one.
+        "shadowed_by_env": bool(env_key) and bool(resolved),
+        # Whether a call can authenticate at all, counting the environment. A
+        # block with no key on a keyed deployment still runs — the generic
+        # variable supplies it — so this is the field a "can this run?" badge
+        # wants, while ``usable`` answers "is this block's own key in force?".
+        "authenticates": bool(resolved) or bool(env_key),
+    }
 
 
 def load_defaults_block(custom_path: Path | str | None = None) -> dict[str, Any]:

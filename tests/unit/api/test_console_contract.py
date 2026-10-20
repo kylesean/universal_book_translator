@@ -1515,3 +1515,103 @@ def test_every_rendered_capability_control_is_submitted() -> None:
     )
     # And that set must actually contain the standalone checkbox.
     assert "'supports_vision'" in source[source.index("const SUBMITTED_FLAGS") :][:200]
+
+
+def test_the_doctor_panel_and_the_editor_share_one_grid_cell() -> None:
+    """The editor must replace the runtime panel, not push it out of the grid.
+
+    They were two independent grid children of a two-column grid, so opening the
+    form made three boxes: the editor took the right cell of row 1 and the whole
+    runtime panel wrapped into row 2 at x=368 — under the diagnostics, in the
+    *left* column, still reporting "local-gemma4 is active" while the operator
+    edited index-translate. Measured in a browser at 1440px: panel x=860 before,
+    x=368 after. Same data twice on screen, one copy in the wrong place.
+    """
+    repo = _REPO_ROOT
+    view = repo / "web" / "src" / "views" / "doctor" / "SystemDoctorView.tsx"
+    if not view.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+
+    source = view.read_text(encoding="utf-8")
+    # One wrapper claims the right column explicitly...
+    assert "md:col-start-2" in source, (
+        "the panel and the editor must share a grid cell; as two siblings the "
+        "third box wraps into the left column"
+    )
+    # ...and the panel is hidden rather than unmounted while the form is open.
+    assert "editingProvider !== undefined ? 'hidden'" in source
+    # The row being edited is marked, or the list highlights only the *active*
+    # provider and gives no confirmation of what is open.
+    assert "editingProvider === p.name" in source
+
+
+def test_the_credential_copy_matches_what_the_server_actually_does() -> None:
+    """The UI must not claim credentials are refused over HTTP.
+
+    That sentence was true before ``34fb4de`` made the write deployment-gated,
+    and it survived in three places — the zh copy, the en copy, and the client
+    docstring — so the same screen offered a credential field and, one line
+    below it, said a credential can never arrive over HTTP. A form contradicting
+    itself is worse than a form with no explanation.
+    """
+    repo = _REPO_ROOT
+    zh = repo / "web" / "src" / "i18n" / "translations" / "zh.ts"
+    en = repo / "web" / "src" / "i18n" / "translations" / "en.ts"
+    client = repo / "web" / "src" / "api" / "client.ts"
+    if not zh.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+
+    for path in (zh, en, client):
+        text = path.read_text(encoding="utf-8")
+        for stale in (
+            "从不接受 HTTP",
+            "never accepted over HTTP",
+            "Credentials are not writable here",
+        ):
+            assert stale not in text, f"{path.name} still claims credentials are refused"
+
+    # And the replacement says what is actually true.
+    zh_text = zh.read_text(encoding="utf-8")
+    assert "本机" in zh_text and "0600" in zh_text
+    en_text = en.read_text(encoding="utf-8")
+    assert "loopback" in en_text and "0600" in en_text
+
+
+def test_a_save_that_the_environment_outranks_is_reported_as_such() -> None:
+    """The form said "effective on the next job" while the env said otherwise.
+
+    ``UBT_LLM_API_KEY`` outranks every provider block, so writing a key into the
+    file while that variable is set produced a successful save whose credential
+    the engine never used. The response has to carry that fact, and the form has
+    to render it, or the operator debugs a translation that keeps hitting the old
+    account.
+    """
+    from ubt.api.models import ProviderDetailResponse
+
+    assert "credential_shadowed_by_env" in ProviderDetailResponse.model_fields
+
+    repo = _REPO_ROOT
+    editor = repo / "web" / "src" / "views" / "doctor" / "ProviderEditor.tsx"
+    if not editor.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+    source = editor.read_text(encoding="utf-8")
+    assert "credential_shadowed_by_env" in source
+    assert "credentialShadowedByEnv" in source
+
+
+def test_the_doctor_does_not_render_a_credential_variable_name_in_the_list() -> None:
+    """The provider list must report the *code*, not the variable name.
+
+    A name like ``OPENCODE_API_KEY`` is one step closer to the credential than a
+    stable code, and this payload renders every provider at once. The actionable
+    detail belongs on the single-provider endpoint the operator opens to fix it.
+    """
+    from ubt.api.runtime_config import describe_runtime_config
+    from ubt.core.config import UBTConfig
+
+    payload = describe_runtime_config(UBTConfig.from_env())
+    for provider in payload["providers"]:
+        assert "unresolved_vars" not in provider
+    import json
+
+    assert "unresolved_vars" not in json.dumps(payload)

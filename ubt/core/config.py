@@ -1344,6 +1344,51 @@ def env_var_names(field_name: str) -> list[str]:
     return [f"UBT_{field_name.upper()}"]
 
 
+def credential_required(config: UBTConfig) -> bool:
+    """Whether this configuration needs a real credential to run for real.
+
+    A **loopback endpoint does not.** llama.cpp, Ollama, vLLM and llama-swap
+    accept any bearer — often none at all — and this project's own reference
+    configuration points at ``127.0.0.1:9090`` with no ``api_key``. The old rule
+    ("no credential means rehearsal") therefore downgraded a correctly configured
+    local model to a zero-token mock, and the operator saw a rehearsal they never
+    asked for while the model sat there answering ``/v1/models``.
+
+    The distinction that matters is not "is there a key" but "**would sending
+    this request to this endpoint bill somebody, or reach a third party**". A
+    hosted endpoint without a credential cannot run at all, so it must rehearse
+    rather than post ``mock-key`` to ``api.openai.com`` (the failure the sentinel
+    exists to prevent). A local one runs fine, so it must not be blocked.
+
+    ``UBT_BILL_LOCAL_ENDPOINT`` is deliberately *not* consulted: that flag says
+    "this loopback gateway charges money", which affects pricing, not whether a
+    credential is needed to reach it. A paid local gateway still accepts requests
+    without a key from the machine that hosts it.
+
+    One predicate, because six call sites each compared against ``MOCK_API_KEY``
+    and every one of them got the local case wrong.
+    """
+    from ubt.core.router.pricing import endpoint_is_local
+
+    return not endpoint_is_local(config.base_url)
+
+
+def has_real_credential(config: UBTConfig) -> bool:
+    """Whether a usable credential is configured — the sentinel is not one.
+
+    ``UBTConfig`` fills an unconfigured ``api_key`` with ``MOCK_API_KEY``
+    (``"mock-key"``), so "no credential" is not an empty string. Every caller
+    that tested truthiness treated a keyless, air-gapped worker as authenticated
+    and built a live provider against the literal sentinel.
+
+    Note this answers "is a key present", not "can this run": a local endpoint
+    with no key is runnable (:func:`credential_required` is False) even though
+    this returns False. Both questions are real and they are not the same one.
+    """
+    key = config.api_key.get_secret_value().strip()
+    return bool(key) and key != MOCK_API_KEY
+
+
 def require_api_key(config: UBTConfig | None = None) -> str:
     """Return the configured API key, or fail fast with an actionable message.
 
@@ -1351,6 +1396,10 @@ def require_api_key(config: UBTConfig | None = None) -> str:
     canonical ladder (``UBT_LLM_API_KEY``, provider configured ``api_key``,
     or CLI flag) and refuses to silently run live workloads against the
     ``mock-key`` placeholder. Raises :class:`SystemExit` when unconfigured.
+
+    A loopback endpoint is not exempt: a script that asks for a key wants one,
+    and the local case is served by not calling this at all rather than by
+    returning the sentinel.
     """
     key = (config or UBTConfig.from_env()).api_key.get_secret_value()
     if not key or key == MOCK_API_KEY:

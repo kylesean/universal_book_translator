@@ -192,15 +192,151 @@ def test_the_edit_is_atomic_and_tightens_permissions(config_dir: Path) -> None:
     assert not [p for p in config_dir.iterdir() if p.name.startswith(".ubt.toml")]
 
 
-def test_reading_a_provider_reports_presence_not_the_secret(config_dir: Path) -> None:
+def test_reading_a_provider_reports_presence_not_the_secret(
+    config_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``has_credential`` must mean *resolves*, not *is written*.
+
+    ``_BASE_BLOCK`` carries ``api_key = "${DEMO_KEY}"``. With the variable unset
+    the loader hands the router an empty string and every call fails, so the old
+    ``bool(raw)`` answer — "credential set" — was a promise the next job could not
+    keep. The block is still reported as carrying a credential *reference*, which
+    is what ``credential_in_file`` says, but not as usable.
+    """
     from ubt.api.provider_editor import read_provider
 
+    monkeypatch.delenv("DEMO_KEY", raising=False)
+    unresolved = read_provider("demo")
+    assert unresolved["has_credential"] is False
+    assert unresolved["credential_in_file"] is True
+    assert unresolved["credential_issue"] == "unresolved_variable"
+    assert unresolved["unresolved_vars"] == ["DEMO_KEY"]
+
+    # Same block, variable set: now it resolves, and the reference is still not
+    # echoed — only the mask is.
+    monkeypatch.setenv("DEMO_KEY", "sk-resolved")
+    resolved = read_provider("demo")
+    assert resolved["has_credential"] is True
+    assert resolved["credential_issue"] is None
+    assert resolved["unresolved_vars"] == []
+    for payload in (unresolved, resolved):
+        # The value itself is never in the payload — only a boolean and a mask.
+        assert "sk-resolved" not in str(payload)
+        assert "${DEMO_KEY}" not in str(payload)
+
+
+def test_a_keyless_local_endpoint_is_not_reported_as_missing(config_dir: Path) -> None:
+    """A loopback endpoint accepts an empty bearer, so "no key" is not a fault.
+
+    ``local-gemma4`` on the reference machine points at ``127.0.0.1:9090`` and
+    runs with no credential at all. Reporting ``missing`` for it sends the
+    operator to fix a configuration that is already correct.
+    """
+    from ubt.api.provider_editor import read_provider, upsert_provider
+
+    upsert_provider(
+        "local",
+        {
+            "base_url": "http://127.0.0.1:9090/v1",
+            "api_mode": "openai-chat",
+            "draft_model": "local-model",
+        },
+    )
+    detail = read_provider("local")
+    assert detail["has_credential"] is False
+    assert detail["credential_issue"] is None
+
+
+def test_a_remote_endpoint_with_no_credential_is_reported_as_missing(
+    config_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ubt.api.provider_editor import read_provider, upsert_provider
+
+    monkeypatch.delenv("UBT_LLM_API_KEY", raising=False)
+    upsert_provider(
+        "remote",
+        {
+            "base_url": "https://api.example.com/v1",
+            "api_mode": "openai-chat",
+            "draft_model": "hosted-model",
+        },
+    )
+    detail = read_provider("remote")
+    assert detail["has_credential"] is False
+    assert detail["credential_issue"] == "missing"
+
+
+def test_a_written_credential_reports_that_the_environment_outranks_it(
+    config_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A save the next job cannot honour must not read as a successful save.
+
+    ``UBT_LLM_API_KEY`` outranks every provider block, so writing a key into the
+    file while that variable is set produces a form that says "saved, effective on
+    the next job" and a job that keeps using the shell value.
+    """
+    from ubt.api.provider_editor import read_provider, upsert_provider
+
+    monkeypatch.setenv("UBT_LLM_API_KEY", "sk-from-shell")
+    upsert_provider("demo", {"api_key": "sk-written-into-file"}, allow_credential=True)
+
     detail = read_provider("demo")
+    # The block does hold a usable key of its own...
     assert detail["has_credential"] is True
-    assert detail["credential_in_file"] is True
-    # The value itself is never in the payload — only the boolean.
-    assert "${DEMO_KEY}" not in str(detail)
-    assert "DEMO_KEY" not in str(detail)
+    # ...and the form is told it is nevertheless not the one in force.
+    assert detail["credential_shadowed_by_env"] is True
+
+    monkeypatch.delenv("UBT_LLM_API_KEY")
+    assert read_provider("demo")["credential_shadowed_by_env"] is False
+
+
+def test_a_keyless_block_on_a_keyed_deployment_authenticates_through_the_env(
+    config_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``has_credential`` False must not imply "cannot run".
+
+    A block with no key of its own still works when the generic variable supplies
+    one, and collapsing the two would show "no credential" for a working provider.
+    """
+    from ubt.api.provider_editor import read_provider, upsert_provider
+
+    monkeypatch.setenv("UBT_LLM_API_KEY", "sk-from-shell")
+    upsert_provider(
+        "keyless",
+        {
+            "base_url": "https://api.example.com/v1",
+            "api_mode": "openai-chat",
+            "draft_model": "hosted-model",
+        },
+    )
+    detail = read_provider("keyless")
+    assert detail["has_credential"] is False
+    assert detail["authenticates"] is True
+    # Nothing is wrong with the credential: the environment supplies it.
+    assert detail["credential_issue"] is None
+    # And nothing is shadowed — the block holds no key to be shadowed.
+    assert detail["credential_shadowed_by_env"] is False
+
+
+def test_an_unresolved_reference_is_reported_even_when_the_env_supplies_a_key(
+    config_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The two facts are independent and both matter.
+
+    ``demo`` names ``${DEMO_KEY}``; with that unset, the block's stated intent
+    cannot be honoured. ``UBT_LLM_API_KEY`` still lets the *call* succeed, so
+    ``authenticates`` is True and the block runs — but the reference itself is
+    broken, and hiding that would leave an operator with a block that silently
+    ignores the variable it names.
+    """
+    from ubt.api.provider_editor import read_provider
+
+    monkeypatch.setenv("UBT_LLM_API_KEY", "sk-from-shell")
+    monkeypatch.delenv("DEMO_KEY", raising=False)
+    detail = read_provider("demo")
+    assert detail["authenticates"] is True
+    assert detail["credential_issue"] == "unresolved_variable"
+    assert detail["unresolved_vars"] == ["DEMO_KEY"]
 
 
 def test_a_new_provider_can_be_created(config_dir: Path) -> None:

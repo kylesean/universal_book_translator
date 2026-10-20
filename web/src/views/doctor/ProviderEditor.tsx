@@ -245,22 +245,47 @@ export function ProviderEditor({
           </label>
         ) : null}
 
-        {/* Credential status: a boolean, because that is all the API reveals. */}
+        {/* Credential status: the state the *loader* will see, not merely whether
+            the key exists in the file. A block carrying an unset ``${VAR}``
+            reports "unresolved variable" and names it, because "credential set"
+            there was a promise the next job could not keep. */}
         <div className="flex items-center gap-2 type-help">
           <span
             className={
-              detail?.has_credential
+              detail?.has_credential || detail?.authenticates || detail?.credential_issue === null
                 ? 'text-[#15803d]'
                 : 'text-[#b45309]'
             }
           >
             ●{' '}
-            {detail?.has_credential
-              ? t.doctor.credentialConfigured
-              : t.doctor.credentialMissing}
+            {detail?.credential_issue === 'unresolved_variable'
+              ? t.doctor.credentialUnresolvedVar.replace(
+                  '{vars}',
+                  (detail?.unresolved_vars ?? []).join(', '),
+                )
+              : detail?.has_credential
+                ? t.doctor.credentialConfigured
+                : detail?.authenticates
+                  ? t.doctor.credentialEnvSupplied
+                  : detail?.credential_issue === null
+                    ? // No issue and no credential: a loopback endpoint, which
+                      // accepts an empty bearer. Saying "no credential" here was
+                      // the false alarm that sent operators to fix a working
+                      // local model.
+                      t.doctor.credentialLocalEndpoint
+                    : t.doctor.credentialMissing}
           </span>
           <InfoTip label={t.doctor.providerConfigHint}>{t.doctor.providerConfigHint}</InfoTip>
         </div>
+
+        {/* The trap the form used to walk into: it said "saved, effective on the
+            next job" while ``UBT_LLM_API_KEY`` outranked the block it had just
+            written. A save that cannot take effect has to say so. */}
+        {detail?.credential_shadowed_by_env ? (
+          <p className="type-help text-[#b45309] leading-relaxed">
+            {t.doctor.credentialShadowedByEnv}
+          </p>
+        ) : null}
 
         {/* The credential field is offered only where the deployment permits it.
             Rendering it disabled with a reason beats rendering it enabled and

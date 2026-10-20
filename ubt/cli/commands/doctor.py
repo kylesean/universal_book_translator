@@ -16,7 +16,7 @@ from rich.markup import escape
 from rich.table import Table
 
 from ubt.cache.dirs import cache_root
-from ubt.core.config import MOCK_API_KEY, UBTConfig
+from ubt.core.config import UBTConfig, credential_required, has_real_credential
 from ubt.core.exceptions import DocumentParseError, UBTError
 from ubt.core.fs_perms import world_readable_files
 from ubt.core.job_options import default_output_dir_for_scan
@@ -440,8 +440,22 @@ def collect_checks(config: UBTConfig, *, probe: bool = False) -> list[_Check]:
             )
 
     # -- credentials -----------------------------------------------------
-    key = config.api_key.get_secret_value()
-    if not key or key == MOCK_API_KEY:
+    # A loopback endpoint needs no credential, so reporting FAIL for one was the
+    # single most misleading line in this report: on the reference machine the
+    # operator had a working local model at 127.0.0.1:9090 and the first row said
+    # "API key: FAIL, not configured". The run was fine; the check was wrong.
+    if has_real_credential(config):
+        record("API key", "OK", "configured", code="api_key", detail_code="api_key.ok")
+    elif not credential_required(config):
+        record(
+            "API key",
+            "OK",
+            "not needed for a local endpoint",
+            code="api_key",
+            detail_code="api_key.local_not_needed",
+            params={"base_url": config.base_url},
+        )
+    else:
         record(
             "API key",
             "FAIL",
@@ -451,8 +465,6 @@ def collect_checks(config: UBTConfig, *, probe: bool = False) -> list[_Check]:
             detail_code="api_key.missing",
             fix_code="api_key.missing",
         )
-    else:
-        record("API key", "OK", "configured", code="api_key", detail_code="api_key.ok")
     record(
         "Base URL",
         "OK",
@@ -466,7 +478,12 @@ def collect_checks(config: UBTConfig, *, probe: bool = False) -> list[_Check]:
         key_str = config.api_key.get_secret_value()
         base_clean = config.base_url.strip().rstrip("/")
         headers: dict[str, str] = {}
-        if key_str and key_str != MOCK_API_KEY:
+        # Only send an Authorization header when there is a real credential —
+        # the same rule the transport follows. Probing with `Bearer mock-key`
+        # would test a wire shape no real job ever uses, and a local server that
+        # rejects an unknown bearer would report a connectivity failure that
+        # does not exist.
+        if has_real_credential(config):
             if config.api_mode == "anthropic-messages":
                 headers["x-api-key"] = key_str
                 headers["anthropic-version"] = "2023-06-01"

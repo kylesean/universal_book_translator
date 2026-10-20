@@ -1546,6 +1546,13 @@ export interface components {
          *     ``has_credential`` / ``credential_in_file`` are booleans on purpose: whether a
          *     key is configured decides whether the block can run at all, and a boolean is
          *     the most that may be revealed about it.
+         *
+         *     **"Configured" means "resolves", not "is written".** A block may carry
+         *     ``api_key = "${OPENCODE_API_KEY}"`` while that variable is unset; the loader
+         *     then hands the router an empty string and every call fails, so a form that
+         *     reported "credential set" for it promised an authentication the next job could
+         *     not perform. ``credential_issue`` names the two failure shapes by code, and
+         *     ``unresolved_vars`` says which exports are missing — names only, never values.
          */
         ProviderDetailResponse: {
             /** Name */
@@ -1557,10 +1564,32 @@ export interface components {
             declared: boolean;
             /**
              * Has Credential
-             * @description Whether any credential is configured
+             * @description Whether this block's own credential resolves to a non-empty value. False for an unset ${VAR}: present in the file, unusable on the wire
              * @default false
              */
             has_credential: boolean;
+            /**
+             * Authenticates
+             * @description Whether a call from this block can authenticate at all, counting UBT_LLM_API_KEY. Distinct from has_credential: a keyless block on a deployment that exports the generic variable does run
+             * @default false
+             */
+            authenticates: boolean;
+            /**
+             * Credential Issue
+             * @description Stable code for why the credential is unusable: 'unresolved_variable' when a ${VAR} reference has no value, 'missing' when nothing supplies one, null when it resolves
+             */
+            credential_issue?: string | null;
+            /**
+             * Unresolved Vars
+             * @description Names of ${VAR} references in the block that resolve to nothing
+             */
+            unresolved_vars?: string[];
+            /**
+             * Credential Shadowed By Env
+             * @description True when this block holds a usable credential that UBT_LLM_API_KEY nevertheless outranks. A save is then inert until that variable is unset, and the form must say so rather than promise the next job
+             * @default false
+             */
+            credential_shadowed_by_env: boolean;
             /**
              * Credential Hint
              * @description A fixed mask when a credential is configured, never the value: the console needs to render 'already set', not to read the secret back
@@ -1860,6 +1889,11 @@ export interface components {
              * @default false
              */
             is_free: boolean;
+            /**
+             * Credential Issue
+             * @description Why this provider cannot authenticate, as a stable code ('unresolved_variable' or 'missing'), or null when it can. The variable name is not included: it belongs on the single-provider endpoint the operator opens to fix it
+             */
+            credential_issue?: string | null;
             /** Supports Temperature */
             supports_temperature?: boolean | null;
             /** Supports Reasoning Effort */

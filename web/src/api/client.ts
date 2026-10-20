@@ -715,7 +715,7 @@ export async function getRuntimeConfig(): Promise<RuntimeConfig> {
   return res.json()
 }
 
-/** One provider block, with the credential reduced to `has_credential`. */
+/** One provider block, with the credential reduced to a mask. */
 export async function getProvider(name: string): Promise<ProviderDetail> {
   const res = await apiFetch(`${BASE_URL}/system/providers/${encodeURIComponent(name)}`)
   if (!res.ok) throw await apiError(res, `Failed to load provider ${name}`)
@@ -725,11 +725,16 @@ export async function getProvider(name: string): Promise<ProviderDetail> {
 /**
  * Create or update a `[providers.<name>]` block in `ubt.toml`.
  *
- * Credentials are not writable here: the request model forbids unknown fields, so
- * an `api_key` in the body is a 422 naming the field. That is the same boundary
- * every job payload enforces — a credential arrives through the file or the
- * environment, never over HTTP. The engine re-reads the file on each job start,
- * so a save applies to the next submitted job without a restart.
+ * An `api_key` in the body is accepted only on a loopback, non-strict
+ * deployment — the same server that lets the operator read `ubt.toml` already.
+ * Anywhere else the field is refused with a message saying to use the file or
+ * the environment, because a shared server must not let a bearer token mint
+ * another one. The engine re-reads the file on each job start, so a save applies
+ * to the next submitted job without a restart.
+ *
+ * A save is not necessarily *effective*: `UBT_LLM_API_KEY` outranks every
+ * provider block, so the response carries `credential_shadowed_by_env` and the
+ * form shows it rather than promising the next job.
  */
 export async function saveProvider(
   name: string,

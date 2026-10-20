@@ -9,6 +9,7 @@ from typing import Any
 
 import httpx
 
+from ubt.core.config import MOCK_API_KEY
 from ubt.core.exceptions import ModelProviderError
 from ubt.core.router.transports.base import (
     _CHAT_TEMPERATURE_KEYS,
@@ -51,11 +52,15 @@ class OpenAIChatTransport(BaseTransport):
     def _batch_headers(self) -> dict[str, str]:
         # Match ``_auth_headers``: a key that already carries the ``Bearer``
         # prefix must not gain a second one, or every /files and /batches call
-        # 401s and the run silently falls back to full-price interactive.
-        api_key = self._api_key
-        if not api_key.lower().startswith("bearer "):
-            api_key = f"Bearer {api_key}"
-        headers = {"Authorization": api_key}
+        # 401s and the run silently falls back to full-price interactive. An
+        # unconfigured key (empty or the ``mock-key`` sentinel) is omitted
+        # entirely rather than sent as ``Bearer mock-key``.
+        headers: dict[str, str] = {}
+        if self._api_key and self._api_key != MOCK_API_KEY:
+            api_key = self._api_key
+            if not api_key.lower().startswith("bearer "):
+                api_key = f"Bearer {api_key}"
+            headers["Authorization"] = api_key
         if self._extra_headers:
             headers.update(self._extra_headers)
         return headers

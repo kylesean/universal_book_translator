@@ -192,24 +192,43 @@ export function SystemDoctorView() {
 
             That table is gone. Capability is now declared per provider block, so
             this panel shows the live configuration and lets the operator edit
-            the block it comes from. */}
-        {editingProvider !== undefined ? (
-          <ProviderEditor
-            name={editingProvider}
-            // ``undefined`` → null: the configuration could not be read, which
-            // the form reports as unknown rather than as a refusal.
-            canWriteCredential={
-              runtime ? (runtime.can_write_credential ?? false) : null
-            }
-            onCancel={() => setEditingProvider(undefined)}
-            onSaved={() => void load(false)}
-          />
-        ) : null}
+            the block it comes from.
 
-        <div className="rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] overflow-hidden shadow-2xs">
-          <div className="px-4 py-2.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] type-group">
-            {t.doctor.runtimeConfig}
-          </div>
+            The panel and the editor share ONE grid cell (``col-start-2``), and
+            the editor replaces the panel while it is open. They used to be two
+            separate grid children, which put three boxes into a two-column grid:
+            the editor took the right cell of row 1 and the whole runtime panel
+            wrapped into row 2 at x=368 — under the diagnostics, in the *left*
+            column, showing "local-gemma4 is active" while the operator edited
+            index-translate. Same data, twice on screen, one copy in the wrong
+            place. */}
+        <div className="md:col-start-2 md:row-start-1">
+          {editingProvider !== undefined ? (
+            <ProviderEditor
+              name={editingProvider}
+              // ``undefined`` → null: the configuration could not be read, which
+              // the form reports as unknown rather than as a refusal.
+              canWriteCredential={
+                runtime ? (runtime.can_write_credential ?? false) : null
+              }
+              onCancel={() => setEditingProvider(undefined)}
+              onSaved={() => void load(false)}
+            />
+          ) : null}
+
+          <div
+            className={`rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] overflow-hidden shadow-2xs ${
+              // ``hidden``, not ``display:none`` via a conditional: the editor
+              // sits above it in the same cell, and unmounting the panel would
+              // throw away its scroll position and re-fetch nothing. Keeping it
+              // mounted but hidden is also what makes the "restart required"
+              // warning reappear unchanged when the form closes.
+              editingProvider !== undefined ? 'hidden' : ''
+            }`}
+          >
+            <div className="px-4 py-2.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] type-group">
+              {t.doctor.runtimeConfig}
+            </div>
 
           {/* First run: no provider declared means a submit would silently run as
               a zero-token rehearsal. Saying so here — before the wizard is ever
@@ -371,17 +390,44 @@ export function SystemDoctorView() {
                   <div
                     key={p.name}
                     className={`flex items-center justify-between gap-2 rounded-[4px] px-2 py-1 type-value font-mono ${
-                      p.active
-                        ? 'bg-[#15803d]/10 border border-[#15803d]/25'
-                        : 'border border-transparent'
+                      editingProvider === p.name
+                        ? // The row the form above is editing. Without this the
+                          // list highlighted only the *active* provider, so
+                          // editing index-translate left local-gemma4 green and
+                          // the operator had no confirmation of what was open.
+                          'bg-[var(--paper-subsurface)] border border-dashed border-[var(--ink-muted)]'
+                        : p.active
+                          ? 'bg-[#15803d]/10 border border-[#15803d]/25'
+                          : 'border border-transparent'
                     }`}
                   >
                     <span
-                      className={`truncate ${p.active ? 'font-semibold text-[#15803d]' : 'text-[var(--ink-secondary)]'}`}
+                      className={`truncate ${
+                        editingProvider === p.name
+                          ? 'font-semibold text-[var(--ink-primary)]'
+                          : p.active
+                            ? 'font-semibold text-[#15803d]'
+                            : 'text-[var(--ink-secondary)]'
+                      }`}
                     >
                       {p.name}
                     </span>
                     <span className="flex items-center gap-1.5 shrink-0">
+                      {/* Why this row cannot make a call, when it cannot. The
+                          block is still listed — it is declared, so the operator
+                          should see it — but silently, as it used to be, is how
+                          an unset ${VAR} stayed invisible. The variable name is
+                          not in this payload: it is shown in the form, which is
+                          where the fix happens. */}
+                      {p.credential_issue === 'unresolved_variable' ? (
+                        <span className="type-help text-[#b45309]">
+                          {t.doctor.credentialUnresolved}
+                        </span>
+                      ) : p.credential_issue === 'missing' ? (
+                        <span className="type-help text-[#b45309]">
+                          {t.doctor.credentialMissing}
+                        </span>
+                      ) : null}
                       {p.is_free && (
                         <span className="type-help text-[var(--ink-muted)]">
                           {t.doctor.freeLabel}
@@ -436,6 +482,7 @@ export function SystemDoctorView() {
             <p className="mt-2 type-help text-[var(--ink-muted)] leading-relaxed">
               {t.doctor.providerConfigHint}
             </p>
+          </div>
           </div>
         </div>
       </div>

@@ -22,7 +22,7 @@ from contextlib import aclosing, suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from ubt.core.config import MOCK_API_KEY, UBTConfig
+from ubt.core.config import UBTConfig, credential_required, has_real_credential
 from ubt.core.engine.events import TranslationProgressEvent
 from ubt.core.engine.job_queue import JobQueue, JobStatus, QueuedJob
 from ubt.core.engine.job_runner import build_job_orchestrator
@@ -53,20 +53,25 @@ EventSource = Callable[[QueuedJob, UBTConfig], AsyncGenerator[TranslationProgres
 def _should_rehearse(payload: dict[str, Any], job_config: UBTConfig) -> bool:
     """Whether this worker runs the job as a zero-token rehearsal.
 
-    Decided from THIS process's key, not the API process's auto-decision: an
-    explicit user ``dry_run`` is honored, but an auto-set one (marked
-    ``rehearsal_auto``) is overridden when this worker holds a key.
+    Decided from THIS process's configuration, not the API process's
+    auto-decision: an explicit user ``dry_run`` is honored, but an auto-set one
+    (marked ``rehearsal_auto``) is overridden when this worker can run for real.
 
-    "Holds a key" means a *real* credential, not the ``MOCK_API_KEY`` sentinel
-    ``UBTConfig`` fills in when nothing is configured. Testing only truthiness
-    let the documented air-gapped default — a keyless worker — build a live
-    provider against the literal string ``mock-key`` and send it to
-    ``api.openai.com``. The API and MCP surfaces already compare against the
-    sentinel; the worker must agree.
+    "Can run for real" combines the two predicates in ``ubt.core.config``: a
+    keyless worker pointed at a hosted endpoint must rehearse (testing only
+    truthiness let the air-gapped default build a live provider against the
+    literal string ``mock-key`` and post it to ``api.openai.com``), while a
+    keyless worker pointed at **loopback** runs for real, because a local server
+    needs no credential. The old rule collapsed both into "no key ⇒ rehearsal",
+    which downgraded a correctly configured local model to a mock.
     """
     explicit_dry = bool(payload.get("dry_run")) and not payload.get("rehearsal_auto", False)
-    key = job_config.api_key.get_secret_value().strip()
-    return explicit_dry or not key or key == MOCK_API_KEY
+    if explicit_dry:
+        return True
+    if not credential_required(job_config):
+        # A loopback endpoint is runnable with or without a credential.
+        return False
+    return not has_real_credential(job_config)
 
 
 class JobWorker:

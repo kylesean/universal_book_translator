@@ -397,9 +397,16 @@ export const zh: TranslationDictionary = {
     builtinProviders: '内置协议与别名',
     aliasLabel: '别名',
     providerConfigHint:
-      '接口地址、协议、模型名与能力标志可在此编辑并保存到 ubt.toml。密钥不可：它来自文件中的 provider 块、${VAR} 展开或 UBT_LLM_API_KEY，从不接受 HTTP 传入。',
+      '接口地址、协议、模型名与能力标志可在此编辑并保存到 ubt.toml。密钥写在对应 provider 块里；本机（仅回环、未启用严格鉴权）部署可直接在此填写，会保存为明文并保持文件 0600。',
     credentialConfigured: '已配置密钥',
     credentialMissing: '未配置密钥',
+    credentialLocalEndpoint: '本地端点，无需密钥',
+    credentialUnresolved:
+      '变量未设置',
+    credentialUnresolvedVar: '引用的变量未设置：{vars}',
+    credentialShadowedByEnv:
+      '已写入 ubt.toml，但 shell 中的 UBT_LLM_API_KEY 优先级更高，当前生效的不是这里的密钥。要让它生效，请 unset UBT_LLM_API_KEY。',
+    credentialEnvSupplied: '密钥来自环境变量 UBT_LLM_API_KEY。',
     editProvider: '编辑',
     addProvider: '新建提供商',
     newProviderName: '提供商名称',

@@ -423,9 +423,16 @@ export const en: TranslationDictionary = {
     builtinProviders: 'Built-in protocols & aliases',
     aliasLabel: 'alias',
     providerConfigHint:
-      'Endpoint, wire protocol, model ids and capability flags are editable here and saved to ubt.toml. Credentials are not: they come from the provider block in the file, ${VAR} expansion, or UBT_LLM_API_KEY, and are never accepted over HTTP.',
+      'Endpoint, wire protocol, model ids and capability flags are editable here and saved to ubt.toml. A credential is stored in the provider block itself; on a local deployment (loopback bind, strict auth off) you can type it here and it is written as plain text with the file kept at 0600.',
     credentialConfigured: 'credential set',
     credentialMissing: 'no credential',
+    credentialLocalEndpoint: 'local endpoint, no credential needed',
+    credentialUnresolved:
+      'variable not set',
+    credentialUnresolvedVar: 'references a variable that is not set: {vars}',
+    credentialShadowedByEnv:
+      'Saved to ubt.toml, but UBT_LLM_API_KEY in the shell outranks it, so that value is what the next job uses. Unset it for this one to take effect.',
+    credentialEnvSupplied: 'Credential supplied by UBT_LLM_API_KEY.',
     editProvider: 'Edit',
     addProvider: 'Add provider',
     newProviderName: 'Provider name',

@@ -8,6 +8,7 @@ from typing import Any
 
 import httpx
 
+from ubt.core.config import MOCK_API_KEY
 from ubt.core.exceptions import ModelProviderError
 from ubt.core.router.transports.base import (
     _ANTHROPIC_TEMPERATURE_KEYS,
@@ -74,10 +75,15 @@ class AnthropicMessagesTransport(BaseTransport):
 
     def _auth_headers(self) -> dict[str, str]:
         headers = {
-            "x-api-key": self._api_key,
             "anthropic-version": "2023-06-01",
             "content-type": "application/json",
         }
+        # An unconfigured key (empty or the ``mock-key`` sentinel) is omitted
+        # rather than sent as a literal, matching ``BaseTransport._auth_headers``.
+        # A local Anthropic-compatible gateway needs no key, and sending the
+        # sentinel put a fake credential on the wire.
+        if self._api_key and self._api_key != MOCK_API_KEY:
+            headers["x-api-key"] = self._api_key
         if self._prompt_caching:
             headers["anthropic-beta"] = "prompt-caching-2024-07-31"
         if self._extra_headers:

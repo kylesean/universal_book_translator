@@ -42,7 +42,7 @@ from ubt.api.routes.shared import (
 from ubt.api.scope import ApiScope
 from ubt.api.security import resolve_secure_path, validate_job_id
 from ubt.api.uploads import UPLOAD_MAX_BYTES
-from ubt.core.config import MOCK_API_KEY
+from ubt.core.config import credential_required, has_real_credential
 from ubt.core.engine.job_queue import TERMINAL_JOB_STATUSES, JobStatus
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.progress import ProgressSnapshot
@@ -366,17 +366,26 @@ def register_job_routes(
                 "glossary": resolved_glossary,
             }
         )
-        # No provider key and no injected router → the run can only be a mock:
-        # auto-set rehearsal so every downstream surface (submit response,
-        # status, queue payload, worker) labels it instead of silently
+        # No usable credential and no injected router → a hosted endpoint can
+        # only be a mock: auto-set rehearsal so every downstream surface (submit
+        # response, status, queue payload, worker) labels it instead of silently
         # reporting a mock delivery as a real one.
-        app_key = app_config.api_key.get_secret_value()
+        #
+        # A loopback endpoint is exempt. It needs no credential, so requiring one
+        # turned a correctly configured local model into a rehearsal the operator
+        # never asked for — the same defect the worker had.
         auto_rehearsal = False
-        if not safe_req.dry_run and router is None and (not app_key or app_key == MOCK_API_KEY):
+        if (
+            not safe_req.dry_run
+            and router is None
+            and credential_required(app_config)
+            and not has_real_credential(app_config)
+        ):
             safe_req = safe_req.model_copy(update={"dry_run": True})
             auto_rehearsal = True
             logger.warning(
-                "No API key configured: auto-setting dry_run rehearsal for input %s",
+                "No API key configured for a remote endpoint: auto-setting dry_run "
+                "rehearsal for input %s",
                 safe_req.input_path,
             )
         if job_queue is not None:

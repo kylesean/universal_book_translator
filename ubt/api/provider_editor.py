@@ -59,8 +59,10 @@ from ubt.core.providers import (
     PROVIDER_ALLOWED_KEYS,
     PROVIDER_FORBIDDEN_KEYS,
     _read_shipped_providers,
+    credential_resolution,
     find_config_file,
 )
+from ubt.core.router.pricing import endpoint_is_local
 
 #: What a credential is reported as. Never the value: the console needs to know
 #: whether one is configured, and a boolean plus this mask is the most that may
@@ -354,6 +356,13 @@ def read_provider(name: str) -> dict[str, Any]:
     The credential itself is never read into the result. ``has_credential`` is
     what the form needs — a block with no key and no environment variable cannot
     make a call — and it is the only thing a boolean can reveal.
+
+    ``has_credential`` means *usable*, not *present*: a block carrying
+    ``api_key = "${OPENCODE_API_KEY}"`` whose variable is unset reported "credential
+    set" while the loader resolved it to ``""``, so the form promised an
+    authentication the next job could not perform. The state is resolved by
+    :func:`ubt.core.providers.credential_resolution`, which the loader itself
+    agrees with, and ``credential_issue`` names what is wrong when it is.
     """
     _validate_name(name)
     path = _config_path()
@@ -372,9 +381,23 @@ def read_provider(name: str) -> dict[str, Any]:
             # Presence only. The value — literal or ``${VAR}`` — is replaced by a
             # fixed mask, so the field can be rendered as "already set" without
             # the secret entering the response, the browser or the DOM.
-            raw = merged.get("api_key")
-            result["has_credential"] = bool(raw)
-            result["credential_hint"] = CREDENTIAL_MASK if raw else None
+            state = credential_resolution(name)
+            # A loopback endpoint accepts an empty bearer, so "no key" is not a
+            # fault there. The same predicate the provider list uses, so the form
+            # and the row cannot disagree about whether the block can run.
+            local_endpoint = endpoint_is_local(merged.get("base_url"))
+            result["has_credential"] = bool(state["usable"])
+            result["credential_hint"] = CREDENTIAL_MASK if state["usable"] else None
+            # The two ways a credential can be configured-but-unusable, or
+            # usable-but-inert. Reported as a code plus the variable names, never
+            # as a value: the console renders its own copy from the code.
+            result["credential_issue"] = _credential_issue(state, local_endpoint)
+            result["unresolved_vars"] = list(state["unresolved_vars"])
+            result["credential_shadowed_by_env"] = bool(state["shadowed_by_env"])
+            # Distinct from ``has_credential``: a block may hold no key of its own
+            # and still authenticate through ``UBT_LLM_API_KEY``. Collapsing the
+            # two would show "no credential" for a provider that works.
+            result["authenticates"] = bool(state["authenticates"])
             continue
         if field in merged and merged[field] is not None:
             result[field] = merged[field]
@@ -383,3 +406,21 @@ def read_provider(name: str) -> dict[str, Any]:
     # endpoint can replace, one from ``UBT_LLM_API_KEY`` is not.
     result["credential_in_file"] = bool(declared.get("api_key"))
     return result
+
+
+def _credential_issue(state: dict[str, Any], local_endpoint: bool = False) -> str | None:
+    """A stable code for what is wrong with this block's credential, or ``None``.
+
+    Codes rather than sentences: the console localizes its own copy, and a test
+    can assert on the code without pinning the wording.
+
+    ``missing`` is only reported when nothing else can authenticate the block —
+    a keyless block on a deployment that exports ``UBT_LLM_API_KEY`` works, and
+    calling that "missing" would send the operator to fix a non-problem. The same
+    goes for a loopback endpoint, which accepts an empty bearer by design.
+    """
+    if state["unresolved_vars"]:
+        return "unresolved_variable"
+    if not state["authenticates"] and not local_endpoint:
+        return "missing"
+    return None
