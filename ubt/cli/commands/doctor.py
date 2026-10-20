@@ -872,14 +872,36 @@ def collect_checks(config: UBTConfig, *, probe: bool = False) -> list[_Check]:
     group_code = _GROUPS[2][0]
     group = _GROUPS[2][1]
     if config.qe_engine == "tiered":
+        # The judge may be a *different* provider block, and that block carries
+        # its own model. Printing the translator's repair_model here named a model
+        # the judge endpoint has never heard of — the reference config answers
+        # with `workbuddy/deepseek-v4.1-flash` while this line said `gemma4-e4b`,
+        # and the same mismatch had already been measured at runtime as twelve
+        # `404 no such model` answers in one run.
         judge = config.qe_judge_model or config.repair_model
+        judge_provider = config.qe_judge_provider
+        if judge_provider:
+            from ubt.core.providers import load_layer
+
+            try:
+                block = load_layer(judge_provider)
+            except Exception:  # a broken block is reported by its own check
+                block = {}
+            judge = str(block.get("repair_model") or block.get("draft_model") or judge) or judge
         record(
             "QE (tiered)",
             "OK",
-            f"ambiguous-class + {config.qe_judge_pass_sample:.0%} pass sample, judge={judge}",
+            (
+                f"ambiguous-class + {config.qe_judge_pass_sample:.0%} pass sample, "
+                f"judge={judge}" + (f" via {judge_provider}" if judge_provider else "")
+            ),
             code="qe",
             detail_code="qe.tiered",
-            params={"sample": f"{config.qe_judge_pass_sample:.0%}", "judge": judge},
+            params={
+                "sample": f"{config.qe_judge_pass_sample:.0%}",
+                "judge": judge,
+                "provider": judge_provider or "",
+            },
         )
     else:
         record(

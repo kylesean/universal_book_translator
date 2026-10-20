@@ -29,6 +29,37 @@ function fill(template: string, params: Record<string, unknown>): string {
   })
 }
 
+/**
+ * A variant template is `"<detail_code>.<suffix>"`, chosen only when the param it
+ * needs is non-empty.
+ *
+ * The QE check reads `judge=gemma4-e4b` or `judge=workbuddy/... via local-judge`
+ * depending on whether a judge provider block is configured, and the two read
+ * badly as one template ("via " with nothing after it). Keeping both in the
+ * catalogue and picking by param beats interpolating `{provider}` into a
+ * sentence that grammatically needs it.
+ */
+const PARAM_VARIANTS: ReadonlyArray<{ code: string; suffix: string; param: string }> = [
+  { code: 'qe.tiered', suffix: 'via', param: 'provider' },
+]
+
+/** The most specific template for `detailCode`, or undefined. */
+function pickTemplate(
+  details: Record<string, string>,
+  detailCode: string,
+  params: Record<string, unknown>,
+): string | undefined {
+  for (const { code, suffix, param } of PARAM_VARIANTS) {
+    if (detailCode !== code) continue
+    const value = params[param]
+    const variant = details[`${code}.${suffix}`]
+    if (variant && value !== undefined && value !== null && String(value) !== '') {
+      return variant
+    }
+  }
+  return details[detailCode]
+}
+
 export interface LocalizedCheck {
   group: string
   name: string
@@ -44,7 +75,7 @@ export function localizeDoctorCheck(
   const group = codes.groups[check.group_code] ?? check.group
   const name = codes.names[check.code] ?? check.name
 
-  const detailTemplate = codes.details[check.detail_code]
+  const detailTemplate = pickTemplate(codes.details, check.detail_code, params)
   const detail = detailTemplate ? fill(detailTemplate, params) : check.detail
 
   let fix: string | null = check.fix

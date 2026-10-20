@@ -76,6 +76,23 @@ def test_every_engine_code_has_a_chinese_rendering(section: str) -> None:
     assert not missing, f"{section} codes with no Chinese copy: {missing}"
 
 
+def _base_code(code: str) -> str:
+    """The engine code a catalogue key belongs to.
+
+    A key may be a *variant* of an engine code — ``qe.tiered.via`` is the same
+    check with an extra param (the judge provider) filled in, chosen by
+    ``pickTemplate`` in ``doctorText.ts``. It is not a code the engine emits, so
+    the staleness check must resolve it to its base rather than call it dead. Only
+    a key whose base is *also* absent is stale.
+    """
+    head, _, tail = code.rpartition(".")
+    return head if tail in _VARIANT_SUFFIXES and head else code
+
+
+#: Suffixes ``doctorText.ts`` appends to a base detail code to name a variant.
+_VARIANT_SUFFIXES = frozenset({"via"})
+
+
 def test_the_catalogue_has_no_stale_codes() -> None:
     """A code the engine no longer emits is dead weight that hides drift.
 
@@ -91,7 +108,7 @@ def test_the_catalogue_has_no_stale_codes() -> None:
     stale = sorted(translated["groups"] - _group_codes())
     assert not stale, f"groups codes the engine never emits: {stale}"
     for section, codes in declared.items():
-        stale = sorted(translated[section] - codes)
+        stale = sorted(code for code in translated[section] if _base_code(code) not in codes)
         assert not stale, f"{section} codes the engine never emits: {stale}"
 
 

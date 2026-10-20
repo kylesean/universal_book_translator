@@ -89,6 +89,10 @@ export const doctorCodesZh: DoctorCodeTables = {
       '已关闭外发（UBT_ALLOW_PAGE_UPLOAD=false）：书页不会离开本机；cloud/vlm OCR 拒绝启动，视觉修复降级为文本',
     'page_images.allowed': '已允许；当前生效路径：{routes}',
     'qe.tiered': '歧义类 + {sample} 通过抽样，judge={judge}',
+    // Same text with the provider block named. Picked in ``localizeDoctorCheck``
+    // only when ``{provider}`` is non-empty; without it the sentence above is
+    // used unchanged, so English (which has no details table) is unaffected.
+    'qe.tiered.via': '歧义类 + {sample} 通过抽样，judge={judge}（provider 块 {provider}）',
     'qe.heuristic': '零 token 规则评分',
     'batch_api.enabled': '已启用 — 端点须实现 /v1/files + /v1/batches（离线不探测）',
     'batch_api.disabled': '已禁用',

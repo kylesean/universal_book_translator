@@ -1615,3 +1615,80 @@ def test_the_doctor_does_not_render_a_credential_variable_name_in_the_list() -> 
     import json
 
     assert "unresolved_vars" not in json.dumps(payload)
+
+
+def test_the_doctor_names_the_judge_model_its_block_actually_uses() -> None:
+    """The QE row printed the translator's repair_model as the judge.
+
+    When ``qe_judge_provider`` names a different block, that block carries its own
+    model. The reference config answers with ``workbuddy/deepseek-v4.1-flash``
+    while the row said ``gemma4-e4b`` — a model the judge endpoint has never heard
+    of. The same mismatch had already been measured at runtime as twelve
+    ``404 no such model`` answers in one run.
+    """
+    import os
+    import tempfile
+    from pathlib import Path
+
+    from ubt.cli.commands.doctor import collect_checks
+
+    with tempfile.TemporaryDirectory(dir=_REPO_ROOT) as tmp:
+        Path(tmp, "ubt.toml").write_text(
+            """
+[defaults]
+qe_engine = "tiered"
+qe_judge_enabled = true
+qe_judge_pass_sample = 0.15
+qe_judge_provider = "judge"
+
+[providers.main]
+base_url = "http://127.0.0.1:9090/v1"
+api_mode = "openai-chat"
+draft_model = "translator-model"
+repair_model = "translator-model"
+
+[providers.judge]
+base_url = "http://127.0.0.1:3425/v1"
+api_mode = "openai-chat"
+repair_model = "judge-model"
+""",
+            encoding="utf-8",
+        )
+        previous = Path.cwd()
+        os.chdir(tmp)
+        try:
+            from ubt.core.config import UBTConfig
+
+            # The ambient shell may export UBT_PROVIDER (this repo's own does),
+            # which would select a provider this fixture never declared.
+            os.environ.pop("UBT_PROVIDER", None)
+            cfg = UBTConfig.from_env()
+            checks = collect_checks(cfg, probe=False)
+        finally:
+            os.chdir(previous)
+
+    qe = next(c for c in checks if c.code == "qe")
+    assert "judge-model" in qe.detail, f"QE row names the wrong judge model: {qe.detail}"
+    assert "translator-model" not in qe.detail
+    # ``params`` is optional on the model; a check that emits a template with
+    # ``{provider}`` must always set it, so an absent dict is itself a failure.
+    assert (qe.params or {}).get("provider") == "judge"
+
+
+def test_the_doctor_panel_prefers_the_provider_variant_when_one_is_named() -> None:
+    """The variant template must actually be reachable from the renderer.
+
+    ``qe.tiered.via`` exists so the Chinese sentence can name the provider block.
+    A catalogue entry nothing selects is dead copy — the same class of defect as a
+    control that renders but never submits.
+    """
+    repo = _REPO_ROOT
+    text = repo / "web" / "src" / "i18n" / "doctorText.ts"
+    if not text.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+
+    source = text.read_text(encoding="utf-8")
+    assert "PARAM_VARIANTS" in source, "the variant picker was removed"
+    assert "'qe.tiered'" in source and "'via'" in source
+    # The picker must consult the param that decides the variant.
+    assert "'provider'" in source
