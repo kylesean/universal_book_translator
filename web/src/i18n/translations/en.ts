@@ -475,6 +475,7 @@ export const en: TranslationDictionary = {
     deploymentBackendHelp:
       'Set only when a local stack serves this model: it enables one retry against localhost when a gateway answers "model not supported".',
     isFree: 'Free (no billable spend)',
+    fixLabel: 'fix',
     providerMatrix: 'Model Routing & Latency Matrix',
     securityBoundary: 'Security & Isolation Boundary',
     listenInterface: 'Bound Address',

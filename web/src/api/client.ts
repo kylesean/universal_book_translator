@@ -43,11 +43,25 @@ export interface TmEntry {
 }
 
 export interface DoctorCheck {
+  /** English group label, as the CLI prints it. */
   group: string
+  /** Stable group identifier a localized console switches on. */
+  group_code: string
+  /** English check name, as the CLI prints it. */
   name: string
+  /** Stable check identifier (`api_key`, `disk_space`, …). */
+  code: string
   status: string
+  /** English diagnosis, printed verbatim by the CLI. */
   detail: string
+  /** Stable variant identifier for `detail` (`disk_space.low`, …). */
+  detail_code: string
+  /** English remediation, or null when the check needs no action. */
   fix: string | null
+  /** Stable variant identifier for `fix`. */
+  fix_code: string
+  /** Values interpolated into the English copy, for a localized renderer. */
+  params: Record<string, unknown>
 }
 
 export interface DoctorReport {

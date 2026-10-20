@@ -21,6 +21,8 @@ import {
   type SystemInfo,
 } from '@/api/client'
 import { useI18n } from '@/i18n/useI18n'
+import { localizeDoctorCheck } from '@/i18n/doctorText'
+import { doctorCodesEn, doctorCodesZh } from '@/i18n/translations/doctorCodes'
 import { ProviderEditor } from './ProviderEditor'
 
 function CheckIcon({ status }: { status: string }) {
@@ -38,7 +40,7 @@ function statusBadgeVariant(status: string): 'success' | 'warning' | 'destructiv
 }
 
 export function SystemDoctorView() {
-  const { t } = useI18n()
+  const { t, language } = useI18n()
   const [checks, setChecks] = useState<DoctorCheck[]>([])
   const [runtime, setRuntime] = useState<RuntimeConfig | null>(null)
   const [info, setInfo] = useState<SystemInfo | null>(null)
@@ -83,7 +85,18 @@ export function SystemDoctorView() {
     void load(true)
   }
 
-  const groups = Array.from(new Set(checks.map((check) => check.group)))
+  // The engine prints English; this panel is the same checklist. Each check
+  // carries a stable code plus the values interpolated into its English sentence,
+  // so the console renders its own copy. A code the catalogue does not know falls
+  // back to the engine's English text — never a raw key.
+  const codeTables = language === 'zh' ? doctorCodesZh : doctorCodesEn
+  const localized = checks.map((check) => ({
+    check,
+    text: localizeDoctorCheck(check, codeTables),
+  }))
+  // Ordered by the engine's group codes, so the sections keep the CLI's order
+  // rather than the order they happen to arrive in.
+  const groups = Array.from(new Set(localized.map(({ check }) => check.group_code)))
 
   return (
     <div className="flex-1 overflow-y-auto px-8 py-7 space-y-7 max-w-5xl mx-auto w-full">
@@ -122,29 +135,32 @@ export function SystemDoctorView() {
                 <Loader2 className="h-4 w-4 animate-spin mx-auto" />
               </div>
             ) : (
-              groups.map((group) => (
-                <div key={group}>
+              groups.map((groupCode) => (
+                <div key={groupCode}>
                   <div className="px-3.5 pt-3 pb-1 text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)]">
-                    {group}
+                    {localized.find(({ check }) => check.group_code === groupCode)?.text.group ??
+                      groupCode}
                   </div>
-                  {checks
-                    .filter((check) => check.group === group)
-                    .map((check, idx) => (
+                  {localized
+                    .filter(({ check }) => check.group_code === groupCode)
+                    .map(({ check, text }, idx) => (
                       <div
-                        key={`${group}-${idx}`}
+                        key={`${groupCode}-${idx}`}
                         className="px-3.5 py-2.5 flex items-start justify-between gap-3 text-xs"
                       >
                         <div className="flex items-start gap-2.5">
                           <CheckIcon status={check.status} />
                           <div>
                             <div className="font-semibold text-[var(--ink-primary)]">
-                              {check.name}
+                              {text.name}
                             </div>
                             <div className="text-xs text-[var(--ink-secondary)] font-mono mt-0.5">
-                              {check.detail}
+                              {text.detail}
                             </div>
-                            {check.fix && (
-                              <div className="text-xs text-[#b45309] mt-0.5">fix: {check.fix}</div>
+                            {text.fix && (
+                              <div className="text-xs text-[#b45309] mt-0.5">
+                                {t.doctor.fixLabel}: {text.fix}
+                              </div>
                             )}
                           </div>
                         </div>

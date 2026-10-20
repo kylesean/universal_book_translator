@@ -391,6 +391,7 @@ export interface TranslationDictionary {
     firstRunCta: string
     firstRunDismiss: string
     loadFailed: string
+    fixLabel: string
     providerMatrix: string
     securityBoundary: string
     listenInterface: string

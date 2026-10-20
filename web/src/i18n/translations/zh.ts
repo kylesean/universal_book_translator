@@ -447,6 +447,7 @@ export const zh: TranslationDictionary = {
     deploymentBackendHelp:
       '仅当本地栈服务该模型时填写：网关返回「模型不存在」时会额外重试一次本地端点。',
     isFree: '免费（不计费）',
+    fixLabel: '修复建议',
     providerMatrix: '模型路由与延迟矩阵',
     securityBoundary: '安全与隔离边界',
     listenInterface: '服务绑定地址',

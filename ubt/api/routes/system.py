@@ -222,13 +222,23 @@ def register_system_routes(api_app: FastAPI, scope: ApiScope) -> None:
             {
                 "status": _overall_status(summary),
                 "summary": summary,
+                # Each check ships its English copy AND the stable codes plus
+                # interpolation values a localized console needs. A client that
+                # knows the code renders its own sentence; one that does not falls
+                # back to the English text rather than printing a raw key. Same
+                # contract as ``AssessmentWarning`` in ubt.core.assess.
                 "checks": [
                     {
                         "group": check.group,
+                        "group_code": check.group_code,
                         "name": check.name,
+                        "code": check.code,
                         "status": check.status,
                         "detail": check.detail,
+                        "detail_code": check.detail_code,
                         "fix": check.fix,
+                        "fix_code": check.fix_code,
+                        "params": check.params or {},
                     }
                     for check in checks
                 ],
