@@ -23,6 +23,7 @@ from fastapi import (
 from fastapi.responses import JSONResponse
 
 from ubt import __version__
+from ubt.api.config_source import ConfigSource
 from ubt.api.manager import JobManager, JobRecord
 from ubt.api.models import (
     JobAssessRequest,
@@ -245,6 +246,7 @@ def create_app(
     router: ModelRouter | None = None,
     qe_runner: BaseQERunner | None = None,
     queue: JobQueue | None = None,
+    config_overrides: dict[str, Any] | None = None,
 ) -> FastAPI:
     """Factory creating FastAPI application instance.
 
@@ -300,12 +302,19 @@ def create_app(
     # mode, where the manager pushes events directly.
     sse_broadcaster = QueueSseBroadcaster(job_queue) if job_queue is not None else None
 
+    # Deployment identity is fixed at boot (ledger, auth gate, job mode); model
+    # configuration is not. The source re-reads the file when it changes, so a
+    # console save is visible to the next request instead of only to the next
+    # process. Without it, a save wrote the file successfully and the panel kept
+    # showing the pre-save value forever.
+    config_source = ConfigSource(app_config, overrides=dict(config_overrides or {}))
     scope = ApiScope(
         config=app_config,
         manager=manager,
         job_queue=job_queue,
         assess_semaphore=assess_semaphore,
         sse_broadcaster=sse_broadcaster,
+        source=config_source,
     )
 
     @asynccontextmanager

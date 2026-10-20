@@ -79,7 +79,16 @@ ubt console                  # opens http://127.0.0.1:8000/ in a browser
 
 `ubt console` serves the same FastAPI app as the `ubt-api` entry point, on
 `127.0.0.1:8000` by default, and opens the browser for you; for a loopback bind
-it also opens the server without an auth gate. Running `ubt-api` directly
+it also opens the server without an auth gate.
+
+**Configuring a model in the browser.** You do not need a shell to get started.
+Engine Doctor (`/system`) lists every provider block in `ubt.toml`, lets you add
+one, pick which is in force, and edit its endpoint, wire protocol, model ids and
+capability flags. On a loopback server the credential field is available too;
+beyond loopback, or under `UBT_STRICT_AUTH`, it is refused and the panel says
+where the secret belongs instead. Saves go to `ubt.toml` and take effect on the
+next job — no restart. Settings bound at startup (ledger directory, job mode, auth
+gate) are reported as needing a restart rather than silently ignored. Running `ubt-api` directly
 refuses to start without one and prints the two ways to supply it: set
 `UBT_API_KEY` (the inbound `X-API-Key`, not the LLM key), or opt into an open
 local server for development. The console also runs the review workbench, where

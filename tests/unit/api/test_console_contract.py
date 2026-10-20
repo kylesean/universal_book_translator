@@ -1225,13 +1225,14 @@ def test_the_doctor_has_no_capability_preset_list() -> None:
     assert "ProviderEditor" in source
 
 
-def test_the_provider_editor_never_offers_a_credential_field() -> None:
-    """A form that cannot save a secret cannot leak one.
+def test_the_provider_editor_gates_the_credential_field_on_the_deployment() -> None:
+    """The credential input must be conditional, not always-on or always-off.
 
-    The console writes ``ubt.toml``, which may hold a literal key. Offering an
-    ``api_key`` input would mean the secret round-trips through a browser tab and
-    a request body; the endpoint refuses it, so the field would be a dead control
-    that teaches the operator the wrong model of where credentials live.
+    Refusing the write outright (the earlier design) left a fresh install with
+    zero declared providers and zero edit buttons, so a model could only be
+    configured from a shell. Offering it unconditionally would put a secret in a
+    request body on a shared server. The form has to follow the server's answer,
+    which arrives as ``can_write_credential``.
     """
     repo = _REPO_ROOT
     editor = repo / "web" / "src" / "views" / "doctor" / "ProviderEditor.tsx"
@@ -1239,10 +1240,54 @@ def test_the_provider_editor_never_offers_a_credential_field() -> None:
         pytest.skip("web/ frontend is not present in this checkout")
 
     source = editor.read_text(encoding="utf-8")
-    # It may *report* credential presence, but never bind an input to it.
+    # Presence is reported as a mask, never as the value: the placeholder is the
+    # fixed mask, so a configured key renders as "already set" rather than being
+    # read back into the browser.
     assert "has_credential" in source
-    for forbidden in ("api_key", "apiKey", "ocr_api_key"):
-        assert forbidden not in source, f"the editor references {forbidden}"
+    assert "'********'" in source
+    # The input is bound to the deployment's permission, and the refusal branch
+    # explains itself instead of silently hiding the control.
+    assert "canWriteCredential" in source
+    assert "credentialBlockedHint" in source
+    # The other channel's credential has no business in an LLM provider form.
+    assert "ocr_api_key" not in source
+
+
+def test_the_console_can_create_the_first_provider() -> None:
+    """A fresh install has no declared provider, so the list alone is a dead end.
+
+    ``providers.filter(p => p.declared)`` renders zero rows when nothing is
+    configured, which means zero edit buttons — the exact state a new user starts
+    in. A create affordance is what makes the panel reachable at all.
+    """
+    repo = _REPO_ROOT
+    view = repo / "web" / "src" / "views" / "doctor" / "SystemDoctorView.tsx"
+    if not view.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+
+    source = view.read_text(encoding="utf-8")
+    assert "addProvider" in source
+    # ``null`` means "create" and ``undefined`` means "closed"; a single nullable
+    # string cannot express both, and collapsing them kills the button.
+    assert "setEditingProvider(null)" in source
+
+
+def test_a_failed_config_load_does_not_claim_zero_providers() -> None:
+    """``(runtime?.providers ?? []).length`` renders "(0)" on a load failure.
+
+    That asserts a fact the panel does not have — the same failure as the
+    "latency matrix" heading that named a number no endpoint produced. The count
+    must distinguish "none" from "could not read".
+    """
+    repo = _REPO_ROOT
+    view = repo / "web" / "src" / "views" / "doctor" / "SystemDoctorView.tsx"
+    if not view.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+
+    source = view.read_text(encoding="utf-8")
+    assert "loadFailed" in source
+    # The old unconditional coalesce must be gone from the count expression.
+    assert "{(runtime?.providers ?? []).filter((p) => !p.declared).length}" not in source
 
 
 def test_an_undeclared_configuration_reports_the_generic_default() -> None:
@@ -1262,3 +1307,28 @@ def test_an_undeclared_configuration_reports_the_generic_default() -> None:
     # sent rather than leaving four blanks.
     assert active["supports_temperature"] is True
     assert active["supports_reasoning_effort"] is False
+
+
+def test_a_state_value_is_declared_before_the_expression_that_reads_it() -> None:
+    """A hook-derived value must not be declared above the state it reads.
+
+    ``const isCreate = initialName === null && detail === null`` placed above the
+    ``useState`` for ``detail`` throws "Cannot access 'm' before initialization" —
+    a temporal dead zone. Neither ``tsc`` nor ``oxlint`` flags it (the identifier
+    is declared later in the same scope, so both consider it valid), and the error
+    boundary turns the whole screen into a blank page. Only a browser run caught
+    it, which is too late for CI.
+    """
+    repo = _REPO_ROOT
+    editor = repo / "web" / "src" / "views" / "doctor" / "ProviderEditor.tsx"
+    if not editor.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+
+    source = editor.read_text(encoding="utf-8")
+    derived = source.find("const isCreate =")
+    detail_state = source.find("const [detail, setDetail] = useState")
+    assert derived != -1 and detail_state != -1
+    assert detail_state < derived, (
+        "isCreate is declared above the useState it reads; that is a temporal dead "
+        "zone at runtime and neither tsc nor oxlint reports it"
+    )

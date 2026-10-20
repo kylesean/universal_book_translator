@@ -58,36 +58,81 @@ def test_an_edit_writes_the_block_and_preserves_everything_else(config_dir: Path
     assert 'base_url = "http://127.0.0.1:9090/v1"' in text
 
 
-def test_a_credential_can_never_be_written(config_dir: Path) -> None:
-    """The single most important rejection: no HTTP path may set a secret."""
-    from ubt.api.provider_editor import ProviderEditError, validate_edit
+def test_a_credential_is_refused_unless_the_caller_opts_in(config_dir: Path) -> None:
+    """The default is still "no", and the gate is a parameter, not a guess.
 
-    for field in ("api_key", "ocr_api_key", "service_api_key"):
-        with pytest.raises(ProviderEditError) as excinfo:
-            validate_edit("demo", {field: "sk-injected"})
-        assert field in str(excinfo.value)
+    ``validate_edit`` defaults to ``allow_credential=False`` so a new caller cannot
+    write a secret by forgetting an argument. The route passes the deployment's
+    actual answer (loopback + non-strict), which only it knows.
+    """
+    from ubt.api.provider_editor import ProviderEditError, upsert_provider, validate_edit
 
-    # And the file is unchanged after a rejected edit attempt.
-    from ubt.api.provider_editor import upsert_provider
+    with pytest.raises(ProviderEditError) as excinfo:
+        validate_edit("demo", {"api_key": "sk-injected"})
+    assert "credential cannot be written" in str(excinfo.value)
 
     with pytest.raises(ProviderEditError):
         upsert_provider("demo", {"api_key": "sk-injected"})
     assert "sk-injected" not in (config_dir / "ubt.toml").read_text(encoding="utf-8")
 
 
-def test_the_rest_request_model_rejects_a_credential() -> None:
-    """``extra="forbid"`` turns a credential in the body into a named 422.
+def test_a_credential_is_written_when_the_deployment_allows_it(config_dir: Path) -> None:
+    """On loopback the write is allowed, and the value never comes back out."""
+    from ubt.api.provider_editor import upsert_provider
 
-    Without it the key would be silently ignored, which reads to a client as "the
-    save succeeded" — the worst of both outcomes.
+    result = upsert_provider("demo", {"api_key": "sk-local"}, allow_credential=True)
+    assert result["has_credential"] is True
+    # Reported as a fixed mask, never the value.
+    assert result["credential_hint"] == "********"
+    assert "sk-local" not in str(result)
+    # And it reached the file, which is tightened because it may now hold one.
+    text = (config_dir / "ubt.toml").read_text(encoding="utf-8")
+    assert 'api_key = "sk-local"' in text
+    assert (config_dir / "ubt.toml").stat().st_mode & 0o777 == 0o600
+
+
+def test_the_other_credentials_are_still_unwritable(config_dir: Path) -> None:
+    """``ocr_api_key`` and the inbound gate secret have no console path at all.
+
+    ``ocr_api_key`` belongs to the OCR driver's channel, not the LLM path, and
+    ``service_api_key`` is the inbound gate — writing it over HTTP would let a
+    caller holding the current key mint a new gate for everyone.
+    """
+    from ubt.api.provider_editor import ProviderEditError, validate_edit
+
+    for field in ("ocr_api_key", "service_api_key"):
+        with pytest.raises(ProviderEditError) as excinfo:
+            validate_edit("demo", {field: "x"}, allow_credential=True)
+        assert field in str(excinfo.value)
+
+
+def test_credential_write_is_gated_on_bind_and_auth_posture() -> None:
+    """Both conditions are required, and each alone is enough to refuse."""
+    from ubt.api.provider_editor import credential_write_allowed
+
+    assert credential_write_allowed(is_loopback=True, is_strict=False) is True
+    # Strict auth promises the server authenticates; a bearer token must not mint
+    # another one.
+    assert credential_write_allowed(is_loopback=True, is_strict=True) is False
+    # A non-loopback bind is a shared service.
+    assert credential_write_allowed(is_loopback=False, is_strict=False) is False
+    assert credential_write_allowed(is_loopback=False, is_strict=True) is False
+
+
+def test_the_rest_request_model_still_forbids_unknown_fields() -> None:
+    """``extra="forbid"`` is what turns a typo into a named 422.
+
+    ``api_key`` is a declared field now, so this checks the mechanism with a key
+    that is genuinely not accepted — a silently ignored field reads to a client as
+    "the save succeeded", the worst of both outcomes.
     """
     from pydantic import ValidationError
 
     from ubt.api.models import ProviderEditRequest
 
     with pytest.raises(ValidationError) as excinfo:
-        ProviderEditRequest(api_key="sk-x")  # type: ignore[call-arg]
-    assert "api_key" in str(excinfo.value)
+        ProviderEditRequest(wibble="x")  # type: ignore[call-arg]
+    assert "wibble" in str(excinfo.value)
 
 
 def test_only_whitelisted_fields_are_writable(config_dir: Path) -> None:
@@ -103,7 +148,9 @@ def test_only_whitelisted_fields_are_writable(config_dir: Path) -> None:
     from ubt.core.providers import PROVIDER_ALLOWED_KEYS
 
     assert set(WRITABLE_FIELDS) <= PROVIDER_ALLOWED_KEYS
-    assert "api_key" not in WRITABLE_FIELDS
+    # A credential is writable only through the separate, deployment-aware gate.
+    assert "api_key" in WRITABLE_FIELDS
+    assert "ocr_api_key" not in WRITABLE_FIELDS
 
 
 def test_invalid_values_are_rejected_before_they_reach_the_file(config_dir: Path) -> None:

@@ -1,19 +1,37 @@
-"""Editing a ``[providers.<name>]`` block from the console, without touching secrets.
+"""Editing a ``[providers.<name>]`` block from the console.
 
-**Scope.** The console may change *where* a provider points and *what it accepts*:
-endpoint, wire protocol, model ids, the declared capability flags, and a few
-run-policy knobs. It may **not** read, write, or clear a credential. That is not
-a missing feature — it is the same boundary every job payload already enforces
-(``allow_provider_keys=False`` in ``ubt.core.job_options``): a credential arrives
-through the operator's environment or the file, never over HTTP. An API that
-could write one would turn any local process into a credential-writer, and this
-server is routinely started on loopback with no API key at all.
+**What the console may change.** Endpoint, wire protocol, model ids, the declared
+capability flags, a few run-policy knobs — and, on a local server, the credential.
+
+**Why the credential rule is conditional.** An earlier version refused to write a
+credential at all, on the argument that a secret must never cross HTTP. That
+argument is correct for a *hosted* deployment and wrong for this tool's default
+shape. ``ubt console`` binds ``127.0.0.1`` and, for a loopback bind with no
+``UBT_API_KEY``, deliberately runs without an auth gate — so anyone who can reach
+the port can already read ``ubt.toml`` off the disk. Refusing the write protected
+nothing while making a fresh install unusable without a shell:
+
+    declared providers: 0   edit buttons: 0   draft_model: ""
+
+The rule is therefore deployment-aware (:func:`credential_write_allowed`):
+
+* **loopback + non-strict** → a credential may be written. This is a local tool
+  being configured from its own local UI.
+* **non-loopback, or strict auth** → refused with a reason. There the server is a
+  shared service, the request may come from anywhere, and the operator's shell is
+  the right place for a secret.
+
+Cross-origin reach is already closed independently: this API sets no CORS
+headers, and a JSON ``PUT`` is not a CORS-simple request, so a browser will not
+send it cross-origin without a preflight the server never approves. The
+Host-header guard covers DNS rebinding.
 
 **Why a whitelist, twice.** The fields a request may set are enumerated here
 (:data:`WRITABLE_FIELDS`) *and* filtered against
 :data:`ubt.core.providers.PROVIDER_ALLOWED_KEYS` before the file is touched, so a
 key this module forgets cannot reach the TOML. The response is built from the same
-whitelist, so a value already in the file cannot leak back out by being present.
+whitelist, so a value already in the file cannot leak back out by being present —
+a credential is reported only as :data:`CREDENTIAL_MASK`.
 
 **Why the file, and why atomically.** ``ubt.toml`` is the one place an operator
 can see, diff and version their configuration, and ``ubt.core.providers``
@@ -21,7 +39,8 @@ re-reads it on every ``load_layer`` call — so a write takes effect on the next
 without restarting the server. The write goes through
 ``ubt.core.atomic.atomic_write_text`` (temp file in the same directory, fsync,
 ``os.replace``) so a crash mid-write cannot leave a half-parsed config that would
-fail every subsequent job at startup.
+fail every subsequent job at startup. The file is then tightened to 0600, because
+it may now hold a literal secret.
 """
 
 from __future__ import annotations
@@ -43,13 +62,23 @@ from ubt.core.providers import (
     find_config_file,
 )
 
+#: What a credential is reported as. Never the value: the console needs to know
+#: whether one is configured, and a boolean plus this mask is the most that may
+#: be revealed. A literal echo would put the secret into a browser tab, the
+#: response log and the DOM.
+CREDENTIAL_MASK = "********"
+
 #: Fields a console request may set on a provider block.
 #:
-#: Deliberately excludes ``api_key`` and ``ocr_api_key`` (credentials), and every
-#: key that selects *another* provider (``repair_provider``, ``qe_judge_provider``)
-#: or a global path (``db_dir``, ``prices_file``) — editing those from a provider
+#: ``api_key`` is here but gated separately (:func:`credential_write_allowed`) —
+#: it is listed so the field reaches validation, and refused there when the
+#: deployment is not local. Excluded on purpose: ``ocr_api_key`` (a different
+#: channel's credential, set by the OCR driver, not the LLM path), and every key
+#: that selects *another* provider (``repair_provider``, ``qe_judge_provider``) or
+#: a global path (``db_dir``, ``prices_file``) — editing those from a provider
 #: form would silently reconfigure a different part of the engine.
 WRITABLE_FIELDS: tuple[str, ...] = (
+    "api_key",
     "base_url",
     "api_mode",
     "draft_model",
@@ -177,13 +206,43 @@ def _coerce_value(field: str, value: Any) -> Any:
     return cleaned
 
 
-def validate_edit(name: str, changes: dict[str, Any]) -> dict[str, Any]:
+def credential_write_allowed(*, is_loopback: bool, is_strict: bool) -> bool:
+    """Whether this deployment may accept a credential over HTTP.
+
+    Two independent conditions, both required:
+
+    * **loopback** — the request cannot have arrived from another machine. On a
+      non-loopback bind the server is a shared service and a secret belongs in the
+      operator's shell, not in a request body.
+    * **not strict** — ``UBT_STRICT_AUTH`` / ``UBT_ENV=production`` is a promise
+      that this server authenticates. Writing a credential there would mean a
+      bearer token is enough to mint another bearer token.
+
+    Both are passed in rather than read from the environment here: the caller owns
+    the request's actual bind and the boot-time auth posture, and a helper that
+    sniffed globals would answer for the wrong deployment in a test.
+    """
+    return bool(is_loopback) and not bool(is_strict)
+
+
+def validate_edit(
+    name: str,
+    changes: dict[str, Any],
+    *,
+    allow_credential: bool = False,
+) -> dict[str, Any]:
     """Reject an edit that may not be applied, returning the coerced values.
 
     Every rejection names the offending field: a console that answers "invalid
     request" to a form makes the operator guess which of a dozen inputs is wrong.
     """
     _validate_name(name)
+    if "api_key" in changes and not allow_credential:
+        raise ProviderEditError(
+            "a credential cannot be written from the console on this deployment: it is "
+            "reachable beyond loopback, or strict auth is on. Set it in ubt.toml or "
+            "export UBT_LLM_API_KEY instead."
+        )
     unknown = sorted(set(changes) - set(WRITABLE_FIELDS))
     if unknown:
         raise ProviderEditError(
@@ -247,14 +306,20 @@ def _tighten_permissions(path: Path) -> None:
         pass
 
 
-def upsert_provider(name: str, changes: dict[str, Any]) -> dict[str, Any]:
+def upsert_provider(
+    name: str,
+    changes: dict[str, Any],
+    *,
+    allow_credential: bool = False,
+) -> dict[str, Any]:
     """Create or update one ``[providers.<name>]`` block; returns what was stored.
 
     Only the keys in ``changes`` are touched, so a form that submits one edited
     field cannot silently drop the block's other settings. A credential already in
-    the file is preserved verbatim — this function never reads or writes one.
+    the file is preserved verbatim unless ``changes`` names it, and then only when
+    ``allow_credential`` is set (see :func:`credential_write_allowed`).
     """
-    coerced = validate_edit(name, changes)
+    coerced = validate_edit(name, changes, allow_credential=allow_credential)
     cleared = {field for field, value in changes.items() if value is None}
     if not coerced and not cleared:
         raise ProviderEditError("no writable field was supplied")
@@ -304,11 +369,17 @@ def read_provider(name: str) -> dict[str, Any]:
     result: dict[str, Any] = {"name": name, "declared": bool(declared)}
     for field in READABLE_FIELDS:
         if field == "api_key":
-            result["has_credential"] = bool(merged.get("api_key"))
+            # Presence only. The value — literal or ``${VAR}`` — is replaced by a
+            # fixed mask, so the field can be rendered as "already set" without
+            # the secret entering the response, the browser or the DOM.
+            raw = merged.get("api_key")
+            result["has_credential"] = bool(raw)
+            result["credential_hint"] = CREDENTIAL_MASK if raw else None
             continue
         if field in merged and merged[field] is not None:
             result[field] = merged[field]
     # Whether the key comes from the file or the environment matters when the
-    # operator is deciding where to change it.
+    # operator is deciding where to change it: a value in the file is what this
+    # endpoint can replace, one from ``UBT_LLM_API_KEY`` is not.
     result["credential_in_file"] = bool(declared.get("api_key"))
     return result

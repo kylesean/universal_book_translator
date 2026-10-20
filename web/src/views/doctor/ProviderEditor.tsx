@@ -6,8 +6,10 @@ import { InfoTip } from '@/components/ui/InfoTip'
 import { useI18n } from '@/i18n/useI18n'
 
 interface ProviderEditorProps {
-  /** The provider block being edited. */
-  name: string
+  /** The provider block being edited; ``null`` starts a new one. */
+  name: string | null
+  /** Whether this deployment may accept a credential over HTTP. */
+  canWriteCredential: boolean
   /** Called after a successful save so the parent can refresh its view. */
   onSaved: () => void
   onCancel: () => void
@@ -57,9 +59,20 @@ const EXTRACTION_STRATEGIES = ['auto', 'xml_tag', 'raw', 'cp']
  * the safe default". Rendering both as an unchecked box would silently convert
  * one into the other on every save.
  */
-export function ProviderEditor({ name, onSaved, onCancel }: ProviderEditorProps) {
+export function ProviderEditor({
+  name: initialName,
+  canWriteCredential,
+  onSaved,
+  onCancel,
+}: ProviderEditorProps) {
   const { t } = useI18n()
+  const [name, setName] = useState(initialName ?? '')
   const [detail, setDetail] = useState<ProviderDetail | null>(null)
+  // Create mode ends as soon as the block exists. Declared after ``detail``: it
+  // reads that state, and reading it before the declaration throws a temporal
+  // dead-zone ReferenceError that the error boundary surfaces as a blank screen.
+  const isCreate = initialName === null && detail === null
+  const [credential, setCredential] = useState('')
   const [text, setText] = useState<Partial<Record<TextField, string>>>({})
   const [flags, setFlags] = useState<Partial<Record<FlagField, boolean | undefined>>>({})
   const [apiMode, setApiMode] = useState('')
@@ -70,6 +83,10 @@ export function ProviderEditor({ name, onSaved, onCancel }: ProviderEditorProps)
   const [saved, setSaved] = useState(false)
 
   useEffect(() => {
+    // A new block starts from the state's initial values (empty), so there is
+    // nothing to load and nothing to set — returning here rather than calling
+    // setState keeps the effect free of a synchronous state write.
+    if (isCreate) return
     let cancelled = false
     void getProvider(name)
       .then((loaded) => {
@@ -98,15 +115,25 @@ export function ProviderEditor({ name, onSaved, onCancel }: ProviderEditorProps)
     return () => {
       cancelled = true
     }
-  }, [name])
+  }, [name, isCreate])
+
+  const nameIsValid = /^[A-Za-z0-9_-]{1,64}$/.test(name)
 
   const handleSave = useCallback(async () => {
+    if (!nameIsValid) {
+      setError(t.doctor.newProviderNameInvalid)
+      return
+    }
     setIsSaving(true)
     setError(null)
     try {
       // Only what the operator touched: an omitted key is left untouched in the
       // file, so saving one field cannot rewrite the rest of the block.
       const changes: Record<string, unknown> = {}
+      // A credential is submitted only when the operator typed one. An empty box
+      // means "keep what is configured", never "clear it" — a form that wiped the
+      // key on every save would break the provider it was editing.
+      if (credential.trim()) changes.api_key = credential.trim()
       for (const { field } of TEXT_FIELDS) {
         const value = text[field]
         if (value !== undefined && value !== (detail?.[field] ?? '')) {
@@ -130,11 +157,17 @@ export function ProviderEditor({ name, onSaved, onCancel }: ProviderEditorProps)
         changes.extraction_strategy = extraction
       }
       if (isFree !== (detail?.is_free ?? false)) changes.is_free = isFree
-      if (Object.keys(changes).length === 0) {
+      if (Object.keys(changes).length === 0 && !isCreate) {
         onSaved()
         return
       }
-      await saveProvider(name, changes)
+      const stored = await saveProvider(name, changes)
+      // Adopt the stored block as the new baseline. Without this the form stays
+      // in "create" mode after a successful create: it keeps offering "Create",
+      // keeps showing "no credential" for the credential it just wrote, and a
+      // second click would overwrite what the first one made.
+      setDetail(stored)
+      setCredential('')
       setSaved(true)
       onSaved()
     } catch (err) {
@@ -142,14 +175,16 @@ export function ProviderEditor({ name, onSaved, onCancel }: ProviderEditorProps)
     } finally {
       setIsSaving(false)
     }
-  }, [apiMode, detail, extraction, flags, isFree, name, onSaved, text])
+  }, [apiMode, credential, detail, extraction, flags, isCreate, isFree, name, nameIsValid, onSaved, t, text])
 
   return (
     <div className="rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] overflow-hidden">
       <div className="px-4 py-2.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <div className="type-group">{t.doctor.editingProvider}</div>
-          <div className="type-value font-mono font-semibold truncate">{name}</div>
+          <div className="type-group">
+            {isCreate ? t.doctor.addProvider : t.doctor.editingProvider}
+          </div>
+          <div className="type-value font-mono font-semibold truncate">{name || '—'}</div>
         </div>
         <button
           type="button"
@@ -162,6 +197,29 @@ export function ProviderEditor({ name, onSaved, onCancel }: ProviderEditorProps)
       </div>
 
       <div className="p-3.5 space-y-3">
+        {/* A new block needs a name: it becomes the [providers.<name>] key. */}
+        {isCreate ? (
+          <label className="block">
+            <span className="type-label text-[var(--ink-secondary)]">
+              {t.doctor.newProviderName}
+            </span>
+            <input
+              type="text"
+              value={name}
+              placeholder="my-endpoint"
+              onChange={(event) => setName(event.target.value)}
+              className="mt-1 w-full rounded-[4px] border border-[var(--paper-border)] bg-[var(--paper-bg)] px-2 py-1 type-value font-mono"
+            />
+            <span
+              className={`block mt-0.5 type-help ${name && !nameIsValid ? 'text-[#b91c1c]' : 'text-[var(--ink-muted)]'}`}
+            >
+              {name && !nameIsValid
+                ? t.doctor.newProviderNameInvalid
+                : t.doctor.newProviderNameHint}
+            </span>
+          </label>
+        ) : null}
+
         {/* Credential status: a boolean, because that is all the API reveals. */}
         <div className="flex items-center gap-2 type-help">
           <span
@@ -178,6 +236,35 @@ export function ProviderEditor({ name, onSaved, onCancel }: ProviderEditorProps)
           </span>
           <InfoTip label={t.doctor.providerConfigHint}>{t.doctor.providerConfigHint}</InfoTip>
         </div>
+
+        {/* The credential field is offered only where the deployment permits it.
+            Rendering it disabled with a reason beats rendering it enabled and
+            failing on submit: the operator learns the rule from the form rather
+            than from a 400 after typing a secret. */}
+        {canWriteCredential ? (
+          <label className="block">
+            <span className="type-label text-[var(--ink-secondary)]">
+              {t.doctor.credentialField}
+            </span>
+            <input
+              type="password"
+              value={credential}
+              placeholder={detail?.has_credential ? '********' : t.doctor.credentialPlaceholder}
+              autoComplete="off"
+              onChange={(event) => setCredential(event.target.value)}
+              className="mt-1 w-full rounded-[4px] border border-[var(--paper-border)] bg-[var(--paper-bg)] px-2 py-1 type-value font-mono"
+            />
+            <span className="block mt-0.5 type-help text-[var(--ink-muted)]">
+              {detail?.has_credential
+                ? t.doctor.credentialKeepHint
+                : t.doctor.credentialPlaceholder}
+            </span>
+          </label>
+        ) : (
+          <p className="type-help text-[#b45309] leading-relaxed">
+            {t.doctor.credentialBlockedHint}
+          </p>
+        )}
 
         {TEXT_FIELDS.map(({ field, labelKey, placeholder }) => (
           <label key={field} className="block">
@@ -290,11 +377,17 @@ export function ProviderEditor({ name, onSaved, onCancel }: ProviderEditorProps)
         ) : null}
 
         <div className="flex items-center gap-2 pt-1">
-          <Button size="sm" onClick={() => void handleSave()} disabled={isSaving || !detail}>
+          <Button
+            size="sm"
+            onClick={() => void handleSave()}
+            disabled={isSaving || (!isCreate && !detail) || !nameIsValid}
+          >
             {isSaving ? (
               <>
                 <Loader2 size={12} className="animate-spin" /> {t.doctor.saving}
               </>
+            ) : isCreate ? (
+              t.doctor.createProvider
             ) : (
               t.doctor.save
             )}

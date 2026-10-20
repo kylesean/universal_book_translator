@@ -342,9 +342,49 @@ export interface TranslationDictionary {
     builtinProviders: string
     aliasLabel: string
     providerConfigHint: string
-    capabilityPresets: string
-    capabilityPresetsHelp: string
-    inUse: string
+    credentialConfigured: string
+    credentialMissing: string
+    editProvider: string
+    editingProvider: string
+    cancel: string
+    save: string
+    saving: string
+    savedHint: string
+    capabilityTitle: string
+    capabilityHelp: string
+    capabilityTemperature: string
+    capabilityReasoning: string
+    capabilitySystem: string
+    capabilityVision: string
+    capabilityReasoningNote: string
+    capabilityVisionNote: string
+    capabilityUndeclared: string
+    capabilityYes: string
+    capabilityNo: string
+    baseUrl: string
+    apiMode: string
+    apiTimeout: string
+    extractionStrategy: string
+    deploymentBackend: string
+    deploymentBackendHelp: string
+    isFree: string
+    addProvider: string
+    newProviderName: string
+    newProviderNameHint: string
+    newProviderNameInvalid: string
+    activateProvider: string
+    activeProviderLabel: string
+    createProvider: string
+    credentialField: string
+    credentialPlaceholder: string
+    credentialKeepHint: string
+    credentialBlockedHint: string
+    frozenFieldsWarning: string
+    firstRunTitle: string
+    firstRunBody: string
+    firstRunCta: string
+    firstRunDismiss: string
+    loadFailed: string
     providerMatrix: string
     securityBoundary: string
     listenInterface: string
@@ -360,11 +400,6 @@ export interface TranslationDictionary {
     exposedWarning: string
     exposed: string
     loopbackOnly: string
-    capabilityVision: string
-    capabilityReasoning: string
-    capabilitySystem: string
-    capabilityNoSystem: string
-    capabilityExtract: string
   }
   review: {
     title: string

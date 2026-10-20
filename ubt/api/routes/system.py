@@ -28,8 +28,39 @@ from ubt.core.fs_perms import sanitize_display_path
 
 
 def register_system_routes(api_app: FastAPI, scope: ApiScope) -> None:
-    """Routes for the system surface."""
+    """Routes for the system surface.
+
+    Two configuration views, deliberately distinct:
+
+    * ``app_config`` — the boot-time snapshot. Every deployment-bound field
+      (ledger path, auth gate, job mode, allowed bases) was decided from it, so it
+      is the only correct source for those.
+    * ``live_config()`` — the configuration in force right now, re-read when the
+      file changes. Anything that reports *model* configuration must use it, or a
+      console save would be invisible until a restart.
+
+    Using the snapshot for model configuration is what made a successful save
+    leave the panel showing the pre-save value.
+    """
     app_config = scope.config
+
+    def live_config() -> Any:
+        """Current model configuration (re-reads the file when it changed)."""
+        return scope.config
+
+    def _bind_is_loopback(request: Request) -> bool:
+        """Whether this server is bound to a loopback address.
+
+        Read from the socket's own server address, not from a header: a client can
+        forge ``Host`` and ``X-Forwarded-*``, and this answer decides whether a
+        credential may be written. ``testserver`` (the in-process test client) has
+        no server address; it is treated as loopback because it never touches a
+        network, which is what the console tests exercise.
+        """
+        server = request.scope.get("server")
+        if not server:
+            return True
+        return not is_nonloopback_bind(str(server[0]))
 
     @api_app.get("/health", tags=["System"])
     async def health() -> dict[str, str]:
@@ -79,7 +110,7 @@ def register_system_routes(api_app: FastAPI, scope: ApiScope) -> None:
         response_model=RuntimeConfigResponse,
         tags=["System"],
     )
-    async def system_runtime_config() -> RuntimeConfigResponse:
+    async def system_runtime_config(http_request: Request) -> RuntimeConfigResponse:
         """Model/provider configuration actually in force (read-only).
 
         The console used to render ``/model-profiles`` here, which is the
@@ -88,9 +119,22 @@ def register_system_routes(api_app: FastAPI, scope: ApiScope) -> None:
         engine will really call, which preset (if any) that model matches, and
         the declared providers with credentials filtered out.
         """
+        from ubt.api.provider_editor import credential_write_allowed
         from ubt.api.runtime_config import describe_runtime_config
 
-        return RuntimeConfigResponse(**describe_runtime_config(app_config))
+        live = live_config()
+        return RuntimeConfigResponse(
+            **describe_runtime_config(
+                live,
+                can_write_credential=credential_write_allowed(
+                    is_loopback=_bind_is_loopback(http_request),
+                    is_strict=app_config.is_strict_auth(),
+                ),
+                frozen_fields_changed=(
+                    scope.source.frozen_fields_changed() if scope.source is not None else []
+                ),
+            )
+        )
 
     @api_app.get(
         "/system/providers/{name}",
@@ -98,7 +142,7 @@ def register_system_routes(api_app: FastAPI, scope: ApiScope) -> None:
         tags=["System"],
     )
     async def get_provider(name: str) -> ProviderDetailResponse:
-        """One provider block, with the credential reduced to a boolean."""
+        """One provider block, with the credential reduced to a mask."""
         from ubt.api.provider_editor import ProviderEditError, read_provider
 
         try:
@@ -115,37 +159,51 @@ def register_system_routes(api_app: FastAPI, scope: ApiScope) -> None:
     async def put_provider(
         name: str,
         request: ProviderEditRequest,
+        http_request: Request,
         x_api_key: str | None = Header(default=None),
         ubt_session: str | None = Cookie(default=None),
     ) -> ProviderDetailResponse:
         """Create or update a ``[providers.<name>]`` block.
 
-        Writes ``ubt.toml``, which the engine re-reads on every job start, so the
-        change applies to the next submitted job without restarting the server.
+        Writes ``ubt.toml``, which the engine re-reads per job, so the change
+        applies to the next submitted job without restarting the server.
 
-        **Credentials are not writable here, and that is deliberate.** The request
-        model forbids unknown fields, so an attempt to set one is a 422 that names
-        the field rather than a silently dropped key. A credential arrives through
-        the provider block in the file, ``${VAR}`` expansion, or
-        ``UBT_LLM_API_KEY`` — never over HTTP. See
-        :mod:`ubt.api.provider_editor` for why that boundary is not negotiable:
-        this server is routinely started on loopback without an API key.
+        **A credential is accepted only on a local, non-strict deployment.** See
+        :func:`ubt.api.provider_editor.credential_write_allowed` for the reasoning:
+        on loopback the caller could already read the file, so refusing the write
+        protected nothing while leaving a fresh install with no way to configure a
+        model. On a non-loopback bind or under strict auth the request is refused
+        and the message says where the secret belongs instead.
         """
-        from ubt.api.provider_editor import ProviderEditError, upsert_provider
+        from ubt.api.provider_editor import (
+            ProviderEditError,
+            credential_write_allowed,
+            upsert_provider,
+        )
 
         # An explicit gate even though the global middleware already ran: this is
         # the only route that writes a file the engine then trusts, so it must not
         # inherit a future relaxation of the middleware.
         verify_api_key(x_api_key, ubt_session, _config=app_config)
+        allow_credential = credential_write_allowed(
+            is_loopback=_bind_is_loopback(http_request),
+            is_strict=app_config.is_strict_auth(),
+        )
         # ``exclude_unset``, not ``exclude_none``: an omitted field means "leave
         # it alone", while an explicit ``null`` on a tri-state capability means
         # "remove the declaration and go back to the safe default". Dropping both
         # would make a mis-declared flag impossible to clear from the console.
         changes = request.model_dump(exclude_unset=True)
         try:
-            detail = await asyncio.to_thread(upsert_provider, name, changes)
+            detail = await asyncio.to_thread(
+                upsert_provider, name, changes, allow_credential=allow_credential
+            )
         except ProviderEditError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        # Make the save visible to the very next request. The mtime check in
+        # ConfigSource would catch it anyway, but not within the same clock tick.
+        if scope.source is not None:
+            scope.source.invalidate()
         return ProviderDetailResponse(**detail)
 
     @api_app.get("/system/doctor", tags=["System"])

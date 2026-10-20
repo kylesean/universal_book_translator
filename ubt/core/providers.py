@@ -88,6 +88,19 @@ PROVIDER_ALLOWED_KEYS = frozenset(
         # block (documented as the config baseline) must accept it too or the
         # same key is settable on every surface except the config file.
         "db_dir",
+        # Which ``[providers.<name>]`` block is in force.
+        #
+        # Only meaningful in ``[defaults]`` (a provider block naming itself is
+        # circular, and ``load_layer`` reads this key from the defaults before it
+        # merges a block). Without it the file could describe ten providers and
+        # still not say which one runs: selection lived only in ``UBT_PROVIDER``
+        # or ``--provider``, so the console could edit a block but never make it
+        # the active one — the single most important setting on the page.
+        #
+        # Precedence is unchanged and still explicit-over-config: an explicit
+        # ``--provider`` or ``UBT_PROVIDER`` outranks this key, because
+        # ``from_env`` reads the environment *before* the file layer.
+        "provider",
         # Run-level quality-gate knobs. Same reasoning as ``db_dir``: the
         # ``[defaults]`` block is documented as the config baseline, so a user
         # who wants the semantic judge on must be able to say so in a file

@@ -1251,12 +1251,27 @@ class UBTConfig(BaseSettings):
         ladder, shared with ``apply_config_overrides``:
 
         ``overrides > process env > [providers.<name>] > [defaults] > field default``
+
+        **Provider selection** follows the same ladder. An explicit ``provider=``
+        or ``UBT_PROVIDER`` wins; otherwise ``[defaults] provider = "<name>"``
+        decides. The file form is what lets the console write a complete
+        configuration: without it the file could declare ten providers and still
+        not say which one runs, so selecting one was a CLI-only operation.
         """
-        from ubt.core.providers import load_layer, merge_provider_under
+        from ubt.core.providers import load_defaults_block, load_layer, merge_provider_under
 
         clean = {k: v for k, v in overrides.items() if v is not None}
         provider_name = clean.get("provider") or os.getenv("UBT_PROVIDER")
+        if not provider_name:
+            # The file layer names the provider only when nothing more explicit
+            # did. Read it from ``[defaults]`` alone: resolving it through
+            # ``load_layer`` would need the answer it is trying to produce.
+            declared = load_defaults_block().get("provider")
+            provider_name = str(declared) if declared else None
         fields = load_layer(str(provider_name) if provider_name else None)
+        # ``load_layer`` already carries ``provider`` when it came from
+        # ``[defaults]``, so the selection survives the merge without a separate
+        # assignment here — one owner for the key, not two that can disagree.
         clean = merge_provider_under(clean, fields, env_supplied=_env_supplied_field_names())
         cfg = cls(**clean)
         if bootstrap:

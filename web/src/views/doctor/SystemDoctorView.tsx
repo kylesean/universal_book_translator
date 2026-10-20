@@ -7,6 +7,7 @@ import {
   MinusCircle,
   Loader2,
   Pencil,
+  Plus,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
@@ -41,7 +42,11 @@ export function SystemDoctorView() {
   const [checks, setChecks] = useState<DoctorCheck[]>([])
   const [runtime, setRuntime] = useState<RuntimeConfig | null>(null)
   const [info, setInfo] = useState<SystemInfo | null>(null)
-  const [editingProvider, setEditingProvider] = useState<string | null>(null)
+  // ``undefined`` = closed, ``null`` = creating a new block, a string = editing
+  // that one. A single ``string | null`` cannot express all three, and the
+  // difference between "closed" and "create" is the difference between a dead
+  // button and a working one.
+  const [editingProvider, setEditingProvider] = useState<string | null | undefined>(undefined)
   const [isPinging, setIsPinging] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -172,10 +177,11 @@ export function SystemDoctorView() {
             That table is gone. Capability is now declared per provider block, so
             this panel shows the live configuration and lets the operator edit
             the block it comes from. */}
-        {editingProvider ? (
+        {editingProvider !== undefined ? (
           <ProviderEditor
             name={editingProvider}
-            onCancel={() => setEditingProvider(null)}
+            canWriteCredential={runtime?.can_write_credential ?? false}
+            onCancel={() => setEditingProvider(undefined)}
             onSaved={() => void load(false)}
           />
         ) : null}
@@ -184,6 +190,36 @@ export function SystemDoctorView() {
           <div className="px-4 py-2.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] type-group">
             {t.doctor.runtimeConfig}
           </div>
+
+          {/* First run: no provider declared means a submit would silently run as
+              a zero-token rehearsal. Saying so here — before the wizard is ever
+              opened — is the difference between a working first session and a
+              mock deliverable the operator did not ask for. */}
+          {runtime && (runtime.providers ?? []).filter((p) => p.declared).length === 0 ? (
+            <div className="p-3.5 border-b border-[var(--paper-border)] bg-[#b45309]/10">
+              <div className="type-value font-semibold text-[#b45309] mb-1">
+                {t.doctor.firstRunTitle}
+              </div>
+              <p className="type-help text-[var(--ink-secondary)] leading-relaxed mb-2">
+                {t.doctor.firstRunBody}
+              </p>
+              <Button size="sm" onClick={() => setEditingProvider(null)}>
+                {t.doctor.firstRunCta}
+              </Button>
+            </div>
+          ) : null}
+
+          {/* A deployment-bound field edited in the file is not in force. Reporting
+              it is the difference between a control that works and one that
+              silently does nothing until the next restart. */}
+          {(runtime?.frozen_fields_changed ?? []).length > 0 ? (
+            <div className="px-3.5 py-2 border-b border-[var(--paper-border)] bg-[#b45309]/10 type-help text-[#b45309]">
+              {t.doctor.frozenFieldsWarning.replace(
+                '{fields}',
+                (runtime?.frozen_fields_changed ?? []).join(', '),
+              )}
+            </div>
+          ) : null}
 
           {/* Active configuration: the part the old screen never showed. */}
           {runtime ? (
@@ -283,7 +319,25 @@ export function SystemDoctorView() {
           {/* Declared providers, credentials filtered server-side, each row
               editable through the form above. */}
           <div className="px-3.5 py-2.5 border-b border-[var(--paper-border)]">
-            <div className="type-group mb-2">{t.doctor.declaredProviders}</div>
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <span className="type-group">{t.doctor.declaredProviders}</span>
+              {/* The create affordance. Without it a fresh install has zero
+                  declared providers, so the list renders zero rows and there is
+                  no way to add the first one from the console at all. */}
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setEditingProvider(null)}
+                className="!h-6 !px-1.5 type-help"
+              >
+                <Plus size={11} /> {t.doctor.addProvider}
+              </Button>
+            </div>
+            {(runtime?.providers ?? []).filter((p) => p.declared).length === 0 ? (
+              <p className="type-help text-[var(--ink-muted)] leading-relaxed">
+                {t.doctor.firstRunBody}
+              </p>
+            ) : null}
             {/* Only what the operator declared. The API also returns shipped
                 wire protocols and bare aliases (`chat`, `claude`, `responses`);
                 rendering all three put seven aliases above the six real
@@ -332,7 +386,14 @@ export function SystemDoctorView() {
             <details className="mt-2">
               <summary className="cursor-pointer type-help font-mono text-[var(--ink-muted)] hover:text-[var(--ink-primary)] select-none">
                 {t.doctor.builtinProviders} (
-                {(runtime?.providers ?? []).filter((p) => !p.declared).length})
+                {/* ``runtime === null`` means the configuration could not be read,
+                    which is NOT the same as "there are none". The old code
+                    coalesced to ``[]`` and rendered "(0)" — the panel asserting a
+                    fact it did not have, which is the same failure the "latency
+                    matrix" heading had. */}
+                {runtime
+                  ? (runtime.providers ?? []).filter((p) => !p.declared).length
+                  : t.doctor.loadFailed})
               </summary>
               <div className="mt-1 space-y-0.5">
                 {(runtime?.providers ?? [])

@@ -285,7 +285,7 @@
           "System"
         ],
         "summary": "Get Provider",
-        "description": "One provider block, with the credential reduced to a boolean.",
+        "description": "One provider block, with the credential reduced to a mask.",
         "operationId": "get_provider_system_providers__name__get",
         "parameters": [
           {
@@ -358,7 +358,7 @@
           "System"
         ],
         "summary": "Put Provider",
-        "description": "Create or update a ``[providers.<name>]`` block.\n\nWrites ``ubt.toml``, which the engine re-reads on every job start, so the\nchange applies to the next submitted job without restarting the server.\n\n**Credentials are not writable here, and that is deliberate.** The request\nmodel forbids unknown fields, so an attempt to set one is a 422 that names\nthe field rather than a silently dropped key. A credential arrives through\nthe provider block in the file, ``${VAR}`` expansion, or\n``UBT_LLM_API_KEY`` \u2014 never over HTTP. See\n:mod:`ubt.api.provider_editor` for why that boundary is not negotiable:\nthis server is routinely started on loopback without an API key.",
+        "description": "Create or update a ``[providers.<name>]`` block.\n\nWrites ``ubt.toml``, which the engine re-reads per job, so the change\napplies to the next submitted job without restarting the server.\n\n**A credential is accepted only on a local, non-strict deployment.** See\n:func:`ubt.api.provider_editor.credential_write_allowed` for the reasoning:\non loopback the caller could already read the file, so refusing the write\nprotected nothing while leaving a fresh install with no way to configure a\nmodel. On a non-loopback bind or under strict auth the request is refused\nand the message says where the secret belongs instead.",
         "operationId": "put_provider_system_providers__name__put",
         "parameters": [
           {
@@ -5005,6 +5005,18 @@
             "description": "Whether any credential is configured",
             "default": false
           },
+          "credential_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credential Hint",
+            "description": "A fixed mask when a credential is configured, never the value: the console needs to render 'already set', not to read the secret back"
+          },
           "credential_in_file": {
             "type": "boolean",
             "title": "Credential In File",
@@ -5201,6 +5213,18 @@
       },
       "ProviderEditRequest": {
         "properties": {
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key",
+            "description": "Credential for this provider block. Accepted only on a loopback, non-strict deployment; elsewhere the request is refused and the message says to use the environment or the file."
+          },
           "base_url": {
             "anyOf": [
               {
@@ -5548,8 +5572,22 @@
           "credential_source": {
             "type": "string",
             "title": "Credential Source",
-            "description": "Where the credential comes from; it is never accepted from the console",
+            "description": "Where the credential comes from when the console may not write it",
             "default": ""
+          },
+          "can_write_credential": {
+            "type": "boolean",
+            "title": "Can Write Credential",
+            "description": "True on a loopback, non-strict deployment. False means the console must not offer a credential field at all, and says why",
+            "default": false
+          },
+          "frozen_fields_changed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Frozen Fields Changed",
+            "description": "Deployment-bound fields edited in the file that need a restart. They are decided once at boot, so reporting them is the difference between a control that works and one that silently does nothing"
           }
         },
         "type": "object",

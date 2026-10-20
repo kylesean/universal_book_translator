@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ubt.api.app import JobManager
+    from ubt.api.config_source import ConfigSource
     from ubt.api.sse_broadcaster import QueueSseBroadcaster
     from ubt.core.config import UBTConfig
     from ubt.core.engine.job_queue import JobQueue
@@ -31,13 +32,37 @@ class ApiScope:
         job_queue: JobQueue | None,
         assess_semaphore: asyncio.Semaphore,
         sse_broadcaster: QueueSseBroadcaster | None = None,
+        source: ConfigSource | None = None,
     ) -> None:
-        self.config = config
+        #: ``source`` is the live view; ``config`` is the boot-time snapshot that
+        #: deployment-bound fields (ledger dir, auth gate, job mode) were decided
+        #: from. Routes that report *model* configuration must read ``source``:
+        #: the snapshot is frozen at boot, so a console save would never appear.
+        self.source = source
+        self._boot_config = config
         self.manager = manager
         self.job_queue = job_queue
         self.assess_semaphore = assess_semaphore
         #: Queue-mode SSE fan-out poller (None in embedded mode).
         self.sse_broadcaster = sse_broadcaster
+
+    @property
+    def config(self) -> UBTConfig:
+        """The configuration in force right now.
+
+        Re-reads the file when it changed, so a console save is visible without a
+        restart. Deployment-bound fields (``DEPLOYMENT_FIELDS``) are still the
+        boot values, because they are evaluated once by design — see
+        :mod:`ubt.api.config_source`.
+        """
+        if self.source is not None:
+            return self.source.config
+        return self._boot_config
+
+    @property
+    def boot_config(self) -> UBTConfig:
+        """The configuration the process started with (deployment identity)."""
+        return self._boot_config
 
     def tenant_allows(self, job_id: str, tenant: str) -> bool:
         """False when a queued job exists but belongs to another tenant.

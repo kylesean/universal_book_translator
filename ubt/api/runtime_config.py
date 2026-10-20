@@ -68,7 +68,12 @@ def _safe_block(name: str) -> dict[str, Any]:
     return exposed
 
 
-def describe_runtime_config(config: UBTConfig) -> dict[str, Any]:
+def describe_runtime_config(
+    config: UBTConfig,
+    *,
+    can_write_credential: bool = False,
+    frozen_fields_changed: list[str] | None = None,
+) -> dict[str, Any]:
     """What the engine will call, which profile that resolves to, and the menu.
 
     ``active`` is the part the old screen never showed: the provider and models
@@ -154,7 +159,13 @@ def describe_runtime_config(config: UBTConfig) -> dict[str, Any]:
         # string that merely *names* the field would trip the same check. The
         # guard is worth more than the phrasing.
         "credential_source": (
-            "the provider block's credential (${VAR} expansion) or UBT_LLM_API_KEY; "
-            "never accepted from the console"
+            "the provider block's credential (${VAR} expansion) or UBT_LLM_API_KEY"
         ),
+        # Whether the console may write a credential here. Passed in rather than
+        # inferred: it depends on the request's bind address and the boot-time auth
+        # posture, which only the caller knows. A UI that offered the field and
+        # then failed on submit would be the same "control that lies" pattern this
+        # panel exists to remove.
+        "can_write_credential": bool(can_write_credential),
+        "frozen_fields_changed": list(frozen_fields_changed or []),
     }

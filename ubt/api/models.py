@@ -754,7 +754,22 @@ class RuntimeConfigResponse(BaseModel):
     )
     credential_source: str = Field(
         default="",
-        description="Where the credential comes from; it is never accepted from the console",
+        description="Where the credential comes from when the console may not write it",
+    )
+    can_write_credential: bool = Field(
+        default=False,
+        description=(
+            "True on a loopback, non-strict deployment. False means the console "
+            "must not offer a credential field at all, and says why"
+        ),
+    )
+    frozen_fields_changed: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Deployment-bound fields edited in the file that need a restart. They "
+            "are decided once at boot, so reporting them is the difference between "
+            "a control that works and one that silently does nothing"
+        ),
     )
 
 
@@ -768,6 +783,14 @@ class ProviderEditRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    api_key: str | None = Field(
+        default=None,
+        description=(
+            "Credential for this provider block. Accepted only on a loopback, "
+            "non-strict deployment; elsewhere the request is refused and the "
+            "message says to use the environment or the file."
+        ),
+    )
     base_url: str | None = Field(default=None, description="Endpoint base URL (http/https)")
     api_mode: str | None = Field(
         default=None, description="Wire protocol (openai-chat, openai-responses, …)"
@@ -817,6 +840,13 @@ class ProviderDetailResponse(BaseModel):
     name: str
     declared: bool = Field(description="True when the operator declared it in [providers.*]")
     has_credential: bool = Field(default=False, description="Whether any credential is configured")
+    credential_hint: str | None = Field(
+        default=None,
+        description=(
+            "A fixed mask when a credential is configured, never the value: the "
+            "console needs to render 'already set', not to read the secret back"
+        ),
+    )
     credential_in_file: bool = Field(
         default=False, description="True when the block itself carries the credential"
     )

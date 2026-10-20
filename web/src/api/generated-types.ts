@@ -89,23 +89,22 @@ export interface paths {
         };
         /**
          * Get Provider
-         * @description One provider block, with the credential reduced to a boolean.
+         * @description One provider block, with the credential reduced to a mask.
          */
         get: operations["get_provider_system_providers__name__get"];
         /**
          * Put Provider
          * @description Create or update a ``[providers.<name>]`` block.
          *
-         *     Writes ``ubt.toml``, which the engine re-reads on every job start, so the
-         *     change applies to the next submitted job without restarting the server.
+         *     Writes ``ubt.toml``, which the engine re-reads per job, so the change
+         *     applies to the next submitted job without restarting the server.
          *
-         *     **Credentials are not writable here, and that is deliberate.** The request
-         *     model forbids unknown fields, so an attempt to set one is a 422 that names
-         *     the field rather than a silently dropped key. A credential arrives through
-         *     the provider block in the file, ``${VAR}`` expansion, or
-         *     ``UBT_LLM_API_KEY`` — never over HTTP. See
-         *     :mod:`ubt.api.provider_editor` for why that boundary is not negotiable:
-         *     this server is routinely started on loopback without an API key.
+         *     **A credential is accepted only on a local, non-strict deployment.** See
+         *     :func:`ubt.api.provider_editor.credential_write_allowed` for the reasoning:
+         *     on loopback the caller could already read the file, so refusing the write
+         *     protected nothing while leaving a fresh install with no way to configure a
+         *     model. On a non-loopback bind or under strict auth the request is refused
+         *     and the message says where the secret belongs instead.
          */
         put: operations["put_provider_system_providers__name__put"];
         post?: never;
@@ -1558,6 +1557,11 @@ export interface components {
              */
             has_credential: boolean;
             /**
+             * Credential Hint
+             * @description A fixed mask when a credential is configured, never the value: the console needs to render 'already set', not to read the secret back
+             */
+            credential_hint?: string | null;
+            /**
              * Credential In File
              * @description True when the block itself carries the credential
              * @default false
@@ -1605,6 +1609,11 @@ export interface components {
          *     submits only what changed, and an omitted field is left untouched in the file.
          */
         ProviderEditRequest: {
+            /**
+             * Api Key
+             * @description Credential for this provider block. Accepted only on a loopback, non-strict deployment; elsewhere the request is refused and the message says to use the environment or the file.
+             */
+            api_key?: string | null;
             /**
              * Base Url
              * @description Endpoint base URL (http/https)
@@ -1781,10 +1790,21 @@ export interface components {
             provider_config_source: string;
             /**
              * Credential Source
-             * @description Where the credential comes from; it is never accepted from the console
+             * @description Where the credential comes from when the console may not write it
              * @default
              */
             credential_source: string;
+            /**
+             * Can Write Credential
+             * @description True on a loopback, non-strict deployment. False means the console must not offer a credential field at all, and says why
+             * @default false
+             */
+            can_write_credential: boolean;
+            /**
+             * Frozen Fields Changed
+             * @description Deployment-bound fields edited in the file that need a restart. They are decided once at boot, so reporting them is the difference between a control that works and one that silently does nothing
+             */
+            frozen_fields_changed?: string[];
         };
         /**
          * RuntimeProvider
