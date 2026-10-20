@@ -80,6 +80,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/system/providers/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Provider
+         * @description One provider block, with the credential reduced to a boolean.
+         */
+        get: operations["get_provider_system_providers__name__get"];
+        /**
+         * Put Provider
+         * @description Create or update a ``[providers.<name>]`` block.
+         *
+         *     Writes ``ubt.toml``, which the engine re-reads on every job start, so the
+         *     change applies to the next submitted job without restarting the server.
+         *
+         *     **Credentials are not writable here, and that is deliberate.** The request
+         *     model forbids unknown fields, so an attempt to set one is a 422 that names
+         *     the field rather than a silently dropped key. A credential arrives through
+         *     the provider block in the file, ``${VAR}`` expansion, or
+         *     ``UBT_LLM_API_KEY`` — never over HTTP. See
+         *     :mod:`ubt.api.provider_editor` for why that boundary is not negotiable:
+         *     this server is routinely started on loopback without an API key.
+         */
+        put: operations["put_provider_system_providers__name__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/system/doctor": {
         parameters: {
             query?: never;
@@ -1429,15 +1464,16 @@ export interface components {
         };
         /**
          * ModelProfile
-         * @description Declarative capability profile for a translation model.
+         * @description Declarative capability profile for one model on one provider.
          *
-         *     Decouples model execution logic from brittle name matching, enabling
-         *     enterprise self-hosted models to configure behavior declaratively.
+         *     Every field is a statement about the endpoint, so a profile is only ever
+         *     attached to a specific ``[providers.<name>]`` block or to the generic
+         *     fallback — never to a model *name* alone.
          */
         ModelProfile: {
             /**
              * Model Pattern
-             * @description Exact model name or substring pattern used to resolve this profile.
+             * @description The model id this profile describes, exactly as it is sent on the wire. Resolution is an exact, case-insensitive match; there is no substring matching.
              */
             model_pattern: string;
             /**
@@ -1452,7 +1488,7 @@ export interface components {
             extraction_strategy: components["schemas"]["ExtractionStrategy"];
             /**
              * Supports Reasoning Effort
-             * @description Whether the provider/model accepts the reasoning_effort parameter.
+             * @description Whether the endpoint accepts a reasoning-effort control. True also means the output-token cap is left unset, because reasoning tokens bill against it and capping them corrupts the visible answer.
              * @default false
              */
             supports_reasoning_effort: boolean;
@@ -1464,7 +1500,7 @@ export interface components {
             supports_system_prompt: boolean;
             /**
              * Supports Temperature
-             * @description Whether model supports explicit temperature control.
+             * @description Whether the model accepts a temperature. False for the reasoning families that reject it with a 400.
              * @default true
              */
             supports_temperature: boolean;
@@ -1500,6 +1536,157 @@ export interface components {
          */
         PromptStrategy: "rich" | "minimal" | "hybrid";
         /**
+         * ProviderDetailResponse
+         * @description One provider block as the console may see it.
+         *
+         *     ``has_credential`` / ``credential_in_file`` are booleans on purpose: whether a
+         *     key is configured decides whether the block can run at all, and a boolean is
+         *     the most that may be revealed about it.
+         */
+        ProviderDetailResponse: {
+            /** Name */
+            name: string;
+            /**
+             * Declared
+             * @description True when the operator declared it in [providers.*]
+             */
+            declared: boolean;
+            /**
+             * Has Credential
+             * @description Whether any credential is configured
+             * @default false
+             */
+            has_credential: boolean;
+            /**
+             * Credential In File
+             * @description True when the block itself carries the credential
+             * @default false
+             */
+            credential_in_file: boolean;
+            /** Base Url */
+            base_url?: string | null;
+            /** Api Mode */
+            api_mode?: string | null;
+            /** Draft Model */
+            draft_model?: string | null;
+            /** Repair Model */
+            repair_model?: string | null;
+            /** Draft Reasoning Effort */
+            draft_reasoning_effort?: string | null;
+            /** Repair Reasoning Effort */
+            repair_reasoning_effort?: string | null;
+            /** Reasoning Dialect */
+            reasoning_dialect?: string | null;
+            /** Supports Temperature */
+            supports_temperature?: boolean | null;
+            /** Supports Reasoning Effort */
+            supports_reasoning_effort?: boolean | null;
+            /** Supports System Prompt */
+            supports_system_prompt?: boolean | null;
+            /** Supports Vision */
+            supports_vision?: boolean | null;
+            /** Extraction Strategy */
+            extraction_strategy?: string | null;
+            /** Deployment Backend */
+            deployment_backend?: string | null;
+            /** Is Free */
+            is_free?: boolean | null;
+            /** Api Timeout */
+            api_timeout?: number | null;
+            /** Fallback Models */
+            fallback_models?: string[] | null;
+        };
+        /**
+         * ProviderEditRequest
+         * @description One provider block edit from the console.
+         *
+         *     ``extra="forbid"`` so a client that sends a credential gets a 422 naming the
+         *     field instead of a silently ignored key. Every field is optional: an edit
+         *     submits only what changed, and an omitted field is left untouched in the file.
+         */
+        ProviderEditRequest: {
+            /**
+             * Base Url
+             * @description Endpoint base URL (http/https)
+             */
+            base_url?: string | null;
+            /**
+             * Api Mode
+             * @description Wire protocol (openai-chat, openai-responses, …)
+             */
+            api_mode?: string | null;
+            /**
+             * Draft Model
+             * @description Model id used for drafting
+             */
+            draft_model?: string | null;
+            /**
+             * Repair Model
+             * @description Model id used for repair
+             */
+            repair_model?: string | null;
+            /**
+             * Draft Reasoning Effort
+             * @description Draft reasoning effort
+             */
+            draft_reasoning_effort?: string | null;
+            /**
+             * Repair Reasoning Effort
+             * @description Repair reasoning effort
+             */
+            repair_reasoning_effort?: string | null;
+            /**
+             * Reasoning Dialect
+             * @description How the responses protocol spells a reasoning effort
+             */
+            reasoning_dialect?: string | null;
+            /**
+             * Supports Temperature
+             * @description Whether the endpoint accepts a temperature
+             */
+            supports_temperature?: boolean | null;
+            /**
+             * Supports Reasoning Effort
+             * @description Whether the endpoint accepts a reasoning effort
+             */
+            supports_reasoning_effort?: boolean | null;
+            /**
+             * Supports System Prompt
+             * @description Whether the endpoint accepts a system turn
+             */
+            supports_system_prompt?: boolean | null;
+            /**
+             * Supports Vision
+             * @description Whether the endpoint accepts image input
+             */
+            supports_vision?: boolean | null;
+            /**
+             * Extraction Strategy
+             * @description How to recover the translation (auto, xml_tag, raw, cp)
+             */
+            extraction_strategy?: string | null;
+            /**
+             * Deployment Backend
+             * @description Self-hosted stack serving this model (ollama, vllm, …)
+             */
+            deployment_backend?: string | null;
+            /**
+             * Is Free
+             * @description Declared free (no billable spend)
+             */
+            is_free?: boolean | null;
+            /**
+             * Api Timeout
+             * @description Per-request timeout (s)
+             */
+            api_timeout?: number | null;
+            /**
+             * Fallback Models
+             * @description Ordered model fallback chain
+             */
+            fallback_models?: string[] | null;
+        };
+        /**
          * RuntimeActiveModel
          * @description The provider and models the engine will actually call, right now.
          */
@@ -1531,12 +1718,12 @@ export interface components {
             api_mode: string;
             /**
              * Matched Pattern
-             * @description Capability profile this model matched, or null when it fell through to the generic default (common for a locally hosted model)
+             * @description Capability profile this model resolved to, or null when it fell through to the generic default
              */
             matched_pattern?: string | null;
             /**
              * Prompt Strategy
-             * @description Prompt strategy the matched profile selects
+             * @description Prompt strategy the resolved profile selects
              */
             prompt_strategy: string;
             /**
@@ -1544,6 +1731,37 @@ export interface components {
              * @description Human-readable name of the resolved profile
              */
             display_name: string;
+            /**
+             * Declared Capability
+             * @description Capability flags the provider block states outright. Every other flag is the conservative default, not a measurement of the endpoint.
+             */
+            declared_capability?: string[];
+            /**
+             * Supports Temperature
+             * @description Whether a temperature is sent
+             */
+            supports_temperature?: boolean | null;
+            /**
+             * Supports Reasoning Effort
+             * @description Whether a reasoning effort is sent
+             */
+            supports_reasoning_effort?: boolean | null;
+            /**
+             * Supports System Prompt
+             * @description Whether the system turn is sent as its own message
+             */
+            supports_system_prompt?: boolean | null;
+            /**
+             * Supports Vision
+             * @description Whether a page image may be sent to this model
+             */
+            supports_vision?: boolean | null;
+            /**
+             * Extraction Strategy
+             * @description How the translation is recovered from the completion
+             * @default
+             */
+            extraction_strategy: string;
         };
         /**
          * RuntimeConfigResponse
@@ -1558,9 +1776,15 @@ export interface components {
             providers: components["schemas"]["RuntimeProvider"][];
             /**
              * Provider Config Source
-             * @description Where provider settings live (they cannot be edited from the console)
+             * @description Where provider settings live (ubt.toml or the UBT_* environment)
              */
             provider_config_source: string;
+            /**
+             * Credential Source
+             * @description Where the credential comes from; it is never accepted from the console
+             * @default
+             */
+            credential_source: string;
         };
         /**
          * RuntimeProvider
@@ -1605,6 +1829,18 @@ export interface components {
              * @default false
              */
             is_free: boolean;
+            /** Supports Temperature */
+            supports_temperature?: boolean | null;
+            /** Supports Reasoning Effort */
+            supports_reasoning_effort?: boolean | null;
+            /** Supports System Prompt */
+            supports_system_prompt?: boolean | null;
+            /** Supports Vision */
+            supports_vision?: boolean | null;
+            /** Extraction Strategy */
+            extraction_strategy?: string | null;
+            /** Deployment Backend */
+            deployment_backend?: string | null;
         };
         /**
          * SegmentEditRequest
@@ -1988,6 +2224,80 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RuntimeConfigResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_provider_system_providers__name__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-key"?: string | null;
+            };
+            path: {
+                name: string;
+            };
+            cookie?: {
+                ubt_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_provider_system_providers__name__put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-key"?: string | null;
+            };
+            path: {
+                name: string;
+            };
+            cookie?: {
+                ubt_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProviderEditRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderDetailResponse"];
                 };
             };
             /** @description Validation Error */

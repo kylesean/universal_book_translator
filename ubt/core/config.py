@@ -34,7 +34,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 from urllib.parse import urlsplit
 
 from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
@@ -45,6 +45,11 @@ from pydantic_settings import (
     PydanticBaseSettingsSource,
     SettingsConfigDict,
 )
+
+if TYPE_CHECKING:
+    # Import-time cost and import direction: ``config`` is imported by everything,
+    # and the router package must not be pulled in just to type a return value.
+    from ubt.core.router.capabilities import ModelProfile
 
 #: The four LLM wire protocols UBT speaks. A provider is just an endpoint that
 #: speaks one of them — vendor identity never selects the protocol.
@@ -103,6 +108,9 @@ def resolve_repair_model(
 
 
 PromptStrategyName = Literal["auto", "minimal", "hybrid", "rich"]
+#: How to recover the translation from a raw completion. ``auto`` (the default)
+#: tries the XML tag first, then strips code fences and conversational lead-ins.
+ExtractionStrategyName = Literal["auto", "xml_tag", "raw", "cp"]
 OcrMode = Literal["auto", "sidecar", "cloud", "vlm", "rapidocr", "off"]
 ExecMode = Literal["auto", "short", "long"]
 FormulaEnrichment = Literal["auto", "on", "off"]
@@ -283,9 +291,32 @@ class UBTConfig(BaseSettings):
     qe_judge_provider: str | None = Field(default=None, validation_alias="UBT_QE_JUDGE_PROVIDER")
     is_free: bool = False
     cost_per_mtok: tuple[float, float] | None = None
-    capability_profile: str | None = None
+    # -- Declared model capability ------------------------------------------
+    # What the endpoint accepts on the wire. Every field is ``None`` when the
+    # provider block does not say, which means "not declared" and resolves to the
+    # conservative fallback in ``ubt.core.router.registry.fallback_profile``.
+    #
+    # These used to be *inferred from the model name* by a fourteen-entry table
+    # in the registry. That table could not answer for a locally hosted model
+    # (the reference machine's five local models all matched nothing) and it
+    # mis-answered for unrelated vendors: a name ending in ``-pro`` matched the
+    # ``pro`` entry and lost its output-token cap, while ``claude-sonnet-4``
+    # matched the bare ``claude`` entry and had its thinking budget suppressed.
+    # Declaring the capability next to the endpoint and model id it describes is
+    # the only place the answer is actually known.
     supports_temperature: bool | None = None
     supports_reasoning_effort: bool | None = None
+    supports_system_prompt: bool | None = None
+    supports_vision: bool | None = None
+    #: How to recover the translation from the raw completion. ``auto`` tries the
+    #: XML tag first, then strips code fences and conversational lead-ins.
+    extraction_strategy: ExtractionStrategyName = "auto"
+    #: Which self-hosted stack serves this model (``ollama``, ``llama-swap``,
+    #: ``vllm``, ...). When set, a gateway that answers 401/404 "model not
+    #: supported" earns exactly one retry against the local stack. Unset disables
+    #: that retry, because guessing it would send a private request to
+    #: ``localhost`` for every hosted model.
+    deployment_backend: str = ""
     # How the responses protocol spells a reasoning effort: "nested" is
     # ``reasoning: {effort}`` (OpenAI); "flat" is ``reasoning_effort`` with a
     # nested-minimal fallback (OpenCode Zen). Endpoint data, never host sniffing.
@@ -812,12 +843,13 @@ class UBTConfig(BaseSettings):
     # their own band, still fail-closed on fit.
     translate_chrome: bool = False
 
-    # -- Prompt-strategy override (local test vs production) --------------------
-    # 'auto' (default): the capability registry decides per model.
-    # Force 'minimal' / 'hybrid' / 'rich' to run every model under one
-    # strategy — e.g. production runs against large models with 'rich',
-    # while local smoke tests keep 'minimal'. Extraction and
-    # output-format profiles are NOT overridden, only prompt assembly.
+    # -- Prompt-strategy declaration (local test vs production) -----------------
+    # 'auto' (default): keep whatever the resolved capability profile says.
+    # Force 'minimal' / 'hybrid' / 'rich' to run every model under one strategy —
+    # e.g. production runs against large models with 'rich', while local smoke
+    # tests keep 'minimal'. Extraction is declared separately
+    # (``extraction_strategy``), because a model can need a different prompt shape
+    # and a different output-recovery rule.
     prompt_strategy: PromptStrategyName = "auto"
 
     # -- Execution-mode router (unified entry, adaptive execution) --------------
@@ -1066,36 +1098,114 @@ class UBTConfig(BaseSettings):
 
         declare_custom_prices_file(self.prices_file)
 
-        if (
-            self.capability_profile
-            or self.supports_temperature is not None
-            or self.supports_reasoning_effort is not None
-        ):
-            from ubt.core.router.capabilities import ModelProfile
-            from ubt.core.router.registry import get_default_registry
+    def capability_profiles(self) -> list[ModelProfile]:
+        """The capability profiles *this* configuration declares.
 
-            reg = get_default_registry()
-            for m_name in {self.draft_model, self.repair_model}:
-                if m_name:
-                    base_prof = reg.resolve(self.capability_profile or m_name)
-                    new_prof = ModelProfile(
-                        model_pattern=m_name,
-                        prompt_strategy=base_prof.prompt_strategy,
-                        extraction_strategy=base_prof.extraction_strategy,
-                        supports_reasoning_effort=(
-                            self.supports_reasoning_effort
-                            if self.supports_reasoning_effort is not None
-                            else base_prof.supports_reasoning_effort
-                        ),
-                        supports_system_prompt=base_prof.supports_system_prompt,
-                        supports_temperature=(
-                            self.supports_temperature
-                            if self.supports_temperature is not None
-                            else base_prof.supports_temperature
-                        ),
-                        display_name=f"Config Custom ({m_name})",
-                    )
-                    reg.register(new_prof, override=True)
+        Pure: builds and returns a list, registering nothing globally. The router
+        consumes it through ``registry_from_config``.
+
+        This replaced a block in :meth:`bootstrap_runtime_environment` that
+        registered a profile into the process-wide singleton for every
+        ``draft_model``/``repair_model``. Three measured defects came from that:
+
+        * **Cross-job leakage.** ``apply_config_overrides`` returns a fresh
+          ``UBTConfig`` per job, and the pipeline bootstrapped it. A job that
+          declared a capability for ``shared-model`` made the next job on the same
+          model id inherit it — including ``supports_system_prompt=False``, which
+          merges the system prompt into the user turn for an endpoint that accepts
+          a system role.
+        * **Unbounded growth.** Five jobs registering distinct model ids took the
+          registry from 14 to 20 entries, never reclaimed.
+        * **Field loss.** The old copy listed five fields, so a profile's
+          ``supports_vision`` and ``deployment_backend`` were dropped by any
+          override — the exact flags the visual-scalpel repair and the local
+          self-hosted retry read.
+
+        Every undeclared field comes from :func:`fallback_profile`, never from a
+        name table: only what this configuration actually states is asserted.
+
+        **An empty list when nothing is declared.** Returning a profile for the
+        model id unconditionally made the router resolve to a profile whose
+        pattern was the model name, so a diagnostics screen reported
+        ``Capability profile: gemma4-e4b`` — technically true and completely
+        uninformative, because it only echoed the model id back. Worse, it made
+        "no capability declared" indistinguishable from "capabilities declared",
+        which is the one distinction the screen exists to draw. With an empty
+        list the generic fallback applies and the resolution reports itself as
+        the fallback.
+        """
+        from ubt.core.router.capabilities import ExtractionStrategy, ModelProfile, PromptStrategy
+        from ubt.core.router.registry import fallback_profile
+
+        # Nothing declared: let the fallback speak, rather than minting a
+        # profile that says nothing.
+        declares_something = (
+            self.supports_temperature is not None
+            or self.supports_reasoning_effort is not None
+            or self.supports_system_prompt is not None
+            or self.supports_vision is not None
+            or self.prompt_strategy != "auto"
+            or self.extraction_strategy != "auto"
+            or bool(self.deployment_backend)
+        )
+        if not declares_something:
+            return []
+
+        profiles: list[ModelProfile] = []
+        # Both tiers get a profile because a job may route either one, and a
+        # dedupe keeps a config whose draft and repair are the same model id from
+        # registering it twice.
+        seen: set[str] = set()
+        for model_name in (self.draft_model, self.repair_model):
+            if not model_name or model_name in seen:
+                continue
+            seen.add(model_name)
+            base = fallback_profile(model_name)
+            # ``'auto'`` means "no opinion": the profile default stands. Any other
+            # value is an explicit operator choice, which is the whole point of
+            # the field. The enums are constructed here rather than passed as the
+            # config's literal strings, so an out-of-vocabulary value fails at the
+            # one place that builds a profile instead of halfway through a run.
+            strategy = (
+                base.prompt_strategy
+                if self.prompt_strategy == "auto"
+                else PromptStrategy(self.prompt_strategy)
+            )
+            extraction = (
+                base.extraction_strategy
+                if self.extraction_strategy == "auto"
+                else ExtractionStrategy(self.extraction_strategy)
+            )
+            profiles.append(
+                ModelProfile(
+                    model_pattern=model_name,
+                    prompt_strategy=strategy,
+                    extraction_strategy=extraction,
+                    supports_reasoning_effort=(
+                        base.supports_reasoning_effort
+                        if self.supports_reasoning_effort is None
+                        else self.supports_reasoning_effort
+                    ),
+                    supports_system_prompt=(
+                        base.supports_system_prompt
+                        if self.supports_system_prompt is None
+                        else self.supports_system_prompt
+                    ),
+                    supports_temperature=(
+                        base.supports_temperature
+                        if self.supports_temperature is None
+                        else self.supports_temperature
+                    ),
+                    supports_vision=(
+                        base.supports_vision
+                        if self.supports_vision is None
+                        else self.supports_vision
+                    ),
+                    deployment_backend=self.deployment_backend,
+                    display_name=f"Declared ({model_name})",
+                )
+            )
+        return profiles
 
     def is_strict_auth(self) -> bool:
         """Whether the API must enforce authentication (strict/production)."""

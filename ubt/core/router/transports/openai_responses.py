@@ -9,10 +9,16 @@ from ubt.core.exceptions import ModelProviderError
 from ubt.core.router.transports.base import (
     BaseTransport,
     _extract_cached_tokens,
+    _heal_drop_temperature,
     raise_for_status,
 )
 
 logger = logging.getLogger(__name__)
+
+#: Error phrases this protocol uses when it refuses ``temperature``. Same set the
+#: chat-completions transport heals on, kept as one definition so the two cannot
+#: drift apart on the same endpoint.
+_RESPONSES_TEMPERATURE_KEYS = ("temperature", "unsupported parameter")
 
 
 class OpenAIResponsesTransport(BaseTransport):
@@ -128,6 +134,10 @@ class OpenAIResponsesTransport(BaseTransport):
             else:
                 payload["reasoning"] = {"effort": eff}
 
+        # Same learning as the chat transport: a 400 proved ``temperature``
+        # unsupported for this model, so do not re-send it on every block.
+        payload = self._apply_learned_omissions(payload)
+
         client = self._get_client()
         responses_url = f"{self._base_url}/responses"
         response = await self._request_json(client, responses_url, payload)
@@ -180,6 +190,18 @@ class OpenAIResponsesTransport(BaseTransport):
                     if retry_resp.status_code == 200:
                         self._model_reasoning_mode[target_model] = "none"
                     response = retry_resp
+
+        # Temperature is rejected by the reasoning families on this protocol too,
+        # and this transport had no rule for it: a model whose chat-completions
+        # sibling healed fine failed every call here with a permanent 400.
+        if response.status_code == 400 and "temperature" in payload:
+            response = await self._self_heal_400(
+                client,
+                responses_url,
+                payload,
+                response,
+                (_heal_drop_temperature(*_RESPONSES_TEMPERATURE_KEYS),),
+            )
 
         raise_for_status(response)
 

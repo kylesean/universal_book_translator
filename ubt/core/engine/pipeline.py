@@ -69,7 +69,7 @@ from ubt.core.router.provider import create_model_provider
 if TYPE_CHECKING:
     from ubt.core.qe.llm_judge import JudgeFn
 from ubt.core.router.rate_limiter import AdaptiveTokenBucket
-from ubt.core.router.registry import get_default_registry
+from ubt.core.router.registry import registry_from_config
 from ubt.core.router.router import ModelRouter, set_run_cancel_token
 from ubt.core.router_mode import decide
 
@@ -313,9 +313,11 @@ class PipelineOrchestrator:
                 fallback_models=self.config.fallback_models,
                 prompt_strategy_override=self.config.prompt_strategy,
                 allow_page_upload=self.config.allow_page_upload,
-                # Share the process-wide registry so runtime profile
-                # registration (API /model-profiles) actually reaches jobs.
-                registry=get_default_registry(),
+                # Per-configuration, never the process singleton: this config's
+                # capability declarations belong to this job. Registering them
+                # globally let job A's override become job B's capability for the
+                # same model id, and grew the registry without bound.
+                registry=registry_from_config(self.config),
                 request_timeout=self.config.api_timeout,
             )
         else:

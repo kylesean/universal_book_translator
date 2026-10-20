@@ -1,18 +1,26 @@
 import React, { useCallback, useEffect, useState } from 'react'
-import { CheckCircle2, RefreshCw, AlertTriangle, XCircle, MinusCircle, Loader2 } from 'lucide-react'
+import {
+  CheckCircle2,
+  RefreshCw,
+  AlertTriangle,
+  XCircle,
+  MinusCircle,
+  Loader2,
+  Pencil,
+} from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
+import { InfoTip } from '@/components/ui/InfoTip'
 import {
   getDoctor,
   getRuntimeConfig,
   getSystemInfo,
-  listModelProfiles,
   type DoctorCheck,
-  type ModelProfile,
   type RuntimeConfig,
   type SystemInfo,
 } from '@/api/client'
 import { useI18n } from '@/i18n/useI18n'
+import { ProviderEditor } from './ProviderEditor'
 
 function CheckIcon({ status }: { status: string }) {
   if (status === 'FAIL') return <XCircle className="h-4 w-4 text-[#b91c1c] shrink-0 mt-0.5" />
@@ -31,9 +39,9 @@ function statusBadgeVariant(status: string): 'success' | 'warning' | 'destructiv
 export function SystemDoctorView() {
   const { t } = useI18n()
   const [checks, setChecks] = useState<DoctorCheck[]>([])
-  const [profiles, setProfiles] = useState<ModelProfile[]>([])
   const [runtime, setRuntime] = useState<RuntimeConfig | null>(null)
   const [info, setInfo] = useState<SystemInfo | null>(null)
+  const [editingProvider, setEditingProvider] = useState<string | null>(null)
   const [isPinging, setIsPinging] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -41,14 +49,12 @@ export function SystemDoctorView() {
   const load = useCallback(async (probe: boolean) => {
     setLoading(true)
     try {
-      const [doctor, modelProfiles, systemInfo, runtimeCfg] = await Promise.all([
+      const [doctor, systemInfo, runtimeCfg] = await Promise.all([
         getDoctor(probe),
-        listModelProfiles().catch(() => [] as ModelProfile[]),
         getSystemInfo().catch(() => null),
         getRuntimeConfig().catch(() => null),
       ])
       setChecks(doctor.checks)
-      setProfiles(modelProfiles)
       setInfo(systemInfo)
       setRuntime(runtimeCfg)
       setError(null)
@@ -155,25 +161,35 @@ export function SystemDoctorView() {
         {/* Right: what the engine will actually call.
 
             This panel used to render `/model-profiles` under the heading
-            "model routing and latency matrix". That endpoint returns the
+            "model routing and latency matrix". That endpoint returned the
             engine's hard-coded capability *presets* — fourteen name patterns
-            like `o1`, `o3`, `claude` — none of which is a configured model, and
-            the payload contains no latency at all. On this machine the operator
-            runs `local-gemma4` / `gemma4-e4b`, which matches none of the
+            like `o1`, `o3`, `claude` — none of which was a configured model, and
+            the payload contained no latency at all. On this machine the operator
+            runs `local-gemma4` / `gemma4-e4b`, which matched none of the
             fourteen, so the screen showed fourteen irrelevant rows and hid the
-            one configuration that was live. */}
+            one configuration that was live.
+
+            That table is gone. Capability is now declared per provider block, so
+            this panel shows the live configuration and lets the operator edit
+            the block it comes from. */}
+        {editingProvider ? (
+          <ProviderEditor
+            name={editingProvider}
+            onCancel={() => setEditingProvider(null)}
+            onSaved={() => void load(false)}
+          />
+        ) : null}
+
         <div className="rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] overflow-hidden shadow-2xs">
-          <div className="px-4 py-2.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
+          <div className="px-4 py-2.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] type-group">
             {t.doctor.runtimeConfig}
           </div>
 
           {/* Active configuration: the part the old screen never showed. */}
           {runtime ? (
             <div className="p-3.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)]">
-              <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] mb-2 font-semibold">
-                {t.doctor.activeNow}
-              </div>
-              <dl className="space-y-1 text-xs font-mono">
+              <div className="type-group mb-2">{t.doctor.activeNow}</div>
+              <dl className="space-y-1 type-value font-mono">
                 <div className="flex justify-between gap-3">
                   <dt className="text-[var(--ink-secondary)]">{t.doctor.providerLabel}</dt>
                   <dd className="text-[var(--ink-primary)] font-semibold truncate">
@@ -211,29 +227,63 @@ export function SystemDoctorView() {
                   </dd>
                 </div>
               </dl>
-              {/* A model with no matching preset is not broken — it runs on the
-                  generic default — but the operator should know the prompt
-                  strategy was not tuned for it. */}
-              {!runtime.active.matched_pattern && runtime.active.draft_model && (
-                <p className="mt-2 text-xs text-[var(--ink-muted)] leading-relaxed">
-                  {t.doctor.noProfileMatchHelp.replace(
-                    '{strategy}',
-                    runtime.active.prompt_strategy || 'hybrid',
+
+              {/* Which flags the block states, and which are the safe default.
+                  A screen that showed all four as plain booleans would present
+                  an assumption as if it were a measurement of the endpoint. */}
+              <div className="mt-2 pt-2 border-t border-[var(--paper-border)]">
+                <div className="flex items-center gap-1.5 mb-1">
+                  <span className="type-label text-[var(--ink-muted)]">
+                    {t.doctor.capabilityTitle}
+                  </span>
+                  <InfoTip label={t.doctor.capabilityHelp}>{t.doctor.capabilityHelp}</InfoTip>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {(
+                    [
+                      ['supports_temperature', t.doctor.capabilityTemperature],
+                      ['supports_reasoning_effort', t.doctor.capabilityReasoning],
+                      ['supports_system_prompt', t.doctor.capabilitySystem],
+                      ['supports_vision', t.doctor.capabilityVision],
+                    ] as const
+                  ).map(([field, label]) => {
+                    const declared = runtime.active.declared_capability.includes(field)
+                    const value = runtime.active[field]
+                    return (
+                      <span
+                        key={field}
+                        className={`type-help font-mono px-1.5 py-0.5 rounded border ${
+                          declared
+                            ? value
+                              ? 'border-[#15803d]/25 bg-[#15803d]/10 text-[#15803d]'
+                              : 'border-[var(--paper-border)] bg-[var(--paper-surface)] text-[var(--ink-secondary)] line-through'
+                            : 'border-dashed border-[var(--paper-border)] text-[var(--ink-muted)]'
+                        }`}
+                        title={declared ? undefined : t.doctor.capabilityUndeclared}
+                      >
+                        {label}
+                      </span>
+                    )
+                  })}
+                </div>
+                {runtime.active.declared_capability.length === 0 &&
+                  runtime.active.draft_model && (
+                    <p className="mt-1.5 type-help text-[var(--ink-muted)] leading-relaxed">
+                      {t.doctor.noProfileMatchHelp}
+                    </p>
                   )}
-                </p>
-              )}
+              </div>
             </div>
           ) : (
-            <div className="p-4 text-xs text-[var(--ink-muted)]">
+            <div className="p-4 type-help text-[var(--ink-muted)]">
               {t.doctor.runtimeConfigUnavailable}
             </div>
           )}
 
-          {/* Declared providers, credentials filtered server-side. */}
+          {/* Declared providers, credentials filtered server-side, each row
+              editable through the form above. */}
           <div className="px-3.5 py-2.5 border-b border-[var(--paper-border)]">
-            <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] mb-2 font-semibold">
-              {t.doctor.declaredProviders}
-            </div>
+            <div className="type-group mb-2">{t.doctor.declaredProviders}</div>
             {/* Only what the operator declared. The API also returns shipped
                 wire protocols and bare aliases (`chat`, `claude`, `responses`);
                 rendering all three put seven aliases above the six real
@@ -244,7 +294,7 @@ export function SystemDoctorView() {
                 .map((p) => (
                   <div
                     key={p.name}
-                    className={`flex items-center justify-between gap-2 rounded-[4px] px-2 py-1 text-xs font-mono ${
+                    className={`flex items-center justify-between gap-2 rounded-[4px] px-2 py-1 type-value font-mono ${
                       p.active
                         ? 'bg-[#15803d]/10 border border-[#15803d]/25'
                         : 'border border-transparent'
@@ -257,13 +307,21 @@ export function SystemDoctorView() {
                     </span>
                     <span className="flex items-center gap-1.5 shrink-0">
                       {p.is_free && (
-                        <span className="text-[10px] text-[var(--ink-muted)]">
+                        <span className="type-help text-[var(--ink-muted)]">
                           {t.doctor.freeLabel}
                         </span>
                       )}
-                      <span className="text-[10px] text-[var(--ink-muted)] truncate max-w-[9rem]">
+                      <span className="type-help text-[var(--ink-muted)] truncate max-w-[9rem]">
                         {p.draft_model || p.api_mode || '—'}
                       </span>
+                      <button
+                        type="button"
+                        onClick={() => setEditingProvider(p.name)}
+                        aria-label={`${t.doctor.editProvider} ${p.name}`}
+                        className="p-0.5 rounded text-[var(--ink-muted)] hover:text-[var(--ink-primary)]"
+                      >
+                        <Pencil size={11} />
+                      </button>
                     </span>
                   </div>
                 ))}
@@ -272,7 +330,7 @@ export function SystemDoctorView() {
             {/* Built-in protocols and aliases, collapsed: they are usable names,
                 not configurations. */}
             <details className="mt-2">
-              <summary className="cursor-pointer text-[11px] font-mono text-[var(--ink-muted)] hover:text-[var(--ink-primary)] select-none">
+              <summary className="cursor-pointer type-help font-mono text-[var(--ink-muted)] hover:text-[var(--ink-primary)] select-none">
                 {t.doctor.builtinProviders} (
                 {(runtime?.providers ?? []).filter((p) => !p.declared).length})
               </summary>
@@ -282,60 +340,20 @@ export function SystemDoctorView() {
                   .map((p) => (
                     <div
                       key={p.name}
-                      className="flex items-center justify-between gap-2 px-2 text-[11px] font-mono text-[var(--ink-muted)]"
+                      className="flex items-center justify-between gap-2 px-2 type-help font-mono text-[var(--ink-muted)]"
                     >
                       <span className="truncate">{p.name}</span>
-                      <span className="text-[10px] shrink-0">
+                      <span className="shrink-0">
                         {p.is_alias ? t.doctor.aliasLabel : p.api_mode || '—'}
                       </span>
                     </div>
                   ))}
               </div>
             </details>
-            <p className="mt-2 text-xs text-[var(--ink-muted)] leading-relaxed">
+            <p className="mt-2 type-help text-[var(--ink-muted)] leading-relaxed">
               {t.doctor.providerConfigHint}
             </p>
           </div>
-
-          {/* Capability presets: explicitly labelled as matching rules, not as
-              configured models, so the list is read for what it is. */}
-          <details className="group">
-            <summary className="px-3.5 py-2.5 cursor-pointer text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold hover:text-[var(--ink-primary)] select-none">
-              {t.doctor.capabilityPresets} ({profiles.length})
-            </summary>
-            <p className="px-3.5 pb-2 text-xs text-[var(--ink-muted)] leading-relaxed">
-              {t.doctor.capabilityPresetsHelp}
-            </p>
-            <div className="divide-y divide-[var(--paper-border)]">
-              {profiles.map((profile) => (
-                <div key={profile.model_pattern} className="px-3.5 py-2 text-xs">
-                  <div className="font-semibold text-[var(--ink-primary)] flex items-center gap-2">
-                    <span className="font-mono truncate">{profile.model_pattern}</span>
-                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--paper-subsurface)] text-[var(--ink-muted)] border border-[var(--paper-border)]">
-                      {profile.prompt_strategy}
-                    </span>
-                    {runtime?.active.matched_pattern === profile.model_pattern && (
-                      <span className="text-[10px] font-mono text-[#15803d]">
-                        {t.doctor.inUse}
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-[11px] text-[var(--ink-secondary)] mt-0.5 flex flex-wrap gap-1.5 font-mono">
-                    {profile.supports_vision && <span>{t.doctor.capabilityVision}</span>}
-                    {profile.supports_reasoning_effort && <span>{t.doctor.capabilityReasoning}</span>}
-                    <span>
-                      {profile.supports_system_prompt
-                        ? t.doctor.capabilitySystem
-                        : t.doctor.capabilityNoSystem}
-                    </span>
-                    <span>
-                      {t.doctor.capabilityExtract}:{profile.extraction_strategy}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </details>
         </div>
       </div>
 

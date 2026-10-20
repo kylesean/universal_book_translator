@@ -1186,3 +1186,79 @@ def test_the_doctor_no_longer_claims_a_latency_matrix() -> None:
     assert "getRuntimeConfig" in source
     # The alias/protocol split is what keeps the list readable.
     assert ".filter((p) => p.declared)" in source
+
+
+def test_the_doctor_renders_declared_capability_not_a_preset_table() -> None:
+    """The screen must distinguish a declared flag from an assumed default.
+
+    ``declared_capability`` exists because four plain booleans cannot say whether
+    the operator told the engine that the endpoint rejects temperature, or the
+    engine simply assumed it does not. Presenting an assumption as a measurement
+    is exactly the failure the old "latency matrix" heading had.
+    """
+    from ubt.api.runtime_config import describe_runtime_config
+    from ubt.core.config import UBTConfig
+
+    declared = describe_runtime_config(
+        UBTConfig.from_env(draft_model="m", supports_temperature=False)
+    )["active"]
+    assert declared["declared_capability"] == ["supports_temperature"]
+    assert declared["supports_temperature"] is False
+
+    assumed = describe_runtime_config(UBTConfig.from_env(draft_model="m"))["active"]
+    assert assumed["declared_capability"] == []
+    assert assumed["supports_temperature"] is True
+
+
+def test_the_doctor_has_no_capability_preset_list() -> None:
+    """The fourteen-name table is gone from both the view and the API surface."""
+    repo = _REPO_ROOT
+    view = repo / "web" / "src" / "views" / "doctor" / "SystemDoctorView.tsx"
+    if not view.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+
+    source = view.read_text(encoding="utf-8")
+    # The panel used to render one row per built-in preset.
+    assert "listModelProfiles" not in source
+    assert "capabilityPresets" not in source
+    # It edits the block the capability actually comes from instead.
+    assert "ProviderEditor" in source
+
+
+def test_the_provider_editor_never_offers_a_credential_field() -> None:
+    """A form that cannot save a secret cannot leak one.
+
+    The console writes ``ubt.toml``, which may hold a literal key. Offering an
+    ``api_key`` input would mean the secret round-trips through a browser tab and
+    a request body; the endpoint refuses it, so the field would be a dead control
+    that teaches the operator the wrong model of where credentials live.
+    """
+    repo = _REPO_ROOT
+    editor = repo / "web" / "src" / "views" / "doctor" / "ProviderEditor.tsx"
+    if not editor.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+
+    source = editor.read_text(encoding="utf-8")
+    # It may *report* credential presence, but never bind an input to it.
+    assert "has_credential" in source
+    for forbidden in ("api_key", "apiKey", "ocr_api_key"):
+        assert forbidden not in source, f"the editor references {forbidden}"
+
+
+def test_an_undeclared_configuration_reports_the_generic_default() -> None:
+    """The panel must not echo the model id back as if it were a capability.
+
+    With nothing declared, ``matched_pattern`` was the model name — so the screen
+    read "Capability profile: gemma4-e4b" while the paragraph beneath it said no
+    flags were declared. Two contradictory statements on one panel.
+    """
+    from ubt.api.runtime_config import describe_runtime_config
+    from ubt.core.config import UBTConfig
+
+    active = describe_runtime_config(UBTConfig.from_env(draft_model="undeclared-model"))["active"]
+    assert active["matched_pattern"] is None
+    assert active["declared_capability"] == []
+    # The safe defaults are still reported, so the panel can show what will be
+    # sent rather than leaving four blanks.
+    assert active["supports_temperature"] is True
+    assert active["supports_reasoning_effort"] is False

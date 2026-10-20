@@ -90,6 +90,10 @@ class OpenAIChatTransport(BaseTransport):
         if self._chat_template_kwargs:
             payload["chat_template_kwargs"] = self._chat_template_kwargs
 
+        # Apply what an earlier 400 already proved this endpoint rejects, so the
+        # fix is paid once per model instead of once per block.
+        payload = self._apply_learned_omissions(payload)
+
         client = self._get_client()
         chat_url = f"{self._base_url}/chat/completions"
         response = await self._request_json(client, chat_url, payload)

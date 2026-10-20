@@ -6,11 +6,16 @@ import asyncio
 import shutil
 from typing import Any
 
-from fastapi import FastAPI, Header, Request
+from fastapi import Cookie, FastAPI, Header, HTTPException, Request, status
 from fastapi.responses import JSONResponse, Response
 
 from ubt import __version__
-from ubt.api.models import RuntimeConfigResponse, SystemInfoResponse
+from ubt.api.models import (
+    ProviderDetailResponse,
+    ProviderEditRequest,
+    RuntimeConfigResponse,
+    SystemInfoResponse,
+)
 from ubt.api.routes.shared import is_nonloopback_bind
 from ubt.api.scope import ApiScope
 from ubt.api.security import (
@@ -86,6 +91,62 @@ def register_system_routes(api_app: FastAPI, scope: ApiScope) -> None:
         from ubt.api.runtime_config import describe_runtime_config
 
         return RuntimeConfigResponse(**describe_runtime_config(app_config))
+
+    @api_app.get(
+        "/system/providers/{name}",
+        response_model=ProviderDetailResponse,
+        tags=["System"],
+    )
+    async def get_provider(name: str) -> ProviderDetailResponse:
+        """One provider block, with the credential reduced to a boolean."""
+        from ubt.api.provider_editor import ProviderEditError, read_provider
+
+        try:
+            detail = read_provider(name)
+        except ProviderEditError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        return ProviderDetailResponse(**detail)
+
+    @api_app.put(
+        "/system/providers/{name}",
+        response_model=ProviderDetailResponse,
+        tags=["System"],
+    )
+    async def put_provider(
+        name: str,
+        request: ProviderEditRequest,
+        x_api_key: str | None = Header(default=None),
+        ubt_session: str | None = Cookie(default=None),
+    ) -> ProviderDetailResponse:
+        """Create or update a ``[providers.<name>]`` block.
+
+        Writes ``ubt.toml``, which the engine re-reads on every job start, so the
+        change applies to the next submitted job without restarting the server.
+
+        **Credentials are not writable here, and that is deliberate.** The request
+        model forbids unknown fields, so an attempt to set one is a 422 that names
+        the field rather than a silently dropped key. A credential arrives through
+        the provider block in the file, ``${VAR}`` expansion, or
+        ``UBT_LLM_API_KEY`` — never over HTTP. See
+        :mod:`ubt.api.provider_editor` for why that boundary is not negotiable:
+        this server is routinely started on loopback without an API key.
+        """
+        from ubt.api.provider_editor import ProviderEditError, upsert_provider
+
+        # An explicit gate even though the global middleware already ran: this is
+        # the only route that writes a file the engine then trusts, so it must not
+        # inherit a future relaxation of the middleware.
+        verify_api_key(x_api_key, ubt_session, _config=app_config)
+        # ``exclude_unset``, not ``exclude_none``: an omitted field means "leave
+        # it alone", while an explicit ``null`` on a tri-state capability means
+        # "remove the declaration and go back to the safe default". Dropping both
+        # would make a mis-declared flag impossible to clear from the console.
+        changes = request.model_dump(exclude_unset=True)
+        try:
+            detail = await asyncio.to_thread(upsert_provider, name, changes)
+        except ProviderEditError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        return ProviderDetailResponse(**detail)
 
     @api_app.get("/system/doctor", tags=["System"])
     async def system_doctor(probe: bool = False) -> JSONResponse:

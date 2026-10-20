@@ -24,7 +24,6 @@ if TYPE_CHECKING:
 from ubt.core.exceptions import BudgetExceededError, JobInterruptedError, ModelProviderError
 from ubt.core.ir.models import IRBlock
 from ubt.core.router.capabilities import (
-    ExtractionStrategy,
     ModelProfile,
     PromptStrategy,
 )
@@ -41,7 +40,7 @@ from ubt.core.router.prompts import (
 )
 from ubt.core.router.provider import BaseModelProvider, OpenAICompatibleProvider
 from ubt.core.router.rate_limiter import AdaptiveTokenBucket, NullRateLimiter
-from ubt.core.router.registry import ModelCapabilityRegistry
+from ubt.core.router.registry import ModelCapabilityRegistry, fallback_profile
 from ubt.core.router.router_errors import (  # noqa: F401 -- re-exported
     _BATCH_RESULT_FETCH_BACKOFF_SECONDS,
     _BATCH_RESULT_FETCH_GRACE_SECONDS,
@@ -57,7 +56,6 @@ from ubt.core.router.router_errors import (  # noqa: F401 -- re-exported
     _RETRY_AFTER_MAX_SECONDS,
     _RETRYABLE_STATUS,
     _SELF_HOSTED_BACKENDS,
-    _VISION_NAME_HINTS,
     _VISION_TOKENS_PER_PAGE_IMAGE,
     BatchDraftRequest,
     BatchDraftResult,
@@ -317,20 +315,19 @@ class ModelRouter:
                     rl_closer()
 
     def _get_profile(self, model_name: str | None = None) -> ModelProfile:
-        """Resolve model capability profile from registry, or default to standard LLM."""
+        """The capability profile for ``model_name``: declared, else the fallback.
+
+        The router never guesses from the model name. A model whose provider block
+        declares nothing resolves to
+        :func:`~ubt.core.router.registry.fallback_profile`, which asserts only what
+        is safe for an unknown OpenAI-compatible endpoint. That is why the
+        ``registry is None`` branch uses the *same* profile rather than a second,
+        subtly different set of defaults: one definition, both paths.
+        """
         target = model_name or self.draft_model
-        if self.registry is not None:
-            profile = self.registry.resolve(target)
-        else:
-            profile = ModelProfile(
-                model_pattern="*",
-                prompt_strategy=PromptStrategy.HYBRID,
-                extraction_strategy=ExtractionStrategy.AUTO,
-                supports_reasoning_effort=False,
-                supports_system_prompt=True,
-                supports_temperature=True,
-                display_name=f"Standard LLM ({target or 'default'})",
-            )
+        profile = (
+            self.registry.resolve(target) if self.registry is not None else fallback_profile(target)
+        )
         if self.prompt_strategy_override is not None:
             profile = profile.model_copy(update={"prompt_strategy": self.prompt_strategy_override})
         return profile
@@ -1523,13 +1520,14 @@ class ModelRouter:
         # L4 Visual Scalpel precision repair: if high-res visual crop is available,
         # try multimodal repair first to resolve formula, subscript, or layout defects.
         repair_profile = self._get_profile(self.repair_model)
-        # Prefer the declared capability (ModelProfile.supports_vision, which an
-        # operator can set on any model via UBT_MODEL_PROFILES_*); fall back to
-        # a named hint list for the common multimodal families that ship
-        # without a vision flag. Kept out of the call site so it reads as data.
-        model_is_vision = repair_profile.supports_vision or any(
-            hint in self.repair_model.lower() for hint in _VISION_NAME_HINTS
-        )
+        # Declared capability only. This used to fall back to a list of name
+        # substrings (``vl``, ``vision``, ``4o``, ``gemini``, ``claude-3``, …),
+        # which both over- and under-claimed: ``gemini-embedding-001`` matched
+        # ``gemini`` and was sent a page image it cannot read, while
+        # ``claude-sonnet-4-5`` matched nothing and silently lost visual repair
+        # altogether. The provider block is where the answer is actually known, so
+        # an operator who wants the visual path declares ``supports_vision = true``.
+        model_is_vision = repair_profile.supports_vision
         if image_b64 and model_is_vision and not self.allow_page_upload:
             logger.warning(
                 "Visual repair skipped (crop ready): page-image egress disabled by "
@@ -1628,7 +1626,6 @@ __all__ = [
     "_RETRYABLE_STATUS",
     "_RETRY_AFTER_MAX_SECONDS",
     "_SELF_HOSTED_BACKENDS",
-    "_VISION_NAME_HINTS",
     "_VISION_TOKENS_PER_PAGE_IMAGE",
     "_estimate_prompt_tokens",
     "_is_chain_fail_fast",

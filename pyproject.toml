@@ -83,6 +83,7 @@ dependencies = [
     # future interpreter or a caller passing its own parser. Pure Python, zero
     # transitive deps, PSF/BSD.
     "defusedxml>=0.7.1",
+    "tomlkit>=0.13.0",
 ]
 
 [project.scripts]

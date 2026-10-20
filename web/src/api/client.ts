@@ -14,6 +14,8 @@ export type JobUploadResponse = paths['/jobs/upload']['post']['responses']['201'
 export type JobSummary = paths['/jobs']['get']['responses']['200']['content']['application/json']['jobs'][number]
 export type ModelProfile = paths['/api/v1/model-profiles']['get']['responses']['200']['content']['application/json'][number]
 export type RuntimeConfig = paths['/system/runtime-config']['get']['responses']['200']['content']['application/json']
+export type ProviderDetail = paths['/system/providers/{name}']['get']['responses']['200']['content']['application/json']
+export type ProviderEditRequest = paths['/system/providers/{name}']['put']['requestBody']['content']['application/json']
 export type SystemInfo = paths['/system/info']['get']['responses']['200']['content']['application/json']
 
 export interface DeliverableItem {
@@ -687,14 +689,44 @@ export async function listModelProfiles(): Promise<ModelProfile[]> {
  * What the engine will actually call: provider, models, and the capability
  * profile the draft model resolves to.
  *
- * Distinct from `listModelProfiles`, which returns the engine's hard-coded
- * capability *presets* (`o1`, `claude`, …). Those are name-matching rules, not
- * configured models; the console used to render them under a "model routing and
- * latency matrix" heading, which described neither.
+ * Capability is declared per provider block (`supports_temperature`,
+ * `supports_vision`, …), not inferred from the model name. There is no preset
+ * table any more: the engine used to ship fourteen name patterns (`o1`,
+ * `claude`, …) and resolve by substring, which mis-answered for any model it had
+ * not heard of — including every locally hosted one.
  */
 export async function getRuntimeConfig(): Promise<RuntimeConfig> {
   const res = await apiFetch(`${BASE_URL}/system/runtime-config`)
   if (!res.ok) throw await apiError(res, "Failed to load runtime configuration")
+  return res.json()
+}
+
+/** One provider block, with the credential reduced to `has_credential`. */
+export async function getProvider(name: string): Promise<ProviderDetail> {
+  const res = await apiFetch(`${BASE_URL}/system/providers/${encodeURIComponent(name)}`)
+  if (!res.ok) throw await apiError(res, `Failed to load provider ${name}`)
+  return res.json()
+}
+
+/**
+ * Create or update a `[providers.<name>]` block in `ubt.toml`.
+ *
+ * Credentials are not writable here: the request model forbids unknown fields, so
+ * an `api_key` in the body is a 422 naming the field. That is the same boundary
+ * every job payload enforces — a credential arrives through the file or the
+ * environment, never over HTTP. The engine re-reads the file on each job start,
+ * so a save applies to the next submitted job without a restart.
+ */
+export async function saveProvider(
+  name: string,
+  changes: ProviderEditRequest,
+): Promise<ProviderDetail> {
+  const res = await apiFetch(`${BASE_URL}/system/providers/${encodeURIComponent(name)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(changes),
+  })
+  if (!res.ok) throw await apiError(res, `Failed to save provider ${name}`)
   return res.json()
 }
 

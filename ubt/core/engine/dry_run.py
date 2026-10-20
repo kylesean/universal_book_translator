@@ -18,6 +18,7 @@ from ubt.core.qe.heuristic import MockQERunner
 from ubt.core.router.prompts import draft_source_from_prompt
 from ubt.core.router.provider import MockModelProvider
 from ubt.core.router.rate_limiter import AdaptiveTokenBucket
+from ubt.core.router.registry import registry_from_config
 from ubt.core.router.router import ModelRouter
 
 
@@ -118,6 +119,10 @@ def create_dry_run_orchestrator(
         # The rehearsal closes page-image egress above; the router's master gate
         # must agree, or visual-scalpel repair would still try to upload pages.
         allow_page_upload=False,
+        # Same reason as the strategy: a rehearsal that resolved capabilities
+        # differently from the real run would rehearse a prompt shape and an
+        # output budget the run never sends.
+        registry=registry_from_config(rehearsal_config),
     )
     return PipelineOrchestrator(
         config=rehearsal_config,

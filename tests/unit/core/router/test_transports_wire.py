@@ -909,3 +909,138 @@ def test_retry_after_ms_is_converted_to_seconds() -> None:
     assert retry_after_seconds(httpx.Headers({"retry-after-ms": "20000"})) == "20.0"
     assert retry_after_seconds(httpx.Headers({})) is None
     assert retry_after_seconds(httpx.Headers({"retry-after-ms": "abc"})) is None
+
+
+async def test_a_rejected_parameter_is_remembered_across_calls() -> None:
+    """A 400 heal must be paid once per model, not once per block.
+
+    The heal rules fixed the *retry* but nothing remembered the outcome, so a
+    model that rejects ``temperature`` (the gpt-5 / o-series endpoints do) sent it
+    again on the next block and ate another 400. On a 137-block job that is 137
+    wasted round-trips.
+    """
+    calls: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        calls.append(body)
+        if "temperature" in body:
+            return httpx.Response(
+                400,
+                json={
+                    "error": {"message": "Unsupported parameter: 'temperature' is not supported"}
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"content": "译文"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 3, "completion_tokens": 2},
+            },
+        )
+
+    rec = _Recorder(handler)
+    t = OpenAIChatTransport(
+        api_key="k", base_url="https://x/v1", default_model="o3", transport=rec.transport
+    )
+
+    # First block: rejected, healed.
+    await t.generate_with_finish_reason("hi", temperature=0.3)
+    assert "temperature" in calls[0]
+    assert "temperature" not in calls[1]
+
+    # Second block: the parameter is never sent again.
+    calls.clear()
+    await t.generate_with_finish_reason("hi", temperature=0.3)
+    assert len(calls) == 1, "the second call paid the same 400 again"
+    assert "temperature" not in calls[0]
+
+
+async def test_the_learned_omission_is_per_model() -> None:
+    """Evidence about one endpoint must not strip a parameter from another."""
+    calls: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        calls.append(body)
+        if body.get("model") == "strict-model" and "temperature" in body:
+            return httpx.Response(
+                400, json={"error": {"message": "'temperature' unsupported parameter"}}
+            )
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+            },
+        )
+
+    rec = _Recorder(handler)
+    t = OpenAIChatTransport(
+        api_key="k", base_url="https://x/v1", default_model="strict-model", transport=rec.transport
+    )
+    await t.generate_with_finish_reason("hi", model="strict-model", temperature=0.3)
+
+    calls.clear()
+    await t.generate_with_finish_reason("hi", model="lenient-model", temperature=0.3)
+    assert calls[0]["temperature"] == 0.3
+
+
+async def test_an_unrelated_400_teaches_nothing() -> None:
+    """Only a *proven* outcome may be recorded.
+
+    An unrelated 400 ("context length exceeded") fails every retry identically;
+    recording its removals would silently disable a parameter the endpoint
+    accepts for the rest of the process.
+    """
+    calls: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(json.loads(request.content))
+        return httpx.Response(400, json={"error": {"message": "context length exceeded"}})
+
+    rec = _Recorder(handler)
+    t = OpenAIChatTransport(
+        api_key="k", base_url="https://x/v1", default_model="m", transport=rec.transport
+    )
+    with pytest.raises(ModelProviderError):
+        await t.generate_with_finish_reason("hi", temperature=0.3)
+    assert t._learned_omissions == {}
+
+
+async def test_openai_responses_heals_a_rejected_temperature() -> None:
+    """The responses transport had no temperature rule at all.
+
+    A model whose chat-completions sibling healed fine failed every call here
+    with a permanent 400.
+    """
+    calls: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        calls.append(body)
+        if "temperature" in body:
+            return httpx.Response(
+                400, json={"error": {"message": "'temperature' unsupported parameter"}}
+            )
+        return httpx.Response(
+            200,
+            json={
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [{"type": "output_text", "text": "译文"}],
+                    }
+                ],
+                "usage": {"input_tokens": 3, "output_tokens": 2},
+            },
+        )
+
+    rec = _Recorder(handler)
+    t = OpenAIResponsesTransport(
+        api_key="k", base_url="https://x/v1", default_model="gpt-5", transport=rec.transport
+    )
+    text, _ = await t.generate_with_finish_reason("hi", temperature=0.3)
+    assert text == "译文"
+    assert "temperature" in calls[0]
+    assert "temperature" not in calls[1]

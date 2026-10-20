@@ -236,6 +236,7 @@ def _build_offline_router(config: UBTConfig) -> Any:
     keeps the whole quote credential-free.
     """
     from ubt.core.router.provider import MockModelProvider
+    from ubt.core.router.registry import registry_from_config
     from ubt.core.router.router import ModelRouter
 
     return ModelRouter(
@@ -243,6 +244,11 @@ def _build_offline_router(config: UBTConfig) -> Any:
         draft_model=config.draft_model,
         repair_model=config.repair_model,
         prompt_strategy_override=config.prompt_strategy,
+        # The prefix measurement depends on the prompt shape, and the prompt shape
+        # depends on the capability profile. Without this the quote measured the
+        # generic fallback while the real run used the declared strategy, so the
+        # quoted token count described a prompt the run would never send.
+        registry=registry_from_config(config),
     )
 
 

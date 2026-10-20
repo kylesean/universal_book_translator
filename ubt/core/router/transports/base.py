@@ -14,7 +14,6 @@ from pydantic import SecretStr
 from ubt.core.exceptions import ModelProviderError
 from ubt.core.router.capabilities import ExtractionStrategy
 from ubt.core.router.extractor import TranslationOutputExtractor
-from ubt.core.router.registry import get_default_registry
 
 logger = logging.getLogger(__name__)
 
@@ -208,17 +207,22 @@ def _extract_cached_tokens(usage: dict[str, Any]) -> int:
 
 
 def sanitize_thought_output(raw_text: str, model: str | None = None) -> str:
-    """De-noise by extraction strategy."""
-    strategy = (
-        ExtractionStrategy.AUTO
-        if model is None
-        else get_default_registry().resolve(model).extraction_strategy
-    )
-    if strategy == ExtractionStrategy.RAW:
-        return raw_text.strip()
-    if strategy == ExtractionStrategy.XML_TAG:
-        return TranslationOutputExtractor.strip_reasoning(raw_text)
-    return TranslationOutputExtractor.extract(raw_text, strategy=strategy)
+    """Strip reasoning traces, code fences and conversational lead-ins.
+
+    Always ``AUTO``: the transport's job is to hand the router clean text, and the
+    router then applies the *declared* extraction strategy from the resolved
+    capability profile (``router.draft`` → ``TranslationOutputExtractor.extract``).
+    Doing the authoritative extraction here as well would apply a second, weaker
+    rule to text the profile had already shaped.
+
+    This used to resolve a per-model strategy out of the global registry, which
+    was dead weight in both directions: the built-in table carried ``auto`` for
+    every one of its entries, so the lookup could only ever return the default,
+    and once that table was removed the lookup could only ever return the
+    fallback. ``model`` is kept in the signature because callers pass it and a
+    future profile-aware transport will want it.
+    """
+    return TranslationOutputExtractor.extract(raw_text, strategy=ExtractionStrategy.AUTO)
 
 
 _EFFORT_REJECTION_KEYS = (
@@ -353,6 +357,11 @@ class BaseTransport(ABC):
         self._extra_headers = dict(extra_headers or {})
         self._chat_template_kwargs = dict(chat_template_kwargs or {})
         self._sanitize_output = sanitize_output
+        # Parameters this endpoint rejected with a 400 and a retry proved
+        # unnecessary, keyed by model id. Instance-scoped on purpose: the
+        # evidence is about *this* endpoint, and a shared cache would let one
+        # gateway's rejection strip a parameter from a different one's calls.
+        self._learned_omissions: dict[str, frozenset[str]] = {}
         # NOTE: only the Anthropic transport reads this. The OpenAI
         # chat/responses transports leave it inert — real OpenAI caches a static
         # prefix automatically, and a compat server that does not is simply not
@@ -526,6 +535,46 @@ class BaseTransport(ABC):
         except httpx.RequestError as exc:
             raise ModelProviderError(f"HTTP request error: {exc}") from exc
 
+    def _learned_omissions_for(self, model: Any) -> frozenset[str]:
+        """Parameter names this endpoint already rejected for ``model``."""
+        if not isinstance(model, str) or not model:
+            return frozenset()
+        return self._learned_omissions.get(model, frozenset())
+
+    def _apply_learned_omissions(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Drop parameters a previous 400 proved this endpoint rejects.
+
+        Without this, every block paid the same failed round-trip: the heal rules
+        fixed the *retry* but nothing remembered the outcome, so a model that
+        rejects ``temperature`` (the gpt-5 / o-series endpoints do) sent it again
+        on the next block and ate another 400. Measured on a 137-block job that is
+        137 wasted requests.
+        """
+        omitted = self._learned_omissions_for(payload.get("model"))
+        if not omitted:
+            return payload
+        return {key: value for key, value in payload.items() if key not in omitted}
+
+    def _remember_rejected_parameters(self, before: dict[str, Any], after: dict[str, Any]) -> None:
+        """Record parameters a successful heal had to remove, keyed by model.
+
+        Only keys present in ``before`` and absent from ``after`` count, so the
+        clamp path (``reasoning_effort: high → low``) is not recorded — the
+        parameter is still accepted, just narrowed.
+        """
+        model = before.get("model")
+        if not isinstance(model, str) or not model:
+            return
+        removed = {key for key in before if key not in after}
+        # ``max_tokens`` is renamed rather than removed, and the nested
+        # ``reasoning`` object is dialect-specific: neither is a plain omission.
+        removed -= {"model", "max_tokens", "reasoning"}
+        if not removed:
+            return
+        self._learned_omissions[model] = frozenset(
+            set(self._learned_omissions.get(model, frozenset())) | removed
+        )
+
     async def _self_heal_400(
         self,
         client: httpx.AsyncClient,
@@ -544,7 +593,13 @@ class BaseTransport(ABC):
                 retry_payload = fixed
         if retry_payload is payload:
             return response
-        return await self._request_json(client, url, retry_payload)
+        healed = await self._request_json(client, url, retry_payload)
+        # Learn only on a proven outcome: an unrelated 400 fails every retry
+        # identically, and recording its removals would silently disable a
+        # parameter the endpoint actually accepts.
+        if healed.status_code == 200:
+            self._remember_rejected_parameters(payload, retry_payload)
+        return healed
 
     async def _post_json(
         self, client: httpx.AsyncClient, url: str, payload: dict[str, Any]

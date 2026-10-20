@@ -279,6 +279,164 @@
         }
       }
     },
+    "/system/providers/{name}": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Get Provider",
+        "description": "One provider block, with the credential reduced to a boolean.",
+        "operationId": "get_provider_system_providers__name__get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderDetailResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Put Provider",
+        "description": "Create or update a ``[providers.<name>]`` block.\n\nWrites ``ubt.toml``, which the engine re-reads on every job start, so the\nchange applies to the next submitted job without restarting the server.\n\n**Credentials are not writable here, and that is deliberate.** The request\nmodel forbids unknown fields, so an attempt to set one is a 422 that names\nthe field rather than a silently dropped key. A credential arrives through\nthe provider block in the file, ``${VAR}`` expansion, or\n``UBT_LLM_API_KEY`` \u2014 never over HTTP. See\n:mod:`ubt.api.provider_editor` for why that boundary is not negotiable:\nthis server is routinely started on loopback without an API key.",
+        "operationId": "put_provider_system_providers__name__put",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderEditRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderDetailResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/system/doctor": {
       "get": {
         "tags": [
@@ -4751,7 +4909,7 @@
           "model_pattern": {
             "type": "string",
             "title": "Model Pattern",
-            "description": "Exact model name or substring pattern used to resolve this profile."
+            "description": "The model id this profile describes, exactly as it is sent on the wire. Resolution is an exact, case-insensitive match; there is no substring matching."
           },
           "prompt_strategy": {
             "$ref": "#/components/schemas/PromptStrategy",
@@ -4766,7 +4924,7 @@
           "supports_reasoning_effort": {
             "type": "boolean",
             "title": "Supports Reasoning Effort",
-            "description": "Whether the provider/model accepts the reasoning_effort parameter.",
+            "description": "Whether the endpoint accepts a reasoning-effort control. True also means the output-token cap is left unset, because reasoning tokens bill against it and capping them corrupts the visible answer.",
             "default": false
           },
           "supports_system_prompt": {
@@ -4778,7 +4936,7 @@
           "supports_temperature": {
             "type": "boolean",
             "title": "Supports Temperature",
-            "description": "Whether model supports explicit temperature control.",
+            "description": "Whether the model accepts a temperature. False for the reasoning families that reject it with a 400.",
             "default": true
           },
           "supports_vision": {
@@ -4800,12 +4958,13 @@
             "default": ""
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "model_pattern"
         ],
         "title": "ModelProfile",
-        "description": "Declarative capability profile for a translation model.\n\nDecouples model execution logic from brittle name matching, enabling\nenterprise self-hosted models to configure behavior declaratively."
+        "description": "Declarative capability profile for one model on one provider.\n\nEvery field is a statement about the endpoint, so a profile is only ever\nattached to a specific ``[providers.<name>]`` block or to the generic\nfallback \u2014 never to a model *name* alone."
       },
       "Preset": {
         "type": "string",
@@ -4828,6 +4987,421 @@
         ],
         "title": "PromptStrategy",
         "description": "Prompt assembly strategy."
+      },
+      "ProviderDetailResponse": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "declared": {
+            "type": "boolean",
+            "title": "Declared",
+            "description": "True when the operator declared it in [providers.*]"
+          },
+          "has_credential": {
+            "type": "boolean",
+            "title": "Has Credential",
+            "description": "Whether any credential is configured",
+            "default": false
+          },
+          "credential_in_file": {
+            "type": "boolean",
+            "title": "Credential In File",
+            "description": "True when the block itself carries the credential",
+            "default": false
+          },
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url"
+          },
+          "api_mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Mode"
+          },
+          "draft_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft Model"
+          },
+          "repair_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repair Model"
+          },
+          "draft_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft Reasoning Effort"
+          },
+          "repair_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repair Reasoning Effort"
+          },
+          "reasoning_dialect": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning Dialect"
+          },
+          "supports_temperature": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supports Temperature"
+          },
+          "supports_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supports Reasoning Effort"
+          },
+          "supports_system_prompt": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supports System Prompt"
+          },
+          "supports_vision": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supports Vision"
+          },
+          "extraction_strategy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extraction Strategy"
+          },
+          "deployment_backend": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deployment Backend"
+          },
+          "is_free": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Free"
+          },
+          "api_timeout": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Timeout"
+          },
+          "fallback_models": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fallback Models"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "declared"
+        ],
+        "title": "ProviderDetailResponse",
+        "description": "One provider block as the console may see it.\n\n``has_credential`` / ``credential_in_file`` are booleans on purpose: whether a\nkey is configured decides whether the block can run at all, and a boolean is\nthe most that may be revealed about it."
+      },
+      "ProviderEditRequest": {
+        "properties": {
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url",
+            "description": "Endpoint base URL (http/https)"
+          },
+          "api_mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Mode",
+            "description": "Wire protocol (openai-chat, openai-responses, \u2026)"
+          },
+          "draft_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft Model",
+            "description": "Model id used for drafting"
+          },
+          "repair_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repair Model",
+            "description": "Model id used for repair"
+          },
+          "draft_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft Reasoning Effort",
+            "description": "Draft reasoning effort"
+          },
+          "repair_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repair Reasoning Effort",
+            "description": "Repair reasoning effort"
+          },
+          "reasoning_dialect": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning Dialect",
+            "description": "How the responses protocol spells a reasoning effort"
+          },
+          "supports_temperature": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supports Temperature",
+            "description": "Whether the endpoint accepts a temperature"
+          },
+          "supports_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supports Reasoning Effort",
+            "description": "Whether the endpoint accepts a reasoning effort"
+          },
+          "supports_system_prompt": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supports System Prompt",
+            "description": "Whether the endpoint accepts a system turn"
+          },
+          "supports_vision": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supports Vision",
+            "description": "Whether the endpoint accepts image input"
+          },
+          "extraction_strategy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extraction Strategy",
+            "description": "How to recover the translation (auto, xml_tag, raw, cp)"
+          },
+          "deployment_backend": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deployment Backend",
+            "description": "Self-hosted stack serving this model (ollama, vllm, \u2026)"
+          },
+          "is_free": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Free",
+            "description": "Declared free (no billable spend)"
+          },
+          "api_timeout": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Timeout",
+            "description": "Per-request timeout (s)"
+          },
+          "fallback_models": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fallback Models",
+            "description": "Ordered model fallback chain"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ProviderEditRequest",
+        "description": "One provider block edit from the console.\n\n``extra=\"forbid\"`` so a client that sends a credential gets a 422 naming the\nfield instead of a silently ignored key. Every field is optional: an edit\nsubmits only what changed, and an omitted field is left untouched in the file."
       },
       "RuntimeActiveModel": {
         "properties": {
@@ -4866,17 +5440,79 @@
               }
             ],
             "title": "Matched Pattern",
-            "description": "Capability profile this model matched, or null when it fell through to the generic default (common for a locally hosted model)"
+            "description": "Capability profile this model resolved to, or null when it fell through to the generic default"
           },
           "prompt_strategy": {
             "type": "string",
             "title": "Prompt Strategy",
-            "description": "Prompt strategy the matched profile selects"
+            "description": "Prompt strategy the resolved profile selects"
           },
           "display_name": {
             "type": "string",
             "title": "Display Name",
             "description": "Human-readable name of the resolved profile"
+          },
+          "declared_capability": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Declared Capability",
+            "description": "Capability flags the provider block states outright. Every other flag is the conservative default, not a measurement of the endpoint."
+          },
+          "supports_temperature": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supports Temperature",
+            "description": "Whether a temperature is sent"
+          },
+          "supports_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supports Reasoning Effort",
+            "description": "Whether a reasoning effort is sent"
+          },
+          "supports_system_prompt": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supports System Prompt",
+            "description": "Whether the system turn is sent as its own message"
+          },
+          "supports_vision": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supports Vision",
+            "description": "Whether a page image may be sent to this model"
+          },
+          "extraction_strategy": {
+            "type": "string",
+            "title": "Extraction Strategy",
+            "description": "How the translation is recovered from the completion",
+            "default": ""
           }
         },
         "type": "object",
@@ -4907,7 +5543,13 @@
           "provider_config_source": {
             "type": "string",
             "title": "Provider Config Source",
-            "description": "Where provider settings live (they cannot be edited from the console)"
+            "description": "Where provider settings live (ubt.toml or the UBT_* environment)"
+          },
+          "credential_source": {
+            "type": "string",
+            "title": "Credential Source",
+            "description": "Where the credential comes from; it is never accepted from the console",
+            "default": ""
           }
         },
         "type": "object",
@@ -4996,6 +5638,72 @@
             "title": "Is Free",
             "description": "Declared free (no billable spend)",
             "default": false
+          },
+          "supports_temperature": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supports Temperature"
+          },
+          "supports_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supports Reasoning Effort"
+          },
+          "supports_system_prompt": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supports System Prompt"
+          },
+          "supports_vision": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supports Vision"
+          },
+          "extraction_strategy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extraction Strategy"
+          },
+          "deployment_backend": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deployment Backend"
           }
         },
         "type": "object",

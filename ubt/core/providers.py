@@ -67,9 +67,18 @@ PROVIDER_ALLOWED_KEYS = frozenset(
         "prompt_caching_enabled",
         "is_free",
         "cost_per_mtok",
-        "capability_profile",
+        # Declared model capability. These describe what the endpoint accepts on
+        # the wire, so they belong next to the endpoint and model id that they
+        # describe — not in a package-wide table keyed by model-name substrings.
+        # ``supports_*`` are tri-state: an absent key means "not declared" and
+        # resolves to the conservative fallback, while an explicit ``false`` is a
+        # real statement that the endpoint rejects that parameter.
         "supports_temperature",
         "supports_reasoning_effort",
+        "supports_system_prompt",
+        "supports_vision",
+        "extraction_strategy",
+        "deployment_backend",
         "reasoning_dialect",
         "repair_provider",
         "qe_judge_provider",

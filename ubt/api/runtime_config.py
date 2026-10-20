@@ -2,18 +2,17 @@
 
 The console's "provider matrix" used to show ``GET /model-profiles``, which is
 the engine's *capability preset table* — fourteen hard-coded name patterns
-(``o1``, ``o3``, ``claude``, …) that decide prompt strategy and parameter
-support when a model name matches. Nothing on that list is a configured model:
+(``o1``, ``o3``, ``claude``, …) that decided prompt strategy and parameter
+support when a model name matched. Nothing on that list was a configured model:
 on the reference machine the operator runs ``local-gemma4`` / ``gemma4-e4b``,
-which matches none of the fourteen and therefore falls through to the generic
-"Standard LLM" default. The screen was titled "model routing and latency
-matrix" while showing neither routing nor latency.
+which matched none of the fourteen and therefore fell through to the generic
+default. The screen was titled "model routing and latency matrix" while showing
+neither routing nor latency.
 
-This module answers the question the operator actually has — *what is my
-engine going to call, and where does that come from?* — without exposing any
-credential and without offering a write path (provider credentials may only
-arrive through the operator's environment; see
-``ubt.core.job_options.overrides_from_request``).
+That table is gone. Capability is now declared per provider block, so this module
+answers the question the operator actually has — *what is my engine going to
+call, and where did each of those answers come from?* — without exposing any
+credential.
 
 **Credential safety.** ``load_provider_block`` returns the merged block as
 written, and a block may legitimately contain ``api_key = "${OPENCODE_API_KEY}"``
@@ -27,7 +26,7 @@ from typing import Any
 
 from ubt.core.config import UBTConfig
 from ubt.core.providers import list_providers, load_provider_block
-from ubt.core.router.registry import get_default_registry
+from ubt.core.router.registry import FALLBACK_PATTERN, registry_from_config
 
 #: Provider-block fields the console may display. Everything else — most
 #: importantly ``api_key``, ``extra_headers`` and any credential — is dropped
@@ -39,6 +38,12 @@ _EXPOSED_FIELDS: tuple[str, ...] = (
     "draft_model",
     "repair_model",
     "is_free",
+    "supports_temperature",
+    "supports_reasoning_effort",
+    "supports_system_prompt",
+    "supports_vision",
+    "extraction_strategy",
+    "deployment_backend",
 )
 
 
@@ -67,17 +72,23 @@ def describe_runtime_config(config: UBTConfig) -> dict[str, Any]:
     """What the engine will call, which profile that resolves to, and the menu.
 
     ``active`` is the part the old screen never showed: the provider and models
-    in force *right now*, plus the capability profile the router will pick for
-    the draft model. ``matched_pattern`` is ``None`` when the model name hits no
-    preset and therefore runs on the generic default — which is the common case
-    for a locally hosted model, and worth saying out loud rather than hiding.
+    in force *right now*, plus the capability profile the router picks for the
+    draft model. ``declared_capability`` says which of those flags the operator
+    actually stated in the provider block versus which fell back to the generic
+    default — the difference between "I told the engine this model rejects
+    temperature" and "the engine assumed it".
     """
-    registry = get_default_registry()
+    # Per-configuration, matching what a job started from this config will use.
+    registry = registry_from_config(config)
     draft_model = config.draft_model or ""
     resolved = registry.resolve(draft_model) if draft_model else None
-    # ``resolve`` always returns a profile (the wildcard default), so a match is
-    # only real when the pattern is not the catch-all.
-    matched = None if resolved is None or resolved.model_pattern == "*" else resolved.model_pattern
+    # ``resolve`` always returns a profile, so a declared match is only real when
+    # the pattern is not the catch-all.
+    matched = (
+        None
+        if resolved is None or resolved.model_pattern == FALLBACK_PATTERN
+        else resolved.model_pattern
+    )
 
     active = {
         "provider": config.provider or "",
@@ -88,6 +99,24 @@ def describe_runtime_config(config: UBTConfig) -> dict[str, Any]:
         "matched_pattern": matched,
         "prompt_strategy": resolved.prompt_strategy.value if resolved else "",
         "display_name": resolved.display_name if resolved else "",
+        # Which capability flags the provider block states outright. The rest
+        # are the generic default, and a diagnostic screen should say so rather
+        # than present an assumption as a measurement.
+        "declared_capability": sorted(
+            field
+            for field in (
+                "supports_temperature",
+                "supports_reasoning_effort",
+                "supports_system_prompt",
+                "supports_vision",
+            )
+            if getattr(config, field, None) is not None
+        ),
+        "supports_temperature": resolved.supports_temperature if resolved else None,
+        "supports_reasoning_effort": resolved.supports_reasoning_effort if resolved else None,
+        "supports_system_prompt": resolved.supports_system_prompt if resolved else None,
+        "supports_vision": resolved.supports_vision if resolved else None,
+        "extraction_strategy": resolved.extraction_strategy.value if resolved else "",
     }
 
     # Split the menu into what the operator declared and what ships with the
@@ -116,8 +145,16 @@ def describe_runtime_config(config: UBTConfig) -> dict[str, Any]:
     return {
         "active": active,
         "providers": providers,
-        # The operator cannot change these from the console, and the reason is a
-        # security boundary rather than an omission — say so where they will
-        # look for the control.
+        # Provider settings are editable from the console, but credentials are
+        # not: a job payload may never carry one, and this endpoint will not read
+        # one back out. Saying where they live is more useful than a dead button.
         "provider_config_source": "ubt.toml [providers.<name>] or UBT_* environment variables",
+        # Deliberately worded without the literal credential key name: the
+        # console-contract guard asserts no response body contains it, and a
+        # string that merely *names* the field would trip the same check. The
+        # guard is worth more than the phrasing.
+        "credential_source": (
+            "the provider block's credential (${VAR} expansion) or UBT_LLM_API_KEY; "
+            "never accepted from the console"
+        ),
     }

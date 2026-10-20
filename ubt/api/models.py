@@ -681,12 +681,34 @@ class RuntimeActiveModel(BaseModel):
     matched_pattern: str | None = Field(
         default=None,
         description=(
-            "Capability profile this model matched, or null when it fell through to "
-            "the generic default (common for a locally hosted model)"
+            "Capability profile this model resolved to, or null when it fell through "
+            "to the generic default"
         ),
     )
-    prompt_strategy: str = Field(description="Prompt strategy the matched profile selects")
+    prompt_strategy: str = Field(description="Prompt strategy the resolved profile selects")
     display_name: str = Field(description="Human-readable name of the resolved profile")
+    declared_capability: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Capability flags the provider block states outright. Every other flag is "
+            "the conservative default, not a measurement of the endpoint."
+        ),
+    )
+    supports_temperature: bool | None = Field(
+        default=None, description="Whether a temperature is sent"
+    )
+    supports_reasoning_effort: bool | None = Field(
+        default=None, description="Whether a reasoning effort is sent"
+    )
+    supports_system_prompt: bool | None = Field(
+        default=None, description="Whether the system turn is sent as its own message"
+    )
+    supports_vision: bool | None = Field(
+        default=None, description="Whether a page image may be sent to this model"
+    )
+    extraction_strategy: str = Field(
+        default="", description="How the translation is recovered from the completion"
+    )
 
 
 class RuntimeProvider(BaseModel):
@@ -708,6 +730,12 @@ class RuntimeProvider(BaseModel):
     draft_model: str | None = None
     repair_model: str | None = None
     is_free: bool = Field(default=False, description="Declared free (no billable spend)")
+    supports_temperature: bool | None = None
+    supports_reasoning_effort: bool | None = None
+    supports_system_prompt: bool | None = None
+    supports_vision: bool | None = None
+    extraction_strategy: str | None = None
+    deployment_backend: str | None = None
 
 
 class RuntimeConfigResponse(BaseModel):
@@ -722,5 +750,89 @@ class RuntimeConfigResponse(BaseModel):
     active: RuntimeActiveModel
     providers: list[RuntimeProvider]
     provider_config_source: str = Field(
-        description="Where provider settings live (they cannot be edited from the console)"
+        description="Where provider settings live (ubt.toml or the UBT_* environment)"
     )
+    credential_source: str = Field(
+        default="",
+        description="Where the credential comes from; it is never accepted from the console",
+    )
+
+
+class ProviderEditRequest(BaseModel):
+    """One provider block edit from the console.
+
+    ``extra="forbid"`` so a client that sends a credential gets a 422 naming the
+    field instead of a silently ignored key. Every field is optional: an edit
+    submits only what changed, and an omitted field is left untouched in the file.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    base_url: str | None = Field(default=None, description="Endpoint base URL (http/https)")
+    api_mode: str | None = Field(
+        default=None, description="Wire protocol (openai-chat, openai-responses, …)"
+    )
+    draft_model: str | None = Field(default=None, description="Model id used for drafting")
+    repair_model: str | None = Field(default=None, description="Model id used for repair")
+    draft_reasoning_effort: str | None = Field(default=None, description="Draft reasoning effort")
+    repair_reasoning_effort: str | None = Field(default=None, description="Repair reasoning effort")
+    reasoning_dialect: str | None = Field(
+        default=None, description="How the responses protocol spells a reasoning effort"
+    )
+    supports_temperature: bool | None = Field(
+        default=None, description="Whether the endpoint accepts a temperature"
+    )
+    supports_reasoning_effort: bool | None = Field(
+        default=None, description="Whether the endpoint accepts a reasoning effort"
+    )
+    supports_system_prompt: bool | None = Field(
+        default=None, description="Whether the endpoint accepts a system turn"
+    )
+    supports_vision: bool | None = Field(
+        default=None, description="Whether the endpoint accepts image input"
+    )
+    extraction_strategy: str | None = Field(
+        default=None, description="How to recover the translation (auto, xml_tag, raw, cp)"
+    )
+    deployment_backend: str | None = Field(
+        default=None, description="Self-hosted stack serving this model (ollama, vllm, …)"
+    )
+    is_free: bool | None = Field(default=None, description="Declared free (no billable spend)")
+    api_timeout: float | None = Field(default=None, gt=0, description="Per-request timeout (s)")
+    fallback_models: list[str] | None = Field(
+        default=None, description="Ordered model fallback chain"
+    )
+
+
+class ProviderDetailResponse(BaseModel):
+    """One provider block as the console may see it.
+
+    ``has_credential`` / ``credential_in_file`` are booleans on purpose: whether a
+    key is configured decides whether the block can run at all, and a boolean is
+    the most that may be revealed about it.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    name: str
+    declared: bool = Field(description="True when the operator declared it in [providers.*]")
+    has_credential: bool = Field(default=False, description="Whether any credential is configured")
+    credential_in_file: bool = Field(
+        default=False, description="True when the block itself carries the credential"
+    )
+    base_url: str | None = None
+    api_mode: str | None = None
+    draft_model: str | None = None
+    repair_model: str | None = None
+    draft_reasoning_effort: str | None = None
+    repair_reasoning_effort: str | None = None
+    reasoning_dialect: str | None = None
+    supports_temperature: bool | None = None
+    supports_reasoning_effort: bool | None = None
+    supports_system_prompt: bool | None = None
+    supports_vision: bool | None = None
+    extraction_strategy: str | None = None
+    deployment_backend: str | None = None
+    is_free: bool | None = None
+    api_timeout: float | None = None
+    fallback_models: list[str] | None = None

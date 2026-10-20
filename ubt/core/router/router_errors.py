@@ -99,19 +99,6 @@ _SELF_HOSTED_BACKENDS = frozenset(
     }
 )
 
-# Fallback name hints for multimodal models whose capability profile does not
-# declare ``supports_vision=True``. The profile flag (settable per deployment
-# via UBT_MODEL_PROFILES_JSON/FILE) always wins; this list only covers shipped
-# families so visual-scalpel repair works out of the box.
-_VISION_NAME_HINTS: tuple[str, ...] = (
-    "vl",
-    "vision",
-    "4o",
-    "gemini",
-    "claude-3",
-    "claude-4",
-    "llava",
-)
 # Gateway rejections worth exactly one local retry (model unknown there).
 _MODEL_REJECTION_STATUSES = frozenset({401, 404})
 # Message shapes identifying a *model-identity* rejection (unknown / not
