@@ -13,7 +13,10 @@ from typing import Annotated
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
+
+from ubt.cli.jstoolchain import JsToolchainError, detect_js_toolchain
 
 console = Console()
 
@@ -69,8 +72,30 @@ def console_command(
             console.print("[bold red]❌ Cannot start --dev: web/package.json not found.[/]")
             raise typer.Exit(1)
 
-        console.print("[bold cyan]🚀 Starting Vite frontend dev server (pnpm dev)...[/]")
-        vite_proc = subprocess.Popen(["pnpm", "dev"], cwd=web_dir)
+        # Probe rather than assume. This used to run a bare ``pnpm dev``, so a
+        # machine without pnpm got a raw ``FileNotFoundError`` traceback instead of
+        # being told what to install — even though ``web/node_modules/.bin/vite``
+        # was already present and needs no package manager at all.
+        toolchain = detect_js_toolchain(web_dir)
+        try:
+            dev_argv = toolchain.dev_argv()
+        except JsToolchainError as exc:
+            console.print(f"[bold red]❌ {escape(str(exc))}[/]")
+            raise typer.Exit(1) from exc
+
+        runner = (
+            "Vite (local node_modules)"
+            if toolchain.local("vite")
+            else str(toolchain.package_manager)
+        )
+        console.print(f"[bold cyan]🚀 Starting Vite frontend dev server via {runner}...[/]")
+        try:
+            vite_proc = subprocess.Popen(dev_argv, cwd=web_dir)
+        except OSError as exc:
+            console.print(
+                f"[bold red]❌ Could not start the Vite dev server: {escape(str(exc))}[/]"
+            )
+            raise typer.Exit(1) from exc
         target_url = "http://localhost:3000/"
 
         def _cleanup_vite(*_: object) -> None:
@@ -96,6 +121,18 @@ def console_command(
                     console.print(
                         "[bold red]❌ Cannot auto-build: scripts/build_console_assets.py not found.[/]"
                     )
+            except subprocess.CalledProcessError as exc:
+                # The script prints its own diagnosis (it now probes for a
+                # toolchain instead of assuming pnpm); echoing the exception alone
+                # hid the reason behind "returned non-zero exit status 1".
+                console.print(
+                    "[bold red]❌ Failed to build the web console assets "
+                    f"(exit {exc.returncode}); see the message above.[/]"
+                )
+                console.print(
+                    "[dim]The console can still start once ubt/api/static exists. "
+                    "Build it with: python scripts/build_console_assets.py[/dim]"
+                )
             except Exception as exc:
                 console.print(f"[bold red]❌ Failed to build static assets: {exc}[/]")
 
