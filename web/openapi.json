@@ -4379,6 +4379,18 @@
             "description": "Domain profile (general, textbook, paper)",
             "default": "general"
           },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider",
+            "description": "Provider block to run this job against (must be declared in ubt.toml or be a built-in wire protocol). Endpoint and credentials still come from that block."
+          },
           "draft_model": {
             "anyOf": [
               {

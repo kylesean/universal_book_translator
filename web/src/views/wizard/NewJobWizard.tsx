@@ -142,6 +142,10 @@ export function NewJobWizard() {
   // Whether a real translation is possible at all. ``null`` = not loaded yet, so
   // the banner stays hidden rather than flashing a false warning on mount.
   const [runtime, setRuntime] = useState<RuntimeConfig | null>(null)
+  // Which declared provider block this job runs against. Empty means "use
+  // whatever the operator configured as active" — a real default, not a sentinel
+  // the server has to interpret.
+  const [provider, setProvider] = useState('')
   // The operator can proceed knowingly, but only after seeing the banner. A hard
   // block would be wrong (a rehearsal is a legitimate feature); a silent one is
   // what produced a mock deliverable nobody asked for.
@@ -169,6 +173,12 @@ export function NewJobWizard() {
   // UBT_LLM_API_KEY set has no declared provider block and still runs for real, so
   // inferring this from ``providers.some(p => p.declared)`` would warn wrongly.
   const rehearsalOnly = runtime !== null && !runtime.active.can_translate
+
+  // Only blocks the operator declared. Built-in wire protocols are usable names
+  // but carry no endpoint of their own, so listing them here would offer a choice
+  // that changes nothing visible.
+  const declaredProviders = (runtime?.providers ?? []).filter((p) => p.declared)
+  const selectedProviderDetail = declaredProviders.find((p) => p.name === provider)
 
   const lastAssessedFileRef = useRef<string>('')
   const hasUserSelectedPresetRef = useRef<boolean>(false)
@@ -361,6 +371,9 @@ export function NewJobWizard() {
         target_lang: targetLang,
         source_lang: sourceLang,
         profile: domainProfile,
+        // A provider *name*, validated server-side against the declared blocks.
+        // Endpoint and credentials still come from that block.
+        provider: provider || null,
         preset: preset,
         dual_mode: dualMode === 'auto' ? null : dualMode,
         // null = "align to the source layout"; the engine rejects anything but 1/2.
@@ -556,6 +569,47 @@ export function NewJobWizard() {
 
           {/* Languages & Preset */}
           <div className="space-y-4 pt-4 border-t border-[var(--paper-border)]">
+            {/* Provider: which declared block does the work. A job may name one;
+                the server validates it against the operator's ubt.toml. Hidden
+                when nothing is declared, because then there is nothing to choose
+                and the first-run banner already says what to do. */}
+            {declaredProviders.length > 0 ? (
+              <div>
+                <div className="flex items-center gap-1 mb-1">
+                  <label className="type-label">{t.wizard.provider}</label>
+                  <InfoTip label={t.wizard.providerHelp}>{t.wizard.providerHelp}</InfoTip>
+                </div>
+                <select
+                  value={provider}
+                  onChange={(e) => setProvider(e.target.value)}
+                  className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs"
+                >
+                  <option value="">
+                    {runtime?.active.provider
+                      ? `${t.wizard.providerDefault} (${runtime.active.provider})`
+                      : t.wizard.providerDefault}
+                  </option>
+                  {declaredProviders.map((p) => (
+                    <option key={p.name} value={p.name}>
+                      {p.name}
+                      {p.draft_model ? ` — ${p.draft_model}` : ''}
+                    </option>
+                  ))}
+                </select>
+                {selectedProviderDetail ? (
+                  <p className="type-help text-[var(--ink-muted)] mt-1">
+                    {selectedProviderDetail.base_url ?? '—'}
+                    {selectedProviderDetail.api_mode
+                      ? ` · ${selectedProviderDetail.api_mode}`
+                      : ''}
+                    {selectedProviderDetail.draft_model
+                      ? ` · ${selectedProviderDetail.draft_model}`
+                      : ''}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+
             {/* Language Pair */}
             <div className="grid grid-cols-2 gap-4">
               <div>

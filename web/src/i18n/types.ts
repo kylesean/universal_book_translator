@@ -41,6 +41,9 @@ export interface TranslationDictionary {
     orBrowse: string
     manualPathPlaceholder: string
     sourceLang: string
+    provider: string
+    providerHelp: string
+    providerDefault: string
     targetLang: string
     presets: string
     presetPublication: string

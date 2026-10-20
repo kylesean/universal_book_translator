@@ -41,6 +41,10 @@ export const en: TranslationDictionary = {
     orBrowse: 'browse local file',
     manualPathPlaceholder: 'Or enter an absolute path reachable by the server...',
     sourceLang: 'Source Language',
+    provider: 'Provider',
+    providerHelp:
+      'Which declared [providers.<name>] block runs this job. The endpoint, wire protocol and credential all come from that block; choosing one here changes nothing about where your key is stored.',
+    providerDefault: 'Default',
     targetLang: 'Target Language',
     presets: 'Execution Profile',
     // The copy describes the engine parameters each preset actually sets

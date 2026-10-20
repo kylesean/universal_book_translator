@@ -1243,6 +1243,11 @@ export interface components {
              */
             profile: string;
             /**
+             * Provider
+             * @description Provider block to run this job against (must be declared in ubt.toml or be a built-in wire protocol). Endpoint and credentials still come from that block.
+             */
+            provider?: string | null;
+            /**
              * Draft Model
              * @description Override draft model tier
              */

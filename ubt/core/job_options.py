@@ -169,6 +169,33 @@ RUN_ONLY_KEYS: tuple[str, ...] = (
 )
 
 
+def _validated_provider_name(name: Any) -> str:
+    """A provider name that resolves to a block the operator actually declared.
+
+    A job payload may name a provider; it may not invent one. The name is checked
+    against :func:`ubt.core.providers.list_providers` — the same set the loader
+    would accept — so a typo fails here with a readable message instead of
+    surfacing later as a "provider not found" from deep inside the pipeline, and a
+    crafted name cannot become a lookup key for something the file never defined.
+
+    Shipped wire protocols and bare aliases are in that set too, which is correct:
+    ``openai-chat`` is a usable provider with no user block behind it, and an
+    operator running one against ``UBT_LLM_API_KEY`` must be able to select it.
+    """
+    from ubt.core.providers import list_providers
+
+    if not isinstance(name, str) or not name.strip():
+        raise UBTError("provider must be a non-empty provider name")
+    cleaned = name.strip()
+    available = list_providers()
+    if cleaned not in available:
+        raise UBTError(
+            f"Unknown provider {cleaned!r}: it is not declared in ubt.toml and is not a "
+            f"built-in wire protocol. Available: {', '.join(available)}"
+        )
+    return cleaned
+
+
 def overrides_from_request(
     request: Mapping[str, Any], *, allow_provider_keys: bool = True
 ) -> dict[str, Any]:
@@ -182,12 +209,29 @@ def overrides_from_request(
     rejects credential and endpoint keys: those may only arrive via the
     operator's own CLI flags or environment, never through a job payload
     (defense in depth behind the API's ``extra="forbid"`` request model and MCP's fixed tool signature).
+
+    **``provider`` is deliberately NOT in that list.** The two things are not the
+    same kind of input:
+
+    * ``base_url`` / ``api_mode`` / ``api_key`` let a payload choose *where* the
+      request goes and *what secret* it carries. Accepting those would turn the API
+      into a credential-writer and an SSRF primitive.
+    * ``provider`` is a *name* that must already exist in the operator's
+      ``ubt.toml``. The endpoint, the protocol and the credential all still come
+      from that file; the payload only says which declared block to use. Refusing
+      it meant the console could edit and activate provider blocks but no job could
+      ever select a different one, so a user with three configured endpoints could
+      only use whichever ``[defaults] provider`` named — a capability the UI
+      presented and the API silently ignored.
+
+    The name is validated against the declared set (:func:`_validated_provider_name`),
+    so an unknown or malformed name is a clear error rather than a lookup that
+    fails later inside the pipeline.
     """
     if not allow_provider_keys:
         leaked = sorted(
             key
             for key in (
-                "provider",
                 "repair_provider",
                 "base_url",
                 "api_mode",
@@ -200,7 +244,7 @@ def overrides_from_request(
         )
         if leaked:
             raise UBTError(
-                "Provider selection/credential keys are not accepted in job payloads: "
+                "Credential/endpoint keys are not accepted in job payloads: "
                 + ", ".join(leaked)
                 + " (set them via UBT_* environment variables or CLI flags)"
             )
@@ -211,11 +255,22 @@ def overrides_from_request(
     explicit = {key: request.get(key) for key in PRESET_ENGINE_FIELDS}
     overrides.update(resolve_engine_params(preset, explicit))
 
+    # A named provider must resolve to a declared block before it becomes an
+    # override. Validated here rather than at assignment so the failure names the
+    # problem ("Unknown provider 'typo'") instead of arriving as a lookup error
+    # from inside the pipeline, after the job has already been accepted.
+    if request.get("provider") is not None:
+        overrides["provider"] = _validated_provider_name(request["provider"])
+
     valid_fields = set(UBTConfig.model_fields)
     for key, value in request.items():
         if value is None:
             continue
         field = _REQUEST_KEY_ALIASES.get(key, key)
+        # ``provider`` is already handled above, validated; letting the generic
+        # loop copy it again would bypass that check.
+        if field == "provider":
+            continue
         if field in valid_fields:
             overrides[field] = value
     # A request that leaves dual_mode unset gets the same profile/engine-aware

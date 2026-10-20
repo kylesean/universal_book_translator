@@ -76,6 +76,21 @@ class JobSubmitRequest(BaseModel):
         description="Domain profile (general, textbook, paper)",
         pattern=PROFILE_NAME_PATTERN,
     )
+    #: Which declared ``[providers.<name>]`` block this job runs against.
+    #:
+    #: A *name*, not an endpoint: the URL, the wire protocol and the credential all
+    #: still come from the operator's file. Selecting a different provider per job
+    #: is therefore not a credential-injection path — see the reasoning in
+    #: ``ubt.core.job_options.overrides_from_request``. The name is validated
+    #: against the declared set, so an unknown one is a 400 naming it.
+    provider: str | None = Field(
+        default=None,
+        description=(
+            "Provider block to run this job against (must be declared in ubt.toml "
+            "or be a built-in wire protocol). Endpoint and credentials still come "
+            "from that block."
+        ),
+    )
     draft_model: str | None = Field(default=None, description="Override draft model tier")
     repair_model: str | None = Field(default=None, description="Override repair model tier")
     preset: Preset | None = Field(

@@ -41,6 +41,10 @@ export const zh: TranslationDictionary = {
     orBrowse: '浏览本地文件',
     manualPathPlaceholder: '或输入服务器可访问的文件绝对路径...',
     sourceLang: '源语言',
+    provider: '提供商',
+    providerHelp:
+      '本次作业使用哪个已声明的 [providers.<name>] 块。接口地址、通信协议与密钥都来自该块；在这里选择不会改变密钥的存放位置。',
+    providerDefault: '默认',
     targetLang: '目标语言',
     presets: '编译路由策略',
     presetPublication: '出版级 (Publication)',
