@@ -78,6 +78,9 @@ CHECK_CODES: dict[str, tuple[str, ...]] = {
     "details": (
         "api_key.missing",
         "api_key.ok",
+        # A loopback endpoint needs no credential; reporting FAIL for one sent
+        # operators looking for a key the endpoint never wanted.
+        "api_key.local_not_needed",
         "base_url.ok",
         "live_probe.model_online",
         "live_probe.model_missing",

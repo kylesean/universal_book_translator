@@ -57,6 +57,7 @@ export const doctorCodesZh: DoctorCodeTables = {
   details: {
     'api_key.missing': '未配置',
     'api_key.ok': '已配置',
+    'api_key.local_not_needed': '本地端点无需密钥',
     'base_url.ok': '{base_url}',
     'live_probe.model_online': '{base_url} 可达（{rtt_ms}ms）；草稿模型「{model}」已确认在线',
     'live_probe.model_missing':

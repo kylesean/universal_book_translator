@@ -1337,36 +1337,47 @@ def test_a_state_value_is_declared_before_the_expression_that_reads_it() -> None
 def test_can_translate_is_the_servers_own_verdict() -> None:
     """The wizard must not infer "would run as a rehearsal" from provider rows.
 
-    ``/jobs/submit`` downgrades a keyless submit using ``not key or key ==
-    MOCK_API_KEY``. A client-side guess based on "no declared provider" would be
-    wrong for the common built-in-protocol setup: ``UBT_LLM_API_KEY`` plus
-    ``openai-chat`` has no declared block and still translates for real.
+    ``/jobs/submit`` downgrades a keyless submit using ``credential_required``
+    plus ``has_real_credential``. A client-side guess based on "no declared
+    provider" would be wrong for the common built-in-protocol setup:
+    ``UBT_LLM_API_KEY`` plus ``openai-chat`` has no declared block and still
+    translates for real.
+
+    Every config here pins ``base_url`` to a *hosted* endpoint on purpose. The
+    credential rules depend on it: a loopback endpoint needs no key and reports
+    ``can_translate: true``, so inheriting the ambient ``ubt.toml`` made this
+    test pass or fail depending on the developer's machine — it went green only
+    while the file had no default provider.
     """
     from ubt.api.runtime_config import describe_runtime_config
     from ubt.core.config import MOCK_API_KEY, UBTConfig
 
-    keyless = describe_runtime_config(UBTConfig.from_env(draft_model="m"))["active"]
+    HOSTED = "https://api.example.com/v1"
+
+    keyless = describe_runtime_config(UBTConfig.from_env(base_url=HOSTED, draft_model="m"))[
+        "active"
+    ]
     assert keyless["can_translate"] is False
 
     # A model with no credential cannot translate …
     assert (
-        describe_runtime_config(UBTConfig.from_env(draft_model="", api_key="sk-real"))["active"][
-            "can_translate"
-        ]
+        describe_runtime_config(
+            UBTConfig.from_env(base_url=HOSTED, draft_model="", api_key="sk-real")
+        )["active"]["can_translate"]
         is False
     )
     # … and the placeholder sentinel is not a credential either.
     assert (
-        describe_runtime_config(UBTConfig.from_env(draft_model="m", api_key=MOCK_API_KEY))[
-            "active"
-        ]["can_translate"]
+        describe_runtime_config(
+            UBTConfig.from_env(base_url=HOSTED, draft_model="m", api_key=MOCK_API_KEY)
+        )["active"]["can_translate"]
         is False
     )
     # Real key plus a model is the only combination that translates.
     assert (
-        describe_runtime_config(UBTConfig.from_env(draft_model="m", api_key="sk-real"))["active"][
-            "can_translate"
-        ]
+        describe_runtime_config(
+            UBTConfig.from_env(base_url=HOSTED, draft_model="m", api_key="sk-real")
+        )["active"]["can_translate"]
         is True
     )
 
