@@ -22,6 +22,10 @@ htmlcov/
 output/
 tmp/
 scratch/
+# Agent/tool scratch space. The name never matched ``scratch/``, so a
+# pre-commit cache lock landed in a commit by accident; both spellings are
+# ignored now so a local scratch directory can never be staged.
+.scratch/
 scripts/mathjax/node_modules/
 web/node_modules/
 node_modules/
