@@ -120,7 +120,12 @@ def register_job_routes(
     async def assess_job(req: JobAssessRequest) -> dict[str, Any]:
         from ubt.core.assess import AssessmentError, assess_document_async
 
-        cfg = app_config
+        # ``scope.config`` is a live property (it re-reads the file when that
+        # changed); ``app_config`` is the value it returned at startup. Reading the
+        # snapshot here made a freshly configured provider invisible: assess
+        # reported ``draft_model: ""`` and priced nothing, while the panel beside it
+        # named the model that would actually run.
+        cfg = scope.config
         if req.preset is not None:
             from ubt.core.presets import apply_preset
 
@@ -375,11 +380,15 @@ def register_job_routes(
         # turned a correctly configured local model into a rehearsal the operator
         # never asked for — the same defect the worker had.
         auto_rehearsal = False
+        # Live config, not the startup snapshot: a provider saved from the console
+        # must be usable by the very next submit, which is the whole point of
+        # writing it to a file the engine re-reads.
+        live = scope.config
         if (
             not safe_req.dry_run
             and router is None
-            and credential_required(app_config)
-            and not has_real_credential(app_config)
+            and credential_required(live)
+            and not has_real_credential(live)
         ):
             safe_req = safe_req.model_copy(update={"dry_run": True})
             auto_rehearsal = True
@@ -452,7 +461,10 @@ def register_job_routes(
                 detail=str(exc),
             ) from exc
 
-        record.task = asyncio.create_task(manager.execute_job(record, app_config))
+        # ``scope.config``, not the boot snapshot: the worker must translate with
+        # the provider the operator just saved, not the one that existed when
+        # the server started.
+        record.task = asyncio.create_task(manager.execute_job(record, scope.config))
 
         return JobSubmitResponse(
             job_id=record.job_id,
@@ -682,7 +694,10 @@ def register_job_routes(
         record.error = None
         record.progress = ProgressSnapshot()
         record.status = JobStatus.SUBMITTED
-        record.task = asyncio.create_task(manager.execute_job(record, app_config))
+        # ``scope.config``, not the boot snapshot: the worker must translate with
+        # the provider the operator just saved, not the one that existed when
+        # the server started.
+        record.task = asyncio.create_task(manager.execute_job(record, scope.config))
         return JSONResponse(
             {
                 "job_id": valid_id,

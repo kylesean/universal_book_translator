@@ -188,6 +188,43 @@ def escape_markup(text: str) -> str:
 _TOC_TITLE_TEXTS = frozenset({"contents", "table of contents", "目录", "目錄", "目次"})
 
 
+def typst_lang_arguments(lang: str | None) -> str:
+    """``lang: "zh", region: "CN"`` — the form Typst actually accepts.
+
+    Typst validates ``lang`` as a bare ISO 639-1/2/3 code and rejects a BCP-47
+    tag: ``#set text(lang: "zh-CN")`` fails to compile with *"expected two or
+    three letter language code"*, and the hint tells you to put the country in
+    ``region`` instead. This project stores target languages as BCP-47
+    (``zh-CN``, ``pt-BR``), so passing one straight through turned every CJK
+    deliverable into a compile failure — caught by the pre-flight check before
+    any translation was billed, which is why it surfaced as "render pre-flight
+    failed" on an otherwise correct configuration.
+
+    Returns the complete argument fragment, including the leading ``, `` so a
+    caller can append it to an existing ``#set text(...)`` call. An empty or
+    unparseable tag yields ``""``: no ``lang`` is better than an invalid one,
+    because the latter fails the whole document.
+    """
+    code = (lang or "").strip().replace("_", "-")
+    if not code:
+        return ""
+    parts = [part for part in code.split("-") if part]
+    primary = parts[0].lower()
+    # Typst wants 2-3 letters; a 4-letter script subtag (``zh-Hans``) is not a
+    # language code and must not be sent as one.
+    if not (2 <= len(primary) <= 3) or not primary.isalpha():
+        return ""
+    args = f', lang: "{primary}"'
+    # A region is the 2-letter (or 3-digit) subtag, skipping a script subtag.
+    for part in parts[1:]:
+        if len(part) == 4 and part.isalpha():
+            continue  # script: Hans / Hant / Latn — Typst has no slot for it
+        if (len(part) in (2, 3) and part.isalpha()) or (len(part) == 3 and part.isdigit()):
+            args += f', region: "{part.upper()}"'
+            break
+    return args
+
+
 def _is_toc_heading_text(text: str) -> bool:
     """Whether a heading's text names the table of contents itself."""
     return text.strip().lower() in _TOC_TITLE_TEXTS
@@ -1174,7 +1211,7 @@ class TypstDocumentRenderer:
         return "\n".join(
             [
                 TypstDocumentRenderer._PAGE_SETUP,
-                f'#set text(font: ({body}), size: 10.5pt, lang: "{lang}")' + rtl,
+                f"#set text(font: ({body}), size: 10.5pt{typst_lang_arguments(lang)})" + rtl,
                 # Leading comes from the Theme owner, not a literal here: this
                 # line and ``Theme.leading_em`` disagreed (0.78 vs 0.85), so a
                 # maintainer tuning the theme tuned nothing.

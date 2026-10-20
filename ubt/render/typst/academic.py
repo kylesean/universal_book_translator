@@ -10,7 +10,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from ubt.layout.theme import direction_for
-from ubt.render.typst.document_renderer import escape_markup
+from ubt.render.typst.document_renderer import escape_markup, typst_lang_arguments
 
 #: Minimum share of pages the profiler must flag multi-column before the
 #: renderer treats the source as two-column. A genuine two-column document has
@@ -239,7 +239,7 @@ def academic_preamble(
         header_block,
         '  numbering: "1",',
         ")",
-        f'#set text(font: ({body_fonts}), size: {font_size}, lang: "{lang}"){rtl}',
+        f"#set text(font: ({body_fonts}), size: {font_size}{typst_lang_arguments(lang)}){rtl}",
         par_rules,
         "#show heading.where(level: 1): it => [",
         "  #v(0.5em)",

@@ -1850,3 +1850,27 @@ def test_a_saved_provider_is_immediately_visible_to_the_doctor(
     assert after["api_key"].status == "OK"
     assert after["models"].status == "OK"
     assert "the-model" in after["models"].detail
+
+
+def test_submit_and_assess_read_the_live_config() -> None:
+    """A provider saved a second ago must be what the next job uses.
+
+    ``app_config = scope.config`` takes the *value* the live property returned at
+    startup, so everything that read it was pinned to the boot snapshot. Found on
+    a fresh install: the console showed the new provider as active and
+    ``can_translate: true``, while ``/jobs/assess`` answered ``draft_model: ""``
+    and the submit path still considered the deployment keyless.
+    """
+    repo = _REPO_ROOT
+    routes = repo / "ubt" / "api" / "routes" / "job.py"
+    source = routes.read_text(encoding="utf-8")
+
+    assess = source[source.index("async def assess_job") :][:900]
+    assert "cfg = scope.config" in assess, "assess must price against the live config"
+
+    submit = source[source.index("auto_rehearsal = False") :][:600]
+    assert "scope.config" in submit, "the rehearsal decision must read the live config"
+
+    # And the worker itself, at both call sites (fresh submit and resume).
+    assert source.count("execute_job(record, scope.config)") == 2
+    assert "execute_job(record, app_config)" not in source
