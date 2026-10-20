@@ -214,6 +214,11 @@ export const en: TranslationDictionary = {
     glossaryPathInvalid: 'Enter an absolute path (starting with /) ending in .csv, .tsv or .json.',
     rehearsalLabel: 'Rehearsal (zero-token dry run)',
     rehearsalHelp: 'Runs the full pipeline with an echo provider: proves the plumbing reaches a rendered artifact, spends nothing, and the result is not a translation.',
+    rehearsalBannerTitle: 'This would run as a rehearsal',
+    rehearsalBannerBody:
+      'No model or no credential is configured, so the server would downgrade this job to a zero-token rehearsal and deliver mock output. Configure a provider first to translate for real.',
+    rehearsalBannerCta: 'Configure a model',
+    rehearsalBannerAck: 'Run as rehearsal anyway',
     rehearsalActiveWarning: 'Rehearsal mode: the output is echo text, NOT a translation. Use it to validate the pipeline, then re-submit with a real run.',
     engineRecommended: '✦ Engine Recommended',
     sliceSampleQuickBtn: 'Sample 1-5',
@@ -429,7 +434,9 @@ export const en: TranslationDictionary = {
     credentialPlaceholder: 'sk-… or ${VAR}',
     credentialKeepHint: 'Leave blank to keep the current credential.',
     credentialBlockedHint:
-      'This server is reachable beyond loopback, or strict auth is on, so a credential cannot be written from here. Set it in ubt.toml or export UBT_LLM_API_KEY.',
+      'A credential cannot be written from the console on this deployment (reachable beyond loopback, or strict auth is on). Set it in ubt.toml or export UBT_LLM_API_KEY.',
+    credentialUnknownHint:
+      'Could not read this deployment’s configuration, so the console cannot tell whether writing a credential is allowed here. Reload the page; if it persists, set the credential in ubt.toml or UBT_LLM_API_KEY.',
     frozenFieldsWarning:
       'Saved, but these settings are bound at startup and need a restart to take effect: {fields}',
     firstRunTitle: 'Configure a model to start',

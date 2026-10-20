@@ -153,6 +153,10 @@ export interface TranslationDictionary {
     glossaryPathInvalid: string
     rehearsalLabel: string
     rehearsalHelp: string
+    rehearsalBannerTitle: string
+    rehearsalBannerBody: string
+    rehearsalBannerCta: string
+    rehearsalBannerAck: string
     rehearsalActiveWarning: string
     engineRecommended: string
     sliceSampleQuickBtn: string
@@ -379,6 +383,7 @@ export interface TranslationDictionary {
     credentialPlaceholder: string
     credentialKeepHint: string
     credentialBlockedHint: string
+    credentialUnknownHint: string
     frozenFieldsWarning: string
     firstRunTitle: string
     firstRunBody: string

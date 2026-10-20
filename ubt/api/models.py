@@ -709,6 +709,14 @@ class RuntimeActiveModel(BaseModel):
     extraction_strategy: str = Field(
         default="", description="How the translation is recovered from the completion"
     )
+    can_translate: bool = Field(
+        default=False,
+        description=(
+            "True when a submit would translate for real. False means the server "
+            "would downgrade it to a zero-token rehearsal (no model, or no real "
+            "credential) — the wizard says so before the button is pressed"
+        ),
+    )
 
 
 class RuntimeProvider(BaseModel):

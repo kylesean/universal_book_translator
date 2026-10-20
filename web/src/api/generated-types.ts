@@ -1771,6 +1771,12 @@ export interface components {
              * @default
              */
             extraction_strategy: string;
+            /**
+             * Can Translate
+             * @description True when a submit would translate for real. False means the server would downgrade it to a zero-token rehearsal (no model, or no real credential) — the wizard says so before the button is pressed
+             * @default false
+             */
+            can_translate: boolean;
         };
         /**
          * RuntimeConfigResponse

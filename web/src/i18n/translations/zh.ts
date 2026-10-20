@@ -193,6 +193,11 @@ export const zh: TranslationDictionary = {
     glossaryPathInvalid: '路径需为 .csv / .tsv / .json 之一的绝对路径（以 / 开头）。',
     rehearsalLabel: '排练模式（零成本干跑）',
     rehearsalHelp: '用回显提供方跑完整管线：验证流程能产出文件，零花费；产出不是译文。',
+    rehearsalBannerTitle: '这个作业会以演练模式运行',
+    rehearsalBannerBody:
+      '未配置模型或未配置密钥，服务端会把该作业降级为零 token 演练，交付 mock 产物。先配置提供商才能真实翻译。',
+    rehearsalBannerCta: '去配置模型',
+    rehearsalBannerAck: '仍以演练模式运行',
     rehearsalActiveWarning: '排练模式：产出为回显文本，不是译文。用于验证流程；确认后再以正式运行提交。',
     engineRecommended: '✦ 引擎推荐',
     sliceSampleQuickBtn: '填入前5页打样',
@@ -403,7 +408,9 @@ export const zh: TranslationDictionary = {
     credentialPlaceholder: 'sk-… 或 ${VAR}',
     credentialKeepHint: '留空则保留当前密钥。',
     credentialBlockedHint:
-      '该服务可在回环之外访问，或已启用严格鉴权，因此不能在此写入密钥。请在 ubt.toml 中设置，或导出 UBT_LLM_API_KEY。',
+      '当前部署不允许在控制台写入密钥（可在回环之外访问，或已启用严格鉴权）。请在 ubt.toml 中设置，或导出 UBT_LLM_API_KEY。',
+    credentialUnknownHint:
+      '无法读取当前部署的配置，因此无法判断这里是否允许写入密钥。请刷新页面；若仍然如此，请在 ubt.toml 中设置密钥，或导出 UBT_LLM_API_KEY。',
     frozenFieldsWarning: '已保存，但以下设置在启动时绑定，需要重启才会生效：{fields}',
     firstRunTitle: '先配置一个模型',
     firstRunBody:

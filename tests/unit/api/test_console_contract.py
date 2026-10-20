@@ -1332,3 +1332,105 @@ def test_a_state_value_is_declared_before_the_expression_that_reads_it() -> None
         "isCreate is declared above the useState it reads; that is a temporal dead "
         "zone at runtime and neither tsc nor oxlint reports it"
     )
+
+
+def test_can_translate_is_the_servers_own_verdict() -> None:
+    """The wizard must not infer "would run as a rehearsal" from provider rows.
+
+    ``/jobs/submit`` downgrades a keyless submit using ``not key or key ==
+    MOCK_API_KEY``. A client-side guess based on "no declared provider" would be
+    wrong for the common built-in-protocol setup: ``UBT_LLM_API_KEY`` plus
+    ``openai-chat`` has no declared block and still translates for real.
+    """
+    from ubt.api.runtime_config import describe_runtime_config
+    from ubt.core.config import MOCK_API_KEY, UBTConfig
+
+    keyless = describe_runtime_config(UBTConfig.from_env(draft_model="m"))["active"]
+    assert keyless["can_translate"] is False
+
+    # A model with no credential cannot translate …
+    assert (
+        describe_runtime_config(UBTConfig.from_env(draft_model="", api_key="sk-real"))["active"][
+            "can_translate"
+        ]
+        is False
+    )
+    # … and the placeholder sentinel is not a credential either.
+    assert (
+        describe_runtime_config(UBTConfig.from_env(draft_model="m", api_key=MOCK_API_KEY))[
+            "active"
+        ]["can_translate"]
+        is False
+    )
+    # Real key plus a model is the only combination that translates.
+    assert (
+        describe_runtime_config(UBTConfig.from_env(draft_model="m", api_key="sk-real"))["active"][
+            "can_translate"
+        ]
+        is True
+    )
+
+
+def test_the_wizard_blocks_a_rehearsal_it_has_not_announced() -> None:
+    """A mock deliverable nobody asked for is the failure being prevented."""
+    repo = _REPO_ROOT
+    wizard = repo / "web" / "src" / "views" / "wizard" / "NewJobWizard.tsx"
+    if not wizard.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+
+    source = wizard.read_text(encoding="utf-8")
+    # The verdict comes from the server, not from a row count.
+    assert "can_translate" in source
+    assert "rehearsalAcknowledged" in source
+    # The guard runs before the submit call.
+    guard = source.index("if (rehearsalOnly && !rehearsalAcknowledged)")
+    submit = source.index("await submitJob(")
+    assert guard < submit
+
+
+def test_a_failed_config_load_is_not_reported_as_a_refusal() -> None:
+    """``?? false`` on a failed load claimed the server was reachable remotely.
+
+    That is a statement about the deployment the console cannot make when it could
+    not read the deployment configuration at all.
+    """
+    repo = _REPO_ROOT
+    editor = repo / "web" / "src" / "views" / "doctor" / "ProviderEditor.tsx"
+    if not editor.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+
+    source = editor.read_text(encoding="utf-8")
+    assert "canWriteCredential: boolean | null" in source
+    assert "credentialUnknownHint" in source
+
+
+def test_the_frontend_typecheck_command_actually_checks_something() -> None:
+    """``tsc --noEmit`` on this repo type-checks NOTHING.
+
+    ``web/tsconfig.json`` is a solution file: ``{"files": [], "references": [...]}``.
+    ``tsc --noEmit`` reads that root config, finds no inputs, and exits 0 — so a
+    green run proves only that tsc started. The real check is ``tsc -b`` (which is
+    what ``pnpm build`` runs), and it caught two genuine type errors that the
+    ``--noEmit`` form had reported as clean.
+    """
+    import json
+
+    repo = _REPO_ROOT
+    tsconfig = repo / "web" / "tsconfig.json"
+    if not tsconfig.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+
+    root = json.loads(tsconfig.read_text(encoding="utf-8"))
+    # The root config must stay a pure solution file; if it ever gains "include"
+    # or "files" entries, `--noEmit` would start working and this guard should go.
+    assert root.get("files") == [], (
+        "web/tsconfig.json now has inputs, so `tsc --noEmit` is no longer a no-op — "
+        "update this test and the documented command"
+    )
+    assert root.get("references"), "the solution file must reference the real projects"
+
+    # The script CI relies on is the one that actually builds.
+    pkg = json.loads((repo / "web" / "package.json").read_text(encoding="utf-8"))
+    assert pkg["scripts"]["build"].startswith("tsc -b"), (
+        "web build must run `tsc -b`; `tsc --noEmit` type-checks nothing here"
+    )

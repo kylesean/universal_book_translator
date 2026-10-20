@@ -14,7 +14,14 @@ import {
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { InfoTip } from '@/components/ui/InfoTip'
-import { assessJob, submitJob, uploadSourceDocument, type JobAssessResponse } from '@/api/client'
+import {
+  assessJob,
+  getRuntimeConfig,
+  submitJob,
+  uploadSourceDocument,
+  type JobAssessResponse,
+  type RuntimeConfig,
+} from '@/api/client'
 import { useI18n } from '@/i18n/useI18n'
 
 /** Human-readable duration from a seconds estimate (e.g. "3m", "1.2h"). */
@@ -132,6 +139,36 @@ export function NewJobWizard() {
 
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
+  // Whether a real translation is possible at all. ``null`` = not loaded yet, so
+  // the banner stays hidden rather than flashing a false warning on mount.
+  const [runtime, setRuntime] = useState<RuntimeConfig | null>(null)
+  // The operator can proceed knowingly, but only after seeing the banner. A hard
+  // block would be wrong (a rehearsal is a legitimate feature); a silent one is
+  // what produced a mock deliverable nobody asked for.
+  const [rehearsalAcknowledged, setRehearsalAcknowledged] = useState(false)
+
+  // One read on mount: whether a provider/model is configured decides whether a
+  // submit can be real. A failure is treated as "unknown" (no banner) rather than
+  // "unconfigured", so a transient error cannot block a working setup.
+  useEffect(() => {
+    let cancelled = false
+    void getRuntimeConfig()
+      .then((loaded) => {
+        if (!cancelled) setRuntime(loaded)
+      })
+      .catch(() => {
+        if (!cancelled) setRuntime(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // The server's own verdict, not a client-side guess. The rule is "no model, or
+  // no real credential" — an operator using a built-in protocol with
+  // UBT_LLM_API_KEY set has no declared provider block and still runs for real, so
+  // inferring this from ``providers.some(p => p.declared)`` would warn wrongly.
+  const rehearsalOnly = runtime !== null && !runtime.active.can_translate
 
   const lastAssessedFileRef = useRef<string>('')
   const hasUserSelectedPresetRef = useRef<boolean>(false)
@@ -310,6 +347,12 @@ export function NewJobWizard() {
 
   const handleSubmit = async () => {
     if (!filePath.trim() || isSubmitting || glossaryError || budgetInvalid) return
+    if (rehearsalOnly && !rehearsalAcknowledged) {
+      // The banner is the only path to a mock delivery: pressing compile without
+      // acknowledging it must not silently produce one.
+      setSubmitError(t.wizard.rehearsalBannerBody)
+      return
+    }
     setIsSubmitting(true)
     setSubmitError(null)
     try {
@@ -1140,6 +1183,35 @@ export function NewJobWizard() {
               </div>
             )}
           </div>
+
+          {/* Rehearsal banner: the server downgrades a keyless submit to a
+              zero-token rehearsal, which delivers mock output. Saying it here —
+              with a link to the configuration form — is the difference between a
+              labelled feature and a silent substitution. */}
+          {rehearsalOnly ? (
+            <div className="mx-4 mb-3 p-3 rounded-[5px] bg-[#b45309]/10 border border-[#b45309]/25">
+              <div className="type-value font-semibold text-[#b45309] mb-1">
+                {t.wizard.rehearsalBannerTitle}
+              </div>
+              <p className="type-help text-[var(--ink-secondary)] leading-relaxed mb-2">
+                {t.wizard.rehearsalBannerBody}
+              </p>
+              <div className="flex items-center gap-2">
+                <Button size="sm" onClick={() => navigate('/system')}>
+                  {t.wizard.rehearsalBannerCta}
+                </Button>
+                {!rehearsalAcknowledged ? (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setRehearsalAcknowledged(true)}
+                  >
+                    {t.wizard.rehearsalBannerAck}
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
 
           {/* Action Footer */}
           <div className="p-4 border-t border-[var(--paper-border)] bg-[var(--paper-subsurface)]">

@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ubt.core.config import UBTConfig
+from ubt.core.config import MOCK_API_KEY, UBTConfig
 from ubt.core.providers import list_providers, load_provider_block
 from ubt.core.router.registry import FALLBACK_PATTERN, registry_from_config
 
@@ -94,6 +94,10 @@ def describe_runtime_config(
         if resolved is None or resolved.model_pattern == FALLBACK_PATTERN
         else resolved.model_pattern
     )
+    # The same predicate ``/jobs/submit`` uses for its auto-rehearsal decision:
+    # a model id is required, and the credential must not be the placeholder.
+    raw_key = config.api_key.get_secret_value().strip()
+    can_translate = bool(draft_model) and bool(raw_key) and raw_key != MOCK_API_KEY
 
     active = {
         "provider": config.provider or "",
@@ -122,6 +126,13 @@ def describe_runtime_config(
         "supports_system_prompt": resolved.supports_system_prompt if resolved else None,
         "supports_vision": resolved.supports_vision if resolved else None,
         "extraction_strategy": resolved.extraction_strategy.value if resolved else "",
+        # Whether a submit can actually translate. The server downgrades a keyless
+        # submit to a zero-token rehearsal, so the console must be able to say so
+        # *before* the button is pressed. Derived here rather than in the client:
+        # the rule is "no real credential", not "no declared provider" — an
+        # operator using a built-in protocol with UBT_LLM_API_KEY set has no
+        # declared block and still runs for real.
+        "can_translate": can_translate,
     }
 
     # Split the menu into what the operator declared and what ships with the

@@ -8,8 +8,13 @@ import { useI18n } from '@/i18n/useI18n'
 interface ProviderEditorProps {
   /** The provider block being edited; ``null`` starts a new one. */
   name: string | null
-  /** Whether this deployment may accept a credential over HTTP. */
-  canWriteCredential: boolean
+  /** Whether this deployment may accept a credential over HTTP.
+
+  ``null`` means the console could not read the deployment configuration, which is
+  NOT a refusal: claiming "this server is reachable beyond loopback" when the
+  panel merely failed to load would be a false statement about the deployment.
+  */
+  canWriteCredential: boolean | null
   /** Called after a successful save so the parent can refresh its view. */
   onSaved: () => void
   onCancel: () => void
@@ -262,7 +267,9 @@ export function ProviderEditor({
           </label>
         ) : (
           <p className="type-help text-[#b45309] leading-relaxed">
-            {t.doctor.credentialBlockedHint}
+            {canWriteCredential === null
+              ? t.doctor.credentialUnknownHint
+              : t.doctor.credentialBlockedHint}
           </p>
         )}
 

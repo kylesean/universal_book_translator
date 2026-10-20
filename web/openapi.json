@@ -5537,6 +5537,12 @@
             "title": "Extraction Strategy",
             "description": "How the translation is recovered from the completion",
             "default": ""
+          },
+          "can_translate": {
+            "type": "boolean",
+            "title": "Can Translate",
+            "description": "True when a submit would translate for real. False means the server would downgrade it to a zero-token rehearsal (no model, or no real credential) \u2014 the wizard says so before the button is pressed",
+            "default": false
           }
         },
         "type": "object",

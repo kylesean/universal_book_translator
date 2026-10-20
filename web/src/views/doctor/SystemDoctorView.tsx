@@ -180,7 +180,11 @@ export function SystemDoctorView() {
         {editingProvider !== undefined ? (
           <ProviderEditor
             name={editingProvider}
-            canWriteCredential={runtime?.can_write_credential ?? false}
+            // ``undefined`` → null: the configuration could not be read, which
+            // the form reports as unknown rather than as a refusal.
+            canWriteCredential={
+              runtime ? (runtime.can_write_credential ?? false) : null
+            }
             onCancel={() => setEditingProvider(undefined)}
             onSaved={() => void load(false)}
           />
@@ -283,7 +287,7 @@ export function SystemDoctorView() {
                       ['supports_vision', t.doctor.capabilityVision],
                     ] as const
                   ).map(([field, label]) => {
-                    const declared = runtime.active.declared_capability.includes(field)
+                    const declared = (runtime.active.declared_capability ?? []).includes(field)
                     const value = runtime.active[field]
                     return (
                       <span
@@ -302,7 +306,7 @@ export function SystemDoctorView() {
                     )
                   })}
                 </div>
-                {runtime.active.declared_capability.length === 0 &&
+                {(runtime.active.declared_capability ?? []).length === 0 &&
                   runtime.active.draft_model && (
                     <p className="mt-1.5 type-help text-[var(--ink-muted)] leading-relaxed">
                       {t.doctor.noProfileMatchHelp}
