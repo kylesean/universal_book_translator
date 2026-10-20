@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ubt.api.provider_editor import default_provider_name
 from ubt.core.config import UBTConfig, credential_required, has_real_credential
 from ubt.core.providers import credential_resolution, list_providers, load_provider_block
 from ubt.core.router.pricing import endpoint_is_local
@@ -175,6 +176,7 @@ def describe_runtime_config(
     from ubt.core.providers import PROTOCOL_ALIASES, declared_provider_names
 
     declared = declared_provider_names()
+    file_default = default_provider_name()
     providers: list[dict[str, Any]] = []
     for name in list_providers():
         block = _safe_block(name)
@@ -182,6 +184,11 @@ def describe_runtime_config(
             {
                 "name": name,
                 "active": name == config.provider,
+                # What ``[defaults] provider`` names, which is not the same as what
+                # is running: ``UBT_PROVIDER`` outranks the file. Without this an
+                # operator whose shell exported a provider saw six blocks and no
+                # way to tell which one the *file* would pick without it.
+                "is_default": name == file_default,
                 "available": block.pop("available", False),
                 "declared": name in declared,
                 "is_alias": name in PROTOCOL_ALIASES,

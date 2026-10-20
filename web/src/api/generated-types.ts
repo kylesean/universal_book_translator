@@ -114,6 +114,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/system/providers/{name}/default": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Default Provider Route
+         * @description Make ``name`` the provider a run uses when nothing more explicit does.
+         *
+         *     Writes ``[defaults] provider``. Creating a block without this left a fresh
+         *     install unable to run: the block existed, the console listed it, and
+         *     ``can_translate`` stayed false because nothing named it.
+         *
+         *     A *selection*, not an edit — the request carries no body, so it works for a
+         *     block the operator did not otherwise change.
+         */
+        put: operations["set_default_provider_route_system_providers__name__default_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/system/doctor": {
         parameters: {
             query?: never;
@@ -128,6 +155,12 @@ export interface paths {
          *     Reuses the CLI's ``collect_checks`` so the console and the command line
          *     report the same verdicts. ``probe=true`` additionally contacts the
          *     provider endpoint (a live network call), so it is off by default.
+         *
+         *     Reads the **live** config, not the boot snapshot. ``app_config`` is built
+         *     once at startup, so a provider saved from the console an instant earlier
+         *     was invisible here: the form said "saved", the panel below it reported the
+         *     new provider as active, and this checklist still said ``API key FAIL`` and
+         *     ``no draft model configured`` — two contradictory statements on one screen.
          */
         get: operations["system_doctor_system_doctor_get"];
         put?: never;
@@ -1644,6 +1677,11 @@ export interface components {
          */
         ProviderEditRequest: {
             /**
+             * Make Default
+             * @description Also write [defaults] provider = name. The console sends this when creating a block, because a declared block that nothing points at is still a rehearsal — the state a fresh install was stuck in
+             */
+            make_default?: boolean | null;
+            /**
              * Api Key
              * @description Credential for this provider block. Accepted only on a loopback, non-strict deployment; elsewhere the request is refused and the message says to use the environment or the file.
              */
@@ -1858,6 +1896,12 @@ export interface components {
              * @description True for the provider currently selected
              */
             active: boolean;
+            /**
+             * Is Default
+             * @description True when [defaults] provider names this block. Distinct from ``active``: UBT_PROVIDER / --provider outrank the file, so the panel must be able to show what the file says separately from what runs
+             * @default false
+             */
+            is_default: boolean;
             /**
              * Available
              * @description False when the block could not be loaded
@@ -2363,6 +2407,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProviderDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_default_provider_route_system_providers__name__default_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-key"?: string | null;
+            };
+            path: {
+                name: string;
+            };
+            cookie?: {
+                ubt_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
                 };
             };
             /** @description Validation Error */

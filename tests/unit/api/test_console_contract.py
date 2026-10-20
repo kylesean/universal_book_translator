@@ -1703,3 +1703,150 @@ def test_the_doctor_panel_prefers_the_provider_variant_when_one_is_named() -> No
     assert "'qe.tiered'" in source and "'via'" in source
     # The picker must consult the param that decides the variant.
     assert "'provider'" in source
+
+
+def test_a_fresh_install_can_reach_a_runnable_state_from_the_console() -> None:
+    """The end-to-end gap: create a block, and it must actually run.
+
+    Measured on a fresh clone (no ``ubt.toml``, no ``UBT_*``): one block declared,
+    yet ``provider: ''``, ``draft_model: ''`` and ``can_translate: false``. The
+    console showed the block and a working credential, and the first job still
+    became a rehearsal. Nothing in the UI pointed at a default, and
+    ``activateProvider`` — the copy for exactly that action — was unused.
+    """
+    import os
+    import tempfile
+    from pathlib import Path
+
+    from ubt.api.provider_editor import upsert_provider
+    from ubt.api.runtime_config import describe_runtime_config
+    from ubt.core.config import UBTConfig
+
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp, "ubt.toml")
+        target.write_text('[defaults]\nqe_engine = "heuristic"\n', encoding="utf-8")
+        previous = Path.cwd()
+        os.chdir(tmp)
+        try:
+            os.environ.pop("UBT_PROVIDER", None)
+            before = describe_runtime_config(UBTConfig.from_env())["active"]
+            assert before["can_translate"] is False
+
+            # The create form's path.
+            upsert_provider(
+                "first",
+                {
+                    "base_url": "https://api.example.com/v1",
+                    "api_mode": "openai-chat",
+                    "draft_model": "the-model",
+                    "api_key": "sk-user",
+                },
+                allow_credential=True,
+                make_default=True,
+            )
+            after = describe_runtime_config(UBTConfig.from_env())["active"]
+        finally:
+            os.chdir(previous)
+
+    assert after["provider"] == "first"
+    assert after["draft_model"] == "the-model"
+    assert after["can_translate"] is True, (
+        "creating the first provider must leave a runnable configuration"
+    )
+
+
+def test_the_wizard_lists_which_provider_is_the_file_default() -> None:
+    """``active`` and ``is_default`` answer different questions.
+
+    ``UBT_PROVIDER`` outranks the file, so a shell that exported a provider hid
+    what the file would pick. The list has to carry both, or "which one runs
+    without my shell variable" is unanswerable from the console.
+    """
+    from ubt.api.models import RuntimeProvider
+
+    assert "is_default" in RuntimeProvider.model_fields
+    repo = _REPO_ROOT
+    view = repo / "web" / "src" / "views" / "doctor" / "SystemDoctorView.tsx"
+    if not view.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+    source = view.read_text(encoding="utf-8")
+    assert "p.is_default" in source
+    # And the switch affordance uses the copy that existed but was never wired.
+    assert "activateProvider" in source
+    assert "setDefaultProvider" in source
+
+
+def test_creating_a_provider_makes_it_the_default() -> None:
+    """One action, not "create, then discover you also have to select it"."""
+    repo = _REPO_ROOT
+    editor = repo / "web" / "src" / "views" / "doctor" / "ProviderEditor.tsx"
+    if not editor.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+    source = editor.read_text(encoding="utf-8")
+    assert "changes.make_default = true" in source
+    # Only on create: editing an existing block must not silently steal the
+    # default from whichever block is currently configured to run.
+    save_start = source.index("const handleSave = useCallback")
+    save_body = source[source.index("if (isCreate) changes.make_default", save_start) :][:120]
+    assert "isCreate" in save_body
+
+
+def test_the_doctor_endpoint_reads_the_live_config_not_the_boot_snapshot() -> None:
+    """One screen, two answers: the form said saved, the checklist said missing.
+
+    ``/system/doctor`` ran ``collect_checks`` against ``app_config`` — the config
+    built once at startup — while ``/system/runtime-config`` beside it read the
+    live source. Create a provider in the console and the panel reported the new
+    block as active while the checklist still said ``API key FAIL`` and
+    ``no draft model configured``.
+    """
+    repo = _REPO_ROOT
+    routes = repo / "ubt" / "api" / "routes" / "system.py"
+    source = routes.read_text(encoding="utf-8")
+    start = source.index("async def system_doctor")
+    body = source[start : start + 1200]
+    assert "live_config()" in body, (
+        "the doctor must check the live configuration; app_config is a boot snapshot"
+    )
+    assert "collect_checks, app_config" not in body
+
+
+def test_a_saved_provider_is_immediately_visible_to_the_doctor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Behavioural counterpart: the checks must see what the console just wrote.
+
+    The static guard above can be satisfied by a rename; this one runs the real
+    path — write a block, rebuild the config, run the checks — and asserts the
+    credential row flips. It is the difference between "the variable name is
+    right" and "a fresh install's first provider is actually reported as usable".
+    """
+    from ubt.api.provider_editor import upsert_provider
+    from ubt.cli.commands.doctor import collect_checks
+    from ubt.core.config import UBTConfig
+
+    (tmp_path / "ubt.toml").write_text('[defaults]\nqe_engine = "heuristic"\n', encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("UBT_PROVIDER", raising=False)
+    monkeypatch.delenv("UBT_LLM_API_KEY", raising=False)
+
+    before = {c.code: c for c in collect_checks(UBTConfig.from_env(), probe=False)}
+    assert before["api_key"].status == "FAIL"
+    assert before["models"].status == "FAIL"
+
+    upsert_provider(
+        "first",
+        {
+            "base_url": "https://api.example.com/v1",
+            "api_mode": "openai-chat",
+            "draft_model": "the-model",
+            "api_key": "sk-user",
+        },
+        allow_credential=True,
+        make_default=True,
+    )
+
+    after = {c.code: c for c in collect_checks(UBTConfig.from_env(), probe=False)}
+    assert after["api_key"].status == "OK"
+    assert after["models"].status == "OK"
+    assert "the-model" in after["models"].detail

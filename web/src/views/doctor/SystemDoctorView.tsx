@@ -16,6 +16,7 @@ import {
   getDoctor,
   getRuntimeConfig,
   getSystemInfo,
+  setDefaultProvider,
   type DoctorCheck,
   type RuntimeConfig,
   type SystemInfo,
@@ -50,6 +51,8 @@ export function SystemDoctorView() {
   // button and a working one.
   const [editingProvider, setEditingProvider] = useState<string | null | undefined>(undefined)
   const [isPinging, setIsPinging] = useState(false)
+  // Which row is mid-switch, so the button disables instead of firing twice.
+  const [defaultBusy, setDefaultBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -72,6 +75,26 @@ export function SystemDoctorView() {
       setIsPinging(false)
     }
   }, [])
+
+  // Declared *after* `load`: it calls that binding, and a callback defined
+  // above it would close over the uninitialized const (a TDZ ReferenceError
+  // at first click that neither tsc nor oxlint reports).
+  const handleMakeDefault = useCallback(
+    async (name: string) => {
+      setDefaultBusy(name)
+      setError(null)
+      try {
+        await setDefaultProvider(name)
+        // Re-read so `is_default` and the active provider both reflect the file.
+        await load(false)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : `Failed to select ${name}`)
+      } finally {
+        setDefaultBusy(null)
+      }
+    },
+    [load],
+  )
 
   useEffect(() => {
     // Mount-time load; `load`'s setStates are the loading flag and the results,
@@ -432,6 +455,25 @@ export function SystemDoctorView() {
                         <span className="type-help text-[var(--ink-muted)]">
                           {t.doctor.freeLabel}
                         </span>
+                      )}
+                      {/* Which block the *file* names as default. Distinct from
+                          "active": UBT_PROVIDER or --provider outranks it, so an
+                          operator whose shell exported a provider had no way to
+                          see what the file would pick without it. */}
+                      {p.is_default ? (
+                        <span className="type-help font-semibold text-[var(--ink-primary)]">
+                          {t.doctor.defaultProviderLabel}
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => void handleMakeDefault(p.name)}
+                          disabled={defaultBusy === p.name}
+                          aria-label={`${t.doctor.activateProvider} ${p.name}`}
+                          className="type-help text-[var(--ink-muted)] hover:text-[var(--ink-primary)] disabled:opacity-50"
+                        >
+                          {t.doctor.activateProvider}
+                        </button>
                       )}
                       <span className="type-help text-[var(--ink-muted)] truncate max-w-[9rem]">
                         {p.draft_model || p.api_mode || '—'}

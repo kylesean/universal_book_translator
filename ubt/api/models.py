@@ -741,6 +741,14 @@ class RuntimeProvider(BaseModel):
 
     name: str
     active: bool = Field(description="True for the provider currently selected")
+    is_default: bool = Field(
+        default=False,
+        description=(
+            "True when [defaults] provider names this block. Distinct from "
+            "``active``: UBT_PROVIDER / --provider outrank the file, so the panel "
+            "must be able to show what the file says separately from what runs"
+        ),
+    )
     available: bool = Field(description="False when the block could not be loaded")
     declared: bool = Field(
         default=False, description="True when the operator declared it in [providers.*]"
@@ -815,6 +823,14 @@ class ProviderEditRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    make_default: bool | None = Field(
+        default=None,
+        description=(
+            "Also write [defaults] provider = name. The console sends this when "
+            "creating a block, because a declared block that nothing points at is "
+            "still a rehearsal — the state a fresh install was stuck in"
+        ),
+    )
     api_key: str | None = Field(
         default=None,
         description=(

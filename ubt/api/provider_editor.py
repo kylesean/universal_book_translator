@@ -61,6 +61,7 @@ from ubt.core.providers import (
     _read_shipped_providers,
     credential_resolution,
     find_config_file,
+    load_defaults_block,
 )
 from ubt.core.router.pricing import endpoint_is_local
 
@@ -313,6 +314,7 @@ def upsert_provider(
     changes: dict[str, Any],
     *,
     allow_credential: bool = False,
+    make_default: bool = False,
 ) -> dict[str, Any]:
     """Create or update one ``[providers.<name>]`` block; returns what was stored.
 
@@ -320,10 +322,18 @@ def upsert_provider(
     field cannot silently drop the block's other settings. A credential already in
     the file is preserved verbatim unless ``changes`` names it, and then only when
     ``allow_credential`` is set (see :func:`credential_write_allowed`).
+
+    ``make_default`` writes ``[defaults] provider = name`` — the step without which
+    a fresh install could never run. Creating a block alone left ``provider`` unset,
+    so the console answered ``can_translate: false`` and the first job became a
+    rehearsal even though the operator had just typed a working endpoint and key.
+    The form passes this on create, where "the block I just made" is unambiguously
+    what the operator wants; :func:`set_default_provider` does the same for an
+    existing one.
     """
     coerced = validate_edit(name, changes, allow_credential=allow_credential)
     cleared = {field for field, value in changes.items() if value is None}
-    if not coerced and not cleared:
+    if not coerced and not cleared and not make_default:
         raise ProviderEditError("no writable field was supplied")
     path = _config_path()
     document = _load_document(path)
@@ -345,9 +355,65 @@ def upsert_provider(
         # from an explicit ``false`` — see CLEARABLE_FIELDS.
         block.pop(field, None)
 
+    if make_default:
+        # The block must exist before it can be named, so this runs after the
+        # table is created above. Written to ``[defaults]`` because that is where
+        # ``UBTConfig.from_env`` looks when neither ``--provider`` nor
+        # ``UBT_PROVIDER`` names one — a complete configuration then lives in the
+        # file rather than in somebody's shell history.
+        _write_default_provider(document, name)
+
     atomic_write_text(path, tomlkit.dumps(document))
     _tighten_permissions(path)
     return read_provider(name)
+
+
+def _write_default_provider(document: tomlkit.TOMLDocument, name: str) -> None:
+    """Point ``[defaults] provider`` at ``name`` inside an already-parsed document."""
+    defaults = document.get("defaults")
+    if defaults is None:
+        defaults = tomlkit.table()
+        document["defaults"] = defaults
+    defaults["provider"] = tomlkit.item(name)
+
+
+def set_default_provider(name: str) -> dict[str, Any]:
+    """Name ``name`` as the provider a run uses when nothing more explicit does.
+
+    Separate from :func:`upsert_provider` because switching which block runs is not
+    an edit to that block: a form submitting an empty diff would otherwise fail
+    with "no writable field was supplied". Refuses a name that is not declared,
+    since ``[defaults] provider`` pointing at nothing makes every run raise
+    ``ProviderNotFoundError`` at startup — the worst failure to leave behind in a
+    config file.
+    """
+    _validate_name(name)
+    path = _config_path()
+    document = _load_document(path)
+    providers = document.get("providers")
+    declared = set(providers.keys()) if isinstance(providers, dict) else set()
+    if name not in declared:
+        raise ProviderEditError(
+            f"{name!r} is not a declared provider; declare it first "
+            f"(declared: {', '.join(sorted(declared)) or 'none'})"
+        )
+    _write_default_provider(document, name)
+    atomic_write_text(path, tomlkit.dumps(document))
+    return {"provider": name}
+
+
+def default_provider_name() -> str | None:
+    """The provider ``[defaults]`` names, or None. Never raises.
+
+    Deliberately does not fall back to ``UBT_PROVIDER`` or the CLI: the console is
+    reporting what the *file* says, and an environment variable that outranks it is
+    a separate fact the panel already surfaces as the active provider.
+    """
+    try:
+        declared = load_defaults_block().get("provider")
+    except Exception:  # a malformed [defaults] is reported by the doctor, not here
+        return None
+    return str(declared) if declared else None
 
 
 def read_provider(name: str) -> dict[str, Any]:

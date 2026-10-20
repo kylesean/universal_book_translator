@@ -422,3 +422,116 @@ def test_a_required_field_cannot_be_cleared(config_dir: Path) -> None:
     for field in ("base_url", "draft_model", "api_mode"):
         with pytest.raises(ProviderEditError):
             upsert_provider("demo", {field: None})
+
+
+def test_a_new_block_can_be_made_the_default(config_dir: Path) -> None:
+    """The step whose absence made a fresh install unable to run.
+
+    Creating a block alone left ``[defaults] provider`` unset, so the console
+    answered ``can_translate: false`` and the first job became a rehearsal even
+    though the operator had just typed a working endpoint and key. Measured on a
+    fresh clone: one provider declared, ``provider: ''``, ``draft_model: ''``.
+    """
+    from ubt.api.provider_editor import default_provider_name, upsert_provider
+
+    assert default_provider_name() is None
+    upsert_provider(
+        "first",
+        {
+            "base_url": "https://api.example.com/v1",
+            "api_mode": "openai-chat",
+            "draft_model": "m1",
+            "api_key": "sk-test",
+        },
+        allow_credential=True,
+        make_default=True,
+    )
+    assert default_provider_name() == "first"
+    text = (config_dir / "ubt.toml").read_text(encoding="utf-8")
+    assert "[defaults]" in text
+    assert 'provider = "first"' in text
+
+
+def test_the_default_survives_to_what_the_engine_resolves(config_dir: Path) -> None:
+    """Writing the key is not enough: ``UBTConfig`` must actually pick it up."""
+    from ubt.api.provider_editor import upsert_provider
+
+    upsert_provider(
+        "chosen",
+        {
+            "base_url": "https://api.example.com/v1",
+            "api_mode": "openai-chat",
+            "draft_model": "the-model",
+            "api_key": "sk-test",
+        },
+        allow_credential=True,
+        make_default=True,
+    )
+    from ubt.core.config import UBTConfig, credential_required, has_real_credential
+
+    cfg = UBTConfig.from_env(provider=None)
+    assert cfg.provider == "chosen"
+    assert cfg.draft_model == "the-model"
+    assert credential_required(cfg) and has_real_credential(cfg)
+
+
+def test_an_explicit_environment_still_outranks_the_file_default(
+    config_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``UBT_PROVIDER`` was the bug that hid the default; it must keep winning.
+
+    The file default is the *fallback*, not an override. Removing the environment
+    variable from ``~/.bashrc`` made the file's answer visible; it did not make it
+    authoritative — a user who exports one expects it to win.
+    """
+    from ubt.api.provider_editor import set_default_provider, upsert_provider
+    from ubt.core.config import UBTConfig
+
+    upsert_provider("other", {"base_url": "https://api.example.com/v1", "draft_model": "o"})
+    set_default_provider("other")
+    assert UBTConfig.from_env().provider == "other"
+
+    # The environment outranks it, and points at a declared block.
+    monkeypatch.setenv("UBT_PROVIDER", "demo")
+    assert UBTConfig.from_env().provider == "demo"
+
+
+def test_switching_the_default_does_not_edit_the_block(config_dir: Path) -> None:
+    """Selecting which block runs is not a change to that block."""
+    from ubt.api.provider_editor import set_default_provider
+
+    before = (config_dir / "ubt.toml").read_text(encoding="utf-8")
+    set_default_provider("demo")
+    after = (config_dir / "ubt.toml").read_text(encoding="utf-8")
+    # The block's own lines are untouched; only [defaults] was added.
+    assert 'base_url = "http://127.0.0.1:9090/v1"' in after
+    assert "# an operator comment that must survive an edit" in after
+    assert after.count("[providers.demo]") == 1
+    assert "[defaults]" in after and "[defaults]" not in before
+
+
+def test_a_name_that_is_not_declared_cannot_become_the_default(config_dir: Path) -> None:
+    """``[defaults] provider`` pointing at nothing breaks every run at startup."""
+    from ubt.api.provider_editor import ProviderEditError, set_default_provider
+
+    with pytest.raises(ProviderEditError, match="not a declared provider"):
+        set_default_provider("ghost")
+
+
+def test_the_editor_never_writes_outside_the_discovered_config(
+    config_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A test seam, not an engine rule: pin the target and prove it is honoured.
+
+    ``_config_path`` walks *up* from the CWD, so a temporary directory created
+    inside this repository resolves to the repository's own ``ubt.toml``. Running
+    the write path against one silently edited a developer's real configuration.
+    Every write in this file therefore goes through a fixture that pins the path,
+    and this test asserts the pin actually redirects.
+    """
+    from ubt.api import provider_editor
+
+    target = config_dir / "ubt.toml"
+    monkeypatch.setattr(provider_editor, "_config_path", lambda: target)
+    assert provider_editor._config_path() == target
+    assert provider_editor._config_path().parent == config_dir

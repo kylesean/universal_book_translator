@@ -384,6 +384,7 @@ export interface TranslationDictionary {
     newProviderNameInvalid: string
     activateProvider: string
     activeProviderLabel: string
+    defaultProviderLabel: string
     createProvider: string
     credentialField: string
     credentialPlaceholder: string

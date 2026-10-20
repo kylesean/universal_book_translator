@@ -749,6 +749,21 @@ export async function saveProvider(
   return res.json()
 }
 
+/**
+ * Make `name` the provider a run uses when nothing more explicit does.
+ *
+ * Writes `[defaults] provider` in `ubt.toml`. This is the step a fresh install
+ * was missing: a declared block that nothing names leaves `provider` unset, so
+ * the first job became a rehearsal even with a working endpoint and key.
+ */
+export async function setDefaultProvider(name: string): Promise<{ provider: string }> {
+  const res = await apiFetch(`${BASE_URL}/system/providers/${encodeURIComponent(name)}/default`, {
+    method: 'PUT',
+  })
+  if (!res.ok) throw await apiError(res, `Failed to make ${name} the default provider`)
+  return res.json()
+}
+
 /** The live security boundary: reachable host, auth gate, and allowed roots. */
 export async function getSystemInfo(): Promise<SystemInfo> {
   const res = await apiFetch(`${BASE_URL}/system/info`)

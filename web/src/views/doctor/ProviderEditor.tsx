@@ -186,6 +186,12 @@ export function ProviderEditor({
         onSaved()
         return
       }
+      // A block nothing points at still runs as a rehearsal: `provider` stays
+      // unset, `draft_model` comes out empty, and the wizard announces mock
+      // output. On create, "the block I just made" is unambiguously what the
+      // operator wants to run, so it becomes the file default in the same save —
+      // one action instead of "create, then discover you also have to select it".
+      if (isCreate) changes.make_default = true
       const stored = await saveProvider(name, changes)
       // Adopt the stored block as the new baseline. Without this the form stays
       // in "create" mode after a successful create: it keeps offering "Create",

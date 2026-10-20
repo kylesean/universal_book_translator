@@ -194,9 +194,17 @@ def register_system_routes(api_app: FastAPI, scope: ApiScope) -> None:
         # "remove the declaration and go back to the safe default". Dropping both
         # would make a mis-declared flag impossible to clear from the console.
         changes = request.model_dump(exclude_unset=True)
+        # ``make_default`` is a control flag, not a field of the block: it selects
+        # which provider runs. Stripped here rather than written into the TOML,
+        # where the loader would reject it as an unknown key.
+        make_default = bool(changes.pop("make_default", False))
         try:
             detail = await asyncio.to_thread(
-                upsert_provider, name, changes, allow_credential=allow_credential
+                upsert_provider,
+                name,
+                changes,
+                allow_credential=allow_credential,
+                make_default=make_default,
             )
         except ProviderEditError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -206,6 +214,36 @@ def register_system_routes(api_app: FastAPI, scope: ApiScope) -> None:
             scope.source.invalidate()
         return ProviderDetailResponse(**detail)
 
+    @api_app.put(
+        "/system/providers/{name}/default",
+        tags=["System"],
+    )
+    async def set_default_provider_route(
+        name: str,
+        http_request: Request,
+        x_api_key: str | None = Header(default=None),
+        ubt_session: str | None = Cookie(default=None),
+    ) -> dict[str, str]:
+        """Make ``name`` the provider a run uses when nothing more explicit does.
+
+        Writes ``[defaults] provider``. Creating a block without this left a fresh
+        install unable to run: the block existed, the console listed it, and
+        ``can_translate`` stayed false because nothing named it.
+
+        A *selection*, not an edit — the request carries no body, so it works for a
+        block the operator did not otherwise change.
+        """
+        from ubt.api.provider_editor import ProviderEditError, set_default_provider
+
+        verify_api_key(x_api_key, ubt_session, _config=app_config)
+        try:
+            result = await asyncio.to_thread(set_default_provider, name)
+        except ProviderEditError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        if scope.source is not None:
+            scope.source.invalidate()
+        return result
+
     @api_app.get("/system/doctor", tags=["System"])
     async def system_doctor(probe: bool = False) -> JSONResponse:
         """Engine Doctor self-check (the ``ubt doctor`` checklist as JSON).
@@ -213,10 +251,16 @@ def register_system_routes(api_app: FastAPI, scope: ApiScope) -> None:
         Reuses the CLI's ``collect_checks`` so the console and the command line
         report the same verdicts. ``probe=true`` additionally contacts the
         provider endpoint (a live network call), so it is off by default.
+
+        Reads the **live** config, not the boot snapshot. ``app_config`` is built
+        once at startup, so a provider saved from the console an instant earlier
+        was invisible here: the form said "saved", the panel below it reported the
+        new provider as active, and this checklist still said ``API key FAIL`` and
+        ``no draft model configured`` — two contradictory statements on one screen.
         """
         from ubt.cli.commands.doctor import _overall_status, _summary, collect_checks
 
-        checks = await asyncio.to_thread(collect_checks, app_config, probe=probe)
+        checks = await asyncio.to_thread(collect_checks, live_config(), probe=probe)
         summary = _summary(checks)
         return JSONResponse(
             {

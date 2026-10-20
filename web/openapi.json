@@ -437,13 +437,92 @@
         }
       }
     },
+    "/system/providers/{name}/default": {
+      "put": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Set Default Provider Route",
+        "description": "Make ``name`` the provider a run uses when nothing more explicit does.\n\nWrites ``[defaults] provider``. Creating a block without this left a fresh\ninstall unable to run: the block existed, the console listed it, and\n``can_translate`` stayed false because nothing named it.\n\nA *selection*, not an edit \u2014 the request carries no body, so it works for a\nblock the operator did not otherwise change.",
+        "operationId": "set_default_provider_route_system_providers__name__default_put",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Set Default Provider Route System Providers  Name  Default Put"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/system/doctor": {
       "get": {
         "tags": [
           "System"
         ],
         "summary": "System Doctor",
-        "description": "Engine Doctor self-check (the ``ubt doctor`` checklist as JSON).\n\nReuses the CLI's ``collect_checks`` so the console and the command line\nreport the same verdicts. ``probe=true`` additionally contacts the\nprovider endpoint (a live network call), so it is off by default.",
+        "description": "Engine Doctor self-check (the ``ubt doctor`` checklist as JSON).\n\nReuses the CLI's ``collect_checks`` so the console and the command line\nreport the same verdicts. ``probe=true`` additionally contacts the\nprovider endpoint (a live network call), so it is off by default.\n\nReads the **live** config, not the boot snapshot. ``app_config`` is built\nonce at startup, so a provider saved from the console an instant earlier\nwas invisible here: the form said \"saved\", the panel below it reported the\nnew provider as active, and this checklist still said ``API key FAIL`` and\n``no draft model configured`` \u2014 two contradictory statements on one screen.",
         "operationId": "system_doctor_system_doctor_get",
         "parameters": [
           {
@@ -5257,6 +5336,18 @@
       },
       "ProviderEditRequest": {
         "properties": {
+          "make_default": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Make Default",
+            "description": "Also write [defaults] provider = name. The console sends this when creating a block, because a declared block that nothing points at is still a rehearsal \u2014 the state a fresh install was stuck in"
+          },
           "api_key": {
             "anyOf": [
               {
@@ -5659,6 +5750,12 @@
             "type": "boolean",
             "title": "Active",
             "description": "True for the provider currently selected"
+          },
+          "is_default": {
+            "type": "boolean",
+            "title": "Is Default",
+            "description": "True when [defaults] provider names this block. Distinct from ``active``: UBT_PROVIDER / --provider outrank the file, so the panel must be able to show what the file says separately from what runs",
+            "default": false
           },
           "available": {
             "type": "boolean",
