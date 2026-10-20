@@ -59,10 +59,33 @@ export function MissionControl() {
   const [totalBlocks, setTotalBlocks] = useState<number>(0)
   const [costUsd, setCostUsd] = useState<number>(0)
   const [avgQe, setAvgQe] = useState<number>(0)
+  // Blocks the skip rule finished without translating them (images, list
+  // markers, short headings). They are excluded from total/completed so the
+  // percentage reflects translation work, and reported separately so the panel
+  // does not appear to be describing a shorter book than the source.
+  const [skippedBlocks, setSkippedBlocks] = useState<number>(0)
+  // Blocks that ended in a failure. The API always carried this; the panel never
+  // rendered it, so a job with 15 failed blocks read as a clean 100%.
+  const [failedBlocks, setFailedBlocks] = useState<number>(0)
+  const [needsHumanBlocks, setNeedsHumanBlocks] = useState<number>(0)
+  // Mirrors of the counters above, for the SSE log tail. The stream callback is
+  // created once and closes over its first render's state, so reading the state
+  // variables directly there would print the initial zeros on a terminal frame
+  // that carries no counters — the "0/0 blocks" bug — and would also need every
+  // counter in the callback's dependency list, re-subscribing the stream on each
+  // frame. Refs are the standard way out: the callback stays stable, the value
+  // is always current.
+  const completedRef = useRef(0)
+  const totalRef = useRef(0)
+  const skippedRef = useRef(0)
+  const failedRef = useRef(0)
   // The engine sends 0.0 as the "nothing scored" sentinel under the heuristic
   // QE engine; a measured average is never exactly 0 in practice (defect bands
   // floor at 0.30), so 0 renders as "not measured" instead of a failing score.
   const qeMeasured = avgQe > 0
+  // The run is over, so its live log can no longer be replayed.
+  const isTerminal =
+    statusStr === 'completed' || statusStr === 'failed' || statusStr === 'cancelled'
   const [jobs, setJobs] = useState<JobSummary[]>([])
   const [resuming, setResuming] = useState(false)
   const [downloading, setDownloading] = useState(false)
@@ -102,10 +125,30 @@ export function MissionControl() {
       if (res.status) setStatusStr(String(res.status))
       if (typeof res.stage === 'string') setStage(res.stage as PipelineStage)
       if (typeof res.progress_percent === 'number') setProgressPct(res.progress_percent)
-      if (typeof res.completed_blocks === 'number') setCompletedBlocks(res.completed_blocks)
-      if (typeof res.total_blocks === 'number') setTotalBlocks(res.total_blocks)
+      if (typeof res.completed_blocks === 'number') {
+        setCompletedBlocks(res.completed_blocks)
+        completedRef.current = res.completed_blocks
+      }
+      if (typeof res.total_blocks === 'number') {
+        setTotalBlocks(res.total_blocks)
+        totalRef.current = res.total_blocks
+      }
       if (typeof res.estimated_cost_usd === 'number') setCostUsd(res.estimated_cost_usd)
       if (typeof res.current_avg_qe === 'number') setAvgQe(res.current_avg_qe)
+      // The new counters have to be read here too, or a finished job — whose
+      // stream is gone — shows no skipped/failed/human counts at all: this
+      // status call is the only hydration that path ever gets.
+      if (typeof res.skipped_blocks === 'number') {
+        setSkippedBlocks(res.skipped_blocks)
+        skippedRef.current = res.skipped_blocks
+      }
+      if (typeof res.failed_blocks === 'number') {
+        setFailedBlocks(res.failed_blocks)
+        failedRef.current = res.failed_blocks
+      }
+      if (typeof res.needs_human_blocks === 'number') {
+        setNeedsHumanBlocks(res.needs_human_blocks)
+      }
       // The engine already phrases a terminal error for the operator
       // (`public_job_error` keeps the actionable types verbatim). Without this
       // read, a failed job was a badge with no reason.
@@ -146,13 +189,38 @@ export function MissionControl() {
         if (typeof frame.total_blocks === 'number') setTotalBlocks(frame.total_blocks)
         if (typeof frame.estimated_cost_usd === 'number') setCostUsd(frame.estimated_cost_usd)
         if (typeof frame.current_avg_qe === 'number') setAvgQe(frame.current_avg_qe)
+        if (typeof frame.completed_blocks === 'number') completedRef.current = frame.completed_blocks
+        if (typeof frame.total_blocks === 'number') totalRef.current = frame.total_blocks
+        if (typeof frame.skipped_blocks === 'number') {
+          setSkippedBlocks(frame.skipped_blocks)
+          skippedRef.current = frame.skipped_blocks
+        }
+        if (typeof frame.failed_blocks === 'number') {
+          setFailedBlocks(frame.failed_blocks)
+          failedRef.current = frame.failed_blocks
+        }
+        if (typeof frame.needs_human_blocks === 'number') setNeedsHumanBlocks(frame.needs_human_blocks)
 
         // Log the engine's own message when it has one — the stream is a build
         // log, not a counter echo. The counters stay on the line as the tail so
         // a frame without a message still reads as progress.
         const level: LogLevel = frame.error ? 'ERROR' : frame.status === 'failed' ? 'ERROR' : 'INFO'
-        const qePart = (frame.current_avg_qe ?? 0) > 0 ? `QE ${(frame.current_avg_qe ?? 0).toFixed(3)}` : 'QE not measured'
-        const counters = `${frame.completed_blocks ?? 0}/${frame.total_blocks ?? 0} blocks · ${qePart}`
+        const qePart =
+          (frame.current_avg_qe ?? 0) > 0
+            ? `QE ${(frame.current_avg_qe ?? 0).toFixed(3)}`
+            : // "not measured" is a fact about the QE engine (heuristic runs score
+              // nothing), not a failure — say which, so the word does not read as
+              // an error on an otherwise clean run.
+              'QE n/a (heuristic)'
+        // A terminal frame now carries its own counters; when it does not, keep
+        // the last known ones instead of printing 0/0.
+        const done = frame.completed_blocks ?? completedRef.current
+        const total = frame.total_blocks ?? totalRef.current
+        const skippedPart = skippedRef.current > 0 ? ` (+${skippedRef.current} skipped)` : ''
+        const failPart = (frame.failed_blocks ?? failedRef.current) > 0
+          ? ` · ${frame.failed_blocks ?? failedRef.current} failed`
+          : ''
+        const counters = `${done}/${total} blocks${skippedPart}${failPart} · ${qePart}`
         const text = frame.error
           ? `ERROR ${frame.error}`
           : frame.message
@@ -574,8 +642,40 @@ export function MissionControl() {
           <div className="text-xl font-bold font-mono text-[var(--ink-primary)] mt-0.5">
             {completedBlocks} <span className="text-xs text-[var(--ink-muted)] font-normal">/ {totalBlocks || '—'}</span>
           </div>
+          {/* The denominator counts translatable blocks only; skipped ones are
+              reported beside it so the panel does not look like it is describing
+              a shorter book than the source. */}
+          {skippedBlocks > 0 && (
+            <div className="text-xs font-mono text-[var(--ink-muted)] mt-0.5">
+              +{skippedBlocks} {t.mission.skippedBlocks}
+            </div>
+          )}
+          {/* Failures and the human queue were in the API and never rendered: a
+              job that ended with 15 blocks needing a person read as a clean
+              100%. Shown next to the completed count, and red when non-zero. */}
+          {(failedBlocks > 0 || needsHumanBlocks > 0) && (
+            <div className="text-xs font-mono mt-0.5 text-[#b45309]">
+              {failedBlocks > 0 && (
+                <span>
+                  {failedBlocks} {t.mission.failedBlocks}
+                </span>
+              )}
+              {failedBlocks > 0 && needsHumanBlocks > 0 ? ' · ' : null}
+              {needsHumanBlocks > 0 && (
+                <span>
+                  {needsHumanBlocks} {t.mission.needsHumanBlocks}
+                </span>
+              )}
+            </div>
+          )}
           <div className="text-xs text-[#15803d] font-mono mt-1.5 font-medium">
-            {qeMeasured ? `Avg QE ${avgQe.toFixed(3)}` : <span title="No semantic scoring ran (heuristic QE engine)">QE not measured</span>}
+            {qeMeasured ? (
+              `Avg QE ${avgQe.toFixed(3)}`
+            ) : (
+              <span title="The heuristic QE engine scores nothing; enable qe_engine = 'tiered' for a semantic score.">
+                {t.mission.qeNotMeasuredHeuristic}
+              </span>
+            )}
           </div>
         </div>
 
@@ -649,7 +749,13 @@ export function MissionControl() {
           className="flex-1 p-3 overflow-y-auto font-mono text-xs leading-relaxed text-[var(--ink-primary)] space-y-1 select-text bg-[var(--paper-surface)]"
         >
           {logs.length === 0 ? (
-            <div className="text-[var(--ink-muted)] italic">{t.mission.waitingStream}</div>
+            // A finished job has no live stream to wait for: the server drops
+            // terminal jobs from memory, so ``/stream`` answers 404 and this
+            // placeholder would sit on "waiting for the first frame" forever —
+            // on a job that already delivered its files. Say which case it is.
+            <div className="text-[var(--ink-muted)] italic">
+              {isTerminal ? t.mission.logUnavailableTerminal : t.mission.waitingStream}
+            </div>
           ) : filteredLogs.length === 0 ? (
             <div className="text-[var(--ink-muted)] italic">{t.mission.noMatch}</div>
           ) : (

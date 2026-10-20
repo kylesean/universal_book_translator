@@ -143,12 +143,42 @@ def progress_frame(snapshot: dict[str, Any], status: str) -> str:
     )
 
 
-def terminal_frame(status: str, output_file: str | None, error: str | None) -> str:
-    """The one terminal ``/stream`` frame, shared by both deployment modes."""
-    return (
-        f"event: {status}\n"
-        f"data: {json.dumps({'status': status, 'output_file': output_file, 'error': error})}\n\n"
-    )
+def terminal_frame(
+    status: str,
+    output_file: str | None,
+    error: str | None,
+    *,
+    counters: dict[str, Any] | None = None,
+) -> str:
+    """The one terminal ``/stream`` frame, shared by both deployment modes.
+
+    ``counters`` carries the final block totals. Without them the console's log
+    line fell back to ``0/0 blocks``: the terminal frame used to hold only
+    ``status``/``output_file``/``error``, so a finished job's last line read
+    "completed · 0/0 blocks" — the one line a user looks at to confirm the run,
+    reporting that zero blocks were processed.
+    """
+    payload: dict[str, Any] = {"status": status, "output_file": output_file, "error": error}
+    if counters:
+        payload.update(
+            {
+                key: counters[key]
+                for key in (
+                    "total_blocks",
+                    "completed_blocks",
+                    "skipped_blocks",
+                    "failed_blocks",
+                    "needs_human_blocks",
+                    "blocked_human_blocks",
+                    "processed_blocks",
+                    "progress_percent",
+                    "estimated_cost_usd",
+                    "current_avg_qe",
+                )
+                if key in counters
+            }
+        )
+    return f"event: {status}\ndata: {json.dumps(payload)}\n\n"
 
 
 def output_path_claimant(

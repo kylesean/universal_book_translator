@@ -1165,6 +1165,11 @@ export interface components {
              */
             total_blocks: number;
             /**
+             * Skipped Blocks
+             * @default 0
+             */
+            skipped_blocks: number;
+            /**
              * Completed Blocks
              * @default 0
              */

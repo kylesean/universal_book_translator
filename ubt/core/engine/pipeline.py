@@ -698,6 +698,7 @@ class PipelineOrchestrator:
         """
         stats = await asyncio.to_thread(ledger.get_job_stats, job_id)
         total = int(stats.get("total", 0))
+        skipped = int(stats.get("skipped", 0))
         completed = int(stats.get("completed", 0))
         drafted = int(stats.get("drafted", 0))
         repaired = int(stats.get("repaired", 0))
@@ -723,6 +724,7 @@ class PipelineOrchestrator:
             event_type=event_type,
             job_id=job_id,
             total_blocks=total,
+            skipped_blocks=skipped,
             completed_blocks=completed,
             drafted_blocks=drafted,
             repaired_blocks=repaired,

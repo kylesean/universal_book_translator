@@ -1932,3 +1932,64 @@ def test_the_panel_help_says_a_protocol_still_needs_a_model_id() -> None:
     # And the two groups are rendered separately, not as one flat list.
     assert "p.is_protocol" in source
     assert "p.alias_of" in source
+
+
+def test_the_terminal_stream_frame_carries_the_final_counters() -> None:
+    """The last log line of a finished job said "completed · 0/0 blocks".
+
+    ``terminal_frame`` held only ``status``/``output_file``/``error``, so the
+    console fell back to ``?? 0`` for both counts — on the one line a user reads
+    to confirm the run.
+    """
+    import json
+
+    from ubt.api.routes.shared import terminal_frame
+
+    frame = terminal_frame(
+        "completed",
+        "book.zh.pdf",
+        None,
+        counters={
+            "total_blocks": 105,
+            "completed_blocks": 90,
+            "skipped_blocks": 154,
+            "needs_human_blocks": 15,
+            "failed_blocks": 0,
+            "progress_percent": 100.0,
+        },
+    )
+    payload = json.loads(frame.split("data: ", 1)[1].strip())
+    assert payload["status"] == "completed"
+    assert payload["total_blocks"] == 105
+    assert payload["completed_blocks"] == 90
+    assert payload["skipped_blocks"] == 154
+    assert payload["needs_human_blocks"] == 15
+
+    # A caller that passes nothing still gets a valid frame (older clients and
+    # the failed-before-start path have no snapshot to send).
+    bare = json.loads(terminal_frame("failed", None, "boom").split("data: ", 1)[1].strip())
+    assert bare == {"status": "failed", "output_file": None, "error": "boom"}
+
+
+def test_the_panel_renders_failures_and_the_human_queue() -> None:
+    """The API always carried them; the panel never showed them.
+
+    A job ending with 15 blocks routed to a person rendered as a clean 100%, and
+    the number existed only in ``/status``.
+    """
+    repo = _REPO_ROOT
+    view = repo / "web" / "src" / "views" / "mission-control" / "MissionControl.tsx"
+    if not view.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+    source = view.read_text(encoding="utf-8")
+
+    # Counters are folded from the stream and rendered.
+    for field in ("needs_human_blocks", "failed_blocks", "skipped_blocks"):
+        assert field in source, f"{field} is not read from the stream"
+    assert "needsHumanBlocks > 0" in source
+    assert "failedBlocks > 0" in source
+    assert "skippedBlocks > 0" in source
+
+    # And the zero-fallback that produced "0/0 blocks" is gone from the log line.
+    assert "frame.completed_blocks ?? completedRef.current" in source
+    assert "${frame.completed_blocks ?? 0}/${frame.total_blocks ?? 0}" not in source

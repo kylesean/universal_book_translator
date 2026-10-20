@@ -4235,6 +4235,11 @@
             "title": "Total Blocks",
             "default": 0
           },
+          "skipped_blocks": {
+            "type": "integer",
+            "title": "Skipped Blocks",
+            "default": 0
+          },
           "completed_blocks": {
             "type": "integer",
             "title": "Completed Blocks",

@@ -91,6 +91,11 @@ class ProgressSnapshot(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     total_blocks: int = 0
+    #: Blocks the skip rule marked done without translating them. Excluded from
+    #: ``total_blocks`` and from ``processed_blocks``: they are not work, and
+    #: counting them made two books with identical translation load report wildly
+    #: different progress depending on how many images they had.
+    skipped_blocks: int = 0
     completed_blocks: int = 0
     repaired_blocks: int = 0
     failed_blocks: int = 0
@@ -155,6 +160,7 @@ class ProgressSnapshot(BaseModel):
         )
         return cls(
             total_blocks=event.total_blocks,
+            skipped_blocks=event.skipped_blocks,
             completed_blocks=event.completed_blocks,
             repaired_blocks=event.repaired_blocks,
             failed_blocks=event.failed_blocks,
@@ -195,6 +201,10 @@ class ProgressSnapshot(BaseModel):
         stage = stage_raw if stage_raw in _PIPELINE_STAGES else None
         return cls(
             total_blocks=total,
+            # Carried through: the query excludes skipped blocks from
+            # ``total``/``completed``, and the panel needs the skipped count to
+            # explain why the denominator is smaller than the source block count.
+            skipped_blocks=int(stats.get("skipped", 0)),
             completed_blocks=completed,
             repaired_blocks=int(stats.get("repaired", 0)),
             failed_blocks=failed,

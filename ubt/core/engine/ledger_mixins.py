@@ -478,14 +478,18 @@ class LedgerJobsMixin(_LedgerHost):
             cursor = conn.execute(
                 f"""
                 SELECT
-                    COUNT(*) as total,
-                    SUM(CASE WHEN status IN ('mtqe_passed', 'repaired') THEN 1 ELSE 0 END) as completed,
+                    COUNT(*) as total_all,
+                    SUM(CASE WHEN COALESCE(skip_translate, 0) = 1 THEN 1 ELSE 0 END) as skipped,
+                    SUM(CASE WHEN COALESCE(skip_translate, 0) = 0 THEN 1 ELSE 0 END) as total,
+                    SUM(CASE WHEN status IN ('mtqe_passed', 'repaired')
+                              AND COALESCE(skip_translate, 0) = 0 THEN 1 ELSE 0 END) as completed,
                     SUM(CASE WHEN status = 'drafted' THEN 1 ELSE 0 END) as drafted,
                     SUM(CASE WHEN status = 'repaired' THEN 1 ELSE 0 END) as repaired,
                     SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
                     SUM(CASE WHEN status = 'needs_human' THEN 1 ELSE 0 END) as needs_human,
                     SUM(CASE WHEN status = 'blocked_human' THEN 1 ELSE 0 END) as blocked_human,
-                    AVG(CASE WHEN {QE_SCORED_SQL} THEN mtqe_score ELSE NULL END) as avg_score
+                    AVG(CASE WHEN {QE_SCORED_SQL} AND COALESCE(skip_translate, 0) = 0
+                             THEN mtqe_score ELSE NULL END) as avg_score
                 FROM blocks
                 WHERE job_id = ?
                 """,  # noqa: S608 — policy constant, not user input
@@ -511,7 +515,18 @@ class LedgerJobsMixin(_LedgerHost):
 
             conn.execute("COMMIT;")
             return {
+                # ``total``/``completed`` count only blocks that could be
+                # translated. Skipped blocks (images, list markers, short
+                # headings — 154 of 259 on the reference job) are marked
+                # ``mtqe_passed`` by the skip rule without any work, so counting
+                # them inflated both sides of the fraction equally: the panel
+                # reported "154/259 = 59.5%" for a job with 90 real translated
+                # blocks out of 105, and different books got different-looking
+                # progress for identical work depending on how many images they
+                # contained.
                 "total": row["total"] or 0,
+                "total_all": row["total_all"] or 0,
+                "skipped": row["skipped"] or 0,
                 "completed": row["completed"] or 0,
                 "drafted": row["drafted"] or 0,
                 "repaired": row["repaired"] or 0,

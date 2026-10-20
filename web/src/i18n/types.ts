@@ -188,6 +188,10 @@ export interface TranslationDictionary {
     openWorkbench: string
     progress: string
     completedPages: string
+    skippedBlocks: string
+    failedBlocks: string
+    needsHumanBlocks: string
+    qeNotMeasuredHeuristic: string
     queuePosition: string
     totalSpend: string
     executionState: string
@@ -200,6 +204,7 @@ export interface TranslationDictionary {
     sseStream: string
     bufferedLines: string
     waitingStream: string
+    logUnavailableTerminal: string
     queueTitle: string
     queueEmpty: string
     colJob: string

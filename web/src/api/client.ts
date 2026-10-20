@@ -96,6 +96,9 @@ export interface ProgressStreamFrame {
   message?: string | null
   progress_percent?: number
   total_blocks?: number
+  /** Blocks the skip rule finished without translating them (images, list
+   * markers, short headings). Excluded from total/completed. */
+  skipped_blocks?: number
   completed_blocks?: number
   processed_blocks?: number
   repaired_blocks?: number

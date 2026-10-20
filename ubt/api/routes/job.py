@@ -85,6 +85,38 @@ def _ledger_page_scope(ledger: Any, job_id: str) -> str | None:
     return page_scope_label(ledger.get_job_metadata_value(job_id, "selected_pages"))
 
 
+def _progress_from_ledger(db_dir: Path, job_id: str) -> dict[str, Any] | None:
+    """A terminal job's progress rebuilt from its ledger, or ``None``.
+
+    The in-memory snapshot a finished job carries was folded from the events it
+    emitted while running, so it preserves whatever counters that code produced
+    at the time — including a denominator that counted skipped blocks. A job
+    that finished before a fix kept reporting the old numbers forever, because
+    nothing recomputed them. The ledger is the durable record and the query
+    behind it is current, so a terminal job is rebuilt from there.
+
+    Returns ``None`` for anything that cannot be read (no ledger, a malformed
+    row): the endpoint must still answer, and a stale-but-valid snapshot beats a
+    500.
+    """
+    from ubt.core.engine.ledger import SQLiteJobLedger
+    from ubt.core.engine.progress import ProgressSnapshot
+
+    db_path = db_dir / f"{job_id}.sqlite"
+    if not db_path.exists():
+        return None
+    try:
+        with SQLiteJobLedger(db_path, read_only=True) as ledger:
+            snap = ledger.get_job_snapshot(job_id)
+            if not snap:
+                return None
+            return ProgressSnapshot.from_ledger(
+                snap, lambda key: ledger.get_job_metadata_value(job_id, key)
+            ).model_dump()
+    except Exception:  # a broken ledger must not break /status
+        return None
+
+
 #: The console's built index.html: the SPA shell the browser-navigation branch
 #: of ``GET /jobs`` serves. Resolved from the package root (``ubt/api/static``),
 #: not this file's directory -- the route modules live one level below since the
@@ -869,8 +901,19 @@ def register_job_routes(
                 )
         record = manager.get_job(valid_id)
         if record:
+            # A terminal job's in-memory snapshot was folded from the events it
+            # emitted at the time, so it carries whatever denominator the code
+            # had while it ran — a finished job kept reporting the old
+            # ``244/259`` long after the query behind it had been corrected. A
+            # terminal record has a ledger, and the ledger is the source of
+            # truth, so rebuild from it.
+            progress_payload = record.progress.model_dump()
+            if record.status in TERMINAL_JOB_STATUSES:
+                ledger_progress = _progress_from_ledger(app_config.db_dir, valid_id)
+                if ledger_progress is not None:
+                    progress_payload = ledger_progress
             return JobStatusResponse(
-                **public_progress(record.progress.model_dump()),
+                **public_progress(progress_payload),
                 job_id=record.job_id,
                 status=record.status,
                 created_at=record.created_at,
