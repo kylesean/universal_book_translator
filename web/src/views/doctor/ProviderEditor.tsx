@@ -21,37 +21,35 @@ interface ProviderEditorProps {
 }
 
 /**
- * The capability flags, split by whether the engine can discover them itself.
+ * The capability fields this form edits — and the reason there are only two.
  *
- * Only a fact the engine cannot learn earns a control (see the reasoning in
- * ``ubt/core/config.py`` next to these fields):
+ * A capability earns a control only when the engine cannot discover it:
  *
- * - ``REQUIRED_FLAGS`` — a rejected system role is a 400 no self-heal rule can
- *   fix, because the fix is a decision (merge into the user turn), not a dropped
- *   parameter. The job fails outright, so this is asked plainly.
- * - ``OPTIONAL_FLAGS`` — a rejected temperature or reasoning effort is dropped by
- *   the self-heal and then remembered per model, so the entire cost of not
- *   declaring it is one failed call per model per process. Asked only under
- *   "advanced", for an operator who wants to skip that round-trip.
+ * - ``supports_system_prompt`` — a rejected system role is a 400 no self-heal
+ *   rule can fix, because the fix (merge the system text into the user turn) is a
+ *   decision, not a dropped parameter. The job fails outright, so it is asked
+ *   plainly.
+ * - ``supports_vision`` — a model that cannot read images fails every visual
+ *   repair attempt, per block. Declaring it avoids a repeated cost.
+ *
+ * ``supports_temperature`` and ``supports_reasoning_effort`` have no control here
+ * on purpose. A rejected one is dropped by the 400 self-heal and then remembered
+ * per model (measured: four blocks take five requests, and the parameter never
+ * reappears), so a control could only ever save that single round-trip — while
+ * asking an operator to answer a question the engine answers itself. The flags
+ * remain in ``ModelProfile`` and remain settable in a provider block; they are
+ * simply not a form field. See ``ubt/core/config.py`` for the full reasoning.
  */
-const REQUIRED_FLAGS = [
+const CAPABILITY_FIELDS = [
   { field: 'supports_system_prompt', labelKey: 'capabilitySystem', noteKey: 'capabilitySystemNote' },
 ] as const
 
-const OPTIONAL_FLAGS = [
-  { field: 'supports_temperature', labelKey: 'capabilityTemperature', noteKey: null },
-  { field: 'supports_reasoning_effort', labelKey: 'capabilityReasoning', noteKey: null },
-] as const
+/** The system-prompt control renders as a two-way choice with these labels. */
+type FlagField = 'supports_system_prompt' | 'supports_vision'
 
-const ALL_FLAGS = [...REQUIRED_FLAGS, ...OPTIONAL_FLAGS] as const
-
-type FlagField = (typeof ALL_FLAGS)[number]['field'] | 'supports_vision'
-
-/** Every capability field the form can submit, including the standalone checkbox. */
-const SUBMITTED_FLAGS = [
-  ...ALL_FLAGS.map((flag) => flag.field),
-  'supports_vision',
-] as const satisfies readonly FlagField[]
+/** Every capability field the form can submit. */
+const SUBMITTED_FLAGS = ['supports_system_prompt', 'supports_vision'] as const satisfies
+  readonly FlagField[]
 
 /** Which text fields the form edits, and how each is labelled. */
 const TEXT_FIELDS = [
@@ -164,9 +162,9 @@ export function ProviderEditor({
           changes[field] = value.trim()
         }
       }
-      // ``ALL_FLAGS`` covers the two groups only; ``supports_vision`` is a
-      // separate checkbox, so it is listed explicitly. Walking ALL_FLAGS alone
-      // meant the checkbox rendered and then never reached the request.
+      // Every rendered capability control, in one list. ``supports_vision`` is a
+      // checkbox rather than a select, and walking only the select group once made
+      // it render, toggle and then never reach the request.
       for (const field of SUBMITTED_FLAGS) {
         const value = flags[field]
         const stored = detail?.[field]
@@ -354,7 +352,7 @@ export function ProviderEditor({
           {/* Required: the engine cannot discover this one. A rejected system role
               is a 400 with no self-heal (the fix is a merge decision), so the job
               fails rather than degrades. */}
-          {REQUIRED_FLAGS.map(({ field, labelKey, noteKey }) => (
+          {CAPABILITY_FIELDS.map(({ field, labelKey, noteKey }) => (
             <div key={field} className="mt-1.5">
               <div className="flex items-center justify-between gap-3">
                 <span className="type-value">{t.doctor[labelKey]}</span>
@@ -399,45 +397,19 @@ export function ProviderEditor({
             </span>
           </label>
 
-          {/* Advanced: the two the engine learns on its own. Collapsed because
-              asking an operator to answer a question the engine answers itself was
-              the design error; the control stays for skipping one round-trip. */}
-          <details className="mt-2.5">
-            <summary className="cursor-pointer type-help font-mono text-[var(--ink-muted)] hover:text-[var(--ink-primary)] select-none">
-              {t.doctor.capabilityAdvanced}
-            </summary>
-            <p className="type-help text-[var(--ink-muted)] mt-1 leading-relaxed">
-              {t.doctor.capabilityAdvancedHelp}
-            </p>
-            <div className="mt-1.5 space-y-2">
-              {OPTIONAL_FLAGS.map(({ field, labelKey }) => (
-                <div key={field} className="flex items-center justify-between gap-3">
-                  <span className="type-value">{t.doctor[labelKey]}</span>
-                  {/* Three states, and the default is the interesting one:
-                      "auto" sends the parameter and lets a 400 teach the engine;
-                      "never" skips that round-trip; "always" forces it for a
-                      gateway the engine would otherwise learn to omit it from. */}
-                  <select
-                    value={flags[field] === undefined ? '' : String(flags[field])}
-                    onChange={(event) => {
-                      const raw = event.target.value
-                      setFlags((prev) => {
-                        const next = { ...prev }
-                        if (raw === '') delete next[field]
-                        else next[field] = raw === 'true'
-                        return next
-                      })
-                    }}
-                    className="shrink-0 rounded-[4px] border border-[var(--paper-border)] bg-[var(--paper-bg)] px-1.5 py-0.5 type-help font-mono"
-                  >
-                    <option value="">{t.doctor.capabilityAutoLearn}</option>
-                    <option value="false">{t.doctor.capabilityNever}</option>
-                    <option value="true">{t.doctor.capabilityAlways}</option>
-                  </select>
-                </div>
-              ))}
-            </div>
-          </details>
+          {/* No temperature / reasoning-effort controls, deliberately.
+
+              Both are recovered by the 400 self-heal and then remembered per
+              model, so the engine already knows what this form would ask. The
+              control that existed here only ever saved one round-trip, and it made
+              an operator answer a question the engine answers itself.
+
+              The engine keeps ``ModelProfile.supports_temperature`` and
+              ``supports_reasoning_effort``: they decide whether a parameter is
+              *sent*, and without them a rejected parameter would be re-sent on
+              every block. The flags are still settable in a provider block for the
+              operator who wants to skip that first 400 — they are simply no longer
+              a form field. */}
         </div>
 
         <label className="flex items-center gap-2 cursor-pointer pt-1 border-t border-[var(--paper-border)]">

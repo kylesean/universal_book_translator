@@ -453,8 +453,6 @@ export const en: TranslationDictionary = {
     capabilityTitle: 'Declared capability',
     capabilityHelp:
       'What this endpoint accepts on the wire. Every flag here is a statement you make, not a guess the engine makes from the model name.',
-    capabilityTemperature: 'Accepts temperature',
-    capabilityReasoning: 'Accepts reasoning effort',
     capabilitySystem: 'Independent system turn',
     capabilitySystemNote:
       'Some endpoints reject a separate system message. The engine cannot probe this: merging the system text into the user turn is a decision, not a parameter it can drop. If unsure, leave it as the safe default.',
@@ -464,12 +462,7 @@ export const en: TranslationDictionary = {
     capabilityVisionNote:
       'Image input is required for visual-scalpel repair, and it sends page images to the endpoint.',
     capabilityUndeclared: 'not declared (safe default)',
-    capabilityAdvanced: 'Parameter compatibility (usually leave alone)',
-    capabilityAdvancedHelp:
-      'A rejected temperature or reasoning effort is dropped automatically on the first 400 and never sent again for that model. Leaving these on "auto learn" costs one failed call per model per process restart; declaring "never send" skips even that.',
-    capabilityAutoLearn: 'auto learn',
-    capabilityNever: 'never send',
-    capabilityAlways: 'always send',
+
     baseUrl: 'Base URL',
     apiMode: 'Wire protocol',
     apiTimeout: 'Timeout (s)',

@@ -42,18 +42,29 @@
 # These describe what the endpoint ACCEPTS on the wire. The engine reads them to
 # decide what to send; it does not infer any of them from the model name.
 #
-#   supports_temperature       = false   # the o1/o3/gpt-5 families reject it
-#   supports_reasoning_effort  = true    # also leaves the output-token cap unset
+# Two of them are worth setting:
+#
 #   supports_system_prompt     = true    # false merges the system turn into user
 #   supports_vision            = true    # required for visual-scalpel repair
+#
 #   extraction_strategy        = "auto"  # auto | xml_tag | raw | cp
 #   deployment_backend         = "ollama"  # enables one local retry on 401/404
+#
+# Two more exist but are normally left alone, because the engine discovers them:
+#
+#   supports_temperature       = false   # the o1/o3/gpt-5 families reject it
+#   supports_reasoning_effort  = true    # also leaves the output-token cap unset
+#
+# A rejected temperature or reasoning effort is dropped automatically on the first
+# 400 and then never re-sent for that model, so the cost of not declaring one is a
+# single failed call per model per process. Set them only to skip that round-trip.
+# The console does not offer them: it would be asking a question the engine
+# answers itself.
 #
 # Omitting a flag means "not declared": the engine falls back to a safe default
 # (system turn and temperature accepted; reasoning and vision not claimed).
 # Declaring `false` is a real statement that the endpoint REJECTS the parameter,
-# which is different from omitting the key — the console shows them differently
-# and can clear a declaration back to "not declared".
+# which is different from omitting the key.
 #
 # -----------------------------------------------------------------------------
 # Third-party & Self-hosted Provider Configuration Examples

@@ -1437,15 +1437,17 @@ def test_the_frontend_typecheck_command_actually_checks_something() -> None:
 
 
 def test_the_capability_form_asks_only_what_the_engine_cannot_learn() -> None:
-    """The design error this guard prevents: asking the engine's own question.
+    """Two controls, and the reason the other two are absent.
 
     ``supports_temperature`` and ``supports_reasoning_effort`` are recovered by the
     400 self-heal and then remembered per model (measured: four blocks take five
-    requests, and the parameter never reappears). Presenting them as primary
-    three-state controls made an operator answer something the engine answers
-    itself. They belong under "advanced", where they only save one round-trip.
-    ``supports_system_prompt`` cannot be healed at all — the fix is a merge
-    decision — so it stays a primary control.
+    requests, and the parameter never reappears). A control could only ever save
+    that one round-trip, while asking an operator to answer a question the engine
+    answers itself. They were removed from the form entirely — not moved to an
+    "advanced" group, which still asked the question.
+
+    ``supports_system_prompt`` cannot be healed at all (the fix is a merge
+    decision), so it stays. ``supports_vision`` fails per block, so it stays.
     """
     repo = _REPO_ROOT
     editor = repo / "web" / "src" / "views" / "doctor" / "ProviderEditor.tsx"
@@ -1453,34 +1455,41 @@ def test_the_capability_form_asks_only_what_the_engine_cannot_learn() -> None:
         pytest.skip("web/ frontend is not present in this checkout")
 
     source = editor.read_text(encoding="utf-8")
-    required = source[source.index("const REQUIRED_FLAGS") : source.index("const OPTIONAL_FLAGS")]
-    optional = source[source.index("const OPTIONAL_FLAGS") : source.index("const ALL_FLAGS")]
+    fields = source[source.index("const CAPABILITY_FIELDS") : source.index("type FlagField")]
+    assert "supports_system_prompt" in fields
+    assert "supports_temperature" not in fields
+    assert "supports_reasoning_effort" not in fields
 
-    assert "supports_system_prompt" in required
-    assert "supports_temperature" not in required
-    assert "supports_reasoning_effort" not in required
-    assert "supports_temperature" in optional
-    assert "supports_reasoning_effort" in optional
-    # Vision is its own checkbox, not part of either list: off is safe and costs
-    # only a degraded repair, never a failed job.
-    assert "supports_vision" not in required
-    assert "supports_vision" not in optional
+    # No control at all for the two the engine learns — not even a collapsed one.
+    for gone in (
+        "capabilityTemperature",
+        "capabilityReasoning",
+        "capabilityAutoLearn",
+        "capabilityAdvanced",
+    ):
+        assert gone not in source, f"{gone} is back in the form"
     assert "supports_vision" in source
 
 
-def test_the_advanced_group_explains_what_auto_learn_costs() -> None:
-    """A control whose default is "do nothing" must say what that costs."""
-    repo = _REPO_ROOT
-    editor = repo / "web" / "src" / "views" / "doctor" / "ProviderEditor.tsx"
-    if not editor.exists():
-        pytest.skip("web/ frontend is not present in this checkout")
+def test_the_removed_controls_are_still_engine_fields() -> None:
+    """Removing the form control must not remove the engine's knowledge.
 
-    source = editor.read_text(encoding="utf-8")
-    # The three states are named for what they do, not for a boolean value.
-    assert "capabilityAutoLearn" in source
-    assert "capabilityNever" in source
-    assert "capabilityAlways" in source
-    assert "capabilityAdvancedHelp" in source
+    ``ModelProfile.supports_temperature`` decides whether the parameter is *sent*.
+    Without it a rejected temperature would be re-sent on every block, and the
+    self-heal could only fix the retry, not the next call.
+    """
+    from ubt.core.config import UBTConfig
+    from ubt.core.router.capabilities import ModelProfile
+
+    for field in ("supports_temperature", "supports_reasoning_effort"):
+        assert field in ModelProfile.model_fields, f"{field} left the profile"
+        assert field in UBTConfig.model_fields, f"{field} left the config"
+    # And they are still settable in a provider block, for the operator who wants
+    # to skip the first 400.
+    from ubt.core.providers import PROVIDER_ALLOWED_KEYS
+
+    assert "supports_temperature" in PROVIDER_ALLOWED_KEYS
+    assert "supports_reasoning_effort" in PROVIDER_ALLOWED_KEYS
 
 
 def test_every_rendered_capability_control_is_submitted() -> None:

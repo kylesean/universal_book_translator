@@ -356,17 +356,10 @@ export interface TranslationDictionary {
     savedHint: string
     capabilityTitle: string
     capabilityHelp: string
-    capabilityTemperature: string
-    capabilityReasoning: string
     capabilitySystem: string
     capabilitySystemNote: string
     capabilitySystemAccepted: string
     capabilitySystemMerged: string
-    capabilityAdvanced: string
-    capabilityAdvancedHelp: string
-    capabilityAutoLearn: string
-    capabilityNever: string
-    capabilityAlways: string
     capabilityVision: string
     capabilityVisionNote: string
     capabilityUndeclared: string

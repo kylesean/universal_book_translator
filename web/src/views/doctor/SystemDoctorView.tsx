@@ -280,9 +280,11 @@ export function SystemDoctorView() {
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   {(
+                    // Only the two the operator can actually declare. The
+                      // temperature and reasoning flags are learned by the engine
+                      // and have no form control, so showing them here would
+                      // present an engine assumption as a configuration choice.
                     [
-                      ['supports_temperature', t.doctor.capabilityTemperature],
-                      ['supports_reasoning_effort', t.doctor.capabilityReasoning],
                       ['supports_system_prompt', t.doctor.capabilitySystem],
                       ['supports_vision', t.doctor.capabilityVision],
                     ] as const
