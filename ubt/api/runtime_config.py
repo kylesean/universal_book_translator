@@ -1,0 +1,123 @@
+"""A read-only view of the model/provider configuration actually in force.
+
+The console's "provider matrix" used to show ``GET /model-profiles``, which is
+the engine's *capability preset table* — fourteen hard-coded name patterns
+(``o1``, ``o3``, ``claude``, …) that decide prompt strategy and parameter
+support when a model name matches. Nothing on that list is a configured model:
+on the reference machine the operator runs ``local-gemma4`` / ``gemma4-e4b``,
+which matches none of the fourteen and therefore falls through to the generic
+"Standard LLM" default. The screen was titled "model routing and latency
+matrix" while showing neither routing nor latency.
+
+This module answers the question the operator actually has — *what is my
+engine going to call, and where does that come from?* — without exposing any
+credential and without offering a write path (provider credentials may only
+arrive through the operator's environment; see
+``ubt.core.job_options.overrides_from_request``).
+
+**Credential safety.** ``load_provider_block`` returns the merged block as
+written, and a block may legitimately contain ``api_key = "${OPENCODE_API_KEY}"``
+or even a literal secret. Only fields on :data:`_EXPOSED_FIELDS` are ever read
+out, so a future config key cannot leak by being added to a TOML file.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from ubt.core.config import UBTConfig
+from ubt.core.providers import list_providers, load_provider_block
+from ubt.core.router.registry import get_default_registry
+
+#: Provider-block fields the console may display. Everything else — most
+#: importantly ``api_key``, ``extra_headers`` and any credential — is dropped
+#: even when the block declares it. This is an allow-list on purpose: a deny-list
+#: would leak the next credential field somebody adds to ``providers.toml``.
+_EXPOSED_FIELDS: tuple[str, ...] = (
+    "base_url",
+    "api_mode",
+    "draft_model",
+    "repair_model",
+    "is_free",
+)
+
+
+def _safe_block(name: str) -> dict[str, Any]:
+    """The displayable subset of one provider block; never raises.
+
+    A malformed block must not break the whole page — the operator needs to see
+    the *other* providers and the rest of the diagnostics in order to work out
+    what is wrong.
+    """
+    try:
+        block = load_provider_block(name)
+    except Exception:  # a broken block is reported as unavailable, not fatal
+        return {"available": False}
+    exposed = {
+        key: block[key] for key in _EXPOSED_FIELDS if key in block and block[key] is not None
+    }
+    # ``is_free`` is what tells the operator a run costs nothing; absent means
+    # "not declared", which is not the same as "costs money".
+    exposed.setdefault("is_free", False)
+    exposed["available"] = True
+    return exposed
+
+
+def describe_runtime_config(config: UBTConfig) -> dict[str, Any]:
+    """What the engine will call, which profile that resolves to, and the menu.
+
+    ``active`` is the part the old screen never showed: the provider and models
+    in force *right now*, plus the capability profile the router will pick for
+    the draft model. ``matched_pattern`` is ``None`` when the model name hits no
+    preset and therefore runs on the generic default — which is the common case
+    for a locally hosted model, and worth saying out loud rather than hiding.
+    """
+    registry = get_default_registry()
+    draft_model = config.draft_model or ""
+    resolved = registry.resolve(draft_model) if draft_model else None
+    # ``resolve`` always returns a profile (the wildcard default), so a match is
+    # only real when the pattern is not the catch-all.
+    matched = None if resolved is None or resolved.model_pattern == "*" else resolved.model_pattern
+
+    active = {
+        "provider": config.provider or "",
+        "draft_model": draft_model,
+        "repair_model": config.repair_model or "",
+        "base_url": config.base_url or "",
+        "api_mode": config.api_mode or "",
+        "matched_pattern": matched,
+        "prompt_strategy": resolved.prompt_strategy.value if resolved else "",
+        "display_name": resolved.display_name if resolved else "",
+    }
+
+    # Split the menu into what the operator declared and what ships with the
+    # engine. ``list_providers`` returns all three kinds at once — declared
+    # blocks, shipped wire protocols (``openai-chat``) and bare aliases
+    # (``chat``, ``claude``, ``responses``) — and rendering them as one list put
+    # seven aliases above the operator's own six entries, which is how a
+    # seventeen-row wall appears for a six-provider config.
+    from ubt.core.providers import PROTOCOL_ALIASES, declared_provider_names
+
+    declared = declared_provider_names()
+    providers: list[dict[str, Any]] = []
+    for name in list_providers():
+        block = _safe_block(name)
+        providers.append(
+            {
+                "name": name,
+                "active": name == config.provider,
+                "available": block.pop("available", False),
+                "declared": name in declared,
+                "is_alias": name in PROTOCOL_ALIASES,
+                **block,
+            }
+        )
+
+    return {
+        "active": active,
+        "providers": providers,
+        # The operator cannot change these from the console, and the reason is a
+        # security boundary rather than an omission — say so where they will
+        # look for the control.
+        "provider_config_source": "ubt.toml [providers.<name>] or UBT_* environment variables",
+    }

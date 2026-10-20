@@ -245,6 +245,19 @@ def list_providers(custom_path: Path | str | None = None) -> list[str]:
     return sorted(names)
 
 
+def declared_provider_names(custom_path: Path | str | None = None) -> set[str]:
+    """Names the operator declared in ``[providers.*]``, excluding shipped ones.
+
+    ``list_providers`` merges three populations — the operator's blocks, the
+    shipped wire protocols and the bare aliases — which is right for validation
+    ("is this name usable?") but wrong for a configuration screen: it renders a
+    seventeen-row list for a six-provider config. This returns just the first
+    population.
+    """
+    declared = _read_toml(custom_path).get("providers", {})
+    return {str(k) for k in declared} if isinstance(declared, dict) else set()
+
+
 def load_provider_block(name: str, custom_path: Path | str | None = None) -> dict[str, Any]:
     """Resolve ``name`` to a dictionary of config fields.
 

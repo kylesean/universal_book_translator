@@ -666,3 +666,61 @@ class TMListResponse(BaseModel):
 
     total: int
     entries: list[TMEntryItem]
+
+
+class RuntimeActiveModel(BaseModel):
+    """The provider and models the engine will actually call, right now."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    provider: str = Field(description="Selected provider name (UBT_PROVIDER / --provider)")
+    draft_model: str = Field(description="Model used for drafting; empty when unconfigured")
+    repair_model: str = Field(description="Model used for repair; empty when unconfigured")
+    base_url: str = Field(description="Endpoint the selected provider resolves to")
+    api_mode: str = Field(description="Wire protocol (openai-chat, openai-responses, …)")
+    matched_pattern: str | None = Field(
+        default=None,
+        description=(
+            "Capability profile this model matched, or null when it fell through to "
+            "the generic default (common for a locally hosted model)"
+        ),
+    )
+    prompt_strategy: str = Field(description="Prompt strategy the matched profile selects")
+    display_name: str = Field(description="Human-readable name of the resolved profile")
+
+
+class RuntimeProvider(BaseModel):
+    """One declared provider, with credentials deliberately omitted."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    name: str
+    active: bool = Field(description="True for the provider currently selected")
+    available: bool = Field(description="False when the block could not be loaded")
+    declared: bool = Field(
+        default=False, description="True when the operator declared it in [providers.*]"
+    )
+    is_alias: bool = Field(
+        default=False, description="True for a bare protocol alias (chat, claude, responses)"
+    )
+    base_url: str | None = None
+    api_mode: str | None = None
+    draft_model: str | None = None
+    repair_model: str | None = None
+    is_free: bool = Field(default=False, description="Declared free (no billable spend)")
+
+
+class RuntimeConfigResponse(BaseModel):
+    """Read-only model/provider configuration actually in force.
+
+    Credentials are never included: provider blocks are filtered through an
+    allow-list before they reach this model.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    active: RuntimeActiveModel
+    providers: list[RuntimeProvider]
+    provider_config_source: str = Field(
+        description="Where provider settings live (they cannot be edited from the console)"
+    )

@@ -10,7 +10,7 @@ from fastapi import FastAPI, Header, Request
 from fastapi.responses import JSONResponse, Response
 
 from ubt import __version__
-from ubt.api.models import SystemInfoResponse
+from ubt.api.models import RuntimeConfigResponse, SystemInfoResponse
 from ubt.api.routes.shared import is_nonloopback_bind
 from ubt.api.scope import ApiScope
 from ubt.api.security import (
@@ -68,6 +68,24 @@ def register_system_routes(api_app: FastAPI, scope: ApiScope) -> None:
         """Log the console out (clears the session cookie)."""
         response.delete_cookie(SESSION_COOKIE_NAME)
         return {"authenticated": False}
+
+    @api_app.get(
+        "/system/runtime-config",
+        response_model=RuntimeConfigResponse,
+        tags=["System"],
+    )
+    async def system_runtime_config() -> RuntimeConfigResponse:
+        """Model/provider configuration actually in force (read-only).
+
+        The console used to render ``/model-profiles`` here, which is the
+        engine's capability *preset* table — fourteen hard-coded name patterns,
+        none of which is a configured model. This endpoint reports what the
+        engine will really call, which preset (if any) that model matches, and
+        the declared providers with credentials filtered out.
+        """
+        from ubt.api.runtime_config import describe_runtime_config
+
+        return RuntimeConfigResponse(**describe_runtime_config(app_config))
 
     @api_app.get("/system/doctor", tags=["System"])
     async def system_doctor(probe: bool = False) -> JSONResponse:

@@ -4,10 +4,12 @@ import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import {
   getDoctor,
+  getRuntimeConfig,
   getSystemInfo,
   listModelProfiles,
   type DoctorCheck,
   type ModelProfile,
+  type RuntimeConfig,
   type SystemInfo,
 } from '@/api/client'
 import { useI18n } from '@/i18n/useI18n'
@@ -30,6 +32,7 @@ export function SystemDoctorView() {
   const { t } = useI18n()
   const [checks, setChecks] = useState<DoctorCheck[]>([])
   const [profiles, setProfiles] = useState<ModelProfile[]>([])
+  const [runtime, setRuntime] = useState<RuntimeConfig | null>(null)
   const [info, setInfo] = useState<SystemInfo | null>(null)
   const [isPinging, setIsPinging] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -38,14 +41,16 @@ export function SystemDoctorView() {
   const load = useCallback(async (probe: boolean) => {
     setLoading(true)
     try {
-      const [doctor, modelProfiles, systemInfo] = await Promise.all([
+      const [doctor, modelProfiles, systemInfo, runtimeCfg] = await Promise.all([
         getDoctor(probe),
         listModelProfiles().catch(() => [] as ModelProfile[]),
         getSystemInfo().catch(() => null),
+        getRuntimeConfig().catch(() => null),
       ])
       setChecks(doctor.checks)
       setProfiles(modelProfiles)
       setInfo(systemInfo)
+      setRuntime(runtimeCfg)
       setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Doctor check failed')
@@ -147,39 +152,190 @@ export function SystemDoctorView() {
           </div>
         </div>
 
-        {/* Right: Model Provider Matrix */}
+        {/* Right: what the engine will actually call.
+
+            This panel used to render `/model-profiles` under the heading
+            "model routing and latency matrix". That endpoint returns the
+            engine's hard-coded capability *presets* — fourteen name patterns
+            like `o1`, `o3`, `claude` — none of which is a configured model, and
+            the payload contains no latency at all. On this machine the operator
+            runs `local-gemma4` / `gemma4-e4b`, which matches none of the
+            fourteen, so the screen showed fourteen irrelevant rows and hid the
+            one configuration that was live. */}
         <div className="rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] overflow-hidden shadow-2xs">
           <div className="px-4 py-2.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
-            {t.doctor.providerMatrix}
+            {t.doctor.runtimeConfig}
           </div>
-          <div className="divide-y divide-[var(--paper-border)]">
-            {profiles.length === 0 ? (
-              <div className="p-6 text-center text-xs text-[var(--ink-muted)]">
-                No model profiles registered.
+
+          {/* Active configuration: the part the old screen never showed. */}
+          {runtime ? (
+            <div className="p-3.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)]">
+              <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] mb-2 font-semibold">
+                {t.doctor.activeNow}
               </div>
-            ) : (
-              profiles.map((profile) => (
-                <div key={profile.model_pattern} className="p-3.5 text-xs">
-                  <div className="font-semibold text-[var(--ink-primary)] flex items-center gap-2">
-                    <span className="font-mono truncate">{profile.model_pattern}</span>
-                    <span className="text-xs font-mono px-1.5 py-0.5 rounded bg-[var(--paper-subsurface)] text-[var(--ink-muted)] border border-[var(--paper-border)]">
-                      {profile.prompt_strategy}
+              <dl className="space-y-1 text-xs font-mono">
+                <div className="flex justify-between gap-3">
+                  <dt className="text-[var(--ink-secondary)]">{t.doctor.providerLabel}</dt>
+                  <dd className="text-[var(--ink-primary)] font-semibold truncate">
+                    {runtime.active.provider || '—'}
+                  </dd>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <dt className="text-[var(--ink-secondary)]">{t.doctor.draftModel}</dt>
+                  <dd className="text-[var(--ink-primary)] font-semibold truncate">
+                    {runtime.active.draft_model || t.doctor.notConfigured}
+                  </dd>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <dt className="text-[var(--ink-secondary)]">{t.doctor.repairModel}</dt>
+                  <dd className="text-[var(--ink-primary)] truncate">
+                    {runtime.active.repair_model || t.doctor.notConfigured}
+                  </dd>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <dt className="text-[var(--ink-secondary)]">{t.doctor.endpoint}</dt>
+                  <dd className="text-[var(--ink-primary)] truncate" title={runtime.active.base_url}>
+                    {runtime.active.base_url || '—'}
+                  </dd>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <dt className="text-[var(--ink-secondary)]">{t.doctor.capabilityProfile}</dt>
+                  <dd
+                    className={
+                      runtime.active.matched_pattern
+                        ? 'text-[var(--ink-primary)]'
+                        : 'text-[#b45309] font-semibold'
+                    }
+                  >
+                    {runtime.active.matched_pattern ?? t.doctor.noProfileMatch}
+                  </dd>
+                </div>
+              </dl>
+              {/* A model with no matching preset is not broken — it runs on the
+                  generic default — but the operator should know the prompt
+                  strategy was not tuned for it. */}
+              {!runtime.active.matched_pattern && runtime.active.draft_model && (
+                <p className="mt-2 text-xs text-[var(--ink-muted)] leading-relaxed">
+                  {t.doctor.noProfileMatchHelp.replace(
+                    '{strategy}',
+                    runtime.active.prompt_strategy || 'hybrid',
+                  )}
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="p-4 text-xs text-[var(--ink-muted)]">
+              {t.doctor.runtimeConfigUnavailable}
+            </div>
+          )}
+
+          {/* Declared providers, credentials filtered server-side. */}
+          <div className="px-3.5 py-2.5 border-b border-[var(--paper-border)]">
+            <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] mb-2 font-semibold">
+              {t.doctor.declaredProviders}
+            </div>
+            {/* Only what the operator declared. The API also returns shipped
+                wire protocols and bare aliases (`chat`, `claude`, `responses`);
+                rendering all three put seven aliases above the six real
+                entries. Aliases are folded away below. */}
+            <div className="space-y-1">
+              {(runtime?.providers ?? [])
+                .filter((p) => p.declared)
+                .map((p) => (
+                  <div
+                    key={p.name}
+                    className={`flex items-center justify-between gap-2 rounded-[4px] px-2 py-1 text-xs font-mono ${
+                      p.active
+                        ? 'bg-[#15803d]/10 border border-[#15803d]/25'
+                        : 'border border-transparent'
+                    }`}
+                  >
+                    <span
+                      className={`truncate ${p.active ? 'font-semibold text-[#15803d]' : 'text-[var(--ink-secondary)]'}`}
+                    >
+                      {p.name}
+                    </span>
+                    <span className="flex items-center gap-1.5 shrink-0">
+                      {p.is_free && (
+                        <span className="text-[10px] text-[var(--ink-muted)]">
+                          {t.doctor.freeLabel}
+                        </span>
+                      )}
+                      <span className="text-[10px] text-[var(--ink-muted)] truncate max-w-[9rem]">
+                        {p.draft_model || p.api_mode || '—'}
+                      </span>
                     </span>
                   </div>
-                  <div className="text-xs text-[var(--ink-secondary)] mt-1 flex flex-wrap gap-1.5 font-mono">
+                ))}
+            </div>
+
+            {/* Built-in protocols and aliases, collapsed: they are usable names,
+                not configurations. */}
+            <details className="mt-2">
+              <summary className="cursor-pointer text-[11px] font-mono text-[var(--ink-muted)] hover:text-[var(--ink-primary)] select-none">
+                {t.doctor.builtinProviders} (
+                {(runtime?.providers ?? []).filter((p) => !p.declared).length})
+              </summary>
+              <div className="mt-1 space-y-0.5">
+                {(runtime?.providers ?? [])
+                  .filter((p) => !p.declared)
+                  .map((p) => (
+                    <div
+                      key={p.name}
+                      className="flex items-center justify-between gap-2 px-2 text-[11px] font-mono text-[var(--ink-muted)]"
+                    >
+                      <span className="truncate">{p.name}</span>
+                      <span className="text-[10px] shrink-0">
+                        {p.is_alias ? t.doctor.aliasLabel : p.api_mode || '—'}
+                      </span>
+                    </div>
+                  ))}
+              </div>
+            </details>
+            <p className="mt-2 text-xs text-[var(--ink-muted)] leading-relaxed">
+              {t.doctor.providerConfigHint}
+            </p>
+          </div>
+
+          {/* Capability presets: explicitly labelled as matching rules, not as
+              configured models, so the list is read for what it is. */}
+          <details className="group">
+            <summary className="px-3.5 py-2.5 cursor-pointer text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold hover:text-[var(--ink-primary)] select-none">
+              {t.doctor.capabilityPresets} ({profiles.length})
+            </summary>
+            <p className="px-3.5 pb-2 text-xs text-[var(--ink-muted)] leading-relaxed">
+              {t.doctor.capabilityPresetsHelp}
+            </p>
+            <div className="divide-y divide-[var(--paper-border)]">
+              {profiles.map((profile) => (
+                <div key={profile.model_pattern} className="px-3.5 py-2 text-xs">
+                  <div className="font-semibold text-[var(--ink-primary)] flex items-center gap-2">
+                    <span className="font-mono truncate">{profile.model_pattern}</span>
+                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--paper-subsurface)] text-[var(--ink-muted)] border border-[var(--paper-border)]">
+                      {profile.prompt_strategy}
+                    </span>
+                    {runtime?.active.matched_pattern === profile.model_pattern && (
+                      <span className="text-[10px] font-mono text-[#15803d]">
+                        {t.doctor.inUse}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[11px] text-[var(--ink-secondary)] mt-0.5 flex flex-wrap gap-1.5 font-mono">
                     {profile.supports_vision && <span>{t.doctor.capabilityVision}</span>}
                     {profile.supports_reasoning_effort && <span>{t.doctor.capabilityReasoning}</span>}
-                    {profile.supports_system_prompt ? (
-                      <span>{t.doctor.capabilitySystem}</span>
-                    ) : (
-                      <span>{t.doctor.capabilityNoSystem}</span>
-                    )}
-                    <span>{t.doctor.capabilityExtract}:{profile.extraction_strategy}</span>
+                    <span>
+                      {profile.supports_system_prompt
+                        ? t.doctor.capabilitySystem
+                        : t.doctor.capabilityNoSystem}
+                    </span>
+                    <span>
+                      {t.doctor.capabilityExtract}:{profile.extraction_strategy}
+                    </span>
                   </div>
                 </div>
-              ))
-            )}
-          </div>
+              ))}
+            </div>
+          </details>
         </div>
       </div>
 

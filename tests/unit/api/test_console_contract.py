@@ -1095,3 +1095,94 @@ def test_the_wizard_sends_ocr_mode_within_the_api_enum() -> None:
     source = _WIZARD_SRC.read_text(encoding="utf-8")
     assert re.search(r"ocr_mode:\s*ocrMode === 'auto' \? null : ocrMode", source)
     assert "ocr_mode" in JobSubmitRequest.model_fields
+
+
+# --- the doctor's config panel must describe the live configuration ----------
+
+
+def test_runtime_config_never_exposes_credentials() -> None:
+    """Provider blocks may hold an ``api_key``; the endpoint must filter it.
+
+    ``load_provider_block`` returns the merged block as written, and a real
+    config does declare ``api_key = "${OPENCODE_API_KEY}"``. Returning the block
+    verbatim would put credential material — or at least the name of the secret
+    it expands from — on an unauthenticated-by-default HTTP surface.
+    """
+    from ubt.api.runtime_config import _EXPOSED_FIELDS
+
+    forbidden = {"api_key", "api-key", "token", "secret", "password", "extra_headers"}
+    assert not (set(_EXPOSED_FIELDS) & forbidden), (
+        f"credential fields are exposed: {sorted(set(_EXPOSED_FIELDS) & forbidden)}"
+    )
+
+    # And the serialised payload carries no credential material at all.
+    import json
+
+    from ubt.api.runtime_config import describe_runtime_config
+    from ubt.core.config import UBTConfig
+
+    payload = json.dumps(describe_runtime_config(UBTConfig.from_env()))
+    for needle in ("api_key", "OPENCODE_API_KEY", "extra_headers", "Bearer"):
+        assert needle not in payload, f"runtime config leaked {needle!r}"
+
+
+def test_runtime_config_reports_the_active_model_not_the_preset_table() -> None:
+    """The panel must name the provider/model in force, not fourteen presets.
+
+    ``/model-profiles`` returns the engine's hard-coded capability table
+    (``o1``, ``o3``, ``claude``, …). None of those is a configured model; on the
+    reference machine the live configuration is ``local-gemma4`` /
+    ``gemma4-e4b``, which matches none of them. The screen was titled "model
+    routing and latency matrix" while containing neither.
+    """
+    from ubt.api.runtime_config import describe_runtime_config
+    from ubt.core.config import UBTConfig
+
+    cfg = UBTConfig.from_env()
+    active = describe_runtime_config(cfg)["active"]
+
+    # UBTConfig.provider is None when unset; the view normalises it to "".
+    assert active["provider"] == (cfg.provider or "")
+    assert active["draft_model"] == cfg.draft_model
+    assert active["base_url"] == cfg.base_url
+    # A model that hits no preset must report that honestly rather than
+    # borrowing the wildcard profile's name.
+    assert "matched_pattern" in active
+    assert active["matched_pattern"] != "*"
+
+
+def test_runtime_config_separates_declared_providers_from_aliases() -> None:
+    """Seventeen rows for a six-provider config was the readability failure.
+
+    ``list_providers`` merges declared blocks, shipped wire protocols and bare
+    aliases (``chat``, ``claude``, ``responses``). A configuration screen must
+    show the operator's own entries first and fold the rest away.
+    """
+    from ubt.api.runtime_config import describe_runtime_config
+    from ubt.core.config import UBTConfig
+    from ubt.core.providers import PROTOCOL_ALIASES, declared_provider_names
+
+    providers = describe_runtime_config(UBTConfig.from_env())["providers"]
+    declared = [p for p in providers if p["declared"]]
+    aliases = [p for p in providers if p["is_alias"]]
+
+    # Every declared name is flagged, and no alias is.
+    assert {p["name"] for p in declared} == declared_provider_names()
+    assert not ({p["name"] for p in declared} & set(PROTOCOL_ALIASES))
+    assert {p["name"] for p in aliases} <= set(PROTOCOL_ALIASES)
+    # Exactly one provider is marked active.
+    assert sum(1 for p in providers if p["active"]) <= 1
+
+
+def test_the_doctor_no_longer_claims_a_latency_matrix() -> None:
+    """No endpoint returns latency; the heading said it did."""
+    repo = _REPO_ROOT
+    view = repo / "web" / "src" / "views" / "doctor" / "SystemDoctorView.tsx"
+    if not view.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+
+    source = view.read_text(encoding="utf-8")
+    assert "runtimeConfig" in source, "the panel does not use the runtime-config endpoint"
+    assert "getRuntimeConfig" in source
+    # The alias/protocol split is what keeps the list readable.
+    assert ".filter((p) => p.declared)" in source

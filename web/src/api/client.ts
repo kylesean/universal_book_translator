@@ -13,6 +13,7 @@ export type JobStatusResponse = paths['/jobs/{job_id}/status']['get']['responses
 export type JobUploadResponse = paths['/jobs/upload']['post']['responses']['201']['content']['application/json']
 export type JobSummary = paths['/jobs']['get']['responses']['200']['content']['application/json']['jobs'][number]
 export type ModelProfile = paths['/api/v1/model-profiles']['get']['responses']['200']['content']['application/json'][number]
+export type RuntimeConfig = paths['/system/runtime-config']['get']['responses']['200']['content']['application/json']
 export type SystemInfo = paths['/system/info']['get']['responses']['200']['content']['application/json']
 
 export interface DeliverableItem {
@@ -679,6 +680,21 @@ export async function getDoctor(probe = false): Promise<DoctorReport> {
 export async function listModelProfiles(): Promise<ModelProfile[]> {
   const res = await apiFetch(`${BASE_URL}/api/v1/model-profiles`)
   if (!res.ok) throw await apiError(res, "Failed to load model profiles")
+  return res.json()
+}
+
+/**
+ * What the engine will actually call: provider, models, and the capability
+ * profile the draft model resolves to.
+ *
+ * Distinct from `listModelProfiles`, which returns the engine's hard-coded
+ * capability *presets* (`o1`, `claude`, …). Those are name-matching rules, not
+ * configured models; the console used to render them under a "model routing and
+ * latency matrix" heading, which described neither.
+ */
+export async function getRuntimeConfig(): Promise<RuntimeConfig> {
+  const res = await apiFetch(`${BASE_URL}/system/runtime-config`)
+  if (!res.ok) throw await apiError(res, "Failed to load runtime configuration")
   return res.json()
 }
 

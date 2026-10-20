@@ -213,6 +213,72 @@
         }
       }
     },
+    "/system/runtime-config": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "System Runtime Config",
+        "description": "Model/provider configuration actually in force (read-only).\n\nThe console used to render ``/model-profiles`` here, which is the\nengine's capability *preset* table \u2014 fourteen hard-coded name patterns,\nnone of which is a configured model. This endpoint reports what the\nengine will really call, which preset (if any) that model matches, and\nthe declared providers with credentials filtered out.",
+        "operationId": "system_runtime_config_system_runtime_config_get",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeConfigResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/system/doctor": {
       "get": {
         "tags": [
@@ -4762,6 +4828,184 @@
         ],
         "title": "PromptStrategy",
         "description": "Prompt assembly strategy."
+      },
+      "RuntimeActiveModel": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider",
+            "description": "Selected provider name (UBT_PROVIDER / --provider)"
+          },
+          "draft_model": {
+            "type": "string",
+            "title": "Draft Model",
+            "description": "Model used for drafting; empty when unconfigured"
+          },
+          "repair_model": {
+            "type": "string",
+            "title": "Repair Model",
+            "description": "Model used for repair; empty when unconfigured"
+          },
+          "base_url": {
+            "type": "string",
+            "title": "Base Url",
+            "description": "Endpoint the selected provider resolves to"
+          },
+          "api_mode": {
+            "type": "string",
+            "title": "Api Mode",
+            "description": "Wire protocol (openai-chat, openai-responses, \u2026)"
+          },
+          "matched_pattern": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Matched Pattern",
+            "description": "Capability profile this model matched, or null when it fell through to the generic default (common for a locally hosted model)"
+          },
+          "prompt_strategy": {
+            "type": "string",
+            "title": "Prompt Strategy",
+            "description": "Prompt strategy the matched profile selects"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name",
+            "description": "Human-readable name of the resolved profile"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "draft_model",
+          "repair_model",
+          "base_url",
+          "api_mode",
+          "prompt_strategy",
+          "display_name"
+        ],
+        "title": "RuntimeActiveModel",
+        "description": "The provider and models the engine will actually call, right now."
+      },
+      "RuntimeConfigResponse": {
+        "properties": {
+          "active": {
+            "$ref": "#/components/schemas/RuntimeActiveModel"
+          },
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/RuntimeProvider"
+            },
+            "type": "array",
+            "title": "Providers"
+          },
+          "provider_config_source": {
+            "type": "string",
+            "title": "Provider Config Source",
+            "description": "Where provider settings live (they cannot be edited from the console)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "active",
+          "providers",
+          "provider_config_source"
+        ],
+        "title": "RuntimeConfigResponse",
+        "description": "Read-only model/provider configuration actually in force.\n\nCredentials are never included: provider blocks are filtered through an\nallow-list before they reach this model."
+      },
+      "RuntimeProvider": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active",
+            "description": "True for the provider currently selected"
+          },
+          "available": {
+            "type": "boolean",
+            "title": "Available",
+            "description": "False when the block could not be loaded"
+          },
+          "declared": {
+            "type": "boolean",
+            "title": "Declared",
+            "description": "True when the operator declared it in [providers.*]",
+            "default": false
+          },
+          "is_alias": {
+            "type": "boolean",
+            "title": "Is Alias",
+            "description": "True for a bare protocol alias (chat, claude, responses)",
+            "default": false
+          },
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url"
+          },
+          "api_mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Mode"
+          },
+          "draft_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft Model"
+          },
+          "repair_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repair Model"
+          },
+          "is_free": {
+            "type": "boolean",
+            "title": "Is Free",
+            "description": "Declared free (no billable spend)",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "active",
+          "available"
+        ],
+        "title": "RuntimeProvider",
+        "description": "One declared provider, with credentials deliberately omitted."
       },
       "SegmentEditRequest": {
         "properties": {

@@ -54,6 +54,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/system/runtime-config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * System Runtime Config
+         * @description Model/provider configuration actually in force (read-only).
+         *
+         *     The console used to render ``/model-profiles`` here, which is the
+         *     engine's capability *preset* table — fourteen hard-coded name patterns,
+         *     none of which is a configured model. This endpoint reports what the
+         *     engine will really call, which preset (if any) that model matches, and
+         *     the declared providers with credentials filtered out.
+         */
+        get: operations["system_runtime_config_system_runtime_config_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/system/doctor": {
         parameters: {
             query?: never;
@@ -1474,6 +1500,113 @@ export interface components {
          */
         PromptStrategy: "rich" | "minimal" | "hybrid";
         /**
+         * RuntimeActiveModel
+         * @description The provider and models the engine will actually call, right now.
+         */
+        RuntimeActiveModel: {
+            /**
+             * Provider
+             * @description Selected provider name (UBT_PROVIDER / --provider)
+             */
+            provider: string;
+            /**
+             * Draft Model
+             * @description Model used for drafting; empty when unconfigured
+             */
+            draft_model: string;
+            /**
+             * Repair Model
+             * @description Model used for repair; empty when unconfigured
+             */
+            repair_model: string;
+            /**
+             * Base Url
+             * @description Endpoint the selected provider resolves to
+             */
+            base_url: string;
+            /**
+             * Api Mode
+             * @description Wire protocol (openai-chat, openai-responses, …)
+             */
+            api_mode: string;
+            /**
+             * Matched Pattern
+             * @description Capability profile this model matched, or null when it fell through to the generic default (common for a locally hosted model)
+             */
+            matched_pattern?: string | null;
+            /**
+             * Prompt Strategy
+             * @description Prompt strategy the matched profile selects
+             */
+            prompt_strategy: string;
+            /**
+             * Display Name
+             * @description Human-readable name of the resolved profile
+             */
+            display_name: string;
+        };
+        /**
+         * RuntimeConfigResponse
+         * @description Read-only model/provider configuration actually in force.
+         *
+         *     Credentials are never included: provider blocks are filtered through an
+         *     allow-list before they reach this model.
+         */
+        RuntimeConfigResponse: {
+            active: components["schemas"]["RuntimeActiveModel"];
+            /** Providers */
+            providers: components["schemas"]["RuntimeProvider"][];
+            /**
+             * Provider Config Source
+             * @description Where provider settings live (they cannot be edited from the console)
+             */
+            provider_config_source: string;
+        };
+        /**
+         * RuntimeProvider
+         * @description One declared provider, with credentials deliberately omitted.
+         */
+        RuntimeProvider: {
+            /** Name */
+            name: string;
+            /**
+             * Active
+             * @description True for the provider currently selected
+             */
+            active: boolean;
+            /**
+             * Available
+             * @description False when the block could not be loaded
+             */
+            available: boolean;
+            /**
+             * Declared
+             * @description True when the operator declared it in [providers.*]
+             * @default false
+             */
+            declared: boolean;
+            /**
+             * Is Alias
+             * @description True for a bare protocol alias (chat, claude, responses)
+             * @default false
+             */
+            is_alias: boolean;
+            /** Base Url */
+            base_url?: string | null;
+            /** Api Mode */
+            api_mode?: string | null;
+            /** Draft Model */
+            draft_model?: string | null;
+            /** Repair Model */
+            repair_model?: string | null;
+            /**
+             * Is Free
+             * @description Declared free (no billable spend)
+             * @default false
+             */
+            is_free: boolean;
+        };
+        /**
          * SegmentEditRequest
          * @description A human post-edit of one block's target text (L3 workbench).
          */
@@ -1822,6 +1955,39 @@ export interface operations {
                     "application/json": {
                         [key: string]: boolean;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    system_runtime_config_system_runtime_config_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeConfigResponse"];
                 };
             };
             /** @description Validation Error */

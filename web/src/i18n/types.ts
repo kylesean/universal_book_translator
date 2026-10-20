@@ -325,6 +325,26 @@ export interface TranslationDictionary {
     }
     pingAll: string
     engineDiagnostics: string
+    /** "What the engine will actually call" — replaces the old provider matrix. */
+    runtimeConfig: string
+    activeNow: string
+    providerLabel: string
+    draftModel: string
+    repairModel: string
+    endpoint: string
+    capabilityProfile: string
+    noProfileMatch: string
+    noProfileMatchHelp: string
+    notConfigured: string
+    runtimeConfigUnavailable: string
+    declaredProviders: string
+    freeLabel: string
+    builtinProviders: string
+    aliasLabel: string
+    providerConfigHint: string
+    capabilityPresets: string
+    capabilityPresetsHelp: string
+    inUse: string
     providerMatrix: string
     securityBoundary: string
     listenInterface: string
