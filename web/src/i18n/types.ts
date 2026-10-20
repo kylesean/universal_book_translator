@@ -359,12 +359,17 @@ export interface TranslationDictionary {
     capabilityTemperature: string
     capabilityReasoning: string
     capabilitySystem: string
+    capabilitySystemNote: string
+    capabilitySystemAccepted: string
+    capabilitySystemMerged: string
+    capabilityAdvanced: string
+    capabilityAdvancedHelp: string
+    capabilityAutoLearn: string
+    capabilityNever: string
+    capabilityAlways: string
     capabilityVision: string
-    capabilityReasoningNote: string
     capabilityVisionNote: string
     capabilityUndeclared: string
-    capabilityYes: string
-    capabilityNo: string
     baseUrl: string
     apiMode: string
     apiTimeout: string

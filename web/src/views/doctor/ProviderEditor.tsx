@@ -20,19 +20,38 @@ interface ProviderEditorProps {
   onCancel: () => void
 }
 
-/** The four capability flags, in the order the form renders them. */
-const CAPABILITY_FLAGS = [
-  { field: 'supports_temperature', labelKey: 'capabilityTemperature', noteKey: null },
-  {
-    field: 'supports_reasoning_effort',
-    labelKey: 'capabilityReasoning',
-    noteKey: 'capabilityReasoningNote',
-  },
-  { field: 'supports_system_prompt', labelKey: 'capabilitySystem', noteKey: null },
-  { field: 'supports_vision', labelKey: 'capabilityVision', noteKey: 'capabilityVisionNote' },
+/**
+ * The capability flags, split by whether the engine can discover them itself.
+ *
+ * Only a fact the engine cannot learn earns a control (see the reasoning in
+ * ``ubt/core/config.py`` next to these fields):
+ *
+ * - ``REQUIRED_FLAGS`` — a rejected system role is a 400 no self-heal rule can
+ *   fix, because the fix is a decision (merge into the user turn), not a dropped
+ *   parameter. The job fails outright, so this is asked plainly.
+ * - ``OPTIONAL_FLAGS`` — a rejected temperature or reasoning effort is dropped by
+ *   the self-heal and then remembered per model, so the entire cost of not
+ *   declaring it is one failed call per model per process. Asked only under
+ *   "advanced", for an operator who wants to skip that round-trip.
+ */
+const REQUIRED_FLAGS = [
+  { field: 'supports_system_prompt', labelKey: 'capabilitySystem', noteKey: 'capabilitySystemNote' },
 ] as const
 
-type FlagField = (typeof CAPABILITY_FLAGS)[number]['field']
+const OPTIONAL_FLAGS = [
+  { field: 'supports_temperature', labelKey: 'capabilityTemperature', noteKey: null },
+  { field: 'supports_reasoning_effort', labelKey: 'capabilityReasoning', noteKey: null },
+] as const
+
+const ALL_FLAGS = [...REQUIRED_FLAGS, ...OPTIONAL_FLAGS] as const
+
+type FlagField = (typeof ALL_FLAGS)[number]['field'] | 'supports_vision'
+
+/** Every capability field the form can submit, including the standalone checkbox. */
+const SUBMITTED_FLAGS = [
+  ...ALL_FLAGS.map((flag) => flag.field),
+  'supports_vision',
+] as const satisfies readonly FlagField[]
 
 /** Which text fields the form edits, and how each is labelled. */
 const TEXT_FIELDS = [
@@ -105,7 +124,7 @@ export function ProviderEditor({
         // Seed each flag from the file, keeping "absent" distinguishable: an
         // undefined entry means the key is not in the block at all.
         const seeded: Partial<Record<FlagField, boolean>> = {}
-        for (const { field } of CAPABILITY_FLAGS) {
+        for (const field of SUBMITTED_FLAGS) {
           const value = loaded[field]
           if (typeof value === 'boolean') seeded[field] = value
         }
@@ -145,7 +164,10 @@ export function ProviderEditor({
           changes[field] = value.trim()
         }
       }
-      for (const { field } of CAPABILITY_FLAGS) {
+      // ``ALL_FLAGS`` covers the two groups only; ``supports_vision`` is a
+      // separate checkbox, so it is listed explicitly. Walking ALL_FLAGS alone
+      // meant the checkbox rendered and then never reached the request.
+      for (const field of SUBMITTED_FLAGS) {
         const value = flags[field]
         const stored = detail?.[field]
         const storedIsSet = typeof stored === 'boolean'
@@ -259,11 +281,11 @@ export function ProviderEditor({
               onChange={(event) => setCredential(event.target.value)}
               className="mt-1 w-full rounded-[4px] border border-[var(--paper-border)] bg-[var(--paper-bg)] px-2 py-1 type-value font-mono"
             />
-            <span className="block mt-0.5 type-help text-[var(--ink-muted)]">
-              {detail?.has_credential
-                ? t.doctor.credentialKeepHint
-                : t.doctor.credentialPlaceholder}
-            </span>
+            {detail?.has_credential ? (
+              <span className="block mt-0.5 type-help text-[var(--ink-muted)]">
+                {t.doctor.credentialKeepHint}
+              </span>
+            ) : null}
           </label>
         ) : (
           <p className="type-help text-[#b45309] leading-relaxed">
@@ -328,18 +350,73 @@ export function ProviderEditor({
             <span className="type-group">{t.doctor.capabilityTitle}</span>
             <InfoTip label={t.doctor.capabilityHelp}>{t.doctor.capabilityHelp}</InfoTip>
           </div>
-          <div className="mt-1.5 space-y-2">
-            {CAPABILITY_FLAGS.map(({ field, labelKey, noteKey }) => (
-              <div key={field}>
-                <div className="flex items-center justify-between gap-3">
+
+          {/* Required: the engine cannot discover this one. A rejected system role
+              is a 400 with no self-heal (the fix is a merge decision), so the job
+              fails rather than degrades. */}
+          {REQUIRED_FLAGS.map(({ field, labelKey, noteKey }) => (
+            <div key={field} className="mt-1.5">
+              <div className="flex items-center justify-between gap-3">
+                <span className="type-value">{t.doctor[labelKey]}</span>
+                <select
+                  value={flags[field] === undefined ? '' : String(flags[field])}
+                  onChange={(event) => {
+                    const raw = event.target.value
+                    setFlags((prev) => {
+                      const next = { ...prev }
+                      if (raw === '') delete next[field]
+                      else next[field] = raw === 'true'
+                      return next
+                    })
+                  }}
+                  className="shrink-0 rounded-[4px] border border-[var(--paper-border)] bg-[var(--paper-bg)] px-1.5 py-0.5 type-help font-mono"
+                >
+                  <option value="">{t.doctor.capabilityUndeclared}</option>
+                  <option value="true">{t.doctor.capabilitySystemAccepted}</option>
+                  <option value="false">{t.doctor.capabilitySystemMerged}</option>
+                </select>
+              </div>
+              <p className="type-help text-[var(--ink-muted)] mt-0.5">{t.doctor[noteKey]}</p>
+            </div>
+          ))}
+
+          {/* Vision: a plain checkbox. Off is the safe default and costs only a
+              degraded repair, never a failed job. */}
+          <label className="flex items-start gap-2 cursor-pointer mt-2.5">
+            <input
+              type="checkbox"
+              checked={flags.supports_vision ?? false}
+              onChange={(event) =>
+                setFlags((prev) => ({ ...prev, supports_vision: event.target.checked }))
+              }
+              className="mt-0.5 shrink-0"
+            />
+            <span className="min-w-0">
+              <span className="type-value">{t.doctor.capabilityVision}</span>
+              <span className="block type-help text-[var(--ink-muted)]">
+                {t.doctor.capabilityVisionNote}
+              </span>
+            </span>
+          </label>
+
+          {/* Advanced: the two the engine learns on its own. Collapsed because
+              asking an operator to answer a question the engine answers itself was
+              the design error; the control stays for skipping one round-trip. */}
+          <details className="mt-2.5">
+            <summary className="cursor-pointer type-help font-mono text-[var(--ink-muted)] hover:text-[var(--ink-primary)] select-none">
+              {t.doctor.capabilityAdvanced}
+            </summary>
+            <p className="type-help text-[var(--ink-muted)] mt-1 leading-relaxed">
+              {t.doctor.capabilityAdvancedHelp}
+            </p>
+            <div className="mt-1.5 space-y-2">
+              {OPTIONAL_FLAGS.map(({ field, labelKey }) => (
+                <div key={field} className="flex items-center justify-between gap-3">
                   <span className="type-value">{t.doctor[labelKey]}</span>
-                  {/* Tri-state, because a checkbox cannot express this field.
-                      ``undefined`` means the key is absent from the block and
-                      the engine uses the safe default; ``false`` is a real claim
-                      that the endpoint REJECTS the parameter (the gpt-5 / o1
-                      family rejects temperature). A two-state control collapses
-                      "not declared" into "declared false" on the first save,
-                      which silently converts an assumption into a statement. */}
+                  {/* Three states, and the default is the interesting one:
+                      "auto" sends the parameter and lets a 400 teach the engine;
+                      "never" skips that round-trip; "always" forces it for a
+                      gateway the engine would otherwise learn to omit it from. */}
                   <select
                     value={flags[field] === undefined ? '' : String(flags[field])}
                     onChange={(event) => {
@@ -353,17 +430,14 @@ export function ProviderEditor({
                     }}
                     className="shrink-0 rounded-[4px] border border-[var(--paper-border)] bg-[var(--paper-bg)] px-1.5 py-0.5 type-help font-mono"
                   >
-                    <option value="">{t.doctor.capabilityUndeclared}</option>
-                    <option value="true">{t.doctor.capabilityYes}</option>
-                    <option value="false">{t.doctor.capabilityNo}</option>
+                    <option value="">{t.doctor.capabilityAutoLearn}</option>
+                    <option value="false">{t.doctor.capabilityNever}</option>
+                    <option value="true">{t.doctor.capabilityAlways}</option>
                   </select>
                 </div>
-                {noteKey ? (
-                  <p className="type-help text-[var(--ink-muted)] mt-0.5">{t.doctor[noteKey]}</p>
-                ) : null}
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          </details>
         </div>
 
         <label className="flex items-center gap-2 cursor-pointer pt-1 border-t border-[var(--paper-border)]">

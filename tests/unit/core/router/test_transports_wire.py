@@ -1044,3 +1044,89 @@ async def test_openai_responses_heals_a_rejected_temperature() -> None:
     assert text == "译文"
     assert "temperature" in calls[0]
     assert "temperature" not in calls[1]
+
+
+async def test_temperature_costs_exactly_one_400_per_model() -> None:
+    """The measurement that made ``supports_temperature`` an optional control.
+
+    A rejected temperature is dropped by the self-heal and then remembered, so the
+    entire cost of not declaring it is one failed call per model per process. Four
+    blocks therefore take five requests, not eight, and the parameter never
+    reappears. This is why asking an operator to answer the question was wrong: the
+    engine answers it itself.
+    """
+    calls: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        calls.append(body)
+        if "temperature" in body:
+            return httpx.Response(
+                400,
+                json={
+                    "error": {
+                        "message": "Unsupported value: 'temperature' does not support 0.3 "
+                        "with this model."
+                    }
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"content": "译文"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+            },
+        )
+
+    rec = _Recorder(handler)
+    t = OpenAIChatTransport(
+        api_key="k",
+        base_url="https://x/v1",
+        default_model="reasoning-model",
+        transport=rec.transport,
+    )
+    for _ in range(4):
+        await t.generate_with_finish_reason("hi", temperature=0.3)
+
+    assert len(calls) == 5, f"expected 4 blocks + 1 rejected probe, got {len(calls)}"
+    assert "temperature" in calls[0]
+    assert not any("temperature" in body for body in calls[1:]), "the 400 was paid twice"
+    assert t._learned_omissions["reasoning-model"] >= {"temperature"}
+
+
+async def test_a_rejected_system_role_is_not_self_healed() -> None:
+    """The one capability the engine genuinely cannot discover.
+
+    Dropping the parameter is mechanical; merging the system text into the user
+    turn is a decision. With no heal rule the call fails outright — which is why
+    ``supports_system_prompt`` is the only flag the console asks for plainly.
+    """
+    calls: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        calls.append(body)
+        if any(m.get("role") == "system" for m in body.get("messages", [])):
+            return httpx.Response(
+                400,
+                json={"error": {"message": "Invalid role: system messages are not supported"}},
+            )
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"content": "译文"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+            },
+        )
+
+    rec = _Recorder(handler)
+    t = OpenAIChatTransport(
+        api_key="k",
+        base_url="https://x/v1",
+        default_model="no-system-model",
+        transport=rec.transport,
+    )
+    with pytest.raises(ModelProviderError):
+        await t.generate_with_finish_reason("hi", system_prompt="You are a translator.")
+    # Exactly one attempt: there is no rule that could retry it differently.
+    assert len(calls) == 1

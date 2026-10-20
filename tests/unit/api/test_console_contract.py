@@ -1434,3 +1434,75 @@ def test_the_frontend_typecheck_command_actually_checks_something() -> None:
     assert pkg["scripts"]["build"].startswith("tsc -b"), (
         "web build must run `tsc -b`; `tsc --noEmit` type-checks nothing here"
     )
+
+
+def test_the_capability_form_asks_only_what_the_engine_cannot_learn() -> None:
+    """The design error this guard prevents: asking the engine's own question.
+
+    ``supports_temperature`` and ``supports_reasoning_effort`` are recovered by the
+    400 self-heal and then remembered per model (measured: four blocks take five
+    requests, and the parameter never reappears). Presenting them as primary
+    three-state controls made an operator answer something the engine answers
+    itself. They belong under "advanced", where they only save one round-trip.
+    ``supports_system_prompt`` cannot be healed at all — the fix is a merge
+    decision — so it stays a primary control.
+    """
+    repo = _REPO_ROOT
+    editor = repo / "web" / "src" / "views" / "doctor" / "ProviderEditor.tsx"
+    if not editor.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+
+    source = editor.read_text(encoding="utf-8")
+    required = source[source.index("const REQUIRED_FLAGS") : source.index("const OPTIONAL_FLAGS")]
+    optional = source[source.index("const OPTIONAL_FLAGS") : source.index("const ALL_FLAGS")]
+
+    assert "supports_system_prompt" in required
+    assert "supports_temperature" not in required
+    assert "supports_reasoning_effort" not in required
+    assert "supports_temperature" in optional
+    assert "supports_reasoning_effort" in optional
+    # Vision is its own checkbox, not part of either list: off is safe and costs
+    # only a degraded repair, never a failed job.
+    assert "supports_vision" not in required
+    assert "supports_vision" not in optional
+    assert "supports_vision" in source
+
+
+def test_the_advanced_group_explains_what_auto_learn_costs() -> None:
+    """A control whose default is "do nothing" must say what that costs."""
+    repo = _REPO_ROOT
+    editor = repo / "web" / "src" / "views" / "doctor" / "ProviderEditor.tsx"
+    if not editor.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+
+    source = editor.read_text(encoding="utf-8")
+    # The three states are named for what they do, not for a boolean value.
+    assert "capabilityAutoLearn" in source
+    assert "capabilityNever" in source
+    assert "capabilityAlways" in source
+    assert "capabilityAdvancedHelp" in source
+
+
+def test_every_rendered_capability_control_is_submitted() -> None:
+    """A checkbox that renders but never reaches the request is a dead control.
+
+    ``supports_vision`` is its own checkbox rather than an entry in
+    ``ALL_FLAGS``, so the save loop (which walked ``ALL_FLAGS``) skipped it: the
+    box toggled, the state updated, and nothing was sent. Found by saving through
+    the real UI and diffing the file — the type checker and the linter both saw a
+    valid component.
+    """
+    repo = _REPO_ROOT
+    editor = repo / "web" / "src" / "views" / "doctor" / "ProviderEditor.tsx"
+    if not editor.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+
+    source = editor.read_text(encoding="utf-8")
+    # The save loop must iterate the submitted set, not the display groups.
+    save_start = source.index("const handleSave = useCallback")
+    save_body = source[save_start : source.index("return (", save_start)]
+    assert "SUBMITTED_FLAGS" in save_body, (
+        "handleSave must iterate SUBMITTED_FLAGS; iterating ALL_FLAGS skips supports_vision"
+    )
+    # And that set must actually contain the standalone checkbox.
+    assert "'supports_vision'" in source[source.index("const SUBMITTED_FLAGS") :][:200]

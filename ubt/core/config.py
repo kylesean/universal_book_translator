@@ -304,6 +304,26 @@ class UBTConfig(BaseSettings):
     # matched the bare ``claude`` entry and had its thinking budget suppressed.
     # Declaring the capability next to the endpoint and model id it describes is
     # the only place the answer is actually known.
+    #
+    # **Which of these are worth asking.** Only two facts cannot be discovered by
+    # the engine, and only those earn a form control:
+    #
+    # * ``supports_system_prompt`` — a rejected system role is a 400 that the
+    #   self-heal rules cannot fix, because the fix (merge the system text into the
+    #   user turn) is a decision, not a parameter drop. Measured: one call, no
+    #   retry, job fails. This one is required.
+    # * ``supports_vision`` — a model that cannot read images fails *every* visual
+    #   repair attempt, and the failure is per block. Declaring it avoids a
+    #   repeated cost; the engine degrades to text repair but pays each time.
+    #
+    # ``supports_temperature`` and ``supports_reasoning_effort`` are different: the
+    # 400 self-heal drops the parameter and the learned-omission cache stops
+    # re-sending it, so the whole cost is one failed call per model per process.
+    # Measured over four blocks: five requests (four blocks plus one 400) and the
+    # parameter never reappears. Asking an operator to answer a question the engine
+    # answers itself was the design error this comment records. They stay as
+    # overrides for the one case that matters — skipping that single round-trip, or
+    # forcing a parameter a gateway accepts but the engine would otherwise drop.
     supports_temperature: bool | None = None
     supports_reasoning_effort: bool | None = None
     supports_system_prompt: bool | None = None
