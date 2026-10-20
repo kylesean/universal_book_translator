@@ -756,6 +756,21 @@ class RuntimeProvider(BaseModel):
     is_alias: bool = Field(
         default=False, description="True for a bare protocol alias (chat, claude, responses)"
     )
+    alias_of: str | None = Field(
+        default=None,
+        description=(
+            "The canonical wire protocol an alias stands for (``claude`` -> "
+            "``anthropic-messages``), or null for a protocol or a declared block"
+        ),
+    )
+    is_protocol: bool = Field(
+        default=False,
+        description=(
+            "True for the four canonical wire protocols (openai-chat, …). They are "
+            "the names a [providers.*] block should carry; an alias is a shortcut "
+            "to one of them"
+        ),
+    )
     base_url: str | None = None
     api_mode: str | None = None
     draft_model: str | None = None

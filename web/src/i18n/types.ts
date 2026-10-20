@@ -348,6 +348,9 @@ export interface TranslationDictionary {
     freeLabel: string
     builtinProviders: string
     aliasLabel: string
+    protocolLabel: string
+    aliasGroupLabel: string
+    builtinProvidersHelp: string
     providerConfigHint: string
     credentialConfigured: string
     credentialMissing: string

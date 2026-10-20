@@ -422,6 +422,10 @@ export const en: TranslationDictionary = {
     freeLabel: 'free',
     builtinProviders: 'Built-in protocols & aliases',
     aliasLabel: 'alias',
+    protocolLabel: 'protocol',
+    aliasGroupLabel: 'Aliases (resolve to a protocol above)',
+    builtinProvidersHelp:
+      'The first group is the four wire protocols — use one of those names in a [providers.*] block. The second is shorthand that resolves to one of them. Neither needs a config file, but both still need a model id (--draft-model or UBT_DRAFT_MODEL) before a run can start.',
     providerConfigHint:
       'Endpoint, wire protocol, model ids and capability flags are editable here and saved to ubt.toml. A credential is stored in the provider block itself; on a local deployment (loopback bind, strict auth off) you can type it here and it is written as plain text with the file kept at 0600.',
     credentialConfigured: 'credential set',

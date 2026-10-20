@@ -23,8 +23,23 @@
 # Built-in shortcuts / aliases:
 #   - UBT_PROVIDER=openai-chat        (alias: openai, chat)
 #   - UBT_PROVIDER=openai-responses   (alias: responses)
-#   - UBT_PROVIDER=anthropic-messages (alias: anthropic, messages)
+#   - UBT_PROVIDER=anthropic-messages (alias: anthropic, messages, claude)
 #   - UBT_PROVIDER=gemini-native      (alias: gemini)
+#
+# Nothing else is built in. Vendor names (deepseek, opencode, kimi, qwen, …) are
+# NOT presets: they must be declared as [providers.<name>] blocks below, or a run
+# fails with ProviderNotFoundError.
+#
+# A protocol supplies an endpoint and a wire format but no model id, so selecting
+# one is not enough to run:
+#
+#   export UBT_PROVIDER=gemini
+#   export UBT_LLM_API_KEY="..."          # the ONLY recognised key variable
+#   export UBT_DRAFT_MODEL="gemini-3.8-flash"   # required
+#
+# The generic key is deliberately the only one: the engine does not sniff
+# GEMINI_API_KEY / OPENAI_API_KEY, because translating a book through an account
+# the user never named is worse than asking for one variable.
 #
 # -----------------------------------------------------------------------------
 # Selecting which provider runs

@@ -505,21 +505,50 @@ export function SystemDoctorView() {
                   ? (runtime.providers ?? []).filter((p) => !p.declared).length
                   : t.doctor.loadFailed})
               </summary>
+              {/* Two kinds of entry, rendered as two groups. They used to be one
+                  flat list where both were labelled "alias": ``openai-chat`` is a
+                  wire *protocol* — the name a block should carry — while ``chat``
+                  and ``claude`` merely resolve to one. Labelling a protocol an
+                  alias, and printing ``anthropic-messages`` next to itself, told
+                  the operator nothing about which name to write in a block. */}
               <div className="mt-1 space-y-0.5">
                 {(runtime?.providers ?? [])
-                  .filter((p) => !p.declared)
+                  .filter((p) => !p.declared && p.is_protocol)
                   .map((p) => (
                     <div
                       key={p.name}
                       className="flex items-center justify-between gap-2 px-2 type-help font-mono text-[var(--ink-muted)]"
                     >
                       <span className="truncate">{p.name}</span>
+                      <span className="shrink-0">{t.doctor.protocolLabel}</span>
+                    </div>
+                  ))}
+                {(runtime?.providers ?? []).filter((p) => !p.declared && p.is_alias).length >
+                0 ? (
+                  <div className="pt-1 px-2 type-help text-[var(--ink-muted)]">
+                    {t.doctor.aliasGroupLabel}
+                  </div>
+                ) : null}
+                {(runtime?.providers ?? [])
+                  .filter((p) => !p.declared && p.is_alias)
+                  .map((p) => (
+                    <div
+                      key={p.name}
+                      className="flex items-center justify-between gap-2 px-2 type-help font-mono text-[var(--ink-muted)]"
+                    >
+                      <span className="truncate">{p.name}</span>
+                      {/* The mapping itself: ``claude → anthropic-messages``. */}
                       <span className="shrink-0">
-                        {p.is_alias ? t.doctor.aliasLabel : p.api_mode || '—'}
+                        {p.alias_of ? `\u2192 ${p.alias_of}` : t.doctor.aliasLabel}
                       </span>
                     </div>
                   ))}
               </div>
+              {/* A protocol name is usable on its own, but carries no model id —
+                  which is the actual prerequisite a newcomer trips over. */}
+              <p className="mt-1.5 px-2 type-help text-[var(--ink-muted)] leading-relaxed">
+                {t.doctor.builtinProvidersHelp}
+              </p>
             </details>
             <p className="mt-2 type-help text-[var(--ink-muted)] leading-relaxed">
               {t.doctor.providerConfigHint}

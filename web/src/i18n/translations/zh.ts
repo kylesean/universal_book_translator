@@ -396,6 +396,10 @@ export const zh: TranslationDictionary = {
     freeLabel: '免费',
     builtinProviders: '内置协议与别名',
     aliasLabel: '别名',
+    protocolLabel: '协议',
+    aliasGroupLabel: '别名（指向上面的协议）',
+    builtinProvidersHelp:
+      '上面一行是四个线路协议本体——在 [providers.*] 块里写这个名字。下面一行是简称，会解析到对应协议。用它们不需要写配置文件，但还需要指定模型名（--draft-model 或 UBT_DRAFT_MODEL），否则无法运行。',
     providerConfigHint:
       '接口地址、协议、模型名与能力标志可在此编辑并保存到 ubt.toml。密钥写在对应 provider 块里；本机（仅回环、未启用严格鉴权）部署可直接在此填写，会保存为明文并保持文件 0600。',
     credentialConfigured: '已配置密钥',

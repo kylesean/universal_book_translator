@@ -177,6 +177,14 @@ def describe_runtime_config(
 
     declared = declared_provider_names()
     file_default = default_provider_name()
+    # The shipped entries split into two kinds that the panel must not conflate:
+    # the four *wire protocols* (``openai-chat``) are the real names, and the
+    # seven *aliases* (``openai``, ``chat``, ``claude``) resolve to one of them.
+    # Rendering both as "alias" hid the relationship — ``anthropic-messages``
+    # showed its own name on the right, which told the operator nothing.
+    from ubt.core.providers import _read_shipped_providers
+
+    shipped_protocols = set(_read_shipped_providers())
     providers: list[dict[str, Any]] = []
     for name in list_providers():
         block = _safe_block(name)
@@ -192,6 +200,12 @@ def describe_runtime_config(
                 "available": block.pop("available", False),
                 "declared": name in declared,
                 "is_alias": name in PROTOCOL_ALIASES,
+                # What an alias stands for, so the row can say "-> openai-chat"
+                # instead of repeating its own name or a bare "alias".
+                "alias_of": PROTOCOL_ALIASES.get(name),
+                # True for the four canonical wire protocols: they are the names
+                # a ``[providers.*]`` block should use.
+                "is_protocol": name in shipped_protocols,
                 **block,
             }
         )

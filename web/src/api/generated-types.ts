@@ -1919,6 +1919,17 @@ export interface components {
              * @default false
              */
             is_alias: boolean;
+            /**
+             * Alias Of
+             * @description The canonical wire protocol an alias stands for (``claude`` -> ``anthropic-messages``), or null for a protocol or a declared block
+             */
+            alias_of?: string | null;
+            /**
+             * Is Protocol
+             * @description True for the four canonical wire protocols (openai-chat, …). They are the names a [providers.*] block should carry; an alias is a shortcut to one of them
+             * @default false
+             */
+            is_protocol: boolean;
             /** Base Url */
             base_url?: string | null;
             /** Api Mode */

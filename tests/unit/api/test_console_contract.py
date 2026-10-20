@@ -1874,3 +1874,61 @@ def test_submit_and_assess_read_the_live_config() -> None:
     # And the worker itself, at both call sites (fresh submit and resume).
     assert source.count("execute_job(record, scope.config)") == 2
     assert "execute_job(record, app_config)" not in source
+
+
+def test_the_builtin_list_distinguishes_protocols_from_aliases() -> None:
+    """Labelling a protocol an "alias" hid which name belongs in a block.
+
+    Both kinds rendered the same way, so ``openai-chat`` (a wire protocol — the
+    name a ``[providers.*]`` block should carry) looked identical to ``chat`` (a
+    shortcut to it), and ``anthropic-messages`` printed its own name on the right,
+    which says nothing. The payload now separates them and names the target.
+    """
+    from ubt.api.runtime_config import describe_runtime_config
+    from ubt.core.config import UBTConfig
+
+    providers = describe_runtime_config(UBTConfig.from_env())["providers"]
+    by_name = {p["name"]: p for p in providers if not p["declared"]}
+
+    # Exactly four protocols, and they are not aliases.
+    protocols = {n for n, p in by_name.items() if p["is_protocol"]}
+    assert protocols == {
+        "openai-chat",
+        "openai-responses",
+        "anthropic-messages",
+        "gemini-native",
+    }
+    for name in protocols:
+        assert by_name[name]["is_alias"] is False
+        assert by_name[name]["alias_of"] is None
+
+    # Every alias names the protocol it resolves to, and that target exists.
+    for name, row in by_name.items():
+        if not row["is_alias"]:
+            continue
+        assert row["alias_of"] in protocols, f"{name} points at {row['alias_of']!r}"
+    assert by_name["claude"]["alias_of"] == "anthropic-messages"
+    assert by_name["chat"]["alias_of"] == "openai-chat"
+
+
+def test_the_panel_help_says_a_protocol_still_needs_a_model_id() -> None:
+    """The prerequisite a newcomer actually trips over.
+
+    Selecting ``gemini`` supplies an endpoint and a wire format and nothing else;
+    ``draft_model`` stays empty and the run cannot start. The list said none of
+    that, so the entries looked like ready-to-use configurations.
+    """
+    repo = _REPO_ROOT
+    zh = repo / "web" / "src" / "i18n" / "translations" / "zh.ts"
+    view = repo / "web" / "src" / "views" / "doctor" / "SystemDoctorView.tsx"
+    if not view.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+
+    text = zh.read_text(encoding="utf-8")
+    assert "builtinProvidersHelp" in text
+    assert "模型名" in text, "the help must name the missing prerequisite"
+    source = view.read_text(encoding="utf-8")
+    assert "builtinProvidersHelp" in source
+    # And the two groups are rendered separately, not as one flat list.
+    assert "p.is_protocol" in source
+    assert "p.alias_of" in source

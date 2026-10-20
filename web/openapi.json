@@ -5774,6 +5774,24 @@
             "description": "True for a bare protocol alias (chat, claude, responses)",
             "default": false
           },
+          "alias_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alias Of",
+            "description": "The canonical wire protocol an alias stands for (``claude`` -> ``anthropic-messages``), or null for a protocol or a declared block"
+          },
+          "is_protocol": {
+            "type": "boolean",
+            "title": "Is Protocol",
+            "description": "True for the four canonical wire protocols (openai-chat, \u2026). They are the names a [providers.*] block should carry; an alias is a shortcut to one of them",
+            "default": false
+          },
           "base_url": {
             "anyOf": [
               {
