@@ -1336,16 +1336,32 @@ def map_iterated_items(
         elif label == DocItemLabel.LIST_ITEM:
             text = (getattr(item, "text", "") or "").strip()
             block_type, flow_id, skip = BlockType.LIST_ITEM, FlowID.MAIN_STORY, False
-            # Docling leaves ``marker`` empty and strips the ``[n]`` off a
-            # reference entry, so the delivered bibliography loses its numbering
-            # (measured on arXiv 2609.20519: 108 markers in the source, none in
-            # the ledger). Put it back from the page's own text layer before the
-            # entry is typed, so the number travels with the text through
-            # translation and rendering.
-            if pdf_path is not None:
-                marker = _recover_reference_marker(text, _reference_text())
-                if marker:
-                    text = f"{marker} {text}"
+            # Docling's own ``marker`` is authoritative when present: on the
+            # reference chapter it is correct for all 39 list items ("1." … "5."
+            # for the numbered procedure, "[1]" … "[34]" for the bibliography),
+            # and it was being read nowhere. Only the bibliography used to be
+            # repaired, so every *ordered* step list in the body shipped without
+            # its number — "Calculate the continuous starting function in the
+            # following order:" became a bare sentence and its five steps lost the
+            # 1..5 the author wrote.
+            #
+            # The marker goes into the text, not onto the element, because the
+            # translator rewrites the text and the renderer typesets it: a marker
+            # kept only on the element would have to be re-inserted from two
+            # sides, and the ledger already carries it for audit.
+            marker = (getattr(item, "marker", "") or "").strip()
+            if marker and not text.startswith(marker):
+                text = f"{marker} {text}"
+            elif pdf_path is not None:
+                # Docling leaves ``marker`` empty and strips the ``[n]`` off a
+                # reference entry, so the delivered bibliography loses its
+                # numbering (measured on arXiv 2609.20519: 108 markers in the
+                # source, none in the ledger). Put it back from the page's own
+                # text layer before the entry is typed, so the number travels
+                # with the text through translation and rendering.
+                recovered = _recover_reference_marker(text, _reference_text())
+                if recovered:
+                    text = f"{recovered} {text}"
         else:
             # text / paragraph / reference / form fields → narrative
             text = (getattr(item, "text", "") or "").strip()
