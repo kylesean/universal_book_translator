@@ -68,7 +68,7 @@ def _tight_pdf(tmp_path: Path, *, leading: float = 8.0) -> Path:
         }
     )
     font_ref = writer._add_object(font)  # noqa: SLF001 - pypdf has no public page-resource API
-    page[NameObject("/Resources")] = DictionaryObject(  # type: ignore[index]
+    page[NameObject("/Resources")] = DictionaryObject(  # resources are a plain dict
         {NameObject("/Font"): DictionaryObject({NameObject("/F1"): font_ref})}
     )
     ops = ["BT", "/F1 9 Tf", "1 0 0 1 72 600 Tm", f"{leading} TL"]
