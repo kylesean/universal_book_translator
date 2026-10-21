@@ -279,10 +279,18 @@ def overrides_from_request(
     if "dual_mode" not in overrides and not any(
         var in os.environ for var in env_var_names("dual_mode")
     ):
-        # The adaptive default is a *default*: writing it into the overrides
-        # layer would outrank UBT_DUAL_MODE, which the CLI help documents as
-        # "unset follows config / UBT_DUAL_MODE".
-        adaptive = adaptive_dual_mode(None, request.get("profile"))
+        # The adaptive default must be derived from the *resolved* profile.
+        # Reading ``request["profile"]`` verbatim meant the literal string
+        # "auto" reached ``adaptive_dual_mode``, which recognises only concrete
+        # names — so the web console (which submits "auto" from the browser)
+        # got no default at all, while the CLI (which resolves "auto" to
+        # "paper" before building the request) got ``mono``. The same PDF then
+        # rendered monolingual through one surface and bilingual through the
+        # other, with a different filename. Resolving here makes the decision
+        # depend on the document, not on which door the request came through.
+        adaptive = adaptive_dual_mode(
+            None, resolve_profile_name(request.get("profile"), request.get("input_path"))
+        )
         if adaptive is not None:
             overrides["dual_mode"] = adaptive
     return overrides
