@@ -22,6 +22,41 @@ from ubt.core.qe.score_policy import is_shippable
 logger = logging.getLogger(__name__)
 
 
+def failed_draft_checkpoint(cand: IRBlock, res: BaseException) -> dict[str, Any]:
+    """The checkpoint written when a repair call fails for one block.
+
+    Option B: preserve the draft/target with a failure notice instead of
+    replacing it with the bare source.
+
+    The ``title`` keeps a one-line summary, not the provider's whole JSON
+    envelope. The envelope was ~700 escaped characters on the reference job, and
+    the review workbench renders ``target_text`` as plain text — so the attribute
+    became content and broke out of a 446px column as an 828px line. The full
+    detail is already on the ledger; this attribute exists to tell a human what
+    happened.
+
+    Module level, not a closure: as a closure it ran only on a live provider
+    failure, so nothing in the fast tier exercised it and the coverage gate
+    flagged the module it calls.
+    """
+    fallback_text = cand.target_text or cand.draft_text or ""
+    summary = html.escape(summarize_provider_error(res), quote=True)
+    target_str = (
+        f'<mark class="ubt-failed-draft" title="{summary}">{fallback_text}</mark>'
+        if fallback_text
+        else cand.source_text
+    )
+    return {
+        "block_id": cand.id,
+        "target_text": target_str,
+        "status": BlockStatus.FAILED,
+        "mtqe_score": cand.mtqe_score,
+        "repair_rounds": cand.repair_rounds,
+        # The ledger keeps the full error: only the rendered notice is shortened.
+        "error_flags": [*cand.error_flags, f"{REPAIR_ERROR_PREFIX} {res}"],
+    }
+
+
 async def run_repair_stage(
     ctx: StageContext,
     services: RunServices,
@@ -107,27 +142,7 @@ async def run_repair_stage(
             }
 
         def _record_failure(cand: IRBlock, res: BaseException) -> dict[str, Any]:
-            # Option B: Preserve draft/target with failure notice instead of bare source
-            fallback_text = cand.target_text or cand.draft_text or ""
-            # The title keeps a one-line summary, not the provider's whole JSON
-            # envelope. The envelope was ~700 escaped characters on the reference
-            # job and the workbench renders target_text as plain text, so it broke
-            # out of a 446px column as an 828px line. The full detail is already
-            # on the ledger; this attribute exists to tell a human what happened.
-            summary = html.escape(summarize_provider_error(res), quote=True)
-            target_str = (
-                f'<mark class="ubt-failed-draft" title="{summary}">{fallback_text}</mark>'
-                if fallback_text
-                else cand.source_text
-            )
-            return {
-                "block_id": cand.id,
-                "target_text": target_str,
-                "status": BlockStatus.FAILED,
-                "mtqe_score": cand.mtqe_score,
-                "repair_rounds": cand.repair_rounds,
-                "error_flags": [*cand.error_flags, f"{REPAIR_ERROR_PREFIX} {res}"],
-            }
+            return failed_draft_checkpoint(cand, res)
 
         flusher = CheckpointBatchFlusher(
             ledger=ledger,

@@ -62,20 +62,60 @@ def test_a_malformed_envelope_does_not_raise() -> None:
         summarize_provider_error(raw)
 
 
-def test_the_repair_stage_actually_uses_the_summary() -> None:
-    """The unit tests above pass even if ``repair.py`` ignores this module.
+def _block(**overrides):
+    """A minimal IRBlock: only the fields the checkpoint builder reads."""
+    from ubt.core.ir.models import BlockStatus, BlockType, FlowID, RegionKind, make_element
 
-    Reverting the call site to ``f"{REPAIR_ERROR_PREFIX} {res}"`` kept every test
-    green, because they only exercised the function. The behaviour that matters is
-    which string reaches the ``<mark title=...>``, so assert on the source of the
-    stage as well.
-    """
-    from pathlib import Path
-
-    stage = Path(__file__).resolve().parents[3] / "ubt" / "core" / "engine" / "stages" / "repair.py"
-    source = stage.read_text(encoding="utf-8")
-    assert "summarize_provider_error(res)" in source, (
-        "repair.py must summarize the provider error before putting it in a title"
+    element = make_element(
+        id="b1",
+        spine_index=0,
+        block_type=BlockType.NARRATIVE,
+        flow_id=FlowID.MAIN_STORY,
+        region=RegionKind.BODY,
+        source_text="Original English prose",
+        bbox=None,
     )
-    # The raw exception must not be interpolated into the attribute again.
-    assert 'title="{REPAIR_ERROR_PREFIX} {html.escape(str(res))}"' not in source
+    from ubt.core.ir.models import IRBlock
+
+    fields = dict(
+        element=element,
+        target_text="译文正文",
+        status=BlockStatus.REPAIRED,
+        mtqe_score=0.42,
+        repair_rounds=2,
+        error_flags=[],
+    )
+    fields.update(overrides)
+    return IRBlock(**fields)
+
+
+def test_the_checkpoint_keeps_the_translation_and_a_short_reason() -> None:
+    """Behaviour, not just the string: this is what reaches ``target_text``.
+
+    The closure that wrote this used to hold ``f"{REPAIR_ERROR_PREFIX} {res}"``,
+    so every unit test above still passed while the pane received 620 characters
+    of escaped JSON. Testing the builder closes that gap.
+    """
+    from ubt.core.engine.stages.repair import failed_draft_checkpoint
+
+    result = failed_draft_checkpoint(
+        _block(), RuntimeError("Model API error (500): " + _LLAMASWAP.split(": ", 1)[1])
+    )
+    target = result["target_text"]
+
+    # The translation survives, inside the marker, so nothing is lost.
+    assert target.startswith('<mark class="ubt-failed-draft" title="')
+    assert target.endswith(">译文正文</mark>")
+    # The title is a summary, not the envelope.
+    assert "upstream command exited prematurely" in target
+    assert len(target) < 300, f"mark still carries the whole envelope: {len(target)} chars"
+    assert "&quot;src&quot;" not in target
+    # The full error stays on the ledger, where it belongs.
+    assert any("llama-swap" in flag for flag in result["error_flags"])
+
+
+def test_the_checkpoint_falls_back_to_the_source_when_nothing_was_translated() -> None:
+    from ubt.core.engine.stages.repair import failed_draft_checkpoint
+
+    result = failed_draft_checkpoint(_block(target_text="", repair_rounds=0), RuntimeError("boom"))
+    assert result["target_text"] == "Original English prose"
