@@ -228,6 +228,58 @@ def collect_dropped_line_indices(
     return dropped
 
 
+def _drop_null_bytes(content: str) -> str:
+    """Remove NUL debris, keeping a sign that stood where the NUL was.
+
+    A publisher CMap that cannot map a glyph emits ```` (U+0000) in its place,
+    and the glyphs it fails on are precisely the sign-bearing ones. The old
+    code deleted every NUL, which is right for debris between words but wrong
+    between a number and the next token, where the missing character *was* the
+    value:
+
+        "1.58 \x00 10 \x00 6 %"        is "1.58 × 10⁻⁶ %"
+        "gate voltage ( \x00 0.2 to …)"  is "gate voltage (−0.2 to …)"
+        "temperature ( \x00 100 °C …)"   is "temperature (−100 °C …)"
+
+    All three shipped with the sign gone, so the delivered report claimed an RMS
+    error of "1.58 - 10⁶" (a million times too large) and a temperature range of
+    "100°C to 100°C" (the whole range collapsed). Nothing downstream could
+    recover it: the numeric validator compares the tokens the *source* carries,
+    and by then the source no longer carries a sign.
+
+    The repair is deliberately conservative. A NUL is only read as a sign when
+    it sits in a numeric context — after an opening paren or a comparison, or
+    between a number and "10" — and ``×`` is only chosen when a power follows,
+    because that is the only reading a flattened ``a × 10^b`` can have. Every
+    other NUL is still plain debris and is dropped, so prose keeps its shape.
+    """
+    if "\x00" not in content:
+        return content
+    # ``1.58 <NUL> 10 <NUL> 6 %`` / ``1 <NUL> 10 15`` → a multiplication and a
+    # negative exponent. Checked before the single-NUL rules so the pair is read
+    # as one numeric expression rather than two signs.
+    content = re.sub(
+        r"(?<=[0-9])[ \t]*\x00[ \t]*(10)[ \t]*\x00[ \t]*(?=[0-9])",
+        lambda m: " \u00d7 " + m.group(1) + "^-",
+        content,
+    )
+    # ``1.58 - 10 <NUL> 6``: the hyphen before ``10`` is the flattened
+    # multiplication sign (the CMap lost it), and the NUL is the exponent's
+    # minus. Only this numeric shape, so a genuine range ("1 - 10 nm") is left
+    # alone.
+    content = re.sub(
+        r"(?<=[0-9])\s+[-\u2212]\s+(10)[ \t]*\x00[ \t]*(?=[0-9])",
+        lambda m: " \u00d7 " + m.group(1) + "^-",
+        content,
+    )
+    # ``( <NUL> 0.2`` / ``( <NUL> 100`` → a leading minus on the number.
+    content = re.sub(r"([(\[=<>≤≥~≈])\s*\x00\s*(?=[0-9.])", r"\1-", content)
+    # ``<NUL> 1`` directly after a comparison is a minus too, e.g. "(F <NUL> F)".
+    content = re.sub(r"\x00\s*(?=[0-9])", "-", content)
+    content = content.replace("\x00", "")
+    return content
+
+
 def normalize_academic_pdf_math(content: str) -> str:
     """Repair publisher font CMap corruption and flattened math in academic PDFs.
 
@@ -246,11 +298,11 @@ def normalize_academic_pdf_math(content: str) -> str:
         if sentinels:
             for idx, s_tag in enumerate(sentinels):
                 content = content.replace(s_tag, f"__UBT_SPAN_SENTINEL_{idx}__")
-            content = content.replace("\x00", "")
+            content = _drop_null_bytes(content)
             for idx, s_tag in enumerate(sentinels):
                 content = content.replace(f"__UBT_SPAN_SENTINEL_{idx}__", s_tag)
         else:
-            content = content.replace("\x00", "")
+            content = _drop_null_bytes(content)
 
     # 2. PDF stream glyph escapes & soft-hyphen line-break word splits
     # Docling preserves U+00AD (\xad) followed by a space on hyphenated line
