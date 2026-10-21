@@ -604,7 +604,7 @@ export function ReviewWorkbench() {
                                 )}
                               </div>
                               {editing[seg.block_id] ? (
-                                <textarea
+                                <AutoGrowTextarea
                                   autoFocus
                                   // Editing starts from the *translation*, not
                                   // from the <mark> markup: saving what was on
@@ -636,7 +636,9 @@ export function ReviewWorkbench() {
                                       setEditing((prev) => ({ ...prev, [seg.block_id]: false }))
                                     }
                                   }}
-                                  rows={3}
+                                  // No `rows`: the height is measured from the
+                                  // content, so one block's editor is never a
+                                  // three-line window onto its own paragraph.
                                   className="w-full bg-transparent text-[var(--ink-primary)] text-xs resize-none focus:outline-none font-mono leading-relaxed placeholder:text-[var(--ink-muted)]"
                                 />
                               ) : (
@@ -648,6 +650,16 @@ export function ReviewWorkbench() {
                                     onDoubleClick={() =>
                                       setEditing((prev) => ({ ...prev, [seg.block_id]: true }))
                                     }
+                                    // The card's own onClick opens the inspector,
+                                    // which narrows this column from 446px to
+                                    // 286px at 1280px. A double-click fires a
+                                    // click first, so the element moved out from
+                                    // under the second click and the editor never
+                                    // opened (measured: 0 of 2 attempts at 1280
+                                    // and 1366, 2 of 2 at 1600). Opening the
+                                    // editor is this node's own gesture; it must
+                                    // not also reflow the card underneath it.
+                                    onClick={(event) => event.stopPropagation()}
                                     title={t.review.editHint}
                                     className="min-h-[3rem] text-[var(--ink-primary)] text-xs font-mono leading-relaxed whitespace-pre-wrap break-words cursor-text"
                                   >
@@ -952,6 +964,64 @@ export function ReviewWorkbench() {
       )}
     </div>
   )
+}
+
+/**
+ * A textarea that is exactly as tall as the text it holds.
+ *
+ * The review pane sized its editor with `rows={3}`. Measured on the reference
+ * job, the translation of `pdf_main#b0005` occupies 351px beside 718 characters
+ * of source, but opening the editor replaced it with a 58.5px box showing three
+ * lines — so reviewing a paragraph meant scrolling inside a sliver that showed
+ * a sixth of the text it was editing. The read view and the edit view of the
+ * same block must be the same size, or the pane appears to shrink the moment
+ * the operator starts working.
+ *
+ * Height is re-measured whenever the value changes (including the mount commit,
+ * where the node and the text arrive together). `height` is reset to `auto`
+ * first: without it a textarea that grew once can never shrink back after the
+ * operator deletes a line.
+ */
+function AutoGrowTextarea({
+  className,
+  value,
+  ...props
+}: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  const localRef = useRef<HTMLTextAreaElement | null>(null)
+
+  const fit = useCallback(() => {
+    const el = localRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    // +2px: the border box, so a fractional last line cannot clip its descenders.
+    el.style.height = `${el.scrollHeight + 2}px`
+  }, [])
+
+  useEffect(fit, [fit, value])
+
+  // A width change re-wraps the text, so the height measured for the old width
+  // no longer covers it: opening the inspector narrows the target column from
+  // 446px to 286px at 1280px, and the same text needs 566px instead of 351px.
+  // Without this the textarea keeps the pre-resize height and hides its tail.
+  //
+  // Only a *width* change re-fits. This element is its own observer target and
+  // fitting changes its height, so reacting to height would re-enter on every
+  // adjustment and spin (the browser reports it as an undelivered-notification
+  // loop). Width is driven by the layout, not by this effect, so it cannot.
+  useEffect(() => {
+    const el = localRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    let lastWidth = el.clientWidth
+    const observer = new ResizeObserver(() => {
+      if (el.clientWidth === lastWidth) return
+      lastWidth = el.clientWidth
+      fit()
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [fit])
+
+  return <textarea {...props} ref={localRef} value={value} className={className} />
 }
 
 type TermScope = 'block' | 'subsequent' | 'all'
