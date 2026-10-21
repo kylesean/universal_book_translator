@@ -18,8 +18,10 @@ import {
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import {
+  ApiError,
   listSegments,
   listIssues,
+  listDeliverables,
   editSegment,
   reExportJob,
   getBlockTerms,
@@ -53,6 +55,51 @@ const blockStatusLabel = (t: ReturnType<typeof useI18n>['t'], status: string): s
 const mqmSeverityLabel = (t: ReturnType<typeof useI18n>['t'], severity: string | null): string =>
   severity ? (t.review.mqmSeverities[severity] ?? severity) : '—'
 
+/**
+ * Uncommitted review edits, mirrored to `sessionStorage`.
+ *
+ * `drafts` lived only in component state, so leaving the workbench — to check
+ * the quality gate, to look at another block, or simply a reload — discarded
+ * every edit the reviewer had typed but not yet saved, with no warning. On a
+ * 100-page book that is a real amount of work, and nothing in the UI said it
+ * was at risk.
+ *
+ * `sessionStorage`, not `localStorage`: a draft belongs to this editing session
+ * and this job; keeping it past the tab would resurrect half-finished text days
+ * later. Keyed by job so two jobs never mix.
+ */
+const _DRAFT_PREFIX = 'ubt_review_drafts:'
+
+function readDrafts(jobId: string | null): Record<string, string> {
+  if (!jobId) return {}
+  try {
+    const raw = sessionStorage.getItem(_DRAFT_PREFIX + jobId)
+    if (!raw) return {}
+    const parsed: unknown = JSON.parse(raw)
+    if (parsed === null || typeof parsed !== 'object') return {}
+    const out: Record<string, string> = {}
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof v === 'string') out[k] = v
+    }
+    return out
+  } catch {
+    return {}   // private mode, or a corrupt entry: start clean rather than crash
+  }
+}
+
+function writeDrafts(jobId: string | null, drafts: Record<string, string>): void {
+  if (!jobId) return
+  try {
+    if (Object.keys(drafts).length === 0) {
+      sessionStorage.removeItem(_DRAFT_PREFIX + jobId)
+    } else {
+      sessionStorage.setItem(_DRAFT_PREFIX + jobId, JSON.stringify(drafts))
+    }
+  } catch {
+    // Storage refused: the in-memory copy still carries the session.
+  }
+}
+
 //: Segments fetched per request. The backend caps a single page at 500, so this
 //: is also the hard ceiling on one request; the list pages past it via
 //: ``offset`` and the "load more" affordance rather than silently dropping the
@@ -73,7 +120,7 @@ export function ReviewWorkbench() {
   const [loading, setLoading] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [drafts, setDrafts] = useState<Record<string, string>>({})
+  const [drafts, setDrafts] = useState<Record<string, string>>(() => readDrafts(jobId))
   const [editing, setEditing] = useState<Record<string, boolean>>({})
   const [saving, setSaving] = useState<Record<string, boolean>>({})
   const [saved, setSaved] = useState<Record<string, boolean>>({})
@@ -95,15 +142,23 @@ export function ReviewWorkbench() {
     setLoading(true)
     setError(null)
     try {
-      const [segmentData, issueData] = await Promise.all([
+      const [segmentData, issueData, listing] = await Promise.all([
         listSegments(jobId, { status: filter, limit: PAGE_LIMIT, offset: 0 }),
         listIssues(jobId),
+        // The delivered file's freshness, from the ledger — not from this tab's
+        // memory. `reExportPending` used to be set only by a save in this
+        // session, so reopening the workbench (or another reviewer's browser)
+        // showed a clean "re-render" button while the delivered files were
+        // still stale. The backend already answers this on the deliverables
+        // endpoint; the review pane just never asked.
+        listDeliverables(jobId).catch(() => null),
       ])
       setSegments(segmentData.segments)
       setSegmentTotal(segmentData.total)
       setIssues(issueData)
       setSaved({})
       setIssueCursor(0)
+      if (listing) setReExportPending(listing.stale)
     } catch (err) {
       setError(err instanceof Error ? err.message : t.review.loadFailed)
     } finally {
@@ -138,6 +193,17 @@ export function ReviewWorkbench() {
   useEffect(() => {
     void load()
   }, [load])
+
+  // Mirror the drafts to sessionStorage on every change, and re-read them when
+  // the job changes: switching from job A to job B inside this view does not
+  // remount it, so without the second line B would open holding A's drafts.
+  useEffect(() => {
+    writeDrafts(jobId, drafts)
+  }, [jobId, drafts])
+
+  useEffect(() => {
+    setDrafts(readDrafts(jobId))
+  }, [jobId])
 
   // Virtualize the segment list: a 10k-segment book keeps a constant DOM node
   // count (PRD §9 risk 1) instead of one card per segment.
@@ -234,7 +300,19 @@ export function ReviewWorkbench() {
       // "re-render" button) so a review session re-renders once, at the end.
       setReExportPending(true)
     } catch (err) {
-      setError(err instanceof Error ? err.message : t.review.saveFailed)
+      // A 409 is not "the save failed" — it means this job's ledger is held by
+      // another writer (a running resume, another reviewer's edit), or the run
+      // started again underneath the workbench. Retrying blindly would lose the
+      // draft, so say which case it is and keep the text in `drafts` for a
+      // retry once the conflict clears.
+      const conflict = err instanceof ApiError && err.status === 409
+      setError(
+        conflict
+          ? `${t.review.saveConflict} ${err instanceof Error ? err.message : ''}`.trim()
+          : err instanceof Error
+            ? err.message
+            : t.review.saveFailed
+      )
     } finally {
       setSaving((prev) => ({ ...prev, [segment.block_id]: false }))
     }
@@ -605,6 +683,17 @@ export function ReviewWorkbench() {
                                     {t.review.saved}
                                   </span>
                                 )}
+                                {/* A draft restored from a previous session is
+                                    indistinguishable from the saved text
+                                    otherwise: the reviewer would not know which
+                                    block they had left unfinished. */}
+                                {!saved[seg.block_id] &&
+                                  drafts[seg.block_id] !== undefined &&
+                                  drafts[seg.block_id] !== seg.target_text && (
+                                    <span className="text-[#b45309] font-sans font-medium">
+                                      {t.review.unsavedDraft}
+                                    </span>
+                                  )}
                               </div>
                               {editing[seg.block_id] ? (
                                 <AutoGrowTextarea
@@ -653,6 +742,21 @@ export function ReviewWorkbench() {
                                     onDoubleClick={() =>
                                       setEditing((prev) => ({ ...prev, [seg.block_id]: true }))
                                     }
+                                    // Post-editing was reachable ONLY by double-click,
+                                    // and the Save button stays disabled until an edit
+                                    // is open — so a keyboard user could browse, filter
+                                    // and read the whole book but could not fix a single
+                                    // block. role+tabIndex+Enter make the pane a control;
+                                    // the double-click stays as a mouse shortcut.
+                                    role="button"
+                                    tabIndex={0}
+                                    onKeyDown={(event) => {
+                                      if (event.key === 'Enter') {
+                                        event.preventDefault()
+                                        setEditing((prev) => ({ ...prev, [seg.block_id]: true }))
+                                      }
+                                    }}
+                                    aria-label={t.review.startEditing}
                                     // The card's own onClick opens the inspector,
                                     // which narrows this column from 446px to
                                     // 286px at 1280px. A double-click fires a

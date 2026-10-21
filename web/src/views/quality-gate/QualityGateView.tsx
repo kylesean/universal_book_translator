@@ -18,6 +18,7 @@ import {
   getVisualReport,
   listDeliverables,
   deliverableDownloadUrl,
+  reExportJob,
   pagePreviewUrl,
   type DeliverableItem,
 } from '@/api/client'
@@ -150,6 +151,12 @@ export function QualityGateView() {
   const [report, setReport] = useState<Record<string, any> | null>(null)
   const [reportError, setReportError] = useState<string | null>(null)
   const [deliverables, setDeliverables] = useState<DeliverableItem[]>([])
+  // True when the files predate the ledger text. The download endpoint
+  // refuses such a job with 409, and `window.open` would show the operator
+  // a page of raw JSON instead of a file.
+  const [deliveryStale, setDeliveryStale] = useState(false)
+  const [downloadBusy, setDownloadBusy] = useState(false)
+  const [downloadError, setDownloadError] = useState<string | null>(null)
   const [visual, setVisual] = useState<Record<string, any> | null>(null)
   const [expanded, setExpanded] = useState<number | null>(null)
 
@@ -169,8 +176,11 @@ export function QualityGateView() {
       })
 
     listDeliverables(jobId)
-      .then(({ items }) => {
-        if (isMounted) setDeliverables(items)
+      .then(({ items, stale }) => {
+        if (isMounted) {
+          setDeliverables(items)
+          setDeliveryStale(stale)
+        }
       })
       .catch(() => {
         if (isMounted) setDeliverables([])
@@ -206,7 +216,20 @@ export function QualityGateView() {
   const placeholder = report?.placeholder ?? {}
   const terminology = report?.terminology ?? {}
   const entity = report?.entity_consistency ?? {}
-  const fidelity = report?.fidelity ?? {}
+  // `report.fidelity` no longer exists — the overlay engine it described was
+  // deleted, and nothing in the report schema carries `pages_measured` or
+  // `non_text_residual` any more. Reading it produced a permanent "0 pages ·
+  // residual —" with a 100 score and a PASS badge: a full-marks pillar for a
+  // measurement that had not been taken since the field was removed.
+  //
+  // The real pixel verdict lives on the *visual report* payload, which the
+  // route already serves beside it.
+  const visualPassed: boolean | null =
+    typeof visual?.passed === 'boolean' ? visual.passed : null
+  const visualSkipped: string | null =
+    typeof visual?.skipped_reason === 'string' && visual.skipped_reason
+      ? visual.skipped_reason
+      : null
   const coverage = report?.render_coverage ?? {}
   const repair = report?.repair_breakdown ?? {}
   const config = report?.config_snapshot ?? {}
@@ -223,8 +246,19 @@ export function QualityGateView() {
   // gate passes it by construction, so without this flag the screen showed
   // "PRODUCTION READY" over `[模拟翻译]` text.
   const rehearsal: boolean = report?.rehearsal === true
-  const isPassed = verdict ? verdict === 'passed' : failedBlocks === 0
-  const isWarning = verdict === 'warning'
+  // No report means NO VERDICT — never a pass.
+  //
+  // `summary` defaults to `{}`, so `failed_blocks ?? 0` is 0 when the report
+  // failed to load, and the old `verdict ? ... : failedBlocks === 0` fallback
+  // rendered a green check, "PRODUCTION READY", a PASS badge, "All formal
+  // checks passed" and five passing pillars for a job whose report had never
+  // been written. The report fetch legitimately 409s while a job is still
+  // running and 404s before the reporter writes it, so this was reachable by
+  // simply opening the gate too early — an attestation of nothing, on the one
+  // screen whose entire purpose is attestation.
+  const hasReport = report !== null
+  const isPassed = hasReport && (verdict ? verdict === 'passed' : failedBlocks === 0)
+  const isWarning = hasReport && verdict === 'warning'
   const fidelityScore = Math.round((summary.pass_rate ?? 0) * 1000) / 10
 
   const pct = (value: number | undefined, digits = 1) =>
@@ -322,17 +356,18 @@ export function QualityGateView() {
     {
       title: t.quality.pillar3Title,
       desc: t.quality.pillar3Desc,
-      metric: `${fidelity.pages_measured ?? 0} pages · residual ${pct(fidelity.non_text_residual, 2)} · ${flaggedPages.length} ${t.quality.flaggedPages}`,
-      status: pillarStatus(
-        flaggedPages.length > 0,
-        (fidelity.non_text_residual ?? 0) > 0.02
-      ),
-      score:
-        (fidelity.pages_measured ?? 0) > 0
-          ? clampScore(1 - (fidelity.non_text_residual ?? 0))
-          : flaggedPages.length > 0
-            ? 60
-            : 100,
+      metric: visualSkipped
+        ? `${t.quality.visualGateSkipped}: ${visualSkipped}`
+        : `${flaggedPages.length} ${t.quality.flaggedPages}`,
+      // A skipped gate is not a passing gate. `visual_gate` reports
+      // `skipped_reason` when the tooling or the artifact type prevents the
+      // check (e.g. "not a rendered pdf"), and this view used to render that as
+      // a green PASS because it only ever looked at `findings` — which are
+      // empty when the gate never ran.
+      status: visualSkipped
+        ? 'warn'
+        : pillarStatus(flaggedPages.length > 0 || visualPassed === false, false),
+      score: visualSkipped ? 0 : visualPassed === false ? 55 : flaggedPages.length > 0 ? 60 : 100,
       detail: (
         <div className="space-y-2">
           {visualFindings.length === 0 ? (
@@ -444,8 +479,26 @@ export function QualityGateView() {
     { label: t.quality.axisDelivered, value: clampScore(summary.pass_rate) },
   ]
 
-  const handleDownload = (key: string) => {
-    window.open(deliverableDownloadUrl(jobId, key), '_blank')
+  // A stale delivery is re-rendered before the download, the same way Mission
+  // Control does it: the backend guard exists so a customer never receives the
+  // pre-edit file, and the console's job is to make that guard invisible rather
+  // than to hand the operator a 409 they cannot act on.
+  const handleDownload = async (key: string) => {
+    if (downloadBusy) return
+    setDownloadBusy(true)
+    try {
+      if (deliveryStale) {
+        await reExportJob(jobId)
+        const refreshed = await listDeliverables(jobId)
+        setDeliverables(refreshed.items)
+        setDeliveryStale(refreshed.stale)
+      }
+      window.open(deliverableDownloadUrl(jobId, key), '_blank')
+    } catch (err) {
+      setDownloadError(err instanceof Error ? err.message : t.quality.downloadFailed)
+    } finally {
+      setDownloadBusy(false)
+    }
   }
 
   const statusBadge = (status: PillarStatus) =>
@@ -491,7 +544,25 @@ export function QualityGateView() {
         </div>
       )}
 
+      {/* No report yet: say so, and do not render a verdict block at all.
+          The pillars below read from the same absent payload, so they would
+          otherwise all render as passing. */}
+      {!hasReport && (
+        <div className="p-5 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] flex items-start gap-3 shadow-2xs">
+          <AlertTriangle className="h-5 w-5 text-[#b45309] shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <div className="text-sm font-semibold text-[var(--ink-primary)]">
+              {t.quality.noVerdictTitle}
+            </div>
+            <p className="text-xs text-[var(--ink-secondary)] leading-relaxed">
+              {t.quality.noVerdictBody}
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Decision Banner + Radar */}
+      {hasReport && (
       <div className="p-5 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] flex items-center justify-between gap-6 shadow-2xs">
         <div className="flex items-center gap-3.5">
           <div
@@ -548,8 +619,11 @@ export function QualityGateView() {
           {report && <RadarChart axes={radarAxes} />}
         </div>
       </div>
+      )}
 
-      {/* Formal Verification Checklist */}
+      {/* Formal Verification Checklist — only with a report: every pillar is
+          derived from it, so without one they would all render as passing. */}
+      {hasReport && (
       <div className="rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] overflow-hidden shadow-2xs">
         <div className="px-4 py-2.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
           {t.quality.pillarsTitle}
@@ -592,6 +666,7 @@ export function QualityGateView() {
           ))}
         </div>
       </div>
+      )}
 
       {/* Deliverable Download Section */}
       <div className="rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] p-5 space-y-4 shadow-2xs">
@@ -604,6 +679,16 @@ export function QualityGateView() {
           </p>
         </div>
 
+        {deliveryStale && (
+          <div className="rounded border border-[#b45309]/30 bg-[#b45309]/5 px-2.5 py-1.5 text-xs text-[#b45309]">
+            {t.quality.deliveryStaleNote}
+          </div>
+        )}
+        {downloadError && (
+          <div className="rounded border border-[#b91c1c]/30 bg-[#b91c1c]/5 px-2.5 py-1.5 text-xs text-[#b91c1c]">
+            {downloadError}
+          </div>
+        )}
         {deliverables.length === 0 ? (
           <div className="text-xs text-[var(--ink-muted)] py-2">
             {t.quality.noDeliverables}
@@ -613,7 +698,8 @@ export function QualityGateView() {
             {deliverables.map((item) => (
               <Button
                 key={item.key}
-                onClick={() => handleDownload(item.key)}
+                onClick={() => void handleDownload(item.key)}
+                disabled={downloadBusy}
                 variant="secondary"
                 className="h-10 justify-start px-3 text-xs"
               >

@@ -154,6 +154,26 @@ function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
 }
 
 /**
+ * A failed API call, carrying the HTTP status alongside the server's message.
+ *
+ * Callers need the status, not just the text: a 409 from the review surface
+ * means "another writer holds this job" or "the job is running", which the
+ * operator can act on (retry, stop the job) — while a 422 means the request
+ * itself was wrong and retrying is pointless. Flattening both into a bare
+ * `Error` forced every call site to pattern-match on prose, so none of them
+ * distinguished the cases at all.
+ */
+export class ApiError extends Error {
+  readonly status: number
+
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+  }
+}
+
+/**
  * The server's own explanation of a failed request, or a labelled fallback.
  *
  * ``res.statusText`` — what these call sites used to interpolate — is EMPTY
@@ -166,20 +186,21 @@ function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
  * This helper reads all three; anything unparseable degrades to
  * ``<label> (HTTP <status>)`` rather than an empty suffix.
  */
-export async function apiError(res: Response, label: string): Promise<Error> {
+export async function apiError(res: Response, label: string): Promise<ApiError> {
   const fallback = `${label} (HTTP ${res.status})`
+  let message = fallback
   try {
     const body: unknown = await res.json()
     const detail =
       body !== null && typeof body === 'object' && 'detail' in body
         ? (body as { detail: unknown }).detail
         : null
-    if (typeof detail === 'string' && detail.trim()) return new Error(detail)
-    if (detail !== null && typeof detail === 'object' && 'message' in detail) {
-      const message = (detail as { message: unknown }).message
-      if (typeof message === 'string' && message.trim()) return new Error(message)
-    }
-    if (Array.isArray(detail)) {
+    if (typeof detail === 'string' && detail.trim()) {
+      message = detail
+    } else if (detail !== null && typeof detail === 'object' && 'message' in detail) {
+      const text = (detail as { message: unknown }).message
+      if (typeof text === 'string' && text.trim()) message = text
+    } else if (Array.isArray(detail)) {
       // FastAPI 422: [{loc: [...], msg: "...", type: "..."}, ...]
       const messages = detail
         .map((item) =>
@@ -188,12 +209,12 @@ export async function apiError(res: Response, label: string): Promise<Error> {
             : null,
         )
         .filter((msg): msg is string => Boolean(msg))
-      if (messages.length) return new Error(messages.join('; '))
+      if (messages.length) message = messages.join('; ')
     }
   } catch {
     // Not JSON (a proxy error page, a truncated body): fall through.
   }
-  return new Error(fallback)
+  return new ApiError(message, res.status)
 }
 
 /**
@@ -260,7 +281,7 @@ export async function uploadSourceDocument(file: File): Promise<JobUploadRespons
   form.append('file', file)
   const res = await apiFetch(`${BASE_URL}/jobs/upload`, { method: 'POST', body: form })
   if (!res.ok) {
-    throw await apiError(res, "string")
+    throw await apiError(res, "Upload failed")
   }
   return res.json()
 }
@@ -453,12 +474,30 @@ export function deliverableDownloadUrl(jobId: string, key: string): string {
 // Language assets
 // --------------------------------------------------------------------------- //
 
-export async function getGlossary(): Promise<GlossaryTerm[]> {
+export interface GlossaryListing {
+  terms: GlossaryTerm[]
+  /**
+   * False when no glossary file is configured at all (the server answers 409).
+   *
+   * Distinguishing this from "configured but empty" matters: the panel used to
+   * render "0 active terms" plus a green "No glossary conflicts detected" for a
+   * missing `glossary_path`, which asserts two facts it does not have — and the
+   * operator never learns what to set.
+   */
+  configured: boolean
+  /** The server's own explanation, when `configured` is false. */
+  reason: string | null
+}
+
+export async function getGlossary(): Promise<GlossaryListing> {
   const res = await apiFetch(`${BASE_URL}/assets/glossary`)
-  if (res.status === 409) return []
+  if (res.status === 409) {
+    const err = await apiError(res, "Glossary is not configured")
+    return { terms: [], configured: false, reason: err.message }
+  }
   if (!res.ok) throw await apiError(res, "Failed to load glossary")
   const data = await res.json()
-  return data.terms ?? []
+  return { terms: data.terms ?? [], configured: true, reason: null }
 }
 
 export async function upsertGlossaryTerm(source: string, target: string): Promise<GlossaryTerm[]> {

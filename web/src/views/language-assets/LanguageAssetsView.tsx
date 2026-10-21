@@ -12,6 +12,7 @@ import {
   Layers,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Badge } from '@/components/ui/Badge'
 import {
   getGlossary,
@@ -37,6 +38,13 @@ export function LanguageAssetsView() {
   // Glossary
   const [terms, setTerms] = useState<GlossaryTerm[]>([])
   const [conflicts, setConflicts] = useState<GlossaryConflict[]>([])
+  // False when the server reports no glossary file is configured at all.
+  const [glossaryConfigured, setGlossaryConfigured] = useState(true)
+  // A glossary rewrite and a TM row removal are both irreversible, and a
+  // `human_pe` TM row is exactly the post-editing work this product exists
+  // to accumulate. One icon click was too cheap.
+  const [pendingDeleteTerm, setPendingDeleteTerm] = useState<string | null>(null)
+  const [pendingEvictId, setPendingEvictId] = useState<number | null>(null)
   const [glossaryError, setGlossaryError] = useState<string | null>(null)
   const [glossaryLoading, setGlossaryLoading] = useState(false)
   const [newSource, setNewSource] = useState('')
@@ -61,12 +69,16 @@ export function LanguageAssetsView() {
     setGlossaryLoading(true)
     setGlossaryError(null)
     try {
-      const [loadedTerms, loadedConflicts] = await Promise.all([
-        getGlossary(),
-        getGlossaryConflicts().catch(() => [] as GlossaryConflict[]),
-      ])
-      setTerms(loadedTerms)
-      setConflicts(loadedConflicts)
+      const listing = await getGlossary()
+      setTerms(listing.terms)
+      setGlossaryConfigured(listing.configured)
+      // Conflicts are only meaningful when a glossary exists; asking anyway
+      // turns an unconfigured file into an empty (i.e. "clean") conflicts list.
+      setConflicts(
+        listing.configured
+          ? await getGlossaryConflicts().catch(() => [] as GlossaryConflict[])
+          : []
+      )
     } catch (err) {
       setGlossaryError(err instanceof Error ? err.message : 'Failed to load glossary')
     } finally {
@@ -113,6 +125,7 @@ export function LanguageAssetsView() {
   }
 
   const handleDeleteTerm = async (source: string) => {
+    setPendingDeleteTerm(null)
     try {
       setTerms(await deleteGlossaryTerm(source))
     } catch (err) {
@@ -121,6 +134,7 @@ export function LanguageAssetsView() {
   }
 
   const handleEvict = async (id: number) => {
+    setPendingEvictId(null)
     try {
       await evictTm([id])
       setTmEntries((prev) => prev.filter((entry) => entry.id !== id))
@@ -174,6 +188,26 @@ export function LanguageAssetsView() {
 
   return (
     <div className="flex-1 overflow-y-auto px-8 py-7 space-y-7 max-w-5xl mx-auto w-full">
+      <ConfirmDialog
+        open={pendingDeleteTerm !== null}
+        title={t.assets.deleteTermTitle}
+        body={(t.assets.deleteTermBody ?? '').replace('{term}', pendingDeleteTerm ?? '')}
+        confirmLabel={t.common.confirm}
+        cancelLabel={t.common.cancel}
+        danger
+        onConfirm={() => void handleDeleteTerm(pendingDeleteTerm ?? '')}
+        onCancel={() => setPendingDeleteTerm(null)}
+      />
+      <ConfirmDialog
+        open={pendingEvictId !== null}
+        title={t.assets.evictTmTitle}
+        body={t.assets.evictTmBody}
+        confirmLabel={t.common.confirm}
+        cancelLabel={t.common.cancel}
+        danger
+        onConfirm={() => void handleEvict(pendingEvictId ?? 0)}
+        onCancel={() => setPendingEvictId(null)}
+      />
       {/* View Header */}
       <div className="flex items-center justify-between border-b border-[var(--paper-border)] pb-4">
         <div>
@@ -240,7 +274,15 @@ export function LanguageAssetsView() {
             <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
               {t.assets.conflictsTitle}
             </div>
-            {conflicts.length === 0 ? (
+            {!glossaryConfigured ? (
+              // No file configured is not "no conflicts": claiming a clean bill
+              // of health for a glossary that does not exist is the one thing
+              // this panel must never do.
+              <div className="text-xs text-[#b45309] flex items-start gap-2">
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                <span>{t.assets.glossaryNotConfigured}</span>
+              </div>
+            ) : conflicts.length === 0 ? (
               <div className="text-xs text-[var(--ink-muted)] flex items-center gap-2">
                 <CheckCircle2 className="h-3.5 w-3.5 text-[#15803d]" />
                 {t.assets.noConflicts}
@@ -322,7 +364,7 @@ export function LanguageAssetsView() {
                       <td className="py-2 px-4 text-[#15803d] font-bold">{term.target}</td>
                       <td className="py-2 px-4 text-right">
                         <button
-                          onClick={() => handleDeleteTerm(term.source)}
+                          onClick={() => setPendingDeleteTerm(term.source)}
                           className="text-[var(--ink-muted)] hover:text-[#b91c1c] transition-colors p-1"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
@@ -505,7 +547,7 @@ export function LanguageAssetsView() {
                       </td>
                       <td className="py-2 px-4 text-right">
                         <button
-                          onClick={() => handleEvict(entry.id)}
+                          onClick={() => setPendingEvictId(entry.id)}
                           className="text-[var(--ink-muted)] hover:text-[#b91c1c] transition-colors p-1"
                         >
                           <Trash2 className="h-3.5 w-3.5" />

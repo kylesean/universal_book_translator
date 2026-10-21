@@ -490,7 +490,16 @@ export function NewJobWizard() {
               accept=".pdf,.epub,.docx,.md,.markdown,.txt,.html,.htm"
               className="hidden"
             />
+            {/* A div with onClick is unreachable by keyboard, and the real
+                <input type="file"> above is `hidden` (hence unfocusable), so a
+                keyboard-only operator could not attach a document at all — the
+                wizard's very first required step. `role="button"` + tabIndex +
+                Enter/Space make the dropzone a control, without changing how
+                drag-and-drop behaves for a mouse. */}
             <div
+              role="button"
+              tabIndex={0}
+              aria-label={t.wizard.uploadAria}
               onDragOver={(e) => {
                 e.preventDefault()
                 setIsDragOver(true)
@@ -498,6 +507,12 @@ export function NewJobWizard() {
               onDragLeave={() => setIsDragOver(false)}
               onDrop={handleFileDrop}
               onClick={() => fileInputRef.current?.click()}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  fileInputRef.current?.click()
+                }
+              }}
               className={`rounded-lg border-2 border-dashed p-7 transition-all cursor-pointer text-center ${
                 isDragOver
                   ? 'border-[var(--ink-primary)] bg-[var(--paper-subsurface)]'

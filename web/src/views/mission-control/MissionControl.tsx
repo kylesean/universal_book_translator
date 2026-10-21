@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import {
+  ApiError,
   getJobStatus,
   cancelJob,
   resumeJob,
@@ -164,6 +165,22 @@ export function MissionControl() {
   // the book re-translated at full cost, so it takes a typed phrase, not a click.
   const [pendingReparse, setPendingReparse] = useState<string | null>(null)
   const [reparsing, setReparsing] = useState(false)
+  // Bumped whenever a finished job is started again on the SAME id.
+  // The SSE client closes the stream permanently on a terminal frame, so
+  // without a new subscription a resumed or re-parsed run streams nothing:
+  // the panel kept showing the previous run's final "completed 250/250"
+  // lines while a full-cost re-translation was actually running.
+  const [streamGeneration, setStreamGeneration] = useState(0)
+  // Set when the job cannot be read at all (404 — deleted, or a ledger this
+  // server session never saw). Without it the view rendered a RUNNING badge, a
+  // live Cancel button and "waiting for the first frame" forever, because
+  // `statusStr` defaults to 'running' and the poll swallowed every error.
+  const [statusMissing, setStatusMissing] = useState(false)
+  // Cancel throws away an in-flight, billable run — the most expensive
+  // irreversible action in the console, and the only one that used to fire
+  // on a single click while delete and re-parse demanded a typed id.
+  const [pendingCancel, setPendingCancel] = useState(false)
+  const [cancelling, setCancelling] = useState(false)
   // The job's terminal error, as the engine phrased it for an operator. The
   // status payload always carried it and the console never read it, so a
   // failed job showed a red FAILED badge and nothing else — the operator had
@@ -194,11 +211,49 @@ export function MissionControl() {
   useEffect(() => {
     if (!currentJobId) return
 
-    // Switching jobs inside this view does not remount it, so the previous
-    // job's lines have to be swapped out explicitly — otherwise job B's panel
-    // opens showing job A's log above job B's first frame.
+    // Switching jobs inside this view does not remount it, so EVERY per-job
+    // value has to be reset, not just the log. Previously only `setLogs` ran
+    // here: status, stage, progress, the block counters, cost, QE, queue
+    // position and the failure text all kept job A's numbers under job B's id
+    // until B's first poll returned — and the mirror refs (`completedRef` and
+    // friends) were never reset at all, so B's first terminal frame printed A's
+    // counts. `jobError` was worse: it only cleared when the next status was
+    // not 'failed', so switching between two failed jobs showed the first
+    // one's failure reason over the second.
     // oxlint-disable-next-line react/set-state-in-effect
     setLogs(historyFor(currentJobId))
+    // oxlint-disable-next-line react/set-state-in-effect
+    setStatusStr('running')
+    // oxlint-disable-next-line react/set-state-in-effect
+    setStage(null)
+    // oxlint-disable-next-line react/set-state-in-effect
+    setProgressPct(0)
+    // oxlint-disable-next-line react/set-state-in-effect
+    setCompletedBlocks(0)
+    // oxlint-disable-next-line react/set-state-in-effect
+    setTotalBlocks(0)
+    // oxlint-disable-next-line react/set-state-in-effect
+    setSkippedBlocks(0)
+    // oxlint-disable-next-line react/set-state-in-effect
+    setFailedBlocks(0)
+    // oxlint-disable-next-line react/set-state-in-effect
+    setNeedsHumanBlocks(0)
+    // oxlint-disable-next-line react/set-state-in-effect
+    setCostUsd(0)
+    // oxlint-disable-next-line react/set-state-in-effect
+    setAvgQe(0)
+    // oxlint-disable-next-line react/set-state-in-effect
+    setQueuePosition(null)
+    // oxlint-disable-next-line react/set-state-in-effect
+    setJobError(null)
+    // oxlint-disable-next-line react/set-state-in-effect
+    setStatusMissing(false)
+    // The mirror refs feed the log line; they are not React state, so the
+    // reset above cannot reach them.
+    completedRef.current = 0
+    totalRef.current = 0
+    skippedRef.current = 0
+    failedRef.current = 0
 
     let isMounted = true
     const applyStatus = (res: Record<string, unknown>) => {
@@ -250,8 +305,13 @@ export function MissionControl() {
         if (isMounted) {
           applyStatus(res as unknown as Record<string, unknown>)
         }
-      } catch {
-        // Polling catch
+      } catch (err) {
+        // A 404 is not a transient poll failure: the job does not exist, so
+        // retrying every 3 s forever is pointless and the "running" default is
+        // a lie. Say so once and stop pretending.
+        if (isMounted && err instanceof ApiError && err.status === 404) {
+          setStatusMissing(true)
+        }
       }
     }
 
@@ -319,7 +379,7 @@ export function MissionControl() {
       clearInterval(timer)
       unsubscribe()
     }
-  }, [currentJobId, appendLog])
+  }, [currentJobId, appendLog, streamGeneration])
 
   useEffect(() => {
     if (autoScroll && logContainerRef.current) {
@@ -328,12 +388,16 @@ export function MissionControl() {
   }, [logs, autoScroll])
 
   const handleCancel = async () => {
+    setPendingCancel(false)
     if (!currentJobId) return
+    setCancelling(true)
     try {
       await cancelJob(currentJobId)
       appendLog([{ text: t.mission.logAborted, level: 'WARN' }])
     } catch (err) {
-      toast.push(err instanceof Error ? err.message : 'Cancel failed', 'error')
+      toast.push(err instanceof Error ? err.message : t.mission.cancelFailed, 'error')
+    } finally {
+      setCancelling(false)
     }
   }
 
@@ -344,6 +408,7 @@ export function MissionControl() {
       await resumeJob(currentJobId)
       appendLog([{ text: t.mission.logResumed, level: 'INFO' }])
       setStatusStr('submitted')
+      setStreamGeneration((n) => n + 1)
     } catch (err) {
       toast.push(err instanceof Error ? err.message : 'Resume failed', 'error')
     } finally {
@@ -362,6 +427,12 @@ export function MissionControl() {
   const handleDownload = async () => {
     if (!currentJobId || downloading) return
     setDownloading(true)
+    // Open the tab SYNCHRONOUSLY, while still inside the click gesture. The
+    // previous version called window.open after up to three awaits (the stale
+    // branch re-renders, then re-lists), and browsers treat that as a popup
+    // rather than a user-initiated navigation — so a download on a job with
+    // un-rendered edits appeared to do nothing at all.
+    const tab = window.open('', '_blank')
     try {
       let listing = await listDeliverables(currentJobId)
       if (listing.stale) {
@@ -371,11 +442,17 @@ export function MissionControl() {
       }
       const primary = listing.items.find((d) => d.key === 'primary') ?? listing.items[0]
       if (primary) {
-        window.open(deliverableDownloadUrl(currentJobId, primary.key), '_blank')
+        const url = deliverableDownloadUrl(currentJobId, primary.key)
+        if (tab) tab.location.href = url
+        else window.open(url, '_blank')
       } else {
+        tab?.close()
         toast.push(t.mission.noDeliverables, 'error')
       }
     } catch (err) {
+      // The blank tab was opened up front; leaving it open on failure would
+      // strand an empty window the operator has to close by hand.
+      tab?.close()
       toast.push(err instanceof Error ? err.message : t.mission.downloadFailed, 'error')
     } finally {
       setDownloading(false)
@@ -417,6 +494,7 @@ export function MissionControl() {
     setReparsing(true)
     try {
       await reparseJob(jobId)
+      setStreamGeneration((n) => n + 1)
       toast.push(t.mission.reparseStarted, 'info')
       await refreshQueue()
     } catch (err) {
@@ -471,12 +549,30 @@ export function MissionControl() {
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden px-8 py-6 space-y-5">
       <ConfirmDialog
+        open={pendingCancel}
+        title={t.mission.cancelTitle}
+        body={t.mission.cancelConfirm}
+        confirmLabel={t.mission.cancelCompile}
+        cancelLabel={t.common.cancel}
+        danger
+        onConfirm={() => void handleCancel()}
+        onCancel={() => setPendingCancel(false)}
+      />
+      <ConfirmDialog
+        // Deleting a job destroys its ledger and every delivered file. That is
+        // at least as destructive as re-parsing, which already demands a typed
+        // phrase — a one-click delete here was the weakest guard on the most
+        // irreversible action in the console.
+        key={pendingDelete ?? 'none'}
         open={pendingDelete !== null}
         title={t.mission.deleteJob}
         body={t.mission.deleteConfirm}
         confirmLabel={t.common.confirm}
         cancelLabel={t.common.cancel}
         danger
+        typeToConfirm={pendingDelete ?? ''}
+        typeToConfirmLabel={t.mission.deleteTypePrompt}
+        typeToConfirmMismatch={t.mission.reparseTypeMismatch}
         onConfirm={() => void confirmDeleteJob()}
         onCancel={() => setPendingDelete(null)}
       />
@@ -572,9 +668,14 @@ export function MissionControl() {
           )}
 
           {currentJobId && !isCompleted && !isFailed && (
-            <Button onClick={handleCancel} variant="danger" size="sm">
+            <Button
+              onClick={() => setPendingCancel(true)}
+              variant="danger"
+              size="sm"
+              disabled={cancelling}
+            >
               <Square className="h-3 w-3 mr-1" />
-              {t.mission.cancelCompile}
+              {cancelling ? t.mission.cancelling : t.mission.cancelCompile}
             </Button>
           )}
         </div>
@@ -701,7 +802,26 @@ export function MissionControl() {
         </div>
       </div>
 
-      {!currentJobId ? (
+      {statusMissing ? (
+        // The id in the URL does not resolve (deleted, or a ledger this server
+        // session never loaded). Rendering the live dashboard here showed a
+        // RUNNING badge and a working Cancel button for a job that does not
+        // exist.
+        <div className="flex-1 flex items-center justify-center text-center text-[var(--ink-muted)]">
+          <div className="max-w-sm space-y-2">
+            <AlertTriangle className="h-8 w-8 mx-auto text-[#b45309]" />
+            <h2 className="text-sm font-semibold text-[var(--ink-primary)]">
+              {t.mission.jobMissingTitle}
+            </h2>
+            <p className="text-xs text-[var(--ink-secondary)] leading-relaxed">
+              {t.mission.jobMissingDesc}
+            </p>
+            <Button onClick={() => navigate('/jobs')} variant="secondary" size="sm">
+              {t.mission.backToQueue}
+            </Button>
+          </div>
+        </div>
+      ) : !currentJobId ? (
         <div className="flex-1 flex items-center justify-center text-center text-[var(--ink-muted)]">
           <div className="max-w-sm space-y-2">
             <Activity className="h-8 w-8 mx-auto text-[var(--paper-border-hover)]" />
@@ -929,7 +1049,12 @@ export function MissionControl() {
 function formatTimestamp(value: string | null | undefined): string {
   if (!value) return '—'
   const normalized = value.includes('T') ? value : value.replace(' ', 'T')
-  const parsed = new Date(normalized.endsWith('Z') ? normalized : `${normalized}Z`)
+  // Only a *naive* stamp needs the UTC marker. Queued rows come back as
+  // `datetime.isoformat()`, i.e. already offset-aware ("…T17:00:00+00:00");
+  // appending "Z" to those produced "…+00:00Z", which `new Date` rejects, so
+  // the column fell back to printing the raw ISO string for every queued job.
+  const hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/.test(normalized)
+  const parsed = new Date(hasZone ? normalized : `${normalized}Z`)
   if (Number.isNaN(parsed.getTime())) return value
   const pad = (n: number) => String(n).padStart(2, '0')
   return `${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())} ${pad(parsed.getHours())}:${pad(parsed.getMinutes())}`

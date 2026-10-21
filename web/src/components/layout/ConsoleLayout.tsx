@@ -123,10 +123,15 @@ export function ConsoleLayout({ children }: ConsoleLayoutProps) {
   const renderNav = (items: NavItem[]) =>
     items.map((item) => {
       const Icon = item.icon
+      // Keyed by label, not by target: with no job selected, three entries fall
+      // back to `/jobs` (Mission Control, plus the two job-scoped panes in their
+      // disabled state), and React reported "two children with the same key,
+      // `/jobs`" on every render of that screen. The label is unique per entry;
+      // the target is not.
       if (item.disabled) {
         return (
           <div
-            key={item.to}
+            key={item.label}
             title={t.mission.noActiveJobTitle}
             className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-[5px] text-xs font-medium text-[var(--ink-muted)] opacity-60 cursor-not-allowed border border-transparent"
           >
@@ -139,9 +144,13 @@ export function ConsoleLayout({ children }: ConsoleLayoutProps) {
       }
       return (
         <NavLink
-          key={item.to}
+          key={item.label}
           to={item.to}
-          end={item.to === '/jobs' || item.to === '/wizard'}
+          // `/jobs` must NOT be `end`: the job detail screen (`/jobs/:jobId`) is
+          // the same MissionControl view (App.tsx), so `end` left no sidebar
+          // entry highlighted on it — "you are here" disappeared on the screen
+          // the operator spends the most time on.
+          end={item.to === '/wizard'}
           className={({ isActive }) =>
             `w-full flex items-center gap-2.5 px-2.5 py-2 rounded-[5px] text-xs font-medium transition-all text-left ${
               isActive

@@ -36,6 +36,7 @@ export interface TranslationDictionary {
     subtitle: string
     dropzoneTitle: string
     dropzoneSubtitle: string
+    uploadAria: string
     dropzoneActive: string
     uploading: string
     orBrowse: string
@@ -171,6 +172,13 @@ export interface TranslationDictionary {
   mission: {
     title: string
     noActiveJobTitle: string
+    jobMissingTitle: string
+    cancelTitle: string
+    cancelConfirm: string
+    cancelling: string
+    cancelFailed: string
+    jobMissingDesc: string
+    backToQueue: string
     noActiveJobDesc: string
     pipelineGraph: string
     stageExtract: string
@@ -225,6 +233,7 @@ export interface TranslationDictionary {
     noDeliverables: string
     deleteJob: string
     deleteConfirm: string
+    deleteTypePrompt: string
     //: Job statuses shown as a badge on the header and in the queue rows.
     //: Both used ``status.toUpperCase()``, so "COMPLETED" appeared in every
     //: locale.
@@ -286,6 +295,13 @@ export interface TranslationDictionary {
     //: missing from the label switch, so the button fell back to the backend's
     //: English `label` — the only two deliverables still untranslated.
     htmlView: string
+    //: The files are older than the ledger text; the download re-renders first.
+    deliveryStaleNote: string
+    //: Rendered instead of a verdict when the report could not be loaded.
+    visualGateSkipped: string
+    noVerdictTitle: string
+    noVerdictBody: string
+    downloadFailed: string
     xliffDoc: string
     //: Quality-gate verdict badge, and the report's pass-rate phrasing.
     verdictPass: string
@@ -366,6 +382,11 @@ export interface TranslationDictionary {
     //: The bible workflow's step badges and the empty-glossary row.
     stepBadge: string
     noTerms: string
+    glossaryNotConfigured: string
+    deleteTermTitle: string
+    deleteTermBody: string
+    evictTmTitle: string
+    evictTmBody: string
   }
   doctor: {
     title: string
@@ -490,6 +511,8 @@ export interface TranslationDictionary {
     loadMore: string
     saving: string
     saved: string
+    //: Marks a block whose edit is restored from a previous session but not saved.
+    unsavedDraft: string
     reExportDone: string
     reExportAction: string
     reExportStale: string
@@ -529,6 +552,7 @@ export interface TranslationDictionary {
     inspectorSeverity: string
     inspectorProvenance: string
     editHint: string
+    startEditing: string
     cancelEdit: string
     //: Names for the backend's issue kinds (``IssuesReport.counts`` keys).
     //: These were a hardcoded English map in the view, so the ribbon read
@@ -549,5 +573,8 @@ export interface TranslationDictionary {
     loadMoreFailed: string
     saveFailed: string
     propagateFailed: string
+    //: Shown when the ledger is held by another writer (HTTP 409), so the
+    //: operator knows to stop the run or retry rather than assume the save lost.
+    saveConflict: string
   }
 }

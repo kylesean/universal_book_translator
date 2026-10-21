@@ -127,3 +127,151 @@ def test_the_console_says_re_parsing_is_expensive_and_destructive() -> None:
         body = text[text.index("reparseConfirm:") :][:900]
         for word in words:
             assert word in body, f"reparseConfirm does not mention {word!r}"
+
+
+def test_the_client_error_type_carries_the_http_status() -> None:
+    """A bare `Error` forced every call site to guess at prose.
+
+    The review surface distinguishes a 409 (another writer holds the job — retry
+    once it clears) from a 422 (the request is wrong — retrying is pointless),
+    and could not, because `apiError` flattened both into `new Error(detail)`.
+    """
+    client = _source(_REPO_ROOT / "web" / "src" / "api" / "client.ts")
+
+    assert "export class ApiError extends Error" in client
+    assert "readonly status: number" in client
+    assert "new ApiError(message, res.status)" in client
+    # The malformed label a template-literal refactor left behind.
+    assert 'apiError(res, "string")' not in client
+
+
+def test_the_review_pane_reads_freshness_from_the_ledger() -> None:
+    """`reExportPending` in `useState` forgot across sessions what the ledger knows.
+
+    A reviewer who edited, closed the tab, and came back saw a clean toolbar
+    button while the delivered files were still stale — the marker lived only in
+    the tab that made the edit.
+    """
+    view = _source(_VIEWS / "review" / "ReviewWorkbench.tsx")
+
+    assert "listDeliverables(jobId)" in view
+    assert "setReExportPending(listing.stale)" in view
+
+
+def test_uncommitted_review_drafts_survive_leaving_the_page() -> None:
+    """`drafts` was component state: any navigation discarded unsaved edits.
+
+    On a long book that is real work lost with no warning and no trace.
+    """
+    view = _source(_VIEWS / "review" / "ReviewWorkbench.tsx")
+
+    assert "_DRAFT_PREFIX" in view
+    assert "sessionStorage.setItem(_DRAFT_PREFIX" in view
+    assert "useState<Record<string, string>>(() => readDrafts(jobId))" in view
+    # And the reviewer can see which block is carrying a restored draft.
+    assert "t.review.unsavedDraft" in view
+
+
+def test_every_destructive_console_action_requires_a_typed_phrase() -> None:
+    """Deleting a job destroys more than re-parsing it, and was guarded more weakly.
+
+    Re-parse (discard the ledger, re-translate) demanded the job id typed out;
+    delete (ledger AND every delivered file, permanently) was one click.
+    """
+    view = _source(_VIEWS / "mission-control" / "MissionControl.tsx")
+
+    for action in ("pendingReparse", "pendingDelete"):
+        marker = f"typeToConfirm={{{action} ?? ''}}"
+        assert marker in view, f"{action} does not require the job id"
+        assert f"key={{{action} ?? 'none'}}" in view, f"{action} is not remounted per job"
+
+
+def test_the_gate_never_attests_a_report_it_did_not_load() -> None:
+    """A missing report rendered as PRODUCTION READY / PASS / five green pillars.
+
+    `summary` defaults to `{}`, so `failed_blocks ?? 0` is 0 when the fetch
+    failed, and the old `verdict ? … : failedBlocks === 0` fallback made the
+    absent report read as a clean pass. The report legitimately 409s while a job
+    is running and 404s before it is written, so this was reachable by opening
+    the gate too early — an attestation of nothing, on the screen whose only job
+    is attestation.
+    """
+    view = _source(_VIEWS / "quality-gate" / "QualityGateView.tsx")
+
+    assert "const hasReport = report !== null" in view
+    assert "const isPassed = hasReport &&" in view
+    # The verdict block and the pillar list must both be gated on it.
+    assert view.count("{hasReport && (") >= 2
+    assert "t.quality.noVerdictTitle" in view
+
+
+def test_pillar_three_reads_the_live_visual_verdict_not_a_deleted_field() -> None:
+    """`report.fidelity` was removed with the overlay engine, but stayed read.
+
+    The result was a permanent "0 pages · residual —" scoring 100 and PASS: full
+    marks for a measurement nobody took. The real verdict (`passed`,
+    `skipped_reason`) lives on the visual report payload.
+    """
+    view = _source(_VIEWS / "quality-gate" / "QualityGateView.tsx")
+    reporter = _source(_REPO_ROOT / "ubt" / "core" / "engine" / "reporter.py")
+
+    assert "fidelity" not in reporter, "the report schema grew fidelity back — recheck the view"
+    assert "report?.fidelity" not in view
+    assert "visual?.passed" in view and "visual?.skipped_reason" in view
+    # A skipped gate must not read as a pass.
+    assert "visualSkipped\n        ? 'warn'" in view or "visualSkipped ? 'warn'" in view
+
+
+def test_an_unconfigured_glossary_is_not_reported_as_clean() -> None:
+    """A 409 ("no glossary file configured") was swallowed into `[]`.
+
+    The panel then showed "0 active terms" beside a green "No glossary conflicts
+    detected" — two positive claims about a file that does not exist.
+    """
+    client = _source(_REPO_ROOT / "web" / "src" / "api" / "client.ts")
+    view = _source(_VIEWS / "language-assets" / "LanguageAssetsView.tsx")
+
+    assert "configured: false" in client
+    assert "glossaryConfigured" in view
+    assert "t.assets.glossaryNotConfigured" in view
+
+
+def test_every_irreversible_console_action_confirms_first() -> None:
+    """The cheapest clicks were on the most expensive mistakes."""
+    assets = _source(_VIEWS / "language-assets" / "LanguageAssetsView.tsx")
+    mission = _source(_VIEWS / "mission-control" / "MissionControl.tsx")
+
+    # Glossary term and TM row: an icon click used to rewrite the glossary file
+    # and delete TM rows (including human post-editing) with no prompt.
+    assert "setPendingDeleteTerm(" in assets and "open={pendingDeleteTerm !== null}" in assets
+    assert "setPendingEvictId(" in assets and "open={pendingEvictId !== null}" in assets
+    # Cancel: aborts a billable in-flight run. It demanded a single click while
+    # delete and re-parse demanded a typed phrase.
+    assert "setPendingCancel(true)" in mission and "open={pendingCancel}" in mission
+
+
+def test_the_mission_control_view_recovers_from_a_missing_job() -> None:
+    """`statusStr` defaulted to 'running' and the poll swallowed every error.
+
+    An unknown or deleted id therefore rendered a RUNNING badge, a live Cancel
+    button and "waiting for the first frame" indefinitely.
+    """
+    view = _source(_VIEWS / "mission-control" / "MissionControl.tsx")
+
+    assert "statusMissing" in view
+    assert "err.status === 404" in view
+    assert "t.mission.jobMissingTitle" in view
+
+
+def test_a_restarted_run_resubscribes_its_stream() -> None:
+    """The SSE client closes permanently on a terminal frame.
+
+    Resume and re-parse restart the SAME job id, so without a new subscription
+    the panel kept the previous run's "completed · 250/250" lines above a run
+    that was actively re-translating.
+    """
+    view = _source(_VIEWS / "mission-control" / "MissionControl.tsx")
+
+    assert "streamGeneration" in view
+    assert "}, [currentJobId, appendLog, streamGeneration])" in view
+    assert view.count("setStreamGeneration((n) => n + 1)") == 2
