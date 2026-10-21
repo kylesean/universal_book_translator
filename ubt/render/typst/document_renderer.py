@@ -162,6 +162,18 @@ _FIGURE_REFERENCE_TEXT_WIDTH_PT = 470.55
 #: swallow a body paragraph directly under an image.
 _PENDING_CAPTION_MAX_CHARS = 320
 
+#: Longest text that may bind as a caption *because it opens with a figure
+#: label* ("图 3.1 …"). A caption is a single short line under an image; a
+#: sentence of this length that merely mentions a figure is body prose. On the
+#: reference chapter a 176-character narrative opening "Fig. 3.1 shows…" was
+#: re-laid as a grey caption under the very figure it was discussing.
+_CAPTION_LABEL_MAX_CHARS = 160
+
+#: Longest description after a label that still reads as a caption. A caption
+#: is a clause under an image ("示意图。"); prose that opens with a figure number
+#: runs for several sentences.
+_CAPTION_LABEL_BODY_MAX_CHARS = 40
+
 #: Smallest share (in em) a table column keeps when widths are derived from
 #: content. Stops a short column (``✓``, ``FPS``, ``3B``) from collapsing to zero
 #: beside a long text column, while still letting the text column lead.
@@ -1006,6 +1018,79 @@ def render_table(
     return "\n".join(lines)
 
 
+def _looks_like_a_label(text: str) -> bool:
+    """Whether a label-led line is a caption rather than prose about a figure.
+
+    A caption is a short line under an image: ``FIG. 3.1``, ``图 1：示意图。``,
+    ``图 1 | RT-DocLayout 的性能``. A body paragraph can open the same way —
+    "图 3.1 展示了双栅 FinFET 的二维横截面，该结构被用作模型推导的参考。"
+    — and must stay body prose.
+
+    The delimiter decides first, because it is the translator's own caption
+    marker: ``图 1 | …`` and ``Figure 1: …`` are emitted only for a caption, and
+    one can run to several clauses (the reference corpus has a 301-character
+    one). Only the plain ``.``/``：`` forms are ambiguous, and for those length
+    and sentence count are measured *after* the label: a caption's description
+    is a clause, while a paragraph that names a figure keeps going.
+    """
+    stripped = text.strip()
+    if len(stripped) > _CAPTION_LABEL_MAX_CHARS * 3:
+        return False
+    if "|" in stripped[: _label_delimiter_end(stripped)]:
+        # The explicit caption marker the translator emits. A caption in that
+        # form is a caption however many clauses follow.
+        return True
+    if len(stripped) > _CAPTION_LABEL_MAX_CHARS:
+        return False
+    body = _CAPTION_RE.sub("", stripped, count=1).strip()
+    if not body:
+        # A bare label ("FIG. 3.1") is a caption on its own.
+        return True
+    if len(body) > _CAPTION_LABEL_BODY_MAX_CHARS:
+        return False
+    # One sentence at most: a caption does not narrate.
+    return sum(body.count(ch) for ch in ".。！？!?") <= 1
+
+
+def _label_delimiter_end(text: str) -> int:
+    """Index just past the label's delimiter, or 0 when there is none early."""
+    match = _CAPTION_RE.match(text)
+    return match.end() if match else 0
+
+
+def _binds_as_caption(block: IRBlock, text: str, figure: _Figure | None = None) -> bool:
+    """Whether this prose block is the caption of the figure just placed.
+
+    Signals, strongest first:
+
+    * ``FlowID.CAPTION`` — the reader saw a caption. Binds however long; the
+      descriptive line under ``FIG. 3.11`` is 162 characters and is still a
+      caption.
+    * An explicit ``Figure N``/``图 N`` label whose text still *is* a label
+      (short, one clause) — a reader that classifies by text, and a caption the
+      extractor labelled but filed in the main story.
+    * ``FlowID.MAIN_STORY`` / ``footnote`` — body prose. Never binds by length:
+      on the reference chapter 15 paragraphs were re-laid as grey captions under
+      equations because translation compression put them under a character cap.
+    * A short unlabelled line after a *picture* — the caption whose label the
+      extractor dropped.
+    * Never after a formula / text-recovery crop: the paragraph following an
+      equation is body prose or the lead-in to the next one.
+    """
+    if str(getattr(block.block_type, "value", block.block_type) or "") == "heading":
+        return False
+    flow = str(getattr(block, "flow_id", None) or "")
+    if flow == "caption":
+        return True
+    if _CAPTION_RE.match(text) and _looks_like_a_label(text):
+        return True
+    if flow in ("main_story", "footnote"):
+        return False
+    if figure is not None and not figure.is_picture:
+        return False
+    return len(text) <= _PENDING_CAPTION_MAX_CHARS
+
+
 @dataclass(slots=True)
 class _Figure:
     """A pending image plus the caption that follows it."""
@@ -1022,6 +1107,14 @@ class _Figure:
     #: that channel by block id); without it the miss was recorded against an
     #: asset path and no consumer could match it.
     block_id: str = ""
+    #: Whether the source block was a *picture* (a figure with a caption under
+    #: it) rather than a formula / text-recovery crop (an equation, whose
+    #: following paragraph is body prose or the lead-in to the next equation).
+    #: The extractor already distinguishes them — a ``PICTURE`` item carries
+    #: ``FlowID.CAPTION``, a recovered formula carries ``FlowID.MAIN_STORY`` —
+    #: so the renderer does not have to guess from text length, which is what
+    #: re-laid body paragraphs as captions.
+    is_picture: bool = False
 
 
 @dataclass(slots=True)
@@ -1527,6 +1620,7 @@ class TypstDocumentRenderer:
                     asset=asset.strip(),
                     width_pt=(bbox.x1 - bbox.x0) if bbox is not None else None,
                     block_id=block.id,
+                    is_picture=str(getattr(block, "flow_id", None) or "") == "caption",
                 )
                 continue
 
@@ -1712,7 +1806,7 @@ class TypstDocumentRenderer:
                 # far stronger signal than the length heuristic. The heuristic
                 # stays for an *unlabelled* short paragraph directly under an
                 # image (a caption the extractor stripped the "Figure N" from).
-                if _CAPTION_RE.match(text) or len(text) <= _PENDING_CAPTION_MAX_CHARS:
+                if _binds_as_caption(block, text, pending):
                     pending.caption = text
                     flush_figure()
                     continue

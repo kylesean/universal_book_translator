@@ -20,6 +20,7 @@ import pytest
 
 from ubt.core.ir.models import BlockType, InlineRun, IRBlock, make_element
 from ubt.render.typst.document_renderer import (
+    _PENDING_CAPTION_MAX_CHARS,
     ReflowStats,
     TypstDocumentRenderer,
     render_prose,
@@ -94,10 +95,15 @@ def test_a_failed_math_conversion_falls_back_to_escaped_text(tmp_path: Path) -> 
     """An un-convertible span must not leave an unbalanced ``$``.
 
     A stray delimiter unbalances the paragraph and Typst then fails the whole
-    page, so the span degrades to literal text instead.
+    page, so the span degrades to literal text instead. Asserting only the
+    dollar parity is not enough: the output has no dollars at all, so the check
+    also passes when the whole span (or the surrounding prose) was dropped.
     """
     out = render_prose("Broken $\\undefinedcmd{x}$ end.")
+
     assert out.count("$") % 2 == 0
+    assert "Broken" in out and "end." in out, "the surrounding prose must survive"
+    assert "⟨math⟩" in out, "the span must degrade to a visible marker, not vanish"
 
 
 def test_display_math_gets_its_own_block(tmp_path: Path) -> None:
@@ -1452,3 +1458,107 @@ def test_a_narrow_figure_is_sized_relative_to_its_column_not_in_points(
     # No measured width: the existing cap applies, unchanged.
     unknown = renderer._figure_markup(_Figure(asset=str(asset)), build)
     assert f"width: {renderer.figure_width}" in unknown
+
+
+# --- captions are figure captions, not "whatever follows a figure" ---------
+
+
+def test_body_prose_after_a_figure_is_not_rendered_as_its_caption(tmp_path: Path) -> None:
+    """A main-story paragraph keeps body type even when it is short.
+
+    Translation compresses a source paragraph to ~0.3-0.5x, so a 486-character
+    English paragraph arrives as ~180 Chinese characters. Under the old
+    length-only rule that landed under the caption cap and was re-laid at 8.5pt
+    grey under the preceding image — on the reference chapter, 15 real
+    paragraphs, among them the definitions that introduce the next equation.
+    """
+    asset = tmp_path / "fig.png"
+    asset.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
+    blocks = [
+        _block(BlockType.IMAGE, block_id="i1", source=str(asset)),
+        _block(
+            BlockType.NARRATIVE,
+            block_id="body1",
+            source="where psi(x, y) is the electrostatic potential in the channel",
+            target="其中 ψ(x, y) 是通道中的静电势。",
+        ),
+    ]
+    out, _ = TypstDocumentRenderer().build_source(blocks, tmp_path / "build")
+    assert "caption: [" not in out
+    assert "其中 ψ(x, y) 是通道中的静电势。" in out
+
+
+def test_a_formula_crop_never_absorbs_the_next_paragraph(tmp_path: Path) -> None:
+    """The paragraph after an equation is prose, however short it is.
+
+    A formula recovered as a source crop is not a picture: the paragraph under
+    it either defines its symbols or leads into the next equation. Treating it
+    as a caption put the lead-in sentence at 8.5pt under the equation, which is
+    how "Gauss's law … leads to a second important equation:" stopped being the
+    first half of a sentence.
+    """
+    asset = tmp_path / "eq.png"
+    asset.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
+    blocks = [
+        _block(BlockType.IMAGE, block_id="eq1", source=str(asset)),
+        _block(
+            BlockType.NARRATIVE,
+            block_id="lead",
+            source="Gauss's law leads to a second important equation:",
+            target="高斯定律可导出第二个重要方程：",
+        ),
+    ]
+    out, _ = TypstDocumentRenderer().build_source(blocks, tmp_path / "build")
+    assert "caption: [" not in out
+    assert "高斯定律可导出第二个重要方程：" in out
+
+
+def test_a_long_descriptive_caption_still_binds(tmp_path: Path) -> None:
+    """The extractor's own ``caption`` flow binds regardless of length.
+
+    The description under FIG. 3.11 runs to 162 characters; a length rule would
+    orphan it from its image, which is a worse defect than the one being fixed.
+    """
+    from ubt.core.ir.models import FlowID, make_element
+
+    asset = tmp_path / "fig.png"
+    asset.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
+    target = "DG FinFET 的漏极电流与栅极电压关系曲线，" + "并涵盖三种不同的通道掺杂浓度。" * 22
+    caption_element = make_element(
+        id="c1",
+        spine_index=1,
+        block_type=BlockType.NARRATIVE,
+        flow_id=FlowID.CAPTION,
+        source_text="Drain current versus gate voltage of DG FinFETs",
+    )
+    blocks = [
+        _block(BlockType.IMAGE, block_id="i1", source=str(asset)),
+        IRBlock(element=caption_element, target_text=target),
+    ]
+    assert blocks[1].flow_id is FlowID.CAPTION
+    assert len(target) > _PENDING_CAPTION_MAX_CHARS
+    out, _ = TypstDocumentRenderer().build_source(blocks, tmp_path / "build")
+    assert "caption: [" in out
+
+
+def test_prose_that_opens_with_a_figure_number_is_not_a_caption(tmp_path: Path) -> None:
+    """A sentence naming a figure is not that figure's caption.
+
+    "图 3.1 展示了…" reads as prose, not as the small grey line under an image.
+    """
+    asset = tmp_path / "fig.png"
+    asset.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
+    blocks = [
+        _block(BlockType.IMAGE, block_id="i1", source=str(asset)),
+        _block(
+            BlockType.NARRATIVE,
+            block_id="body1",
+            source="Fig. 3.1 shows a two-dimensional cross section of a DG FinFET.",
+            target=(
+                "图 3.1 展示了双栅 FinFET 的二维横截面，该结构被用作模型推导的参考。"
+                "在渐变通道近似（GCA）条件下，假设反型载流子服从玻尔兹曼分布。"
+            ),
+        ),
+    ]
+    out, _ = TypstDocumentRenderer().build_source(blocks, tmp_path / "build")
+    assert "caption: [" not in out
