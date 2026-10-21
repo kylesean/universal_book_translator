@@ -604,8 +604,11 @@ def own_prior_deliverable(target: Path, prior: PriorOutput | None) -> bool:
     Overwrite is a *re-run of one job*, not a licence to truncate any file the
     job could name. The three entry points used to answer this question three
     different ways — REST compared a directory's *parent*, MCP treated ``fresh``
-    as a blanket licence, and the CLI missed the suffix-less path form — so the
-    same request overwrote a file on one surface and was refused on another.
+    as a blanket licence, and the CLI missed the suffix-less path form. REST and
+    MCP now share this helper. The CLI does **not** call it: ``translate``
+    refuses any existing candidate without a same-job exemption, so a legitimate
+    re-run of one job is allowed on the API/MCP surfaces and refused on the CLI.
+
     There is one question ("is this the file this very job already produced?")
     and it has one answer:
 
