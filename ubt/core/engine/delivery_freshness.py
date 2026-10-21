@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -49,7 +50,7 @@ RENDERED_TEXT_DIGEST_KEY = "rendered_text_digest"
 _ARTIFACT_TEXT_FIELDS = ("target_text", "status")
 
 
-def text_digest(blocks: list[object]) -> str:
+def text_digest(blocks: Sequence[object]) -> str:
     """Digest of the text a render would emit for ``blocks``.
 
     Ordered by block id so two reads of the same ledger agree regardless of the
